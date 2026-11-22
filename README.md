@@ -1,7 +1,7 @@
 <h1 align="center">Punchlist</h1>
 
-<p align="center"><b>A Windows desktop prototype for project finance due diligence.</b><br>
-Punchlist checks deal documents against a master checklist and cites the pages that support its findings.</p>
+<p align="center"><b>Prototype designed to enhance the due diligence process for investment banking and credit professionals.</b><br>
+Punchlist checks deal documents against general, product, and sector-specific checklists and cites the sources that support its findings.</p>
 
 <p align="center">
   <a href="#what-it-does">What it does</a> ·
