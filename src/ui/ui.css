@@ -1,0 +1,1598 @@
+/* Additions for the rebuilt UI: native editors styled like the prototype's inline editing. */
+.efwrap{display:inline;position:relative}
+.rtyping{display:contents}   /* only marks the response field as being typed in, for Draft all; adds no box */
+.ef{font:inherit;color:inherit;background:transparent;border:0;outline:0;padding:0;margin:0;resize:none;width:100%;display:block;line-height:inherit}
+.ef.inl{display:inline;width:auto;min-width:4ch;border-bottom:1px dotted var(--ink-3);padding:0 2px}
+.ef.inl:focus{border-bottom-color:var(--accent)}
+.ef.qtext,.ef.rtext{font-size:13.5px;line-height:1.6;color:var(--ink);max-width:70ch;white-space:pre-wrap;border-radius:6px;padding:2px 4px;margin:-2px -4px;min-height:22px;overflow:hidden}
+.ef.qtext:focus,.ef.rtext:focus{background:color-mix(in srgb,var(--accent) 6%,transparent)}
+.ef::placeholder{color:var(--ink-3)}
+.ef.dedit{font:inherit;color:var(--ink-2);background:transparent;border:0;display:inline;width:auto}
+.efstate{font-size:11.5px;color:var(--ink-3);margin-left:6px}
+.efstate.fail{color:var(--high);background:none;border:0;cursor:pointer;font:inherit;font-size:11.5px}
+.efstate.ext button{background:none;border:0;color:var(--accent);cursor:pointer;font:inherit;font-size:11.5px;padding:0 2px}
+.efstate.ext{color:var(--high)}   /* text waiting on the person's choice is outstanding, so red as "Not saved" is */
+.ef.saving{opacity:.85}
+/* the folder box is a raised glass row, as the open finding row is (.f.on; design.md, the glass family) */
+.nddrop{border:1px solid var(--glass-edge);background:var(--glass-2);box-shadow:inset 0 1px 0 var(--spec);
+  border-radius:var(--r-card);padding:14px}
+/* the ways to add a folder, as two buttons under the list; dropping one is said in the first one's tooltip */
+.ndadd{display:flex;gap:8px}
+.ndpaste{display:flex;gap:8px;margin-top:10px}
+.ndpaste .field{flex:1}
+.linkb{background:none;border:0;color:var(--accent);cursor:pointer;font:inherit;padding:0}
+.emptyline.err{color:var(--high)}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+#root{height:100%;display:contents}
+
+a.flagrow{text-decoration:none;color:inherit}
+
+/* menu items sit above the glass sheen (as the search palette's content already does), so the first item keeps its ink color in light */
+.colmenu.glass>*{position:relative;z-index:1}
+.palres .empty{padding:22px 14px;font-size:13.5px}
+.palres button{align-items:baseline}
+/* two lines: the hit, then where it is, smaller and quieter, so neither is cut to make room for the other.
+   Where it is gives way at its end, with an ellipsis (whole on hover) */
+.sdrop .palres button:has(>.where){flex-direction:column;align-items:stretch;gap:3px;padding:6px 14px}
+.palres .where{white-space:nowrap;min-width:0;max-width:none;width:100%;margin-left:0;overflow:hidden;text-overflow:ellipsis}
+/* inside a deal, as in the approved mock-up: what tells it from a deal of the same name (the
+   counterparty, else the day) comes first and is never cut; the place sits whole at the right; the deal's name takes the room
+   between and is cut at its end. Only where the counterparty and a sheet cell together are wider than the line does the cell
+   wrap onto a second line that the one-line box hides, leaving it to the hover */
+.palres .where.parts{display:flex}
+.palres .where.parts:has(>.wat.long){flex-wrap:wrap;max-height:1lh}
+.palres .where.parts>span{white-space:pre;min-width:0;overflow:hidden;text-overflow:ellipsis}   /* pre keeps the separator's spaces; line breaks are folded before they get here */
+.palres .where.parts>.wtwin{flex:0 1 auto}   /* the deal's name has no width of its own, so this is cut only where it and the place are wider than the line: a page or question number is never cut short */
+.palres .where.parts>.wdeal{flex:1 1 0;max-width:max-content}   /* no width of its own when the line is laid out, so it never pushes the place off it */
+.palres .where.parts .ww{display:inline-block}   /* cut by whole words (search.tsx, Words) */
+.palres .where.parts>.wat{flex:none;margin-left:auto;padding-left:16px;font-variant-numeric:tabular-nums}
+
+/* cached mark: a document loaded in the user's store right now */
+.cmark{display:inline-block;flex:none;width:6px;height:6px;margin-left:7px;border-radius:50%;background:var(--accent);vertical-align:1.5px;position:relative}
+.cmark::after{content:'';position:absolute;inset:-7px}
+
+/* file names: one line everywhere; when there is no room the middle is shortened and the start and the end (version, extension) stay */
+.docnm{display:inline-flex;flex:0 1 auto;min-width:0;max-width:100%;white-space:pre;unicode-bidi:isolate}
+.docnm .dni{display:contents}
+.docnm .dnh{flex:0 1 auto;min-width:3ch;overflow:hidden;text-overflow:ellipsis}
+.docnm .dnt{flex:none}
+/* sliding through once: the full name, clipped to the same box, moved left until its end shows */
+.docnm.run{overflow:hidden}
+.docnm.run .dni{display:inline-flex;flex:none;transform:translateX(var(--dx,0px));transition:transform var(--dur,0s) linear}
+.docnm.run .dnh{flex:none;min-width:0;overflow:visible;text-overflow:clip}
+/* the full name on hover */
+.tip{white-space:pre-line;position:fixed;z-index:95;max-width:min(560px,calc(100vw - 24px));padding:7px 10px 0;border-bottom:7px solid transparent;border-radius:8px;background:var(--toast);color:var(--toast-ink);font-size:12.5px;line-height:1.4;box-shadow:var(--shadow-pop);pointer-events:none;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:6;overflow:hidden;animation:lift var(--fast) var(--ease) both}
+.docmenu .grp{display:flex;align-items:center;min-width:0}
+.palres button .ttl{display:flex;align-items:center;flex:1 1 auto;min-width:0}
+.ref .pop i.psrc{display:flex;flex-direction:row;align-items:center;overflow:visible;color:var(--ink)}
+/* a source row: the document in ink, its places in the faintest ink; the places give way first when the row is long */
+.ref .pop i.psrc>.docnm{flex:none;max-width:72%}
+.ref .pop i.psrc .loc{flex:0 1 auto;min-width:0;white-space:pre;overflow:hidden;text-overflow:ellipsis;color:var(--ink-3)}
+/* the pop's action under a rule; the bridge spans exactly the gap to the phrase (below it, or above for a pop placed above), keeping the pop while the pointer crosses */
+.ref .pop u.pfoot{cursor:pointer;margin-top:4px;padding-top:8px;border-top:1px solid var(--line)}
+.ref .pop u.pfoot:hover{text-decoration:underline;text-underline-offset:3px}
+.ref .pop::before{content:'';position:absolute;left:0;right:0;top:calc(-1 * var(--bridge,0px));height:var(--bridge,0px)}
+.ref .pop.up::before{top:auto;bottom:calc(-1 * var(--bridge,0px))}
+.ref:hover .rb,.ref:focus-within .rb{color:var(--ink);text-decoration-color:var(--accent)}
+/* a finding's full list of sources: one row per document, its places as links */
+details.fsrcs .sgl{margin:6px 0 4px;display:grid;grid-template-columns:fit-content(45%) minmax(0,1fr);column-gap:24px}
+details.fsrcs .sgr{grid-column:1/-1;display:grid;grid-template-columns:subgrid;align-items:baseline;padding:6px 0;border-top:1px solid color-mix(in srgb,var(--line) 55%,transparent);font-size:13px}
+details.fsrcs .sgr:first-child{border-top:0}
+details.fsrcs .sgd{min-width:0;color:var(--ink)}
+details.fsrcs .sgp{display:flex;flex-wrap:wrap;gap:2px 12px;color:var(--ink-2)}
+details.fsrcs .sgp .srcbtn:hover{color:var(--ink);text-decoration-color:var(--accent)}
+/* reading bar: one line, never wider than the page it sits under; page and count never wrap */
+/* 23vw leaves room for the rest of the bar */
+.docnav .docname b{display:inline-flex;align-items:center;min-width:0}
+.docnav .docname .loc,.docnav .docname .cnt{flex:none;white-space:nowrap}
+.askbox .chip.att{max-width:min(100%,300px)}
+.askbox .chip.att .docnm{flex:0 1 auto}
+/* the document list is centered on the reading bar by margin, not transform: its opening animation owns transform,
+   which had left it hanging off the bar's center and off-screen at 1024 wide */
+.docmenu{left:50%;margin-left:-200px;transform:none}
+
+/* ---- reading-mode document list: name | pages on one grid, so pages line up and names are cut at the same place ---- */
+.docmenu.dm{width:520px;margin-left:-260px;max-height:min(72vh,600px);padding:6px 6px 8px;display:grid;
+  grid-template-columns:minmax(0,1fr) auto auto;align-items:center;row-gap:1px;scrollbar-width:thin;scrollbar-color:var(--ink-3) transparent}
+.dm-sec{display:contents}
+.dm-h{grid-column:1/-1;padding:14px 10px 5px;font-size:12px;line-height:1.3;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dm-sec:first-child .dm-h{padding-top:7px}
+.dm-r{grid-column:1/-1;display:grid;grid-template-columns:subgrid;align-items:center;min-height:32px;padding:0 6px 0 10px;border-radius:9px;font-size:13px;line-height:1.3;color:var(--ink);cursor:pointer}
+.dm-r:hover{background:color-mix(in srgb,var(--line) 55%,transparent)}
+.dm-r .nm{display:flex;align-items:center;min-width:0}
+.dm-r.on .nm{font-weight:500}
+/* pages as quiet buttons: beside the name for up to three, flowing beneath for more */
+.dm-r .pgs{display:flex;justify-content:flex-end;gap:2px;padding-left:12px}
+.dm-r.many{padding-top:3px}
+.dm-r.many .nm{grid-column:1/3;min-height:28px}
+.dm-r .flow{grid-column:1/3;display:flex;flex-wrap:wrap;gap:2px;margin:-3px 0 6px -7px}
+.dm-p{height:24px;padding:0 7px;border:0;border-radius:7px;background:transparent;font:inherit;font-size:12.5px;color:var(--ink-2);white-space:nowrap;font-variant-numeric:tabular-nums;cursor:pointer}
+.dm-p:hover{background:var(--line);color:var(--ink)}
+.dm-p.on{background:var(--ink);color:var(--surface);font-weight:500}
+/* a document with one page needs no second marker: the row itself is the selection */
+.dm-r.single .dm-p,.dm-r.single .dm-p:hover{background:transparent}
+.dm-r.single .dm-p.on{color:var(--ink);font-weight:400}
+.docnav>button:disabled,.pgstack>button:disabled{opacity:.45;cursor:default;pointer-events:none}
+
+
+/* ---- notices: at the top of the page column (right of the sidebar), clear of the composer and the reading bar.
+   The app sets --colmid and --colw from the page column. Toasts stack as a deck: the newest in front, two older ones
+   peeking behind with their words hidden; pointing at the deck or tabbing into it spreads them out. ---- */
+.notices{position:fixed;top:6px;left:var(--colmid,50%);transform:translateX(-50%);z-index:91;display:flex;flex-direction:row;flex-wrap:wrap;justify-content:center;align-items:flex-start;gap:8px;width:max-content;max-width:var(--colw,calc(100vw - 32px));pointer-events:none}
+.notices>*{pointer-events:auto}
+/* the offline, read-only and interrupted notices stand beside the stack, each as wide as one of its notices */
+.notices>.toast,.intbar{width:min(400px,var(--colw,calc(100vw - 32px)))}
+.intbar{display:flex;flex-direction:column;gap:6px}
+.toasts{display:grid;width:min(400px,var(--colw,calc(100vw - 32px)));isolation:isolate}
+.toasts:empty{display:none}
+/* every notice is one base (notice.tsx): glyph, words, actions and ✕ on one 24px line,
+   6px in from every side, in the popup glass every menu and popup has (the shared rule further down) */
+.notices .toast,.notices .toast:not(.hide){grid-area:1/1;position:static;transform:none;display:grid;grid-template-columns:24px minmax(0,1fr) auto auto 24px;
+  align-items:center;gap:8px;min-width:0;width:100%;padding:6px;color:var(--ink);
+  animation:toastin var(--base) var(--ease);transition:transform var(--base) var(--ease),opacity var(--base) var(--ease)}
+.notices .toast:not(:has(.tundo+.tundo)){grid-template-columns:24px minmax(0,1fr) auto 24px}
+.notices .toast:not(:has(.tundo)){grid-template-columns:24px minmax(0,1fr) 24px}
+.notices .toast:not(:has(.tclose)){grid-template-columns:24px minmax(0,1fr) auto}
+.toast .tg{width:24px;height:24px;display:grid;place-items:center;color:var(--ink-2)}
+.toasts .toast:not(:last-child)>*{visibility:hidden}
+.notices .toasts .toast:nth-last-child(2){transform:translateY(3px) scale(.96);opacity:.7;z-index:-1}
+.notices .toasts .toast:nth-last-child(3){transform:translateY(6px) scale(.92);opacity:.45;z-index:-2}
+.toasts:hover,.toasts:focus-within{display:flex;flex-direction:column;gap:6px}
+.toasts:hover .toast>*,.toasts:focus-within .toast>*{visibility:visible}
+.notices .toasts:hover .toast.toast,.notices .toasts:focus-within .toast.toast{transform:none;opacity:1}
+.toast .ttext{display:flex;min-width:0;overflow:hidden;white-space:nowrap;font-size:13px;line-height:24px}
+/* the title gives way only once the detail is gone */
+.toast .ttitle{flex:none;max-width:100%;overflow:hidden;text-overflow:ellipsis;font-weight:600;color:var(--ink)}
+.toast .tbody{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;margin-left:4px;color:var(--ink-2)}
+.toast .tbody::first-letter{text-transform:uppercase}
+.toast .tsplit{display:flex}
+.toast .tsplit>span{flex:none;white-space:pre}
+.toast .tsplit>.tcut{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.toast .tundo{height:24px;min-width:60px;padding:0 10px;border:1px solid var(--line);border-radius:999px;background:var(--card);
+  color:var(--ink);font:inherit;font-size:12px;font-weight:500;line-height:22px;text-align:center;cursor:pointer}
+.toast .tundo:hover{background:var(--card-hover)}
+/* a dialog's select keeps its focus ring inside its column */
+.srow .field:focus-visible{outline-offset:-2px}
+.toast .tclose{width:24px;height:24px;display:grid;place-items:center;border:0;border-radius:50%;background:none;color:var(--ink-3);cursor:pointer}
+.toast .tclose:hover{background:var(--card-hover);color:var(--ink)}
+@keyframes toastin{from{opacity:0;transform:translateY(-6px)}}
+
+/* ---- deal header: Deal status and ⋯ ---- */
+.headrow .hacts{display:flex;align-items:center;gap:6px;margin:0 0 10px auto;flex:none}
+.headrow h1.ttl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* the field is as wide as the name, so the tabs stay where they were */
+.headrow .rename.over{mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent)}
+.headrow h1.ttl.renaming{overflow:visible}
+/* a new name changed elsewhere meanwhile: the choice sits on its own line under the name, clear of the tabs */
+.headrow h1.ttl.renaming{position:relative}.headrow #deal-name-moved{position:absolute;left:0;top:100%;margin:2px 0 0;white-space:nowrap;font-family:var(--body);line-height:16px;z-index:2}
+/* a new name that could not be saved waits beside the name, opened on purpose */
+.headrow .keptname{font-family:var(--body);font-size:12px;color:var(--high);margin:0 0 0 10px;white-space:nowrap;flex:none;align-self:center}
+.headrow .rename{field-sizing:content;min-width:4ch;max-width:100%;font:inherit;letter-spacing:inherit;color:inherit;background:transparent;border:0;border-bottom:1px solid var(--accent);border-radius:0;padding:0;margin:0 0 -1px;outline:0}
+.headrow .dtabs{flex:none}
+.rail a.dealrow{min-width:0}
+.rail a.dealrow .dn1{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---- attachments: on the message they were sent with, and the explicit "Add to sources" ---- */
+.msgs .me,.msgs .ai{overflow-wrap:anywhere}
+.msgs .matt{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;margin-top:6px}
+.msgs .matt .chip.att{display:inline-flex;align-items:center;gap:6px;height:26px;max-width:min(100%,360px);padding:0 9px;border-radius:999px;border:1px solid var(--line);background:var(--card);font-size:12px;color:var(--ink)}
+.msgs .matt .chip.att svg{flex:none}.msgs .matt .chip.att .docnm{flex:0 1 auto}
+.askbox .chip.att button.addsrc,.msgs .matt .chip.att button.addsrc{flex:none;width:auto;height:20px;padding:0 7px;border:0;border-left:1px solid var(--line);border-radius:0;background:none;color:var(--accent);font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.askbox .chip.att button.addsrc:hover,.msgs .matt .chip.att button.addsrc:hover{background:none;text-decoration:underline;text-underline-offset:3px}
+.askbox .chip.att:has(.addsrc){max-width:min(100%,420px)}
+
+/* ---- finding: edit in place ---- */
+.opening .fedit{margin-top:10px}
+.opening .fedit .lbl{margin:10px 0 4px}
+/* the finding editor's detail (#636): plain text with citation tags, four to twelve lines tall as the text box was */
+.card .in.ta.ced{min-height:calc(4lh + 20px);max-height:calc(12lh + 20px);overflow:auto;
+  white-space:pre-wrap;overflow-wrap:anywhere;cursor:text}
+.srcbtn{display:inline-flex;align-items:baseline;min-width:0;max-width:100%;padding:0;border:0;background:none;color:inherit;font:inherit;cursor:pointer;text-decoration:underline dotted;text-decoration-color:var(--ink-3);text-underline-offset:4px}
+.srcbtn:hover{color:var(--accent)}
+.srcbtn .loc{flex:none;white-space:pre}
+
+/* ---- deleted items ---- */
+.scrim .dlg{max-height:calc(100vh - 32px - var(--notices-h,0px));overflow-y:auto}
+/* while notices show, the dialog is centered in the room below them */
+.scrim{padding-top:var(--notices-h,0px);transition:padding-top var(--base) var(--ease)}
+.deldlg .delscroll{max-height:min(56vh,460px);overflow-y:auto;margin:6px -8px 0;padding:0 8px 22px;-webkit-mask-image:linear-gradient(var(--mask) calc(100% - 24px),transparent);mask-image:linear-gradient(var(--mask) calc(100% - 24px),transparent)}
+/* group labels as the app's other group labels, each with its count beside it */
+.deldlg .lbl{margin:16px 0 2px;font-size:13px;color:var(--ink-2);font-weight:600}
+.deldlg .lbl .n{font-weight:400;color:var(--ink-3);margin-left:6px}
+.delrow{display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+.delrow:last-child{border-bottom:0}
+.delrow .dcode{font-weight:400;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.delrow .dtext{flex:1 1 auto;min-width:0;display:grid;grid-template-columns:5ch minmax(0,1fr);column-gap:8px;row-gap:2px}.delrow .dtext>*{grid-column:2}.delrow .dtext>.dcode{grid-column:1;grid-row:1;font-size:13.5px;line-height:inherit}
+.delrow .dtext b{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.delrow .dtext b{font-weight:500;font-size:13.5px;overflow:hidden}
+.delrow .dtext .dmeta{font-size:12px;color:var(--ink-3)}.delrow .dmeta .dpc{color:var(--ink);font-weight:600}
+.delrow .btn{flex:none;margin-top:-2px}
+.delrow .dmeta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---- import: what a merge will overwrite ---- */
+.imchg{max-height:150px}
+.imchg td{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.imchg td:first-child,.imchg th:first-child{width:44px}
+
+/* ---- search: a field in the rail, results drop from it ---- */
+.rsearch{margin:6px 12px 8px;height:34px;border:1px solid var(--line);background:var(--card);border-radius:var(--r-ctl);display:flex;align-items:center;gap:8px;padding:0 10px;color:var(--ink-2);font-size:13px;position:relative;z-index:1;cursor:text}
+.rsearch svg{flex:none}
+.rsearch input{flex:1 1 auto;min-width:0;height:100%;border:0;outline:0;background:transparent;color:var(--ink);font:inherit;padding:0}
+.rsearch input::placeholder{color:var(--ink-3)}
+.rsearch kbd{flex:none;font:11px var(--body);color:var(--ink-3);border:1px solid var(--line);border-radius:4px;padding:0 5px}
+.rsearch.on{border-color:var(--accent)}
+.rsearch.float{position:fixed;left:84px;top:14px;width:320px;margin:0;z-index:71;background:var(--menu-solid);box-shadow:var(--shadow-pop)}
+.sdrop{position:fixed;z-index:70;display:flex;flex-direction:column;border-radius:14px;overflow:hidden;background:var(--menu-solid);border:1px solid var(--glass-edge);box-shadow:var(--shadow-pop);animation:toastin var(--base) var(--ease)}
+.sdrop .palres{max-height:none;overflow:auto;padding:4px 6px 6px}
+/* a group's head: its label in title style, how many match, and "Show N More" at the right */
+.sdrop .phead{display:flex;align-items:baseline;gap:6px;padding:10px 14px 4px}
+.sdrop .plbl{margin:0;font-size:13px;font-weight:600;color:var(--ink-2)}
+.sdrop .pcount{font-size:13px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.sdrop .palres .phead button.pmore{width:auto;margin:0 -6px 0 auto;padding:2px 6px;border-radius:8px;font-size:13px;font-weight:500;color:var(--accent)}
+.sdrop .palres button .ttl b{font-weight:600}
+.sdrop .pgrp+.pgrp{border-top:1px solid var(--line);margin-top:4px}
+.sdrop .palres button{padding:8px 14px}
+.sdrop .palres button .ttl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.sdrop .palres button .ttl:has(.docnm){display:flex}
+
+/* a choice of one looks like a choice of one */
+.colmenu input[type=radio],.pklist input[type=radio]{border-radius:50%}
+.colmenu input[type=radio]:checked,.pklist input[type=radio]:checked{background:transparent;border-color:var(--accent)}
+.colmenu input[type=radio]:checked::after,.pklist input[type=radio]:checked::after{width:6px;height:6px;border:0;border-radius:50%;background:var(--accent);transform:none}
+.colmenu .mirow{display:flex;align-items:center;gap:4px}.colmenu .mirow .mi{flex:1}
+.colmenu .fb{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;flex:none;border:0;border-radius:7px;background:var(--card-hover);color:var(--ink);cursor:pointer}.colmenu .fb:hover,.colmenu .fb:focus-visible{background:var(--line)}
+.colmenu .mi:disabled{opacity:.45;cursor:default}.colmenu .mi:disabled:hover{background:none}
+
+/* a dialog taller than the window scrolls inside itself, and its buttons stay in reach at the bottom */
+.scrim .dlg.imdlg{padding-bottom:0}
+.imdlg .shead{position:sticky;top:-22px;z-index:2;margin:-22px -26px 0;padding:22px 26px 6px;background:var(--menu-solid);border-radius:22px 22px 0 0;border-bottom:1px solid var(--line)}   /* the close button stays in reach too */
+.imdlg .shead + .srow{border-top:0}   /* the header's own rule stands in for the first row's */
+.imdlg .xfoot{position:sticky;bottom:0;z-index:2;margin:8px -26px 0;padding:14px 26px 22px;background:var(--menu-solid);border-radius:0 0 22px 22px}
+.imchg{max-height:124px}
+/* the preview fits its columns to the dialog: a long value ends in an ellipsis, in full on hover, never cut at the edge */
+.imprev table{table-layout:fixed}.imprev td{max-width:none}.imprev th{overflow:hidden;text-overflow:ellipsis}
+/* import dialogs: a label column only as wide as their longest label ("Existing questions"), so the preview's question and response get the width */
+.imdlg .srow{grid-template-columns:124px minmax(0,1fr)}
+/* Import an issues list: the points already raised scroll under the file row; their label stays in sight */
+.ilf-body{max-height:calc(100vh - 230px);overflow-y:auto;margin:0 -26px;padding:0 26px;scrollbar-width:thin;scrollbar-color:var(--ink-3) transparent}
+.ilf .srow{grid-template-columns:150px minmax(0,1fr)}
+.ilf .srow.top .k{position:sticky;top:8px}
+.ilf .k .cnt{color:var(--ink-3);margin-left:6px;font-variant-numeric:tabular-nums}
+.ilfile{display:flex;gap:10px;align-items:baseline;min-width:0;font-size:13.5px;color:var(--ink)}
+.ilfile .fnw{display:flex;min-width:0}
+.ilfile .fn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.ilfile .fnw>span:last-child{white-space:pre;flex:none}
+.ilfile .c{color:var(--ink-2);white-space:nowrap}
+.ilfile .linkb{flex:none}.ilfile .grow{flex:1}
+/* each already-raised point says what it joins, with its "Keep separate" box at the end of the row; the new findings follow,
+   one line each. The numbers sit in one column (--nw, the longest number's width) so every title starts at the same place (#835) */
+.ilf .rv-row.ilr{grid-template-columns:var(--nw,4ch) minmax(0,1fr) auto;column-gap:12px;align-items:baseline;font-size:13px;padding:12px 0;border-top:1px solid var(--line);cursor:default}
+.ilf .rv-row.ilr:first-child{border-top:0;padding-top:4px}
+.ilf .rv-row.ilr:last-child,.ilf .iln:last-child{padding-bottom:0}
+.ilr .n,.iln .n{font-size:13px;line-height:1.45;color:var(--ink-3);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ilr .pt{font-size:13.5px;line-height:1.45;color:var(--ink)}
+.ilr .was{font-size:13px;line-height:1.45;color:var(--ink-2);margin-top:4px}
+.ilr .was i{font-style:normal;font-size:11px;font-weight:600;color:var(--ink-3);margin-right:8px}
+/* checked: the join is struck through, as Import will not make it */
+.ilr .was.off{text-decoration:line-through;text-decoration-color:var(--ink-3)}
+/* the box sits on the point's first line, whatever its own baseline, which moves when it is checked */
+.ilr .keep{display:flex;align-items:center;align-self:start;height:calc(13.5px * 1.45);gap:7px;font-size:12.5px;line-height:1;color:var(--ink-2);white-space:nowrap;cursor:pointer}
+.ilr .keep input{margin:0}
+.ilf .iln{display:grid;grid-template-columns:var(--nw,4ch) minmax(0,1fr) auto;column-gap:12px;align-items:baseline;font-size:13px;padding:9px 0;border-top:1px solid var(--line)}
+.ilf .iln:first-child{border-top:0;padding-top:4px}
+.iln .t{font-size:13.5px;line-height:1.45;color:var(--ink)}
+.iln .ws{font-size:13px;line-height:1.45;color:var(--ink-2);white-space:nowrap}
+/* a long list's rows are laid out only near the view */
+.ilf .ilr,.ilf .iln{content-visibility:auto;contain-intrinsic-size:auto 40px}.ilf .ilr{contain-intrinsic-size:auto 100px}
+.ilf .k .aim{font-family:var(--body);color:var(--accent);font-size:11px;font-weight:600;letter-spacing:.4px;margin-left:8px;vertical-align:1px}
+/* "#3 on issues list" on a finding's page: the list and the point's words on hover */
+.ilh{cursor:default;outline-offset:2px}
+/* the preview's short fields keep a fixed width that fits their heading; the question and the response share the rest */
+.imprev th[data-k=received]{width:80px}.imprev th[data-k=responded]{width:64px}.imprev th[data-k=priority]{width:76px}.imprev th[data-k=status]{width:72px}.imprev th[data-k=askedBy],.imprev th[data-k=respondedBy],.imprev th[data-k=workstream]{width:108px}
+
+/* ---- import: where the table starts ---- */
+.imwhere{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.imwhere label{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-2)}
+.imwhere .field{height:30px;font-size:13px}
+.imwhere input.field{width:72px}
+.imwhere select.field{max-width:220px}
+
+/* ---- folded rail: Search and Settings stay one click away ---- */
+.rail{position:relative}
+/* the queue strip above them ends 16px clear of their top (.qgrid in styles.css): move both together */
+.rtools{position:absolute;left:13px;bottom:166px;z-index:3;display:flex;flex-direction:column;gap:8px}
+/* reading a document there is no queue below them: search and settings sit at the foot of the slim rail, centered in it
+   like Home at its head */
+body.reading:not(.queued) .rtools{left:50%;transform:translateX(-50%);bottom:15px}
+/* while the queue is open its list runs down past them (.qgrid in styles.css), so they fade out of its way and let the pointer through to it. They stay in the Tab order: focus on one leaves the queue, which folds, and they show again */
+.rtools{transition:opacity var(--fast)}
+body.qopen .rtools{opacity:0;pointer-events:none}
+
+/* ---- asking before a response is replaced ---- */
+.msgs .card.confirm p{margin:0 0 10px}
+
+/* deal facts typed in place take the width of what is in them */
+.trail .tfacts{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none;padding-left:16px}
+.home.top .trail{flex-wrap:nowrap}
+.trail .facts{white-space:nowrap}
+.home.top .trail>a,.home.top .trail>span:not(.sep):not(.tfacts):not(.facts){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.home.top .trail>.sep,.home.top .trail>.facts{flex:none}
+
+/* ---- deal page: the folders a deal reads, with labels that can be changed ---- */
+.foldl{margin-top:26px}
+.foldlist{list-style:none;margin:6px 0 0;padding:0}
+.foldlist li{padding:9px 0;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:2px;min-width:0}
+.foldlist .fl-top{display:flex;align-items:baseline;gap:10px;min-width:0}
+.foldlist .fl-top .ef.inl{flex:1 1 auto;min-width:0;width:auto;font-size:13.5px;color:var(--ink)}
+.foldlist .fl-n{flex:none;font-size:12px;color:var(--ink-2)}
+.foldlist .fl-path{display:flex;min-width:0;font-size:12px;color:var(--ink-2)}
+/* ---- Q&A: the open question when it no longer matches the filter ---- */
+.md .li.offfilter .q,.md .li.offfilter .n,.md .li.offfilter .by,.md .li.offfilter .pr{opacity:.6}
+.foldlist .fl-top .ef.inl{flex:0 1 auto;field-sizing:content;min-width:8ch;max-width:100%}
+.foldlist .fl-n{margin-left:auto}
+
+/* ---- conversation: what you sent sits on the right, as wide as its words; what came back sits on the left ---- */
+.msgs>div{display:flex;flex-direction:column;align-items:flex-start}
+.msgs>div>.me{align-self:flex-end;width:fit-content;max-width:60%}
+.msgs>div>.matt{align-self:flex-end;max-width:60%}
+.msgs>div>.ai,.msgs>div>.card{align-self:stretch}
+.msgs>div>.ai{max-width:80ch}
+body.reading .chatwrap.withdoc .msgs>div>.me,body.reading .chatwrap.withdoc .msgs>div>.matt{max-width:85%}
+
+/* ---- shared work: a record changed in two places, a deal whose changes cannot be read ---- */
+.cf{color:var(--high)}
+.cfl{margin-top:12px;animation:enter var(--base) var(--ease) both}
+/* design B: the record's title in its page's title style (.qtxt), "Two Versions" under it */
+.cfl .cfl-title{margin:0 0 2px}
+.cfl-sub{margin:0 0 12px;font-size:12.5px;color:var(--ink-2)}
+.cfl-vs{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));column-gap:12px;row-gap:0;align-items:start}
+.cfl-v{min-width:0;margin-bottom:12px;padding:12px 14px;border-radius:var(--r-card);background:var(--card);border:1px solid var(--line);display:grid;grid-template-rows:subgrid;row-gap:10px;align-items:start}
+.cfl-who{display:flex;flex-direction:column;gap:1px;font-size:12.5px;color:var(--ink-2)}
+.cfl-who b{font-size:13.5px;font-weight:500;color:var(--ink)}
+.cfl-tag{display:inline-block;vertical-align:1px;margin-left:8px;font-size:11px;font-weight:600;letter-spacing:.3px;line-height:18px;padding:0 7px;border-radius:6px;background:color-mix(in srgb,var(--ink-3) 26%,transparent);color:var(--ink)}
+.cfl-v.pick{cursor:pointer;transition:border-color var(--fast) var(--ease),background-color var(--fast) var(--ease)}
+.cfl-v.pick:hover{background:var(--card-hover)}
+.cfl-v.pick{position:relative}
+/* picked: a gray edge and check mark (a selection is marked in gray, not the accent) */
+.cfl-v.pick.on,.cfl-v.pick.on:hover{border-color:var(--ink-2);box-shadow:inset 0 0 0 1px var(--ink-2);
+  background:var(--card)}
+.cfl-chk{position:absolute;top:12px;right:12px;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;
+  color:var(--ink-2)}
+.cfl-top{display:flex;align-items:flex-start;gap:8px}
+.qpanel.conflict .cfl{margin-top:0}
+.cfl-v .cfl-val{max-height:calc(1.55em * 6);overflow-y:auto}
+.cfl-top .cfl-head{flex:1 1 auto;min-width:0}
+.cfl-keep{flex:none}
+.cfl-go{display:flex;justify-content:flex-end;margin-top:2px}
+.cfl-f{min-width:0}
+.cfl .cfl-f .lbl{font-size:13px;color:var(--ink-2);font-weight:600;margin:0 0 3px}
+.cfl-val{margin:0;font-size:13.5px;line-height:1.55;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere}
+/* a named item of a list's version: a long one wraps under its text, not under the dot */
+.cfl-val .bl{padding-left:.8ch;text-indent:-.8ch}
+.cfl-val.none{color:var(--ink-2)}
+.cfl .cacts{display:flex;gap:8px;margin-top:2px;align-self:end}
+.home.top>.cfl{margin:14px 0 4px}
+.opening .cfl{margin-top:4px}
+/* the stepper and Keep, under the cards (12px of their own margin, and 4px) */
+.cfl-foot{display:flex;align-items:center;gap:8px;margin-top:4px}
+.cfl-foot .grow{flex:1}
+/* no rule under a record in two versions: it would cut under the stepper row */
+.opening:has(>.cfl){border-bottom-color:transparent}
+.ef[readonly]{cursor:default}
+@media (forced-colors:active){
+  .cfl-v{border:1px solid CanvasText}
+  .cf{color:Highlight}
+  .cfl-v.pick.on{border-color:Highlight}
+  .cfl-chk{color:Highlight}
+}
+
+/* ---- the Folders dialog: list rows divided by rules, no boxes and no column heads;
+   each is the folder icon, the name over its path cut at its start, a quiet count and the × (folderRow.tsx) ---- */
+.fdgroup{display:flex;flex-direction:column;margin-top:6px}
+.fdrow{display:grid;grid-template-columns:16px minmax(0,1fr) auto 24px;column-gap:12px;align-items:center;
+  min-height:44px;box-sizing:border-box;padding:8px 4px;border-bottom:1px solid var(--line);font-size:12px}
+.fdrow:last-child{border-bottom:0}
+.fdicon{display:grid;place-items:center;width:16px;height:16px;color:var(--ink-3)}
+.fdstack{display:flex;flex-direction:column;gap:1px;min-width:0}
+.fdname-tip{display:block;min-width:0}
+/* a name's note ("Not saved") follows it on its line, so the row keeps its two lines; the name gives way first */
+.fdstack .efwrap{display:flex;align-items:baseline;min-width:0}
+.fdstack .efwrap>.fdname{flex:0 1 auto}
+.fdstack .efwrap>.efstate{flex:none;white-space:nowrap}
+/* glass levels (design.md, The glass family): the row under the pointer is Bare, as a sidebar row is; the name in it is
+   an editable value, bare at rest and the Control level under the pointer (--card fill in a 1px --line ring) */
+.fdrow:hover{background:var(--card-hover);border-radius:var(--r-ctl)}
+.fdrow .fdname{display:block;box-sizing:border-box;height:26px;width:auto;min-width:0;max-width:100%;
+  field-sizing:content;margin:-2px 0 -2px -8px;padding:0 8px;border:0;border-radius:999px;background:transparent;
+  outline:0;font:500 12px/26px var(--body);color:var(--ink);text-align:left;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.fdrow:hover .fdname:not([readonly]):not(span){background:var(--card);box-shadow:inset 0 0 0 1px var(--line)}
+.fdrow .fdname:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.fdrow .p{font-size:12px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;
+  text-align:left}
+.fdrow .cnt{font-size:12px;color:var(--ink-3);white-space:nowrap;font-variant-numeric:tabular-nums;text-align:right}
+.fdrow .cnt.ix{color:var(--ink-2)}
+.fdrow .x{width:24px;height:24px;display:grid;place-items:center;padding:0;border:0;border-radius:6px;
+  background:none;color:var(--ink-3);cursor:pointer}
+.fdrow .x:hover{color:var(--ink);background:var(--line)}
+/* the Removed and To Add groups are headed as the app's other group labels are (design.md, section labels) */
+.fdsec{margin:18px 0 2px;padding:0 4px;font-size:13px;font-weight:600;color:var(--ink-2)}
+/* a removed folder: dimmed with the text tokens, not opacity, so both lines stay readable; only its icon fades.
+   Restore takes the count and × columns, so no column changes width */
+.fdrow.gone .fdname{margin:0;padding:0;height:auto;line-height:20px;color:var(--ink-2)}
+.fdrow.gone .fdicon{opacity:.6}
+.fdrow.gone .put{grid-column:3/5;justify-self:end;margin-right:-4px}   /* on the row's edge, as the × column is */
+.nddlg .dropzone.row{margin-top:14px}
+/* the Folders dialog scrolls only its body: the title, the × and the footer stay put and nothing scrolls under them
+   The body runs to the dialog's edges so a row's hover and focus ring are not cut */
+.scrim .dlg:has(>.fdbody){display:flex;flex-direction:column;overflow:hidden}
+.dlg:has(>.fdbody)>.shead,.dlg:has(>.fdbody)>.acts{flex:none}
+.dlg:has(>.fdbody)>.acts{position:static}
+.fdbody{flex:1 1 auto;min-height:0;overflow-y:auto;margin:0 -28px;padding:0 28px 4px}
+/* in light, --ink-2 and --ink-3 fall below 4.5:1 on the dialog's glass with no row box under them (4.1 measured), so
+   the quiet words take --ink there and are told apart by weight (design.md, Legibility) */
+:root[data-theme="light"] .fdrow .p,:root[data-theme="light"] .fdrow .cnt,
+:root[data-theme="light"] .fdrow.gone .fdname{color:var(--ink)}
+
+/* ---- keyboard and reading aids ---- */
+/* the first stop on every page: past the rail, to the page itself */
+.skip{position:fixed;left:16px;top:12px;z-index:95;padding:8px 14px;border-radius:999px;background:var(--toast);color:var(--toast-ink);font-size:13px;text-decoration:none;box-shadow:var(--shadow-pop);transform:translateY(-300%)}
+.skip:focus{transform:none}
+#view:focus{outline:none}
+.qpanel:focus{outline:none}   /* the question panel holds the focus only while a draft is being written: no ring round the whole panel */
+/* a citation's popup put away with Escape stays away until the phrase is reached again */
+.ref.nopop .pop{display:none !important}
+/* links in the trail are a line of text high; the area that takes a click is 24px without moving anything */
+.trail>a,.chathead .back a{padding-block:2px;margin-block:-2px}
+/* the queue's search field takes no focus while it cannot be seen */
+body:not(.qopen) .qsearch{pointer-events:none}
+@media (forced-colors:active){
+  .avatar{forced-color-adjust:none;background:Canvas;color:CanvasText;border:1px solid CanvasText}
+  .palres button[aria-selected="true"],.palres button.on{outline:2px solid Highlight;outline-offset:-2px}
+  .docbody .page,.docbody .sheet{border:1px solid CanvasText}
+  .skip{border:1px solid CanvasText}
+}
+
+/* ---- reading mode: the page is the sheet. It runs on under the floating bar and fades out; the conversation takes the width the page does not use ---- */
+body.reading{--colw:clamp(320px,calc(100vw - 1000px),560px)}
+.docpanel{top:-16px;right:-16px;bottom:-16px}
+.docstage{padding:0}
+/* the page's top is level with the finding card's */
+.docstage .docbody{padding:16px 16px 132px 0;mask-image:linear-gradient(to bottom,transparent 0,var(--mask) 18px,var(--mask) calc(100% - 150px),transparent calc(100% - 14px)),linear-gradient(to right,var(--mask) calc(100% - 14px),transparent);mask-composite:intersect}
+.docstage .docbody .page,.docstage .docbody .sheet{border-radius:var(--r-card);box-shadow:var(--shadow-sheet)}
+.docstage .docbody .page{overflow:hidden}
+.docstage .docbody .page.pdf{padding:0}
+.docstage .docbody .page.pdf.ready{min-height:0}
+.docstage .docbody .page.pdf .pg{display:none}
+.docnav{position:absolute;left:0;bottom:34px;margin:0 0 0 var(--nl,0px);z-index:2}
+/* page and zoom (13b): a column at the document's bottom right; its right and bottom are set by pageControls.tsx */
+.pgstack{position:absolute;right:16px;bottom:90px;z-index:2;display:flex;flex-direction:column;align-items:center;
+  gap:4px;padding:5px}
+.pgstack .pgrule{display:block;width:18px;height:1px;margin:2px 0;background:var(--line)}
+/* ---- Q&A list: columns as wide as what is in them, so the question text gets the room; rows line up with the bar above; no rule under the filters ---- */
+@property --qa-fade{syntax:'<length>';inherits:false;initial-value:0px}
+@keyframes qafade{from{--qa-fade:0px}to{--qa-fade:22px}}
+.md{border-top:0;margin-top:12px}
+.md .list{padding:0 0 10px;display:grid;align-content:start;column-gap:14px;grid-template-columns:auto auto auto minmax(0,1fr) auto;
+  mask-image:linear-gradient(to bottom,transparent 0,var(--mask) var(--qa-fade));animation:qafade linear both}
+.md .list>*{grid-column:1/-1}
+.md .li,.md.nopr .li,.md.noby .li,.md.nopr.noby .li{grid-template-columns:subgrid;column-gap:14px;padding:11px 12px 11px 10px}
+.md .li:first-child{border-top:1px solid var(--line)}
+.md .li .n{text-align:center;min-width:20px;font-variant-numeric:tabular-nums}
+.md .li .by{max-width:18ch}
+/* the priority column keeps its place even when no question has one; it is hidden only by the person's own choice in the More menu */
+/* the columns themselves are set on the list by the page, from what is switched on and whether the detail pane is open */
+/* ---- the full table: no question open, the list takes the whole width and shows the start of each response ---- */
+.md.wide{grid-template-columns:minmax(0,1fr)}
+.md.wide .list{border-right:0}
+.md .lh{display:grid;grid-template-columns:subgrid;column-gap:14px;padding:2px 12px 8px 10px;font-size:11px;color:var(--ink-2);font-weight:600;white-space:nowrap}
+.md .lh .n{text-align:center}
+.md .lh+.li{border-top:1px solid var(--line)}
+/* Q&A: the heads sit above the list; the list's own copy is kept, hidden and flat, for its columns to size around */
+.md .lh[data-sizes]{visibility:hidden;height:0;padding-top:0;padding-bottom:0;overflow:hidden}
+.md .lh[data-sizes]+.li{border-top:0}
+.lhout{position:relative;padding:2px 0 8px;margin-top:12px;margin-bottom:-12px;border-bottom:1px solid var(--line);font-size:11px;color:var(--ink-2);font-weight:600;white-space:nowrap}
+/* as tall as the heads in the list were (a line of their type, 2px above and 8px below), so the rows sit where they did */
+.lhout::before{content:"\200b"}
+.lhout span{position:absolute;top:2px;overflow:hidden;text-overflow:clip}
+.lhout .n{text-align:center}
+/* Q&A: scrolling down the list tucks the deal's header row away (#593, design C); the list takes the height it gives back */
+.home.qapage .headrow{max-height:120px;transition:max-height var(--base) var(--ease),opacity var(--base) var(--ease),border-color var(--base) var(--ease)}
+.home.qapage.tuck .headrow{max-height:0;opacity:0;border-bottom-color:transparent;overflow:hidden;visibility:hidden;transition:max-height var(--base) var(--ease),opacity var(--base) var(--ease),border-color var(--base) var(--ease),visibility 0s var(--base)}
+.home.qapage .trail{transition:margin-bottom var(--base) var(--ease)}
+.home.qapage.tuck .trail{margin-bottom:0}
+.home.qapage.tuck .trail .tp{color:var(--ink);font-weight:500}
+/* animated only for the tuck: with a question open the panel sizes the list itself, at once (an animated shrink would let the page scroll meanwhile) */
+.home.qapage .md .list:not([style*="max-height"]){transition:max-height var(--base) var(--ease)}
+@media (prefers-reduced-motion:reduce){.home.qapage.tuck .headrow{transition:none}}
+.md .li .rs{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4;color:var(--ink-2);overflow-wrap:anywhere}
+/* a ready draft waiting in place of the response, as it is not the response until a person uses it: --ink-3 (dimmer only in dark),
+   and the AI mark (names.aiContent) before it, which is what tells it from a response in both themes */
+.md .li .rs.dr{color:var(--ink-3)}
+.md .li .rs.dr.has{color:var(--ink-2)}   /* a response taken from a draft: marked, in the color any response reads in */
+.md .li .rs.dr .aim,.msgs .suggest .verdict .aim{
+  color:var(--accent);font-size:11px;font-weight:600;letter-spacing:.4px;margin-inline-end:6px}
+.flagrow .ft .aim,.qtxt .aim{font-family:var(--body);color:var(--accent);font-size:11px;font-weight:600;letter-spacing:.4px;margin-inline-end:7px;vertical-align:1px}
+/* Option A. A question in two versions: the stripe an open finding has, on its own row only (design.md Marks), and
+   its Response cell says only "Two versions" in --high. A cell taken in from the Q&A log and not yet seen: its value in full ink,
+   and the log icon in --ink-2 hung at the cell's top right, so every value keeps its column's left edge. */
+.md .li.cfrow{position:relative}
+.md .li.cfrow::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:2px;background:var(--high)}
+.md .li .cfrs{display:block}
+.md .li .cfrs .cfw{color:var(--high);font-weight:500}
+.md .li>.chg{position:relative;padding-right:22px;color:var(--ink)}
+.md .li .chgi{position:absolute;right:0;top:1px;width:15px;height:15px;color:var(--ink-2);font-style:normal}
+.md .li .chgi svg{display:block}
+@media (forced-colors:active){.md .li.cfrow::before{forced-color-adjust:none;background:Highlight}.md .li .cfrs .cfw{color:Highlight}}
+/* The Q&A toolbar giving way, a step at a time (QaTools): the select narrows, the buttons take their short words, the select narrows again */
+/* (the workstream filter button narrows only while it shows a workstream's name) */
+.trk-tools.sq1 #qa-ws.named,.trk-tools.sq2 #qa-ws.named{max-width:150px}
+.trk-tools:is(.sq2,.sq3,.sq4,.sq5) .btn .long{display:none}.trk-tools:is(.sq2,.sq3,.sq4,.sq5) .btn .short{display:inline}
+.trk-tools:is(.sq3,.sq4,.sq5) #qa-ws.named{max-width:118px}
+.trk-tools .wsfilter{position:relative;display:inline-flex;flex:0 1 auto;min-width:0}
+.trk-tools #qa-ws.ico{width:28px;padding:0;display:inline-grid;place-items:center}
+.trk-tools #qa-ws.named{flex:0 1 auto;min-width:0;max-width:200px;gap:6px}.trk-tools #qa-ws svg{flex:none}
+.trk-tools #qa-ws .wsname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trk-tools .wsmenu{left:0;right:auto;min-width:200px}
+.trk-tools .findwrap{position:relative;margin-right:auto}
+.trk-tools #qa-find{width:28px;height:28px;padding:0;display:inline-grid;place-items:center}
+.findmenu{left:0;right:auto;width:240px}
+.findmenu .field{width:100%;box-sizing:border-box}
+.md .li .rby{max-width:18ch;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.md .li .rdt,.md .li .stc{white-space:nowrap}
+/* closing the pane: one control, top right of the pane */
+.md .det{position:relative}
+.md .det{mask-image:linear-gradient(to bottom,transparent 0,var(--mask) var(--qa-fade));animation:qafade linear both}
+/* the timeline is set apart from the shorthand above: a minifier folds it into `animation`, which Chromium then rejects whole */
+.md :is(.list,.det){animation-timeline:scroll(self);animation-range:0 28px}
+/* conversation: more air between what was asked and what was answered */
+.msgs{gap:34px;padding-top:24px}
+.msgs>div{gap:18px}
+.msgs .acts{margin-top:10px}
+/* the actions under an answer are icons, left-aligned with the answer's text; each says its name on hover */
+.msgs .acts,body.reading .msgs .acts{gap:2px;justify-content:flex-start;margin-left:-6px}
+.msgs .ib{display:inline-grid;place-items:center;width:30px;height:30px;padding:0;border:0;background:none;cursor:pointer;border-radius:var(--r-ctl);color:var(--ink-2)}
+.msgs .ib:hover{background:var(--card-hover);color:var(--ink)}
+.msgs .ib:focus-visible,.msgs .suggest .sq:focus-visible,.msgs .suggest .ask:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+/* "Use as response to a question…": the deal's open questions to pick from, narrowed by the field above them */
+.msgs .usecard{gap:8px}
+.msgs .usecard .ufind{position:relative;display:block}
+.msgs .usecard .ufind svg{position:absolute;left:11px;top:11px;color:var(--ink-3);pointer-events:none}
+.msgs .usecard .ufind .in{width:100%;box-sizing:border-box;padding-left:32px}
+/* about four questions high; the rest scroll */
+.msgs .usecard .ulist{max-height:212px;overflow:auto;margin:0 -8px;padding:2px 0;scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--ink) 22%,transparent) transparent}
+.msgs .usecard .uopt{display:grid;grid-template-columns:auto minmax(0,1fr) auto;column-gap:10px;align-items:baseline;padding:7px 8px;border-radius:10px;font-size:13.5px;line-height:1.45;color:var(--ink);cursor:pointer}
+.msgs .usecard .uopt.on{background:color-mix(in srgb,var(--ink) 7%,transparent)}
+.msgs .usecard .uopt b{font-weight:600;font-variant-numeric:tabular-nums;min-width:2.4em}
+.msgs .usecard .ut{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.msgs .usecard .uhas{font-size:12px;color:var(--ink-2);white-space:nowrap}
+.msgs .usecard .unone{margin:4px 8px;font-size:13px;color:var(--ink-2)}
+@media (forced-colors:active){.msgs .usecard .uopt.on{outline:1px solid Highlight}}
+/* the suggested open question under an answer: its number and text, Check, Use as response and "Not this one"
+   */
+.msgs .suggest{display:flex;flex-direction:column;gap:4px;margin-top:10px;padding:9px 8px 8px 14px;border:1px solid var(--line);border-radius:var(--r-ctl);background:var(--card);font-size:13px;color:var(--ink);min-width:0;animation:enter var(--base) var(--ease) both}
+/* the card spans the chat column, as wide as the chat box; the answer above it keeps its reading width */
+.msgs:has(.suggest){container-type:inline-size}
+.msgs .suggest{width:100cqw;box-sizing:border-box}
+.msgs .suggest.on{border-color:color-mix(in srgb,var(--accent) 45%,var(--line));box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 30%,transparent)}
+.msgs .suggest .lead{font-size:12.5px;color:var(--ink-2)}
+/* Check whether the answer does address it: the result in one or two lines under the question */
+.msgs .suggest .ask[aria-disabled="true"]{opacity:.45;cursor:default}
+.msgs .suggest .verdict{margin:2px 0 0;font-size:12.5px;line-height:1.45;color:var(--ink-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.msgs .suggest .verdict b{font-weight:600;color:var(--ink)}
+.msgs .suggest .verdict .aim{margin-inline-end:2px}   /* a space follows it, so a screen reader hears two words */
+/* Check, Use as response and Not this one together at the bottom right */
+.msgs .suggest .row{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:4px;min-width:0}
+/* the question, two lines at most; it opens in the side pane */
+.msgs .suggest .sq{all:unset;min-width:0;cursor:pointer;text-wrap:pretty;line-height:1.5;border-radius:4px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.msgs .suggest .sq b{font-weight:600;margin-right:6px}
+.msgs .suggest .sq span{text-decoration:underline dotted var(--ink-3);text-underline-offset:3px}
+.msgs .suggest .btn.sm{flex:none;height:28px}
+.msgs .ib.sm{width:26px;height:26px;flex:none;margin-top:-1px}
+/* the More menu lists six columns: two across, so the menu stays inside a short window */
+.colmenu .mcols{display:grid;grid-template-columns:auto auto;column-gap:4px}
+.colmenu .mcols label{white-space:nowrap}
+/* the menu hangs about 300px down the page: in a window too short for it, it scrolls inside itself rather than running off the foot */
+.colmenu{max-height:calc(100vh - 312px);overflow-y:auto}
+
+/* The findings heading and its controls: one row that never wraps. findings.tsx measures it and gives up words before it would overflow. */
+.lbl.flagsl.fhead{justify-content:flex-start;gap:8px;min-height:28px;white-space:nowrap}
+.fhead>*{flex:none}.fhead .sp{flex:1 1 0;min-width:0}
+.fhead .h{margin-right:2px}
+.fhead .seg{text-transform:none;letter-spacing:0;font-weight:400;padding:2px}.fhead .seg button{height:22px;padding:0 10px}
+.fhead .btn.sm{height:26px;text-transform:none;letter-spacing:0;font-weight:500;gap:6px}
+.fhead .btn.sm.ico{width:26px;padding:0;place-items:center;display:inline-grid}.fhead .btn.sm.act.ico:has(span){width:auto;padding:0 8px;display:inline-flex}
+.fhead .btn.sm svg{flex:none}
+.fhead .fwrap{position:relative;display:inline-flex}
+.fhead #f-filter.on,.trk-tools #qa-ws.on{color:var(--accent);border-color:var(--accent)}
+.fhead .fmenu{background:var(--menu-solid);left:0;right:auto;top:calc(100% + 6px);min-width:190px;display:flex;flex-direction:column;gap:2px;text-transform:none;letter-spacing:0;font-weight:400;white-space:normal}
+.fhead .fmenu .field{width:100%;margin-top:4px}
+/* a filter menu's sections: a long one scrolls between its first and pinned last options */
+.colmenu:has(.mchoice.long){overflow:hidden}
+.colmenu .mchoice{flex:none;display:flex;flex-direction:column}.colmenu .mchoice.long{flex:0 1 auto;min-height:0}
+.colmenu .mchoice .scroll{display:flex;flex-direction:column;flex:0 1 auto;min-height:0;overflow-y:auto}
+/* the Findings ⋯ menu: plain words, under its button at the row's right */
+.fhead .fmore .colmenu{top:calc(100% + 6px);text-transform:none;letter-spacing:0;font-weight:400;white-space:normal}
+/* when everything was last checked, and the way to check it again */
+.brieflet .lbl.flagsl .btn.sm{height:26px;text-transform:none;letter-spacing:0;font-weight:500}
+.brieflet .offer{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:2px 0 14px;font-size:14px;color:var(--ink)}
+
+/* ---- small layout fixes ---- */
+/* the conversation composer: the attachment, the text and the buttons start on one line; the same space all round; one line of text until more is typed */
+/* Home's box, a deal page's open box and a conversation's composer are one composer: the same sizes everywhere */
+.pcomp,#homeask,.askslot .askbox.open{padding:14px 14px 11px;gap:10px}
+.pcomp textarea,#homeask textarea,.askslot .askbox.open textarea{font-size:15px;padding:0 4px;min-height:24px;max-height:168px;scrollbar-width:thin;scrollbar-color:var(--ink-3) transparent}
+.pcomp .chips,#homeask .chips,.askslot .askbox.open .chips{margin-bottom:2px}
+/* the same space under the buttons as beside them: every control in the bar is one height, so none adds room of its own */
+.pcomp .scopebtn,.pcomp .send,#homeask .scopebtn,#homeask .send,.askslot .askbox.open .scopebtn,.askslot .askbox.open .send{height:32px}.pcomp .send,#homeask .send,.askslot .askbox.open .send{width:32px}
+/* and the same above the words: a line of text carries its own room over the letters, so with no attachment above it the line starts higher */
+.pcomp .chips:empty+textarea,#homeask .chips:empty+textarea,.askslot .askbox.open .chips:empty+textarea{margin-top:-2px}
+/* reading mode: nothing readable shows through the composer */
+body.reading .tcomp.narrow{background:var(--menu-solid);backdrop-filter:none}
+/* Retry and Resume in a line of text look like the app's other in-line actions */
+/* Retry on a page has one look, an accent word; on a notice it is the notice's underlined word, like Undo */
+.loadfail .tundo,.ai.failed .tundo{background:none;border:0;padding:0;margin-left:4px;font:inherit;font-weight:500;color:var(--accent);cursor:pointer}
+.loadfail .tundo:hover,.ai.failed .tundo:hover{text-decoration:underline;text-underline-offset:3px}
+/* icon buttons keep their icon whole */
+.fctl .btn.sm.ico{width:28px;height:28px;padding:0;justify-content:center}.fctl .btn.sm.ico svg{flex:none}
+.rail a.railx{padding:0}
+/* the filter menu's text field is a field, not a checkbox */
+.colmenu input.field{appearance:auto;width:100%;height:32px;border-radius:var(--r-ctl);border:1px solid var(--line);display:block;margin:4px 0 0}
+/* the queue, opened over a page, is not see-through */
+body.queued.qopen .rail{background:var(--menu-solid);backdrop-filter:none}
+/* reading, the open queue covers most of the conversation column: the column steps back rather than show a cut strip past the queue */
+body.reading.qopen .chatwrap.withdoc .chat,body.reading.qopen #pcomposer:not(:focus-within){mask-image:linear-gradient(transparent,transparent)}   /* a mask: its settle animation holds the opacity. A composer being typed in stays in view */
+/* a conversation with nothing said yet takes no room under the record */
+.chat .msgs:empty{display:none}
+/* the trail: Home and the page keep their width; the facts give way first (a long counterparty), then the deal's name, with an ellipsis */
+.home.top .trail>.th,.home.top .trail>.tp{flex:none}
+.home.top .trail>.tn{flex:0 1 auto;min-width:8ch}
+.trail .tfacts{flex:0 1000 auto;min-width:0}   /* a long counterparty gives way before the deal's name does */
+.trail .tfacts .efwrap{flex:0 1 auto;min-width:6ch;display:flex}
+.trail .tfacts .sep{flex:none}
+/* the finding's controls: fixed widths, so nothing moves when a word changes */
+.fctl #f-review{width:98px;justify-content:center}.fctl #f-status{width:82px;justify-content:space-between}
+/* a mark on a finding, why it is there, and what to do about it: one line under the finding's details */
+.fnotice{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 12px;font-size:13.5px;color:var(--ink)}
+.fnotice .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--high);margin-right:8px;vertical-align:1px}
+.fnotice .btn.sm{height:26px;font-size:12px;padding:0 10px;flex:none}
+/* the heading stays on one line; a long check line wraps under itself instead */
+.brieflet .lbl.flagsl>[role="heading"]{white-space:nowrap;flex:none}.brieflet .lbl.flagsl{gap:16px}
+/* Check again on Overview, only when due: under the three blocks, after a rule */
+.ovcheck{display:flex;align-items:center;gap:10px;margin:14px 0 4px;padding-top:14px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-2)}
+.ovcheck .when{min-width:0}.ovcheck .when .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--high);margin-right:8px;vertical-align:1px}
+/* Q&A: the tools start as close under the ask box as the Findings heading does, with no rule and no empty band between; the list and the open question use the height that frees */
+.home.top .tracker{margin-top:0}.home.top .trk-head{border-top:0;padding-top:8px}
+.md .list,.md .det{max-height:calc(100vh - 296px)}
+@media (max-height:700px){.md .list,.md .det{max-height:calc(100vh - 282px)}}
+/* on Q&A the column heads sit above the list (26.8px with their rule), so the list is that much shorter; tucked, it takes the height the header gives back */
+.home.qapage .md .list{max-height:calc(100vh - 322.8px + var(--tuck,0px))}
+@media (max-height:700px){.home.qapage .md .list{max-height:calc(100vh - 308.8px + var(--tuck,0px))}}
+/* the deal's details on Overview: three equal columns, each above the block it shares a column with */
+/* "Structure: value" on one line, in the same three columns as the blocks beneath */
+.ovfacts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));column-gap:32px;align-items:baseline;margin:0 0 20px}
+.ovfacts>div{min-width:0;display:flex;align-items:baseline;gap:6px}
+.ovfacts .k{font-size:13px;color:var(--ink-2);font-weight:600;white-space:nowrap;flex:none}.ovfacts .k::after{content:':'}
+.ovfacts>div>:not(.k){min-width:0}
+@media(max-width:1180px){.ovfacts{column-gap:22px}}
+
+/* Q&A pane header: one row that ends at the pane's edge; the three set-once choices are a line of text under it */
+.md .det .dmeta{flex-wrap:nowrap;gap:8px;min-width:0}
+.md .det .dmeta .n{flex:none;margin-right:0}
+.md .det .dmeta .stsel{flex:none;height:28px;line-height:26px;padding:0 8px}
+.md .det .dmeta .stword{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;line-height:28px}
+.md .det .dmeta .btn.sm{height:28px;flex:none;margin:0}
+.md .det .dmeta .btn.sm.ico{width:28px;padding:0;display:inline-grid;place-items:center}
+.md .det .dprops{display:flex;flex-wrap:wrap;align-items:baseline;margin:10px 0 2px;font-size:13px;line-height:20px;color:var(--ink-2)}
+.md .det .dprops select{appearance:none;field-sizing:content;font:inherit;color:inherit;background:transparent;border:0;border-bottom:1px dotted var(--ink-3);border-radius:0;padding:0 0 1px;margin:0;max-width:100%;cursor:pointer;outline:0;text-overflow:ellipsis}
+.md .det .dprops select:hover{color:var(--ink)}
+.md .det .dprops select:focus-visible{color:var(--ink);border-bottom:1px solid var(--accent)}
+.md .det .dprops select:disabled{cursor:default}
+.md .det .dprops select option{color:var(--option-ink);background:var(--option-bg)}
+.md .det .dprops i{font-style:normal;color:var(--ink-3);margin:0 8px}
+
+.chathead .back .here{color:var(--ink-2)}
+/* a long deal name is the part of the breadcrumb that gives way, ending in an ellipsis (whole on hover), so the trail stays on one line */
+.chathead .back{min-width:0;flex:0 1 auto}.chathead .back>*{flex:none;white-space:nowrap}.chathead .back>.dn{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.md .det .draft.nf{margin-bottom:10px}
+
+/* New deal and Folders dialogs: more room above a label than below it; folder rows in columns under one heading;
+   the buttons stay in view when the list is longer than the window */
+.dlg>.lbl{display:block;margin:18px 0 8px}
+.dlg .nddrop{display:grid;grid-template-columns:minmax(0,1fr) fit-content(220px) max-content 24px;column-gap:12px;
+  row-gap:8px}
+.dlg .nddrop>*{grid-column:1/-1}
+.dlg .ndrow,.dlg .ndhd{display:grid;grid-template-columns:subgrid;align-items:center}
+.dlg .ndhd{padding:0 13px;font-size:11px;font-weight:600;color:var(--ink-2)}
+.dlg .ndhd span:nth-child(3){text-align:right}
+.dlg .ndrow input.lab{field-sizing:content;width:100%;min-width:110px;max-width:220px;text-align:left;padding:0 10px;
+  text-overflow:ellipsis}
+.dlg .ndrow .cnt{text-align:right;white-space:nowrap;color:var(--ink-2);font-size:12px}
+.dlg .ndrow .x{width:24px;height:24px;display:inline-grid;place-items:center;padding:0;border-radius:6px}
+.dlg .ndrow .x:hover{color:var(--ink);background:var(--line)}
+.dlg .ndpaste{margin-top:0}
+/* the name takes the dialog's width, like the folders under it, and Add stands as tall as the path field beside it */
+.nddlg #nd-name{width:100%}
+/* Name and Counterparty side by side at the top of the New deal form */
+.ndtop{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:12px;margin-top:18px}.ndtop .lbl{display:block;margin:0 0 8px}.ndtop .field{width:100%;box-sizing:border-box}.dlg .ndpaste .btn{height:32px}
+.dlg>.acts{position:sticky;bottom:-22px;z-index:1;margin:10px -28px -22px;padding:12px 28px 22px;background:var(--menu-solid);border-radius:0 0 22px 22px}
+
+/* Settings fits the smallest window without scrolling, and is as wide as the import dialogs so its lines seldom wrap */
+.scrim .dlg.setdlg{width:720px}
+.sdlg .srow.keys.top .k{padding-top:1px}
+@media (max-height:760px){.setdlg .srow{padding:12px 0}}   /* the desktop app adds a Punchlist folder row: Settings still fits at 1280x736 */
+@media (max-height:700px){.setdlg .srow{padding:9px 0}.setdlg .keylist{row-gap:4px}.scrim .dlg.setdlg{padding-top:18px;padding-bottom:12px}}
+
+/* icon buttons: square, with the icon in the middle. (8px of side padding left a 16px icon less room than it needs,
+   so it sat 2px right of center.) */
+.btn.ico{padding:0}
+.btn.sm.ico{width:28px}
+/* the same for the sidebar's and the queue's icon buttons: no padding to push a 16px icon off center, and the
+   sidebar's link styles (a row of text) do not apply to a link that is an icon */
+.qarrows button,.docnav>button,.pgstack>button,.railx,.brand .plus{padding:0}
+.rail a.railx{display:grid;place-items:center;width:30px;height:30px;padding:0;gap:0}
+.dlg>.acts #nd-err{margin:0 auto 0 0;align-self:center;min-width:0;overflow-wrap:anywhere}
+.sdlg .shead .sver{margin:0 14px 0 auto;font-size:12.5px;color:var(--ink-2)}
+/* the pane's label lines stay on one line: a name ("Submitted by", "Responded by") is as wide as what it says, and one
+   too long for the line is cut with an ellipsis; the date keeps its place at the end */
+.md .det .lbl{display:flex;align-items:baseline;gap:.4em;white-space:nowrap;min-width:0}
+.md .det .lbl>.efwrap{flex:0 1 auto;min-width:0;display:flex}
+.md .det .lbl>.efwrap:has(.dedit){flex:none}
+.md .det .lbl .ef.inl{field-sizing:content;min-width:9ch;max-width:100%;text-overflow:ellipsis}
+/* a disabled button takes no pointer, so the reason it is off is on this wrapper's title */
+.needs{display:inline-flex}.needs>button:disabled{pointer-events:none}
+
+/* Overview, under the blocks: the two columns start level (one heading height, a rule over both lists), and a
+   document bar is the same length while indexing and after, with any share that is not zero wide enough to see */
+.twocol.ov .lbl.flagsl{min-height:28px}
+.gaps.linked{border-top:1px solid var(--line)}
+.twocol.ov .dcrows,.twocol.ov.solo .dcrows,.twocol.ov:not(.solo) .dcrows{grid-template-columns:minmax(0,1fr) 120px auto;column-gap:14px}
+@media (max-width:1180px){.twocol.ov .dcrows,.twocol.ov.solo .dcrows,.twocol.ov:not(.solo) .dcrows{grid-template-columns:minmax(0,1fr) 96px auto;column-gap:12px}}
+.dcrow .fbar i.some{min-width:4px}
+/* a document's other places, under its name in reading mode's list; a folder's copies, under its name on Overview */
+.dm-r.also{align-items:first baseline;padding:7px 6px 7px 10px}
+.dm-r .nmw{display:flex;flex-direction:column;min-width:0}
+.alsoat{display:block;margin-top:1px;font-size:12px;line-height:1.4;color:var(--ink-2);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dcrow .fn .copies{display:block;white-space:normal;line-height:1.35;font-size:12px;color:var(--ink-3);margin-top:1px}
+
+/* the opened queue: rows a pointer can hit */
+body.qopen .g,body.qopen .g.on{height:24px!important}
+
+/* small targets: at least 24px high */
+.draft .dacts button,.msgs .acts button,.md .det .more{min-height:24px}
+.chip.att>button[aria-label^="Remove"]{min-width:24px;min-height:24px;display:inline-grid;place-items:center}
+/* controls that are off while their record cannot be changed look off */
+.md .det .dprops select:disabled,.stsel:disabled,.headrow .hsel:disabled{opacity:.45;cursor:default}
+/* Q&A table: a column heading gives way with its column (cut with an ellipsis) rather than holding the column open */
+.md .lh span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Checklist: the list and the open item side by side, as in the Q&A log */
+.ckpage{container-type:inline-size}
+.md.ck{margin-top:0;border-top:0}
+.md.ck .list.ckrows{border-top:0;grid-template-columns:26px minmax(0,1.05fr) minmax(0,1fr);column-gap:14px}
+.md.ck:not(.wide) .list.ckrows{grid-template-columns:26px minmax(0,1fr) auto!important}
+/* the mark sits 12px in from the row's edge, as the Q&A table's number does, so it has room inside the row's highlight */
+.md.ck .ckrow .mk{justify-self:end;width:14px}
+.md.ck .li.ckrow{display:grid;grid-template-columns:subgrid;grid-auto-rows:max-content;column-gap:14px;align-items:center;min-height:auto;padding:11px 12px 11px 0;font-size:14px;line-height:1.4;color:var(--ink)}
+.md.ck .ckrow .it{min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.md.ck .ckrow .oc{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.md.ck:not(.wide) .ckrow .oc{font-size:13px;max-width:22ch}
+/* an item resolved by a person: the finding's title gives way, so who closed it stays in sight */
+.md.ck .ckrow .oc.cl{display:flex}.md.ck .ckrow .oc.cl .ft{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.md.ck .ckgroup{grid-column:1/-1;padding-left:12px}   /* in line with the marks, as the Q&A table's header is with its rows */
+/* the Checklist grouped by list, then section, then subsection */
+.md.ck .cksec,.md.ck .cksub{grid-column:1/-1;display:flex;align-items:baseline;gap:8px}
+.md.ck .cksec{font-size:13.5px;font-weight:600;color:var(--ink);padding:16px 0 6px 12px}
+.md.ck .cksub{font-size:12.5px;color:var(--ink-2);padding:10px 0 4px 12px}
+.md.ck .ckgroup+.cksec{padding-top:12px}
+.md.ck .cksec .n,.md.ck .cksub .n{font-weight:400;font-size:12px;color:var(--ink-3)}
+/* beside the pane the list is as tall as the pane (useToSidebarBottom). Wherever the list is cut, top or bottom, the rows
+   fade out rather than end in a hard line: the bottom fade goes as the list reaches its end. */
+.md.ck:not(.wide) .list.ckrows{max-height:none}
+@property --ck-end{syntax:'<length>';inherits:false;initial-value:0px}
+@keyframes ckend{from{--ck-end:22px}to{--ck-end:0px}}
+.md.ck .list.ckrows{mask-image:linear-gradient(to bottom,transparent 0,var(--mask) var(--qa-fade),var(--mask) calc(100% - var(--ck-end)),transparent 100%);animation:qafade linear both,ckend linear both}
+/* the timeline in a rule of its own, under another selector so the minifier cannot fold it into the shorthand above */
+.md.ck>.list.ckrows{animation-timeline:scroll(self),scroll(self);animation-range:0 28px,calc(100% - 28px) 100%}
+/* the open item's row is the strongest in the list: a row under the pointer is a step lighter than it */
+.md.ck .li:hover{background:var(--card)}.md.ck .li.on,.md.ck .li.on:hover{background:var(--card-hover)}
+/* a turned-off item: listed, and quieter than the items on, but the open one is as strong as any open row */
+.ckrow .mk.k-off::before{content:"";width:10px;height:2px;border-radius:1px;background:var(--ink-3)}
+.md.ck .ckrow.off .it,.md.ck .ckrow.off .oc{color:var(--ink-3)}
+.md .ckdet.glass>.dmeta{z-index:3}
+.ckhead .colmenu{text-transform:none;letter-spacing:0;font-weight:400}
+.ckhead .fmenu{background:var(--menu-solid);left:auto;right:0;top:calc(100% + 6px);min-width:190px;
+  display:flex;flex-direction:column;gap:2px}
+.lbl.flagsl.ckhead{flex-wrap:nowrap;white-space:nowrap}
+.ckhead .lblacts{display:inline-flex;align-items:center;gap:8px}
+.ckhead .fwrap{position:relative;display:inline-flex}
+.ckhead .btn.sm.ico{width:28px;padding:0;display:inline-grid;place-items:center}
+.md.ck .ckrow.off.on .it{color:var(--ink)}
+/* the header's last fold, after short names and the filter menu (CkHead) */.ckhead .seg.tight button{padding:0 7px}
+.ckdet .cktitle{font:600 17px/1.35 var(--body);letter-spacing:-.15px;color:var(--ink);margin:12px 0 2px;max-width:60ch}
+.ckdet .ckp{margin:0 0 2px;max-width:60ch;overflow-wrap:anywhere}
+/* the dotted link between records: the Checklist pane's finding, a finding's checklist item, and what a question was
+   asked for (#298) */
+.ckdet .ckp a,.flinks .dtxt a,.qlbl .qfor a{
+  color:var(--ink);text-decoration:underline dotted var(--ink-3);text-underline-offset:4px;
+  text-decoration-thickness:1px}
+.ckdet .ckp a:hover,.flinks .dtxt a:hover,.qlbl .qfor a:hover{text-decoration-color:var(--accent)}
+.qlbl .qfor a{color:inherit}
+.ckdet #ck-ask,.ckdet .ckask,.flinks #f-ask,.flinks .fask{margin-top:14px}
+.flinks .lbl{margin-top:12px}.flinks .fask .lbl{margin-top:0}
+.flinks .fask textarea.ta{field-sizing:content;resize:none}
+.ckdet .ckask .lbl{margin-top:0}
+/* The pane's header stays put and the rest scrolls beneath it, fading out under the header and under the pane's bottom
+   edge wherever it is cut, as the list beside it does. The body reaches the pane's edges, so its scroll bar sits on the
+   pane's edge and the bottom fade on the pane's bottom. */
+.md .det.ckdet{display:flex;flex-direction:column;overflow:hidden}
+.ckdet .dmeta{flex:none}
+.ckdet .ckbody{flex:1 1 auto;min-height:0;overflow:auto;margin:0 -22px -16px;padding:0 22px 16px;scrollbar-width:thin;scrollbar-color:var(--ink-3) transparent;
+  mask-image:linear-gradient(to bottom,transparent 0,var(--mask) var(--qa-fade),var(--mask) calc(100% - var(--ck-end)),transparent 100%);animation:qafade linear both,ckend linear both}
+.ckdet>.ckbody{animation-timeline:scroll(self),scroll(self);animation-range:0 28px,calc(100% - 28px) 100%}
+/* the question box grows with what is typed, so its text never scrolls inside it under its top border; the body scrolls instead */
+.ckdet .ckask textarea.ta{field-sizing:content;resize:none}
+.cksrc,.ckasked{list-style:none;margin:0;padding:0}
+.cksrc li{border-bottom:1px solid var(--line);padding:0 0 8px}
+.cksrc li:first-child{border-top:1px solid var(--line)}
+.cksrc .ckopen{display:flex;justify-content:space-between;align-items:center;gap:14px;width:100%;min-height:38px;background:none;border:0;padding:0;font:inherit;color:var(--ink);cursor:pointer;text-align:left;border-radius:6px}
+.cksrc .ckopen:hover .cdn{text-decoration:underline;text-decoration-color:var(--accent);text-underline-offset:4px}
+.cksrc .ckopen:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.cksrc .cdn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* a long place (a sheet's name and a range) gives way before the document's name does, never taking more than half the line */
+.cksrc .clc{flex:0 1 auto;min-width:0;max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2)}
+.cksrc blockquote{margin:0;padding-left:12px;border-left:2px solid var(--line);color:var(--ink-2);font-size:13px;line-height:1.5;max-width:60ch;overflow-wrap:anywhere}
+.cksrc li:not(:has(blockquote)){padding-bottom:0}
+/* one set of columns for every row, so a longer number or status never moves the next row's words (#2) */
+.ckasked{display:grid;grid-template-columns:auto auto minmax(0,1fr);column-gap:10px}
+.ckasked li{grid-column:1/-1;display:grid;grid-template-columns:subgrid;align-items:baseline;padding:4px 0}
+/* its first line as far under its label as Suggested next step's */
+.flinks .ckasked li:first-child{padding-top:1.5px}
+.ckasked .linkb{justify-self:start}   /* a shorter number sits at the column's left, not its middle */
+.ckasked .cst,.ckasked .cqt{color:var(--ink-2)}
+/* the question as asked, whole: it wraps, and keeps its line breaks */
+.ckasked .cqt{white-space:pre-line;overflow-wrap:anywhere}
+
+/* The open item's pane, Checklist and Q&A (Glass 1). The sidebar's glass: its blur, edge, sheen, shadow
+   and corners. Its top is on the list's top line, its right edge on the page's, its bottom on the sidebar's bottom line
+   (height set by useToSidebarBottom). The open row stays flat. No line between list and pane. */
+.md:not(.wide){column-gap:20px}
+.md:not(.wide) .list{border-right:0}
+.md .det.glass{border-radius:var(--r-pane);padding:16px 22px;max-height:none;mask-image:none;-webkit-mask-image:none;animation:none;box-sizing:border-box;overflow:auto}
+.md .det.glass>*{position:relative;z-index:1}
+/* no drop shadow: the page's scroll area ends at the pane's bottom and would cut the shadow off in a hard line; the glass keeps its edge light */
+.md .det.glass{box-shadow:inset 0 1px 0 var(--spec),inset 0 -1px 0 var(--inset-edge)}
+/* the pane ends on the sidebar's bottom line, which is the window's last line: the page keeps no padding below it, so nothing scrolls */
+.home:has(.md .det.glass){padding-bottom:0}
+/* Question and response easy to find: the question in the display face, as an item's title is on the
+   Checklist; the labels a step darker; the response in a field of its own, with room above it. */
+.md .det .lbl{color:var(--ink-2)}
+.md .det .lbl.rlbl{margin-top:24px}
+.md .det .ef.qtext{font:600 17px/1.35 var(--body);letter-spacing:-.15px;color:var(--ink)}
+.md .det .ef.rtext{background:var(--card);border:1px solid var(--line);border-radius:var(--r-ctl);padding:9px 12px;margin:4px 0 0;min-height:64px;max-width:none}
+.md .det .ef.rtext:focus{background:var(--card-hover);border-color:var(--ink-3)}
+
+/* The response, one place: a waiting draft stands where the response goes, in the same box with a dashed
+   edge (not yet the response); its actions, and Draft from documents, are the app's small buttons, one size throughout. */
+.md .det .draft .rbox{background:var(--card);border:1px dashed var(--ink-3);border-radius:var(--r-ctl);padding:9px 12px;margin-top:4px;min-height:64px;box-sizing:border-box}
+.md .det .draft .rbox p{margin:0;color:var(--ink-2);font-size:13.5px;line-height:1.6}
+.md .det .draft .dtext{font-size:13.5px;line-height:1.6;color:var(--ink)}
+.md .det .draft.stale .rbox{opacity:.6}
+.md .det .racts{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}
+.md .det .racts .stword{font-size:12px;color:var(--ink-2);margin-right:4px}
+.md .det .draft.pending .rbox{display:flex;align-items:center}
+/* findings have no number since codes went: the title takes the number's column too, not just the 44px meant for "Q12"
+   */
+.g i + span{grid-column:2/-1}
+/* queue titles end at one edge: cut at the panel's line rather than an ellipsis after the last whole letter, which
+   lands at a different place on each row; a short fade so no letter is sliced hard */
+body.qopen .g span{text-overflow:clip;mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent)}
+
+/* ── Q&A: the open question across the top of the page, in place of the ask box (design G) ──
+   One header line; the question on the left and the response on the right in the same type, first lines level.
+   Its height is set by usePanelFit (qa.tsx): up to about 64% of the window (300 to 680px), trimmed so the response ends on a whole line. */
+.qpanel{box-sizing:border-box;margin:0 0 14px;padding:16px 22px 18px;border-radius:var(--r-pane);display:grid;grid-template-columns:minmax(0,.82fr) minmax(0,1.5fr);grid-template-rows:auto auto minmax(0,1fr);column-gap:30px;row-gap:0;box-shadow:inset 0 1px 0 var(--spec),inset 0 -1px 0 var(--inset-edge)}
+.qpanel>*{position:relative;z-index:1}
+.qpanel.conflict{display:block;height:auto!important}
+.qph{grid-column:1/-1;grid-row:1;position:relative;display:flow-root;min-width:0;margin-bottom:12px}
+/* Q1, the status and the details flow as lines of text do, each line starting at the header's left edge, 28px high and 10px
+   apart; the buttons stay at the right of the top line, and a float as wide as them keeps the details clear */
+.qlead{line-height:28px;margin-top:-10px}   /* the top line's 10px is not the header's */
+.qlead::before{content:'';float:right;width:var(--qnav,0px);height:38px}   /* --qnav: useNavRoom in qa.tsx; the 8px after each capsule spaces it from the buttons */
+.qlead>*,.qprops>*{vertical-align:top;margin:10px 8px 0 0}
+.qph .n{display:inline-block;font:600 15px/28px var(--body);color:var(--ink)}
+.qnav{position:absolute;top:0;right:0;display:flex;align-items:center;gap:8px}
+.qpos{flex:none;font-size:12.5px;color:var(--ink-2);margin-right:2px;white-space:nowrap}
+.qph .btn.sm{height:28px;flex:none;margin:0}
+.qph .btn.sm.ico{width:28px;padding:0;display:inline-grid;place-items:center}
+.qprops{display:contents}   /* each detail is a capsule of the run of lines above, so it can start a line of its own */
+.qlead>.stpick{margin-right:14px}   /* the status sits 14px from the details */
+.qwarn{grid-column:1/-1;grid-row:2;margin:0 0 10px}
+.qcol{grid-row:3;display:flex;flex-direction:column;min-height:0;min-width:0}
+.qlbl{flex:none;display:flex;align-items:center;gap:8px;min-height:28px;margin:0 0 6px;font:600 13px/1.3 var(--body);color:var(--ink);white-space:nowrap;min-width:0}
+.qlbl .sub{font-weight:400;color:var(--ink-2);min-width:0;overflow:hidden;text-overflow:ellipsis}
+.qlbl .sub.by{display:inline-flex;gap:8px;align-items:center}
+/* what a question was asked for stays beside its label and gives way to an ellipsis, so the question keeps its lines */
+.qlbl .sub.qfor{flex:1 1 0;min-width:0;white-space:nowrap}
+/* empty, still there to tab to and type in, drawn only on hover or focus; clear ink, so nothing moves
+   when it shows */
+/* typed text and any note under it (Not saved, Changed elsewhere) are always drawn: the panel's render may not have heard of
+   them yet, and nothing typed is ever out of sight (#892) */
+.sub.by.unfilled *{transition:color var(--fast) var(--ease),border-color var(--fast) var(--ease),background-color var(--fast) var(--ease)}
+.qlbl:not(:hover):not(:focus-within) .sub.by.unfilled:not(:has(.efstate,input:not(:placeholder-shown))) *{color:transparent;border-color:transparent;background-color:transparent}
+.qlbl:not(:hover):not(:focus-within) .sub.by.unfilled:not(:has(.efstate,input:not(:placeholder-shown))) ::placeholder{color:transparent}
+.qlbl .grow{flex:1}
+.qlbl .racts{display:flex;gap:8px;flex:none;margin:0}
+.qcol>.efwrap,.qcol>.qstack>.rtyping>.efwrap{flex:1 1 0;min-height:0;display:flex;flex-direction:column}
+.qpanel .ef.qtext,.qpanel .ef.rtext{flex:1 1 0;min-height:0;height:auto!important;max-width:none;margin:0;box-sizing:border-box;overflow:auto;resize:none;font:400 15px/1.6 var(--body);color:var(--ink);scrollbar-width:thin;scrollbar-color:var(--ink-3) transparent}
+/* the question's first line on the response's: the response box's border and padding, given to the question as padding */
+.qpanel .ef.qtext{padding:10px 10px 10px 0;border:0;border-radius:0;background:transparent}
+.qpanel .ef.qtext:focus{background:transparent;box-shadow:inset 2px 0 0 transparent}
+.qpanel .ef.rtext{padding:9px 12px;border:1px solid var(--line);border-radius:var(--r-ctl);background:var(--card)}
+.qpanel .ef.rtext:focus{background:var(--card-hover);border-color:var(--ink-3)}
+.qpanel .draft{flex:1 1 0;min-height:0;display:flex;flex-direction:column;margin:0}
+.qpanel .draft .rbox{flex:1 1 0;min-height:0;overflow:auto;box-sizing:border-box;margin:0;background:var(--card);border:1px dashed var(--ink-3);border-radius:var(--r-ctl);padding:9px 12px;font-size:15px;line-height:1.6;color:var(--ink);scrollbar-width:thin;scrollbar-color:var(--ink-3) transparent}
+.qpanel .draft .rbox p{margin:0 0 .6em;font-size:15px;line-height:1.6}
+.qpanel .draft .rbox p:last-child{margin:0}
+.qpanel .draft .dtext{font-size:15px;line-height:1.6;color:var(--ink)}
+.qpanel .draft.nf .rbox p{color:var(--ink-2)}
+.qpanel .draft.stale .rbox{opacity:.6}
+.qpanel .draft.pending .rbox{display:flex;align-items:center;justify-content:center}
+/* at 1180px and narrower the header gives 3px of its margin back, so a 640px window still fits the panel and four rows of the table */
+@media (max-width:1180px){.qph{margin-bottom:9px}}
+/* A box that scrolls shows the next line through its bottom padding, cut in half. So the space under the last line is a
+   transparent border, which text never enters, and the box's line is drawn as an outline on the edge (no line cut). */
+.qpanel .ef.qtext{padding:10px 10px 0 0;border:0;border-bottom:10px solid transparent}
+.qpanel .ef.rtext{padding:10px 12px 0;border:0;border-bottom:9px solid transparent;outline:1px solid var(--line);outline-offset:-1px}
+.qpanel .ef.rtext:focus{outline-color:var(--ink-3);border-bottom-color:transparent}   /* the focus rule above colors every border: that clear space would show as a bar */
+.qpanel .draft .rbox{padding:10px 12px 0;border:0;border-bottom:9px solid transparent;outline:1px dashed var(--ink-3);outline-offset:-1px}
+/* high contrast gives every border the text color, a transparent one too: the clear space takes the color behind it instead */
+@media (forced-colors:active){.qpanel .ef.qtext,.qpanel .ef.rtext,.qpanel .ef.rtext:focus,.qpanel .draft .rbox{border-bottom-color:Canvas}}
+/* the saving dot comes and goes with every save: it sits in the panel's bottom padding, under the box, and takes no room from it */
+.qcol>.efwrap>i.efstate,.qcol>.qstack>.rtyping>.efwrap>i.efstate{position:absolute;left:0;top:100%;line-height:16px}
+.qpanel.fitting .qcol>.efwrap>.efstate,.qpanel.fitting .qcol>.qstack>.rtyping>.efwrap>.efstate{display:none}   /* usePanelFit (qa.tsx) sizes the panel as if no state line were under a box */
+/* Status, Workstream and Priority are buttons with their own lists (Pick in qa.tsx): the list opens under the button, in
+   the glass of the page's menus, and the header line is lifted over the boxes below while it is open. Pick sets left and top;
+   a long list (a deal with many workstreams of its own) scrolls. */
+.stpick{position:relative;flex:none;display:inline-flex}
+.qph:has(.stlist){z-index:2}
+.qpanel:has(.stlist){z-index:3}   /* Workstream's list is longer than the panel: it goes over the table's tools and rows below */
+.qph .stlist,.headrow .stlist{left:0;right:auto;top:calc(100% + 6px);min-width:150px;max-width:320px;max-height:340px;overflow:hidden;padding:6px}
+.stlist .scroll{display:flex;flex-direction:column;flex:0 1 auto;min-height:0;overflow-y:auto}   /* the choices scroll; a "No …" option stays below them */
+.stlist .mi>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Workstream and Priority: the list opens under its own capsule, on whichever line of the header the capsule is */
+.qpick{position:relative;display:inline-flex;min-width:0;flex:0 1 auto}
+.stlist .mi{display:flex;align-items:center;justify-content:space-between;gap:12px;line-height:18px}
+.stlist .mi.hi{background:color-mix(in srgb,var(--ink) 6%,transparent)}   /* as the past conversations' list marks the row the arrows reached */
+.stlist .mi[aria-disabled]{opacity:.45;cursor:default}.stlist .mi[aria-disabled]:hover{background:none}
+@media (forced-colors:active){.stlist .mi.hi{outline:2px solid Highlight;outline-offset:-2px}}
+/* the panel's text in the table's size: question, response and details at 13px, the same as the rows below */
+.qpanel .ef.qtext,.qpanel .ef.rtext,.qpanel .draft .rbox,.qpanel .draft .rbox p,.qpanel .draft .dtext{font-size:13px;line-height:1.6}
+.qp,.qpos{font-size:13px}
+.qpanel .ef.qtext{border-bottom-width:9px}   /* the same space under the last line as the response box, so both show the same whole lines */
+/* question and response get the same width */
+.qpanel{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+/* what does not fit on a label line beside the label goes onto a line of its own, rather than being cut or running past the
+   panel; each column's text sits right under its own label, so a label line that wraps moves only its own column */
+.qcol{display:grid;grid-template-rows:auto minmax(0,1fr)}   /* the label line, then the box taking the rest */
+.qlbl{flex-wrap:wrap;row-gap:6px;line-height:28px}   /* every line as tall as one line of buttons, so the two labels' words stay level */
+.qlbl .sub.by{line-height:1.3}   /* the fields there keep the height they had */
+/* who responded gives way before the date does, and the date goes under the name when both cannot fit: a date is never cut */
+.qlbl .sub.by{flex-wrap:wrap;row-gap:6px;overflow:visible}
+.qlbl .sub.by>.efwrap{display:flex;align-items:center;flex-wrap:wrap;column-gap:6px;min-width:0}
+.qlbl .sub.by .efstate{margin-left:0}   /* the gap above spaces it, so a note that wraps lines up under its field */
+.qlbl .sub.by>.efwrap:has(.dedit){flex:none;max-width:100%}
+.qlbl .racts{flex:0 1 auto;flex-wrap:wrap;row-gap:6px;min-width:0}
+
+/* ---- Past conversations: a button in every composer and the list it opens over the page ---- */
+.askbox .pastbtn{white-space:nowrap;cursor:pointer;transition:opacity var(--base) var(--ease),visibility 0s linear 0s}
+.askbox .pastbtn:hover,.askbox .pastbtn.on{color:var(--ink);background:var(--card-hover)}
+/* once something is typed the button gives way to the words; it comes back when the composer is empty */
+.askbox.typing:not(.pastopen) .pastbtn{opacity:0;visibility:hidden;pointer-events:none;transition:opacity var(--base) var(--ease),visibility 0s linear var(--base)}
+.pastpop{position:absolute;z-index:30;width:min(620px,100%);box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden;border-radius:16px;background:var(--menu-solid);box-shadow:var(--shadow-dlg),0 0 0 1px var(--line);cursor:default;text-align:left;animation:enter var(--base) var(--ease) both}
+.pastpop.down{top:calc(100% + 9px);right:-1px}
+.pastpop.up{bottom:calc(100% + 9px);left:-1px}
+.pastpop .ptop{display:flex;align-items:center;gap:10px;padding:12px 14px 10px;flex:none}
+.pastpop .psearch,.fhead .fmenu .psearch{position:relative;flex:1;min-width:0;display:block}
+:is(.pastpop,.fhead .fmenu) .psearch svg{position:absolute;left:11px;top:8px;color:var(--ink-3);pointer-events:none}
+.pastpop .psearch input,.fhead .fmenu .psearch input{width:100%;box-sizing:border-box;height:30px;padding:0 12px 0 32px;border:1px solid var(--line);border-radius:var(--r-ctl);background:transparent;font:inherit;font-size:13px;color:var(--ink);outline:0}
+:is(.pastpop,.fhead .fmenu) .psearch input:focus-visible{border-color:color-mix(in srgb,var(--accent) 70%,transparent)}
+:is(.pastpop,.fhead .fmenu) .psearch input::placeholder{color:var(--ink-3)}
+.pastpop .pseg{display:inline-flex;flex:none;padding:2px;border:1px solid var(--line);border-radius:999px}
+.pastpop .pseg button{height:24px;padding:0 10px;border:0;border-radius:999px;background:none;font:inherit;font-size:12.5px;color:var(--ink-2);white-space:nowrap;cursor:pointer}
+.pastpop .pseg button.on{background:color-mix(in srgb,var(--ink) 11%,transparent);color:var(--ink)}
+.pastpop .plist{flex:1;min-height:0;overflow:auto;padding:0 6px 8px;scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--ink) 22%,transparent) transparent}
+.pastpop .pg{font:600 13px/1 var(--body);color:var(--ink-2);padding:12px 12px 6px}
+.pastpop .prow{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:18px;row-gap:2px;align-items:baseline;padding:8px 12px;border-radius:10px;color:var(--ink);text-decoration:none}
+.pastpop .prow+.prow{box-shadow:inset 0 1px 0 var(--line)}
+.pastpop .prow.on{background:color-mix(in srgb,var(--ink) 6%,transparent)}.pastpop .prow.on+.prow{box-shadow:none}
+.pastpop .pt{font-size:14px;line-height:1.4;white-space:nowrap;overflow:hidden;mask-image:linear-gradient(to right,#000 calc(100% - 20px),transparent)}
+.pastpop .pm{display:inline-flex;align-items:center;gap:10px;font-size:12.5px;color:var(--ink-2);white-space:nowrap}
+.pastpop .pa{font-size:12px;color:var(--ink-2);padding:1px 8px;border:1px solid var(--line);border-radius:999px;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+.pastpop .pp{grid-column:1/-1;font-size:13px;line-height:1.45;color:var(--ink-2);white-space:nowrap;overflow:hidden;mask-image:linear-gradient(to right,#000 calc(100% - 20px),transparent)}
+.pastpop .pnone{margin:6px 12px 10px;font-size:13px;color:var(--ink-2)}
+@media (forced-colors:active){.pastpop{border:1px solid CanvasText}.pastpop .prow.on{outline:1px solid Highlight}}
+.askbox.pastopen:focus-within{border-color:var(--glass-edge);box-shadow:inset 0 1px 0 var(--spec),inset 0 -1px 0 var(--inset-edge),var(--shadow)}   /* the focus is in the list, not in the box */
+
+/* ---- the side pane: a finding named in an answer opens beside the conversation. The pane takes the
+   right of the page, top and bottom on the rail's; the conversation keeps its left edge and gives up width on the right ---- */
+body{--sidew:clamp(360px,34vw,460px)}
+.chatwrap.withside{position:relative}
+.chatwrap.withside .chat{max-width:none;margin:0 0 0 calc((100% - min(900px,100%)) / 2);width:calc(100% - var(--sidew) - 28px - (100% - min(900px,100%)) / 2)}
+.tcomp.beside{left:var(--cl,20px);width:var(--cw,380px);transform:none}
+.sidepane{position:absolute;top:0;right:0;bottom:0;z-index:6;width:var(--sidew);box-sizing:border-box;padding:16px 22px 18px;border-radius:var(--r-pane);display:flex;flex-direction:column;overflow:hidden;box-shadow:inset 0 1px 0 var(--spec),inset 0 -1px 0 var(--inset-edge);animation:slidein var(--slow) var(--ease) both}
+.sidepane:focus{outline:none}
+.sidepane>*{position:relative;z-index:1}
+.sphead{display:flex;align-items:center;gap:8px;flex:none;margin-bottom:14px}
+.sphead .t{font:600 13px var(--body);color:var(--ink)}
+.sphead .grow{flex:1}
+.sphead .btn.sm{height:28px;margin:0}
+.sphead .btn.sm.ico{width:28px;padding:0;display:inline-grid;place-items:center}
+.spbody{flex:1;min-height:0;overflow:auto;scrollbar-width:thin;scrollbar-color:var(--ink-3) transparent}
+.spbody .opening{margin:0;padding:0;max-width:none}
+/* the finding named in the answer is marked while it is open beside it */
+.chat .ref .rb.on{background:color-mix(in srgb,var(--accent) 13%,transparent);border-radius:3px;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 13%,transparent)}
+/* beside the pane or in reading mode the composer can be narrow (352px at 1024 wide): Past conversations keeps its icon and gives up its words */
+.tcomp.beside,body.reading .tcomp{container:composer/inline-size}
+@container composer (max-width:440px){.pastbtn .t{display:none}.pastbtn{width:32px;padding:0;justify-content:center}}
+/* a suggested open question in the side pane: the question, its details, its response now and the answer that would replace it */
+.qcheck .qmeta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;font-size:13px;color:var(--ink-2);margin-bottom:6px}
+.qcheck .qmeta b{font:600 15px var(--body);color:var(--ink)}
+.qcheck .qmeta .st{height:24px;padding:0 9px;border:1px solid var(--line);border-radius:var(--r-ctl);display:inline-flex;align-items:center;color:var(--ink);background:var(--card)}
+.qcheck .qrec{margin:0 0 12px;font-size:13px;color:var(--ink-2)}
+/* the question at the size of its response and the proposed one beneath it */
+.qcheck .qfull{margin:0 0 18px;font-size:14px;line-height:1.6;color:var(--ink);
+  white-space:pre-wrap;overflow-wrap:anywhere}
+.qcheck .plbl{font:600 13px var(--body);color:var(--ink);margin:0 0 6px}
+.qcheck .qnone{margin:0 0 18px;font-size:14px;color:var(--ink-3)}
+.qcheck .qresp{margin:0 0 18px;font-size:14px;line-height:1.6;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere}
+/* what would become the response is not the response yet: a dashed edge */
+.qcheck .qprop{margin:0;font-size:14px;line-height:1.6;color:var(--ink);padding:10px 12px;border-radius:var(--r-ctl);background:var(--card);outline:1px dashed var(--ink-3);outline-offset:-1px;white-space:pre-wrap;overflow-wrap:anywhere}
+.qcheck .pacts{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+/* once the answer is the response, said in the pane where Use as response was */
+.qcheck .qused{display:flex;align-items:center;gap:7px;margin:0 0 14px;font-size:13.5px;color:var(--ink);border-radius:4px}
+.qcheck .qused svg{color:var(--accent);flex:none}
+.qcheck .qused:focus{outline:none}.qcheck .qused:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.qcheck .card.confirm p{margin:0 0 10px}
+
+/* The shared folder (desktop): the connect page and its row in Settings (connect.tsx). The page stands alone: no sidebar before there is a folder to read deals from */
+#app.connect{grid-template-columns:minmax(0,1fr)}
+.cf-path{display:flex;align-items:center;gap:9px;margin:0 0 18px;padding:10px 16px;border-radius:var(--r-ctl);background:var(--glass);border:1px solid var(--glass-edge);color:var(--ink);font-size:13.5px;max-width:min(520px,100%)}
+.cf-path svg{flex:none;color:var(--ink-3)}.cf-path span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cf-row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.cf-opts{display:flex;flex-direction:column;align-items:center;gap:8px;margin:0 0 18px;width:min(520px,100%)}.cf-opts .cf-path{margin:0;width:100%;font:inherit;font-size:13.5px;text-align:left;cursor:pointer}
+.cf-opt[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}.home.firstrun h1+.cf-opts{margin-top:10px}
+.home.firstrun h1+.cf-path,.home.firstrun h1+.cf-row{margin-top:10px}   /* no line under the heading: the same space it used to leave */
+.cf-warn{margin:-6px 0 18px;max-width:46ch;font-size:13px;line-height:1.5;color:var(--high)}
+.cf-set{min-width:0}.cf-line{display:flex;align-items:center;gap:8px}
+.cf-now{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--ink-2)}
+.cf-note{margin:8px 0 0;font-size:12.5px;line-height:1.5;color:var(--ink-3)}.cf-note.warn{color:var(--high)}
+/* the sign-in page (first setup): the key field sits in the row with its buttons, as tall as them, in the folder page's glass box; the line under the row keeps its room when empty, so nothing moves when it shows */
+.si-key{flex-wrap:nowrap;align-items:center}.home.firstrun h1+.si-key,.home.firstrun h1+.si-ways{margin-top:10px}
+/* first setup's sign-in: the app's mark over the heading, single sign-on over the key's link */
+.si-mark{width:56px;height:56px;border-radius:14px;margin-bottom:22px}
+.si-ways{display:flex;flex-direction:column;align-items:center;gap:14px}
+.si-ways .fr-new{min-width:240px;justify-content:center}
+.si-field{height:40px;width:340px;max-width:100%;padding:0 14px;border-radius:var(--r-ctl);background:var(--glass);border:1px solid var(--glass-edge);font-size:14px}
+.cf-warn.si-line{margin:14px 0 0;min-height:20px}.cf-warn.si-line.hold{visibility:hidden}
+.field.sm{height:28px;font-size:12.5px}
+.ronm{display:flex;flex-direction:column;line-height:1.2;min-width:0}.ronm small{font-size:12px;color:var(--high);font-weight:500}
+.netdot.out{background:var(--high)}
+/* the ask box while read-only: flat and off, its "Read-only" legible; the send arrow a faint ring, as turned-off icon buttons are; the send keeps its place beside a wrapper that carries the reason on hover */
+.askbox.ro{background:var(--off-soft);border-color:transparent;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}.askbox.ro::before,.askbox.ro::after{display:none}
+.askbox.ro textarea{opacity:.45}   /* read-only: the ask box shows it cannot send */
+.askbox .needs:has(> .send){margin-left:auto}
+.ai.pending .waitsi{margin-left:10px;font-size:13px;color:var(--ink-2)}
+.plus:disabled{background:transparent;border-color:var(--off-edge);color:var(--off-icon);cursor:default}
+.askbox .send:disabled{background:none;box-shadow:inset 0 0 0 1px var(--off-edge);color:var(--off-icon);cursor:default;pointer-events:none}
+
+/* ---- the firm's checklist and bringing a list in ---- */
+.fl-intro{font-size:13.5px;line-height:1.5;color:var(--ink-2);margin:2px 0 6px}
+.fl-sec{padding:14px 0 6px;border-top:1px solid var(--line)}
+.fl-sec:first-of-type{border-top:0}
+.fl-h{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
+.fl-h b{font-size:13px;color:var(--ink-2);font-weight:600}
+.fl-h .c{font-size:12px;color:var(--ink-3)}
+.fl-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:baseline;column-gap:16px;padding:7px 0}
+.fl-row .nm{font-size:14px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fl-row .meta{font-size:12.5px;color:var(--ink-2);white-space:nowrap}
+/* Replace… and Choose… take one width, so every row's text ends on the same line */
+.fl-row .linkb{min-width:60px;text-align:right}
+.fl-none{font-size:13px;color:var(--ink-3);padding:4px 0 6px}
+/* no lists yet: the 160px drop area, set apart from the header and footer, in a dialog at least 360px tall */
+.fldlg.empty .dropzone{margin:37px 0}   /* 37px each way makes the dialog 360px tall */
+.cl-name{display:flex;align-items:center;gap:12px;margin-top:10px;font-size:12.5px;color:var(--ink-2)}
+.cl-name .field{width:240px;height:32px}
+/* the paste box: as wide as the drop zone above it, with its corners; ten whole lines, then it scrolls. Its label
+   sits on the box's first line */
+.cl-paste{display:block;width:100%;box-sizing:border-box;height:215px;padding:10px;border-radius:9px;font:inherit;font-size:14px;line-height:1.5;resize:none;white-space:pre;overflow:auto;scrollbar-width:thin;scrollbar-color:var(--ink-3) transparent}
+.sdlg .srow.top.cl-pasterow .k{padding-top:10px}
+/* a list read by the model: the section columns take what they need, and the items the rest */
+.imprev th.cl-sec{width:180px}
+/* the import's preview shows its five rows whole; the Left out list reads at the preview's size, its label level with the first line */
+.imdlg .imprev{max-height:190px}
+#cl-leftout .rv-row{padding:7px 10px;align-items:center}#cl-leftout .rv-new{font-size:12px}#cl-leftout .rv-row input{margin:0}
+.sdlg #cl-leftout.srow.top .k{padding-top:8px}
+.cl-checks{display:flex;flex-direction:column;gap:8px}
+.cl-checks .xcheck{align-items:flex-start}
+.rv-h{display:flex;align-items:baseline;gap:10px;margin:4px 0 8px;flex-wrap:wrap}
+.rv-h b{font-size:14px;font-weight:600;color:var(--ink)}
+.rv-h span{font-size:12.5px;color:var(--ink-2)}
+.rv-h .linkb{font-size:12.5px;padding:3px 0;margin:-3px 0}.rv-h .linkb:disabled{opacity:.45;cursor:default}
+.rv-list{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+/* a review of a long list lays out only the rows in view, so thousands of them open at once */
+.rv-list>.rv-row,.rv-list>.rv-pair{content-visibility:auto;contain-intrinsic-size:auto 64px}
+.rv-row{display:grid;grid-template-columns:22px minmax(0,1fr);column-gap:10px;padding:10px 12px;align-items:start;cursor:pointer}
+.rv-row+.rv-row{border-top:1px solid var(--line)}
+.rv-row input,.cl-checks input{appearance:none;width:14px;height:14px;border-radius:4px;border:1px solid var(--ink-3);display:grid;place-items:center;margin:3px 0 0;flex:none}
+.rv-row input:checked,.cl-checks input:checked{background:var(--accent);border-color:var(--accent)}
+.rv-row input:checked::after,.cl-checks input:checked::after{content:'';width:4px;height:7px;border:solid var(--accent-ink);border-width:0 2px 2px 0;transform:translateY(-1px) rotate(45deg)}
+.rv-row input:disabled{opacity:.45}
+.rv-row input:focus-visible,.cl-checks input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.rv-was{font-size:13px;line-height:1.45;color:var(--ink-3)}
+.rv-was i,.rv-new i{font-style:normal;font-size:11px;font-weight:600;margin-right:6px}
+.rv-new{font-size:13.5px;line-height:1.45;color:var(--ink)}
+.rv-was+.rv-new{margin-top:3px}
+.rv-new i{color:var(--ink-3)}
+.rv-pair{padding:4px 12px 8px}
+.rv-pair+.rv-pair{border-top:1px solid var(--line)}
+.rv-pair .rv-row{padding:6px 0;border:0}
+div.rv-row{cursor:default}
+.rv-pair .tag{display:inline-block;font-size:11.5px;color:var(--ink-2);border:1px solid var(--line);border-radius:6px;padding:0 6px;margin-left:8px;line-height:18px}
+.rv-pair .nobox{width:14px}
+.rv-why{font-size:12.5px;color:var(--ink-3);padding:2px 0 0 32px}
+/* Structure, Sector and Technology picked from the firm's lists, on Overview */
+.pickwrap{position:relative;display:inline-block;max-width:100%}
+.pickbtn:disabled{cursor:default}
+.pk-menu{left:0;right:auto;width:290px;max-height:none}
+.pk-menu .mi{display:flex;justify-content:space-between;gap:16px}
+.pk-menu .mi .c{color:var(--ink-3);font-size:12.5px;white-space:nowrap}
+.pk-menu .mi{position:relative;padding-right:34px}   /* every row keeps room for the check mark, so the counts line up */
+.pk-menu .mi .mcheck{position:absolute;right:10px;top:50%;margin-top:-7px}
+.pk-menu.end{left:auto;right:0}
+/* a long list scrolls inside the menu while its search box and None stay put; the height is set from where it opens */
+.pk-menu{overflow:hidden}
+.pk-menu .scroll{display:flex;flex-direction:column;flex:0 1 auto;min-height:0;overflow-y:auto}
+.pk-menu.float{position:fixed;right:auto;width:250px;z-index:70}
+.pk-menu .psearch{position:relative;display:block;margin:2px 2px 6px;padding:0;cursor:text}
+.pk-menu .psearch svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--ink-3);pointer-events:none}
+.pk-menu .psearch .in{display:block;place-items:normal;appearance:none;width:100%;height:30px;box-sizing:border-box;padding:0 12px 0 32px;border:1px solid var(--line);border-radius:var(--r-ctl);background:transparent;font:inherit;font-size:13px;color:var(--ink);text-align:left;outline:0}
+.pk-menu .psearch .in:focus{border-color:color-mix(in srgb,var(--accent) 70%,transparent);box-shadow:none}
+.pk-menu .psearch .in::placeholder{color:var(--ink-3)}
+.pk-menu mark{background:none;color:inherit;font-weight:600}
+.pk-menu .mi.first{background:var(--card-hover)}
+.ndpicks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));column-gap:12px;margin-top:18px}
+.ndpicks .lbl{display:block;margin:0 0 8px}
+.ndpicks .pickwrap{display:block}
+.ndpicks .field{width:100%;box-sizing:border-box}
+.ndpicks button.field{text-align:left;cursor:pointer;font:inherit;font-size:14px;color:var(--ink);padding-right:28px;background-image:var(--select-arrow);background-repeat:no-repeat;background-position:right 9px center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ndpicks button.field.none{color:var(--ink-3)}
+.pk-menu .mnone{padding:7px 10px;font-size:13px;color:var(--ink-3)}
+.cf-now.warn{color:var(--high)}
+/* the Q&A workstream button with a name stays its usual size whatever workstreams were imported; in a narrow
+   window it is about as wide as "All workstreams", so the filter keeps the rest of the row (#430) */
+@container (max-width: 940px){.trk-tools #qa-ws.named{max-width:150px}}
+/* the checklist import's three columns (item, section, subsection) on one line, so the dialog still fits at 1280x736 */
+.immap.three{grid-template-columns:repeat(3,minmax(0,1fr));column-gap:12px}
+.immap.three label{grid-template-columns:minmax(0,1fr);gap:4px}
+@media (max-height:760px){.imdlg:has(.immap.three) .srow{padding:12px 0}}   /* with the Subsection column, the checklist import still fits at 1280x736 */
+
+/* ---- a document's drafts: the open draft's date in the reading bar, opening the list of drafts ---- */
+.docnav .drafts{display:inline-flex;align-items:center;gap:6px;width:auto;height:30px;padding:0 10px;border:0;border-radius:999px;background:none;font:inherit;font-size:12.5px;color:var(--ink-2);cursor:pointer;white-space:nowrap}
+.docnav .drafts:hover,.docnav .drafts.on{background:var(--card-hover);color:var(--ink)}
+.docnav .drafts svg{flex:none;color:var(--ink-3)}
+.docnav .docname small{display:block}
+.docmenu.dl{width:360px;margin-left:-180px;grid-template-columns:auto minmax(0,1fr) auto auto}
+.dl .dm-r{width:100%;border:0;background:none;font:inherit;font-size:13px;text-align:left;color:var(--ink)}
+.dl .dm-r:hover{background:color-mix(in srgb,var(--line) 55%,transparent)}
+.dl .dm-r.on{font-weight:500}
+.dl .dt{font-variant-numeric:tabular-nums;padding-right:14px;white-space:nowrap}
+.dl .fo{color:var(--ink-3);font-size:12px;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dl .nw{color:var(--ink-3);font-size:12px;font-weight:400;padding-left:12px}
+.rsch-chip .dr{color:var(--ink-3);font-size:12px;margin-left:2px}
+/* a blackline's page cited in an answer: what it shows of a change is the model's reading */
+.rsch-chip .rdg,.ced .ctag{display:inline-flex;align-items:center;height:17px;padding:0 6px;margin-left:2px;
+  border:1px solid var(--line);border-radius:999px;font-size:11px;line-height:1;color:var(--ink-2)}
+/* a citation in the finding editor (#636): the same pill, a little larger and filled, as in the approved mock-up */
+.ced .ctag{height:20px;margin:0 2px;padding:0 7px;font-size:11.5px;vertical-align:1px;
+  background:color-mix(in srgb,var(--card-hover) 50%,transparent);
+  white-space:nowrap;cursor:default;user-select:none}
+/* Add deal: Find a deal with New deal beside it, then every deal, those to add first */
+.dlg.adddlg{width:min(620px,calc(100vw - 48px));max-width:none;text-align:left}
+.addbar{display:flex;align-items:center;gap:10px;margin-top:14px}.addbar .btn{flex:none}
+.addfind{display:block;position:relative;flex:1}
+.addfind svg{position:absolute;left:11px;top:9px;color:var(--ink-3)}
+.addfind input{width:100%;box-sizing:border-box;height:32px;padding:0 12px 0 32px;border:1px solid var(--line);border-radius:var(--r-ctl);background:transparent;font:inherit;font-size:13px;color:var(--ink);outline:0}
+.addfind input::placeholder{color:var(--ink-3)}
+.addfind input:focus-visible{border-color:var(--accent)}
+.addlist{display:flex;flex-direction:column;max-height:calc(100vh - 236px);overflow:auto;margin:10px -8px 0;padding:0 8px 4px}
+.addrow{display:flex;align-items:center;gap:14px;min-height:50px;padding:6px 4px 6px 13px}
+.addrow+.addrow{border-top:1px solid var(--line)}
+.addrow .dwho{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;flex:1}
+.addrow .an{display:flex;align-items:center;gap:8px;min-width:0;max-width:100%;font-size:14px;color:var(--ink)}
+.addrow .an>span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.addrow .cp{max-width:100%;font-size:12.5px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.addrow .tag{flex:none;font-size:11px;line-height:17px;padding:0 7px;border:1px solid var(--line);border-radius:999px;color:var(--ink-2)}
+.addrow .btn.sm{height:26px;font-size:12px;padding:0 10px;flex:none}
+.addrow .yours{flex:none;display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--ink-3);padding-right:10px}
+.addrow.mine .an{color:var(--ink-2)}
+.addlist .emptyline{margin:18px 0 8px}
+/* the faint ⋯ on a sidebar deal: only while the deal is pointed at, focused, or its menu is open */
+.rail .drow{position:relative}
+.rail .dmore{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:24px;height:24px;display:grid;place-items:center;padding:0;border:0;border-radius:7px;background:transparent;color:var(--ink-3);cursor:pointer;opacity:0}
+.rail .drow:hover .dmore,.rail .dmore:focus-visible,.rail .dmore.open{opacity:1}
+.rail .dmore:hover,.rail .dmore.open{color:var(--ink)}
+.rail .drow:hover a.dealrow,.rail .drow:focus-within a.dealrow{padding-right:34px}
+.railmenu{position:fixed;z-index:60;right:auto;bottom:auto;width:max-content;min-width:180px;padding:6px;background:var(--menu);border:1px solid var(--glass-edge);border-radius:12px;box-shadow:var(--shadow-pop)}
+.railmenu .mi{display:flex;width:100%;align-items:center;height:30px;padding:0 10px;border:0;border-radius:8px;background:transparent;color:var(--ink);font:inherit;font-size:13px;text-align:left;cursor:pointer}
+.railmenu .mi:hover,.railmenu .mi:focus-visible{background:var(--card-hover);outline:0}
+/* a menu item that cannot be used just now stays focusable, so its reason (title, aria-description) can be reached by key */
+.railmenu .mi[aria-disabled="true"]{opacity:.45;cursor:default}.railmenu .mi[aria-disabled="true"]:hover{background:none}
+.uldlg .xfoot{border-top:0;padding-top:0;margin-top:18px}   /* a title-only confirm: no rule between the question and its answers */
+/* the connection card above the account row, and the dot on the avatar that says to look at it */
+.avatar{position:relative}
+.netdot{position:absolute;right:-2px;bottom:-2px;width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--surface)}
+.conncard{position:absolute;left:10px;right:10px;bottom:calc(100% + 6px);z-index:95;box-sizing:border-box;padding:4px 12px;border-radius:14px;background:var(--menu-solid);border:1px solid var(--glass-edge);box-shadow:var(--shadow-pop);font-size:13px;color:var(--ink);animation:toastin var(--base) var(--ease)}
+.conncard[hidden]{display:none}
+.conncard::after{content:'';position:absolute;left:0;right:0;top:100%;height:8px}   /* bridges the gap to the row, so the pointer can move onto the card */
+@media (forced-colors:active){.netdot,.conncard .cr i{forced-color-adjust:none;background:CanvasText;box-shadow:0 0 0 2px Canvas}.netdot,.conncard .cr i.med,.conncard .cr i.high{background:Highlight}}
+.conncard .cr{display:grid;grid-template-columns:7px 1fr;column-gap:10px;padding:9px 0;border-top:1px solid var(--line)}
+.conncard .cr:first-child{border-top:0}
+.conncard .cr i{width:7px;height:7px;border-radius:50%;margin-top:6px;background:var(--ink-3)}
+.conncard .cr i.med{background:var(--accent)}.conncard .cr i.high{background:var(--high)}
+.conncard .cr b{font-weight:500;font-size:14px}
+.conncard .cr>span{grid-column:2;min-width:0;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* a question or response in Hebrew or Arabic starts at the right of its cell */
+.md .li .q[dir],.md .li .rs[dir]{text-align:start}
+/* the attach button's count of files going with the next message: quiet, in figures that keep their width; at the most, the button reads as off */
+.askbox .scopebtn.attach .acount{color:var(--ink-3);font-variant-numeric:tabular-nums}
+.askbox .scopebtn.attach[aria-disabled="true"]{opacity:.45;cursor:default}
+/* a date shows as "Oct 28" at rest, with the browser's field over it unseen until it has the focus; the app's calendar icon is the only one */
+.efwrap.dtext{position:relative}
+.efwrap.dtext>input.ef.dedit,.efwrap.dtext>.efcap>input.ef.dedit{position:absolute;inset:0;width:100%;min-width:0;max-width:none;padding:0;opacity:0}
+.dshow{display:inline-block;white-space:nowrap}
+.dedit-show{color:inherit}.md .det .lbl .dedit-show{font-size:11px;color:var(--ink-2);border-bottom:1px dotted var(--ink-3);padding:0 2px}
+input.dedit::-webkit-calendar-picker-indicator{display:none}
+/* a choice not made yet reads as a placeholder, not as a value; the open list keeps its own colors */
+select.field.unset{color:var(--ink-3)}select.field.unset option{color:var(--option-ink)}
+/* a shared ⋯ menu (moreMenu.tsx) hangs from its own wrapper, not the Q&A menu's .colwrap */
+.morewrap{position:relative}
+.headrow:has(.colmenu){position:relative;z-index:21}   /* the header's open menus go over the ask box (z-index 20) */
+#deal-more .rsch-spin{width:13px;height:13px}   /* ⋯ spins while the deal memo is made */
+
+/* ---- reading mode pages and zoom: the up and down arrows in the reading bar step through pages; a page that is not
+   cited says so where the citation count was; zoom scales the page itself (its width is set from the zoom in DocPanel) ---- */
+.docnav .docname .cnt.off{color:var(--ink-3)}
+.pgstack .zoomv{width:36px;padding:0;font:inherit;font-size:10.5px;font-variant-numeric:tabular-nums;
+  color:var(--ink-2)}
+.pgstack .zoomv.off{color:var(--ink-3)}
+.docstage .docbody .page:not(.pdf){padding:calc(56px * var(--z,1)) calc(64px * var(--z,1))}
+.docstage .docbody .page:not(.pdf)>*{zoom:var(--z,1)}
+.docstage .docbody .sheet{font-size:calc(13px * var(--z,1))}
+.docstage .docbody .sheet th{font-size:calc(11.5px * var(--z,1));padding:calc(5px * var(--z,1)) calc(8px * var(--z,1))}
+.docstage .docbody .sheet td{padding:calc(6px * var(--z,1)) calc(11px * var(--z,1))}
+.docstage .docbody .page.pdf canvas{width:100%;height:auto}
+.docstage .docbody .page,.docstage .docbody .sheet{flex:none}   /* a zoomed page keeps its width and is scrolled to, rather than squeezed into the stage */
+.docnav .docname{min-width:0;flex:0 1 auto}.docnav>button:not(.docname){flex:none}   /* in a narrow pane the document's name shortens first */
+.docnav .loc,.docnav .cnt{font-variant-numeric:tabular-nums}
+/* Settings > Keyboard: each key cap with its short name, in two columns; the full description is the tooltip */
+.setdlg .keylist{display:grid;grid-template-columns:repeat(2,max-content max-content);gap:6px 10px;align-items:center}
+.setdlg .keylist dt{cursor:default;align-self:center}
+.setdlg .keylist dd{margin:0;padding-top:0;align-self:center;line-height:22px;color:var(--ink-2);white-space:nowrap}
+.setdlg .keylist dd:nth-of-type(odd){margin-right:8px}
+/* it is the name that shortens, never the place or the count; the name's box is capped and the name fills it,
+   so it never holds empty room that comes and goes as the name slides, moving the name from under the pointer
+   */
+.docnav .docname .dn{min-width:0;max-width:clamp(150px,23vw,380px);flex:0 1 auto}
+.docnav .docname .dn>b{max-width:100%}
+
+/* the hidden row that keeps a long Q&A list's column widths while only part of it is drawn (qa.tsx, Sizer) */
+.md .li.vsize{visibility:hidden;height:0;min-height:0;padding-top:0;padding-bottom:0;border:0;overflow:hidden;pointer-events:none}
+
+/* ---- Locate deal folders: the top folders still missing on this PC, and those found */
+.scrim .dlg.lfdlg{width:720px}
+/* Locate Deal Folders: no rule under the title or over the footer; the folders to
+   locate first, each with the red warning glyph and why in red, then those found under "Found 42", each with the
+   folder icon */
+.lfdlg .shead{border-bottom:0;padding-bottom:0;margin-bottom:6px}
+.lfbody{margin:0 -26px;padding:0 26px}
+.lflbl{font-size:13px;color:var(--ink-2);font-weight:600;margin:18px 0 2px}
+.lflbl .lfn{margin-left:6px;font-weight:500;font-variant-numeric:tabular-nums}
+.lfrow{display:grid;grid-template-columns:16px minmax(0,1fr) auto;column-gap:12px;align-items:center;min-height:56px;
+  box-sizing:border-box;border-bottom:1px solid var(--line);padding:8px 0}
+.lfrow:last-child{border-bottom:0}
+.lfrow:hover{background:var(--card-hover);border-radius:var(--r-ctl);margin:0 -10px;padding:8px 10px;
+  border-bottom-color:transparent}
+.lficon{display:grid;place-items:center;width:16px;height:16px;color:var(--ink-3)}
+.lfrow.miss .lficon{color:var(--high)}
+.lfrow .t{min-width:0}
+.lfrow .n{display:block;font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  direction:rtl;text-align:left}
+.lfrow .p{font-size:12px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lfrow .lfwhy{font-weight:500;color:var(--high)}
+.lfrow .b{justify-self:end}
+.lfrow .b .btn{min-width:84px;justify-content:center}
+.lfdlg .xfoot{border-top:0;padding-top:6px}
+.lfdlg .lfcount:empty{display:none}
+.lfdlg .lfcount{font-size:13px;color:var(--ink-2);min-width:0;overflow-wrap:anywhere}
+.lfdlg .lfcount .err{color:var(--high)}
+/* a deal folder not on this PC: no bar, and the first line says so once */
+.dcrow .awayfn{grid-column:span 2}.dcrow .rd.away{color:var(--high)}
+/* beside a deal's name when another deal has the same name: its counterparty and the day it was made */
+.dtw{flex:0 1 auto;min-width:0;margin-left:6px;color:var(--ink-3);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* a same-named deal in the narrow sidebar: what tells it apart goes on a second, smaller line under the name, so both show in full */
+.rail a.dealrow:has(.dtw){height:auto;min-height:32px;padding-top:5px;padding-bottom:5px;flex-direction:column;align-items:flex-start;justify-content:center;gap:1px}
+.rail a.dealrow:has(.dtw) .dn1,.rail a.dealrow:has(.dtw) .dtw{max-width:100%}.rail a.dealrow .dtw{margin-left:0;font-size:11.5px;line-height:1.3}
+
+/* "Is this Project X?": the deal's facts as 44px rows of 12px words, then Create Anyway alone at the left and
+   Back and the main action at the right; no rule under the title or over the buttons, 23px under them */
+.twdlg .shead h2{min-width:0;margin-right:14px}.twdlg .twn{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+.twdlg .srow{padding:12px 0;min-height:44px;box-sizing:border-box;font-size:12px}
+.twdlg .srow .k{font-size:12px;color:var(--ink-2)}
+.twdlg .srow>div:last-child{font-weight:500;color:var(--ink)}
+.twdlg .xfoot{margin-top:6px;padding-top:6px;border-top:0}
+.twdlg .twgo{max-width:320px;min-width:0}
+.scrim .dlg.twdlg{padding-bottom:22px}   /* with the dialog's 1px edge, 23px under the buttons */
+.dcrow.also .fn{grid-column:1/3;text-decoration:none}.dcrow.also .fn:hover .an{text-decoration:underline;text-underline-offset:3px}   /* another deal holds this one's documents: its name opens it */
+.dcrow.also:has(.copies){height:auto;padding:8px 0}   /* a same-named deal's two lines keep the 8px above and below the other rows have */
+/* The response box holds the panel's last row; with a draft under it the two stack, each up to four lines (three on a
+   short window) and scrolling past that, and the panel is as tall as both need (usePanelFit) */
+.qpanel .qstack{display:flex;flex-direction:column;min-height:0;min-width:0}
+.qpanel .qstack.stacked>.rtyping>.efwrap{flex:none}
+.qpanel .qstack.stacked .ef.rtext{flex:none;min-height:calc(4 * 1.6em + 19px)}   /* four lines to write in; it scrolls past them */
+.qpanel .qstack>.draft{flex:0 1 auto;min-height:0}
+.qpanel .qstack>.draft .rbox{flex:0 1 auto;max-height:calc(4 * 1.6em + 19px)}
+.qpanel .qstack>.draft.pending .rbox{min-height:39px}
+@media (max-height:700px){.qpanel .qstack.stacked .ef.rtext{min-height:calc(3 * 1.6em + 19px)}.qpanel .qstack>.draft .rbox{max-height:calc(3 * 1.6em + 19px)}}
+.qpanel .qlbl2{align-self:stretch;margin:12px 0 6px;font-weight:400}
+.qpanel .qlbl2 .sub{color:var(--ink-2)}
+/* beside who responded and when, in a narrow window (as the details' line, above), the button says just "Draft", so the label line stays one line */
+.qpanel #q-draft .short{display:none}
+@media (max-width:1180px){.qpanel .qlbl:has(.sub.by) #q-draft .long{display:none}.qpanel .qlbl:has(.sub.by) #q-draft .short{display:inline}}
+
+.delrow .dtext .dresp{font-size:12.5px;line-height:1.45;color:var(--ink-2);white-space:pre-wrap;overflow-wrap:anywhere}.delrow .dtext .dresp.none{color:var(--ink-3)}
+@media (max-width:1100px){.cfl-v{padding:10px 12px;row-gap:8px}.qpanel.conflict{padding-bottom:12px}.cfl .cfl-f .lbl{margin-bottom:2px}}
+.delrow.twin .dtext b{display:block;-webkit-line-clamp:none;overflow:visible}
+.delrow.nocode .dtext{grid-template-columns:minmax(0,1fr)}.delrow.nocode .dtext>*{grid-column:1}   /* a finding has no number: its title starts at the edge */
+/* Resolve: a question in two versions with the Q&A log, side by side (the conflict-screen design). The title
+   and the buttons stay; the body between them scrolls as one, so a long response is read whole at 1024x640 too. */
+.scrim .dlg.rsvdlg{width:720px;height:min(612px,calc(100vh - 32px - var(--notices-h,0px)));display:flex;flex-direction:column;overflow:hidden;padding-bottom:0}   /* one height: the arrows and buttons stay put while stepping */
+/* edge to edge, as the footer's rule */
+.rsvdlg .shead{flex:none;gap:8px;margin:0 -26px 6px;padding:0 26px 10px;border-bottom:1px solid var(--line)}
+.rsvdlg .shead h2{margin-right:auto}
+/* the stepper (choiceCards.tsx): "3 of 112", then Previous and Next */
+.rsv-nav{display:flex;gap:8px}.rsv-nav .btn.sm.ico{width:28px;height:28px;padding:0;display:inline-grid;place-items:center}
+.stp-pos{margin:0 2px 0 0;font-size:12.5px;color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.rsv-body{flex:1 1 auto;min-height:0;overflow-y:auto;scroll-padding:26px 0 16px;margin:0 -28px;padding:0 28px 16px;scrollbar-width:thin;scrollbar-color:var(--ink-3) transparent}
+.rsv-q{margin:20px 0 16px}
+.rsv-k{font-size:13px;font-weight:600;color:var(--ink);margin:0 0 4px}
+.rsv-qt{font-size:13px;line-height:1.6;color:var(--ink)}
+.rsv-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:16px}
+.rsv-c,.rsv-m{display:flex;flex-direction:column;min-width:0}
+.rsv-m{margin-top:16px}
+/* the third choice, under the two and the same card as a version: unpicked it offers the merge with the AI mark, and a
+   merge already drafted shows its text with the AI draft's dashed edge (--ink-3; the accent is for what is picked) */
+/* the AI mark sits on the words' baseline so it reads centered (it sat high) */
+.rsv-offer{display:flex;align-items:baseline;gap:8px;flex:none}
+.rsv-offer .aim{color:var(--accent);font-size:11px;font-weight:600;letter-spacing:.4px}
+.rsv-r.rsv-draft{outline:1px dashed var(--ink-3);outline-offset:-1px}.rsv-r[aria-disabled="true"]{opacity:.45;cursor:default}
+.rsv-l{display:flex;gap:8px;align-items:center;min-width:0;height:20px;margin:0 0 6px;font-size:13px;white-space:nowrap}
+/* the two versions' headings stay at the top while the body scrolls, so a picked card always has its name and dot */
+.rsv-two .rsv-l{position:sticky;top:0;z-index:1;box-sizing:border-box;height:26px;margin:0;padding-bottom:6px;background:var(--menu-solid)}
+/* once the body has scrolled, the cards pass under them through a short fade, not a hard cut through a line of text */
+.rsv-body.scrolled .rsv-two .rsv-l::after{content:'';position:absolute;left:0;right:0;top:100%;height:22px;background:linear-gradient(var(--menu-solid) 40%,transparent);pointer-events:none}   /* a line tall (13px × 1.6), solid first, so no half line shows */
+.rsv-l b{font-weight:600;color:var(--ink)}.rsv-l span{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis}
+.rsv-dot{flex:none;width:14px;height:14px;box-sizing:border-box;border-radius:50%;border:1.5px solid var(--ink-3)}
+/* picked: a gray check mark in place of the dot (a selection is marked in gray, not the accent) */
+.rsv-dot.on{border:0;color:var(--ink-2);display:inline-grid;place-items:center}
+.rsv-dot.on svg{display:block}
+.rsv-r{flex:1 1 auto;box-sizing:border-box;margin:0;padding:10px 12px;border-radius:var(--r-ctl);background:var(--card);outline:1px solid var(--line);outline-offset:-1px;font-size:13px;line-height:1.6;color:var(--ink);cursor:pointer;white-space:pre-wrap;overflow-wrap:anywhere}
+.rsv-r:not([aria-disabled="true"]):hover{background:var(--card-hover)}
+.rsv-r[aria-checked="true"]{outline:2px solid var(--ink-2);outline-offset:-2px}
+/* the keyboard's place: a ring outside the card's own edge (an outline too, which would otherwise hide the app's focus ring), so focus and picked read apart */
+.rsv-r:focus-visible{box-shadow:0 0 0 2px var(--menu-solid),0 0 0 4px var(--accent)}
+/* cells that differ sit at the foot of each card, so they line up across the two */
+.rsv-c .rsv-r{display:flex;flex-direction:column}.rsv-c .rsv-t{flex:1 1 auto}
+.rsv-f{margin:0;display:grid;grid-template-columns:max-content minmax(0,1fr);column-gap:12px;row-gap:2px;font-size:12.5px}
+.rsv-t+.rsv-f{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
+.rsv-f>div{display:contents}.rsv-f dt{color:var(--ink-2)}.rsv-f dd{margin:0;color:var(--ink)}
+textarea.rsv-r.draftbox{field-sizing:content;min-height:calc(5 * 1.6em + 20px);resize:none;cursor:text;outline:2px dashed var(--accent);outline-offset:-2px;border:0;font:inherit;font-size:13px;line-height:1.6}
+.rsv-keep{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:10px;font-size:12.5px;color:var(--ink-2)}
+.rsv-kf{display:flex;align-items:center;gap:8px}
+.rsvdlg .xfoot{flex:none;display:flex;align-items:center;gap:8px;margin:0 -28px;padding:14px 28px 22px;
+  border-top:1px solid var(--line)}
+.rsvdlg #rsv-keep{min-width:128px;justify-content:center}
+@media (forced-colors:active){
+  .rsv-r[aria-checked="true"]{outline-color:Highlight}
+  .rsv-dot.on{color:Highlight}
+}
+/* "Where does this edit go?": a kept edit's row that reads like several of the log's, placed by the person */
+.pkdlg{width:620px;max-width:calc(100vw - 48px)}
+.pkdlg .shead{border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:0}
+.pkbody{max-height:min(460px,calc(100vh - 220px));overflow:auto;scrollbar-width:thin;margin:0 -26px;padding:0 26px}
+.pkask + .pkask{border-top:1px solid var(--line)}
+.pkdlg .srow{grid-template-columns:124px minmax(0,1fr);padding:12px 0;font-size:13.5px}
+.pkdlg .srow + .srow{border-top:0;padding-top:0}
+.pkv{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pklist{max-height:none;overflow:visible}
+.pklist label{min-width:0}
+.pklist input:disabled + .pkrow,.pklist input:disabled ~ .pkcells{color:var(--ink-3)}
+.pklist .pkrow{flex:none;min-width:7.5ch;font-variant-numeric:tabular-nums}   /* the cells line up from row to row */
+.pklist .pkcells{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2)}
+.pkdlg .xfoot{border-top:1px solid var(--line)}
+/* Dialogs that preview a list of questions to write or close (#2): 620px, the list scrolls between the title and the
+   footer, and the dialog keeps its height while the list is read, so nothing jumps when it arrives */
+.dlg.lnkdlg{width:min(620px,calc(100vw - 48px));max-width:none;display:flex;flex-direction:column;box-sizing:border-box;max-height:calc(100vh - 56px)}
+.dlg.lnkdlg.tall{height:calc(100vh - 56px)}
+.lnkdlg .llist{flex:1;min-height:0;overflow:auto;margin:6px 0 0;padding:0;scrollbar-width:thin}   /* rows and their rules stay inside the title's column, as in the mock-up */
+.lnkdlg .lgrp{position:sticky;top:0;z-index:1;display:flex;gap:8px;padding:12px 0 6px;font-size:13px;color:var(--ink-2);font-weight:600;background:var(--menu-solid)}
+.lnkdlg .lgrp span{font-weight:500}
+.lnkdlg label.lrow{display:grid;grid-template-columns:14px minmax(0,1fr);gap:12px;align-items:start;padding:9px 8px;cursor:pointer}
+.lnkdlg label.lrow:hover{background:var(--card-hover)}
+.lnkdlg label.lrow+label.lrow{border-top:1px solid var(--line)}
+.lnkdlg .lrow input{appearance:none;width:14px;height:14px;border-radius:4px;border:1px solid var(--ink-3);display:grid;place-items:center;margin:3px 0 0}
+.lnkdlg .lrow input:checked{background:var(--accent);border-color:var(--accent)}.lnkdlg .lrow input:checked::after{content:'';width:4px;height:7px;border:solid var(--accent-ink);border-width:0 2px 2px 0;transform:translateY(-1px) rotate(45deg)}
+.lnkdlg .lq{font-size:14px;color:var(--ink);line-height:1.5;overflow-wrap:anywhere}
+.lnkdlg .lq b{font-weight:500;margin-right:6px}
+.lnkdlg .lfor{display:block;margin-top:2px;font-size:12px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lnkdlg .lout{padding:9px 8px 9px 34px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-2)}.lnkdlg .lout b{font-weight:500;color:var(--ink);margin-right:6px}
+.lnkdlg .xfoot{flex:none;margin-top:0}
+.lnkdlg .llist>.loadfail,.lnkdlg .llist>.emptyline{padding:0}   /* in line with the title, as the group labels are */
+#au-out{margin-left:-4px}   /* the gap before it is then as wide as the space after its dot */
+#au-out .tundo{background:none;border:0;padding:0;margin-left:2px;font:inherit;font-weight:500;color:var(--accent);cursor:pointer}#au-out .tundo:hover{text-decoration:underline;text-underline-offset:3px}   /* points that could not be drafted, beside the count */
+.lnkdlg .srow{border-top:0}
+.lnkdlg .phrow{display:grid;grid-template-columns:14px minmax(0,1fr);gap:12px;padding:12px 8px}.lnkdlg .phrow+.phrow{border-top:1px solid var(--line)}
+.lnkdlg .phrow .bx{width:14px;height:14px;border-radius:4px;border:1px solid var(--line)}
+.lnkdlg .phrow i{margin:3px 0 8px}.lnkdlg .phrow i+i{width:45%;margin-bottom:0}
+/* the Q&A page's line about questions the checklist has settled */
+.qnote{margin:8px 0 4px}   /* otherwise the app's status line with an action (.loadfail: "Indexing stopped … Resume") */
+/* the response's corner with two buttons: in a short window Close gives up words first ("Close Q3"), the whole name on hover */
+.qpanel .racts.two{display:inline-flex;gap:8px}.qpanel .racts #q-close-wrap{order:-1}
+.colmenu>.needs{display:flex}.colmenu>.needs>.mi{flex:1}
+@media (max-width:1180px){#q-close-settled .long{display:none}#q-close-settled .short{display:inline}}   /* Close gives up words first; Draft from documents shortens only beside who responded and when (above) */
+/* the Checklist page's ⋯ menu sits in the heading's row, whose label style its items must not take */
+.ckpmore{display:inline-flex;margin-left:2px}.lbl.flagsl .ckpmore .btn.sm.ico{height:28px;width:28px;padding:0;justify-content:center}.ckpmore .colmenu{min-width:250px;font-weight:400;letter-spacing:0;text-transform:none}
+
+/* ---- Editable values (design.md, Editable values) ----
+   Every value a person changes in place is a capsule, the same object as a small button: Overview's Structure, Sector and
+   Technology (.pickbtn, or a typed .efcap), the counterparty, a response's Responded by and date, the Q&A panel's details
+   (.qp), the question's status (.qph .stsel) and Deal status (.headrow .hsel). Typed values are an EditField with `cap`:
+   the capsule holds the icon and the field, and the field's notes (Not saved, Changed elsewhere) sit outside it. */
+.efcap,.pickbtn,button.qp,.qph .stsel,.headrow .hsel{display:inline-flex;align-items:center;gap:6px;box-sizing:border-box;flex:0 1 auto;height:28px;min-width:0;max-width:100%;padding:0 10px;margin:0;border:1px solid var(--line);border-radius:999px;background-color:var(--card);color:var(--ink);font-family:inherit;font-size:12px;font-weight:500;line-height:normal;white-space:nowrap;text-align:left;vertical-align:middle;overflow:hidden;cursor:pointer;transition:background-color var(--fast) var(--ease),border-color var(--fast) var(--ease)}
+.efcap:hover,.pickbtn:not(:disabled):hover,button.qp:not(:disabled):hover,.qph .stsel:not(:disabled):hover,.headrow .hsel:not(:disabled):hover{background-color:var(--card-hover)}
+.efcap{position:relative;cursor:text}
+.pickbtn.none{color:var(--ink-3)}
+.pickbtn.none .chev{color:var(--ink-3);opacity:1}   /* on Not set the chevron is --ink-3 */
+.efcap>svg,button.qp>svg{flex:none;color:var(--ink-2)}
+.efcap.lift>svg{transform:translateY(-.5px)}   /* the user and building icons sit a half pixel higher, so they look centered */
+/* the words: a capsule is as wide as its value; only a value longer than the whole line it is on ends in an ellipsis */
+.pickbtn .pv,button.qp .pv,.qph .stsel .pv,.headrow .hsel .pv{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* a value picked from a list ends in a chevron, the words' color at 70%, 4px after them */
+.pickbtn .chev,button.qp .chev,.qph .stsel .chev,.headrow .hsel .chev{display:inline-grid;flex:none;margin-left:-2px;opacity:.7}
+/* typing happens inside the capsule: the field is clear and borderless and sizes to what is in it */
+.efcap>.ef,.efcap>.dshow{flex:0 1 auto;box-sizing:border-box;height:26px;min-width:1ch;width:auto;max-width:none;field-sizing:content;margin:0;padding:.5px 0 0;border:0;border-radius:0;background:transparent;outline:0;font:inherit;color:var(--ink);text-align:left;text-overflow:ellipsis}
+.efcap>.dshow{display:inline-flex;align-items:center}
+.efcap>.ef::placeholder{color:var(--ink-3)}
+.ovfacts .efcap>.ef{min-width:0;max-width:100%}
+.trail .tfacts{align-self:center}.trail .tfacts .efcap{margin:-3.75px 0}   /* the trail keeps the height of its line of text, so the page's heights below hold */
+.efwrap.capped{display:inline-flex;align-items:center;flex-wrap:wrap;column-gap:6px;min-width:0;max-width:100%}
+.ovfacts .efwrap.capped{display:flex;flex-direction:column;align-items:flex-start}   /* on Overview a note goes under the value, as before */
+.ovfacts .efwrap.capped>.efstate{margin-left:0}
+/* in the Q&A header a detail that does not fit goes onto the next line whole, rather than giving way */
+.qprops>.efwrap.capped,.qpick{flex:none;min-width:0;max-width:100%}
+.qprops .efwrap.capped{flex-wrap:nowrap}.qprops .efwrap.capped>.efstate{flex:none;white-space:nowrap}   /* a note stays on the header's line, after its capsule */
+.qprops .efcap>.ef,.qph .stsel .pv,button.qp .pv{min-width:0}
+.qlbl .sub.by{gap:8px}
+/* the date's capsule never gives way; who responded does, ending in an ellipsis inside its capsule */
+.qlbl .sub.by>.efwrap.capped:has(.dedit),.qlbl .sub.by .efcap:has(.dedit){flex-shrink:0}
+.qlbl .sub.by>.efwrap.capped:not(:has(.dedit)){flex:0 1 auto;min-width:0}   /* who responded is not cut: the date goes under it instead */
+/* focus and typing: the 2px accent ring, 2px off; the capsule keeps its look */
+.pickbtn:focus-visible,button.qp:focus-visible,.qph .stsel:focus-visible,.headrow .hsel:focus-visible,.efcap:has(:focus-visible),.efcap:has(.ef:focus){outline:2px solid var(--accent);outline-offset:2px}
+@media (forced-colors:active){
+  .efcap,.pickbtn,button.qp,.qph .stsel,.headrow .hsel{border-color:ButtonText}
+  .efcap>svg,button.qp>svg,.pickbtn .chev,button.qp .chev,.qph .stsel .chev,.headrow .hsel .chev{color:ButtonText}
+}
+
+/* ---- The Q&A panel's details ----
+   Workstream, Priority, Submitted by, Received, and Responded by with its date are plain gray words with their icon, at
+   the Bare level of the glass family (as a sidebar row): no fill or edge at rest, --card-hover with the --r-ctl radius
+   under the pointer. They open the same lists and fields as before; the capsules elsewhere are unchanged. */
+.qpanel .qprops button.qp,.qpanel .qprops .efcap,.qpanel .qlbl .sub.by .efcap{
+  border-color:transparent;background-color:transparent;border-radius:var(--r-ctl);
+  color:var(--ink-2);font-weight:400;padding:0 2px;gap:5px}
+.qpanel .qprops button.qp:not(:disabled):hover,.qpanel .qprops .efcap:hover,
+.qpanel .qlbl .sub.by .efcap:hover{background-color:var(--card-hover)}
+.qpanel .qprops .chev{display:none}
+.qpanel .qprops button.qp>svg,.qpanel .qprops .efcap>svg,.qpanel .qlbl .sub.by .efcap>svg{color:var(--ink-3)}
+.qpanel .qprops .efcap>.ef,.qpanel .qprops .efcap>.dshow,
+.qpanel .qlbl .sub.by .efcap>.ef,.qpanel .qlbl .sub.by .efcap>.dshow{color:var(--ink-2);font-weight:400}
+/* while typing, the box being typed in shows the Control level, so it reads as a field */
+.qpanel .qprops .efcap:has(.ef:focus),.qpanel .qlbl .sub.by .efcap:has(.ef:focus){
+  border-color:var(--line);background-color:var(--card)}
+/* one 20px rhythm on the drawn ink: status to the first detail, detail to detail, and along the Response label line */
+/* each detail starts 4px early, its icon's inset, so one that wraps to a line of its own has its ink on the header's
+   left edge, under Q1; the margins before it are 4px wider, so the gaps stay as they were */
+.qpanel .qprops>*{margin:10px 16px 0 -4px}
+.qpanel .qprops>*:last-child{margin-right:8px}   /* the last detail stays 8px clear of the buttons, as before */
+.qpanel .qlead>.stpick{margin-right:20px}
+.qpanel .qlbl .sub.by{gap:12px;margin-left:6px}
+/* quiet labels, so the question and the response under them are read first */
+.qpanel .qcol>.qlbl{font-weight:500;color:var(--ink-2)}
+
+/* ---- Popup glass (design.md, Glass → Popup glass: option B) ----
+   Every menu, popover, search result list, the connection card and every dialog. Menus and popovers are drawn in the top
+   layer (popups.ts), so their blur reaches the page even from inside a blurred pane; a dialog's scrim carries its blur on a
+   layer of its own, so the scrim is not the dialog's backdrop root. */
+:root[data-theme="dark"]{--pop-fill:var(--glass-2)}
+:root[data-theme="light"]{--pop-fill:color-mix(in srgb,var(--menu-solid) 36%,transparent)}
+.colmenu,.notices .toast,.fhead .fmenu,.railmenu,.docmenu,.pastpop,.conncard,.sdrop,.rsearch.float,
+.ref .pop,.trk .ref .pop,.chat .ref .pop,.askthread .ref .pop,.dlg{
+  background-color:var(--pop-fill);background-image:linear-gradient(170deg,var(--glass-sheen),transparent 38%);border:1px solid var(--glass-edge);
+  -webkit-backdrop-filter:blur(12px) saturate(150%);backdrop-filter:blur(12px) saturate(150%)}
+.colmenu,.notices .toast,.fhead .fmenu,.railmenu,.docmenu,.pastpop,.conncard,.sdrop,.rsearch.float,
+.ref .pop,.trk .ref .pop,.chat .ref .pop,.askthread .ref .pop{box-shadow:inset 0 1px 0 var(--spec),inset 0 -1px 0 var(--inset-edge),var(--shadow-pop)}
+.dlg{box-shadow:inset 0 1px 0 var(--spec),inset 0 -1px 0 var(--inset-edge),var(--shadow-dlg)}
+.colmenu.glass::after{content:none}   /* the sheen is in the popup's own background */
+/* a popup in the top layer: the browser's own popover look is put back to what the popup's rules say (only what they leave unset) */
+:where([popover][data-lift]){inset:auto;margin:0;padding:0;border:0;color:inherit;background:none;overflow:visible;height:auto}
+[popover][data-lift]:not(:popover-open){display:none!important}
+/* behind a menu (popups.ts): clear, the page neither dimmed nor blurred; it takes the pointer,
+   and a press on it closes the menu */
+.popshield{position:fixed;inset:0;width:auto;height:auto;margin:0;padding:0;border:0;background:transparent}
+.popshield:not(:popover-open){display:none}
+/* dialogs: the page dimmed and slightly blurred, the blur on a layer under the dialog; the fade lets go of its end
+   state, which would otherwise make the scrim the dialog's backdrop root and leave its glass nothing to blur */
+.scrim,.scrim.blur{background:var(--scrim-soft);-webkit-backdrop-filter:none;backdrop-filter:none;isolation:isolate;animation-fill-mode:backwards}
+.scrim::before{content:"";position:fixed;inset:0;z-index:-1;-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);pointer-events:none}
+/* a dialog's parts that stay put while its body scrolls take the dialog's own glass: what scrolls under them is blurred, not cut;
+   the blur goes on only while something is under them (dialogs.tsx), since over nothing it shows as a band */
+.imdlg .shead,.imdlg .xfoot,.dlg>.acts,.rsv-two .rsv-l,.lnkdlg .lgrp{background:transparent}
+.dlg.under-top .shead,.dlg.under-foot .xfoot,.dlg.under-foot>.acts,.rsv-two .rsv-l,.lnkdlg .lgrp{-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+.rsv-body.scrolled .rsv-two .rsv-l::after{content:none}
+/* in light, the grays under ink fall below 4.5:1 on this glass: a footer line and a review's old wording go one step darker */
+:root[data-theme="light"] .dlg .xfoot,:root[data-theme="light"] .dlg .xfoot .err{color:var(--ink)}
+:root[data-theme="light"] .dlg .rv-was{color:var(--ink-2)}
+@media (forced-colors:active){
+  .colmenu,.fhead .fmenu,.railmenu,.docmenu,.pastpop,.conncard,.sdrop,.rsearch.float,.ref .pop,.trk .ref .pop,.chat .ref .pop,.askthread .ref .pop,.dlg{background:Canvas;-webkit-backdrop-filter:none;backdrop-filter:none}
+  .imdlg .shead,.imdlg .xfoot,.dlg>.acts,.rsv-two .rsv-l,.lnkdlg .lgrp{background:Canvas;-webkit-backdrop-filter:none;backdrop-filter:none}
+  .scrim::before{-webkit-backdrop-filter:none;backdrop-filter:none}
+}
+/* an item no longer in the firm's list (linking design, section 5): a small icon at the end of its words' column, the same place on every row, kept in sight when they run to two lines */
+.md.ck .ckrow .it.unl{display:flex;align-items:flex-start;gap:4px;overflow:visible}.md.ck .ckrow .it.unl .tx{flex:1;min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.md.ck .ckrow .unli{flex:none;display:inline-grid;place-items:center;height:1.4em;color:var(--ink-3)}
+/* the deal's ⋯ menu: when the checklist and findings were last checked sits at the right of Check again */
+#deal-menu{min-width:240px}
+#deal-menu .mi{display:flex;align-items:baseline;justify-content:space-between;gap:16px;white-space:nowrap}
+#deal-menu .mi span{color:var(--ink-3);font-size:12px}
+/* a single choice in a menu (design.md, Menus): a gray check mark at the row's right end, on a light
+   highlight, the accent's in light and a gray in dark. In dark the row under the pointer is lit more, to stay apart */
+:root[data-theme="light"]{--mi-chosen:color-mix(in srgb,var(--accent) 10%,transparent)}
+:root[data-theme="dark"]{--mi-chosen:color-mix(in srgb,var(--card-hover) 50%,transparent);
+  --mi-hover:color-mix(in srgb,var(--ink) 14%,transparent)}
+.mcheck{display:inline-flex;flex:none;margin-left:auto;color:var(--ink-2)}
+.colmenu .mi.on{display:flex;align-items:center;gap:16px}
+.colmenu .mi.on:not(:hover):not(.hi),.mchoice label.on:not(:hover),.dm-r.on:not(:hover){background:var(--mi-chosen)}
+/* a filter menu's sections keep their radios for the keyboard, unseen: the row's check mark and highlight show the choice */
+.mchoice label{position:relative}
+.mchoice input[type=radio]{position:absolute;left:10px;top:50%;opacity:0;width:1px;height:1px;margin:0;pointer-events:none}
+.mchoice label:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:-2px}
+.dm-r .dtk{grid-column:3;grid-row:1;display:flex;width:14px;padding-left:10px}
+.dl .dtk{grid-column:4;display:flex;width:14px;padding-left:10px}
+:root[data-theme="dark"] :is(.colmenu .mi:hover,.colmenu .mi.hi,.colmenu label:not(.psearch):hover,.railmenu .mi:hover,
+  .dm-r:hover):not(:disabled):not([aria-disabled="true"]){background:var(--mi-hover)}
+/* in forced colors the highlight is Canvas: the chosen row is outlined as well as checked */
+@media (forced-colors:active){.colmenu .mi.on,.mchoice label.on,.dm-r.on{outline:1px solid Highlight;outline-offset:-1px}}
+/* Home's example questions fade as they change (homeExamples.ts) */
+#hask::placeholder{transition:opacity .4s var(--ease)}
+#hask.phfade::placeholder{opacity:0}
+/* The Checklist's word is for screen readers only. With the list grouped, its first
+   heading rises into the filters' line, the open item's pane starts under them, and rows scrolled up fade out before
+   they reach them */
+.home.top .brieflet.ckpage.rise>.ckhead{position:relative;z-index:2;height:34px;margin-bottom:-34px;pointer-events:none}
+.ckpage.rise>.ckhead>*{pointer-events:auto}
+.ckpage.rise .md.ck>.det{margin-top:42px}
+@keyframes ckrise{from{--qa-fade:0px}to{--qa-fade:40px}}
+.ckpage.rise .md.ck .list.ckrows{animation-name:ckrise,ckend}
+/* the Q&A table's column heads keep the height their 10.5px capitals had, so the rows under them do not move */
+.md .lh,.lhout{line-height:15.75px}

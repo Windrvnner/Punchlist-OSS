@@ -1,0 +1,72 @@
+# Run by hand only (Actions > CI > Run workflow). The same checks run locally with `npm run check:all` before
+# every merge.
+name: CI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      # lint errors only; the formatter is off by decision
+      - run: npx biome lint --diagnostic-level=error .
+      - run: node scripts/check-secrets.mjs --all
+      - run: npm test
+      - run: npm run build
+
+  browser:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # the suites drive the runner's Google Chrome (/usr/bin/google-chrome) through Playwright
+      - run: npm run browser -- --jobs 2
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-logs
+          path: out/browser/*.log
+
+  # the built Electron app end to end on temporary folders, on a virtual display
+  desktop:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: xvfb-run -a npm run desktop:test
+
+  # the Windows installer, kept as a download on the run (without LibreOffice, which is copied in on a release PC)
+  installer:
+    needs: check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run installer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: punchlist-installer
+          path: out/installer/*.exe

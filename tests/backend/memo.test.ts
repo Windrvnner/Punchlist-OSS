@@ -1,0 +1,103 @@
+// @vitest-environment node
+// The deal memo's model-written parts: a rating of each open finding, kept in the deal's shared check log until the
+// finding's words change, and a summary of facts with no advice in it.
+import { describe, it, expect } from 'vitest';
+import { nodeAi, type AiDocs } from '../../src/backend/ai';
+import { StandInService } from '../../src/backend/service';
+import { StoreKeeper } from '../../src/backend/storeKeeper';
+import type { Folder } from '../../src/backend/logRepository';
+import { memRepo, type MemRepo } from '../adapters/memRepo';
+
+class Mem implements Folder { files = new Map<string, string>(); list() { return [...this.files.keys()]; } size(n: string) { return this.files.get(n)?.length ?? -1; } read(n: string) { return this.files.get(n) ?? null; } append(n: string, t: string) { this.files.set(n, (this.files.get(n) ?? '') + t); } write(n: string, t: string) { this.files.set(n, t); } }
+type Call = { model: string; prompt: string };
+let t = 0; const clock = () => new Date(Date.UTC(2026, 10, 15, 9, 0, 0, t++)).toISOString();
+const isRate = (c: Call) => c.prompt.startsWith('Rate each of these open findings');
+const isGroup = (c: Call) => c.prompt.startsWith('These are the open findings on a deal, each with');
+
+/** a backend on a stand-in model: `rate` answers the asks for ratings, `sum` those for the summary; `shared` is the deal's shared folder, `pc` this PC */
+function setup(rate: (c: Call, n: number) => unknown, sum: (c: Call, n: number) => unknown = () => ({ paragraphs: ['A solar project. The yield is above the advisor’s figure.'] }), shared = new Mem(), repo: MemRepo = memRepo(clock), pc = 'pc1', group: (c: Call) => unknown = () => ({ risks: [] })) {
+  const rates: Call[] = []; const sums: Call[] = []; const groups: Call[] = [];
+  const svc = new StandInService((c) => { const call = c as Call; const r = isRate(call) ? (rates.push(call), rate(call, rates.length)) : isGroup(call) ? (groups.push(call), group(call)) : (sums.push(call), sum(call, sums.length)); return typeof r === 'string' ? r : JSON.stringify(r); });
+  const docs: AiDocs = { records: () => [], wanted: async () => [] };
+  const ai = nodeAi({ service: svc, docs, keeper: new StoreKeeper(svc, new Mem(), { recheckMs: 0, clock }), repo, shared, installId: pc, clock });
+  return { ai, rates, sums, groups, repo, shared };
+}
+const val = <T,>(r: { ok: boolean; value?: T }) => { expect(r.ok).toBe(true); return r.value as T; };
+async function deal(repo: MemRepo) { val(await repo.transaction({ writes: [{ kind: 'deal', id: 'd1', data: { id: 'd1', name: 'Project Southridge', counterparty: 'Southridge Solar', sector: 'Solar' }, expectedRev: null }], index: { dealId: '_', add: [{ kind: 'deal', id: 'd1' }] } })); }
+async function finding(repo: MemRepo, id: string, title: string, extra: object = {}, rev: number | null = null) { val(await repo.transaction({ writes: [{ kind: 'finding', id, data: { id, dealId: 'd1', title, workstream: 'Technical', status: 'open', body: ['As written. [1]'], sources: [], ...extra }, expectedRev: rev }], index: { dealId: 'd1', add: [{ kind: 'finding', id }] } })); }
+/** rate every finding the ask lists as given, by id */
+const by = (given: Record<string, string>) => (c: Call) => ({ ratings: [...c.prompt.matchAll(/^(f_\w+) \(/gm)].map((m) => ({ id: m[1], rating: given[m[1]] })) });
+
+describe('the deal memo’s ratings and summary', () => {
+  it('rates each open finding against the definitions, and with none rates nothing but still says what the deal is', async () => {
+    const s = setup(by({ f_1: 'High', f_2: 'low' })); await deal(s.repo);
+    expect(val(await s.ai.memo!('d1'))).toEqual({ summary: ['A solar project. The yield is above the advisor’s figure.'], ratings: {}, risks: [] });
+    expect(s.rates.length).toBe(0); expect(s.sums.length).toBe(1); expect(s.sums[0].prompt).toContain('that it has no open findings');
+    s.sums.length = 0;
+    await finding(s.repo, 'f_1', 'Yield above the advisor’s'); await finding(s.repo, 'f_2', 'Notice address differs'); await finding(s.repo, 'f_3', 'Closed one', { status: 'closed' });
+    const m = val(await s.ai.memo!('d1'));
+    expect(m.ratings).toEqual({ f_1: 'High', f_2: 'Low' });
+    expect(s.rates[0].model).toBe('standard');
+    expect(s.rates[0].prompt).toContain('High: Affects price, structure or whether the deal can close.');
+    expect(s.rates[0].prompt).toContain('f_1 (Technical): Yield above the advisor’s. As written.'); expect(s.rates[0].prompt).not.toContain('Closed one');
+    expect(m.summary).toEqual(['A solar project. The yield is above the advisor’s figure.']);
+    expect(s.sums[0].prompt).toContain('Project Southridge; Southridge Solar; Solar'); expect(s.sums[0].prompt).toContain('- Yield above the advisor’s: (Technical) Yield above the advisor’s. As written.');
+  });
+
+  it('keeps a rating in the shared log until the finding’s words change, so another PC’s memo agrees and asks nothing', async () => {
+    const a = setup(by({ f_1: 'High', f_2: 'Medium' })); await deal(a.repo); await finding(a.repo, 'f_1', 'One'); await finding(a.repo, 'f_2', 'Two');
+    val(await a.ai.memo!('d1')); expect(a.rates.length).toBe(1);
+    const b = setup(by({ f_1: 'Low', f_2: 'Low' }), undefined, a.shared, a.repo, 'pc2');
+    expect(val(await b.ai.memo!('d1')).ratings).toEqual({ f_1: 'High', f_2: 'Medium' }); expect(b.rates.length).toBe(0);
+    // a review mark changes the record, not its words: the rating holds
+    await finding(a.repo, 'f_2', 'Two', { reviewed: { by: 'sroe', at: clock() } }, 1);
+    val(await b.ai.memo!('d1')); expect(b.rates.length).toBe(0);
+    // new words: rated again, and only that one
+    await finding(a.repo, 'f_2', 'Two', { body: ['Rewritten. [1]'] }, 2);
+    expect(val(await b.ai.memo!('d1')).ratings).toEqual({ f_1: 'High', f_2: 'Low' });
+    expect(b.rates.length).toBe(1); expect(b.rates[0].prompt).toContain('f_2 (Technical)'); expect(b.rates[0].prompt).not.toContain('f_1 (Technical)');
+  });
+
+  it('asks again for what a reply left out or got wrong, then the thorough model, and leaves unrated what none could rate', async () => {
+    const s = setup((c, n) => (n === 1 ? { ratings: [{ id: 'f_1', rating: 'Severe' }, { id: 'f_404', rating: 'High' }, { id: 'f_2', rating: 'Medium' }] } : n === 2 ? 'no' : { ratings: [] }));
+    await deal(s.repo); await finding(s.repo, 'f_1', 'One'); await finding(s.repo, 'f_2', 'Two');
+    const m = val(await s.ai.memo!('d1'));
+    expect(m.ratings).toEqual({ f_2: 'Medium' });
+    expect(s.rates.filter((c) => !c.prompt.includes('It cannot be read as written')).map((c) => c.model)).toEqual(['standard', 'standard', 'thorough']);
+    expect(s.rates[1].prompt).toContain('f_1 (Technical)'); expect(s.rates[1].prompt).not.toContain('f_2 (Technical)');
+  });
+
+  it('sends back a summary that advises, and leaves it out if it still does', async () => {
+    const advice = { paragraphs: ['A solar project. The lenders should insist on a higher contingency.'] };
+    const once = setup(by({ f_1: 'High' }), (_c, n) => (n === 1 ? advice : { paragraphs: ['A solar project. Contingency is 4% of EPC.'] }));
+    await deal(once.repo); await finding(once.repo, 'f_1', 'One');
+    expect(val(await once.ai.memo!('d1')).summary).toEqual(['A solar project. Contingency is 4% of EPC.']);
+    expect(once.sums[1].prompt).toContain('That gives advice or a judgment. Write it again with facts only.');
+    const never = setup(by({ f_1: 'High' }), () => advice); await deal(never.repo); await finding(never.repo, 'f_1', 'One');
+    const m = val(await never.ai.memo!('d1')); expect(m.summary).toEqual([]); expect(m.ratings).toEqual({ f_1: 'High' });
+    expect(never.sums.map((c) => c.model)).toEqual(['standard', 'standard', 'thorough']);
+  });
+
+  it('rates a deal with many findings a part at a time', async () => {
+    const s = setup((c) => ({ ratings: [...c.prompt.matchAll(/^(f_\w+) \(/gm)].map((m) => ({ id: m[1], rating: 'Low' })) })); await deal(s.repo);
+    for (let k = 0; k < 45; k++) await finding(s.repo, `f_${k}`, `Finding ${k}`);
+    const m = val(await s.ai.memo!('d1'));
+    expect(Object.keys(m.ratings).length).toBe(45); expect(s.rates.map((c) => c.prompt.match(/^f_\w+ \(/gm)!.length)).toEqual([40, 5]);
+  });
+
+  it('keeps a summary that reports what a document requires', async () => {
+    const terms = { paragraphs: ['The credit agreement says the borrower should maintain a DSCR of 1.20x. The advisor recommends a P90 case.'] };
+    const s = setup(by({ f_1: 'High' }), () => terms); await deal(s.repo); await finding(s.repo, 'f_1', 'One');
+    expect(val(await s.ai.memo!('d1')).summary).toEqual(terms.paragraphs); expect(s.sums.length).toBe(1);
+  });
+
+  it('never shows an id the model wrote, nor a link or citation marker', async () => {
+    const s = setup(by({ f_1: 'High' }), () => ({ paragraphs: ['The {yield gap|f_1} is f_1, as cited. [1]'] })); await deal(s.repo); await finding(s.repo, 'f_1', 'One');
+    const [p] = val(await s.ai.memo!('d1')).summary; expect(p).not.toMatch(/f_1|\[1\]|\{/); expect(p).toContain('yield gap');
+  });
+
+  it('fails as unreachable when the model service is', async () => {
+    const s = setup(() => { const e: any = new Error('down'); e.code = 'unreachable'; throw e; }); await deal(s.repo); await finding(s.repo, 'f_1', 'One');
+    const r = await s.ai.memo!('d1'); expect(!r.ok && r.error.kind).toBe('unreachable');
+  });
+});

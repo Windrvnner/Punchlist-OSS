@@ -1,0 +1,20 @@
+# dependencies and builds
+node_modules/
+dist/
+dist-desktop/
+dist-desktop-test/
+*.tsbuildinfo
+
+# secrets: the Claude API key lives in .env, never in git
+.env
+.env.*
+!.env.example
+
+# output: screenshots, videos, logs, zips and one-off mock-up scripts stay on disk only
+out/
+*.log
+.DS_Store
+
+# LibreOffice copied in for the installer (see vendor/libreoffice/README.md)
+vendor/libreoffice/*
+!vendor/libreoffice/README.md

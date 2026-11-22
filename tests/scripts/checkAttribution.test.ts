@@ -1,0 +1,74 @@
+// @vitest-environment node
+// The AI-attribution check: tracked files and the branch's commit messages must hold no AI-tool attribution, footer,
+// or link to an AI chat session. The refused texts are built at run time, so this file itself holds none of them.
+import { execFileSync, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+const script = path.resolve('scripts/check-attribution.mjs');
+const refused = {
+  link: ['https://claude', '.ai/code/session_01'].join(''),
+  footer: ['Generated with [Claude', ' Code](https://claude.com/', 'claude-code)'].join(''),
+  header: ['_Requested by', ' **Someone** · project thread_'].join(''),
+  hidden: ['<!-- claude-projects', '-attribution: {} -->'].join(''),
+  trailer: ['Co-Authored-By: Claude', ' <noreply@example.com>'].join(''),
+  session: ['Claude-Sess', 'ion: x'].join(''),
+};
+
+function repo() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attribution-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: dir });
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.email', 't@example.com');
+  git('config', 'user.name', 't');
+  const commit = (message: string) => git('commit', '-q', '--allow-empty', '-m', message);
+  const track = (file: string, text: string) => {
+    fs.writeFileSync(path.join(dir, file), text);
+    git('add', file);
+  };
+  const check = () => spawnSync('node', [script], { cwd: dir, encoding: 'utf8' });
+  return { commit, track, check, git };
+}
+
+describe('the attribution check', () => {
+  it('passes clean files and vendor documentation links', () => {
+    const r = repo();
+    r.track('a.md', 'See https://platform.claude.com/docs/en/api/overview. Sample generated with a script.\n');
+    r.commit('Add a note');
+    expect(r.check().status).toBe(0);
+  });
+
+  it.each(Object.entries(refused))('refuses a tracked file that holds the %s', (_name, text) => {
+    const r = repo();
+    r.track('a.md', `Text\n\n${text}\n`);
+    r.commit('Add a note');
+    const out = r.check();
+    expect(out.status).toBe(1);
+    expect(out.stderr).toContain('a.md');
+    expect(out.stderr).not.toContain(text);
+  });
+
+  it('refuses a commit message of the branch, and ignores older commits on main', () => {
+    const r = repo();
+    r.commit(`Old\n\n${refused.trailer}`);
+    r.git('checkout', '-q', '-b', 'topic');
+    r.commit('Clean change');
+    expect(r.check().status).toBe(0);
+    r.commit(`Bad change\n\n${refused.session}`);
+    const out = r.check();
+    expect(out.status).toBe(1);
+    expect(out.stderr).toContain('commit');
+  });
+});
+
+describe('the attribution check on main and on a fresh history', () => {
+  it('reads the latest commits when the branch adds none, as on main itself', () => {
+    const r = repo();
+    r.commit(`Bad change\n\n${refused.trailer}`);
+    const out = r.check();
+    expect(out.status).toBe(1);
+    expect(out.stderr).toContain('commit');
+  });
+});

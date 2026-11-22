@@ -1,0 +1,98 @@
+{
+  "name": "punchlist",
+  "type": "module",
+  "version": "0.9.20",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p . && vite build",
+    "typecheck": "tsc -p . --noEmit",
+    "lint": "biome lint .",
+    "test": "vitest run",
+    "check": "npm run typecheck && biome lint --diagnostic-level=error . && node scripts/check-secrets.mjs --all && node scripts/check-attribution.mjs && node scripts/check-readability.mjs && npm test",
+    "check:all": "node scripts/check-all.mjs",
+    "e2e": "vitest run tests/e2e",
+    "e2e:live": "node scripts/live.mjs",
+    "ai:check": "node scripts/ai-check.mjs",
+    "browser": "node scripts/browser-all.mjs",
+    "serve": "node tests/browser/serve.mjs dist 4178",
+    "screens": "node scripts/screens.mjs",
+    "package": "npm run build && node scripts/package.mjs",
+    "prepare": "simple-git-hooks",
+    "desktop:build": "npm run build && node scripts/desktop-build.mjs",
+    "desktop": "npm run desktop:build && electron .",
+    "desktop:live": "node scripts/live.mjs --desktop",
+    "desktop:test": "npm run desktop:build && node tests/desktop/smoke.spec.mjs",
+    "desktop:signin": "node tests/desktop/signin.spec.mjs",
+    "installer": "npm run desktop:build && electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.7",
+    "@preact/preset-vite": "^2.10.6",
+    "@types/aws4": "1.11.6",
+    "@types/node": "^26.6.6",
+    "electron": "44.11.3",
+    "electron-builder": "26.18.0",
+    "jsdom": "^31.0.0",
+    "lint-staged": "17.6.0",
+    "playwright": "^1.65.0",
+    "simple-git-hooks": "2.14.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.7",
+    "vitest": "^5.1.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.8.0",
+    "aws4": "1.13.2",
+    "jsonrepair": "^3.15.0",
+    "pdfjs-dist": "^4.10.38",
+    "preact": "^11.2.0",
+    "ulid": "^3.0.2",
+    "zod": "^4.6.7"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "npx lint-staged && node scripts/check-secrets.mjs"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,mjs,js,json,css}": "biome lint --diagnostic-level=error --no-errors-on-unmatched"
+  },
+  "main": "dist-desktop/main.mjs",
+  "description": "Deal due diligence: findings, checklist, Q&A and AI conversations about a data room",
+  "author": "Punchlist",
+  "build": {
+    "appId": "com.punchlist.desktop",
+    "productName": "Punchlist",
+    "directories": {
+      "output": "out/installer"
+    },
+    "files": [
+      "dist/**",
+      "dist-desktop/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/libreoffice",
+        "to": "libreoffice",
+        "filter": [
+          "**/*",
+          "!README.md"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "license": "build/license.txt"
+    },
+    "publish": null
+  }
+}

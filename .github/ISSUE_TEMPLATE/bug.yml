@@ -1,0 +1,25 @@
+name: Bug
+description: Something in the app that does the wrong thing. File it only once it is reproduced on the current build.
+type: Bug
+labels: [bug, needs triage]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens
+      description: The steps, what you saw, and what should happen instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: Major for anything that can lose what a person typed or chose.
+      options: [Major, Minor, Polish]
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Build
+      description: The version in Settings, or the commit.

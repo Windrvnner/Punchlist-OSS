@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Punchlist</title>
+<!-- No icon file: the window icon comes from the packaged app. This stops the browser asking for /favicon.ico. -->
+<link rel="icon" href="data:,">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' punchlist-doc:; worker-src 'self' blob:; font-src 'self' data:">
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="/src/shell/desktop.tsx"></script>
+</body>
+</html>

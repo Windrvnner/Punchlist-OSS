@@ -1,0 +1,10 @@
+Punchlist
+
+This app includes LibreOffice, which it uses to turn documents into PDF pages and to read and write spreadsheets.
+LibreOffice is made available under the Mozilla Public License, version 2.0 (https://www.mozilla.org/MPL/2.0/).
+Its license files are installed with it, in the app's resources\libreoffice folder, and its source code is
+available at https://www.libreoffice.org/download/source-code/.
+
+The app is built on Electron (MIT License, https://github.com/electron/electron), which includes Chromium and
+Node.js under their own licenses; those notices are in the LICENSES.chromium.html and LICENSE.electron.txt files
+in the app's folder.

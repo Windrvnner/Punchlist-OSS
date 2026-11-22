@@ -1,0 +1,524 @@
+// Import matching: a file row is the question with its wording first, then its number; a deleted
+// question a row matches is brought back, not copied.
+import { describe, it, expect } from 'vitest';
+import { Store } from '../../src/app/store';
+import { memRepo, disk } from '../adapters/memRepo';
+import { MemoryLocal } from '../../src/adapters/local';
+import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
+import { mockAi, mockDocuments, mockSession } from '../../src/adapters/mocks';
+import { CreateDeal } from '../../src/app/commands/deals';
+import { CreateQuestion, SetResponse, DeleteQuestion, RestoreQuestion, EditQuestionField, SetQuestionStatus } from '../../src/app/commands/questions';
+import { CreateFinding, DeleteFinding, RestoreFindingSnapshot } from '../../src/app/commands/findings';
+import { ImportQuestions, RevertImport } from '../../src/app/commands/importQuestions';
+import { RestoreQuestionSnapshot } from '../../src/app/commands/drafts';
+import { registry } from '../../src/app/commands/undo';
+import { dealQuestions, dealFindings } from '../../src/app/state';
+import { prepareImport, suggestMapping } from '../../src/domain/importExport';
+import { previewImport } from '../../src/app/transfer';
+import { matchRows } from '../../src/domain/logWrite';
+
+const COMMANDS = [CreateDeal, CreateQuestion, SetResponse, DeleteQuestion, RestoreQuestion, EditQuestionField, SetQuestionStatus, CreateFinding, DeleteFinding, RestoreFindingSnapshot, ImportQuestions, RevertImport, RestoreQuestionSnapshot];
+for (const c of COMMANDS) registry.set(c.name, c);
+let t = 0; const clock = { now: () => new Date(Date.UTC(2026, 10, 9, 10, 0, 0, t++)).toISOString() };
+let seq = 0; const ids = { next: (p: string) => `${p}_01HZZZZZZZZZZZZZZZZ${String(seq++).padStart(7, '0')}` };
+function make() {
+  const opts = { latency: [0, 0] as [number, number] }; const kv = disk(); const repo = memRepo(clock.now, kv);
+  const store = new Store({ repo, ai: mockAi(opts, repo), docs: mockDocuments(opts), fs: { pickFolders: null, pathFor: null, save: async () => ({ ok: true as const, value: 'saved' as const }) }, sheets: csvCodec, session: mockSession(opts), local: new MemoryLocal(), clock, ids }, COMMANDS);
+  return { store, kv, repo };
+}
+async function deal(store: Store) { await store.boot(); await store.dispatch(CreateDeal, { name: 'Datum', folders: [] }); const id = Object.keys(store.get().deals)[0]; await store.loadDeal(id); return id; }
+const rowsFrom = (csv: string) => { const t = readCsv(new TextEncoder().encode(csv)); if (!t.ok) throw new Error('csv'); return prepareImport(t.value.rows, suggestMapping(t.value.columns)).rows; };
+const byN = (store: Store, dealId: string) => Object.fromEntries(dealQuestions(store.get(), dealId).map((q) => [q.n, q]));
+
+const lines = (store: Store, dealId: string) => dealQuestions(store.get(), dealId).map((q) => `${q.n}: ${q.text} | ${q.response}`);
+
+describe('a merge matches each row to its question', () => {
+  it('by wording first: a list numbered its own way lines up with the log, and a misread letter is still the same question (its wording shows under Will overwrite)', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    for (const text of ['What is the DSCR?', 'Who is the EPC contractor?', 'Is the O&M contract signed?']) await store.dispatch(CreateQuestion, { dealId, text });
+    const ids = dealQuestions(store.get(), dealId).map((q) => q.id);
+    const r = await store.dispatch(ImportQuestions, {
+      dealId,
+      mode: 'merge',
+      rows: rowsFrom(
+        'No.,Question,Response\n1,"Who is the EPC  contractor ' +
+          '?",Fabrikam\n2,What is the DSCR?,1.20x\n3,"ls the O&M contract signed ?",Yes\n',
+      ),
+    });
+    expect(r.ok).toBe(true);
+    expect(lines(store, dealId)).toEqual([
+      '1: What is the DSCR? | 1.20x',
+      '2: Who is the EPC  contractor ? | Fabrikam',
+      '3: ls the O&M contract signed ? | Yes',
+    ]);
+    expect(dealQuestions(store.get(), dealId).map((q) => q.id)).toEqual(ids);       // the same three questions, none added
+  });
+  it('then by number, but only when the row reads mostly as that question: another party\'s own question 1 is a question of its own', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    await store.dispatch(CreateQuestion, { dealId, text: 'What is the DSCR for the base case?' }); await store.dispatch(CreateQuestion, { dealId, text: 'Who is the EPC contractor?' });
+    const r = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: rowsFrom('No.,Question,Response\n1,What is the DSCR in the base case?,1.20x\n2,Is there a tax equity investor?,\n') });
+    expect(r.ok).toBe(true);
+    expect(lines(store, dealId)).toEqual(['1: What is the DSCR in the base case? | 1.20x', '2: Who is the EPC contractor? | ', '3: Is there a tax equity investor? | ']);
+  });
+  it('of two questions that read the same, the one with the row\'s number', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    await store.dispatch(CreateQuestion, { dealId, text: 'Same words' }); await store.dispatch(CreateQuestion, { dealId, text: 'Same words' });
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: rowsFrom('No.,Question,Response\n2,Same words,To two\n') })).ok).toBe(true);
+    expect(lines(store, dealId)).toEqual(['1: Same words | ', '2: Same words | To two']);
+  });
+});
+
+describe('a row that matches a deleted question', () => {
+  it('brings it back with the file\'s values, says so in the preview, and Undo deletes it again', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    await store.dispatch(CreateQuestion, { dealId, text: 'What is the DSCR?' }); await store.dispatch(CreateQuestion, { dealId, text: 'Who is the EPC contractor?' });
+    const gone = dealQuestions(store.get(), dealId)[1];
+    await store.dispatch(EditQuestionField, { dealId, questionId: gone.id, field: 'workstream', value: 'Technical' });
+    await store.dispatch(DeleteQuestion, { dealId, questionId: gone.id });
+    const rows = rowsFrom('No.,Question,Response\n7,Who is the EPC contractor?,Fabrikam\n');
+    expect(previewImport(store, dealId, 'merge', rows)).toEqual({ ok: true, value: { created: 0, updated: 0, restored: 1, changes: [] } });
+    const r = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows }); if (!r.ok) throw new Error(r.error.message);
+    expect(store.get().ui.toasts.at(-1)?.text).toBe('Imported · 0 new · 0 updated · 1 restored');
+    expect(store.get().questions[gone.id]).toMatchObject({
+      n: 2,
+      text: 'Who is the EPC contractor?',
+      response: 'Fabrikam',
+      workstream: 'Technical',
+    });
+    expect(store.get().tombstones[gone.id]).toBeUndefined(); expect(dealQuestions(store.get(), dealId).length).toBe(2);
+    await store.undo(r.value.opId);
+    expect(store.get().questions[gone.id]).toBeUndefined(); expect(store.get().tombstones[gone.id]).toMatchObject({ kind: 'question' });
+    expect((await store.dispatch(RestoreQuestion, { dealId, questionId: gone.id })).ok).toBe(true);   // and can still be restored from Deleted
+    expect(store.get().questions[gone.id]).toMatchObject({ response: '', workstream: 'Technical' });
+  });
+  it('keeps its own number: an import before it gave that number to no other question', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    await store.dispatch(CreateQuestion, { dealId, text: 'Old question one' }); const gone = dealQuestions(store.get(), dealId)[0];
+    await store.dispatch(DeleteQuestion, { dealId, questionId: gone.id });
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: rowsFrom('No.,Question\n1,A different question\n') });
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: rowsFrom('No.,Question\n1,Old question one\n') })).ok).toBe(true);
+    expect(lines(store, dealId)).toEqual(['1: Old question one | ', '2: A different question | ']); expect(store.get().questions[gone.id]?.n).toBe(1);
+  });
+  it('is not brought back by Append, which always adds', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    await store.dispatch(CreateQuestion, { dealId, text: 'Kept deleted' }); const gone = dealQuestions(store.get(), dealId)[0];
+    await store.dispatch(DeleteQuestion, { dealId, questionId: gone.id });
+    await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: rowsFrom('No.,Question\n1,Kept deleted\n') });
+    expect(store.get().tombstones[gone.id]).toBeTruthy(); expect(lines(store, dealId)).toEqual(['2: Kept deleted | ']);
+  });
+});
+
+// Deals run to 2,000 questions. Importing the log of a deal that size, half of it changed, is quick.
+describe('a merge at the size of a real deal', () => {
+  it('matches 2,000 rows to 2,000 questions, renumbered and reworded a little, in a few seconds', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    const text = (i: number) => `Question ${i}: what is the position on item ${i * 7919 % 10007} of the ${['tax', 'legal', 'technical', 'commercial'][i % 4]} review?`;
+    const csv = (rows: string[][]) => rowsFrom(['No.,Question,Response', ...rows.map((r) => r.map((v) => `"${v}"`).join(','))].join('\n'));
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: csv(Array.from({ length: 2000 }, (_, k) => [String(k + 1), text(k + 1), ''])) })).ok).toBe(true);
+    const at = Date.now();   // the counterparty's copy: numbered from 5001, spaced differently, half answered
+    const r = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: csv(Array.from({ length: 2000 }, (_, k) => [String(k + 5001), text(k + 1).replace(' ', '  '), k % 2 ? `Answer ${k + 1}` : ''])) });
+    const ms = Date.now() - at; console.log('2,000-row merge, ms:', ms);
+    expect(r.ok).toBe(true); expect(dealQuestions(store.get(), dealId)).toHaveLength(2000); expect(ms).toBeLessThan(10_000);
+    expect(byN(store, dealId)[2].response).toBe('Answer 2');
+  }, 60_000);
+});
+
+
+const sheet = (header: string, rows: string[][]) => rowsFrom([header, ...rows.map((r) => r.map((v) => `"${v.replace(/"/g, '""')}"`).join(','))].join('\n'));
+const parties = (store: Store, dealId: string) => dealQuestions(store.get(), dealId).map((q) => `${q.n} ${q.askedBy}: ${q.text} | ${q.response}`);
+
+describe('a row from another party', () => {
+  it('with the same words is a question of its own: the other party\'s question and its response stay theirs', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    const ask = 'Provide the audited financial statements for FY2023 to FY2025.';
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Submitted by,Response', [['1', ask, 'Lender A', 'Uploaded to 3.1.2']]) });
+    const r = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Submitted by,Response', [['1', ask, 'Lender B', '']]) });
+    expect(r.ok).toBe(true);
+    expect(parties(store, dealId)).toEqual([`1 Lender A: ${ask} | Uploaded to 3.1.2`, `2 Lender B: ${ask} | `]);
+  });
+  it('under the same number and much the same words is a question of its own too', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Submitted by', [['4', 'What is the DSCR for the base case?', 'Lender A']]) });
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Submitted by', [['4', 'What is the DSCR in the base case?', 'Lender B']]) });
+    expect(parties(store, dealId)).toEqual(['4 Lender A: What is the DSCR for the base case? | ', '5 Lender B: What is the DSCR in the base case? | ']);
+  });
+  it('is the same question when the party differs only in capitals, spaces or a final period, or when either names no one', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Submitted by', [['1', 'Who is the EPC contractor?', 'Lender A'], ['2', 'Is the O&M contract signed?', '']]) });
+    const r = await store.dispatch(ImportQuestions, {
+      dealId,
+      mode: 'merge',
+      rows: sheet('No.,Question,Submitted by,Response', [
+        ['1', 'Who is the EPC contractor?', ' lender a.', 'Fabrikam'],
+        ['2', 'Is the O&M contract signed?', 'Lender B', 'Yes'],
+      ]),
+    });
+    expect(r.ok).toBe(true);
+    expect(dealQuestions(store.get(), dealId).map((q) => `${q.n} ${q.response}`)).toEqual(['1 Fabrikam', '2 Yes']);
+  });
+});
+
+describe('of two questions that read the same', () => {
+  it('a row with one\'s number gets that one, even after a row of the same words with no number', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    for (const text of ['Same words', 'Other', 'Same words']) await store.dispatch(CreateQuestion, { dealId, text });
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Response', [['', 'Same words', 'unnumbered'], ['1', 'Same words', 'to one']]) })).ok).toBe(true);
+    expect(lines(store, dealId)).toEqual(['1: Same words | to one', '2: Other | ', '3: Same words | unnumbered']);
+  });
+  it('and of two deleted ones, the same', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    for (const text of ['Same words', 'Same words']) await store.dispatch(CreateQuestion, { dealId, text });
+    for (const q of dealQuestions(store.get(), dealId)) await store.dispatch(DeleteQuestion, { dealId, questionId: q.id });
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Response', [['', 'Same words', 'unnumbered'], ['2', 'Same words', 'to two']]) })).ok).toBe(true);
+    expect(lines(store, dealId)).toEqual(['1: Same words | unnumbered', '2: Same words | to two']);
+  });
+});
+
+describe('a row is matched on everything it gives', () => {
+  it('of two questions that read the same, the one of the row\'s party', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Submitted by', [['1', 'Provide the cap table.', 'Lender A'], ['2', 'Provide the cap table.', 'Lender B']]) });
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('Question,Submitted by,Response', [['Provide the cap table.', 'Lender B', 'Tab 2']]) })).ok).toBe(true);
+    expect(parties(store, dealId)).toEqual(['1 Lender A: Provide the cap table. | ', '2 Lender B: Provide the cap table. | Tab 2']);
+  });
+  it('and of its workstream and received date, even when a vaguer row of the same words comes first', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Workstream,Received', [['1', 'Provide the cap table.', 'Legal', '2026-11-02'], ['2', 'Provide the cap table.', 'Financial', '2026-11-05']]) });
+    const r = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('Question,Workstream,Received,Response', [['Provide the cap table.', '', '', 'vague'], ['Provide the cap table.', 'Legal', '2026-11-02', 'to the legal one']]) });
+    expect(r.ok).toBe(true);
+    expect(lines(store, dealId)).toEqual(['1: Provide the cap table. | to the legal one', '2: Provide the cap table. | vague']);
+  });
+});
+
+describe('a row numbered as a deleted question of the same words as a live one', () => {
+  it('brings the deleted one back and leaves the live one as it was', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Submitted by,Response', [['4', 'Provide the model.', 'Lender A', 'A4'], ['7', 'Provide the model.', 'Lender A', 'A7']]) });
+    await store.dispatch(DeleteQuestion, { dealId, questionId: byN(store, dealId)[7].id });
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Submitted by,Response', [['7', 'Provide the model.', 'Lender A', 'new for 7']]) })).ok).toBe(true);
+    expect(parties(store, dealId)).toEqual(['4 Lender A: Provide the model. | A4', '7 Lender A: Provide the model. | new for 7']);
+  });
+});
+
+describe('of two rows that fit equally well', () => {
+  it('a row only one question fits chooses first, so a vaguer row never takes it', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Submitted by,Workstream,Received', [['1', 'Provide the model.', 'Lender A', 'Legal', '2026-11-02'], ['2', 'Provide the model.', 'Lender A', 'Legal', '2026-11-05']]) });
+    const r = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('Question,Submitted by,Workstream,Received,Response', [['Provide the model.', 'Lender A', 'Legal', '', 'vague'], ['Provide the model.', 'Lender A', '', '2026-11-02', 'dated']]) });
+    expect(r.ok).toBe(true);
+    expect(dealQuestions(store.get(), dealId).map((q) => `${q.n} ${q.received} ${q.response}`)).toEqual(['1 2026-11-02 dated', '2 2026-11-05 vague']);
+  });
+  it('a Submitted by of only a period names no one: it never takes over a party\'s question as a party of its own', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Submitted by,Response', [['1', 'Provide the model.', 'Lender B', 'B resp']]) });
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Submitted by,Response', [['1', 'Provide the model.', '.', 'dot']]) });
+    expect(parties(store, dealId)).toEqual(['1 Lender B: Provide the model. | dot']);
+  });
+});
+
+describe('4,000 rows into 4,000 questions all in the same words', () => {
+  it('matches each, quickly, and Undo puts every one back', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    const W = ['Legal', 'Financial', 'Technical', ''];
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Workstream', Array.from({ length: 4000 }, (_, k) => [String(k + 1), 'Provide the model.', W[k % 4]])) });
+    const before = dealQuestions(store.get(), dealId).map((q) => ({ ...q }));
+    const at = Date.now();
+    const r = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('Question,Workstream,Response', Array.from({ length: 4000 }, (_, k) => ['Provide the model.', W[(k + 1) % 4], `r${k}`])) });
+    const ms = Date.now() - at; console.log('4,000 rows all one wording, ms:', ms);
+    if (!r.ok) throw new Error(r.error.message); expect(ms).toBeLessThan(5_000);
+    const now = dealQuestions(store.get(), dealId); expect(now).toHaveLength(4000);
+    // a row with a workstream lands on a question of that workstream
+    expect(now.filter((q) => q.response).length).toBe(4000);
+    await store.undo(r.value.opId);
+    expect(dealQuestions(store.get(), dealId).map((q) => [q.id, q.n, q.response, q.workstream])).toEqual(before.map((q) => [q.id, q.n, q.response, q.workstream]));
+  }, 120_000);
+});
+
+// A consolidated log at the size of a real deal (2,000+ questions), in the words such logs use, then one
+// lender's own list merged into it: numbered its own way, much of it asked by the others too, some of it its own questions
+// reworded or answered since, and a few the team had deleted.
+describe('a lender\'s list merged into a full log', () => {
+  const ASSETS = [
+    'Contoso Solar', 'Wingtip Wind', 'Woodgrove Storage', 'Litware Solar', 'Tailspin Wind', 'Adatum Storage',
+    'Northwind Solar', 'Trey Wind', 'Coho Solar', 'Relecloud Storage', 'Lucerne Solar', 'Alpine Wind',
+  ];
+  const ASKS = [
+    (a: string) => `Provide the executed EPC contract for ${a}, with all amendments and change orders.`,
+    (a: string) => `Confirm whether the interconnection agreement for ${a} has been assigned to the project company.`,
+    (a: string) => `What is the P50 net capacity factor assumed for ${a}, and who prepared the energy yield report?`,
+    (a: string) => `Provide the PPA for ${a}, including the offtaker's credit support and any termination notices.`,
+    (a: string) => `List all permits held for ${a} and confirm none are subject to appeal.`,
+    (a: string) => `Describe any liquidated damages paid or claimed under the ${a} construction contract.`,
+    (a: string) => `Provide the title report and survey for the ${a} site.`,
+    (a: string) => `Has ${a} experienced any curtailment above 3% in the last 24 months?`,
+    (a: string) => `Provide the O&M agreement for ${a} and the last 12 monthly performance reports.`,
+    (a: string) => `Confirm the tax equity flip date and current partnership allocations for ${a}.`,
+    (a: string) => `What insurance claims have been made for ${a} since COD?`,
+    (a: string) => `Provide the decommissioning plan and bond for ${a}.`,
+    (a: string) => `Confirm whether any lender consents are needed for the sale of ${a}.`,
+    (a: string) => `Provide the land lease for ${a}, with the rent schedule and extension options.`,
+    (a: string) => `Is there any pending or threatened litigation involving ${a}?`,
+    (a: string) => `Provide the warranty schedule for the major equipment at ${a}.`,
+    (a: string) => `Describe the environmental studies performed at ${a} and any open remediation.`,
+    (a: string) => `Provide the operating budget for ${a} for FY2026 and actuals for FY2024 and FY2025.`,
+  ];
+  const YEARS = ['FY2024', 'FY2025', 'H1 2026', 'Q3 2026', 'the hold period', 'the construction period', 'the first operating year', 'the last refinancing', 'the sale process', 'the current fiscal year', 'the budget year'];
+  // 12 assets x 18 asks x 11 periods = 2,376 distinct questions
+  const all: string[] = []; for (const y of YEARS) for (const a of ASSETS) for (const ask of ASKS) all.push(ask(a).replace(/\.$|\?$/, (p) => ` (for ${y})${p}`));
+  const PARTIES = ['Lender A', 'Lender B', 'Bidder C'];
+
+  it('adds the lender\'s new questions, updates only its own, brings back its deleted ones, and leaves every other party\'s question as it was', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    const log = all.map((text, k) => [String(k + 1), text, PARTIES[k % 3], k % 5 === 0 ? `See data room 4.${k}` : '']);
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Submitted by,Response', log) })).ok).toBe(true);
+    expect(dealQuestions(store.get(), dealId)).toHaveLength(all.length);
+    const before = new Map(dealQuestions(store.get(), dealId).map((q) => [q.id, { ...q }]));
+    // the team deleted 30 of Lender B's questions
+    const binned = dealQuestions(store.get(), dealId).filter((q) => q.askedBy === 'Lender B').slice(0, 30);
+    for (const q of binned) await store.dispatch(DeleteQuestion, { dealId, questionId: q.id });
+
+    // Lender B's list: its share of the log as exported to it (the log's numbers), sent back with 600 of its questions, one in
+    // four reworded a little and half answered; 500 the other parties asked in the same words, under those questions' numbers;
+    // the 30 deleted; and 300 new ones under the lender's own numbers, which other questions of the log hold (a number the file
+    // gives twice is two questions under one number, marked)
+    const ownB = dealQuestions(store.get(), dealId).filter((q) => q.askedBy === 'Lender B').slice(0, 600);
+    const others = [...before.values()].filter((q) => q.askedBy !== 'Lender B').slice(0, 500);
+    const fresh = Array.from({ length: 300 }, (_, k) => `Provide the ${['tax', 'legal', 'technical'][k % 3]} memo on item ${k + 1} of the Lender B request list for ${ASSETS[k % 12]}.`);
+    const inFile = new Set([...ownB, ...others, ...binned].map((q) => q.n));
+    const taken = [...before.values()].map((q) => q.n).filter((n) => !inFile.has(n)).slice(0, 300);
+    const reword = (t: string) => t.replace('Provide the', 'Please provide the').replace('Confirm whether', 'Please confirm whether').replace(/\?$/, ', please?');
+    const rows = [
+      ...ownB.map((q, k) => [String(q.n), k % 4 === 0 ? reword(q.text) : q.text, k % 2 ? `B answer ${k}` : '']),
+      ...others.map((q) => [String(q.n), q.text, '']),
+      ...binned.map((q) => [String(q.n), q.text, 'Back']),
+      ...fresh.map((t, k) => [String(taken[k]), t, '']),
+    ].map((r) => [r[0], r[1], 'Lender B', r[2]]);
+    const at = Date.now();
+    const r = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Submitted by,Response', rows) });
+    const ms = Date.now() - at; console.log(`${rows.length}-row lender list into a ${all.length}-question log, ms:`, ms);
+    if (!r.ok) throw new Error(r.error.message);
+    expect(ms).toBeLessThan(15_000);
+
+    const now = dealQuestions(store.get(), dealId); const byId = new Map(now.map((q) => [q.id, q]));
+    // every other party's question is exactly as it was
+    for (const q of before.values()) if (q.askedBy !== 'Lender B') expect(byId.get(q.id)).toEqual(q);
+    // each of the lender's own questions is updated in place, reworded ones too (by their number), and none is copied
+    for (const [k, q] of ownB.entries()) expect(byId.get(q.id)).toMatchObject({ n: q.n, text: rows[k][1], response: k % 2 ? `B answer ${k}` : before.get(q.id)!.response });
+    // the 30 deleted are back, under their own numbers, with the file's response
+    for (const q of binned) expect(byId.get(q.id)).toMatchObject({ n: q.n, response: 'Back' });
+    // the other parties' 500 and the 300 new each became one of Lender B's own questions, under a number of their own
+    const added = now.filter((q) => !before.has(q.id));
+    expect(added.length).toBe(800); expect(added.every((q) => q.askedBy === 'Lender B' && q.n > all.length)).toBe(true);
+    // no number holds two questions
+    expect(new Set(now.map((q) => q.n)).size).toBe(now.length);
+    // and Undo puts the log back as it was before the import
+    await store.undo(r.value.opId);
+    expect(dealQuestions(store.get(), dealId).length).toBe(all.length - binned.length);
+    for (const q of dealQuestions(store.get(), dealId)) expect(byId.has(q.id) && { ...q, rev: 0, updatedAt: '' }).toEqual({ ...before.get(q.id)!, rev: 0, updatedAt: '' });
+  }, 120_000);
+});
+
+// One standard ask put by every party, half of a 3,000-question log, matched in a moment and each row to its own party's question.
+describe('many questions in the same words', () => {
+  it('3,000 rows, half of them one ask from three parties, each matched to its own party\'s question in a few seconds', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    const P = ['Lender A', 'Lender B', 'Bidder C']; const ask = (k: number) => (k % 2 ? 'Provide the financial model in native format.' : `Provide the board minutes for meeting ${k}.`);
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Submitted by', Array.from({ length: 3000 }, (_, k) => [String(k + 1), ask(k), P[k % 3]])) });
+    const at = Date.now();
+    const r = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Submitted by,Response', Array.from({ length: 3000 }, (_, k) => [String(k + 9001), ask(k), P[k % 3], `${P[k % 3]} answer`])) });
+    const ms = Date.now() - at; console.log('3,000 rows, half one ask, ms:', ms);
+    expect(r.ok).toBe(true); expect(ms).toBeLessThan(5_000);
+    const qs = dealQuestions(store.get(), dealId); expect(qs).toHaveLength(3000);
+    expect(qs.every((q) => q.response === `${q.askedBy} answer`)).toBe(true);
+  }, 120_000);
+});
+
+// A chain of ties, where each row fits its own question and the one before it, stays quick at deal size.
+describe('a chain of tied rows', () => {
+  it('2,000 rows, each fitting two questions, are matched in a few seconds', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    const day = (j: number) => new Date(Date.UTC(2025, 0, 1 + j)).toISOString().slice(0, 10);
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('No.,Question,Submitted by,Workstream,Received', Array.from({ length: 2000 }, (_, j) => [String(j + 1), 'Provide the model.', 'Lender A', `W${j}`, day(j - 1 + 1000)])) });
+    const at = Date.now();
+    const r = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: sheet('Question,Submitted by,Workstream,Received,Response', Array.from({ length: 2000 }, (_, j) => ['Provide the model.', 'Lender A', `W${j}`, day(j + 1000), `r${j}`])) });
+    const ms = Date.now() - at; console.log('2,000-row chain of ties, ms:', ms);
+    expect(r.ok).toBe(true); expect(ms).toBeLessThan(5_000); expect(dealQuestions(store.get(), dealId)).toHaveLength(2000);
+  }, 120_000);
+});
+
+const mapping = suggestMapping(['Number', 'Question', 'Response', 'Submitted by', 'Workstream']);
+const fileRow = (n: number, text: string, response: string) => rowsFrom(
+  `Number,Question,Response,Submitted by,Workstream\n${n},${text},${response},Lender,Finance\n`,
+);
+
+describe('identifiers and combining marks stay distinct during Merge', () => {
+  const distinct = [
+    ['Please confirm the distribution rights for Class I shares.',
+      'Please confirm the distribution rights for Class L shares.'],
+    ['What is the commitment under Facility I?', 'What is the commitment under Facility L?'],
+    ['Please confirm the meaning of दिन in clause 1.', 'Please confirm the meaning of दीन in clause 1.'],
+    ['Please confirm the distribution rights for Class i shares.',
+      'Please confirm the distribution rights for Class L shares.'],
+    ['Please confirm the distribution rights for Class ii shares.',
+      'Please confirm the distribution rights for Class LL shares.'],
+    ['Please confirm the distribution rights for Class iv shares.',
+      'Please confirm the distribution rights for Class LV shares.'],
+  ];
+  for (const [before, incoming] of distinct) {
+    for (const n of [1, 2]) {
+      it(`keeps ${before} separate from incoming number ${n}: ${incoming}`, async () => {
+        const { store } = make();
+        const dealId = await deal(store);
+        expect((await store.dispatch(ImportQuestions, {
+          dealId, mode: 'append', rows: fileRow(1, before, 'Original imported answer'),
+        })).ok).toBe(true);
+        const original = dealQuestions(store.get(), dealId)[0];
+        expect((await store.dispatch(SetResponse, {
+          dealId, questionId: original.id, response: 'Original typed answer',
+        })).ok).toBe(true);
+        const saved = structuredClone(store.get().questions[original.id]);
+        expect(matchRows({ rows: [[String(n), incoming, 'New answer', 'Lender', 'Finance']] }, mapping, [saved]))
+          .toEqual(new Map());
+        const rows = fileRow(n, incoming, 'New answer');
+        const preview = previewImport(store, dealId, 'merge', rows);
+        const result = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows });
+        expect(result.ok).toBe(true);
+        expect(store.get().questions[original.id]).toEqual(saved);
+        expect(preview).toEqual({ ok: true, value: { created: 1, updated: 0, restored: 0, changes: [] } });
+        const questions = dealQuestions(store.get(), dealId);
+        expect(questions).toHaveLength(2);
+        expect(questions.find((q) => q.id !== original.id)).toMatchObject({
+          n: 2, text: incoming, response: 'New answer',
+        });
+        if (!result.ok) throw new Error(result.error.message);
+        expect((await store.undo(result.value.opId)).ok).toBe(true);
+        expect(dealQuestions(store.get(), dealId)).toEqual([saved]);
+      });
+    }
+  }
+});
+
+describe('OCR and genuinely renumbered questions still match', () => {
+  for (const [before, incoming] of [
+    ['Is the O&M contract signed?', 'ls the O&M contract signed?'],
+    ['Please confirm the distribution rights for Class I shares.',
+      'Please confirm the distribution rights for Class I shares.'],
+    ['IS the O&M contract signed?', 'Is the O&M contract signed?'],
+  ]) {
+    it(`still matches a genuinely renumbered question: ${incoming}`, async () => {
+      const { store } = make();
+      const dealId = await deal(store);
+      expect((await store.dispatch(ImportQuestions, {
+        dealId, mode: 'append', rows: fileRow(1, before, 'Original answer'),
+      })).ok).toBe(true);
+      const original = dealQuestions(store.get(), dealId)[0];
+      expect(matchRows({ rows: [['2', incoming, 'Updated answer', 'Lender', 'Finance']] }, mapping, [original]))
+        .toEqual(new Map([[original.id, 0]]));
+      const rows = fileRow(2, incoming, 'Updated answer');
+      const preview = previewImport(store, dealId, 'merge', rows);
+      expect(preview.ok && preview.value).toMatchObject({ created: 0, updated: 1, restored: 0 });
+      expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows })).ok).toBe(true);
+      expect(dealQuestions(store.get(), dealId)).toHaveLength(1);
+      expect(store.get().questions[original.id]).toMatchObject({ n: 1, text: incoming, response: 'Updated answer' });
+    });
+  }
+});
+
+describe('the existing number fallback stays the same', () => {
+  for (const [before, incoming, n, matches] of [
+    ['Is the O&M contract signed?', 'is the O&M contract signed?', 1, true],
+    ['Is the O&M contract signed?', 'is the O&M contract signed?', 2, false],
+    ['Please confirm the mail delivery arrangements.', 'Please confirm the mall delivery arrangements.', 1, true],
+    ['Please confirm the mail delivery arrangements.', 'Please confirm the mall delivery arrangements.', 2, false],
+    ['Please confirm the civil engineering design and project completion schedule.',
+      'Please confirm the clvll engineering design and project completion schedule.', 1, true],
+    ['Please confirm the civil engineering design and project completion schedule.',
+      'Please confirm the clvll engineering design and project completion schedule.', 2, false],
+  ] as const) {
+    it(`preserves the existing number fallback for ${before} / ${incoming} / ${n}`, async () => {
+      const { store } = make();
+      const dealId = await deal(store);
+      expect((await store.dispatch(ImportQuestions, {
+        dealId, mode: 'append', rows: fileRow(1, before, 'Original answer'),
+      })).ok).toBe(true);
+      const original = dealQuestions(store.get(), dealId)[0];
+      const rows = fileRow(n, incoming, 'Updated answer');
+      expect(matchRows({ rows: [[String(n), incoming, 'Updated answer', 'Lender', 'Finance']] }, mapping, [original]))
+        .toEqual(matches ? new Map([[original.id, 0]]) : new Map());
+      const preview = previewImport(store, dealId, 'merge', rows);
+      expect(preview.ok && preview.value).toMatchObject({ created: matches ? 0 : 1, updated: matches ? 1 : 0 });
+      expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows })).ok).toBe(true);
+      expect(dealQuestions(store.get(), dealId)).toHaveLength(matches ? 1 : 2);
+      expect(store.get().questions[original.id]).toMatchObject({
+        text: matches ? incoming : before, response: matches ? 'Updated answer' : 'Original answer',
+      });
+    });
+  }
+});
+
+it('merges a sentence-initial I misread as l into the same question', async () => {
+  const { store } = make();
+  const dealId = await deal(store);
+  const originalText = 'I understand the lender requires the DSCR model; please confirm.';
+  const incomingText = 'l understand the lender requires the DSCR model; please confirm.';
+  expect((await store.dispatch(ImportQuestions, {
+    dealId, mode: 'append', rows: fileRow(1, originalText, 'Original answer'),
+  })).ok).toBe(true);
+  const original = dealQuestions(store.get(), dealId)[0];
+  expect((await store.dispatch(ImportQuestions, {
+    dealId, mode: 'merge', rows: fileRow(1, incomingText, 'Updated answer'),
+  })).ok).toBe(true);
+  const questions = dealQuestions(store.get(), dealId);
+  expect(questions).toHaveLength(1);
+  expect(questions[0]).toMatchObject({ id: original.id, n: 1, text: incomingText, response: 'Updated answer' });
+});
+
+it('keeps Class I shares and Class L shares as separate questions', async () => {
+  const { store } = make();
+  const dealId = await deal(store);
+  expect((await store.dispatch(ImportQuestions, {
+    dealId, mode: 'append', rows: fileRow(1, 'Class I shares', 'Original answer'),
+  })).ok).toBe(true);
+  expect((await store.dispatch(ImportQuestions, {
+    dealId, mode: 'merge', rows: fileRow(1, 'Class L shares', 'New answer'),
+  })).ok).toBe(true);
+  expect(dealQuestions(store.get(), dealId)).toMatchObject([
+    { n: 1, text: 'Class I shares', response: 'Original answer' },
+    { n: 2, text: 'Class L shares', response: 'New answer' },
+  ]);
+});
+
+it.each(['No.', 'Ref.'])('preserves the original answer when an identifier follows %s', async (prefix) => {
+  const { store } = make();
+  const dealId = await deal(store);
+  const originalText = `Facility ${prefix} I requires consent.`;
+  const incomingText = `Facility ${prefix} L requires consent.`;
+  expect((await store.dispatch(ImportQuestions, {
+    dealId, mode: 'append', rows: fileRow(1, originalText, 'Original answer'),
+  })).ok).toBe(true);
+  const original = dealQuestions(store.get(), dealId)[0];
+  expect((await store.dispatch(ImportQuestions, {
+    dealId, mode: 'merge', rows: fileRow(1, incomingText, 'New answer'),
+  })).ok).toBe(true);
+  expect(dealQuestions(store.get(), dealId)).toMatchObject([
+    { id: original.id, n: 1, text: originalText, response: 'Original answer' },
+    { n: 2, text: incomingText, response: 'New answer' },
+  ]);
+});
+
+it('matches a renumbered question with a lowercase sentence-initial i', async () => {
+  const { store } = make();
+  const dealId = await deal(store);
+  const originalText = 'I understand the lender requires the DSCR model; please confirm.';
+  const incomingText = 'i understand the lender requires the DSCR model; please confirm.';
+  expect((await store.dispatch(ImportQuestions, {
+    dealId, mode: 'append', rows: fileRow(1, originalText, 'Original answer'),
+  })).ok).toBe(true);
+  const original = dealQuestions(store.get(), dealId)[0];
+  expect((await store.dispatch(ImportQuestions, {
+    dealId, mode: 'merge', rows: fileRow(12, incomingText, 'Updated answer'),
+  })).ok).toBe(true);
+  expect(dealQuestions(store.get(), dealId)).toMatchObject([
+    { id: original.id, n: 1, text: incomingText, response: 'Updated answer' },
+  ]);
+});

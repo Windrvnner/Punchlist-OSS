@@ -1,0 +1,18 @@
+name: Build list item
+description: A feature or change to decide, design or build.
+type: Feature
+labels: [build list, "status: to decide"]
+body:
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: What it is, what has been decided, and what is still open.
+    validations:
+      required: true
+  - type: dropdown
+    id: status
+    attributes:
+      label: Status
+      description: The label is set to To decide; change it when this says otherwise.
+      options: [To decide, To design, Decided, Building, On hold, Later]

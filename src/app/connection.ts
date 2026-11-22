@@ -1,0 +1,60 @@
+/**
+ * What the connection card above the person's name says: the network, OneDrive, the model service
+ * ("Intelligence") and whether changes from other PCs are waiting. The card shows only when something is wrong, and a dot
+ * on the avatar only once it has lasted:
+ *   - changes held back for 5 minutes, or OneDrive out of touch for 2 minutes;
+ *   - never while the network is down (nothing can sync then, and the PC says it is offline);
+ *   - a wait older than a day no longer marks the avatar: a PC that is never switched on would keep it lit for good.
+ *     Its line stays in the card. OneDrive out on this PC always marks it. A wait is timed from when the held change was made, so a restart does not reset it;
+ *   - OneDrive out for 15 minutes is also told once, in an ordinary notice.
+ */
+import type { State } from './state';
+import { SERVICE } from '../control';
+
+/** the event a window hears when the app is connected again: a field whose save could not be written sends its text again */
+export const CONNECTED = 'punchlist-connected';
+
+export const DOT_WAITING_MS = 5 * 60_000;
+export const DOT_ONEDRIVE_MS = 2 * 60_000;
+export const DOT_QUIET_MS = 24 * 60 * 60_000;
+export const NOTICE_ONEDRIVE_MS = 15 * 60_000;
+
+export type Tone = 'good' | 'med' | 'high';
+export interface ConnRow { /** Network, OneDrive, the service's name from the control file ("Intelligence"), Sync */ name: string; tone: Tone; lines: string[] }
+export interface Connection { rows: ConnRow[]; wrong: boolean; dot: boolean; /** a notice to give once for this outage, or null */ notice: string | null }
+
+/** a time today as "2:41 PM", another day as "Nov 14, 2:41 PM" */
+export function clockTime(at: string, now: number): string {
+  const d = new Date(at); const today = new Date(now).toDateString() === d.toDateString();
+  return d.toLocaleString('en-US', today ? { hour: 'numeric', minute: '2-digit' } : { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+const changes = (n: number) => `${n} ${n === 1 ? 'change' : 'changes'}`;
+const names = (xs: string[]) => (xs.length <= 2 ? xs.join(' and ') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
+
+/** `online`: whether the PC has a network (the window says); `now` in milliseconds. */
+export function connection(s: Pick<State, 'sync' | 'net' | 'signin'>, online: boolean, now: number): Connection {
+  const out = s.sync?.outOfTouchSince ?? null; const waiting = s.sync?.waiting ?? [];
+  // what waits, and for which PC, is said whatever holds sync up as a whole
+  const held = waiting.flatMap((w) => [`Waiting for ${w.label ?? 'another PC'}`, `${changes(w.changes)} from ${names(w.from)}`]);
+  const sync: ConnRow = !online ? { name: 'Sync', tone: 'med', lines: ['Waiting for the network', ...held] }
+    : out ? { name: 'Sync', tone: 'med', lines: ['Waiting for OneDrive', ...held] }
+    : held.length ? { name: 'Sync', tone: 'med', lines: held }
+    : { name: 'Sync', tone: 'good', lines: ['Up to date'] };
+  const rows: ConnRow[] = [
+    online ? { name: 'Network', tone: 'good', lines: ['Connected'] } : { name: 'Network', tone: 'high', lines: ['Offline'] },
+    out ? { name: 'OneDrive', tone: 'high', lines: ['Not syncing', `Since ${clockTime(out, now)}`] }
+      : !online ? { name: 'OneDrive', tone: 'med', lines: ['Waiting for the network'] }
+      : { name: 'OneDrive', tone: 'good', lines: ['In sync'] },
+    s.signin?.out ? { name: SERVICE, tone: 'high', lines: ['Not signed in'] }
+      : s.net.model ? { name: SERVICE, tone: 'high', lines: ['Can’t be reached'] } : { name: SERVICE, tone: 'good', lines: ['Connected'] },
+    sync,
+  ];
+  // lasted long enough to mark, and not so long that it has gone quiet
+  const lasted = (since: string, after: number) => { const age = now - Date.parse(since); return age >= after && age < DOT_QUIET_MS; };
+  // this PC's own OneDrive never goes quiet: the PC is plainly on, and its changes reach nobody until it is fixed
+  const dot = online && ((!!out && now - Date.parse(out) >= DOT_ONEDRIVE_MS) || waiting.some((w) => lasted(w.since, DOT_WAITING_MS)));
+  // OneDrive out for 15 minutes is also said once in a notice, as any other notice
+  const notice = online && !!out && now - Date.parse(out) >= NOTICE_ONEDRIVE_MS ? `OneDrive hasn’t synced since ${clockTime(out, now)}` : null;
+  return { rows, wrong: rows.some((r) => r.tone !== 'good'), dot, notice };
+}
