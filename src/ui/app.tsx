@@ -246,7 +246,7 @@ function Rail() {
         <button type="button" class="railx" id="rt-settings" aria-label="Settings" title="Settings" aria-haspopup="dialog" onClick={() => store.ui({ settings: true })}><Icon name="gear" size={15} /></button>
       </div>}
       <nav id="rail-nav" aria-label="Primary">
-        {booting ? <div class="ph" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div>
+        {booting ? <div class="ph" aria-hidden="true"><i /><i /><i /><i /><i /></div>
           : queued ? <QueueStrip scope={queued} />
           : isReading(s.ui) ? <a href="#deals" class="railx" title="Home" aria-label="Home">
             <Icon name="home" size={16} />
