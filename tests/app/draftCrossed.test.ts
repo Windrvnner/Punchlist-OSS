@@ -309,17 +309,22 @@ describe('a reply held while its question has two versions (#22)', () => {
     expect(shown()).toEqual(before);
   }, 120000);
 
-  it('a draft the coworker used as the response is not brought back beside it', async () => {
+  it('a draft the coworker used is not brought back, even when the choice is undone and made again', async () => {
     const w = await world(); const q = w.qs()[30];
     const opId = await w.draft(q); w.answer(); await w.store.settled(opId);
     await w.repo.sync(); const v = folderView(w.repo.shared); const found = v.state('question', q.id).tips[0];
     await type(w, q);
+    // the coworker's PC uses the written draft as the response, without seeing the response typed here
     const foundThere = v.version(found)!.data as Question;
-    const used = { ...foundThere, response: TEXT, status: 'answered' as const, draft: undefined };
-    pcWriting(w.repo.shared, THEM)(q, found, { ...used, updatedAt: THEM.at }, THEM.at);
+    const theirs = { ...foundThere, response: TEXT, status: 'answered' as const, draft: undefined };
+    pcWriting(w.repo.shared, THEM)(q, found, { ...theirs, updatedAt: THEM.at }, THEM.at);
     await w.repo.sync(); await settle(); await settle();
+    const r = await keep(w, q.id, versionOf(w, q.id, false).id);
+    expect(r.ok).toBe(true);
+    expect(w.now(q.id)).toMatchObject({ status: theirs.status, response: theirs.response });
+    expect(w.now(q.id).draft).toBeUndefined();
+    expect((await w.store.undo(r.ok ? r.value.opId : '')).ok).toBe(true);
     expect((await keep(w, q.id, versionOf(w, q.id, false).id)).ok).toBe(true);
-    expect(w.now(q.id)).toMatchObject({ status: 'answered', response: TEXT });
     expect(w.now(q.id).draft).toBeUndefined();
   }, 120000);
 

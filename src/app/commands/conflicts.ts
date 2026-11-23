@@ -49,6 +49,17 @@ function withCarriedDraft(kind: string, kept: Version, aside: Version[]): Versio
   return { ...keeps, draft: furthest };
 }
 
+/**
+ * A version as Undo of the choice stands it again. Its draft requests go with it, so choosing again after Undo still
+ * knows a draft that version used or discarded (#22).
+ */
+function asReopened(v: Version) {
+  const deleted = v.deleted ? { deleted: true, ...(v.data ? { held: v.data } : {}) } : {};
+  const drafts = v.drafts ? { drafts: v.drafts } : {};
+  const here = v.here ? { here: true } : {};
+  return { id: v.id, by: v.by, from: v.from, at: v.at, data: v.raw, ...here, ...deleted, ...drafts };
+}
+
 export const ResolveConflict = define({
   name: 'ResolveConflict',
   input: z.object({ dealId: DealOrNone, recordId: z.string().min(1), keep: z.string().min(1) }),
@@ -65,7 +76,13 @@ export const ResolveConflict = define({
     const resolves = c.versions.map((v) => v.id);
     const audit = !c.dealId ? [] : [{ kind: 'resolved' as const, recordId: c.id, dealId: c.dealId, text: kept.deleted ? `Kept it deleted, as ${kept.by} did on ${kept.from}` : `Kept the version by ${kept.by} from ${kept.from}`, from: aside.map((v) => ({ by: v.by, from: v.from, at: v.at, data: v.raw })) }];
     const tomb = state.tombstones[c.id] as ShownNote | undefined;
-    const reopen = (made: string[], cleared: ShownNote[]) => ({ command: 'ReopenConflict', input: { dealId: c.dealId, recordId: c.id, kind: c.kind, versions: c.versions.map((v) => ({ id: v.id, by: v.by, from: v.from, at: v.at, data: v.raw, ...(v.here ? { here: true } : {}), ...(v.deleted ? { deleted: true, ...(v.data ? { held: v.data } : {}) } : {}) })), ...(made.length ? { made } : {}), ...(cleared.length ? { cleared: cleared.map(stored) } : {}) } });
+    const reopen = (made: string[], cleared: ShownNote[]) => ({
+      command: 'ReopenConflict',
+      input: {
+        dealId: c.dealId, recordId: c.id, kind: c.kind, versions: c.versions.map(asReopened),
+        ...(made.length ? { made } : {}), ...(cleared.length ? { cleared: cleared.map(stored) } : {}),
+      },
+    });
     if (c.kind === 'question' || c.kind === 'finding') {
       // Nothing is thrown away: every version not kept is listed under Deleted as an entry of its own, with
       // the PC it came from, unless it says what the kept one says. An entry already there that says what is kept goes.
@@ -113,11 +130,22 @@ export const ResolveConflict = define({
   },
 });
 
+/** a version as Undo of a choice stands it again (`asReopened`) */
+const ReopenedVersion = z.object({
+  id: z.string(), by: z.string(), from: z.string(), at: z.string(), data: z.unknown(),
+  here: z.boolean().optional(), deleted: z.boolean().optional(), held: z.unknown().optional(),
+  drafts: z.array(z.string()).optional(),
+});
+
 /** The inverse of a choice: the versions stand again, unchosen, and the record shows as it did before the choice. */
 export const ReopenConflict = define({
   name: 'ReopenConflict',
   // `made`: the entries the choice listed under Deleted, which go again; `cleared`: entries it took away, which come back
-  input: z.object({ dealId: DealOrNone, recordId: z.string().min(1), kind: z.enum(CLASH_KINDS), versions: z.array(z.object({ id: z.string(), by: z.string(), from: z.string(), at: z.string(), data: z.unknown(), here: z.boolean().optional(), deleted: z.boolean().optional(), held: z.unknown().optional() })).min(2), made: z.array(z.string()).optional(), cleared: z.array(Tombstone).optional() }),
+  input: z.object({
+    dealId: DealOrNone, recordId: z.string().min(1), kind: z.enum(CLASH_KINDS),
+    versions: z.array(ReopenedVersion).min(2),
+    made: z.array(z.string()).optional(), cleared: z.array(Tombstone).optional(),
+  }),
   targets: (_s, i) => [i.recordId],
   plan(state, input, ctx) {
     const cur = current(state, input.kind, input.recordId);
