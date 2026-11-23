@@ -84,7 +84,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Merge never matches a row to a question when each names an identifier the other does not: anything with a digit, a Roman numeral or code in capitals, a single capital letter, or a letter in parentheses or after a word such as class, tranche, part or clause (Class A and B, Tranche II and IV, clause 4(a) and 4(b)). Such a row is a question of its own; spacing, capitals and punctuation alone never make two identifiers differ (#125, #127, #128).
 - In a number, a capital I or O before a single digit, or I before a point and a digit, is a letter (Facility I1 is not 11, Class I.1 is not 1.1); a letter elsewhere in a number reads as the digit it looks like (I00, 2O24, O.5).
 - The same list imported on two PCs makes one set of questions, with ids derived from the deal, number, party, and wording.
-- Two questions with the same number are both kept and marked; a person renumbers one.
+- Two questions with the same number are both kept and marked; a person renumbers one. Undo, Restore, and a kept
+  version's Restore bring a deleted question back under its own number, even when another question holds it (#13, #116).
 - Export has no finding or link columns and always carries every column of the log.
 - No person in the app is named in a prompt, export, spreadsheet, or the memo. An accepted AI draft exports as "AI draft, accepted on" a date, and findings export the date reviewed but not the reviewer. Who responded from outside the firm is kept.
 - Each deal has one consolidated Q&A log, in the team's own folder and format; the app keeps no copy and never gates it. One file is one deal's Q&A log: a file another deal already uses as its log can't be imported into a second deal (#38).
