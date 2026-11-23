@@ -1255,6 +1255,7 @@ export class LogRepository implements Repository {
       if (this.view.deletedBy(d).includes(this.id)) return fail({ kind: 'rejected', message: DEAL_GONE });
       const copyId = recoveredId(d, this.id);
       if (!this.readScope(this.scopeName(copyId))) return fail(this.miss);
+      if (this.lateWriteDropped(r, copyId)) return fail({ kind: 'rejected', message: DEAL_GONE });
       const made = this.view.known('deal', copyId);
       if (!worked.has(d)) { worked.add(d); for (const [was, now] of recoveredIds(d, copyId, this.hadOf(d))) if (was !== d || made) ids.set(was, now); }
       // a record new to the deal takes the id it would have had in the copy
@@ -1284,6 +1285,15 @@ export class LogRepository implements Repository {
     }
     // what is filed, and the history written, go with the records: under the copy, once it is made
     return ok({ tx: { ...tx, ...(tx.index ? { index: remap(tx.index, map) } : {}), ...(tx.audit ? { audit: remap(tx.audit, map) } : {}) }, writes: w2, deletes: d2, asHad, moved });
+  }
+
+  /**
+   * A save to a deleted deal that nothing would keep: a person's place on it (members are not copied), or anything
+   * once this PC's recovered copy was deleted too (#222). It is refused, so the window keeps what was typed.
+   */
+  private lateWriteDropped(record: Write | Delete, copyId: string): boolean {
+    if (!('data' in record)) return false;
+    return record.kind === 'member' || this.view.goneWith('deal', copyId).length > 0;
   }
 
   /**
