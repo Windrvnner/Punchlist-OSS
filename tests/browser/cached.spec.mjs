@@ -2,6 +2,7 @@
 // A document without it still opens and can still be asked about.
 import { launchChrome } from './chrome.mjs';
 import { openOnFindings } from './landing.mjs';
+import { longPdf } from './longpdf.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
 const browser = await launchChrome();
@@ -26,7 +27,7 @@ async function samplePreview(page, name, number) {
   const cached = await page.locator('.docnav .cmark').count() === 1;
   const controls = await page.locator('.docnav button#doc-close, .pgstack button:not(:disabled)').count() === 6;
   await page.click('#doc-close');
-  return title === name && message[0] === 'Preview unavailable for this sample document.' && cached && controls;
+  return title === name && message[0] === 'Page preview unavailable.' && cached && controls;
 }
 
 async function samplePreviews(page, area) {
@@ -36,6 +37,25 @@ async function samplePreviews(page, area) {
   await citations.nth(1).click();
   const memorandum = await samplePreview(page, 'Information memorandum', 22);
   return [report, memorandum];
+}
+
+async function uploadedPreview(page) {
+  const filename = 'Uploaded agreement.pdf';
+  await page.setInputFiles('#pcomposer input[type=file]', {
+    name: filename,
+    mimeType: 'application/pdf',
+    buffer: longPdf(3),
+  });
+  await page.click('.askbox .chip.att [data-addsrc]');
+  const chip = page.getByRole('button', { name: `Open ${filename}`, exact: true });
+  await chip.waitFor();
+  await page.reload();
+  await chip.click();
+  const paper = page.locator('.docbody .page');
+  await paper.locator('h4').waitFor();
+  const status = await paper.locator(':scope > p').allTextContents();
+  return status[0] === 'Page preview unavailable.' && await paper.locator('h4').textContent() === 'Uploaded agreement'
+    && await paper.locator('.pg').textContent() === 'Page 1' && await page.locator('#doc-close').isVisible();
 }
 
 // #443: the newly indexed demo's sample citations explain the missing preview wherever reading mode opens.
@@ -54,8 +74,10 @@ async function samplePreviews(page, area) {
   await page.getByRole('option', { name: /Operating assumptions agree across the advisors’ reports/ }).click();
   await page.click('#ck-open-finding');
   const linked = await samplePreviews(page, '.opening');
+  const uploaded = await uploadedPreview(page);
   say('demo-citations-explain-the-unavailable-preview',
-    direct && [...finding, ...chat, ...linked].every(Boolean), JSON.stringify({ finding, chat, direct, linked }));
+    direct && uploaded && [...finding, ...chat, ...linked].every(Boolean),
+    JSON.stringify({ finding, chat, direct, linked, uploaded }));
   await ctx.close();
 }
 

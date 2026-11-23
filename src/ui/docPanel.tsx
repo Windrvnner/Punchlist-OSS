@@ -394,7 +394,7 @@ function DocPage({ page, dealId, current, shown, zoom, onPages }: {
   return (
     <article class="page">
       <h4>{current.doc.replace(/\.(pdf|xlsx?)$/i, '')}</h4>
-      <p>Preview unavailable for this sample document.</p>
+      <p>Page preview unavailable.</p>
       <div class="pg">Page {pageNumber}</div>
     </article>
   );

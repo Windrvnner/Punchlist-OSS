@@ -161,7 +161,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Each PC keeps its own word index of the data room; nothing is added to the shared folder.
 - Documents open in reading mode beside the conversation, with page keys and zoom.
 - Switching documents opens the cited page at the top and keeps the zoom (#447).
-- In the browser demo, a sample PDF without a preview shows its title, page number, and a preview status (#443).
+- In the browser demo, a PDF without a preview shows its title, page number, and a preview status (#443).
 - Decided but not built: plain-symbol math, a named finding opening in a side pane, answer actions as icons, and a suggested open question card.
 
 ## Deal memo
