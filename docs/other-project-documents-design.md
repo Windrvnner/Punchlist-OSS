@@ -8,10 +8,10 @@ A redline (also called a blackline: a document that shows the changes from one d
 
 ## What was already built
 
-Much of this was already built for every blackline (see "Tracked changes and blacklines" in [decisions.md](decisions.md), line 171). A blackline, recognized by its name or by a comparison tool's cover page, is:
+Much of this was already built for every blackline (see "Tracked changes and blacklines" in [decisions.md](decisions.md#documents-and-indexing)). A blackline, recognized by its name or by a comparison tool's cover page, is:
 - read only together with, or after, its clean draft, which is the truth for the deal's terms (`withClean`, ai.ts:731);
 - told to the model as the model's reading, never as fact (`blacklineLine`, ai.ts:906);
-- cited with the "reading" tag (`fit`, ai.ts:980), and a checklist item whose only citations carry it is never settled (ai.ts:1267); it never closes a finding by itself (line 171).
+- cited with the "reading" tag (`fit`, ai.ts:980), and a checklist item whose only citations carry it is never settled (ai.ts:1267); it never closes a finding by itself (same decision).
 
 Before this design, three things were missing for a redline against another project:
 1. **Findings and Q&A.** A finding could be raised or reassessed on blackline pages alone (ai.ts:1273, 1374), and a Q&A response could be drafted from them alone (ai.ts:1352).
@@ -22,7 +22,7 @@ Before this design, three things were missing for a redline against another proj
 
 Nothing in this design guesses at names to call something another project's:
 - **Capitalized names after "compared to" or "vs"** would flag this deal's own blacklines: "SPA v3 Redline to SPA v2" names "SPA v2".
-- **Other deals' names** depended on which deals a person has and how far start-up has loaded them (docs/architecture.md line 96), so people got different answers.
+- **Other deals' names** depended on which deals a person has and how far start-up has loaded them (startup in [architecture.md](architecture.md#storage-shared-between-pcs)), so people got different answers.
 - **Documents 3 or more other deals hold** (`SHARED_BY`, sameRoom.ts; this design's first draft): with four deals made from one data room, `alsoIn` drops every document 3 others hold (ai.ts:1004), so the whole room would be another project's; and it depends on loaded deals.
 - **"A vs B" with different first words** (this design's second draft): it made "Budget vs Actual Q3.pdf" and "Base Case vs Downside Case.pdf" into blacklines, and "Doe vs Roe judgment.pdf" and "Landlord vs Tenant dispute summary.pdf" too, against tests/backend/blacklines.test.ts:21-31. A comparison tool's output is a blackline by its cover page whatever its name, so only an uncovered, oddly named comparison is missed, and it is read as now.
 - **"Precedent" in a file's name** (second draft): "Gas Transportation Precedent Agreement.pdf" is this deal's own contract.
@@ -60,7 +60,7 @@ It returns one of three answers, checked in this order:
 
 ### C. Never a main source
 
-A **secondary source** is a document of another project, or a blackline that is another project's or not known. An own blackline keeps the existing blackline rules exactly (line 171), since this rule is about redlines against another project. A citation of a blackline keeps "reading"; a citation of another project's document carries its own tag (question 1). Then:
+A **secondary source** is a document of another project, or a blackline that is another project's or not known. An own blackline keeps the existing blackline rules exactly ("Tracked changes and blacklines" in decisions.md), since this rule is about redlines against another project. A citation of a blackline keeps "reading"; a citation of another project's document carries its own tag (question 1). Then:
 - **Checklist item:** settled only with at least one citation of a document of this deal that is not a blackline (the rule at ai.ts:1267, now also for documents of another project). Quick checks, which skip that rule, are unchanged.
 - **Finding raised by a check (ai.ts:1273):** one with no citation of this deal's own documents is not raised; the item is left "more", needing "a document of this deal that shows it", as a blackline-only item already is.
 - **Finding reassessed (ai.ts:1374):** a reassessment with no citation of this deal's own documents, none at all included, is not offered; the finding stays as written, with the reason in the failure line reassess already shows.
@@ -91,8 +91,8 @@ Before this design, `cleanOf` was worked out again on every `ranked` and `withCl
 
 ## Changes to decisions
 
-- "Tracked changes and blacklines" (line 171) is edited in place: a blackline against another project, or one that cannot be told to be against this deal's own earlier draft, is never by itself the source of a settled item, a raised or reassessed finding, or a Q&A response; documents of another project (every place in a precedents folder) are treated the same and are never drafts; the model is told which of the three a blackline is.
-- "Core documents" (line 175) is replaced by the core-documents design; this part adds that secondary sources are never core. A blackline is not a draft, so this does not go against including a draft whose kind is unclear.
+- "Tracked changes and blacklines" ([decisions.md](decisions.md#documents-and-indexing)) is edited in place: a blackline against another project, or one that cannot be told to be against this deal's own earlier draft, is never by itself the source of a settled item, a raised or reassessed finding, or a Q&A response; documents of another project (every place in a precedents folder) are treated the same and are never drafts; the model is told which of the three a blackline is.
+- "Core documents" ([decisions.md](decisions.md#documents-and-indexing)) is replaced by the core-documents design; this part adds that secondary sources are never core. A blackline is not a draft, so this does not go against including a draft whose kind is unclear.
 
 ## Acceptance criteria
 

@@ -451,8 +451,7 @@ body.reading .tcomp.narrow{left:var(--cl,30px);width:var(--cw,380px);bottom:30px
 .opening .lbl{font-size:13px;color:var(--ink-2);font-weight:600;margin:0 0 6px}
 .opening .qtxt,.cfl .qtxt{font:600 17px/1.35 var(--body);letter-spacing:-.15px;color:var(--ink);margin:0 0 14px}
 .opening .dtxt{font-size:14.5px;line-height:1.65;color:var(--ink);margin:0}
-/* in a chat, a finding's or a question's text reads like an answer, its sources as chips above it
-   (#1283) */
+/* in a chat, a finding's or a question's text reads like an answer, its sources as chips above it */
 .chat .opening .dtxt{font-size:15px;line-height:1.7;max-width:80ch}
 .opening .rsch-chips{margin:2px 0 12px}
 .opening .dtxt p{margin:0 0 10px}.opening .dtxt p:last-child{margin-bottom:0}
