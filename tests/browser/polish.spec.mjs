@@ -132,5 +132,94 @@ for (const scheme of ['dark', 'light']) {
   await ctx.close();
 }
 
+async function checkRailLoading(page, at) {
+  await page.addInitScript(() => { window.__down = true; });
+  await page.goto(URL);
+  await page.waitForSelector('.netbar');
+  const bars = page.locator('#rail-nav .ph i');
+  const styles = () => bars.evaluateAll((items) => items.map((item) => {
+    const style = getComputedStyle(item);
+    return { radius: style.borderRadius, pulse: style.animationName };
+  }));
+  const loading = await styles();
+  const hidden = await page.locator('#rail-nav .ph[aria-hidden="true"]').count() === 1;
+  const links = await page.getByRole('navigation', { name: 'Primary' }).getByRole('link').count();
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const reduced = await styles();
+  await page.evaluate(() => { window.__down = false; });
+  await page.click('.netbar .tundo');
+  await page.waitForSelector('#rail-nav a[href="#deals"]');
+  say(`${at}:612-rail-loading-bars`, loading.length === 5 && hidden && links === 0
+    && loading.every(({ radius, pulse }) => radius === '6px' && pulse === 'phpulse')
+    && reduced.every(({ pulse }) => pulse === 'none') && await bars.count() === 0, JSON.stringify(loading));
+}
+
+async function seedVisualPolish(page) {
+  return page.evaluate(async () => {
+    const run = (name, input) => store.dispatch(store.commandNamed(name), input, { quiet: true });
+    await run('CreateDeal', { name: 'Datum', folders: [] });
+    const dealId = Object.values(store.get().deals)[0].id;
+    for (const title of ['First finding', 'Current finding']) {
+      await run('CreateFinding', { dealId, title, workstream: 'Legal' });
+    }
+    const findings = Object.keys(store.get().findings);
+    for (const findingId of findings) {
+      await run('SetFindingStatus', { dealId, findingId, status: 'closed', note: 'Agreed' });
+    }
+    return { dealId, findingId: findings[1] };
+  });
+}
+
+async function checkComposerInsets(page, at, dealId, findingId) {
+  const measure = (form) => page.locator(form + ' .send').evaluate((send) => {
+    const card = send.closest('form').getBoundingClientRect();
+    const rect = send.getBoundingClientRect();
+    return { right: card.right - rect.right, bottom: card.bottom - rect.bottom, size: rect.width };
+  });
+  const home = await measure('#homeask');
+  await page.goto(URL + '#overview-' + dealId);
+  const closed = await measure('#dask');
+  await page.locator('#dask textarea').focus();
+  await page.locator('#dask.open').waitFor();
+  const deal = await measure('#dask');
+  await page.goto(URL + `#finding-${dealId}-${findingId}`);
+  const conversation = await measure('#pcomposer');
+  const equal = ({ right, bottom, size }) => Math.abs(right - bottom) < 0.5 && size === 32;
+  say(`${at}:613-open-composers-inset-send-evenly`, [home, deal, conversation].every(equal) && closed.size === 36,
+    JSON.stringify({ home, closed, deal, conversation }));
+}
+
+async function checkClosedTicks(page, at) {
+  await page.evaluate(() => store.ui({ findingFilter: { ...store.get().ui.findingFilter, status: 'all' } }));
+  const marks = await page.locator('.g.done:not(.on) i').evaluate((other) => {
+    const current = document.querySelector('.g.on.done i');
+    const sample = document.createElement('i');
+    sample.style.transition = 'none';
+    sample.style.backgroundColor = 'color-mix(in srgb, var(--ink-3) 55%, transparent)';
+    other.after(sample);
+    const gray = getComputedStyle(sample).backgroundColor;
+    sample.style.backgroundColor = 'var(--accent)';
+    const accent = getComputedStyle(sample).backgroundColor;
+    sample.remove();
+    return { current: getComputedStyle(current).backgroundColor, other: getComputedStyle(other).backgroundColor,
+      accent, gray };
+  });
+  say(`${at}:615-current-closed-tick-stays-accent`, marks.current === marks.accent && marks.other === marks.gray,
+    JSON.stringify(marks));
+}
+
+for (const [width, height] of [[1280, 736], [1024, 640]]) {
+  for (const colorScheme of ['dark', 'light']) {
+    const at = `${colorScheme}-${width}x${height}`;
+    const ctx = await browser.newContext({ viewport: { width, height }, colorScheme });
+    const page = await ctx.newPage();
+    await checkRailLoading(page, at);
+    const { dealId, findingId } = await seedVisualPolish(page);
+    await checkComposerInsets(page, at, dealId, findingId);
+    await checkClosedTicks(page, at);
+    await ctx.close();
+  }
+}
+
 await browser.close();
 const failed = results.filter(([, ok]) => !ok).length; console.log(`\n${results.length - failed}/${results.length} passed`); process.exit(failed ? 1 : 0);
