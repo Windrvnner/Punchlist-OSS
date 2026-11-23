@@ -36,10 +36,12 @@ verdict, and no criteria in your own words.
 > 3. An acceptance criterion not met, including one no test proves.
 > 4. A regression against `main`, including a check or screen that passes on `main` and fails on the branch.
 > 5. Attribution: saying who asked for, decided, or said something (a name, "the owner wants", a quote of the user,
->    a note that carries a person and a date), or any AI-tool attribution (a trailer, a footer, a header, or a
->    link to an AI chat session), in code, docs, every commit message in `git log main..HEAD`, the pull request, or
->    issues it files or edits. Product terms and data fields (`owner`, "the end user") are not attribution. The usual
->    Git author and committer fields are allowed.
+>    a note that carries a person and a date), or any AI-tool attribution (a co-author or session trailer, a
+>    "Requested by" header, or a link to an AI chat, session, project, or thread), in code, docs, every commit
+>    message in `git log main..HEAD`, the pull request, or issues it files or edits. Product terms and data fields
+>    (`owner`, "the end user") are not attribution. The usual Git author and committer fields are allowed, and so is
+>    a coding tool's plain "Generated with" footer (the tool's name, with at most a link to its product page): it
+>    never blocks a merge and is not reported.
 > 6. New or changed code that is hard for a person to read, by the rules under "Readable code" in CLAUDE.md (the
 >    hints from `scripts/check-readability.mjs` help).
 > 7. A breach of the clean-contributions rule in CLAUDE.md, in new or changed text in the diff, every commit message
