@@ -1,6 +1,7 @@
 // The firm's checklist: bringing a list in from Settings, its review, the pick lists on Overview, and Undo.
 // Runs on the mock services, whose rewording and duplicate check stand in for the fast model.
 import { launchChrome } from './chrome.mjs';
+import { checkDuplicateRetries } from './firmlistRetries.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
@@ -217,6 +218,8 @@ const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().ite
   say('no errors on the page', page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }
+
+await checkDuplicateRetries(start, say);
 
 { // A list of deal size (2,400 rows, alike in wording, 200 of them repeated) is reviewed and brought in within seconds, counted in en-US
   const { ctx, page, id } = await start();
