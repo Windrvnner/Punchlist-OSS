@@ -2962,7 +2962,9 @@ export function nodeAi(o: AiOptions) {
     const { st, want } = followMerges(took, epoch);
     if (closing || st.left) throw STALE;                   // this PC has left the round (it closed, or gave up)
     if (mine.get(dealId) !== st) {                         // the round has ended, or this PC has moved on from it
-      if (took === st || st.epoch !== want || !await lastRound(dealId, st.round)) throw STALE;
+      // it slept since it last renewed there (it renews until it sees the round end), or a later round began
+      const slept = nowMs() - st.lastRenew > T.lapse;
+      if (took === st || slept || st.epoch !== want || !await lastRound(dealId, st.round)) throw STALE;
       return;
     }
     if (nowMs() - st.lastRenew > T.lapse) { st.epoch++; st.rejoin = true; }
@@ -2997,7 +2999,7 @@ export function nodeAi(o: AiOptions) {
     st.lastRenew = nowMs(); st.rejoin = false;
     await say(dealId, { member: { round: R.def.id, pc: me, ...whoAmI(), epoch: st.epoch, ok: needs.every((id) => have.has(id)) } });
   }
-  /** this PC in round R; `merged`: because the round it was in was merged into R */
+  /** this PC in round R; `merged`: the round it was in has just been merged into R, which `R.ids` may not show yet */
   async function join(dealId: string, R: RoundState, merged = false) {
     const st = mine.get(dealId);
     if (st && st.round === R.def.id && !st.left) { if (st.rejoin) await renew(dealId, R); return; }
@@ -3007,7 +3009,7 @@ export function nodeAi(o: AiOptions) {
       round: R.def.id, epoch: (st?.epoch ?? 0) + 1, lastRenew: nowMs(), rejoin: true,
       timer: null, running: null, ticking: false, tries: 0, left: false,
     };
-    if (st && merged) linkMerged(st, next);
+    if (st && (merged || R.ids.has(st.round))) linkMerged(st, next);
     mine.set(dealId, next);
     await renew(dealId, R);
     const timer = setInterval(() => void tick(dealId), T.watch); (timer as { unref?: () => void }).unref?.(); mine.get(dealId)!.timer = timer;
