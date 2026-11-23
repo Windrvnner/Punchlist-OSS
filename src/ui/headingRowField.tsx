@@ -26,9 +26,7 @@ export function HeadingRowField({ id, importKey, table, sheet = table.sheet, rea
         aria-valuemin={1} aria-valuemax={table.lastRow} aria-valuenow={row ?? table.headerRow}
         aria-valuetext={row === null ? (text || 'Empty') : undefined}
         disabled={disabled} onInput={(e) => void pick(e.currentTarget.value)}
-        onKeyDown={(e) => {
-          if (sheet === table.sheet) stepRow(e, table.lastRow, pick);
-        }}
+        onKeyDown={(e) => stepRow(e, table.lastRow, pick)}
         aria-invalid={!!reason || undefined} aria-describedby={reason ? noteId : undefined} title={reason} />
       {reason && <span id={noteId} class="efstate fail" role="alert" title={reason}
         style={{ color: 'light-dark(var(--ink), var(--high))', cursor: 'default' }}>Not used</span>}
