@@ -169,6 +169,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Key risks lists every High risk, then the oldest Medium risks up to `memo.keyRisks`, A to Z within each severity.
 - The memo keeps usable risk groups when other entries in the model's reply are malformed.
   Each open finding has one risk, on its own if the model left it out (#658).
+- The memo limits a key risk write-up to two paragraphs and 200 words. If retries yield no usable write-up,
+  it uses the findings' own cited words (#659).
 - The memo reports facts only: no recommendation, mitigants, next steps, or judging words.
 - **Deal Memo…** in the deal header's ⋯ menu asks where to save (Word or PDF), then makes the memo; there is no review step.
 - The memo has no text in capitals, headings included.
