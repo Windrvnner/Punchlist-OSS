@@ -36,7 +36,7 @@ These are new:
 - Documents of another project (precedents, and blacklines against another project), never a main source.
 - The synonyms and abbreviations library (`lists.synonyms`).
 - Item keywords kept by wording, from the search agent's replies.
-- Learning the deal's short names from paths with no model, in place of the removed core calls as the source of candidates ([`learnShort`](../src/backend/ai.ts), reused for the letter check).
+- Learning the deal's short names from paths with no model, including checking the abbreviation against the phrase's initials, is handled by [`shortNamesIn`](../src/backend/core.ts); [`learnShort`](../src/backend/ai.ts) installs them for matching.
 
 ## The core set
 
