@@ -54,14 +54,16 @@ const ratingCases = [
   { name: 'no open findings', rated: 0, closedOnly: true, expected: [NO_OPEN] },
 ] as const;
 
-async function scriptedScaleMemo(testCase: (typeof ratingCases)[number]) {
+async function scriptedScaleMemo(
+  testCase: (typeof ratingCases)[number], summarize: (call: Call, attempt: number) => unknown = summaryFromPrompt,
+) {
   const findings = 'closedOnly' in testCase ? scaleMemoInput.findings.filter((f) => f.status === 'closed')
     : scaleMemoInput.findings;
   const ratings = Object.fromEntries(SCALE_FINDINGS.slice(0, testCase.rated).map((f): [string, Rating] => [
     f.id, 'firstRating' in testCase ? testCase.firstRating : 'Low',
   ]));
   const rate = by(ratings);
-  const s = setup((call) => ({ ratings: rate(call).ratings.filter((row) => row.rating) }), summaryFromPrompt);
+  const s = setup((call) => ({ ratings: rate(call).ratings.filter((row) => row.rating) }), summarize);
   await deal(s.repo);
   for (const f of findings) await finding(s.repo, f.id, f.title, { ...f, dealId: 'd1' });
   const result = val(await s.ai.memo!('d1'));
@@ -152,6 +154,21 @@ describe('the deal memo’s ratings and summary', () => {
     }
     const count = 'closedOnly' in testCase ? 'No open findings.' : `${SCALE_FINDINGS.length} open findings`;
     expect(pageOne).toContain(count);
+  });
+
+  it('uses the unrated count when summary retries still claim there are no High findings', async () => {
+    const missing = ratingCases[0];
+    const wrong = { paragraphs: ['No open finding is rated High.'] };
+    const recovered = await scriptedScaleMemo(missing, (call, attempt) =>
+      attempt < 3 ? wrong : summaryFromPrompt(call));
+    const fallback = await scriptedScaleMemo(missing, () => wrong);
+    for (const { pageOne, sums } of [recovered, fallback]) {
+      expect(sums.map((call) => call.model)).toEqual(['standard', 'standard', 'thorough']);
+      expect(sums[1].prompt).toContain('while ratings are unresolved');
+      expect(pageOne).not.toContain(wrong.paragraphs[0]);
+      expect(pageOne).toContain('42 unrated.');
+    }
+    expect(recovered.pageOne).toContain('Open findings have unresolved ratings.');
   });
 
   it('keeps a summary that reports what a document requires', async () => {

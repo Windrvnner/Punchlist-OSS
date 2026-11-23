@@ -404,6 +404,19 @@ function memoSummaryPrompt(
     + 'Name no person. Never write an id.';
 }
 
+/** An unrated finding prevents a blanket conclusion about High ratings (#661). */
+function memoSummaryRejection(unrated: number, advises: (text: string) => boolean) {
+  const noHighRating = /\b(?:no|none of the) (?:open )?(?:findings?|risks?) (?:is |are )?rated high\b/i;
+  const noHighRisk = /\bno high(?:-rated|[- ]risk)? (?:open )?(?:findings?|risks?)\b/i;
+  return (paragraphs: string[]): string => {
+    const text = paragraphs.join(' ').replace(/\s+/g, ' ');
+    if (unrated && (noHighRating.test(text) || noHighRisk.test(text))) {
+      return 'That claims there are no High risks while ratings are unresolved. State that ratings are unresolved.';
+    }
+    return paragraphs.some(advises) ? 'That gives advice or a judgment. Write it again with facts only.' : '';
+  };
+}
+
 export function nodeAi(o: AiOptions) {
   const clock = o.clock ?? (() => new Date().toISOString()); const L = control.limits; const width = o.width ?? L.docsPerCall; const batch = Math.max(1, o.batch ?? L.itemsPerCall); const shortlist = Math.max(1, o.shortlist ?? L.shortlist);
   let offered: Awaited<ReturnType<ModelService['models']>> | null = null;
@@ -1214,6 +1227,53 @@ export function nodeAi(o: AiOptions) {
     }
   }
 
+  /** Read the memo summary from its documents, or from the deal facts when none are available. */
+  async function readMemoSummary(
+    dealId: string, tiers: { standard: string; thorough: string }, prompt: string, facts: string, unrated: number,
+    parasOf: (reply: { paragraphs?: unknown } | null) => string[],
+    rejectSummary: (paragraphs: string[]) => string,
+  ): Promise<Result<string[]>> {
+    async function withoutDocuments(): Promise<string[]> {
+      const question = `${prompt}\nReply as JSON: {"paragraphs": ["…"]}`;
+      let summary: string[] = [];
+      const attempts = [[tiers.standard, false], [tiers.standard, true], [tiers.thorough, false]] as const;
+      for (const [model, again] of attempts) {
+        const correction = again && summary.length
+          ? `\n\nYou wrote:\n${summary.join('\n')}\n\n${rejectSummary(summary)}`
+          : '';
+        summary = parasOf(await askJson<{ paragraphs?: unknown }>({
+          kind: 'memoSummary', model, system: JSON_ONLY, prompt: question + correction,
+        }, ['paragraphs']));
+        if (summary.length && !rejectSummary(summary)) break;
+      }
+      return summary;
+    }
+
+    try {
+      const fromDocs = await read('memoSummary', [dealId], tiers.standard, prompt,
+        `${facts} project description capacity sponsor offtake financing structure`, {},
+        '{"paragraphs": ["…", "…"], "sources": [...]}', {
+          escalate: tiers.thorough,
+          usable(reply) {
+            const paragraphs = parasOf(reply);
+            return paragraphs.length > 0 && !rejectSummary(paragraphs);
+          },
+          wrong: 'it is empty, or it gives advice or a judgment: write it again with facts only'
+            + (unrated ? ', and state that ratings are unresolved' : ''),
+        });
+      if (!fromDocs.ok && fromDocs.error.kind === 'unreachable') {
+        const stopped = Object.assign(new Error(fromDocs.error.message), { code: 'unreachable' });
+        return failure(stopped, `${SERVICE} did not answer`);
+      }
+      const summary = fromDocs.ok && fromDocs.value.sent.length
+        ? parasOf(fromDocs.value.reply)
+        : await withoutDocuments();
+      return ok(rejectSummary(summary) ? [] : summary);
+    } catch (e) {
+      return unreachable(e) ? failure(e, `${SERVICE} did not answer`) : ok([]);
+    }
+  }
+
   // ── the checklist and what the first pass made of each item ──────────────────────────────────────────────────────────
   const held = new Map<string, string>();                                       // the results, when there is no shared folder to keep them in
   /** the checklist as read at the start of a first pass or a check on a deal, kept while it runs so it is read once */
@@ -1609,23 +1669,16 @@ export function nodeAi(o: AiOptions) {
 
       const got = await o.repo.get('deal', dealId); const deal = got.ok && got.value ? got.value.envelope.data as { name: string; counterparty?: string; product?: string; sector?: string; technology?: string } : null;
       const facts = deal ? [deal.name, deal.counterparty, deal.product, deal.sector, deal.technology].filter(Boolean).join('; ') : '';
-      const prompt = memoSummaryPrompt(facts, open.length, unratedFindings(open, ratings).length, grouped, (id) => {
+      const unrated = unratedFindings(open, ratings).length;
+      const rejectSummary = memoSummaryRejection(unrated, advises);
+      const prompt = memoSummaryPrompt(facts, open.length, unrated, grouped, (id) => {
         const finding = byId.get(id)!;
         return `(${finding.workstream || 'no workstream'}) ${plain(finding)}`;
       });
       const parasOf = (reply: { paragraphs?: unknown } | null) => strings(reply?.paragraphs).map((p) => unid(noMarks(p), ids)).filter(Boolean).slice(0, 2);
-      let summary: string[] = [];
-      try {
-        // read from the core documents, as a draft is; with none indexed, from the deal's facts and risks alone, as before
-        const fromDocs = await read('memoSummary', [dealId], m.standard, prompt, `${facts} project description capacity sponsor offtake financing structure`, {}, '{"paragraphs": ["…", "…"], "sources": [...]}', { escalate: m.thorough, usable: (reply) => parasOf(reply).length > 0 && !parasOf(reply).some(advises), wrong: 'it is empty, or it gives advice or a judgment: write it again with facts only' });
-        if (!fromDocs.ok && fromDocs.error.kind === 'unreachable') return failure(Object.assign(new Error(fromDocs.error.message), { code: 'unreachable' }), `${SERVICE} did not answer`);
-        if (fromDocs.ok && fromDocs.value.sent.length) summary = parasOf(fromDocs.value.reply);
-        else for (const [model, again] of [[m.standard, false], [m.standard, true], [m.thorough, false]] as const) {
-          const got = parasOf(await askJson<{ paragraphs?: unknown }>({ kind: 'memoSummary', model, system: JSON_ONLY, prompt: again && summary.length ? `${prompt}\nReply as JSON: {"paragraphs": ["…"]}\n\nYou wrote:\n${summary.join('\n')}\n\nThat gives advice or a judgment. Write it again with facts only.` : `${prompt}\nReply as JSON: {"paragraphs": ["…"]}` }, ['paragraphs']));
-          summary = got; if (got.length && !got.some(advises)) break;
-        }
-      } catch (e) { if (unreachable(e)) return failure(e, `${SERVICE} did not answer`); summary = []; }
-      return ok({ summary: summary.some(advises) ? [] : summary, ratings, risks });
+      const summary = await readMemoSummary(dealId, m, prompt, facts, unrated, parasOf, rejectSummary);
+      if (!summary.ok) return summary;
+      return ok({ summary: summary.value, ratings, risks });
     },
     /** Checklist items with no document behind them, as the first pass left them. No model is asked. */
     async gaps(dealId) {

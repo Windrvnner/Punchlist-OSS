@@ -171,8 +171,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - **Deal Memo…** in the deal header's ⋯ menu asks where to save (Word or PDF), then makes the memo; there is no review step.
 - The memo has no text in capitals, headings included.
 - Risks are rated High, Medium, or Low, only in the memo, by the model against the control file's definitions. A finding keeps its rating until the finding changes, so two memos agree. The memo carries no AI mark, only one disclaimer at the end. High prints in red; Medium and Low print in the text color.
-- When open findings lack ratings, the deal memo summary states that ratings are unresolved, and the first-page counts
-  include the number of unrated open findings (#661).
+- When ratings are unresolved, the memo asks the model to say so in the summary and counts the unrated open findings
+  on page one (#661).
 - The memo currently uses a built-in plain template; custom Word templates are planned. The memo is for internal use only.
 
 ## Documents and indexing
