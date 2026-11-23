@@ -3,9 +3,12 @@
 //   --shard 2/4 runs only the second of four groups of suites (every fourth suite), for parallel CI jobs
 // Each suite starts its own browser and shares nothing with the others, so they can run side by side. A suite that fails
 // while others are running is run once more on its own; if it passes then, that is reported as such, not hidden.
-// Exit code 0 only if every suite passed (alone or alongside). Logs go to out/browser/<suite>.log.
+// Exit code 0 only if every suite passed (alone or alongside). Logs go to out/browser/<suite>.log; the suites that took
+// longest last time start first (out/browser/times.json).
 import { spawn } from 'node:child_process'; import fs from 'node:fs'; import http from 'node:http';
+import path from 'node:path';
 import { noResultReason, summaryOf } from './browser-reason.mjs';
+import { insideGate } from './gate-dir.mjs';
 
 const args = process.argv.slice(2); const j = args.indexOf('--jobs'); const jobs = j >= 0 ? Math.max(1, +args[j + 1] || 1) : 5;
 const shardAt = args.indexOf('--shard');
@@ -82,6 +85,39 @@ async function appIsReady() {
   return ready;
 }
 
+// Each suite's time in the last run, so the next starts the longest first and no slot idles while one runs alone at
+// the end (#103). Suites with no time yet go first, in name order; reporting stays in the order suites finish.
+const TIMES = 'out/browser/times.json';
+
+/** The times kept from earlier runs, by suite; none before the first run or after out/ is cleared. */
+function readTimes() {
+  try {
+    const times = JSON.parse(fs.readFileSync(TIMES, 'utf8'));
+    return times && typeof times === 'object' && !Array.isArray(times) ? times : {};
+  } catch {
+    return {};
+  }
+}
+
+/** The suites ordered by their last time, longest first; unknown ones first. */
+function longestFirst(names) {
+  const times = readTimes();
+  const known = (name) => (Number.isFinite(times[name]) ? times[name] : Infinity);
+  return [...names].sort((a, b) => known(b) - known(a) || (a < b ? -1 : 1));
+}
+
+/**
+ * Keeps the time of each suite that passed alongside the others, beside those kept before. A suite that failed keeps
+ * its earlier time: a crash or a run on its own would rank it shorter than it is.
+ */
+function rememberTimes(passed) {
+  const times = readTimes();
+  for (const result of passed) times[result.name] = result.secs;
+  // written whole and then moved into place, so a run reading it never sees half a file
+  fs.writeFileSync(`${TIMES}.tmp`, JSON.stringify(times, null, 2));
+  fs.renameSync(`${TIMES}.tmp`, TIMES);
+}
+
 /** A successful exit without a positive, complete suite summary is missing coverage. */
 function suiteResult(name, code, out, started, reason = '') {
   const { passed, total, valid } = summaryOf(out);
@@ -91,6 +127,8 @@ function suiteResult(name, code, out, started, reason = '') {
     name, code: code === 0 && valid && passed === total ? 0 : code || 1,
     passed: valid ? passed : 0, total: valid ? total : 0,
     fails: out.split('\n').filter((line) => line.startsWith('FAIL')),
+    // every check line, kept whole for a person comparing two runs (IDs hold spaces and many carry notes)
+    lines: out.split('\n').filter((line) => /^(PASS|FAIL) /.test(line)),
     secs: Math.round((Date.now() - started) / 1000),
   };
 }
@@ -114,7 +152,9 @@ const run = async (name) => {
     });
   });
 };
-const started = Date.now(); const queue = [...suites]; const results = [];
+const started = Date.now();
+const queue = longestFirst(suites);
+const results = [];
 await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, async () => {
   while (!stopped) {
     const name = queue.shift();
@@ -128,6 +168,7 @@ await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, async () 
     if (!result.total) console.log(`     ${result.fails.at(-1) ?? 'no result'}`);
   }
 }));
+const passedAlongside = results.filter((result) => result.code === 0).map(({ name, secs }) => ({ name, secs }));
 for (const result of results.filter((entry) => entry.code !== 0)) {
   if (stopped) break;
   fs.copyFileSync(`out/browser/${result.name}.log`, `out/browser/${result.name}.first.log`);
@@ -139,9 +180,11 @@ for (const result of results.filter((entry) => entry.code !== 0)) {
   Object.assign(result, again, { rerun: true, firstFails: result.fails });
 }
 server?.kill();
+rememberTimes(passedAlongside);
 const completed = new Set(results.map((result) => result.name));
 const unrun = suites.filter((name) => !completed.has(name));
 if (unrun.length) console.error(`Not run (${unrun.length}/${suites.length} suites): ${unrun.join(', ')}`);
+writeGateResult();
 const bundle = fs.readdirSync('dist/assets').find((f) => /^index-.*\.js$/.test(f)); const bad = results.filter((r) => r.code !== 0); const rerun = results.filter((r) => r.rerun && r.code === 0);
 console.log(`\n${results.reduce((a, r) => a + r.passed, 0)}/${results.reduce((a, r) => a + r.total, 0)} checks passed in ${results.length} suites · ${bundle} · ${Math.round((Date.now() - started) / 1000)}s with ${jobs} at a time`);
 if (rerun.length) console.log(`Passed only on their own: ${rerun.map((r) => r.name).join(', ')}`);
@@ -154,3 +197,18 @@ if (bad.length) {
 }
 if (stopped) process.exit(2);
 if (bad.length) process.exit(1);
+
+/** Under check:all, each requested suite's result for scripts/gate-compare.mjs; an unrun suite has total 0. */
+function writeGateResult() {
+  const dir = insideGate(process.env.PUNCHLIST_GATE_DIR);
+  if (!dir) return;
+  const byName = new Map(results.map((result) => [result.name, result]));
+  const entries = suites.map((name) => {
+    const result = byName.get(name);
+    if (!result) return { name, passed: 0, total: 0, secs: 0, rerun: false, firstFails: [], lines: [] };
+    const { passed, total, secs, lines } = result;
+    return { name, passed, total, secs, rerun: !!result.rerun, firstFails: result.firstFails ?? [], lines };
+  });
+  const secs = Math.round((Date.now() - started) / 1000);
+  fs.writeFileSync(path.join(dir, 'browser.json'), JSON.stringify({ jobs, secs, suites: entries }, null, 2));
+}
