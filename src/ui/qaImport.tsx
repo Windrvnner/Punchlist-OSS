@@ -10,7 +10,7 @@ import { dealQuestions } from '../app/state';
 import { readImportFile, readImportBytes, proposeLayout, previewImport, type ImportTable } from '../app/transfer';
 import { prepareImport, importCounts, type Mapping, type ImportRow } from '../domain/importExport';
 import { ImportQuestions } from '../app/commands/importQuestions';
-import { keepImportedLog } from '../app/qaLog';
+import { keepImportedLog, logTakenBy } from '../app/qaLog';
 import { SERVICE } from '../control';
 import {
   keptImport, keepImport, saveImport, dropImport, importKey, useKeptImportsReady, useFreshOnCrash,
@@ -22,6 +22,8 @@ import type { Store } from '../app/store';
 
 /** What the dialog is doing while the person waits */
 export type Busy = '' | 'reading' | 'importing' | 'asking';
+/** a sheet or heading row chosen in the import and being read */
+export type Rereading = { sheet?: string; headerRow?: number };
 /** What happens to questions the file already holds: changed in place, or added again as new ones */
 export type ImportMode = 'merge' | 'append';
 
@@ -140,6 +142,8 @@ function useQaImportState(dealId: string, fresh: boolean) {
     if (!touched.current) setMakeLog(parties >= 2);
   }, [parties, table]);
   const [busy, setBusy] = useState<Busy>('');
+  // the sheet or heading row a reread is reading: shown in its field until the read settles (#63)
+  const [wanted, setWanted] = useState<Rereading>({});
   const [error, setError] = useState('');
   const [restart, setRestart] = useState(false);   // "start over" asks first, in the footer
   const fileRef = useRef<HTMLInputElement>(null);
@@ -148,7 +152,8 @@ function useQaImportState(dealId: string, fresh: boolean) {
   const token = useRef(0);
   return {
     key, table, setTable, mapping, setMapping, path, setPath, mode, setMode, answered, setAnswered,
-    makeLog, setMakeLog, touched, busy, setBusy, error, setError, restart, setRestart, fileRef, token,
+    makeLog, setMakeLog, touched, busy, setBusy, wanted, setWanted, error, setError, restart, setRestart, fileRef,
+    token,
   };
 }
 export type QaImportState = ReturnType<typeof useQaImportState>;
@@ -236,16 +241,22 @@ function useQaImportActions(store: Store, dealId: string, qa: QaImportState, pla
   };
 
   const run = () => runImport(store, dealId, qa, plan, keeping);
-  return { close, startOver, changeFile, run, ...fileReading(store, qa) };
+  return { close, startOver, changeFile, run, ...fileReading(store, dealId, qa) };
 }
 export type QaImportActions = ReturnType<typeof useQaImportActions>;
 
 /** Reading the file: the file the person picks, the model's proposal of its layout, and another sheet or heading row */
-function fileReading(store: Store, qa: QaImportState) {
+function fileReading(store: Store, dealId: string, qa: QaImportState) {
   const { table, busy, token, setBusy, setError, setTable, setMapping } = qa;
 
   const load = async (file: File) => {
     if (busy) return;
+    // another deal's Q&A log is refused before it is read (#38)
+    const taken = logTakenBy(store, dealId, store.services.fs.pathFor?.(file) ?? null);
+    if (taken) {
+      setError(taken);
+      return;
+    }
     const mine = ++token.current;
     setBusy('reading');
     setError('');
@@ -287,11 +298,16 @@ function fileReading(store: Store, qa: QaImportState) {
   };
 
   // the person says where the table really starts: another sheet, or another heading row
-  const reread = async (where: { sheet?: string; headerRow?: number }) => {
-    if (!table || busy) return;
+  // a reread waits for nothing but an import or a proposal; a later choice replaces a pending one, and Import waits
+  // for it, so what is imported is always the sheet and heading row shown (#63)
+  const reread = async (where: Rereading) => {
+    if (!table || (busy && busy !== 'reading')) return;
     const mine = ++token.current;   // a later choice wins over a slower earlier read
+    setBusy('reading');
+    qa.setWanted(where);
     const again = await readImportBytes(store, table.name, table.bytes, where);
     if (token.current !== mine) return;
+    setBusy('');
     if (!again.ok) {
       setError(`Could not read ${table.name}: ${again.error.message}`);
       return;
@@ -314,6 +330,12 @@ async function runImport(store: Store, dealId: string, qa: QaImportState, plan: 
   qa.setError('');
   qa.setRestart(false);
   try {
+    // a kept import not sent yet, of a file another deal has made its log since, imports nothing (#38)
+    const taken = savedSubmission(qa.key) ? null : logTakenBy(store, dealId, qa.path);
+    if (taken) {
+      qa.setError(taken);
+      return;
+    }
     const chosen = await chooseSubmission(store, qa, prepared?.rows ?? []);
     if (!chosen.ok) { qa.setError(chosen.error.message); return; }
     const submission = chosen.value;
