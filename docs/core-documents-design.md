@@ -22,7 +22,7 @@ These are reused as they are:
 - `families.ts`: drafts in sibling dated folders, newest first; `draftsInOrder` and the `earlier` map.
 - `blacklines.ts`: a blackline by name or by its cover page (`cover`, kept at indexing), its clean draft, standalone ones.
 - `sameRoom.ts`: documents other deals hold by content.
-- The checks' search agent (`searchFor`; decisions.md line 207): the fast model's searches per item, each item's trail of its latest 8 searches on its result, and "a gap already searched for on the same documents and wording is not searched again".
+- The checks' search agent (`searchFor`; the first pass and Check again in [decisions.md](decisions.md#ai-and-models)): the fast model's searches per item, each item's trail of its latest 8 searches on its result, and "a gap already searched for on the same documents and wording is not searched again".
 - Checklist items' `section` and `subsection` headings (src/domain/checklist.ts:124-127).
 - The word index (`wordIndex.ts`) and `scores`; a document with no readable text (a scan) is already marked at indexing (`words: []`, documents.ts:49).
 - The word lists in the control file, `src/control.ts` (`lists.searchFiller`, `lists.indexFiller`).
@@ -85,7 +85,7 @@ Describing a document means the fast model reads it for a summary and search ter
 
 ## Filling gaps (part 4)
 
-Reading 100 documents up front is acceptable, but nothing may stop further searching when a check has gaps to fill. There must still be some limit, and the further searching uses the tool-calling search that is already built. Without this part, an item gets its main call (up to `limits.docsPerCall` documents, shared), one second look of a quarter of a handful (ai.ts:2243), and no third round. An item whose searches find nothing is searched once more in other words, and is then a gap (decisions.md line 207).
+Reading 100 documents up front is acceptable, but nothing may stop further searching when a check has gaps to fill. There must still be some limit, and the further searching uses the tool-calling search that is already built. Without this part, an item gets its main call (up to `limits.docsPerCall` documents, shared), one second look of a quarter of a handful (ai.ts:2243), and no third round. An item whose searches find nothing is searched once more in other words, and is then a gap (the first pass and Check again in [decisions.md](decisions.md#ai-and-models)).
 
 In this part, items that a check leaves not settled or as gaps are handed, a few at a time, to the chat agent's own tool-calling loop (`chatAgent`, src/backend/agent.ts), with its search and read tools unchanged: it searches and reads as often as it needs. Its existing ceilings are the safety stop: about `limits.chatTurns` turns (25) per run, `limits.searchCalls` per search run, and `limits.checkSearchCalls` per deal on each PC. An item that the agent still cannot settle stays a gap if nothing was found, and becomes "not settled" if the run stopped at a ceiling, saying so on hover. Questions in the chat already run on this loop. The extra calls per gap item are to be measured on the 2,400-item checklist before the defaults are set.
 
@@ -108,13 +108,13 @@ The design is built in four parts, each in its own pull request:
 
 ## Changes to decisions
 
-- Line 174: replaced by this design (done in part 1, with the library as its own line).
-- Line 170 (part 3): "Tracked changes and blacklines" is edited in place (done in part 3); unclear blacklines stay unread.
-- Line 172: versions in one folder are drafts (done in part 1).
-- Line 176: "the deal's short names folded" becomes the library and learned short names (done in part 1).
-- Line 30: "Core documents N of M read" counts the whole set; flagged for review.
+- "Core documents" (Documents and indexing): replaced by this design (done in part 1, with the library as its own line).
+- "Tracked changes and blacklines" (Documents and indexing, part 3): edited in place (done in part 3); unclear blacklines stay unread.
+- Drafts of one agreement (Documents and indexing): versions in one folder are drafts (done in part 1).
+- Synonyms and abbreviations (Documents and indexing): "the deal's short names folded" becomes the library and learned short names (done in part 1).
+- Documents on Overview (Pages and navigation): "Core documents N of M read" counts the whole set; flagged for review.
 - Code: `askCore`, `AiOptions.coreMax` and `corePage`, `limits.coreDocs` and `limits.corePage`, and their tests are removed (done in part 1). No core lines are written anymore, and old ones are ignored.
-- An earlier decision and line 174's "no hand-kept list" are reversed.
+- An earlier decision and the "Core documents" line's "no hand-kept list" are reversed.
 
 ## Acceptance criteria
 
