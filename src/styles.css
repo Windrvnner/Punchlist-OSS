@@ -346,10 +346,12 @@ table.trk{width:100%;min-width:1056px;border-collapse:separate;border-spacing:0;
 .stsel:hover{border-color:var(--line)}
 .stsel option{color:var(--option-ink);background:var(--option-bg)}
 .view.chatview{padding-bottom:0;overflow:hidden}
-body.reading .view.chatview{padding:16px 16px 16px 16px}
+/* The reading pane's shadow extends into the gaps around the view (#442). */
+body.reading .view.chatview{padding:16px;overflow:visible}
 .chatwrap{height:100%;display:grid;grid-template-columns:minmax(0,1fr);min-height:0}
+.reading-pane{display:contents}
 .chatwrap.withdoc{grid-template-columns:minmax(380px,38%) minmax(0,1fr);gap:0}
-.chatwrap .chat{overflow:auto;min-height:0;padding-bottom:150px;scrollbar-width:none}
+.chatwrap .chat{overflow:auto;min-height:0;padding-bottom:var(--thread-padding,150px);scrollbar-width:none}
 .chatwrap.withdoc .chat{max-width:none;padding-right:22px;margin:0}
 .qstrip{position:relative;height:100%}
 body.queued #app{grid-template-columns:var(--railw,56px) minmax(0,1fr);transition:grid-template-columns .18s ease}
@@ -397,8 +399,21 @@ body.reading:not(.queued) .rail nav{padding:14px 0;display:flex;justify-content:
 .railx{width:30px;height:30px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink-2);font-size:15px;cursor:pointer;display:grid;place-items:center;text-decoration:none;flex:none}
 .railx:hover{color:var(--ink);background:var(--card-hover)}
 body.reading .chatwrap.withdoc{display:block;position:relative;height:100%}
-body.reading .chatwrap.withdoc .chat{position:absolute;left:0;top:0;bottom:0;width:var(--colw,400px);padding:22px 20px 150px;scrollbar-width:none;border-radius:18px;background:var(--glass-solid);border:1px solid var(--glass-edge);backdrop-filter:blur(24px);box-shadow:var(--shadow-page);overflow:auto;z-index:3}
-body.reading .chatwrap.withdoc .chat{padding-top:0}body.reading .chatwrap.withdoc .chat .chathead{position:sticky;top:0;z-index:3;margin:0 -20px 14px;padding:16px 20px 10px;background:var(--menu-solid);border-radius:18px 18px 0 0;border-bottom:1px solid var(--line);flex-wrap:wrap;row-gap:4px}
+body.reading .chatwrap.withdoc .reading-pane{
+  display:block;position:absolute;inset:0 auto 0 0;width:var(--colw,400px);
+  border-radius:var(--r-pane);overflow:hidden;z-index:3
+}
+/* The content scrollport ends above the composer, inside the full glass pane (#438). */
+body.reading .chatwrap.withdoc .chat{
+  --covered:var(--composer-cover,0px);
+  width:100%;height:calc(100% - var(--covered));padding:0 20px calc(var(--thread-padding,150px) - var(--covered));
+  position:relative;z-index:1
+}
+body.reading .chatwrap.withdoc .chat .chathead{
+  position:sticky;top:0;z-index:3;margin:0 -20px 14px;padding:16px 20px 10px;
+  background:var(--menu-solid);box-shadow:inset 0 1px 0 var(--spec);border-bottom:1px solid var(--line);
+  flex-wrap:wrap;row-gap:4px
+}
 @media (max-width:1399px){body.reading .chatwrap.withdoc .chat .chathead{margin:0 -16px 14px;padding:14px 16px 10px}}
 body.reading .chatwrap.withdoc .opening .qtxt{font-size:16px}
 body.reading .chatwrap.withdoc .opening .dtxt,body.reading .chatwrap.withdoc .msgs .ai{font-size:13.5px;line-height:1.6}
@@ -426,7 +441,7 @@ body.reading .msgs .acts{flex-wrap:wrap;gap:10px}
 .docmenu .mi{display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left;padding:8px 10px;border:0;border-radius:8px;background:transparent;font-size:13px;color:var(--ink);cursor:pointer}
 .docmenu .mi span{color:var(--ink-2);font-size:12px;white-space:nowrap}
 .docmenu .mi.on,.docmenu .mi:hover{background:var(--glass-2)}
-body.reading .tcomp.narrow{left:var(--cl,30px);width:var(--cw,380px);bottom:30px;z-index:4}
+body.reading .tcomp.narrow{left:var(--cl,30px);width:var(--cw,380px);bottom:30px;z-index:4;border-radius:var(--r-pane)}
 .doclist{padding:16px 12px;overflow:auto;min-height:0;border-right:1px solid var(--line);scrollbar-width:thin}
 .doclist .grp{font-size:13px;color:var(--ink-2);font-weight:600;margin:14px 10px 6px}
 .doclist .grp:first-child{margin-top:0}
@@ -696,7 +711,7 @@ body.dragging .view::after{content:"Drop folders to add them";position:absolute;
 /* reading mode: page slides in, column settles */
 .docpanel{animation:slidein var(--slow) var(--ease) both}
 @keyframes slidein{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
-body.reading .chatwrap.withdoc .chat{animation:settle var(--slow) var(--ease) both}
+body.reading .chatwrap.withdoc .reading-pane{animation:settle var(--slow) var(--ease) both}
 @keyframes settle{from{opacity:.6;transform:translateX(-10px)}to{opacity:1;transform:none}}
 .docstage .page{transition:opacity var(--base) var(--ease)}
 .docnav{animation:lift var(--base) var(--ease) both;animation-delay:120ms}
@@ -804,7 +819,13 @@ body.reading .chatwrap.withdoc .chat{animation:settle var(--slow) var(--ease) bo
 .md .det .draft.pending{padding:6px 0}
 /* a question opened in a narrow window stays beside the list, as it does in a wide one; the list keeps the number, the question and the status, and gives up priority and who submitted it */
 @container (max-width: 760px){.md:not(.wide){grid-template-columns:minmax(0,.82fr) minmax(0,1fr)}.md:not(.wide) .list{grid-template-columns:auto minmax(0,1fr) auto!important}.md:not(.wide) .li .pr,.md:not(.wide) .li .by{display:none}}
-@media (max-width:1399px){body.reading .chatwrap.withdoc .chat{padding:0 16px 150px}body.reading #pcomposer .hint{display:none}body.reading #pcomposer .scopebtn{white-space:nowrap;max-width:140px;overflow:hidden;text-overflow:ellipsis}body.reading #pcomposer .scopebtn.attach .t{display:none}body.reading #pcomposer .scopebtn.attach{max-width:none}body.reading #pcomposer .mwrap .scopebtn{max-width:none}}
+@media (max-width:1399px){
+  body.reading .chatwrap.withdoc .chat{padding-inline:16px}
+  body.reading #pcomposer .hint{display:none}
+  body.reading #pcomposer .scopebtn{white-space:nowrap;max-width:140px;overflow:hidden;text-overflow:ellipsis}
+  body.reading #pcomposer .scopebtn.attach .t{display:none}
+  body.reading #pcomposer .scopebtn.attach,body.reading #pcomposer .mwrap .scopebtn{max-width:none}
+}
 
 .railx svg,.qarrows button svg,.docnav>button svg,.pgstack>button svg,.brand .plus svg,.btn.ico svg{display:block}
 .qarrows button,.docnav>button,.pgstack>button,.railx,.brand .plus{display:grid;place-items:center}

@@ -148,11 +148,13 @@ export function ConversationPage({ scope }: { scope: Scope }) {
   const empty = thread.length === 0;
   return (
     <div class={`chatwrap ${open ? 'withdoc' : ''} ${side ? 'withside' : ''}`}>
-      <div class="chat" ref={chatRef}>
-        <div class="chathead">{trail}</div>
-        <Opening scope={scope} deal={deal} question={question} checklistItem={empty ? fromList?.item : undefined}
-          onOpen={openDoc} />
-        <Messages scope={scope} thread={thread} onOpen={openDoc} />
+      <div class={open ? 'reading-pane glass' : 'reading-pane'}>
+        <div class="chat" ref={chatRef}>
+          <div class="chathead">{trail}</div>
+          <Opening scope={scope} deal={deal} question={question} checklistItem={empty ? fromList?.item : undefined}
+            onOpen={openDoc} />
+          <Messages scope={scope} thread={thread} onOpen={openDoc} />
+        </div>
       </div>
       {side && <SidePane onOpen={openDoc} thread={thread} />}
       {open && readDeal && !stale && <DocPanel dealId={readDeal} docs={docs}
@@ -268,10 +270,11 @@ function fitHeight(box: HTMLTextAreaElement, oneLine: boolean) {
  */
 function placeComposer(composer: HTMLFormElement, chat: HTMLElement, reading: boolean, beside: boolean) {
   const frame = composer.offsetParent as HTMLElement | null;
-  if (reading && frame) {
-    const wrapLeft = chat.parentElement!.getBoundingClientRect().left;
+  const pane = reading && frame ? chat.parentElement : null;
+  if (pane && frame) {
+    const wrapLeft = pane.parentElement!.getBoundingClientRect().left;
     composer.style.setProperty('--cl', wrapLeft - frame.getBoundingClientRect().left + 14 + 'px');
-    composer.style.setProperty('--cw', chat.offsetWidth - 28 + 'px');
+    composer.style.setProperty('--cw', pane.offsetWidth - 28 + 'px');
     composer.style.removeProperty('--tw');
   } else if (beside && frame) {
     composer.style.setProperty('--cl', chat.getBoundingClientRect().left - frame.getBoundingClientRect().left + 'px');
@@ -279,12 +282,21 @@ function placeComposer(composer: HTMLFormElement, chat: HTMLElement, reading: bo
   } else {
     composer.style.setProperty('--tw', chat.offsetWidth + 'px');
   }
-  const gap = Math.round(chat.getBoundingClientRect().bottom - composer.getBoundingClientRect().top);
-  const want = gap + THREAD_GAP + 'px';
-  if (chat.style.paddingBottom === want) return;
-  const fromEnd = chat.scrollHeight - chat.scrollTop - chat.clientHeight;
-  chat.style.paddingBottom = want;
-  chat.scrollTop = chat.scrollHeight - chat.clientHeight - fromEnd;
+  const bottom = (pane ?? chat).getBoundingClientRect().bottom;
+  fitThread(chat, Math.round(bottom - composer.getBoundingClientRect().top), !!pane);
+}
+
+/** In reading mode, take the covered height out of both the scrollport and its padding (#438). */
+function fitThread(chat: HTMLElement, gap: number, reading: boolean) {
+  const padding = gap + THREAD_GAP + 'px';
+  const cover = reading ? gap + 'px' : '';
+  if (chat.style.getPropertyValue('--thread-padding') === padding &&
+      chat.style.getPropertyValue('--composer-cover') === cover) return;
+  const top = chat.scrollTop;
+  const fromEnd = chat.scrollHeight - chat.clientHeight - top;
+  chat.style.setProperty('--thread-padding', padding);
+  chat.style.setProperty('--composer-cover', cover);
+  chat.scrollTop = reading && (top === 0 || fromEnd > 1) ? top : chat.scrollHeight - chat.clientHeight - fromEnd;
 }
 
 /** The composer under a conversation is placed on every render and when the window changes size; an ask box is not. */

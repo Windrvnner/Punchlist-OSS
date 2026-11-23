@@ -19,6 +19,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A heading has one row of controls under it, never two. A header that runs short of space drops words first, then turns buttons into icons.
 - Controls that are clicked repeatedly keep a fixed width and position. Icon buttons sit centered with no padding; small ones are 28×28.
 - Home's ask box, a deal page's ask box, and a conversation's composer are one composer, with the same sizes and controls, **Attach** included. It grows to seven full lines and then scrolls; the conversation ends 34px above it, and what was in view stays in view.
+- In reading mode, the conversation pane and follow-up composer use 22px pane glass. The thread scrolls above the
+  composer, and the pane shadow fades into the gaps around the view (#437, #438, #442).
 - Dropdown menus are sorted A to Z as a person reads them, with "No…", "None", and "— not in file —" last, and "All …" or an unset prompt first. Menus with an order of their own (statuses, priority, Deal status, model tiers, and a file's sheets and columns) keep that order, as do lists that aren't dropdowns.
 - Everything works by keyboard alone. Escape closes; focus returns to whatever opened a dialog; Ctrl Z does what the visible notice's **Undo** does.
 - There is no explainer or helper text on screen; explanations go in tooltips.
