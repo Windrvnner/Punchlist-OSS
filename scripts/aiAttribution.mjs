@@ -4,9 +4,12 @@
 // checks use this list. Patterns work as JavaScript regular expressions and as `git grep -E` (extended) patterns,
 // matched ignoring case. Some are written in pieces so this file does not match its own check.
 const NAMES = 'Cla' + 'ude|Anthropic|ChatGPT|Copilot|Cod' + 'ex|Gemini|Cursor|Sonnet|Opus|Haiku';
-// Every path on the chat site except the product page itself, `code` followed by the end of the line, a space, a
-// carriage return, or closing punctuation. Spelled out letter by letter because `git grep -E` has no lookahead.
-const NOT_PRODUCT_PAGE = '($|[^c]|c($|[^o])|co($|[^d])|cod($|[^e])|code[^ )>"\',.\r]|code[,.][^ \r])';
+// Every path on the chat site except the product page itself: `code`, then only closing punctuation (or a slash),
+// then the end of the line, a space, or a carriage return. Spelled out letter by letter because `git grep -E` has no
+// lookahead. `]` is left out of the set because the two expression syntaxes escape it differently.
+const CLOSING = ')>"\'/.,;:!_*';
+const NOT_PRODUCT_PAGE =
+  '($|[^c]|c($|[^o])|co($|[^d])|cod($|[^e])|code[^ \r' + CLOSING + ']|code[' + CLOSING + ']+[^ \r' + CLOSING + '])';
 
 export const AI_ATTRIBUTION_PATTERNS = [
   {

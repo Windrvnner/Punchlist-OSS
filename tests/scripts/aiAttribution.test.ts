@@ -1,6 +1,7 @@
 // @vitest-environment node
 // The shared attribution patterns behave the same as JavaScript expressions and as `git grep -E` patterns, catch the
-// realistic spellings, and leave vendor documentation links and a coding tool's plain footer alone (#729). Refused texts are built at run time.
+// realistic spellings, and leave vendor documentation links and a coding tool's plain footer alone (#729).
+// Refused texts are built at run time.
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -22,6 +23,10 @@ const refused = [
   `https://${site}/code#x`,
   `https://${site}/codes`,
   `https://${site}/code.x`,
+  `https://${site}/code)/session_1`,
+  `<https://${site}/code>/session_1`,
+  `https://${site}/code"/session_1`,
+  `https://${site}/code//session_1`,
   `https://${site}/`,
   `Generated with [${tool} Code](https://${site}/code/session_1)`,
   `Co-Authored-By: ${tool} <a@example.com>`,
@@ -47,6 +52,8 @@ const allowed = [
   `Generated with ${tool} Code`,
   `Made with **${tool} Code**, see https://${site}/code.`,
   `See https://${site}/code`,
+  `[${tool} Code](https://${site}/code/)`,
+  `Try https://${site}/code!`,
 ];
 
 /** What `git grep -E` says about a text, line by line, for every pattern together. */
