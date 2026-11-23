@@ -259,6 +259,25 @@ async function createHoldsTheForm() {
   await ctx.close();
 }
 
+/** #36, #55: a reload while Create reads a typed path brings that path back once, as a folder, not also as typed */
+async function createReadAcrossReload() {
+  const { ctx, page } = await open();
+  await reopen(page);
+  await page.fill('#nd-name', 'Ghost deal');
+  await page.click('#nd-paste');
+  await page.fill('#nd-path', 'D:\\Example\\Data room');
+  await holdScans(page);
+  await page.click('#nd-create');
+  await page.waitForFunction(() => window.scansHeld() === 1);
+  await reload(page);
+  await reopen(page);
+  await rowsShown(page, 1);
+  const back = await form(page);
+  say('#36 a reload during Create\'s read lists the typed folder once', back.name === 'Ghost deal'
+    && back.folders.join() === 'D:\\Example\\Data room' && !back.path && !page.errors.length, JSON.stringify(back));
+  await ctx.close();
+}
+
 /** #36: a typed path that cannot be read gives the form back with everything in it */
 async function failedReadGivesBack() {
   const { ctx, page } = await open();
@@ -290,6 +309,7 @@ await chosenWhileReading();
 await readingAcrossReload();
 await severalChosen();
 await createHoldsTheForm();
+await createReadAcrossReload();
 await failedReadGivesBack();
 await browser.close();
 const failed = results.filter(([, ok]) => !ok).length;

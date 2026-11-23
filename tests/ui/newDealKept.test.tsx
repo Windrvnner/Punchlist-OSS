@@ -3,7 +3,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const KEY = 'dil/1/kept-drafts';
-const load = async () => { vi.resetModules(); return import('../../src/ui/newDealKept'); };
+const load = async () => {
+  vi.resetModules();
+  return import('../../src/ui/newDealKept');
+};
 const folder = (n: number) => ({ path: `D:\\Deals\\Room ${n}`, label: `Room ${n}`, files: 100 + n, size: '0.3 GB' });
 const DRAFT = {
   name: 'Buyer diligence', counterparty: 'Acme', kinds: { product: 'Acquisition' },
@@ -22,7 +25,8 @@ describe('the kept New deal form', () => {
 
   it('is forgotten once the deal is made', async () => {
     let k = await load();
-    k.keepNewDeal(DRAFT); k.keepNewDeal(null);
+    k.keepNewDeal(DRAFT);
+    k.keepNewDeal(null);
     window.dispatchEvent(new Event('pagehide'));
     k = await load();
     expect(k.keptNewDeal()).toBe(null);
