@@ -10,7 +10,7 @@ import type { ChecklistRow } from '../ports';
 import type { UiState } from '../app/state';
 import { PageTop, Stalled, NoRoom } from './deal';
 import { findingHref } from './findings';
-import { navigate } from './nav';
+import { focusSearchResult, navigate } from './nav';
 import { ReadOnlyContext } from './editField';
 import { MoreMenu, MenuItem, ChoiceCheck } from './moreMenu';
 import { CreateQuestion } from '../app/commands/questions';
@@ -181,6 +181,15 @@ export function ChecklistPage({ dealId }: { dealId: string }) {
   // one stop for Tab in the list: the open item, else the first; the arrow keys, Home and End move through the items
   const at = sel && shown.some((r) => r.id === sel.id) ? sel.id : shown[0]?.id;
   const focusRow = (id: string) => listRef.current?.querySelector<HTMLElement>(`[data-item="${id}"]`)?.focus();
+  useLayoutEffect(() => {
+    if (!sel || s.ui.searchFocus !== sel.id) return;
+    const list = listRef.current;
+    const row = list?.querySelector<HTMLElement>(`[data-item="${CSS.escape(sel.id)}"]`);
+    if (row) focusSearchResult(store, sel.id, () => {
+      revealChecklistRow(list, sel.id);
+      row.focus({ preventScroll: true });
+    });
+  }, [sel?.id, s.ui.searchFocus, listedNow]);
   const close = () => { const id = sel?.id; store.ui({ selectedChecklist: null }); if (id) requestAnimationFrame(() => focusRow(id)); };
   const onKey = (e: KeyboardEvent) => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key) || !shown.length) return;

@@ -97,6 +97,7 @@ export interface UiState {
   /** the import or export dialog that is open, if any (or the confirmation of Undo last import); its form state lives in the dialog */
   dialog: null | { kind: 'importQa' | 'exportQa' | 'exportFindings' | 'deleted' | 'importIssues' | 'placeKept' | 'closeSettled' | 'addUnresolved' | 'undoImport'; dealId: DealId } | { kind: 'resolveQa'; dealId: DealId; questionId: QuestionId };
   selectedQuestion: QuestionId | null;
+  searchFocus: string | null;
   /** the checklist item open beside the list on the Checklist page */
   selectedChecklist: string | null;
   /** `changed` and `versions`: only the questions changed in the Q&A log, or in two versions (shown while there are any) */
@@ -222,6 +223,7 @@ export const initialState = (): State => ({
     palette: false,
     dialog: null,
     selectedQuestion: null,
+    searchFocus: null,
     selectedChecklist: null,
     qaFilter: { status: 'open', workstream: '', text: '' },
     toasts: [],

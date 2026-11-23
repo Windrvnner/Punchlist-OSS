@@ -1,3 +1,4 @@
+import { focusSearchResult } from './nav';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { RefObject } from 'preact';
 import { useAppState, useStore, fmtDate, useDismiss } from './hooks';
@@ -160,7 +161,15 @@ export function QaPage({ dealId }: { dealId: string }) {
   const focusRow = (id: string) => requestAnimationFrame(() => listRef.current?.querySelector<HTMLElement>(`.li[data-q="${id}"]`)?.focus());
   // Enter on the row already open goes into it: to the Response, or while a draft is coming to its first button, else the
   // Question, rather than a dozen Shift+Tabs back up the page. A click (detail > 0) only opens.
-  const intoPanel = () => (document.querySelector<HTMLElement>('.qpanel textarea.rtext') ?? document.querySelector<HTMLElement>('.qpanel .qright button:not(:disabled)') ?? document.querySelector<HTMLElement>('.qpanel textarea.qtext'))?.focus();
+  const intoPanel = () => (
+    document.querySelector<HTMLElement>('.qpanel textarea.rtext:not(:disabled)') ??
+    document.querySelector<HTMLElement>('.qpanel .qright button:not(:disabled)') ??
+    document.querySelector<HTMLElement>('.qpanel textarea.qtext:not(:disabled)') ??
+    document.querySelector<HTMLElement>('.qpanel')
+  )?.focus();
+  useLayoutEffect(() => {
+    if (sel && s.ui.searchFocus === sel.id) focusSearchResult(store, sel.id, intoPanel);
+  }, [sel?.id, s.ui.searchFocus]);
   const close = () => { if (!sel) return; const id = sel.id; setCursor(id); store.ui({ selectedQuestion: null }); focusRow(id); };
   const escClose = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); close(); } };
   // the open question's place in the list, and a step to the one before or after it (the panel's arrows)

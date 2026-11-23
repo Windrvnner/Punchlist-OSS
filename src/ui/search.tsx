@@ -58,14 +58,14 @@ export function SearchBox({ float }: { float?: boolean }) {
     const back = was?.isConnected && was !== document.body ? was : document.getElementById('view');
     back?.focus({ preventScroll: true });
   };
-  const pick = (item: Item | undefined) => {
+  const pick = (item: Item | undefined, keyboard = false) => {
     if (!item) return;
     if ('more' in item) {
       setExpanded([...expanded, item.more.kind]);
       return;
     }
     leave(false);
-    if (!revealOpenChecklistHit(store, item.hit)) navigate(store, item.hit.hash, item.hit.ui ?? {});
+    openSearchHit(store, item.hit, keyboard);
   };
   const onKey = (e: KeyboardEvent) => {
     if (e.isComposing) return;
@@ -88,7 +88,7 @@ export function SearchBox({ float }: { float?: boolean }) {
       if (to) { e.preventDefault(); leave(false); to.focus(); }
       return;
     }
-    selectByKey(e, pick);
+    selectByKey(e, (item) => pick(item, true));
   };
   useLayoutEffect(() => { if (res.current) fitWords(res.current); }, [groups, at]);   // the rows and the panel's size change it; moving through them does not
   const loading = Object.keys(s.deals).some((id) => s.dealLoad[id] === 'loading' || s.dealLoad[id] === undefined);
@@ -116,6 +116,13 @@ export function SearchBox({ float }: { float?: boolean }) {
       {!active && <kbd>Ctrl K</kbd>}
     </div>);
   return <>{float ? createPortal(field, document.body) : field}{panel}</>;
+}
+
+// #498: ask a keyboard result's destination to focus once its selected record is rendered.
+function openSearchHit(store: Store, hit: Hit, keyboard: boolean) {
+  const searchFocus = keyboard ? hit.ui?.selectedQuestion ?? hit.ui?.selectedChecklist ?? null : null;
+  if (revealOpenChecklistHit(store, hit)) store.ui({ searchFocus });
+  else navigate(store, hit.hash, { ...hit.ui, searchFocus });
 }
 
 // #496: choosing the open Checklist item again keeps its filter and brings its row back into view.
