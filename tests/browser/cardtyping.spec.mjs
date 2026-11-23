@@ -1,6 +1,6 @@
-// Text typed into a finding's cards is never lost: while Save or Create Finding is still out (#32, #115), and on a finding's page when the
-// finding is deleted under a question being typed (#340); and in an answer's Add as question and Add as finding
-// cards, which keep what was typed per answer (#51). At deal scale: a log of 2,000 questions in the deal.
+// Text typed into a finding's cards is never lost: while Save or Create Finding is still out (#32, #115); on a
+// finding's page when the finding is deleted under a question being typed (#340); and in an answer's Add as question
+// and Add as finding cards, which keep what was typed per answer (#51). At deal scale: a log of 2,000 questions.
 import { launchChrome } from './chrome.mjs';
 import { openOnFindings } from './landing.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
@@ -97,7 +97,8 @@ const titleOf = (page, fid) => page.evaluate((f) => store.get().findings[f]?.tit
   await holdNext(page, 'EditFinding');
   await page.click('#fe-save');
   await page.evaluate(() => window.resume());
-  const closed = await page.waitForSelector('#fe-title', { state: 'detached', timeout: 5000 }).then(() => true, () => false);
+  const closed = await page.waitForSelector('#fe-title', { state: 'detached', timeout: 5000 })
+    .then(() => true, () => false);
   say('#32 a save with nothing typed during it still closes the edit',
     closed && await titleOf(page, fid) === 'Saved with nothing typed after' && !page.errors.length,
     JSON.stringify({ closed, errors: page.errors }));
@@ -113,7 +114,8 @@ const titleOf = (page, fid) => page.evaluate((f) => store.get().findings[f]?.tit
   await page.fill('#fe-title', 'Second title');
   await page.evaluate(() => window.resume());
   await page.waitForFunction((f) => store.get().findings[f].title === 'First title', fid);
-  await page.evaluate((f) => __peer.change(f, { body: ['Changed on the other PC.'] }, { by: 'jdoe', from: 'PC B' }), fid);
+  const elsewhere = { by: 'jdoe', from: 'PC B' };
+  await page.evaluate(([f, who]) => __peer.change(f, { body: ['Changed on the other PC.'] }, who), [fid, elsewhere]);
   await page.waitForFunction((f) => store.get().findings[f].body[0] === 'Changed on the other PC.', fid);
   await page.click('#fe-save');
   const settled = await page.waitForSelector('#fe-title', { state: 'detached', timeout: 5000 }).then(() => 'closed',
@@ -165,8 +167,9 @@ const titled = (page, dealId, title) => page.evaluate(([d, t]) => Object.values(
   await page.click('#f-new');
   const fresh = await page.evaluate(() => document.querySelector('#af-title').value);
   say('#115 one Save puts the later text on that same finding, and no second finding is made',
-    after?.title === 'Step-in period is too short' && after.body.join() === 'The direct agreement gives 20 days; lenders '
-    + 'asked for 60.' && all === 4 && fresh === '' && !page.errors.length,
+    after?.title === 'Step-in period is too short'
+    && after.body.join() === 'The direct agreement gives 20 days; lenders asked for 60.'
+    && all === 4 && fresh === '' && !page.errors.length,
     JSON.stringify({ after: after && { title: after.title, body: after.body }, all, fresh, errors: page.errors }));
   // control: nothing typed during Create closes the form on the Findings page, as before
   await page.fill('#af-title', 'Deposit not posted');
@@ -323,6 +326,57 @@ const ask = async (page, words, nth) => {
   say('#340 in two versions the question stays in sight; Cancel clears it; nothing typed shows no card',
     twoVersions.text === restored && cleared.text === null && none.text === null && !page.errors.length,
     JSON.stringify({ twoVersions, cleared, none, errors: page.errors }));
+  await ctx.close();
+}
+
+{ // #32, #115: a title sent with a space at its end still lets the next Save through; Cancel during a save lets go
+  const { ctx, page, id, fid } = await findingPage();
+  const hash = await page.evaluate(() => location.hash);
+  await page.click('#f-edit');
+  await page.fill('#fe-title', 'Capacity shortfall ');
+  await holdNext(page, 'EditFinding');
+  await page.click('#fe-save');
+  await page.fill('#fe-title', 'Capacity shortfall against the base case');
+  await page.evaluate(() => window.resume());
+  await page.waitForFunction((f) => store.get().findings[f].title === 'Capacity shortfall', fid);
+  await page.waitForTimeout(200);
+  await page.click('#fe-save');
+  await page.waitForSelector('#fe-title', { state: 'detached', timeout: 5000 }).catch(() => {});
+  const editErr = await page.evaluate(() => document.querySelector('#fe-err')?.textContent ?? '');
+  const edited = await titleOf(page, fid);
+  await page.goto(`${URL}#deal-${id}`);
+  await page.click('#f-new');
+  await page.fill('#af-title', 'Step-in period ');
+  await page.selectOption('#af-ws', 'Legal');
+  await holdNext(page, 'CreateFinding');
+  await page.click('#af-create');
+  await page.fill('#af-title', 'Step-in period is short');
+  await page.evaluate(() => window.resume());
+  await page.waitForSelector('#fe-title', { timeout: 5000 }).catch(() => {});
+  if (await page.$('#fe-save')) await page.click('#fe-save');
+  await page.waitForSelector('#fe-title', { state: 'detached', timeout: 5000 }).catch(() => {});
+  const createErr = await page.evaluate(() => document.querySelector('#fe-err')?.textContent ?? '');
+  const made = await titled(page, id, 'Step-in period is short');
+  say('#32 #115 a title sent with a space at its end: the next Save writes what was typed since, unrefused',
+    edited === 'Capacity shortfall against the base case' && !editErr && made.length === 1 && !createErr
+    && !page.errors.length, JSON.stringify({ edited, editErr, made: made.length, createErr, errors: page.errors }));
+  // Cancel while the save is out: the save lands as sent, and what was typed since is let go, as Cancel says
+  await page.goto(URL + hash);
+  await page.click('#f-edit');
+  await page.fill('#fe-title', 'Sent before Cancel');
+  await holdNext(page, 'EditFinding');
+  await page.click('#fe-save');
+  await page.fill('#fe-title', 'Typed then cancelled');
+  await page.click('#fe-cancel');
+  await page.evaluate(() => window.resume());
+  await page.waitForFunction((f) => store.get().findings[f].title === 'Sent before Cancel', fid);
+  await page.waitForTimeout(300);
+  await page.goto(`${URL}#deal-${id}`);
+  await page.goto(URL + hash);
+  await page.waitForSelector('#f-edit');
+  const reopened = await page.evaluate(() => !!document.querySelector('#fe-title'));
+  say('#32 Cancel during a save lets go of what was typed since', !reopened && !page.errors.length,
+    JSON.stringify({ reopened, errors: page.errors }));
   await ctx.close();
 }
 
