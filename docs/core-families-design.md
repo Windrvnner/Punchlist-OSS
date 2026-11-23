@@ -110,7 +110,7 @@ Change orders and variation orders are amendments of their contract, so all 48 c
 ## Changes to decisions
 
 - [decisions.md](decisions.md) (core documents): this part's families are added.
-- Line 173 (drafts): unchanged.
+- [decisions.md](decisions.md#documents-and-indexing) (drafts of one agreement): unchanged.
 
 ## Acceptance criteria
 

@@ -266,7 +266,7 @@ details.fsrcs .sgp .srcbtn:hover{color:var(--ink);text-decoration-color:var(--ac
 .ilfile .c{color:var(--ink-2);white-space:nowrap}
 .ilfile .linkb{flex:none}.ilfile .grow{flex:1}
 /* each already-raised point says what it joins, with its "Keep separate" box at the end of the row; the new findings follow,
-   one line each. The numbers sit in one column (--nw, the longest number's width) so every title starts at the same place (#835) */
+   one line each. The numbers sit in one column (--nw, the longest number's width) so every title starts at the same place */
 .ilf .rv-row.ilr{grid-template-columns:var(--nw,4ch) minmax(0,1fr) auto;column-gap:12px;align-items:baseline;font-size:13px;padding:12px 0;border-top:1px solid var(--line);cursor:default}
 .ilf .rv-row.ilr:first-child{border-top:0;padding-top:4px}
 .ilf .rv-row.ilr:last-child,.ilf .iln:last-child{padding-bottom:0}
@@ -919,7 +919,7 @@ body.qopen .g span{text-overflow:clip;mask-image:linear-gradient(to right,#000 c
 /* empty, still there to tab to and type in, drawn only on hover or focus; clear ink, so nothing moves
    when it shows */
 /* typed text and any note under it (Not saved, Changed elsewhere) are always drawn: the panel's render may not have heard of
-   them yet, and nothing typed is ever out of sight (#892) */
+   them yet, and nothing typed is ever out of sight */
 .sub.by.unfilled *{transition:color var(--fast) var(--ease),border-color var(--fast) var(--ease),background-color var(--fast) var(--ease)}
 .qlbl:not(:hover):not(:focus-within) .sub.by.unfilled:not(:has(.efstate,input:not(:placeholder-shown))) *{color:transparent;border-color:transparent;background-color:transparent}
 .qlbl:not(:hover):not(:focus-within) .sub.by.unfilled:not(:has(.efstate,input:not(:placeholder-shown))) ::placeholder{color:transparent}
