@@ -38,8 +38,6 @@ const DISTINCT: [string, string][] = [
     'Please confirm the consents required under clause 4 b of the facility agreement.'],
   ['Please confirm the consents required under clause 4( a ) of the facility agreement.',
     'Please confirm the consents required under clause 4( b ) of the facility agreement.'],
-  ['Please confirm the distribution rights for the a class shares.',
-    'Please confirm the distribution rights for the b class shares.'],
   ['Please confirm the indemnity cap under Section 1.10 of the SPA.',
     'Please confirm the indemnity cap under Section 11.0 of the SPA.'],
   ['Please confirm the distribution rights for class-a shares.',
@@ -75,7 +73,7 @@ const SAME: [string, string][] = [
 const REWORDED: [string, string] = ['Please confirm Tranche II outstanding debt for review',
   'Please confirm the Tranche II outstanding debt balance for review'];
 
-/** [saved wording, incoming wording]: one question reworded under its own number, the word I in one only */
+/** [saved wording, incoming wording]: one question reworded under its own number, an article or the word I in one */
 const PRONOUN: [string, string][] = [
   ['I understand the SPA is signed; please send the final version and the disclosure letter.',
     'We understand the SPA is signed; please send the final version and the disclosure letter (DL).'],
@@ -83,6 +81,12 @@ const PRONOUN: [string, string][] = [
     'Can we get a copy of the signed facility agreement and the fee letter from the CFO?'],
   ['Please confirm whether I should send the board minutes and the shareholder register.',
     'Please confirm whether we should send the board minutes and the shareholder register to the VDR.'],
+  ['Please provide a schedule of all material leases and their expiry dates.',
+    'Please provide the schedule of all material leases and their expiry dates (VDR).'],
+  ['Is there a facility agreement in place for the acquisition financing?',
+    'Is there the facility agreement in place for the acquisition financing (SFA)?'],
+  ['Please send the list for each item. I understand it is in the data room.',
+    'Please send the list for each item. We understand it is in the data room folder 3.'],
 ];
 
 /** a deal holding `text` as question 1, with a typed response: the deal and the question as saved */
