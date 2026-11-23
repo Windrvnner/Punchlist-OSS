@@ -40,7 +40,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - "Project " is added in front of a deal name that lacks it. A name that starts with that word in any capitalization, followed by anything other than a letter, accent, or digit, has the word rewritten as "Project" and the rest kept as typed; misspellings are not corrected. Deals may share a name; they are told apart by counterparty, then by creation date, in the sidebar, Add Deal, and search.
 - The New Deal form has Name and Counterparty; Structure, Sector, and Technology pick lists; and Folders. × closes it, and there is no Cancel. **Create** stays unavailable until there is a name.
 - Before a new deal is made, a duplicate check asks "Is this Project X?" when the folders' files, or the name and counterparty, match a team deal; nothing is refused.
-- Each deal has a Deleted list for findings and questions, showing who deleted each and when, with **Restore**. A deleted record reached by a link says so and offers **Restore**. A deleted question's number is never reused. An imported issues list can be removed from the Deleted list.
+- Each deal has a Deleted list for findings and questions, showing who deleted each and when, with **Restore**. A deleted record reached by a link says so and offers **Restore**; a question being typed on a deleted finding's page stays there, with **Log Question** off (#340). A deleted question's number is never reused. An imported issues list can be removed from the Deleted list.
 - Notices stack, up to three at the top of the page, for 8 seconds each (paused on hover or focus), each with its own **Undo**, and only on the PC that acted.
 - Unseen changes that another PC made to a deal deleted elsewhere are kept on that PC as "Project X (recovered)", with a notice that stays until closed and says who deleted the original; keeping or deleting the copy is that person's call. Details still open are in GitHub Issues.
 - A record changed on two PCs, or deleted on one and changed on another, shows design B: the person picks a version, then confirms, and until then the record takes no edits. One record in two versions never blocks the others.
@@ -82,6 +82,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - On import, real date cells are read as dates and plain numbers are not. An ambiguous date is settled by the row's other date, its neighbors, and the rule that no date is in the future; otherwise it is left blank and listed.
 - Marking imported questions that have a response as Answered is optional and off by default.
 - Merge matches a row by wording first, then by number; a row that matches a deleted question brings it back. A row that names who submitted it never matches another party's question. "Will overwrite" is shown field by field first.
+- Merge never matches a row to a question that names a different identifier: anything with a digit, a Roman numeral or code in capitals, a single capital letter, or a letter or numeral in parentheses or after a word such as class, tranche, part or clause (Class A and B, Tranche II and IV, clause 4(a) and 4(b)). A row matched by number alone names exactly the question's identifiers, in the same capitals (the SPA and the spa are two questions there); any other row is a question of its own. Otherwise spacing, capitals and punctuation alone never make identifiers differ (#125, #127, #128).
+- In a number, an I, l or O before a single digit, or an I or l before a point and a digit, is a letter (Facility I1 is l1 but not 11, Class I.1 is not 1.1); an I, l or O elsewhere in a number reads as 1 or 0 (I00, 2O24, O.5). The word I is not an identifier (#127, #128).
 - The same list imported on two PCs makes one set of questions, with ids derived from the deal, number, party, and wording.
 - Two questions with the same number are both kept and marked; a person renumbers one. Undo, Restore, and a kept
   version's Restore bring a deleted question back under its own number, even when another question holds it (#13, #116).
@@ -201,7 +203,11 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A deal shows for the people who created or added it; this organizes deals but doesn't restrict access. There are currently no per-deal walls and no encryption.
 - When a record has changed on two PCs, both versions are kept and a person chooses; the app never picks.
 - An import in progress (Q&A, an issues list, or the master checklist) is kept on its PC until it is done, replaced, or started over, so closing, reloading, or restarting loses nothing.
+- The New Deal form is kept on its PC as it changes, folders still being read included, until the deal is created, so closing, reloading, or restarting loses nothing (#55, #113). Once Create is pressed, the form stays open until the deal is made or Create fails (#36).
 - No design may lose or hide typed work. Every version not kept is listed under Deleted as "Superseded by" the person who chose, and can be restored.
+- Text typed into a new finding (New finding or **Add as finding**) while **Create Finding** is saving goes to the finding made: its page opens in Edit with that text. A form that held only what was sent closes (#115).
+- A form closed and opened again while its save is out shares one kept draft with it: the save settles that draft once when it lands, and the form on screen then closes only if nothing typed is kept, so the typing is in one place (#771).
+- A save that lands after its deal was deleted elsewhere goes to the recovered copy, removed fields included, unless the copy changed those fields or the save left out a field it never saw; then it is refused. A save to a deleted deal's member, or after its recovered copy was deleted, is refused (#664, #222).
 - A change that arrives before a change it builds on is held back without pausing the deal; one more than a day old is let go as a choice. A deal can't be deleted while such changes are on their way.
 - The connection status card shows only when something is wrong. The avatar's dot is the accent color or red, and OneDrive being unavailable for 15 minutes produces one notice.
 - A copied install is detected and stops writing. A build never changes a record written by a newer version.
@@ -210,6 +216,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - The check line names who is working.
 - A check waiting on the model service says so after 2 minutes and resumes by itself; a check waiting on a sign-in says that instead.
 - Attachments are kept in the shared folder under their document's id. A file attached on Home is kept with the person's conversations.
+- A deal's recovered copy keeps the deal's attached files, and files attached and not yet sent follow their conversation to the copy (#117).
+- A message goes with all of its attached files or not at all: a file this PC can no longer send is named, its chip is marked, and nothing is sent (#671).
 
 ## AI and models
 

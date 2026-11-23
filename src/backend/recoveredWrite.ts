@@ -34,8 +34,9 @@ function directEditTouches(
  * Older versions have no routing marker: a postcreation change then conservatively counts as a direct edit.
  */
 export function recoveredWriteClashes(guard: RecoveryGuard): boolean {
-  // A deletion affects every business field, including edits later put back as they were.
-  const fields = guard.deleting ? null : new Set(businessKeys(changedValues(guard.had, guard.wrote)));
+  // A deletion affects every business field, including edits later put back as they were. A save touches the fields it
+  // changed and the ones it removed (#664).
+  const fields = guard.deleting ? null : changedFields(guard.had, guard.wrote);
   if (fields && !fields.size) return false;
   const pending = [...guard.heads];
   const seen = new Set<string>();

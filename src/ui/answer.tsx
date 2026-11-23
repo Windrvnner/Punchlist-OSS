@@ -117,10 +117,10 @@ export function Answer({ scope, message: answer, asked, onOpen, suggest }: {
       {suggested && deal && <SuggestedQuestion question={suggested} dealId={deal.id} answer={answer}
         verdict={state.ui.verdicts[`${answer.id}|${suggested.id}`]} askUse={use.askUse} />}
       {replacing && <ReplacePrompt question={replacing} onReplace={replaceIt} onKeep={closeReplace} />}
-      {card === 'q' && deal && <QuestionCard scope={scope} initial={scope.kind === 'finding' ? clean : asked}
-        onDone={closeCard} />}
-      {card === 'f' && deal && <FindingCard dealId={deal.id} text={plain} sources={answer.sources ?? []}
-        onDone={closeCard} />}
+      {card === 'q' && deal && <QuestionCard scope={scope} answerId={answer.id}
+        initial={scope.kind === 'finding' ? clean : asked} onDone={closeCard} />}
+      {card === 'f' && deal && <FindingCard dealId={deal.id} answerId={answer.id} text={plain}
+        sources={answer.sources ?? []} onDone={closeCard} />}
     </div>
   );
 }

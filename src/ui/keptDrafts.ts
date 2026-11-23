@@ -1,11 +1,11 @@
 /**
  * Text typed into a form that is not a record yet (the composer and ask box, a new finding, a finding's edit, a closing
- * note, a question asked from the Checklist) lives in a map in memory, per thing it belongs to, so it survives moving to
- * another page or item. Closing the app, a reload or a crash would still throw it away. Each such map is made here
- * and kept in the window's local storage as it changes: shortly after each change, when the window is hidden, and as the
- * page goes. The next start reads the maps back, so each form comes back as it was left. Storage is overwritten with the
- * maps as they stand, never cleared at start, so drafts brought back survive a second crash too. The desktop app runs
- * one window at a time (main.ts), so one window's maps are the whole of it.
+ * note, a question asked from the Checklist, the New deal form) lives in a map in memory, per thing it belongs to, so
+ * it survives moving to another page or item. Closing the app, a reload or a crash would still throw it away. Each such
+ * map is made here and kept in the window's local storage as it changes: shortly after each change, when the window is
+ * hidden, and as the page goes. The next start reads the maps back, so each form comes back as it was left. Storage is
+ * overwritten with the maps as they stand, never cleared at start, so drafts brought back survive a second crash too.
+ * The desktop app runs one window at a time (main.ts), so one window's maps are the whole of it.
  *
  * What is read back is checked entry by entry, and anything not of the map's shape is dropped, so an unreadable or old
  * entry costs that entry only. Edit fields keep the text they could not save in one of these maps too (editField.tsx).

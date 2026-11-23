@@ -18,7 +18,7 @@ import { dealFindings, versionsWord, listedFindings, findingListed, workstreamHe
 import { NO_WORKSTREAM } from '../app/state';
 import { ConflictView } from './conflict';
 import { AskFirst } from './dialogs';
-import { FindingLinks } from './findingAsk';
+import { FindingLinks, askKept } from './findingAsk';
 import { CreateFinding, EditFinding, SetFindingStatus, ReviewFinding, DeleteFinding, TITLE_MAX } from '../app/commands/findings';
 import { reassess, previousVersion } from '../app/findings';
 import type { Deal, Finding, Source } from '../domain/model';
@@ -26,6 +26,9 @@ import { localYmd, CHECK_REASON } from '../domain/model';
 import { splitCited, toParagraphs } from '../domain/cite';
 import { SERVICE, AI_LABEL } from '../control';
 import { keptDrafts, hasTexts } from './keptDrafts';
+import { useSaveOut } from './saveOut';
+import { editDrafts, editsOut, landCreated, landEdit, newFindingDrafts } from './findingDrafts';
+import type { EditDraft } from './findingDrafts';
 import { SourceChips } from './research';
 import { CitedEditor } from './citedEditor';
 import { MenuChoice, workstreamOptions, type MenuOption } from './filterMenu';
@@ -284,16 +287,6 @@ export function FindingsSection({ deal: d }: { deal: Deal }) {
  * finding, another tab or another deal, or pressing Escape, keeps it, and it comes back when the finding is opened again.
  * Cancel, Save, or the change being made clears it.
  */
-type EditDraft = {
-  title: string; ws: string; body: string;
-  base: { title: string; workstream: string; body: string[] };
-};
-const isEditDraft = (v: unknown): v is EditDraft => hasTexts('title', 'ws', 'body')(v)
-  && hasTexts('title', 'workstream')((v as EditDraft).base)
-  && Array.isArray((v as EditDraft).base.body)
-  && (v as EditDraft).base.body.every((x) => typeof x === 'string');
-// each kept across a restart too
-const editDrafts = keptDrafts('finding-edit', isEditDraft);
 const isNoteDraft = (v: unknown): v is { status: 'open' | 'closed'; text: string } => hasTexts('text', 'status')(v) && (v.status === 'open' || v.status === 'closed');
 const noteDrafts = keptDrafts('closing-note', isNoteDraft);
 /** a summary's "N more" opens its finding with the focus on the full list of sources: the page that mounts for it takes the wish;
@@ -306,7 +299,8 @@ const CITE_TIP = 'A tag after a sentence names the source it cites. It moves wit
 
 function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
   const store = useStore();
-  const kept = editDrafts.get(f.id);
+  // what was typed and kept, or, after Cancel while a save is out, what that save sent (#771)
+  const kept = editDrafts.get(f.id) ?? editsOut.get(f.id);
   // the finding as this edit began (kept with the draft, so a change made elsewhere meanwhile is still caught on Save)
   const start: EditDraft = kept ?? {
     title: f.title, ws: f.workstream, body: f.body.join('\n\n'),
@@ -315,25 +309,47 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
   const [title, setTitleState] = useState(start.title);
   const [ws, setWsState] = useState(start.ws);
   const [body, setBodyState] = useState(start.body);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');   // why Save was refused: said beside the buttons, and the edit stays open
   const draft = useRef(start); const base = useRef(start.base);
   // remembered as it is typed (not after the next draw), so leaving the finding straight after typing keeps it
-  const remember = (patch: Partial<EditDraft>) => { draft.current = { ...draft.current, ...patch }; editDrafts.set(f.id, draft.current); };
+  // the base kept with the draft wins: a save sent from this edit before it was closed and opened again moves it on
+  const keptBase = () => editDrafts.get(f.id)?.base ?? base.current;
+  const remember = (patch: Partial<EditDraft>) => {
+    draft.current = { ...draft.current, base: keptBase(), ...patch };
+    editDrafts.set(f.id, draft.current);
+  };
   const setTitle = (v: string) => { setTitleState(v); remember({ title: v }); }; const setWs = (v: string) => { setWsState(v); remember({ ws: v }); };
   const setBody = (v: string) => {
     setBodyState(v);
     remember({ body: v });
   };
-  const cancel = () => { editDrafts.delete(f.id); onDone(); };
+  // #771: once a save lands, this edit (or the one drawn for the finding since) shows a refusal, or closes when
+  // nothing typed is kept
+  const settle = (refusal: string | null) => {
+    if (refusal) setError(refusal);
+    else if (!editDrafts.has(f.id)) onDone();
+  };
+  const out = useSaveOut('finding-edit:' + f.id, settle);
+  const busy = out.busy;
+  const cancel = () => {
+    out.cancel();
+    editDrafts.delete(f.id);
+    onDone();
+  };
   const wsOptions = workstreamChoices([f.workstream]);   // a name of its own (from an import) takes its place A to Z
-  const save = async () => {
-    if (busy) return; setBusy(true);
+  const save = () => {
+    if (busy) return;
+    remember({});   // the kept draft holds what is sent, so the save can tell what is typed after it (#771)
+    const sent = draft.current;
     const edit = {
-      dealId: f.dealId, findingId: f.id, title, workstream: ws, body: toParagraphs(body), base: base.current,
+      dealId: f.dealId, findingId: f.id, title, workstream: ws, body: toParagraphs(body), base: sent.base,
     };
-    const r = await store.dispatch(EditFinding, edit, { idempotencyKey: 'f-edit-' + f.id });
-    setBusy(false); if (r.ok) { editDrafts.delete(f.id); onDone(); } else setError(r.error.kind === 'invalid' ? Object.values(r.error.fields ?? {})[0] ?? r.error.message : r.error.message);
+    void out.send(async (cancelled) => {
+      editsOut.set(f.id, sent);
+      const r = await store.dispatch(EditFinding, edit, { idempotencyKey: 'f-edit-' + f.id })
+        .finally(() => editsOut.delete(f.id));
+      return landEdit(f.id, sent, r, cancelled());
+    });
   };
   return (
     <div class="card addf fedit" data-holds-work onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onDone(); } }}>
@@ -348,25 +364,40 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
   );
 }
 
-/**
- * A new finding half written, by deal: leaving the page (another tab, another deal) or pressing Escape keeps it, and
- * the form comes back with it when the Findings page is opened again. Cancel or creating the finding clears it.
- */
-const newFindingDrafts = keptDrafts('new-finding', hasTexts('title', 'ws', 'body'));   // kept across a restart too
-
 function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void }) {
   const store = useStore();
   const kept = newFindingDrafts.get(d.id);
-  const [title, setTitleState] = useState(kept?.title ?? ''); const [ws, setWsState] = useState(kept?.ws ?? ''); const [body, setBodyState] = useState(kept?.body ?? ''); const [busy, setBusy] = useState(false);
+  const [title, setTitleState] = useState(kept?.title ?? '');
+  const [ws, setWsState] = useState(kept?.ws ?? '');
+  const [body, setBodyState] = useState(kept?.body ?? '');
   // remembered as it is typed (not after the next draw), so leaving the page straight after typing keeps it
   const draft = useRef({ title: kept?.title ?? '', ws: kept?.ws ?? '', body: kept?.body ?? '' });
   const remember = (patch: Partial<typeof draft.current>) => { const n = { ...draft.current, ...patch }; draft.current = n; if (n.title || n.ws || n.body) newFindingDrafts.set(d.id, n); else newFindingDrafts.delete(d.id); };
   const setTitle = (v: string) => { setTitleState(v); remember({ title: v }); }; const setWs = (v: string) => { setWsState(v); remember({ ws: v }); }; const setBody = (v: string) => { setBodyState(v); remember({ body: v }); };
-  const discard = () => { newFindingDrafts.delete(d.id); onDone(); };
-  const create = async () => {
-    if (busy) return; setBusy(true);
-    const r = await store.dispatch(CreateFinding, { dealId: d.id, title, workstream: ws, body: toParagraphs(body), origin: 'human' }, { idempotencyKey: 'f-create-' + d.id });
-    setBusy(false); if (r.ok) discard();
+  // #771: once Create lands, the form on screen (this one, or one opened again since) closes when nothing typed is
+  // kept, and opens the finding made when what was typed since went to it. Left alone (undefined) after a refusal,
+  // or when Cancel let the save go
+  const settle = (made: Finding | null | undefined) => {
+    if (made === undefined || newFindingDrafts.has(d.id)) return;
+    onDone();
+    if (made) location.hash = findingHref(made);
+  };
+  const out = useSaveOut('new-finding:' + d.id, settle);
+  const busy = out.busy;
+  const cancel = () => {
+    out.cancel();
+    newFindingDrafts.delete(d.id);
+    onDone();
+  };
+  const create = () => {
+    const sent = { title, ws, body };
+    const input = { dealId: d.id, title, workstream: ws, body: toParagraphs(body), origin: 'human' as const };
+    void out.send(async (cancelled) => {
+      const r = await store.dispatch(CreateFinding, input, { idempotencyKey: 'f-create-' + d.id });
+      // cancelled while it was out: a form opened since is left alone
+      if (!r.ok || cancelled()) return undefined;
+      return landCreated(d.id, sent, createdFinding(store, r.value.opId));
+    });
   };
   return (
     <div class="card addf" data-holds-work onKeyDown={(e) =>
@@ -377,9 +408,16 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
       <textarea class="in ta" id="af-body" maxLength={TEXT_MAX} rows={3} placeholder="What you found and where" aria-label="Detail" value={body} onInput={(e) => setBody((e.currentTarget as HTMLTextAreaElement).value)} />
       <div class="cacts"><button type="button" class="btn sm pri" id="af-create" disabled={busy || !title.trim() || !ws}
         onClick={() => void create()}>Create Finding</button><button type="button" class="btn sm" id="af-cancel"
-        onClick={discard}>Cancel</button></div>
+        onClick={cancel}>Cancel</button></div>
     </div>
   );
+}
+
+/** the finding a CreateFinding made, by what its write wrote */
+export function createdFinding(store: ReturnType<typeof useStore>, opId: string): Finding | undefined {
+  const state = store.get();
+  const written = Object.keys(state.ops[opId]?.resultRevs ?? {});
+  return written.map((id) => state.findings[id]).find(Boolean);
 }
 
 const HIST_TEXT: Record<string, string> = { edited: 'Edited', status: 'Status changed', response: 'Response received', responseWithdrawn: 'Response removed', document: 'Document attached', reassessed: 'Updated', note: 'Note added' };
@@ -408,7 +446,9 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
   if (s.conflicts[f.id]) {
     // the stepper only on the finding's own page: from the side pane it would leave the page behind
     const clash = <ConflictView conflict={s.conflicts[f.id]} stepper={!pane} />;
-    return <div class="opening"><div class="lbl fmeta"><span>{f.workstream}</span></div>{clash}</div>;
+    // #340: a question being typed stays in sight while the finding is in two versions
+    const typing = askKept(f.id) && <FindingLinks key={f.id} dealId={dealId} f={f} pane={pane} />;
+    return <div class="opening"><div class="lbl fmeta"><span>{f.workstream}</span></div>{clash}{typing}</div>;
   }
   const audit = s.audit[f.id] ?? [];
   const undone = new Set(audit.map((a) => a.undoes).filter(Boolean));
