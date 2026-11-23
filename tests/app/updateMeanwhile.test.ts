@@ -71,6 +71,7 @@ async function world(reply: { body: string[]; sources: Source[] }) {
 }
 const GONE = 'A document it cites is no longer in the data room';
 const AM3 = { doc: 'EPC amendment 3.pdf', loc: 'p. 2', docId: 'doc_am3' };
+const AM4 = { doc: 'EPC amendment 4.pdf', loc: 'p. 1', docId: 'doc_am4' };
 /** a reply that cites amendment 3 */
 const CITES_AM3 = { body: ['Amendment 3 lifts the cap. [1]'], sources: [AM3] };
 const NEW = { body: ['The liability cap is 20% of the contract price. [1]'], sources: [{ doc: 'EPC contract.pdf', loc: 'p. 82', docId: 'doc_epc' }] };
@@ -190,4 +191,16 @@ describe('Update from documents while a person works on the finding', () => {
     expect(r.f()).toMatchObject({ updated: true, updatedWhy: GONE });
     expect(r.f().sources.map((x) => x.doc)).toEqual(['EPC contract.pdf', AM3.doc]);
   }, 240000);
+
+  it('names the newer document when a second one is attached while it ran, so the mark names what it did not read (#327)',
+    async () => {
+    const w = await world(CITES_AM3);
+    const { done } = await w.press();
+    await w.attach(AM3);
+    await w.attach(AM4);
+    expect(w.f().updatedWhy).toBe(`${AM4.doc} attached`);
+    w.answer();
+    await done;
+    expect(w.f()).toMatchObject({ updated: true, updatedWhy: `${AM4.doc} attached` });
+  }, 120000);
 });
