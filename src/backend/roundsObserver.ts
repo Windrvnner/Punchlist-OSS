@@ -5,7 +5,7 @@
 import type { RLine } from './rounds';
 
 /** the round a line did a piece's work in, if it did any */
-const roundOfWork = (line: RLine) =>
+export const roundOfWork = (line: RLine) =>
   (line.item && line.result ? line.round : undefined) ??
   line.glanced?.round ??
   line.verified?.round ??
