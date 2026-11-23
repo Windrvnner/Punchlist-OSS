@@ -1,24 +1,28 @@
 // Runs every browser suite in tests/browser, several at a time, against the built app in dist/.
 //   node scripts/browser-all.mjs [--jobs 5] [name ...]     e.g.  npm run browser -- --jobs 4 decisions keyboard
-//   --shard 2/4 runs only the second of four groups of suites (every fourth suite), for parallel CI jobs
+//   --shard 2/4 runs only the second of four groups of suites of about equal time, for parallel CI jobs
 // Each suite starts its own browser and shares nothing with the others, so they can run side by side. A suite that fails
 // while others are running is run once more on its own; if it passes then, that is reported as such, not hidden.
 // Exit code 0 only if every suite passed (alone or alongside). Logs go to out/browser/<suite>.log; the suites that took
-// longest last time start first (out/browser/times.json).
+// longest last time start first (out/browser/times.json, else the CI times in tests/browser/suite-times.json).
 import { spawn } from 'node:child_process'; import fs from 'node:fs'; import http from 'node:http';
 import path from 'node:path';
 import { noResultReason, summaryOf } from './browser-reason.mjs';
+import { browserSuites, longestFirst, shardOf } from './browser-shard.mjs';
 import { insideGate } from './gate-dir.mjs';
 
 const args = process.argv.slice(2); const j = args.indexOf('--jobs'); const jobs = j >= 0 ? Math.max(1, +args[j + 1] || 1) : 5;
 const shardAt = args.indexOf('--shard');
 const optionValues = [j, shardAt].filter((at) => at >= 0).map((at) => at + 1);
 const only = args.filter((a, i) => !a.startsWith('--') && !optionValues.includes(i));
-const all = fs.readdirSync('tests/browser').filter((f) => f.endsWith('.spec.mjs')).map((f) => f.replace('.spec.mjs', '')).sort();
+const all = browserSuites();
 const named = only.length ? all.filter((s) => only.includes(s)) : all;
+// Each suite's time on a CI job, kept in the repo so every job splits the suites the same way (npm run browser:times
+// refreshes it from a local check:all).
+const CI_TIMES = timesIn('tests/browser/suite-times.json');
 const suites = inShard(named, shardAt >= 0 ? args[shardAt + 1] : null);
 
-/** With `--shard k/n`, the k-th of n groups, taking every n-th suite in name order; otherwise every suite. */
+/** With `--shard k/n`, the k-th of n groups of about equal CI time; otherwise every suite. */
 function inShard(names, shard) {
   if (shard === null) return names;
   const [k, n] = (shard ?? '').split('/').map(Number);
@@ -26,7 +30,7 @@ function inShard(names, shard) {
     console.error(`--shard takes k/n with 1 <= k <= n, not ${shard}`);
     process.exit(2);
   }
-  return names.filter((_, index) => index % n === k - 1);
+  return shardOf(names, k, n, CI_TIMES);
 }
 const unknown = only.filter((name) => !all.includes(name));
 if (unknown.length || !suites.length) {
@@ -86,24 +90,23 @@ async function appIsReady() {
 }
 
 // Each suite's time in the last run, so the next starts the longest first and no slot idles while one runs alone at
-// the end (#103). Suites with no time yet go first, in name order; reporting stays in the order suites finish.
+// the end (#103). A suite with no time from this machine takes its CI time, and one with neither takes the middle
+// time; reporting stays in the order suites finish.
 const TIMES = 'out/browser/times.json';
 
 /** The times kept from earlier runs, by suite; none before the first run or after out/ is cleared. */
 function readTimes() {
+  return timesIn(TIMES);
+}
+
+/** The times by suite in a JSON file; none when it is missing or not an object, so a broken file never stops a run. */
+function timesIn(file) {
   try {
-    const times = JSON.parse(fs.readFileSync(TIMES, 'utf8'));
+    const times = JSON.parse(fs.readFileSync(file, 'utf8'));
     return times && typeof times === 'object' && !Array.isArray(times) ? times : {};
   } catch {
     return {};
   }
-}
-
-/** The suites ordered by their last time, longest first; unknown ones first. */
-function longestFirst(names) {
-  const times = readTimes();
-  const known = (name) => (Number.isFinite(times[name]) ? times[name] : Infinity);
-  return [...names].sort((a, b) => known(b) - known(a) || (a < b ? -1 : 1));
 }
 
 /**
@@ -153,7 +156,7 @@ const run = async (name) => {
   });
 };
 const started = Date.now();
-const queue = longestFirst(suites);
+const queue = longestFirst(suites, { ...CI_TIMES, ...readTimes() });
 const results = [];
 await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, async () => {
   while (!stopped) {
