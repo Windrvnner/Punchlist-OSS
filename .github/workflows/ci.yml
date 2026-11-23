@@ -34,7 +34,11 @@ jobs:
       # the tests that convert Word and spreadsheet files need LibreOffice at /usr/bin/soffice
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-calc
       - run: npm ci
+      # as in check:all: LibreOffice must convert a workbook, and its tests then run on it rather than skip
+      - run: node scripts/office-check.mjs
       - run: npm run check
+        env:
+          PUNCHLIST_OFFICE: required
 
   # the browser suites against the built app, in four groups at once
   browser:
