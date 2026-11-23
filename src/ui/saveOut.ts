@@ -12,11 +12,15 @@ import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 const saving = new Map<string, Promise<unknown>>();
 /** Keys whose save still out was let go with Cancel: a form opened again since is left alone when it lands. */
 const letGo = new Set<string>();
+/** How many forms are on screen, by key: a save landing may open what it made only while one is in sight. */
+const onScreenCount = new Map<string, number>();
+const onScreen = (key: string) => (onScreenCount.get(key) ?? 0) > 0;
 
 /**
  * The save for the form kept under `key`. `busy` is on while a save is out, also on a form drawn again for the key
- * meanwhile. `send` runs `save`, which dispatches and then settles the kept text, saying whether Cancel let it go
- * meanwhile, and returns what the form on screen needs to know; `settle` is then told that.
+ * meanwhile. `send` runs `save`, which dispatches and then settles the kept text, asking whether Cancel let it go
+ * meanwhile and whether a form for the key is on screen, and returns what that form needs to know; `settle` is then
+ * told that.
  */
 export function useSaveOut<Outcome>(key: string, settle: (outcome: Outcome) => void) {
   const [busy, setBusy] = useState(() => saving.has(key));
@@ -32,14 +36,16 @@ export function useSaveOut<Outcome>(key: string, settle: (outcome: Outcome) => v
   // found the save out, so the save cannot land in between and leave the form busy
   useLayoutEffect(() => {
     void saving.get(key)?.then((outcome) => landed(outcome as Outcome));
+    onScreenCount.set(key, (onScreenCount.get(key) ?? 0) + 1);
     return () => {
       shown.current = false;
+      onScreenCount.set(key, (onScreenCount.get(key) ?? 1) - 1);
     };
   }, []);
-  const send = async (save: (cancelled: () => boolean) => Promise<Outcome>) => {
+  const send = async (save: (cancelled: () => boolean, inSight: () => boolean) => Promise<Outcome>) => {
     if (saving.has(key)) return;
     setBusy(true);
-    const pending = save(() => letGo.has(key)).finally(() => {
+    const pending = save(() => letGo.has(key), () => onScreen(key)).finally(() => {
       saving.delete(key);
       letGo.delete(key);
     });

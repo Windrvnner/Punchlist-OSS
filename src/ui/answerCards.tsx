@@ -18,6 +18,8 @@ import type { Finding, Source } from '../domain/model';
 
 /** What a card holds as typed: the question or the finding's title, and its workstream. */
 type CardDraft = { text: string; ws: string };
+/** What Add as finding sent to make the finding. */
+type SentFinding = { title: string; workstream: string; body: string[] };
 /** "Add as question" and "Add as finding" cards half typed, per answer: kept on Escape, leaving and a restart */
 const questionDrafts = keptDrafts('answer-question', hasTexts('text', 'ws'));
 const findingDrafts = keptDrafts('answer-finding', hasTexts('text', 'ws'));
@@ -140,26 +142,30 @@ export function FindingCard({ dealId, answerId, text, sources, onDone }: {
     const sent = draft.typed;
     const body = toParagraphs(text);
     const finding = { dealId, title: title.trim(), workstream, body, sources, origin: 'chat' as const };
-    void out.send(async (cancelled) => {
+    void out.send(async (cancelled, onScreen) => {
       const result = await store.dispatch(CreateFinding, finding, { idempotencyKey: 'card-f-' + dealId, quiet: true });
       if (!result.ok) {
         store.toast(result.error.message);
         return false;
       }
-      toastCreated(store, dealId, finding.title);
       // cancelled while it was out: the finding is made all the same, and said so; a card opened since stays open
-      if (cancelled()) return false;
-      return draft.landed(sent) || editMade(createdFinding(store, result.value.opId), finding);
+      const made = createdFinding(store, result.value.opId);
+      const closes = !cancelled() && (draft.landed(sent) || editMade(made, finding, onScreen));
+      // after the finding made is opened, so the toast knows whether to offer Open
+      toastCreated(store, dealId, finding.title);
+      return closes;
     });
   };
   // #115's decision for this card too: what was typed since Create was sent becomes an open edit of the finding made,
-  // which its toast's Open shows, and leaves the card (#771). A finding that cannot be found leaves the card open
-  const editMade = (made: Finding | undefined, sent: { title: string; workstream: string; body: string[] }) => {
+  // and leaves the card (#771); its page opens in Edit while a card for the answer is in sight. A finding that cannot
+  // be found leaves the card open with the typing
+  const editMade = (made: Finding | undefined, sent: SentFinding, onScreen: () => boolean) => {
     if (!made) return false;
     const typedNow = draft.latest();
     const typed = { title: typedNow.text, ws: typedNow.ws, body: made.body.join('\n\n') };
     keepAsEdit(made, typed, { title: sent.title, workstream: sent.workstream, body: sent.body });
     draft.forget();
+    if (onScreen()) location.hash = findingHref(made);
     return true;
   };
   const cancel = () => {
@@ -191,6 +197,11 @@ export function FindingCard({ dealId, answerId, text, sources, onDone }: {
 /** "Finding created", with a way to open it. */
 function toastCreated(store: Store, dealId: string, title: string) {
   const created = dealFindings(store.get(), dealId).find((finding) => finding.title === title);
+  // already open in Edit (#115): Open would only take the person where they are
+  if (created && location.hash === findingHref(created)) {
+    store.toast('Finding created');
+    return;
+  }
   const open = () => {
     location.hash = findingHref(created!).slice(1);
   };
