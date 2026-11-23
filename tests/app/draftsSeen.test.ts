@@ -17,10 +17,11 @@ describe('seenSince', () => {
     expect(local.read(KEY)).toEqual({});
   });
 
-  it('counts a time after now (the clock was put back) or a damaged entry as now', () => {
+  it('keeps a time after now (the clock was put back), and counts a damaged entry as now', () => {
     const local = new MemoryLocal();
     local.write(KEY, { a: 50_000, b: 'yesterday', c: null });
-    expect([...seenSince(local, DEAL, ['a', 'b', 'c'], 2_000)]).toEqual([['a', 2_000], ['b', 2_000], ['c', 2_000]]);
+    expect([...seenSince(local, DEAL, ['a', 'b', 'c'], 2_000)]).toEqual([['a', 50_000], ['b', 2_000], ['c', 2_000]]);
+    expect(seenSince(local, DEAL, ['a'], 60_000).get('a')).toBe(50_000);   // the clock set right again: not older
     local.write(KEY, 'not a list');
     expect(seenSince(local, DEAL, ['a'], 3_000).get('a')).toBe(3_000);
   });

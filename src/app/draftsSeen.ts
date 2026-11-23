@@ -20,15 +20,16 @@ function storedSeen(local: LocalStore, dealId: string): Record<string, unknown> 
 
 /**
  * When this PC first saw each of these requests, in milliseconds. Only these are kept, so the stored list holds the
- * deal's drafts still pending from other PCs and no more. A time after `now` (this PC's clock was put back) counts as
- * now. A failing write is ignored: the drafts are still waited on, from now.
+ * deal's drafts still pending from other PCs and no more. A time is kept as first stored, even when it is after `now`
+ * (this PC's clock was put back): the wait then runs longer, never shorter. A failing write is ignored: the drafts are
+ * still waited on, from now.
  */
 export function seenSince(local: LocalStore, dealId: string, opIds: string[], now: number): Map<string, number> {
   const stored = storedSeen(local, dealId);
   const seen = new Map<string, number>();
   for (const id of opIds) {
     const at = stored[id];
-    seen.set(id, typeof at === 'number' && Number.isFinite(at) && at <= now ? at : now);
+    seen.set(id, typeof at === 'number' && Number.isFinite(at) ? at : now);
   }
   const same = Object.keys(stored).length === seen.size && [...seen].every(([id, at]) => stored[id] === at);
   if (!same) {
