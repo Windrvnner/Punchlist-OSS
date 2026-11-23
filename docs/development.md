@@ -9,7 +9,9 @@ You need the following:
 - Node.js 22 (see `.nvmrc`) and npm
 - Google Chrome at `/usr/bin/google-chrome` for browser tests. Set `PUNCHLIST_CHROME_PATH` to the absolute
   executable path when Chrome is installed elsewhere.
-- Optionally, LibreOffice at `/usr/bin/soffice` (backend tests that need it are skipped without it)
+- LibreOffice at `/usr/bin/soffice`, or at the path in `PUNCHLIST_SOFFICE`. `npm test` skips the tests that need it
+  when it is missing; `npm run check:all` first converts a small workbook with it (`node scripts/office-check.mjs`
+  runs that check alone) and stops if it cannot, then runs those tests on it with none skipped.
   - The presentation file-name field test also needs LibreOffice Impress.
   - The spreadsheet column-width test also needs Calibri or Carlito.
 
