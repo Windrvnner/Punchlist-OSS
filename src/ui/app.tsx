@@ -38,6 +38,7 @@ import { keepAttachments } from './keptAttachments';
 import { followCopies } from '../app/attachments';
 import { staleKept } from './editField';
 import { isReading, dealHash, dealTwin } from '../app/state';
+import { num } from './counts';
 
 const GROUPS: [State['deals'][string]['group'], string][] = (['live', 'monitor', 'pitch', 'closed'] as const).map((g) => [g, GROUP_HEADING[g]]);
 
@@ -286,7 +287,7 @@ function RailGroup({ label, deals, open, toggle, cur }: {
     <div>
       <button type="button" class="grp-h" aria-expanded={open} onClick={toggle}>
         <span class={`tri ${open ? 'open' : ''}`}><Icon name="chevr" size={12} /></span>
-        {label}<span class="cnt">{deals.length}</span>
+        {label}<span class="cnt">{num(deals.length)}</span>
       </button>
       {open && deals.map(row)}
     </div>
