@@ -273,9 +273,104 @@ async function placeholderContrast(page) {
   return lowest;
 }
 
+async function longAnswer(page, dealId, findingId) {
+  await page.evaluate(([dealId, findingId]) => {
+    const terms = 'The agreement uses the distribution lock-up ratio from the signed term sheet. ' +
+      'The draft has a lower figure, so confirm the applicable threshold with the counterparty.';
+    const at = new Date().toISOString();
+    store.setThread(`f:${dealId}:${findingId}`, [
+      { id: 'lock-up-question', role: 'me', text: 'Which distribution threshold applies?', state: 'done', at },
+      { id: 'lock-up-answer', role: 'ai', text: Array(20).fill(terms).join(' '), state: 'done', at },
+    ]);
+  }, [dealId, findingId]);
+  await page.waitForSelector('.msgs .acts button');
+}
+
+function readingScroll(page, fraction) {
+  return page.evaluate((fraction) => {
+    const chat = document.querySelector('.chat');
+    if (fraction !== undefined) chat.scrollTop = fraction * (chat.scrollHeight - chat.clientHeight);
+    return { top: chat.scrollTop, max: chat.scrollHeight - chat.clientHeight,
+      head: document.querySelector('.chathead').getBoundingClientRect().top,
+      endGap: document.querySelector('#pcomposer').getBoundingClientRect().top -
+        document.querySelector('.msgs').getBoundingClientRect().bottom };
+  }, fraction);
+}
+
+async function compareComposerPixels(page) {
+  await page.locator('#pcomposer').evaluate(async (composer) => {
+    await Promise.all(composer.getAnimations().map((animation) => animation.finished.catch(() => {})));
+  });
+  const boxes = await page.evaluate(() => {
+    const composer = document.querySelector('#pcomposer').getBoundingClientRect();
+    const x = Math.ceil(composer.left + 18);
+    const width = Math.floor(composer.width - 36);
+    return [[x, Math.floor(composer.top - 90), width, 70],
+      [x, Math.ceil(composer.top + 24), width, Math.floor(composer.height - 40)],
+      [x, Math.ceil(composer.bottom), width, 12]];
+  });
+  const painted = await readingPixels(page, boxes);
+  const hidden = await page.addStyleTag({ content: '.chat .opening,.chat .msgs{visibility:hidden}' });
+  const background = await readingPixels(page, boxes);
+  await hidden.evaluate((style) => style.remove());
+  return painted.map((rgba, region) => rgba.filter((value, i) => Math.abs(value - background[region][i]) > 3).length);
+}
+
+async function fillComposer(page, text) {
+  await page.fill('#pask', text);
+  await page.waitForFunction((height) => document.getElementById('pask').offsetHeight === height, text ? 168 : 24);
+}
+
+async function answerActionFocus(page) {
+  const actions = page.locator('.msgs .acts button');
+  await readingScroll(page, 0.5);
+  await actions.nth(1).evaluate((button) => button.focus({ preventScroll: true }));
+  await page.keyboard.press('Tab');
+  return actions.last().evaluate((last) => {
+    const box = last.getBoundingClientRect();
+    const composer = document.querySelector('#pcomposer').getBoundingClientRect();
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    return last === document.activeElement && box.bottom <= composer.top && last.contains(hit);
+  });
+}
+
+async function composerOcclusion(page, note) {
+  const evidence = [];
+  const before = await readingScroll(page, 0);
+  evidence.push(await compareComposerPixels(page));
+  const middle = await readingScroll(page, 0.5);
+  evidence.push(await compareComposerPixels(page));
+  const tall = 'See the signed term sheet.\n'.repeat(7).trimEnd();
+  await fillComposer(page, tall);
+  const grown = await readingScroll(page);
+  evidence.push(await compareComposerPixels(page));
+  const top = await readingScroll(page, 0);
+  evidence.push(await compareComposerPixels(page));
+  const end = await readingScroll(page, 1);
+  evidence.push(await compareComposerPixels(page));
+  await fillComposer(page, '');
+  const shrunk = await readingScroll(page);
+  evidence.push(await compareComposerPixels(page));
+  const focus = await answerActionFocus(page);
+  await page.locator('#pask').focus();
+  await readingScroll(page, 0);
+  await fillComposer(page, tall);
+  const start = await readingScroll(page);
+  await fillComposer(page, '');
+  const clear = evidence.every(([above, through, below]) => above > 50 && through === 0 && below === 0);
+  const anchored = grown.top === middle.top && start.top === 0 && shrunk.top === shrunk.max &&
+    [middle, grown, top, end, shrunk, start].every(({ head }) => head === before.head);
+  const gaps = [end, shrunk].map(({ endGap }) => +endGap.toFixed(1));
+  const endGap = gaps.every((gap) => Math.abs(gap - 34) <= 1.5);
+  const extent = Math.abs((grown.max - middle.max) - 144) <= 1;
+  say(`reading-text-stays-above-composer-and-remains-reachable-438-${note}`,
+    clear && anchored && endGap && extent && focus, JSON.stringify({ evidence, anchored, gaps, extent, focus }));
+}
+
 // #437 reuses the rail's pane glass. #442 checks both formerly clipped shadow edges, one pixel at a time.
 for (const colorScheme of ['dark', 'light']) {
-  const { ctx, page } = await reading({ pdf: false, colorScheme });
+  const { ctx, page, id, fid } = await reading({ pdf: false, colorScheme });
+  await longAnswer(page, id, fid);
   for (const [width, height] of [[1280, 736], [1024, 640], [1440, 900]]) {
     await page.setViewportSize({ width, height });
     await page.mouse.move(width - 2, 1);
@@ -290,6 +385,7 @@ for (const colorScheme of ['dark', 'light']) {
     const shadow = await paneShadow(page, height);
     say(`reading-pane-shadow-falls-off-beyond-view-442-${colorScheme}-${width}`,
       Math.abs(shadow.side) <= 2 && Math.abs(shadow.bottom) <= 2 && shadow.fits, JSON.stringify(shadow));
+    if (width !== 1440) await composerOcclusion(page, `${colorScheme}-${width}`);
   }
   await ctx.close();
 }
