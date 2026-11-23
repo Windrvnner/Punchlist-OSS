@@ -183,6 +183,25 @@ describe('a deal\'s Q&A log', () => {
     // the next update finds nothing to write, and the question no longer counts as changed then
     expect(await exportQaLog(store, dealId)).toMatchObject({ value: { status: 'written', changed: 0, updated: 0, kept: [] } }); expect(saves).toEqual([]);
   });
+  it('a response saved in the app while the update saves the file is kept as two versions, never replaced (#40)', async () => {
+    const at = (r: string) => ({ columns, cols: [0, 1, 2], lines: [2, 3], lastRow: 3, rows: [['1', 'What is the DSCR?', ''], ['2', 'Who is the EPC contractor?', r]], stamp: r });
+    const box = { file: at('Fabrikam') }; const { f } = files({ read: async () => ok(box.file) });
+    const { store, dealId } = await make(f); const [q1, q2] = dealQuestions(store.get(), dealId);
+    box.file = at('Fabrikam SA, signed November 14');                                     // changed in the file
+    await store.dispatch(SetResponse, { dealId, questionId: q1.id, response: '1.20x' });  // so the update saves
+    const save = store.services.qaLogs!.save;
+    store.services.qaLogs!.save = async (req) => {
+      const saved = await save(req);
+      const typed = await store.dispatch(SetResponse, { dealId, questionId: q2.id, response: 'Fabrikam Construction, app revision' });
+      expect(typed.ok).toBe(true);
+      return saved;
+    };
+    expect(await exportQaLog(store, dealId)).toMatchObject({ value: { status: 'written', changed: 0, kept: [2] } });
+    const q = store.get().questions[q2.id];
+    expect([q.response, qaVersions(store.get(), q), qaKept(store.get(), q)])
+      .toEqual(['Fabrikam Construction, app revision', 'Two versions', { response: 'Fabrikam SA, signed November 14' }]);
+    expect(logOf(store, dealId)!.last!.sent[q2.id].response).toBe('Fabrikam');
+  });
   // a log that writes a status or a date its own way ("Outstanding", 11/20/2026) is read in the app's terms
   it('takes in a status or date only the log changed, written its own way, as Changed and not as two versions', async () => {
     const cols4 = ['No.', 'Question', 'Response', 'Status', 'Date'];

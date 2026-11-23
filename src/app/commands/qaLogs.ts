@@ -8,6 +8,8 @@ import { DealId, QaLog, Question, QuestionId, QuestionStatus, Finding, type Deal
 import { setResponse, editQuestionField, checkQuestion } from '../../domain/transitions';
 import { ok, fail, notFound, rejected, type Result } from '../../domain/result';
 import { keepAside } from './keptVersions';
+import { cellValue } from '../../domain/logWrite';
+import type { ImportField } from '../../domain/importExport';
 
 /** the fields a version may set besides Response and Status (as EditQuestionField takes them) */
 const QuestionFieldName = z.enum(['text', 'askedBy', 'received', 'workstream', 'priority', 'respondedBy', 'responded']);
@@ -159,14 +161,30 @@ function applyVersion(state: { findings: Record<string, Finding> }, q: Question,
  * which the update writes. A question whose cells cannot be used as they are is left as it is (`skipped`); the next
  * update offers them again. Undo puts the questions back.
  */
+/**
+ * The log's cells for a question, without any the app changed after the update compared it: that is the person's newer
+ * edit, so the cell is left for two versions (#40)
+ */
+function stillAsCompared(q: Question, set: Record<string, string>, expected: Record<string, string> | undefined) {
+  const changedSince = (k: string) => expected?.[k] !== undefined && cellValue(q, k as ImportField) !== expected[k];
+  return Object.fromEntries(Object.entries(set).filter(([k]) => !changedSince(k)));
+}
+
 export const TakeFromQaLog = define({
   name: 'TakeFromQaLog',
-  input: z.object({ dealId: DealId, set: z.record(z.string(), z.record(z.string(), z.string())) }),
+  input: z.object({
+    dealId: DealId,
+    set: z.record(z.string(), z.record(z.string(), z.string())),
+    /** the app's values by question and field as the update compared them */
+    expect: z.record(z.string(), z.record(z.string(), z.string())).optional(),
+  }),
   targets: (s, i) => [...Object.keys(i.set), ...Object.keys(i.set).map((id) => s.questions[id]?.linkedFinding).filter((x): x is string => !!x)],
   plan(state, input, ctx) {
     const upserts: any[] = []; const snapshots: Question[] = []; const findings: Finding[] = []; const skipped: string[] = [];
-    for (const [id, set] of Object.entries(input.set)) {
+    for (const [id, all] of Object.entries(input.set)) {
       const q = state.questions[id]; if (!q || q.dealId !== input.dealId) continue;
+      const set = stillAsCompared(q, all, input.expect?.[id]);
+      if (!Object.keys(set).length) continue;
       const r = applyVersion(state, q, set, ctx); if (!r.ok) { skipped.push(id); continue; }
       if (r.value.next === q) continue;
       upserts.push({ kind: 'question', record: r.value.next, expectedRev: q.rev }); snapshots.push(q);

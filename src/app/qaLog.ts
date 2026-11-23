@@ -165,6 +165,15 @@ export type ExportOutcome =
  */
 export type PlaceKept = (ask: KeptAsk[]) => Promise<number[] | null>;
 
+/** what the update compared for each question it takes cells for, so a later edit is never replaced (#40) */
+function comparedValues(qs: Question[], taken: Record<string, Record<string, string>>) {
+  const byId = new Map(qs.map((q) => [q.id, q] as const));
+  return Object.fromEntries(Object.entries(taken).flatMap(([id, cells]) => {
+    const q = byId.get(id);
+    return q ? [[id, Object.fromEntries(Object.keys(cells).map((k) => [k, cellValue(q, k as ImportField)]))]] : [];
+  }));
+}
+
 /**
  * Bring the deal's log up to date with everything the app holds (logWrite), in the file itself. A failure after the log was
  * saved still says how many kept edits it filed not fully merged.
@@ -248,10 +257,10 @@ export async function exportQaLog(store: Store, dealId: string, place?: PlaceKep
   // what each cell held before. One the app cannot take as it is (an Answered status with no response,
   // say) is left in two versions, its cell recorded as before, so the next update never writes over it.
   const keptText = { ...w.keptText }; const changed: Record<string, Record<string, string>> = {};
-  const was = new Map(Object.keys(w.taken).map((id) => [id, store.get().questions[id]] as const));
+  const was = new Map(qs.filter((q) => w.taken[q.id]).map((q) => [q.id, q] as const));
   if (Object.keys(w.taken).length) {
     const set = Object.fromEntries(Object.entries(w.taken).map(([id, cells]) => [id, readCells(store, store.get().questions[id], cells)]));
-    const took = await store.dispatch(TakeFromQaLog, { dealId, set }, { quiet: true }); if (!took.ok) return settleThen(took);
+    const took = await store.dispatch(TakeFromQaLog, { dealId, set, expect: comparedValues(qs, w.taken) }, { quiet: true }); if (!took.ok) return settleThen(took);
     // taken where the question now says what the log does, read in the app's terms ("Outstanding" as Open)
     for (const [id, cells] of Object.entries(w.taken)) {
       const q = store.get().questions[id]; const before = was.get(id); if (!q || !before) continue;
