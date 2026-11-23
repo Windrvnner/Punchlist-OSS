@@ -50,9 +50,11 @@ verdict, and no criteria in your own words.
 >    documentation, wording that is not provider-neutral, or a change not described in technical terms.
 > 8. Existing documentation that the changes in the pull request make inaccurate.
 >
-> Anything else is minor: file it as a GitHub issue (after checking for an existing one, reproduced on the current
-> build, with its template and labels) instead of asking for another round. File every other problem you notice the
-> same way, including ones outside this change; never dismiss one as pre-existing without filing it.
+> Anything else is minor. A minor finding that is small and in code the pull request already touches is fixed in
+> the same pull request, without a review round of its own. File every other minor finding (in other code, or too
+> big to fix here) as a GitHub issue (after checking for an existing one, reproduced on the current build, with its
+> template and labels) instead of asking for another round. Treat every other problem you notice the same way,
+> including ones outside this change; never dismiss one as pre-existing without fixing or filing it.
 >
 > For a change to a screen, open every screenshot and check it against docs/design.md and the matching approved
 > screen side by side, in dark and light, at 1280x736 and 1024x640. Measure alignment in pixels (text and icons
@@ -64,12 +66,15 @@ verdict, and no criteria in your own words.
 > skipped. Re-run a failing file on its own before you treat the failure as real.
 >
 > Post the review on the pull request as a comment review, and follow the same no-attribution rule in it. List the
-> blockers first, each with how to reproduce it, then the issues you filed. End with "Blockers: none" or the count.
+> blockers first, each with how to reproduce it, then the minor findings to fix in this pull request, then the issues
+> you filed. End with "Blockers: none" or the count.
 
 ## Rounds
 
 - The author fixes the class of problem, not only the reported case, and attacks the fix at deal scale with the
   repo's realistic data before asking for re-review.
+- The author fixes the small minor findings in code the pull request already touches in the same pull request. Those
+  fixes get no review round of their own.
 - After three rounds, one short fresh-context review of only the fixes since round three is allowed. If it still
   finds a blocker, the work is cut or split instead of starting another round.
 - A pull request that passes with no blockers and whose required GitHub checks pass on its latest commit is merged,
