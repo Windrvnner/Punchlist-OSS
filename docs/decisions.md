@@ -82,6 +82,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - On import, real date cells are read as dates and plain numbers are not. An ambiguous date is settled by the row's other date, its neighbors, and the rule that no date is in the future; otherwise it is left blank and listed.
 - Marking imported questions that have a response as Answered is optional and off by default.
 - Merge matches a row by wording first, then by number; a row that matches a deleted question brings it back. A row that names who submitted it never matches another party's question. "Will overwrite" is shown field by field first.
+- Merge never matches a row to a question that names a different identifier: anything with a digit, a Roman numeral or code in capitals, a single capital letter, or a letter or numeral in parentheses or after a word such as class, tranche, part or clause (Class A and B, Tranche II and IV, clause 4(a) and 4(b)). A row matched by number alone names exactly the question's identifiers, in the same capitals (the SPA and the spa are two questions there); any other row is a question of its own. Otherwise spacing, capitals and punctuation alone never make identifiers differ (#125, #127, #128).
+- In a number, an I, l or O before a single digit, or an I or l before a point and a digit, is a letter (Facility I1 is l1 but not 11, Class I.1 is not 1.1); an I, l or O elsewhere in a number reads as 1 or 0 (I00, 2O24, O.5). The word I is not an identifier (#127, #128).
 - The same list imported on two PCs makes one set of questions, with ids derived from the deal, number, party, and wording.
 - Two questions with the same number are both kept and marked; a person renumbers one. Undo, Restore, and a kept
   version's Restore bring a deleted question back under its own number, even when another question holds it (#13, #116).
@@ -201,6 +203,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A deal shows for the people who created or added it; this organizes deals but doesn't restrict access. There are currently no per-deal walls and no encryption.
 - When a record has changed on two PCs, both versions are kept and a person chooses; the app never picks.
 - An import in progress (Q&A, an issues list, or the master checklist) is kept on its PC until it is done, replaced, or started over, so closing, reloading, or restarting loses nothing.
+- The New Deal form is kept on its PC as it changes, folders still being read included, until the deal is created, so closing, reloading, or restarting loses nothing (#55, #113). Once Create is pressed, the form stays open until the deal is made or Create fails (#36).
 - No design may lose or hide typed work. Every version not kept is listed under Deleted as "Superseded by" the person who chose, and can be restored.
 - Text typed into a new finding (New finding or **Add as finding**) while **Create Finding** is saving goes to the finding made: its page opens in Edit with that text. A form that held only what was sent closes (#115).
 - A form closed and opened again while its save is out shares one kept draft with it: the save settles that draft once when it lands, and the form on screen then closes only if nothing typed is kept, so the typing is in one place (#771).
