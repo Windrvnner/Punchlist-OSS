@@ -2970,6 +2970,7 @@ export function nodeAi(o: AiOptions) {
         if (!x || xFor !== R.pieces.length) { const c = await open(dealId, R); if (!c.ok) throw Object.assign(new Error(c.error.message), { kind: c.error.kind, code: c.error.kind === 'unreachable' ? 'unreachable' : undefined }); x = c.value; xFor = R.pieces.length; }
         guards.set(dealId, () => guard(dealId, epoch));
         await runBatch(dealId, R, ts, x, facts);
+        serviceAnswered(st);
       } catch (e) { if (e !== STALE) throw e; }
       finally { guards.delete(dealId); await release(dealId, units).catch(() => undefined); }
     }
@@ -2994,10 +2995,20 @@ export function nodeAi(o: AiOptions) {
   /** while the person is still kept waiting: until when; after that, nothing (the check carries on by itself) */
   const retryUntil = (st: Mine) => (st.failingSince !== undefined && nowMs() - st.failingSince < T.giveUp ? new Date(st.failingSince + T.giveUp).toISOString() : undefined);
   const awayLong = (st: Mine | undefined) => !!st && st.failingSince !== undefined && nowMs() - st.failingSince >= T.giveUp;
+  /**
+   * The model service answered: the outage, if there was one, is over. Said after each batch, not only once the whole
+   * share is done, so a long share that resumed after a short outage is not later reported as out of reach (#131).
+   */
+  function serviceAnswered(st: Mine) {
+    st.tries = 0;
+    st.failingSince = undefined;
+    st.nextTry = undefined;
+    st.signedOut = false;
+  }
   function runShare(dealId: string, st: Mine, kind: RoundKind) {
     if (st.running) return st.running;
     const go = inLane(dealId, () => logged(kind === 'first' ? 'firstPass' : 'checkAll', dealId, () => share(dealId, st.round)))
-      .then(() => { st.tries = 0; st.failingSince = undefined; st.nextTry = undefined; st.signedOut = false; }, (e) => failedShare(dealId, st, e));
+      .then(() => serviceAnswered(st), (e) => failedShare(dealId, st, e));
     st.running = go.finally(() => { st.running = null; });
     return st.running;
   }
