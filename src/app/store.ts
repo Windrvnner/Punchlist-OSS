@@ -1546,7 +1546,11 @@ export class Store {
       q.dealId === dealId && q.draft?.status === 'pending' && q.draft.opId ? [q.draft.opId] : []);
     const otherPc = pending.filter((id) => !this.liveRequests.has(id) && !this.state.ops[id]);
     const now = Date.parse(this.services.clock.now());
-    const seen = seenSince(this.services.local, dealId, otherPc, now);
+    // a deal not loaded here holds no questions to judge: its stored times are left as they are
+    const loaded = this.state.dealLoad[dealId] === 'loaded';
+    const seen = loaded
+      ? seenSince(this.services.local, dealId, otherPc, now)
+      : new Map(otherPc.map((id) => [id, now]));
     const seenFor = (id: string) => Math.max(0, now - seen.get(id)!);     // a clock put back counts as no time
     const waits = otherPc.map((id) => DRAFT_GIVE_UP_MS - seenFor(id)).filter((ms) => ms > 0);
     const ids = pending.filter((id) => {
