@@ -191,6 +191,11 @@ export function FindingCard({ dealId, answerId, text, sources, onDone }: {
 /** "Finding created", with a way to open it. */
 function toastCreated(store: Store, dealId: string, title: string) {
   const created = dealFindings(store.get(), dealId).find((finding) => finding.title === title);
+  // already open in Edit (#115): Open would only take the person where they are
+  if (created && location.hash === findingHref(created)) {
+    store.toast('Finding created');
+    return;
+  }
   const open = () => {
     location.hash = findingHref(created!).slice(1);
   };
