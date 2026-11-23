@@ -531,3 +531,13 @@ export function dealTwin(s: Pick<State, 'deals'>, d: Deal, short = false): strin
   const k = dealNameKey(d.name); const group = [d, ...Object.values(s.deals).filter((x) => x.id !== d.id && dealNameKey(x.name) === k)];
   const t = dealTwins(group).get(d.id); return (short ? t?.short : t?.full) ?? '';
 }
+
+/**
+ * A deal's name as a confirmation or notice says it: with the sidebar's short line in brackets when another deal shares
+ * the name, as "Project Kestrel (Wingtip)"; the name alone otherwise (#27). A notice splits its text at " · " into
+ * title and body, so a line holding both counterparty and day joins them with a comma instead.
+ */
+export function dealLabel(s: Pick<State, 'deals'>, d: Deal): string {
+  const twin = dealTwin(s, d, true).replaceAll(' · ', ', ');
+  return twin ? `${d.name} (${twin})` : d.name;
+}
