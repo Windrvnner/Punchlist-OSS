@@ -7,6 +7,8 @@ import { ImportQuestions } from '../../src/app/commands/importQuestions';
 import { dealQuestions } from '../../src/app/state';
 import { previewImport } from '../../src/app/transfer';
 import { matchRows, identifiers, sameIdentifiers } from '../../src/domain/logWrite';
+import type { Question } from '../../src/domain/model';
+import { dealList } from '../backend/dealList';
 import { make, deal, sheet, mapping, fileRow } from './importKit';
 
 /** [saved wording, incoming wording]: different questions that a misreading or a reworded number could join */
@@ -114,3 +116,57 @@ describe('the identifiers a question names', () => {
     expect(sameIdentifiers(['i', 'spa'], ['i', 'spa'])).toBe(true);
   });
 });
+
+/** [saved suffix, incoming suffix]: what each of a deal's questions names, and another identifier that reads alike */
+const LOOKALIKES: [string, string][] = [['for Facility I1', 'for Facility 11'], ['for Facility O1', 'for Facility 01'],
+  ['for Class I.1', 'for Class 1.1'], ['for Tranche II', 'for Tranche IV'], ['for Tranche V', 'for Tranche X'],
+  ['for Class A', 'for Class B'], ['under the SPA', 'under the SHA'], ['for Facility 2', 'for Facility 4'],
+  ['for Class I shares', 'for Class L shares']];
+/** a lowercase l read as a capital I inside words, as a scan reads it */
+const scanned = (text: string) => text.replace(/(?<=\p{L})l|l(?=\p{L})/gu, 'I');
+
+describe('a lender\'s list of 2,400 questions merged into a full log', () => {
+  it('updates the questions it asks again, keeps every other saved response, and matches log rows alike', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    const asks = dealList().items.map((item, i) => `${item} ${LOOKALIKES[i % LOOKALIKES.length][0]}`);
+    const header = 'Number,Question,Response,Submitted by,Workstream';
+    const log = asks.map((text, i) => [String(i + 1), text, `Saved response ${i + 1}`, 'Lender', 'Finance']);
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: sheet(header, log) })).ok).toBe(true);
+    const before = new Map(dealQuestions(store.get(), dealId).map((q) => [q.n, structuredClone(q)]));
+    // even questions come back scanned and renumbered; odd ones name a lookalike identifier, half under their number
+    const incoming = asks.map((text, i) => i % 2 === 0
+      ? [String(asks.length - i), scanned(text), `Updated ${i + 1}`]
+      : [String(i % 4 === 1 ? i + 1 : i + 5001), text.replace(LOOKALIKES[i % LOOKALIKES.length][0],
+        LOOKALIKES[i % LOOKALIKES.length][1]), `New ${i + 1}`]);
+    const rows = sheet(header, incoming.map(([n, text, response]) => [n, text, response, 'Lender', 'Finance']));
+    const preview = previewImport(store, dealId, 'merge', rows);
+    expect(preview.ok && preview.value).toMatchObject({ created: 1200, updated: 1200, restored: 0 });
+    const at = Date.now();
+    const result = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows });
+    const ms = Date.now() - at; console.log('2,400-row merge with lookalike identifiers, ms:', ms);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(ms).toBeLessThan(10_000);
+    expect(dealQuestions(store.get(), dealId)).toHaveLength(3600);
+    for (const [n, q] of before) {
+      const now = store.get().questions[q.id];
+      if (n % 2 === 0) expect(now).toEqual(q);
+      else expect(now).toMatchObject({ n, text: scanned(q.text), response: `Updated ${n}` });
+    }
+    expect(matchedRows(incoming, [...before.values()])).toEqual(new Map([...before.values()]
+      .filter((q) => q.n % 2 === 1).map((q) => [q.id, q.n - 1])));
+    expect((await store.undo(result.value.opId)).ok).toBe(true);
+    // Undo writes each question back as a new revision
+    const content = (q: Question) => ({ ...q, rev: 0, updatedAt: '' });
+    expect(dealQuestions(store.get(), dealId).map(content)).toEqual([...before.values()].map(content));
+  }, 120_000);
+});
+
+/** the log's row matching of `incoming` to `questions`, timed */
+function matchedRows(incoming: string[][], questions: Question[]) {
+  const at = Date.now();
+  const rows = matchRows({ rows: incoming.map(([n, text, response]) => [n, text, response, 'Lender', 'Finance']) },
+    mapping, questions);
+  const ms = Date.now() - at; console.log('2,400-row log match with lookalike identifiers, ms:', ms);
+  expect(ms).toBeLessThan(5_000);
+  return rows;
+}
