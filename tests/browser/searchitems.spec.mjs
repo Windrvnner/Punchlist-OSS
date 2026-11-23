@@ -134,6 +134,73 @@ async function selectedExpansion(page, oldCount) {
   await ctx.close();
 }
 
+const QUESTION = 'Who guarantees delivery under the direct agreement?';
+const FILTER = { status: 'closed', workstream: 'Financial', text: 'permit' };
+const DEFAULT_FILTER = { status: 'all', workstream: '', text: '' };
+const sameFilter = (a, b) => a.status === b.status && a.workstream === b.workstream && a.text === b.text;
+
+async function chooseQuestion(page, dealId, origin, pointer = false) {
+  await page.goto(URL + '#' + origin);
+  await page.waitForFunction((hash) => location.hash === '#' + hash, origin);
+  await page.waitForSelector('#view');
+  await page.evaluate((qaFilter) => store.ui({ qaFilter, selectedQuestion: null }), FILTER);
+  await search(page, QUESTION);
+  const result = page.locator('#pal-res [data-kind=question] button:not(.pmore)').first();
+  await result.waitFor();
+  if (pointer) await result.click();
+  else await page.keyboard.press('Enter');
+  await page.waitForFunction((id) =>
+    location.hash === '#qa-' + id && document.querySelector('.qpanel textarea.qtext')?.value.includes('guarantees'),
+  dealId);
+  return page.evaluate(() => store.get().ui.qaFilter);
+}
+
+async function keepsQaFilters(page, k, o) {
+  const fromQa = await chooseQuestion(page, k, 'qa-' + k);
+  const chosenVisible = await page.locator('.md .li.on').isVisible();
+  await page.focus('.qpanel textarea.qtext');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.qpanel', { state: 'detached' });
+  const afterEscape = await page.evaluate(() => store.get().ui.qaFilter);
+  const sameDeal = await chooseQuestion(page, k, 'overview-' + k);
+  const fromHome = await chooseQuestion(page, k, 'deals');
+  const otherDeal = await chooseQuestion(page, k, 'qa-' + o);
+  say('#497 Search keeps same-deal Q&A filters and opens out-of-filter questions',
+    chosenVisible && [fromQa, afterEscape, sameDeal].every((filter) => sameFilter(filter, FILTER)) &&
+      [fromHome, otherDeal].every((filter) => sameFilter(filter, DEFAULT_FILTER)),
+    JSON.stringify({ fromQa, afterEscape, sameDeal, fromHome, otherDeal }));
+}
+
+{
+  const { ctx, page, k, o } = await start();
+  const created = await page.evaluate(([dealId, text]) =>
+    store.dispatch(store.commandNamed('CreateQuestion'), { dealId, text, workstream: 'Legal' }, { quiet: true }),
+  [k, QUESTION]);
+  if (!created.ok) throw new Error(JSON.stringify(created.error));
+  await page.goto(URL + '#deals');
+  await page.reload();
+  await page.waitForFunction(() => store.get().boot.stage === 'ready');
+  await page.evaluate(([id, target, questions]) => {
+    const repo = store.services.repo;
+    const list = repo.list.bind(repo);
+    repo.list = async (kind, dealId) => {
+      const read = await list(kind, dealId);
+      if (!read.ok || kind !== 'question' || dealId !== id) return read;
+      const sample = read.value.find(({ envelope }) => envelope.data.text === target);
+      const extra = questions.map(({ text }, index) => ({
+        ...sample,
+        envelope: {
+          ...sample.envelope,
+          data: { ...sample.envelope.data, id: `q_${String(index + 10).padStart(26, '0')}`, n: index + 10, text },
+        },
+      }));
+      return { ...read, value: [...read.value, ...extra] };
+    };
+  }, [k, QUESTION, general()]);
+  await keepsQaFilters(page, k, o);
+  await ctx.close();
+}
+
 for (const [w, h] of SHOTS ? [[1280, 736], [1024, 640]] : []) for (const scheme of ['dark', 'light']) {
   const { ctx, page, k } = await start([w, h], scheme);
   await page.waitForSelector('#toast', { state: 'detached', timeout: 15000 }).catch(() => {});   // the deals' "created" notices gone
@@ -146,6 +213,12 @@ for (const [w, h] of SHOTS ? [[1280, 736], [1024, 640]] : []) for (const scheme 
   for (let i = 0; i < n; i++) await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter'); await page.waitForSelector('#ck-detail'); await page.waitForTimeout(600);
   await page.screenshot({ path: `${SHOTS}/2-item-opened-${scheme}-${w}x${h}.png` });
+  await page.evaluate(([dealId, text]) =>
+    store.dispatch(store.commandNamed('CreateQuestion'), { dealId, text, workstream: 'Legal' }, { quiet: true }),
+  [k, QUESTION]);
+  await chooseQuestion(page, k, 'qa-' + k);
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: `${SHOTS}/3-question-opened-${scheme}-${w}x${h}.png` });
   await ctx.close();
 }
 
