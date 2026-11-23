@@ -27,11 +27,13 @@ export interface Plan {
   dealId?: string;
   upserts: Upsert[];
   removes?: Remove[];
-  /** index membership: which deal's index gains or loses which records */
   /** remove everything filed under this deal (see Transaction.purgeDeal) */
   purgeDeal?: string;
   /** with `purgeDeal`: what this PC had taken in when the person began deleting (see Transaction.seen) */
   seen?: Seen;
+  /** index membership changes for records filed under a deal; see Transaction.index.
+   * `remove` accompanies deletion and takes nothing off by itself.
+   */
   index?: { dealId: string; add?: { kind: RecordKind; id: string }[]; remove?: { kind: RecordKind; id: string }[] };
   audit: AuditDraft[];
   /** Undo of a choice between versions: they stand again, unchosen (see Transaction.reopen) */

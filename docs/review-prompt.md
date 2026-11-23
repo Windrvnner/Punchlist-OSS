@@ -56,9 +56,10 @@ verdict, and no criteria in your own words.
 > screen side by side, in dark and light, at 1280x736 and 1024x640. Measure alignment in pixels (text and icons
 > centered in their controls, consistent spacing) after transitions settle.
 >
-> Run the whole `npm run check:all` yourself, desktop step included (installing dev dependencies such as Electron is
-> fine). A skipped step leaves the review incomplete, not passed; say which, and whether the LibreOffice tests ran.
-> Re-run a failing file on its own before you treat the failure as real.
+> Read the required GitHub checks (`check`, `desktop`, and `browser (1)` to `browser (4)`) on the pull request's latest
+> commit; a missing or failing one leaves the review incomplete, not passed. Run any tests you need locally as well
+> (installing dev dependencies such as Electron is fine), and say which you ran and which you skipped. Re-run a
+> failing file on its own before you treat the failure as real.
 >
 > Post the review on the pull request as a comment review, and follow the same no-attribution rule in it. List the
 > blockers first, each with how to reproduce it, then the issues you filed. End with "Blockers: none" or the count.
@@ -69,4 +70,5 @@ verdict, and no criteria in your own words.
   repo's realistic data before asking for re-review.
 - After three rounds, one short fresh-context review of only the fixes since round three is allowed. If it still
   finds a blocker, the work is cut or split instead of starting another round.
-- A pull request that passes with no blockers and a full local `npm run check:all` is merged, in the merge order.
+- A pull request that passes with no blockers and whose required GitHub checks pass on its latest commit is merged,
+  in the merge order.

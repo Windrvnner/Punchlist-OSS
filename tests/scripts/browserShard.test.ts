@@ -2,11 +2,10 @@
 // How the browser runner splits its suites into CI groups of about equal time and orders them longest first.
 import fs from 'node:fs';
 import { describe, it, expect } from 'vitest';
-import { longestFirst, shardOf, typicalTime } from '../../scripts/browser-shard.mjs';
+import { browserSuites, longestFirst, shardOf, typicalTime } from '../../scripts/browser-shard.mjs';
 
 const ciTimes: Record<string, number> = JSON.parse(fs.readFileSync('tests/browser/suite-times.json', 'utf8'));
-const suites = fs.readdirSync('tests/browser').filter((file) => file.endsWith('.spec.mjs'))
-  .map((file) => file.replace('.spec.mjs', '')).sort();
+const suites = browserSuites();
 const sum = (names: string[]) => names.reduce((total, name) => total + ciTimes[name], 0);
 const groupsOf = (names: string[], count: number, times: Record<string, number>) =>
   Array.from({ length: count }, (_, index) => shardOf(names, index + 1, count, times));
@@ -30,15 +29,18 @@ describe('splitting the suites into CI groups', () => {
     const totals = groupsOf(suites, 4, ciTimes).map(sum);
     const longest = Math.max(...Object.values(ciTimes));
     expect(Math.max(...totals) - Math.min(...totals)).toBeLessThanOrEqual(longest);
-    // the round-robin split by name it replaces put 1,194 s in one group and 474 s in another
-    expect(Math.max(...totals)).toBeLessThan(sum(suites) / 4 + longest / 2);
+    // the bound a longest-first split always meets, whatever times npm run browser:times writes; the round-robin
+    // split by name it replaces put 1,194 s in one group and 474 s in another
+    expect(Math.max(...totals)).toBeLessThanOrEqual(sum(suites) / 4 + (longest * 3) / 4);
   });
 
   it('splits only the named suites, and the same way on every call', () => {
     const named = ['checklist', 'lostwork', 'qapanel', 'keyboard', 'toolbars'];
-    const groups = groupsOf(named, 2, ciTimes);
+    // fixed times, since npm run browser:times rewrites the kept ones
+    const times = { checklist: 410, keyboard: 178, lostwork: 233, qapanel: 197, toolbars: 30 };
+    const groups = groupsOf(named, 2, times);
     expect(groups.flat().sort()).toEqual([...named].sort());
-    expect(groupsOf(named, 2, ciTimes)).toEqual(groups);
+    expect(groupsOf(named, 2, times)).toEqual(groups);
     expect(groups).toEqual([['checklist', 'keyboard'], ['lostwork', 'qapanel', 'toolbars']]);
   });
 
