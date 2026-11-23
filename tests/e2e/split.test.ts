@@ -86,7 +86,13 @@ describe('two PCs share a deal\'s checks', () => {
       stuck = true; p.net.pause('ba');                                                                    // the laptop stops answering, and nothing more of it reaches the office
       const t0 = Date.now(); await a;
       await until('the office to finish the round', () => [...roundsOf(p.sync.A, p.dealId).values()].some((r) => r.end?.kind === 'done'), 20000);
-      expect(Date.now() - t0).toBeGreaterThanOrEqual(FAST.lapse! - 100);                                   // it waited for the lapse before taking over
+      // it waited for the lapse before taking over, counted from the laptop's last line the office saw: on a busy
+      // machine that line can be written a little before the pause (#131)
+      const laptopId = p.B.backend.installId;
+      const fromLaptop = logOf(p.sync.A, p.dealId).filter((l) => l.pc === laptopId);
+      const lastSeen = Math.max(...fromLaptop.map((l) => Date.parse(l.at)));
+      expect(lastSeen).toBeLessThanOrEqual(t0);
+      expect(Date.now() - lastSeen).toBeGreaterThanOrEqual(FAST.lapse! - 100);
       const t = tally(p); expect(t.size).toBe(100); const twice = [...t].filter(([, x]) => x > 1).map(([n]) => n); expect(twice.length).toBeLessThanOrEqual(10);   // at most the laptop's batch in flight was done twice
     } finally { p.close(); }
   }, 60000);
@@ -100,7 +106,9 @@ describe('two PCs share a deal\'s checks', () => {
       await until('the office to finish the round', () => [...roundsOf(p.sync.A, p.dealId).values()].some((r) => r.end?.kind === 'done'), 20000);
       expect(Date.now() - t0).toBeLessThan(8000);                                                          // no lapse to wait for: the laptop said it left
       const t = tally(p); expect(t.size).toBe(100);
-      expect(logOf(p.sync.A, p.dealId).some((l) => l.left?.pc && l.pc === l.left.pc && l.pc !== logOf(p.sync.A, p.dealId).find((x) => x.plan)!.plan!.by)).toBe(true);
+      // the laptop said it left, whichever PC planned the round (on a busy machine the laptop can be first) (#131)
+      const bId = p.B.backend.installId;
+      expect(logOf(p.sync.A, p.dealId).some((l) => l.pc === bId && l.left?.pc === bId)).toBe(true);
     } finally { p.close(); }
   }, 60000);
 
@@ -187,7 +195,10 @@ describe('two PCs share a deal\'s checks', () => {
       expect(fulls.length).toBeGreaterThanOrEqual(1); expect(new Set(fulls.map((l) => JSON.stringify(l.full))).size).toBe(1);
       const std = [...checks(p.svcA), ...checks(p.svcB)].filter(([m]) => m === 'standard');
       expect(std.flatMap(([, ns]) => ns).sort((a, b) => a - b)).toEqual([...[15, 30, 45, 60], ...std.flatMap(([, ns]) => ns).filter((n) => n % 15 !== 0)].sort((a, b) => a - b));   // the flagged four and the sample, nothing else
-      expect(std.length).toBeLessThanOrEqual(4);                                                         // per PC: the flagged items in one call, the sample in one call
+      // per PC: the flagged items in one call, the sample in one call. A failure names each PC's calls (#131).
+      const standardOf = (svc: typeof p.svcA) => checks(svc).filter(([m]) => m === 'standard');
+      const byPc = { office: standardOf(p.svcA), laptop: standardOf(p.svcB) };
+      expect(std.length, JSON.stringify(byPc)).toBeLessThanOrEqual(4);
     } finally { p.close(); }
   }, 90000);
   it('5. a PC that sleeps and wakes after its share was taken: its batch is thrown away, and nothing is written twice', async () => {
