@@ -33,7 +33,7 @@ export const KeepQaLog = define({
 });
 
 /** a path as Windows compares it: case and slash direction don't matter, nor a separator at the end */
-const windowsPath = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLocaleLowerCase('en-US');
+export const windowsPath = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLocaleLowerCase('en-US');
 
 /**
  * Two deals may share a name, and so may their logs' files: one file is one deal's log, or each would write the other's
@@ -170,12 +170,6 @@ function applyVersion(state: { findings: Record<string, Finding> }, q: Question,
 }
 
 /**
- * An update takes in the cells only the Q&A log changed (an edit in the log is the latest), in one step:
- * `set` by question id, each field in the app's terms. The questions are marked Changed by the log's record (`changed`),
- * which the update writes. A question whose cells cannot be used as they are is left as it is (`skipped`); the next
- * update offers them again. Undo puts the questions back.
- */
-/**
  * The log's cells for a question, without any the app changed after the update compared it: that is the person's newer
  * edit, so the cell is left for two versions (#40)
  */
@@ -184,6 +178,12 @@ function stillAsCompared(q: Question, set: Record<string, string>, expected: Rec
   return Object.fromEntries(Object.entries(set).filter(([k]) => !changedSince(k)));
 }
 
+/**
+ * An update takes in the cells only the Q&A log changed (an edit in the log is the latest), in one step:
+ * `set` by question id, each field in the app's terms. The questions are marked Changed by the log's record (`changed`),
+ * which the update writes. A question whose cells cannot be used as they are is left as it is (`skipped`); the next
+ * update offers them again. Undo puts the questions back.
+ */
 export const TakeFromQaLog = define({
   name: 'TakeFromQaLog',
   input: z.object({

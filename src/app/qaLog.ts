@@ -12,7 +12,7 @@ import { localYmd, type QaLog, type Question } from '../domain/model';
 import { dealQuestions, dealTwin, qaKept } from './state';
 import { logWrite, logHolds, matchRows, cellValue, readLogCells, holds } from '../domain/logWrite';
 import {
-  KeepQaLog, SetQaLogFolder, RecordQaLogExport, ChooseQaVersion, TakeFromQaLog, fileTaken,
+  KeepQaLog, SetQaLogFolder, RecordQaLogExport, ChooseQaVersion, TakeFromQaLog, fileTaken, windowsPath as samePath,
 } from './commands/qaLogs';
 import { questionsSheet, suggestMapping, type Mapping, type ImportField } from '../domain/importExport';
 import { ok, fail, type Result } from '../domain/result';
@@ -28,8 +28,6 @@ export const logOf = (store: Store, dealId: string): QaLog | undefined => store.
 /** a file's folder and name, from its full path ("X:\Deals\Proseware\Q&A log.xlsx") */
 const placeOf = (full: string) => { const i = Math.max(full.lastIndexOf('\\'), full.lastIndexOf('/')); return i > 0 ? { folder: full.slice(0, i), file: full.slice(i + 1) } : null; };
 
-/** a path as Windows compares it: case and slash direction don't matter, nor a separator at the end */
-const samePath = (p: string) => p.toLowerCase().replace(/\//g, '\\').replace(/\\+$/, '');
 
 /**
  * What an imported file can be to the deal's log, by where the file is (`path`, which only the desktop app knows):

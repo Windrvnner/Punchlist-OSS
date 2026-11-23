@@ -43,9 +43,12 @@ async function dialog() {
   const sheets = app.store.services.sheets;
   const original = sheets.read;
   const held = new Map<number, () => void>();
+  const failing = new Set<number>();                                     // rows whose read fails once let go
   sheets.read = async (bytes, name, opts) => {
     const row = opts?.headerRow;
     if (row === 2 || row === 3) await new Promise<void>((go) => held.set(row, go));
+    const locked = { ok: false as const, error: { kind: 'failed' as const, message: 'The file is locked' } };
+    if (row && failing.has(row)) return locked;
     return original.call(sheets, bytes, name, opts);
   };
   const screen = document.createElement('div');
@@ -71,7 +74,7 @@ async function dialog() {
     sheets.read = original;
     await app.repo.close();
   };
-  return { app, dealId, get, heading, letGo, done };
+  return { app, dealId, get, heading, letGo, done, failing };
 }
 
 describe('a heading row read again in the Q&A import (#63)', () => {
@@ -123,6 +126,39 @@ describe('a heading row read again in the Q&A import (#63)', () => {
       await new Promise((settled) => setTimeout(settled, 50));
       expect([get<HTMLInputElement>('#im-header').value, get('#im-line').textContent])
         .toEqual(['1', 'Import 32 questions · 32 new']);
+    } finally {
+      await done();
+    }
+  });
+
+  it('a reread that fails says so and lets the person go on with the row already read', async () => {
+    const { app, dealId, get, heading, letGo, done, failing } = await dialog();
+    try {
+      failing.add(2);
+      await heading(2);
+      await letGo(2);
+      const said = 'Could not read Lender Q&A.csv: The file is locked';
+      await vi.waitFor(() => expect(get('#im-line').textContent).toBe(said));
+      const field = get<HTMLInputElement>('#im-header');
+      expect([field.value, field.disabled]).toEqual(['1', false]);
+      await heading(3);
+      await letGo(3);
+      await vi.waitFor(() => expect(get('#im-line').textContent).toBe('Import 30 questions · 30 new'));
+      expect(dealQuestions(app.store.get(), dealId)).toHaveLength(0);
+    } finally {
+      await done();
+    }
+  });
+
+  it('choosing another file while a reread is pending leaves nothing reading and nothing imported', async () => {
+    const { app, dealId, get, heading, letGo, done } = await dialog();
+    try {
+      await heading(3);
+      await act(() => get<HTMLButtonElement>('#im-back').click());
+      expect(get('#im-browse')).not.toBeNull();
+      await letGo(3);
+      await new Promise((settled) => setTimeout(settled, 50));
+      expect([get('#im-go'), get('.xfoot'), dealQuestions(app.store.get(), dealId).length]).toEqual([null, null, 0]);
     } finally {
       await done();
     }

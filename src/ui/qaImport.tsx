@@ -332,7 +332,10 @@ async function runImport(store: Store, dealId: string, qa: QaImportState, plan: 
   try {
     // a kept import not sent yet, of a file another deal has made its log since, imports nothing (#38)
     const taken = savedSubmission(qa.key) ? null : logTakenBy(store, dealId, qa.path);
-    if (taken) { qa.setError(taken); return; }
+    if (taken) {
+      qa.setError(taken);
+      return;
+    }
     const chosen = await chooseSubmission(store, qa, prepared?.rows ?? []);
     if (!chosen.ok) { qa.setError(chosen.error.message); return; }
     const submission = chosen.value;
