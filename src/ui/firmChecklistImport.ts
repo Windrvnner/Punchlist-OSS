@@ -256,7 +256,7 @@ export function useListReview(
 
   // A model that cannot be asked leaves its part out and says so; the list can still be brought in.
   const next = async () => {
-    if (!prepared || !prepared.items.length || !target.named || work.busy) return;
+    if (!prepared || !prepared.items.length || !target.named || work.busy || retries.asking.current) return;
     const texts = prepared.items.map((item) => item.text);
     const sig = askedAbout(texts, askReword, askSame, generalTexts);
     if (review && askedFor.current === sig) {
@@ -342,6 +342,13 @@ function askModel(
   return Promise.all([rewording, duplicates]);
 }
 
+/** A failed duplicate retry changes the reason for the rows it asked about (#378). */
+function withFailedPairs(was: Review, reason: Asked): Review {
+  if (!was.sameMissed) return { ...was, asked: { ...was.asked, same: reason } };
+  const kind = reason === 'unreachable' ? reason : 'failed';
+  return { ...was, sameMissed: { ...was.sameMissed, kind } };
+}
+
 /** Asking the model again for what the review is missing, keeping what the person checked as it was. */
 function useReviewRetries(
   store: Store, work: Work, review: Review | null, setReview: (review: Review) => void, generalTexts: string[],
@@ -352,17 +359,21 @@ function useReviewRetries(
   // The duplicate check missed some items last time (a part the service did not answer): Next asks about those alone
   // again, and adds what it finds.
   const askMissed = async (was: Review, texts: string[], missedAt: number[]) => {
+    if (work.busy || asking.current || !ai.sameMeaning) return false;
+    asking.current = true;
     const mine = work.begin('reviewing');
-    const sameReply = await ai.sameMeaning!({ items: texts, against: generalTexts, only: missedAt });
-    if (!work.isLatest(mine)) return false;
-    work.setBusy('');
-    // asked again and still not answered: the review shows as it was, check marks and all, and its line says so
-    if (!sameReply.ok) {
-      work.setError(`${NOT_DONE[failedAs(sameReply)]} again`);
+    try {
+      const sameReply = await ai.sameMeaning({ items: texts, against: generalTexts, only: missedAt });
+      if (!work.isLatest(mine)) return false;
+      const updated = sameReply.ok ? withMissedPairs(was, sameReply.value) : withFailedPairs(was, failedAs(sameReply));
+      setReview(updated);
+      const reason = NOT_DONE[updated.sameMissed?.kind ?? updated.asked.same];
+      if (reason) work.setError(`${reason} again`);
       return true;
+    } finally {
+      asking.current = false;
+      if (work.isLatest(mine)) work.setBusy('');
     }
-    setReview(withMissedPairs(was, sameReply.value));
-    return true;
   };
   // Retry beside the duplicates line does what Back then Next does: asks about the missed items alone, or all of them
   // when the check failed outright, and keeps the review on screen while it waits. Back drops its answer: Next
@@ -392,7 +403,7 @@ function useReviewRetries(
     }
     setReview(withRewordings(was, rewordReply.value));
   };
-  return { askMissed, retry, retryWording };
+  return { asking, askMissed, retry, retryWording };
 }
 
 /** The items as checked in the review, and bringing them in. */
