@@ -9,13 +9,13 @@ A redline (also called a blackline: a document that shows the changes from one d
 ## What was already built
 
 Much of this was already built for every blackline (see "Tracked changes and blacklines" in [decisions.md](decisions.md#documents-and-indexing)). A blackline, recognized by its name or by a comparison tool's cover page, is:
-- read only together with, or after, its clean draft, which is the truth for the deal's terms (`withClean`, ai.ts:731);
-- told to the model as the model's reading, never as fact (`blacklineLine`, ai.ts:906);
-- cited with the "reading" tag (`fit`, ai.ts:980), and a checklist item whose only citations carry it is never settled (ai.ts:1267); it never closes a finding by itself (same decision).
+- read only together with, or after, its clean draft, which is the truth for the deal's terms ([`withClean`](../src/backend/ai.ts));
+- told to the model as the model's reading, never as fact ([`blacklineLine`](../src/backend/ai.ts));
+- cited with the "reading" tag ([`fit`](../src/backend/ai.ts)), and a checklist item whose only citations carry it is never settled ([`check`](../src/backend/ai.ts)); it never closes a finding by itself (same decision).
 
 Before this design, three things were missing for a redline against another project:
-1. **Findings and Q&A.** A finding could be raised or reassessed on blackline pages alone (ai.ts:1273, 1374), and a Q&A response could be drafted from them alone (ai.ts:1352).
-2. **What the model is told.** Every blackline was described as "a comparison of two drafts" (ai.ts:912). For one against another project that is wrong: its deleted text is the other project's wording, not an earlier draft of this deal, which is the confusion to avoid.
+1. **Findings and Q&A.** A finding could be raised or reassessed on blackline pages alone ([`check`](../src/backend/ai.ts), [`reassess`](../src/backend/ai.ts)), and a Q&A response could be drafted from them alone ([`draft`](../src/backend/ai.ts)).
+2. **What the model is told.** Every blackline was described as "a comparison of two drafts" ([`blacklineLine`](../src/backend/ai.ts)). For one against another project that is wrong: its deleted text is the other project's wording, not an earlier draft of this deal, which is the confusion to avoid.
 3. **Precedent-folder documents** were read as this deal's own and could settle an item, and a precedent in a folder beside dated draft folders could become a family's newest draft and a blackline's clean draft (reproduced; filed as #433, which also covers any undated folder).
 
 ## Rules not used, and why
@@ -23,8 +23,8 @@ Before this design, three things were missing for a redline against another proj
 Nothing in this design guesses at names to call something another project's:
 - **Capitalized names after "compared to" or "vs"** would flag this deal's own blacklines: "SPA v3 Redline to SPA v2" names "SPA v2".
 - **Other deals' names** depended on which deals a person has and how far start-up has loaded them (startup in [architecture.md](architecture.md#storage-shared-between-pcs)), so people got different answers.
-- **Documents 3 or more other deals hold** (`SHARED_BY`, sameRoom.ts; this design's first draft): with four deals made from one data room, `alsoIn` drops every document 3 others hold (ai.ts:1004), so the whole room would be another project's; and it depends on loaded deals.
-- **"A vs B" with different first words** (this design's second draft): it made "Budget vs Actual Q3.pdf" and "Base Case vs Downside Case.pdf" into blacklines, and "Doe vs Roe judgment.pdf" and "Landlord vs Tenant dispute summary.pdf" too, against tests/backend/blacklines.test.ts:21-31. A comparison tool's output is a blackline by its cover page whatever its name, so only an uncovered, oddly named comparison is missed, and it is read as now.
+- **Documents 3 or more other deals hold** (`SHARED_BY`, `sameRoom.ts`; this design's first draft): with four deals made from one data room, `alsoIn` drops every document 3 others hold ([`alsoIn`](../src/backend/ai.ts)), so the whole room would be another project's; and it depends on loaded deals.
+- **"A vs B" with different first words** (this design's second draft): it made "Budget vs Actual Q3.pdf" and "Base Case vs Downside Case.pdf" into blacklines, and "Doe vs Roe judgment.pdf" and "Landlord vs Tenant dispute summary.pdf" too, against the cases in [`blacklines.test.ts`](../tests/backend/blacklines.test.ts). A comparison tool's output is a blackline by its cover page whatever its name, so only an uncovered, oddly named comparison is missed, and it is read as now.
 - **"Precedent" in a file's name** (second draft): "Gas Transportation Precedent Agreement.pdf" is this deal's own contract.
 
 A blackline is called this deal's own only when that is confirmed; otherwise the rule for another project's blackline is applied, since which it is cannot be told. A wrong call costs no more than a more careful sentence to the model, and a source that only supports, never a source used as the deal's terms.
@@ -34,8 +34,8 @@ A blackline is called this deal's own only when that is confirmed; otherwise the
 - `blacklines.ts`: `isBlackline`, `cleanDrafts` (clean, unclear or standalone), `coverOf` and the kept cover, and the name forms "A Redline to B" and "A vs B" (`wants`, `VS`), all unchanged in what they decide.
 - `families.ts`: drafts in sibling dated folders; with part 1, versions in one folder; `roomPath`.
 - Part 1's precedent-folder rule: a folder named Precedent, Precedents or Precedent Documents once a leading number and punctuation are taken off ("12. Precedents", never "Conditions Precedent").
-- The "reading" tag, its chip and tooltip (research.tsx:57), and the rule at ai.ts:1267.
-- `blacklineLine` and the listing lines in `send` (ai.ts:914).
+- The "reading" tag, its chip and tooltip ([`ResearchView`](../src/ui/research.tsx)), and the rule in [`check`](../src/backend/ai.ts).
+- [`blacklineLine`](../src/backend/ai.ts) and the listing lines in [`send`](../src/backend/ai.ts).
 - The parent design's cap of two places in any pick for a document of another project.
 
 ## New
@@ -61,11 +61,11 @@ It returns one of three answers, checked in this order:
 ### C. Never a main source
 
 A **secondary source** is a document of another project, or a blackline that is another project's or not known. An own blackline keeps the existing blackline rules exactly ("Tracked changes and blacklines" in decisions.md), since this rule is about redlines against another project. A citation of a blackline keeps "reading"; a citation of another project's document carries its own tag (question 1). Then:
-- **Checklist item:** settled only with at least one citation of a document of this deal that is not a blackline (the rule at ai.ts:1267, now also for documents of another project). Quick checks, which skip that rule, are unchanged.
-- **Finding raised by a check (ai.ts:1273):** one with no citation of this deal's own documents is not raised; the item is left "more", needing "a document of this deal that shows it", as a blackline-only item already is.
-- **Finding reassessed (ai.ts:1374):** a reassessment with no citation of this deal's own documents, none at all included, is not offered; the finding stays as written, with the reason in the failure line reassess already shows.
-- **Finding re-checked (`verify`, ai.ts:1862):** its reply carries no citations, and it only marks the finding for a person to look at (`mark`, ai.ts:2525 and 2665). The rule goes in what the model is told (D), both ways.
-- **Q&A draft (ai.ts:1352):** secondary citations do not count toward "a draft rests on a document it cites"; a draft resting only on them is "none", as a draft with no citation already is. A reused earlier response still counts, but the model's own paragraph after it is added only when it cites a document of this deal that is not secondary.
+- **Checklist item:** settled only with at least one citation of a document of this deal that is not a blackline (the rule in [`check`](../src/backend/ai.ts), now also for documents of another project). Quick checks, which skip that rule, are unchanged.
+- **Finding raised by a check:** one with no citation of this deal's own documents is not raised; the item is left "more", needing "a document of this deal that shows it", as a blackline-only item already is ([`check`](../src/backend/ai.ts)).
+- **Finding reassessed:** a reassessment with no citation of this deal's own documents, none at all included, is not offered; the finding stays as written, with the reason in the failure line reassess already shows ([`reassess`](../src/backend/ai.ts)).
+- **Finding re-checked:** its reply carries no citations, and it only marks the finding for a person to look at ([`verify`](../src/backend/ai.ts), [`mark`](../src/backend/ai.ts)). The rule goes in what the model is told (D), both ways.
+- **Q&A draft:** secondary citations do not count toward "a draft rests on a document it cites"; a draft resting only on them is "none", as a draft with no citation already is. A reused earlier response still counts, but the model's own paragraph after it is added only when it cites a document of this deal that is not secondary ([`draft`](../src/backend/ai.ts)).
 - **Chat answers:** see question 2 below.
 
 One citation of this deal's own documents is enough to pass; the app does not check that it backs each point, which would take a model's judgment.
@@ -83,11 +83,11 @@ Every secondary source takes at most two places in any pick (the parent design's
 
 ### E. Unclear blacklines
 
-A blackline whose clean draft cannot be told, even from its folder path, name and cover, stays out of every choice, as before (`ranked`, ai.ts:741). A blackline misread is a far greater risk than one missed.
+A blackline whose clean draft cannot be told, even from its folder path, name and cover, stays out of every choice, as before ([`ranked`](../src/backend/ai.ts)). A blackline misread is a far greater risk than one missed.
 
 ### F. Speed
 
-Before this design, `cleanOf` was worked out again on every `ranked` and `withClean` call (ai.ts:729-741). With `againstOf` added, both are kept per deal and worked out again only when the deal's documents change.
+Before this design, [`cleanOf`](../src/backend/ai.ts) was worked out again on every [`ranked`](../src/backend/ai.ts) and [`withClean`](../src/backend/ai.ts) call. With `againstOf` added, both are kept per deal and worked out again only when the deal's documents change.
 
 ## Changes to decisions
 
