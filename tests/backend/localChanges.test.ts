@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { LocalChanges } from '../../src/backend/localChanges';
-import { LogRepository } from '../../src/backend/logRepository';
+import { COPIED, LogRepository } from '../../src/backend/logRepository';
 import { isLine, type Line } from '../../src/backend/changeLines';
 import { sha256Hex } from '../../src/domain/checklist';
 import { Question } from '../../src/domain/model';
-import { Mem, quota } from '../adapters/memRepo';
+import { Mem, quota, refuse } from '../adapters/memRepo';
 
 const dealId = 'd_00000000000000000000000001';
 const file = `changes-office-${dealId}-0001.jsonl`;
@@ -152,5 +152,49 @@ describe('compact pending ownership (#503)', () => {
     local.write(sidecar, JSON.stringify([{ file, text: JSON.stringify({ ...proof, proof: 2 }) }]));
     expect(() => new LocalChanges(local, 'office')).toThrow('Pending change ownership could not be read');
     expect(local.read(file)).toBeNull();
+  });
+});
+
+describe('a copied install reusing a pending sequence (#112)', () => {
+  const question = (id: string, text: string) => ({
+    writes: [{ kind: 'question' as const, id, data: { id, dealId: 'd1', text }, expectedRev: null }],
+    index: { dealId: 'd1', add: [{ kind: 'question' as const, id }] },
+  });
+
+  const title = 'reports the copy, keeps the pending proof, and reads the deal under a new id after a restart';
+  for (const place of [undefined, '/onedrive/team']) it(`${title} (folder: ${place ?? 'none'})`, async () => {
+    const shared = new Mem();
+    const local = new Mem();
+    const ids = ['office', 'fresh'];
+    const where = place ? { place, machine: () => 'M1' } : {};
+    const options = {
+      local, shared, label: 'Office', user: () => 'adoe', clock: () => at, newId: () => ids.shift()!, ...where,
+    };
+    const first = new LogRepository(options);
+    expect((await first.transaction(question('q1', 'Saved here'))).ok).toBe(true);
+    const restore = refuse(shared, (text) => text.includes('"q2"'), () => new Error('EIO: refused'));
+    expect((await first.transaction(question('q2', 'Refused by the shared folder'))).ok).toBe(false);
+    restore();
+    const proof = local.read(sidecar);
+    expect(JSON.parse(proof!)).toHaveLength(1);
+    const name = shared.list().find((n) => n.startsWith('changes-office-d1-'))!;
+    const copy = { ...JSON.parse(shared.read(name)!.trim()), seq: 2 };
+    const data = { ...copy.recs[0].data, id: 'q3', text: 'Copy' };
+    copy.recs = [{ ...copy.recs[0], id: 'q3', ver: 'office.2.0', data }];
+    shared.append(name, JSON.stringify(copy) + '\n');
+    const synced = await first.sync();
+    expect(synced.ok && synced.value.self.note).toBe(COPIED);
+    expect(local.read(sidecar)).toBe(proof);
+    await first.close();
+    const restarted = new LogRepository(options);
+    expect(restarted.id).toBe('fresh');
+    const textOf = async (id: string) => {
+      const read = await restarted.get('question', id);
+      return read.ok ? (read.value?.envelope.data as Question | undefined)?.text : undefined;
+    };
+    expect(await textOf('q1')).toBe('Saved here');
+    expect(await textOf('q3')).toBe('Copy');
+    expect(local.read(sidecar)).toBe(proof);
+    await restarted.close();
   });
 });
