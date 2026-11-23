@@ -71,17 +71,21 @@ function isChecklistKept(value: unknown): value is ChecklistKept {
 /**
  * Where the import is kept, and what was left there. It is kept by the way in: a kept "Import a list…" never opens in
  * place of the list "Replace…" names, nor the other way round. `fresh` opens it fresh past a kept import it could not
- * show. `holding` stops writes while the list is brought in; `keepNow` keeps the state as it is when called.
+ * show. `setAside` is true while a kept import that was not shown (`fresh`, or one that fails its shape check) is still
+ * left as it is: nothing new has been typed or read in its place yet (#381). `holding` stops writes while the list is
+ * brought in; `keepNow` keeps the state as it is when called.
  */
 export function useKeeper(layer: Layer | undefined, name: string | undefined, fresh: boolean) {
   const key = importKey.checklist(layer, name);
-  const [left] = useState(() => {
-    const kept = fresh ? null : keptImport(key);
-    return isChecklistKept(kept) ? kept : null;
+  const [{ left, unreadable }] = useState(() => {
+    const kept = fresh ? undefined : keptImport(key);
+    const readable = isChecklistKept(kept);
+    return { left: readable ? kept : null, unreadable: kept !== undefined && !readable };
   });
+  const setAside = useRef(fresh || unreadable);
   const holding = useRef(false);
   const keepNow = useRef(() => {});
-  return { key, fresh, left, holding, keepNow };
+  return { key, left, setAside, holding, keepNow };
 }
 export type Keeper = ReturnType<typeof useKeeper>;
 
@@ -99,14 +103,15 @@ export interface KeptNow {
 
 /** Writes the import as it changes, before the next frame. */
 export function useKeepImport(keeper: Keeper, now: KeptNow) {
-  const { key, fresh } = keeper;
+  const { key } = keeper;
   const { paste, table, text, reads, review, choices } = now;
   const keep = () => {
     if (keeper.holding.current) return;
     if (!table && !text) {
-      keepPasteAlone(key, fresh, paste);
+      keepPasteAlone(keeper, paste);
       return;
     }
+    keeper.setAside.current = false;   // a list read in its place: what was set aside is written over whole
     const askedFor = now.askedFor.current;
     keepImport(key, { paste, table, text, reads, review, choices: { ...choices, askedFor } });
   };
@@ -122,11 +127,15 @@ export function useKeepImport(keeper: Keeper, now: KeptNow) {
 }
 
 /** Before a list is read only the paste box is kept, as typed. */
-function keepPasteAlone(key: string, fresh: boolean, paste: string) {
-  // opened fresh past a kept import it could not show: that one is left as it is until a list is read in its place
-  if (fresh) {
+function keepPasteAlone(keeper: Keeper, paste: string) {
+  const { key } = keeper;
+  // opened past a kept import it could not show: that one is left as it is until something is typed in its place,
+  // which then replaces the whole of it, so no part of it is kept beside the new paste
+  if (keeper.setAside.current) {
+    if (!paste.trim()) return;
     const nothingElse = { table: null, text: null, reads: null, review: null, choices: undefined };
-    if (paste.trim()) keepImport(key, { paste, ...nothingElse });
+    keepImport(key, { paste, ...nothingElse });
+    keeper.setAside.current = false;
     return;
   }
   if (paste.trim() || keptImport(key)?.paste) keepImport(key, { paste });

@@ -44,6 +44,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Notices stack, up to three at the top of the page, for 8 seconds each (paused on hover or focus), each with its own **Undo**, and only on the PC that acted.
 - Unseen changes that another PC made to a deal deleted elsewhere are kept on that PC as "Project X (recovered)", with a notice that stays until closed and says who deleted the original; keeping or deleting the copy is that person's call. Details still open are in GitHub Issues.
 - A record changed on two PCs, or deleted on one and changed on another, shows design B: the person picks a version, then confirms, and until then the record takes no edits. One record in two versions never blocks the others.
+- A finding put back from Deleted on two PCs from the same deletion, then changed or deleted on one, stays as that PC has it, with nothing to choose (#401).
 - A question's draft never conflicts with a person's change on another PC; both are kept. Two crossing drafts, or a delete alongside a draft, still require a choice.
 - Settings (720px wide) has Account, Appearance, Deals Open On, Checklist, Default Model, and Keyboard, plus, in the desktop app, the Punchlist folder and Intelligence sign-in, with the app's version in the header. There is no Firm field, because the firm's name comes from the control file, and there are no job titles.
 - Each thing has one name: "counterparty"; "finding" (not "issue"); "Deal status"; "Changed elsewhere", with **Keep Mine** and **Take Theirs**; "Q&A" for the page and "Q&A log" for the spreadsheet; "Remove" to take something off a list and "Delete" for a record; and "Data room" and "Folders". The app says **Retry Now** where it already retries and **Retry** elsewhere. An interrupted or undone action is named by its button. "Blocker" simply means something flagged. The duplicate confirmation says **Create Anyway**.
@@ -82,7 +83,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Marking imported questions that have a response as Answered is optional and off by default.
 - Merge matches a row by wording first, then by number; a row that matches a deleted question brings it back. A row that names who submitted it never matches another party's question. "Will overwrite" is shown field by field first.
 - The same list imported on two PCs makes one set of questions, with ids derived from the deal, number, party, and wording.
-- Two questions with the same number are both kept and marked; a person renumbers one.
+- Two questions with the same number are both kept and marked; a person renumbers one. Undo, Restore, and a kept
+  version's Restore bring a deleted question back under its own number, even when another question holds it (#13, #116).
 - Export has no finding or link columns and always carries every column of the log.
 - No person in the app is named in a prompt, export, spreadsheet, or the memo. An accepted AI draft exports as "AI draft, accepted on" a date, and findings export the date reviewed but not the reviewer. Who responded from outside the firm is kept.
 - Each deal has one consolidated Q&A log, in the team's own folder and format; the app keeps no copy and never gates it. One file is one deal's Q&A log: a file another deal already uses as its log can't be imported into a second deal (#38).
@@ -97,6 +99,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Findings have no codes and are named by title everywhere; no id is ever cited.
 - A finding's page has Reviewed, status, edit, and delete in fixed places, and no suggested questions under it.
 - An open finding that the documents may have overtaken is marked "May be out of date", with its reason and **Update from Documents**. The app never rewrites a finding by itself.
+- Attaching a document to a finding already marked "May be out of date" for another reason than a response keeps that reason (#327).
 - An update that replaces the finding's words clears Reviewed and keeps the earlier text under "Previous version".
 - There is no separate "look again" button: new documents, Check again, or the finding's conversation do that.
 - A finding's stripe is red while the finding is open and gray once it is closed, whoever raised it; it is not colored by severity.
@@ -200,6 +203,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - An import in progress (Q&A, an issues list, or the master checklist) is kept on its PC until it is done, replaced, or started over, so closing, reloading, or restarting loses nothing.
 - No design may lose or hide typed work. Every version not kept is listed under Deleted as "Superseded by" the person who chose, and can be restored.
 - Text typed into a new finding (New finding or **Add as finding**) while **Create Finding** is saving goes to the finding made: its page opens in Edit with that text. A form that held only what was sent closes (#115).
+- A save that lands after its deal was deleted elsewhere goes to the recovered copy, removed fields included, unless the copy changed those fields or the save left out a field it never saw; then it is refused. A save to a deleted deal's member, or after its recovered copy was deleted, is refused (#664, #222).
 - A change that arrives before a change it builds on is held back without pausing the deal; one more than a day old is let go as a choice. A deal can't be deleted while such changes are on their way.
 - The connection status card shows only when something is wrong. The avatar's dot is the accent color or red, and OneDrive being unavailable for 15 minutes produces one notice.
 - A copied install is detected and stops writing. A build never changes a record written by a newer version.
@@ -208,6 +212,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - The check line names who is working.
 - A check waiting on the model service says so after 2 minutes and resumes by itself; a check waiting on a sign-in says that instead.
 - Attachments are kept in the shared folder under their document's id. A file attached on Home is kept with the person's conversations.
+- A deal's recovered copy keeps the deal's attached files, and files attached and not yet sent follow their conversation to the copy (#117).
+- A message goes with all of its attached files or not at all: a file this PC can no longer send is named, its chip is marked, and nothing is sent (#671).
 
 ## AI and models
 

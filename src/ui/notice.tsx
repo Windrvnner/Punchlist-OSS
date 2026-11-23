@@ -94,8 +94,15 @@ function Cut({ text }: { text: string }) {
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    // the span is as wide as its text until there is no more room, so the text fits when it does not overflow the span
-    const fits = (s: string) => { el.textContent = s; return el.scrollWidth <= el.clientWidth + 1; };
+    // the span is as wide as its text until there is no more room, so the text fits when it does not overflow the span.
+    // Measured to the fraction of a pixel: text over by less than one whole pixel would still be cut again by the
+    // style sheet's own ellipsis, which leaves a gap before the words after it (#754).
+    const fits = (s: string) => {
+      el.textContent = s;
+      const text = document.createRange();
+      text.selectNodeContents(el);
+      return text.getBoundingClientRect().width <= el.getBoundingClientRect().width + 0.01;
+    };
     const fit = () => {
       if (fits(text)) return;
       const g = graphemes(text);

@@ -750,6 +750,29 @@ export function nodeDocuments(o: DocumentsOptions) {
     const j = jobs.get(dealId); if (j && !j.done) { j.again = true; if (quietUntil !== undefined) j.quietUntil = quietUntil; }   // the run just started (nothing awaits between the check above and its start)
     return ok('running');
   }
+  /**
+   * The files attached on a deal that has since been deleted on another PC become its recovered copy's too, so what was
+   * attached there still opens and sends from the copy (#117). The file stays where it was saved in the shared folder;
+   * only its line is written again, under the copy. A document the copy already knows is left as it is.
+   */
+  function carryAttached(fromDealId: string, toDealId: string) {
+    const have = all(toDealId);
+    for (const d of records(fromDealId).values()) {
+      const place = [d, ...(d.copies ?? [])].find((p) => p.folder === ATTACHED);
+      if (!place || have.get(d.docId)?.name) continue;
+      const line = { docId: d.docId, hash: d.hash, name: place.name, folder: ATTACHED, rel: place.rel, size: d.size };
+      // what is known of the file goes with it, so the copy need not read it again
+      for (const key of ['pages', 'via', 'tracked', 'words'] as const) {
+        if (d[key] !== undefined) Object.assign(line, { [key]: d[key] });
+      }
+      say(toDealId, line);
+    }
+  }
+  /** Of these documents of a deal, those whose file this PC cannot send now: gone, or not synced here yet (#671). */
+  async function unsendable(dealId: string, docIds: string[]): Promise<string[]> {
+    const found = new Set((await wanted(dealId, docIds)).map((w) => w.docId));
+    return docIds.filter((id) => !found.has(id));
+  }
   const service: DocumentService = {
     scanFolder: safe(async (p) => {
       if (!isDir(p)) return fail({ kind: 'notFound', message: `${p} could not be opened` });
@@ -833,6 +856,8 @@ export function nodeDocuments(o: DocumentsOptions) {
       } catch (e) { return fail({ kind: 'failed', message: (e as Error).message || unloaded }); }
       return ok({ doc: known(dealId, docId)?.name ?? file.name, docId });
     }),
+    carryAttached: safe(async (fromDealId, toDealId) => ok(carryAttached(fromDealId, toDealId))),
+    unsendable: safe(async (dealId, docIds) => ok(await unsendable(dealId, docIds))),
     cached: safe(async () => ok(o.keeper.loaded())),
     drafts: safe(async (dealId, docId) => {
       const all = [...records(dealId).values()]; const fam = families(all.map((r) => ({ docId: r.docId, path: roomPath(r), ...(r.seen ? { seen: r.seen } : {}) }))).find((f) => f.drafts.some((d) => d.docId === docId));

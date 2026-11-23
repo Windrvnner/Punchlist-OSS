@@ -71,6 +71,19 @@ export class LocalChanges {
 
   has(line: string): boolean { return !!this.find(line); }
 
+  /**
+   * A shared line proves only its own exact bytes. The same PC and sequence with other bytes was written by a copied
+   * install under this id, so it is not this PC's pending change; local journal reads stay strict (#112).
+   */
+  sharedIsPending(line: string): boolean {
+    try {
+      return this.has(line);
+    } catch (error) {
+      if (error instanceof OwnershipError) return false;
+      throw error;
+    }
+  }
+
   get hasPending(): boolean { return this.attempts.size > 0; }
 
   pendingFiles(id: string): Set<string> {
