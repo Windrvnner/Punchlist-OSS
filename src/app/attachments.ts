@@ -96,13 +96,25 @@ async function unsendableOf(store: Store, dealId: string, docIds: string[]): Pro
   return again.ok ? again.value : first.value;
 }
 
+/** Chips of these files show whether their file was found, so a person can see which to attach again (#671). */
+function markMissing(store: Store, dealId: string, checked: string[], missing: string[]) {
+  const marked = (attachment: Attachment): Attachment => {
+    if (attachment.dealId !== dealId || !attachment.docId || !checked.includes(attachment.docId)) return attachment;
+    const { missing: _was, ...rest } = attachment;
+    return missing.includes(attachment.docId) ? { ...rest, missing: true } : rest;
+  };
+  store.ui((ui) => ({ attachments: ui.attachments.map(marked) }));
+}
+
 /**
  * Whether attached files can all go with a message (#671). When one can no longer be sent from this PC (its copy in
  * the shared folder was removed, or has not synced here yet), nothing is sent and a notice names it, rather than the
  * message going without it.
  */
 export async function filesSendable(store: Store, dealId: string, files: { doc: string; docId: string }[]) {
-  const missing = await unsendableOf(store, dealId, files.map((file) => file.docId));
+  const checked = files.map((file) => file.docId);
+  const missing = await unsendableOf(store, dealId, checked);
+  markMissing(store, dealId, checked, missing);
   if (!missing.length) return true;
   const names = [...new Set(files.filter((file) => missing.includes(file.docId)).map((file) => file.doc))];
   // one file is named, its name giving way when the line is too short; several are counted, and named on hover

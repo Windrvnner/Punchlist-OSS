@@ -26,7 +26,12 @@ export const pageHash = (page: Landing, dealId: string) => `${DEAL_PAGES.find((p
 /** The address a deal opens on: the page the person chose in Settings. */
 export const dealHash = (prefs: Pick<Prefs, 'landing'>, dealId: string) => pageHash(prefs.landing, dealId);
 /** A file waiting to go with the next message of one conversation (`conv` is that conversation's key). */
-export interface Attachment { id: string; name: string; dealId: string; findingId?: string; conv: string; state: 'pending' | 'done'; doc?: string; docId?: string }
+export interface Attachment {
+  id: string; name: string; dealId: string; findingId?: string; conv: string;
+  state: 'pending' | 'done'; doc?: string; docId?: string;
+  /** its file could not be found when the message was to be sent: it must be attached again (#671) */
+  missing?: boolean;
+}
 /** 'failed' can be retried; 'missing' is the backend saying the file is not in the deal's folders */
 export type PageState = 'loading' | 'failed' | { kind: 'missing'; message: string } | PageView;
 
