@@ -352,14 +352,47 @@ describe('two PCs share a deal\'s checks', () => {
       await until('the laptop to finish the round', () => [...roundsOf(p.sync.B, p.dealId).values()].some((r) => r.end?.kind === 'done'), 30000);
       expect(tally(p).size).toBe(100); expect(logOf(p.sync.B, p.dealId).some((l) => l.left && l.pc === p.B.backend.installId)).toBe(false);
     } finally { p.close(); }
-    // alone, with the service away for less than the time a person is kept waiting: the check ends as usual
-    let off = false; const q = await pair({ items: 30, one: true, scriptA: { delay: 10, down: () => off } });
+    // alone, with the service away for one call: the check ends as usual, even when the rest of it, once the service
+    // is back, takes longer than the time a person is kept waiting (#131). Two items a call keep the rest over it.
+    let off = false;
+    const awayOnce = () => {
+      const was = off;
+      off = false;
+      return was;
+    };
+    const q = await pair({ items: 30, one: true, batch: 2, scriptA: { delay: 40, down: awayOnce } });
     try {
-      val(await aiOf(q.A).firstPass(q.dealId)); await allEnded(q);
-      off = true; const r = q.A.backend.ai.checkAll!({ dealId: q.dealId, deep: true }); setTimeout(() => { off = false; }, FAST.giveUp! / 3);
+      val(await aiOf(q.A).firstPass(q.dealId));
+      await allEnded(q);
+      off = true;
+      const at = Date.now();
+      const r = q.A.backend.ai.checkAll!({ dealId: q.dealId, deep: true });
       expect(val(await r)).toMatchObject({ items: 30, unchecked: { items: 0, findings: 0 } });
+      expect(Date.now() - at).toBeGreaterThan(FAST.giveUp!);                       // the rest did outlast the wait
     } finally { q.close(); }
   }, 90000);
+
+  it('11h. alone: a second outage after the service answered again starts its own wait, '
+    + 'and the check ends as out of reach', async () => {
+    // away for the first call, back for three, then away for good (#131)
+    let calls = 0;
+    let awayAgainAt = 0;
+    const away = () => {
+      calls++;
+      if (calls >= 5 && !awayAgainAt) awayAgainAt = Date.now();
+      return calls === 1 || calls >= 5;
+    };
+    const q = await pair({ items: 30, one: true, batch: 2 });
+    try {
+      val(await aiOf(q.A).firstPass(q.dealId));
+      await allEnded(q);
+      q.svcA.set({ delay: 40, down: away });
+      const r = await q.A.backend.ai.checkAll!({ dealId: q.dealId, deep: true });
+      expect(!r.ok && r.error.message).toMatch(/can’t be reached/);
+      // the wait was counted from the second outage, not from the first
+      expect(Date.now() - awayAgainAt).toBeGreaterThanOrEqual(FAST.giveUp!);
+    } finally { q.close(); }
+  }, 60000);
 
   it('11b. the only other member lacks a document the round needs: the round is not stuck', async () => {
     const p = await pair({ items: 10 });
@@ -428,6 +461,9 @@ describe('two PCs share a deal\'s checks', () => {
       await allEnded(p);
       const lines = logOf(p.sync.A, p.dealId); const followed = lines.filter((l) => l.done && (l.done.docs ?? []).length === 3);
       expect(new Set(followed.map((l) => l.done!.round ?? l.done!.opening)).size, `the lines: ${JSON.stringify(lines.filter((l) => l.opening || l.plan || l.done || l.merged || l.abandoned).map((l) => ({ n: l.n, pc: l.pc?.slice(0, 4), k: Object.keys(l).find((x) => !['v', 'at', 'n', 'pc'].includes(x)), id: l.opening?.id ?? l.plan?.id ?? l.done?.round ?? l.done?.opening ?? l.merged?.round ?? l.abandoned?.round, docs: l.done?.docs?.length ?? l.plan?.docList.length })))}`).toBe(1);                // one round (or one opening with nothing to do) followed it
+      // the laptop's finding, if it wrote it, is read here too (#131)
+      p.net.now();
+      await p.A.backend.repo.sync!();
       const titles = val(await p.A.backend.repo.list('finding', p.dealId)).map((l) => (l.envelope.data as any).title); expect(titles.length).toBe(1);
     } finally { p.close(); }
   }, 60000);
@@ -471,14 +507,24 @@ describe('two PCs share a deal\'s checks', () => {
   it('20. a PC that was not part of the round, with the app open, finishes a round the only PC in it left unfinished', async () => {
     for (const how of ['sleeps', 'closes'] as const) {
       let stuck = false; const never = new Promise<void>(() => undefined);
-      const p = await pair({ items: 60, scriptA: { delay: 40, hold: () => (stuck ? never : undefined) } });
+      // a PC that closes says it left, so the laptop does not wait out a lapse: a long lapse there keeps a busy
+      // machine's slowness apart from the lapse it proves was not waited for (#131)
+      const timing = how === 'closes' ? { lapse: 8000 } : undefined;
+      const p = await pair({ items: 60, scriptA: { delay: 40, hold: () => (stuck ? never : undefined) }, timing });
       try {
         void aiOf(p.A).firstPass(p.dealId).catch(() => undefined);                                       // only the office goes through the checklist
         await until('the office to be part-way', () => checks(p.svcA).length >= 2);
         const t0 = Date.now();
+        const aId = p.A.backend.installId;
         if (how === 'sleeps') { stuck = true; p.net.pause('ab'); } else p.A.backend.close();
         await until('the laptop to finish it', () => { const r = [...roundsOf(p.sync.B, p.dealId).values()]; return r.length > 0 && r.every((x) => x.end) && r.some((x) => x.end?.kind === 'done'); }, 30000);
-        const took = Date.now() - t0; if (how === 'sleeps') expect(took).toBeGreaterThanOrEqual(FAST.lapse! - 100); else expect(took).toBeLessThan(FAST.lapse!);
+        const took = Date.now() - t0;
+        if (how === 'sleeps') expect(took).toBeGreaterThanOrEqual(FAST.lapse! - 100);
+        else {
+          expect(took).toBeLessThan(8000);
+          // the office said it left
+          expect(logOf(p.sync.B, p.dealId).some((l) => l.pc === aId && l.left?.pc === aId)).toBe(true);
+        }
         expect(checks(p.svcB).length).toBeGreaterThan(0); expect(tally(p).size).toBe(60);
         expect([...roundsOf(p.sync.B, p.dealId).values()].filter((x) => x.end?.kind === 'done').length).toBe(1);   // the same round, finished: not a fresh one
       } finally { p.close(); }
