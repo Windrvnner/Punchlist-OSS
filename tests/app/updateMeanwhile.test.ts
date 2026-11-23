@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { Store } from '../../src/app/store';
-import { memRepo, disk } from '../adapters/memRepo';
+import { memRepo, disk, ELSEWHERE } from '../adapters/memRepo';
 import { mockAi, mockDocuments, mockSession } from '../../src/adapters/mocks';
 import { CreateDeal, AddFolders, DeleteDeal, RecordIndexingProgress } from '../../src/app/commands/deals';
 import { CreateQuestion, EditQuestionField, SetQuestionStatus, SetResponse, DeleteQuestion, RestoreQuestion } from '../../src/app/commands/questions';
@@ -26,6 +26,7 @@ let seq = 0; const ids = { next: (p: string) => `${p}_01HZZZZZZZZZZZZZZZZ${Strin
 
 const rowsFrom = (csv: string) => { const t = readCsv(new TextEncoder().encode(csv)); if (!t.ok) throw new Error('csv'); return prepareImport(t.value.rows, suggestMapping(t.value.columns)).rows; };
 const EPC: Source = { doc: 'EPC contract.pdf', loc: 'p. 80', docId: 'doc_epc' };
+const settle = () => new Promise((r) => setTimeout(r, 0));
 const QUESTIONS = 2000, FINDINGS = 120;
 
 /** A deal of 2,000 questions and 120 findings. The finding under test cites the EPC contract and has two questions asked about it. */
@@ -52,8 +53,27 @@ async function world(reply: { body: string[]; sources: Source[] }) {
   /** press Update from documents, and return once the model has been asked; `done` settles when the reply has landed (wrapped, so awaiting press does not wait for it) */
   const press = async () => { const done = reassess(store, dealId, findingId); await calling; return { done }; };
   const last = (command: string) => Object.values(store.get().ops).filter((o) => o.command === command).at(-1)!;
-  return { store, dealId, findingId, linked, f, press, answer, last };
+  /** another PC marks the finding for a reason of its own, as the backend's check does, and the change syncs here */
+  const markElsewhere = async (why: string) => {
+    const { updatedOn: _was, ...data } = f();
+    const marked = { ...data, updated: true, updatedWhy: why, updatedAt: ELSEWHERE.at };
+    repo.peer.change('finding', findingId, marked, ELSEWHERE);
+    await repo.sync();
+    await settle();
+    await settle();
+    expect(f().updatedWhy).toBe(why);
+  };
+  /** a person attaches a document to the finding */
+  const attach = (source: Source) => store.dispatch(AttachDocumentToFinding, {
+    dealId, findingId, doc: source.doc, docId: source.docId,
+  });
+  return { store, dealId, findingId, linked, f, press, answer, last, markElsewhere, attach };
 }
+const GONE = 'A document it cites is no longer in the data room';
+const AM3 = { doc: 'EPC amendment 3.pdf', loc: 'p. 2', docId: 'doc_am3' };
+const AM4 = { doc: 'EPC amendment 4.pdf', loc: 'p. 1', docId: 'doc_am4' };
+/** a reply that cites amendment 3 */
+const CITES_AM3 = { body: ['Amendment 3 lifts the cap. [1]'], sources: [AM3] };
 const NEW = { body: ['The liability cap is 20% of the contract price. [1]'], sources: [{ doc: 'EPC contract.pdf', loc: 'p. 82', docId: 'doc_epc' }] };
 
 describe('Update from documents while a person works on the finding', () => {
@@ -129,5 +149,58 @@ describe('Update from documents while a person works on the finding', () => {
     w.answer(); await done;
     expect(w.f()).toMatchObject({ title: 'Liability cap', body: NEW.body, updated: false, updatedWhy: '' });
     expect(w.f().updatedOn).toBeUndefined(); expect(w.f().sources).toEqual(NEW.sources);
+  }, 120000);
+
+  it('keeps a mark set elsewhere while it ran when a document it cites is attached afterwards (#327)', async () => {
+    const w = await world(CITES_AM3);
+    const { done } = await w.press();
+    await w.markElsewhere(GONE);
+    await w.attach(AM3);
+    expect(w.f()).toMatchObject({ updated: true, updatedWhy: GONE });   // the attach does not hide the other reason
+    expect(w.f().sources.map((x) => x.doc)).toEqual(['EPC contract.pdf', AM3.doc]);
+    w.answer();
+    await done;
+    expect(w.f()).toMatchObject({ body: CITES_AM3.body, updated: true, updatedWhy: GONE });
+    // the other way round: attached first, marked elsewhere after
+    const r = await world(CITES_AM3);
+    const { done: d2 } = await r.press();
+    await r.attach(AM3);
+    await r.markElsewhere(GONE);
+    r.answer();
+    await d2;
+    expect(r.f()).toMatchObject({ updated: true, updatedWhy: GONE });
+  }, 240000);
+
+  it('clears a mark it read when the only news is a document it cites; one it does not cite keeps the mark (#327)',
+    async () => {
+    // marked elsewhere before the update began, so the update reads the reason; then the cited document is attached
+    const w = await world(CITES_AM3);
+    await w.markElsewhere(GONE);
+    const { done } = await w.press();
+    await w.attach(AM3);
+    w.answer();
+    await done;
+    expect(w.f()).toMatchObject({ updated: false, updatedWhy: '' });
+    // the same, but the reply does not cite the attached document: it has not read it, so the mark stays
+    const r = await world(NEW);
+    await r.markElsewhere(GONE);
+    const { done: d2 } = await r.press();
+    await r.attach(AM3);
+    r.answer();
+    await d2;
+    expect(r.f()).toMatchObject({ updated: true, updatedWhy: GONE });
+    expect(r.f().sources.map((x) => x.doc)).toEqual(['EPC contract.pdf', AM3.doc]);
+  }, 240000);
+
+  it('names the newer document when a second one is attached while it ran (#327)',
+    async () => {
+    const w = await world(CITES_AM3);
+    const { done } = await w.press();
+    await w.attach(AM3);
+    await w.attach(AM4);
+    expect(w.f().updatedWhy).toBe(`${AM4.doc} attached`);
+    w.answer();
+    await done;
+    expect(w.f()).toMatchObject({ updated: true, updatedWhy: `${AM4.doc} attached` });
   }, 120000);
 });
