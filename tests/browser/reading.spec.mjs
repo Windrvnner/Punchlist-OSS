@@ -11,11 +11,8 @@ const browser = await launchChrome();
 openOnFindings(browser);
 const PAGES = 320; const bytes = longPdf(PAGES);
 
-async function reading({ pdf = true, size = [1280, 736], recordRuntime = false, colorScheme } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: size[0], height: size[1] }, colorScheme });
-  const page = await ctx.newPage();
-  page.errors = [];
-  page.on('pageerror', (e) => page.errors.push(e.message));
+async function reading({ pdf = true, size = [1280, 736], recordRuntime = false } = {}) {
+  const ctx = await browser.newContext({ viewport: { width: size[0], height: size[1] } }); const page = await ctx.newPage(); page.errors = []; page.on('pageerror', (e) => page.errors.push(e.message));
   if (recordRuntime) await ctx.addInitScript(() => {
     const send = Worker.prototype.postMessage;
     Worker.prototype.postMessage = function (message, ...options) {
@@ -202,8 +199,13 @@ for (const size of [[1280, 736], [1024, 640]]) {
 }
 
 // Sample what Chromium actually paints. Reuse the same screenshot for every strip in a frame.
-async function readingPixels(page, boxes) {
-  const png = await page.screenshot();
+async function readingPixels(page, boxes, options) {
+  const x = Math.min(...boxes.map(([left]) => left));
+  const y = Math.min(...boxes.map(([, top]) => top));
+  const clip = { x, y, width: Math.max(...boxes.map(([left, , width]) => left + width)) - x,
+    height: Math.max(...boxes.map(([, top, , height]) => top + height)) - y };
+  const regions = boxes.map(([left, top, width, height]) => [left - x, top - y, width, height]);
+  const png = await page.screenshot({ ...options, clip });
   return page.evaluate(async ({ png, boxes }) => {
     const image = new Image();
     image.src = 'data:image/png;base64,' + png;
@@ -211,7 +213,7 @@ async function readingPixels(page, boxes) {
     const context = new OffscreenCanvas(image.width, image.height).getContext('2d');
     context.drawImage(image, 0, 0);
     return boxes.map(([x, y, width, height]) => Array.from(context.getImageData(x, y, width, height).data));
-  }, { png: png.toString('base64'), boxes });
+  }, { png: png.toString('base64'), boxes: regions });
 }
 
 async function paneShadow(page, height) {
@@ -251,13 +253,15 @@ async function paneMaterials(page) {
   });
 }
 
-async function placeholderContrast(page) {
-  const { color, box } = await page.locator('#pask').evaluate((input) => {
-    const { left, top, width, height } = input.getBoundingClientRect();
-    return { color: getComputedStyle(input, '::placeholder').color.match(/\d+/g).map(Number),
-      box: [Math.ceil(left + 4), Math.ceil(top + 1), Math.floor(Math.min(width - 8, 200)), Math.floor(height - 2)] };
-  });
-  const style = await page.addStyleTag({ content: '#pask::placeholder{opacity:0}' });
+async function readingContrast(page, selector, pseudo = '') {
+  const { color, box } = await page.locator(selector).evaluate((element, pseudo) => {
+    const { left, top, width, height } = element.getBoundingClientRect();
+    const inset = pseudo ? 4 : 1;
+    return { color: getComputedStyle(element, pseudo).color.match(/\d+/g).map(Number),
+      box: [Math.ceil(left + inset), Math.ceil(top + 1), Math.floor(Math.min(width - inset * 2, 200)),
+        Math.floor(height - 2)] };
+  }, pseudo);
+  const style = await page.addStyleTag({ content: `${selector}${pseudo}{color:transparent!important}` });
   const [background] = await readingPixels(page, [box]);
   await style.evaluate((node) => node.remove());
   const luminance = (red, green, blue) => {
@@ -290,17 +294,15 @@ function readingScroll(page, fraction) {
   return page.evaluate((fraction) => {
     const chat = document.querySelector('.chat');
     if (fraction !== undefined) chat.scrollTop = fraction * (chat.scrollHeight - chat.clientHeight);
+    const composerTop = document.querySelector('#pcomposer').getBoundingClientRect().top;
     return { top: chat.scrollTop, max: chat.scrollHeight - chat.clientHeight,
       head: document.querySelector('.chathead').getBoundingClientRect().top,
-      endGap: document.querySelector('#pcomposer').getBoundingClientRect().top -
-        document.querySelector('.msgs').getBoundingClientRect().bottom };
+      clipGap: composerTop - chat.getBoundingClientRect().bottom,
+      endGap: composerTop - document.querySelector('.msgs').getBoundingClientRect().bottom };
   }, fraction);
 }
 
 async function compareComposerPixels(page) {
-  await page.locator('#pcomposer').evaluate(async (composer) => {
-    await Promise.all(composer.getAnimations().map((animation) => animation.finished.catch(() => {})));
-  });
   const boxes = await page.evaluate(() => {
     const composer = document.querySelector('#pcomposer').getBoundingClientRect();
     const x = Math.ceil(composer.left + 18);
@@ -309,9 +311,11 @@ async function compareComposerPixels(page) {
       [x, Math.ceil(composer.top + 24), width, Math.floor(composer.height - 40)],
       [x, Math.ceil(composer.bottom), width, 12]];
   });
-  const painted = await readingPixels(page, boxes);
+  // Keep the glass and isolate its backdrop from edits, focus transitions, and button state.
+  const options = { animations: 'disabled', style: '#pcomposer > * { opacity:0 }' };
+  const painted = await readingPixels(page, boxes, options);
   const hidden = await page.addStyleTag({ content: '.chat .opening,.chat .msgs{visibility:hidden}' });
-  const background = await readingPixels(page, boxes);
+  const background = await readingPixels(page, boxes, options);
   await hidden.evaluate((style) => style.remove());
   return painted.map((rgba, region) => rgba.filter((value, i) => Math.abs(value - background[region][i]) > 3).length);
 }
@@ -320,6 +324,8 @@ async function fillComposer(page, text) {
   await page.fill('#pask', text);
   await page.waitForFunction((height) => document.getElementById('pask').offsetHeight === height, text ? 168 : 24);
 }
+
+const tallDraft = 'See the signed term sheet.\n'.repeat(7).trimEnd();
 
 async function answerActionFocus(page) {
   const actions = page.locator('.msgs .acts button');
@@ -335,41 +341,40 @@ async function answerActionFocus(page) {
 }
 
 async function composerOcclusion(page, note) {
-  const evidence = [];
   const before = await readingScroll(page, 0);
-  evidence.push(await compareComposerPixels(page));
   const middle = await readingScroll(page, 0.5);
-  evidence.push(await compareComposerPixels(page));
-  const tall = 'See the signed term sheet.\n'.repeat(7).trimEnd();
-  await fillComposer(page, tall);
+  const shortPixels = await compareComposerPixels(page);
+  await fillComposer(page, tallDraft);
   const grown = await readingScroll(page);
-  evidence.push(await compareComposerPixels(page));
+  const tallPixels = await compareComposerPixels(page);
   const top = await readingScroll(page, 0);
-  evidence.push(await compareComposerPixels(page));
   const end = await readingScroll(page, 1);
-  evidence.push(await compareComposerPixels(page));
   await fillComposer(page, '');
   const shrunk = await readingScroll(page);
-  evidence.push(await compareComposerPixels(page));
   const focus = await answerActionFocus(page);
   await page.locator('#pask').focus();
   await readingScroll(page, 0);
-  await fillComposer(page, tall);
+  await fillComposer(page, tallDraft);
   const start = await readingScroll(page);
   await fillComposer(page, '');
-  const clear = evidence.every(([above, through, below]) => above > 50 && through === 0 && below === 0);
+  const positions = [before, middle, grown, top, end, shrunk, start];
+  const pixels = [shortPixels, tallPixels];
+  const clear = pixels.every(([above, through, below]) => above > 50 && through === 0 && below === 0) &&
+    positions.every(({ clipGap }) => clipGap >= 0 && clipGap <= 2);
   const anchored = grown.top === middle.top && start.top === 0 && shrunk.top === shrunk.max &&
-    [middle, grown, top, end, shrunk, start].every(({ head }) => head === before.head);
+    positions.every(({ head }) => head === before.head);
   const gaps = [end, shrunk].map(({ endGap }) => +endGap.toFixed(1));
   const endGap = gaps.every((gap) => Math.abs(gap - 34) <= 1.5);
   const extent = Math.abs((grown.max - middle.max) - 144) <= 1;
   say(`reading-text-stays-above-composer-and-remains-reachable-438-${note}`,
-    clear && anchored && endGap && extent && focus, JSON.stringify({ evidence, anchored, gaps, extent, focus }));
+    clear && anchored && endGap && extent && focus, JSON.stringify({ clear, pixels, anchored, gaps, extent, focus }));
 }
 
 // #437 reuses the rail's pane glass. #442 checks both formerly clipped shadow edges, one pixel at a time.
 for (const colorScheme of ['dark', 'light']) {
-  const { ctx, page, id, fid } = await reading({ pdf: false, colorScheme });
+  const { ctx, page, id, fid } = await reading();
+  await page.emulateMedia({ colorScheme });
+  await page.waitForFunction((theme) => document.documentElement.dataset.theme === theme, colorScheme);
   await longAnswer(page, id, fid);
   for (const [width, height] of [[1280, 736], [1024, 640], [1440, 900]]) {
     await page.setViewportSize({ width, height });
@@ -378,9 +383,16 @@ for (const colorScheme of ['dark', 'light']) {
     await page.waitForTimeout(525);
     if (width !== 1440) {
       const glass = await paneMaterials(page);
-      const contrast = await placeholderContrast(page);
+      const placeholder = await readingContrast(page, '#pask', '::placeholder');
+      await readingScroll(page, 0);
+      const location = '.opening .rsch-chip:last-child em';
+      await page.locator(location).hover();
+      await page.waitForTimeout(180);
+      const hovered = await readingContrast(page, location);
+      await page.mouse.move(width - 2, 1);
       say(`reading-pane-and-composer-use-pane-glass-437-${colorScheme}-${width}`,
-        glass.pane && glass.composer && contrast >= 4.5, JSON.stringify({ ...glass, contrast: +contrast.toFixed(2) }));
+        glass.pane && glass.composer && placeholder >= 4.5 && hovered >= 4.5,
+        JSON.stringify({ ...glass, placeholder: +placeholder.toFixed(2), hovered: +hovered.toFixed(2) }));
     }
     const shadow = await paneShadow(page, height);
     say(`reading-pane-shadow-falls-off-beyond-view-442-${colorScheme}-${width}`,

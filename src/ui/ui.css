@@ -637,7 +637,7 @@ body.reading{--colw:clamp(320px,calc(100vw - 1000px),560px)}
 :root[data-theme="dark"] body.reading .reading-pane
   :is(.rsch-chip em,.rsch-chip .dr,.rsch-pill .rsch-m){color:var(--ink-2)}
 :root[data-theme="dark"] body.reading .reading-pane :is(
-  .rsch-chip:hover em,.rsch-chip:hover .dr,.rsch-pill:is(.on,:hover) .rsch-m,.rsch-step em,.rsch-psg b
+  .rsch-chip:hover :is(em,.dr,.rdg),.rsch-pill:is(.on,:hover) .rsch-m,.rsch-step em,.rsch-psg b
 ){color:var(--ink)}
 :root[data-theme="dark"] body.reading .tcomp.narrow textarea::placeholder{color:var(--ink-2)}
 /* Retry and Resume in a line of text look like the app's other in-line actions */
