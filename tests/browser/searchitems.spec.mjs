@@ -106,6 +106,37 @@ async function loadingUsesMyDeals() {
   await ctx.close();
 }
 
+async function selectionSurvivesLoading() {
+  const { ctx, page, k, o } = await start();
+  const phrase = 'Financial model has been audited';
+  const created = await page.evaluate(([dealId, title]) =>
+    store.dispatch(store.commandNamed('CreateFinding'), { dealId, title, workstream: 'Legal' }, { quiet: true }),
+  [o, phrase]);
+  if (!created.ok) throw new Error(JSON.stringify(created.error));
+  const original = page.locator('#pal-res [data-kind=item] button').filter({ hasText: 'Project Proseware' }).first();
+  const selected = page.locator('#pal-res [aria-selected=true]');
+  const outcomes = [];
+  for (const pointer of [false, true]) {
+    await page.goto(URL + '#overview-' + k);
+    await page.reload();
+    await page.waitForFunction((id) => store.get().dealLoad[id] === 'loaded', k);
+    await holdDeal(page, o);
+    await search(page, phrase);
+    await original.waitFor();
+    if (pointer) await original.hover();
+    await page.evaluate(() => window.releaseSearchRead());
+    await page.locator('#pal-res [data-kind=finding]').waitFor();
+    const kept = await selected.textContent();
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('#pal-drop', { state: 'detached' });
+    const hash = await page.evaluate(() => location.hash);
+    outcomes.push(kept.includes('Project Proseware') && hash === `#checklist-${k}`);
+  }
+  say('#501 Search keeps keyboard and pointer selections through a late finding', outcomes.every(Boolean),
+    JSON.stringify(outcomes));
+  await ctx.close();
+}
+
 async function selectedExpansion(page, oldCount) {
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve())));
   return page.evaluate((before) => {
@@ -204,6 +235,7 @@ async function selectedExpansion(page, oldCount) {
 }
 
 await loadingUsesMyDeals();
+await selectionSurvivesLoading();
 
 for (const [w, h] of SHOTS ? [[1280, 736], [1024, 640]] : []) for (const scheme of ['dark', 'light']) {
   const { ctx, page, k } = await start([w, h], scheme);
