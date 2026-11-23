@@ -20,24 +20,32 @@ async function chipsInReadingMode(page, selected, shot) {
   const measurements = await chips.evaluateAll((items) => items.map((chip) => {
     const name = chip.querySelector('.docnm');
     const head = name.querySelector('.dnh');
-    const lastNamePart = name.querySelector('.dnt') ?? head;
+    const tail = name.querySelector('.dnt');
+    const lastNamePart = tail ?? head;
     const location = chip.querySelector('em');
     const tag = chip.querySelector('.rdg');
     const bounds = chip.getBoundingClientRect();
     const column = chip.closest('.msgs').getBoundingClientRect();
     const nameOverflow = name.scrollWidth - name.clientWidth;
     const locationGap = location.getBoundingClientRect().left - lastNamePart.getBoundingClientRect().right;
-    const textFits = (part) => {
+    const textBounds = (part) => {
       const range = document.createRange();
       range.selectNodeContents(part);
-      const text = range.getBoundingClientRect();
+      return range.getBoundingClientRect();
+    };
+    const textFits = (part) => {
+      const text = textBounds(part);
       const box = part.getBoundingClientRect();
       return text.left >= box.left - 0.5 && text.right <= box.right + 0.5
         && box.right <= bounds.right && Math.abs((text.top + text.bottom - bounds.top - bounds.bottom) / 2) <= 1;
     };
+    const tailClipped = tail && textBounds(tail).width > tail.getBoundingClientRect().width + 0.5;
+    const ellipsis = tailClipped
+      ? getComputedStyle(tail).textOverflow === 'ellipsis' && head.getBoundingClientRect().width < 0.5
+      : getComputedStyle(head).textOverflow === 'ellipsis';
     return {
       label: chip.getAttribute('aria-label'), name: name.textContent, location: location.textContent,
-      tag: tag?.textContent ?? '', ellipsis: getComputedStyle(head).textOverflow === 'ellipsis',
+      tag: tag?.textContent ?? '', ellipsis,
       shortened: head.scrollWidth > head.clientWidth + 1,
       fits: bounds.height === 28 && bounds.left >= column.left && bounds.right <= column.right + 0.5
         && chip.scrollWidth <= chip.clientWidth && nameOverflow <= 1 && locationGap >= 5.5,
