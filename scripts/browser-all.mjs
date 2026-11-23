@@ -5,6 +5,8 @@
 // while others are running is run once more on its own; if it passes then, that is reported as such, not hidden.
 // Exit code 0 only if every suite passed (alone or alongside). Logs go to out/browser/<suite>.log.
 import { spawn } from 'node:child_process'; import fs from 'node:fs'; import http from 'node:http';
+import path from 'node:path';
+import { insideGate } from './gate-dir.mjs';
 
 const args = process.argv.slice(2); const j = args.indexOf('--jobs'); const jobs = j >= 0 ? Math.max(1, +args[j + 1] || 1) : 5;
 const shardAt = args.indexOf('--shard');
@@ -93,6 +95,8 @@ function suiteResult(name, code, out, started) {
     name, code: code === 0 && valid && passed === total ? 0 : code || 1,
     passed: valid ? passed : 0, total: valid ? total : 0,
     fails: out.split('\n').filter((line) => line.startsWith('FAIL')),
+    // every check line, kept whole for a person comparing two runs (IDs hold spaces and many carry notes)
+    lines: out.split('\n').filter((line) => /^(PASS|FAIL) /.test(line)),
     secs: Math.round((Date.now() - started) / 1000),
   };
 }
@@ -139,6 +143,7 @@ server?.kill();
 const completed = new Set(results.map((result) => result.name));
 const unrun = suites.filter((name) => !completed.has(name));
 if (unrun.length) console.error(`Not run (${unrun.length}/${suites.length} suites): ${unrun.join(', ')}`);
+writeGateResult();
 const bundle = fs.readdirSync('dist/assets').find((f) => /^index-.*\.js$/.test(f)); const bad = results.filter((r) => r.code !== 0); const rerun = results.filter((r) => r.rerun && r.code === 0);
 console.log(`\n${results.reduce((a, r) => a + r.passed, 0)}/${results.reduce((a, r) => a + r.total, 0)} checks passed in ${results.length} suites · ${bundle} · ${Math.round((Date.now() - started) / 1000)}s with ${jobs} at a time`);
 if (rerun.length) console.log(`Passed only on their own: ${rerun.map((r) => r.name).join(', ')}`);
@@ -151,3 +156,18 @@ if (bad.length) {
 }
 if (stopped) process.exit(2);
 if (bad.length) process.exit(1);
+
+/** Under check:all, each requested suite's result for scripts/gate-compare.mjs; an unrun suite has total 0. */
+function writeGateResult() {
+  const dir = insideGate(process.env.PUNCHLIST_GATE_DIR);
+  if (!dir) return;
+  const byName = new Map(results.map((result) => [result.name, result]));
+  const entries = suites.map((name) => {
+    const result = byName.get(name);
+    if (!result) return { name, passed: 0, total: 0, secs: 0, rerun: false, firstFails: [], lines: [] };
+    const { passed, total, secs, lines } = result;
+    return { name, passed, total, secs, rerun: !!result.rerun, firstFails: result.firstFails ?? [], lines };
+  });
+  const secs = Math.round((Date.now() - started) / 1000);
+  fs.writeFileSync(path.join(dir, 'browser.json'), JSON.stringify({ jobs, secs, suites: entries }, null, 2));
+}

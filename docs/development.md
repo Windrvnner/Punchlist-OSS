@@ -54,6 +54,15 @@ The GitHub Actions workflow also builds the Windows installer when it is started
 
 The Store is the object that holds the app's state and runs its commands; see [architecture.md](architecture.md).
 
+Each `npm run check:all` run writes its stage times and test results to `out/gate/<time>/`: `gate.json` (each stage's
+command, seconds and exit status), `vitest.json`, `browser.json` (each suite's checks, time and re-runs) and
+`smoke.json` (the desktop smoke check IDs). A change that speeds up the tests shows it keeps coverage with
+`node scripts/gate-compare.mjs <before> <after>`, which prints each stage's difference and exits 1 if any Vitest test,
+smoke check or stage that passed before is missing, skipped or failing after, or if a browser suite has fewer checks
+or passes. It lists the browser PASS lines seen only before, since their notes can change between runs. Both folders
+must be under `out/gate/`; the scripts read and write run folders nowhere else. Standalone commands write nothing
+there.
+
 ### Linux test runner troubleshooting
 
 On Linux, the browser suites' layout checks expect Inter in place of Segoe UI: install the `fonts-inter` package and
