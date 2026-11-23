@@ -46,6 +46,19 @@ a.flagrow{text-decoration:none;color:inherit}
 .palres .where.parts>.wtwin{flex:0 1 auto}   /* the deal's name has no width of its own, so this is cut only where it and the place are wider than the line: a page or question number is never cut short */
 .palres .where.parts>.wdeal{flex:1 1 0;max-width:max-content}   /* no width of its own when the line is laid out, so it never pushes the place off it */
 .palres .where.parts .ww{display:inline-block}   /* cut by whole words (search.tsx, Words) */
+/* #494: one word that exceeds the whole label can ellipsize inside its own box. */
+.palres .where.parts .wtwin>.ww:only-child{max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
+/* #495: a first name word wider than its share can still show a readable beginning. */
+.palres .wdeal>.wlong{max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
+.palres .wdeal>.wlong:nth-child(2){max-width:calc(100% - 7ch)}
+/* #490: the RTL name clips on its own, while the separator and reference keep their places. */
+.palres .wdeal:has(.wrtl){display:flex}
+.palres .wrtl{min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* #492: the distinguishing words retain their width while shared words give way. */
+.twin-label{display:flex;max-width:100%;white-space:pre}
+.twin-label>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.twin-label>.twin-focus{flex:none;max-width:100%}
+.twin-label>span:last-child{flex-shrink:6}
 .palres .where.parts>.wat{flex:none;margin-left:auto;padding-left:16px;font-variant-numeric:tabular-nums}
 
 /* cached mark: a document loaded in the user's store right now */
