@@ -1,5 +1,6 @@
 // Text typed into a finding's cards is never lost: while Save or Create Finding is still out (#32, #115), and on a finding's page when the
-// finding is deleted under a question being typed (#340). At deal scale: a log of 2,000 questions in the deal.
+// finding is deleted under a question being typed (#340); and in an answer's Add as question and Add as finding
+// cards, which keep what was typed per answer (#51). At deal scale: a log of 2,000 questions in the deal.
 import { launchChrome } from './chrome.mjs';
 import { openOnFindings } from './landing.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
@@ -176,6 +177,106 @@ const titled = (page, dealId, title) => page.evaluate(([d, t]) => Object.values(
   say('#115 a Create with nothing typed during it closes the form and stays on Findings',
     stayed.hash === `#deal-${id}` && !stayed.form && (await titled(page, id, 'Deposit not posted')).length === 1,
     JSON.stringify(stayed));
+  await ctx.close();
+}
+
+/** opens an answer's Add as question ('q') or Add as finding ('f') card under the answer at `nth` */
+const openAdd = async (page, which, nth = 0) => {
+  const name = which === 'q' ? 'Add as question' : 'Add as finding';
+  await page.click(`.msgs .ai >> nth=${nth} >> .acts button[aria-label="${name}"]`);
+  await page.waitForSelector(which === 'q' ? '#aq-text' : '#af-title');
+};
+/** what an open card holds */
+const cardHolds = (page, which) => page.evaluate((w) => ({
+  text: document.querySelector(w === 'q' ? '#aq-text' : '#af-title')?.value ?? null,
+  ws: document.querySelector(w === 'q' ? '#aq-ws' : '#af-ws')?.value ?? null,
+}), which);
+/** asks the deal a question and waits for the answer at `nth` */
+const ask = async (page, words, nth) => {
+  await page.fill('#pcomposer textarea, #hask', words);
+  await page.keyboard.press('Enter');
+  await page.waitForSelector(`.msgs .ai:not(.pending):not(.failed) >> nth=${nth}`, { timeout: 15000 });
+};
+
+{ // #51: an answer's Add as question and Add as finding cards keep what was typed on Escape, on leaving and on reload;
+  // Cancel and a save clear it; each answer keeps its own
+  const { ctx, page, id } = await findingPage();
+  await page.goto(`${URL}#deal-${id}`);
+  await page.waitForSelector('#hask');
+  await ask(page, 'What are the three biggest issues?', 0);
+  await ask(page, 'What does the credit agreement say about the lock-up?', 1);
+  const chat = await page.evaluate(() => location.hash);
+  const QUESTION = 'Negotiated diligence question the banker typed';
+  await openAdd(page, 'q');
+  const proposed = await cardHolds(page, 'q');
+  await page.fill('#aq-text', QUESTION);
+  await page.selectOption('#aq-ws', 'Antitrust & FDI');
+  await page.keyboard.press('Escape');
+  await openAdd(page, 'q');
+  const afterEsc = await cardHolds(page, 'q');
+  await page.goto(`${URL}#deal-${id}`);
+  await page.goto(URL + chat);
+  await page.reload();
+  await page.waitForSelector('.msgs .ai:not(.pending) >> nth=1');
+  await openAdd(page, 'q');
+  const afterReload = await cardHolds(page, 'q');
+  const want = { text: QUESTION, ws: 'Antitrust & FDI' };
+  const same = (a, b) => a.text === b.text && a.ws === b.ws;
+  await page.keyboard.press('Escape');
+  await openAdd(page, 'q', 1);
+  const other = await cardHolds(page, 'q');
+  await page.keyboard.press('Escape');
+  say('#51 Add as question keeps what was typed on Escape, leaving and reload; another answer keeps its own',
+    same(afterEsc, want) && same(afterReload, want) && other.text !== QUESTION && !page.errors.length,
+    JSON.stringify({ proposed, afterEsc, afterReload, other, errors: page.errors }));
+  await openAdd(page, 'q');
+  await page.click('.addq .btn:not(.pri)');
+  await openAdd(page, 'q');
+  const afterCancel = await cardHolds(page, 'q');
+  await page.fill('#aq-text', QUESTION);
+  await page.selectOption('#aq-ws', 'Antitrust & FDI');
+  await page.click('#aq-log');
+  await page.waitForSelector('#aq-text', { state: 'detached' });
+  await openAdd(page, 'q');
+  const afterLog = await cardHolds(page, 'q');
+  await page.keyboard.press('Escape');
+  say('#51 Cancel and Log Question clear what Add as question kept',
+    same(afterCancel, proposed) && same(afterLog, proposed) && !page.errors.length,
+    JSON.stringify({ proposed, afterCancel, afterLog, errors: page.errors }));
+  // Add as finding: the same, and typing during Create Finding goes to the finding made (#115's decision)
+  const TITLE = 'Banker customized finding title';
+  await openAdd(page, 'f');
+  const generated = await cardHolds(page, 'f');
+  await page.fill('#af-title', TITLE);
+  await page.selectOption('#af-ws', 'Legal');
+  await page.keyboard.press('Escape');
+  await page.reload();
+  await page.waitForSelector('.msgs .ai:not(.pending) >> nth=1');
+  await openAdd(page, 'f');
+  const keptF = await cardHolds(page, 'f');
+  await page.click('.addf .btn:not(.pri)');
+  await openAdd(page, 'f');
+  const clearedF = await cardHolds(page, 'f');
+  say('#51 Add as finding keeps its title and workstream on Escape and reload; Cancel clears them',
+    same(keptF, { text: TITLE, ws: 'Legal' }) && same(clearedF, generated) && !page.errors.length,
+    JSON.stringify({ generated, keptF, clearedF, errors: page.errors }));
+  await page.fill('#af-title', TITLE);
+  await page.selectOption('#af-ws', 'Legal');
+  await holdNext(page, 'CreateFinding');
+  await page.click('#af-create');
+  await page.fill('#af-title', 'Retitled while it saved');
+  await page.evaluate(() => window.resume());
+  await page.waitForSelector('#af-title', { state: 'detached', timeout: 5000 }).catch(() => {});
+  const made = await titled(page, id, TITLE);
+  await openAdd(page, 'f');
+  const nextOpen = await cardHolds(page, 'f');
+  await page.keyboard.press('Escape');
+  if (made.length) await page.goto(`${URL}#finding-${id}-${made[0].id}`);
+  await page.waitForSelector('#fe-title', { timeout: 5000 }).catch(() => {});
+  const edit = await page.evaluate(() => document.querySelector('#fe-title')?.value ?? null);
+  say('#51 typing during Add as finding\'s Create goes to the finding made, as an open edit; the card starts afresh',
+    made.length === 1 && edit === 'Retitled while it saved' && same(nextOpen, generated) && !page.errors.length,
+    JSON.stringify({ made: made.length, edit, nextOpen, errors: page.errors }));
   await ctx.close();
 }
 
