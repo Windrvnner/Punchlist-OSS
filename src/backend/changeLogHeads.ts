@@ -264,3 +264,38 @@ export function bookkeepingGivesWay(heads: Ver[], graph: VersionGraph): Ver[] {
   const changed = heads.filter((head) => !sameAsBase(head));
   return changed.length >= 1 ? changed : heads;
 }
+
+/**
+ * A finding put back from Deleted on two PCs, each from the same deletion, as it was then: one PC went on to change
+ * or delete it before the other's restore arrived (an issues list's Undo on one PC, a restore by hand on the other).
+ * The restore that went no further brings nothing the other has not: it gives way, so the change stands with nothing
+ * to choose (#401). Two changes made after the restores stay two versions for a person to choose between.
+ */
+export function restoredTwiceGivesWay(heads: Ver[], graph: VersionGraph): Ver[] {
+  return heads.filter((head) => !heads.some((other) => other !== head && wentOnFrom(head, other, graph)));
+}
+
+/** whether `later` descends from a restore, other than `restore` itself, of the same deletion to the same content */
+function wentOnFrom(restore: Ver, later: Ver, graph: VersionGraph): boolean {
+  if (!isRestore(restore, graph)) return false;
+  const sameDeletion = (version: Ver) => version.base.length === restore.base.length
+    && version.base.every((ver) => restore.base.includes(ver));
+  const seen = new Set<string>();
+  const walk = [later];
+  while (walk.length) {
+    const version = walk.pop()!;
+    if (seen.has(version.ver)) continue;
+    seen.add(version.ver);
+    const twin = version !== restore && !version.del && sameDeletion(version);
+    if (twin && sameContent(version.data, restore.data)) return true;
+    walk.push(...standingParents(graph, version));
+  }
+  return false;
+}
+
+/** a version that puts the record back: based only on delete markers */
+function isRestore(version: Ver, graph: VersionGraph): boolean {
+  if (version.del || !version.base.length) return false;
+  const parents = standingParents(graph, version);
+  return parents.length === version.base.length && parents.every((parent) => parent.del);
+}
