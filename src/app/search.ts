@@ -3,6 +3,7 @@
  * questions. Pure over state; the palette loads unvisited deals' records first.
  */
 import type { Store } from './store';
+import type { TwinFocus } from './dealLabel';
 import { type State, type UiState, dealQuestions, dealFindings, dealHash, dealTwinLabels } from './state';
 import { conversationDocs, docIndex } from './conversations';
 import { docKey } from '../domain/model';
@@ -14,7 +15,7 @@ export type HitKind = 'deal' | 'finding' | 'item' | 'question' | 'document';
 export interface Place {
   deal: string;
   twin: string;
-  focus?: string;
+  focus?: TwinFocus;
   at: string;
 }
 
@@ -26,7 +27,7 @@ export interface Hit {
   hash: string;
   tip?: string;
   place?: Place;
-  twinFocus?: string;
+  twinFocus?: TwinFocus;
   ui?: Partial<UiState>;
   doc?: { doc: string; docId: string };
 }
@@ -121,7 +122,7 @@ function gather(s: State, query: string, itemsShown: number): { hits: Hit[]; ite
     // a hit inside a deal names it, and where another deal has the same name, its counterparty and the day it was made
     // whole in `where` (the hover); the row, short of room, shows only what differs, as the sidebar does
     // Work out the labels only for deals with a match.
-    let twins: [string, string, string] | undefined;
+    let twins: [string, string, TwinFocus?] | undefined;
     const inDeal = (place = ''): Pick<Hit, 'where' | 'place'> => {
       const [twin, short, focus] = twins ??= [twinOf(d), twinOf(d, true), twinOf(d, 'focus')];
       const at = place.replace(/\s+/g, ' ').trim();

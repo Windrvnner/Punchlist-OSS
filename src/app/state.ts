@@ -1,4 +1,4 @@
-import { distinguishingWords } from './dealLabel';
+import { distinguishingWords, type TwinFocus } from './dealLabel';
 import type { Deal, Question, Finding, Tombstone, Member, Operation, DealId, QuestionId, FindingId, AuditEntry, Source, Folder, RecordKind, ClashKind } from '../domain/model';
 import type { Item, ListRecord } from '../domain/checklist';
 import type { CheckState, ModelThread, Research } from '../ports';
@@ -509,20 +509,23 @@ export function dealTwinLabels(deals: Iterable<Deal>) {
     named.set(key, matches);
   }
   const labels = new Map<string, ReturnType<typeof dealTwins>>();
-  return (deal: Deal, short: boolean | 'focus' = false) => {
+  function labelFor(deal: Deal, short: 'focus'): TwinFocus | undefined;
+  function labelFor(deal: Deal, short?: boolean): string;
+  function labelFor(deal: Deal, short: boolean | 'focus' = false): string | TwinFocus | undefined {
     const key = dealNameKey(deal.name);
     const matches = named.get(key);
-    if (!matches || matches.length < 2) return '';
+    if (!matches || matches.length < 2) return short === 'focus' ? undefined : '';
     let group = labels.get(key);
     if (!group) {
       group = dealTwins(matches);
       labels.set(key, group);
     }
     const label = group.get(deal.id);
-    if (!label) return '';
+    if (!label) return short === 'focus' ? undefined : '';
     if (short === 'focus') return distinguishingWords(label.short, [...group.values()].map((twin) => twin.short));
     return short ? label.short : label.full;
-  };
+  }
+  return labelFor;
 }
 
 export function dealTwin(s: Pick<State, 'deals'>, d: Deal, short = false): string {

@@ -1,6 +1,9 @@
+export interface TwinFocus { start: number; end: number }
+
 // #492: reserve the difference from the closest label that shares a long beginning.
 // Keep the word before it for context ("Fund IV"), dropping shared legal-form words first.
-export function distinguishingWords(label: string, others: string[]): string {
+export function distinguishingWords(label: string, others: string[]): TwinFocus | undefined {
+  label = label.replace(/\s+/g, ' ');
   const words = [...label.matchAll(/\S+/g)];
   const keys = words.map(([word]) => word.toLocaleLowerCase('en-US'));
   let bestPrefix = 0;
@@ -18,8 +21,8 @@ export function distinguishingWords(label: string, others: string[]): string {
     bestPrefix = prefix;
     bestSuffix = suffix;
   }
-  if (!bestPrefix) return '';
+  if (!bestPrefix) return;
   const start = words[bestPrefix - 1].index;
   const end = bestSuffix ? words[words.length - bestSuffix].index : label.length;
-  return label.slice(start, end).trimEnd();
+  return { start, end: start + label.slice(start, end).trimEnd().length };
 }

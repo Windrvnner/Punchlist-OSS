@@ -1,17 +1,17 @@
 import type { ComponentChildren } from 'preact';
+import type { TwinFocus } from '../app/dealLabel';
 
 // #492: keep the distinguishing words visible between two independently shortened sides.
 export function TwinLabel({ text, focus, children }: {
   text: string;
-  focus?: string;
+  focus?: TwinFocus;
   children?: ComponentChildren;
 }) {
-  const start = focus ? text.indexOf(focus) : -1;
-  if (start < 1 || !focus) return <>{children ?? text}</>;
-  const end = start + focus.length;
+  if (!focus) return <>{children ?? text}</>;
+  const label = text.replace(/\s+/g, ' ');
   return <span class="twin-label">
-    <span>{text.slice(0, start)}</span>
-    <span class="twin-focus">{focus}</span>
-    <span>{text.slice(end)}</span>
+    <span>{label.slice(0, focus.start)}</span>
+    <span class="twin-focus">{label.slice(focus.start, focus.end)}</span>
+    <span>{label.slice(focus.end)}</span>
   </span>;
 }
