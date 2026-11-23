@@ -870,8 +870,7 @@ body.qopen .g,body.qopen .g.on{height:24px!important}
 .md .det.glass{box-shadow:inset 0 1px 0 var(--spec),inset 0 -1px 0 var(--inset-edge)}
 /* the pane ends on the sidebar's bottom line, which is the window's last line: the page keeps no padding below it, so nothing scrolls */
 .home:has(.md .det.glass){padding-bottom:0}
-/* Question and response easy to find: the question in the display face, as an item's title is on the
-   Checklist; the labels a step darker; the response in a field of its own, with room above it. */
+/* The question uses heading weight like a Checklist item title. The response has a field of its own. */
 .md .det .lbl{color:var(--ink-2)}
 .md .det .lbl.rlbl{margin-top:24px}
 .md .det .ef.qtext{font:600 17px/1.35 var(--body);letter-spacing:-.15px;color:var(--ink)}
