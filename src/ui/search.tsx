@@ -1,14 +1,16 @@
 import type { RefObject } from 'preact';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
-import { useAppState, useStore } from './hooks';
+import { nameDir, useAppState, useStore } from './hooks';
 import { Icon } from './icons';
-import { DocName } from './docName';
+import { DocName, graphemes } from './docName';
 import { CachedMark } from './cached';
 import type { Store } from '../app/store';
 import { revealChecklistRow } from './checklist';
 import { navigate } from './nav';
 import { searchGroups, loadAllForSearch, GROUP_PAGE, type Hit, type HitGroup, type HitKind } from '../app/search';
+import { TwinLabel } from './dealLabel';
+import { bareDealName } from '../app/commands/deals';
 import { isMine } from '../app/commands/members';
 import { Marked } from './searchMark';
 
@@ -226,7 +228,7 @@ function ResultGroup({ g, first, cur, query, onPoint, onPick }: {
           </button>)}
       </div>
       {g.hits.map((h, k) => (
-        <button type="button" key={h.key} {...row(at + k)}>
+        <button type="button" key={h.key} {...row(at + k)} aria-description={h.tip ?? h.where}>
           <span class="ttl">
             {h.doc
               ? <><DocName name={h.title} /><CachedMark doc={h.doc} /></>
@@ -238,40 +240,128 @@ function ResultGroup({ g, first, cur, query, onPoint, onPick }: {
   );
 }
 
-/**
- * The second lines' cuts, which CSS alone can't make. The deal's name keeps at least its first word ("· Project…"), so
- * the line always names the deal; and a counterparty cut by whole words is narrowed to the words it shows, so no gap opens
- * before the " · " that follows it. Measured from the word boxes, which lay out at full width even where they are cut.
- */
-function fitWords(root: HTMLElement) {
-  const rows = [...root.querySelectorAll<HTMLElement>('.where.parts')]; if (!rows.length) return;
-  for (const r of rows) for (const e of r.querySelectorAll<HTMLElement>('.wdeal,.wtwin')) { e.style.minWidth = ''; e.style.maxWidth = ''; }
-  const ctx = document.createElement('canvas').getContext('2d'); if (ctx) ctx.font = getComputedStyle(rows[0]).font;
-  const ell = Math.ceil(ctx?.measureText('…').width ?? 12);
-  const end = (e: HTMLElement, w: Element) => w.getBoundingClientRect().right - e.getBoundingClientRect().left;
-  // the floors, then the narrowing, each read for every row before any is written: a write between two reads lays the
-  // whole panel out again, once a row, and a panel of many rows froze the app (#2)
-  const floors = rows.map((r) => { const d = r.querySelector<HTMLElement>('.wdeal'), first = d?.querySelector('.ww'); return d && first ? [d, Math.min(d.scrollWidth, Math.ceil(end(d, first)) + ell)] as const : null; });
-  for (const f of floors) if (f) f[0].style.minWidth = `${f[1]}px`;
-  const cuts = rows.map((r) => {
-    const t = r.querySelector<HTMLElement>('.wtwin'); if (!t || t.scrollWidth <= t.clientWidth + 0.5) return null;
-    const room = t.clientWidth - ell, fit = [...t.querySelectorAll('.ww')].filter((w) => end(t, w) <= room + 0.5).pop();
-    return fit ? [t, Math.ceil(end(t, fit)) + ell] as const : null;
-  });
-  for (const c of cuts) if (c) c[0].style.maxWidth = `${c[1]}px`;
+// #495: reserve the first meaningful part of the deal's name after the common Project prefix.
+function dealNameFloor(deal: HTMLElement, ellipsis: number, measure: (text: string) => number) {
+  const full = deal.textContent ?? '';
+  const name = full.replace(/^ · /, '');
+  const bare = bareDealName(name, 'navigation') || name;
+  const leading = full.slice(0, full.length - bare.length);
+  const firstWord = bare.split(/\s+/)[0];
+  const floor = name.length <= 28 ? full : leading + [...firstWord].slice(0, 14).join('');
+  return Math.ceil(Math.min(measure(full), measure(floor) + ellipsis));
 }
 
-/** Text cut by whole words: each word, with the space before it, is one unbreakable box, so the ellipsis never follows a space ("Project Wide World …") */
-const Words = ({ text }: { text: string }) => <>{text.split(/(?= )/).map((w, i) => <span class="ww" key={i}>{w}</span>)}</>;
+// #790: size an oversized single word to the graphemes and ellipsis it can actually show.
+function singleWordWidth(
+  label: HTMLElement, ellipsis: number, measure: (text: string) => number, widths: Map<string, number>,
+) {
+  const word = label.firstElementChild;
+  if (!word?.classList.contains('ww') || word.scrollWidth <= word.clientWidth) return null;
+  const room = label.getBoundingClientRect().width;
+  if (room < ellipsis) return null;
+  const text = word.textContent ?? '';
+  const key = `${room}:${text}`;
+  const saved = widths.get(key);
+  if (saved !== undefined) return saved;
+  let prefix = '';
+  let used = ellipsis;
+  for (const letter of graphemes(text)) {
+    prefix += letter;
+    const next = measure(prefix) + ellipsis;
+    if (next > room) break;
+    used = next;
+  }
+  const width = Math.min(room, Math.ceil(used));
+  widths.set(key, width);
+  return width;
+}
+
+/**
+ * Measure the floors first, then narrow cut counterparties to their last whole word, so there is no gap
+ * before the separator. Read each batch before writing to avoid laying out the full panel once per row (#2).
+ */
+function fitWords(root: HTMLElement) {
+  const rows = [...root.querySelectorAll<HTMLElement>('.where.parts')];
+  if (!rows.length) return;
+  for (const row of rows) {
+    for (const label of row.querySelectorAll<HTMLElement>('.wdeal,.wtwin')) {
+      label.style.minWidth = '';
+      label.style.maxWidth = '';
+    }
+  }
+  const ctx = document.createElement('canvas').getContext('2d');
+  const { fontWeight, fontSize, fontFamily } = getComputedStyle(rows[0]);
+  if (ctx) ctx.font = `${fontWeight} ${fontSize} ${fontFamily}`;
+  const measure = (value: string) => ctx?.measureText(value).width ?? value.length * 8;
+  const ellipsis = measure('…');
+  const ell = Math.ceil(ellipsis);
+  const end = (label: HTMLElement, word: Element) =>
+    word.getBoundingClientRect().right - label.getBoundingClientRect().left;
+  const floors = rows.map((row) => {
+    const deal = row.querySelector<HTMLElement>('.wdeal');
+    return deal ? [deal, dealNameFloor(deal, ell, measure)] as const : null;
+  });
+  for (const floor of floors) {
+    if (!floor) continue;
+    const [deal, width] = floor;
+    deal.style.minWidth = `${width}px`;
+  }
+  const wordWidths = new Map<string, number>();
+  const cuts = rows.map((row) => {
+    const twin = row.querySelector<HTMLElement>('.wtwin');
+    if (!twin) return null;
+    if (twin.childElementCount === 1) {
+      const width = singleWordWidth(twin, ellipsis, measure, wordWidths);
+      return width === null ? null : [twin, width] as const;
+    }
+    if (twin.scrollWidth <= twin.clientWidth + 0.5) return null;
+    const room = twin.clientWidth - ell;
+    const fit = [...twin.querySelectorAll('.ww')].filter((word) => end(twin, word) <= room + 0.5).pop();
+    return fit ? [twin, Math.ceil(end(twin, fit)) + ell] as const : null;
+  });
+  for (const cut of cuts) {
+    if (cut) cut[0].style.maxWidth = `${cut[1]}px`;
+  }
+}
+
+/** Keep each word with its preceding space so a whole-word ellipsis never follows a space. */
+function Words({ text, clipAt }: { text: string; clipAt?: number }) {
+  return <>{[...text.matchAll(/ *[^ ]+/g)].map(({ 0: word, index: start }) => {
+    const clipped = clipAt !== undefined && start <= clipAt && clipAt < start + word.length;
+    return <span class={clipped ? 'ww wlong' : 'ww'} key={start}>{word}</span>;
+  })}</>;
+}
+
 /** A question number or pages ("Q12", "p. 4", "pp. 1120-1185", "pages 3, 7") is never cut; any other place (a sheet cell) is whole or left to the hover. */
 const PAGES = /^(Q\d+|(pp?\.|pages?) ?\d[\d,;–—\- ]*)$/i;
+// #490: keep the reading direction within the name, with the separator and reference outside it.
+function SearchDealName({ name, hasTwin }: { name: string; hasTwin: boolean }) {
+  const bare = bareDealName(name, 'navigation') || name;
+  const clipAt = bare.split(/\s+/)[0].length > 15 ? name.length - bare.length : undefined;
+  return <span class="wdeal">
+    {hasTwin && ' · '}
+    {nameDir(name) === 'rtl'
+      ? <span class="wrtl" dir="rtl">{name}</span>
+      : <Words text={name} clipAt={clipAt} />}
+  </span>;
+}
+
 /**
  * Where a hit is, on the row's second line. Inside a deal that shares its name, what tells it apart comes first, since
  * that is what the line is for; the deal's name takes what room is left; the place sits at the right, set off by a gap that a
  * screen reader hears as " · " (ui.css). Whole on hover.
  */
 function Where({ h }: { h: Hit }) {
-  const p = h.place; if (!p) return <span class="where" title={h.tip ?? h.where}>{h.where}</span>;
+  const p = h.place;
+  if (!p) return <span class="where" title={h.tip ?? h.where}>
+    <TwinLabel text={h.where} focus={h.twinFocus} />
+  </span>;
   const twin = p.twin.replace(/\s+/g, ' ');
-  return <span class="where parts" title={h.where}>{twin && <span class="wtwin"><Words text={twin} /></span>}<span class="wdeal">{twin && ' · '}<Words text={p.deal} /></span>{p.at && <><span class="sr-only"> · </span><span class={PAGES.test(p.at) ? 'wat' : 'wat long'}>{p.at}</span></>}</span>;
+  return <span class="where parts" title={h.where}>
+    {twin && <span class="wtwin">
+      <TwinLabel text={twin} focus={p.focus}><Words text={twin} /></TwinLabel>
+    </span>}
+    <SearchDealName name={p.deal} hasTwin={!!twin} />
+    {p.at && <><span class="sr-only"> · </span><span class={PAGES.test(p.at) ? 'wat' : 'wat long'}>{p.at}</span></>}
+  </span>;
 }
