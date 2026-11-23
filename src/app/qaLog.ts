@@ -28,7 +28,6 @@ export const logOf = (store: Store, dealId: string): QaLog | undefined => store.
 /** a file's folder and name, from its full path ("X:\Deals\Proseware\Q&A log.xlsx") */
 const placeOf = (full: string) => { const i = Math.max(full.lastIndexOf('\\'), full.lastIndexOf('/')); return i > 0 ? { folder: full.slice(0, i), file: full.slice(i + 1) } : null; };
 
-
 /**
  * What an imported file can be to the deal's log, by where the file is (`path`, which only the desktop app knows):
  * 'same' when it is the deal's log already, 'new' when the deal has none and this file could be it, null otherwise.

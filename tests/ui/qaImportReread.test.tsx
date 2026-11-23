@@ -140,7 +140,7 @@ describe('a heading row read again in the Q&A import (#63)', () => {
       const said = 'Could not read Lender Q&A.csv: The file is locked';
       await vi.waitFor(() => expect(get('#im-line').textContent).toBe(said));
       const field = get<HTMLInputElement>('#im-header');
-      expect([field.value, field.disabled]).toEqual(['1', false]);
+      expect([field.value, get<HTMLButtonElement>('#im-go').disabled]).toEqual(['1', false]);
       await heading(3);
       await letGo(3);
       await vi.waitFor(() => expect(get('#im-line').textContent).toBe('Import 30 questions · 30 new'));
