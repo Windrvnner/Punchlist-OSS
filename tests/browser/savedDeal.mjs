@@ -13,7 +13,7 @@ function restoreSession(entries) {
 }
 
 /** A new browser context at this size and scheme, on the start page; with `saved`, holding that saved state. */
-export async function fresh(browser, width = 1280, height = 736, colorScheme = 'light', saved = undefined) {
+async function fresh(browser, width = 1280, height = 736, colorScheme = 'light', saved = undefined) {
   const storageState = saved?.state;
   const ctx = await browser.newContext({ viewport: { width, height }, colorScheme, storageState });
   // the tab's own session storage (its install id and change files) is not in a storageState: put back, so the copy
