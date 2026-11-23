@@ -90,4 +90,21 @@ describe('restoring a question whose number another question holds', () => {
       expect(listed.map((t) => [t.of, (t.snapshot as { response: string }).response])).toEqual([[answered, '']]);
     }
   }, 120_000);
+
+  it('a restore never writes over the same question while it is live in two versions', async () => {
+    const { A, B, dealId, answered } = await sharedNumberDeal();
+    okd(await A.store.dispatch(DeleteQuestion, { dealId, questionId: answered }));
+    okd(await B.store.dispatch(SetResponse, { dealId, questionId: answered, response: FROM_B }));
+    await syncAll(A, B);
+    for (const X of [A, B]) {
+      expect((await X.store.dispatch(RestoreQuestion, { dealId, questionId: answered })).ok).toBe(false);
+      expect(X.store.get().conflicts[answered]).toBeDefined();
+    }
+    await syncAll(A, B);
+    // B's typed response is still one of the two versions a person chooses between, on both PCs
+    for (const X of [A, B]) {
+      const versions = X.store.get().conflicts[answered].versions;
+      expect(versions.map((v) => (v.data as { response?: string } | undefined)?.response)).toContain(FROM_B);
+    }
+  }, 120_000);
 });
