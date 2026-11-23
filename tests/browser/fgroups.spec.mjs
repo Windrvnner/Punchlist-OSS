@@ -50,7 +50,9 @@ async function setup(w, h, scheme) {
     }
     await repo.transaction({ writes, index: { dealId, add } });
   }, [id, POOL, SUBJ, WHY]);
-  await page.goto(`${URL}#deal-${id}`); await page.reload(); await page.waitForFunction(() => document.querySelectorAll('.flagrow').length > 50, null, { timeout: 30000 });
+  await page.goto(`${URL}#deal-${id}`);
+  await page.reload();
+  await page.waitForFunction(() => document.querySelectorAll('.flagrow').length > 50, null, { timeout: 30000 });
   return { ctx, page, id };
 }
 
@@ -65,22 +67,42 @@ const read = (page) => page.evaluate(() => {
 
 // The 120 findings are written once; each size and color scheme after the first reloads the same page (#97).
 const { ctx, page, id } = await setup(1280, 736, 'dark');
-/** The page at this size and scheme, reloaded on the deal, with the Open filter and all 120 findings in place. */
+/** What the list starts from: the stored findings, and the rows as shown, in order, with their marks. */
+const startState = () => page.evaluate(() => {
+  const findings = Object.values(store.get().findings);
+  const rows = [...document.querySelectorAll('.flagrow')];
+  return {
+    findings: findings.length, closed: findings.filter((f) => f.status === 'closed').length,
+    reviewed: findings.filter((f) => f.reviewed).length, rows: rows.length,
+    groups: document.querySelectorAll('.fgroup').length, marked: document.querySelectorAll('.flagrow .upd').length,
+    order: rows.map((r) => r.getAttribute('href')).join(' '),
+  };
+});
+// the stored data right after setup, put back before each reload so one size's clicks cannot reach the next
+const stored = await page.evaluate(() => ({ local: { ...localStorage }, session: { ...sessionStorage } }));
+const first = await startState();
+/** Puts back the stored data from setup, then reloads the page at this size and scheme. */
 async function reloadAs(w, h, scheme) {
   await page.setViewportSize({ width: w, height: h });
   await page.emulateMedia({ colorScheme: scheme });
-  await page.goto(`${URL}#deal-${id}`); await page.reload();
+  await page.goto(`${URL}#deal-${id}`);
+  await page.evaluate((saved) => {
+    localStorage.clear();
+    sessionStorage.clear();
+    for (const [k, v] of Object.entries(saved.local)) localStorage.setItem(k, v);
+    for (const [k, v] of Object.entries(saved.session)) sessionStorage.setItem(k, v);
+  }, stored);
+  page.errors = [];   // this load's errors count from here; the first size keeps the errors from setup
+  await page.reload();
   await page.waitForFunction(() => document.querySelectorAll('.flagrow').length > 50, null, { timeout: 30000 });
-  const start = await page.evaluate(() => ({
-    findings: Object.keys(store.get().findings).length, rows: document.querySelectorAll('.flagrow').length,
-    groups: document.querySelectorAll('.fgroup').length,
-  }));
-  say(`${w}-${scheme}: the reloaded list starts from the 120 findings, 90 open, under 9 headings`,
-    start.findings === 120 && start.rows === 90 && start.groups === 9, JSON.stringify(start));
 }
 for (const [w, h] of [[1280, 736], [1024, 640]]) for (const scheme of ['dark', 'light']) {
   if (w !== 1280 || scheme !== 'dark') await reloadAs(w, h, scheme);
-  page.errors = []; const T = `${w}-${scheme}:`;
+  const T = `${w}-${scheme}:`;
+  const start = await startState();
+  say(`${T} the list starts from the same 120 findings, 90 open under 9 headings, in the same order and marks`,
+    start.findings === 120 && start.rows === 90 && start.groups === 9 && JSON.stringify(start) === JSON.stringify(first),
+    JSON.stringify({ ...start, order: start.order === first.order }));
   const open = await read(page);
   const heads = open.groups.map((g) => g.head);
   say(`${T} one heading per workstream, A to Z, then none`, JSON.stringify(heads) === JSON.stringify(ORDER) && open.first, JSON.stringify(heads));
