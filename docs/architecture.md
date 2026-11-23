@@ -117,7 +117,7 @@ with a record's current versions in `changeLogHeads.ts` and the folding of draft
   field in `src/domain/versions.ts`. Otherwise, records with derived IDs clash when they should not.
 - **Clashes stay local to one record.** A line built on a version that hasn't arrived yet is held back until that version arrives, without pausing the rest of the deal. A held line more than a day old is let go and shown as a choice (`letGoStuck`).
 - **Nothing is thrown away.** Every version that is not kept becomes a deletion entry under **Deleted** (`src/app/commands/keptVersions.ts`). When a deal is deleted on one PC, another PC keeps any changes the deleting PC hadn't seen, as a recovered copy (`src/domain/recovered.ts`).
-- **A local copy guards against sync loss.** Each PC keeps its own files outside the synced folder, and restores any lines that the shared copy loses.
+- **A local copy guards against sync loss.** Each PC keeps its own files outside the synced folder, and restores any lines that the shared copy loses, even when the shared folder lost all of them and the PC lost its install files too.
 - **The undo journal never leaves the PC.** Its entry is checked before a line is written and settled afterward, so a save that is cut off stays pending. A damaged journal is set aside, and its complete entries are still read.
 - **Files are written safely.** A file that is replaced in full is written beside the old file, flushed, and then moved over it. When a sync client or virus scanner holds a file, the app waits briefly for it.
 - **A copied install is detected**, and it stops writing.

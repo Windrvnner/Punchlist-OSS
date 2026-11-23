@@ -289,6 +289,106 @@ describe('change files on one PC', () => {
       expect(open(A, '/onedrive/team').id).toBe(a.id); expect(open(B, '/onedrive/personal').id).toBe(b.id);
     });
 
+    /** every change file in the shared folder lost, and both install files emptied (#29) */
+    const loseAll = (shared: Mem, local: Mem) => { shared.files.clear(); damage(local, () => ''); };
+    const lineCount = (shared: Mem, id: string) => shared.files.get(file(id, 'd1'))!.trim().split('\n').length;
+
+    it('every shared file and both install files lost: this PC’s id, lines and Undo come back (#29)', async () => {
+      const { A, local, open } = setup();
+      const a = open(A, '/onedrive/team');
+      for (let i = 1; i <= 300; i++) val(await a.transaction(add(`q${i}`, `op${i}`)));
+      await a.close();
+      loseAll(A, local);
+      const b = open(A, '/onedrive/team');
+      await b.ready();
+      expect(b.id).toBe(a.id);
+      expect(await text(b, 'q1')).toBe('q1');
+      expect(await text(b, 'q300')).toBe('q300');
+      expect(lineCount(A, a.id)).toBe(300);
+      expect(await ops(b)).toHaveLength(300);
+      val(await b.transaction(add('q301', 'op301')));
+      await b.close();
+      const c = open(A, '/onedrive/team');
+      await c.ready();
+      expect(c.id).toBe(a.id);
+      // a second start adds nothing twice
+      expect(lineCount(A, a.id)).toBe(301);
+    });
+
+    it('every shared file lost: a copy on another machine takes a new id, and both keep their work (#29)', async () => {
+      const { A, local, open } = setup();
+      const a = open(A, '/onedrive/team');
+      val(await a.transaction(add('q1', 'op1')));
+      await a.close();
+      loseAll(A, local);
+      const copy = clone(local);
+      const B2 = new Mem();
+      const b = open(A, '/onedrive/team');
+      const c = open(B2, '/onedrive/team', copy, 'M2');
+      await b.ready();
+      await c.ready();
+      expect(b.id).toBe(a.id);
+      expect(c.id).not.toBe(a.id);
+      val(await b.transaction(add('qb', 'opb')));
+      val(await c.transaction(add('qc', 'opc')));
+      carry(A, B2);
+      for (const r of [b, c]) expect(val(await r.sync()).self.note).toBeUndefined();
+      for (const r of [b, c]) for (const q of ['q1', 'qb', 'qc']) expect(await text(r, q)).toBe(q);
+    });
+
+    it('every shared file lost: a copy on this machine, opened after the lines are back, is found (#29)', async () => {
+      const { A, local, open } = setup();
+      const a = open(A, '/onedrive/team');
+      val(await a.transaction(add('q1', 'op1')));
+      await a.close();
+      loseAll(A, local);
+      const copy = clone(local);
+      const b = open(A, '/onedrive/team');
+      await b.ready();
+      expect(b.id).toBe(a.id);
+      const c = open(A, '/onedrive/team', copy);
+      await c.ready();
+      val(await b.transaction(add('qb', 'opb')));
+      const refused = await c.transaction(add('qc', 'opc'));
+      expect(!refused.ok && refused.error.message).toBe(COPIED);
+      val(await b.transaction(add('qd', 'opd')));
+      expect(await text(b, 'qd')).toBe('qd');
+    });
+
+    for (const busy of [false, true]) it(`every shared file lost: an id left after a copy was found is not taken back${
+      busy ? ', though its folder record was held when the copy was found' : ''} (#29)`, async () => {
+      const { A, local, open } = setup();
+      const a = open(A, '/onedrive/team');
+      val(await a.transaction(add('q1', 'op1')));
+      const other = open(A, '/onedrive/team', clone(local));
+      val(await other.transaction(add('qo', 'opo')));
+      const write = local.write.bind(local);
+      const held = (n: string) => busy && n.startsWith('place-');
+      local.write = (n, t) => { if (held(n)) throw new Error('EBUSY: resource busy'); write(n, t); };
+      expect(val(await a.sync()).self.note).toBe(COPIED);
+      local.write = write;
+      await a.close();
+      const moved = open(A, '/onedrive/team');
+      expect(moved.id).not.toBe(a.id);
+      await moved.close();
+      loseAll(A, local);
+      const again = open(A, '/onedrive/team');
+      expect(again.id).not.toBe(a.id);
+      val(await again.transaction(add('qt', 'opt')));
+      for (const r of [other, again]) expect(val(await r.sync()).self.note).toBeUndefined();
+      for (const q of ['q1', 'qo', 'qt']) expect(await text(other, q)).toBe(q);
+    });
+
+    it('every shared file lost: an id recorded for another folder is never taken here (#29)', async () => {
+      const { A, B, local, open } = setup();
+      const b = open(B, '/onedrive/personal');
+      val(await b.transaction(add('q2', 'op2')));
+      await b.close();
+      loseAll(B, local);
+      expect(open(A, '/onedrive/team').id).not.toBe(b.id);
+      expect(A.files.get(file(b.id, 'd1'))).toBeUndefined();
+    });
+
     it('a local folder copied to another PC never takes the first PC’s id, even with install.json lost or damaged', async () => {
       const { A, local, open } = setup(); const a = open(A, '/onedrive/team'); val(await a.transaction(add('q1', 'op1')));
       const gone = clone(local); gone.files.delete('install.json');                                   // its spare still names the machine

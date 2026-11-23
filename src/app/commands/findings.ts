@@ -289,6 +289,23 @@ export const ApplyReassessment = define({
   },
 });
 
+/**
+ * The "May be out of date" mark after a document is attached. A mark set for another reason (a check, a cited document
+ * gone from the data room) is left as it is, as a response leaves one (transitions.ts): the next update must still read
+ * it, and an update running now must not take the document's mark for the only news (#327). A mark from responses, an
+ * earlier attach's, or none gives way to the document's: responses and added sources are compared on their own when an
+ * update lands.
+ */
+function attachMark(finding: Finding, doc: string): Pick<Finding, 'updated' | 'updatedWhy' | 'updatedOn'> {
+  const ownReason = finding.updated && !finding.updatedOn && !attachedReason(finding);
+  if (ownReason) return { updated: true, updatedWhy: finding.updatedWhy, updatedOn: undefined };
+  return { updated: true, updatedWhy: `${doc} attached`, updatedOn: undefined };
+}
+
+/** whether the finding's mark is the one attaching one of its sources set */
+const attachedReason = (finding: Finding) =>
+  finding.sources.some((source) => finding.updatedWhy === `${source.doc} attached`);
+
 /** A document a person attached to a finding: it joins the finding's sources and offers a reassessment. */
 export const AttachDocumentToFinding = define({
   name: 'AttachDocumentToFinding',
@@ -298,7 +315,8 @@ export const AttachDocumentToFinding = define({
     const f = live(state, input);
     if (!f) return fail(notFound('Finding not found', input.findingId));
     if (f.sources.some((x) => docKey(x) === docKey(input))) return ok({ upserts: [], audit: [] });   // the same document, not merely the same name
-    const next: Finding = { ...f, sources: [...f.sources, { doc: input.doc, loc: '', docId: input.docId }], updated: true, updatedWhy: `${input.doc} attached`, updatedOn: undefined, updatedAt: ctx.at };
+    const sources = [...f.sources, { doc: input.doc, loc: '', docId: input.docId }];
+    const next: Finding = { ...f, sources, ...attachMark(f, input.doc), updatedAt: ctx.at };
     return ok({
       dealId: f.dealId,
       upserts: [{ kind: 'finding', record: next, expectedRev: f.rev }],
