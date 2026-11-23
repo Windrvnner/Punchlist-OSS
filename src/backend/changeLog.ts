@@ -23,6 +23,7 @@ import type { AuditEntry, RecordKind } from '../domain/model';
 import { DraftFold } from './changeLogDrafts';
 import {
   bookkeepingGivesWay,
+  restoredTwiceGivesWay,
   mayBeOneImport,
   oneImport,
   oneOfEqual,
@@ -418,6 +419,7 @@ export class Combined {
     if (mayBeOneImport(heads, kind)) heads = oneImport(heads, kind, this.graph);
     if (kind === 'tombstone') heads = tombstoneHeads(heads, () => this.state('question', id).live);
     if (kind === 'item' && heads.length > 1) heads = bookkeepingGivesWay(heads, this.graph);
+    if (kind === 'finding' && heads.length > 1) heads = restoredTwiceGivesWay(heads, this.graph);
     if (kind === 'question' && heads.length > 1) heads = this.withDraftFolded(heads, tips);
     // A delete made without knowledge of an edit (or an edit made without knowledge of a delete) is a clash like any
     // other: a person chooses between the deleted record and the edited one. The software never picks. The record's

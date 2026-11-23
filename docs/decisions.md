@@ -44,6 +44,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Notices stack, up to three at the top of the page, for 8 seconds each (paused on hover or focus), each with its own **Undo**, and only on the PC that acted.
 - Unseen changes that another PC made to a deal deleted elsewhere are kept on that PC as "Project X (recovered)", with a notice that stays until closed and says who deleted the original; keeping or deleting the copy is that person's call. Details still open are in GitHub Issues.
 - A record changed on two PCs, or deleted on one and changed on another, shows design B: the person picks a version, then confirms, and until then the record takes no edits. One record in two versions never blocks the others.
+- A finding put back from Deleted on two PCs from the same deletion, then changed or deleted on one, stays as that PC has it, with nothing to choose (#401).
 - A question's draft never conflicts with a person's change on another PC; both are kept. Two crossing drafts, or a delete alongside a draft, still require a choice.
 - Settings (720px wide) has Account, Appearance, Deals Open On, Checklist, Default Model, and Keyboard, plus, in the desktop app, the Punchlist folder and Intelligence sign-in, with the app's version in the header. There is no Firm field, because the firm's name comes from the control file, and there are no job titles.
 - Each thing has one name: "counterparty"; "finding" (not "issue"); "Deal status"; "Changed elsewhere", with **Keep Mine** and **Take Theirs**; "Q&A" for the page and "Q&A log" for the spreadsheet; "Remove" to take something off a list and "Delete" for a record; and "Data room" and "Folders". The app says **Retry Now** where it already retries and **Retry** elsewhere. An interrupted or undone action is named by its button. "Blocker" simply means something flagged. The duplicate confirmation says **Create Anyway**.
@@ -82,10 +83,11 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Marking imported questions that have a response as Answered is optional and off by default.
 - Merge matches a row by wording first, then by number; a row that matches a deleted question brings it back. A row that names who submitted it never matches another party's question. "Will overwrite" is shown field by field first.
 - The same list imported on two PCs makes one set of questions, with ids derived from the deal, number, party, and wording.
-- Two questions with the same number are both kept and marked; a person renumbers one.
+- Two questions with the same number are both kept and marked; a person renumbers one. Undo, Restore, and a kept
+  version's Restore bring a deleted question back under its own number, even when another question holds it (#13, #116).
 - Export has no finding or link columns and always carries every column of the log.
 - No person in the app is named in a prompt, export, spreadsheet, or the memo. An accepted AI draft exports as "AI draft, accepted on" a date, and findings export the date reviewed but not the reviewer. Who responded from outside the firm is kept.
-- Each deal has one consolidated Q&A log, in the team's own folder and format; the app keeps no copy and never gates it.
+- Each deal has one consolidated Q&A log, in the team's own folder and format; the app keeps no copy and never gates it. One file is one deal's Q&A log: a file another deal already uses as its log can't be imported into a second deal (#38).
 - An import can make a spreadsheet the deal's log ("Make this the deal's Q&A log", checked for a file with two or more parties). If there is no log, the first update creates one in the app's layout, in a folder a person picks. A later party's file only adds and updates questions and is never written to.
 - Updates add no columns and never write to a formula cell. To reply to one party, use Export filtered by Submitted By.
 - **Update Q&A Log** brings every column up to date and first saves the old version to the folder's archive; it never deletes anything else. A log open elsewhere is retried every 30 seconds for 20 minutes; the notice names who has it open only when the lock file does.
@@ -97,6 +99,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Findings have no codes and are named by title everywhere; no id is ever cited.
 - A finding's page has Reviewed, status, edit, and delete in fixed places, and no suggested questions under it.
 - An open finding that the documents may have overtaken is marked "May be out of date", with its reason and **Update from Documents**. The app never rewrites a finding by itself.
+- Attaching a document to a finding already marked "May be out of date" for another reason than a response keeps that reason (#327).
 - An update that replaces the finding's words clears Reviewed and keeps the earlier text under "Previous version".
 - There is no separate "look again" button: new documents, Check again, or the finding's conversation do that.
 - A finding's stripe is red while the finding is open and gray once it is closed, whoever raised it; it is not colored by severity.

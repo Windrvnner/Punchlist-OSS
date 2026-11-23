@@ -12,7 +12,9 @@ import { Undo } from '../../src/app/commands/undo';
 import { registry } from '../../src/app/commands/undo';
 import { dealQuestions, qaKept, qaVersions, qaChanged } from '../../src/app/state';
 import { RestoreVersion, entriesOf } from '../../src/app/commands/keptVersions';
-import { keepImportedLog, chooseVersion, exportQaLog, logName, logOf, logChoice } from '../../src/app/qaLog';
+import {
+  keepImportedLog, chooseVersion, exportQaLog, logName, logOf, logChoice, logTakenBy,
+} from '../../src/app/qaLog';
 import { suggestMapping } from '../../src/domain/importExport';
 import { ok, fail } from '../../src/domain/result';
 import type { QaLogFiles } from '../../src/ports';
@@ -182,6 +184,28 @@ describe('a deal\'s Q&A log', () => {
     ]).toEqual(['Fabrikam SA, signed November 14', '', ['response'], { response: 'Fabrikam' }]);
     // the next update finds nothing to write, and the question no longer counts as changed then
     expect(await exportQaLog(store, dealId)).toMatchObject({ value: { status: 'written', changed: 0, updated: 0, kept: [] } }); expect(saves).toEqual([]);
+  });
+  it('a response saved in the app while the update saves the file is in two versions, not replaced (#40)', async () => {
+    const rows = (r: string) => [['1', 'What is the DSCR?', ''], ['2', 'Who is the EPC contractor?', r]];
+    const at = (r: string) => ({ columns, cols: [0, 1, 2], lines: [2, 3], lastRow: 3, rows: rows(r), stamp: r });
+    const box = { file: at('Fabrikam') }; const { f } = files({ read: async () => ok(box.file) });
+    const { store, dealId } = await make(f); const [q1, q2] = dealQuestions(store.get(), dealId);
+    box.file = at('Fabrikam SA, signed November 14');                                     // changed in the file
+    await store.dispatch(SetResponse, { dealId, questionId: q1.id, response: '1.20x' });  // so the update saves
+    const save = store.services.qaLogs!.save;
+    store.services.qaLogs!.save = async (req) => {
+      const saved = await save(req);
+      const response = 'Fabrikam Construction, app revision';
+      const typed = await store.dispatch(SetResponse, { dealId, questionId: q2.id, response });
+      expect(typed.ok).toBe(true);
+      return saved;
+    };
+    expect(await exportQaLog(store, dealId)).toMatchObject({ value: { status: 'written', changed: 0, kept: [2] } });
+    const q = store.get().questions[q2.id];
+    expect([q.response, qaVersions(store.get(), q), qaKept(store.get(), q)]).toEqual([
+      'Fabrikam Construction, app revision', 'Two versions', { response: 'Fabrikam SA, signed November 14' },
+    ]);
+    expect(logOf(store, dealId)!.last!.sent[q2.id].response).toBe('Fabrikam');
   });
   // a log that writes a status or a date its own way ("Outstanding", 11/20/2026) is read in the app's terms
   it('takes in a status or date only the log changed, written its own way, as Changed and not as two versions', async () => {
@@ -407,6 +431,25 @@ describe('a deal\'s Q&A log', () => {
     // the app's Fabrikam never went over it
     expect(await exportQaLog(store, dealId)).toMatchObject({ value: { status: 'written', kept: [2] } });
     expect(saves).toEqual([]);
+  });
+  it('one file is one deal\'s log: another deal can\'t import it (#38)', async () => {
+    const { store, dealId } = await make(files().f);                                      // its log is PATH
+    await store.dispatch(CreateDeal, { name: 'Contoso', folders: [] });
+    const other = Object.keys(store.get().deals).find((id) => id !== dealId)!; await store.loadDeal(other);
+    const said = new RegExp('^Project Proseware already uses “Lender A Q&A\\.xlsx” in this folder as its Q&A log\\. '
+      + 'Choose another file$');
+    for (const path of [PATH, PATH.toLowerCase(), PATH.replace(/\\/g, '/')]) {
+      expect(logTakenBy(store, other, path)).toMatch(said);
+    }
+    expect(logTakenBy(store, dealId, PATH)).toBeNull();                                  // its own log imports again
+    const had = store.get().deals[dealId].qaLogs;
+    const log = {
+      name: 'Lender A Q&A', file: 'Lender A Q&A.xlsx', folder: 'X:/Deals/Proseware/Q&A/', sheet: 'Log', headerRow: 1,
+      mapping: suggestMapping(columns),
+    };
+    const r = await store.dispatch(KeepQaLog, { dealId: other, log });
+    expect(!r.ok && r.error.message).toMatch(said);
+    expect([store.get().deals[other].qaLogs, store.get().deals[dealId].qaLogs]).toEqual([[], had]);
   });
   it('of two deals with one name, each keeps its own file: one file is one deal\'s log, and a log the app starts says which deal it is', async () => {
     const { f, made } = files(); const { store, dealId } = await make(f);                // the first Proseware's log is X:\\Deals\\Proseware\\Q&A\\Lender A Q&A.xlsx

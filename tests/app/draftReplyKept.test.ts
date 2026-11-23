@@ -36,11 +36,14 @@ const PCS = [{ by: 'tdoe', from: 'Tablet' }, { by: 'sroe', from: 'Desk PC' }];
 const gone = () => Object.assign(new Error('EIO: i/o error, write'), { code: 'EIO' });
 
 /** A Store on this PC's disk, with every draft held open until the test lets the model answer. */
-function open(d: Disk, local = new MemoryLocal()) {
-  const opts = { latency: [0, 0] as [number, number] }; const repo = memRepo(clock.now, d);
+function open(d: Disk, local = new MemoryLocal(), clk = clock) {
+  const opts = { latency: [0, 0] as [number, number] }; const repo = memRepo(clk.now, d);
   let answer!: () => void; const held = new Promise<void>((r) => { answer = r; });
   const ai = { ...mockAi(opts, repo), draft: async () => { await held; return ok({ status: 'found' as const, text: TEXT, sources: [{ doc: 'EPC contract.pdf', loc: 'p. 82', docId: 'doc_epc' }] }); } };
-  const store = new Store({ repo, ai, docs: mockDocuments(opts), fs: { pickFolders: null, pathFor: null, save: async () => ({ ok: true as const, value: 'saved' as const }) }, sheets: csvCodec, session: mockSession(opts), local, clock, ids }, COMMANDS);
+  const fs = { pickFolders: null, pathFor: null, save: async () => ({ ok: true as const, value: 'saved' as const }) };
+  const docs = mockDocuments(opts);
+  const session = mockSession(opts);
+  const store = new Store({ repo, ai, docs, fs, sheets: csvCodec, session, local, clock: clk, ids }, COMMANDS);
   Object.assign(store.replyWait, { first: 20, max: 80 });
   return { store, repo, answer, local };
 }
@@ -755,4 +758,67 @@ describe('the held notice with a slow journal, and a held draft discarded', () =
     expect(held()).toEqual(['Draft not saved: 2 questions have versions to choose between']);
     expect(w.now(picked[0].id).response).toBe('Typed here');
   }, 60_000);
+});
+
+describe('a PC whose clock differs from the drafting PC\'s (#24)', () => {
+  /** a clock `ahead` minutes ahead of this test's own, which can be moved on */
+  const clockAhead = (ahead: number) => {
+    const at = { offset: ahead * 60_000 };
+    const shifted = { now: () => new Date(Date.parse(clock.now()) + at.offset).toISOString() };
+    return { ...shifted, moveOn: (minutes: number) => { at.offset += minutes * 60_000; } };
+  };
+  /** another PC on the same shared folder, with its own disk, local store, and clock */
+  const otherPc = async (w: World, local: MemoryLocal, clk: ReturnType<typeof clockAhead>, own = disk()) => {
+    const pc = open({ shared: w.d.shared, local: own.local }, local, clk);
+    await pc.store.boot(); await pc.store.loadDeal(w.dealId);
+    return { ...pc, own };
+  };
+
+  for (const ahead of [20, 60]) {
+    it(`a clock ${ahead} minutes ahead leaves a draft still being written alone, on 2,000 questions`, async () => {
+      const w = await world(); const q = w.qs()[1499];
+      const opId = await w.draft(q);
+      const localB = new MemoryLocal(); const clockB = clockAhead(ahead);
+      const b = await otherPc(w, localB, clockB);
+      expect(b.store.get().questions[q.id].draft).toMatchObject({ status: 'pending', opId });
+      w.answer(); await w.store.settled(opId);
+      expect(w.now(q.id).draft).toMatchObject({ status: 'found', text: TEXT });
+      await b.repo.sync(); await settle();
+      expect(b.store.get().questions[q.id].draft).toMatchObject({ status: 'found', text: TEXT });
+    });
+  }
+
+  it('B stays open: the draft is given up 15 minutes after B first saw it, with one look set', async () => {
+    const w = await world(); const q = w.qs()[1499];
+    await w.draft(q);
+    const clockB = clockAhead(20);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const opening = otherPc(w, new MemoryLocal(), clockB); await vi.advanceTimersByTimeAsync(50);
+      const b = await opening;
+      const timers = vi.getTimerCount();
+      const look = () => (b.store as any).recoverDrafts(w.dealId) as Promise<void>;
+      await look(); await look();                                    // looked at again: no second look is set
+      expect(vi.getTimerCount()).toBe(timers);
+      clockB.moveOn(14); await vi.advanceTimersByTimeAsync(14 * 60_000);
+      expect(b.store.get().questions[q.id].draft?.status).toBe('pending');
+      clockB.moveOn(2); await vi.advanceTimersByTimeAsync(2 * 60_000);
+      expect(b.store.get().questions[q.id].draft?.status).toBe('failed');
+    } finally { vi.useRealTimers(); w.answer(); }
+  });
+
+  it('B restarts halfway, then gives the draft up once it has seen it for 15 minutes by its own clock', async () => {
+    const w = await world(); const q = w.qs()[1499];
+    const opId = await w.draft(q);
+    const localB = new MemoryLocal(); const clockB = clockAhead(20);
+    const first = await otherPc(w, localB, clockB);
+    clockB.moveOn(10);                                                               // B restarts 10 minutes on
+    const again = await otherPc(w, localB, clockB, first.own);
+    expect(again.store.get().questions[q.id].draft?.status).toBe('pending');
+    clockB.moveOn(6);                                                                // 16 minutes after B first saw it
+    const later = await otherPc(w, localB, clockB, first.own);
+    expect(later.store.get().questions[q.id].draft?.status).toBe('failed');
+    w.answer(); await w.store.settled(opId);                                         // the reply still lands
+    expect(w.now(q.id).draft).toMatchObject({ status: 'found', text: TEXT });
+  });
 });

@@ -18,6 +18,7 @@ import type { Repository, Transaction, Loaded, Version, SyncState, Recovered, Wr
 import { CURRENT_SCHEMA, CLASH_KINDS, Envelope, schemaOf, type AuditEntry, type ClashKind, type RecordKind } from '../domain/model';
 import { ok, fail, type Result, type Failure } from '../domain/result';
 import { Combined, isLine, recKey, type Line, type RecChange, type RecState } from './changeLog';
+import type { Ver } from './changeLines';
 import { shareOwn, wholeLines } from './ownFile';
 import { LocalChanges } from './localChanges';
 import { recoveredWriteClashes } from './recoveredWrite';
@@ -91,6 +92,27 @@ function readInstalled(text: string): { saved: Installed; damaged: boolean } {
 const INSTALL = 'install.json', SPARE = 'install.spare.json';
 /** the install id in a change file's name (`changes-<id>-<deal>-<number>.jsonl`), or null */
 const idOfFile = (name: string) => /^changes-(.+)-[A-Za-z0-9_]+-\d{4,}\.jsonl$/.exec(name)?.[1] ?? null;
+
+/** A file's whole lines under an id (one cut off, or ended by healing a torn write, is passed over). */
+function linesOf(text: string, id: string): { l: string; at: string }[] {
+  return text.split('\n').flatMap((l) => {
+    try {
+      const x = JSON.parse(l);
+      return isLine(x) && x.pc === id ? [{ l, at: x.at }] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/** Whether a folder record (`place-<id>.json`) marks its id as left after a copy was found (#29). */
+function leftIn(record: string | null): boolean {
+  try {
+    return JSON.parse(record ?? 'null')?.left === true;
+  } catch {
+    return false;
+  }
+}
 
 const AUDIT_KEEP = 200;
 const CHANGE_FILE = /^changes-.+\.jsonl$/;
@@ -415,11 +437,10 @@ export class LogRepository implements Repository {
       const j = o.journal ?? o.local;
       if (j.read(`ops-${id}.json`) == null) { const text = j.read(`ops-${carry}.json`); if (text != null) j.write(`ops-${id}.json`, text); }
       this.previous = carry;
+      this.keepPlaceRecord(carry, true);
     }
     const now = this.install(id);
-    // which folder this id is for, kept apart from install.json, so an id found again after install.json is lost is only ever
-    // taken in its own folder: a copy of the folder holds the same files under it. Tried again at each start until it is there.
-    if (o.place) try { const rec = JSON.stringify({ place: o.place }); if (o.local.read(`place-${id}.json`) !== rec) o.local.write(`place-${id}.json`, rec); } catch { /* the next start */ }
+    this.keepPlaceRecord(id);
     this.keepInstall(JSON.stringify(now), texts);
     this.changes = new LocalChanges(o.local, id);
     this.ownLines = new Set(this.changes.ownLines(id));
@@ -629,22 +650,71 @@ export class LogRepository implements Repository {
     for (const i of [...kept.keys()]) if (!mine(i)) kept.delete(i);
     if (!kept.size) return null;
     const there = new Map<string, string[]>(); for (const n of o.shared.list()) { const i = idOfFile(n); if (i && kept.has(i)) there.set(i, [...(there.get(i) ?? []), n]); }
-    // a file's whole lines under an id (one cut off, or ended by healing a torn write, is passed over)
-    const lines = (text: string, i: string) => text.split('\n').flatMap((l) => { try { const x = JSON.parse(l); return isLine(x) && x.pc === i ? [{ l, at: x.at }] : []; } catch { return []; } });
     const found: [string, string][] = [];
     for (const [i, names] of kept) {
-      const shared = there.get(i) ?? []; if (!shared.length || shared.some((n) => !names.includes(n))) continue;
+      const shared = there.get(i) ?? [];
+      if (!shared.length) {
+        if (this.placedOnThisMachine(i)) found.push([i, this.latestKeptAt(names, i)]);
+        continue;
+      }
+      if (shared.some((n) => !names.includes(n))) continue;
       let here = '', ahead = false;
       for (const n of names) {
         if (!shared.includes(n)) continue;
-        const held = new Set(lines(o.local.read(n) ?? '', i).map((x) => x.l));
-        const theirs = lines(o.shared.read(n) ?? '', i);               // will not open just now: the start fails, and is tried again
+        const held = new Set(linesOf(o.local.read(n) ?? '', i).map((x) => x.l));
+        // will not open just now: the start fails, and is tried again
+        const theirs = linesOf(o.shared.read(n) ?? '', i);
         if (theirs.some((x) => !held.has(x.l))) ahead = true;
         for (const x of theirs) if (x.at > here) here = x.at;
       }
       if (!ahead) found.push([i, here]);
     }
     return found.sort((a, b) => (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : 0))[0]?.[0] ?? null;
+  }
+
+  /**
+   * An id with no file left in the shared folder (#29): nothing there can tell a copy of this local folder from
+   * this PC, so it is taken only when its folder record names this machine and Windows user. A copy on another PC
+   * takes a new id.
+   */
+  private placedOnThisMachine(id: string): boolean {
+    const here = this.o.machine?.();
+    if (!this.o.place || !here) return false;
+    try {
+      const record = this.o.local.read(`place-${id}.json`);
+      return JSON.parse(record ?? 'null')?.machine === here && !leftIn(record);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Which folder an id is for, kept apart from install.json, so an id found again after install.json is lost is only
+   * ever taken in its own folder: a copy of the folder holds the same files under it. Its machine is kept too, so an id
+   * with no file left in the shared folder can still be taken back on this PC (#29). An id left after a copy was found
+   * is marked, and the mark is never dropped, so it is never taken back that way: the copy may still be writing under
+   * it. Tried again at each start until it is there (the left id while it is the last id in this folder).
+   */
+  private keepPlaceRecord(id: string, left = false) {
+    const here = this.o.machine?.();
+    if (!this.o.place) return;
+    try {
+      const name = `place-${id}.json`;
+      const kept = this.o.local.read(name);
+      const machine = here ? { machine: here } : {};
+      const mark = left || leftIn(kept) ? { left: true } : {};
+      const record = JSON.stringify({ place: this.o.place, ...machine, ...mark });
+      if (kept !== record) this.o.local.write(name, record);
+    } catch { /* the next start */ }
+  }
+
+  /** When an id last wrote, from the copies of its files kept here (#29). */
+  private latestKeptAt(names: string[], id: string): string {
+    let latest = '';
+    for (const name of names) {
+      for (const { at } of linesOf(this.o.local.read(name) ?? '', id)) if (at > latest) latest = at;
+    }
+    return latest;
   }
 
   /** What install.json holds: the current id, whose machine it is, its shared folder, the id used in each folder, and the last id in each folder where it took a new one. */
@@ -701,6 +771,7 @@ export class LogRepository implements Repository {
     if (this.cloned) return; this.cloned = true;
     // the next start takes the new id, and this one's undo journal with it
     if (this.o.place) this.lastIds[this.o.place] = this.id;
+    this.keepPlaceRecord(this.id, true);
     try { this.keepInstall(JSON.stringify(this.install((this.o.newId ?? (() => globalThis.crypto.randomUUID()))()))); } catch { /* the check runs again at the next start */ }
   }
   /** Tell whoever is watching about a record written here by something other than the window (the first pass writing a finding). */
@@ -783,7 +854,7 @@ export class LogRepository implements Repository {
 
   private readOwnLine(line: Line, raw: string, writeReceipt: boolean): boolean {
     this.seq = Math.max(this.seq, line.seq);
-    if (this.changes.has(raw)) {
+    if (this.changes.sharedIsPending(raw)) {
       if (!this.changes.confirm(raw)) return false;
       this.ownLines.add(raw);
       if (line.op) this.ops.landed([line.op], writeReceipt);
@@ -928,7 +999,24 @@ export class LogRepository implements Repository {
     // a deleted version carries the copy its deletion note kept, so a person choosing sees the words that were deleted
     const held = (v: (typeof st.heads)[number]) => (this.view.lineMate(v, 'tombstone', id)?.data as { snapshot?: unknown } | undefined)?.snapshot;
     const conflict: Version[] = st.heads.map((v) => ({ id: v.ver, by: v.by, from: v.from, at: v.at, data: v.del ? undefined : v.data, ...(v.del ? { deleted: true, ...(held(v) ? { held: held(v) } : {}) } : {}), ...(v.pc === this.id ? { here: true } : {}) }));
+    if (kind === 'question') for (const [i, v] of st.heads.entries()) conflict[i].drafts = this.draftsIn(v);
     return { kind, id, rev: st.rev, envelope, conflict };
+  }
+  /** every draft request held anywhere in a version's history, back through each version it was based on (#22) */
+  private draftsIn(head: Ver): string[] {
+    const visited = new Set<string>();
+    const drafts = new Set<string>();
+    const todo = [head.ver];
+    while (todo.length) {
+      const ver = todo.pop()!;
+      const version = visited.has(ver) ? undefined : this.view.version(ver);
+      visited.add(ver);
+      if (!version) continue;
+      const opId = (version.data as { draft?: { opId?: unknown } } | undefined)?.draft?.opId;
+      if (typeof opId === 'string') drafts.add(opId);
+      todo.push(...version.base);
+    }
+    return [...drafts];
   }
   /** a record as it stands, read at once, for a caller that cannot wait; not for ops */
   peek(kind: Exclude<RecordKind, 'op'>, id: string): Loaded | null { this.readFor(kind, id); return this.loaded(kind, id); }

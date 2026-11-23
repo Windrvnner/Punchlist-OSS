@@ -47,6 +47,10 @@ body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;bac
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+::selection{
+  background-color:var(--accent);
+  color:var(--accent-ink);
+}
 h1,h2,h3,p{margin:0}
 h1{font:600 26px/1.15 var(--display);letter-spacing:-.4px;text-wrap:balance}
 h2{font:600 18px/1.25 var(--body);letter-spacing:-.2px}
@@ -137,8 +141,6 @@ select.field option{color:var(--option-ink);background:var(--option-bg)}
 .deal .k{font-size:13px;color:var(--ink-2);margin-bottom:3px}
 .deal .v{font-weight:500;font-size:13.5px}
 .deal .flag{display:flex;align-items:baseline;gap:8px}
-.deal .flag b{font:600 26px/1 var(--display);letter-spacing:-.4px}
-.deal .flag b.hot{color:var(--high)}
 .deal .delta{font-size:13.5px}
 .deal .delta.quiet{color:var(--ink-3)}
 .dealshead{display:grid;grid-template-columns:minmax(220px,1.5fr) 120px 120px 120px minmax(220px,1.6fr);gap:18px;padding:0 22px 8px;font-size:11px;color:var(--ink-2);max-width:1180px}
@@ -218,8 +220,6 @@ select.field option{color:var(--option-ink);background:var(--option-bg)}
 .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0 22px}
 .tile{padding:14px 16px}
 .tile .k{font-size:12px;color:var(--ink-2)}
-.tile .v{font:600 26px/1.1 var(--display);letter-spacing:-.4px;margin-top:4px}
-.tile .v.hot{color:var(--high)}
 .rsec{margin-top:22px}
 .rsec h3{margin-bottom:10px}
 .flag{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:start;padding:14px 16px;border-top:1px solid var(--line)}
@@ -369,11 +369,14 @@ body.qopen .qgrid{gap:6px;right:14px;justify-content:flex-start;bottom:168px}
 .g{display:grid;grid-template-columns:56px 44px minmax(0,1fr);align-items:center;height:5px;border:0;background:none;padding:0;text-align:left;color:var(--ink-2);font-size:12.5px;cursor:pointer;transition:height var(--base) var(--ease),opacity var(--base) var(--ease)}
 body.qopen .g{opacity:1!important}
 body.qopen .g{height:22px!important}
-.g.on i{width:26px;height:8px}
 .g i{justify-self:center;width:16px;height:5px;border-radius:3px;background:var(--tick);transition:width var(--base) var(--ease),height var(--base) var(--ease),background var(--fast)}
 .g.on{height:8px;color:var(--ink)}body.qopen .g.on{height:22px}
-.g.on i{width:26px;height:8px;background:var(--accent)}
 .g.done i{background:color-mix(in srgb,var(--ink-3) 55%,transparent)}   /* done is the one gray, as on the Overview */
+.g.on i{
+  width:26px;
+  height:8px;
+  background:var(--accent);
+}
 .g b,.g span{opacity:0;transition:opacity .15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .g b{color:var(--ink);font-weight:500}
 .g.done span{color:var(--ink-3)}
@@ -767,7 +770,11 @@ body.reading .chatwrap.withdoc .chat{animation:settle var(--slow) var(--ease) bo
 .askslot .askbox{position:relative;padding:6px 6px 6px 18px;flex-direction:row;align-items:center;border-radius:999px;gap:10px}
 .askslot .askbox textarea{min-height:28px;height:28px;flex:1;font-size:15px;line-height:28px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .askslot .askbox:not(.open) .bar .scopebtn:not(.pastbtn),.askslot .askbox:not(.open) .bar .hint{display:none}
-.askslot .askbox.open{flex-direction:column;align-items:stretch;border-radius:22px;padding:14px 14px 11px;gap:10px}
+.askslot .askbox.open{
+  flex-direction:column;
+  align-items:stretch;
+  border-radius:22px;
+}
 .askslot .askbox.open textarea{min-height:24px;height:auto;max-height:168px;line-height:24px;padding:0 4px;white-space:pre-wrap;overflow:auto;scrollbar-width:thin;scrollbar-color:var(--ink-3) transparent}
 /* open, the box is a column: the one-line box's flex:1 would make the field's height 0 plus its 24px floor, overriding the
    height the composer sets as lines are typed, so the text scrolled inside one line with its top line cut (#104) */
@@ -890,9 +897,12 @@ details.prev{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}d
 .page.ph-page{display:flex;align-items:flex-start;justify-content:center}
 .page.ph-page .ph{width:100%;margin-top:18px}
 .page.ph-page .ph i{background:var(--paper-rule)}
-body.booting #rail-nav a,body.booting #rail-nav .grp-h{visibility:hidden}
-body.booting #rail-nav::before{content:"";display:block;height:140px;margin:46px 10px 0;border-radius:8px;background:repeating-linear-gradient(to bottom,color-mix(in srgb,var(--ink) 9%,transparent) 0 11px,transparent 11px 30px);animation:phpulse 1.4s ease-in-out infinite}
-@media (prefers-reduced-motion:reduce){.ph i,.phrow i,body.booting #rail-nav::before{animation:none}}
+.rail nav .ph{
+  gap:19px;
+  margin:46px 10px 0;
+}
+.rail nav .ph i{width:100%}
+@media (prefers-reduced-motion:reduce){.ph i,.phrow i{animation:none}}
 /* A button that is turned off: a flat gray capsule with secondary words, no accent and no edge, so it is easy to
    read and plainly not pressable. An icon button keeps a fainter ring and a dimmed icon, with no fill, so it never reads
    as chosen. After the button rules, so it wins over a kind's own colors. */
