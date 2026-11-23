@@ -239,6 +239,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - The standard checks use the real backend with stand-in model services. Run the opt-in live checks when requested.
 - Two things are not to be checked: Windows High Contrast on Windows itself, and emoji in imported spreadsheets.
 - Use test fixtures and stand-ins for routine verification.
+- `npm run check:all` first proves LibreOffice converts a two-sheet workbook and then requires it: its LibreOffice
+  tests fail rather than skip. A plain test run still skips them without LibreOffice (#85).
 - Built work is shown with a short screen recording and single, distinctly named screenshots.
 - Before building the installer, set the organization name, model provider, and other shared settings in
   `src/control.ts`. Each person signs in after installation.

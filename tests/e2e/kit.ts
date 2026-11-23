@@ -52,10 +52,22 @@ export function carry(a: string, b: string) {
 
 export interface PcApp { backend: Backend; store: Store; service: ModelService; dirs: { shared: string; local: string; work: string } }
 /** one PC: its own local and work folders, its copy of the sync folder, the real backend, and the app's store on it */
-export async function pcApp(root: string, name: string, o: { service: ModelService; checklist?: () => Checklist; user?: string; /** one sync folder for several PCs: OneDrive with no delay */ shared?: string; timing?: Partial<Timing>; inTouch?: () => boolean; now?: () => number; clock?: () => string; batch?: number }): Promise<PcApp> {
+export async function pcApp(root: string, name: string, o: {
+  service: ModelService; checklist?: () => Checklist; user?: string;
+  /** one sync folder for several PCs: OneDrive with no delay */
+  shared?: string;
+  timing?: Partial<Timing>; inTouch?: () => boolean; now?: () => number; clock?: () => string; batch?: number;
+  /** how long a changed folder must stay the same before it is read; the product's 2 s unless set */
+  settleMs?: number;
+}): Promise<PcApp> {
   const dirs = { shared: o.shared ?? path.join(root, `sync-${name}`), local: path.join(root, `local-${name}`), work: path.join(root, `work-${name}`) };
   for (const d of Object.values(dirs)) fs.mkdirSync(d, { recursive: true });
-  const backend = composeBackend({ retry: { sleep: async () => {} }, sharedPath: dirs.shared, localPath: dirs.local, workPath: dirs.work, label: name, user: () => o.user ?? name, service: o.service, checklist: o.checklist ? () => o.checklist!() : undefined, tuning: { width: 4, batch: o.batch ?? 10 }, timing: o.timing, inTouch: o.inTouch, now: o.now, clock: o.clock });
+  const backend = composeBackend({
+    retry: { sleep: async () => {} }, sharedPath: dirs.shared, localPath: dirs.local, workPath: dirs.work, label: name,
+    user: () => o.user ?? name, service: o.service, checklist: o.checklist ? () => o.checklist!() : undefined,
+    tuning: { width: 4, batch: o.batch ?? 10 }, timing: o.timing, inTouch: o.inTouch, now: o.now, clock: o.clock,
+    settleMs: o.settleMs,
+  });
   const store = new Store({
     repo: backend.repo, ai: backend.ai, docs: backend.docs, session: backend.session,
     fs: { pickFolders: null, pathFor: null, save: async () => ({ ok: true as const, value: 'saved' as const }) } as any, sheets: csvCodec, local: new MemoryLocal(),

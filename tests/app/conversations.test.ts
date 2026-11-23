@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, onTestFinished, vi } from 'vitest';
 import { Store, NOT_THESE_KEEP } from '../../src/app/store';
 import { memRepo, disk, type Disk, type MemRepo } from '../adapters/memRepo';
 import { MemoryLocal } from '../../src/adapters/local';
@@ -49,12 +49,18 @@ describe('conversations', () => {
       research: async (runId) => { asked.push(runId); return ok(steps); },
     };
     const { store } = make({ kv, local, ai }); const dealId = await deal(store); const scope: Scope = { kind: 'deal', dealId };
-    const p = ask(store, scope, 'lock-up'); await sleep(800);
+    // the poll's 700 ms waits run on a test clock: only setTimeout is faked, from here to the end of the case (#101)
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const p = ask(store, scope, 'lock-up'); await vi.advanceTimersByTimeAsync(800);
     const pending = store.get().threads[convKey(scope)][1]; expect(pending.state).toBe('pending');
     expect(asked[0]).toBe(pending.id); expect(store.get().ui.researching[pending.id]).toEqual(steps);   // asked by the pending message's id, and shown
     release(); await p;
     const done = store.get().threads[convKey(scope)][1]; expect(done.research?.steps[0]).toMatchObject({ done: true, result: '3 listed · 1 opened · 0 passages' }); expect(store.get().ui.researching).toEqual({});
-    const n = asked.length; await sleep(800); expect(asked.length).toBe(n);                                                  // and no longer asked once answered
+    // and no longer asked once answered
+    const n = asked.length; await vi.advanceTimersByTimeAsync(800); expect(asked.length).toBe(n);
+    // the restart runs on real time
+    vi.useRealTimers();
     const again = make({ kv, local }); await again.store.boot(); expect(again.store.get().threads[convKey(scope)][1].research?.ms).toBe(1800);
   });
 

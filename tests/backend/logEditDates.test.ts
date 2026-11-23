@@ -7,8 +7,8 @@ import { libreOfficeConverter } from '../../src/backend/convert';
 import { editXlsx } from '../../src/backend/xlsxEdit';
 import { readZip, partText } from '../../src/backend/zipParts';
 import { writtenAsMeant, type SheetEdit } from '../../src/domain/sheets';
+import { hasOffice as has, soffice } from './officePrerequisites';
 
-const soffice = '/usr/bin/soffice'; const has = fs.existsSync(soffice);
 const lo = libreOfficeConverter({ soffice, profile: fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-dates-lo-')) });
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-dates-'));
 const main = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'; const rel = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';

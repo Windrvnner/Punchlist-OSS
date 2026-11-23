@@ -235,8 +235,23 @@ await app.close();
     }
   }
   fs.rmSync(shared); fs.renameSync(shared + '-kept', shared);
-  // tried again 30 seconds after the failed start (REOPEN_EVERY_MS), at the page's next look
-  const back = opened ? await opened.waitForFunction(() => window.store?.get().boot.stage === 'ready', null, { timeout: 50000 }).then(() => true, () => false) : false;
+  // tried again 30 seconds after the failed start (REOPEN_EVERY_MS), at the page's next look. The main process's clock
+  // is moved on those 30 seconds rather than waited out; the real poll, call and start-up follow, and the clock is put
+  // back. tests/desktop/folder.test.ts holds the exact boundary: no reopen at 29,999 ms, a reopen at 30,000 ms (#99).
+  const ready = () => window.store?.get().boot.stage === 'ready';
+  // the clock must be what the retry waits on: still not back just before it is moved
+  const waitingBefore = opened ? !(await opened.evaluate(ready).catch(() => false)) : false;
+  await app.evaluate(() => {
+    const realNow = Date.now;
+    globalThis.restoreNow = () => {
+      Date.now = realNow;
+    };
+    Date.now = () => realNow() + 30_000;
+  });
+  const backInTime = opened?.waitForFunction(ready, null, { timeout: 30000 }).then(() => true, () => false);
+  const recovered = (await backInTime) ?? false;
+  const back = waitingBefore && recovered;
+  await app.evaluate(() => globalThis.restoreNow()).catch(() => undefined);
   say('unusable-folder-recovers-on-its-own', back);
   await app.close().catch(() => undefined);
 }
