@@ -19,7 +19,7 @@ import { memRepo } from '../adapters/memRepo';
 import { tokenHolder } from '../../src/backend/signInToken';
 import { nodeSession, initialsOf } from '../../src/backend/session';
 import { control } from '../../src/control';
-import { hasImpress, soffice } from './officePrerequisites';
+import { hasImpress, hasOffice, soffice } from './officePrerequisites';
 
 const made: string[] = []; afterAll(() => { for (const d of made) fs.rmSync(d, { recursive: true, force: true }); });
 const tmp = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'dil-docs-')); made.push(d); return d; };
@@ -252,9 +252,12 @@ describe('documents on real folders', () => {
     expect(q.log[1]).toBe('2 files could not be turned into pages and were not indexed: 01 Legal/Broken.pdf, 01 Legal/Locked.docx'); expect(b.docs.records('d1').map((r) => r.name).sort()).toEqual(['Credit Agreement.pdf', 'Energy Yield Report.pdf', 'Model v12.xlsx', 'Notes.docx', 'Shareholders Agreement.pdf']);   // a Word file is indexed from its text with no converter; only showing it needs one
   });
 
-  it.skipIf(!fs.existsSync('/usr/bin/soffice'))('a real Word file converts with LibreOffice, and its pages are counted from the PDF', async () => {
+  it.skipIf(!hasOffice)(
+    'a real Word file converts with LibreOffice, and its pages are counted from the PDF',
+    async () => {
     const root = tmp(); const vdr = path.join(root, 'vdr'); put(vdr, 'Notes.docx', NOTES);
-    const a = pc(root, 'office', new StandInService(), { convert: libreOfficeConverter({ soffice: '/usr/bin/soffice' }) }); const p = await indexAll(a, vdr);
+    const a = pc(root, 'office', new StandInService(), { convert: libreOfficeConverter({ soffice }) });
+    const p = await indexAll(a, vdr);
     expect(p.log).toEqual(['Indexed 1 file']); expect(a.docs.records('d1')[0].pages).toBeUndefined(); expect(a.docs.records('d1')[0].words).toEqual(['notes', 'three', 'two']);
     const page = val(await a.docs.page('d1', { doc: 'Notes.docx', docId: idOf(NOTES) }, 'p. 2')); expect(page.kind === 'pdf' && page.page).toBe(2);
     expect(a.docs.records('d1')[0]).toMatchObject({ name: 'Notes.docx', pages: 3, via: 'libreoffice' });                                    // converted when first opened, and its pages counted then
@@ -266,11 +269,15 @@ describe('documents on real folders', () => {
   const TRACKED = new Uint8Array(fs.readFileSync(path.join(__dirname, 'fixtures', 'Tracked.docx')));
   const KEPT = ['The lock-up ratio is 1.15x from financial close.', 'First half of a sentence joined to its second half.', 'MOVEDSENTENCE new place.', 'INSERTEDROW', 'Tranche C', 'Commented sentence.', 'Last line, unchanged.', 'FOOTERNEW'];
   const GONE = ['1.10x', 'MOVEDSENTENCE old place', 'DELETEDROW', '999', 'WHOLEPARAGRAPHGONE', 'FOOTEROLD', 'COMMENTTEXT'];
-  it.skipIf(!fs.existsSync('/usr/bin/soffice'))('LibreOffice gives the clean text of a file with tracked changes: all that was inserted, nothing that was deleted, no comments', async () => {
+  it.skipIf(!hasOffice)(
+    'LibreOffice gives the clean text of a file with tracked changes: all that was inserted, nothing that was deleted, no comments',
+    async () => {
     const dir = tmp(); const file = put(dir, 'Tracked.docx', TRACKED); const profile = path.join(tmp(), 'lo');
-    const clean = await libreOfficeConverter({ soffice: '/usr/bin/soffice', profile })(file, dir, 'clean.pdf'); const text = (await pdfText(fs.readFileSync(clean))).join(' ');
+    const clean = await libreOfficeConverter({ soffice, profile })(file, dir, 'clean.pdf');
+    const text = (await pdfText(fs.readFileSync(clean))).join(' ');
     for (const k of KEPT) expect(text).toContain(k); for (const g of GONE) expect(text).not.toContain(g);
-    const marked = await libreOfficeConverter({ soffice: '/usr/bin/soffice', profile, markup: true })(file, dir, 'marked.pdf'); const both = (await pdfText(fs.readFileSync(marked))).join(' ');
+    const marked = await libreOfficeConverter({ soffice, profile, markup: true })(file, dir, 'marked.pdf');
+    const both = (await pdfText(fs.readFileSync(marked))).join(' ');
     for (const g of ['1.10x', '1.15x', 'DELETEDROW', 'INSERTEDROW', 'FOOTEROLD', 'FOOTERNEW']) expect(both).toContain(g);                  // asked for, the changes are shown
     expect(fs.readdirSync(dir).sort()).toEqual(['Tracked.docx', 'clean.pdf', 'marked.pdf']);                                             // and nothing is left behind
   }, 120000);
@@ -304,15 +311,23 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     expect([shortExt('a.DOCX '), shortExt('.csv'), shortExt('Notes.v12 final'), shortExt('a.verylongext'), shortExt('Notes.')]).toEqual(['.docx', '.csv', '', '', '']);
   });
 
-  it.skipIf(!fs.existsSync('/usr/bin/soffice'))('a Word file with a 240-character name deep in the data room converts, and its tracked changes are read', async () => {
-    const dir = tmp(); const file = put(path.join(dir, 'a'.repeat(100), 'b'.repeat(100)), LONG, TRACKED); const lo = libreOfficeConverter({ soffice: '/usr/bin/soffice', profile: path.join(tmp(), 'lo') });
+  it.skipIf(!hasOffice)(
+    'a Word file with a 240-character name deep in the data room converts, and its tracked changes are read',
+    async () => {
+    const dir = tmp();
+    const file = put(path.join(dir, 'a'.repeat(100), 'b'.repeat(100)), LONG, TRACKED);
+    const lo = libreOfficeConverter({ soffice, profile: path.join(tmp(), 'lo') });
     const text = (await pdfText(fs.readFileSync(await lo(file, dir, 'clean.pdf')))).join(' '); for (const k of KEPT) expect(text).toContain(k);
     expect((await lo.changes!(file)).tracked).toBe(13);
   }, 120000);
 
   // a Word file with a field that prints its file name, and one that prints its folder and name (FILENAME, FILENAME \\p)
-  it.skipIf(!fs.existsSync('/usr/bin/soffice'))('a field that prints the file name prints the document’s own name on the converted pages, never the copy’s or a folder on this PC (#423)', async () => {
-    const dir = tmp(); const field = fs.readFileSync(path.join(__dirname, 'fixtures', 'NameField.docx')); const lo = libreOfficeConverter({ soffice: '/usr/bin/soffice', profile: path.join(tmp(), 'lo') });
+  it.skipIf(!hasOffice)(
+    'a field that prints the file name prints the document’s own name on the converted pages, never the copy’s or a folder on this PC (#423)',
+    async () => {
+    const dir = tmp();
+    const field = fs.readFileSync(path.join(__dirname, 'fixtures', 'NameField.docx'));
+    const lo = libreOfficeConverter({ soffice, profile: path.join(tmp(), 'lo') });
     const text = (await pdfText(fs.readFileSync(await lo(put(dir, 'Project Bellows SPA v12.docx', field), dir, 'a.pdf')))).join(' ');
     expect(text).toContain('Document name: Project Bellows SPA v12.docx'); expect(text).toContain('Full ref: Project Bellows SPA v12.docx'); expect(text).not.toMatch(/punchlist-in|lo\/user|\/tmp\//);
     // an attached file is kept under its id: the name it was attached under is what is printed
@@ -341,15 +356,23 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     expect(() => holdFolder(path.join(tmp(), 'x'.repeat(252)))).toThrow(/ENAMETOOLONG/);                // a lock that cannot be written is an error, not a reason to count up for ever
   });
 
-  it.skipIf(!fs.existsSync('/usr/bin/soffice'))('two LibreOffice conversions at once on one settings folder both finish, each with its own PDF', async () => {
+  it.skipIf(!hasOffice)(
+    'two LibreOffice conversions at once on one settings folder both finish, each with its own PDF',
+    async () => {
     const dir = tmp(); const profile = path.join(tmp(), 'lo'); const one = put(dir, 'One.docx', TRACKED), two = put(dir, 'Two.docx', TRACKED);
-    const [clean, marked] = await Promise.all([libreOfficeConverter({ soffice: '/usr/bin/soffice', profile })(one, dir, 'clean.pdf'), libreOfficeConverter({ soffice: '/usr/bin/soffice', profile, markup: true })(two, dir, 'marked.pdf')]);
+    const [clean, marked] = await Promise.all([
+      libreOfficeConverter({ soffice, profile })(one, dir, 'clean.pdf'),
+      libreOfficeConverter({ soffice, profile, markup: true })(two, dir, 'marked.pdf'),
+    ]);
     const words = async (f: string) => (await pdfText(fs.readFileSync(f))).join(' ');
     expect(await words(clean)).not.toContain('1.10x'); expect(await words(marked)).toContain('1.10x');
   }, 120000);
 
-  it.skipIf(!fs.existsSync('/usr/bin/soffice'))('LibreOffice lists the tracked changes and comments: what, who, when, and each passage before and after', async () => {
-    const dir = tmp(); const convert = libreOfficeConverter({ soffice: '/usr/bin/soffice', profile: path.join(tmp(), 'lo') });
+  it.skipIf(!hasOffice)(
+    'LibreOffice lists the tracked changes and comments: what, who, when, and each passage before and after',
+    async () => {
+    const dir = tmp();
+    const convert = libreOfficeConverter({ soffice, profile: path.join(tmp(), 'lo') });
     const list = await convert.changes!(put(dir, 'Tracked.docx', TRACKED)); const sroe = { by: 'sroe', at: '2026-10-01T10:00:00' };
     expect(list.tracked).toBe(13); expect(list.complete).toBe(true);
     const has = (before: string, after: string, changes: object[]) => expect(list.passages).toContainEqual({ before, after, changes });
@@ -380,9 +403,14 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     const none = await a.docs.changes('d1', 'doc_000000000000000000000000'); expect(!none.ok && none.error.kind).toBe('notFound');
   });
 
-  it.skipIf(!fs.existsSync('/usr/bin/soffice'))('with LibreOffice the count and the list come from the file itself, and the list is worked out once', async () => {
+  it.skipIf(!hasOffice)(
+    'with LibreOffice the count and the list come from the file itself, and the list is worked out once',
+    async () => {
     const root = tmp(); const vdr = path.join(root, 'vdr'); put(vdr, 'SPA draft.docx', TRACKED); put(vdr, 'Notes.docx', NOTES);
-    const lo = libreOfficeConverter({ soffice: '/usr/bin/soffice', profile: path.join(tmp(), 'lo') }); let asked = 0; const listing = lo.changes!; lo.changes = (f) => { asked++; return listing(f); };
+    const lo = libreOfficeConverter({ soffice, profile: path.join(tmp(), 'lo') });
+    let asked = 0;
+    const listing = lo.changes!;
+    lo.changes = (f) => { asked++; return listing(f); };
     const a = pc(root, 'office', new StandInService(), { convert: lo }); await indexAll(a, vdr);
     expect(a.docs.records('d1').map((r) => [r.name, r.tracked, r.pages, r.via])).toEqual([['Notes.docx', undefined, undefined, undefined], ['SPA draft.docx', 13, undefined, undefined]]);   // counted from the file at indexing
     await a.keeper.ensure(await a.docs.wanted('d1', [idOf(TRACKED)])); expect(a.docs.records('d1')[1]).toMatchObject({ tracked: 13, pages: 1, via: 'libreoffice' });       // sent: converted, and LibreOffice's count agrees
@@ -390,8 +418,11 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     expect(val(await a.docs.changes('d1', idOf(TRACKED)))).toBe(first); expect(asked).toBe(1);
   }, 120000);
 
-  it.skipIf(!fs.existsSync('/usr/bin/soffice'))('LibreOffice refuses a file that is not what its name says, and a missing one, and carries on with the next', async () => {
-    const dir = tmp(); const convert = libreOfficeConverter({ soffice: '/usr/bin/soffice', profile: path.join(tmp(), 'lo') });
+  it.skipIf(!hasOffice)(
+    'LibreOffice refuses a file that is not what its name says, and a missing one, and carries on with the next',
+    async () => {
+    const dir = tmp();
+    const convert = libreOfficeConverter({ soffice, profile: path.join(tmp(), 'lo') });
     await expect(convert(put(dir, 'Garbage.docx', 'this is not a Word file'), dir, 'a.pdf')).rejects.toThrow('the file is not what its name says');
     await expect(convert(path.join(dir, 'Nowhere.docx'), dir, 'b.pdf')).rejects.toThrow();
     expect(await pdfPages(fs.readFileSync(await convert(put(dir, 'Notes.docx', NOTES), dir, 'c.pdf')))).toBe(3);

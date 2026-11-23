@@ -5,8 +5,8 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { libreOfficeConverter } from '../../src/backend/convert';
 import { libreOfficeSheets } from '../../src/backend/spreadsheets';
+import { hasOffice as has, soffice } from './officePrerequisites';
 
-const soffice = '/usr/bin/soffice'; const has = fs.existsSync(soffice);
 const lo = libreOfficeConverter({ soffice, profile: fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-list-test-lo-')) });
 const LIST = ['Proseware Solar checklist', '1. Site', '1.1 Title report for the whole site', '1.2 Leases cover the array', '2. Permits', '2.1 Conditional use permit issued'];
 
