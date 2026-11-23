@@ -96,6 +96,31 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
     expect(nameDir('Project Lucerne \u05e9\u05de\u05e9')).toBe('auto');     // a Hebrew word later on doesn't decide it
   });
 
+  it('routes explicit navigation for Unicode and hyphenated deal names (#500)', async () => {
+    const m = make();
+    const hyphenated = await deal(m, 'Harbor-Refinance');
+    const spaced = await deal(m, 'Harbor Refinance');
+    const accented = await deal(m, 'Énergie-Refinance');
+    const suffix = await deal(m, 'Harbor Overview');
+    const base = await deal(m, 'Harbor');
+    await deal(m, "Harbor's");
+    const article = await deal(m, 'The');
+    for (const [name, id] of [
+      ['Harbor-Refinance', hyphenated],
+      ['Project Harbor Refinance', spaced],
+      ['Project: Énergie-Refinance', accented],
+      ['E\u0301nergie-Refinance\n', accented],
+      ['Harbor Overview', suffix],
+      ['Harbor’s', base],
+      ['The', article],
+    ]) {
+      expect(navIntent(m.store, `Open ${name} Q&A`)).toBe(true);
+      expect(location.hash).toBe(`#${pageHash('qa', id)}`);
+    }
+    expect(navIntent(m.store, 'Open Unknown-Deal Q&A')).toBe(false);
+    expect(navIntent(m.store, 'What is in Harbor-Refinance Q&A?')).toBe(false);
+  });
+
   it('Undo brings back a capitalized "Project"; an accent or hidden character is not the word', async () => {
     const m = make();
     const a = await deal(m, 'project Wingtip Storage');
