@@ -12,7 +12,10 @@ export { Mem };
 export class Tearing extends Mem {
   tear: number | null = null;
   refuseWrites = false;
-  size(n: string) { const t = this.files.get(n); return t == null ? -1 : Buffer.byteLength(t); }
+  size(n: string) {
+    const text = this.files.get(n);
+    return text == null ? -1 : Buffer.byteLength(text);
+  }
   append(n: string, t: string) {
     if (this.tear === null) return super.append(n, t);
     super.append(n, t.slice(0, this.tear));
