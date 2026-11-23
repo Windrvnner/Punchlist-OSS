@@ -8,8 +8,8 @@
  * rather than passed on.
  *
  * Which model:
- *   - the fast model does the cheap sorting: which of a deal's documents are core, which documents a call should read,
- *     what a document is (asked only of documents that are read), where the table is in a spreadsheet;
+ *   - the fast model does the cheap sorting: which documents a call should read, what a document is (asked only of
+ *     documents that are read), where the table is in a spreadsheet;
  *   - the standard model does the answering the backend chooses a model for: the first pass, a reassessment, the brief,
  *     whether an answer addresses a question;
  *   - the thorough model is a fallback only. When the standard model's reply cannot be used it is sent back to the
@@ -19,10 +19,10 @@
  * Reading as little as possible:
  *   - indexing asks no model and uploads nothing. Each document is known by its path and by the words it uses most,
  *     which the document service counts on the PC;
- *   - a deal's core documents, a hundred at most, are the portfolio every question on the deal draws on first. The
- *     fast model chooses them from every file's path and most-used words, three hundred files a call, and notes the
- *     short names the paths use (PPA, SHA) so a search can match them to their long forms. Later only new files are
- *     asked about. The expectation is that they settle most of what is asked;
+ *   - `core.ts` works out a deal's core documents on each PC without a model or cap. The best 100 are described up
+ *     front; they are a subset of the core set, not its limit. The fast model sees core documents marked when it picks
+ *     which ranked documents to read. Deal-specific short names are learned from paths without a model. The
+ *     expectation is that core documents settle most of what is asked;
  *   - only a document that is read is described by a model: the core documents once they are chosen, and any other the
  *     first time a call is given it. A description is a summary and search terms, written once and kept;
  *   - one call is given a handful of documents, eight unless set otherwise: more than about ten and answers get worse.
