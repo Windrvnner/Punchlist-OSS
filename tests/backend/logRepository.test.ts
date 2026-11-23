@@ -355,6 +355,25 @@ describe('change files on one PC', () => {
       expect(await text(b, 'qd')).toBe('qd');
     });
 
+    it('every shared file lost: an id this PC left after a copy was found is not taken back (#29)', async () => {
+      const { A, local, open } = setup();
+      const a = open(A, '/onedrive/team');
+      val(await a.transaction(add('q1', 'op1')));
+      const other = open(A, '/onedrive/team', clone(local));
+      val(await other.transaction(add('qo', 'opo')));
+      expect(val(await a.sync()).self.note).toBe(COPIED);
+      await a.close();
+      const moved = open(A, '/onedrive/team');
+      expect(moved.id).not.toBe(a.id);
+      await moved.close();
+      loseAll(A, local);
+      const again = open(A, '/onedrive/team');
+      expect(again.id).not.toBe(a.id);
+      val(await again.transaction(add('qt', 'opt')));
+      for (const r of [other, again]) expect(val(await r.sync()).self.note).toBeUndefined();
+      for (const q of ['q1', 'qo', 'qt']) expect(await text(other, q)).toBe(q);
+    });
+
     it('every shared file lost: an id recorded for another folder is never taken here (#29)', async () => {
       const { A, B, local, open } = setup();
       const b = open(B, '/onedrive/personal');

@@ -431,11 +431,7 @@ export class LogRepository implements Repository {
     const now = this.install(id);
     // which folder this id is for, kept apart from install.json, so an id found again after install.json is lost is only ever
     // taken in its own folder: a copy of the folder holds the same files under it. Tried again at each start until it is there.
-    // and its machine, so an id with no file left in the shared folder can still be taken back on this PC (#29)
-    if (o.place) try {
-      const rec = JSON.stringify({ place: o.place, ...(here ? { machine: here } : {}) });
-      if (o.local.read(`place-${id}.json`) !== rec) o.local.write(`place-${id}.json`, rec);
-    } catch { /* the next start */ }
+    this.keepPlaceRecord(id);
     this.keepInstall(JSON.stringify(now), texts);
     this.changes = new LocalChanges(o.local, id);
     this.ownLines = new Set(this.changes.ownLines(id));
@@ -676,10 +672,26 @@ export class LogRepository implements Repository {
     const here = this.o.machine?.();
     if (!this.o.place || !here) return false;
     try {
-      return JSON.parse(this.o.local.read(`place-${id}.json`) ?? 'null')?.machine === here;
+      const record = JSON.parse(this.o.local.read(`place-${id}.json`) ?? 'null');
+      return record?.machine === here && !record.left;
     } catch {
       return false;
     }
+  }
+
+  /**
+   * The folder an id is for, and its machine, so an id with no file left in the shared folder can still be taken back
+   * on this PC (#29). An id left after a copy was found is marked, so it is never taken back that way: the copy may
+   * still be writing under it. Tried again at each start until it is there.
+   */
+  private keepPlaceRecord(id: string, left = false) {
+    const here = this.o.machine?.();
+    if (!this.o.place) return;
+    try {
+      const machine = here ? { machine: here } : {};
+      const record = JSON.stringify({ place: this.o.place, ...machine, ...(left ? { left } : {}) });
+      if (this.o.local.read(`place-${id}.json`) !== record) this.o.local.write(`place-${id}.json`, record);
+    } catch { /* the next start */ }
   }
 
   /** When an id last wrote, from the copies of its files kept here (#29). */
@@ -745,6 +757,7 @@ export class LogRepository implements Repository {
     if (this.cloned) return; this.cloned = true;
     // the next start takes the new id, and this one's undo journal with it
     if (this.o.place) this.lastIds[this.o.place] = this.id;
+    this.keepPlaceRecord(this.id, true);
     try { this.keepInstall(JSON.stringify(this.install((this.o.newId ?? (() => globalThis.crypto.randomUUID()))()))); } catch { /* the check runs again at the next start */ }
   }
   /** Tell whoever is watching about a record written here by something other than the window (the first pass writing a finding). */
