@@ -13,6 +13,8 @@ async function newDeal(page, name, paths, button = '#fr-new') {
   return page.evaluate((n) => Object.values(store.get().deals).find((d) => d.name === `Project ${n}`).id, name);
 }
 const num = (s) => +s.replace(/,/g, '');
+// a document bar's width moves to its share over half a second: its length is read once it has got there (#695)
+const barsSettled = (page) => page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a instanceof CSSTransition).map((a) => a.finished.catch(() => undefined))));
 const noOverflow = (page) => page.evaluate(() => { const v = document.querySelector('.home.top').getBoundingClientRect(); return document.documentElement.scrollWidth <= innerWidth && [...document.querySelectorAll('.home.top *')].every((e) => { const r = e.getBoundingClientRect(); return r.width === 0 || r.right <= v.right + 1; }); });
 const docs = (page) => page.evaluate(() => [...document.querySelectorAll('#ov-docs .dcrow')].map((r) => ({ name: r.querySelector('.fn').textContent, text: r.querySelector('.rd').textContent, part: r.classList.contains('part'), live: !!r.querySelector('.fbar .live'), bar: [r.querySelector('.fbar').getBoundingClientRect().left, r.querySelector('.fbar').getBoundingClientRect().right].map(Math.round).join('-'), read: (r.querySelector('.fbar .rv')?.getBoundingClientRect().width ?? 0) / r.querySelector('.fbar').getBoundingClientRect().width, cut: r.querySelector('.fn').scrollWidth > r.querySelector('.fn').clientWidth })));
 
@@ -64,10 +66,10 @@ const blocksOf = (page) => page.evaluate(() => [...document.querySelectorAll('#o
     && b0[0].left < b0[1].left && b0[1].left < b0[2].left && new Set(b0.map((x) => x.barTop)).size === 1 && b0.every((x) => x.fits) && b0.map((x) => x.leaders).join() === '1,2,0' && Math.abs(b0[1].widths[1] / b0[1].widths[0] - 19 / 5) < 0.4, JSON.stringify(b0));
   const over = await page.evaluate(() => ({ details: [...document.querySelectorAll('#ov-details > div')].map((c) => Math.round(c.getBoundingClientRect().left)), blocks: [...document.querySelectorAll('#ov-standing .pcol')].map((c) => Math.round(c.getBoundingClientRect().left)), names: [...document.querySelectorAll('#ov-details .k')].map((e) => e.textContent).join(), above: document.getElementById('ov-details').getBoundingClientRect().bottom <= document.getElementById('ov-standing').getBoundingClientRect().top, under: document.getElementById('ov-details').getBoundingClientRect().top >= document.querySelector('.askslot').getBoundingClientRect().bottom }));
   say('the-deals-details-stand-over-the-three-blocks', over.names === 'Structure,Sector,Technology' && over.details.join() === over.blocks.join() && over.above && over.under, JSON.stringify(over));
-  const rd = await docs(page); const r = rd.map((x) => /^([\d,]+) of ([\d,]+) read$/.exec(x.text)); const coreRows = rd.filter((x) => x.name === 'Core documents');
+  await barsSettled(page); const rd = await docs(page); const r = rd.map((x) => /^([\d,]+) of ([\d,]+) read$/.exec(x.text)); const coreRows = rd.filter((x) => x.name === 'Core documents');
   const told = await page.evaluate((i) => { const f = store.get().progress[i].folders; return { n: f.length, core: f.reduce((a, x) => a + x.core, 0), coreRead: f.reduce((a, x) => a + x.coreRead, 0), each: f.every((x) => x.core > 0) }; }, id);
   say('documents-show-what-has-been-read-and-one-core-line-for-the-deal', rd.length === 4 && r.every(Boolean) && num(r[0][1]) === num(r[1][1]) + num(r[2][1]) && num(r[0][2]) === num(r[1][2]) + num(r[2][2]) && coreRows.length === 1 && !coreRows[0].part && told.n === 2 && told.each && num(r[3][1]) === told.coreRead && num(r[3][2]) === told.core && rd.every((x) => !x.live && !x.cut) && new Set(rd.map((x) => x.bar)).size === 1
-    && rd.slice(0, 3).every((x, i) => Math.abs(x.read - num(r[i][1]) / num(r[i][2])) < 0.02 && x.read < 0.5) && Math.abs(rd[3].read - num(r[3][1]) / num(r[3][2])) < 0.02 && await noOverflow(page), JSON.stringify(rd));
+    && rd.slice(0, 3).every((x, i) => Math.abs(x.read - num(r[i][1]) / num(r[i][2])) < 0.02 && x.read < 0.5) && Math.abs(rd[3].read - num(r[3][1]) / num(r[3][2])) < 0.02 && await noOverflow(page), JSON.stringify({ rd, told }));
   // under the blocks the two columns start level, and a document's bar is as long after the first pass as it was while indexing, with a small share still wide enough to see
   const barLen = (b) => { const [l, r] = b.split('-').map(Number); return r - l; };
   await page.waitForTimeout(500);                                        // the rows have finished arriving
@@ -97,7 +99,14 @@ const blocksOf = (page) => page.evaluate(() => [...document.querySelectorAll('#o
   const menu = async () => { await page.click('#deal-more'); await page.waitForSelector('#deal-check'); const t = await page.textContent('#deal-check'); await page.keyboard.press('Escape'); await page.waitForSelector('#deal-check', { state: 'detached' }); return t; };
   const idle = await line(); const inMenu = await menu();
   // Check again is pressed once from the menu, to see what the line says while a check runs; the outcomes are then set off directly, so nothing depends on catching the button mid-press
-  await page.evaluate(() => { window.__check = { unchecked: { items: 3, findings: 1 } }; }); await page.click('#deal-more'); await page.click('#deal-check'); await page.waitForSelector('#ov-check button[aria-disabled="true"]'); const during = await line(); await page.waitForSelector('#ov-check button:not([aria-disabled="true"])'); const left = await line();
+  // the check is held until the line has been read while it runs, so a quick mock check cannot end first (#695)
+  await page.evaluate(() => {
+    window.__check = { unchecked: { items: 3, findings: 1 } }; const ai = store.services.ai; const was = ai.checkAll.bind(ai);
+    ai.checkAll = (i) => new Promise((go) => { window.__letCheck = go; }).then(() => { ai.checkAll = was; return was(i); });
+  });
+  await page.click('#deal-more'); await page.click('#deal-check'); await page.waitForFunction(() => !!window.__letCheck);
+  await page.waitForSelector('#ov-check button[aria-disabled="true"]'); const during = await line();
+  await page.evaluate(() => window.__letCheck()); await page.waitForSelector('#ov-check button:not([aria-disabled="true"])'); const left = await line();
   // what was left out is checked on its own; the mock then leaves nothing out, and the line goes
   await page.evaluate(() => { delete window.__check; }); const asked = await page.evaluate(() => { const ai = store.services.ai; const was = ai.checkAll.bind(ai); window.__asked = []; ai.checkAll = (i) => { window.__asked.push(i); return was(i); }; return true; });
   await page.click('#f-check-left'); await page.waitForFunction(() => window.__asked.length === 1 && !document.getElementById('ov-check')); const rest = await line(); const only = await page.evaluate(() => window.__asked[0].only); const focusAfter = await page.evaluate(() => document.activeElement?.id);   // the line has gone: the focus is on the ⋯, not the page
@@ -266,6 +275,8 @@ const blocksOf = (page) => page.evaluate(() => [...document.querySelectorAll('#o
 // ---- both themes, at the usual window and the smallest one: nothing is cut off and nothing spills ----
 for (const scheme of ['light', 'dark']) for (const [w, h] of [[1280, 736], [1024, 640]]) { const { ctx, page } = await fresh(scheme, w, h); const tag = `${scheme}-${w}`;
   const id = await newDeal(page, 'Proseware', ['C:\\Deals\\Proseware\\vdr', 'C:\\Deals\\Proseware\\advisor reports']); await page.waitForSelector('#ov-checklist', { timeout: 60000 }); await page.waitForSelector('#ov-core');
+  // the first pass's figures and gaps have arrived, not only their blocks: its counts can follow its block by a moment (#695)
+  await page.waitForSelector('.gaps li span'); await page.waitForFunction(() => document.querySelector('#ov-checklist .tot')?.textContent === '24 in all');
   // with open questions as well as open findings, so both tabs carry a count: the widest the row of tabs gets
   await page.evaluate(async (dealId) => { for (const t of ['Who is the offtaker?', 'What is the tenor?']) await store.dispatch(store.commandNamed('CreateQuestion'), { dealId, text: t }); }, id); await page.waitForSelector('.dtabs a:has-text("2 open")'); await page.evaluate(() => document.querySelectorAll('#toast,.toast').forEach((e) => { e.remove(); })); await page.mouse.move(w - 30, h - 30); await page.waitForTimeout(300);
   const cols = await blocksOf(page);
