@@ -328,7 +328,10 @@ describe('two PCs share a deal\'s checks', () => {
       p.net.pause('both');
       const a = aiOf(p.A).firstPass(p.dealId), b = aiOf(p.B).firstPass(p.dealId);
       await until('both to have written a round', () => logOf(p.sync.A, p.dealId).some((l) => l.plan) && logOf(p.sync.B, p.dealId).some((l) => l.plan));
-      await until('both to have checked the first block', () => checks(p.svcA).length >= 1 && checks(p.svcB).length >= 1);
+      // each has written down item 3 before they hear of each other: what a batch has not yet written when its round is
+      // merged away is dropped, so resuming once the calls had only started could lose the office's finding (#131)
+      const wroteItem3 = (dir: string) => logOf(dir, p.dealId).some((l) => l.item === 'c3' && l.result);
+      await until('both to have checked item 3', () => wroteItem3(p.sync.A) && wroteItem3(p.sync.B));
       p.net.resume(); await Promise.all([a, b]); await allEnded(p);
       const ends = [...roundsOf(p.sync.A, p.dealId).values()].map((r) => r.end?.kind).sort(); expect(ends).toEqual(['done', 'merged']);
       await p.A.backend.repo.sync!(); await p.B.backend.repo.sync!();
