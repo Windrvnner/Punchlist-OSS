@@ -92,6 +92,18 @@ const INSTALL = 'install.json', SPARE = 'install.spare.json';
 /** the install id in a change file's name (`changes-<id>-<deal>-<number>.jsonl`), or null */
 const idOfFile = (name: string) => /^changes-(.+)-[A-Za-z0-9_]+-\d{4,}\.jsonl$/.exec(name)?.[1] ?? null;
 
+/** A file's whole lines under an id (one cut off, or ended by healing a torn write, is passed over). */
+function linesOf(text: string, id: string): { l: string; at: string }[] {
+  return text.split('\n').flatMap((l) => {
+    try {
+      const x = JSON.parse(l);
+      return isLine(x) && x.pc === id ? [{ l, at: x.at }] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
 const AUDIT_KEEP = 200;
 const CHANGE_FILE = /^changes-.+\.jsonl$/;
 /** a change file's deal (or `_`), from its name; a name of any other shape (a sync client's conflict copy, say) is null */
@@ -419,7 +431,11 @@ export class LogRepository implements Repository {
     const now = this.install(id);
     // which folder this id is for, kept apart from install.json, so an id found again after install.json is lost is only ever
     // taken in its own folder: a copy of the folder holds the same files under it. Tried again at each start until it is there.
-    if (o.place) try { const rec = JSON.stringify({ place: o.place }); if (o.local.read(`place-${id}.json`) !== rec) o.local.write(`place-${id}.json`, rec); } catch { /* the next start */ }
+    // and its machine, so an id with no file left in the shared folder can still be taken back on this PC (#29)
+    if (o.place) try {
+      const rec = JSON.stringify({ place: o.place, ...(here ? { machine: here } : {}) });
+      if (o.local.read(`place-${id}.json`) !== rec) o.local.write(`place-${id}.json`, rec);
+    } catch { /* the next start */ }
     this.keepInstall(JSON.stringify(now), texts);
     this.changes = new LocalChanges(o.local, id);
     this.ownLines = new Set(this.changes.ownLines(id));
@@ -629,22 +645,50 @@ export class LogRepository implements Repository {
     for (const i of [...kept.keys()]) if (!mine(i)) kept.delete(i);
     if (!kept.size) return null;
     const there = new Map<string, string[]>(); for (const n of o.shared.list()) { const i = idOfFile(n); if (i && kept.has(i)) there.set(i, [...(there.get(i) ?? []), n]); }
-    // a file's whole lines under an id (one cut off, or ended by healing a torn write, is passed over)
-    const lines = (text: string, i: string) => text.split('\n').flatMap((l) => { try { const x = JSON.parse(l); return isLine(x) && x.pc === i ? [{ l, at: x.at }] : []; } catch { return []; } });
     const found: [string, string][] = [];
     for (const [i, names] of kept) {
-      const shared = there.get(i) ?? []; if (!shared.length || shared.some((n) => !names.includes(n))) continue;
+      const shared = there.get(i) ?? [];
+      if (!shared.length) {
+        if (this.placedOnThisMachine(i)) found.push([i, this.latestKeptAt(names, i)]);
+        continue;
+      }
+      if (shared.some((n) => !names.includes(n))) continue;
       let here = '', ahead = false;
       for (const n of names) {
         if (!shared.includes(n)) continue;
-        const held = new Set(lines(o.local.read(n) ?? '', i).map((x) => x.l));
-        const theirs = lines(o.shared.read(n) ?? '', i);               // will not open just now: the start fails, and is tried again
+        const held = new Set(linesOf(o.local.read(n) ?? '', i).map((x) => x.l));
+        // will not open just now: the start fails, and is tried again
+        const theirs = linesOf(o.shared.read(n) ?? '', i);
         if (theirs.some((x) => !held.has(x.l))) ahead = true;
         for (const x of theirs) if (x.at > here) here = x.at;
       }
       if (!ahead) found.push([i, here]);
     }
     return found.sort((a, b) => (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : 0))[0]?.[0] ?? null;
+  }
+
+  /**
+   * An id with no file left in the shared folder (#29): nothing there can tell a copy of this local folder from
+   * this PC, so it is taken only when its folder record names this machine and Windows user. A copy on another PC
+   * takes a new id.
+   */
+  private placedOnThisMachine(id: string): boolean {
+    const here = this.o.machine?.();
+    if (!this.o.place || !here) return false;
+    try {
+      return JSON.parse(this.o.local.read(`place-${id}.json`) ?? 'null')?.machine === here;
+    } catch {
+      return false;
+    }
+  }
+
+  /** When an id last wrote, from the copies of its files kept here (#29). */
+  private latestKeptAt(names: string[], id: string): string {
+    let latest = '';
+    for (const name of names) {
+      for (const { at } of linesOf(this.o.local.read(name) ?? '', id)) if (at > latest) latest = at;
+    }
+    return latest;
   }
 
   /** What install.json holds: the current id, whose machine it is, its shared folder, the id used in each folder, and the last id in each folder where it took a new one. */
