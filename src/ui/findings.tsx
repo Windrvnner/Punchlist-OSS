@@ -26,7 +26,8 @@ import { localYmd, CHECK_REASON } from '../domain/model';
 import { splitCited, toParagraphs } from '../domain/cite';
 import { SERVICE, AI_LABEL } from '../control';
 import { keptDrafts, hasTexts } from './keptDrafts';
-import { asStored, editDrafts, keepAsEdit, newFindingDrafts, sameAsSent } from './findingDrafts';
+import { useSaveOut } from './saveOut';
+import { editDrafts, editsOut, landCreated, landEdit, newFindingDrafts } from './findingDrafts';
 import type { EditDraft } from './findingDrafts';
 import { SourceChips } from './research';
 import { CitedEditor } from './citedEditor';
@@ -298,7 +299,8 @@ const CITE_TIP = 'A tag after a sentence names the source it cites. It moves wit
 
 function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
   const store = useStore();
-  const kept = editDrafts.get(f.id);
+  // what was typed and kept, or, after Cancel while a save is out, what that save sent (#771)
+  const kept = editDrafts.get(f.id) ?? editsOut.get(f.id);
   // the finding as this edit began (kept with the draft, so a change made elsewhere meanwhile is still caught on Save)
   const start: EditDraft = kept ?? {
     title: f.title, ws: f.workstream, body: f.body.join('\n\n'),
@@ -307,7 +309,6 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
   const [title, setTitleState] = useState(start.title);
   const [ws, setWsState] = useState(start.ws);
   const [body, setBodyState] = useState(start.body);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');   // why Save was refused: said beside the buttons, and the edit stays open
   const draft = useRef(start); const base = useRef(start.base);
   // remembered as it is typed (not after the next draw), so leaving the finding straight after typing keeps it
@@ -322,40 +323,33 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
     setBodyState(v);
     remember({ body: v });
   };
-  const cancelled = useRef(false);
+  // #771: once a save lands, this edit (or the one drawn for the finding since) shows a refusal, or closes when
+  // nothing typed is kept
+  const settle = (refusal: string | null) => {
+    if (refusal) setError(refusal);
+    else if (!editDrafts.has(f.id)) onDone();
+  };
+  const out = useSaveOut('finding-edit:' + f.id, settle);
+  const busy = out.busy;
   const cancel = () => {
-    cancelled.current = true;
+    out.cancel();
     editDrafts.delete(f.id);
     onDone();
   };
   const wsOptions = workstreamChoices([f.workstream]);   // a name of its own (from an import) takes its place A to Z
-  const save = async () => {
-    if (busy) return; setBusy(true);
+  const save = () => {
+    if (busy) return;
+    remember({});   // the kept draft holds what is sent, so the save can tell what is typed after it (#771)
+    const sent = draft.current;
     const edit = {
-      dealId: f.dealId, findingId: f.id, title, workstream: ws, body: toParagraphs(body), base: keptBase(),
+      dealId: f.dealId, findingId: f.id, title, workstream: ws, body: toParagraphs(body), base: sent.base,
     };
-    const sent = { title, ws, body };
-    const r = await store.dispatch(EditFinding, edit, { idempotencyKey: 'f-edit-' + f.id });
-    setBusy(false);
-    if (cancelled.current) return;   // cancelled while the save was out: an edit opened since is left alone
-    if (!r.ok) {
-      const field = r.error.kind === 'invalid' ? Object.values(r.error.fields ?? {})[0] : undefined;
-      setError(field ?? r.error.message);
-      return;
-    }
-    if (sameAsSent(draft.current, sent)) {
-      editDrafts.delete(f.id);
-      onDone();
-    } else keepTypingAfter(edit);
-  };
-  // #32: more was typed while Save was out. The edit stays open with it, now measured from what that save sent (each
-  // field the finding held, or the one written over it), so the next Save writes only what changed since, and a change
-  // made elsewhere meanwhile is still kept or asked about, never written over
-  const keepTypingAfter = (sent: EditDraft['base']) => {
-    base.current = asStored(sent);
-    draft.current = { ...draft.current, base: base.current };
-    // only the base moves: an edit opened again meanwhile keeps what it has typed
-    editDrafts.set(f.id, { ...(editDrafts.get(f.id) ?? draft.current), base: base.current });
+    void out.send(async (cancelled) => {
+      editsOut.set(f.id, sent);
+      const r = await store.dispatch(EditFinding, edit, { idempotencyKey: 'f-edit-' + f.id });
+      editsOut.delete(f.id);
+      return landEdit(f.id, sent, r, cancelled());
+    });
   };
   return (
     <div class="card addf fedit" data-holds-work onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onDone(); } }}>
@@ -373,37 +367,37 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
 function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void }) {
   const store = useStore();
   const kept = newFindingDrafts.get(d.id);
-  const [title, setTitleState] = useState(kept?.title ?? ''); const [ws, setWsState] = useState(kept?.ws ?? ''); const [body, setBodyState] = useState(kept?.body ?? ''); const [busy, setBusy] = useState(false);
+  const [title, setTitleState] = useState(kept?.title ?? '');
+  const [ws, setWsState] = useState(kept?.ws ?? '');
+  const [body, setBodyState] = useState(kept?.body ?? '');
   // remembered as it is typed (not after the next draw), so leaving the page straight after typing keeps it
   const draft = useRef({ title: kept?.title ?? '', ws: kept?.ws ?? '', body: kept?.body ?? '' });
   const remember = (patch: Partial<typeof draft.current>) => { const n = { ...draft.current, ...patch }; draft.current = n; if (n.title || n.ws || n.body) newFindingDrafts.set(d.id, n); else newFindingDrafts.delete(d.id); };
   const setTitle = (v: string) => { setTitleState(v); remember({ title: v }); }; const setWs = (v: string) => { setWsState(v); remember({ ws: v }); }; const setBody = (v: string) => { setBodyState(v); remember({ body: v }); };
-  const discard = () => { newFindingDrafts.delete(d.id); onDone(); };
-  const cancelled = useRef(false);
-  const cancel = () => {
-    cancelled.current = true;
-    discard();
+  // #771: once Create lands, the form on screen (this one, or one opened again since) closes when nothing typed is
+  // kept, and opens the finding made when what was typed since went to it. Left alone (undefined) after a refusal,
+  // or when Cancel let the save go
+  const settle = (made: Finding | null | undefined) => {
+    if (made === undefined || newFindingDrafts.has(d.id)) return;
+    onDone();
+    if (made) location.hash = findingHref(made);
   };
-  const shown = useRef(true);
-  useEffect(() => () => { shown.current = false; }, []);
-  const create = async () => {
-    if (busy) return; setBusy(true);
+  const out = useSaveOut('new-finding:' + d.id, settle);
+  const busy = out.busy;
+  const cancel = () => {
+    out.cancel();
+    newFindingDrafts.delete(d.id);
+    onDone();
+  };
+  const create = () => {
     const sent = { title, ws, body };
     const input = { dealId: d.id, title, workstream: ws, body: toParagraphs(body), origin: 'human' as const };
-    const r = await store.dispatch(CreateFinding, input, { idempotencyKey: 'f-create-' + d.id });
-    setBusy(false);
-    if (!r.ok || cancelled.current) return;   // cancelled while it was out: a form opened since is left alone
-    if (sameAsSent(draft.current, sent)) discard();
-    else editCreated(createdFinding(store, r.value.opId), { title, workstream: ws, body: input.body });
-  };
-  // #115 (decision: typing during Create goes to the new finding): the finding is made as sent, and what was typed
-  // since becomes an open edit of it, measured from what was sent, so one Save puts it on that finding. Unless the
-  // finding cannot be found: then the form stays as it is, and nothing typed is lost
-  const editCreated = (made: Finding | undefined, sent: EditDraft['base']) => {
-    if (!made) return;
-    keepAsEdit(made, draft.current, sent);
-    discard();
-    if (shown.current) location.hash = findingHref(made);
+    void out.send(async (cancelled) => {
+      const r = await store.dispatch(CreateFinding, input, { idempotencyKey: 'f-create-' + d.id });
+      // cancelled while it was out: a form opened since is left alone
+      if (!r.ok || cancelled()) return undefined;
+      return landCreated(d.id, sent, createdFinding(store, r.value.opId));
+    });
   };
   return (
     <div class="card addf" data-holds-work onKeyDown={(e) =>
