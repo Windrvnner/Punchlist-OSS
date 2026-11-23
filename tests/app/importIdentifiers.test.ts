@@ -34,6 +34,12 @@ const DISTINCT: [string, string][] = [
   ['Please provide the list in Schedule 3 part e of the SPA.',
     'Please provide the list in Schedule 3 part f of the SPA.'],
   ['Please confirm the tranche a margin and fees.', 'Please confirm the tranche b margin and fees.'],
+  ['Please confirm the indemnity cap under Section 1.10 of the SPA.',
+    'Please confirm the indemnity cap under Section 11.0 of the SPA.'],
+  ['Please confirm the distribution rights for class-a shares.',
+    'Please confirm the distribution rights for class-b shares.'],
+  ['Please confirm the distribution rights for class: a shares.',
+    'Please confirm the distribution rights for class: b shares.'],
   ['Please confirm the distribution rights for Class IA shares.',
     'Please confirm the distribution rights for Class LA shares.'],
 ];
@@ -55,11 +61,23 @@ const SAME: [string, string][] = [
   ['Has the SPA been signed by the cfo yet?', 'Has the spa been signed by the CFO yet?'],
   ['Is the arrangement fee I00 bps?', 'Is the arrangement fee 100 bps?'],
   ['Is the commitment fee O.5% per annum?', 'Is the commitment fee 0.5% per annum?'],
+  ['Please confirm the consent requirements for Facility I1.',
+    'Please confirm the consent requirements for Facility l1.'],
 ];
 
 /** Tranche II outstanding debt reworded, the identifier kept: matched by its number only */
 const REWORDED: [string, string] = ['Please confirm Tranche II outstanding debt for review',
   'Please confirm the Tranche II outstanding debt balance for review'];
+
+/** [saved wording, incoming wording]: one question reworded under its own number, the word I in one only */
+const PRONOUN: [string, string][] = [
+  ['I understand the SPA is signed; please send the final version and the disclosure letter.',
+    'We understand the SPA is signed; please send the final version and the disclosure letter (DL).'],
+  ['Can I get a copy of the signed facility agreement and the fee letter?',
+    'Can we get a copy of the signed facility agreement and the fee letter from the CFO?'],
+  ['Please confirm whether I should send the board minutes and the shareholder register.',
+    'Please confirm whether we should send the board minutes and the shareholder register to the VDR.'],
+];
 
 /** a deal holding `text` as question 1, with a typed response: the deal and the question as saved */
 async function saved(text: string) {
@@ -107,6 +125,9 @@ describe('a misread or reworded row naming the same identifiers is still the que
     it(`${before} / ${incoming}, number ${n}`, () => matches(before, incoming, n));
   }
   it('a question reworded under its own number, its identifier kept', () => matches(...REWORDED, 1));
+  for (const [before, incoming] of PRONOUN) {
+    it(`the word I is no identifier: ${incoming}`, () => matches(before, incoming, 1));
+  }
   it('a prose word that reads as a numeral is no identifier', () => matches(
     'Please confirm revenue mix by segment and region for the group',
     'Please confirm revenue by segment and region for the group in FY24', 1));
@@ -122,10 +143,11 @@ describe('the identifiers a question names', () => {
   it('are numbers, capital numerals, letters and codes, and letters a clause or class names, as they read', () => {
     expect(identifiers('Is the O&M fee for Facility I1 under the SPA 2O24 or l00?'))
       .toEqual(['100', '2024', 'i1', 'm', 'o', 'spa']);
-    expect(identifiers('I understand the phase I report is final.')).toEqual(['i', 'i']);
-    expect(identifiers('l understand the Class ii terms under clause 4(b).')).toEqual(['4', 'b', 'i', 'ii']);
+    expect(identifiers('I understand the phase I report is final.')).toEqual(['i']);
+    expect(identifiers('l understand the Class ii terms under clause 4(b).')).toEqual(['4', 'b', 'ii']);
     expect(identifiers('Please confirm revenue mix by segment, 25 m or more.')).toEqual(['25']);
     expect(identifiers('Is it I00, O.5, I.1 or O1?')).toEqual(['0.5', '100', 'i.1', 'o1']);
+    expect(identifiers('Facility l1 and o1, or can I send the agreement?')).toEqual(['i1', 'o1']);
     expect(identifiers('Please provide the signed agreement.')).toEqual([]);
   });
   it('differ only when each wording names one the other does not, however it is spaced or capitalized', () => {
