@@ -29,6 +29,7 @@ import { Item, ListRecord } from '../domain/checklist';
 import { Undo } from './commands/undo';
 import { lastImport } from './commands/importQuestions';
 import { merged, localConversations } from './threads';
+import { seenSince } from './draftsSeen';
 import { freshen, FOLDER_CHECK } from './folderWatch';
 import { reassess } from './findings';
 
@@ -110,7 +111,10 @@ const FIELD_SAVES = new Set(['EditQuestionField', 'SetResponse', 'EditDeal', 'Ed
  * interrupted.
  */
 export const ALIVE_MS = 5_000, STALE_MS = 20_000;
-/** a draft asked for on another PC is taken as abandoned once this old: the same 15 minutes after which a quiet PC's round is taken over */
+/**
+ * a draft asked for on another PC is taken as abandoned once this PC has seen it pending this long, by its own clock
+ * (`seenSince`, #24): the same 15 minutes after which a quiet PC's round is taken over
+ */
 export const DRAFT_GIVE_UP_MS = 15 * 60_000;
 /** how soon start-up is tried again when the deals could not all be read: the pace of the offline check */
 export const BOOT_RETRY_MS = 10_000;
@@ -1503,8 +1507,9 @@ export class Store {
   }
   /**
    * The pending drafts on a deal that may still be running somewhere, so must not be marked failed: this
-   * window's, another window's of this PC while that window is alive, and another PC's (not in this PC's journal) until it
-   * is DRAFT_GIVE_UP_MS old. Only drafts this PC started in a window now gone, or long-abandoned ones, are given up.
+   * window's, another window's of this PC while that window is alive, and another PC's (not in this PC's journal) until
+   * this PC has seen it for DRAFT_GIVE_UP_MS. Only drafts this PC started in a window now gone, or long-abandoned ones,
+   * are given up.
    */
   private async recoverDrafts(dealId: string) {
     const recover = this.commands.get('RecoverDrafts'); if (!recover) return;
@@ -1513,19 +1518,36 @@ export class Store {
     await this.dispatch(recover, { dealId, liveRequestIds: [...live.ids, ...held] }, { quiet: true, system: true });
     // another window of this PC was still at a draft: looked at again once it could have gone quiet, in case it closed mid-way
     if (live.otherWindow || held.length) setTimeout(() => { if (this.state.deals[dealId]) void this.recoverDrafts(dealId); }, STALE_MS);
+    this.giveUpLater(dealId, live.otherPcDue);
   }
-  private draftsNotEnded(dealId: string): { ids: string[]; otherWindow: boolean } {
+  /** One look per deal, when the first draft from another PC that is still pending here is due to be given up (#24). */
+  private giveUpTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private giveUpLater(dealId: string, due: number | undefined) {
+    // a look already set is due no later than this one: each look sets the next
+    if (due === undefined || this.giveUpTimers.has(dealId)) return;
+    const timer = setTimeout(() => {
+      this.giveUpTimers.delete(dealId);
+      if (this.state.deals[dealId]) void this.recoverDrafts(dealId);
+    }, due);
+    (timer as any).unref?.();
+    this.giveUpTimers.set(dealId, timer);
+  }
+  /** the drafts not to give up yet, and how soon the first of another PC's could be (`otherPcDue`, in ms) */
+  private draftsNotEnded(dealId: string): { ids: string[]; otherWindow: boolean; otherPcDue?: number } {
     let otherWindow = false;
+    const pending = Object.values(this.state.questions).flatMap((q) =>
+      q.dealId === dealId && q.draft?.status === 'pending' && q.draft.opId ? [q.draft.opId] : []);
+    const otherPc = pending.filter((id) => !this.liveRequests.has(id) && !this.state.ops[id]);
     const now = Date.parse(this.services.clock.now());
-    const ids = Object.values(this.state.questions).flatMap((q) => {
-      const id = q.dealId === dealId && q.draft?.status === 'pending' ? q.draft.opId : undefined;
-      if (!id) return [];
-      if (this.liveRequests.has(id)) return [id];
+    const seen = seenSince(this.services.local, dealId, otherPc, now);
+    const waits = otherPc.map((id) => DRAFT_GIVE_UP_MS - (now - seen.get(id)!)).filter((ms) => ms > 0);
+    const ids = pending.filter((id) => {
+      if (this.liveRequests.has(id)) return true;
       const op = this.state.ops[id];
-      if (op) { const alive = op.window !== this.windowId && this.isLive(op); otherWindow ||= alive; return alive ? [id] : []; }
-      return now - Date.parse(q.draft!.at ?? q.updatedAt) < DRAFT_GIVE_UP_MS ? [id] : [];
+      if (op) { const alive = op.window !== this.windowId && this.isLive(op); otherWindow ||= alive; return alive; }
+      return now - seen.get(id)! < DRAFT_GIVE_UP_MS;
     });
-    return { ids, otherWindow };
+    return { ids, otherWindow, ...(waits.length ? { otherPcDue: Math.min(...waits) } : {}) };
   }
   private gapsSeq = new Map<string, number>();
   /** The deal's document gaps, and with them when it was last checked and how far it has been read. Read-only; a newer
