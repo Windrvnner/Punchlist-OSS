@@ -185,6 +185,52 @@ async function readingAcrossReload() {
   await ctx.close();
 }
 
+/** waits a while for the form to list `count` folders */
+const rowsShown = (page, count) => page.waitForFunction((n) => document.querySelectorAll('.ndrow').length === n, count,
+  { timeout: 5000 }).catch(() => {});
+
+/** releases the held reads one at a time, `count` of them, each once it has started */
+async function releaseInTurn(page, count) {
+  for (let n = 0; n < count; n++) {
+    await page.waitForFunction(() => window.scansHeld() === 1);
+    await page.evaluate(() => window.releaseScans());
+  }
+}
+
+/** #113: several folders chosen at once are kept whole while the first is read, across a dismiss and a reload */
+async function severalChosen() {
+  const { ctx, page } = await open();
+  const three = ['D:\\A\\One', 'D:\\A\\Two', 'D:\\A\\Three'];
+  await holdScans(page);
+  await page.evaluate((paths) => {
+    window.punchlist = { pickFolders: async () => ({ ok: true, value: paths }) };
+  }, three);
+  await reopen(page);
+  await page.fill('#nd-name', 'Northwind');
+  await page.click('#nd-browse');
+  await page.waitForFunction(() => window.scansHeld() === 1);
+  await dismiss(page);
+  await reopen(page);
+  // the closed form's read of One and the open form's own read of it end together, then Two and Three are read
+  await page.waitForFunction(() => window.scansHeld() === 2);
+  await page.evaluate(() => window.releaseScans());
+  await releaseInTurn(page, 2);
+  await rowsShown(page, 3);
+  const reopened = await form(page);
+  say('#113 folders chosen together all come back after a dismiss mid-read', reopened.folders.join() === three.join(),
+    JSON.stringify(reopened));
+  await page.evaluate(() => store.ui((ui) => ({ newDeal: { ...ui.newDeal, folders: [] } })));
+  await page.click('#nd-browse');
+  await page.waitForFunction(() => window.scansHeld() === 1);
+  await reload(page);
+  await reopen(page);
+  await rowsShown(page, 3);
+  const reloaded = await form(page);
+  say('#113 folders chosen together all come back after a reload mid-read', reloaded.folders.join() === three.join()
+    && !page.errors.length, JSON.stringify({ reloaded, errors: page.errors }));
+  await ctx.close();
+}
+
 /** #36: Escape and the × wait while Create reads a typed path, and one deal is made, with that folder */
 async function createHoldsTheForm() {
   const { ctx, page } = await open();
@@ -242,6 +288,7 @@ await keptAcrossReload();
 await keptOnlyWhileFilled();
 await chosenWhileReading();
 await readingAcrossReload();
+await severalChosen();
 await createHoldsTheForm();
 await failedReadGivesBack();
 await browser.close();
