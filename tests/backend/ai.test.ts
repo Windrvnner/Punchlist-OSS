@@ -809,6 +809,10 @@ describe('deal memo model replies', () => {
     { name: 'one 100,000-character token', paragraphs: ['', '  ', `${'x'.repeat(100_000)} [1]`] },
     { name: '202 words separated by citation markers', paragraphs: ['Ratio.[1]Term '.repeat(101)] },
     {
+      name: 'oversized text joined when invalid citations are removed',
+      paragraphs: [`${Array(15).fill('x'.repeat(200)).join(' [999]')} The draft sets the ratio. [1]`],
+    },
+    {
       name: '201 words after removing a finding ID',
       paragraphs: [`${'covenant '.repeat(199)}${lockUp.id}. [1]`],
     },
@@ -848,6 +852,20 @@ describe('deal memo model replies', () => {
     expect(standIn.calls.filter(memoWrite).map(({ model }) => model)).toEqual(['standard']);
     expect(memo.risks![0]).toEqual({
       ...distributionRisk, body, sources: [...lockUp.sources, ...testPeriod.sources],
+    });
+  });
+
+  it('retries an overlong deal memo write-up when Standard and Thorough share a model', async () => {
+    const valid = [`${creditWords} [1]`, `${termWords} [2]`];
+    const standIn = await setupMemoReplies([distributionRisk], (call, attempt) =>
+      citedRiskReply(call, attempt < 3 ? overlong[0].paragraphs : valid));
+    standIn.svc.offered.thorough = standIn.svc.offered.standard;
+    const memo = val(await standIn.ai.memo!('d1'));
+    const writes = standIn.calls.filter(memoWrite);
+    expect(writes.map((call) => call.model)).toEqual(['standard', 'standard', 'standard']);
+    expect(writes[1].prompt).toContain('That cannot be used:');
+    expect(memo.risks![0]).toEqual({
+      ...distributionRisk, body: valid, sources: [...lockUp.sources, ...testPeriod.sources],
     });
   });
 

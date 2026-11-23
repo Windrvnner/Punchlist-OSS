@@ -382,8 +382,12 @@ function memoRiskFits(paragraphs: string[], ids: Set<string>): boolean {
   if (!paragraphs.length || paragraphs.length > 2) return false;
   const text = paragraphs.join(' ');
   if (text.length > MEMO_RISK_TEXT_CHARS) return false;
-  if (text.split(/\s+/).some((token) => token.length > MEMO_RISK_TOKEN_CHARS)) return false;
-  const prose = paragraphs.map((paragraph) => withoutMemoMarks(unid(paragraph, ids), ' ')).join(' ');
+  const scrubbed = paragraphs.map((paragraph) => unid(paragraph, ids));
+  // Citation fitting can join adjacent text when it removes an invalid marker (#659).
+  const withoutCitations = scrubbed.map((paragraph) => withoutMemoMarks(paragraph)).join(' ');
+  const oversized = (value: string) => value.split(/\s+/).some((token) => token.length > MEMO_RISK_TOKEN_CHARS);
+  if (oversized(text) || oversized(withoutCitations)) return false;
+  const prose = scrubbed.map((paragraph) => withoutMemoMarks(paragraph, ' ')).join(' ');
   const words = prose.match(/\S+/g) ?? [];
   return words.length > 0 && words.length <= MEMO_RISK_WORDS;
 }
@@ -1194,7 +1198,10 @@ export function nodeAi(o: AiOptions) {
       }
     } catch (e) { return failure(e, 'The documents could not be read'); }
     if (!sent.length) return ok({ reply: {}, sent });
-    let using = model; let pool: Sent[] | undefined;                              // the documents chosen, kept from the first refusal of a request as too long
+    let using = model;
+    let pool: Sent[] | undefined;
+    // Memo risk correction still runs when Standard and Thorough share a model (#659).
+    let canRetry = kind === 'memoRisk' || model !== again?.escalate;
     for (let round = 1; ; round++) {
       let reply: Record<string, unknown> | null;
       try {
@@ -1206,10 +1213,14 @@ export function nodeAi(o: AiOptions) {
         const inAll = deals.reduce((sum, d) => sum + o.docs.records(d).length, 0);
         const prompt = `Documents:\n${listing}\n\nThese are ${sent.length} of the ${inAll} documents in ${deals.length > 1 ? 'these data rooms' : 'the data room'}: the ones chosen as likeliest to bear on this. You have not seen the others, so do not say what the data room as a whole does or does not contain; say what these documents show.\n\n${ask}\n\nReply as JSON: ${shape}${round === 1 ? ' If a document you were not given is needed to answer, add "need": ["a few words describing it"].' : ''}`;
         reply = await askJson({ kind, model: using, system: RULES, files, prompt }, keys, shape);
-        if (again && using !== again.escalate && (!reply || !again.usable(reply))) {
+        if (again && canRetry && (!reply || !again.usable(reply))) {
           const correction = readCorrection(prompt, reply, again);
           reply = await askJson({ kind, model: using, system: RULES, files, prompt: correction }, keys, shape, false);
-          if (!reply || !again.usable(reply)) { using = again.escalate; reply = await askJson({ kind, model: using, system: RULES, files, prompt }, keys, shape, false); }
+          if (!reply || !again.usable(reply)) {
+            canRetry = false;
+            using = again.escalate;
+            reply = await askJson({ kind, model: using, system: RULES, files, prompt }, keys, shape, false);
+          }
         }
       } catch (e) {
         // a request the service refuses as too long is asked again with the likeliest half of the documents, down to one (limits.ts)
