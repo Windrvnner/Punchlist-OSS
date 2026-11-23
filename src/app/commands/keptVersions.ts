@@ -87,7 +87,7 @@ export const RestoreVersion = define({
       });
     }
     const rec = parse({ ...(e.snapshot as object), id, dealId: e.dealId, updatedAt: ctx.at });
-    if (kind === 'question' && Object.values(state.questions).some((x) => x.dealId === e.dealId && x.n === (rec as Question).n)) return fail(rejected(`Q${(rec as Question).n} can’t be restored: another question now has that number`));
+    // a question comes back under its own number even when another question holds it; both are marked (#116)
     // what the record's own deletion note holds is kept as an entry in its place, unless it says the same
     const note = state.tombstones[id] as ShownNote | undefined;
     const others = note ? keepAside(kind, e.dealId, id, otherCopies(note, rec), [rec], state.tombstones) : { upserts: [], ids: [] };

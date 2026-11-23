@@ -215,7 +215,7 @@ export const RestoreQuestion = define({
     const snap = input.copy ? t.copies?.find((c) => c.ver === input.copy)?.snapshot : t.snapshot;
     if (!snap) return fail(notFound('That copy is no longer here', input.questionId));
     const q = Question.parse({ ...(snap as object), id: t.id, updatedAt: ctx.at });
-    if (Object.values(state.questions).some((x) => x.dealId === q.dealId && x.n === q.n)) return fail(rejected(`Q${q.n} can’t be restored: another question now has that number`));
+    // a number another question holds now is shared again, as it was before the delete; both are marked (#13)
     const others = keepAside('question', q.dealId, q.id, otherCopies(t, q), [q], state.tombstones);
     return ok({
       dealId: q.dealId,
