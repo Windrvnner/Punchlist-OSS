@@ -138,6 +138,8 @@ const QUESTION = 'Who guarantees delivery under the direct agreement?';
 const FILTER = { status: 'closed', workstream: 'Financial', text: 'permit' };
 const DEFAULT_FILTER = { status: 'all', workstream: '', text: '' };
 const sameFilter = (a, b) => a.status === b.status && a.workstream === b.workstream && a.text === b.text;
+const itemIn = (page, deal) =>
+  page.locator('#pal-res [data-kind=item] button:not(.pmore)').filter({ hasText: deal }).first();
 
 async function chooseQuestion(page, dealId, origin, pointer = false) {
   await page.goto(URL + '#' + origin);
@@ -171,6 +173,54 @@ async function keepsQaFilters(page, k, o) {
     JSON.stringify({ fromQa, afterEscape, sameDeal, fromHome, otherDeal }));
 }
 
+async function revealsOpenChecklistRow(page, k) {
+  await page.goto(URL + '#overview-' + k);
+  await search(page, LAST);
+  await itemIn(page, 'Project Proseware').click();
+  await page.waitForSelector('#ck-detail');
+  const outcomes = [];
+  for (const pointer of [false, true]) {
+    await page.locator('#ck-rows').evaluate((list) => { list.scrollTop = 0; });
+    await search(page, LAST);
+    const item = itemIn(page, 'Project Proseware');
+    await item.waitFor();
+    if (pointer) await item.click();
+    else {
+      await item.hover();
+      await page.keyboard.press('Enter');
+    }
+    await page.waitForSelector('#pal-drop', { state: 'detached' });
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    outcomes.push(await page.evaluate(() => {
+      const list = document.querySelector('#ck-rows').getBoundingClientRect();
+      const row = document.querySelector('#ck-rows .ckrow.on').getBoundingClientRect();
+      return row.top >= Math.max(0, list.top) && row.bottom <= Math.min(innerHeight, list.bottom);
+    }));
+  }
+  say('#496 Search reveals the already-open Checklist row', outcomes.every(Boolean), JSON.stringify(outcomes));
+}
+
+async function focusesKeyboardResults(page, k, o) {
+  const inQuestion = () => page.evaluate(() => !!document.activeElement?.closest('.qpanel'));
+  await chooseQuestion(page, k, 'qa-' + k);
+  const samePage = await inQuestion();
+  await page.keyboard.press('Tab');
+  const next = await page.evaluate(() => !!document.activeElement?.closest('#view'));
+  await chooseQuestion(page, k, 'qa-' + o);
+  const otherDeal = await inQuestion();
+  await chooseQuestion(page, k, 'qa-' + k, true);
+  const pointer = await inQuestion();
+  await page.goto(URL + '#checklist-' + k);
+  await search(page, LAST);
+  await itemIn(page, 'Project Proseware').hover();
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('#ck-detail');
+  const checklist = await page.evaluate(() => document.activeElement?.matches('#ck-rows .ckrow.on'));
+  say('#498 keyboard Search moves focus to the opened question or Checklist row',
+    samePage && next && otherDeal && !pointer && checklist,
+    JSON.stringify({ samePage, next, otherDeal, pointer, checklist }));
+}
+
 {
   const { ctx, page, k, o } = await start();
   const created = await page.evaluate(([dealId, text]) =>
@@ -198,6 +248,8 @@ async function keepsQaFilters(page, k, o) {
     };
   }, [k, QUESTION, general()]);
   await keepsQaFilters(page, k, o);
+  await revealsOpenChecklistRow(page, k);
+  await focusesKeyboardResults(page, k, o);
   await ctx.close();
 }
 
