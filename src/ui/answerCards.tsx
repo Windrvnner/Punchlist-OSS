@@ -1,6 +1,6 @@
 // The cards an answer opens to add it as a new question or a new finding.
-import { useEffect, useRef, useState } from 'preact/hooks';
-import { useAppState, useStore } from './hooks';
+import { useRef, useState } from 'preact/hooks';
+import { useAppState, useShown, useStore } from './hooks';
 import type { Store } from '../app/store';
 import { createdFinding, findingHref, keepAsEdit } from './findings';
 import { hasTexts, keptDrafts } from './keptDrafts';
@@ -127,10 +127,7 @@ export function FindingCard({ dealId, answerId, text, sources, onDone }: {
   const draft = useCardDraft(findingDrafts, answerId, { text: firstSentence(plainText), ws: '' });
   const { text: title, ws: workstream } = draft.typed;
   const [busy, setBusy] = useState(false);
-  const shown = useRef(true);
-  useEffect(() => () => {
-    shown.current = false;
-  }, []);
+  const shown = useShown();
   // why Create is off, said on hover
   const need = !title.trim() ? 'Give the finding a title' : !workstream ? 'Choose a workstream' : null;
   const create = async () => {

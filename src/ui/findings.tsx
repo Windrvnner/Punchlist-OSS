@@ -6,7 +6,7 @@ import { TEXT_MAX } from '../domain/importExport';
 import { checkingSays } from '../app/checking';
 import { showTip, hideTip } from './tip';
 import { ReadOnlyContext } from './editField';
-import { useAppState, useStore, fmtDate, whenText , useDismiss, useMinuteTick } from './hooks';
+import { useAppState, useStore, fmtDate, whenText , useDismiss, useMinuteTick, useShown } from './hooks';
 import { afterDeletingFinding } from './nav';
 import { Icon } from './icons';
 import { ChoiceCheck } from './moreMenu';
@@ -404,8 +404,7 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
     cancelled.current = true;
     discard();
   };
-  const shown = useRef(true);
-  useEffect(() => () => { shown.current = false; }, []);
+  const shown = useShown();
   const create = async () => {
     if (busy) return; setBusy(true);
     const sent = { title, ws, body };
