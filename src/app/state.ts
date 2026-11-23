@@ -1,3 +1,4 @@
+import { distinguishingWords } from './dealLabel';
 import type { Deal, Question, Finding, Tombstone, Member, Operation, DealId, QuestionId, FindingId, AuditEntry, Source, Folder, RecordKind, ClashKind } from '../domain/model';
 import type { Item, ListRecord } from '../domain/checklist';
 import type { CheckState, ModelThread, Research } from '../ports';
@@ -508,7 +509,7 @@ export function dealTwinLabels(deals: Iterable<Deal>) {
     named.set(key, matches);
   }
   const labels = new Map<string, ReturnType<typeof dealTwins>>();
-  return (deal: Deal, short = false) => {
+  return (deal: Deal, short: boolean | 'focus' = false) => {
     const key = dealNameKey(deal.name);
     const matches = named.get(key);
     if (!matches || matches.length < 2) return '';
@@ -518,7 +519,9 @@ export function dealTwinLabels(deals: Iterable<Deal>) {
       labels.set(key, group);
     }
     const label = group.get(deal.id);
-    return (short ? label?.short : label?.full) ?? '';
+    if (!label) return '';
+    if (short === 'focus') return distinguishingWords(label.short, [...group.values()].map((twin) => twin.short));
+    return short ? label.short : label.full;
   };
 }
 
