@@ -304,6 +304,10 @@ let wantSources: string | null = null;
 /** the Detail label's tooltip in the finding editor */
 const CITE_TIP = 'A tag after a sentence names the source it cites. It moves with its sentence.';
 
+/** Whether the edit still holds exactly what a save sent: then the save lands it and the form closes (#32). */
+const sameAsSent = (d: EditDraft, sent: { title: string; ws: string; body: string }) =>
+  d.title === sent.title && d.ws === sent.ws && d.body === sent.body;
+
 function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
   const store = useStore();
   const kept = editDrafts.get(f.id);
@@ -332,8 +336,24 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
     const edit = {
       dealId: f.dealId, findingId: f.id, title, workstream: ws, body: toParagraphs(body), base: base.current,
     };
+    const sent = { title, ws, body };
     const r = await store.dispatch(EditFinding, edit, { idempotencyKey: 'f-edit-' + f.id });
-    setBusy(false); if (r.ok) { editDrafts.delete(f.id); onDone(); } else setError(r.error.kind === 'invalid' ? Object.values(r.error.fields ?? {})[0] ?? r.error.message : r.error.message);
+    setBusy(false);
+    if (!r.ok) {
+      setError(r.error.kind === 'invalid' ? Object.values(r.error.fields ?? {})[0] ?? r.error.message : r.error.message);
+      return;
+    }
+    if (sameAsSent(draft.current, sent)) {
+      editDrafts.delete(f.id);
+      onDone();
+    } else keepTypingAfter(edit);
+  };
+  // #32: more was typed while Save was out. The edit stays open with it, now measured from what that save sent (each
+  // field the finding held, or the one written over it), so the next Save writes only what changed since, and a change
+  // made elsewhere meanwhile is still kept or asked about, never written over
+  const keepTypingAfter = (sent: { title: string; workstream: string; body: string[] }) => {
+    base.current = { title: sent.title, workstream: sent.workstream, body: sent.body };
+    remember({ base: base.current });
   };
   return (
     <div class="card addf fedit" data-holds-work onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onDone(); } }}>
