@@ -103,11 +103,16 @@ function longestFirst(names) {
   return [...names].sort((a, b) => known(b) - known(a) || (a < b ? -1 : 1));
 }
 
-/** Keeps each finished suite's time (its run on its own, if it was run again), beside those of suites not run now. */
-function rememberTimes(finished) {
+/**
+ * Keeps the time of each suite that passed alongside the others, beside those kept before. A suite that failed keeps
+ * its earlier time: a crash or a run on its own would rank it shorter than it is.
+ */
+function rememberTimes(passed) {
   const times = readTimes();
-  for (const result of finished) times[result.name] = result.secs;
-  fs.writeFileSync(TIMES, JSON.stringify(times, null, 2));
+  for (const result of passed) times[result.name] = result.secs;
+  // written whole and then moved into place, so a run reading it never sees half a file
+  fs.writeFileSync(`${TIMES}.tmp`, JSON.stringify(times, null, 2));
+  fs.renameSync(`${TIMES}.tmp`, TIMES);
 }
 
 /** A successful exit without a positive, complete suite summary is missing coverage. */
@@ -142,7 +147,9 @@ const run = async (name) => {
     });
   });
 };
-const started = Date.now(); const queue = longestFirst(suites); const results = [];
+const started = Date.now();
+const queue = longestFirst(suites);
+const results = [];
 await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, async () => {
   while (!stopped) {
     const name = queue.shift();
@@ -154,6 +161,7 @@ await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, async () 
       + ` ${result.passed}/${result.total}  ${result.secs}s`);
   }
 }));
+const passedAlongside = results.filter((result) => result.code === 0).map(({ name, secs }) => ({ name, secs }));
 for (const result of results.filter((entry) => entry.code !== 0)) {
   if (stopped) break;
   fs.copyFileSync(`out/browser/${result.name}.log`, `out/browser/${result.name}.first.log`);
@@ -165,7 +173,7 @@ for (const result of results.filter((entry) => entry.code !== 0)) {
   Object.assign(result, again, { rerun: true, firstFails: result.fails });
 }
 server?.kill();
-rememberTimes(results);
+rememberTimes(passedAlongside);
 const completed = new Set(results.map((result) => result.name));
 const unrun = suites.filter((name) => !completed.has(name));
 if (unrun.length) console.error(`Not run (${unrun.length}/${suites.length} suites): ${unrun.join(', ')}`);
