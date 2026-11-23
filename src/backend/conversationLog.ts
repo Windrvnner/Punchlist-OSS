@@ -49,14 +49,14 @@ export function conversationLog(o: ConversationLogOptions): ConversationStore & 
   const byPerson = new Map<string, Map<string, Map<string, Line>>>(); let heldFor: string | undefined;
   let seq = -1; let file = 0;
   /** the highest number in this PC's own lines, read or just written: a failed save never goes below it (#759) */
-  let highestRead = -1;
+  let highestOwn = -1;
 
   const own = (n: number) => `talk-${o.installId}-${n}.jsonl`;
   const take = (l: Line) => {
     const id = `${l.pc}.${l.seq}`; if (ids.has(id)) return false;
     ids.add(id);
     if (l.pc === o.installId) {
-      highestRead = Math.max(highestRead, l.seq);
+      highestOwn = Math.max(highestOwn, l.seq);
       seq = Math.max(seq, l.seq);
     }
     if (l.by !== heldFor) return false;
@@ -137,7 +137,7 @@ export function conversationLog(o: ConversationLogOptions): ConversationStore & 
         // this PC's copy could not be written, so nothing was, anywhere: the numbers are used again, and the failure says so (`failed`)
         // unless part of it is still there, to be cut off later: a number it holds is not given to another line (#126)
         // and never below a number already read from this PC's files: those lines are not read again to raise it (#759)
-        if (!holdsFailedAppend(o.local, own(file))) seq = Math.max(before, highestRead);
+        if (!holdsFailedAppend(o.local, own(file))) seq = Math.max(before, highestOwn);
         return fail({ kind: 'failed' as const, message: (e as { code?: string })?.code === 'ENOSPC' ? 'The disk is full' : 'This PC’s copy of the conversation could not be written' });
       }
     },
