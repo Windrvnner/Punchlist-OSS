@@ -195,6 +195,7 @@ describe('the deal memo’s ratings and summary', () => {
     ['The deal has zero High-rated findings.', ratingCases[0]],
     ['Not one open finding is rated High.', ratingCases[0]],
     ['Of the open findings, none were rated High.', ratingCases[0]],
+    ['High-rated open findings: none.', ratingCases[0]],
     [
       'Ratings for some findings remain unresolved. None of the open findings has a High rating.',
       ratingCases[2],
@@ -240,13 +241,25 @@ describe('the deal memo’s ratings and summary', () => {
   });
 
   it('keeps a stated fact about a known High risk when other ratings are unresolved', async () => {
-    const known = 'One High risk is that no signed agreement covers the remaining capacity.';
+    const known = 'No signed agreement covers the remaining capacity. The high-voltage connection is unsigned.';
     const { pageOne, sums } = await scriptedScaleMemo(ratingCases[2], () => ({
       paragraphs: ['Open findings have unresolved ratings.', known],
     }));
     expect(sums).toHaveLength(1);
     expect(pageOne).toContain(known);
     expect(pageOne).toContain('41 unrated.');
+  });
+
+  it('keeps the known-risk facts when a correction leaves rating labels to the counts', async () => {
+    const fact = 'The financial model uses an energy yield above the independent estimate.';
+    const claim = 'The difference is a High risk for debt sizing.';
+    const { pageOne, sums } = await scriptedScaleMemo(ratingCases[2], (_call, attempt) => ({
+      paragraphs: ['Open findings have unresolved ratings.', attempt === 1 ? `${fact} ${claim}` : fact],
+    }));
+    expect(sums.map((call) => call.model)).toEqual(['standard', 'standard']);
+    expect(pageOne).toContain(fact);
+    expect(pageOne).not.toContain(claim);
+    expect(pageOne).toContain('1 High, 0 Medium, 0 Low, 41 unrated.');
   });
 
   it('keeps a summary that reports what a document requires', async () => {

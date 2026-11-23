@@ -396,33 +396,24 @@ function memoSummaryPrompt(
     riskInstructions = openCount ? 'that no open risk is rated High. ' : 'that it has no open findings. ';
   }
   const deal = facts ? ` (${facts})` : '';
+  const ratingInstructions = unratedCount ? 'Describe the issues in facts. Leave rating labels to the counts. ' : '';
   return `Write the summary of a deal memo for a managing director at an investment bank, about this deal${deal}: `
     + 'two paragraphs, at most 170 words in all. First what the project and the financing are, with the figures '
     + 'the documents give (size, capacity, location, sponsor, offtake, structure, timetable). '
-    + `Then ${riskInstructions}`
+    + `Then ${riskInstructions}${ratingInstructions}`
     + 'Facts only: no advice, no recommendation, no next steps, and no judgment of how the deal or the work is going. '
     + 'Name no person. Never write an id.';
 }
 
-/** An unrated finding prevents a blanket conclusion about High ratings (#661). */
+/** The counts carry the ratings when some findings are unrated (#661). */
 function memoSummaryRejection(unrated: number, advises: (text: string) => boolean) {
-  const denial = /\b(?:no|none|not|never|neither|zero|without|0)\b/i;
-  const highRating = new RegExp(
-    '\\b(?:(?:rated|classified as|assessed as|considered) high|'
-      + 'high(?:[- ]rated)? (?:findings?|risks?|ratings?|severity|category))\\b',
-    'i',
-  );
-  const absentRating = /\b(?:not|never) (?:been )?(?:rated|assigned|identified|found|recorded)\b/i;
-  const deniesHigh = (sentence: string) => {
-    const category = sentence.search(/\bHigh\b/);
-    const high = category < 0 ? sentence.search(highRating) : category;
-    const negative = sentence.search(denial);
-    return high >= 0 && negative >= 0 && (negative < high || absentRating.test(sentence));
-  };
+  const ratingLabel = new RegExp(`\\b(?:${RATINGS.join('|')})\\b`);
+  const ratingPhrase = /\b(?:high|medium|low)[- ](?:rated|risk|ratings?|severity|category)\b/i;
+  const ratedAs = /\b(?:rated|classified as|assessed as|considered) (?:high|medium|low)\b/i;
   return (paragraphs: string[]): string => {
-    const sentences = paragraphs.join(' ').replace(/\s+/g, ' ').split(/(?<=[.!?])\s+/);
-    if (unrated && sentences.some(deniesHigh)) {
-      return 'That claims there are no High risks while ratings are unresolved. State that ratings are unresolved.';
+    const text = paragraphs.join(' ').replace(/\s+/g, ' ');
+    if (unrated && (ratingLabel.test(text) || ratingPhrase.test(text) || ratedAs.test(text))) {
+      return 'Keep rating labels in the counts while ratings are unresolved. Describe the facts in the summary.';
     }
     return paragraphs.some(advises) ? 'That gives advice or a judgment. Write it again with facts only.' : '';
   };
@@ -1277,7 +1268,7 @@ export function nodeAi(o: AiOptions) {
         return paragraphs.length > 0 && !rejectSummary(paragraphs);
       },
       wrong: unrated
-        ? 'it is empty, gives advice or a judgment, or denies High findings while ratings are unresolved'
+        ? 'it is empty, gives advice or a judgment, or uses rating labels while ratings are unresolved'
         : 'it is empty, or it gives advice or a judgment: write it again with facts only',
       retrySharedModel: unrated > 0,
     };
