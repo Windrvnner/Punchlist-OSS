@@ -101,8 +101,8 @@ async function loadingUsesMyDeals() {
   await page.fill('#pal-in', 'lease term');
   const question = page.locator('#pal-res [data-kind=question] button:not(.pmore)').first();
   const match = await question.waitFor({ timeout: 3000 }).then(() => true, () => false);
-  say('#491 Search completes after My Deals are read', loading === 'Searching' && done === 'No matches.' && ownOnly && match,
-    JSON.stringify({ loading, done, ownOnly, match }));
+  const finished = loading === 'Searching' && done === 'No matches.' && ownOnly && match;
+  say('#491 Search completes after My Deals are read', finished, JSON.stringify({ loading, done, ownOnly, match }));
   await ctx.close();
 }
 
