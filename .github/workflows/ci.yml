@@ -14,9 +14,7 @@ permissions:
 # a newer run for the same pull request replaces its run still going; every other run has a group of its own, so
 # runs on main are never cancelled or dropped from the queue
 concurrency:
-  group: >-
-    ${{ github.event_name == 'pull_request' && format('ci-{0}', github.ref)
-    || format('ci-run-{0}', github.run_id) }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
