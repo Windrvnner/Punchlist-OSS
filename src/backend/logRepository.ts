@@ -21,7 +21,9 @@ import { Combined, isLine, recKey, type Line, type RecChange, type RecState } fr
 import { shareOwn, wholeLines } from './ownFile';
 import { LocalChanges } from './localChanges';
 import { recoveredWriteClashes } from './recoveredWrite';
-import { changedOnto, recoveredDeal, recoveredId, recoveredIds, remap, type Had } from '../domain/recovered';
+import {
+  changedOnto, recoveredDeal, recoveredId, recoveredIds, remap, removedFields, type Had,
+} from '../domain/recovered';
 
 /** A folder, as much of one as this needs. `size` is in bytes, -1 for no such file. `append` and `write` may throw; a full disk throws with code ENOSPC. */
 export interface Folder { list(): string[]; size(name: string): number; read(name: string): string | null; append(name: string, text: string): void; write(name: string, text: string): void }
@@ -1221,6 +1223,7 @@ export class LogRepository implements Repository {
       return fail({ kind: 'rejected', message: DEAL_DELETED });
     }
     const before = this.view.lastHad(write.kind, write.id)[0]?.data;
+    if (this.removesUnseen(write, before)) return fail({ kind: 'rejected', message: DEAL_DELETED });
     const heads = this.view.state(write.kind, to).tips.map((id) => this.view.version(id)!);
     if (recoveredWriteClashes({
       originalId: write.id, had: before, wrote: write.data, heads, version: (id) => this.view.version(id),
@@ -1228,6 +1231,16 @@ export class LogRepository implements Repository {
     return ok({
       kind: write.kind, id: to, data: changedOnto(before, write.data, now?.envelope.data, ids), expectedRev: 'any',
     });
+  }
+
+  /**
+   * A save that leaves out a field, prepared on an older version than this PC had: the field may have arrived after
+   * the save was prepared (an AI draft), so its absence is not a person's choice to remove it (#664).
+   */
+  private removesUnseen(write: Write, before: unknown): boolean {
+    if (typeof write.expectedRev !== 'number') return false;
+    const stale = write.expectedRev !== this.view.state(write.kind, write.id, true).rev;
+    return stale && removedFields(before, write.data).length > 0;
   }
 
   /**
