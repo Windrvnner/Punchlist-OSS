@@ -12,8 +12,15 @@ async function dealWithQuestions(page, texts) {
   const id = await page.evaluate(() => Object.values(store.get().deals)[0].id);
   await page.goto(URL + '#qa-' + id); await page.waitForSelector('#qa-add');
   const ids = [];
-  for (const t of texts) { await page.evaluate(() => { window.__prevQ = store.get().ui.selectedQuestion; }); await page.click('#qa-add'); await page.waitForFunction(() => { const q = store.get().ui.selectedQuestion; return !!q && q !== window.__prevQ && !document.querySelector('.det[inert]') && !!document.querySelector('.det textarea.qtext'); }); await page.fill('.det textarea.qtext', t); await page.press('.det textarea.qtext', 'Tab'); await page.waitForTimeout(600); ids.push(await page.evaluate(() => store.get().ui.selectedQuestion)); }
+  for (const t of texts) { await page.evaluate(() => { window.__prevQ = store.get().ui.selectedQuestion; }); await page.click('#qa-add'); await page.waitForFunction(() => { const q = store.get().ui.selectedQuestion; return !!q && q !== window.__prevQ && !document.querySelector('.det[inert]') && !!document.querySelector('.det textarea.qtext'); }); await page.fill('.det textarea.qtext', t); await page.press('.det textarea.qtext', 'Tab'); await questionSaved(page, t); ids.push(await page.evaluate(() => store.get().ui.selectedQuestion)); }
   return { id, ids };
+}
+/** Waits until the selected question holds exactly `text` in the store: the save has landed (#101). */
+async function questionSaved(page, text) {
+  await page.waitForFunction((expected) => {
+    const state = store.get();
+    return state.questions[state.ui.selectedQuestion]?.text === expected;
+  }, text);
 }
 // what the response label says about the draft (design G: the draft's state sits beside "Response")
 const word = (page) => page.evaluate(() => document.querySelector('.qpanel .qright .qlbl .sub')?.textContent || '');
