@@ -52,7 +52,7 @@ import { createHash } from 'node:crypto';
 import { ListRecord, Item, firmOf, orderItems } from '../domain/checklist';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ulid } from 'ulid';
-import { readJson, unfinished, list as listOf, strings, int, pageOf, word, tagNumber } from './lenient';
+import { readJson, unfinished, list as listOf, strings, int, pageOf, word, tagNumber, isObject } from './lenient';
 import type { LineRead } from '../domain/listRead';
 import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK } from './limits';
 import { UNREAD_REPLY, UNUSABLE_REPLY, UNREACHED, CUT_ON_IT, CUT_BEFORE_IT, UNUSABLE_ON_IT } from './limits';
@@ -355,6 +355,14 @@ export function unid(text: string, ids: Set<string>): string {
     return t;
   }
 }
+/** Ignore malformed entries individually so a usable group beside one still stands (#658). */
+function memoGroupRows(value: unknown, ids: Set<string>): RiskGroup[] {
+  return listOf(value).filter(isObject).map((row) => ({
+    title: unid(strings(row.title)[0] ?? '', ids).slice(0, 160),
+    findings: strings(row.findings),
+  })).filter((group) => group.findings.length);
+}
+
 /**
  * LaTeX-style notation in a text, which the model is told not to write (plain symbols such as
  * + − × ÷ * / = % are fine): the pieces found, none when there are none. A $ before a figure is money, not notation:
@@ -1555,7 +1563,7 @@ export function nodeAi(o: AiOptions) {
         try {
           const rows = open.map((f) => `${f.id} (${f.workstream || 'no workstream'}, ${ratings[f.id] ?? 'unrated'}): ${f.title}`);
           const reply = await askJson<{ risks?: unknown }>({ kind: 'memoGroups', model: m.standard, system: JSON_ONLY, prompt: `These are the open findings on a deal, each with its workstream and risk rating:\n${rows.join('\n')}\n\nGroup them into the deal's risks for a memo to a senior banker. A risk is one underlying problem for the deal; findings that are evidence of the same problem, or that bear on the same term, figure or approval, go together, even across workstreams. A finding unlike any other is a risk on its own. Put every finding in exactly one risk. Give each risk a short plain title of your own (at most 12 words) that says what the problem is, as a fact, with no judging words.\nReply as JSON: {"risks": [{"title": "…", "findings": ["id", "id"]}]}` }, ['risks']);
-          groups = listOf(reply?.risks).map((x) => x as { title?: unknown; findings?: unknown }).map((x) => ({ title: unid(strings(x.title)[0] ?? '', ids).slice(0, 160), findings: strings(x.findings).map((id) => id.trim()) })).filter((g) => g.findings.length);
+          groups = memoGroupRows(reply?.risks, ids);
         } catch (e) { if (unreachable(e)) return failure(e, `${SERVICE} did not answer`); groups = []; }
       }
       const byId = new Map(open.map((f) => [f.id, f]));
