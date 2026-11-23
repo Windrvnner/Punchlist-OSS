@@ -5,6 +5,7 @@
 // while others are running is run once more on its own; if it passes then, that is reported as such, not hidden.
 // Exit code 0 only if every suite passed (alone or alongside). Logs go to out/browser/<suite>.log.
 import { spawn } from 'node:child_process'; import fs from 'node:fs'; import http from 'node:http';
+import { noResultReason, summaryOf } from './browser-reason.mjs';
 
 const args = process.argv.slice(2); const j = args.indexOf('--jobs'); const jobs = j >= 0 ? Math.max(1, +args[j + 1] || 1) : 5;
 const shardAt = args.indexOf('--shard');
@@ -81,22 +82,9 @@ async function appIsReady() {
   return ready;
 }
 
-/**
- * Why a suite ended without a summary (#157, #163): its exit, its last line of output, and whether the app server was
- * still answering, so a run under load says whether the suite crashed, timed out, or lost its server.
- */
-async function noResultReason(code, signal, out) {
-  const last = out.trim().split('\n').filter((line) => line.trim()).at(-1)?.slice(0, 160) ?? 'no output';
-  const exit = signal ? `signal ${signal}` : `exit ${code}`;
-  return `${exit}; server ${(await up()) ? 'up' : 'down'}; last line: ${last}`;
-}
-
 /** A successful exit without a positive, complete suite summary is missing coverage. */
 function suiteResult(name, code, out, started, reason = '') {
-  const summary = [...out.matchAll(/^(\d+)\/(\d+) passed\r?$/gm)].at(-1);
-  const passed = summary ? Number(summary[1]) : 0;
-  const total = summary ? Number(summary[2]) : 0;
-  const valid = Number.isSafeInteger(passed) && Number.isSafeInteger(total) && total > 0 && passed <= total;
+  const { passed, total, valid } = summaryOf(out);
   if (!valid) out += `\nFAIL ${name}: missing or invalid positive test summary (${reason})\n`;
   fs.writeFileSync(`out/browser/${name}.log`, out);
   return {
@@ -117,7 +105,9 @@ const run = async (name) => {
     child.stderr.on('data', (part) => (out += part));
     child.on('error', (error) => { out += `\nFAIL ${name}: could not start: ${error.message}\n`; });
     child.on('close', async (code, signal) => {
-      const reason = await noResultReason(code, signal, out);
+      // the server is asked only when the suite left no summary, so a passing suite's time is not held up
+      const serverUp = summaryOf(out).valid ? true : await servesThisBuild().catch(() => false);
+      const reason = noResultReason(code, signal, out, serverUp);
       if (signal) out += `\nBrowser suite terminated by signal ${signal}\n`;
       else if (code) out += `\nBrowser suite exited with code ${code}\n`;
       done(suiteResult(name, code, out, started, reason));
@@ -134,6 +124,8 @@ await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, async () 
     results.push(result);
     console.log(`${result.code === 0 ? 'ok  ' : 'FAIL'} ${name.padEnd(14)}`
       + ` ${result.passed}/${result.total}  ${result.secs}s`);
+    // a suite with no summary says why at once, even if the server is gone before it could run again
+    if (!result.total) console.log(`     ${result.fails.at(-1) ?? 'no result'}`);
   }
 }));
 for (const result of results.filter((entry) => entry.code !== 0)) {
@@ -142,7 +134,6 @@ for (const result of results.filter((entry) => entry.code !== 0)) {
   const again = await run(result.name);
   if (!again) break;
   const first = result.fails.map((failure) => failure.split(' ')[1]).join(', ') || 'no result';
-  if (!result.total) console.log(`     ${result.name}: ${result.fails.at(-1) ?? 'no result'}`);
   console.log(`${again.code === 0 ? 'ok  ' : 'FAIL'} ${again.name.padEnd(14)} ${again.passed}/${again.total}`
     + `  ${again.secs}s  (on its own, after failing alongside others: ${first})`);
   Object.assign(result, again, { rerun: true, firstFails: result.fails });
