@@ -13,6 +13,30 @@ async function start(size = [1280, 736], scheme = 'dark') {
   return { ctx, page, id: await page.evaluate(() => Object.values(store.get().deals)[0].id) };
 }
 
+{ // New Deal uses en-US file counts even when the browser locale is German (#699)
+  const page = await browser.newPage({ locale: 'de-DE' });
+  await page.goto(URL);
+  await page.click('#fr-new');
+  await page.evaluate(() => {
+    store.services.docs.scanFolder = async (path) => ({
+      ok: true,
+      value: { files: path === 'Contracts' ? 1 : 1277, size: '0.0 GB' },
+    });
+  });
+  await page.click('#nd-paste');
+  const counts = page.locator('.ndrow .cnt');
+  for (const [index, path] of ['Contracts', 'Data room'].entries()) {
+    await page.fill('#nd-path', path);
+    await page.press('#nd-path', 'Enter');
+    await counts.nth(index).waitFor();
+  }
+  const shown = await counts.allTextContents();
+  const expected = ['1 file · 0.0 GB', '1,277 files · 0.0 GB'];
+  say('699:new-deal-folder-counts-use-en-US-and-singular-file',
+    shown.length === expected.length && shown.every((count, index) => count === expected[index]), shown.join(' | '));
+  await page.close();
+}
+
 for (const scheme of ['dark', 'light']) {
   const { ctx, page, id } = await start([1024, 640], scheme);
   // while a notice shows, an open dialog starts below it, and still fits
