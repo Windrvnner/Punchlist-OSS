@@ -46,6 +46,24 @@ describe('what each piece still needs', () => {
     for (const p of R.pieces) expect(need(R, f, p)).toBe(p.key === 'item:i11' ? null : drawn.includes(p) ? (p.key.startsWith('item:') ? 'sample' : 'standard') : null);
   });
 
+  it('a quick check: an item its look flagged waits for its full check until every look is in (#131)', () => {
+    const items = Array.from({ length: 4 }, (_, i) => item(`i${i}`, 'glance'));
+    const P = plan('r', 'quick', items, { block: 2 });
+    const looked = (pairs: [string, boolean][], pc = 'a') =>
+      L({ glanced: { round: 'r', items: pairs.map(([id, same]) => ({ item: id, same })) } }, pc);
+    const flagged = looked([['i0', false], ['i1', true]]);
+    let v = view([L({ plan: P }), flagged]); let R = v.rounds.get('r')!;
+    // the second block's looks are not in yet, perhaps on the other PC: its flags could still join this call
+    expect(R.pieces.map((p) => need(R, factsOf(v, R), p))).toEqual(['wait', 'wait', 'glance', 'glance']);
+    v = view([...v.lines, looked([['i2', false], ['i3', true]], 'b')]);
+    R = v.rounds.get('r')!;
+    expect([items[0], items[2]].map((p) => need(R, factsOf(v, R), p))).toEqual(['check', 'check']);
+    // a look skipped (the item left the checklist) is not waited for
+    const skipped = L({ skipped: { round: 'r', key: 'item:i2', why: 'It is no longer on the checklist' } });
+    v = view([L({ plan: P }), flagged, skipped, looked([['i3', true]])]);
+    R = v.rounds.get('r')!; expect(need(R, factsOf(v, R), items[0])).toBe('check');
+  });
+
   it('the sample is drawn by hash from the round id: the same on every PC, whoever did the looks; and a different round draws differently', () => {
     const items = Array.from({ length: 30 }, (_, i) => item(`i${i}`, 'glance')); const lines = (id: string, pc: string) => [L({ plan: plan(id, 'quick', items, { block: 30 }) }), L({ glanced: { round: id, items: items.map((p) => ({ item: p.key.slice(5), same: true })) } }, pc)];
     const pick = (id: string, pc: string) => { const v = view(lines(id, pc)); const R = v.rounds.get(id)!; const f = factsOf(v, R); return R.pieces.filter((p) => sampled(R, f, p.key)).map((p) => p.key); };

@@ -389,11 +389,24 @@ function sampleOf(r: RoundState, facts: Map<string, PieceFacts>): Set<string> | 
   drawnFor.set(facts, { r, pieces: r.pieces, count: r.pieces.length, drawn });
   return drawn;
 }
+/** the round's item pieces that start with a look, leaving out skipped ones */
+function lookPieces(r: RoundState, facts: Map<string, PieceFacts>): Piece[] {
+  return r.pieces.filter((p) => isItem(p) && p.stage === 'glance' && !facts.get(p.key)?.skipped);
+}
+/** whether every look in the round is in, worked out once for a round and its facts, as the sample is (`sampleOf`) */
+type Looked = { r: RoundState; pieces: Piece[]; count: number; done: boolean };
+const lookedFor = new WeakMap<Map<string, PieceFacts>, Looked>();
+function allLooked(r: RoundState, facts: Map<string, PieceFacts>): boolean {
+  const kept = lookedFor.get(facts);
+  if (kept && kept.r === r && kept.pieces === r.pieces && kept.count === r.pieces.length) return kept.done;
+  const done = lookPieces(r, facts).every((p) => facts.get(p.key)?.glance);
+  lookedFor.set(facts, { r, pieces: r.pieces, count: r.pieces.length, done });
+  return done;
+}
 function draw(r: RoundState, facts: Map<string, PieceFacts>): Set<string> | null {
-  const live = r.pieces.filter((p) => !facts.get(p.key)?.skipped);
-  const looks = live.filter((p) => isItem(p) && p.stage === 'glance');
-  const findings = live.filter((p) => !isItem(p));
-  if (looks.some((p) => !facts.get(p.key)?.glance)) return null;
+  const looks = lookPieces(r, facts);
+  const findings = r.pieces.filter((p) => !isItem(p) && !facts.get(p.key)?.skipped);
+  if (!allLooked(r, facts)) return null;
   if (findings.some((p) => !facts.get(p.key)?.fast)) return null;
   const pool = [
     ...looks.filter((p) => facts.get(p.key)!.glance!.same),
@@ -418,10 +431,19 @@ function itemNeed(r: RoundState, facts: Map<string, PieceFacts>, p: Piece, known
   if (kind === 'first') return firstPassItemNeed(p, known);
   if (kind === 'deep' || p.stage !== 'glance') return known.result ? null : 'check';
   if (!known.glance) return 'glance';
-  if (!known.glance.same) return known.result ? null : 'check';
+  if (!known.glance.same) return flaggedNeed(r, facts, known);
   const inSample = sampled(r, facts, p.key);
   if (inSample === null) return 'wait';
   return inSample && !known.sample ? 'sample' : null;
+}
+
+/**
+ * An item its look flagged gets its full check only once every look in the round is in, so each PC sends the flagged
+ * items it owns together rather than one call per block as the looks arrive from either PC (#131).
+ */
+function flaggedNeed(r: RoundState, facts: Map<string, PieceFacts>, known: PieceFacts): Need {
+  if (known.result) return null;
+  return allLooked(r, facts) ? 'check' : 'wait';
 }
 
 /** a first pass checks each item, after a look first at one a change may have touched */
