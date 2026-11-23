@@ -115,6 +115,10 @@ describe('files that can no longer be sent (#671)', () => {
     expect(m.asked()).toEqual([]);
     expect(m.box().value).toBe('Do the consents cover the change of control?');
     expect(m.chips()).toHaveLength(MAX_ATTACHED);
+    // the chips of the missing files show it, with the red warning glyph
+    expect(m.chips().map((chip) => !!chip.missing)).toEqual(m.chips().map((_chip, i) => i === 2 || i === 5));
+    const marked = [...m.host.querySelectorAll('.chip.att.missing')].map((el) => el.textContent);
+    expect(marked).toEqual(['Consent 3.pdf', 'Consent 6.pdf']);
     expect(m.toasts().at(-1)).toBe('Couldn’t find 2 files — attach them again');
     // once the file is back, the same message goes with all of them
     m.lose();
