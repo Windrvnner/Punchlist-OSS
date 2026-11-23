@@ -57,6 +57,8 @@ a.flagrow{text-decoration:none;color:inherit}
 .docnm .dni{display:contents}
 .docnm .dnh{flex:0 1 auto;min-width:3ch;overflow:hidden;text-overflow:ellipsis}
 .docnm .dnt{flex:none}
+/* Leave a filename hover target even when the source location uses the rest of the chip. */
+.rsch-chip .docnm{min-width:3ch}
 /* Give the head the space left by the tail. A tail that cannot fit uses a leading ellipsis. */
 .rsch-chip .docnm:not(.run) .dnh{flex:1;min-width:0}
 .rsch-chip .docnm:not(.run) .dnt{flex-shrink:1;overflow:hidden;text-overflow:ellipsis;direction:rtl}

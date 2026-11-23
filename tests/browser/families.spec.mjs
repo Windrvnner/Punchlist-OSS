@@ -53,7 +53,12 @@ async function chipsInReadingMode(page, selected, shot) {
       detailsFit: [location, tag].filter(Boolean).every(textFits),
     };
   }));
-  if (shot) await page.screenshot({ path: shot, animations: 'disabled' });
+  if (shot) {
+    const viewport = page.viewportSize();
+    await page.setViewportSize({ ...viewport, width: viewport.width + 1 });
+    await page.setViewportSize(viewport);
+    await page.screenshot({ path: shot, animations: 'disabled' });
+  }
   const hover = measurements.findIndex((chip) => chip.shortened);
   let tooltip = '';
   if (hover >= 0) {
@@ -63,6 +68,28 @@ async function chipsInReadingMode(page, selected, shot) {
     await page.mouse.move(2, 2);
   }
   return { measurements, tooltip, fullName: measurements[hover]?.name ?? '' };
+}
+
+async function crampedNameTooltip(page) {
+  const doc = 'Construction Cost and Funding Schedule v12.xlsx';
+  const loc = "'WORKING CAPITAL RECONCILIATION'!Z515";
+  await page.evaluate((source) => {
+    const answer = Object.values(store.get().threads).flat().find((item) => item.sources?.some((src) => src.precedent));
+    Object.assign(answer.sources[0], source);
+    store.ui({ doc: 1 });
+  }, { doc, loc });
+  const name = page.getByRole('button', { name: `Open ${doc}, ${loc}`, exact: true }).locator('.docnm');
+  const point = await name.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    const visible = box.width > 0 ? box : node.querySelector('.dnh').getBoundingClientRect();
+    const x = visible.left + visible.width / 2;
+    const y = visible.top + visible.height / 2;
+    return visible.width > 0 && node.contains(document.elementFromPoint(x, y)) ? [x, y] : null;
+  });
+  if (!point) return false;
+  await page.mouse.move(...point);
+  await page.waitForSelector('.tip');
+  return (await page.textContent('.tip')) === doc;
 }
 
 for (const [scheme, w, h] of [['dark', 1280, 736], ['light', 1280, 736], ['dark', 1024, 640], ['light', 1024, 640]]) {
@@ -123,6 +150,7 @@ for (const [scheme, w, h] of [['dark', 1280, 736], ['light', 1280, 736], ['dark'
   say(`${tag}:precedent-chip`, pre.length === 2 && pre[0][0] === '' && pre[1][0] === 'precedent' && pre[1][1] === "Another project's document, not this deal's terms." && pre.every((c) => c[2]), JSON.stringify(pre));
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/E-precedent-${tag}.png` });
   const precedent = await chipsInReadingMode(page, 1, SHOTS && `${SHOTS}/441-precedent-${tag}.png`);
+  const crampedTip = await crampedNameTooltip(page);
   const shown = [...blackline.measurements, ...precedent.measurements];
   const details = shown.map(({ name, location, tag: badge }) => [name, location, badge]);
   const expected = [
@@ -135,8 +163,8 @@ for (const [scheme, w, h] of [['dark', 1280, 736], ['light', 1280, 736], ['dark'
     JSON.stringify(details) === JSON.stringify(expected)
     && shown.every(({ fits, detailsFit, ellipsis, label, name, location }) =>
       fits && detailsFit && ellipsis && label === `Open ${name}, ${location}`)
-    && [blackline, precedent].every(({ tooltip, fullName }) => fullName && tooltip === fullName),
-    JSON.stringify({ blackline, precedent }));
+    && [blackline, precedent].every(({ tooltip, fullName }) => fullName && tooltip === fullName) && crampedTip,
+    JSON.stringify({ blackline, precedent, crampedTip }));
   say(`${tag}:no-page-errors`, page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }
