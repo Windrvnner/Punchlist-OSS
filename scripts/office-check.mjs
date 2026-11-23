@@ -1,23 +1,21 @@
 // Proves LibreOffice can do the spreadsheet work the tests need, before check:all runs them (#85).
 //   node scripts/office-check.mjs        prints the converter's path and version, or why it cannot be used
-// The converter is PUNCHLIST_SOFFICE, else /usr/bin/soffice, else the first soffice on PATH. It turns a two-sheet
+// The converter is PUNCHLIST_SOFFICE, else /usr/bin/soffice, the same one the tests use. It turns a two-sheet
 // workbook into XLSX and back into one CSV per sheet, each on a fresh profile, as the app does. A missing converter,
 // one that hangs, or one that writes the wrong result exits 1; `--version` alone would pass a build that hangs in Calc.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const STEP_MS = 90_000;
 const SHEETS = [['Questions', 'Question,Response', 'What is the cap?,1.25x'], ['Notes', 'Note', 'Second sheet']];
 
-/** The converter to check: the environment's, then the usual place, then PATH; null when there is none. */
+/** The converter to check, found as the tests find it (officePrerequisites.ts); null when there is none. */
 export function findSoffice(env = process.env) {
   if (env.PUNCHLIST_SOFFICE) return env.PUNCHLIST_SOFFICE;
-  if (fs.existsSync('/usr/bin/soffice')) return '/usr/bin/soffice';
-  const onPath = spawnSync(process.platform === 'win32' ? 'where' : 'which', ['soffice'], { encoding: 'utf8' });
-  return onPath.status === 0 ? onPath.stdout.split(/\r?\n/)[0].trim() || null : null;
+  return fs.existsSync('/usr/bin/soffice') ? '/usr/bin/soffice' : null;
 }
 
 /** A flat OpenDocument spreadsheet holding SHEETS, one cell per comma-separated value. */
@@ -37,7 +35,7 @@ function flatWorkbook() {
 /** Runs the converter on a fresh profile; throws with the reason when it fails or takes longer than STEP_MS. */
 function run(soffice, dir, args) {
   const profile = fs.mkdtempSync(path.join(dir, 'profile-'));
-  const result = spawnSync(soffice, [`-env:UserInstallation=${new URL(`file://${profile}`).href}`, ...args], {
+  const result = spawnSync(soffice, [`-env:UserInstallation=${pathToFileURL(profile).href}`, ...args], {
     encoding: 'utf8', timeout: STEP_MS,
   });
   if (result.error?.code === 'ETIMEDOUT') throw new Error(`no result within ${STEP_MS / 1000} s: ${args.join(' ')}`);
