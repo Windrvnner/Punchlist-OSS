@@ -44,11 +44,11 @@ npm run installer       # build the Windows installer into out/installer (on Win
 | `npm run typecheck` | Type-checks with TypeScript, with no output files. |
 | `npm run lint` | Runs Biome (lint only, no formatter). |
 | `npm run check` | Runs the type-check, Biome, the secrets check and the AI-attribution check on every tracked file (the attribution check also reads the branch's commit messages), readability hints for the changed code (never failing), and the unit tests. |
-| `npm run check:all` | Runs `check`, the build, browser suites, and desktop smoke and sign-in checks. Run it before every merge, because CI on GitHub runs only when started by hand. |
+| `npm run check:all` | Runs `check`, the build, browser suites, and desktop smoke and sign-in checks. Run it before every merge. CI on GitHub runs it on every pull request and push to `main`. |
 | `npm run screens` | Takes screenshots of every main screen into `out/` (add `-- 1440x900 --pdfs <folder>` for options). Needs `npm run serve`. |
 | `npm run package` | Optional local release ZIP containing the app, source, and `docs/`, written to `out/punchlist-<version>.zip`. |
 
-The GitHub Actions workflow has a separate optional Windows installer job.
+The GitHub Actions workflow also builds the Windows installer when it is started by hand.
 
 The Store is the object that holds the app's state and runs its commands; see [architecture.md](architecture.md).
 
