@@ -1,6 +1,7 @@
 // Merge never joins two questions that name different identifiers (#125, #127, #128): the import, its preview and the
 // Q&A log's row matching each keep the saved question and its response, and make the row a question of its own.
-// Misread letters and rewordings that name the same identifiers still match.
+// Misread letters and rewordings that name the same identifiers still match; a row matched by number alone that adds or
+// drops an identifier does not, and capitals alone never add or drop one.
 import { describe, it, expect } from 'vitest';
 import { SetResponse } from '../../src/app/commands/questions';
 import { ImportQuestions } from '../../src/app/commands/importQuestions';
@@ -72,6 +73,15 @@ const SAME: [string, string][] = [
 /** Tranche II outstanding debt reworded, the identifier kept: matched by its number only */
 const REWORDED: [string, string] = ['Please confirm Tranche II outstanding debt for review',
   'Please confirm the Tranche II outstanding debt balance for review'];
+/** the Tranche II question reworded without its identifier, close enough to match by number alone */
+const DROPPED = 'Please confirm the outstanding debt for review';
+/** [saved wording, incoming wording]: one question reworded under its own number, a code or the row in capitals */
+const CAPITALS: [string, string][] = [
+  ['Please send the SPA and disclosure letter for review', 'Please send the spa and the disclosure letter for review'],
+  ['Please send the spa and disclosure letter for review', 'Please send the SPA and the disclosure letter for review'],
+  ['PLEASE SEND THE BOARD MINUTES FOR THE GROUP', 'Please send board minutes for the group'],
+  ['Please send board minutes for the group', 'PLEASE SEND THE BOARD MINUTES FOR THE GROUP'],
+];
 
 /** [saved wording, incoming wording]: one question reworded under its own number, an article or the word I in one */
 const PRONOUN: [string, string][] = [
@@ -102,22 +112,25 @@ async function saved(text: string) {
 /** the log's row for `text` under number `n`, as the log's row matching reads it */
 const logRow = (n: number, text: string) => [String(n), text, 'New answer', 'Lender', 'Finance'];
 
+/** the import, its preview and the log's row matching each keep the saved question and add `incoming` as its own */
+async function apart(before: string, incoming: string, n: number) {
+  const { store, dealId, original } = await saved(before);
+  expect(matchRows({ rows: [logRow(n, incoming)] }, mapping, [original])).toEqual(new Map());
+  const rows = fileRow(n, incoming, 'New answer');
+  expect(previewImport(store, dealId, 'merge', rows))
+    .toEqual({ ok: true, value: { created: 1, updated: 0, restored: 0, changes: [] } });
+  const result = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows });
+  if (!result.ok) throw new Error(result.error.message);
+  expect(store.get().questions[original.id]).toEqual(original);
+  const added = dealQuestions(store.get(), dealId).filter((q) => q.id !== original.id);
+  expect(added).toMatchObject([{ text: incoming, response: 'New answer' }]);
+  expect((await store.undo(result.value.opId)).ok).toBe(true);
+  expect(dealQuestions(store.get(), dealId)).toEqual([original]);
+}
+
 describe('a row naming another identifier is a question of its own', () => {
   for (const [before, incoming] of DISTINCT) for (const n of [1, 2]) {
-    it(`${before} / ${incoming}, number ${n}`, async () => {
-      const { store, dealId, original } = await saved(before);
-      expect(matchRows({ rows: [logRow(n, incoming)] }, mapping, [original])).toEqual(new Map());
-      const rows = fileRow(n, incoming, 'New answer');
-      expect(previewImport(store, dealId, 'merge', rows))
-        .toEqual({ ok: true, value: { created: 1, updated: 0, restored: 0, changes: [] } });
-      const result = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows });
-      if (!result.ok) throw new Error(result.error.message);
-      expect(store.get().questions[original.id]).toEqual(original);
-      const added = dealQuestions(store.get(), dealId).filter((q) => q.id !== original.id);
-      expect(added).toMatchObject([{ text: incoming, response: 'New answer' }]);
-      expect((await store.undo(result.value.opId)).ok).toBe(true);
-      expect(dealQuestions(store.get(), dealId)).toEqual([original]);
-    });
+    it(`${before} / ${incoming}, number ${n}`, () => apart(before, incoming, n));
   }
 });
 
@@ -141,12 +154,11 @@ describe('a misread or reworded row naming the same identifiers is still the que
   it('a prose word that reads as a numeral is no identifier', () => matches(
     'Please confirm revenue mix by segment and region for the group',
     'Please confirm revenue by segment and region for the group', 1));
-  it('a reworded row that drops an identifier is a question of its own', async () => {
-    const { store, dealId, original } = await saved(REWORDED[0]);
-    const rows = fileRow(1, 'Please confirm the outstanding debt for review', 'New answer');
-    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows })).ok).toBe(true);
-    expect(store.get().questions[original.id]).toEqual(original);
-  });
+  for (const [before, incoming] of CAPITALS) {
+    it(`capitals alone name no other identifier: ${incoming}`, () => matches(before, incoming, 1));
+  }
+  it('a reworded row that drops an identifier is a question of its own', () => apart(REWORDED[0], DROPPED, 1));
+  it('a reworded row that adds an identifier is a question of its own', () => apart(DROPPED, REWORDED[0], 1));
   it('but not under another number, as before', async () => {
     const { store, dealId, original } = await saved(REWORDED[0]);
     const rows = fileRow(2, REWORDED[1], 'New answer');
@@ -170,7 +182,11 @@ describe('the identifiers a question names', () => {
     const same = (a: string, b: string) => sameIdentifiers(identifierSig(a), identifierSig(b));
     expect(same('Tranche II', 'Tranche IV')).toBe(false);
     expect(same('Class A and Tranche II', 'Tranche II')).toBe(true);
-    expect(exactIdentifiers(identifierSig('Class A and Tranche II'), identifierSig('Tranche II'))).toBe(false);
+    const exact = (a: string, b: string) => exactIdentifiers(identifierSig(a), identifierSig(b));
+    expect(exact('Class A and Tranche II', 'Tranche II')).toBe(false);
+    expect(exact('Tranche II', 'Class A and Tranche II')).toBe(false);
+    expect(exact('send the SPA now', 'send the spa')).toBe(true);
+    expect(exact('PLEASE SEND THE MINUTES', 'please send the minutes')).toBe(true);
     expect(same('the facility', 'Facility B')).toBe(true);
     expect(same('the FY 2024 accounts', 'the FY2024 accounts')).toBe(true);
   });

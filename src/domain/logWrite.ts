@@ -203,14 +203,19 @@ function numberForm(token: string): string {
 }
 
 /**
- * What two wordings' identifiers are compared on: the identifiers, and the words with only case, spacing and
- * punctuation taken out, which say the same whenever the identifiers do ("FY 2024" and "FY2024", "SPA" and "spa").
- * A point or comma inside a number stays: Section 1.10 is not Section 11.0.
+ * What two wordings' identifiers are compared on: the identifiers, the words with only case, spacing and punctuation
+ * taken out, which say the same whenever the identifiers do ("FY 2024" and "FY2024", "SPA" and "spa"), and each word
+ * in the form an identifier takes, whatever its case. A point or comma inside a number stays: 1.10 is not 11.0.
  */
-export interface IdentifierSig { plain: string; ids: string[] }
+export interface IdentifierSig { plain: string; ids: string[]; words: Set<string> }
 export function identifierSig(text: string): IdentifierSig {
-  const plain = text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}.,]|(?<!\p{N})[.,]|[.,](?!\p{N})/gu, '');
-  return { plain, ids: identifiers(text) };
+  const normal = text.normalize('NFKC');
+  const plain = normal.toLowerCase().replace(/[^\p{L}\p{M}\p{N}.,]|(?<!\p{N})[.,]|[.,](?!\p{N})/gu, '');
+  const words = new Set<string>();
+  for (const [token] of normal.matchAll(QUESTION_TOKEN)) {
+    words.add(/\p{N}/u.test(token) ? numberForm(token) : token.toLowerCase());
+  }
+  return { plain, ids: identifiers(text), words };
 }
 
 /**
@@ -224,9 +229,11 @@ export function sameIdentifiers(a: IdentifierSig, b: IdentifierSig): boolean {
 /**
  * Whether two wordings name exactly the same identifiers, for a match by number alone: there the words differ, and a
  * row that adds or drops an identifier (Tranche II) may be another question, so it is a question of its own (#125).
+ * Case alone never adds or drops one: "SPA" is named by "spa", and an all-caps copy by its ordinary wording.
  */
 export function exactIdentifiers(a: IdentifierSig, b: IdentifierSig): boolean {
-  return a.plain === b.plain || (!namesOther(a.ids, b.ids) && !namesOther(b.ids, a.ids));
+  if (a.plain === b.plain) return true;
+  return a.ids.every((id) => b.words.has(id)) && b.ids.every((id) => a.words.has(id));
 }
 /** whether `ids` names an identifier, counted with its repeats, that `others` does not */
 function namesOther(ids: readonly string[], others: readonly string[]): boolean {
