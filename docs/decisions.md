@@ -242,6 +242,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Built work is shown with a short screen recording and single, distinctly named screenshots.
 - Before building the installer, set the organization name, model provider, and other shared settings in
   `src/control.ts`. Each person signs in after installation.
+- An npm override moves the packaging tools' minimatch 9 and 10 copies to minimatch 11, the first release with the
+  denial-of-service fix (#644). It comes out once electron-builder itself requires minimatch 11.
 
 ## Working rules
 
