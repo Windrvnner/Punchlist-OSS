@@ -6,11 +6,41 @@ const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, String(note).slice(0, 300)); };
 const browser = await launchChrome();
 openOnFindings(browser);
-async function fresh(width = 1280, height = 736, colorScheme = 'light') { const ctx = await browser.newContext({ viewport: { width, height }, colorScheme }); const page = await ctx.newPage(); page.errors = []; page.on('pageerror', (e) => page.errors.push(e.message)); await page.goto(URL); await page.waitForSelector('#fr-new'); return { ctx, page }; }
+/** A new browser context at this size and scheme, on the start page; with `storageState`, holding that saved state. */
+async function fresh(width = 1280, height = 736, colorScheme = 'light', storageState = undefined) {
+  const ctx = await browser.newContext({ viewport: { width, height }, colorScheme, storageState });
+  const page = await ctx.newPage();
+  page.errors = [];
+  page.on('pageerror', (e) => page.errors.push(e.message));
+  await page.goto(URL);
+  await page.waitForSelector('#fr-new');
+  return { ctx, page };
+}
 async function indexedDeal(page) {
   await page.click('#fr-new'); await page.fill('#nd-name', 'Proseware'); await page.click('#nd-paste'); await page.fill('#nd-path', 'reports'); await page.press('#nd-path', 'Enter'); await page.waitForSelector('.ndrow'); await page.click('#nd-create'); await page.waitForSelector('#nd-create', { state: 'detached' });
   await page.waitForFunction(() => Object.values(store.get().findings).length === 3, null, { timeout: 30000 });
   return page.evaluate(() => Object.keys(store.get().deals)[0]);
+}
+// The indexed deal the scenarios start from is made once through the real new-deal flow, then copied into each
+// scenario's own context (#96). The new-deal, indexing and first-pass steps keep their own tests (regress.spec.mjs).
+const indexed = await (async () => {
+  const { ctx, page } = await fresh();
+  const id = await indexedDeal(page);
+  const state = await ctx.storageState();
+  await ctx.close();
+  return { id, state };
+})();
+/** A fresh context holding a copy of the indexed deal, checked to start as it was made. */
+async function freshDeal(width, height, colorScheme) {
+  const { ctx, page } = await fresh(width, height, colorScheme, indexed.state);
+  await page.goto(`${URL}#deal-${indexed.id}`);
+  await page.waitForFunction(() => Object.values(store.get().findings).length === 3, null, { timeout: 30000 });
+  const start = await page.evaluate(() => ({ deals: Object.keys(store.get().deals), questions:
+    Object.keys(store.get().questions).length, threads: Object.keys(store.get().threads).length }));
+  if (start.deals.join() !== indexed.id || start.questions || start.threads) {
+    throw new Error(`The copied deal did not start as it was made: ${JSON.stringify(start)}`);
+  }
+  return { ctx, page, id: indexed.id };
 }
 /** a conversation on the deal with two answers: the first names the three findings, the second cites the documents */
 async function twoAnswers(page, id) {
@@ -34,8 +64,8 @@ const addQ = (page, id, text, response = '') => page.evaluate(async ([d, t, r]) 
 
 // at 1280 light and at 1024 dark: the finding opens beside the conversation, which stays and makes room for it
 for (const [w, h, scheme] of [[1280, 736, 'light'], [1024, 640, 'dark']]) {
-  const { ctx, page } = await fresh(w, h, scheme);
-  const id = await indexedDeal(page); await twoAnswers(page, id); const before = await page.evaluate(() => location.hash);
+  const { ctx, page, id } = await freshDeal(w, h, scheme);
+  await twoAnswers(page, id); const before = await page.evaluate(() => location.hash);
   await page.locator('.msgs .ai .ref .rb', { hasText: 'lock-up' }).click(); await page.waitForSelector('#sidepane .opening'); await page.waitForTimeout(600);
   const at = await layout(page);
   const shown = await page.evaluate((b) => ({ same: location.hash === b, title: document.querySelector('#sidepane .qtxt')?.textContent, marked: [...document.querySelectorAll('.msgs .rb.on')].map((e) => e.textContent), noEdit: !document.querySelector('#sidepane #f-edit, #sidepane #f-delete'), review: !!document.querySelector('#sidepane #f-review') }), before);
@@ -46,8 +76,8 @@ for (const [w, h, scheme] of [[1280, 736, 'light'], [1024, 640, 'dark']]) {
 
 // keyboard: Enter on the phrase opens the pane with the focus in it; Escape closes it and the focus goes back to the phrase.
 // A document opened from the pane takes the room; a person marks the finding reviewed from the pane; leaving the page closes it.
-{ const { ctx, page } = await fresh();
-  const id = await indexedDeal(page); await twoAnswers(page, id);
+{ const { ctx, page, id } = await freshDeal();
+  await twoAnswers(page, id);
   await page.locator('.msgs .ai .ref .rb', { hasText: 'revenue' }).focus(); await page.keyboard.press('Enter'); await page.waitForSelector('#sidepane .opening');
   const inPane = await page.evaluate(() => document.activeElement?.id);
   await page.keyboard.press('Escape'); await page.waitForFunction(() => !document.querySelector('#sidepane')); await page.waitForTimeout(100);
@@ -68,8 +98,8 @@ for (const [w, h, scheme] of [[1280, 736, 'light'], [1024, 640, 'dark']]) {
 
 // the actions under an answer are icons, left-aligned under it, each named on hover; "Use as response to a question…" opens
 // the deal's open questions to pick from, narrowed as a person types (never a number typed from memory)
-{ const { ctx, page } = await fresh();
-  const id = await indexedDeal(page); await twoAnswers(page, id);
+{ const { ctx, page, id } = await freshDeal();
+  await twoAnswers(page, id);
   const row = await page.evaluate(() => { const a = document.querySelector('.msgs .ai'); const b = [...a.querySelectorAll('.acts button')]; const p = a.querySelector('p').getBoundingClientRect();
     return { names: b.map((x) => x.getAttribute('aria-label')).join('|'), words: b.some((x) => x.textContent.trim()), icons: b.every((x) => x.querySelector('svg')), left: Math.round(b[0].getBoundingClientRect().left - p.left), box: !!document.querySelector('.touse, .msgs .acts input') }; });
   say('answer-actions-are-icons', row.names === 'Copy|Add as question|Add as finding|Use as response to a question…' && !row.words && row.icons && row.left >= -8 && row.left <= 0 && !row.box, JSON.stringify(row));
@@ -140,8 +170,10 @@ for (const [w, h, scheme] of [[1280, 736, 'light'], [1024, 640, 'dark']]) {
 // to be checked. Nothing changes until a person uses it; "Not this one" puts it away.
 const Q4 = 'Confirm the operating assumption used in the base case, and where it comes from. If the technical advisor and the information memorandum differ, say which one the model follows and why.';
 for (const [w, h, scheme] of [[1280, 736, 'light'], [1024, 640, 'dark']]) {
-  const { ctx, page } = await fresh(w, h, scheme);
-  const id = await indexedDeal(page); const q = await addQ(page, id, Q4); await addQ(page, id, 'Provide the insurance certificates for the construction period.'); await twoAnswers(page, id);
+  const { ctx, page, id } = await freshDeal(w, h, scheme);
+  const q = await addQ(page, id, Q4);
+  await addQ(page, id, 'Provide the insurance certificates for the construction period.');
+  await twoAnswers(page, id);
   const card = await page.evaluate(() => { const R = (e) => e.getBoundingClientRect(); const all = [...document.querySelectorAll('.msgs .suggest')]; const c = all[0]; const ai = [...document.querySelectorAll('.msgs .ai')];
     const within = (b) => R(b).right <= R(c).right - 4 && R(b).left >= R(c).left;
     const inside = c && [...c.querySelectorAll('button')].every(within);
@@ -184,8 +216,8 @@ for (const [w, h, scheme] of [[1280, 736, 'light'], [1024, 640, 'dark']]) {
 
 // a person uses the suggestion: from the card at once, or from the pane, asked first when it would replace a response; the
 // pane stays open after and shows the question with its new response, and Undo puts the check back
-{ const { ctx, page } = await fresh();
-  const id = await indexedDeal(page); const q = await addQ(page, id, Q4, 'The base case follows the information memorandum.'); await twoAnswers(page, id);
+{ const { ctx, page, id } = await freshDeal();
+  const q = await addQ(page, id, Q4, 'The base case follows the information memorandum.'); await twoAnswers(page, id);
   await page.click('.msgs .suggest .sq'); await page.waitForSelector('#side-use');
   const now = await page.textContent('#side-now'); await page.click('#side-use'); await page.waitForSelector('#side-replace');
   const asked = await page.evaluate(() => ({ focus: document.activeElement?.id, text: document.querySelector('#sidepane .card.confirm p')?.textContent }));
