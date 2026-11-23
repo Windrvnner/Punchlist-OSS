@@ -16,13 +16,13 @@ import type { Finding, Source } from '../domain/model';
 
 /** What a card holds as typed: the question or the finding's title, and its workstream. */
 type CardDraft = { text: string; ws: string };
-/** "Add as question" and "Add as finding" cards half typed, per answer: kept on Escape, on leaving and across a restart */
+/** "Add as question" and "Add as finding" cards half typed, per answer: kept on Escape, leaving and a restart */
 const questionDrafts = keptDrafts('answer-question', hasTexts('text', 'ws'));
 const findingDrafts = keptDrafts('answer-finding', hasTexts('text', 'ws'));
 
 /**
- * A card's text and workstream, kept per answer as they are typed (#51): Escape and leaving keep them; Cancel, or a save
- * that lands with nothing typed since, clears them. Back at what the answer proposed, nothing is kept.
+ * A card's text and workstream, kept per answer as they are typed (#51): Escape and leaving keep them; Cancel, or a
+ * save that lands with nothing typed since, clears them. Back at what the answer proposed, nothing is kept.
  */
 function useCardDraft(drafts: Map<string, CardDraft>, answerId: string, start: CardDraft) {
   const [typed, setTyped] = useState(() => drafts.get(answerId) ?? start);
@@ -141,13 +141,15 @@ export function FindingCard({ dealId, answerId, text, sources, onDone }: {
   // #115's decision for this card too: what was typed since Create was sent becomes an open edit of the finding made,
   // which its toast's Open shows. A finding that cannot be found leaves the card open with the typing
   const editMade = (made: Finding | undefined, sent: { title: string; workstream: string; body: string[] }) => {
-    if (!made) return false;
+    if (!made || cancelled.current) return false;
     const typed = { title: draft.now.current.text, ws: draft.now.current.ws, body: made.body.join('\n\n') };
     keepAsEdit(made, typed, { title: sent.title, workstream: sent.workstream, body: sent.body });
     draft.forget();
     return true;
   };
+  const cancelled = useRef(false);
   const cancel = () => {
+    cancelled.current = true;
     draft.forget();
     onDone();
   };

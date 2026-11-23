@@ -53,8 +53,8 @@ function useAskDraft(findingId: string) {
 }
 
 /**
- * #340: a question being typed on a finding's page stays in sight when the finding is deleted, on the page that says so,
- * so the person can keep, copy or cancel it. Log says why not; Restore brings the finding back with it.
+ * #340: a question being typed on a finding's page stays in sight when the finding is deleted, on the page that says
+ * so, so the person can keep, copy or cancel it. Log says why not; Restore brings the finding back with it.
  */
 export function KeptAsk({ dealId, findingId, title }: { dealId: string; findingId: string; title: string }) {
   const s = useAppState();

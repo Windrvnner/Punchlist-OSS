@@ -331,7 +331,12 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
     setBodyState(v);
     remember({ body: v });
   };
-  const cancel = () => { editDrafts.delete(f.id); onDone(); };
+  const cancelled = useRef(false);
+  const cancel = () => {
+    cancelled.current = true;
+    editDrafts.delete(f.id);
+    onDone();
+  };
   const wsOptions = workstreamChoices([f.workstream]);   // a name of its own (from an import) takes its place A to Z
   const save = async () => {
     if (busy) return; setBusy(true);
@@ -342,7 +347,8 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
     const r = await store.dispatch(EditFinding, edit, { idempotencyKey: 'f-edit-' + f.id });
     setBusy(false);
     if (!r.ok) {
-      setError(r.error.kind === 'invalid' ? Object.values(r.error.fields ?? {})[0] ?? r.error.message : r.error.message);
+      const field = r.error.kind === 'invalid' ? Object.values(r.error.fields ?? {})[0] : undefined;
+      setError(field ?? r.error.message);
       return;
     }
     if (sameAsSent(draft.current, sent)) {
@@ -353,8 +359,9 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
   // #32: more was typed while Save was out. The edit stays open with it, now measured from what that save sent (each
   // field the finding held, or the one written over it), so the next Save writes only what changed since, and a change
   // made elsewhere meanwhile is still kept or asked about, never written over
-  const keepTypingAfter = (sent: { title: string; workstream: string; body: string[] }) => {
-    base.current = { title: sent.title, workstream: sent.workstream, body: sent.body };
+  const keepTypingAfter = (sent: EditDraft['base']) => {
+    if (cancelled.current) return;   // Cancel pressed while the save was out: what was typed goes, as Cancel says
+    base.current = asStored(sent);
     remember({ base: base.current });
   };
   return (
@@ -385,6 +392,11 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
   const remember = (patch: Partial<typeof draft.current>) => { const n = { ...draft.current, ...patch }; draft.current = n; if (n.title || n.ws || n.body) newFindingDrafts.set(d.id, n); else newFindingDrafts.delete(d.id); };
   const setTitle = (v: string) => { setTitleState(v); remember({ title: v }); }; const setWs = (v: string) => { setWsState(v); remember({ ws: v }); }; const setBody = (v: string) => { setBodyState(v); remember({ body: v }); };
   const discard = () => { newFindingDrafts.delete(d.id); onDone(); };
+  const cancelled = useRef(false);
+  const cancel = () => {
+    cancelled.current = true;
+    discard();
+  };
   const shown = useRef(true);
   useEffect(() => () => { shown.current = false; }, []);
   const create = async () => {
@@ -395,13 +407,13 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
     setBusy(false);
     if (!r.ok) return;
     if (sameAsSent(draft.current, sent)) discard();
-    else editCreated(createdFinding(store, r.value.opId), input);
+    else editCreated(createdFinding(store, r.value.opId), { title, workstream: ws, body: input.body });
   };
   // #115 (decision: typing during Create goes to the new finding): the finding is made as sent, and what was typed
   // since becomes an open edit of it, measured from what was sent, so one Save puts it on that finding. Unless the
   // finding cannot be found: then the form stays as it is, and nothing typed is lost
   const editCreated = (made: Finding | undefined, sent: EditDraft['base']) => {
-    if (!made) return;
+    if (!made || cancelled.current) return;
     keepAsEdit(made, draft.current, sent);
     discard();
     if (shown.current) location.hash = findingHref(made);
@@ -415,15 +427,21 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
       <textarea class="in ta" id="af-body" maxLength={TEXT_MAX} rows={3} placeholder="What you found and where" aria-label="Detail" value={body} onInput={(e) => setBody((e.currentTarget as HTMLTextAreaElement).value)} />
       <div class="cacts"><button type="button" class="btn sm pri" id="af-create" disabled={busy || !title.trim() || !ws}
         onClick={() => void create()}>Create Finding</button><button type="button" class="btn sm" id="af-cancel"
-        onClick={discard}>Cancel</button></div>
+        onClick={cancel}>Cancel</button></div>
     </div>
   );
 }
 
-/** Text typed into a new finding since its Create was sent: an open edit of the finding made, from what was sent (#115). */
+/** Text typed into a new finding since its Create was sent: an open edit of the finding made, from what was sent
+ *  (#115). */
 export function keepAsEdit(made: Finding, typed: Typed, sent: EditDraft['base']) {
-  editDrafts.set(made.id, { ...typed, base: sent });
+  editDrafts.set(made.id, { ...typed, base: asStored(sent) });
 }
+
+/** What a save sent, as the finding stores it: its title trimmed, as the commands trim it, so the next Save's
+ *  comparison with the finding is not thrown by a space typed at the end */
+const asStored = (sent: EditDraft['base']): EditDraft['base'] =>
+  ({ title: sent.title.trim(), workstream: sent.workstream, body: sent.body });
 
 /** the finding a CreateFinding made, by what its write wrote */
 export function createdFinding(store: ReturnType<typeof useStore>, opId: string): Finding | undefined {
