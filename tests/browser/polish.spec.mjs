@@ -1,5 +1,6 @@
 // Small layout and look fixes, each checked on the built app: the numbers are the GitHub issues they answer.
 import { launchChrome } from './chrome.mjs';
+import { openRename } from './dealMenu.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
 const browser = await launchChrome();
@@ -166,7 +167,10 @@ async function seedVisualPolish(page) {
     for (const findingId of findings) {
       await run('SetFindingStatus', { dealId, findingId, status: 'closed', note: 'Agreed' });
     }
-    return { dealId, findingId: findings[1] };
+    await run('CreateQuestion', { dealId, text: 'Confirm the lock-up ratio.' });
+    const questionId = Object.keys(store.get().questions)[0];
+    await run('DeleteQuestion', { dealId, questionId });
+    return { dealId, findingId: findings[1], questionId };
   });
 }
 
@@ -189,6 +193,30 @@ async function checkComposerInsets(page, at, dealId, findingId) {
     JSON.stringify({ home, closed, deal, conversation }));
 }
 
+async function checkSelection(locator) {
+  return locator.evaluate((element) => {
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      element.focus();
+      element.select();
+    } else {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+    }
+    const selection = getComputedStyle(element, '::selection');
+    const sample = document.createElement('span');
+    sample.style.forcedColorAdjust = 'none';
+    sample.style.backgroundColor = 'var(--accent)';
+    sample.style.color = 'var(--accent-ink)';
+    element.after(sample);
+    const expected = getComputedStyle(sample);
+    const ok = selection.backgroundColor === expected.backgroundColor && selection.color === expected.color;
+    sample.remove();
+    return ok;
+  });
+}
+
 async function checkClosedTicks(page, at) {
   await page.evaluate(() => store.ui({ findingFilter: { ...store.get().ui.findingFilter, status: 'all' } }));
   const marks = await page.locator('.g.done:not(.on) i').evaluate((other) => {
@@ -208,15 +236,63 @@ async function checkClosedTicks(page, at) {
     JSON.stringify(marks));
 }
 
+async function checkFallbackLinks(page, at, dealId, questionId) {
+  const missing = 'Z'.repeat(26);
+  const targets = [
+    ['overview-d_' + missing, '.fr-line a', '#deals'],
+    ['chat-d_' + missing, '#gone a', '#deals'],
+    [`finding-${dealId}-f_${missing}`, '#gone a', dealId],
+    [`q-${dealId}-q_${missing}`, '#gone a', dealId],
+    [`q-${dealId}-${questionId}`, '#gone a', dealId],
+  ];
+  const checks = [];
+  for (const [route, selector, destination] of targets) {
+    await page.goto(URL + '#' + route);
+    const link = page.locator(selector);
+    const result = await link.evaluate((anchor) => {
+      const sample = document.createElement('span');
+      sample.style.color = 'var(--accent)';
+      anchor.after(sample);
+      const actual = { color: getComputedStyle(anchor).color, accent: getComputedStyle(sample).color,
+        underline: getComputedStyle(anchor).textDecorationLine, href: anchor.getAttribute('href') };
+      sample.remove();
+      return actual;
+    });
+    await link.focus();
+    await page.keyboard.press('Enter');
+    await page.waitForURL((url) => url.hash === result.href);
+    await link.waitFor({ state: 'detached' });
+    checks.push(result.color === result.accent && result.underline === 'underline'
+      && result.href.endsWith(destination));
+  }
+  await page.goto(URL + `#q-${dealId}-${questionId}`);
+  await page.click('#gone-restore');
+  await page.waitForFunction((id) => !!store.get().questions[id], questionId);
+  say(`${at}:620-fallback-links-use-accent-and-keep-navigation`, checks.every(Boolean), JSON.stringify(checks));
+}
+
 for (const [width, height] of [[1280, 736], [1024, 640]]) {
   for (const colorScheme of ['dark', 'light']) {
     const at = `${colorScheme}-${width}x${height}`;
     const ctx = await browser.newContext({ viewport: { width, height }, colorScheme });
     const page = await ctx.newPage();
     await checkRailLoading(page, at);
-    const { dealId, findingId } = await seedVisualPolish(page);
+    const { dealId, findingId, questionId } = await seedVisualPolish(page);
     await checkComposerInsets(page, at, dealId, findingId);
     await checkClosedTicks(page, at);
+    const staticText = await checkSelection(page.locator('.opening .qtxt'));
+    const composer = page.locator('#pcomposer textarea');
+    await composer.fill('Selected words');
+    const editableText = await checkSelection(composer);
+    await page.goto(URL + '#overview-' + dealId);
+    await openRename(page);
+    const rename = page.locator('#deal-name');
+    const dealName = await checkSelection(rename);
+    await page.emulateMedia({ forcedColors: 'active' });
+    const forced = await checkSelection(rename);
+    await page.emulateMedia({ forcedColors: 'none' });
+    say(`${at}:614-text-selection-uses-theme-colors`, staticText && editableText && dealName && forced);
+    await checkFallbackLinks(page, at, dealId, questionId);
     await ctx.close();
   }
 }
