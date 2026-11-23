@@ -38,7 +38,7 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
 ```
 
 - `npm run check` takes about 10 minutes. Timing-sensitive tests fail on a busy machine (for example, `tests/e2e/split.test.ts` occasionally; see #131). Re-run a failing file on its own before you treat the failure as real. The browser runner automatically re-runs a suite that fails under load, this time on its own with no other suites running.
-- CI on GitHub runs only when started by hand, so running `npm run check:all` locally is the check before a merge. Run `npm run package` only when every test passes.
+- CI on GitHub runs the steps of `npm run check:all` as parallel jobs on every pull request and push to `main`. Still run it locally before a merge. Run `npm run package` only when every test passes.
 
 ## Code
 
