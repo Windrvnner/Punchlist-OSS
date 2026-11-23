@@ -87,6 +87,8 @@ Three colors carry meaning, one meaning each: red means something needs you; the
 
 The glass, lines, page details, overlays, and shadows are listed with their bases in `src/palette.ts`. The build stops, naming the base to change, when text would fall under 4.5:1 (3:1 for marks) on what it sits on.
 
+On document paper, error text and its always-underlined **Retry** use `--paper-ink`, including the focus ring (#439).
+
 Soft tints, such as `--accent-soft` and `--high-soft`, mix their color at 10–14%.
 
 ## Glass, radii, and shadows

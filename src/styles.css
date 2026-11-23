@@ -890,6 +890,7 @@ details.prev{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}d
 /* ---- connectivity bar, load failures, placeholders ---- */
 .keylist{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;margin:0;font-size:13px}.keylist dt{font-family:var(--body);color:var(--ink);font-weight:500;white-space:nowrap;padding:1px 7px;border:1px solid var(--line);border-radius:6px;background:var(--card);justify-self:start;align-self:start;font-size:12px}.keylist dd{margin:0;color:var(--ink-2);align-self:start;padding-top:1px}
 .loadfail{color:var(--ink-2);font-size:13.5px;margin:12px 0}
+.page .loadfail{color:var(--paper-ink)}
 .ph{display:grid;gap:10px;margin:10px 0 4px}
 .ph i,.phrow i{display:block;height:11px;border-radius:6px;background:color-mix(in srgb,var(--ink) 9%,transparent);animation:phpulse 1.4s ease-in-out infinite}
 .ph i:nth-child(2){width:92%;animation-delay:.1s}.ph i:nth-child(3){width:78%;animation-delay:.2s}.ph i:nth-child(4){width:60%;animation-delay:.3s}

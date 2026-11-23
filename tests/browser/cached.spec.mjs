@@ -18,6 +18,51 @@ async function start(scheme, limit) {
 const popMarks = (page) => page.evaluate(() => [...document.querySelectorAll('.opening .ref .pop i.psrc')].map((i) => [i.querySelector('.docnm').textContent + (i.querySelector('.loc')?.textContent ?? ''), !!i.querySelector('.cmark')]));
 const openFinding = async (page, id, n) => { await page.goto(URL + '#deal-' + id); await page.waitForSelector('.flagrow'); await page.click(`.flagrow:nth-of-type(${n})`).catch(() => page.locator('.flagrow').nth(n - 1).click()); await page.waitForSelector('.opening .ref .rb'); };
 
+async function paperError(page, scheme, kind) {
+  const retry = page.getByRole('button', { name: 'Retry', exact: true });
+  const checks = [];
+  for (const [width, height] of [[1280, 736], [1024, 640]]) {
+    await page.setViewportSize({ width, height });
+    for (const forcedColors of ['none', 'active']) {
+      await page.emulateMedia({ forcedColors });
+      await page.keyboard.press('Shift+Tab');
+      const style = await retry.evaluate((button) => {
+        button.blur();
+        const canvas = document.createElement('canvas').getContext('2d');
+        const luminance = (color) => {
+          canvas.fillStyle = color;
+          canvas.fillRect(0, 0, 1, 1);
+          const channels = Array.from(canvas.getImageData(0, 0, 1, 1).data).slice(0, 3).map((channel) => {
+            const srgb = channel / 255;
+            return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+          });
+          return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+        };
+        const paper = luminance(getComputedStyle(button.closest('.page')).backgroundColor);
+        const contrast = (color) => {
+          const ink = luminance(color);
+          return (Math.max(ink, paper) + 0.05) / (Math.min(ink, paper) + 0.05);
+        };
+        const style = getComputedStyle(button);
+        const idle = { retry: contrast(style.color), underline: style.textDecorationLine.includes('underline') };
+        button.focus();
+        return {
+          ...idle, text: contrast(getComputedStyle(button.parentElement).color), ring: contrast(style.outlineColor),
+          focus: button.matches(':focus-visible') && style.outlineStyle === 'solid'
+            && parseFloat(style.outlineWidth) >= 2,
+        };
+      });
+      checks.push({ width, forcedColors, ...style });
+      if (SHOTS && kind === 'missing' && forcedColors === 'none') {
+        await page.screenshot({ path: `${SHOTS}/439-${scheme}-${width}.png`, animations: 'disabled' });
+      }
+    }
+  }
+  await page.emulateMedia({ forcedColors: 'none' });
+  await page.setViewportSize({ width: 1280, height: 736 });
+  return checks;
+}
+
 // 1 everything the first pass read is loaded: every cited document carries the mark
 { const { ctx, page, id } = await start('light');
   await page.waitForFunction(() => Object.keys(store.get().cached).length === 6, null, { timeout: 5000 }).catch(() => {});
@@ -85,7 +130,18 @@ for (const scheme of ['dark', 'light']) {
   await page.click('.opening .ref .rb'); await page.waitForSelector('#doc-error', { timeout: 8000 });
   const err = await page.textContent('#doc-error');
   say(`${scheme}:file-not-found-message`, /could not be found in the deal’s folders\. Retry/.test(err), err);
-  await page.evaluate(() => { window.__fail = {}; }); await page.click('#doc-error .tundo'); await page.waitForSelector('.docpanel .page:not(.ph-page), .docpanel .sheet', { timeout: 8000 });
+  const missing = await paperError(page, scheme, 'missing');
+  await page.evaluate(() => { window.__fail = { page: true }; });
+  await page.getByRole('button', { name: 'Retry', exact: true }).press('Enter');
+  await page.waitForFunction(() =>
+    document.querySelector('#doc-error')?.textContent.includes('Couldn’t load this page.'));
+  const failedPage = await paperError(page, scheme, 'failed');
+  const legible = [...missing, ...failedPage].every(({ text, retry, ring, underline, focus }) =>
+    text >= 4.5 && retry >= 4.5 && ring >= 3 && underline && focus);
+  say(`${scheme}:paper-error-and-retry-stay-legible`, legible, JSON.stringify({ missing, failedPage }));
+  await page.evaluate(() => { window.__fail = {}; });
+  await page.getByRole('button', { name: 'Retry', exact: true }).press('Space');
+  await page.waitForSelector('.docpanel :is(.page:not(.ph-page, :has(#doc-error)), .sheet)', { timeout: 8000 });
   say(`${scheme}:found-again-on-retry`, !(await page.$('#doc-error')));
   say(`${scheme}:no-page-errors`, page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();

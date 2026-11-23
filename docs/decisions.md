@@ -185,6 +185,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A deleted or replaced document leaves the deal under the rules in architecture.md; nothing linked to it is deleted (#413).
 - A folder that this person may not open doesn't stop indexing, and a check that couldn't read it says "Not complete".
 - The app never deletes documents. Drafts of one agreement form a family: the newest is read first, and reading mode shows a draft's date and lists its family's drafts, any two of which can be compared. Versions in one folder count only with an explicit mark such as v3 or Rev A.
+- A document-page error and its **Retry** use the paper text color. **Retry** is always underlined (#439).
 - "Read" means given to the model in a check that came to a result.
 - Core documents are worked out on each PC without a model; see docs/core-documents-design.md.
 - When an agreement is core, its whole family is core too: schedules, exhibits, annexes, amendments, side letters, signature pages, and change orders, identified from names and paths only; see docs/core-families-design.md.
