@@ -1,21 +1,24 @@
 // The Checklist page: how an item stands as its finding moves on, and the list and the open item's pane at the window
 // sizes and themes the app supports. One check per reported item, each named by its issue number.
 import { launchChrome } from './chrome.mjs';
+import { openCopy, saveIndexedDeal } from './savedDeal.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, ok ? '' : note); };
 const browser = await launchChrome();
 const SIZES = [[1280, 736], [1024, 640]];
 
-/** A deal whose first pass has run, opened on its Checklist: three flagged items, two gaps, nineteen satisfied. */
+// The deal every check starts from is made once, then copied into each check's own context (savedDeal.mjs).
+const proseware = await saveIndexedDeal(browser);
+/**
+ * A copy of a deal whose first pass has run, opened on its Checklist: three flagged items, two gaps, nineteen
+ * satisfied.
+ */
 async function checklist(scheme = 'light', [w, h] = SIZES[0]) {
-  const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme }); const page = await ctx.newPage(); page.errors = [];
-  page.on('pageerror', (e) => page.errors.push(e.message));
-  await page.goto(URL); await page.waitForSelector('#fr-new');
-  await page.click('#fr-new'); await page.fill('#nd-name', 'Proseware'); await page.click('#nd-paste'); await page.fill('#nd-path', 'reports'); await page.press('#nd-path', 'Enter'); await page.waitForSelector('.ndrow'); await page.click('#nd-create');
-  await page.waitForFunction(() => Object.values(store.get().findings).length === 3, null, { timeout: 30000 });
-  const id = await page.evaluate(() => Object.values(store.get().deals)[0].id);
-  await page.goto(URL + '#checklist-' + id); await page.waitForSelector('#ck-rows .ckrow');
-  return { ctx, page, id };
+  const options = { width: w, height: h, colorScheme: scheme, hash: `#checklist-${proseware.id}` };
+  const { ctx, page, start, asMade } = await openCopy(browser, proseware, options);
+  if (!asMade) throw new Error(`The copied deal did not start as it was made: ${JSON.stringify(start)}`);
+  await page.waitForSelector('#ck-rows .ckrow');
+  return { ctx, page, id: proseware.id };
 }
 const LOCKUP = 'Lock-up ratio in the credit agreement draft differs from the term sheet';
 const findingId = (page, title = LOCKUP) => page.evaluate((t) => Object.values(store.get().findings).find((f) => f.title === t).id, title);
