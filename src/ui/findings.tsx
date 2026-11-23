@@ -346,8 +346,8 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
     };
     void out.send(async (cancelled) => {
       editsOut.set(f.id, sent);
-      const r = await store.dispatch(EditFinding, edit, { idempotencyKey: 'f-edit-' + f.id });
-      editsOut.delete(f.id);
+      const r = await store.dispatch(EditFinding, edit, { idempotencyKey: 'f-edit-' + f.id })
+        .finally(() => editsOut.delete(f.id));
       return landEdit(f.id, sent, r, cancelled());
     });
   };

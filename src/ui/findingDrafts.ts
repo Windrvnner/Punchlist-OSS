@@ -24,7 +24,8 @@ const sameAsSent = (d: Typed, sent: Typed) =>
   d.title === sent.title && d.ws === sent.ws && d.body === sent.body;
 
 /** Each edit's save still out, by finding: what it sent, with the base it was measured from. An edit opened after
- *  Cancel, before that save lands, starts from it, so it is measured from it as the finding will be (#771). */
+ *  Cancel, before that save lands, starts from it, so it is measured from it as the finding will be; with nothing
+ *  typed in it, it closes when the save lands, as the finding then holds what it showed (#771). */
 export const editsOut = new Map<string, EditDraft>();
 
 /**

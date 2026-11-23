@@ -46,7 +46,7 @@ export function useSaveOut<Outcome>(key: string, settle: (outcome: Outcome) => v
     saving.set(key, pending);
     landed(await pending);
   };
-  /** Cancel while the save is out: it still lands, but leaves a form opened since alone */
+  /** Cancel while the save is out: it still lands, and `save` is told so, to leave a form opened since as it is */
   const cancel = () => {
     if (saving.has(key)) letGo.add(key);
   };

@@ -67,6 +67,24 @@ const findingCount = (page, dealId) => page.evaluate((d) => Object.values(store.
   say('an edit left during a save keeps what is typed on coming back, and saves it unrefused',
     back.title === 'Typed on coming back' && afterBack.title === 'Typed on coming back, and after it landed'
     && afterBack.form.title === null && !page.errors.length, JSON.stringify({ back, afterBack, errors: page.errors }));
+  // refused: the held save meets a change made elsewhere; the edit opened again says so and keeps its typing
+  await page.click('#f-edit');
+  await page.fill('#fe-title', 'Sent, then refused');
+  await holdNext(page, 'EditFinding');
+  await page.click('#fe-save');
+  await page.keyboard.press('Escape');
+  await page.click('#f-edit');
+  await page.fill('#fe-title', 'Typed before the refusal');
+  const elsewhere = { by: 'jdoe', from: 'PC B' };
+  await page.evaluate(([f, who]) => __peer.change(f, { title: 'Retitled on the other PC' }, who), [fid, elsewhere]);
+  await landed(page, fid, 'Retitled on the other PC');
+  await page.evaluate(() => window.resume());
+  await page.waitForSelector('#fe-err', { timeout: 5000 }).catch(() => {});
+  const refused = await formState(page);
+  say('an edit opened again during a save that is refused says why and keeps its typing',
+    refused.title === 'Typed before the refusal' && /changed elsewhere/.test(refused.err) && !page.errors.length,
+    JSON.stringify({ refused, errors: page.errors }));
+  await page.click('#fe-cancel').catch(() => {});
   // control: opened again and nothing typed, the save landing closes it as before
   await page.click('#f-edit');
   await page.fill('#fe-title', 'Sent, nothing typed after');
