@@ -133,8 +133,9 @@ function keepPasteAlone(keeper: Keeper, paste: string) {
   // which then replaces the whole of it, so no part of it is kept beside the new paste
   if (keeper.setAside.current) {
     if (!paste.trim()) return;
-    const nothingElse = { table: null, text: null, reads: null, review: null, choices: undefined, headingDraft: null };
-    keepImport(key, { paste, ...nothingElse });
+    const nothingElse = { table: null, text: null, reads: null, review: null, choices: undefined };
+    const clearedHeading = keptImport(key)?.headingDraft != null ? { headingDraft: null } : {};
+    keepImport(key, { paste, ...nothingElse, ...clearedHeading });
     keeper.setAside.current = false;
     return;
   }
