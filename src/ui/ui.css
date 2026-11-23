@@ -623,7 +623,10 @@ body.reading{--colw:clamp(320px,calc(100vw - 1000px),560px)}
 /* ---- small layout fixes ---- */
 /* the conversation composer: the attachment, the text and the buttons start on one line; the same space all round; one line of text until more is typed */
 /* Home's box, a deal page's open box and a conversation's composer are one composer: the same sizes everywhere */
-.pcomp,#homeask,.askslot .askbox.open{padding:14px 14px 11px;gap:10px}
+.pcomp,#homeask,.askslot .askbox.open{
+  padding:14px;
+  gap:10px;
+}
 .pcomp textarea,#homeask textarea,.askslot .askbox.open textarea{font-size:15px;padding:0 4px;min-height:24px;max-height:168px;scrollbar-width:thin;scrollbar-color:var(--ink-3) transparent}
 .pcomp .chips,#homeask .chips,.askslot .askbox.open .chips{margin-bottom:2px}
 /* the same space under the buttons as beside them: every control in the bar is one height, so none adds room of its own */
