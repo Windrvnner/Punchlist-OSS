@@ -9,6 +9,7 @@ import type { Store } from '../app/store';
 import { revealChecklistRow } from './checklist';
 import { navigate } from './nav';
 import { searchGroups, loadAllForSearch, GROUP_PAGE, type Hit, type HitGroup, type HitKind } from '../app/search';
+import { isMine } from '../app/commands/members';
 import { Marked } from './searchMark';
 
 /**
@@ -46,7 +47,7 @@ export function SearchBox({ float }: { float?: boolean }) {
 
   // worked out again only when the state or the query changes, not on each arrow key (2,000 items a deal, many deals)
   const groups = useMemo(() => (open ? searchGroups(s, q, expanded) : []), [open, s, q, expanded]);
-  const items = groups.flatMap(itemsOf);
+  const items = useMemo(() => groups.flatMap(itemsOf), [groups]);
   const { current: cur, reset: resetSelection, point, onKey: selectByKey } = useSearchSelection(items, res);
   // refocus: back to what had the focus before search took it, or to the page if that was nothing
   const leave = (refocus: boolean) => {
@@ -91,7 +92,7 @@ export function SearchBox({ float }: { float?: boolean }) {
     selectByKey(e, (item) => pick(item, true));
   };
   useLayoutEffect(() => { if (res.current) fitWords(res.current); }, [groups, at]);   // the rows and the panel's size change it; moving through them does not
-  const loading = Object.keys(s.deals).some((id) => s.dealLoad[id] === 'loading' || s.dealLoad[id] === undefined);
+  const loading = ownDealsLoading(s);
   let n = 0;   // each group's rows are numbered on from the last group's
   const panel = open && at && createPortal(
     <div class="sdrop palbox" id="pal-drop" style={{ left: at.left, top: at.top, width: at.width, maxHeight: at.maxHeight }} onMouseDown={(e) => e.preventDefault()}>
@@ -133,9 +134,10 @@ function revealOpenChecklistHit(store: Store, hit: Hit): boolean {
   return true;
 }
 
-// When the last page is revealed, its group no longer has a Show More row (#628).
-function firstNewRow(moreIndex: number, group: HitGroup): number {
-  return moreIndex + group.hits.length + Number(group.more > GROUP_PAGE);
+// #491: deals outside My Deals are never read by Search.
+function ownDealsLoading(state: ReturnType<typeof useAppState>): boolean {
+  return Object.keys(state.deals).some((id) =>
+    isMine(state, id) && (state.dealLoad[id] === 'loading' || state.dealLoad[id] === undefined));
 }
 
 type Item = { hit: Hit } | { more: HitGroup };
@@ -147,30 +149,54 @@ const itemsOf = (g: HitGroup): Item[] => [
 /** Until the arrows move, the first result is the one Enter opens, never a "Show N More" above it. */
 const firstHit = (items: Item[]) => Math.max(0, items.findIndex((it) => 'hit' in it));
 
+// #501: a hit keeps its identity when another deal loads and inserts rows before it.
+function itemKey(item: Item): string {
+  return 'hit' in item ? JSON.stringify([item.hit.kind, item.hit.hash, item.hit.key]) : `more:${item.more.kind}`;
+}
+
+type Selection = string | { kind: HitKind; offset: number } | null;
+
+// Keyboard Show More starts at the first newly revealed hit, even when the More row disappears (#628).
+function expandedRow(items: Item[], { kind, offset }: { kind: HitKind; offset: number }): number {
+  const first = items.findIndex((item) => 'hit' in item && item.hit.kind === kind);
+  const row = first + offset;
+  const item = items[row];
+  return first >= 0 && item && 'hit' in item && item.hit.kind === kind ? row : -1;
+}
+
 /** Keyboard selection scrolls after the result rows render. Pointing only highlights a row (#628). */
 function useSearchSelection(items: Item[], results: RefObject<HTMLDivElement | null>) {
-  const [index, setIndex] = useState<number | null>(null);
-  const current = index === null ? firstHit(items) : Math.min(index, Math.max(0, items.length - 1));
-  const reveal = (row: number) => {
-    setIndex(row);
-    requestAnimationFrame(() => results.current?.querySelector(`#pal-${row}`)?.scrollIntoView({ block: 'nearest' }));
-  };
+  const [selection, select] = useState<Selection>(null);
+  const expansion = typeof selection === 'object' && selection;
+  const index = expansion ? expandedRow(items, expansion) : items.findIndex((item) => itemKey(item) === selection);
+  const current = index < 0 ? firstHit(items) : index;
+  const key = items[current] ? itemKey(items[current]) : null;
+  const scroll = useRef(false);
+  useLayoutEffect(() => {
+    if (selection !== key) select(key);
+    if (!scroll.current && !expansion) return;
+    scroll.current = false;
+    results.current?.querySelector(`#pal-${current}`)?.scrollIntoView({ block: 'nearest' });
+  }, [key, current, selection]);
   return {
     current,
-    reset: () => setIndex(null),
-    point: (row: number) => { if (row !== current) setIndex(row); },
+    reset: () => select(null),
+    point: (row: number) => select(itemKey(items[row])),
     onKey: (event: KeyboardEvent, pick: (item: Item | undefined) => void) => {
       if (event.key === 'Enter') {
         event.preventDefault();
         const item = items[current];
         pick(item);
-        if (item && 'more' in item) reveal(firstNewRow(current, item.more));
+        if (item && 'more' in item) select({ kind: item.more.kind, offset: item.more.hits.length });
         return;
       }
       if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
       event.preventDefault();
+      if (!items.length) return;
       const direction = event.key === 'ArrowDown' ? 1 : -1;
-      if (items.length) reveal((current + direction + items.length) % items.length);
+      const row = (current + direction + items.length) % items.length;
+      scroll.current = row !== current;
+      select(itemKey(items[row]));
     },
   };
 }

@@ -12,7 +12,7 @@ import { CreateQuestion, UseAsResponse } from './commands/questions';
 import { mayAddress } from '../domain/suggest';
 import { withoutMarkers } from '../domain/cite';
 import type { Research } from '../ports';
-import { bareDealName } from './commands/deals';
+import { bareDealName, cleanName } from './commands/deals';
 import { filesSendable } from './attachments';
 
 /**
@@ -75,18 +75,34 @@ export function pastConversations(s: State): PastConversation[] {
 let seq = 0;
 const mid = () => `m${Date.now().toString(36)}${(seq++).toString(36)}`;
 
+// #500: only the explicit verb and page suffix are syntax; a deal name can contain punctuation or Unicode.
+function typedDealDestination(store: Store, text: string) {
+  const command = /^(?:take me to|go to|open|show me|show|switch to|jump to)\s+(.+)$/is.exec(text);
+  if (!command) return;
+  const target = cleanName(command[1]);
+  const lookup = (name: string) => {
+    const key = bareDealName(name.trim(), 'navigation').toLowerCase();
+    if (!key) return;
+    return Object.values(store.get().deals).find((candidate) =>
+      bareDealName(candidate.name, 'navigation').toLowerCase() === key);
+  };
+  const possessive = (name: string) => lookup(name.replace(/['’]s$/i, '')) ?? lookup(name);
+  const named = (name: string) => {
+    const withoutArticle = name.replace(/^the\s+/i, '');
+    return possessive(withoutArticle) ?? (withoutArticle !== name ? possessive(name) : undefined);
+  };
+  const suffix = /^(.+?)\s+(q ?& ?a|questions|findings|checklist|overview)$/i.exec(target);
+  const deal = suffix && named(suffix[1]);
+  return deal ? { deal, page: suffix[2].toLowerCase() } : { deal: named(target), page: '' };
+}
+
 /** "Go to Proseware findings", "open Trey Q&A", "new deal". Resolved against loaded deals; no service call. */
 export function navIntent(store: Store, text: string): boolean {
   const t = text.trim();
   if (/^(new|create|add|start) (a )?(new )?deal\b/i.test(t)) { store.ui({ newDeal: { name: '', folders: [], error: '', busy: false } }); return true; }
-  // a page named after the deal opens that page; a typed or a curly apostrophe both count
-  const m = /^(?:take me to|go to|open|show me|show|switch to|jump to)\s+(?:the\s+)?(?:project\s+)?([a-z0-9 ]+?)(?:['’]s)?(?:\s+(q ?& ?a|questions|findings|checklist|overview))?\s*$/i.exec(t);
-  if (!m) return false;
-  const name = m[1].toLowerCase().trim();
-  const deal = Object.values(store.get().deals).find((candidate) =>
-    bareDealName(candidate.name, 'navigation').toLowerCase() === name);
-  if (!deal) return false;
-  const page = (m[2] ?? '').toLowerCase();
+  const destination = typedDealDestination(store, t);
+  if (!destination?.deal) return false;
+  const { deal, page } = destination;
   location.hash = page
     ? pageHash(/q|question/.test(page) ? 'qa' : page as 'findings' | 'checklist' | 'overview', deal.id)
     : dealHash(store.get().prefs, deal.id);
