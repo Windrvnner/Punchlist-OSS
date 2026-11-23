@@ -199,7 +199,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - When a record has changed on two PCs, both versions are kept and a person chooses; the app never picks.
 - An import in progress (Q&A, an issues list, or the master checklist) is kept on its PC until it is done, replaced, or started over, so closing, reloading, or restarting loses nothing.
 - No design may lose or hide typed work. Every version not kept is listed under Deleted as "Superseded by" the person who chose, and can be restored.
-- Text typed into a new finding while **Create Finding** is saving goes to the finding made, as an open edit of it; a form that held only what was sent closes (#115).
+- Text typed into a new finding (New finding or **Add as finding**) while **Create Finding** is saving goes to the finding made: its page opens in Edit with that text. A form that held only what was sent closes (#115).
 - A change that arrives before a change it builds on is held back without pausing the deal; one more than a day old is let go as a choice. A deal can't be deleted while such changes are on their way.
 - The connection status card shows only when something is wrong. The avatar's dot is the accent color or red, and OneDrive being unavailable for 15 minutes produces one notice.
 - A copied install is detected and stops writing. A build never changes a record written by a newer version.

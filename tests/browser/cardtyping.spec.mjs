@@ -269,17 +269,19 @@ const ask = async (page, words, nth) => {
   await page.click('#af-create');
   await page.fill('#af-title', 'Retitled while it saved');
   await page.evaluate(() => window.resume());
-  await page.waitForSelector('#af-title', { state: 'detached', timeout: 5000 }).catch(() => {});
+  await page.waitForSelector('#fe-title', { timeout: 5000 }).catch(() => {});
   const made = await titled(page, id, TITLE);
+  // the finding's page opens in Edit by itself, with what was typed since
+  const opened = made.length > 0 && await page.evaluate((f) => location.hash.endsWith(f), made[0].id);
+  const edit = await page.evaluate(() => document.querySelector('#fe-title')?.value ?? null);
+  await page.goBack();
+  await page.waitForSelector('.msgs .ai:not(.pending) >> nth=1');
   await openAdd(page, 'f');
   const nextOpen = await cardHolds(page, 'f');
   await page.keyboard.press('Escape');
-  if (made.length) await page.goto(`${URL}#finding-${id}-${made[0].id}`);
-  await page.waitForSelector('#fe-title', { timeout: 5000 }).catch(() => {});
-  const edit = await page.evaluate(() => document.querySelector('#fe-title')?.value ?? null);
-  say('#51 typing during Add as finding\'s Create goes to the finding made, as an open edit; the card starts afresh',
-    made.length === 1 && edit === 'Retitled while it saved' && same(nextOpen, generated) && !page.errors.length,
-    JSON.stringify({ made: made.length, edit, nextOpen, errors: page.errors }));
+  say('#51 typing during Add as finding\'s Create opens the finding made in Edit with it; the card starts afresh',
+    made.length === 1 && opened && edit === 'Retitled while it saved' && same(nextOpen, generated)
+    && !page.errors.length, JSON.stringify({ made: made.length, opened, edit, nextOpen, errors: page.errors }));
   await ctx.close();
 }
 

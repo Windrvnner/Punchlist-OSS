@@ -1,5 +1,5 @@
 // The cards an answer opens to add it as a new question or a new finding.
-import { useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { useAppState, useStore } from './hooks';
 import type { Store } from '../app/store';
 import { createdFinding, findingHref, keepAsEdit } from './findings';
@@ -127,6 +127,10 @@ export function FindingCard({ dealId, answerId, text, sources, onDone }: {
   const draft = useCardDraft(findingDrafts, answerId, { text: firstSentence(plainText), ws: '' });
   const { text: title, ws: workstream } = draft.typed;
   const [busy, setBusy] = useState(false);
+  const shown = useRef(true);
+  useEffect(() => () => {
+    shown.current = false;
+  }, []);
   // why Create is off, said on hover
   const need = !title.trim() ? 'Give the finding a title' : !workstream ? 'Choose a workstream' : null;
   const create = async () => {
@@ -149,12 +153,14 @@ export function FindingCard({ dealId, answerId, text, sources, onDone }: {
     toastCreated(store, dealId, finding.title);
   };
   // #115's decision for this card too: what was typed since Create was sent becomes an open edit of the finding made,
-  // which its toast's Open shows. A finding that cannot be found leaves the card open with the typing
+  // and its page opens in Edit while the card is still in sight. A finding that cannot be found leaves the card open
+  // with the typing
   const editMade = (made: Finding | undefined, sent: { title: string; workstream: string; body: string[] }) => {
     if (!made) return false;
     const typed = { title: draft.now.current.text, ws: draft.now.current.ws, body: made.body.join('\n\n') };
     keepAsEdit(made, typed, { title: sent.title, workstream: sent.workstream, body: sent.body });
     draft.forget();
+    if (shown.current) location.hash = findingHref(made);
     return true;
   };
   const cancel = () => {
