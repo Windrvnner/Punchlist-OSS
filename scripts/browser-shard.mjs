@@ -1,5 +1,12 @@
 // How the browser runner splits its suites into groups of about equal time, for parallel CI jobs, and orders a
-// group's suites; shared by scripts/browser-all.mjs and its tests.
+// group's suites; shared by scripts/browser-all.mjs, scripts/browser-times.mjs and their tests.
+import fs from 'node:fs';
+
+/** Every browser suite in tests/browser, by name, in name order. */
+export function browserSuites() {
+  const specs = fs.readdirSync('tests/browser').filter((file) => file.endsWith('.spec.mjs'));
+  return specs.map((file) => file.replace('.spec.mjs', '')).sort();
+}
 
 /** The middle of the known times, which stands in for a suite with no time yet; 1 when no time is known. */
 export function typicalTime(times) {
