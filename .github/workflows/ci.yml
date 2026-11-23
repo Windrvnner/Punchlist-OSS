@@ -49,7 +49,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       # the tests that convert Word and spreadsheet files need LibreOffice at /usr/bin/soffice
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-calc
+      - run: sh scripts/ci-apt-install.sh libreoffice-writer libreoffice-calc
       - run: npm ci
       # as in check:all: LibreOffice must convert a workbook, and its tests then run on it rather than skip
       - run: node scripts/office-check.mjs
@@ -84,7 +84,7 @@ jobs:
           cache: npm
       # the layout checks measure the app with Inter in place of Segoe UI (tests/browser/fonts.conf)
       - run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-inter
+          sh scripts/ci-apt-install.sh fonts-inter
           sudo cp tests/browser/fonts.conf /etc/fonts/conf.d/56-prefer-inter.conf
           fc-match "Segoe UI" | grep -q Inter
       - run: npm ci
