@@ -28,17 +28,25 @@ const draftProgress = (d: QuestionDraft) => {
 /**
  * The record a choice keeps. A question's draft is the app's, and never conflicts with a person's change
  * (docs/decisions.md, "A question's draft never conflicts with a person's change"; "Closing a question never discards a
- * draft"). So when the kept version never saw the draft that the versions set aside carry, the draft goes with it,
- * and a reply held while the question had two versions lands on whichever version is kept (#22). Two different drafts
- * are crossing drafts: they stay the person's choice, and nothing is carried. Only the `draft` field is added.
+ * draft"). So when the versions set aside carry a draft request that the kept version never saw, or got further with it
+ * (written beside one shown as failed), the draft goes with the kept version, and a reply held while the question had
+ * two versions lands on whichever version is kept (#22). Only the `draft` field changes. Nothing is carried when:
+ * - the versions set aside carry two different requests, or the kept version a different one: crossing drafts stay the
+ *   person's choice;
+ * - the kept version's history held the request and it has no draft now: a person used or discarded it there.
  */
 function withCarriedDraft(kind: string, kept: Version, aside: Version[]): Version['data'] {
-  const keeps = kept.data;
-  if (kind !== 'question' || !keeps || (keeps as Question).draft) return keeps;
+  const keeps = kept.data as Question | null;
+  if (kind !== 'question' || !keeps) return kept.data;
   const drafts = aside.flatMap((v) => (v.data as Question | null)?.draft ?? []);
-  if (!drafts.length || new Set(drafts.map((d) => d.opId)).size > 1) return keeps;
+  const opId = drafts[0]?.opId;
+  if (!opId || drafts.some((d) => d.opId !== opId)) return keeps;
+  const own = keeps.draft;
+  if (own && own.opId !== opId) return keeps;
+  if (!own && kept.drafts?.includes(opId)) return keeps;
   const furthest = drafts.reduce((a, b) => (draftProgress(b) > draftProgress(a) ? b : a));
-  return { ...(keeps as Question), draft: furthest };
+  if (own && draftProgress(own) >= draftProgress(furthest)) return keeps;
+  return { ...keeps, draft: furthest };
 }
 
 export const ResolveConflict = define({

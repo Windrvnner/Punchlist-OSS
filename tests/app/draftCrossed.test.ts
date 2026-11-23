@@ -233,30 +233,59 @@ describe('a reply held while its question has two versions (#22)', () => {
     w.store.dispatch(ResolveConflict, { dealId: w.dealId, recordId, keep: version }, { quiet: true });
   const type = (w: World, q: Question) =>
     w.store.dispatch(SetResponse, { dealId: w.dealId, questionId: q.id, response: 'Typed here' });
+  /** the newest version of each question, in the shared folder, that holds no draft: what a coworker had before it */
+  const beforeDrafts = async (w: World, picked: Question[]) => {
+    await w.repo.sync(); const v = folderView(w.repo.shared);
+    return new Map(picked.map((q) => {
+      let ver = v.state('question', q.id).tips[0];
+      while ((v.version(ver)!.data as Question).draft) ver = v.version(ver)!.base[0];
+      return [q.id, { ver, data: v.version(ver)!.data as Question }];
+    }));
+  };
+  /** A coworker changes each question as it stood before its draft was asked for: no draft reached them. */
+  const theyChangeUnseen = async (w: World, picked: Question[], patch: (i: number) => Partial<Question>) => {
+    const before = await beforeDrafts(w, picked); const coworker = pcWriting(w.repo.shared, THEM);
+    for (const [i, q] of picked.entries()) {
+      const was = before.get(q.id)!;
+      coworker(q, was.ver, { ...was.data, ...patch(i), updatedAt: THEM.at }, THEM.at);
+    }
+    await w.repo.sync(); await settle(); await settle();
+  };
+  /**
+   * The coworker closes each question with its draft request pending, then their PC gives the request up (marked
+   * failed); meanwhile the reply was written here and a response typed. Q50 is closed with the coworker's own words.
+   */
+  const theyCloseAndGiveUp = async (w: World, picked: Question[], markers: Map<string, string>) => {
+    const coworker = pcWriting(w.repo.shared, THEM); const v = folderView(w.repo.shared);
+    for (const [i, q] of picked.entries()) {
+      const pending = v.version(markers.get(q.id)!)!.data as Question;
+      const closed = { ...pending, status: 'closed' as const, ...(i === 49 ? { response: 'Their words' } : {}) };
+      coworker(q, markers.get(q.id)!, { ...closed, updatedAt: THEM.at }, THEM.at);
+      const gaveUp = { ...closed, draft: { ...pending.draft!, status: 'failed' as const }, updatedAt: THEM.at };
+      const tip = folderView(w.repo.shared).state('question', q.id).tips.find((t) => t.startsWith('pc-pc-b'))!;
+      coworker(q, tip, gaveUp, THEM.at);
+    }
+    await w.repo.sync(); await settle(); await settle();
+  };
 
-  it('lands on whichever version is kept: 100 questions of 2,000, the model asked once each', async () => {
+  it('a written draft goes with whichever version is kept: 100 of 2,000 questions, one model call each', async () => {
     const w = await world(); const picked = w.qs().slice(0, 100);
     const ops = new Map<string, string>();
     for (const q of picked) ops.set(q.id, await w.draft(q));
+    await w.repo.sync(); const v = folderView(w.repo.shared);
+    const markers = new Map(picked.map((q) => [q.id, v.state('question', q.id).tips[0]]));
+    w.answer(); for (const q of picked) await w.store.settled(ops.get(q.id)!);
     for (const q of picked) expect((await type(w, q)).ok).toBe(true);
-    for (const [i, q] of picked.entries()) {
-      const theirWords = i === 49 ? { response: 'Their words' } : {};               // Q50: the coworker typed too
-      await w.theyChange(q, { status: 'closed', ...theirWords });
-    }
+    await theyCloseAndGiveUp(w, picked, markers);
     expect(picked.every((q) => w.store.get().conflicts[q.id])).toBe(true);
-    w.answer();
-    await until(() => picked.every((q) => w.store.hasKeptReply(ops.get(q.id)!)));
     // Q100 keeps the typed version; the rest keep the coworker's close
     for (const [i, q] of picked.entries()) expect((await keep(w, q.id, versionOf(w, q.id, i === 99).id)).ok).toBe(true);
-    expect(picked.every((q) => w.now(q.id).draft?.opId === ops.get(q.id))).toBe(true);
-    for (const q of picked) w.store.retryKeptReply(ops.get(q.id)!);
-    await until(() => picked.every((q) => w.now(q.id).draft?.status === 'found'));
-    expect(picked.every((q) => w.now(q.id).draft?.text === TEXT)).toBe(true);
+    const written = (q: Question) => w.now(q.id).draft?.status === 'found' && w.now(q.id).draft?.text === TEXT;
+    expect(picked.every((q) => written(q) && w.now(q.id).draft?.opId === ops.get(q.id))).toBe(true);
     expect(w.calls.draft).toBe(100);
-    for (const [i, q] of picked.entries()) {
-      const closedAs = { status: 'closed', response: i === 49 ? 'Their words' : '' };
-      expect(w.now(q.id)).toMatchObject(i === 99 ? { status: 'open', response: 'Typed here' } : closedAs);
-    }
+    const closedAs = (i: number) => ({ status: 'closed', response: i === 49 ? 'Their words' : '' });
+    const typedAs = { status: 'open', response: 'Typed here' };
+    for (const [i, q] of picked.entries()) expect(w.now(q.id)).toMatchObject(i === 99 ? typedAs : closedAs(i));
     // the typed version not kept is listed under Deleted
     const typedAside = Object.values(w.store.get().tombstones)
       .filter((t) => (t.snapshot as Question | undefined)?.response === 'Typed here');
@@ -267,7 +296,7 @@ describe('a reply held while its question has two versions (#22)', () => {
     const w = await world(); const q = w.qs()[10];
     const opId = await w.draft(q);
     await type(w, q);
-    await w.theyChange(q, { status: 'closed' });
+    await theyChangeUnseen(w, [q], () => ({ status: 'closed' }));
     w.answer(); await until(() => w.store.hasKeptReply(opId));
     const shown = () => w.store.get().conflicts[q.id].versions.map((v) => {
       const { rev: _r, ...data } = v.data as Question; return { by: v.by, from: v.from, data };
@@ -278,6 +307,39 @@ describe('a reply held while its question has two versions (#22)', () => {
     expect(w.now(q.id).draft?.opId).toBe(opId);
     expect((await w.store.undo(r.ok ? r.value.opId : '')).ok).toBe(true);
     expect(shown()).toEqual(before);
+  }, 120000);
+
+  it('a draft the coworker used as the response is not brought back beside it', async () => {
+    const w = await world(); const q = w.qs()[30];
+    const opId = await w.draft(q); w.answer(); await w.store.settled(opId);
+    await w.repo.sync(); const v = folderView(w.repo.shared); const found = v.state('question', q.id).tips[0];
+    await type(w, q);
+    const foundThere = v.version(found)!.data as Question;
+    const used = { ...foundThere, response: TEXT, status: 'answered' as const, draft: undefined };
+    pcWriting(w.repo.shared, THEM)(q, found, { ...used, updatedAt: THEM.at }, THEM.at);
+    await w.repo.sync(); await settle(); await settle();
+    expect((await keep(w, q.id, versionOf(w, q.id, false).id)).ok).toBe(true);
+    expect(w.now(q.id)).toMatchObject({ status: 'answered', response: TEXT });
+    expect(w.now(q.id).draft).toBeUndefined();
+  }, 120000);
+
+  it('a coworker\'s close kept beside a delete by a third PC takes the held draft with it', async () => {
+    const w = await world(); const q = w.qs()[60];
+    const opId = await w.draft(q); await type(w, q);
+    const before = (await beforeDrafts(w, [q])).get(q.id)!;
+    pcWriting(w.repo.shared, THEM)(q, before.ver, { ...before.data, status: 'closed', updatedAt: THEM.at }, THEM.at);
+    w.repo.peer.remove('question', q.id, { ...THEM, from: 'PC C' });
+    await w.repo.sync(); await settle(); await settle();
+    expect(w.store.get().conflicts[q.id]?.versions.length).toBe(3);
+    w.answer(); await until(() => w.store.hasKeptReply(opId));
+    const versions = w.store.get().conflicts[q.id].versions;
+    const closed = versions.find((v) => (v.data as Question | null)?.status === 'closed')!;
+    expect((await keep(w, q.id, closed.id)).ok).toBe(true);
+    expect(w.now(q.id).draft?.opId).toBe(opId);
+    w.store.retryKeptReply(opId);
+    await until(() => w.now(q.id).draft?.status === 'found');
+    expect(w.now(q.id)).toMatchObject({ status: 'closed', response: '', draft: { text: TEXT } });
+    expect(w.calls.draft).toBe(1);
   }, 120000);
 
   it('two crossing drafts are never merged: keeping a version without a draft carries neither', async () => {
