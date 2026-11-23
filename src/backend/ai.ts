@@ -2997,10 +2997,15 @@ export function nodeAi(o: AiOptions) {
   const retryUntil = (st: Mine) => (st.failingSince !== undefined && nowMs() - st.failingSince < T.giveUp ? new Date(st.failingSince + T.giveUp).toISOString() : undefined);
   const awayLong = (st: Mine | undefined) => !!st && st.failingSince !== undefined && nowMs() - st.failingSince >= T.giveUp;
   /**
-   * The model service answered: the outage, if there was one, is over. Said after each batch, not only once the whole share
-   * is done, so a long share that resumed after a short outage is not later reported as out of reach (#131).
+   * The model service answered: the outage, if there was one, is over. Said after each batch, not only once the whole
+   * share is done, so a long share that resumed after a short outage is not later reported as out of reach (#131).
    */
-  function serviceAnswered(st: Mine) { st.tries = 0; st.failingSince = undefined; st.nextTry = undefined; st.signedOut = false; }
+  function serviceAnswered(st: Mine) {
+    st.tries = 0;
+    st.failingSince = undefined;
+    st.nextTry = undefined;
+    st.signedOut = false;
+  }
   function runShare(dealId: string, st: Mine, kind: RoundKind) {
     if (st.running) return st.running;
     const go = inLane(dealId, () => logged(kind === 'first' ? 'firstPass' : 'checkAll', dealId, () => share(dealId, st.round)))
