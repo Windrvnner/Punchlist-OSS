@@ -7,7 +7,7 @@ import { DocName } from './docName';
 import { ReadOnlyContext } from './editField';
 import { FoldersBody, FoldersActs } from './foldersParts';
 import { versionsWord, dealHash, type DealKinds } from '../app/state';
-import { keepNewDeal, keepLateRead } from './newDealKept';
+import { keepNewDeal } from './newDealKept';
 import { useNewDealDraft } from './useNewDealDraft';
 import { firmOf } from '../domain/checklist';
 import { PickList } from './pickList';
@@ -150,17 +150,12 @@ export function NewDealDialog() {
   // wait for it, rather than closing as if canceled while the deal is made anyway
   const creating = () => !!store.get().ui.newDeal?.busy;
   // the New deal form is kept on this PC as it changes, folders still to be read included (#55, #113)
-  const kept = useNewDealDraft({
-    keeps: !existing, openedEmpty: !nd.name && !nd.folders.length,
-    form: () => ({ name: nd.name, counterparty: nd.counterparty, kinds: nd.kinds, folders: nd.folders, path }),
-    changes: [nd.name, nd.counterparty, nd.kinds, nd.folders, path],
-    restore: (k) => {
-      set({ name: k.name, folders: k.folders, kinds: k.kinds, counterparty: k.counterparty });
-      if (k.path) setPath(k.path);
-      setPasting(!!k.path);
-    },
-    read: (p) => addPath(p),
-  });
+  const putBack = (fields: Partial<typeof nd>, typed: string) => {
+    set(fields);
+    setPath(typed);
+    setPasting(!!typed);
+  };
+  const kept = useNewDealDraft({ nd, path, restore: putBack, read: (p) => addPath(p) });
   const scanning = kept.waiting.length > 0;
   // dismissed rather than canceled: what was typed comes back the next time the dialog opens
   const dismiss = () => {
@@ -191,7 +186,10 @@ export function NewDealDialog() {
     p = p.trim(); if (!p) return;
     // read afresh, not from this render: a second Enter or drop while the first was being read saw the list without it
     const listed = () => (store.get().ui.newDeal?.folders ?? nd.folders).some((f) => norm(f.path) === norm(p)) || !!existing?.folders.some((f) => norm(f.path) === norm(p));
-    if (listed() || kept.isReading(p)) { store.toast('That folder is already on the list'); return; }
+    if (listed() || kept.isReading(p)) {
+      store.toast('That folder is already on the list');
+      return;
+    }
     // a folder inside one already on the list, or holding one, would be read twice: it is refused, with the folder it overlaps
     const inside = (a: string, b: string) => { const x = norm(a).replace(/\\/g, '/'), y = norm(b).replace(/\\/g, '/'); return x.startsWith(y + '/'); };
     const over = [...(store.get().ui.newDeal?.folders ?? nd.folders), ...(existing?.folders ?? [])].find((f) => inside(p, f.path) || inside(f.path, p));
@@ -201,13 +199,8 @@ export function NewDealDialog() {
     if (gone) return await restore(gone);                 // refused (the deal is in two versions): what was typed stays, and the notice says why
     kept.started(p);
     const r = await store.services.docs.scanFolder(p);
-    kept.finished(p);
     const folder = r.ok ? { path: p, label: label ? fitLabel(label) : guessLabel(p, taken()), ...r.value } : null;
-    // a dialog closed meanwhile is not the one open now: the folder goes to its own kept draft, not to another dialog
-    if (!kept.live.current) {
-      if (!existing) keepLateRead(p, folder);
-      return false;
-    }
+    if (!kept.finished(p, folder)) return false;       // this dialog has closed meanwhile
     if (!r.ok) { set({ error: `Couldn’t read ${p}` }); return false; }
     set({ error: '' });
     if (listed()) return true;
@@ -253,9 +246,8 @@ export function NewDealDialog() {
   const create = async (anyway = false) => {
     if (creating() || kept.busy()) return;     // a folder still being read is part of what is being created
     if (needName) return;
-    // Create holds the dialog from the moment it is pressed, the typed path's reading included, as it does for the
-    // write: Escape cannot close it while a deal is still to be made without its folder (#36). It is read from the
-    // store, so a second click before the next render is turned away too.
+    // held from the press, the typed path's read included, so Escape cannot close it before the deal is made (#36);
+    // kept in the store, so a second click before the next render is turned away
     set({ busy: true, error: '' });
     // a path typed but not yet added is part of the deal: add it first (unless it is already listed), and stop if it cannot be read
     const typed = path.trim(); const listed = (p: string) => nd.folders.some((f) => norm(f.path) === norm(p)) || !!existing?.folders.some((f) => norm(f.path) === norm(p));
