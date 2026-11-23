@@ -194,6 +194,18 @@ describe('two PCs share a deal\'s checks', () => {
     try {
       await Promise.all([aiOf(p.A).firstPass(p.dealId), aiOf(p.B).firstPass(p.dealId)]); await allEnded(p);
       p.svcA.calls.length = 0; p.svcB.calls.length = 0;
+      // when each standard call is answered: how many items of this check have a look written down, on either PC
+      const { itemsIn } = await import('../backend/reviewKit');
+      const earlier = new Set(roundsOf(p.sync.A, p.dealId).keys());
+      const lookLines = (dir: string) => logOf(dir, p.dealId).filter((l) => l.glanced && !earlier.has(l.glanced.round));
+      const looks = () => [p.sync.A, p.sync.B].flatMap(lookLines).flatMap((l) => l.glanced!.items.map((g) => g.item));
+      const lookedNow = () => new Set(looks()).size;
+      const lookedBy: number[] = [];
+      const noted = (c: { model: string }) => {
+        if (c.model === 'standard' && itemsIn(c as any).length) lookedBy.push(lookedNow());
+        return undefined;
+      };
+      for (const svc of [p.svcA, p.svcB]) svc.set({ doubt: (n) => n % 15 === 0, hold: noted });
       const [ra, rb] = (await Promise.all([p.A.backend.ai.checkAll!({ dealId: p.dealId }), p.B.backend.ai.checkAll!({ dealId: p.dealId })])).map((r) => val(r));
       await allEnded(p);
       // the two summaries agree, the time included: it is when the work was finished, whichever PC wrote it down
@@ -203,6 +215,9 @@ describe('two PCs share a deal\'s checks', () => {
       expect(fulls.length).toBeGreaterThanOrEqual(1); expect(new Set(fulls.map((l) => JSON.stringify(l.full))).size).toBe(1);
       const std = [...checks(p.svcA), ...checks(p.svcB)].filter(([m]) => m === 'standard');
       expect(std.flatMap(([, ns]) => ns).sort((a, b) => a - b)).toEqual([...[15, 30, 45, 60], ...std.flatMap(([, ns]) => ns).filter((n) => n % 15 !== 0)].sort((a, b) => a - b));   // the flagged four and the sample, nothing else
+      // every look was written down before any standard call, whichever PC looked, so a PC's flagged items go in
+      // one call (#131)
+      expect(lookedBy).toEqual(lookedBy.map(() => 60));
       // per PC: the flagged items in one call, the sample in one call. A failure names each PC's calls (#131).
       const standardOf = (svc: typeof p.svcA) => checks(svc).filter(([m]) => m === 'standard');
       const byPc = { office: standardOf(p.svcA), laptop: standardOf(p.svcB) };
