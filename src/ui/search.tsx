@@ -205,10 +205,7 @@ function dealNameFloor(deal: HTMLElement, ellipsis: number, measure: (text: stri
   const leading = full.slice(0, full.length - bare.length);
   const firstWord = bare.split(/\s+/)[0];
   const floor = name.length <= 28 ? full : leading + [...firstWord].slice(0, 14).join('');
-  const width = Math.ceil(Math.min(measure(full), measure(floor) + ellipsis));
-  const longWord = deal.querySelector<HTMLElement>('.wlong');
-  const before = longWord ? full.slice(0, full.length - name.length + Number(longWord.dataset.start)) : '';
-  return { width, beforeWord: Math.ceil(measure(before)) };
+  return Math.ceil(Math.min(measure(full), measure(floor) + ellipsis));
 }
 
 /**
@@ -237,9 +234,8 @@ function fitWords(root: HTMLElement) {
   });
   for (const floor of floors) {
     if (!floor) continue;
-    const [deal, { width, beforeWord }] = floor;
+    const [deal, width] = floor;
     deal.style.minWidth = `${width}px`;
-    deal.style.setProperty('--words-before', `${beforeWord}px`);
   }
   const cuts = rows.map((row) => {
     const twin = row.querySelector<HTMLElement>('.wtwin');
@@ -255,10 +251,9 @@ function fitWords(root: HTMLElement) {
 
 /** Keep each word with its preceding space so a whole-word ellipsis never follows a space. */
 function Words({ text, clipAt }: { text: string; clipAt?: number }) {
-  return <>{[...text.matchAll(/ *[^ ]+/g)].map(([word], index, words) => {
-    const start = words[index].index;
+  return <>{[...text.matchAll(/ *[^ ]+/g)].map(({ 0: word, index: start }) => {
     const clipped = clipAt !== undefined && start <= clipAt && clipAt < start + word.length;
-    return <span class={clipped ? 'ww wlong' : 'ww'} data-start={clipped ? start : undefined} key={start}>{word}</span>;
+    return <span class={clipped ? 'ww wlong' : 'ww'} key={start}>{word}</span>;
   })}</>;
 }
 

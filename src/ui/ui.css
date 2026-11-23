@@ -46,10 +46,8 @@ a.flagrow{text-decoration:none;color:inherit}
 .palres .where.parts .ww{display:inline-block}   /* cut by whole words (search.tsx, Words) */
 /* #494: one word that exceeds the whole label can ellipsize inside its own box. */
 .palres .where.parts .wtwin>.ww:only-child{max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
-/* #495: a first name word wider than its share can still show a readable beginning. */
-.palres .wdeal>.wlong{
-  max-width:calc(100% - var(--words-before, 0px));overflow:hidden;text-overflow:ellipsis;vertical-align:bottom
-}
+/* #495: let the deal label's ellipsis shorten its long first word within the word. */
+.palres .where.parts .wlong{display:inline}
 /* #490: the RTL name clips on its own, while the separator and reference keep their places. */
 .palres .wdeal:has(.wrtl){display:flex}
 .palres .wrtl{min-width:0;overflow:hidden;text-overflow:ellipsis}

@@ -188,11 +188,11 @@ See reference screenshots 02, 11, and 12.
 - **Search** (14). Results drop from the sidebar field in a popup glass panel (radius 14px, `--shadow-pop`), grouped
   under labels split by rules (Deals, Findings, Checklist Items, Questions, and Documents). The label is 13px in
   600-weight `--ink-2` and title style. The total count uses 13px tabular figures in `--ink-3`. Each group starts with
-  five results. “Show N More” at the right of the label (13px, 500, `--accent`) shows up to 50 more at a time.
-  Until the selection moves, Enter opens the first result. Matched words on the first line use weight 600.
-  A hit inside a deal names its deal on the second line in `--ink-3`, with its question number, pages, or sheet cell
-  at the right in tabular figures. For a shared deal name, the line starts with what distinguishes the deal
-  (the counterparty or creation date), with both on hover.
+  five results. “Show N More” at the right of the label (13px, 500, `--accent`) names the number it adds, up to 50.
+  Until the selection moves, Enter skips “Show N More” and opens the first result. Matched words on the first line
+  use weight 600. A hit inside a deal names its deal on the second line in `--ink-3`. Its question number, pages,
+  or sheet cell appear at the right in tabular figures. For a shared deal name, the line starts with what distinguishes
+  the deal (the counterparty or creation date), with both on hover.
   The location stays on one line and keeps the first meaningful word after “Project” along with the full question
   number or page range (#495). A sheet cell too wide for the location is left to the hover.
   In Search and the sidebar, a shortened counterparty keeps the words that distinguish same-name deals (#492).

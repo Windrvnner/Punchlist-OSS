@@ -292,6 +292,9 @@ async function seedSearchLabels(page) {
       ['Sample A', 'Elm', 'Sample A lease'],
       ['Project - Sample Name with a Long Series of Terms', 'W'.repeat(75), 'Punctuated deal lease'],
       ['Project - Sample Name with a Long Series of Terms', 'Elm', 'Punctuated deal lease'],
+      ['Telecommunication Offshore Wind Portfolio', counterparty, 'Telecommunication lease'],
+      ['Telecommunication Offshore Wind Portfolio', 'W'.repeat(75), 'Telecommunication lease'],
+      ['Telecommunication Offshore Wind Portfolio', 'Elm', 'Telecommunication lease'],
       [longDeal, word, 'Zebra edge finding'],
       [longDeal, 'Oak', 'Zebra edge finding'],
       [arabic, 'W'.repeat(74), 'connection signature'],
@@ -357,6 +360,20 @@ const fitsText = (locator, text) => locator.evaluate((root, text) => {
   return false;
 }, text);
 
+// #495: the browser can hide an entire inline-block to make room for an enclosing ellipsis.
+async function fitsLongNamePrefix(label, prefix) {
+  if (!await fitsText(label, prefix)) return false;
+  return label.evaluate((element, prefix) => {
+    const word = [...element.querySelectorAll('.ww')].find((candidate) => candidate.textContent.includes(prefix));
+    if (!word) return false;
+    if (getComputedStyle(word).display !== 'inline-block' || element.scrollWidth <= element.clientWidth) return true;
+    const canvas = document.createElement('canvas').getContext('2d');
+    canvas.font = getComputedStyle(element).font;
+    const ellipsis = canvas.measureText('…').width;
+    return word.getBoundingClientRect().right <= element.getBoundingClientRect().right - ellipsis;
+  }, prefix);
+}
+
 async function searchLabel(page, query, kind, full = '') {
   await page.fill('#pal-in', query);
   const label = page.locator(`#pal-res [data-kind=${kind}] .where`).filter({ hasText: full }).first();
@@ -408,6 +425,12 @@ for (const [width, height] of [[1280, 736], [1024, 640]]) {
     const punctuated = await searchLabel(page, 'Punctuated deal lease.pdf', 'document', 'WWWW');
     labelChecks[495].push(await fitsText(punctuated.locator('.wdeal'), 'Sample') &&
       await fitsText(punctuated.locator('.wat'), REFERENCE));
+    for (const counterparty of [SAMPLE_PARTY, 'WWWW']) {
+      const longWord = await searchLabel(page, 'communication lease', 'document', counterparty);
+      labelChecks[495].push(await fitsLongNamePrefix(longWord.locator('.wdeal'), 'Telecommun') &&
+        await fitsText(longWord.locator('.wat'), REFERENCE));
+    }
+    await shot('495-long-word-and-pages');
 
     const unbroken = await searchLabel(page, 'Zebra edge finding.pdf', 'document', UNBROKEN);
     const ellipsis = await unbroken.locator('.wtwin .ww').evaluate((word) =>
