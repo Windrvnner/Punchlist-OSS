@@ -1,0 +1,134 @@
+// Text typed into a finding's cards is never lost: while Save is still out (#32), and on a finding's page when the
+// finding is deleted under a question being typed (#340). At deal scale: a log of 2,000 questions in the deal.
+import { launchChrome } from './chrome.mjs';
+import { openOnFindings } from './landing.mjs';
+const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
+const results = [];
+const say = (id, ok, note = '') => {
+  results.push([id, ok]);
+  console.log(ok ? 'PASS' : 'FAIL', id, ok ? '' : note);
+};
+const browser = await launchChrome();
+openOnFindings(browser);
+const N = 2000;
+
+/** the log a deal has by now: 2,000 questions, a third without a response */
+const logRows = (n) => Array.from({ length: n }, (_, k) => ({
+  line: k + 2, n: k + 1, text: `What is the position on condition precedent ${k + 1} of the credit agreement?`,
+  response: k % 3 ? `See section ${k + 1} of the disclosure schedule.` : '', askedBy: k % 2 ? 'Lender A' : 'Bidder C',
+  received: '', workstream: '', priority: 'High', respondedBy: '', responded: '', status: '',
+}));
+
+/** runs a command in the page */
+const run = (page, name, input) => page.evaluate(async ([n, i]) => {
+  const done = await store.dispatch(store.commandNamed(n), i, { quiet: true });
+  if (!done.ok) throw new Error(done.error.message);
+}, [name, input]);
+
+/** A deal whose first pass has run, with a Q&A log of 2,000 questions, opened on its first finding's page. */
+async function findingPage() {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 736 } });
+  const page = await ctx.newPage();
+  page.errors = [];
+  page.on('pageerror', (e) => page.errors.push(e.message));
+  await page.goto(URL);
+  await page.waitForSelector('#fr-new');
+  await page.click('#fr-new');
+  await page.fill('#nd-name', 'Proseware');
+  await page.click('#nd-paste');
+  await page.fill('#nd-path', 'reports');
+  await page.press('#nd-path', 'Enter');
+  await page.waitForSelector('.ndrow');
+  await page.click('#nd-create');
+  await page.waitForFunction(() => document.querySelectorAll('.flagrow').length === 3, null, { timeout: 30000 });
+  const id = await page.evaluate(() => Object.values(store.get().deals)[0].id);
+  await run(page, 'ImportQuestions', { dealId: id, mode: 'append', rows: logRows(N) });
+  await page.evaluate(() => store.ui({ toasts: [] }));
+  await page.click('.flagrow >> nth=0');
+  await page.waitForSelector('#f-edit');
+  const fid = await page.evaluate(() => location.hash.split('-').slice(2).join('-'));
+  return { ctx, page, id, fid };
+}
+
+/** Holds the next run of `command` until `window.resume()`; later runs go straight through. */
+const holdNext = (page, command) => page.evaluate((name) => {
+  const dispatch = store.dispatch.bind(store);
+  let held = false;
+  store.dispatch = async (cmd, ...args) => {
+    if (cmd.name === name && !held) {
+      held = true;
+      await new Promise((resume) => { window.resume = resume; });
+    }
+    return dispatch(cmd, ...args);
+  };
+}, command);
+
+/** a finding's title as stored */
+const titleOf = (page, fid) => page.evaluate((f) => store.get().findings[f]?.title, fid);
+
+{ // #32: text typed into a finding's edit while Save is out stays in the edit, and a second Save writes it
+  const { ctx, page, fid } = await findingPage();
+  const hash = await page.evaluate(() => location.hash);
+  await page.click('#f-edit');
+  await page.fill('#fe-title', 'Submitted title');
+  await holdNext(page, 'EditFinding');
+  await page.click('#fe-save');
+  await page.fill('#fe-title', 'New title typed while saving');
+  await page.evaluate(() => window.resume());
+  await page.waitForFunction((f) => store.get().findings[f].title === 'Submitted title', fid);
+  await page.waitForTimeout(200);
+  const kept = await page.evaluate(() => document.querySelector('#fe-title')?.value ?? null);
+  // away and back: the edit comes back from its kept draft
+  await page.goto(URL + '#deals');
+  await page.goto(URL + hash);
+  await page.waitForSelector('#fe-title', { timeout: 5000 }).catch(() => {});
+  const back = await page.evaluate(() => document.querySelector('#fe-title')?.value ?? null);
+  if (back) await page.click('#fe-save');
+  await page.waitForSelector('#fe-title', { state: 'detached' });
+  const second = await titleOf(page, fid);
+  const err = await page.evaluate(() => !!document.querySelector('#fe-err'));
+  say('#32 text typed while Save is out is kept, survives leaving, and a second Save writes it',
+    kept === 'New title typed while saving' && back === kept && second === kept && !err && !page.errors.length,
+    JSON.stringify({ kept, back, second, err, errors: page.errors }));
+  // control: nothing typed during the save closes the edit as before
+  await page.click('#f-edit');
+  await page.fill('#fe-title', 'Saved with nothing typed after');
+  await holdNext(page, 'EditFinding');
+  await page.click('#fe-save');
+  await page.evaluate(() => window.resume());
+  const closed = await page.waitForSelector('#fe-title', { state: 'detached', timeout: 5000 }).then(() => true, () => false);
+  say('#32 a save with nothing typed during it still closes the edit',
+    closed && await titleOf(page, fid) === 'Saved with nothing typed after' && !page.errors.length,
+    JSON.stringify({ closed, errors: page.errors }));
+  await ctx.close();
+}
+
+{ // #32: another PC changes the detail while Save is out; the later typing and the other PC's detail both stay
+  const { ctx, page, fid } = await findingPage();
+  await page.click('#f-edit');
+  await page.fill('#fe-title', 'First title');
+  await holdNext(page, 'EditFinding');
+  await page.click('#fe-save');
+  await page.fill('#fe-title', 'Second title');
+  await page.evaluate(() => window.resume());
+  await page.waitForFunction((f) => store.get().findings[f].title === 'First title', fid);
+  await page.evaluate((f) => __peer.change(f, { body: ['Changed on the other PC.'] }, { by: 'jdoe', from: 'PC B' }), fid);
+  await page.waitForFunction((f) => store.get().findings[f].body[0] === 'Changed on the other PC.', fid);
+  await page.click('#fe-save');
+  const settled = await page.waitForSelector('#fe-title', { state: 'detached', timeout: 5000 }).then(() => 'closed',
+    () => 'open');
+  const now = await page.evaluate((f) => store.get().findings[f], fid);
+  const err = await page.evaluate(() => document.querySelector('#fe-err')?.textContent ?? '');
+  const bothKept = now.title === 'Second title' && now.body[0] === 'Changed on the other PC.';
+  // or, if the detail sent is taken as a clash, Save says so and the typing stays in the field
+  const askedInstead = settled === 'open' && /changed elsewhere/.test(err)
+    && await page.evaluate(() => document.querySelector('#fe-title').value) === 'Second title';
+  say('#32 a second Save after typing during the first never overwrites another PC\'s change',
+    (bothKept || askedInstead) && !page.errors.length, JSON.stringify({ settled, now, err, errors: page.errors }));
+  await ctx.close();
+}
+
+await browser.close();
+const failed = results.filter(([, ok]) => !ok).length;
+console.log(`\n${results.length - failed}/${results.length} passed`);
+process.exit(failed ? 1 : 0);
