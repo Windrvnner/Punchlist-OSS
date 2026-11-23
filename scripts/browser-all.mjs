@@ -2,7 +2,8 @@
 //   node scripts/browser-all.mjs [--jobs 5] [name ...]     e.g.  npm run browser -- --jobs 4 decisions keyboard
 // Each suite starts its own browser and shares nothing with the others, so they can run side by side. A suite that fails
 // while others are running is run once more on its own; if it passes then, that is reported as such, not hidden.
-// Exit code 0 only if every suite passed (alone or alongside). Logs go to out/browser/<suite>.log.
+// Exit code 0 only if every suite passed (alone or alongside). Logs go to out/browser/<suite>.log; the suites that took
+// longest last time start first (out/browser/times.json).
 import { spawn } from 'node:child_process'; import fs from 'node:fs'; import http from 'node:http';
 
 const args = process.argv.slice(2); const j = args.indexOf('--jobs'); const jobs = j >= 0 ? Math.max(1, +args[j + 1] || 1) : 5;
@@ -66,6 +67,34 @@ async function appIsReady() {
   return ready;
 }
 
+// Each suite's time in the last run, so the next starts the longest first and no slot idles while one runs alone at
+// the end (#103). Suites with no time yet go first, in name order; reporting stays in the order suites finish.
+const TIMES = 'out/browser/times.json';
+
+/** The times kept from earlier runs, by suite; none before the first run or after out/ is cleared. */
+function readTimes() {
+  try {
+    const times = JSON.parse(fs.readFileSync(TIMES, 'utf8'));
+    return times && typeof times === 'object' && !Array.isArray(times) ? times : {};
+  } catch {
+    return {};
+  }
+}
+
+/** The suites ordered by their last time, longest first; unknown ones first. */
+function longestFirst(names) {
+  const times = readTimes();
+  const known = (name) => (Number.isFinite(times[name]) ? times[name] : Infinity);
+  return [...names].sort((a, b) => known(b) - known(a) || (a < b ? -1 : 1));
+}
+
+/** Keeps each finished suite's time (its run on its own, if it was run again), beside those of suites not run now. */
+function rememberTimes(finished) {
+  const times = readTimes();
+  for (const result of finished) times[result.name] = result.secs;
+  fs.writeFileSync(TIMES, JSON.stringify(times, null, 2));
+}
+
 /** A successful exit without a positive, complete suite summary is missing coverage. */
 function suiteResult(name, code, out, started) {
   const summary = [...out.matchAll(/^(\d+)\/(\d+) passed\r?$/gm)].at(-1);
@@ -98,7 +127,7 @@ const run = async (name) => {
     });
   });
 };
-const started = Date.now(); const queue = [...suites]; const results = [];
+const started = Date.now(); const queue = longestFirst(suites); const results = [];
 await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, async () => {
   while (!stopped) {
     const name = queue.shift();
@@ -121,6 +150,7 @@ for (const result of results.filter((entry) => entry.code !== 0)) {
   Object.assign(result, again, { rerun: true, firstFails: result.fails });
 }
 server?.kill();
+rememberTimes(results);
 const completed = new Set(results.map((result) => result.name));
 const unrun = suites.filter((name) => !completed.has(name));
 if (unrun.length) console.error(`Not run (${unrun.length}/${suites.length} suites): ${unrun.join(', ')}`);
