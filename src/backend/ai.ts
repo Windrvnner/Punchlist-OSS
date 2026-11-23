@@ -19,17 +19,16 @@
  * Reading as little as possible:
  *   - indexing asks no model and uploads nothing. Each document is known by its path and by the words it uses most,
  *     which the document service counts on the PC;
- *   - `core.ts` works out a deal's core documents on each PC without a model or cap. The best 100 are described up
- *     front; they are a subset of the core set, not its limit. The fast model sees core documents marked when it picks
- *     which ranked documents to read. Deal-specific short names are learned from paths without a model. The
- *     expectation is that core documents settle most of what is asked;
- *   - only a document that is read is described by a model: the core documents once they are chosen, and any other the
- *     first time a call is given it. A description is a summary and search terms, written once and kept;
+ *   - `core.ts` works out a deal's core documents on each PC without a model or cap. Deal-specific short names are
+ *     learned from paths without a model. The expectation is that core documents settle most of what is asked;
+ *   - the best 100 core documents are described up front; other documents are described the first time a call is given
+ *     them. A description is a summary and search terms, written once and kept;
  *   - one call is given a handful of documents, eight unless set otherwise: more than about ten and answers get worse.
  *     More documents means more calls, not bigger ones;
  *   - which handful is settled in two steps. A keyword search ranks the deal's files against what is being asked: no
  *     model, the same answer every time. Then the fast model picks from the top hundred of that ranking, each shown by
- *     path and summary (or its most-used words, if it has not been described) with core documents marked. If it cannot be asked, the top of the ranking is read as it stands;
+ *     path and summary (or its most-used words, if it has not been described) with the best core documents marked. If
+ *     it cannot be asked, the top of the ranking is read as it stands;
  *   - a further document is read only when the answering model says what is missing;
  *   - the deal brief is asked for again only when the findings have changed; gaps cost no call at all.
  *
