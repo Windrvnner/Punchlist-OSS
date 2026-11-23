@@ -323,6 +323,28 @@ describe('attachments', () => {
     expect(seen[0]).toEqual([{ doc: 'a.pdf', docId: mockAttachedId(a, 'a.pdf', new TextEncoder().encode('x')) }]);
     expect(store.get().ui.attachments.map((x) => x.name)).toEqual(['b.pdf']);
   });
+  it('Retry asks only with every file the question had: one gone is named and nothing is asked (#671)', async () => {
+    const seen: { docId: string }[][] = []; let answers = 0; let gone: string[] = [];
+    const answer: AiService['answer'] = async (i) => {
+      seen.push(i.attachments ?? []);
+      return answers++ ? ok({ text: 'ok', sources: [] }) : fail({ kind: 'failed', message: 'down' });
+    };
+    const unsendable = async (_dealId: string, ids: string[]) => ok(ids.filter((id) => gone.includes(id)));
+    const { store } = make({ ai: { answer }, docs: { unsendable } });
+    const a = await deal(store, 'Datum'); const scope: Scope = { kind: 'deal', dealId: a };
+    const files = Array.from({ length: MAX_ATTACHED }, (_x, i) => new File([`${i}`], `Consent ${i + 1}.pdf`));
+    await attachFiles(store, { dealId: a, conv: convKey(scope) }, files); await sleep(30);
+    await ask(store, scope, 'Do the consents cover the change of control?');
+    const failed = store.get().threads[convKey(scope)].at(-1)!; expect(failed.state).toBe('failed');
+    gone = [seen[0][0].docId];
+    await retry(store, scope, failed.id);
+    expect(seen).toHaveLength(1); expect(store.get().threads[convKey(scope)].at(-1)!.state).toBe('failed');
+    expect(store.get().ui.toasts.at(-1)?.text).toBe('Couldn’t find Consent 1.pdf · attach it again');
+    gone = [];
+    await Promise.all([retry(store, scope, failed.id), retry(store, scope, failed.id)]);   // pressed twice: asked once
+    expect(seen.map((x) => x.length)).toEqual([MAX_ATTACHED, MAX_ATTACHED]);
+    expect(store.get().threads[convKey(scope)].at(-1)!.state).toBe('done');
+  });
   it('no more files are attached to one message than one call takes; the rest are not attached, and the person is told', async () => {
     const { store } = make(); const a = await deal(store, 'Datum'); const conv = convKey({ kind: 'deal', dealId: a });
     const files = (n: number, from = 0) => Array.from({ length: n }, (_x, i) => new File(['x'], `f${from + i}.pdf`));
