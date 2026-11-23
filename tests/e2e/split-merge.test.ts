@@ -16,12 +16,12 @@ const FOUND = 3;
 const checksFound = (c: { model: string; prompt: string }) =>
   itemsIn(c as Parameters<typeof itemsIn>[0]).some((it) => numOf(it.text) === FOUND);
 
-type Release = 'merged' | 'done' | 'later' | 'closed' | 'slept';
+type Release = 'merged' | 'done' | 'long' | 'later' | 'closed' | 'slept';
 /**
  * The laptop opens its round first, so the office's round is the one merged away. The office's first block waits
- * until the office has written the merge (`merged`), until the kept round has ended too (`done`), or until a later
- * check has run after that (`later`), until the office has closed after that (`closed`), or until the office has
- * slept after that (`slept`), then raises a finding on item 3, which the laptop has already passed.
+ * until the office has written the merge (`merged`), or until the kept round has ended too (`done`) and then: more
+ * than a lapse has passed with the office awake (`long`), a later check has run (`later`), the office has closed
+ * (`closed`), or the office has slept (`slept`). Then it raises a finding on item 3, which the laptop has passed.
  */
 async function mergeWhileOut(release: Release) {
   let merging = false;
@@ -50,6 +50,7 @@ async function mergeWhileOut(release: Release) {
   const held = async () => {
     await until('the office to merge its round away', mergedByOffice, 30000);
     if (release !== 'merged') await until('the kept round to end', keptDone, 60000);
+    if (release === 'long') await new Promise((r) => setTimeout(r, LAPSE + 1000));
     if (release === 'later') await until('the later check to end', laterDone, 60000);
     if (release === 'closed') await p.A.backend.close();
     if (release === 'slept') await sleepAfterEnd();
@@ -89,8 +90,11 @@ async function settled(p: Pair, ok: (rows: string[]) => boolean) {
 const isFound = (r: string) => r.startsWith(`c${FOUND}:finding:`);
 
 describe('a batch still out when its round is merged away (#795)', () => {
-  for (const release of ['merged', 'done'] as const) {
-    const when = release === 'done' ? 'after the kept round has ended' : 'while the kept round runs';
+  const whenOf = {
+    merged: 'while the kept round runs', done: 'after the kept round has ended', long: 'a lapse after that',
+  };
+  for (const release of ['merged', 'done', 'long'] as const) {
+    const when = whenOf[release];
     it(`its finding counts, ${when}, on both PCs`, async () => {
       const { p, both } = await mergeWhileOut(release);
       try {
