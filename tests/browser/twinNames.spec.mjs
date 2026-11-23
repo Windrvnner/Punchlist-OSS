@@ -41,14 +41,20 @@ async function shot(page, name) {
   await page.screenshot({ path: `${SHOTS}/${name}-${scheme}-${width}x${height}.png` });
 }
 
+/** where no whole word of the name fits, it gives way at a letter, and the twin line's first word still shows */
+const keepsTwin = (told, name, twin) => {
+  const [, shownName, shownTwin] = told.shown.match(/^(.*?) \((.*)\) (?:deleted$|removed)/) ?? [];
+  return !!shownName && name.startsWith(shownName.replace(/…$/, '')) && shownTwin.startsWith(twin.split(' ')[0]);
+};
 /** a part shown whole, or cut after a whole word of it */
-const keptWords = (shown, full) => shown === full || (shown.endsWith('…') && full.startsWith(`${shown.slice(0, -1)} `));
+const keptWords = (shown, full) =>
+  shown === full || (shown.endsWith('…') && full.startsWith(`${shown.slice(0, -1)} `));
 /**
  * A deal named "Name (Twin)" in a notice gives way at whole words, the name's first, and keeps "Project" and one more
  * word of the name and the first word of its twin line.
  */
 const cutAtWords = (told, name, twin) => {
-  const [, shownName, shownTwin] = told.shown.match(/^(.*?) \((.*)\) deleted$/) ?? [];
+  const [, shownName, shownTwin] = told.shown.match(/^(.*?) \((.*)\) (?:deleted$|removed)/) ?? [];
   return !!shownName && keptWords(shownName, name) && keptWords(shownTwin, twin)
     && shownName.split(' ').length >= 2 && shownTwin.startsWith(twin.split(' ')[0]);
 };
@@ -138,6 +144,10 @@ async function checkWording() {
       + ' Type Project Kestrel to continue.'
     && gone.second === 'Delete Project Kestrel (Wingtip) for good?'
     && gone.told.said === 'Project Kestrel (Wingtip) deleted' && gone.told.whole && gone.fit, JSON.stringify(gone));
+  const longOut = await removeFromMine(page, ids[LONG_PARTY], 'long');
+  say('#27 beside Undo, a long name gives way, to a letter if need be; the twin line starts and "removed" stay',
+    longOut.told.said === `Project ${LONG} (${LONG_PARTY}) removed · From your deals`
+    && keepsTwin(longOut.told, `Project ${LONG}`, LONG_PARTY), JSON.stringify(longOut.told));
   const long = await deleteDeal(page, ids[LONG_PARTY], 'long');
   say('#27 a long name and counterparty wrap inside the dialog', long.fit
     && long.second === `Delete Project ${LONG} (${LONG_PARTY}) for good?`, JSON.stringify(long));
@@ -158,6 +168,7 @@ async function takeShots() {
     for (const scheme of ['dark', 'light']) {
       const { ctx, page, ids } = await open(width, height, scheme);
       await removeFromMine(page, ids.Wingtip, 'twin');
+      await removeFromMine(page, ids[LONG_PARTY], 'long');
       await deleteDeal(page, ids[LONG_PARTY], 'long');
       await deleteDeal(page, ids.Wingtip, 'twin');
       await ctx.close();

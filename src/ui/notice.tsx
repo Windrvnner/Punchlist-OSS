@@ -104,28 +104,58 @@ function Part({ text, cut }: { text: string; cut?: string }) {
   );
 }
 
-/** the first words of `words`, from all but the last down to `least`, each ending in "…" */
+/** the first words of `words`, from all but the last down to `least`, each ending in "…" after no comma */
 const fewerWords = (words: string[], least: number) => {
   const count = Math.max(words.length - least, 0);
-  return Array.from({ length: count }, (_, i) => `${words.slice(0, words.length - 1 - i).join(' ')}…`);
+  const firstWords = (n: number) => words.slice(0, n).join(' ').replace(/,$/, '');
+  return Array.from({ length: count }, (_, i) => `${firstWords(words.length - 1 - i)}…`);
 };
+
+/** where the bracket that closes `text` opens, counting brackets inside it, as "Fund IV (Lux)"; -1 if none */
+function closingBracketStart(text: string) {
+  if (!text.endsWith(')')) return -1;
+  let depth = 0;
+  for (let i = text.length - 1; i >= 0; i--) {
+    if (text[i] === ')') depth++;
+    else if (text[i] === '(' && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/** a deal's name and the words of its twin line, from "Project Name (Twin)"; null for other text */
+function twinParts(text: string): { name: string[]; twin: string[] } | null {
+  const open = closingBracketStart(text);
+  if (open < 1 || text[open - 1] !== ' ') return null;
+  return { name: text.slice(0, open - 1).split(' '), twin: text.slice(open + 1, -1).split(' ') };
+}
 
 /**
  * Shorter forms of a part that gives way, longest first, each cut at a whole word. A deal's name with its twin line in
  * brackets, "Project Name (Twin)", gives up words of the name first, down to "Project" and one more, then words of
- * the twin line, so what tells the deal from its twin stays as long as it can (#27).
+ * the twin line, so what tells the deal from its twin stays as long as it can (#27). The name may hold brackets of its
+ * own: the twin line is the last bracket.
  */
 export function shorterForms(text: string): string[] {
-  const open = text.indexOf(' (');
-  if (open < 0 || !text.endsWith(')')) return fewerWords(text.split(' '), 1);
-  const name = text.slice(0, open).split(' ');
-  const twin = text.slice(open + 2, -1).split(' ');
+  const parts = twinParts(text);
+  if (!parts) return fewerWords(text.split(' '), 1);
+  const { name, twin } = parts;
   const least = name[0] === 'Project' ? 2 : 1;
   const shortName = name.length > least ? `${name.slice(0, least).join(' ')}…` : name.join(' ');
   return [
     ...fewerWords(name, least).map((n) => `${n} (${twin.join(' ')})`),
     ...fewerWords(twin, 1).map((t) => `${shortName} (${t})`),
   ];
+}
+
+/**
+ * Where none of the shorter forms fits, the part is cut at a letter: `head` gives way and `tail` stays, so a deal's
+ * name gives way and the first word of its twin line still shows (#27).
+ */
+export function letterCut(text: string): { head: string; tail: string } {
+  const parts = twinParts(text);
+  if (!parts) return { head: text, tail: '' };
+  const first = fewerWords(parts.twin, 1).at(-1) ?? parts.twin[0];
+  return { head: parts.name.join(' '), tail: ` (${first})` };
 }
 
 /** words that say something did not happen */
@@ -142,8 +172,8 @@ export function glyphOf(text: string, action?: string): Glyph {
 
 /**
  * The part of a notice that gives way when the line does not fit: it is cut at a whole word (see shorterForms), or,
- * where even the shortest of those does not fit, at a whole character, trimmed, and
- * ends in "…" right before the words after it. CSS's own ellipsis leaves a gap there (the room a cut character would
+ * where even the shortest of those does not fit, at a whole character (see letterCut), trimmed, and ending in "…"
+ * right before the words after it. CSS's own ellipsis leaves a gap there (the room a cut character would
  * have taken, and a space when the cut falls after one), so it is only the fallback. Screen readers get the whole
  * text.
  */
@@ -167,8 +197,9 @@ function Cut({ text }: { text: string }) {
       el.dataset.shortened = '';
       const byWords = shorterForms(text).find(fits);
       if (byWords) return;                  // fits() has put it in place
-      const g = graphemes(text);
-      const at = (n: number) => `${g.slice(0, n).join('').trimEnd()}…`;
+      const { head, tail } = letterCut(text);
+      const g = graphemes(head);
+      const at = (n: number) => `${g.slice(0, n).join('').trimEnd()}…${tail}`;
       let lo = 0;
       let hi = g.length - 1;
       while (lo < hi) {
