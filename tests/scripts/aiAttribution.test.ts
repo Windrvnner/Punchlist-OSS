@@ -54,6 +54,7 @@ const allowed = [
   `See https://${site}/code`,
   `[${tool} Code](https://${site}/code/)`,
   `Try https://${site}/code!`,
+  `See https://${site}/code\tthen more`,
 ];
 
 /** What `git grep -E` says about a text, line by line, for every pattern together. */
@@ -74,6 +75,8 @@ describe('the attribution patterns', () => {
 
   it.each(allowed)('pass %s, in JavaScript and in git grep', (text) => {
     expect(aiAttributionIn(text)).toEqual([]);
+    expect(aiAttributionIn(`Title\n\n${text}\nNext line\n`)).toEqual([]);
+    expect(aiAttributionIn(`Title\r\n\r\n${text}\r\nNext line\r\n`)).toEqual([]);
     expect(grepMatches(text)).toBe(false);
   });
 });

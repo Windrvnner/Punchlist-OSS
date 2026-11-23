@@ -5,11 +5,13 @@
 // matched ignoring case. Some are written in pieces so this file does not match its own check.
 const NAMES = 'Cla' + 'ude|Anthropic|ChatGPT|Copilot|Cod' + 'ex|Gemini|Cursor|Sonnet|Opus|Haiku';
 // Every path on the chat site except the product page itself: `code`, then only closing punctuation (or a slash),
-// then the end of the line, a space, or a carriage return. Spelled out letter by letter because `git grep -E` has no
-// lookahead. `]` is left out of the set because the two expression syntaxes escape it differently.
+// then the end of the line, a space, a tab, or a carriage return. Spelled out letter by letter because `git grep -E`
+// has no lookahead. `]` is left out of the set because the two expression syntaxes escape it differently.
 const CLOSING = ')>"\'/.,;:!_*';
+const AFTER_PRODUCT_PAGE = ' \t\r' + CLOSING;
 const NOT_PRODUCT_PAGE =
-  '($|[^c]|c($|[^o])|co($|[^d])|cod($|[^e])|code[^ \r' + CLOSING + ']|code[' + CLOSING + ']+[^ \r' + CLOSING + '])';
+  '($|[^c]|c($|[^o])|co($|[^d])|cod($|[^e])|code[^' + AFTER_PRODUCT_PAGE + ']|code[' + CLOSING + ']+[^' +
+  AFTER_PRODUCT_PAGE + '])';
 
 export const AI_ATTRIBUTION_PATTERNS = [
   {
@@ -25,8 +27,13 @@ export const AI_ATTRIBUTION_PATTERNS = [
   { name: 'an AI co-author trailer', pattern: '^[ >]*Co-Authored-By *:[^<]*\\b(' + NAMES + ')\\b' },
   { name: 'an AI session trailer', pattern: '^[ >]*(' + 'Cla' + 'ude|Cod' + 'ex|AI)-Session *:' },
 ];
+const COMPILED = AI_ATTRIBUTION_PATTERNS.map(({ name, pattern }) => ({ name, regex: new RegExp(pattern, 'i') }));
 
-/** The kinds of AI attribution a text holds, by name; empty when it holds none. */
+/**
+ * The kinds of AI attribution a text holds, by name; empty when it holds none. Each line is matched on its own, as
+ * `git grep` does, so a negated character set never reaches into the next line.
+ */
 export function aiAttributionIn(text) {
-  return AI_ATTRIBUTION_PATTERNS.filter(({ pattern }) => new RegExp(pattern, 'im').test(text)).map(({ name }) => name);
+  const lines = text.split('\n');
+  return COMPILED.filter(({ regex }) => lines.some((line) => regex.test(line))).map(({ name }) => name);
 }
