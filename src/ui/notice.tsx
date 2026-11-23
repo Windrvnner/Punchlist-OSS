@@ -15,7 +15,7 @@ export interface NoticeAction { label: string; run: () => void; id?: string }
 // A notice's title or detail can be clipped within the text container (#564).
 function noticeTextOverflows(el: HTMLElement): boolean {
   const overflows = (part: Element) => part.scrollWidth > part.clientWidth;
-  const shortened = !!el.querySelector('.tcut[data-shortened]');      // a part that gave way to fit (#27)
+  const shortened = !!el.querySelector('.tcut[data-shortened], .tbody[hidden]');   // a part that gave way to fit (#27)
   return shortened || overflows(el) || Array.from(el.querySelectorAll('.ttitle, .tbody')).some(overflows);
 }
 
@@ -56,9 +56,41 @@ export function NoticeWords({ text, cut }: { text: string; cut?: string }) {
   return (
     <>
       <b class="ttitle"><Part text={title} cut={cut} /></b>
-      {body && <><span class="sr-only"> · </span><span class="tbody"><Part text={body} cut={cut} /></span></>}
+      {body && <><span class="sr-only"> · </span><Detail><Part text={body} cut={cut} /></Detail></>}
     </>
   );
+}
+
+/**
+ * The detail gives way first, to an ellipsis; where not even its first word would show, it is left out rather than
+ * shown as a stub of letters (#27). The whole text is still on hover and read aloud.
+ */
+function Detail({ children }: { children: ComponentChildren }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const fit = () => {
+      el.hidden = false;
+      if (el.scrollWidth <= el.clientWidth) return;
+      el.hidden = el.clientWidth < firstWordWidth(el);
+    };
+    fit();
+    addEventListener('resize', fit);
+    return () => removeEventListener('resize', fit);
+  });
+  return <span class="tbody" ref={ref}>{children}</span>;
+}
+
+/** how wide the first word of an element's text is drawn, with the ellipsis that would follow it */
+function firstWordWidth(el: HTMLElement): number {
+  const node = el.firstChild;
+  if (!(node instanceof Text)) return 0;
+  const end = node.data.indexOf(' ');
+  const range = document.createRange();
+  range.setStart(node, 0);
+  range.setEnd(node, end < 0 ? node.data.length : end);
+  return range.getBoundingClientRect().width + 12;      // and room for "…"
 }
 
 /** One part of a notice's words, with its `cut` shortened to fit where it holds it. */
@@ -70,6 +102,13 @@ function Part({ text, cut }: { text: string; cut?: string }) {
       <span>{text.slice(0, at)}</span><Cut text={cut} /><span>{text.slice(at + cut.length)}</span>
     </span>
   );
+}
+
+/** where a cut at `n` characters ends a whole word: at the last space before it, where there is one (#27) */
+function wordEnd(g: string[], n: number) {
+  if (g[n] === ' ') return n;
+  const space = g.slice(0, n).lastIndexOf(' ');
+  return space > 0 ? space : n;
 }
 
 /** words that say something did not happen */
@@ -117,7 +156,7 @@ function Cut({ text }: { text: string }) {
         if (fits(at(m))) lo = m;
         else hi = m - 1;
       }
-      el.textContent = at(lo);
+      el.textContent = at(wordEnd(g, lo));
     };
     fit();
     addEventListener('resize', fit);

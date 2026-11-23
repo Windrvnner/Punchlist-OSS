@@ -41,6 +41,11 @@ async function shot(page, name) {
   await page.screenshot({ path: `${SHOTS}/${name}-${scheme}-${width}x${height}.png` });
 }
 
+/** a notice's shortened name ends at a whole word of the full text */
+const cutAtWord = (told) => {
+  const kept = told.shown.slice(0, told.shown.indexOf('…'));
+  return told.said.startsWith(`${kept} `);
+};
 const text = (page, selector) => page.$eval(selector, (el) => el.textContent.replace(/\s+/g, ' ').trim());
 /** clears the notices shown, so the next one read is the one an action puts up */
 const clearNotices = (page) => page.evaluate(() => store.ui({ toasts: [] }));
@@ -54,7 +59,10 @@ const notice = async (page) => {
       return copy.textContent.replace(/\s+/g, ' ').trim();
     };
     const title = el.querySelector('.ttitle');
-    return { said: without('[aria-hidden="true"]'), shown: without('.sr-only'),
+    const body = el.querySelector('.tbody');
+    // the detail shows whole, or not at all: never a stub of letters
+    const detail = !body ? 'none' : body.hidden ? 'hidden' : body.scrollWidth <= body.clientWidth ? 'whole' : 'cut';
+    return { said: without('[aria-hidden="true"]'), shown: without('.sr-only'), detail,
       whole: !!title && title.scrollWidth <= title.clientWidth + 1
         && !title.querySelector('.tcut')?.textContent.endsWith('…') };
   });
@@ -117,7 +125,7 @@ async function checkWording() {
   say('#27 Remove from My Deals names the twin, and its Undo brings it back',
     removed.asked === 'Remove Project Kestrel (Wingtip) from your deals?'
     && removed.told.said === 'Project Kestrel (Wingtip) removed · From your deals'
-    && removed.told.whole && removed.fit, JSON.stringify(removed));
+    && removed.told.whole && removed.told.detail !== 'cut' && removed.fit, JSON.stringify(removed));
   const gone = await deleteDeal(page, ids.Wingtip, 'twin');
   say('#27 Delete Deal names the twin in both dialogs and the notice; the name alone confirms it',
     gone.first === 'Project Kestrel (Wingtip) will be deleted with its findings and its Q&A.'
@@ -129,7 +137,7 @@ async function checkWording() {
     && long.second === `Delete Project ${LONG} (${LONG_PARTY}) for good?`, JSON.stringify(long));
   say('#27 a long name and twin line give way at their end in the notice, never "deleted"',
     long.told.said === `Project ${LONG} (${LONG_PARTY}) deleted` && long.told.shown.startsWith('Project Northwind')
-    && long.told.shown.endsWith('… deleted'), JSON.stringify(long.told));
+    && long.told.shown.endsWith('… deleted') && cutAtWord(long.told), JSON.stringify(long.told));
   const single = await deleteDeal(page, ids['Project Coho'], 'single');
   say('#27 a deal with a name of its own reads as before', single.second === 'Delete Project Coho for good?'
     && single.told.said === 'Project Coho deleted' && single.told.whole
