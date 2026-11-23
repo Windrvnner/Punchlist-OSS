@@ -377,6 +377,38 @@ const ask = async (page, words, nth) => {
   const reopened = await page.evaluate(() => !!document.querySelector('#fe-title'));
   say('#32 Cancel during a save lets go of what was typed since', !reopened && !page.errors.length,
     JSON.stringify({ reopened, errors: page.errors }));
+  // Cancel during a save, then Edit again and type: the old save landing leaves the new edit alone
+  await page.click('#f-edit');
+  await page.fill('#fe-title', 'Sent, then cancelled');
+  await holdNext(page, 'EditFinding');
+  await page.click('#fe-save');
+  await page.click('#fe-cancel');
+  await page.click('#f-edit');
+  await page.fill('#fe-title', 'Typed in the edit opened again');
+  await page.evaluate(() => window.resume());
+  await page.waitForFunction((f) => store.get().findings[f].title === 'Sent, then cancelled', fid);
+  await page.waitForTimeout(300);
+  const fresh = await page.evaluate(() => document.querySelector('#fe-title')?.value ?? null);
+  await page.click('#fe-cancel').catch(() => {});
+  // Escape during a save, Edit again (the later typing is back), let it land, type more: Save is not refused
+  await page.click('#f-edit');
+  await page.fill('#fe-title', 'Escape A');
+  await holdNext(page, 'EditFinding');
+  await page.click('#fe-save');
+  await page.fill('#fe-title', 'Escape B');
+  await page.keyboard.press('Escape');
+  await page.click('#f-edit');
+  const back = await page.evaluate(() => document.querySelector('#fe-title').value);
+  await page.evaluate(() => window.resume());
+  await page.waitForFunction((f) => store.get().findings[f].title === 'Escape A', fid);
+  await page.fill('#fe-title', 'Escape C');
+  await page.click('#fe-save');
+  await page.waitForSelector('#fe-title', { state: 'detached', timeout: 5000 }).catch(() => {});
+  const err = await page.evaluate(() => document.querySelector('#fe-err')?.textContent ?? '');
+  const saved = await titleOf(page, fid);
+  say('#32 an edit opened again during a save keeps its typing, and its Save is not refused',
+    fresh === 'Typed in the edit opened again' && back === 'Escape B' && saved === 'Escape C' && !err
+    && !page.errors.length, JSON.stringify({ fresh, back, saved, err, errors: page.errors }));
   await ctx.close();
 }
 
