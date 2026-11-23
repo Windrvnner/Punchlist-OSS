@@ -12,6 +12,10 @@ import { CreateQuestion, DeleteQuestion } from '../../src/app/commands/questions
 import { registry } from '../../src/app/commands/undo';
 import { StoreContext } from '../../src/ui/hooks';
 import { Composer } from '../../src/ui/conversation';
+import { attachFiles, followCopies, removeAttachment, MAX_ATTACHED } from '../../src/app/attachments';
+import { convKey } from '../../src/app/conversations';
+import { ok } from '../../src/domain/result';
+import type { DocumentService } from '../../src/ports';
 
 const COMMANDS = [CreateDeal, CreateQuestion, DeleteQuestion];
 for (const c of COMMANDS) registry.set(c.name, c);
@@ -20,22 +24,34 @@ let seq = 0; const ids = { next: (p: string) => `${p}_01HYYYYYYYYYYYYYYYC${Strin
 const settle = (ms = 20) => act(() => new Promise<void>((r) => setTimeout(r, ms)));
 
 /** A deal's ask box over a real store on in-memory storage. */
-async function mount(name: string) {
+async function mount(name: string, docs: Partial<DocumentService> = {}, underConversation = false) {
   const kv = disk(); const repo = memRepo(clock.now, kv); const opts = { latency: [0, 0] as [number, number] };
-  const store = new Store({ repo, ai: mockAi(opts, repo), docs: mockDocuments(opts), fs: { pickFolders: null, pathFor: null, save: async () => ({ ok: true as const, value: 'saved' as const }) }, sheets: csvCodec, session: mockSession(opts), local: new MemoryLocal(), clock, ids }, COMMANDS);
+  const store = new Store({
+    repo, ai: mockAi(opts, repo), docs: { ...mockDocuments(opts), ...docs }, sheets: csvCodec,
+    fs: { pickFolders: null, pathFor: null, save: async () => ({ ok: true as const, value: 'saved' as const }) },
+    session: mockSession(opts), local: new MemoryLocal(), clock, ids,
+  }, COMMANDS);
   await store.boot(); await store.dispatch(CreateDeal, { name, folders: [] });
   const dealId = Object.values(store.get().deals).find((d) => d.name === `Project ${name}`)!.id; await store.loadDeal(dealId);
   const host = document.createElement('div'); document.body.appendChild(host);
-  await act(() => { render(<StoreContext.Provider value={store}><Composer scope={{ kind: 'deal', dealId }} launch="deal" /></StoreContext.Provider>, host); });
+  const composer = <Composer scope={{ kind: 'deal', dealId }} launch={underConversation ? undefined : 'deal'} />;
+  await act(() => { render(<StoreContext.Provider value={store}>{composer}</StoreContext.Provider>, host); });
   const box = () => host.querySelector('textarea') as HTMLTextAreaElement;
+  const type = (v: string) => act(() => {
+    box().value = v;
+    box().dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const press = () => act(() => {
+    box().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  });
   const enter = async (v: string) => {
-    await act(() => { box().value = v; box().dispatchEvent(new Event('input', { bubbles: true })); });
-    await act(() => { box().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+    await type(v);
+    await press();
     await settle();
   };
   const questions = () => Object.values(store.get().questions).filter((q) => q.dealId === dealId);
   const toasts = () => store.get().ui.toasts.map((x) => x.text);
-  return { store, kv, repo, dealId, host, box, enter, questions, toasts };
+  return { store, kv, repo, dealId, host, box, type, press, enter, questions, toasts };
 }
 
 describe('"add a question: …" in a deal’s ask box', () => {
@@ -62,5 +78,99 @@ describe('"add a question: …" in a deal’s ask box', () => {
     expect(m.box().value).toBe('add a question: Please send the waiver.');
     const last = m.store.get().ui.toasts.at(-1);
     expect(last?.text).toMatch(/Couldn’t save/); expect(last?.action).toBeUndefined();
+  });
+});
+
+describe('files that can no longer be sent (#671)', () => {
+  /** a deal's ask box with every file it can take attached, and a check whose answer the test gives */
+  async function attachedAll(name: string) {
+    let gone: string[] = [];
+    let hold: Promise<void> | null = null;
+    const checked: string[][] = [];
+    const unsendable = async (_dealId: string, docIds: string[]) => {
+      checked.push(docIds);
+      if (hold) await hold;
+      return ok(docIds.filter((id) => gone.includes(id)));
+    };
+    const m = await mount(name, { unsendable }, true);
+    const files = Array.from({ length: MAX_ATTACHED }, (_, i) => new File([`consent ${i}`], `Consent ${i + 1}.pdf`));
+    const conv = convKey({ kind: 'deal', dealId: m.dealId });
+    await act(() => attachFiles(m.store, { dealId: m.dealId, conv }, files));
+    await settle(40);
+    const chips = () => m.store.get().ui.attachments;
+    const asked = () => (m.store.get().threads[conv] ?? []).filter((x) => x.role === 'me');
+    const lose = (...n: number[]) => { gone = n.map((i) => chips()[i].docId!); };
+    const holdChecks = () => {
+      let release = () => {};
+      hold = new Promise((r) => { release = r; });
+      return () => { hold = null; release(); };
+    };
+    return { ...m, conv, chips, asked, lose, holdChecks, checked };
+  }
+
+  it('sends nothing, keeps the text and every chip, and names what is missing', async () => {
+    const m = await attachedAll('Mistral');
+    m.lose(2, 5);
+    await m.enter('Do the consents cover the change of control?');
+    expect(m.asked()).toEqual([]);
+    expect(m.box().value).toBe('Do the consents cover the change of control?');
+    expect(m.chips()).toHaveLength(MAX_ATTACHED);
+    // the chips of the missing files show it, with the red warning glyph
+    expect(m.chips().map((chip) => !!chip.missing)).toEqual(m.chips().map((_chip, i) => i === 2 || i === 5));
+    const marked = [...m.host.querySelectorAll('.chip.att.missing')].map((el) => el.textContent);
+    expect(marked).toEqual(['Consent 3.pdf', 'Consent 6.pdf']);
+    expect(m.toasts().at(-1)).toBe('Couldn’t find 2 files — attach them again');
+    // once the file is back, the same message goes with all of them
+    m.lose();
+    await m.press();
+    await settle();
+    expect(m.asked().map((x) => x.attached?.length)).toEqual([MAX_ATTACHED]);
+    expect(m.box().value).toBe('');
+  });
+
+  it('while files are checked, what is typed meanwhile goes too, and a second Enter sends nothing twice', async () => {
+    const m = await attachedAll('Sorrel');
+    const release = m.holdChecks();
+    await m.type('Do the consents');
+    await m.press();
+    await m.type('Do the consents cover the change of control?');
+    await m.press();
+    release();
+    await settle(40);
+    expect(m.checked).toHaveLength(1);
+    expect(m.asked().map((x) => x.text)).toEqual(['Do the consents cover the change of control?']);
+    expect(m.box().value).toBe('');
+  });
+
+  it('when the deal is kept as a copy during the check, nothing goes to the deleted deal (#117)', async () => {
+    const m = await attachedAll('Fennel');
+    await m.store.dispatch(CreateDeal, { name: 'Fennel (recovered)', folders: [] });
+    const copyId = Object.values(m.store.get().deals).find((d) => d.id !== m.dealId)!.id;
+    const stop = followCopies(m.store);
+    const release = m.holdChecks();
+    await m.enter('Do the consents cover the change of control?');
+    await act(() => m.store.tookCopy(m.dealId, copyId, { [m.dealId]: copyId }));
+    release();
+    await settle(40);
+    expect(m.asked()).toEqual([]);
+    const onCopy = convKey({ kind: 'deal', dealId: copyId });
+    expect(m.chips().map((chip) => chip.conv)).toEqual(Array(MAX_ATTACHED).fill(onCopy));
+    stop();
+  });
+
+  it('nor when the files were taken off during the check and the deal was then kept as a copy (#117)', async () => {
+    const m = await attachedAll('Zinnia');
+    await m.store.dispatch(CreateDeal, { name: 'Zinnia (recovered)', folders: [] });
+    const copyId = Object.values(m.store.get().deals).find((d) => d.id !== m.dealId)!.id;
+    const stop = followCopies(m.store);
+    const release = m.holdChecks();
+    await m.enter('Do the consents cover the change of control?');
+    for (const chip of m.chips()) removeAttachment(m.store, chip.id);
+    await act(() => m.store.tookCopy(m.dealId, copyId, { [m.dealId]: copyId }));
+    release();
+    await settle(40);
+    expect(m.asked()).toEqual([]);
+    expect(m.store.get().threads[convKey({ kind: 'deal', dealId: copyId })] ?? []).toEqual([]);
+    stop();
   });
 });

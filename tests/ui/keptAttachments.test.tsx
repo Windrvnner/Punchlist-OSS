@@ -62,4 +62,13 @@ describe('attachments kept across a restart', () => {
     const after = await startWith([done(1, HOME)]);
     expect(after.get().ui.attachments).toEqual([done(1, HOME)]);
   });
+
+  it('moved to a deal’s recovered copy, come back on the copy after a restart (#117)', async () => {
+    const before = await startWith();
+    before.ui(() => ({ attachments: [done(1, DEAL), done(2, HOME)] }));
+    const moved = { ...done(1, 'deal:d_copy:c_01HZZZZZZZZZZZZZZZZ0000003'), dealId: 'd_copy' };
+    before.ui((ui) => ({ attachments: ui.attachments.map((a) => (a.id === 'a1' ? moved : a)) }));
+    const after = await startWith();
+    expect(after.get().ui.attachments).toEqual([moved, done(2, HOME)]);
+  });
 });
