@@ -7,7 +7,13 @@ import type { Converter } from '../../src/backend/convert';
 export function cachedWorkbook(lo: Converter): (fods: string) => Promise<Uint8Array> {
   const made = new Map<string, Promise<Uint8Array>>();
   return async (fods) => {
-    if (!made.has(fods)) made.set(fods, lo.workbook!(fods));
+    if (!made.has(fods)) {
+      // a failed conversion is not kept, so the next case converts again rather than repeat the failure
+      made.set(fods, lo.workbook!(fods).catch((error) => {
+        made.delete(fods);
+        throw error;
+      }));
+    }
     return (await made.get(fods)!).slice();
   };
 }
