@@ -46,15 +46,16 @@ async function openReview(page) {
 }
 
 const failed = (kind) => ({ ok: false, error: { kind, message: kind } });
+const pressTwice = (control) => control.evaluate((button) => {
+  button.click();
+  button.click();
+});
 
 async function wholeFailure({ next, retry, finish, calls, review, itemCount }, say) {
   await next.click();
   await finish(failed('failed'));
   const initial = await review();
-  await retry.evaluate((button) => {
-    button.click();
-    button.click();
-  });
+  await pressTwice(retry);
   await finish(failed('unreachable'));
   const whole = await review();
   const double = await calls();
@@ -120,8 +121,13 @@ async function backDuringWording({ page, next, finish, calls }, say) {
   await page.evaluate((failure) => {
     store.services.ai.reword = () => Promise.resolve(failure);
   }, failed('failed'));
-  await next.click();
+  const beforeFresh = (await calls()).length;
+  await pressTwice(next);
+  const afterFresh = await calls();
   await finish(failed('failed'));
+  say('two Next presses in one frame send one duplicate request for changed review options',
+    afterFresh.length === beforeFresh + 1 && afterFresh.at(-1).only === undefined,
+    JSON.stringify({ before: beforeFresh, after: afterFresh.length }));
   await page.evaluate(() => {
     store.services.ai.reword = () => new Promise((resolve) => { window.__finishWording = resolve; });
   });
@@ -152,10 +158,17 @@ async function replaceDuringRetry({ page, next, retry, finish, calls, rows }, sa
   await page.locator('.imprev').getByText(pasted, { exact: true }).waitFor();
   await page.click('#cl-back');
   const first = 'Provide the equipment acceptance certificate for each commissioned substation.';
+  const appendix = 'Provide the operating permits for the collection network.';
+  const name = 'Replacement checklist.xlsx';
+  await page.evaluate(({ name, first, appendix, rows }) => {
+    const sheet = (name, first) => ({ name, grid: ['Item', first, ...rows].map((value) => [value]) });
+    window.__sheets = { [name]: [sheet('Main', first), sheet('Appendix', appendix)] };
+  }, { name, first, appendix, rows });
   await page.setInputFiles('#cl-file', {
-    name: 'Replacement checklist.csv', mimeType: 'text/csv', buffer: Buffer.from(['Item', first, ...rows].join('\n')),
+    name, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.alloc(0),
   });
   await page.locator('.imprev').getByText(first, { exact: true }).waitFor();
+  const sourceControls = await retrySourceRead(page, appendix);
   const waiting = await next.isDisabled() && /^Asking /.test(await page.locator('#cl-line').textContent());
   await next.evaluate((button) => button.click());
   const after = (await calls()).length;
@@ -167,6 +180,44 @@ async function replaceDuringRetry({ page, next, retry, finish, calls, rows }, sa
     waiting && before === after && latest.count === rows.length + 1 && latest.only === undefined
       && await page.locator('#cl-line').textContent() === 'Import 2,163 items',
     JSON.stringify({ waiting, before, after, latest }));
+  say('Sheet, list reading Retry, and Choose Columns stay available while a review retry is pending', sourceControls);
+}
+
+async function retrySourceRead(page, appendix) {
+  const sheet = page.locator('#cl-sheet');
+  if (await sheet.isDisabled()) return false;
+  await page.evaluate(() => { window.__fail = { readList: true }; });
+  await sheet.selectOption('Appendix');
+  const retry = page.locator('#cl-read-retry');
+  await retry.waitFor();
+  const chooseColumns = await page.locator('#cl-bycolumns').isEnabled();
+  await page.evaluate(() => { window.__fail = {}; });
+  await retry.click();
+  await page.locator('.imprev').getByText(appendix, { exact: true }).waitFor();
+  return chooseColumns;
+}
+
+async function noCallAfterBack({ page, next, retry, finish, calls }, say) {
+  const back = page.getByRole('button', { name: 'Back', exact: true });
+  await back.click();
+  await page.check('#cl-askreword');
+  await page.evaluate((failure) => { store.services.ai.reword = () => Promise.resolve(failure); }, failed('failed'));
+  await next.click();
+  await finish(failed('failed'));
+  await retry.click();
+  const before = (await calls()).length;
+  await back.click();
+  await page.uncheck('#cl-askreword');
+  await page.uncheck('#cl-asksame');
+  const enabled = await next.isEnabled();
+  await next.evaluate((button) => button.click());
+  const shown = await page.locator('#cl-go').isVisible();
+  await finish(failed('unreachable'));
+  const after = (await calls()).length;
+  const footer = await page.locator('#cl-line').textContent();
+  say('Next opens review immediately with both checks off while the old reply is still pending',
+    enabled && shown && before === after && footer === 'Import 2,163 items',
+    JSON.stringify({ enabled, shown, before, after, footer }));
 }
 
 export async function checkDuplicateRetries(start, say) {
@@ -177,6 +228,7 @@ export async function checkDuplicateRetries(start, say) {
   await overlappingRetries(review, say);
   await backDuringWording(review, say);
   await replaceDuringRetry(review, say);
+  await noCallAfterBack(review, say);
   say('no errors during duplicate retries', page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }
