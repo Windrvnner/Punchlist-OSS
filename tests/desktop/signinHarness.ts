@@ -15,6 +15,16 @@ const results: [string, boolean, string?][] = [];
 const check = (name: string, pass: boolean, note = '') => { results.push([name, pass, note]); console.log(`${pass ? 'PASS' : 'FAIL'} ${name} ${note}`); };
 const until = async (f: () => boolean, ms = 10_000) => { const end = Date.now() + ms; while (!f() && Date.now() < end) await new Promise((r) => setTimeout(r, 100)); return f(); };
 
+// On Windows the running app still holds files in its own data folder, so removing the temporary folder can fail
+// with EPERM; that must not keep the app from exiting with the results, so the folder is left to the system's cleanup
+function removeTemporaryFolder(dir: string) {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch (error) {
+    console.log(`(temporary folder left in place: ${(error as Error).message})`);
+  }
+}
+
 app.on('window-all-closed', () => { /* the sign-in window closing must not end the test */ });
 app.whenReady().then(async () => {
   const token = jwt({ sub: 'u1', exp: Math.floor(Date.now() / 1000) + 3600 });
@@ -96,7 +106,7 @@ app.whenReady().then(async () => {
     off.close();
   } catch (e) { check('no-exception', false, String(e)); }
   await north.close();
-  fs.rmSync(dir, { recursive: true, force: true });
+  removeTemporaryFolder(dir);
   const failed = results.filter((r) => !r[1]).length;
   console.log(`${results.length - failed}/${results.length} passed`);
   app.exit(failed ? 1 : 0);
