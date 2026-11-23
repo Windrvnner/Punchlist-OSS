@@ -192,7 +192,7 @@ describe('Update from documents while a person works on the finding', () => {
     expect(r.f().sources.map((x) => x.doc)).toEqual(['EPC contract.pdf', AM3.doc]);
   }, 240000);
 
-  it('names the newer document when a second one is attached while it ran, so the mark names what it did not read (#327)',
+  it('names the newer document when a second one is attached while it ran (#327)',
     async () => {
     const w = await world(CITES_AM3);
     const { done } = await w.press();
