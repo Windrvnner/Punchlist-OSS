@@ -12,17 +12,46 @@ import { memRepo, type MemRepo } from '../adapters/memRepo';
 import { scaleMemoInput } from '../fixtures/memoScale';
 
 class Mem implements Folder { files = new Map<string, string>(); list() { return [...this.files.keys()]; } size(n: string) { return this.files.get(n)?.length ?? -1; } read(n: string) { return this.files.get(n) ?? null; } append(n: string, t: string) { this.files.set(n, (this.files.get(n) ?? '') + t); } write(n: string, t: string) { this.files.set(n, t); } }
-type Call = { model: string; prompt: string };
+type Call = { model: string; prompt: string; files?: { name: string }[] };
 let t = 0; const clock = () => new Date(Date.UTC(2026, 10, 15, 9, 0, 0, t++)).toISOString();
 const isRate = (c: Call) => c.prompt.startsWith('Rate each of these open findings');
 const isGroup = (c: Call) => c.prompt.startsWith('These are the open findings on a deal, each with');
 
 /** a backend on a stand-in model: `rate` answers the asks for ratings, `sum` those for the summary; `shared` is the deal's shared folder, `pc` this PC */
-function setup(rate: (c: Call, n: number) => unknown, sum: (c: Call, n: number) => unknown = () => ({ paragraphs: ['A solar project. The yield is above the advisor’s figure.'] }), shared = new Mem(), repo: MemRepo = memRepo(clock), pc = 'pc1', group: (c: Call) => unknown = () => ({ risks: [] })) {
-  const rates: Call[] = []; const sums: Call[] = []; const groups: Call[] = [];
-  const svc = new StandInService((c) => { const call = c as Call; const r = isRate(call) ? (rates.push(call), rate(call, rates.length)) : isGroup(call) ? (groups.push(call), group(call)) : (sums.push(call), sum(call, sums.length)); return typeof r === 'string' ? r : JSON.stringify(r); });
-  const docs: AiDocs = { records: () => [], wanted: async () => [] };
-  const ai = nodeAi({ service: svc, docs, keeper: new StoreKeeper(svc, new Mem(), { recheckMs: 0, clock }), repo, shared, installId: pc, clock });
+function setup(
+  rate: (call: Call, attempt: number) => unknown,
+  sum: (call: Call, attempt: number) => unknown = () => ({
+    paragraphs: ['A solar project. The yield is above the advisor’s figure.'],
+  }),
+  shared = new Mem(), repo: MemRepo = memRepo(clock), pc = 'pc1',
+  group: (call: Call) => unknown = () => ({ risks: [] }),
+  options: { docs?: AiDocs; sharedModel?: boolean } = {},
+) {
+  const rates: Call[] = [];
+  const sums: Call[] = [];
+  const groups: Call[] = [];
+  const svc = new StandInService((call) => {
+    let reply: unknown;
+    if (isRate(call)) {
+      rates.push(call);
+      reply = rate(call, rates.length);
+    } else if (isGroup(call)) {
+      groups.push(call);
+      reply = group(call);
+    } else if (options.docs && !call.prompt.includes('Write the summary of a deal memo')) {
+      reply = { read: [1] };
+    } else {
+      sums.push(call);
+      reply = sum(call, sums.length);
+    }
+    return typeof reply === 'string' ? reply : JSON.stringify(reply);
+  });
+  if (options.sharedModel) svc.offered.thorough = svc.offered.standard;
+  const docs: AiDocs = options.docs ?? { records: () => [], wanted: async () => [] };
+  const ai = nodeAi({
+    service: svc, docs, keeper: new StoreKeeper(svc, new Mem(), { recheckMs: 0, clock }),
+    repo, shared, installId: pc, clock,
+  });
   return { ai, rates, sums, groups, repo, shared };
 }
 const val = <T,>(r: { ok: boolean; value?: T }) => { expect(r.ok).toBe(true); return r.value as T; };
@@ -56,6 +85,7 @@ const ratingCases = [
 
 async function scriptedScaleMemo(
   testCase: (typeof ratingCases)[number], summarize: (call: Call, attempt: number) => unknown = summaryFromPrompt,
+  docs?: AiDocs,
 ) {
   const findings = 'closedOnly' in testCase ? scaleMemoInput.findings.filter((f) => f.status === 'closed')
     : scaleMemoInput.findings;
@@ -63,7 +93,8 @@ async function scriptedScaleMemo(
     f.id, 'firstRating' in testCase ? testCase.firstRating : 'Low',
   ]));
   const rate = by(ratings);
-  const s = setup((call) => ({ ratings: rate(call).ratings.filter((row) => row.rating) }), summarize);
+  const reply = (call: Call) => ({ ratings: rate(call).ratings.filter((row) => row.rating) });
+  const s = setup(reply, summarize, undefined, undefined, undefined, undefined, { docs, sharedModel: !!docs });
   await deal(s.repo);
   for (const f of findings) await finding(s.repo, f.id, f.title, { ...f, dealId: 'd1' });
   const result = val(await s.ai.memo!('d1'));
@@ -162,6 +193,8 @@ describe('the deal memo’s ratings and summary', () => {
     ['No open findings have been rated High.', ratingCases[0]],
     ['There are no findings with a High risk rating.', ratingCases[0]],
     ['The deal has zero High-rated findings.', ratingCases[0]],
+    ['Not one open finding is rated High.', ratingCases[0]],
+    ['Of the open findings, none were rated High.', ratingCases[0]],
     [
       'Ratings for some findings remain unresolved. None of the open findings has a High rating.',
       ratingCases[2],
@@ -180,6 +213,40 @@ describe('the deal memo’s ratings and summary', () => {
       expect(pageOne).toContain(`${SCALE_FINDINGS.length - missing.rated} unrated.`);
     }
     expect(recovered.pageOne).toContain('Open findings have unresolved ratings.');
+  });
+
+  it('corrects the document-backed summary when Standard and Thorough share a model', async () => {
+    const finance = {
+      docId: 'doc_finance', hash: 'doc_finance', name: 'Financing structure.pdf', folder: 'Financing',
+      rel: 'Financing structure.pdf', size: 100, words: ['financing', 'project', 'structure'],
+      summary: 'The solar project and its financing structure.',
+    };
+    const docs: AiDocs = {
+      records: () => [finance],
+      wanted: async () => [{
+        ...finance, id: finance.docId, read: async () => new TextEncoder().encode('The solar project is 120 MW.'),
+      }],
+    };
+    const blocked = 'No open finding is rated High.';
+    const fixed = 'The solar project is 120 MW. Open findings have unresolved ratings.';
+    const { pageOne, sums } = await scriptedScaleMemo(ratingCases[0], (_call, attempt) => ({
+      paragraphs: [attempt < 3 ? blocked : fixed],
+    }), docs);
+    expect(sums.map((call) => call.model)).toEqual(['standard', 'standard', 'standard']);
+    expect(sums.every((call) => call.files?.length === 1)).toBe(true);
+    expect(pageOne).toContain(fixed);
+    expect(pageOne).not.toContain(blocked);
+    expect(pageOne).toContain('42 unrated.');
+  });
+
+  it('keeps a stated fact about a known High risk when other ratings are unresolved', async () => {
+    const known = 'One High risk is that no signed agreement covers the remaining capacity.';
+    const { pageOne, sums } = await scriptedScaleMemo(ratingCases[2], () => ({
+      paragraphs: ['Open findings have unresolved ratings.', known],
+    }));
+    expect(sums).toHaveLength(1);
+    expect(pageOne).toContain(known);
+    expect(pageOne).toContain('41 unrated.');
   });
 
   it('keeps a summary that reports what a document requires', async () => {
