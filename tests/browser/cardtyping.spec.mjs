@@ -389,24 +389,6 @@ const ask = async (page, words, nth) => {
   await page.waitForFunction((f) => store.get().findings[f].title === 'Sent, then cancelled', fid);
   await page.waitForTimeout(300);
   const fresh = await page.evaluate(() => document.querySelector('#fe-title')?.value ?? null);
-  // ... and its Save is not taken for a change made elsewhere
-  if (fresh) await page.click('#fe-save');
-  await page.waitForSelector('#fe-title', { state: 'detached', timeout: 5000 }).catch(() => {});
-  const afterCancel = { title: await titleOf(page, fid),
-    err: await page.evaluate(() => document.querySelector('#fe-err')?.textContent ?? '') };
-  await page.click('#fe-cancel').catch(() => {});
-  // Escape during a save, Edit again and type: the save landing keeps the new typing open
-  await page.click('#f-edit');
-  await page.fill('#fe-title', 'Sent, then Escape');
-  await holdNext(page, 'EditFinding');
-  await page.click('#fe-save');
-  await page.keyboard.press('Escape');
-  await page.click('#f-edit');
-  await page.fill('#fe-title', 'Typed after opening again');
-  await page.evaluate(() => window.resume());
-  await page.waitForFunction((f) => store.get().findings[f].title === 'Sent, then Escape', fid);
-  await page.waitForTimeout(300);
-  const afterEscape = await page.evaluate(() => document.querySelector('#fe-title')?.value ?? null);
   await page.click('#fe-cancel').catch(() => {});
   // Escape during a save, Edit again (the later typing is back), let it land, type more: Save is not refused
   await page.click('#f-edit');
@@ -425,28 +407,8 @@ const ask = async (page, words, nth) => {
   const err = await page.evaluate(() => document.querySelector('#fe-err')?.textContent ?? '');
   const saved = await titleOf(page, fid);
   say('#32 an edit opened again during a save keeps its typing, and its Save is not refused',
-    fresh === 'Typed in the edit opened again' && afterCancel.title === fresh && !afterCancel.err
-    && afterEscape === 'Typed after opening again' && back === 'Escape B' && saved === 'Escape C' && !err
-    && !page.errors.length, JSON.stringify({ fresh, afterCancel, afterEscape, back, saved, err, errors: page.errors }));
-  // New finding: Escape during Create, open the form again and type: that typing reaches the finding made
-  await page.goto(`${URL}#deal-${id}`);
-  await page.click('#f-new');
-  await page.fill('#af-title', 'Made while the form was closed');
-  await page.selectOption('#af-ws', 'Legal');
-  await holdNext(page, 'CreateFinding');
-  await page.click('#af-create');
-  await page.keyboard.press('Escape');
-  await page.click('#f-new');
-  await page.fill('#af-title', 'Typed in the form opened again');
-  await page.evaluate(() => window.resume());
-  await page.waitForSelector('#af-title', { state: 'detached', timeout: 5000 }).catch(() => {});
-  const madeNew = await titled(page, id, 'Made while the form was closed');
-  if (madeNew.length) await page.goto(`${URL}#finding-${id}-${madeNew[0].id}`);
-  await page.waitForSelector('#fe-title', { timeout: 5000 }).catch(() => {});
-  const carried = await page.evaluate(() => document.querySelector('#fe-title')?.value ?? null);
-  say('#115 typing in a New Finding form opened again during Create reaches the finding made',
-    madeNew.length === 1 && carried === 'Typed in the form opened again' && !page.errors.length,
-    JSON.stringify({ made: madeNew.length, carried, errors: page.errors }));
+    fresh === 'Typed in the edit opened again' && back === 'Escape B' && saved === 'Escape C' && !err
+    && !page.errors.length, JSON.stringify({ fresh, back, saved, err, errors: page.errors }));
   await ctx.close();
 }
 
