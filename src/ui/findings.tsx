@@ -225,7 +225,8 @@ export function CheckLine({ deal: d }: { deal: Deal }) {
   // checklist items no check has reached yet, such as items brought in since the last one; not while the first pass is still reading
   const rows = s.checklists[d.id]; const unchecked = d.stage === 'indexing' || !Array.isArray(rows) ? 0 : rows.filter((r) => r.result === 'unchecked').length;
   // the names shown on hover go when the line no longer has them
-  const lineRef = useRef<HTMLSpanElement>(null); useEffect(() => { if (!shared?.who && lineRef.current) hideTip(lineRef.current); }, [shared?.who]);
+  // the names go in the same frame as the line that named them, not a frame after it (#695)
+  const lineRef = useRef<HTMLSpanElement>(null); useLayoutEffect(() => { if (!shared?.who && lineRef.current) hideTip(lineRef.current); }, [shared?.who]);
   const said = shared ? shared.text : c?.busy ? `Checking the checklist and findings${c.busy === 'deep' ? ' in depth' : ''}`
     : c?.failedAt ? `The check on ${on(c.failedAt)} did not finish`
     : c?.left ? `${on(c.left.at)} check left out ${out}`
