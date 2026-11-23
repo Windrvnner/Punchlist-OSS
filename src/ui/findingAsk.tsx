@@ -14,6 +14,8 @@ import { openChecklistItem } from './nav';
 
 /** Questions half typed on a finding's page, kept across pages and a restart; Cancel or Log clear it. */
 const askDrafts = keptDrafts('finding-ask', isText);
+/** whether a question is being typed on a finding's page */
+export const askKept = (findingId: string) => !!askDrafts.get(findingId);
 
 /** why a question cannot be logged about the finding now; a closed finding is not asked about, as on the Checklist */
 function logBlocked(ro: string | null | undefined, f: Finding, item: NamedItem | null): string | null {
@@ -48,6 +50,24 @@ function useAskDraft(findingId: string) {
   };
   const { busy, log } = useLogQuestion(askDrafts, findingId, () => askDrafts.delete(findingId), settle);
   return { asking, setAsking, text, setText, stopAsking, busy, log, kept: !!askDrafts.get(findingId) };
+}
+
+/**
+ * #340: a question being typed on a finding's page stays in sight when the finding is deleted, on the page that says
+ * so, so the person can keep, copy or cancel it. Log says why not; Restore brings the finding back with it.
+ */
+export function KeptAsk({ dealId, findingId, title }: { dealId: string; findingId: string; title: string }) {
+  const s = useAppState();
+  const draft = useAskDraft(findingId);
+  if (!draft.kept) return null;
+  const cancel = () => draft.setText('');
+  return (
+    <div class="flinks">
+      <AskCard ids="f-ask" cls="fask" counterparty={s.deals[dealId]?.counterparty ?? ''} linked={title}
+        text={draft.text} onText={draft.setText} why="This finding was deleted" busy={draft.busy} onLog={() => {}}
+        onCancel={cancel} onEscape={() => {}} />
+    </div>
+  );
 }
 
 /** In the side pane beside a conversation (`pane`) it offers no Ask: the conversation's Add as question does that. */

@@ -28,7 +28,8 @@ function keepOnly(attachments: Attachment[]) {
     if (record) done.set(record.id, record);
   }
   for (const id of [...kept.keys()]) if (!done.has(id)) kept.delete(id);
-  for (const [id, record] of done) if (!kept.has(id)) kept.set(id, record);
+  // one moved to its deal's recovered copy (#117) is kept as it is now
+  for (const [id, record] of done) if (JSON.stringify(kept.get(id)) !== JSON.stringify(record)) kept.set(id, record);
 }
 
 /** Puts the kept attachments back, then keeps the map in step with the attachments as they change. */
