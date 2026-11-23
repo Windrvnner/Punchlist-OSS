@@ -40,11 +40,11 @@ npm run installer       # build the Windows installer into out/installer (on Win
 | `npm run ai:check -- openai` | Runs a live smoke check on an OpenAI-compatible endpoint. Substitute `claude` or `north` to check those providers. Supply the matching key or token and configure the endpoint for OpenAI-compatible or North. |
 | `npm run desktop:live` | Opens the desktop app, signed in with that key when no key has been entered (`npm run desktop` ignores the key). |
 | `npm run desktop:test` | Builds the desktop app and runs it end to end on temporary folders (on Linux, run `xvfb-run -a npm run desktop:test`). |
-| `npm run browser` | Runs every browser suite against `dist/`, five at a time (add `-- --jobs 3 keyboard` to set how many suites run at once and which suites run), and starts its own server. |
+| `npm run browser` | Runs every browser suite against `dist/`, five at a time (add `-- --jobs 3 keyboard` to set how many suites run at once and which suites run), and starts its own server. `--shard 2/4` runs only the second of four groups of suites. |
 | `npm run typecheck` | Type-checks with TypeScript, with no output files. |
 | `npm run lint` | Runs Biome (lint only, no formatter). |
 | `npm run check` | Runs the type-check, Biome, the secrets check and the AI-attribution check on every tracked file (the attribution check also reads the branch's commit messages), readability hints for the changed code (never failing), and the unit tests. |
-| `npm run check:all` | Runs `check`, the build, browser suites, and desktop smoke and sign-in checks. Run it before every merge. CI on GitHub runs it on every pull request and push to `main`. |
+| `npm run check:all` | Runs `check`, the build, browser suites, and desktop smoke and sign-in checks. Run it before every merge. CI on GitHub runs the same steps as parallel jobs on every pull request and push to `main`. |
 | `npm run screens` | Takes screenshots of every main screen into `out/` (add `-- 1440x900 --pdfs <folder>` for options). Needs `npm run serve`. |
 | `npm run package` | Optional local release ZIP containing the app, source, and `docs/`, written to `out/punchlist-<version>.zip`. |
 
