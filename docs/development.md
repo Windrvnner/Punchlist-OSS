@@ -52,6 +52,12 @@ The GitHub Actions workflow has a separate optional Windows installer job.
 
 The Store is the object that holds the app's state and runs its commands; see [architecture.md](architecture.md).
 
+Each `npm run check:all` run writes its stage times and test results to `out/gate/<time>/`: `gate.json` (each stage's
+command, seconds and exit status), `vitest.json`, `browser.json` (each suite's checks, time and re-runs) and
+`smoke.json` (the desktop smoke check IDs). A change that speeds up the tests shows it keeps coverage with
+`node scripts/gate-compare.mjs <before> <after>`, which prints each stage's difference and exits 1 if any test, check,
+suite or stage that passed before is missing, skipped or failing after. Standalone commands write nothing there.
+
 ### Linux test runner troubleshooting
 
 Run one `npm run check:all` at a time on a shared runner. CPU contention can push the checklist Retry test past
