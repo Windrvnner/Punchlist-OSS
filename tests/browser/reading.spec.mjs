@@ -9,7 +9,9 @@ const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, String(note).slice(0, 240)); };
 const browser = await launchChrome();
 openOnFindings(browser);
-const PAGES = 320; const bytes = longPdf(PAGES);
+const PAGES = 320;
+const bytes = longPdf(PAGES);
+const secondBytes = longPdf(PAGES - 1);
 
 async function reading({ pdf = true, size = [1280, 736], recordRuntime = false, samePage = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width: size[0], height: size[1] } }); const page = await ctx.newPage(); page.errors = []; page.on('pageerror', (e) => page.errors.push(e.message));
@@ -25,7 +27,10 @@ async function reading({ pdf = true, size = [1280, 736], recordRuntime = false, 
       return send.call(this, message, ...options);
     };
   });
-  await page.route('**/long.pdf*', (r) => r.fulfill({ body: bytes, contentType: 'application/pdf' }));
+  await page.route('**/long.pdf*', (route) => {
+    const body = route.request().url().endsWith('?doc=1') ? secondBytes : bytes;
+    return route.fulfill({ body, contentType: 'application/pdf' });
+  });
   await page.goto(URL); await page.waitForSelector('#fr-new');
   await page.click('#fr-new'); await page.fill('#nd-name', 'Proseware'); await page.click('#nd-paste'); await page.fill('#nd-path', 'reports'); await page.press('#nd-path', 'Enter'); await page.waitForSelector('.ndrow');
   await page.click('#nd-create'); await page.waitForSelector('#nd-create', { state: 'detached' }); await page.waitForSelector('.dtabs');
@@ -42,7 +47,7 @@ async function reading({ pdf = true, size = [1280, 736], recordRuntime = false, 
 const bar = (page) => page.evaluate(() => ({ loc: document.querySelector('#doc-menu .loc')?.textContent, cnt: document.querySelector('#doc-menu .cnt')?.textContent || null, shown: document.querySelector('.docbody .page .pg')?.textContent, prev: document.querySelector('#page-prev')?.disabled, next: document.querySelector('#page-next')?.disabled, zoom: document.querySelector('#zoom-reset:not(.off)')?.textContent ?? null, width: Math.round(document.querySelector('.docbody .page').getBoundingClientRect().width), top: document.querySelector('.docbody').scrollTop }));
 const ready = (page, n) => page.waitForFunction((n) => document.querySelector('.docbody .page.pdf.ready .pg')?.textContent === `Page ${n}`, n, { timeout: 8000 });
 
-/** Reuse the long PDF fixture at distinct URLs for the two citations. */
+/** Reuse the long PDF generator for two files with distinct page counts. */
 async function citePdfPages(page, fid, secondPage) {
   await page.evaluate(([id, second]) => {
     const state = store.get();
@@ -88,12 +93,15 @@ async function warmPdfPages(page, secondPage) {
     const current = await bar(page);
     const name = await page.textContent('#doc-menu .docnm');
     const mounted = await panel.evaluate((el) => el === document.querySelector('.docpanel'));
-    steps.push({ ...current, foot: await foot.jsonValue(), name, correct: name === title && mounted });
+    const nextTip = await page.getAttribute('#page-next', 'title');
+    const pdfPages = direction === 'next' ? PAGES - 1 : PAGES;
+    const correct = name === title && mounted && nextTip?.endsWith(` · ${pdfPages} pages`);
+    steps.push({ ...current, foot: await foot.jsonValue(), correct });
   }
   const keepsZoom = (step) => step.zoom === before.zoom && step.width === before.width;
   say('a-different-pdf-starts-at-the-top-with-zoom-kept',
     before.zoom === '150%' && steps.every((step) => step.correct && step.top === 0 && keepsZoom(step)),
-    JSON.stringify(steps.map(({ name, shown, top, zoom, foot }) => [name, shown, top, zoom, foot])));
+    JSON.stringify(steps.map(({ shown, top, zoom, foot, correct }) => [shown, top, zoom, foot, correct])));
   await ctx.close();
 }
 
