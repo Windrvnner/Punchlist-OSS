@@ -75,7 +75,10 @@ describe('two PCs share a deal\'s checks', () => {
       // at most one block twice: the laptop can claim the block the office has just claimed before that claim reaches it, the known
       // limit in docs/decisions.md ("two PCs that claim the same work within one OneDrive sync delay can both run it"); seen on a busy machine (GitHub #131)
       const t = tally(p); expect(t.size).toBe(100); expect([...t.values()].filter((x) => x > 1).length, JSON.stringify([...t].filter(([, x]) => x > 1))).toBeLessThanOrEqual(10); expect(checks(p.svcB).length).toBeGreaterThan(0);
-      expect(logOf(p.sync.A, p.dealId).filter((l) => l.opening).length).toBe(1);                       // the laptop joined: it did not open a round of its own
+      // the laptop joined: it did not open a round of its own. The office renews its opening while it prepares, by the
+      // clock, so a busy machine can write it more than once (#131)
+      const openings = new Set(logOf(p.sync.A, p.dealId).filter((l) => l.opening).map((l) => l.opening!.id));
+      expect(openings.size).toBe(1);
     } finally { p.close(); }
   }, 60000);
 
@@ -96,10 +99,20 @@ describe('two PCs share a deal\'s checks', () => {
       const isSweeps = (l: { claim?: unknown; release?: unknown; report?: unknown }) =>
         !!l.report || sweepKeys(l)?.every((k) => k.startsWith('reports:'));
       const kindOf = (l: object) => Object.keys(l).find((k) => !['v', 'at', 'n', 'pc'].includes(k));
-      const kinds = logOf(p.sync.A, p.dealId).filter((l) => !isSweeps(l)).map(kindOf);
-      expect(kinds.filter((k) => k === 'item').length).toBe(25);
-      // (a slow machine may renew its membership on the way: renewals are by the clock, so only the first is pinned)
-      expect(kinds.filter((k, i) => k !== 'item' && !(k === 'member' && kinds.indexOf('member') < i))).toEqual(['opening', 'claim', 'release', 'plan', 'member', 'claim', 'release', 'claim', 'release', 'claim', 'release', 'done', 'full', 'claim', 'release']);   // no 'core' line: the core set is worked out on each PC. The last two: hearing the responses, claimed, because the round raised a finding
+      const roundLines = logOf(p.sync.A, p.dealId).filter((l) => !isSweeps(l));
+      expect(roundLines.filter((l) => kindOf(l) === 'item').length).toBe(25);
+      // a slow machine may renew its membership, or its opening while it prepares, on the way: renewals are by the
+      // clock, so only the first of each is pinned (#131)
+      const firstMember = roundLines.findIndex((x) => x.member);
+      const renewal = (l: (typeof roundLines)[number], i: number) => (!!l.member && firstMember < i)
+        || (!!l.opening && roundLines.findIndex((x) => x.opening?.id === l.opening!.id) < i);
+      const kinds = roundLines.filter((l, i) => kindOf(l) !== 'item' && !renewal(l, i)).map(kindOf);
+      // no 'core' line: the core set is worked out on each PC. The last two: hearing the responses, claimed, because
+      // the round raised a finding
+      expect(kinds).toEqual([
+        'opening', 'claim', 'release', 'plan', 'member', 'claim', 'release', 'claim', 'release', 'claim', 'release',
+        'done', 'full', 'claim', 'release',
+      ]);
       expect(Date.now() - t0).toBeLessThan(FAST.lapse!);                                                 // no wait for others to join
     } finally { p.close(); }
   }, 60000);
