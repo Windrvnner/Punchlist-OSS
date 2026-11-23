@@ -66,7 +66,63 @@ async function warmPdfPages(page, secondPage) {
   await ready(page, 2);
 }
 
-// #447: document changes reset the scroll at the same page as well as a different page, while keeping zoom.
+/** Two workbook citations in a finding's follow-up open on their own, outside its citation list. */
+async function workbookCitations(page) {
+  await page.click('#doc-close');
+  await page.fill('#pask', 'How do the model cases differ?');
+  await page.press('#pask', 'Enter');
+  const answer = page.locator('.msgs .ai:not(.pending):not(.failed)');
+  await answer.waitFor();
+  await page.evaluate(() => {
+    const state = store.get();
+    const [key, thread] = Object.entries(state.threads)[0];
+    const sources = [
+      { doc: 'Base case.xlsx', docId: 'workbook-base', loc: 'Model!D18' },
+      { doc: 'Sensitivity case.xlsx', docId: 'workbook-sensitivity', loc: 'Model!D18' },
+    ];
+    const text = 'The base case applies the higher energy yield. [1] The sensitivity case uses the lower yield. [2]';
+    const updated = [...thread.slice(0, -1), { ...thread.at(-1), text, sources }];
+    store.set({ ...state, threads: { ...state.threads, [key]: updated } });
+  });
+  return answer.locator('.ref .rb');
+}
+
+const sheetPosition = (page) => page.evaluate(() => {
+  const body = document.querySelector('.docbody');
+  const bodyBox = body.getBoundingClientRect();
+  const cell = body.querySelector('.sheet td.hl').getBoundingClientRect();
+  return {
+    top: body.scrollTop,
+    zoom: document.querySelector('#zoom-reset').textContent,
+    aside: !!store.get().ui.docAside,
+    visible: cell.top >= bodyBox.top && cell.bottom <= bodyBox.bottom,
+  };
+});
+
+/** Keep the cited cell in view when switching between two cached workbooks at the same location. */
+async function workbookSwitch() {
+  const { ctx, page } = await reading({ pdf: false, size: [1024, 640] });
+  const citations = await workbookCitations(page);
+  const select = async (index, title) => {
+    await citations.nth(index).click();
+    await page.waitForFunction((name) => document.querySelector('#doc-menu .docnm')?.textContent === name
+      && !!document.querySelector('.docbody .sheet td.hl'), title);
+  };
+  await select(0, 'Base case.xlsx');
+  await select(1, 'Sensitivity case.xlsx');
+  await select(0, 'Base case.xlsx');
+  for (let i = 0; i < 7; i++) await page.keyboard.press('Control+=');
+  await page.locator('.docbody .sheet td.hl').evaluate((cell) => cell.scrollIntoView({ block: 'center' }));
+  const before = await sheetPosition(page);
+  await select(1, 'Sensitivity case.xlsx');
+  const after = await sheetPosition(page);
+  await ctx.close();
+  const keepsCell = before.top > 0 && after.top === before.top
+    && [before, after].every((state) => state.visible && state.aside && state.zoom === '300%');
+  return { keepsCell, before, after };
+}
+
+// #447: PDF switches reset the scroll and keep zoom. Workbook switches at the same cell keep that cell in view.
 { const { ctx, page, fid } = await reading({ samePage: true });
   const panel = await page.locator('.docpanel').elementHandle();
   await warmPdfPages(page, 2);
@@ -99,10 +155,13 @@ async function warmPdfPages(page, secondPage) {
     steps.push({ ...current, foot: await foot.jsonValue(), correct });
   }
   const keepsZoom = (step) => step.zoom === before.zoom && step.width === before.width;
-  say('a-different-pdf-starts-at-the-top-with-zoom-kept',
-    before.zoom === '150%' && steps.every((step) => step.correct && step.top === 0 && keepsZoom(step)),
-    JSON.stringify(steps.map(({ shown, top, zoom, foot, correct }) => [shown, top, zoom, foot, correct])));
   await ctx.close();
+  const sheet = await workbookSwitch();
+  const pdfs = steps.map(({ shown, top, zoom, foot, correct }) => [shown, top, zoom, foot, correct]);
+  say('a-different-pdf-starts-at-the-top-with-zoom-kept',
+    before.zoom === '150%' && steps.every((step) => step.correct && step.top === 0 && keepsZoom(step))
+      && sheet.keepsCell,
+    JSON.stringify({ pdfs, sheets: [sheet.before, sheet.after] }));
 }
 
 // 1 Page Down leaves the cited page: the bar says which page of how many, and that it is not cited; Page Up comes back to the citation

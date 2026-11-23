@@ -99,10 +99,10 @@ function usePlacement(panel: PanelRef, zoom: number) {
 }
 
 /**
- * A new document or page starts at its top. Page Up while zoomed can turn to the previous page's foot. A change in
+ * A new PDF or page starts at its top. Page Up while zoomed can turn to the previous page's foot. A change in
  * zoom keeps the same part of the page in view.
  */
-function usePageScroll(panel: PanelRef, zoom: number, docIdentity: string, pageAt: number | null, loc: string,
+function usePageScroll(panel: PanelRef, zoom: number, docIdentity: string | null, pageAt: number | null, loc: string,
   toFoot: RefObject<boolean>) {
   useLayoutEffect(() => {
     const body = docBody(panel);
@@ -260,6 +260,7 @@ export function DocPanel({ dealId, docs, index, aside, headed }: {
   // Zoom stays as it is from one document to the next.
   const [zoom, setZoom] = useState(1);
   const page = state.pages[pageKeyFor(dealId, current)];
+  const paged = !(isView(page) && page.kind === 'sheet');
   const pages = usePageTurns(store, docs, current, page);
   const docChanged = [dealId, current.doc, current.docId, current.loc];
   useEffect(() => {
@@ -287,7 +288,7 @@ export function DocPanel({ dealId, docs, index, aside, headed }: {
   useEffect(() => {
     docBody(panel)?.querySelector('td.hl')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [index, typeof page]);
-  usePageScroll(panel, zoom, `${dealId}|${docKey(current)}`, pages.pageAt, current.loc, toFoot);
+  usePageScroll(panel, zoom, paged ? `${dealId}|${docKey(current)}` : null, pages.pageAt, current.loc, toFoot);
   useZoomInput(panel, zoomBy, pageKey);
   const citationCount = !aside && docs.length > 1 ? `Citation ${(index ?? 0) + 1} of ${docs.length}` : null;
   return (
@@ -311,7 +312,7 @@ export function DocPanel({ dealId, docs, index, aside, headed }: {
           pick={menus.pickDoc} />}
         {menus.draftsOpen && <DraftsMenu drafts={drafts} docId={current.docId} pick={menus.openDraft} />}
       </div>
-      <PageControls shown={pages.shown} total={pages.pageCount} paged={!(isView(page) && page.kind === 'sheet')}
+      <PageControls shown={pages.shown} total={pages.pageCount} paged={paged}
         zoom={zoom} turn={pages.turn} zoomBy={zoomBy} />
     </aside>
   );
