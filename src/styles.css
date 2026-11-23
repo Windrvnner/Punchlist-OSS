@@ -406,7 +406,9 @@ body.reading .chatwrap.withdoc .reading-pane{
 /* The content scrollport ends above the composer, inside the full glass pane (#438). */
 body.reading .chatwrap.withdoc .chat{
   --covered:var(--composer-cover,0px);
-  width:100%;height:calc(100% - var(--covered));padding:0 20px calc(var(--thread-padding,150px) - var(--covered));
+  /* Keep the column's measured outer width for document placement. */
+  width:calc(100% + 2px);margin-inline:-1px;border-inline:1px solid transparent;
+  height:calc(100% - var(--covered));padding:0 20px calc(var(--thread-padding,150px) - var(--covered));
   position:relative;z-index:1
 }
 body.reading .chatwrap.withdoc .chat .chathead{

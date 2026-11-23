@@ -224,7 +224,7 @@ async function paneShadow(page, height) {
     const paper = document.querySelector('.docbody .page').getBoundingClientRect();
     const composer = document.getElementById('pcomposer').getBoundingClientRect();
     const fits = document.documentElement.scrollWidth === innerWidth && document.body.scrollWidth === innerWidth &&
-      rail.right < pane.left && pane.right < paper.left && composer.left >= pane.left &&
+      rail.right < pane.left && paper.left - pane.right >= 14.5 && composer.left >= pane.left &&
       composer.right <= pane.right && composer.bottom <= pane.bottom;
     return { left: Math.round(view.left), bottom: Math.round(view.bottom),
       middle: Math.round(pane.left + pane.width / 2), fits };
