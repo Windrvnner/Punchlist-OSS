@@ -415,6 +415,7 @@ describe('two PCs share a deal\'s checks', () => {
       await allEnded(p);
       const lines = logOf(p.sync.A, p.dealId); const followed = lines.filter((l) => l.done && (l.done.docs ?? []).length === 3);
       expect(new Set(followed.map((l) => l.done!.round ?? l.done!.opening)).size, `the lines: ${JSON.stringify(lines.filter((l) => l.opening || l.plan || l.done || l.merged || l.abandoned).map((l) => ({ n: l.n, pc: l.pc?.slice(0, 4), k: Object.keys(l).find((x) => !['v', 'at', 'n', 'pc'].includes(x)), id: l.opening?.id ?? l.plan?.id ?? l.done?.round ?? l.done?.opening ?? l.merged?.round ?? l.abandoned?.round, docs: l.done?.docs?.length ?? l.plan?.docList.length })))}`).toBe(1);                // one round (or one opening with nothing to do) followed it
+      p.net.now(); await p.A.backend.repo.sync!();                                                         // the laptop's finding, if it wrote it, is read here too (#131)
       const titles = val(await p.A.backend.repo.list('finding', p.dealId)).map((l) => (l.envelope.data as any).title); expect(titles.length).toBe(1);
     } finally { p.close(); }
   }, 60000);
@@ -458,14 +459,17 @@ describe('two PCs share a deal\'s checks', () => {
   it('20. a PC that was not part of the round, with the app open, finishes a round the only PC in it left unfinished', async () => {
     for (const how of ['sleeps', 'closes'] as const) {
       let stuck = false; const never = new Promise<void>(() => undefined);
-      const p = await pair({ items: 60, scriptA: { delay: 40, hold: () => (stuck ? never : undefined) } });
+      // a PC that closes says it left, so the laptop does not wait out a lapse: a long lapse there keeps a busy machine's
+      // slowness apart from the lapse it proves was not waited for (#131)
+      const p = await pair({ items: 60, scriptA: { delay: 40, hold: () => (stuck ? never : undefined) }, timing: how === 'closes' ? { lapse: 8000 } : undefined });
       try {
         void aiOf(p.A).firstPass(p.dealId).catch(() => undefined);                                       // only the office goes through the checklist
         await until('the office to be part-way', () => checks(p.svcA).length >= 2);
-        const t0 = Date.now();
+        const t0 = Date.now(); const aId = p.A.backend.installId;
         if (how === 'sleeps') { stuck = true; p.net.pause('ab'); } else p.A.backend.close();
         await until('the laptop to finish it', () => { const r = [...roundsOf(p.sync.B, p.dealId).values()]; return r.length > 0 && r.every((x) => x.end) && r.some((x) => x.end?.kind === 'done'); }, 30000);
-        const took = Date.now() - t0; if (how === 'sleeps') expect(took).toBeGreaterThanOrEqual(FAST.lapse! - 100); else expect(took).toBeLessThan(FAST.lapse!);
+        const took = Date.now() - t0; if (how === 'sleeps') expect(took).toBeGreaterThanOrEqual(FAST.lapse! - 100); else expect(took).toBeLessThan(8000);
+        if (how === 'closes') expect(logOf(p.sync.B, p.dealId).some((l) => l.pc === aId && l.left?.pc === aId)).toBe(true);   // the office said it left
         expect(checks(p.svcB).length).toBeGreaterThan(0); expect(tally(p).size).toBe(60);
         expect([...roundsOf(p.sync.B, p.dealId).values()].filter((x) => x.end?.kind === 'done').length).toBe(1);   // the same round, finished: not a fresh one
       } finally { p.close(); }
