@@ -56,6 +56,9 @@ a.flagrow{text-decoration:none;color:inherit}
 .twin-label>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .twin-label>.twin-focus{flex:none;max-width:100%}
 .twin-label>span:last-child{flex-shrink:6}
+/* #791: leave room for a full ellipsis when the suffix cannot fit. */
+.twin-label>span:last-child:not(:empty){min-width:1em}
+.twin-label:has(>span:last-child:not(:empty))>.twin-focus{max-width:calc(100% - 1em)}
 .palres .where.parts>.wat{flex:none;margin-left:auto;padding-left:16px;font-variant-numeric:tabular-nums}
 
 /* cached mark: a document loaded in the user's store right now */

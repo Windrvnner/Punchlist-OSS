@@ -381,7 +381,20 @@ async function searchLabel(page, query, kind, full = '') {
   return label;
 }
 
-const labelChecks = { 490: [], 492: [], 494: [], 495: [] };
+// #791: a clipped suffix needs enough room to paint its complete ellipsis.
+function showsTwinSuffix(label, mustClip = false) {
+  return label.locator('.twin-label>span:last-child').evaluate((tail, mustClip) => {
+    if (tail.scrollWidth <= tail.clientWidth) return !mustClip;
+    const style = getComputedStyle(tail);
+    const pen = document.createElement('canvas').getContext('2d');
+    pen.font = style.font;
+    const bounds = tail.getBoundingClientRect();
+    return style.textOverflow === 'ellipsis' && bounds.width >= pen.measureText('…').width &&
+      bounds.right <= tail.parentElement.getBoundingClientRect().right + 0.5;
+  }, mustClip);
+}
+
+const labelChecks = { 490: [], 492: [], 494: [], 495: [], 791: [] };
 for (const [width, height] of [[1280, 736], [1024, 640]]) {
   for (const colorScheme of ['dark', 'light']) {
     const ctx = await browser.newContext({ viewport: { width, height }, colorScheme });
@@ -398,6 +411,13 @@ for (const [width, height] of [[1280, 736], [1024, 640]]) {
     };
 
     await shot('492-sidebar');
+    const maple = page.locator('.dealrow').filter({ hasText: 'Project Maple Wind Portfolio' });
+    for (const roman of ['IV', 'V']) {
+      const rail = maple.locator('.dtw').filter({ hasText: FUND + ' ' + roman + ' (Lux) SCSp' });
+      await rail.scrollIntoViewIfNeeded();
+      labelChecks[791].push(await showsTwinSuffix(rail, true));
+    }
+    await shot('791-sidebar-suffix');
     await page.keyboard.press('Control+k');
     for (const roman of ['IV', 'V']) {
       const token = 'Fund ' + roman + ' (';
@@ -416,7 +436,9 @@ for (const [width, height] of [[1280, 736], [1024, 640]]) {
       const distinction = 'Fund ' + roman;
       labelChecks[492].push(await fitsText(repeated.locator('.twin-focus'), distinction) &&
         await fitsText(rail.locator('.twin-focus'), distinction));
+      labelChecks[791].push(await showsTwinSuffix(repeated.locator('.wtwin')));
     }
+    await shot('791-search-suffix');
 
     const sample = await searchLabel(page, 'Sample A lease.pdf', 'document', SAMPLE_PARTY);
     labelChecks[495].push(await fitsText(sample.locator('.wdeal'), 'Sample') &&

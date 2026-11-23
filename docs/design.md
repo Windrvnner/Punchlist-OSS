@@ -196,6 +196,7 @@ See reference screenshots 02, 11, and 12.
   The location stays on one line and keeps the first meaningful word after “Project” along with the full question
   number or page range (#495). A sheet cell too wide for the location is left to the hover.
   In Search and the sidebar, a shortened counterparty keeps the words that distinguish same-name deals (#492).
+  An ellipsis marks a shortened suffix after those words (#791).
   A single oversized counterparty word ends in an ellipsis (#494). The start of a right-to-left deal name stays
   visible in Search (#490). Full labels are available to screen readers and on hover.
   A deal's own hit gives on its second line what tells it apart, or otherwise its sector.

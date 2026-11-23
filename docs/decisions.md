@@ -39,6 +39,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Finding and question pages use the slim rail (the sidebar folded to icons) and the queue strip.
 - "Project " is added in front of a deal name that lacks it. A name that starts with that word in any capitalization, followed by anything other than a letter, accent, or digit, has the word rewritten as "Project" and the rest kept as typed; misspellings are not corrected. Deals may share a name; they are told apart by counterparty, then by creation date, in the sidebar, Add Deal, and search.
 - Search and the sidebar keep the distinguishing words in shortened counterparty labels (#492).
+  An ellipsis marks a shortened suffix after those words (#791).
   Search keeps the meaningful name after “Project” and the full question number or page range (#495).
 - Search ellipsizes an oversized single counterparty word (#494) and keeps the start of right-to-left deal names (#490).
 - The New Deal form has Name and Counterparty; Structure, Sector, and Technology pick lists; and Folders. × closes it, and there is no Cancel. **Create** stays unavailable until there is a name.
