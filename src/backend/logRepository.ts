@@ -104,6 +104,15 @@ function linesOf(text: string, id: string): { l: string; at: string }[] {
   });
 }
 
+/** Whether a folder record (`place-<id>.json`) marks its id as left after a copy was found (#29). */
+function leftIn(record: string | null): boolean {
+  try {
+    return JSON.parse(record ?? 'null')?.left === true;
+  } catch {
+    return false;
+  }
+}
+
 const AUDIT_KEEP = 200;
 const CHANGE_FILE = /^changes-.+\.jsonl$/;
 /** a change file's deal (or `_`), from its name; a name of any other shape (a sync client's conflict copy, say) is null */
@@ -427,10 +436,9 @@ export class LogRepository implements Repository {
       const j = o.journal ?? o.local;
       if (j.read(`ops-${id}.json`) == null) { const text = j.read(`ops-${carry}.json`); if (text != null) j.write(`ops-${id}.json`, text); }
       this.previous = carry;
+      this.keepPlaceRecord(carry, true);
     }
     const now = this.install(id);
-    // which folder this id is for, kept apart from install.json, so an id found again after install.json is lost is only ever
-    // taken in its own folder: a copy of the folder holds the same files under it. Tried again at each start until it is there.
     this.keepPlaceRecord(id);
     this.keepInstall(JSON.stringify(now), texts);
     this.changes = new LocalChanges(o.local, id);
@@ -672,25 +680,30 @@ export class LogRepository implements Repository {
     const here = this.o.machine?.();
     if (!this.o.place || !here) return false;
     try {
-      const record = JSON.parse(this.o.local.read(`place-${id}.json`) ?? 'null');
-      return record?.machine === here && !record.left;
+      const record = this.o.local.read(`place-${id}.json`);
+      return JSON.parse(record ?? 'null')?.machine === here && !leftIn(record);
     } catch {
       return false;
     }
   }
 
   /**
-   * The folder an id is for, and its machine, so an id with no file left in the shared folder can still be taken back
-   * on this PC (#29). An id left after a copy was found is marked, so it is never taken back that way: the copy may
-   * still be writing under it. Tried again at each start until it is there.
+   * Which folder an id is for, kept apart from install.json, so an id found again after install.json is lost is only
+   * ever taken in its own folder: a copy of the folder holds the same files under it. Its machine is kept too, so an id
+   * with no file left in the shared folder can still be taken back on this PC (#29). An id left after a copy was found
+   * is marked, and the mark is never dropped, so it is never taken back that way: the copy may still be writing under
+   * it. Tried again at each start until it is there (the left id while it is the last id in this folder).
    */
   private keepPlaceRecord(id: string, left = false) {
     const here = this.o.machine?.();
     if (!this.o.place) return;
     try {
+      const name = `place-${id}.json`;
+      const kept = this.o.local.read(name);
       const machine = here ? { machine: here } : {};
-      const record = JSON.stringify({ place: this.o.place, ...machine, ...(left ? { left } : {}) });
-      if (this.o.local.read(`place-${id}.json`) !== record) this.o.local.write(`place-${id}.json`, record);
+      const mark = left || leftIn(kept) ? { left: true } : {};
+      const record = JSON.stringify({ place: this.o.place, ...machine, ...mark });
+      if (kept !== record) this.o.local.write(name, record);
     } catch { /* the next start */ }
   }
 

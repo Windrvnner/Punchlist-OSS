@@ -355,13 +355,18 @@ describe('change files on one PC', () => {
       expect(await text(b, 'qd')).toBe('qd');
     });
 
-    it('every shared file lost: an id this PC left after a copy was found is not taken back (#29)', async () => {
+    for (const busy of [false, true]) it(`every shared file lost: an id left after a copy was found is not taken back${
+      busy ? ', though its folder record was held when the copy was found' : ''} (#29)`, async () => {
       const { A, local, open } = setup();
       const a = open(A, '/onedrive/team');
       val(await a.transaction(add('q1', 'op1')));
       const other = open(A, '/onedrive/team', clone(local));
       val(await other.transaction(add('qo', 'opo')));
+      const write = local.write.bind(local);
+      const held = (n: string) => busy && n.startsWith('place-');
+      local.write = (n, t) => { if (held(n)) throw new Error('EBUSY: resource busy'); write(n, t); };
       expect(val(await a.sync()).self.note).toBe(COPIED);
+      local.write = write;
       await a.close();
       const moved = open(A, '/onedrive/team');
       expect(moved.id).not.toBe(a.id);
