@@ -52,10 +52,23 @@ describe('a folder on disk, when a file is held by another program', () => {
   });
 
   it('the working copy and the rename share one wait: a journal write holds the process for one wait in all', () => {
-    const dir = tmp(); const f = nodeFolder(dir, [20, 20, 20]); f.write('ops.json', '{"old":1}'); let left = 2;
-    const w = lock('writeFileSync', 'ops.json.tmp', 'EBUSY', () => left-- > 0); const r = lock('renameSync', 'ops.json', 'EPERM', () => true);
-    const at = Date.now(); expect(() => f.write('ops.json', '{"new":2}')).toThrow(/EPERM/);
-    expect(w.tried).toBe(3); expect(r.tried).toBe(2); expect(Date.now() - at).toBeLessThan(110);    // 2 waits for the working copy, the last 1 for the rename
+    const dir = tmp();
+    const f = nodeFolder(dir, [20, 21, 22]);
+    f.write('ops.json', '{"old":1}');
+    let left = 2;
+    const w = lock('writeFileSync', 'ops.json.tmp', 'EBUSY', () => left-- > 0);
+    const r = lock('renameSync', 'ops.json', 'EPERM', () => true);
+    // count the waits themselves rather than the time they took, which a busy machine stretches (#693)
+    const waited: number[] = [];
+    const realWait = Atomics.wait.bind(Atomics);
+    vi.spyOn(Atomics, 'wait').mockImplementation((array, index, value, ms) => {
+      waited.push(Number(ms));
+      return realWait(array, index, value, ms);
+    });
+    expect(() => f.write('ops.json', '{"new":2}')).toThrow(/EPERM/);
+    expect(w.tried).toBe(3);
+    expect(r.tried).toBe(2);
+    expect(waited).toEqual([20, 21, 22]);    // 2 waits for the working copy, the last 1 for the rename
   });
 
   it('a file written whole is forced to the disk before it replaces the old one, so a power cut leaves one or the other', () => {
