@@ -86,6 +86,9 @@ function mendLocal(local: Folder, name: string) {
   checkedEnds.set(local, checked.add(name));
 }
 
+/** Whether the local copy still holds part of a failed append that could not be taken back yet. */
+export const holdsFailedAppend = (local: Folder, name: string) => failedAppends.get(local)?.has(name) ?? false;
+
 /** The local copy's text without what a failed append not yet taken back left in it: only lines that were written. */
 export function readOwn(local: Pick<Folder, 'read'>, name: string): string | null {
   const text = local.read(name);

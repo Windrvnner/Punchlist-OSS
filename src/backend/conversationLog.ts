@@ -16,7 +16,7 @@
 import type { Folder } from './logRepository';
 import type { ConversationStore, KeptMessage } from '../ports';
 import { ok, fail } from '../domain/result';
-import { appendOwn, healOwn, readOwn, wholeLines } from './ownFile';
+import { appendOwn, healOwn, holdsFailedAppend, readOwn, wholeLines } from './ownFile';
 
 export interface ConversationLogOptions {
   shared: Folder; local: Folder;
@@ -130,7 +130,8 @@ export function conversationLog(o: ConversationLogOptions): ConversationStore & 
         return ok(undefined);
       } catch (e) {
         // this PC's copy could not be written, so nothing was, anywhere: the numbers are used again, and the failure says so (`failed`)
-        seq = before;
+        // unless part of it is still there, to be cut off later: a number it holds is never given to another line (#126)
+        if (!holdsFailedAppend(o.local, own(file))) seq = before;
         return fail({ kind: 'failed' as const, message: (e as { code?: string })?.code === 'ENOSPC' ? 'The disk is full' : 'This PC’s copy of the conversation could not be written' });
       }
     },

@@ -352,4 +352,27 @@ describe('conversations in the synced folder', () => {
     const back = await log.load();
     expect(back.ok && back.value).toEqual({ 'deal:d1:c1': [first] });
   });
+  it('a number left in a failed save that cannot be cut off is not given to the next save (#126)', async () => {
+    const shared = new Mem();
+    let local = new Tearing();
+    const open = (folder: Mem) => conversationLog({
+      shared, local: folder, installId: 'pc', user: () => 'adoe', clock, segmentBytes: 400,      // a file two lines long
+    });
+    const log = open(local);
+    const at = clock();
+    const ask = (id: string) => msg(id, 'me', `Does clause ${id} survive a change of control of the borrower?`, at);
+    expect((await log.save('deal:d1:cA', [ask('a1'), ask('a2')])).ok).toBe(true);
+    local.tear = 250;                                                   // one whole line and part of the next
+    local.refuseWrites = true;                                          // and then too full to cut them off
+    expect((await log.save('deal:d1:cA', [ask('a1'), ask('a2'), ask('a3'), ask('a4')])).ok).toBe(false);
+    expect(local.files.get('talk-pc-1.jsonl')).toMatch(/"a3".*\n\{/);   // a3 whole, a4 begun: not cut off yet
+    expect((await log.save('deal:d1:cB', [ask('b1')])).ok).toBe(true);
+    const restarted = new Tearing();                                    // the app restarts: what failed is not known
+    restarted.files = new Map(local.files);
+    local = restarted;
+    await open(local).load();
+    shared.files = new Map([...shared.files].sort());                  // listed by name, as a disk lists them
+    const there = await conversationLog({ shared, local: new Mem(), installId: 'home', user: () => 'adoe', clock }).load();
+    expect(there.ok && there.value['deal:d1:cB']?.map((m) => m.id)).toEqual(['b1']);
+  });
 });
