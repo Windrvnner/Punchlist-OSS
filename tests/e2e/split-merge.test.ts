@@ -3,33 +3,33 @@
 // comes to counts in the round it was merged into (#795). End to end on the real backend, as in split.test.ts.
 import { describe, it, expect, afterAll } from 'vitest';
 import fs from 'node:fs';
-import { pair, aiOf, roots, checks, logOf, roundsOf, allEnded, until, numOf, type Pair } from './splitKit';
-import { rowsOf as rows } from './splitKit';
-import { itemsIn } from '../backend/reviewKit';
+import { pair, aiOf, roots, checks, logOf, roundsOf, allEnded, until, numOf, rowsOf as rows, FAST, type Pair }
+  from './splitKit';
+import { itemsIn, val } from '../backend/reviewKit';
 
 afterAll(() => { for (const r of roots) fs.rmSync(r, { recursive: true, force: true }); });
-const val = <T>(r: { ok: true; value: T } | { ok: false; error: { message: string } }): T => {
-  if (!r.ok) throw new Error(r.error.message);
-  return r.value;
-};
 const ITEMS = 400;
+const LAPSE = 4000;
 /** the item the office raises a finding on, in its first block; the laptop passes it */
 const FOUND = 3;
 /** a call that checks item 3 (not one that only names it, such as a search) */
 const checksFound = (c: { model: string; prompt: string }) =>
   itemsIn(c as Parameters<typeof itemsIn>[0]).some((it) => numOf(it.text) === FOUND);
 
-type Release = 'merged' | 'done' | 'later' | 'closed';
+type Release = 'merged' | 'done' | 'later' | 'closed' | 'slept';
 /**
  * The laptop opens its round first, so the office's round is the one merged away. The office's first block waits
  * until the office has written the merge (`merged`), until the kept round has ended too (`done`), or until a later
- * check has run after that (`later`), or until the office has closed after that (`closed`), then raises a finding on
- * item 3, which the laptop has already passed.
+ * check has run after that (`later`), until the office has closed after that (`closed`), or until the office has
+ * slept after that (`slept`), then raises a finding on item 3, which the laptop has already passed.
  */
 async function mergeWhileOut(release: Release) {
   let merging = false;
+  let asleep = 0;                                          // how far the office's clock has jumped, as after a sleep
   const p = await pair({
     items: ITEMS,
+    nowA: () => Date.now() + asleep,
+    timing: { lapse: LAPSE },                              // a busy machine's pauses are not taken for a sleep (#131)
     scriptA: {
       delay: 20,
       finding: (n) => n === FOUND,
@@ -52,6 +52,12 @@ async function mergeWhileOut(release: Release) {
     if (release !== 'merged') await until('the kept round to end', keptDone, 60000);
     if (release === 'later') await until('the later check to end', laterDone, 60000);
     if (release === 'closed') await p.A.backend.close();
+    if (release === 'slept') await sleepAfterEnd();
+  };
+  /** the office's watcher has seen the kept round end; then the office sleeps for longer than a lapse */
+  const sleepAfterEnd = async () => {
+    await new Promise((r) => setTimeout(r, 20 * FAST.watch!));
+    asleep = 3 * LAPSE;
   };
   p.net.pause('both');
   const b = aiOf(p.B).firstPass(p.dealId);
@@ -110,8 +116,8 @@ describe('a batch still out when its round is merged away (#795)', () => {
     } finally { p.close(); }
   }, 120000);
 
-  it('once the PC has closed, it is not written', async () => {
-    const { p, both } = await mergeWhileOut('closed');
+  for (const release of ['closed', 'slept'] as const) it(`once the PC has ${release}, it is not written`, async () => {
+    const { p, both } = await mergeWhileOut(release);
     try {
       await Promise.allSettled([both]);
       await until('every round to end', () => {
