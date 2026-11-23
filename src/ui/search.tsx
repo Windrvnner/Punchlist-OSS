@@ -7,6 +7,7 @@ import { DocName } from './docName';
 import { CachedMark } from './cached';
 import { navigate } from './nav';
 import { searchGroups, loadAllForSearch, GROUP_PAGE, type Hit, type HitGroup, type HitKind } from '../app/search';
+import { isMine } from '../app/commands/members';
 import { Marked } from './searchMark';
 
 /**
@@ -89,7 +90,7 @@ export function SearchBox({ float }: { float?: boolean }) {
     selectByKey(e, pick);
   };
   useLayoutEffect(() => { if (res.current) fitWords(res.current); }, [groups, at]);   // the rows and the panel's size change it; moving through them does not
-  const loading = Object.keys(s.deals).some((id) => s.dealLoad[id] === 'loading' || s.dealLoad[id] === undefined);
+  const loading = ownDealsLoading(s);
   let n = 0;   // each group's rows are numbered on from the last group's
   const panel = open && at && createPortal(
     <div class="sdrop palbox" id="pal-drop" style={{ left: at.left, top: at.top, width: at.width, maxHeight: at.maxHeight }} onMouseDown={(e) => e.preventDefault()}>
@@ -114,6 +115,12 @@ export function SearchBox({ float }: { float?: boolean }) {
       {!active && <kbd>Ctrl K</kbd>}
     </div>);
   return <>{float ? createPortal(field, document.body) : field}{panel}</>;
+}
+
+// #491: deals outside My Deals are never read by Search.
+function ownDealsLoading(state: ReturnType<typeof useAppState>): boolean {
+  return Object.keys(state.deals).some((id) =>
+    isMine(state, id) && (state.dealLoad[id] === 'loading' || state.dealLoad[id] === undefined));
 }
 
 // When the last page is revealed, its group no longer has a Show More row (#628).

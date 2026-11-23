@@ -37,6 +37,75 @@ async function start(size = [1280, 736], scheme = 'dark') {
 const groups = (page) => page.evaluate(() => [...document.querySelectorAll('#pal-res .pgrp')].map((g) => [g.dataset.kind, g.querySelector('.plbl').textContent, g.querySelectorAll('button:not(.pmore)').length]));
 const search = async (page, q) => { await page.keyboard.press('Control+k'); await page.fill('#pal-in', q); await page.waitForSelector('#pal-res .pgrp, #pal-res .empty'); await page.waitForTimeout(150); };
 
+// Hold one mock record read until the test releases it, without changing its contents.
+const holdDeal = (page, id) => page.evaluate((id) => {
+  const repo = store.services.repo;
+  const list = repo.list.bind(repo);
+  const held = new Promise((resolve) => { window.releaseSearchRead = resolve; });
+  repo.list = async (kind, dealId) => {
+    if (kind === 'question' && dealId === id) await held;
+    return list(kind, dealId);
+  };
+}, id);
+
+// Supply a deal-scale log through the browser's mock reader, without consuming localStorage quota.
+async function seedQuestions(page, id) {
+  await page.evaluate(([id, wordings]) => {
+    const repo = store.services.repo;
+    const list = repo.list.bind(repo);
+    repo.list = async (kind, dealId) => {
+      const read = await list(kind, dealId);
+      if (!read.ok || kind !== 'question' || dealId !== id) return read;
+      const question = read.value.find(({ envelope }) => envelope.data.text.includes('lease term'));
+      if (!question) throw new Error('Missing mock question template');
+      const rows = wordings.map((text, index) => ({
+        ...question,
+        envelope: {
+          ...question.envelope,
+          data: { ...question.envelope.data, id: `q_${String(index + 1).padStart(26, '0')}`, n: index + 1, text },
+        },
+      }));
+      return { ...read, value: rows };
+    };
+  }, [id, general().map(({ text }) => `Please confirm: ${text}`)]);
+}
+
+async function loadingUsesMyDeals() {
+  const { ctx, page, k, o } = await start();
+  const neverAdded = 'd_00000000000000000000000001';
+  await page.evaluate(async ([removed, neverAdded]) => {
+    await store.dispatch(store.commandNamed('SetDealMember'), { dealId: removed, on: false }, { quiet: true });
+    const data = { ...store.get().deals[removed], id: neverAdded };
+    const result = await store.services.repo.transaction({
+      writes: [{ kind: 'deal', id: neverAdded, data, expectedRev: null }],
+      index: { dealId: '_', add: [{ kind: 'deal', id: neverAdded }] },
+    });
+    if (!result.ok) throw new Error(JSON.stringify(result.error));
+  }, [o, neverAdded]);
+  const created = await page.evaluate((dealId) => store.dispatch(store.commandNamed('CreateQuestion'),
+    { dealId, text: 'Please confirm the lease term.', workstream: 'Legal' }, { quiet: true }), k);
+  if (!created.ok) throw new Error(JSON.stringify(created.error));
+  await page.goto(URL + '#deals');
+  await page.reload();
+  await page.waitForFunction(([mine, unadded]) =>
+    store.get().boot.stage === 'ready' && !!store.get().deals[mine] && !!store.get().deals[unadded], [k, neverAdded]);
+  await seedQuestions(page, k);
+  await holdDeal(page, k);
+  await search(page, 'zzzzqqq');
+  const loading = await page.textContent('#pal-res .empty');
+  await page.evaluate(() => window.releaseSearchRead());
+  await page.waitForFunction((id) => store.get().dealLoad[id] === 'loaded', k);
+  const done = await page.textContent('#pal-res .empty');
+  const ownOnly = await page.evaluate(([removed, unadded]) =>
+    [removed, unadded].every((id) => store.get().dealLoad[id] === undefined), [o, neverAdded]);
+  await page.fill('#pal-in', 'lease term');
+  const question = page.locator('#pal-res [data-kind=question] button:not(.pmore)').first();
+  const match = await question.waitFor({ timeout: 3000 }).then(() => true, () => false);
+  say('#491 Search completes after My Deals are read', loading === 'Searching' && done === 'No matches.' && ownOnly && match,
+    JSON.stringify({ loading, done, ownOnly, match }));
+  await ctx.close();
+}
+
 async function selectedExpansion(page, oldCount) {
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve())));
   return page.evaluate((before) => {
@@ -134,6 +203,8 @@ async function selectedExpansion(page, oldCount) {
   await ctx.close();
 }
 
+await loadingUsesMyDeals();
+
 for (const [w, h] of SHOTS ? [[1280, 736], [1024, 640]] : []) for (const scheme of ['dark', 'light']) {
   const { ctx, page, k } = await start([w, h], scheme);
   await page.waitForSelector('#toast', { state: 'detached', timeout: 15000 }).catch(() => {});   // the deals' "created" notices gone
@@ -146,6 +217,10 @@ for (const [w, h] of SHOTS ? [[1280, 736], [1024, 640]] : []) for (const scheme 
   for (let i = 0; i < n; i++) await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter'); await page.waitForSelector('#ck-detail'); await page.waitForTimeout(600);
   await page.screenshot({ path: `${SHOTS}/2-item-opened-${scheme}-${w}x${h}.png` });
+  await search(page, 'zzzzqqq');
+  await page.locator('#pal-res .empty').filter({ hasText: 'No matches.' }).waitFor();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: `${SHOTS}/3-no-matches-${scheme}-${w}x${h}.png` });
   await ctx.close();
 }
 
