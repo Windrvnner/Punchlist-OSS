@@ -10,6 +10,7 @@ import { mockAi, mockDocuments, mockSession } from '../../src/adapters/mocks';
 import { CreateDeal } from '../../src/app/commands/deals';
 import { CreateQuestion, SetQuestionStatus, SetResponse } from '../../src/app/commands/questions';
 import { RequestDraft, ApplyDraft, AcceptDraft, RestoreQuestionSnapshot } from '../../src/app/commands/drafts';
+import { ResolveConflict, ReopenConflict } from '../../src/app/commands/conflicts';
 import { ImportQuestions, RevertImport } from '../../src/app/commands/importQuestions';
 import { registry } from '../../src/app/commands/undo';
 import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
@@ -20,7 +21,10 @@ import { CURRENT_SCHEMA, type Question } from '../../src/domain/model';
 import { Combined, isLine, type Line } from '../../src/backend/changeLog';
 import type { Folder } from '../../src/backend/logRepository';
 
-const COMMANDS = [CreateDeal, CreateQuestion, SetQuestionStatus, SetResponse, RequestDraft, ApplyDraft, AcceptDraft, RestoreQuestionSnapshot, ImportQuestions, RevertImport];
+const COMMANDS = [
+  CreateDeal, CreateQuestion, SetQuestionStatus, SetResponse, RequestDraft, ApplyDraft, AcceptDraft,
+  RestoreQuestionSnapshot, ImportQuestions, RevertImport, ResolveConflict, ReopenConflict,
+];
 for (const c of COMMANDS) registry.set(c.name, c);
 let t = 0; const clock = { now: () => new Date(Date.UTC(2026, 10, 17, 10, 0, 0, t++)).toISOString() };
 let seq = 0; const ids = { next: (p: string) => `${p}_01HZZZZZZZZZZZZZZZZ${String(seq++).padStart(7, '0')}` };
@@ -33,7 +37,10 @@ const TEXT = 'The cap is 20% of the contract price.';
 async function world() {
   const opts = { latency: [0, 0] as [number, number] }; const repo = memRepo(clock.now, disk());
   let answer!: () => void; const held = new Promise<void>((r) => { answer = r; });
-  const ai = { ...mockAi(opts, repo), draft: async () => { await held; return ok({ status: 'found' as const, text: TEXT, sources: [{ doc: 'EPC contract.pdf', loc: 'p. 82', docId: 'doc_epc' }] }); } };
+  const calls = { draft: 0 };
+  const sources = [{ doc: 'EPC contract.pdf', loc: 'p. 82', docId: 'doc_epc' }];
+  const reply = ok({ status: 'found' as const, text: TEXT, sources });
+  const ai = { ...mockAi(opts, repo), draft: async () => { calls.draft++; await held; return reply; } };
   const store = new Store({ repo, ai, docs: mockDocuments(opts), fs: { pickFolders: null, pathFor: null, save: async () => ({ ok: true as const, value: 'saved' as const }) }, sheets: csvCodec, session: mockSession(opts), local: new MemoryLocal(), clock, ids }, COMMANDS);
   await store.boot(); await store.dispatch(CreateDeal, { name: 'Proseware', folders: [] });
   const dealId = Object.values(store.get().deals)[0].id; await store.loadDeal(dealId);
@@ -47,7 +54,8 @@ async function world() {
     repo.peer.edit('question', before.id, { ...was, ...patch, updatedAt: THEM.at }, THEM); await repo.sync(); await settle(); await settle();
   };
   const draft = async (q: Question) => { const r = await store.dispatch(RequestDraft, { dealId, questionId: q.id }); expect(r.ok).toBe(true); return r.ok ? r.value.opId : ''; };
-  return { store, repo, dealId, qs, answer, theyChange, draft, now: (id: string) => store.get().questions[id] };
+  Object.assign(store.replyWait, { first: 20, max: 80 });                    // a held reply's tries go by quickly
+  return { store, repo, dealId, qs, answer, theyChange, draft, calls, now: (id: string) => store.get().questions[id] };
 }
 
 /** what the shared folder holds, read as any PC reads it */
@@ -210,4 +218,84 @@ describe('two coworkers close a question while it is being drafted, one before t
     expect(Object.keys(w.store.get().conflicts)).toEqual([]);
     expect(picked.every((q) => w.now(q.id).status === 'closed' && w.now(q.id).draft?.status === 'found')).toBe(true);
   }, 240000);
+});
+
+describe('a reply held while its question has two versions (#22)', () => {
+  const until = async (done: () => boolean) => {
+    for (let n = 0; n < 400 && !done(); n++) await new Promise((r) => setTimeout(r, 10));
+    expect(done()).toBe(true);
+  };
+  type World = Awaited<ReturnType<typeof world>>;
+  /** the version of the question's choice written on this PC (`here`), or the coworker's */
+  const versionOf = (w: World, id: string, here: boolean) =>
+    w.store.get().conflicts[id].versions.find((v) => !!v.here === here)!;
+  const keep = (w: World, recordId: string, version: string) =>
+    w.store.dispatch(ResolveConflict, { dealId: w.dealId, recordId, keep: version }, { quiet: true });
+  const type = (w: World, q: Question) =>
+    w.store.dispatch(SetResponse, { dealId: w.dealId, questionId: q.id, response: 'Typed here' });
+
+  it('lands on whichever version is kept: 100 questions of 2,000, the model asked once each', async () => {
+    const w = await world(); const picked = w.qs().slice(0, 100);
+    const ops = new Map<string, string>();
+    for (const q of picked) ops.set(q.id, await w.draft(q));
+    for (const q of picked) expect((await type(w, q)).ok).toBe(true);
+    for (const [i, q] of picked.entries()) {
+      const theirWords = i === 49 ? { response: 'Their words' } : {};               // Q50: the coworker typed too
+      await w.theyChange(q, { status: 'closed', ...theirWords });
+    }
+    expect(picked.every((q) => w.store.get().conflicts[q.id])).toBe(true);
+    w.answer();
+    await until(() => picked.every((q) => w.store.hasKeptReply(ops.get(q.id)!)));
+    // Q100 keeps the typed version; the rest keep the coworker's close
+    for (const [i, q] of picked.entries()) expect((await keep(w, q.id, versionOf(w, q.id, i === 99).id)).ok).toBe(true);
+    expect(picked.every((q) => w.now(q.id).draft?.opId === ops.get(q.id))).toBe(true);
+    for (const q of picked) w.store.retryKeptReply(ops.get(q.id)!);
+    await until(() => picked.every((q) => w.now(q.id).draft?.status === 'found'));
+    expect(picked.every((q) => w.now(q.id).draft?.text === TEXT)).toBe(true);
+    expect(w.calls.draft).toBe(100);
+    for (const [i, q] of picked.entries()) {
+      const closedAs = { status: 'closed', response: i === 49 ? 'Their words' : '' };
+      expect(w.now(q.id)).toMatchObject(i === 99 ? { status: 'open', response: 'Typed here' } : closedAs);
+    }
+    // the typed version not kept is listed under Deleted
+    const typedAside = Object.values(w.store.get().tombstones)
+      .filter((t) => (t.snapshot as Question | undefined)?.response === 'Typed here');
+    expect(typedAside.length).toBe(99);
+  }, 240000);
+
+  it('Undo of the choice brings both versions back as they were', async () => {
+    const w = await world(); const q = w.qs()[10];
+    const opId = await w.draft(q);
+    await type(w, q);
+    await w.theyChange(q, { status: 'closed' });
+    w.answer(); await until(() => w.store.hasKeptReply(opId));
+    const shown = () => w.store.get().conflicts[q.id].versions.map((v) => {
+      const { rev: _r, ...data } = v.data as Question; return { by: v.by, from: v.from, data };
+    });
+    const before = shown();
+    const r = await keep(w, q.id, versionOf(w, q.id, false).id);
+    expect(r.ok).toBe(true);
+    expect(w.now(q.id).draft?.opId).toBe(opId);
+    expect((await w.store.undo(r.ok ? r.value.opId : '')).ok).toBe(true);
+    expect(shown()).toEqual(before);
+  }, 120000);
+
+  it('two crossing drafts are never merged: keeping a version without a draft carries neither', async () => {
+    const w = await world(); const q = w.qs()[20];
+    await w.draft(q); await w.repo.sync(); const forWording = w.now(q.id).draft!.forWording;
+    const v = folderView(w.repo.shared); const base = v.version(v.state('question', q.id).tips[0])!.base[0];
+    const was = v.version(base)!.data as Question;
+    const opId = 'op_01HZZZZZZZZZZZZZZZZ9999999';
+    const theirs = { status: 'pending' as const, text: '', sources: [], forWording, opId, at: HOME.at };
+    // one coworker asks for a draft of their own, and another closes it, both on the version before this PC's draft
+    pcWriting(w.repo.shared, HOME)(q, base, { ...was, draft: theirs, updatedAt: HOME.at }, HOME.at);
+    pcWriting(w.repo.shared, OFFICE)(q, base, { ...was, status: 'closed', updatedAt: OFFICE.at }, OFFICE.at);
+    await w.repo.sync(); await settle(); await settle();
+    const versions = w.store.get().conflicts[q.id]?.versions ?? [];
+    expect(new Set(versions.map((x) => (x.data as Question | null)?.draft?.opId)).size).toBe(3);   // two drafts, none
+    const bare = versions.find((x) => x.data && !(x.data as Question).draft)!;
+    expect((await keep(w, q.id, bare.id)).ok).toBe(true);
+    expect(w.now(q.id)).toMatchObject({ status: 'closed' });
+    expect(w.now(q.id).draft).toBeUndefined();
+  }, 120000);
 });
