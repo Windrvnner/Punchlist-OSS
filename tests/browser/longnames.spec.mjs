@@ -274,19 +274,24 @@ for (const [w, h] of [[1280, 736], [1024, 640]]) {
 const ARABIC = 'مشروع الرياح البحرية الكبير في شمال البحر';
 const HEBREW = 'פרויקט אגירת אנרגיה ימית עם חיבור לתחנות משנה צפוניות';
 const FUND = 'Example Infrastructure Partners Fund';
+const REPEATED_FUND = 'Fund IV Fund V Example Infrastructure Partners Fund';
 const UNBROKEN = 'ExampleCoInvestmentInfrastructureCoInvestmentVehicleIIILuxembourgSCSp';
 const SAMPLE_PARTY = 'Widewater Worldwide Wind Infrastructure Co-Investment Vehicle III (Lux) SCSp';
 const LONG_DEAL = 'Supercalifragilisticexpialidocious-Offshore-Wind-Portfolio-Refinancing';
 const REFERENCE = 'pp. 1120-1185';
 
 async function seedSearchLabels(page) {
-  await page.evaluate(async ({ arabic, hebrew, fund, word, counterparty, longDeal, loc }) => {
+  await page.evaluate(async ({ arabic, hebrew, fund, repeated, word, counterparty, longDeal, loc }) => {
     const run = (name, input) => store.dispatch(store.commandNamed(name), input, { quiet: true });
     const labels = [
       ['Maple Wind Portfolio', fund + ' IV (Lux) SCSp', 'covenant compliance'],
       ['Maple Wind Portfolio', fund + ' V (Lux) SCSp', 'covenant compliance'],
+      ['Meadow Storage Portfolio', repeated + ' IV (Lux) SCSp', 'Reserve fund test'],
+      ['Meadow Storage Portfolio', repeated + ' V (Lux) SCSp', 'Reserve fund test'],
       ['Sample A', counterparty, 'Sample A lease'],
       ['Sample A', 'Elm', 'Sample A lease'],
+      ['Project - Sample Name with a Long Series of Terms', 'W'.repeat(75), 'Punctuated deal lease'],
+      ['Project - Sample Name with a Long Series of Terms', 'Elm', 'Punctuated deal lease'],
       [longDeal, word, 'Zebra edge finding'],
       [longDeal, 'Oak', 'Zebra edge finding'],
       [arabic, 'W'.repeat(74), 'connection signature'],
@@ -306,7 +311,7 @@ async function seedSearchLabels(page) {
         });
       }
     }
-  }, { arabic: ARABIC, hebrew: HEBREW, fund: FUND, word: UNBROKEN, counterparty: SAMPLE_PARTY,
+  }, { arabic: ARABIC, hebrew: HEBREW, fund: FUND, repeated: REPEATED_FUND, word: UNBROKEN, counterparty: SAMPLE_PARTY,
     longDeal: LONG_DEAL, loc: REFERENCE });
 }
 
@@ -387,11 +392,22 @@ for (const [width, height] of [[1280, 736], [1024, 640]]) {
       labelChecks[492].push(searchTwin && railTwin && full);
     }
     await shot('492-funds');
+    for (const roman of ['IV', 'V']) {
+      const full = REPEATED_FUND + ' ' + roman + ' (Lux) SCSp';
+      const repeated = await searchLabel(page, 'Reserve fund test.pdf', 'document', full);
+      const rail = page.locator('.dealrow .dtw').filter({ hasText: full }).first();
+      const distinction = 'Fund ' + roman;
+      labelChecks[492].push(await fitsText(repeated.locator('.twin-focus'), distinction) &&
+        await fitsText(rail.locator('.twin-focus'), distinction));
+    }
 
     const sample = await searchLabel(page, 'Sample A lease.pdf', 'document', SAMPLE_PARTY);
     labelChecks[495].push(await fitsText(sample.locator('.wdeal'), 'Sample') &&
       await fitsText(sample.locator('.wdeal'), ' A') && await fitsText(sample.locator('.wat'), REFERENCE));
     await shot('495-name-and-pages');
+    const punctuated = await searchLabel(page, 'Punctuated deal lease.pdf', 'document', 'WWWW');
+    labelChecks[495].push(await fitsText(punctuated.locator('.wdeal'), 'Sample') &&
+      await fitsText(punctuated.locator('.wat'), REFERENCE));
 
     const unbroken = await searchLabel(page, 'Zebra edge finding.pdf', 'document', UNBROKEN);
     const ellipsis = await unbroken.locator('.wtwin .ww').evaluate((word) =>

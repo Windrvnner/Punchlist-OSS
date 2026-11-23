@@ -8,6 +8,7 @@ import { CachedMark } from './cached';
 import { navigate } from './nav';
 import { searchGroups, loadAllForSearch, GROUP_PAGE, type Hit, type HitGroup, type HitKind } from '../app/search';
 import { TwinLabel } from './dealLabel';
+import { bareDealName } from '../app/commands/deals';
 import { Marked } from './searchMark';
 
 /**
@@ -197,14 +198,17 @@ function ResultGroup({ g, first, cur, query, onPoint, onPick }: {
 }
 
 // #495: reserve the first meaningful part of the deal's name after the common Project prefix.
-function dealNameFloor(deal: HTMLElement, ellipsis: number, measure: (text: string) => number): number {
-  const name = (deal.textContent ?? '').replace(/^ · /, '');
-  const parts = name.trim().split(/\s+/);
-  const project = /^project$/i.test(parts[0]);
-  const first = project ? parts.slice(0, 2).join(' ') : parts[0];
-  const separator = name === deal.textContent ? '' : ' · ';
-  const floor = parts.length <= 3 && name.length <= 28 ? name : [...first].slice(0, project ? 22 : 14).join('');
-  return Math.ceil(Math.min(measure(separator + name), measure(separator + floor) + ellipsis));
+function dealNameFloor(deal: HTMLElement, ellipsis: number, measure: (text: string) => number) {
+  const full = deal.textContent ?? '';
+  const name = full.replace(/^ · /, '');
+  const bare = bareDealName(name, 'navigation') || name;
+  const leading = full.slice(0, full.length - bare.length);
+  const firstWord = bare.split(/\s+/)[0];
+  const floor = name.length <= 28 ? full : leading + [...firstWord].slice(0, 14).join('');
+  const width = Math.ceil(Math.min(measure(full), measure(floor) + ellipsis));
+  const longWord = deal.querySelector<HTMLElement>('.wlong');
+  const before = longWord ? full.slice(0, full.length - name.length + Number(longWord.dataset.start)) : '';
+  return { width, beforeWord: Math.ceil(measure(before)) };
 }
 
 /**
@@ -232,7 +236,10 @@ function fitWords(root: HTMLElement) {
     return deal ? [deal, dealNameFloor(deal, ell, measure)] as const : null;
   });
   for (const floor of floors) {
-    if (floor) floor[0].style.minWidth = `${floor[1]}px`;
+    if (!floor) continue;
+    const [deal, { width, beforeWord }] = floor;
+    deal.style.minWidth = `${width}px`;
+    deal.style.setProperty('--words-before', `${beforeWord}px`);
   }
   const cuts = rows.map((row) => {
     const twin = row.querySelector<HTMLElement>('.wtwin');
@@ -247,21 +254,25 @@ function fitWords(root: HTMLElement) {
 }
 
 /** Keep each word with its preceding space so a whole-word ellipsis never follows a space. */
-function Words({ text, clip }: { text: string; clip?: number }) {
-  return <>{text.split(/(?= )/).map((word, index) =>
-    <span class={clip === index ? 'ww wlong' : 'ww'} key={index}>{word}</span>)}</>;
+function Words({ text, clipAt }: { text: string; clipAt?: number }) {
+  return <>{[...text.matchAll(/ *[^ ]+/g)].map(([word], index, words) => {
+    const start = words[index].index;
+    const clipped = clipAt !== undefined && start <= clipAt && clipAt < start + word.length;
+    return <span class={clipped ? 'ww wlong' : 'ww'} data-start={clipped ? start : undefined} key={start}>{word}</span>;
+  })}</>;
 }
+
 /** A question number or pages ("Q12", "p. 4", "pp. 1120-1185", "pages 3, 7") is never cut; any other place (a sheet cell) is whole or left to the hover. */
 const PAGES = /^(Q\d+|(pp?\.|pages?) ?\d[\d,;–—\- ]*)$/i;
 // #490: keep the reading direction within the name, with the separator and reference outside it.
 function SearchDealName({ name, hasTwin }: { name: string; hasTwin: boolean }) {
-  const words = name.split(/(?= )/);
-  const prefix = words[0]?.toLowerCase() === 'project' ? 1 : 0;
+  const bare = bareDealName(name, 'navigation') || name;
+  const clipAt = bare.split(/\s+/)[0].length > 15 ? name.length - bare.length : undefined;
   return <span class="wdeal">
     {hasTwin && ' · '}
     {nameDir(name) === 'rtl'
       ? <span class="wrtl" dir="rtl">{name}</span>
-      : <Words text={name} clip={words[prefix]?.length > 15 ? prefix : undefined} />}
+      : <Words text={name} clipAt={clipAt} />}
   </span>;
 }
 
@@ -278,7 +289,7 @@ function Where({ h }: { h: Hit }) {
   const twin = p.twin.replace(/\s+/g, ' ');
   return <span class="where parts" title={h.where}>
     {twin && <span class="wtwin">
-      <TwinLabel text={twin} focus={p.focus?.replace(/\s+/g, ' ')}><Words text={twin} /></TwinLabel>
+      <TwinLabel text={twin} focus={p.focus}><Words text={twin} /></TwinLabel>
     </span>}
     <SearchDealName name={p.deal} hasTwin={!!twin} />
     {p.at && <><span class="sr-only"> · </span><span class={PAGES.test(p.at) ? 'wat' : 'wat long'}>{p.at}</span></>}

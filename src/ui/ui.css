@@ -36,10 +36,8 @@ a.flagrow{text-decoration:none;color:inherit}
    Where it is gives way at its end, with an ellipsis (whole on hover) */
 .sdrop .palres button:has(>.where){flex-direction:column;align-items:stretch;gap:3px;padding:6px 14px}
 .palres .where{white-space:nowrap;min-width:0;max-width:none;width:100%;margin-left:0;overflow:hidden;text-overflow:ellipsis}
-/* inside a deal, as in the approved mock-up: what tells it from a deal of the same name (the
-   counterparty, else the day) comes first and is never cut; the place sits whole at the right; the deal's name takes the room
-   between and is cut at its end. Only where the counterparty and a sheet cell together are wider than the line does the cell
-   wrap onto a second line that the one-line box hides, leaving it to the hover */
+/* Inside a deal, the counterparty or day comes first, then the name and the reference.
+   A page or question number stays whole. A sheet cell that cannot fit wraps outside the visible line. */
 .palres .where.parts{display:flex}
 .palres .where.parts:has(>.wat.long){flex-wrap:wrap;max-height:1lh}
 .palres .where.parts>span{white-space:pre;min-width:0;overflow:hidden;text-overflow:ellipsis}   /* pre keeps the separator's spaces; line breaks are folded before they get here */
@@ -49,8 +47,9 @@ a.flagrow{text-decoration:none;color:inherit}
 /* #494: one word that exceeds the whole label can ellipsize inside its own box. */
 .palres .where.parts .wtwin>.ww:only-child{max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
 /* #495: a first name word wider than its share can still show a readable beginning. */
-.palres .wdeal>.wlong{max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
-.palres .wdeal>.wlong:nth-child(2){max-width:calc(100% - 7ch)}
+.palres .wdeal>.wlong{
+  max-width:calc(100% - var(--words-before, 0px));overflow:hidden;text-overflow:ellipsis;vertical-align:bottom
+}
 /* #490: the RTL name clips on its own, while the separator and reference keep their places. */
 .palres .wdeal:has(.wrtl){display:flex}
 .palres .wrtl{min-width:0;overflow:hidden;text-overflow:ellipsis}
