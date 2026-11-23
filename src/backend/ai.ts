@@ -70,7 +70,9 @@ import {
 import { docFamilies } from './related';
 import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
-import { RATINGS, riskGroups, keyRisksOf, type Rating, type RiskGroup } from '../domain/memo';
+import {
+  RATINGS, riskGroups, keyRisksOf, unratedFindings, type Grouped, type Rating, type RiskGroup,
+} from '../domain/memo';
 import { SERVICE, control } from '../control';
 import { view, openRounds, serves, factsOf, finishedAt, need, undone, blockOf, unitOf, owner, findingIdFor, docsHash, isItem, itemOf, findingOf, counts, Observer, type View, type RoundState, type RoundKind, type RoundDef, type Piece, type RLine, type PieceFacts } from './rounds';
 import { SHARE, SHARED_BY, FOLDER_PART } from './sameRoom';
@@ -375,6 +377,32 @@ const unreachable = (e: unknown) => (e as { code?: string })?.code === 'unreacha
 const signedOutErr = (e: unknown) => !!(e as { signedOut?: boolean } | undefined)?.signedOut;
 /** what a check asked for ends with when this PC is signed out: never that the service cannot be reached */
 const SIGNED_OUT = `Waiting for ${SERVICE} sign-in. The check resumes once someone signs in.`;
+
+/** The first-page summary describes any known High risks and discloses unresolved ratings (#661). */
+function memoSummaryPrompt(
+  facts: string,
+  openCount: number,
+  unratedCount: number,
+  risks: Grouped[],
+  describeFinding: (id: string) => string,
+): string {
+  const highs = risks.filter((risk) => risk.rating === 'High');
+  let riskInstructions = unratedCount ? 'state that there are open findings with unresolved ratings. ' : '';
+  if (highs.length) {
+    const lines = highs.map((risk) => `- ${risk.title}: ${risk.findings.map(describeFinding).join(' ')}`);
+    const highInstructions = `each of these High risks in one sentence:\n${lines.join('\n')}\n`;
+    riskInstructions = riskInstructions ? `${riskInstructions}Summarize ${highInstructions}` : highInstructions;
+  } else if (!riskInstructions) {
+    riskInstructions = openCount ? 'that no open risk is rated High. ' : 'that it has no open findings. ';
+  }
+  const deal = facts ? ` (${facts})` : '';
+  return `Write the summary of a deal memo for a managing director at an investment bank, about this deal${deal}: `
+    + 'two paragraphs, at most 170 words in all. First what the project and the financing are, with the figures '
+    + 'the documents give (size, capacity, location, sponsor, offtake, structure, timetable). '
+    + `Then ${riskInstructions}`
+    + 'Facts only: no advice, no recommendation, no next steps, and no judgment of how the deal or the work is going. '
+    + 'Name no person. Never write an id.';
+}
 
 export function nodeAi(o: AiOptions) {
   const clock = o.clock ?? (() => new Date().toISOString()); const L = control.limits; const width = o.width ?? L.docsPerCall; const batch = Math.max(1, o.batch ?? L.itemsPerCall); const shortlist = Math.max(1, o.shortlist ?? L.shortlist);
@@ -1521,11 +1549,11 @@ export function nodeAi(o: AiOptions) {
       // with no open finding there is nothing to rate, but the memo still opens with what the deal is
       let m: Awaited<ReturnType<typeof models>>; try { m = await models(); } catch (e) { return failure(e, `${SERVICE} did not answer`); }
       try {
-        const need = () => open.filter((f) => !ratings[f.id]);
         const ask = (model: string, fs: typeof open) => askJson<{ ratings?: unknown }>({ kind: 'memoRatings', split: true, model, system: JSON_ONLY, prompt: `Rate each of these open findings on a deal as High, Medium or Low risk, by these definitions and nothing else:\nHigh: ${d.high}.\nMedium: ${d.medium}.\nLow: ${d.low}.\n\n${fs.map((f) => `${f.id} (${f.workstream}): ${plain(f)}`).join('\n')}\n\nReply as JSON, with every finding above once: {"ratings": [{"id": "its id", "rating": "High" | "Medium" | "Low"}]}` }, ['ratings']);
         let rateRoom = Infinity;                                                   // the part size a cut-off has shown, carried to the next model's pass
         for (const model of [m.standard, m.standard, m.thorough]) {
-          const fs = need(); if (!fs.length) break;
+          const fs = unratedFindings(open, ratings);
+          if (!fs.length) break;
           // a deal with many findings is rated a part at a time, as the checks are: parts that fit the output limit, halved
           // after a cut-off, keeping the ratings that came whole (parts.ts). One left unrated is asked again by the next model.
           const size = Math.min(rateRoom, partSize({ cap: MEMO_RATE_BATCH, out: control.limits.ratingReplyTokens, outLimit: outLimit(model), in: tokensEach(fs.map((f) => `${f.title} ${f.body.join(' ')}`)), inLimit: inLimit(model) }));
@@ -1579,12 +1607,12 @@ export function nodeAi(o: AiOptions) {
       catch (e) { if (unreachable(e)) return failure(e, `${SERVICE} did not answer`); }
       const risks: RiskGroup[] = grouped.map((g) => { const w = written.get(g); return { title: g.title, findings: g.findings, ...(w?.body?.length ? { body: w.body, sources: w.sources } : {}) }; });
 
-      // the summary: what the project is, from the documents, then each High risk in a sentence (half a page
-      // to a page of summary); on the first page with the glance table, so it is held to about 170 words
       const got = await o.repo.get('deal', dealId); const deal = got.ok && got.value ? got.value.envelope.data as { name: string; counterparty?: string; product?: string; sector?: string; technology?: string } : null;
       const facts = deal ? [deal.name, deal.counterparty, deal.product, deal.sector, deal.technology].filter(Boolean).join('; ') : '';
-      const highs = grouped.filter((g) => g.rating === 'High');
-      const prompt = `Write the summary of a deal memo for a managing director at an investment bank, about this deal${facts ? ` (${facts})` : ''}: two paragraphs, at most 170 words in all. First what the project and the financing are, with the figures the documents give (size, capacity, location, sponsor, offtake, structure, timetable). Then ${highs.length ? `each of these High risks in one sentence:\n${highs.map((g) => `- ${g.title}: ${g.findings.map((id) => `(${byId.get(id)!.workstream || 'no workstream'}) ${plain(byId.get(id)!)}`).join(' ')}`).join('\n')}\n` : open.length ? 'that no open risk is rated High. ' : 'that it has no open findings. '}Facts only: no advice, no recommendation, no next steps, and no judgment of how the deal or the work is going. Name no person. Never write an id.`;
+      const prompt = memoSummaryPrompt(facts, open.length, unratedFindings(open, ratings).length, grouped, (id) => {
+        const finding = byId.get(id)!;
+        return `(${finding.workstream || 'no workstream'}) ${plain(finding)}`;
+      });
       const parasOf = (reply: { paragraphs?: unknown } | null) => strings(reply?.paragraphs).map((p) => unid(noMarks(p), ids)).filter(Boolean).slice(0, 2);
       let summary: string[] = [];
       try {
