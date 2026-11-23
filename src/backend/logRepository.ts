@@ -18,6 +18,7 @@ import type { Repository, Transaction, Loaded, Version, SyncState, Recovered, Wr
 import { CURRENT_SCHEMA, CLASH_KINDS, Envelope, schemaOf, type AuditEntry, type ClashKind, type RecordKind } from '../domain/model';
 import { ok, fail, type Result, type Failure } from '../domain/result';
 import { Combined, isLine, recKey, type Line, type RecChange, type RecState } from './changeLog';
+import type { Ver } from './changeLines';
 import { shareOwn, wholeLines } from './ownFile';
 import { LocalChanges } from './localChanges';
 import { recoveredWriteClashes } from './recoveredWrite';
@@ -928,7 +929,24 @@ export class LogRepository implements Repository {
     // a deleted version carries the copy its deletion note kept, so a person choosing sees the words that were deleted
     const held = (v: (typeof st.heads)[number]) => (this.view.lineMate(v, 'tombstone', id)?.data as { snapshot?: unknown } | undefined)?.snapshot;
     const conflict: Version[] = st.heads.map((v) => ({ id: v.ver, by: v.by, from: v.from, at: v.at, data: v.del ? undefined : v.data, ...(v.del ? { deleted: true, ...(held(v) ? { held: held(v) } : {}) } : {}), ...(v.pc === this.id ? { here: true } : {}) }));
+    if (kind === 'question') for (const [i, v] of st.heads.entries()) conflict[i].drafts = this.draftsIn(v);
     return { kind, id, rev: st.rev, envelope, conflict };
+  }
+  /** every draft request held anywhere in a version's history, back through each version it was based on (#22) */
+  private draftsIn(head: Ver): string[] {
+    const visited = new Set<string>();
+    const drafts = new Set<string>();
+    const todo = [head.ver];
+    while (todo.length) {
+      const ver = todo.pop()!;
+      const version = visited.has(ver) ? undefined : this.view.version(ver);
+      visited.add(ver);
+      if (!version) continue;
+      const opId = (version.data as { draft?: { opId?: unknown } } | undefined)?.draft?.opId;
+      if (typeof opId === 'string') drafts.add(opId);
+      todo.push(...version.base);
+    }
+    return [...drafts];
   }
   /** a record as it stands, read at once, for a caller that cannot wait; not for ops */
   peek(kind: Exclude<RecordKind, 'op'>, id: string): Loaded | null { this.readFor(kind, id); return this.loaded(kind, id); }

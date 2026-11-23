@@ -45,6 +45,8 @@ export interface Version {
   id: string; by: string; from: string; at: string; data: unknown; here?: boolean; deleted?: boolean;
   /** of a deleted version: the record as the deleting PC had it (the copy in the deletion note written with the delete), so a person sees what was deleted */
   held?: unknown;
+  /** of a question's version: every draft request its history held, so a choice can tell a draft it never saw (#22) */
+  drafts?: string[];
 }
 
 export interface Transaction {

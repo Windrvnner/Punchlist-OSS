@@ -1325,7 +1325,14 @@ export class Store {
   private conflictOf(kind: RecordKind, id: string, rev: number, versions: Version[] | undefined): Conflict | null {
     if (!versions || versions.length < 2 || !(CLASH_KINDS as readonly string[]).includes(kind)) return null;
     const schema = schemaOfKind(kind)!;
-    const read = versions.map((v) => { const d = v.data ?? (v.deleted ? v.held : undefined); const r = d && typeof d === 'object' ? schema.safeParse({ ...(d as object), rev }) : null; return { id: v.id, by: v.by, from: v.from, at: v.at, ...(v.here ? { here: true } : {}), ...(v.deleted ? { deleted: true } : {}), data: r?.success ? (r.data as Deal | Question | Finding | Item | ListRecord) : null, raw: v.data }; });
+    const read = versions.map((v) => {
+      const d = v.data ?? (v.deleted ? v.held : undefined);
+      const r = d && typeof d === 'object' ? schema.safeParse({ ...(d as object), rev }) : null;
+      const data = r?.success ? (r.data as Deal | Question | Finding | Item | ListRecord) : null;
+      const marks = { ...(v.here ? { here: true } : {}), ...(v.deleted ? { deleted: true } : {}) };
+      const drafts = v.drafts ? { drafts: v.drafts } : {};
+      return { id: v.id, by: v.by, from: v.from, at: v.at, ...marks, data, raw: v.data, ...drafts };
+    });
     const first = read.find((v) => v.data)?.data as { dealId?: string } | undefined;
     return { kind: kind as Conflict['kind'], id, dealId: kind === 'deal' ? id : first?.dealId ?? '', versions: read };
   }
@@ -1540,12 +1547,13 @@ export class Store {
     const otherPc = pending.filter((id) => !this.liveRequests.has(id) && !this.state.ops[id]);
     const now = Date.parse(this.services.clock.now());
     const seen = seenSince(this.services.local, dealId, otherPc, now);
-    const waits = otherPc.map((id) => DRAFT_GIVE_UP_MS - (now - seen.get(id)!)).filter((ms) => ms > 0);
+    const seenFor = (id: string) => Math.max(0, now - seen.get(id)!);     // a clock put back counts as no time
+    const waits = otherPc.map((id) => DRAFT_GIVE_UP_MS - seenFor(id)).filter((ms) => ms > 0);
     const ids = pending.filter((id) => {
       if (this.liveRequests.has(id)) return true;
       const op = this.state.ops[id];
       if (op) { const alive = op.window !== this.windowId && this.isLive(op); otherWindow ||= alive; return alive; }
-      return now - seen.get(id)! < DRAFT_GIVE_UP_MS;
+      return seenFor(id) < DRAFT_GIVE_UP_MS;
     });
     return { ids, otherWindow, ...(waits.length ? { otherPcDue: Math.min(...waits) } : {}) };
   }
