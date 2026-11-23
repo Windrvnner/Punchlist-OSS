@@ -142,7 +142,35 @@ for (const scheme of ['dark', 'light']) {
   const ddTyped = await page.inputValue('#dd-name'); await page.keyboard.press('Escape'); await page.waitForSelector('#dd-name', { state: 'detached' });
   say(`${scheme}:delete-deal-opens-in-its-name-field`, ddTyped === 'Project Pros', ddTyped);
   await page.goto(URL + '#overview-' + id); await page.waitForSelector('#f-folders'); await page.focus('#f-folders'); await page.keyboard.press('Enter'); await page.waitForSelector('#nd-title');
-  const fdFocus = await active(page); await page.keyboard.press('Escape'); await page.waitForSelector('#nd-title', { state: 'detached' });
+  const fdFocus = await active(page);
+  await page.waitForFunction((dealId) => store.get().deals[dealId]?.stage === 'ready', id, { timeout: 30000 });
+  for (const files of [0, 1, 2]) {
+    await page.evaluate(async ([dealId, count]) => {
+      const deal = store.get().deals[dealId];
+      const folders = deal.folders.map((folder, i) => i ? folder : { ...folder, files: count, indexed: count });
+      await store.dispatch(store.commandNamed('RecordIndexingProgress'), {
+        dealId, folders, log: deal.log, done: true,
+      }, { quiet: true });
+    }, [id, files]);
+    const expected = `${files} ${files === 1 ? 'file' : 'files'}`;
+    await page.waitForFunction((text) => document.querySelector('#folders .cnt')?.textContent === text, expected);
+    const countText = await page.$eval('#folders .cnt', (e) => e.textContent);
+    say(`${scheme}:folder-count-uses-the-right-singular-${files}`, countText === expected, countText);
+  }
+  for (const files of [0, 1, 2]) {
+    await page.evaluate((count) => {
+      const ui = store.get().ui;
+      store.ui({ newDeal: { ...ui.newDeal, folders: [{
+        path: 'incoming', label: 'incoming', files: count, size: '0.0 GB',
+      }] } });
+    }, files);
+    const expected = `${files} ${files === 1 ? 'file' : 'files'} · 0.0 GB`;
+    await page.waitForFunction((text) =>
+      document.querySelector('#folders-waiting .cnt')?.textContent === text, expected);
+    const waitingCount = await page.$eval('#folders-waiting .cnt', (e) => e.textContent);
+    say(`${scheme}:waiting-folder-count-uses-the-right-singular-${files}`, waitingCount === expected, waitingCount);
+  }
+  await page.keyboard.press('Escape'); await page.waitForSelector('#nd-title', { state: 'detached' });
   say(`${scheme}:folders-opens-on-choose-folders`, fdFocus === '#nd-browse' && (await active(page)) === '#f-folders', JSON.stringify({ fdFocus, back: await active(page) }));
   await page.focus('#new-deal'); await page.keyboard.press('Enter'); await page.waitForSelector('#add-new'); await page.focus('#add-new'); await page.keyboard.press('Enter'); await page.waitForSelector('#nd-name'); await page.focus('#nd-paste'); await page.keyboard.press('Enter'); await page.waitForSelector('#nd-path'); await page.waitForTimeout(80);
   const pathPlaceholder = await page.getAttribute('#nd-path', 'placeholder');

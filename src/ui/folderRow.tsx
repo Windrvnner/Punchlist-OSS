@@ -4,6 +4,7 @@
  * folders, the removed ones and the ones waiting to be added all use the same row.
  */
 import type { ComponentChildren } from 'preact';
+import { plural } from './counts';
 import { Icon } from './icons';
 import { showTip, hideTip } from './tip';
 
@@ -37,7 +38,7 @@ export function FolderCount({ files, indexed }: { files: number; indexed?: numbe
     const words = `${indexed.toLocaleString('en-US')} of ${files.toLocaleString('en-US')} indexed`;
     return <span class="cnt ix" title="Indexing">{words}</span>;
   }
-  return <span class="cnt">{files.toLocaleString('en-US')} files</span>;
+  return <span class="cnt">{plural(files, 'file')}</span>;
 }
 
 /** The × that takes a folder off the list */

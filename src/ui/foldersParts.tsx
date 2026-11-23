@@ -8,6 +8,7 @@ import { useAppState, useStore } from './hooks';
 import { DropZone } from './fileDrop';
 import { EditField, ReadOnlyContext, readFolderLabel } from './editField';
 import { FolderCount, FolderRow, NameTip, RemoveX } from './folderRow';
+import { plural } from './counts';
 import { EditDeal, foldersWithRemoved, overlap, FOLDER_LABEL_MAX } from '../app/commands/deals';
 import { liveFolders } from '../app/indexing';
 import type { Deal, Folder } from '../domain/model';
@@ -116,7 +117,7 @@ function WaitingFolders({ folders, change }: { folders: Waiting[]; change: (fold
               onInput={(e) => rename(i, (e.currentTarget as HTMLInputElement).value)} />
           </NameTip>
         );
-        const count = <span class="cnt">{f.files.toLocaleString('en-US')} files · {f.size}</span>;
+        const count = <span class="cnt">{plural(f.files, 'file')} · {f.size}</span>;
         const drop = () => change(folders.filter((_, j) => j !== i));
         return <FolderRow key={f.path} path={f.path} name={name} count={count}
           action={<RemoveX label={`Remove ${f.path}`} onClick={drop} />} />;
