@@ -2846,10 +2846,12 @@ export function nodeAi(o: AiOptions) {
     left: boolean;
     /** this round was merged into another: the entry, and the epoch, this PC went on with there (#795) */
     merged?: { st: Mine; epoch: number };
-    /** this PC has closed */
-    closed?: boolean;
   }
   const mine = new Map<string, Mine>();
+  /** set once this backend closes */
+  let closing = false;
+  /** the most merges followed from one round to the round it ended in, in case the lines ever loop */
+  const MERGES_MAX = 50;
   const preparing = new Set<string>();                                           // openings this PC is preparing now
   const background = new Set<Promise<unknown>>();
   const later = (go: () => Promise<unknown>) => { const p = go().catch(() => undefined); background.add(p); void p.finally(() => background.delete(p)); };
@@ -2957,19 +2959,24 @@ export function nodeAi(o: AiOptions) {
    * round into another is neither: the batch's lines count for the kept round, so they are written (#795).
    */
   async function guard(dealId: string, took: Mine, epoch: number) {
-    let st = took;
-    let want = epoch;
-    for (; st.merged; st = st.merged.st) {
-      if (st.epoch !== want) throw STALE;
-      want = st.merged.epoch;
-    }
-    if (st.closed || st.left) throw STALE;                 // this PC has left the round (it closed, or gave up)
+    const { st, want } = followMerges(took, epoch);
+    if (closing || st.left) throw STALE;                   // this PC has left the round (it closed, or gave up)
     if (mine.get(dealId) !== st) {                         // the round has ended, or this PC has moved on from it
       if (took === st || st.epoch !== want || !await lastRound(dealId, st.round)) throw STALE;
       return;
     }
     if (nowMs() - st.lastRenew > T.lapse) { st.epoch++; st.rejoin = true; }
     if (st.epoch !== want) throw STALE;
+  }
+  /** the entry a batch's lines now count for, through any merges since it was taken, and the epoch it must have */
+  function followMerges(took: Mine, epoch: number) {
+    let st = took;
+    let want = epoch;
+    for (; st.merged; st = st.merged.st) {
+      if (st.epoch !== want) throw STALE;                  // it slept, or rejoined, before the merge
+      want = st.merged.epoch;
+    }
+    return { st, want };
   }
   /**
    * Whether the round a merged batch's lines count for, once it has ended, is still the deal's latest: the batch is
@@ -2978,7 +2985,7 @@ export function nodeAi(o: AiOptions) {
   async function lastRound(dealId: string, roundId: string) {
     const v = view(await lines(dealId));
     let R = v.rounds.get(roundId);
-    for (let i = 0; R?.end?.kind === 'merged' && i < 50; i++) R = v.rounds.get(R.end.into);
+    for (let i = 0; R?.end?.kind === 'merged' && i < MERGES_MAX; i++) R = v.rounds.get(R.end.into);
     const kept = R;
     return !!kept && ![...v.rounds.values()].some((x) => !kept.ids.has(x.def.id) && x.n > kept.n) && !liveOpening(v);
   }
@@ -3000,10 +3007,18 @@ export function nodeAi(o: AiOptions) {
       round: R.def.id, epoch: (st?.epoch ?? 0) + 1, lastRenew: nowMs(), rejoin: true,
       timer: null, running: null, ticking: false, tries: 0, left: false,
     };
-    if (st && merged) st.merged = { st: next, epoch: next.epoch };   // a batch still out there writes here (#795)
+    if (st && merged) linkMerged(st, next);
     mine.set(dealId, next);
     await renew(dealId, R);
     const timer = setInterval(() => void tick(dealId), T.watch); (timer as { unref?: () => void }).unref?.(); mine.get(dealId)!.timer = timer;
+  }
+  /**
+   * A batch still out in a round merged into another writes there (#795), unless this PC slept first: then that is a
+   * new epoch, as `renew` would make it, and the batch is stale.
+   */
+  function linkMerged(st: Mine, next: Mine) {
+    if (nowMs() - st.lastRenew > T.lapse) st.epoch++;
+    st.merged = { st: next, epoch: next.epoch };
   }
   function stopWatch(dealId: string) { const st = mine.get(dealId); if (st?.timer) clearInterval(st.timer); mine.delete(dealId); }
   /** This PC's share of a round: batch after batch of what it owns, until it owns nothing undone. Runs in the deal's lane. */
@@ -3488,10 +3503,10 @@ export function nodeAi(o: AiOptions) {
     close(): Promise<void> {
       if (watchAll) { clearInterval(watchAll); watchAll = null; }
       reportSweeps.close();
+      closing = true;                          // nothing more from a batch still out, whichever round it counts for
       const said: Promise<unknown>[] = [];
       for (const [dealId, st] of [...mine]) {
         if (st.timer) clearInterval(st.timer);
-        st.closed = true;
         mine.delete(dealId);
         said.push(say(dealId, { left: { round: st.round, pc: me } }, true).catch(() => undefined));
       }
