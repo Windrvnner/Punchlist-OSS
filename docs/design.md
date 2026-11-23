@@ -15,7 +15,7 @@ The look is defined in these files: `src/styles.css` (tokens, the shell, and con
   - The main action (filled buttons, send)
   - Where you are and what is chosen: the open tab, the current page in the slim rail, checked boxes, radios, chosen options and filters (a picked choice card is marked in gray instead; see Choice cards), and the check mark on an answer used as its response
   - Links and sources (citations, source numbers, link buttons, and links and buttons under the pointer)
-  - Focus, a name being edited, and a drop target
+  - Focus, selected text, a name being edited, and a drop target
   - Progress (read progress, the open part of the Q&A bar, and a research step under way)
   - AI drafts (the Draft status word, a draft's actions, and the AI dot in a deal's news)
   - News on a finding (its update dot and its reviewed check mark) and a document held on this PC
@@ -29,7 +29,10 @@ The look is defined in these files: `src/styles.css` (tokens, the shell, and con
 - **Shell:** The window is a grid of the sidebar (236px; 208px at 1180px wide and narrower) and the page, 12px apart and 12px from the window edge (`--gap`). Any screenshot shows it.
 - **Sidebar** (`.rail`): The sidebar is one glass pane with a 22px radius. From the top, it holds the app's mark and the + button, Search (Ctrl K) as a field, Home, the deal groups (Live, Monitoring, Pitches, and Closed) with their counts, each shown only once it has a deal, and the account row at the foot. It lists only deals: a deal's pages are its tabs. On finding and question pages, it folds to a slim rail of icons (06).
 - **Page:** Content sits on the surface, not in a pane, in a column up to 900px wide. The deal pages (Overview, Findings, Checklist, and Q&A) use a wider column, up to 1,240px, and everything on them shares its edges: the trail, the header row, the ask box, and the content. There, the ask box runs the full width, stays one line until it is used, and grows in place (option A). A deal page opens with the trail, the breadcrumb path at the top (Home › deal › page · facts), with the counterparty alone at the top right. Then comes one header row: the deal name in the heading weight (see Type); the tabs (Overview, Findings, Checklist, and Q&A, each with its count in `--ink-3`); and, at the right, Deal status and one ⋯ menu. The ⋯ menu holds Check Again with its last-checked date, Deal Memo…, Rename, and, set apart, Delete Deal… While the memo is being made, ⋯ spins and its memo item reads "Making the deal memo…" and is turned off. A 1px `--line` rule runs under the header row, and the open tab has a 2px `--accent` underline. On Q&A, scrolling down the list tucks the header row away and the list takes its height; scrolling up, or reaching the top, brings it back. The trail, ask box, controls, and column heads stay, and the trail's page name is then `--ink`, 500, standing in for the tabs (design C).
-- **Ask box:** The ask box sits under the header on every deal page. Until it is used, it is one line with a 999px radius (03). On Q&A, an open question's panel takes its place. Once open, it is the same composer as Home's (04) and a conversation's (06): radius 22px, padding 14/14/11, 15px text on one line until more is typed, and 32px buttons and send.
+- **Ask box:** The ask box sits under the header on every deal page. Until it is used, it is one line with a 999px radius
+  (03). On Q&A, an open question's panel takes its place. Once open, it is the same composer as Home's (04) and a
+  conversation's (06), with a 22px radius, 14px padding all around, 15px text on one line until more is typed, and 32px
+  buttons and send.
 - **Side pane:** The open item on Checklist sits in a glass pane beside the list, with its top on the list's top line and its bottom on the sidebar's bottom line (08). The open question on Q&A takes a glass panel across the top (09).
 - **Windows:** Window sizes run from 1024×640 to 1536×864. Check every screen at 1280×736 and 1024×640, in dark and light.
 
@@ -48,11 +51,16 @@ Punchlist uses one type family, the computer's own interface font, as native app
 | Section headings (`h2`), deal names in lists | 600, letter-spacing −0.2px | 18px |
 | An open finding's, item's or question's title | 600, letter-spacing −0.15px | 17px / 1.35 |
 | List row titles (findings, deals, feed) | 600 | 14px |
+| Overview column names | 500 | 14px |
+| Overview fact labels | 600, `--ink-2` | 13px |
 | Body | 400 | 14px / 1.5 |
 | Tables, panes, menus, buttons | 400 to 500 | 13px (12px on small buttons) |
 | Section labels (Findings, Show in the List) | 600, `--ink-2`, Apple title style, never all capitals | 13px |
 | Column heads | 600, `--ink-2`, Apple title style | 11px |
 | Trail, meta lines | 400, `--ink-2` | 12–13px |
+
+The table gives the default sizes. [Controls](#controls) specifies 12.5px for composer buttons and native selects.
+Overview progress counts and source popover rows also use 12.5px as specified in their sections.
 
 Numbers that line up use tabular figures (`.num`). All text is en-US.
 
