@@ -10,6 +10,7 @@ const say = (id, ok, note = '') => {
 };
 const browser = await launchChrome();
 openOnFindings(browser);
+const SHOTS = process.env.SHOTS || '';
 
 const SENTENCE_1 = 'The technical advisor supports a lower figure than the one the information memorandum relies on.';
 const SENTENCE_2 = 'The base case uses the higher figure throughout.';
@@ -283,6 +284,92 @@ const openEdit = async (page) => {
   const titles = await page.evaluate(() => ['#doc-prev', '#doc-next'].map((id) => document.querySelector(id).title));
   const wanted = '["Previous document · Left","Next document · Right"]';
   say('document-arrows-have-tooltips', JSON.stringify(titles) === wanted, JSON.stringify(titles));
+  await ctx.close();
+}
+
+const cursor = (ref) => ref.evaluate((node) => getComputedStyle(node).cursor);
+
+async function openCitation(page, ref, key) {
+  const pointer = await cursor(ref);
+  const pop = ref.locator('..').locator('.pop');
+  await ref.hover();
+  await pop.waitFor();
+  const name = await pop.locator('.psrc .docnm').first().textContent();
+  const place = (await pop.locator('.psrc .loc').first().textContent()).replace(/^ · /, '');
+  await page.mouse.move(2, 2);
+  let focused = true;
+  if (key) {
+    await page.keyboard.press('Shift+Tab');
+    await ref.focus();
+    await pop.waitFor();
+    focused = await ref.evaluate((node) =>
+      node.matches(':focus-visible') && getComputedStyle(node).outlineStyle === 'solid');
+    await page.keyboard.press(key);
+  } else await ref.click();
+  await page.waitForFunction(([doc, loc]) => document.querySelector('.docnav .docname .docnm')?.textContent === doc
+    && document.querySelector('.docnav .loc')?.textContent === loc, [name, place]);
+  return { pointer, focused, name, place };
+}
+
+{ const { ctx, page, fid } = await start();
+  const dealId = await page.evaluate((id) => store.get().findings[id].dealId, fid);
+  const finding = page.locator('.opening .ref .rb[role="button"]');
+  const findingCursors = [];
+  for (const colorScheme of ['dark', 'light']) {
+    await page.emulateMedia({ colorScheme });
+    await page.waitForFunction((scheme) => document.documentElement.dataset.theme === scheme, colorScheme);
+    for (const [width, height] of [[1280, 736], [1024, 640]]) {
+      await page.setViewportSize({ width, height });
+      findingCursors.push(...await finding.evaluateAll((refs) => refs.map((ref) => getComputedStyle(ref).cursor)));
+      if (SHOTS) {
+        await finding.first().hover();
+        await page.waitForSelector('.opening .ref:hover .pop');
+        await page.waitForTimeout(500);
+        await page.screenshot({ path: `${SHOTS}/440-${colorScheme}-${width}.png`, animations: 'disabled' });
+        await page.mouse.move(2, 2);
+      }
+    }
+  }
+  await page.setViewportSize({ width: 1280, height: 736 });
+  const fromFinding = await openCitation(page, finding.first(), 'Enter');
+  await page.click('#doc-close');
+  const ask = async () => {
+    await page.fill('#pask', 'What changed in the lock-up ratio in the latest draft?');
+    await page.press('#pask', 'Enter');
+    return page.locator('.msgs .ai .ref .rb[role="button"]').first();
+  };
+  const fromChat = await openCitation(page, await ask(), 'Space');
+
+  await page.goto(`${URL}#qa-${dealId}`);
+  await page.click('#qa-add');
+  const question = page.locator('.det:not([inert]) textarea.qtext');
+  await question.fill('What lock-up test does the facility draft set?');
+  await question.press('Tab');
+  await page.click('#q-draft');
+  const readOnly = page.locator('.qpanel .draft .ref .rb:not([role])').first();
+  await readOnly.hover();
+  await page.waitForSelector('.qpanel .draft .ref:hover .pop');
+  const readOnlyCursor = await cursor(readOnly);
+  const untabbable = await readOnly.getAttribute('tabindex') === null;
+  await readOnly.click();
+  const staysInQa = await page.locator('.docpanel').count() === 0;
+  await page.click('#q-discuss');
+  const fromQa = await openCitation(page, page.locator('.opening .ref .rb[role="button"]').first());
+
+  await page.goto(`${URL}#checklist-${dealId}`);
+  await page.click('#ck-filter [data-filter="all"]');
+  await page.locator('#ck-rows .ckrow[data-result="satisfied"]').first().click();
+  const source = page.locator('#ck-sources .ckopen').first();
+  const checklistCursor = await cursor(source);
+  await source.click();
+  await page.waitForSelector('#from-item');
+  const fromChecklist = await openCitation(page, await ask());
+  const interactive = [fromFinding, fromChat, fromQa, fromChecklist];
+  say('only-interactive-citations-get-the-pointer-cursor', findingCursors.length >= 4
+    && findingCursors.every((value) => value === 'pointer') && checklistCursor === 'pointer'
+    && interactive.every(({ pointer, focused }) => pointer === 'pointer' && focused)
+    && readOnlyCursor === 'default' && untabbable && staysInQa && page.errors.length === 0,
+    JSON.stringify({ findingCursors, checklistCursor, interactive, readOnlyCursor, untabbable, staysInQa }));
   await ctx.close();
 }
 
