@@ -813,6 +813,10 @@ describe('deal memo model replies', () => {
       paragraphs: [`${Array(15).fill('x'.repeat(200)).join(' [999]')} The draft sets the ratio. [1]`],
     },
     {
+      name: 'oversized text joined when export drops control characters',
+      paragraphs: [`${Array(15).fill('x'.repeat(199)).join('\u000b')} The draft sets the ratio. [1]`],
+    },
+    {
       name: '201 words after removing a finding ID',
       paragraphs: [`${'covenant '.repeat(199)}${lockUp.id}. [1]`],
     },
@@ -864,6 +868,24 @@ describe('deal memo model replies', () => {
     const writes = standIn.calls.filter(memoWrite);
     expect(writes.map((call) => call.model)).toEqual(['standard', 'standard', 'standard']);
     expect(writes[1].prompt).toContain('That cannot be used:');
+    expect(memo.risks![0]).toEqual({
+      ...distributionRisk, body: valid, sources: [...lockUp.sources, ...testPeriod.sources],
+    });
+  });
+
+  it('escalates the original deal memo request if the correction is too long for Standard', async () => {
+    const valid = [`${creditWords} [1]`, `${termWords} [2]`];
+    const standIn = await setupMemoReplies([distributionRisk], (call) => {
+      if (call.prompt.includes('That cannot be used:')) {
+        throw Object.assign(new Error('Request too long'), { code: 'toolong' });
+      }
+      return citedRiskReply(call, call.model === 'thorough' ? valid : overlong[0].paragraphs);
+    });
+    const memo = val(await standIn.ai.memo!('d1'));
+    const writes = standIn.calls.filter(memoWrite);
+    expect(writes.map((call) => call.model)).toEqual(['standard', 'standard', 'thorough']);
+    expect(writes[2].prompt).toBe(writes[0].prompt);
+    expect(writes[2].files).toEqual(writes[0].files);
     expect(memo.risks![0]).toEqual({
       ...distributionRisk, body: valid, sources: [...lockUp.sources, ...testPeriod.sources],
     });

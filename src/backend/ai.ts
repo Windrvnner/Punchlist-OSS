@@ -381,7 +381,9 @@ function memoRiskParagraphs(value: unknown): string[] {
 function memoRiskFits(paragraphs: string[], ids: Set<string>): boolean {
   if (!paragraphs.length || paragraphs.length > 2) return false;
   const text = paragraphs.join(' ');
-  if (text.length > MEMO_RISK_TEXT_CHARS) return false;
+  // Control characters discarded by the document builder can hide unbroken text (#659).
+  const invalidText = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/;
+  if (text.length > MEMO_RISK_TEXT_CHARS || invalidText.test(text)) return false;
   const scrubbed = paragraphs.map((paragraph) => unid(paragraph, ids));
   // Citation fitting can join adjacent text when it removes an invalid marker (#659).
   const withoutCitations = scrubbed.map((paragraph) => withoutMemoMarks(paragraph)).join(' ');
@@ -410,7 +412,7 @@ function memoRiskReadOptions(escalate: string, advises: (text: string) => boolea
   const wrong = 'it is empty, contains oversized text, gives advice or a judgment, or exceeds '
     + `the limit of two paragraphs and ${MEMO_RISK_WORDS} words`;
   // Keep an oversized reply from making the correction request too long (#659).
-  return { escalate, usable, wrong, maxEcho: MEMO_RISK_TEXT_CHARS };
+  return { escalate, usable, wrong, maxEcho: MEMO_RISK_TEXT_CHARS, retrySharedModel: true };
 }
 
 /**
@@ -1179,6 +1181,20 @@ export function nodeAi(o: AiOptions) {
   /** the chat agent */
   const agent = chatAgent(agentKit, agentOpts);
 
+  /** A memo correction that does not fit goes to Thorough with the original request (#659). */
+  async function askCorrection(input: Ask, keys: string[], shape: string) {
+    try {
+      return await askJson(input, keys, shape, false);
+    } catch (error) {
+      if (input.kind === 'memoRisk' && isTooLong(error)) return null;
+      throw error;
+    }
+  }
+
+  function readCanRetry(model: string, again: { escalate: string; retrySharedModel?: boolean } | undefined): boolean {
+    return !!again && (model !== again.escalate || again.retrySharedModel === true);
+  }
+
   /**
    * One question, read from documents, in up to two rounds: the second only if the model says what is missing and
    * something answers to it. With `again`, a reply that cannot be used is sent back to the same model with what is
@@ -1200,8 +1216,7 @@ export function nodeAi(o: AiOptions) {
     if (!sent.length) return ok({ reply: {}, sent });
     let using = model;
     let pool: Sent[] | undefined;
-    // Memo risk correction still runs when Standard and Thorough share a model (#659).
-    let canRetry = kind === 'memoRisk' || model !== again?.escalate;
+    let canRetry = readCanRetry(model, again);
     for (let round = 1; ; round++) {
       let reply: Record<string, unknown> | null;
       try {
@@ -1215,7 +1230,7 @@ export function nodeAi(o: AiOptions) {
         reply = await askJson({ kind, model: using, system: RULES, files, prompt }, keys, shape);
         if (again && canRetry && (!reply || !again.usable(reply))) {
           const correction = readCorrection(prompt, reply, again);
-          reply = await askJson({ kind, model: using, system: RULES, files, prompt: correction }, keys, shape, false);
+          reply = await askCorrection({ kind, model: using, system: RULES, files, prompt: correction }, keys, shape);
           if (!reply || !again.usable(reply)) {
             canRetry = false;
             using = again.escalate;
