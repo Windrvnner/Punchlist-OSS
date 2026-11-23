@@ -1,5 +1,5 @@
 import { titleStyle } from './titleStyle';
-import { Fragment, type ComponentChildren } from 'preact';
+import { Fragment, type ComponentChildren, type RefObject } from 'preact';
 import { createPortal } from 'preact/compat';
 import { askAbout, itemStanding, conflictLabel, versionsWord, offFindingCount } from '../app/state';
 import type { ItemKind, State } from '../app/state';
@@ -10,7 +10,7 @@ import type { ChecklistRow } from '../ports';
 import type { UiState } from '../app/state';
 import { PageTop, Stalled, NoRoom } from './deal';
 import { findingHref } from './findings';
-import { navigate } from './nav';
+import { focusSearchResult, navigate } from './nav';
 import { ReadOnlyContext } from './editField';
 import { MoreMenu, MenuItem, ChoiceCheck } from './moreMenu';
 import { CreateQuestion } from '../app/commands/questions';
@@ -104,6 +104,34 @@ function CkHead({ filters, on, offOpen, seg, acts, more }: { filters: [UiState['
     </span>}{more}</span>}</div>;
 }
 
+// #496: reselecting a Search hit can reveal the open item without changing the selection.
+export function revealChecklistRow(list: HTMLElement | null, itemId: string) {
+  const row = list?.querySelector<HTMLElement>(`[data-item="${CSS.escape(itemId)}"]`);
+  if (!list || !row || document.activeElement === row) return;
+  const viewport = list.getBoundingClientRect();
+  const bounds = row.getBoundingClientRect();
+  if (bounds.top < Math.max(0, viewport.top) || bounds.bottom > Math.min(innerHeight, viewport.bottom)) {
+    row.scrollIntoView({ block: 'center' });
+  }
+}
+
+// #498: give keyboard Search focus to the selected row once the Checklist has rendered it.
+function useItemSearchFocus(
+  listRef: RefObject<HTMLDivElement | null>, selectedId: string | undefined, listedNow: boolean,
+  searchFocus: string | null,
+) {
+  const store = useStore();
+  useLayoutEffect(() => {
+    if (!selectedId || searchFocus !== selectedId) return;
+    const list = listRef.current;
+    const row = list?.querySelector<HTMLElement>(`[data-item="${CSS.escape(selectedId)}"]`);
+    if (row) focusSearchResult(store, selectedId, () => {
+      revealChecklistRow(list, selectedId);
+      row.focus({ preventScroll: true });
+    });
+  }, [selectedId, searchFocus, listedNow]);
+}
+
 /**
  * Every checklist item of the deal and what its check came to, as a list with the item that is open beside it, like the
  * Q&A log. A line says how the item stands in a few words; opening it shows the whole of it: what a gap needs, the
@@ -121,11 +149,7 @@ export function ChecklistPage({ dealId }: { dealId: string }) {
   const listedNow = Array.isArray(s.checklists[dealId]);
   useEffect(() => {
     const id = s.ui.selectedChecklist; if (!id) return;
-    const f = requestAnimationFrame(() => {
-      const l = listRef.current, r = l?.querySelector<HTMLElement>(`[data-item="${id}"]`); if (!l || !r || document.activeElement === r) return;
-      const a = l.getBoundingClientRect(), b = r.getBoundingClientRect();
-      if (b.top < Math.max(0, a.top) || b.bottom > Math.min(innerHeight, a.bottom)) r.scrollIntoView({ block: 'center' });
-    });
+    const f = requestAnimationFrame(() => revealChecklistRow(listRef.current, id));
     return () => cancelAnimationFrame(f);
   }, [s.ui.selectedChecklist, listedNow]);
   const inherited = useContext(ReadOnlyContext);
@@ -174,6 +198,7 @@ export function ChecklistPage({ dealId }: { dealId: string }) {
   // one stop for Tab in the list: the open item, else the first; the arrow keys, Home and End move through the items
   const at = sel && shown.some((r) => r.id === sel.id) ? sel.id : shown[0]?.id;
   const focusRow = (id: string) => listRef.current?.querySelector<HTMLElement>(`[data-item="${id}"]`)?.focus();
+  useItemSearchFocus(listRef, sel?.id, listedNow, s.ui.searchFocus);
   const close = () => { const id = sel?.id; store.ui({ selectedChecklist: null }); if (id) requestAnimationFrame(() => focusRow(id)); };
   const onKey = (e: KeyboardEvent) => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key) || !shown.length) return;
