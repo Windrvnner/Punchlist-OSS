@@ -19,7 +19,7 @@ const all = fs.readdirSync('tests/browser').filter((f) => f.endsWith('.spec.mjs'
 const named = only.length ? all.filter((s) => only.includes(s)) : all;
 // Each suite's time on a CI job, kept in the repo so every job splits the suites the same way (refresh it from the
 // times a CI run prints when the groups drift apart).
-const CI_TIMES = JSON.parse(fs.readFileSync('tests/browser/suite-times.json', 'utf8'));
+const CI_TIMES = timesIn('tests/browser/suite-times.json');
 const suites = inShard(named, shardAt >= 0 ? args[shardAt + 1] : null);
 
 /** With `--shard k/n`, the k-th of n groups of about equal CI time; otherwise every suite. */
@@ -96,8 +96,13 @@ const TIMES = 'out/browser/times.json';
 
 /** The times kept from earlier runs, by suite; none before the first run or after out/ is cleared. */
 function readTimes() {
+  return timesIn(TIMES);
+}
+
+/** The times by suite in a JSON file; none when it is missing or not an object, so a broken file costs only order. */
+function timesIn(file) {
   try {
-    const times = JSON.parse(fs.readFileSync(TIMES, 'utf8'));
+    const times = JSON.parse(fs.readFileSync(file, 'utf8'));
     return times && typeof times === 'object' && !Array.isArray(times) ? times : {};
   } catch {
     return {};

@@ -52,8 +52,9 @@ npm run installer       # build the Windows installer into out/installer (on Win
 
 The GitHub Actions workflow also builds the Windows installer when it is started by hand.
 
-A browser suite missing from `tests/browser/suite-times.json` counts as a suite of middle length. When the CI
-browser jobs drift apart, update the file from the times each job prints.
+A new browser suite needs an entry in `tests/browser/suite-times.json` (a unit test checks the file lists every suite);
+until it has a CI time, give it a guess. When the CI browser jobs drift apart, update the file from the times each job
+prints.
 
 The Store is the object that holds the app's state and runs its commands; see [architecture.md](architecture.md).
 

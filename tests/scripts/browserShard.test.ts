@@ -30,7 +30,7 @@ describe('splitting the suites into CI groups', () => {
     const totals = groupsOf(suites, 4, ciTimes).map(sum);
     const longest = Math.max(...Object.values(ciTimes));
     expect(Math.max(...totals) - Math.min(...totals)).toBeLessThanOrEqual(longest);
-    // the round-robin split by name it replaces put about 607 s in one group and 250 s in another
+    // the round-robin split by name it replaces put 1,194 s in one group and 474 s in another
     expect(Math.max(...totals)).toBeLessThan(sum(suites) / 4 + longest / 2);
   });
 

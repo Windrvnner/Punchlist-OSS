@@ -12,7 +12,7 @@ function timeOf(times, typical) {
   return (name) => (Number.isFinite(times[name]) && times[name] > 0 ? times[name] : typical);
 }
 
-/** The suites ordered longest first by `times`, ties and missing times in name order behind the typical time. */
+/** The suites ordered longest first by `times` (a missing or invalid time counts as the typical time), ties by name. */
 export function longestFirst(names, times) {
   const secs = timeOf(times, typicalTime(times));
   return [...names].sort((a, b) => secs(b) - secs(a) || (a < b ? -1 : 1));
