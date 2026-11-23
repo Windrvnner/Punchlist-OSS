@@ -8,7 +8,7 @@ const sites = Array.from({ length: 18 }, (_, index) => `Site ${index + 1}`);
 const preview = '.imprev:not(.imchg) tbody';
 const unused = '.imwhere .efstate.fail';
 
-export async function headingWorkbook(page, prefix) {
+export async function headingWorkbook(page, prefix, supplementOnly = false) {
   const qa = prefix === 'im';
   const name = qa ? 'Lender Q&A.xlsx' : 'Solar diligence checklist.xlsx';
   const headings = qa ? ['#', 'Question', 'Response'] : ['Section', 'Item'];
@@ -18,7 +18,8 @@ export async function headingWorkbook(page, prefix) {
         index % 3 ? 'The current version is filed in the site diligence folder.' : '']
       : [site, item]);
   const grid = [headings, rows[0], headings, ...rows.slice(1)];
-  const sheets = [{ name: 'Main', grid }, { name: 'Supplement', grid: [[], [], [], headings, rows.at(-1)] }];
+  const supplement = { name: 'Supplement', grid: [[], [], [], headings, rows.at(-1)] };
+  const sheets = supplementOnly ? [supplement] : [{ name: 'Main', grid }, supplement];
   await page.evaluate(([name, sheets]) => { window.__sheets = { [name]: sheets }; }, [name, sheets]);
   await page.setInputFiles(`#${prefix}-file`, {
     name, mimeType: 'application/octet-stream', buffer: Buffer.from('PK'),
@@ -105,10 +106,6 @@ export async function checkHeadingRow(page, prefix, fixture, toggle) {
   await field.fill('1');
   await finishRead(page);
   const latestValid = await field.inputValue() === '1' && await focused() && await body.textContent() === initial;
-  await field.fill('3.0');
-  await ready(page, prefix);
-  const integralDecimal = await field.inputValue() === '3.0' && !(await note.isVisible())
-    && (await firstRow(page)).includes(fixture.next);
   await field.fill('0');
   await page.selectOption(`#${prefix}-sheet`, 'Supplement');
   await waitPreview(fixture.other);
@@ -123,7 +120,7 @@ export async function checkHeadingRow(page, prefix, fixture, toggle) {
   await finishRead(page);
   const switched = await waitPreview(fixture.other).then(() => true, () => false);
   const newSheetBounds = switched && await field.inputValue() === '6' && await note.isVisible() && await focused();
-  return { invalid, noReads, keyboard, initiallyReady, duringRead, newerEdit, valid, latestValid, integralDecimal,
+  return { invalid, noReads, keyboard, initiallyReady, duringRead, newerEdit, valid, latestValid,
     changedSheet, duringSheet, newSheetBounds };
 }
 
@@ -139,6 +136,10 @@ export async function checkHeadingRecovery(page, prefix, fixture) {
   const failedRead = await field.inputValue() === '3' && await note.isVisible()
     && (await firstRow(page)).includes(fixture.first)
     && (await page.locator(`#${prefix}-line`).textContent()).includes('The file is locked');
+  await field.fill('3.0');
+  await ready(page, prefix);
+  const integralDecimal = await field.inputValue() === '3.0' && !(await note.isVisible())
+    && (await firstRow(page)).includes(fixture.next);
 
   // The earlier Main/3 read is held across two sheet choices, so it cannot stand in for the new Main/3 choice.
   await field.fill('1');
@@ -159,7 +160,7 @@ export async function checkHeadingRecovery(page, prefix, fixture) {
     && (await firstRow(page)).includes(fixture.next);
   await field.fill('1');
   await ready(page, prefix);
-  return { failedRead, queuedValidRow };
+  return { failedRead, integralDecimal, queuedValidRow };
 }
 
 /** An unused row typed during the sheet read is kept with that sheet through closing and reloading. */
@@ -173,7 +174,14 @@ export async function checkKeptHeading(page, prefix, fixture, reopen) {
   const afterClose = await kept();
   await page.reload();
   await reopen();
-  return { afterClose, afterReload: await kept() };
+  const afterReload = await kept();
+  // A new file can have the same name, sheet and heading as the old import.
+  await page.click(`#${prefix}-back`);
+  if (prefix === 'cl') await page.evaluate(() => { window.__fail = { readList: true }; });
+  await headingWorkbook(page, prefix, true);
+  if (prefix === 'cl') await page.click('#cl-bycolumns');
+  const replaced = await field.inputValue() === '4' && !(await page.locator(unused).isVisible());
+  return { afterClose, afterReload, replaced };
 }
 
 /** Keep a failed layout proposal in flight until a manual row choice has taken over. */

@@ -1,7 +1,7 @@
 // The firm's checklist: bringing a list in from Settings, its review, the pick lists on Overview, and Undo.
 // Runs on the mock services, whose rewording and duplicate check stand in for the fast model.
 import { launchChrome } from './chrome.mjs';
-import { checkHeadingRow, headingWorkbook } from './headingRow.mjs';
+import { checkHeadingRecovery, checkHeadingRow, checkKeptHeading, headingWorkbook } from './headingRow.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
@@ -32,18 +32,24 @@ const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().ite
 
 { // #380: the columns-by-hand fallback keeps the typed row separate from the accepted checklist preview.
   const { ctx, page } = await start();
-  await page.click('#u-menu');
-  await page.click('#s-checklist-open');
-  await page.click('#fl-import');
+  const open = async () => {
+    await page.click('#u-menu');
+    await page.click('#s-checklist-open');
+    await page.click('#fl-import');
+  };
+  await open();
   await page.evaluate(() => { window.__fail = { readList: true }; });
   const fixture = await headingWorkbook(page, 'cl');
   await page.click('#cl-bycolumns');
   await page.waitForSelector('#cl-header');
   await page.click('[data-layer=broad]');
+  const recovery = await checkHeadingRecovery(page, 'cl', fixture);
   const { invalid, ...checks } = await checkHeadingRow(page, 'cl', fixture, '#cl-asksame');
+  const kept = await checkKeptHeading(page, 'cl', fixture, open);
+  const result = { ...checks, ...recovery, ...kept };
   say('checklist heading-row edits preserve typed text and the accepted preview',
-    fixture.lastRow >= 2000 && invalid.every(Boolean) && Object.values(checks).every(Boolean) && !page.errors.length,
-    JSON.stringify({ invalid, ...checks, errors: page.errors }));
+    fixture.lastRow >= 2000 && invalid.every(Boolean) && Object.values(result).every(Boolean) && !page.errors.length,
+    JSON.stringify({ invalid, ...result, errors: page.errors }));
   await ctx.close();
 }
 

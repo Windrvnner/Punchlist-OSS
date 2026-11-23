@@ -4,7 +4,8 @@ import { openRename } from './dealMenu.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { openOnFindings } from './landing.mjs';
 import { followUp } from './followUp.mjs';
-import { checkHeadingRow, headingWorkbook } from './headingRow.mjs';
+import { checkHeadingRecovery, checkHeadingRow, checkKeptHeading, checkManualLayout, headingWorkbook }
+  from './headingRow.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
 const browser = await launchChrome();
@@ -309,14 +310,21 @@ const apart = (a, b) => !a || !b || a.r <= b.l || b.r <= a.l || a.b <= b.t || b.
 { // #380: an invalid heading row stays visible when another Q&A import choice redraws the dialog.
   const { ctx, page, id } = await start('light');
   await page.goto(URL + '#qa-' + id);
-  await page.click('#qa-cols');
-  await page.click('#qa-import');
+  const open = async () => {
+    await page.click('#qa-cols');
+    await page.click('#qa-import');
+  };
+  await open();
   const fixture = await headingWorkbook(page, 'im');
   await page.waitForSelector('#im-header');
+  const manualLayout = await checkManualLayout(page, fixture);
+  const recovery = await checkHeadingRecovery(page, 'im', fixture);
   const { invalid, ...checks } = await checkHeadingRow(page, 'im', fixture, '#im-answered');
+  const kept = await checkKeptHeading(page, 'im', fixture, open);
+  const result = { ...checks, ...recovery, ...kept, manualLayout };
   say('Q&A heading-row edits preserve typed text and the accepted preview',
-    fixture.lastRow >= 2000 && invalid.every(Boolean) && Object.values(checks).every(Boolean) && !page.errors.length,
-    JSON.stringify({ invalid, ...checks, errors: page.errors }));
+    fixture.lastRow >= 2000 && invalid.every(Boolean) && Object.values(result).every(Boolean) && !page.errors.length,
+    JSON.stringify({ invalid, ...result, errors: page.errors }));
   await ctx.close();
 }
 

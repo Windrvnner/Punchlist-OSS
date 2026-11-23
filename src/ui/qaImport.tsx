@@ -269,8 +269,7 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
     }
     const submitted = savedSubmission(qa.key);
     if (submitted) void store.releaseImport(submitted.key);
-    // Choosing a new file replaces the previous import, including an unused heading (#380).
-    keepImport(qa.key, { submission: null, headingDraft: null });
+    keepImport(qa.key, { submission: null, headingDraft: null }); // A newly read file replaces the previous import.
     setTable(read.value);
     setMapping(read.value.mapping);
     qa.setPath(store.services.fs.pathFor?.(file) ?? null);

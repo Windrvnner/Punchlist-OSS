@@ -112,8 +112,6 @@ function useListFile(store: Store, work: Work, key: string, left: ChecklistKept 
       work.setError(`Could not read ${file.name}: ${read.error.message}`);
       return;
     }
-    keepImport(key, { headingDraft: null });
-    setByColumns(false);
     if ('table' in read.value) {
       setText(null);
       take(read.value.table);
@@ -121,6 +119,7 @@ function useListFile(store: Store, work: Work, key: string, left: ChecklistKept 
       setTable(null);
       setText({ name: file.name, lines: read.value.lines });
     }
+    resetFileHeading(key, setByColumns);
   };
   const reread = async (opts: { sheet?: string; headerRow?: number }, accept?: (read: ImportTable) => void) => {
     if (!table || (work.busy && !(byColumns && work.busy === 'reading'))) return;
@@ -140,11 +139,10 @@ function useListFile(store: Store, work: Work, key: string, left: ChecklistKept 
   // what is pasted stays in the box until it is sent, and after "change"
   const pasted = () => {
     if (!paste.trim() || work.busy) return;
-    keepImport(key, { headingDraft: null });
     setTable(null);
-    setByColumns(false);
     work.setError('');
     setText({ name: '', lines: pastedLines(paste) });
+    resetFileHeading(key, setByColumns);
   };
   const forget = () => {
     setTable(null);
@@ -161,6 +159,12 @@ function useListFile(store: Store, work: Work, key: string, left: ChecklistKept 
     table, mapping, setMapping, text, paste, setPaste, byColumns, wantedSheet: sheetRead?.sheet,
     load, reread, chooseColumns, pasted, forget, reset, importKey: key,
   };
+}
+
+/** A successfully replaced source starts without the previous table's heading draft (#380). */
+function resetFileHeading(key: string, setByColumns: (byColumns: boolean) => void) {
+  setByColumns(false);
+  keepImport(key, { headingDraft: null });
 }
 
 /** Reads the sheet again, for its columns to be chosen by hand. */
