@@ -42,14 +42,17 @@ function useCardDraft(drafts: Map<string, CardDraft>, answerId: string, start: C
     cancelled.current = true;
     forget();
   };
+  /** what is typed now, here or in this answer's card closed and opened again meanwhile (they share the draft) */
+  const latest = () => drafts.get(answerId) ?? now.current;
   /** after a save of `sent` lands: whether nothing was typed since, and then the draft is let go */
   const landed = (sent: CardDraft) => {
     if (cancelled.current) return false;
-    const same = now.current.text === sent.text && now.current.ws === sent.ws;
+    const typedNow = latest();
+    const same = typedNow.text === sent.text && typedNow.ws === sent.ws;
     if (same) forget();
     return same;
   };
-  return { typed, change, forget, cancel, cancelled, landed, now };
+  return { typed, change, forget, cancel, cancelled, landed, latest };
 }
 
 /** The workstream a new question or finding goes in, chosen from the firm's list. */
@@ -152,7 +155,8 @@ export function FindingCard({ dealId, answerId, text, sources, onDone }: {
   // which its toast's Open shows. A finding that cannot be found leaves the card open with the typing
   const editMade = (made: Finding | undefined, sent: { title: string; workstream: string; body: string[] }) => {
     if (!made) return false;
-    const typed = { title: draft.now.current.text, ws: draft.now.current.ws, body: made.body.join('\n\n') };
+    const typedNow = draft.latest();
+    const typed = { title: typedNow.text, ws: typedNow.ws, body: made.body.join('\n\n') };
     keepAsEdit(made, typed, { title: sent.title, workstream: sent.workstream, body: sent.body });
     draft.forget();
     return true;
