@@ -14,6 +14,7 @@ import { CheckLine } from './findings';
 import { PickList, type PickName } from './pickList';
 import { AskFirst } from './dialogs';
 import { previewSwap } from '../app/checklistImport';
+import { num } from './counts';
 
 /**
  * The page a deal opens on unless the person chose another in Settings: how the findings, the checklist and the
@@ -109,13 +110,14 @@ function Standing({ deal: d }: { deal: Deal }) {
   const cf = (checklistFilter: UiState['checklistFilter']) => () => store.ui({ checklistFilter });
   // items turned off for this deal leave every count; the heading says how many, and how many still have an open finding (linking design, section 12)
   const offN = Object.values(s.items).filter((it) => it.dealId === d.id && it.off).length; const offOpen = offFindingCount(s, d.id);
+  const offLabel = `${num(offN)} turned off` + (offOpen ? `, ${num(offOpen)} with an open finding` : '');
   const qf = (status: 'open' | 'answered' | 'closed') => () => store.ui({ qaFilter: { ...store.get().ui.qaFilter, status } });
   const lines: Line[] = [
     { id: 'ov-findings', title: 'Findings', href: `#deal-${d.id}`, go: ff('open'), segs: [
       { k: 'open', n: open.length, word: 'open', go: ff('open'), sub: [['may be out of date', again, ff('reassess')]] },
       { k: 'done', n: closed, word: 'closed', go: ff('closed') }] },
     ...(c && (c.items > 0 || offN > 0) ? [{ id: 'ov-checklist', title: 'Checklist', href: `#checklist-${d.id}`, go: cf('all'),
-      off: offN ? [offOpen ? `${offN.toLocaleString()} turned off, ${offOpen.toLocaleString()} with an open finding` : `${offN.toLocaleString()} turned off`, cf('off')] as [string, () => void] : undefined, segs: [
+      off: offN ? [offLabel, cf('off')] : undefined, segs: [
       { k: 'open', n: c.findings + c.gaps + c.gone, word: 'to resolve', go: cf('all'), sub: [['flagged', c.findings, cf('finding')], [c.gaps === 1 ? 'gap' : 'gaps', c.gaps, cf('gap')], [c.gone === 1 ? 'finding deleted' : 'findings deleted', c.gone, cf('gone')]] },
       { k: 'prog', n: c.unsettled, word: 'not settled', go: cf('open') },
       // one done part: satisfied, or with items a person resolved, "settled", with each named after it
@@ -190,20 +192,36 @@ function Leaders({ line: l }: { line: Line }) {
       setPl(parts.length ? { at: placeAll(parts, c.width), top: bar.top - c.top, bot: bar.bottom - c.top, key } : null); };
     lay(); const ro = new ResizeObserver(lay); ro.observe(el); return () => ro.disconnect();
   }, [key]);
-  const n = (x: number) => x.toLocaleString();
+  const totalLabel = `${num(total)} in all`;
   return (
     <div class="pcol" id={l.id} ref={col}>
-      <div class="phead"><span role="heading" aria-level={2}><a class="nm" href={l.href} onClick={l.go}>{l.title}<Icon name="chevr" size={12} /></a></span><span class="tot" title={l.off ? `${n(total)} in all · ${l.off[0]}` : undefined}>{n(total)} in all{l.off && <> · <a href={l.href} onClick={l.off[1]}>{l.off[0]}</a></>}</span></div>
+      <div class="phead">
+        <span role="heading" aria-level={2}>
+          <a class="nm" href={l.href} onClick={l.go}>{l.title}<Icon name="chevr" size={12} /></a>
+        </span>
+        <span class="tot" title={l.off ? `${totalLabel} · ${l.off[0]}` : undefined}>
+          {totalLabel}{l.off && <> · <a href={l.href} onClick={l.off[1]}>{l.off[0]}</a></>}
+        </span>
+      </div>
       <div class="plabs up" />
-      <div class="pbar" title={shown.map((g) => `${n(g.n)} ${g.word}`).join(', ') || undefined}>{shown.length ? shown.map((g, i) => <b key={i} data-i={i} style={{ flex: g.n, background: LEAD[g.k] }} />) : <b class="none" />}</div>
+      <div class="pbar" title={shown.map((g) => `${num(g.n)} ${g.word}`).join(', ') || undefined}>
+        {shown.length ? shown.map((g, i) => <b key={i} data-i={i} style={{ flex: g.n, background: LEAD[g.k] }} />)
+          : <b class="none" />}
+      </div>
       <div class="plabs" />
       {!shown.length && <span class="plab nil">None yet</span>}
       {shown.map((g, i) => { const at = pl?.at[i]; const y = at ? (at.up ? pl!.top - 19 : pl!.bot + 15) : 0;
         const made = (g.sub ?? []).filter(([, k]) => k > 0);
-        return <span key={i} data-i={i} class={`plab ${g.k} ${at?.bare ? 'bare' : ''}`} title={at?.bare && made.length ? made.map(([w, k]) => `${n(k)} ${w}`).join(' · ') : undefined} style={at ? { left: `${at.lx}px`, top: `${y - 9}px`, maxWidth: `${Math.ceil(at.w) + 1}px` } : { visibility: 'hidden' }}>
+        return <span key={i} data-i={i} class={`plab ${g.k} ${at?.bare ? 'bare' : ''}`}
+          title={at?.bare && made.length ? made.map(([w, k]) => `${num(k)} ${w}`).join(' · ') : undefined}
+          style={at ? { left: `${at.lx}px`, top: `${y - 9}px`, maxWidth: `${Math.ceil(at.w) + 1}px` }
+            : { visibility: 'hidden' }}>
           {/* "settled" has no filter of its own: its count is words, and what it is made of each opens its own */}
-          {g.go ? <a class={g.k === 'open' ? 'lo' : ''} href={l.href} onClick={g.go}>{n(g.n)} {g.word}</a> : <span class="pn">{n(g.n)} {g.word}</span>}
-          {made.map(([w, k, go]) => <span class="sub" key={w}> · <a href={l.href} onClick={go}>{n(k)} {w}</a></span>)}
+          {g.go ? <a class={g.k === 'open' ? 'lo' : ''} href={l.href} onClick={g.go}>{num(g.n)} {g.word}</a>
+            : <span class="pn">{num(g.n)} {g.word}</span>}
+          {made.map(([w, k, go]) => <span class="sub" key={w}>
+            {' · '}<a href={l.href} onClick={go}>{num(k)} {w}</a>
+          </span>)}
         </span>; })}
       <svg class="ld" aria-hidden="true">{pl && pl.at.map((at, i) => { const y = at.up ? pl.top - 19 : pl.bot + 15; const y0 = at.up ? pl.top - 2 : pl.bot + 2;
         return at.mode === 'c' ? <path key={i} d={`M${at.x} ${y0} V${at.up ? y + 10 : y - 10}`} fill="none" stroke={STROKE[shown[i].k]} stroke-width="2" />
@@ -231,7 +249,6 @@ function Documents({ deal: d }: { deal: Deal }) {
   const total = rows.length > 1 ? [{ key: '', name: `${rows.length} folders`, title: '', files: sum('files'), indexed: sum('indexed'), read: rows.every((r) => r.read !== undefined) ? rows.reduce((n, r) => n + r.read!, 0) : undefined, docs: sum('docs'), copies: 0 }] : [];
   const core = p ? p.folders.reduce((n, f) => n + f.core, 0) : 0; const coreRead = p ? p.folders.reduce((n, f) => n + f.coreRead, 0) : 0;
   const pct = (n: number, of: number) => (of > 0 ? Math.min(100, Math.max(n ? 1 : 0, 100 * n / of)) : 0);
-  const n = (x: number) => x.toLocaleString();
   // folders this PC cannot open, once the app has looked for them: said once, on the first line, with Locate in place of Folders
   // a folder that opens with nothing in it is said on its own line, "Files not found", with Locate beside Folders, so it can be pointed at where it moved or removed
   const ours = (fs: { dealId: string; folder: string }[]) => fs.filter((f) => f.dealId === d.id).map((f) => f.folder);
@@ -240,9 +257,9 @@ function Documents({ deal: d }: { deal: Deal }) {
   const awayHere = rows.filter((r) => away.has(r.key)).length; const emptyHere = rows.filter((r) => empty.has(r.key)).length;
   // core documents in those folders cannot be opened here either: their line says no count read, as the folders' lines; "not on this PC" is said once, above, unless only some are away
   const coreAway = p && (awayHere || emptyHere) ? p.folders.filter((f) => away.has(f.folder) || empty.has(f.folder)).reduce((x, f) => x + f.core, 0) : 0;
-  const awaySaid = awayHere === rows.length ? 'Not on this PC' : `${n(awayHere)} not on this PC`;
+  const awaySaid = awayHere === rows.length ? 'Not on this PC' : `${num(awayHere)} not on this PC`;
   // with none missing, empty folders are said the same way: once, on the first line; beside missing ones, each says it on its own line
-  const emptySaid = emptyHere === rows.length ? 'Files not found' : `Files not found in ${n(emptyHere)}`;
+  const emptySaid = emptyHere === rows.length ? 'Files not found' : `Files not found in ${num(emptyHere)}`;
   const EMPTY_TIP = 'The folder opens but has no files. Its documents stay in the deal. Locate it if it moved, or remove it under Folders.';
   const EMPTIES_TIP = 'These folders open but have no files. Their documents stay in the deal. Locate them if they moved, or remove them under Folders.';
   const once = awayHere ? { has: (k: string) => away.has(k), said: awaySaid, tip: undefined, attr: { 'data-away': '' } } : { has: (k: string) => empty.has(k), said: emptySaid, tip: emptyHere > 1 ? EMPTIES_TIP : EMPTY_TIP, attr: { 'data-empty': '' } };
@@ -260,18 +277,38 @@ function Documents({ deal: d }: { deal: Deal }) {
             <span class="fn awayfn" title={r.title || undefined}>{r.name}</span>
             <span class="rd away" title={EMPTY_TIP}>Files not found</span>
           </div>);
+        const status = ixing ? `${num(r.indexed)} of ${num(r.files)} indexed`
+          + (stopped ? (r.indexed ? ' · stopped' : ' · not started') : '')
+          : r.read !== undefined ? `${num(r.read)} of ${num(r.docs)} read` : `${num(r.files)} indexed`;
         return (
         <div class={`dcrow ${r.key && total.length ? 'part' : ''}`} key={r.key} data-folder={r.key}>
-          <span class="fn" title={r.title || undefined}>{r.name}{!ixing && r.copies > 0 && <span class="copies">{`${n(r.copies)} ${r.copies === 1 ? 'copy' : 'copies'} counted once`}</span>}</span>
+          <span class="fn" title={r.title || undefined}>{r.name}{!ixing && r.copies > 0 &&
+            <span class="copies">{`${num(r.copies)} ${r.copies === 1 ? 'copy' : 'copies'} counted once`}</span>}</span>
           <span class="fbar"><i class={`ix ${ixing && !stopped ? 'live' : ''} ${r.indexed ? 'some' : ''}`} style={{ width: `${pct(r.indexed, r.files)}%` }} /><i class={`rv ${r.read ? 'some' : ''}`} style={{ width: `${pct(r.read ?? 0, r.docs)}%` }} /></span>
           {/* what "read" means is said on hover, not on the screen */}
-          <span class="rd" title={!ixing && r.read !== undefined ? READ_TIP : undefined}>{ixing ? `${n(r.indexed)} of ${n(r.files)} indexed${stopped ? (r.indexed ? ' · stopped' : ' · not started') : ''}` : r.read !== undefined ? `${n(r.read)} of ${n(r.docs)} read` : `${n(r.files)} indexed`}</span>
+          <span class="rd" title={!ixing && r.read !== undefined ? READ_TIP : undefined}>{status}</span>
         </div>); })}
-      {core > 0 && (coreAway ? <div class="dcrow" id="ov-core" data-away=""><span class="fn awayfn">Core documents</span><span class="rd">{coreAway === core ? '' : `${n(coreAway)} of ${n(core)} not on this PC`}</span></div>
-        : <div class="dcrow" id="ov-core"><span class="fn">Core documents</span><span class="fbar"><i class={`rv ${coreRead ? 'some' : ''}`} style={{ width: `${pct(coreRead, core)}%` }} /></span><span class="rd" title={READ_TIP}>{n(coreRead)} of {n(core)} read</span></div>)}
+      {core > 0 && (coreAway ? <div class="dcrow" id="ov-core" data-away="">
+        <span class="fn awayfn">Core documents</span>
+        <span class="rd">{coreAway === core ? '' : `${num(coreAway)} of ${num(core)} not on this PC`}</span>
+      </div> : <div class="dcrow" id="ov-core">
+        <span class="fn">Core documents</span>
+        <span class="fbar">
+          <i class={`rv ${coreRead ? 'some' : ''}`} style={{ width: `${pct(coreRead, core)}%` }} />
+        </span>
+        <span class="rd" title={READ_TIP}>{num(coreRead)} of {num(core)} read</span>
+      </div>)}
       {/* another deal whose data room holds most of this one's files, by content: it says so, and opens that deal; the two best at most */}
       {(p?.alsoIn ?? []).slice(0, 2).map((a) => { const o = s.deals[a.dealId]; if (!o) return null; const twin = dealTwin(s, o); const who = twin || o.counterparty;   // a same-named deal is told apart by its counterparty and the day it was made
-        return <div class="dcrow also" key={a.dealId} data-also={a.dealId}><a class="fn" href={`#${dealHash(s.prefs, o.id)}`} title={`${o.name}${who ? ` · ${who}` : ''}`}><span class="an">Also in {o.name}</span>{twin && <span class="copies">{twin}</span>}</a><span class="rd" title={`The same files, by content, are in ${o.name}’s data room. Files other deals also hold, such as precedents, are not counted`}>{n(a.docs)} of {n(Math.max(a.of, a.docs))} files</span></div>; })}
+        const tip = `The same files, by content, are in ${o.name}’s data room. `
+          + 'Files other deals also hold, such as precedents, are not counted';
+        return <div class="dcrow also" key={a.dealId} data-also={a.dealId}>
+          <a class="fn" href={`#${dealHash(s.prefs, o.id)}`} title={`${o.name}${who ? ` · ${who}` : ''}`}>
+            <span class="an">Also in {o.name}</span>{twin && <span class="copies">{twin}</span>}
+          </a>
+          <span class="rd" title={tip}>{num(a.docs)} of {num(Math.max(a.of, a.docs))} files</span>
+        </div>;
+      })}
     </div>
   </>;
 }

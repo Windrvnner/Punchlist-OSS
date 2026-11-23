@@ -7,6 +7,7 @@ import { DEAL_PAGES } from '../app/state';
 import { SharedFolderRow } from './connect';
 import { firmOf } from '../domain/checklist';
 import { SignInRow } from './signin';
+import { plural } from './counts';
 
 declare const __APP_VERSION__: string | undefined;
 /** the app's keys: the key, its short name shown beside it in Settings, and what it does (the tooltip) */
@@ -29,8 +30,8 @@ const VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '';
 function checklistLine(lists: { layer: string; items: unknown[] }[]): string {
   if (!lists.length) return 'No lists yet';
   const general = lists.some((l) => l.layer === 'broad'); const others = lists.length - (general ? 1 : 0); const items = lists.reduce((n, l) => n + l.items.length, 0);
-  const named = general ? (others ? `General and ${others} ${others === 1 ? 'list' : 'lists'}` : 'General') : `${others} ${others === 1 ? 'list' : 'lists'}`;
-  return `${named} · ${items} ${items === 1 ? 'item' : 'items'}`;
+  const named = general ? (others ? `General and ${plural(others, 'list')}` : 'General') : plural(others, 'list');
+  return `${named} · ${plural(items, 'item')}`;
 }
 
 export function SettingsDialog() {
