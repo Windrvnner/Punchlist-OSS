@@ -81,14 +81,27 @@ export function recoveredIds(dealId: string, copyId: string, had: Had[]): Map<st
  */
 export function changedOnto(had: unknown, wrote: unknown, now: unknown, ids: ReadonlyMap<string, string>): unknown {
   if (!now || typeof now !== 'object' || !wrote || typeof wrote !== 'object') return remap(wrote, ids);
-  return { ...(now as Record<string, unknown>), ...remap(changedValues(had, wrote), ids) };
+  const changed = remap(changedValues(had, wrote), ids);
+  const next: Record<string, unknown> = { ...(now as Record<string, unknown>), ...changed };
+  for (const field of removedFields(had, wrote)) delete next[field];
+  return next;
 }
+
+/** Fields kept as they are on every copy of a record, whatever a save says. */
+const BOOKKEEPING = ['id', 'rev', 'dealId', 'createdAt'];
 
 /** The fields changed by a save on the original record, before its ids are remapped to the recovered copy. */
 export function changedValues(had: unknown, wrote: unknown): Record<string, unknown> {
   const was = (had && typeof had === 'object' ? had : {}) as Record<string, unknown>;
   if (!wrote || typeof wrote !== 'object') return {};
   const changed = Object.entries(wrote).filter(([key, value]) =>
-    !['id', 'rev', 'dealId', 'createdAt'].includes(key) && JSON.stringify(value) !== JSON.stringify(was[key]));
+    !BOOKKEEPING.includes(key) && JSON.stringify(value) !== JSON.stringify(was[key]));
   return Object.fromEntries(changed);
+}
+
+/** The optional fields a save left out that the record had, such as a discarded draft (#664). */
+export function removedFields(had: unknown, wrote: unknown): string[] {
+  if (!had || typeof had !== 'object' || !wrote || typeof wrote !== 'object') return [];
+  const kept = wrote as Record<string, unknown>;
+  return Object.keys(had).filter((key) => !BOOKKEEPING.includes(key) && kept[key] === undefined);
 }

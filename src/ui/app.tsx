@@ -36,6 +36,7 @@ import { SERVICE } from '../control';
 import { takeNavPatch, closeDocument, takeFocusAfter } from './nav';
 import { renameKept } from './keptDrafts';
 import { keepAttachments } from './keptAttachments';
+import { followCopies } from '../app/attachments';
 import { staleKept } from './editField';
 import { isReading, dealHash, dealTwinLabels } from '../app/state';
 import { num } from './counts';
@@ -62,6 +63,7 @@ export function App({ store }: { store: Store }) {
 function Shell() {
   const store = useStore(); const s = useAppState();
   useLayoutEffect(() => keepAttachments(store), []);   // unsent attachments survive a restart (#60)
+  useEffect(() => followCopies(store), []);   // unsent attachments on a deleted deal follow it to its copy (#117)
   useEffect(() => store.onRenamed((ids) => renameKept(ids, staleKept)), []);   // text kept on a deleted deal follows it to its copy
   useEffect(() => {
     const apply = () => {

@@ -35,7 +35,9 @@ export function Chip({ chip, scope }: { chip: Attachment; scope: Scope }) {
   const canAdd = finding && chip.state === 'done' && chip.doc && !inSources;
   const add = () => void addToSources(store, finding!.dealId, finding!.id, { doc: chip.doc!, docId: chip.docId! });
   return (
-    <span class={`chip att ${chip.state === 'pending' ? 'pending' : ''}`}><Icon name="doc" size={12} />
+    <span class={`chip att ${chip.state === 'pending' ? 'pending' : ''} ${chip.missing ? 'missing' : ''}`}
+      title={chip.missing ? `Couldn’t find ${chip.name} — attach it again` : undefined}>
+      <Icon name={chip.missing ? 'warn' : 'doc'} size={12} />
       <DocName name={chip.name} />
       {canAdd && <button type="button" class="addsrc" data-addsrc onClick={add}>Add to Sources</button>}
       <button type="button" aria-label={`Remove ${chip.name}`} onClick={() => removeAttachment(store, chip.id)}>

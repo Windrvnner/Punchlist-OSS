@@ -19,7 +19,10 @@ import type { Repository, AiService, DocumentService, SpreadsheetCodec, Session,
 export const BRIDGED = {
   repo: ['get', 'list', 'transaction', 'audit', 'sync', 'recover', 'seen'],
   ai: ['answer', 'research', 'stop', 'draft', 'reassess', 'dealBrief', 'memo', 'gaps', 'addresses', 'merge', 'layout', 'reword', 'sameMeaning', 'phrase', 'issuesList', 'checkAll', 'checked', 'responses', 'progress', 'checklist', 'readList'],
-  docs: ['scanFolder', 'index', 'poll', 'freshen', 'page', 'attach', 'cached', 'drafts', 'places', 'findFolders', 'locateTop', 'placeFolders', 'sameRoom'],
+  docs: [
+    'scanFolder', 'index', 'poll', 'freshen', 'page', 'attach', 'carryAttached', 'unsendable', 'cached', 'drafts',
+    'places', 'findFolders', 'locateTop', 'placeFolders', 'sameRoom',
+  ],
   sheets: ['read', 'write', 'document', 'text'],
   qaLogs: ['read', 'save', 'create', 'settle'],
   session: ['load'],

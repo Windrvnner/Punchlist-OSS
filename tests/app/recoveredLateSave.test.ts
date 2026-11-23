@@ -5,11 +5,12 @@ import { DeleteDeal } from '../../src/app/commands/deals';
 import { DiscardDraft } from '../../src/app/commands/drafts';
 import { EditQuestionField } from '../../src/app/commands/questions';
 import { LogRepository } from '../../src/backend/logRepository';
-import type { Question } from '../../src/domain/model';
+import { firstMember, memberId, type Question } from '../../src/domain/model';
 import type { Transaction } from '../../src/ports';
 import { okd, syncAll, twoPcs, type PC } from './pcs';
+import { dealQuestions } from '../../src/app/state';
 
-async function recoveredQuestion(initial: Partial<Question> = {}) {
+async function recoveredQuestion(initial: Partial<Question> = {}, afterPlanned: Partial<Question> = {}) {
   const { A, B, dealId, qid } = await twoPcs();
   okd(await B.store.dispatch(EditQuestionField, {
     dealId, questionId: qid, field: 'text', value: 'Unseen question edited on B',
@@ -30,6 +31,18 @@ async function recoveredQuestion(initial: Partial<Question> = {}) {
       }],
   });
   const lateWrite = (changes: Partial<Question>) => B.repo.transaction(lateTransaction(changes));
+  if (Object.keys(afterPlanned).length) {
+    // A change saved here after the late save was prepared, as an AI draft arriving: the late save does not know it.
+    okd(await B.repo.transaction({
+      writes: [{ kind: 'question', id: qid, data: { ...question, ...afterPlanned }, expectedRev: question.rev }],
+    }));
+  }
+  // A late save that leaves a field out, as Discard Draft does: the key is absent, never set to undefined.
+  const lateWithout = (field: keyof Question) => {
+    const rest: Record<string, unknown> = { ...question };
+    delete rest[field];
+    return B.repo.transaction({ writes: [{ kind: 'question', id: qid, data: rest, expectedRev: question.rev }] });
+  };
   okd(await A.store.dispatch(DeleteDeal, {
     dealId, typedName: A.store.get().deals[dealId].name,
   }));
@@ -41,13 +54,14 @@ async function recoveredQuestion(initial: Partial<Question> = {}) {
   const copied = Object.values(B.store.get().questions)
     .find((candidate) => candidate.dealId === copyId && candidate.n === question.n)!;
   expect(copied.text).toBe('Unseen question edited on B');
-  return { A, B, copyId, copied, lateWrite, lateTransaction };
+  return { A, B, copyId, copied, lateWrite, lateWithout, lateTransaction };
 }
 
 async function withRecoveredQuestion(
   check: (world: Awaited<ReturnType<typeof recoveredQuestion>>) => Promise<void>, initial: Partial<Question> = {},
+  afterPlanned: Partial<Question> = {},
 ) {
-  const world = await recoveredQuestion(initial);
+  const world = await recoveredQuestion(initial, afterPlanned);
   try {
     await check(world);
   } finally {
@@ -179,4 +193,94 @@ it('keeps a draft discarded in the copy absent after restart and a stale draft s
       await restarted.close();
     }
   }, { draft });
+});
+
+const lateDraft = { status: 'found' as const, text: 'AI response to discard', sources: [], forWording: 'wording' };
+
+it('removes a draft from the recovered copy when a late Discard Draft arrives (#664)', async () => {
+  await withRecoveredQuestion(async ({ B, copied, lateWithout }) => {
+    expect(copied.draft?.text).toBe('AI response to discard');
+    okd(await lateWithout('draft'));
+    const after = okd(await B.repo.get('question', copied.id));
+    expect(after.value.envelope.data).not.toHaveProperty('draft');
+    expect(after.value.envelope.data).toMatchObject({ text: 'Unseen question edited on B' });
+    expect(after.value.conflict).toBeUndefined();
+  }, { draft: lateDraft });
+});
+
+it('refuses a late Discard Draft when the draft changed in the recovered copy (#664)', async () => {
+  await withRecoveredQuestion(async ({ B, copied, lateWithout }) => {
+    const edited = { ...lateDraft, text: 'Draft changed in the copy' };
+    okd(await B.repo.transaction({
+      writes: [{ kind: 'question', id: copied.id, data: { ...copied, draft: edited }, expectedRev: copied.rev }],
+    }));
+    const released = await lateWithout('draft');
+    const after = okd(await B.repo.get('question', copied.id));
+    expect.soft(after.value.envelope.data).toMatchObject({ draft: edited });
+    expect(released.ok).toBe(false);
+  }, { draft: lateDraft });
+});
+
+it('applies a late Discard Draft without undoing other edits made in the recovered copy (#664)', async () => {
+  await withRecoveredQuestion(async ({ B, copyId, copied, lateWithout }) => {
+    okd(await B.store.dispatch(EditQuestionField, {
+      dealId: copyId, questionId: copied.id, field: 'text', value: 'New edit in the recovered copy',
+    }));
+    okd(await lateWithout('draft'));
+    const after = okd(await B.repo.get('question', copied.id));
+    expect(after.value.envelope.data).not.toHaveProperty('draft');
+    expect(after.value.envelope.data).toMatchObject({ text: 'New edit in the recovered copy' });
+  }, { draft: lateDraft });
+});
+
+it('refuses a member write that lands after its deal was deleted on another PC (#222)', async () => {
+  const { A, B, dealId } = await twoPcs();
+  try {
+    const id = memberId(dealId, 'sroe');
+    const member = firstMember(dealId, 'sroe', '2026-11-12T09:00:00.000Z');
+    okd(await A.store.dispatch(DeleteDeal, { dealId, typedName: A.store.get().deals[dealId].name }));
+    await syncAll(A, B);
+    const released = await B.repo.transaction({
+      writes: [{ kind: 'member', id, data: member, expectedRev: null }],
+      index: { dealId: '_', add: [{ kind: 'member', id }] },
+    });
+    expect(released.ok).toBe(false);
+    await syncAll(A, B);
+    for (const pc of [A, B]) expect(okd(await pc.repo.get('member', id)).value).toBeNull();
+  } finally {
+    await A.repo.close();
+    await B.repo.close();
+  }
+});
+
+it('refuses late saves once the recovered copy itself was deleted (#222)', async () => {
+  await withRecoveredQuestion(async ({ B, copyId, copied, lateWrite }) => {
+    okd(await B.store.dispatch(DeleteDeal, { dealId: copyId, typedName: B.store.get().deals[copyId].name }));
+    expect((await lateWrite({ response: 'Typed before the copy was deleted' })).ok).toBe(false);
+    expect(okd(await B.repo.get('question', copied.id)).value).toBeNull();
+  });
+});
+
+it('refuses a new record for a deleted deal once its recovered copy was deleted (#222)', async () => {
+  await withRecoveredQuestion(async ({ B, copyId, lateTransaction }) => {
+    const original = lateTransaction({}).writes[0].data as Question;
+    okd(await B.store.dispatch(DeleteDeal, { dealId: copyId, typedName: B.store.get().deals[copyId].name }));
+    const id = 'q_01HPRBFXXXXXXXXXXXTLATE0001';
+    const released = await B.repo.transaction({
+      writes: [{ kind: 'question', id, data: { ...original, id, n: original.n + 1, rev: 0 }, expectedRev: null }],
+      index: { dealId: original.dealId, add: [{ kind: 'question', id }] },
+    });
+    expect(released.ok).toBe(false);
+    expect(okd(await B.repo.get('question', id)).value).toBeNull();
+    expect(dealQuestions(B.store.get(), copyId)).toHaveLength(0);
+  });
+});
+
+it('keeps a draft that arrived after a late save was prepared (#664)', async () => {
+  await withRecoveredQuestion(async ({ B, copied, lateWrite }) => {
+    const released = await lateWrite({ response: 'Reply typed before the draft arrived' });
+    const after = okd(await B.repo.get('question', copied.id));
+    expect.soft(after.value.envelope.data).toMatchObject({ draft: lateDraft });
+    expect(released.ok, 'a stale save that omits the newer draft is refused, not applied as a discard').toBe(false);
+  }, {}, { draft: lateDraft });
 });
