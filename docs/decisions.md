@@ -154,6 +154,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Conversations are kept per person in the shared folder and follow the person between PCs. In the app, each person sees only their own; the files are readable by anyone with access to the folder, and no encryption is planned.
 - Answers cite sources sentence by sentence with a dotted underline, without numbered markers (#636). While a finding is being edited, each citation shows as a tag of at most 30 characters after its sentence (#636). An answer can become a finding, a question, or a response.
 - Cited phrases show the pointer cursor when they open a source. Hover-only citations keep the default cursor (#440).
+- Source chips keep the cited location and tags whole. The name shortens to fit and appears in full on hover (#441).
 - Chat is an agent with search, read, and folder tools. A folder read always covers the whole folder; reading more than `limits.folderDocs` documents asks first, and **Stop** answers from what was found.
 - While chat works, it shows "Researching" with the full trace; once it has answered, it shows "Researched · N steps · N of M documents searched · time", never "read" (option D).
 - Tool calls run inline by default; the hybrid and native modes are set by `models.toolCalls`.

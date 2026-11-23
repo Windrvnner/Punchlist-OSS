@@ -11,6 +11,52 @@ const fits = (page) => page.evaluate(() => {
   return inside(document.querySelector('.docnav')) && inside(document.querySelector('.dl')) && document.querySelector('#doc-drafts').getBoundingClientRect().height <= 31;
 });
 
+async function chipsInReadingMode(page, selected, shot) {
+  const chips = page.locator('.msgs .ai:not(.pending) .rsch-chip');
+  await chips.nth(selected).click();
+  await page.waitForSelector('.docpanel .page:not(.ph-page)');
+  // Let the layout settle after the reader opens and narrows the conversation.
+  await page.waitForTimeout(500);
+  const measurements = await chips.evaluateAll((items) => items.map((chip) => {
+    const name = chip.querySelector('.docnm');
+    const head = name.querySelector('.dnh');
+    const lastNamePart = name.querySelector('.dnt') ?? head;
+    const location = chip.querySelector('em');
+    const tag = chip.querySelector('.rdg');
+    const bounds = chip.getBoundingClientRect();
+    const column = chip.closest('.msgs').getBoundingClientRect();
+    const nameOverflow = name.scrollWidth - name.clientWidth;
+    const locationGap = location.getBoundingClientRect().left - lastNamePart.getBoundingClientRect().right;
+    const textFits = (part) => {
+      const range = document.createRange();
+      range.selectNodeContents(part);
+      const text = range.getBoundingClientRect();
+      const box = part.getBoundingClientRect();
+      return text.left >= box.left - 0.5 && text.right <= box.right + 0.5
+        && box.right <= bounds.right && Math.abs((text.top + text.bottom - bounds.top - bounds.bottom) / 2) <= 1;
+    };
+    return {
+      label: chip.getAttribute('aria-label'), name: name.textContent, location: location.textContent,
+      tag: tag?.textContent ?? '', ellipsis: getComputedStyle(head).textOverflow === 'ellipsis',
+      shortened: head.scrollWidth > head.clientWidth + 1,
+      fits: bounds.height === 28 && bounds.left >= column.left && bounds.right <= column.right + 0.5
+        && chip.scrollWidth <= chip.clientWidth && nameOverflow <= 1 && locationGap >= 5.5,
+      nameOverflow, locationGap,
+      detailsFit: [location, tag].filter(Boolean).every(textFits),
+    };
+  }));
+  if (shot) await page.screenshot({ path: shot, animations: 'disabled' });
+  const hover = measurements.findIndex((chip) => chip.shortened);
+  let tooltip = '';
+  if (hover >= 0) {
+    await chips.nth(hover).locator('.docnm').hover();
+    await page.waitForSelector('.tip');
+    tooltip = await page.textContent('.tip');
+    await page.mouse.move(2, 2);
+  }
+  return { measurements, tooltip, fullName: measurements[hover]?.name ?? '' };
+}
+
 for (const [scheme, w, h] of [['dark', 1280, 736], ['light', 1280, 736], ['dark', 1024, 640], ['light', 1024, 640]]) {
   const tag = `${scheme}-${w}`;
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme }); const page = await ctx.newPage(); page.errors = []; page.on('pageerror', (e) => page.errors.push(e.message));
@@ -53,18 +99,36 @@ for (const [scheme, w, h] of [['dark', 1280, 736], ['light', 1280, 736], ['dark'
   await page.click('#doc-drafts'); await page.locator('.dl .dm-r').first().click(); await page.waitForFunction(() => !document.querySelector('.docnav .docname small'));
   say(`${tag}:back-to-newest-at-its-citation`, await page.evaluate(() => document.querySelector('.docnav .loc').textContent === 'p. 142' && store.get().ui.docAside === null));
   // 4 an answer that cites a blackline: its chip says "reading", the tooltip says why, and it fits the column
-  await page.goto(URL + `#overview-${id}`); await page.waitForSelector('#hask'); await page.fill('#hask', 'What changed in the lock-up in the blackline?'); await page.press('#hask', 'Enter');
+  await page.goto(URL + `#overview-${id}`); await page.waitForSelector('#hask');
+  await page.fill('#hask', 'What changed in the lock-up ratio in the latest draft?');
+  await page.press('#hask', 'Enter');
   await page.waitForSelector('.msgs .ai:not(.pending) .rsch-chip', { timeout: 15000 }); await page.waitForTimeout(300);
   const chips = await page.evaluate(() => [...document.querySelectorAll('.msgs .ai:not(.pending) .rsch-chip')].map((c) => { const r = c.querySelector('.rdg'); const b = c.getBoundingClientRect(), m = document.querySelector('.msgs').getBoundingClientRect(); return [c.querySelector('.docnm')?.textContent ?? c.textContent, r?.textContent ?? '', r?.title ?? '', b.right <= m.right + 1 && b.height <= 30]; }));
   say(`${tag}:blackline-chip-reading`, chips.length === 2 && chips[0][1] === 'reading'
     && /AI's reading/.test(chips[0][2]) && chips[1][1] === '' && chips.every((c) => c[3]), JSON.stringify(chips));
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/D-reading-${tag}.png` });
+  const blackline = await chipsInReadingMode(page, 0, SHOTS && `${SHOTS}/441-${tag}.png`);
   // 5 an answer that cites another project's document beside this deal's own: its chip says "precedent", the tooltip says why
   await page.goto(URL + `#overview-${id}`); await page.waitForSelector('#hask'); await page.fill('#hask', 'How does the lock-up compare with the precedent?'); await page.press('#hask', 'Enter');
   await page.waitForSelector('.msgs .ai:not(.pending) .rsch-chip', { timeout: 15000 }); await page.waitForTimeout(300);
   const pre = await page.evaluate(() => [...document.querySelectorAll('.msgs .ai:not(.pending) .rsch-chip')].map((c) => { const r = c.querySelector('.rdg'); const b = c.getBoundingClientRect(), m = document.querySelector('.msgs').getBoundingClientRect(); return [r?.textContent ?? '', r?.title ?? '', b.right <= m.right + 1 && b.height <= 30]; }));
   say(`${tag}:precedent-chip`, pre.length === 2 && pre[0][0] === '' && pre[1][0] === 'precedent' && pre[1][1] === "Another project's document, not this deal's terms." && pre.every((c) => c[2]), JSON.stringify(pre));
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/E-precedent-${tag}.png` });
+  const precedent = await chipsInReadingMode(page, 1, SHOTS && `${SHOTS}/441-precedent-${tag}.png`);
+  const shown = [...blackline.measurements, ...precedent.measurements];
+  const details = shown.map(({ name, location, tag: badge }) => [name, location, badge]);
+  const expected = [
+    ['Credit agreement (blackline).pdf', 'p. 12', 'reading'],
+    ['Credit agreement (draft 1).pdf', 'p. 142', ''],
+    ['Credit agreement (draft 1).pdf', 'p. 142', ''],
+    ['Coho Solar credit agreement (executed).pdf', 'p. 88', 'precedent'],
+  ];
+  say(`${tag}:chip-places-and-tags-stay-whole-in-reading-mode`,
+    JSON.stringify(details) === JSON.stringify(expected)
+    && shown.every(({ fits, detailsFit, ellipsis, label, name, location }) =>
+      fits && detailsFit && ellipsis && label === `Open ${name}, ${location}`)
+    && [blackline, precedent].every(({ tooltip, fullName }) => fullName && tooltip === fullName),
+    JSON.stringify({ blackline, precedent }));
   say(`${tag}:no-page-errors`, page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }

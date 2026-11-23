@@ -754,6 +754,7 @@ body.reading .chatwrap.withdoc .chat{animation:settle var(--slow) var(--ease) bo
 .rsch-chip{display:inline-flex;align-items:center;gap:6px;height:28px;max-width:100%;min-width:0;padding:0 10px 0 9px;border:1px solid var(--line);border-radius:8px;background:var(--card);font:inherit;font-size:12.5px;color:var(--ink);white-space:nowrap;cursor:pointer}
 .rsch-chip:hover{background:var(--card-hover)}
 .rsch-chip svg{flex:none;color:var(--ink-3)}
+.rsch-chip>em,.rsch-chip>.rdg{flex:none}
 .rsch-chip em{font-style:normal;color:var(--ink-3)}
 .dots{display:inline-flex;gap:5px;padding:4px 0}.dots i{width:6px;height:6px;border-radius:50%;background:var(--ink-3);animation:dot 1.1s var(--ease) infinite}.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
 @keyframes dot{0%,80%,100%{opacity:.35;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}

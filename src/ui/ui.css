@@ -57,6 +57,9 @@ a.flagrow{text-decoration:none;color:inherit}
 .docnm .dni{display:contents}
 .docnm .dnh{flex:0 1 auto;min-width:3ch;overflow:hidden;text-overflow:ellipsis}
 .docnm .dnt{flex:none}
+/* In a tight source chip, the tail can also give way at the middle ellipsis, keeping the end of the name. */
+.rsch-chip .docnm:not(.run) .dnh{min-width:0}
+.rsch-chip .docnm:not(.run) .dnt{display:flex;justify-content:flex-end;flex-shrink:1;overflow:hidden}
 /* sliding through once: the full name, clipped to the same box, moved left until its end shows */
 .docnm.run{overflow:hidden}
 .docnm.run .dni{display:inline-flex;flex:none;transform:translateX(var(--dx,0px));transition:transform var(--dur,0s) linear}
