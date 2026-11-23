@@ -33,7 +33,7 @@ function nextFooter(view: ImportView, line: string, tip?: string) {
   const why = whyNoNext(view);
   const noColumn = source.byColumns && source.mapping.item === null;
   const waiting = listReview.waiting && !why && !noColumn;
-  const status = waiting ? `Asking ${SERVICE}` : line;
+  const status = waiting && !work.error ? `Asking ${SERVICE}` : line;
   return (
     <div class="xfoot">{statusLine(view, status, tip)}<span class="grow" />
       {split && chooseButton(view)}
