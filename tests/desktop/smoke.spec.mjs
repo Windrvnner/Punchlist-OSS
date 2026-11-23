@@ -291,6 +291,10 @@ fs.rmSync(root, { recursive: true, force: true });
 
 const failed = results.filter(([, ok]) => !ok);
 console.log(`\n${results.length - failed.length}/${results.length} passed`);
+// under check:all, the check IDs for scripts/gate-compare.mjs
+const gateDir = process.env.PUNCHLIST_GATE_DIR;
+const checks = results.map(([id, ok]) => ({ id, ok }));
+if (gateDir) fs.writeFileSync(path.join(gateDir, 'smoke.json'), JSON.stringify({ checks }, null, 2));
 process.exit(failed.length ? 1 : 0);
 
 /** a small real PDF whose pages each say `text` (as tests/e2e/kit.ts makes them) */
