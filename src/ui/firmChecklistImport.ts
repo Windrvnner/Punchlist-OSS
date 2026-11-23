@@ -24,9 +24,7 @@ export type Busy = '' | 'reading' | 'asking' | 'reviewing' | 'importing';
  * A retry can still be in flight after Back, while the person chooses and reads another source.
  */
 export function useWork() {
-  const [activity, setBusy] = useState<Busy>('');
-  const [retrying, setRetrying] = useState(false);
-  const busy = activity || (retrying ? 'reviewing' : '');
+  const [busy, setBusy] = useState<Busy>('');
   const [error, setError] = useState('');
   const token = useRef(0);
   /** a new token: any answer still to come for an older one is dropped */
@@ -45,7 +43,7 @@ export function useWork() {
   };
   /** whether nothing newer has started, or the dialog been left, since `mine` began */
   const isLatest = (mine: number) => token.current === mine;
-  return { busy, activity, setBusy, setRetrying, error, setError, newToken, begin, drop, isLatest };
+  return { busy, setBusy, error, setError, newToken, begin, drop, isLatest };
 }
 export type Work = ReturnType<typeof useWork>;
 
@@ -103,7 +101,7 @@ function useListFile(store: Store, work: Work, left: ChecklistKept | null) {
     setMapping(suggestChecklistColumns(read.columns, read.rows));
   };
   const load = async (file: File) => {
-    if (work.activity) return;
+    if (work.busy) return;
     const mine = work.begin('reading');
     const read = await readListFile(store, file);
     if (!work.isLatest(mine)) return;
@@ -122,7 +120,7 @@ function useListFile(store: Store, work: Work, left: ChecklistKept | null) {
     }
   };
   const reread = (opts: { sheet?: string; headerRow?: number }) => {
-    if (!table || work.activity) return;
+    if (!table || work.busy) return;
     void readTableAgain(store, work, table, byColumns ? opts : { ...opts, headerRow: 1 }, take);
   };
   // the fallback when the model could not read a table: its columns chosen by hand
@@ -133,7 +131,7 @@ function useListFile(store: Store, work: Work, left: ChecklistKept | null) {
   };
   // what is pasted stays in the box until it is sent, and after "change"
   const pasted = () => {
-    if (!paste.trim() || work.activity) return;
+    if (!paste.trim() || work.busy) return;
     setTable(null);
     setByColumns(false);
     work.setError('');
@@ -250,28 +248,39 @@ export function useListReview(
   /** what the review would be asked about now, as the person last left the choices: one asked for others isn't shown */
   const sigNow = useRef('');
   const { generalTexts } = target;
-  sigNow.current = prepared
-    ? askedAbout(prepared.items.map((item) => item.text), askReword, askSame, generalTexts)
-    : '';
+  const texts = prepared?.items.map((item) => item.text);
+  const sig = texts ? askedAbout(texts, askReword, askSame, generalTexts) : '';
+  sigNow.current = sig;
+  const cached = review && askedFor.current === sig ? review : null;
+  const canReword = !!ai.reword;
+  const canAskSame = !!ai.sameMeaning;
+  const needsCall = cached
+    ? canAskSame && hasMissedDuplicates(cached)
+    : (askReword && canReword) || (askSame && canAskSame);
   const retries = useReviewRetries(store, work, review, setReview, generalTexts);
+  const waiting = !!texts?.length && needsCall && retries.pending;
   const toBringIn = useBringIn(store, work, target, keeper, { review, remove, useReword });
 
   // A model that cannot be asked leaves its part out and says so; the list can still be brought in.
   const next = async () => {
-    if (!prepared || !prepared.items.length || !target.named || work.busy || retries.asking.current) return;
-    const texts = prepared.items.map((item) => item.text);
-    const sig = askedAbout(texts, askReword, askSame, generalTexts);
-    if (review && askedFor.current === sig) {
-      await showAgain(review, texts, sig);
+    if (!prepared || !texts?.length || !target.named || work.busy) return;
+    if (cached) {
+      if (needsCall) {
+        const missedAt = cached.sameMissed?.at ?? texts.map((_, at) => at);
+        if (!(await retries.askMissed(cached, texts, missedAt))) return;
+      }
+      if (sigNow.current === sig) setShown(true);
       return;
     }
-    const replies = await retries.ask(() => askModel(store, texts, { askReword, askSame }, generalTexts));
-    if (!replies) return;
+    const replies = needsCall
+      ? await retries.ask(() => askModel(store, texts, { askReword, askSame }, generalTexts))
+      : [null, null] as const;
+    if (!replies || sigNow.current !== sig) return;
     const [rewordReply, sameReply] = replies;
-    if (sigNow.current !== sig) return;   // the choices changed while the model was asked
+    work.setError('');
     const fresh = makeReview({
       items: prepared.items, earlierItems: target.replaces?.items, generalTexts, askReword, askSame,
-      canReword: !!ai.reword, canAskSame: !!ai.sameMeaning, rewordReply, sameReply,
+      canReword, canAskSame, rewordReply, sameReply,
     });
     setReview(fresh.review);
     choices.setUseReword(fresh.checked);
@@ -279,18 +288,15 @@ export function useListReview(
     askedFor.current = sig;
     setShown(true);
   };
-  // the duplicate check missed some items, or all of them: those alone are asked about again, and the review shown
-  // only if nothing it was asked about changed meanwhile
-  const showAgain = async (was: Review, texts: string[], sig: string) => {
-    const sameFailed = was.asked.same === 'unreachable' || was.asked.same === 'failed';
-    const missedAt = was.sameMissed?.at ?? (sameFailed ? texts.map((_, at) => at) : null);
-    if (missedAt && ai.sameMeaning && !(await retries.askMissed(was, texts, missedAt))) return;
-    if (sigNow.current === sig) setShown(true);
-  };
   return {
-    ...choices, review, shown: made.shown, askedFor, ...toBringIn,
+    ...choices, review, shown: made.shown, askedFor, waiting, ...toBringIn,
     next, retry: retries.retry, retryWording: retries.retryWording, reset, backToList: made.backToList,
   };
+}
+
+/** A duplicate check can leave some or all items unchecked. */
+function hasMissedDuplicates(review: Review) {
+  return !!review.sameMissed || review.asked.same === 'unreachable' || review.asked.same === 'failed';
 }
 
 /** The review as last made, whether it is on screen, and what it was asked about. */
@@ -355,19 +361,20 @@ function useReviewRetries(
   store: Store, work: Work, review: Review | null, setReview: (review: Review) => void, generalTexts: string[],
 ) {
   const ai = store.services.ai;
-  // The ref guards same-frame presses on every review path.
+  // The ref guards same-frame presses. Only Next needs to know a model call is still pending after Back.
   const asking = useRef(false);
+  const [pending, setPending] = useState(false);
   const ask = async <T>(call: () => Promise<T>): Promise<T | undefined> => {
     if (work.busy || asking.current) return;
     asking.current = true;
-    work.setRetrying(true);
+    setPending(true);
     const mine = work.begin('reviewing');
     try {
       const reply = await call();
       if (work.isLatest(mine)) return reply;
     } finally {
       asking.current = false;
-      work.setRetrying(false);
+      setPending(false);
       if (work.isLatest(mine)) work.setBusy('');
     }
   };
@@ -408,7 +415,7 @@ function useReviewRetries(
     }
     setReview(withRewordings(review, reply.value));
   };
-  return { ask, asking, askMissed, retry, retryWording };
+  return { ask, pending, askMissed, retry, retryWording };
 }
 
 /** The items as checked in the review, and bringing them in. */
