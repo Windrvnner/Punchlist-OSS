@@ -13,8 +13,7 @@ import { Question, Finding, Tombstone, DealId, QuestionId, FindingId, QuestionSt
 import { setResponse, setQuestionStatus, checkQuestion } from '../../domain/transitions';
 import { numbering } from './questions';
 import { sameText, sameWords, type ImportRow } from '../../domain/importExport';
-import { misreadKey, canMatchNumber, identifiers, sameIdentifiers }
-  from '../../domain/logWrite';
+import { misreadKey, canMatchNumber, identifierSig, sameIdentifiers } from '../../domain/logWrite';
 import { ok, fail, notFound, rejected } from '../../domain/result';
 import { dealQuestions, nextQuestionNumber } from '../state';
 import { derivedId } from '../../domain/derivedId';
@@ -88,26 +87,7 @@ export const ImportQuestions = define({
       };
       const live = index([...originals.values()]), dead = index([...gone.values()]);
       const keys = input.rows.map((row) => misreadKey(row.text));
-      // a question of the row's words that names another identifier is not the row's (#127, #128)
-      const rowIds = input.rows.map((row) => identifiers(row.text));
-      const questionIds = new Map([...originals.values(), ...gone.values()]
-        .map((q) => [q.id, identifiers(q.text)]));
-      const alike = (idx: number, q: Question) => sameIdentifiers(rowIds[idx], questionIds.get(q.id)!);
-      // a list walked past the questions already taken at its start
-      const skipTaken = (e: { list: Question[]; at: number }) => {
-        while (e.at < e.list.length && taken.has(e.list[e.at].id)) e.at++;
-      };
-      // the first two questions of a list not yet taken that name no other identifier than the row: the first is the
-      // pick, a second says another fits as well
-      const firstTwo = (pool: ReturnType<typeof index>, at: string, idx: number) => {
-        const e = pool.byFit.get(at); if (!e) return [];
-        skipTaken(e);
-        const two: Question[] = [];
-        for (let j = e.at; j < e.list.length && two.length < 2; j++) {
-          if (!taken.has(e.list[j].id) && alike(idx, e.list[j])) two.push(e.list[j]);
-        }
-        return two;
-      };
+      const alike = identifierMatcher(input.rows, [...originals.values(), ...gone.values()]);
       // the question of the row's words it agrees with most in the other fields, and in how many (a party that differs is
       // never a candidate); of equal ones, the first in the log
       const bestOf = (pool: ReturnType<typeof index>, idx: number) => {
@@ -119,7 +99,8 @@ export const ImportQuestions = define({
           const tries: [string, number][] = party ? [[`p\0${party}\0${keys[idx]}\0${sig}`, n + 1], [`p\0\0${keys[idx]}\0${sig}`, n]] : [[`a\0${keys[idx]}\0${sig}`, n]];
           for (const [at, f] of tries) {
             if (found && f < found.fit) continue;
-            const two = firstTwo(pool, at, idx); if (!two.length) continue;
+            const two = firstTwo(pool.byFit.get(at), taken, (q) => alike(idx, q));
+            if (!two.length) continue;
             if (!found || f > found.fit) found = { q: two[0], fit: f, rivals: new Set() };
             else if (order.get(two[0].id)! < order.get(found.q.id)!) found.q = two[0];
             for (const q of two) found.rivals.add(q.id);
@@ -264,6 +245,28 @@ export const ImportQuestions = define({
     });
   },
 });
+
+/** Whether row `idx` and a question name the same identifiers, each worked out once (#125, #127, #128). */
+function identifierMatcher(rows: ImportRow[], questions: Question[]) {
+  const rowSigs = rows.map((row) => identifierSig(row.text));
+  const questionSigs = new Map(questions.map((q) => [q.id, identifierSig(q.text)]));
+  return (idx: number, q: Question) => sameIdentifiers(rowSigs[idx], questionSigs.get(q.id)!);
+}
+
+/**
+ * The first two questions of a list not yet taken that `fits`: the first is the pick, a second says another fits as
+ * well. The list is walked past the questions taken at its start, so a large file stays quick.
+ */
+function firstTwo(e: { list: Question[]; at: number } | undefined, taken: ReadonlySet<string>,
+  fits: (q: Question) => boolean): Question[] {
+  if (!e) return [];
+  while (e.at < e.list.length && taken.has(e.list[e.at].id)) e.at++;
+  const two: Question[] = [];
+  for (let j = e.at; j < e.list.length && two.length < 2; j++) {
+    if (!taken.has(e.list[j].id) && fits(e.list[j])) two.push(e.list[j]);
+  }
+  return two;
+}
 
 export const RevertImport = define({
   name: 'RevertImport',
