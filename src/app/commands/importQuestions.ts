@@ -224,6 +224,7 @@ export const ImportQuestions = define({
       upserts.push({ kind: 'question', record: q, expectedRev: orig.rev }); restore.push(orig);
     }
     for (const f of findings.values()) upserts.push({ kind: 'finding', record: f, expectedRev: findingOriginals.get(f.id)!.rev });
+    const wroteFindings = [...findings.keys()].map((id) => findingOriginals.get(id)!);
     const updated = restore.length; const back = restored.map((t) => t.id);
     if (!upserts.length) return ok({ upserts: [], audit: [], message: 'Nothing in the file differs from the log' });
     const add = [...created, ...back].map((id) => ({ kind: 'question' as const, id }));
@@ -231,7 +232,11 @@ export const ImportQuestions = define({
       dealId: d.id, upserts, audit,
       removes: back.map((id) => ({ kind: 'tombstone' as const, id, rev: null })),
       index: add.length ? { dealId: d.id, add, remove: back.map((id) => ({ kind: 'tombstone' as const, id })) } : undefined,
-      inverse: { command: 'RevertImport', input: { dealId: d.id, created, restore, findings: [...findingOriginals.values()], buried: restored } },
+      // only findings this import wrote: a finding it left alone is never put back (#50)
+      inverse: {
+        command: 'RevertImport',
+        input: { dealId: d.id, created, restore, findings: wroteFindings, buried: restored },
+      },
       // the file's rows are needed only to run the import again after an interruption: a done import is kept without them, as
       // its last one is kept for "Undo last import" however long ago, and Undo needs only the inverse and results
       settledInput: { dealId: d.id, mode: input.mode },

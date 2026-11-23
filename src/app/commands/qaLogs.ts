@@ -8,6 +8,8 @@ import { DealId, QaLog, Question, QuestionId, QuestionStatus, Finding, type Deal
 import { setResponse, editQuestionField, checkQuestion } from '../../domain/transitions';
 import { ok, fail, notFound, rejected, type Result } from '../../domain/result';
 import { keepAside } from './keptVersions';
+import { cellValue } from '../../domain/logWrite';
+import type { ImportField } from '../../domain/importExport';
 
 /** the fields a version may set besides Response and Status (as EditQuestionField takes them) */
 const QuestionFieldName = z.enum(['text', 'askedBy', 'received', 'workstream', 'priority', 'respondedBy', 'responded']);
@@ -23,18 +25,32 @@ export const KeepQaLog = define({
     const d = state.deals[input.dealId]; if (!d) return fail(notFound('Deal not found', input.dealId));
     const had = d.qaLogs.find((l) => l.name === input.log.name);
     const log = QaLog.parse({ ...had, ...input.log });
+    // one file is one deal's log, even when two PCs import it into two deals at once (#38)
+    const taken = fileTaken(state, d.id, log.file, log.folder, 'Choose another file');
+    if (taken) return fail(rejected(taken));
     return ok({ dealId: d.id, upserts: [{ kind: 'deal', record: withLogs(d, [...d.qaLogs.filter((l) => l.name !== log.name), log], ctx.at), expectedRev: d.rev }], audit: [], inverse: { command: 'RestoreQaLogs', input: { dealId: d.id, logs: d.qaLogs } } });
   },
 });
 
+/** a path as Windows compares it: case and slash direction don't matter, nor a separator at the end */
+export const windowsPath = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLocaleLowerCase('en-US');
+
 /**
  * Two deals may share a name, and so may their logs' files: one file is one deal's log, or each would write the other's
- * answers into it. Why `file` in `folder` cannot be this deal's log, or null when it can.
+ * answers into it. Why `file` in `folder` cannot be this deal's log, or null when it can; `next` says what to do
+ * instead.
  */
-function fileTaken(state: { deals: Record<string, Deal> }, dealId: string, file: string, folder: string): string | null {
-  const same = (a: string, b: string) => a.replace(/[\\/]+$/, '').toLocaleLowerCase('en-US') === b.replace(/[\\/]+$/, '').toLocaleLowerCase('en-US');
-  const taken = Object.values(state.deals).find((x) => x.id !== dealId && x.qaLogs.some((l) => same(l.folder, folder) && same(l.file, file)));
-  return taken ? `${taken.name}${taken.counterparty ? ` (${taken.counterparty})` : ''} already uses “${file}” in this folder as its Q&A log. Choose another folder` : null;
+export function fileTaken(
+  state: { deals: Record<string, Deal> }, dealId: string, file: string, folder: string, next = 'Choose another folder',
+): string | null {
+  const same = (a: string, b: string) => windowsPath(a) === windowsPath(b);
+  const sameFile = (l: QaLog) => same(l.folder, folder) && same(l.file, file);
+  const taken = Object.values(state.deals).find((x) => x.id !== dealId && x.qaLogs.some(sameFile));
+  if (!taken) return null;
+  // the file named as the other deal holds it, however it was typed here
+  const named = taken.qaLogs.find(sameFile)!.file;
+  const deal = `${taken.name}${taken.counterparty ? ` (${taken.counterparty})` : ''}`;
+  return `${deal} already uses “${named}” in this folder as its Q&A log. ${next}`;
 }
 
 /** The folder the log is in, when it has moved; the file keeps its name. What the app wrote stays: it is about the log's cells. */
@@ -154,6 +170,15 @@ function applyVersion(state: { findings: Record<string, Finding> }, q: Question,
 }
 
 /**
+ * The log's cells for a question, without any the app changed after the update compared it: that is the person's newer
+ * edit, so the cell is left for two versions (#40)
+ */
+function stillAsCompared(q: Question, set: Record<string, string>, expected: Record<string, string> | undefined) {
+  const changedSince = (k: string) => expected?.[k] !== undefined && cellValue(q, k as ImportField) !== expected[k];
+  return Object.fromEntries(Object.entries(set).filter(([k]) => !changedSince(k)));
+}
+
+/**
  * An update takes in the cells only the Q&A log changed (an edit in the log is the latest), in one step:
  * `set` by question id, each field in the app's terms. The questions are marked Changed by the log's record (`changed`),
  * which the update writes. A question whose cells cannot be used as they are is left as it is (`skipped`); the next
@@ -161,12 +186,19 @@ function applyVersion(state: { findings: Record<string, Finding> }, q: Question,
  */
 export const TakeFromQaLog = define({
   name: 'TakeFromQaLog',
-  input: z.object({ dealId: DealId, set: z.record(z.string(), z.record(z.string(), z.string())) }),
+  input: z.object({
+    dealId: DealId,
+    set: z.record(z.string(), z.record(z.string(), z.string())),
+    /** the app's values by question and field as the update compared them */
+    expect: z.record(z.string(), z.record(z.string(), z.string())).optional(),
+  }),
   targets: (s, i) => [...Object.keys(i.set), ...Object.keys(i.set).map((id) => s.questions[id]?.linkedFinding).filter((x): x is string => !!x)],
   plan(state, input, ctx) {
     const upserts: any[] = []; const snapshots: Question[] = []; const findings: Finding[] = []; const skipped: string[] = [];
-    for (const [id, set] of Object.entries(input.set)) {
+    for (const [id, all] of Object.entries(input.set)) {
       const q = state.questions[id]; if (!q || q.dealId !== input.dealId) continue;
+      const set = stillAsCompared(q, all, input.expect?.[id]);
+      if (!Object.keys(set).length) continue;
       const r = applyVersion(state, q, set, ctx); if (!r.ok) { skipped.push(id); continue; }
       if (r.value.next === q) continue;
       upserts.push({ kind: 'question', record: r.value.next, expectedRev: q.rev }); snapshots.push(q);

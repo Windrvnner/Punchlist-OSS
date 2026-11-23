@@ -11,7 +11,9 @@ import type { Store } from './store';
 import { localYmd, type QaLog, type Question } from '../domain/model';
 import { dealQuestions, dealTwin, qaKept } from './state';
 import { logWrite, logHolds, matchRows, cellValue, readLogCells, holds } from '../domain/logWrite';
-import { KeepQaLog, SetQaLogFolder, RecordQaLogExport, ChooseQaVersion, TakeFromQaLog } from './commands/qaLogs';
+import {
+  KeepQaLog, SetQaLogFolder, RecordQaLogExport, ChooseQaVersion, TakeFromQaLog, fileTaken, windowsPath as samePath,
+} from './commands/qaLogs';
 import { questionsSheet, suggestMapping, type Mapping, type ImportField } from '../domain/importExport';
 import { ok, fail, type Result } from '../domain/result';
 import { cell, type KeptAsk } from '../domain/keptMerge';
@@ -26,9 +28,6 @@ export const logOf = (store: Store, dealId: string): QaLog | undefined => store.
 /** a file's folder and name, from its full path ("X:\Deals\Proseware\Q&A log.xlsx") */
 const placeOf = (full: string) => { const i = Math.max(full.lastIndexOf('\\'), full.lastIndexOf('/')); return i > 0 ? { folder: full.slice(0, i), file: full.slice(i + 1) } : null; };
 
-/** a path as Windows compares it: case and slash direction don't matter, nor a separator at the end */
-const samePath = (p: string) => p.toLowerCase().replace(/\//g, '\\').replace(/\\+$/, '');
-
 /**
  * What an imported file can be to the deal's log, by where the file is (`path`, which only the desktop app knows):
  * 'same' when it is the deal's log already, 'new' when the deal has none and this file could be it, null otherwise.
@@ -39,6 +38,12 @@ export function logChoice(store: Store, dealId: string, path: string | null): 's
   const had = logOf(store, dealId); if (had) return samePath(had.folder) === samePath(at.folder) && samePath(had.file) === samePath(at.file) ? 'same' : null;
   const inside = (f: string) => { const a = samePath(at.folder), b = samePath(f); return a === b || a.startsWith(`${b}\\`); };
   return store.get().deals[dealId]?.folders.some((f) => inside(f.path)) ? null : 'new';
+}
+
+/** One file is one deal's Q&A log: why `path` can't be imported into this deal, or null when it can (#38) */
+export function logTakenBy(store: Store, dealId: string, path: string | null): string | null {
+  const at = path ? placeOf(path) : null;
+  return at ? fileTaken(store.get(), dealId, at.file, at.folder, 'Choose another file') : null;
 }
 
 /**
@@ -165,6 +170,15 @@ export type ExportOutcome =
  */
 export type PlaceKept = (ask: KeptAsk[]) => Promise<number[] | null>;
 
+/** what the update compared for each question it takes cells for, so a later edit is never replaced (#40) */
+function comparedValues(qs: Question[], taken: Record<string, Record<string, string>>) {
+  const byId = new Map(qs.map((q) => [q.id, q] as const));
+  return Object.fromEntries(Object.entries(taken).flatMap(([id, cells]) => {
+    const q = byId.get(id);
+    return q ? [[id, Object.fromEntries(Object.keys(cells).map((k) => [k, cellValue(q, k as ImportField)]))]] : [];
+  }));
+}
+
 /**
  * Bring the deal's log up to date with everything the app holds (logWrite), in the file itself. A failure after the log was
  * saved still says how many kept edits it filed not fully merged.
@@ -248,10 +262,12 @@ export async function exportQaLog(store: Store, dealId: string, place?: PlaceKep
   // what each cell held before. One the app cannot take as it is (an Answered status with no response,
   // say) is left in two versions, its cell recorded as before, so the next update never writes over it.
   const keptText = { ...w.keptText }; const changed: Record<string, Record<string, string>> = {};
-  const was = new Map(Object.keys(w.taken).map((id) => [id, store.get().questions[id]] as const));
+  const was = new Map(qs.filter((q) => w.taken[q.id]).map((q) => [q.id, q] as const));
   if (Object.keys(w.taken).length) {
     const set = Object.fromEntries(Object.entries(w.taken).map(([id, cells]) => [id, readCells(store, store.get().questions[id], cells)]));
-    const took = await store.dispatch(TakeFromQaLog, { dealId, set }, { quiet: true }); if (!took.ok) return settleThen(took);
+    const expect = comparedValues(qs, w.taken);
+    const took = await store.dispatch(TakeFromQaLog, { dealId, set, expect }, { quiet: true });
+    if (!took.ok) return settleThen(took);
     // taken where the question now says what the log does, read in the app's terms ("Outstanding" as Open)
     for (const [id, cells] of Object.entries(w.taken)) {
       const q = store.get().questions[id]; const before = was.get(id); if (!q || !before) continue;
