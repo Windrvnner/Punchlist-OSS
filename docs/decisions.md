@@ -32,6 +32,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A Search question keeps the current deal's Q&A filters. From Home or a different deal it opens with All (#497).
 - Choosing an open Checklist item in Search reveals its row again (#496).
 - Keyboard selection in Search moves focus to the opened question or Checklist row (#498).
+  When a question closes and its row is hidden by the active filter, focus returns to the Q&A filters.
 - A deal's pages are Overview, Findings, Checklist, and Q&A; **Settings** → **Deals Open On** picks which page opens first (Overview by default). No new tabs are added.
 - The deal header holds Deal status and one ⋯ menu with **Check Again** (showing "Last checked [date]"), **Deal Memo…**, **Rename**, and, set apart, **Delete Deal…**.
 - The counterparty sits alone at the top right of every deal page. Structure, Sector, and Technology appear on Overview only.

@@ -158,7 +158,12 @@ export function QaPage({ dealId }: { dealId: string }) {
   useLayoutEffect(() => { const l = listRef.current; if (tuck && l && l.scrollTop < 24) setTuck(0); }, [list.length, tuck]);
 
   const select = (id: string) => store.ui({ selectedQuestion: id });
-  const focusRow = (id: string) => requestAnimationFrame(() => listRef.current?.querySelector<HTMLElement>(`.li[data-q="${id}"]`)?.focus());
+  const focusRow = (id: string, afterClose = false) => requestAnimationFrame(() => {
+    const row = listRef.current?.querySelector<HTMLElement>(`.li[data-q="${id}"]`);
+    // #498: closing an out-of-filter Search result leaves a keyboard stop on the Q&A toolbar.
+    const filter = afterClose ? document.querySelector<HTMLElement>('.trk-tools [data-qaf][aria-pressed="true"]') : null;
+    (row ?? filter)?.focus();
+  });
   // Enter on the row already open goes into it: to the Response, or while a draft is coming to its first button, else the
   // Question, rather than a dozen Shift+Tabs back up the page. A click (detail > 0) only opens.
   const intoPanel = () => (
@@ -170,7 +175,13 @@ export function QaPage({ dealId }: { dealId: string }) {
   useLayoutEffect(() => {
     if (sel && s.ui.searchFocus === sel.id) focusSearchResult(store, sel.id, intoPanel);
   }, [sel?.id, s.ui.searchFocus]);
-  const close = () => { if (!sel) return; const id = sel.id; setCursor(id); store.ui({ selectedQuestion: null }); focusRow(id); };
+  const close = () => {
+    if (!sel) return;
+    const id = sel.id;
+    setCursor(id);
+    store.ui({ selectedQuestion: null });
+    focusRow(id, true);
+  };
   const escClose = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); close(); } };
   // the open question's place in the list, and a step to the one before or after it (the panel's arrows)
   const selAt = sel ? list.findIndex((r) => r.id === sel.id) : -1;
@@ -458,7 +469,8 @@ function ConflictPanel({ q, busy, onClose, onKeyDown }: {
 }) {
   const s = useAppState();
   return (
-    <section class="det qpanel conflict glass" inert={busy} aria-label={`Q${q.n}`} onKeyDown={onKeyDown}>
+    <section class="det qpanel conflict glass" inert={busy}
+      aria-label={`Q${q.n}`} tabIndex={-1} onKeyDown={onKeyDown}>
       <ConflictView conflict={s.conflicts[q.id]} tail={<CloseDetail onClose={onClose} />} label={`Q${q.n}`} stepper />
     </section>
   );

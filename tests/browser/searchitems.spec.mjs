@@ -163,12 +163,14 @@ async function keepsQaFilters(page, k, o) {
   await page.focus('.qpanel textarea.qtext');
   await page.keyboard.press('Escape');
   await page.waitForSelector('.qpanel', { state: 'detached' });
-  const afterEscape = await page.evaluate(() => store.get().ui.qaFilter);
+  const afterEscape = await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => {
+    resolve({ filter: store.get().ui.qaFilter, focus: !!document.activeElement?.closest('.trk-tools') });
+  })));
   const sameDeal = await chooseQuestion(page, k, 'overview-' + k);
   const fromHome = await chooseQuestion(page, k, 'deals');
   const otherDeal = await chooseQuestion(page, k, 'qa-' + o);
   say('#497 Search keeps same-deal Q&A filters and opens out-of-filter questions',
-    chosenVisible && [fromQa, afterEscape, sameDeal].every((filter) => sameFilter(filter, FILTER)) &&
+    chosenVisible && afterEscape.focus && [fromQa, afterEscape.filter, sameDeal].every((filter) => sameFilter(filter, FILTER)) &&
       [fromHome, otherDeal].every((filter) => sameFilter(filter, DEFAULT_FILTER)),
     JSON.stringify({ fromQa, afterEscape, sameDeal, fromHome, otherDeal }));
 }
@@ -200,6 +202,29 @@ async function revealsOpenChecklistRow(page, k) {
   say('#496 Search reveals the already-open Checklist row', outcomes.every(Boolean), JSON.stringify(outcomes));
 }
 
+async function focusConflictedQuestion(page, dealId) {
+  const conflict = await page.evaluate(async ([dealId, text, qaFilter]) => {
+    const question = Object.values(store.get().questions).find((q) => q.dealId === dealId && q.text === text);
+    const saved = await store.dispatch(store.commandNamed('SetResponse'), {
+      dealId, questionId: question.id, response: 'The draft names the operator.',
+    }, { quiet: true });
+    if (!saved.ok) throw new Error(JSON.stringify(saved.error));
+    const result = await __peer.edit(question.id, { response: 'The revision names the sponsor.' });
+    store.ui({ selectedQuestion: null, qaFilter });
+    return { result, id: question.id };
+  }, [dealId, QUESTION, DEFAULT_FILTER]);
+  if (conflict.result !== 'conflict') throw new Error('Could not seed the mock conflict: ' + conflict.result);
+  await page.waitForFunction((id) => !!store.get().conflicts[id], conflict.id);
+  await search(page, QUESTION);
+  await page.locator('#pal-res [data-kind=question] button:not(.pmore)').first().waitFor();
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.qpanel.conflict');
+  const focused = await page.evaluate(() => document.activeElement?.matches('.qpanel.conflict'));
+  await page.keyboard.press('Tab');
+  const continued = await page.evaluate(() => !!document.activeElement?.closest('.qpanel.conflict'));
+  return focused && continued;
+}
+
 async function focusesKeyboardResults(page, k, o) {
   const inQuestion = () => page.evaluate(() => !!document.activeElement?.closest('.qpanel'));
   await chooseQuestion(page, k, 'qa-' + k);
@@ -210,6 +235,7 @@ async function focusesKeyboardResults(page, k, o) {
   const otherDeal = await inQuestion();
   await chooseQuestion(page, k, 'qa-' + k, true);
   const pointer = await inQuestion();
+  const conflict = await focusConflictedQuestion(page, k);
   await page.goto(URL + '#checklist-' + k);
   await search(page, LAST);
   await itemIn(page, 'Project Proseware').hover();
@@ -217,8 +243,8 @@ async function focusesKeyboardResults(page, k, o) {
   await page.waitForSelector('#ck-detail');
   const checklist = await page.evaluate(() => document.activeElement?.matches('#ck-rows .ckrow.on'));
   say('#498 keyboard Search moves focus to the opened question or Checklist row',
-    samePage && next && otherDeal && !pointer && checklist,
-    JSON.stringify({ samePage, next, otherDeal, pointer, checklist }));
+    samePage && next && otherDeal && !pointer && conflict && checklist,
+    JSON.stringify({ samePage, next, otherDeal, pointer, conflict, checklist }));
 }
 
 {
