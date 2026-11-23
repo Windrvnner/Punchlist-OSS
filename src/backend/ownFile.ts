@@ -31,9 +31,67 @@ export const dealFiles = (names: string[], kind: string, dealId: string) => { co
  */
 export function appendOwn(shared: Pick<Folder, 'append'> & Partial<Pick<Folder, 'read' | 'write'>>, local: Folder | undefined, name: string, text: string, keep = false): unknown {
   if (!local) { shared.append(name, text); return; }
-  local.append(name, text);
+  appendLocal(local, name, text);
   if (!keep) { shareOwn(shared, local, name, text); return; }
   try { shared.append(name, text); } catch (e) { return e; }
+}
+
+/** Per local folder, the files whose last append failed and is not taken back yet: the size in bytes to cut each to. */
+const failedAppends = new WeakMap<Folder, Map<string, number>>();
+/** Per local folder, the files whose end has been checked in this run of the app. */
+const checkedEnds = new WeakMap<Folder, Set<string>>();
+/** `text` cut to its first `size` bytes of UTF-8. */
+function firstBytes(text: string, size: number) {
+  return new TextDecoder().decode(new TextEncoder().encode(text).subarray(0, size));
+}
+
+/**
+ * Append to the local copy, whole or not at all (#126). A write that fails part way may leave the start of the text;
+ * it is cut off again, so the next line is not glued to it. When it cannot be cut off yet (the disk is still full),
+ * no other line is added to that file until it has been.
+ */
+function appendLocal(local: Folder, name: string, text: string) {
+  mendLocal(local, name);
+  const before = sizeBefore(local, name);
+  try { local.append(name, text); }
+  catch (error) {
+    const failed = failedAppends.get(local) ?? new Map<string, number>();
+    failedAppends.set(local, failed.set(name, before));
+    try { takeBackFailed(local, name); } catch { /* cut off before the next append or heal of this file */ }
+    throw error;
+  }
+}
+
+/** The size in bytes to cut a failed append back to: -1 when a file that is there could not be measured. */
+function sizeBefore(local: Folder, name: string) {
+  const size = local.size(name);
+  if (size >= 0) return size;
+  return local.read(name) === null ? 0 : -1;
+}
+
+/** Make the local copy end where its last whole line ends, before anything is added to it. Throws when it cannot. */
+function mendLocal(local: Folder, name: string) {
+  takeBackFailed(local, name);
+  const checked = checkedEnds.get(local) ?? new Set<string>();
+  if (checked.has(name)) return;
+  // a run that stopped part way through an append (a crash, a power cut) may have left the start of a line
+  const text = local.read(name) ?? '';
+  if (!text.endsWith('\n') && text) local.write(name, text.slice(0, text.lastIndexOf('\n') + 1));
+  checkedEnds.set(local, checked.add(name));
+}
+
+/** Whether the local copy still holds part of a failed append: its lines must not be read as written. */
+export const holdsFailedAppend = (local: Folder, name: string) => failedAppends.get(local)?.has(name) ?? false;
+
+/** Cut a failed append back off the local copy: sizes are in bytes, as on a disk. Throws when it cannot. */
+function takeBackFailed(local: Folder, name: string) {
+  const size = failedAppends.get(local)?.get(name);
+  if (size === undefined) return;
+  const text = local.read(name) ?? '';
+  // not measured: only the start of a line is known to be the failed append's
+  const kept = size < 0 ? text.slice(0, text.lastIndexOf('\n') + 1) : firstBytes(text, size);
+  if (kept !== text) local.write(name, kept);
+  failedAppends.get(local)?.delete(name);
 }
 
 /**
@@ -63,10 +121,11 @@ export function healOwn(
 ) {
   if (!local) return;
   try {
+    takeBackFailed(local, name);                                     // a failed append is never shared
     if (!how.whole) { const here = local.size(name); if (here < 0 || shared.size(name) === here) return; }
     const text = shared.read(name) ?? '';
     const lead = how.endTorn && text && !text.endsWith('\n') ? '\n' : '';
-    const mine = (local.read(name) ?? '').split('\n').filter(Boolean);
+    const mine = wholeLines(local.read(name) ?? '');           // a last line with no end is what a failed write left
     const there = new Set(text.split('\n').filter(Boolean));
     const lost = mine.filter((l) => !there.has(l)); if (lost.length || lead) shared.append(name, lead + (lost.length ? lost.join('\n') + '\n' : ''));
   } catch { /* tried again at the next read or write */ }

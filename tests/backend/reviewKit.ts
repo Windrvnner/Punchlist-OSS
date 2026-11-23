@@ -8,6 +8,22 @@ import type { Repository } from '../../src/ports';
 import type { DocRecord } from '../../src/backend/documents';
 
 export { Mem };
+/** A disk that fills part way through a write: `tear` keeps that many characters of the next append, then throws. */
+export class Tearing extends Mem {
+  tear: number | null = null;
+  refuseWrites = false;
+  size(n: string) { const t = this.files.get(n); return t == null ? -1 : Buffer.byteLength(t); }
+  append(n: string, t: string) {
+    if (this.tear === null) return super.append(n, t);
+    super.append(n, t.slice(0, this.tear));
+    this.tear = null;
+    throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
+  }
+  write(n: string, t: string) {
+    if (this.refuseWrites) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
+    super.write(n, t);
+  }
+}
 export const doc = (n: number, name: string, extra: Partial<DocRecord> = {}): DocRecord => ({ docId: `doc_${String(n).padStart(24, '0')}`, hash: 'h', name, folder: 'vdr', rel: name, size: 1, ...(/\.xlsx$/.test(name) ? {} : { pages: 40 }), ...extra });
 export type Call = { model: string; system?: string; prompt: string; files: { id: string; name: string; text: string }[] };
 export const sentNames = (c: Call) => c.files.map((f) => fromStoreName(f.name)!.name).sort();

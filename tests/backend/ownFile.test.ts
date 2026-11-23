@@ -8,7 +8,7 @@ import { nodeAi, type AiDocs } from '../../src/backend/ai';
 import { StandInService } from '../../src/backend/service';
 import { StoreKeeper } from '../../src/backend/storeKeeper';
 import { memRepo } from '../adapters/memRepo';
-import { Mem } from './reviewKit';
+import { Mem, Tearing } from './reviewKit';
 
 class Refusing extends Mem { refuse = false; append(n: string, t: string) { if (this.refuse) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }); super.append(n, t); } }
 
@@ -44,6 +44,58 @@ describe('own files', () => {
     expect((await make('home').gaps('d1') as any).value).toEqual([]);                  // a PC reading now sees nothing yet
     expect((await office.gaps('d1') as any).value).toEqual([{ title: 'The model is audited' }]);   // the office reads its file again: put back
     expect((await make('home').gaps('d1') as any).value).toEqual([{ title: 'The model is audited' }]);
+  });
+
+  it('a local append that fails part way is cut off, so a later line is kept whole and put back whole (#126)', () => {
+    const shared = new Tearing(), local = new Tearing();
+    appendOwn(shared, local, 'f', 'one\n');
+    local.tear = 2; expect(() => appendOwn(shared, local, 'f', 'two\n')).toThrow('ENOSPC');
+    expect(local.files.get('f')).toBe('one\n'); expect(shared.files.get('f')).toBe('one\n');
+    appendOwn(shared, local, 'f', 'three\n');
+    shared.files.set('f', 'one\n');                                     // the sync client put back an older copy
+    healOwn(shared, local, 'f');
+    expect(shared.files.get('f')).toBe('one\nthree\n'); expect(local.files.get('f')).toBe('one\nthree\n');
+  });
+
+  it('when the failed part cannot be cut off yet, nothing is added after it and it is never shared', () => {
+    const shared = new Tearing(), local = new Tearing();
+    const note = (n: number) => `Revenue recognition on contract ${n} – see §4.2`;
+    const line = (n: number) => `${JSON.stringify({ v: 1, n, note: note(n) })}\n`;
+    appendOwn(shared, local, 'f', line(1));
+    local.refuseWrites = true; local.tear = 30;
+    expect(() => appendOwn(shared, local, 'f', line(2) + line(3), true)).toThrow('ENOSPC');
+    expect(() => appendOwn(shared, local, 'f', line(4))).toThrow('ENOSPC');    // still full: refused, not glued on
+    shared.files.set('f', '');                                                  // the sync client lost every line
+    healOwn(shared, local, 'f'); expect(shared.files.get('f')).toBe('');      // the torn part is not put back
+    local.refuseWrites = false;
+    appendOwn(shared, local, 'f', line(5));
+    expect(local.files.get('f')).toBe(line(1) + line(5));
+    healOwn(shared, local, 'f'); expect(shared.files.get('f')).toBe(line(5) + line(1));
+    expect(wholeLines(shared.files.get('f')!).map((l) => JSON.parse(l).n)).toEqual([5, 1]);
+  });
+
+  it('a failed write of several lines is taken back whole, including lines it finished', () => {
+    const shared = new Tearing(), local = new Tearing();
+    appendOwn(shared, local, 'f', 'café\n');
+    local.tear = 7; expect(appendOwn.bind(null, shared, local, 'f', 'naïve\nrésumé\n', true)).toThrow('ENOSPC');
+    expect(local.files.get('f')).toBe('café\n');
+    healOwn(shared, local, 'f', { whole: true }); expect(shared.files.get('f')).toBe('café\n');
+  });
+
+  it('a file whose size cannot be read loses only the failed part, never the lines before it', () => {
+    const shared = new Tearing(), local = new Tearing();
+    appendOwn(shared, local, 'f', 'one\ntwo\n');
+    local.size = () => -1;                                              // the disk would not say how big the file is
+    local.tear = 6; expect(() => appendOwn(shared, local, 'f', 'three\nfour\n')).toThrow('ENOSPC');
+    expect(local.files.get('f')).toBe('one\ntwo\nthree\n');
+  });
+
+  it('the start of a line left by a run that stopped part way is cut off before the next append', () => {
+    const shared = new Tearing(), local = new Tearing();
+    local.files.set('f', 'one\n{"v":1,"n":2,"no'); shared.files.set('f', 'one\n');
+    healOwn(shared, local, 'f'); expect(shared.files.get('f')).toBe('one\n');
+    appendOwn(shared, local, 'f', 'three\n');
+    expect(local.files.get('f')).toBe('one\nthree\n'); expect(shared.files.get('f')).toBe('one\nthree\n');
   });
 
   it('counts a line once across a file, a conflict copy of it and a read again, and keeps only the key it is given for each', () => {
