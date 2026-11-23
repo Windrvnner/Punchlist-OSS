@@ -8,17 +8,17 @@
 import { spawn } from 'node:child_process'; import fs from 'node:fs'; import http from 'node:http';
 import path from 'node:path';
 import { noResultReason, summaryOf } from './browser-reason.mjs';
-import { longestFirst, shardOf } from './browser-shard.mjs';
+import { browserSuites, longestFirst, shardOf } from './browser-shard.mjs';
 import { insideGate } from './gate-dir.mjs';
 
 const args = process.argv.slice(2); const j = args.indexOf('--jobs'); const jobs = j >= 0 ? Math.max(1, +args[j + 1] || 1) : 5;
 const shardAt = args.indexOf('--shard');
 const optionValues = [j, shardAt].filter((at) => at >= 0).map((at) => at + 1);
 const only = args.filter((a, i) => !a.startsWith('--') && !optionValues.includes(i));
-const all = fs.readdirSync('tests/browser').filter((f) => f.endsWith('.spec.mjs')).map((f) => f.replace('.spec.mjs', '')).sort();
+const all = browserSuites();
 const named = only.length ? all.filter((s) => only.includes(s)) : all;
-// Each suite's time on a CI job, kept in the repo so every job splits the suites the same way (refresh it from the
-// times a CI run prints when the groups drift apart).
+// Each suite's time on a CI job, kept in the repo so every job splits the suites the same way (npm run browser:times
+// refreshes it from a local check:all).
 const CI_TIMES = timesIn('tests/browser/suite-times.json');
 const suites = inShard(named, shardAt >= 0 ? args[shardAt + 1] : null);
 
