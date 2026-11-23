@@ -153,7 +153,8 @@ export function EditField({ value, rev, commit, multiline, placeholder, label, c
   const atFocus = useRef(value);                                                         // the value when the person came into the field: what Escape goes back to
   // the field held text not saved when the person came in (kept "Not saved", or a save refused): what was saved then, and the
   // status shown, so Escape puts the field back as it was and leaves that text for the person to send
-  // (a date held in part is not text: Escape and leaving follow halfAtFocus for it, so it is never taken for this)
+  // (a date held in part is not text: Escape (halfAtFocus) and leaving (halfTyped) handle it,
+  // so it is never taken for this)
   const notSavedAtFocus = useRef<{ saved: string; status: 'failed' | 'refused'; byItself: boolean; reason: string } | null>(null);
   const untouched = useRef(false);                                                       // nothing typed since entry, or Escape put the field back as it was on entry
   const [external, setExternalState] = useState(changedSince);
