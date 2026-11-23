@@ -374,6 +374,30 @@ async function fitsLongNamePrefix(label, prefix) {
   }, prefix);
 }
 
+// #790: measure the space the browser leaves after the last grapheme and the painted ellipsis.
+function singleWordEllipsisGap(word) {
+  return word.evaluate((element) => {
+    const text = element.firstChild;
+    const range = document.createRange();
+    const canvas = document.createElement('canvas').getContext('2d');
+    const { fontWeight, fontSize, fontFamily } = getComputedStyle(element);
+    canvas.font = `${fontWeight} ${fontSize} ${fontFamily}`;
+    const ellipsis = canvas.measureText('…').width;
+    const wordBox = element.getBoundingClientRect();
+    const width = wordBox.width;
+    const deal = element.closest('.where.parts').querySelector('.wdeal').getBoundingClientRect();
+    let used = ellipsis;
+    for (let end = 1; end <= text.length; end++) {
+      range.setStart(text, 0);
+      range.setEnd(text, end);
+      const next = range.getBoundingClientRect().width + ellipsis;
+      if (next > width + 0.25) break;
+      used = next;
+    }
+    return deal.left - wordBox.left - used;
+  });
+}
+
 async function searchLabel(page, query, kind, full = '') {
   await page.fill('#pal-in', query);
   const label = page.locator(`#pal-res [data-kind=${kind}] .where`).filter({ hasText: full }).first();
@@ -394,7 +418,7 @@ function showsTwinSuffix(label, mustClip = false) {
   }, mustClip);
 }
 
-const labelChecks = { 490: [], 492: [], 494: [], 495: [], 791: [] };
+const labelChecks = { 490: [], 492: [], 494: [], 495: [], 790: [], 791: [] };
 for (const [width, height] of [[1280, 736], [1024, 640]]) {
   for (const colorScheme of ['dark', 'light']) {
     const ctx = await browser.newContext({ viewport: { width, height }, colorScheme });
@@ -459,6 +483,8 @@ for (const [width, height] of [[1280, 736], [1024, 640]]) {
       getComputedStyle(word).textOverflow === 'ellipsis' && word.scrollWidth > word.clientWidth);
     labelChecks[494].push(ellipsis && await fitsText(unbroken.locator('.wat'), REFERENCE) &&
       (await unbroken.getAttribute('title')).includes(UNBROKEN));
+    const gap = await singleWordEllipsisGap(unbroken.locator('.wtwin .ww'));
+    labelChecks[790].push(gap >= -0.25 && gap <= 1.5);
     await shot('494-unbroken');
 
     const rtl = await searchLabel(page, 'connection signature', 'question', 'WWWW');

@@ -42,6 +42,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
   An ellipsis marks a shortened suffix after those words (#791).
   Search keeps the meaningful name after “Project” and the full question number or page range (#495).
 - Search ellipsizes an oversized single counterparty word (#494) and keeps the start of right-to-left deal names (#490).
+- Search uses the usual separator spacing after an ellipsized single-word counterparty (#790).
 - The New Deal form has Name and Counterparty; Structure, Sector, and Technology pick lists; and Folders. × closes it, and there is no Cancel. **Create** stays unavailable until there is a name.
 - Before a new deal is made, a duplicate check asks "Is this Project X?" when the folders' files, or the name and counterparty, match a team deal; nothing is refused.
 - Each deal has a Deleted list for findings and questions, showing who deleted each and when, with **Restore**. A deleted record reached by a link says so and offers **Restore**; a question being typed on a deleted finding's page stays there, with **Log Question** off (#340). A deleted question's number is never reused. An imported issues list can be removed from the Deleted list.

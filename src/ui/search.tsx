@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import { createPortal } from 'preact/compat';
 import { nameDir, useAppState, useStore } from './hooks';
 import { Icon } from './icons';
-import { DocName } from './docName';
+import { DocName, graphemes } from './docName';
 import { CachedMark } from './cached';
 import { navigate } from './nav';
 import { searchGroups, loadAllForSearch, GROUP_PAGE, type Hit, type HitGroup, type HitKind } from '../app/search';
@@ -208,6 +208,31 @@ function dealNameFloor(deal: HTMLElement, ellipsis: number, measure: (text: stri
   return Math.ceil(Math.min(measure(full), measure(floor) + ellipsis));
 }
 
+// #790: size an oversized single word to the graphemes and ellipsis it can actually show.
+function singleWordWidth(
+  label: HTMLElement, ellipsis: number, measure: (text: string) => number, widths: Map<string, number>,
+) {
+  const word = label.firstElementChild;
+  if (!word?.classList.contains('ww') || word.scrollWidth <= word.clientWidth) return null;
+  const room = label.getBoundingClientRect().width;
+  if (room < ellipsis) return null;
+  const text = word.textContent ?? '';
+  const key = `${room}:${text}`;
+  const saved = widths.get(key);
+  if (saved !== undefined) return saved;
+  let prefix = '';
+  let used = ellipsis;
+  for (const letter of graphemes(text)) {
+    prefix += letter;
+    const next = measure(prefix) + ellipsis;
+    if (next > room) break;
+    used = next;
+  }
+  const width = Math.min(room, Math.ceil(used));
+  widths.set(key, width);
+  return width;
+}
+
 /**
  * Measure the floors first, then narrow cut counterparties to their last whole word, so there is no gap
  * before the separator. Read each batch before writing to avoid laying out the full panel once per row (#2).
@@ -225,7 +250,8 @@ function fitWords(root: HTMLElement) {
   const { fontWeight, fontSize, fontFamily } = getComputedStyle(rows[0]);
   if (ctx) ctx.font = `${fontWeight} ${fontSize} ${fontFamily}`;
   const measure = (value: string) => ctx?.measureText(value).width ?? value.length * 8;
-  const ell = Math.ceil(measure('…'));
+  const ellipsis = measure('…');
+  const ell = Math.ceil(ellipsis);
   const end = (label: HTMLElement, word: Element) =>
     word.getBoundingClientRect().right - label.getBoundingClientRect().left;
   const floors = rows.map((row) => {
@@ -237,9 +263,15 @@ function fitWords(root: HTMLElement) {
     const [deal, width] = floor;
     deal.style.minWidth = `${width}px`;
   }
+  const wordWidths = new Map<string, number>();
   const cuts = rows.map((row) => {
     const twin = row.querySelector<HTMLElement>('.wtwin');
-    if (!twin || twin.childElementCount < 2 || twin.scrollWidth <= twin.clientWidth + 0.5) return null;
+    if (!twin) return null;
+    if (twin.childElementCount === 1) {
+      const width = singleWordWidth(twin, ellipsis, measure, wordWidths);
+      return width === null ? null : [twin, width] as const;
+    }
+    if (twin.scrollWidth <= twin.clientWidth + 0.5) return null;
     const room = twin.clientWidth - ell;
     const fit = [...twin.querySelectorAll('.ww')].filter((word) => end(twin, word) <= room + 0.5).pop();
     return fit ? [twin, Math.ceil(end(twin, fit)) + ell] as const : null;

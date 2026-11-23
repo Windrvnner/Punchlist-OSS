@@ -197,8 +197,9 @@ See reference screenshots 02, 11, and 12.
   number or page range (#495). A sheet cell too wide for the location is left to the hover.
   In Search and the sidebar, a shortened counterparty keeps the words that distinguish same-name deals (#492).
   An ellipsis marks a shortened suffix after those words (#791).
-  A single oversized counterparty word ends in an ellipsis (#494). The start of a right-to-left deal name stays
-  visible in Search (#490). Full labels are available to screen readers and on hover.
+  An oversized single-word counterparty ends in an ellipsis (#494) with normal spacing before the separator (#790).
+  The start of a right-to-left deal name stays visible in Search (#490). Full labels are available to screen readers
+  and on hover.
   A deal's own hit gives on its second line what tells it apart, or otherwise its sector.
 - **Lists and tables:** Rows are divided by 1px `--line` rules, no boxes. Column heads are set as in Type, in title style; on Q&A they stay in view above the list as it scrolls (with design C). The open row is the strongest; the row under the pointer is a step lighter.
 - **Links between records** (#2): A finding's page lists, under its text, its checklist item as a dotted link (as the Checklist pane links its finding), the questions asked (the Checklist pane's Asked list) and Ask the counterparty with its card (the same New question card). A question's panel says "Asked for “…”" on its Question label line, in `--ink-2` like the Response label's notes, with a dotted link. It stays beside the label and gives way to an ellipsis, whole in the tooltip, so the question keeps its lines.
