@@ -783,7 +783,7 @@ export class LogRepository implements Repository {
 
   private readOwnLine(line: Line, raw: string, writeReceipt: boolean): boolean {
     this.seq = Math.max(this.seq, line.seq);
-    if (this.changes.has(raw)) {
+    if (this.changes.sharedIsPending(raw)) {
       if (!this.changes.confirm(raw)) return false;
       this.ownLines.add(raw);
       if (line.op) this.ops.landed([line.op], writeReceipt);
