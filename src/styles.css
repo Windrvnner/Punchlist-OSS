@@ -597,7 +597,6 @@ table.dg{width:100%;border-collapse:collapse}
 .dropzone>svg{color:var(--ink-3);flex:none}
 .dropzone.tall{box-sizing:border-box;min-height:160px}   /* stands in for an empty list (the firm's checklist) */
 .dropzone.over{border-color:var(--accent);background:var(--accent-soft)}
-.dropzone .or{color:var(--ink-3);margin:0 2px}
 /* one line under a list (Folders): the icon at 16px before the words */
 .dropzone.row{flex-direction:row;padding:12px 14px;font-size:13px}
 .dropzone.row .linkb{font-size:13px}
