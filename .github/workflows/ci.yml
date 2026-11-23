@@ -50,6 +50,11 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+      # the layout checks measure the app with Inter in place of Segoe UI (tests/browser/fonts.conf)
+      - run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-inter
+          sudo cp tests/browser/fonts.conf /etc/fonts/conf.d/56-prefer-inter.conf
+          fc-match "Segoe UI" | grep -q Inter
       - run: npm ci
       - run: npm exec -- vite build
       # the suites drive the runner's Google Chrome (/usr/bin/google-chrome) through Playwright

@@ -54,6 +54,9 @@ The Store is the object that holds the app's state and runs its commands; see [a
 
 ### Linux test runner troubleshooting
 
+On Linux, the browser suites' layout checks expect Inter in place of Segoe UI: install the `fonts-inter` package and
+copy `tests/browser/fonts.conf` to `/etc/fonts/conf.d/56-prefer-inter.conf`, as CI does.
+
 Run one `npm run check:all` at a time on a shared runner. CPU contention can push the checklist Retry test past
 Vitest's five-second timeout and the document-family test past its one-second limit per large room. On Linux
 with cgroup v2, `cat /sys/fs/cgroup/cpu.max` shows the CPU quota and period. For example, `400000 100000`
