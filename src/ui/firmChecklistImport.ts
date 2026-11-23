@@ -96,6 +96,7 @@ function useListFile(store: Store, work: Work, left: ChecklistKept | null) {
   const [text, setText] = useState<{ name: string; lines: string[] } | null>(left?.text ?? null);
   const [paste, setPaste] = useState(left?.paste ?? '');
   const [byColumns, setByColumns] = useState(!!left?.choices?.byColumns);
+  const [sheetRead, setSheetRead] = useState<{ sheet?: string }>();
   const take = (read: ImportTable) => {
     setTable(read);
     setMapping(suggestChecklistColumns(read.columns, read.rows));
@@ -119,9 +120,14 @@ function useListFile(store: Store, work: Work, left: ChecklistKept | null) {
       setText({ name: file.name, lines: read.value.lines });
     }
   };
-  const reread = (opts: { sheet?: string; headerRow?: number }) => {
-    if (!table || work.busy) return;
-    void readTableAgain(store, work, table, byColumns ? opts : { ...opts, headerRow: 1 }, take);
+  const reread = async (opts: { sheet?: string; headerRow?: number }, accept?: (read: ImportTable) => void) => {
+    if (!table || (work.busy && !(byColumns && work.busy === 'reading'))) return;
+    if (byColumns && opts.headerRow === undefined) setSheetRead(opts);
+    await readTableAgain(store, work, table, opts, byColumns, (read) => {
+      take(read);
+      accept?.(read);
+    });
+    setSheetRead((latest) => latest === opts ? undefined : latest);
   };
   // the fallback when the model could not read a table: its columns chosen by hand
   const chooseColumns = () => {
@@ -141,6 +147,7 @@ function useListFile(store: Store, work: Work, left: ChecklistKept | null) {
     setTable(null);
     setText(null);
     setByColumns(false);
+    setSheetRead(undefined);
   };
   const reset = () => {
     forget();
@@ -148,7 +155,7 @@ function useListFile(store: Store, work: Work, left: ChecklistKept | null) {
     setMapping(NO_MAPPING);
   };
   return {
-    table, mapping, setMapping, text, paste, setPaste, byColumns,
+    table, mapping, setMapping, text, paste, setPaste, byColumns, wantedSheet: sheetRead?.sheet,
     load, reread, chooseColumns, pasted, forget, reset,
   };
 }
@@ -163,11 +170,13 @@ async function readForColumns(store: Store, work: Work, table: ImportTable, take
 /** Reads a table's file again for another sheet or heading row: an error is said in the footer, and the table kept. */
 async function readTableAgain(
   store: Store, work: Work, table: ImportTable, opts: { sheet?: string; headerRow?: number },
+  byColumns: boolean,
   take: (read: ImportTable) => void,
 ) {
-  const mine = work.newToken();
-  const read = await readImportBytes(store, table.name, table.bytes, opts);
+  const mine = byColumns ? work.begin('reading') : work.newToken();
+  const read = await readImportBytes(store, table.name, table.bytes, byColumns ? opts : { ...opts, headerRow: 1 });
   if (!work.isLatest(mine)) return;
+  if (byColumns) work.setBusy('');
   if (!read.ok) {
     work.setError(`Could not read ${table.name}: ${read.error.message}`);
     return;

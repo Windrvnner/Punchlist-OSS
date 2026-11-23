@@ -131,7 +131,7 @@ describe('a heading row read again in the Q&A import (#63)', () => {
     }
   });
 
-  it('a reread that fails says so and lets the person go on with the row already read', async () => {
+  it('a reread that fails marks the typed row unused and lets the person go on with the row already read', async () => {
     const { app, dealId, get, heading, letGo, done, failing } = await dialog();
     try {
       failing.add(2);
@@ -140,7 +140,9 @@ describe('a heading row read again in the Q&A import (#63)', () => {
       const said = 'Could not read Lender Q&A.csv: The file is locked';
       await vi.waitFor(() => expect(get('#im-line').textContent).toBe(said));
       const field = get<HTMLInputElement>('#im-header');
-      expect([field.value, get<HTMLButtonElement>('#im-go').disabled]).toEqual(['1', false]);
+      expect([field.value, get<HTMLButtonElement>('#im-go').disabled]).toEqual(['2', false]);
+      expect(get('#im-header-unused').textContent).toBe('Not used');
+      expect(get('#im-header-unused').getAttribute('title')).toBe('The preview uses row 1');
       await heading(3);
       await letGo(3);
       await vi.waitFor(() => expect(get('#im-line').textContent).toBe('Import 30 questions · 30 new'));

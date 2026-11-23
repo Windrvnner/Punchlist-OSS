@@ -10,6 +10,7 @@ import { SERVICE } from '../control';
 import type { ListSource } from './firmChecklistImport';
 import { NOT_DONE, plural } from './firmChecklistReview';
 import { Head, chooseButton, statusLine, type ImportView } from './firmChecklistSteps';
+import { HeadingRowField } from './headingRowField';
 
 type Table = NonNullable<ListSource['table']>;
 
@@ -240,22 +241,17 @@ export function columnsStep(view: ImportView, table: Table) {
 
 /** Where the headings are: the sheet, and the row they sit on. */
 function headingsRow(source: ListSource, table: Table) {
-  const typed = (value: number) => {
-    const fits = Number.isInteger(value) && value >= 1 && value <= table.lastRow;
-    if (fits && value !== table.headerRow) void source.reread({ sheet: table.sheet, headerRow: value });
-  };
+  const sheet = source.wantedSheet ?? table.sheet;
   return (
     <div class="srow"><div class="k">Headings</div><div class="imwhere">
       {table.sheets.length > 1 && <label><span>Sheet</span>
-        <select class="field" id="cl-sheet" aria-label="Sheet" value={table.sheet}
+        <select class="field" id="cl-sheet" aria-label="Sheet" value={sheet}
           onChange={(e) => void source.reread({ sheet: (e.currentTarget as HTMLSelectElement).value })}>
           {sheetOptions(table.sheets)}
         </select>
       </label>}
-      <label><span>Row</span>
-        <input class="field" id="cl-header" type="number" aria-label="Heading row" min={1} max={table.lastRow} step={1}
-          value={table.headerRow} onInput={(e) => typed(+(e.currentTarget as HTMLInputElement).value)} />
-      </label>
+      <HeadingRowField id="cl-header" table={table} sheet={sheet}
+        read={(headerRow, accept) => source.reread({ sheet, headerRow }, accept)} />
     </div></div>
   );
 }
@@ -286,6 +282,7 @@ function columnPicker(view: ImportView, table: Table, column: keyof ChecklistMap
 function columnsLine({ work, source, target }: ImportView): string {
   const { mapping, prepared } = source;
   const count = prepared?.items.length ?? 0;
+  if (work.busy === 'reading') return 'Reading the file';
   if (work.busy === 'reviewing') return `Asking ${SERVICE}`;
   if (work.error) return work.error;
   if (target.split) return target.splitSays;
