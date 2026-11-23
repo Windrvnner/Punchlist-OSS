@@ -359,5 +359,63 @@ async function searchLabel(page, query, kind, full = '') {
   return label;
 }
 
+const labelChecks = { 490: [], 492: [], 494: [], 495: [] };
+for (const [width, height] of [[1280, 736], [1024, 640]]) {
+  for (const colorScheme of ['dark', 'light']) {
+    const ctx = await browser.newContext({ viewport: { width, height }, colorScheme });
+    const page = await ctx.newPage();
+    await page.goto(URL);
+    await page.waitForSelector('#fr-new');
+    await seedSearchLabels(page);
+    if (width === 1280 && colorScheme === 'dark') await loadSearchLog(page);
+    await page.goto(URL + '#deals');
+    const shot = async (name) => {
+      if (!SHOTS) return;
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: `${SHOTS}/${name}-${colorScheme}-${width}x${height}.png` });
+    };
+
+    await shot('492-sidebar');
+    await page.keyboard.press('Control+k');
+    for (const roman of ['IV', 'V']) {
+      const token = 'Fund ' + roman + ' (';
+      const rail = page.locator('.dealrow .dtw').filter({ hasText: token }).first();
+      const found = await searchLabel(page, 'covenant compliance', 'question', token);
+      const searchTwin = await fitsText(found.locator('.wtwin'), roman);
+      const railTwin = await fitsText(rail, roman);
+      const full = (await found.getAttribute('title')).includes(FUND + ' ' + roman + ' (Lux) SCSp');
+      labelChecks[492].push(searchTwin && railTwin && full);
+    }
+    await shot('492-funds');
+
+    const sample = await searchLabel(page, 'Sample A lease.pdf', 'document', SAMPLE_PARTY);
+    labelChecks[495].push(await fitsText(sample.locator('.wdeal'), 'Sample') &&
+      await fitsText(sample.locator('.wdeal'), ' A') && await fitsText(sample.locator('.wat'), REFERENCE));
+    await shot('495-name-and-pages');
+
+    const unbroken = await searchLabel(page, 'Zebra edge finding.pdf', 'document', UNBROKEN);
+    const ellipsis = await unbroken.locator('.wtwin .ww').evaluate((word) =>
+      getComputedStyle(word).textOverflow === 'ellipsis' && word.scrollWidth > word.clientWidth);
+    labelChecks[494].push(ellipsis && await fitsText(unbroken.locator('.wat'), REFERENCE) &&
+      (await unbroken.getAttribute('title')).includes(UNBROKEN));
+    await shot('494-unbroken');
+
+    const rtl = await searchLabel(page, 'connection signature', 'question', 'WWWW');
+    const rtlName = rtl.locator('.wdeal');
+    const direction = await rtlName.evaluate((deal) =>
+      getComputedStyle(deal.querySelector('[dir]') ?? deal).direction);
+    labelChecks[490].push(direction === 'rtl' && await fitsText(rtlName, 'مشروع') &&
+      await fitsText(rtl.locator('.wat'), 'Q1'));
+    await shot('490-right-to-left');
+    const hebrew = await searchLabel(page, 'Hebrew connection', 'question');
+    labelChecks[490].push(await fitsText(hebrew.locator('.wdeal'), 'פרויקט') &&
+      await fitsText(hebrew.locator('.wat'), 'Q1'));
+    await ctx.close();
+  }
+}
+for (const [issue, outcomes] of Object.entries(labelChecks)) {
+  say(`#${issue} Search labels at both sizes in both themes`, outcomes.every(Boolean), JSON.stringify(outcomes));
+}
+
 await browser.close();
 const failed = results.filter(([, ok]) => !ok).length; console.log(`\n${results.length - failed}/${results.length} passed`); process.exit(failed ? 1 : 0);
