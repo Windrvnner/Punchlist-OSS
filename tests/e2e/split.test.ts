@@ -357,7 +357,8 @@ describe('two PCs share a deal\'s checks', () => {
     } finally { q.close(); }
   }, 90000);
 
-  it('11h. alone: a second outage after the service answered again starts its own wait, and the check ends as out of reach', async () => {
+  it('11h. alone: a second outage after the service answered again starts its own wait, '
+    + 'and the check ends as out of reach', async () => {
     // away for the first call, back for three, then away for good (#131)
     let calls = 0;
     let awayAgainAt = 0;
