@@ -339,7 +339,7 @@ describe('attachments', () => {
     gone = [seen[0][0].docId];
     await retry(store, scope, failed.id);
     expect(seen).toHaveLength(1); expect(store.get().threads[convKey(scope)].at(-1)!.state).toBe('failed');
-    expect(store.get().ui.toasts.at(-1)?.text).toBe('Couldn’t find Consent 1.pdf to send: attach it again');
+    expect(store.get().ui.toasts.at(-1)?.text).toBe('Couldn’t find Consent 1.pdf — attach it again');
     gone = [];
     await Promise.all([retry(store, scope, failed.id), retry(store, scope, failed.id)]);   // pressed twice: asked once
     expect(seen.map((x) => x.length)).toEqual([MAX_ATTACHED, MAX_ATTACHED]);
