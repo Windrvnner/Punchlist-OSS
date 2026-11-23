@@ -7,19 +7,8 @@ const results = []; const say = (id, ok, note = '') => { results.push([id, ok]);
 const browser = await launchChrome();
 openOnFindings(browser);
 const SHOTS = process.env.SHOTS || '';
-async function start(scheme, limit) {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 736 }, colorScheme: scheme }); const page = await ctx.newPage(); page.errors = []; page.on('pageerror', (e) => page.errors.push(e.message));
-  await page.goto(URL); await page.waitForSelector('#fr-new');
-  if (limit) await page.evaluate((n) => { window.__cacheLimit = n; }, limit);
-  await page.click('#fr-new'); await page.fill('#nd-name', 'Proseware'); await page.click('#nd-paste'); await page.fill('#nd-path', 'reports'); await page.press('#nd-path', 'Enter'); await page.waitForSelector('.ndrow'); await page.click('#nd-create'); await page.waitForSelector('#nd-create', { state: 'detached' }); await page.waitForSelector('.dtabs');
-  await page.waitForFunction(() => document.querySelectorAll('.flagrow').length === 3, null, { timeout: 30000 });
-  return { ctx, page, id: await page.evaluate(() => Object.values(store.get().deals)[0].id) };
-}
-const popMarks = (page) => page.evaluate(() => [...document.querySelectorAll('.opening .ref .pop i.psrc')].map((i) => [i.querySelector('.docnm').textContent + (i.querySelector('.loc')?.textContent ?? ''), !!i.querySelector('.cmark')]));
-const openFinding = async (page, id, n) => { await page.goto(URL + '#deal-' + id); await page.waitForSelector('.flagrow'); await page.click(`.flagrow:nth-of-type(${n})`).catch(() => page.locator('.flagrow').nth(n - 1).click()); await page.waitForSelector('.opening .ref .rb'); };
-
 async function paperError(page, scheme, kind) {
-  const retry = page.getByRole('button', { name: 'Retry', exact: true });
+  const retry = page.locator('#doc-error').getByRole('button', { name: 'Retry', exact: true });
   const checks = [];
   for (const [width, height] of [[1280, 736], [1024, 640]]) {
     await page.setViewportSize({ width, height });
@@ -62,6 +51,34 @@ async function paperError(page, scheme, kind) {
   await page.setViewportSize({ width: 1280, height: 736 });
   return checks;
 }
+
+async function retryCitation(page, source, key) {
+  await page.evaluate(() => { window.__fail = {}; });
+  await page.locator('#doc-error').getByRole('button', { name: 'Retry', exact: true }).press(key);
+  await page.waitForSelector('.docbody :is(.page .pg, .sheet)', { timeout: 8000 });
+  return page.evaluate(({ doc, loc }) => {
+    const nav = document.querySelector('.docnav');
+    const headerMatches = nav.querySelector('.docname .docnm')?.textContent === doc
+      && nav.querySelector('.loc')?.textContent === loc;
+    const pageNumber = document.querySelector('.docbody .page .pg')?.textContent;
+    const sheet = document.querySelector('.docbody .sheet');
+    const cell = sheet ? [...sheet.querySelectorAll('th.hc')].map((part) => part.textContent).join('') : '';
+    const placeMatches = pageNumber ? pageNumber === loc.replace(/^p\. /, 'Page ')
+      : cell === loc.split('!').at(-1) && !!sheet?.querySelector('td.hl');
+    return headerMatches && placeMatches && !document.getElementById('doc-error');
+  }, source);
+}
+
+async function start(scheme, limit) {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 736 }, colorScheme: scheme }); const page = await ctx.newPage(); page.errors = []; page.on('pageerror', (e) => page.errors.push(e.message));
+  await page.goto(URL); await page.waitForSelector('#fr-new');
+  if (limit) await page.evaluate((n) => { window.__cacheLimit = n; }, limit);
+  await page.click('#fr-new'); await page.fill('#nd-name', 'Proseware'); await page.click('#nd-paste'); await page.fill('#nd-path', 'reports'); await page.press('#nd-path', 'Enter'); await page.waitForSelector('.ndrow'); await page.click('#nd-create'); await page.waitForSelector('#nd-create', { state: 'detached' }); await page.waitForSelector('.dtabs');
+  await page.waitForFunction(() => document.querySelectorAll('.flagrow').length === 3, null, { timeout: 30000 });
+  return { ctx, page, id: await page.evaluate(() => Object.values(store.get().deals)[0].id) };
+}
+const popMarks = (page) => page.evaluate(() => [...document.querySelectorAll('.opening .ref .pop i.psrc')].map((i) => [i.querySelector('.docnm').textContent + (i.querySelector('.loc')?.textContent ?? ''), !!i.querySelector('.cmark')]));
+const openFinding = async (page, id, n) => { await page.goto(URL + '#deal-' + id); await page.waitForSelector('.flagrow'); await page.click(`.flagrow:nth-of-type(${n})`).catch(() => page.locator('.flagrow').nth(n - 1).click()); await page.waitForSelector('.opening .ref .rb'); };
 
 // 1 everything the first pass read is loaded: every cited document carries the mark
 { const { ctx, page, id } = await start('light');
@@ -127,22 +144,27 @@ for (const scheme of ['dark', 'light']) {
   // a file the backend cannot find: its message, in place of the page
   await page.evaluate(() => { window.__fail = { pageMissing: true }; });
   await openFindingById(split.loaded);
-  await page.click('.opening .ref .rb'); await page.waitForSelector('#doc-error', { timeout: 8000 });
+  const refs = page.locator('.opening .ref .rb[role="button"]');
+  const cited = await page.evaluate((fid) => store.get().findings[fid].sources, split.loaded);
+  await refs.first().click();
+  await page.waitForSelector('#doc-error', { timeout: 8000 });
   const err = await page.textContent('#doc-error');
   say(`${scheme}:file-not-found-message`, /could not be found in the deal’s folders\. Retry/.test(err), err);
   const missing = await paperError(page, scheme, 'missing');
+  const recoveredMissing = await retryCitation(page, cited[0], 'Enter');
+
+  await page.click('#doc-close');
   await page.evaluate(() => { window.__fail = { page: true }; });
-  await page.getByRole('button', { name: 'Retry', exact: true }).press('Enter');
+  await refs.last().click();
   await page.waitForFunction(() =>
-    document.querySelector('#doc-error')?.textContent.includes('Couldn’t load this page.'));
+    document.querySelector('#doc-error')?.textContent.includes('Couldn’t load this page.'), null, { timeout: 8000 });
   const failedPage = await paperError(page, scheme, 'failed');
+  const recoveredFailure = await retryCitation(page, cited.at(-1), 'Space');
   const legible = [...missing, ...failedPage].every(({ text, retry, ring, underline, focus }) =>
     text >= 4.5 && retry >= 4.5 && ring >= 3 && underline && focus);
   say(`${scheme}:paper-error-and-retry-stay-legible`, legible, JSON.stringify({ missing, failedPage }));
-  await page.evaluate(() => { window.__fail = {}; });
-  await page.getByRole('button', { name: 'Retry', exact: true }).press('Space');
-  await page.waitForSelector('.docpanel :is(.page:not(.ph-page, :has(#doc-error)), .sheet)', { timeout: 8000 });
-  say(`${scheme}:found-again-on-retry`, !(await page.$('#doc-error')));
+  say(`${scheme}:found-again-on-retry`, recoveredMissing && recoveredFailure,
+    JSON.stringify({ recoveredMissing, recoveredFailure }));
   say(`${scheme}:no-page-errors`, page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }
