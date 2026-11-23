@@ -1,14 +1,29 @@
 // Runs every browser suite in tests/browser, several at a time, against the built app in dist/.
 //   node scripts/browser-all.mjs [--jobs 5] [name ...]     e.g.  npm run browser -- --jobs 4 decisions keyboard
+//   --shard 2/4 runs only the second of four groups of suites (every fourth suite), for parallel CI jobs
 // Each suite starts its own browser and shares nothing with the others, so they can run side by side. A suite that fails
 // while others are running is run once more on its own; if it passes then, that is reported as such, not hidden.
 // Exit code 0 only if every suite passed (alone or alongside). Logs go to out/browser/<suite>.log.
 import { spawn } from 'node:child_process'; import fs from 'node:fs'; import http from 'node:http';
 
 const args = process.argv.slice(2); const j = args.indexOf('--jobs'); const jobs = j >= 0 ? Math.max(1, +args[j + 1] || 1) : 5;
-const only = args.filter((a, i) => !a.startsWith('--') && (j < 0 || i !== j + 1));
+const shardAt = args.indexOf('--shard');
+const optionValues = [j, shardAt].filter((at) => at >= 0).map((at) => at + 1);
+const only = args.filter((a, i) => !a.startsWith('--') && !optionValues.includes(i));
 const all = fs.readdirSync('tests/browser').filter((f) => f.endsWith('.spec.mjs')).map((f) => f.replace('.spec.mjs', '')).sort();
-const suites = only.length ? all.filter((s) => only.includes(s)) : all;
+const named = only.length ? all.filter((s) => only.includes(s)) : all;
+const suites = inShard(named, shardAt >= 0 ? args[shardAt + 1] : null);
+
+/** With `--shard k/n`, the k-th of n groups, taking every n-th suite in name order; otherwise every suite. */
+function inShard(names, shard) {
+  if (shard === null) return names;
+  const [k, n] = (shard ?? '').split('/').map(Number);
+  if (!Number.isInteger(k) || !Number.isInteger(n) || n < 1 || k < 1 || k > n) {
+    console.error(`--shard takes k/n with 1 <= k <= n, not ${shard}`);
+    process.exit(2);
+  }
+  return names.filter((_, index) => index % n === k - 1);
+}
 const unknown = only.filter((name) => !all.includes(name));
 if (unknown.length || !suites.length) {
   console.error(unknown.length ? `Unknown browser suites: ${unknown.join(', ')}` : 'No browser suites were found.');

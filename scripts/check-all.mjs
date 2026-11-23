@@ -1,6 +1,6 @@
 // Everything CI ran, on this PC, in order, stopping at the first failure: the checks a commit must pass (types, lint,
 // secrets, unit, backend and end-to-end tests), the build, the browser suites and the built desktop app end to end.
-// Run before every merge (`npm run check:all`); CI on GitHub runs only by hand. The Windows installer is not built here.
+// Run before every merge (`npm run check:all`); CI on GitHub runs it too. The Windows installer is not built here.
 // On Linux with no display, the desktop app runs on a virtual one (xvfb-run).
 // It never makes paid model calls: every step runs without the Claude key or the live-run switch, even when the shell
 // holds them (npm run e2e:live is the one way to run the live tests).
