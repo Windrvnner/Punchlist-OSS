@@ -304,8 +304,10 @@ let wantSources: string | null = null;
 /** the Detail label's tooltip in the finding editor */
 const CITE_TIP = 'A tag after a sentence names the source it cites. It moves with its sentence.';
 
-/** Whether the edit still holds exactly what a save sent: then the save lands it and the form closes (#32). */
-const sameAsSent = (d: EditDraft, sent: { title: string; ws: string; body: string }) =>
+/** a form's three fields, as typed */
+type Typed = { title: string; ws: string; body: string };
+/** Whether a form still holds exactly what a save sent: then the save lands it and the form closes (#32, #115). */
+const sameAsSent = (d: Typed, sent: Typed) =>
   d.title === sent.title && d.ws === sent.ws && d.body === sent.body;
 
 function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
@@ -383,10 +385,26 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
   const remember = (patch: Partial<typeof draft.current>) => { const n = { ...draft.current, ...patch }; draft.current = n; if (n.title || n.ws || n.body) newFindingDrafts.set(d.id, n); else newFindingDrafts.delete(d.id); };
   const setTitle = (v: string) => { setTitleState(v); remember({ title: v }); }; const setWs = (v: string) => { setWsState(v); remember({ ws: v }); }; const setBody = (v: string) => { setBodyState(v); remember({ body: v }); };
   const discard = () => { newFindingDrafts.delete(d.id); onDone(); };
+  const shown = useRef(true);
+  useEffect(() => () => { shown.current = false; }, []);
   const create = async () => {
     if (busy) return; setBusy(true);
-    const r = await store.dispatch(CreateFinding, { dealId: d.id, title, workstream: ws, body: toParagraphs(body), origin: 'human' }, { idempotencyKey: 'f-create-' + d.id });
-    setBusy(false); if (r.ok) discard();
+    const sent = { title, ws, body };
+    const input = { dealId: d.id, title, workstream: ws, body: toParagraphs(body), origin: 'human' as const };
+    const r = await store.dispatch(CreateFinding, input, { idempotencyKey: 'f-create-' + d.id });
+    setBusy(false);
+    if (!r.ok) return;
+    if (sameAsSent(draft.current, sent)) discard();
+    else editCreated(createdFinding(store, r.value.opId), input);
+  };
+  // #115 (decision: typing during Create goes to the new finding): the finding is made as sent, and what was typed
+  // since becomes an open edit of it, measured from what was sent, so one Save puts it on that finding. Unless the
+  // finding cannot be found: then the form stays as it is, and nothing typed is lost
+  const editCreated = (made: Finding | undefined, sent: { title: string; workstream: string; body: string[] }) => {
+    if (!made) return;
+    editDrafts.set(made.id, { ...draft.current, base: sent });
+    discard();
+    if (shown.current) location.hash = findingHref(made);
   };
   return (
     <div class="card addf" data-holds-work onKeyDown={(e) =>
@@ -400,6 +418,13 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
         onClick={discard}>Cancel</button></div>
     </div>
   );
+}
+
+/** the finding a CreateFinding made, by what its write wrote */
+function createdFinding(store: ReturnType<typeof useStore>, opId: string): Finding | undefined {
+  const state = store.get();
+  const written = Object.keys(state.ops[opId]?.resultRevs ?? {});
+  return written.map((id) => state.findings[id]).find(Boolean);
 }
 
 const HIST_TEXT: Record<string, string> = { edited: 'Edited', status: 'Status changed', response: 'Response received', responseWithdrawn: 'Response removed', document: 'Document attached', reassessed: 'Updated', note: 'Note added' };
