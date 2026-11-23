@@ -175,12 +175,18 @@ function identifierForm(token: string, offset: number, text: string): string | u
   return undefined;
 }
 
-/** a single letter or a Roman numeral in parentheses ("(a)", "(iv)") or after a naming word ("class b", "part e") */
+/**
+ * A single letter or a Roman numeral in parentheses ("(a)", "( iv )"), or beside a naming word: after it ("class b",
+ * "part e"), after it and a number ("clause 4 a"), or before it ("the a class").
+ */
 function namedLetter(token: string, offset: number, text: string): boolean {
   if (!/^\p{L}$/u.test(token) && !ROMAN_NUMERAL.test(token)) return false;
-  if (text[offset - 1] === '(' && text[offset + token.length] === ')') return true;
-  const before = /(\p{L}+)[\s\-:.]+$/u.exec(text.slice(Math.max(0, offset - 20), offset));
-  return !!before && NAMING_WORDS.has(before[1].toLowerCase());
+  const before = text.slice(Math.max(0, offset - 30), offset);
+  const after = text.slice(offset + token.length, offset + token.length + 30);
+  if (/\(\s*$/.test(before) && /^\s*\)/.test(after)) return true;
+  const named = (word: string | undefined) => !!word && NAMING_WORDS.has(word.toLowerCase());
+  return named(/(\p{L}+)[\s\-:.]+(?:[\p{N}.]+[\s\-:.]*)?$/u.exec(before)?.[1])
+    || named(/^[\s\-]+(\p{L}+)/u.exec(after)?.[1]);
 }
 
 /**
