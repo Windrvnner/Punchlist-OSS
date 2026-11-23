@@ -11,10 +11,10 @@ on:
 permissions:
   contents: read
 
-# a newer push to the same pull request or branch replaces a run still going
+# a newer push to the same pull request replaces its run still going; every run on main finishes
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # types, lint, secrets, attribution, unit and end-to-end tests, the build, the browser suites and the built desktop
