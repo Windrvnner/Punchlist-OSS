@@ -6,9 +6,18 @@ const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, String(note).slice(0, 300)); };
 const browser = await launchChrome();
 openOnFindings(browser);
-/** A new browser context at this size and scheme, on the start page; with `storageState`, holding that saved state. */
-async function fresh(width = 1280, height = 736, colorScheme = 'light', storageState = undefined) {
+/** Fills an empty session storage with the saved entries; runs in the page before the app. */
+function restoreSession(entries) {
+  if (sessionStorage.length) return;
+  for (const [key, value] of Object.entries(entries)) sessionStorage.setItem(key, value);
+}
+/** A new browser context at this size and scheme, on the start page; with `saved`, holding that saved state. */
+async function fresh(width = 1280, height = 736, colorScheme = 'light', saved = undefined) {
+  const storageState = saved?.state;
   const ctx = await browser.newContext({ viewport: { width, height }, colorScheme, storageState });
+  // the tab's own session storage (its install id and change files) is not in a storageState: put back, so the copy
+  // is the PC that made the deal rather than another one
+  if (saved) await ctx.addInitScript(restoreSession, saved.session);
   const page = await ctx.newPage();
   page.errors = [];
   page.on('pageerror', (e) => page.errors.push(e.message));
@@ -28,20 +37,28 @@ async function indexedDeal(page) {
 const indexed = await (async () => {
   const { ctx, page } = await fresh();
   const id = await indexedDeal(page);
+  // copied only once nothing is in flight, so no copy boots with an interrupted save
+  await page.waitForFunction(() => !Object.values(store.get().ops).some((op) => op.state === 'pending'));
   const state = await ctx.storageState();
+  const session = await page.evaluate(() => ({ ...sessionStorage }));
   await ctx.close();
-  return { id, state };
+  return { id, state, session };
 })();
 /** A fresh context holding a copy of the indexed deal, checked to start as it was made. */
 async function freshDeal(width, height, colorScheme) {
-  const { ctx, page } = await fresh(width, height, colorScheme, indexed.state);
+  const { ctx, page } = await fresh(width, height, colorScheme, indexed);
   await page.goto(`${URL}#deal-${indexed.id}`);
   await page.waitForFunction(() => Object.values(store.get().findings).length === 3, null, { timeout: 30000 });
-  const start = await page.evaluate(() => ({ deals: Object.keys(store.get().deals), questions:
-    Object.keys(store.get().questions).length, threads: Object.keys(store.get().threads).length }));
-  if (start.deals.join() !== indexed.id || start.questions || start.threads) {
-    throw new Error(`The copied deal did not start as it was made: ${JSON.stringify(start)}`);
-  }
+  const start = await page.evaluate(() => {
+    const state = store.get();
+    return {
+      deals: Object.keys(state.deals), questions: Object.keys(state.questions).length,
+      threads: Object.keys(state.threads).length,
+      unsettled: Object.values(state.ops).filter((op) => op.state === 'pending' || op.state === 'interrupted').length,
+    };
+  });
+  const asMade = start.deals.join() === indexed.id && !start.questions && !start.threads && !start.unsettled;
+  say('the copied deal starts as it was made', asMade, JSON.stringify(start));
   return { ctx, page, id: indexed.id };
 }
 /** a conversation on the deal with two answers: the first names the three findings, the second cites the documents */
@@ -219,7 +236,8 @@ for (const [w, h, scheme] of [[1280, 736, 'light'], [1024, 640, 'dark']]) {
 // a person uses the suggestion: from the card at once, or from the pane, asked first when it would replace a response; the
 // pane stays open after and shows the question with its new response, and Undo puts the check back
 { const { ctx, page, id } = await freshDeal();
-  const q = await addQ(page, id, Q4, 'The base case follows the information memorandum.'); await twoAnswers(page, id);
+  const q = await addQ(page, id, Q4, 'The base case follows the information memorandum.');
+  await twoAnswers(page, id);
   await page.click('.msgs .suggest .sq'); await page.waitForSelector('#side-use');
   const now = await page.textContent('#side-now'); await page.click('#side-use'); await page.waitForSelector('#side-replace');
   const asked = await page.evaluate(() => ({ focus: document.activeElement?.id, text: document.querySelector('#sidepane .card.confirm p')?.textContent }));
