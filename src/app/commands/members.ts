@@ -14,6 +14,15 @@ export const isMine = (s: Pick<State, 'members' | 'user'>, dealId: string): bool
 export { firstMember };
 
 /** Add a deal to the person's list ("Add to my deals"), or take it off again; each is the other's Undo. */
+/**
+ * The notice for adding or removing a deal: as before for a name of its own. A twin's longer label is the title with
+ * the verb, "your deals" is its detail, which gives way first, and then the label gives way, never the verb (#27).
+ */
+function memberNotice(label: string, name: string, on: boolean) {
+  if (label === name) return { message: on ? `${name} added to your deals` : `${name} removed from your deals` };
+  return { message: on ? `${label} added · To your deals` : `${label} removed · From your deals`, messageCut: label };
+}
+
 export const SetDealMember = define({
   name: 'SetDealMember',
   input: z.object({ dealId: DealId, on: z.boolean() }),
@@ -32,8 +41,7 @@ export const SetDealMember = define({
       index: { dealId: '_', add: [{ kind: 'member', id }] },          // kept with the list of deals, so start-up reads them together
       audit: [],                                                       // a person's own list: nothing about the deal itself changed
       inverse: { command: 'SetDealMember', input: { dealId: d.id, on: !input.on } },
-      message: input.on ? `${label} added to your deals` : `${label} removed from your deals`,
-      ...(label === d.name ? {} : { messageCut: label }),     // a twin's longer label gives way before the verb (#27)
+      ...memberNotice(label, d.name, input.on),
     });
   },
 });

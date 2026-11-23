@@ -55,9 +55,42 @@ export function NoticeWords({ text, cut }: { text: string; cut?: string }) {
   return (
     <>
       <b class="ttitle"><Part text={title} cut={cut} /></b>
-      {body && <><span class="sr-only"> · </span><span class="tbody"><Part text={body} cut={cut} /></span></>}
+      {body && <><span class="sr-only"> · </span>{cut ? <Detail><Part text={body} cut={cut} /></Detail>
+        : <span class="tbody"><Part text={body} cut={cut} /></span>}</>}
     </>
   );
+}
+
+/**
+ * The detail of a notice whose deal label gives way (#27): where not even its first word would show, it is drawn not
+ * at all rather than as a stub of letters. It stays in the text read aloud, and the whole text is on hover.
+ */
+function Detail({ children }: { children: ComponentChildren }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const fit = () => {
+      el.classList.remove('sr-only');
+      if (el.scrollWidth <= el.clientWidth) return;
+      el.classList.toggle('sr-only', el.clientWidth < firstWordWidth(el));
+    };
+    fit();
+    addEventListener('resize', fit);
+    return () => removeEventListener('resize', fit);
+  }, []);
+  return <span class="tbody" ref={ref}>{children}</span>;
+}
+
+/** how wide the first word of an element's text is drawn, with the ellipsis that would follow it */
+function firstWordWidth(el: HTMLElement): number {
+  const node = el.firstChild;
+  if (!(node instanceof Text)) return 0;
+  const end = node.data.indexOf(' ');
+  const range = document.createRange();
+  range.setStart(node, 0);
+  range.setEnd(node, end < 0 ? node.data.length : end);
+  return range.getBoundingClientRect().width + 12;      // and room for "…"
 }
 
 /** One part of a notice's words, with its `cut` shortened to fit where it holds it. */

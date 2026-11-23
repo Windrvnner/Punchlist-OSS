@@ -71,7 +71,16 @@ const notice = async (page) => {
       return copy.textContent.replace(/\s+/g, ' ').trim();
     };
     const title = el.querySelector('.ttitle');
-    return { said: without('[aria-hidden="true"]'), shown: without('.sr-only'), text: el.textContent,
+    const body = el.querySelector('.tbody');
+    // the detail shows whole, cut after a word, or not at all (read aloud still): never a stub of letters
+    const firstWord = () => {
+      const range = document.createRange();
+      range.setStart(body.firstChild, 0);
+      range.setEnd(body.firstChild, body.textContent.indexOf(' '));
+      return range.getBoundingClientRect().width;
+    };
+    const stub = body && !body.classList.contains('sr-only') && body.clientWidth < firstWord();
+    return { said: without('[aria-hidden="true"]'), shown: without('.sr-only'), text: el.textContent, stub: !!stub,
       whole: !!title && title.scrollWidth <= title.clientWidth + 1
         && !title.querySelector('.tcut')?.textContent.endsWith('…') };
   });
@@ -133,8 +142,8 @@ async function checkWording() {
   const removed = await removeFromMine(page, ids.Wingtip, 'twin');
   say('#27 Remove from My Deals names the twin, and its Undo brings it back',
     removed.asked === 'Remove Project Kestrel (Wingtip) from your deals?'
-    && removed.told.said === 'Project Kestrel (Wingtip) removed from your deals'
-    && removed.told.whole && removed.fit, JSON.stringify(removed));
+    && removed.told.said === 'Project Kestrel (Wingtip) removed · From your deals'
+    && removed.told.whole && !removed.told.stub && removed.fit, JSON.stringify(removed));
   const gone = await deleteDeal(page, ids.Wingtip, 'twin');
   say('#27 Delete Deal names the twin in both dialogs and the notice; the name alone confirms it',
     gone.first === 'Project Kestrel (Wingtip) will be deleted with its findings and its Q&A.'
@@ -143,7 +152,7 @@ async function checkWording() {
     && gone.told.said === 'Project Kestrel (Wingtip) deleted' && gone.told.whole && gone.fit, JSON.stringify(gone));
   const longOut = await removeFromMine(page, ids[LONG_PARTY], 'long');
   say('#27 beside Undo, a long name gives way, to a letter if need be; the twin line starts and "removed" stay',
-    longOut.told.said === `Project ${LONG} (${LONG_PARTY}) removed from your deals`
+    longOut.told.said === `Project ${LONG} (${LONG_PARTY}) removed · From your deals` && !longOut.told.stub
     && keepsTwin(longOut.told, `Project ${LONG}`, LONG_PARTY), JSON.stringify(longOut.told));
   const long = await deleteDeal(page, ids[LONG_PARTY], 'long');
   say('#27 a long name and counterparty wrap inside the dialog', long.fit
