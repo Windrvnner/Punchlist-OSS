@@ -99,15 +99,16 @@ function usePlacement(panel: PanelRef, zoom: number) {
 }
 
 /**
- * A page turned to is read from its top (from its foot when turned back to with Page Up while zoomed, `toFoot`), and a
+ * A new document or page starts at its top. Page Up while zoomed can turn to the previous page's foot. A change in
  * zoom keeps the same part of the page in view.
  */
-function usePageScroll(panel: PanelRef, zoom: number, pageAt: number | null, loc: string, toFoot: RefObject<boolean>) {
+function usePageScroll(panel: PanelRef, zoom: number, docIdentity: string, pageAt: number | null, loc: string,
+  toFoot: RefObject<boolean>) {
   useLayoutEffect(() => {
     const body = docBody(panel);
     if (body) body.scrollTop = toFoot.current ? body.scrollHeight : 0;
     toFoot.current = false;
-  }, [pageAt, loc]);
+  }, [docIdentity, pageAt, loc]);
   const lastZoom = useRef(zoom);
   useLayoutEffect(() => {
     const body = docBody(panel);
@@ -286,7 +287,7 @@ export function DocPanel({ dealId, docs, index, aside, headed }: {
   useEffect(() => {
     docBody(panel)?.querySelector('td.hl')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [index, typeof page]);
-  usePageScroll(panel, zoom, pages.pageAt, current.loc, toFoot);
+  usePageScroll(panel, zoom, `${dealId}|${docKey(current)}`, pages.pageAt, current.loc, toFoot);
   useZoomInput(panel, zoomBy, pageKey);
   const citationCount = !aside && docs.length > 1 ? `Citation ${(index ?? 0) + 1} of ${docs.length}` : null;
   return (

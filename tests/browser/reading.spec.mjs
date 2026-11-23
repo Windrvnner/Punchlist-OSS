@@ -11,7 +11,7 @@ const browser = await launchChrome();
 openOnFindings(browser);
 const PAGES = 320; const bytes = longPdf(PAGES);
 
-async function reading({ pdf = true, size = [1280, 736], recordRuntime = false } = {}) {
+async function reading({ pdf = true, size = [1280, 736], recordRuntime = false, samePage = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width: size[0], height: size[1] } }); const page = await ctx.newPage(); page.errors = []; page.on('pageerror', (e) => page.errors.push(e.message));
   if (recordRuntime) await ctx.addInitScript(() => {
     const send = Worker.prototype.postMessage;
@@ -25,14 +25,15 @@ async function reading({ pdf = true, size = [1280, 736], recordRuntime = false }
       return send.call(this, message, ...options);
     };
   });
-  await page.route('**/long.pdf', (r) => r.fulfill({ body: bytes, contentType: 'application/pdf' }));
+  await page.route('**/long.pdf*', (r) => r.fulfill({ body: bytes, contentType: 'application/pdf' }));
   await page.goto(URL); await page.waitForSelector('#fr-new');
   await page.click('#fr-new'); await page.fill('#nd-name', 'Proseware'); await page.click('#nd-paste'); await page.fill('#nd-path', 'reports'); await page.press('#nd-path', 'Enter'); await page.waitForSelector('.ndrow');
   await page.click('#nd-create'); await page.waitForSelector('#nd-create', { state: 'detached' }); await page.waitForSelector('.dtabs');
   await page.waitForFunction(() => document.querySelectorAll('.flagrow').length === 3, null, { timeout: 30000 });
   const id = await page.evaluate(() => Object.values(store.get().deals)[0].id);
   const fid = await page.evaluate((d) => Object.values(store.get().findings).find((x) => x.dealId === d && x.sources.length > 1 && /p\. \d+/.test(x.sources[0].loc)).id, id);
-  if (pdf) await page.evaluate(() => { window.__pdf = { '*': { url: 'long.pdf' } }; });
+  if (samePage) await citePdfPages(page, fid, 2);
+  else if (pdf) await page.evaluate(() => { window.__pdf = { '*': { url: 'long.pdf' } }; });
   await page.goto(URL + `#finding-${id}-${fid}`); await page.waitForSelector('.opening');
   await page.click('.opening .ref .rb'); await page.waitForSelector('.docpanel');
   await page.waitForSelector(pdf ? '.docbody .page.pdf.ready' : '.docbody .page:not(.ph-page)', { timeout: 20000 });
@@ -40,6 +41,61 @@ async function reading({ pdf = true, size = [1280, 736], recordRuntime = false }
 }
 const bar = (page) => page.evaluate(() => ({ loc: document.querySelector('#doc-menu .loc')?.textContent, cnt: document.querySelector('#doc-menu .cnt')?.textContent || null, shown: document.querySelector('.docbody .page .pg')?.textContent, prev: document.querySelector('#page-prev')?.disabled, next: document.querySelector('#page-next')?.disabled, zoom: document.querySelector('#zoom-reset:not(.off)')?.textContent ?? null, width: Math.round(document.querySelector('.docbody .page').getBoundingClientRect().width), top: document.querySelector('.docbody').scrollTop }));
 const ready = (page, n) => page.waitForFunction((n) => document.querySelector('.docbody .page.pdf.ready .pg')?.textContent === `Page ${n}`, n, { timeout: 8000 });
+
+/** Reuse the long PDF fixture at distinct URLs for the two citations. */
+async function citePdfPages(page, fid, secondPage) {
+  await page.evaluate(([id, second]) => {
+    const state = store.get();
+    const finding = state.findings[id];
+    const sources = finding.sources.map((source, i) => ({ ...source, loc: `p. ${i === 0 ? 2 : second}` }));
+    window.__pdf = Object.fromEntries(sources.map((source, i) => [source.doc, { url: `long.pdf?doc=${i}` }]));
+    store.set({ ...state, findings: { ...state.findings, [id]: { ...finding, sources } } });
+  }, [fid, secondPage]);
+}
+
+/** Load both cited pages before measuring scroll on a return visit. */
+async function warmPdfPages(page, secondPage) {
+  await page.click('#doc-next');
+  await ready(page, secondPage);
+  await page.click('#doc-prev');
+  await ready(page, 2);
+}
+
+// #447: document changes reset the scroll at the same page as well as a different page, while keeping zoom.
+{ const { ctx, page, fid } = await reading({ samePage: true });
+  const panel = await page.locator('.docpanel').elementHandle();
+  await warmPdfPages(page, 2);
+  for (let i = 0; i < 3; i++) await page.keyboard.press('Control+=');
+  const before = await bar(page);
+  const steps = [];
+  for (const [direction, number, title] of [
+    ['next', 2, 'Information memorandum.pdf'], ['prev', 2, 'Technical advisor report.pdf'],
+    ['next', 3, 'Information memorandum.pdf'],
+  ]) {
+    if (number === 3) {
+      await citePdfPages(page, fid, number);
+      await warmPdfPages(page, number);
+    }
+    await page.mouse.move(850, 230);
+    await page.mouse.wheel(0, 3000);
+    const foot = await page.waitForFunction(() => {
+      const body = document.querySelector('.docbody');
+      const bottom = body.scrollHeight - body.clientHeight;
+      return bottom > 0 && Math.abs(body.scrollTop - bottom) < 1 && body.scrollTop;
+    });
+    await page.click(`#doc-${direction}`);
+    await ready(page, number);
+    const current = await bar(page);
+    const name = await page.textContent('#doc-menu .docnm');
+    const mounted = await panel.evaluate((el) => el === document.querySelector('.docpanel'));
+    steps.push({ ...current, foot: await foot.jsonValue(), name, correct: name === title && mounted });
+  }
+  const keepsZoom = (step) => step.zoom === before.zoom && step.width === before.width;
+  say('a-different-pdf-starts-at-the-top-with-zoom-kept',
+    before.zoom === '150%' && steps.every((step) => step.correct && step.top === 0 && keepsZoom(step)),
+    JSON.stringify(steps.map(({ name, shown, top, zoom, foot }) => [name, shown, top, zoom, foot])));
+  await ctx.close();
+}
 
 // 1 Page Down leaves the cited page: the bar says which page of how many, and that it is not cited; Page Up comes back to the citation
 { const { ctx, page } = await reading({ recordRuntime: true });
