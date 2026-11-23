@@ -387,7 +387,8 @@ function memoRiskFits(paragraphs: string[], ids: Set<string>): boolean {
   const scrubbed = paragraphs.map((paragraph) => unid(paragraph, ids));
   // Citation fitting can join adjacent text when it removes an invalid marker (#659).
   const withoutCitations = scrubbed.map((paragraph) => withoutMemoMarks(paragraph)).join(' ');
-  const oversized = (value: string) => value.split(/\s+/).some((token) => token.length > MEMO_RISK_TOKEN_CHARS);
+  // Only ordinary document whitespace can separate printed words (#659).
+  const oversized = (value: string) => value.split(/[ \t\r\n]+/).some((token) => token.length > MEMO_RISK_TOKEN_CHARS);
   if (oversized(text) || oversized(withoutCitations)) return false;
   const prose = scrubbed.map((paragraph) => withoutMemoMarks(paragraph, ' ')).join(' ');
   const words = prose.match(/\S+/g) ?? [];

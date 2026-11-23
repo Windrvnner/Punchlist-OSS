@@ -817,6 +817,10 @@ describe('deal memo model replies', () => {
       paragraphs: [`${Array(15).fill('x'.repeat(199)).join('\u000b')} The draft sets the ratio. [1]`],
     },
     {
+      name: 'oversized text containing zero-width separators',
+      paragraphs: [`${Array(15).fill('x'.repeat(199)).join('\ufeff')} The draft sets the ratio. [1]`],
+    },
+    {
       name: '201 words after removing a finding ID',
       paragraphs: [`${'covenant '.repeat(199)}${lockUp.id}. [1]`],
     },
