@@ -42,15 +42,21 @@ npm run installer       # build the Windows installer into out/installer (on Win
 | `npm run ai:check -- openai` | Runs a live smoke check on an OpenAI-compatible endpoint. Substitute `claude` or `north` to check those providers. Supply the matching key or token and configure the endpoint for OpenAI-compatible or North. |
 | `npm run desktop:live` | Opens the desktop app, signed in with that key when no key has been entered (`npm run desktop` ignores the key). |
 | `npm run desktop:test` | Builds the desktop app and runs it end to end on temporary folders (on Linux, run `xvfb-run -a npm run desktop:test`). |
-| `npm run browser` | Runs every browser suite against `dist/`, five at a time (add `-- --jobs 3 keyboard` to set how many suites run at once and which suites run), and starts its own server. `--shard 2/4` runs only the second of four groups of suites. |
+| `npm run browser` | Runs every browser suite against `dist/`, five at a time (add `-- --jobs 3 keyboard` to set how many suites run at once and which suites run), and starts its own server. `--shard 2/4` runs only the second of four groups of suites of about equal time, split by each suite's CI time in `tests/browser/suite-times.json`. |
+| `npm run browser:times` | Rewrites `tests/browser/suite-times.json` from the suite times of the latest `npm run check:all`. |
 | `npm run typecheck` | Type-checks with TypeScript, with no output files. |
 | `npm run lint` | Runs Biome (lint only, no formatter). |
 | `npm run check` | Runs the type-check, Biome, the secrets check and the AI-attribution check on every tracked file (the attribution check also reads the branch's commit messages), readability hints for the changed code (never failing), and the unit tests. |
-| `npm run check:all` | Runs `check`, the build, browser suites, and desktop smoke and sign-in checks. Run it before every merge. CI on GitHub runs the same steps as parallel jobs on every pull request and push to `main`. |
+| `npm run check:all` | Runs `check`, the build, browser suites, and desktop smoke and sign-in checks. CI on GitHub runs the same steps as parallel jobs on every pull request and push to `main`; their required checks gate merging, so a local run is optional. |
 | `npm run screens` | Takes screenshots of every main screen into `out/` (add `-- 1440x900 --pdfs <folder>` for options). Needs `npm run serve`. |
 | `npm run package` | Optional local release ZIP containing the app, source, and `docs/`, written to `out/punchlist-<version>.zip`. |
 
 The GitHub Actions workflow also builds the Windows installer when it is started by hand.
+
+A new browser suite needs an entry in `tests/browser/suite-times.json` (a unit test checks the file lists every suite).
+After `npm run check:all`, `npm run browser:times` rewrites the file from that run's suite times, scaled to CI speed,
+and lists what changed: commit it with any pull request that adds a suite or makes one noticeably slower.
+`npm run browser:times -- out/gate/<time>` takes the times of an earlier run instead.
 
 The Store is the object that holds the app's state and runs its commands; see [architecture.md](architecture.md).
 

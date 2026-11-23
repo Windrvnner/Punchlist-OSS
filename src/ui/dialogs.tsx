@@ -1,5 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { createPortal } from 'preact/compat';
+import { plural } from './counts';
 import { useAppState, useStore } from './hooks';
 import { Icon } from './icons';
 import { DocName } from './docName';
@@ -284,8 +285,20 @@ export function NewDealDialog() {
       {!existing && <><div class="lbl" id="nd-flbl">Folders</div>
       <div class="nddrop" role="group" aria-labelledby="nd-flbl" onDragOver={(e) => e.preventDefault()} onDrop={(e) => void onDrop(e)}>
         {nd.folders.length > 0 && <div class="ndhd" aria-hidden="true"><span>Folder</span><span>Label</span><span>Files</span><span /></div>}
-        {nd.folders.map((f, i) => (
-          <div class="ndrow" key={f.path}><span class="p"><DocName name={f.path} /></span><input class="lab" aria-label="Label" maxLength={FOLDER_LABEL_MAX} value={f.label} onInput={(e) => set({ folders: nd.folders.map((x, j) => j === i ? { ...x, label: (e.currentTarget as HTMLInputElement).value } : x) })} /><span class="cnt">{f.files.toLocaleString()} files · {f.size}</span><button type="button" class="x" aria-label="Remove" onClick={() => set({ folders: nd.folders.filter((_, j) => j !== i) })}><Icon name="close" size={12} /></button></div>
+        {nd.folders.map((folder, index) => (
+          <div class="ndrow" key={folder.path}>
+            <span class="p"><DocName name={folder.path} /></span>
+            <input class="lab" aria-label="Label" maxLength={FOLDER_LABEL_MAX} value={folder.label}
+              onInput={(event) => set({
+                folders: nd.folders.map((entry, at) =>
+                  at === index ? { ...entry, label: event.currentTarget.value } : entry),
+              })} />
+            <span class="cnt">{plural(folder.files, 'file')} · {folder.size}</span>
+            <button type="button" class="x" aria-label="Remove"
+              onClick={() => set({ folders: nd.folders.filter((_, at) => at !== index) })}>
+              <Icon name="close" size={12} />
+            </button>
+          </div>
         ))}
         {/* New Deal's folder box ends in two buttons; Paste a Path focuses the field it shows */}
         <div class="ndadd">

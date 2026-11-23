@@ -4,7 +4,7 @@ Status: all four parts are built, except the store of item keywords by wording (
 
 ## What core documents do, and what they do not
 
-Core documents are a deal's most important documents. They are marked `*` whenever the fast model picks documents for a check, a question, or a folder read. They also break ties in the keyword ranking (`ranked`, ai.ts:739), and the fast model reads them once up front for a summary and search terms (`describeSoon`). They do not limit what a check can read: every checklist item's search and pick ranks every document in the data room (`ranked` over `o.docs.records`, ai.ts:741; `headed` takes the top `limits.shortlist` of that ranking), so the cap of 100 never kept a document from a check. Coverage comes from the per-item search. The core set is the deal's map of what matters, and it sets the order in which things are read.
+Core documents are a deal's most important documents. They are marked `*` whenever the fast model picks documents for a check, a question, or a folder read. They also break ties in the keyword ranking ([`ranked`](../src/backend/ai.ts)), and the fast model reads them once up front for a summary and search terms ([`describeSoon`](../src/backend/ai.ts)). They do not limit what a check can read: every checklist item's search and pick ranks every document in the data room (`ranked` over `o.docs.records`; [`headed`](../src/backend/ai.ts) takes the top `limits.shortlist` of that ranking), so the cap of 100 never kept a document from a check. Coverage comes from the per-item search. The core set is the deal's map of what matters, and it sets the order in which things are read.
 
 The design has these goals:
 - Cut token use while giving complete coverage, with no artificial cap.
@@ -23,10 +23,10 @@ These are reused as they are:
 - `blacklines.ts`: a blackline by name or by its cover page (`cover`, kept at indexing), its clean draft, standalone ones.
 - `sameRoom.ts`: documents other deals hold by content.
 - The checks' search agent (`searchFor`; the first pass and Check again in [decisions.md](decisions.md#ai-and-models)): the fast model's searches per item, each item's trail of its latest 8 searches on its result, and "a gap already searched for on the same documents and wording is not searched again".
-- Checklist items' `section` and `subsection` headings (src/domain/checklist.ts:124-127).
-- The word index (`wordIndex.ts`) and `scores`; a document with no readable text (a scan) is already marked at indexing (`words: []`, documents.ts:49).
+- Checklist items' `section` and `subsection` headings ([`src/domain/checklist.ts`](../src/domain/checklist.ts)).
+- The word index ([`src/backend/wordIndex.ts`](../src/backend/wordIndex.ts)) and `scores`; a document with no readable text (a scan) is already marked at indexing as an empty `words` list ([`DocRecord`](../src/backend/documents.ts)).
 - The word lists in the control file, `src/control.ts` (`lists.searchFiller`, `lists.indexFiller`).
-- `describeSoon` with its claims across PCs, and the describe-on-read it already does (ai.ts:918).
+- [`describeSoon`](../src/backend/ai.ts) with its claims across PCs, and the describe-on-read it already does.
 - The core line in the shared check log, and `RoundDef.core`, which a shared check keeps for its whole run.
 
 These are new:
@@ -36,11 +36,11 @@ These are new:
 - Documents of another project (precedents, and blacklines against another project), never a main source.
 - The synonyms and abbreviations library (`lists.synonyms`).
 - Item keywords kept by wording, from the search agent's replies.
-- Learning the deal's short names from paths with no model, in place of the removed core calls as the source of candidates (`shortFor`, ai.ts:674, is reused for the letter check).
+- Learning the deal's short names from paths with no model, including checking the abbreviation against the phrase's initials, is handled by [`shortNamesIn`](../src/backend/core.ts); [`learnShort`](../src/backend/ai.ts) installs them for matching.
 
 ## The core set
 
-Each PC works out the core set with no model, from signals that every PC has alike: each document's name, folder path, and most-used words (`words`, in the shared document lines); each item's wording, headings, and kept searches; the library; and the deal's short names. It does not use this PC's full-text index or summaries, which differ between PCs and change as documents are described. So every PC gets the same set without writing it down, and the set does not feed on itself. (A document in a folder that this person may not open is left out of their set and gives its place to no other document.) The set rests mostly on names and paths: the most-used words are 30 single words, and a scan has none (documents.ts:49). That is enough, because the set does not gate what a check reads. The set is worked out when a check or first pass starts, or on demand when a question or folder read needs it and none is worked out yet. It is kept for that run (`RoundDef.core`) and worked out again at the run's end, so it does not shift from batch to batch.
+Each PC works out the core set with no model, from signals that every PC has alike: each document's name, folder path, and most-used words (`words`, in the shared document lines); each item's wording, headings, and kept searches; the library; and the deal's short names. It does not use this PC's full-text index or summaries, which differ between PCs and change as documents are described. So every PC gets the same set without writing it down, and the set does not feed on itself. (A document in a folder that this person may not open is left out of their set and gives its place to no other document.) The set rests mostly on names and paths: the most-used words are 30 single words, and a scan has none ([`DocRecord`](../src/backend/documents.ts)). That is enough, because the set does not gate what a check reads. The set is worked out when a check or first pass starts, or on demand when a question or folder read needs it and none is worked out yet. It is kept for that run (`RoundDef.core`) and worked out again at the run's end, so it does not shift from batch to batch.
 
 **Scoring words.** A word in the file's name counts 10, in its folder path 3, and among its most-used words 1, each weighted by how rare it is among the documents. On the item side, an item's subject terms are its words that fewer than half the checklist's items use and that are not on the control file's list of checklist ask words (`lists.askWords`: executed, copy, provided, party, default, term, lenders, consent and the like). Before an item has kept searches, its section and subsection headings count as subject terms at full weight, and an item with no subject term falls back to its headings. A library group scores as the best of its group match and the member's own words, never instead of them. A blackline (a document that shows the changes from one document to another) whose clean draft is known counts through its clean draft and takes no place of its own.
 
@@ -64,7 +64,7 @@ Part 3 is built; its design is in [other-project-documents-design.md](other-proj
 
 ## Synonyms and abbreviations library
 
-The library is `lists.synonyms` in the control file (`src/control.ts`), beside its word lists. Like every value in the control file, it is part of the app's build, so changing it means building the app again (control.ts:6: "Changing a value means rebuilding"). The control file's validator checks these rules:
+The library is `lists.synonyms` in the control file ([`src/control.ts`](../src/control.ts)), beside its word lists. Like every value in the control file, it is part of the app's build, so changing it means building the app again (the control file says "Changing a value means rebuilding"). The control file's validator checks these rules:
 - A group is a list of names for one thing. A phrase is matched only as a whole phrase, in names, paths, and checklist wording, never as loose words.
 - An abbreviation (capitals, two letters or more) is matched only in names, paths, and checklist wording, where case is kept, as a whole word written in capitals. A name or heading with no lowercase letter at all does not count ("PILOT PROGRAM").
 - No member is a single ordinary word: the validator checks members against a list of ordinary words kept beside the library (`ORDINARY` in control.ts).
@@ -77,15 +77,15 @@ The deal's own short names are learned from paths with no model, and only from e
 
 The app reuses the search trail from the latest result. The separate cache by item wording described here is planned.
 
-The search agent's replies (its searches for an item) are kept by the item's wording in the deal's shared check log. Each is written once per wording and claimed (`claim`/`release`) so that two PCs do not both ask, and a later check starts from them instead of asking again. The agent's second try "in other words" is kept too, by wording and the documents' hash. These lines are new and separate from the trail on each result line (ai.ts:2004), which stays as the gap's display. Calls are counted against `limits.searchCalls` as they are now, and a kept search costs none. The core set uses the kept searches; an item not yet searched is matched on its wording, headings, and the library, and joins the set once it is searched. This needs no extra call, because the first pass already asks.
+The search agent's replies (its searches for an item) are kept by the item's wording in the deal's shared check log. Each is written once per wording and claimed (`claim`/`release`) so that two PCs do not both ask, and a later check starts from them instead of asking again. The agent's second try "in other words" is kept too, by wording and the documents' hash. These lines are new and separate from the trail on each result line (the per-item search trail), which stays as the gap's display. Calls are counted against `limits.searchCalls` as they are now, and a kept search costs none. The core set uses the kept searches; an item not yet searched is matched on its wording, headings, and the library, and joins the set once it is searched. This needs no extra call, because the first pass already asks.
 
 ## Describing documents
 
-Describing a document means the fast model reads it for a summary and search terms. The best 100 are described up front, as they already are, and a check waits for those only (a queue of its own in `describeSoon`, with `described(dealId, ids)`). Every other core document is described the first time a check or question reads it, as any document is (ai.ts:918). Only the best 100 are marked `*` in pick prompts. Nothing else uses the set beyond tie-breaks in `ranked` and the order of a folder read, so the rest of the set mostly sets the order of reading.
+Describing a document means the fast model reads it for a summary and search terms. The best 100 are described up front, as they already are, and a check waits for those only (a queue of its own in [`describeSoon`](../src/backend/ai.ts), with `described(dealId, ids)`). Every other core document is described the first time a check or question reads it, as any document is. Only the best 100 are marked `*` in pick prompts. Nothing else uses the set beyond tie-breaks in [`ranked`](../src/backend/ai.ts) and the order of a folder read, so the rest of the set mostly sets the order of reading.
 
 ## Filling gaps (part 4)
 
-Reading 100 documents up front is acceptable, but nothing may stop further searching when a check has gaps to fill. There must still be some limit, and the further searching uses the tool-calling search that is already built. Without this part, an item gets its main call (up to `limits.docsPerCall` documents, shared), one second look of a quarter of a handful (ai.ts:2243), and no third round. An item whose searches find nothing is searched once more in other words, and is then a gap (the first pass and Check again in [decisions.md](decisions.md#ai-and-models)).
+Reading 100 documents up front is acceptable, but nothing may stop further searching when a check has gaps to fill. There must still be some limit, and the further searching uses the tool-calling search that is already built. Without this part, an item gets its main call (up to `limits.docsPerCall` documents, shared), one second look of a quarter of a handful, and no third round. An item whose searches find nothing is searched once more in other words, and is then a gap (the first pass and Check again in [decisions.md](decisions.md#ai-and-models)).
 
 In this part, items that a check leaves not settled or as gaps are handed, a few at a time, to the chat agent's own tool-calling loop (`chatAgent`, src/backend/agent.ts), with its search and read tools unchanged: it searches and reads as often as it needs. Its existing ceilings are the safety stop: about `limits.chatTurns` turns (25) per run, `limits.searchCalls` per search run, and `limits.checkSearchCalls` per deal on each PC. An item that the agent still cannot settle stays a gap if nothing was found, and becomes "not settled" if the run stopped at a ceiling, saying so on hover. Questions in the chat already run on this loop. The extra calls per gap item are to be measured on the 2,400-item checklist before the defaults are set.
 
@@ -95,7 +95,7 @@ A simulation (names and paths only, with the repo's realistic 2,400-item checkli
 
 - **Choosing the set:** no model calls. The method this design replaces took about 7 calls of 300 paths and 3 to 4 merges, roughly 100,000 to 150,000 tokens, once.
 - **Item keywords:** no new calls; repeat search calls on later checks are saved.
-- **Describing up front:** 100 documents, as before. On the Claude path, each call sends the whole document (claude.ts:124).
+- **Describing up front:** 100 documents, as before. On the Claude path, each call sends the whole document ([`src/backend/claude.ts`](../src/backend/claude.ts)).
 - **On the PC:** names are tokenized once per document, with an inverted index from words to documents, and each item is scored only against documents that hold its words (#461). The target is under 10 seconds at 2,400 items by 2,000 documents.
 
 ## Parts
