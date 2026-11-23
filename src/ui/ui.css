@@ -57,8 +57,12 @@ a.flagrow{text-decoration:none;color:inherit}
 .docnm .dni{display:contents}
 .docnm .dnh{flex:0 1 auto;min-width:3ch;overflow:hidden;text-overflow:ellipsis}
 .docnm .dnt{flex:none}
-/* Keep a filename hover target in untagged chips. Tagged chips give the space to the location and tag first. */
-.rsch-chip:not(:has(>.rdg))>.docnm{min-width:3ch}
+/* Use the 13px icon and 6px gap as part of the filename hover target without taking any extra chip width. */
+.rsch-chip>.docnm{--source-icon-space:19px;position:relative;
+  margin-inline-start:calc(-1 * var(--source-icon-space));padding-inline-start:var(--source-icon-space)}
+/* Keep the slide out of the icon and count the hover padding in its measured travel. */
+.rsch-chip>.docnm.run{overflow:clip;overflow-clip-margin:content-box}
+.rsch-chip>.docnm.run .dni{padding-inline-end:var(--source-icon-space)}
 /* Give the head the space left by the tail. A tail that cannot fit uses a leading ellipsis. */
 .rsch-chip .docnm:not(.run) .dnh{flex:1;min-width:0}
 .rsch-chip .docnm:not(.run) .dnt{flex-shrink:1;overflow:hidden;text-overflow:ellipsis;direction:rtl}

@@ -90,20 +90,25 @@ async function workbookChip(page, index, loc) {
   return chip;
 }
 
-async function crampedNameTooltip(page) {
-  const chip = await workbookChip(page, 0, "'WORKING CAPITAL RECONCILIATION'!Z515");
+async function workbookNameTooltip(page, chip) {
+  const icon = await chip.locator('svg').first().boundingBox();
+  if (!icon) return false;
+  const point = [icon.x + icon.width / 2, icon.y + icon.height / 2];
   const name = chip.locator('.docnm');
-  const point = await name.evaluate((node) => {
-    const box = node.getBoundingClientRect();
-    const visible = box.width > 0 ? box : node.querySelector('.dnh').getBoundingClientRect();
-    const x = visible.left + visible.width / 2;
-    const y = visible.top + visible.height / 2;
-    return visible.width > 0 && node.contains(document.elementFromPoint(x, y)) ? [x, y] : null;
-  });
-  if (!point) return false;
+  const hitsName = () => name.evaluate((node, [x, y]) => node.contains(document.elementFromPoint(x, y)), point);
+  if (!(await hitsName())) return false;
   await page.mouse.move(...point);
   await page.waitForSelector('.tip');
-  return (await page.textContent('.tip')) === WORKBOOK_NAME;
+  const visible = (await page.textContent('.tip')) === WORKBOOK_NAME && await hitsName();
+  await page.mouse.move(2, 2);
+  return visible;
+}
+
+async function measureWorkbook(page, index, loc) {
+  const chip = await workbookChip(page, index, loc);
+  const [bounds] = await measureChips(chip);
+  const tooltip = await workbookNameTooltip(page, chip);
+  return { ...bounds, tooltip };
 }
 
 for (const [scheme, w, h] of [['dark', 1280, 736], ['light', 1280, 736], ['dark', 1024, 640], ['light', 1024, 640]]) {
@@ -167,10 +172,11 @@ for (const [scheme, w, h] of [['dark', 1280, 736], ['light', 1280, 736], ['dark'
   const taggedWorkbooks = [];
   // On main, only the funding model's pill edge has 5px of overflow. Both tags' text fits.
   for (const [loc, maxOverflow] of [["'DEBT FUNDING MODEL'!AA15", 5], ["'DEBT SERVICE MODEL'!AA15", 0]]) {
-    const [workbook] = await measureChips(await workbookChip(page, 1, loc));
+    const workbook = await measureWorkbook(page, 1, loc);
     taggedWorkbooks.push({ ...workbook, maxOverflow });
   }
-  const crampedTip = await crampedNameTooltip(page);
+  const wideTagged = await measureWorkbook(page, 1, "'WORKING CAPITAL RECONCILIATION'!XFD1048576");
+  const wideUntagged = await measureWorkbook(page, 0, "'WORKING CAPITAL RECONCILIATION'!Z515");
   const shown = [...blackline.measurements, ...precedent.measurements];
   const details = shown.map(({ name, location, tag: badge }) => [name, location, badge]);
   const expected = [
@@ -183,10 +189,13 @@ for (const [scheme, w, h] of [['dark', 1280, 736], ['light', 1280, 736], ['dark'
     JSON.stringify(details) === JSON.stringify(expected)
     && shown.every(({ fits, detailsFit, ellipsis, label, name, location }) =>
       fits && detailsFit && ellipsis && label === `Open ${name}, ${location}`)
-    && [blackline, precedent].every(({ tooltip, fullName }) => fullName && tooltip === fullName) && crampedTip
-    && taggedWorkbooks.every(({ chipOverflow, maxOverflow, detailsFit, tag: badge }) =>
-      chipOverflow <= maxOverflow && detailsFit && badge === 'precedent'),
-    JSON.stringify({ blackline, precedent, crampedTip, taggedWorkbooks }));
+    && [blackline, precedent].every(({ tooltip, fullName }) => fullName && tooltip === fullName)
+    && taggedWorkbooks.every(({ chipOverflow, maxOverflow, detailsFit, tag: badge, tooltip }) =>
+      chipOverflow <= maxOverflow && detailsFit && badge === 'precedent' && tooltip)
+    // The long locations already overflow on main (#818). The tooltip should still work without adding overflow.
+    && wideTagged.tag === 'precedent' && wideTagged.tooltip && wideTagged.chipOverflow <= 135
+    && wideUntagged.tag === '' && wideUntagged.tooltip && wideUntagged.chipOverflow <= 12,
+    JSON.stringify({ blackline, precedent, taggedWorkbooks, wideTagged, wideUntagged }));
   say(`${tag}:no-page-errors`, page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }
