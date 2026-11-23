@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import { pair, aiOf, roots, checks, verifies, logOf, roundsOf, allEnded, until, FAST, type Pair } from './splitKit';
 import { SetFindingStatus, DeleteFinding } from '../../src/app/commands/findings';
 import { view } from '../../src/backend/rounds';
+import { roundOfWork } from '../../src/backend/roundsObserver';
 
 afterAll(() => { for (const r of roots) fs.rmSync(r, { recursive: true, force: true }); });
 const val = <T>(r: { ok: true; value: T } | { ok: false; error: { message: string } }): T => { if (!r.ok) throw new Error(r.error.message); return r.value; };
@@ -86,13 +87,17 @@ describe('two PCs share a deal\'s checks', () => {
       stuck = true; p.net.pause('ba');                                                                    // the laptop stops answering, and nothing more of it reaches the office
       const t0 = Date.now(); await a;
       await until('the office to finish the round', () => [...roundsOf(p.sync.A, p.dealId).values()].some((r) => r.end?.kind === 'done'), 20000);
-      // it waited for the lapse before taking over, counted from the laptop's last line the office saw: on a busy
-      // machine that line can be written a little before the pause (#131)
+      // it waited for the lapse before taking over, counted as the office counts it (RoundsObserver.lastWork): from the
+      // laptop's last piece line, or its joining, whichever is later. Renewals do not count, and on a busy machine the
+      // last piece line can be written a little before the pause (#131)
       const laptopId = p.B.backend.installId;
       const fromLaptop = logOf(p.sync.A, p.dealId).filter((l) => l.pc === laptopId);
-      const lastSeen = Math.max(...fromLaptop.map((l) => Date.parse(l.at)));
-      expect(lastSeen).toBeLessThanOrEqual(t0);
-      expect(Date.now() - lastSeen).toBeGreaterThanOrEqual(FAST.lapse! - 100);
+      const joined = fromLaptop.find((l) => l.member);
+      const work = fromLaptop.filter((l) => roundOfWork(l) || l === joined);
+      expect(work.length, 'the office saw the laptop join and work').toBeGreaterThan(0);
+      const lastWork = Math.max(...work.map((l) => Date.parse(l.at)));
+      expect(lastWork).toBeLessThanOrEqual(t0);
+      expect(Date.now() - lastWork).toBeGreaterThanOrEqual(FAST.lapse! - 100);
       const t = tally(p); expect(t.size).toBe(100); const twice = [...t].filter(([, x]) => x > 1).map(([n]) => n); expect(twice.length).toBeLessThanOrEqual(10);   // at most the laptop's batch in flight was done twice
     } finally { p.close(); }
   }, 60000);
