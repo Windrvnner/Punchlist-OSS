@@ -372,4 +372,56 @@ describe('an issues list removed on one PC while another changes it', () => {
     await syncAll(a, b);
     for (const p of [a, b]) { expect(findingsOf(p, dealId).length).toBe(40); expect(Object.keys(p.store.get().conflicts).length).toBe(0); }
   });
+  it('a finding put back and changed on the other PC before the removal\'s Undo reaches it stays as that PC has it, with nothing to choose (#401)', async () => {
+    for (const order of ['undo first', 'edit first'] as const) {
+      const { a, b, dealId } = await twoPcs();
+      await a.store.dispatch(ImportIssuesList, { dealId, doc: DOC, list: LIST, points: points() }); await syncAll(a, b);
+      const r = await a.store.dispatch(RemoveIssuesList, { dealId, doc: DOC }); expect(r.ok).toBe(true);
+      await syncAll(a, b);
+      const id = Object.values(b.store.get().tombstones).find((t) => t.kind === 'finding' && t.dealId === dealId)!.id;
+      const undo = () => a.store.dispatch(Undo, { opId: (r as { value: { opId: string } }).value.opId });
+      if (order === 'undo first') expect((await undo()).ok).toBe(true);
+      expect((await b.store.dispatch(RestoreFinding, { dealId, findingId: id })).ok).toBe(true);
+      const was = b.store.get().findings[id];
+      expect((await b.store.dispatch(EditFinding, { dealId, findingId: id, title: 'broe’s title', workstream: was.workstream,
+        body: ['What broe found in the side letter.'] })).ok).toBe(true);
+      if (order === 'edit first') expect((await undo()).ok).toBe(true);
+      await syncAll(a, b); await syncAll(a, b);
+      for (const p of [a, b]) {
+        expect(p.store.get().conflicts[id]).toBeUndefined();
+        expect(p.store.get().findings[id]).toMatchObject({ title: 'broe’s title', body: ['What broe found in the side letter.'] });
+        expect(findingsOf(p, dealId).length).toBe(40); expect(Object.keys(p.store.get().conflicts)).toEqual([]);
+      }
+    }
+  });
+  it('the removal\'s Undo and a change made since on each PC to a finding put back on the other are still two versions (#401)', async () => {
+    const { a, b, dealId } = await twoPcs();
+    await a.store.dispatch(ImportIssuesList, { dealId, doc: DOC, list: LIST, points: points() }); await syncAll(a, b);
+    const r = await a.store.dispatch(RemoveIssuesList, { dealId, doc: DOC }); expect(r.ok).toBe(true);
+    await syncAll(a, b);
+    const id = Object.values(b.store.get().tombstones).find((t) => t.kind === 'finding' && t.dealId === dealId)!.id;
+    expect((await b.store.dispatch(RestoreFinding, { dealId, findingId: id })).ok).toBe(true);
+    const was = b.store.get().findings[id];
+    await b.store.dispatch(EditFinding, { dealId, findingId: id, title: 'broe’s title', workstream: was.workstream, body: was.body });
+    expect((await a.store.dispatch(Undo, { opId: (r as { value: { opId: string } }).value.opId })).ok).toBe(true);
+    await a.store.dispatch(EditFinding, { dealId, findingId: id, title: 'aroe’s title', workstream: was.workstream, body: was.body });
+    await syncAll(a, b);
+    for (const p of [a, b]) expect(p.store.get().conflicts[id]).toBeTruthy();   // two people's words: a person chooses
+  });
+  it('a finding put back and deleted again on the other PC before the removal\'s Undo reaches it stays in Deleted, with nothing to choose (#401)', async () => {
+    const { a, b, dealId } = await twoPcs();
+    await a.store.dispatch(ImportIssuesList, { dealId, doc: DOC, list: LIST, points: points() }); await syncAll(a, b);
+    const r = await a.store.dispatch(RemoveIssuesList, { dealId, doc: DOC }); expect(r.ok).toBe(true);
+    await syncAll(a, b);
+    const id = Object.values(b.store.get().tombstones).find((t) => t.kind === 'finding' && t.dealId === dealId)!.id;
+    expect((await b.store.dispatch(RestoreFinding, { dealId, findingId: id })).ok).toBe(true);
+    expect((await b.store.dispatch(DeleteFinding, { dealId, findingId: id })).ok).toBe(true);
+    expect((await a.store.dispatch(Undo, { opId: (r as { value: { opId: string } }).value.opId })).ok).toBe(true);
+    await syncAll(a, b); await syncAll(a, b);
+    for (const p of [a, b]) {
+      expect(Object.keys(p.store.get().conflicts)).toEqual([]);
+      expect(p.store.get().findings[id]).toBeUndefined(); expect(p.store.get().tombstones[id]).toBeTruthy();
+      expect(findingsOf(p, dealId).length).toBe(39);
+    }
+  });
 });
