@@ -14,7 +14,11 @@ import { registry, Undo } from '../../src/app/commands/undo';
 import { dealQuestions, dealFindings } from '../../src/app/state';
 import { deletedOf } from '../../src/ui/deleted';
 
-const COMMANDS = [CreateDeal, DeleteDeal, CreateQuestion, SetResponse, DeleteQuestion, RestoreQuestion, EditQuestionField, SetQuestionStatus, CreateFinding, EditFinding, AttachDocumentToFinding, ImportQuestions, RevertImport, UndoLastImport, Undo];
+const COMMANDS = [
+  CreateDeal, DeleteDeal, CreateQuestion, SetResponse, DeleteQuestion, RestoreQuestion, EditQuestionField,
+  SetQuestionStatus, CreateFinding, EditFinding, AttachDocumentToFinding, ImportQuestions, RevertImport,
+  UndoLastImport, Undo,
+];
 for (const c of COMMANDS) registry.set(c.name, c);
 let t = 0; const clock = { now: () => new Date(Date.UTC(2026, 10, 9, 10, 0, 0) + (t++) * 1000).toISOString() };
 let seq = 0; const ids = { next: (p: string) => `${p}_01HZZZZZZZZZZZZZZZY${String(seq++).padStart(7, '0')}` };
@@ -143,9 +147,10 @@ describe('Undo last import', () => {
     expect(byN(store, dealId, 2).response).toBe('');
   }, 120_000);
 
-  it.each(['notice Undo', 'Undo last import'])('a finding the import left alone keeps later edits on %s (#50)', async (how) => {
+  it.each(['notice Undo', 'Undo last import'])('a finding it left keeps later edits: %s (#50)', async (how) => {
     const { store, dealId } = await deal2000();
-    await run(store, CreateFinding, { dealId, title: 'Change of control in the main supply contract', workstream: 'Legal' });
+    const title = 'Change of control in the main supply contract';
+    await run(store, CreateFinding, { dealId, title, workstream: 'Legal' });
     const f = dealFindings(store.get(), dealId)[0];
     const text = 'Does the supply contract allow assignment on a change of control?';
     await run(store, CreateQuestion, { dealId, text, linkedFinding: f.id });                                // Q2001
@@ -153,7 +158,8 @@ describe('Undo last import', () => {
     await run(store, AttachDocumentToFinding, { dealId, findingId: f.id, doc: 'Supply contract.pdf', docId: 'doc-1' });
     const before = qs(store, dealId).map((q) => q.response);
     const linkedRow = { ...rows(1)[0], n: 2001, askedBy: '', text, response: 'Consent needed from the supplier' };
-    const imp = await run(store, ImportQuestions, { dealId, mode: 'merge', rows: [linkedRow, ...rows(500, () => 'Changed')] });
+    const changed = rows(500, () => 'Changed');
+    const imp = await run(store, ImportQuestions, { dealId, mode: 'merge', rows: [linkedRow, ...changed] });
     const ff = store.get().findings[f.id];
     const edited = { title: 'Change of control: supplier consent', body: ['Consent is needed from the supplier.'] };
     await run(store, EditFinding, { dealId, findingId: f.id, workstream: ff.workstream, ...edited });

@@ -11,7 +11,9 @@ import type { Store } from './store';
 import { localYmd, type QaLog, type Question } from '../domain/model';
 import { dealQuestions, dealTwin, qaKept } from './state';
 import { logWrite, logHolds, matchRows, cellValue, readLogCells, holds } from '../domain/logWrite';
-import { KeepQaLog, SetQaLogFolder, RecordQaLogExport, ChooseQaVersion, TakeFromQaLog, fileTaken } from './commands/qaLogs';
+import {
+  KeepQaLog, SetQaLogFolder, RecordQaLogExport, ChooseQaVersion, TakeFromQaLog, fileTaken,
+} from './commands/qaLogs';
 import { questionsSheet, suggestMapping, type Mapping, type ImportField } from '../domain/importExport';
 import { ok, fail, type Result } from '../domain/result';
 import { cell, type KeptAsk } from '../domain/keptMerge';
@@ -266,7 +268,9 @@ export async function exportQaLog(store: Store, dealId: string, place?: PlaceKep
   const was = new Map(qs.filter((q) => w.taken[q.id]).map((q) => [q.id, q] as const));
   if (Object.keys(w.taken).length) {
     const set = Object.fromEntries(Object.entries(w.taken).map(([id, cells]) => [id, readCells(store, store.get().questions[id], cells)]));
-    const took = await store.dispatch(TakeFromQaLog, { dealId, set, expect: comparedValues(qs, w.taken) }, { quiet: true }); if (!took.ok) return settleThen(took);
+    const expect = comparedValues(qs, w.taken);
+    const took = await store.dispatch(TakeFromQaLog, { dealId, set, expect }, { quiet: true });
+    if (!took.ok) return settleThen(took);
     // taken where the question now says what the log does, read in the app's terms ("Outstanding" as Open)
     for (const [id, cells] of Object.entries(w.taken)) {
       const q = store.get().questions[id]; const before = was.get(id); if (!q || !before) continue;

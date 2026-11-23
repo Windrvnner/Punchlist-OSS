@@ -37,7 +37,8 @@ const windowsPath = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').to
 
 /**
  * Two deals may share a name, and so may their logs' files: one file is one deal's log, or each would write the other's
- * answers into it. Why `file` in `folder` cannot be this deal's log, or null when it can; `next` says what to do instead.
+ * answers into it. Why `file` in `folder` cannot be this deal's log, or null when it can; `next` says what to do
+ * instead.
  */
 export function fileTaken(
   state: { deals: Record<string, Deal> }, dealId: string, file: string, folder: string, next = 'Choose another folder',
@@ -48,7 +49,8 @@ export function fileTaken(
   if (!taken) return null;
   // the file named as the other deal holds it, however it was typed here
   const named = taken.qaLogs.find(sameFile)!.file;
-  return `${taken.name}${taken.counterparty ? ` (${taken.counterparty})` : ''} already uses “${named}” in this folder as its Q&A log. ${next}`;
+  const deal = `${taken.name}${taken.counterparty ? ` (${taken.counterparty})` : ''}`;
+  return `${deal} already uses “${named}” in this folder as its Q&A log. ${next}`;
 }
 
 /** The folder the log is in, when it has moved; the file keeps its name. What the app wrote stays: it is about the log's cells. */

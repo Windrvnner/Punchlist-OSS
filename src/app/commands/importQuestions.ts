@@ -233,7 +233,10 @@ export const ImportQuestions = define({
       removes: back.map((id) => ({ kind: 'tombstone' as const, id, rev: null })),
       index: add.length ? { dealId: d.id, add, remove: back.map((id) => ({ kind: 'tombstone' as const, id })) } : undefined,
       // only findings this import wrote: a finding it left alone is never put back (#50)
-      inverse: { command: 'RevertImport', input: { dealId: d.id, created, restore, findings: wroteFindings, buried: restored } },
+      inverse: {
+        command: 'RevertImport',
+        input: { dealId: d.id, created, restore, findings: wroteFindings, buried: restored },
+      },
       // the file's rows are needed only to run the import again after an interruption: a done import is kept without them, as
       // its last one is kept for "Undo last import" however long ago, and Undo needs only the inverse and results
       settledInput: { dealId: d.id, mode: input.mode },

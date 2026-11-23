@@ -66,7 +66,9 @@ describe('another deal\'s Q&A log (#38)', () => {
     const screen = await openImport(app, second);
     const input = screen.querySelector<HTMLInputElement>('#im-file')!;
     Object.defineProperty(input, 'files', { value: [new File([CSV], 'Lender Q&A.csv', { type: 'text/csv' })] });
-    await act(() => input.dispatchEvent(new Event('change')));
+    await act(() => {
+      input.dispatchEvent(new Event('change'));
+    });
     await vi.waitFor(() => expect(screen.querySelector('#im-error')?.textContent).toBe(SAID));
     expect(screen.querySelector('#im-go')).toBeNull();                                    // no mapping is shown
     expect([dealQuestions(app.store.get(), second).length, app.store.get().deals[first].qaLogs]).toEqual([0, had]);
