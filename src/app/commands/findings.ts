@@ -289,6 +289,17 @@ export const ApplyReassessment = define({
   },
 });
 
+/**
+ * The "May be out of date" mark after a document is attached. A mark set for another reason (a check, a cited document
+ * gone from the data room, another document) is left as it is, as a response leaves one (transitions.ts): the next
+ * update must still read it, and an update running now must not take the document's mark for the only news (#327).
+ * A mark from responses, or none, gives way to the document's; responses are compared on their own when an update lands.
+ */
+function attachMark(f: Finding, doc: string): Pick<Finding, 'updated' | 'updatedWhy' | 'updatedOn'> {
+  if (f.updated && !f.updatedOn) return { updated: true, updatedWhy: f.updatedWhy, updatedOn: undefined };
+  return { updated: true, updatedWhy: `${doc} attached`, updatedOn: undefined };
+}
+
 /** A document a person attached to a finding: it joins the finding's sources and offers a reassessment. */
 export const AttachDocumentToFinding = define({
   name: 'AttachDocumentToFinding',
@@ -298,7 +309,8 @@ export const AttachDocumentToFinding = define({
     const f = live(state, input);
     if (!f) return fail(notFound('Finding not found', input.findingId));
     if (f.sources.some((x) => docKey(x) === docKey(input))) return ok({ upserts: [], audit: [] });   // the same document, not merely the same name
-    const next: Finding = { ...f, sources: [...f.sources, { doc: input.doc, loc: '', docId: input.docId }], updated: true, updatedWhy: `${input.doc} attached`, updatedOn: undefined, updatedAt: ctx.at };
+    const sources = [...f.sources, { doc: input.doc, loc: '', docId: input.docId }];
+    const next: Finding = { ...f, sources, ...attachMark(f, input.doc), updatedAt: ctx.at };
     return ok({
       dealId: f.dealId,
       upserts: [{ kind: 'finding', record: next, expectedRev: f.rev }],

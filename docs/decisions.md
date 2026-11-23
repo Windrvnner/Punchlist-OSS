@@ -97,6 +97,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Findings have no codes and are named by title everywhere; no id is ever cited.
 - A finding's page has Reviewed, status, edit, and delete in fixed places, and no suggested questions under it.
 - An open finding that the documents may have overtaken is marked "May be out of date", with its reason and **Update from Documents**. The app never rewrites a finding by itself.
+- Attaching a document to a finding already marked "May be out of date" for another reason than a response keeps that reason (#327).
 - An update that replaces the finding's words clears Reviewed and keeps the earlier text under "Previous version".
 - There is no separate "look again" button: new documents, Check again, or the finding's conversation do that.
 - A finding's stripe is red while the finding is open and gray once it is closed, whoever raised it; it is not colored by severity.
