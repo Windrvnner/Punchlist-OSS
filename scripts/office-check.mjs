@@ -1,6 +1,6 @@
 // Proves LibreOffice can do the spreadsheet work the tests need, before check:all runs them (#85).
 //   node scripts/office-check.mjs        prints the converter's path and version, or why it cannot be used
-// The converter is PUNCHLIST_SOFFICE, else /usr/bin/soffice, the same one the tests use. It turns a two-sheet
+// The converter is /usr/bin/soffice, the same one the tests use. It turns a two-sheet
 // workbook into XLSX and back into one CSV per sheet, each on a fresh profile, as the app does. A missing converter,
 // one that hangs, or one that writes the wrong result exits 1; `--version` alone would pass a build that hangs in Calc.
 import { spawnSync } from 'node:child_process';
@@ -12,11 +12,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const STEP_MS = 90_000;
 const SHEETS = [['Questions', 'Question,Response', 'What is the cap?,1.25x'], ['Notes', 'Note', 'Second sheet']];
 
-/** The converter to check, found as the tests find it (officePrerequisites.ts); null when there is none. */
-export function findSoffice(env = process.env) {
-  if (env.PUNCHLIST_SOFFICE) return env.PUNCHLIST_SOFFICE;
-  return fs.existsSync('/usr/bin/soffice') ? '/usr/bin/soffice' : null;
-}
+/** The converter the tests use (officePrerequisites.ts). */
+export const SOFFICE = '/usr/bin/soffice';
 
 /** A flat OpenDocument spreadsheet holding SHEETS, one cell per comma-separated value. */
 function flatWorkbook() {
@@ -69,9 +66,8 @@ export function checkOffice(soffice) {
 }
 
 /** The converter and its version once it has converted the workbook; throws with the reason it cannot be used. */
-export function usableOffice(env = process.env) {
-  const soffice = findSoffice(env);
-  if (!soffice) throw new Error('LibreOffice was not found: set PUNCHLIST_SOFFICE, or install it at /usr/bin/soffice');
+export function usableOffice(soffice = SOFFICE) {
+  if (!fs.existsSync(soffice)) throw new Error(`LibreOffice was not found: install it at ${soffice}`);
   try {
     return { soffice, version: checkOffice(soffice) };
   } catch (error) {

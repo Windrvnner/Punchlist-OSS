@@ -31,9 +31,8 @@ console.log('\ncheck:all passed');
 /** LibreOffice must convert spreadsheets before the run; the tests that need it then run on it, never skip (#85). */
 function requireOffice() {
   try {
-    const { soffice, version } = usableOffice(env);
+    const { soffice, version } = usableOffice();
     console.log(`LibreOffice ${soffice}: ${version}`);
-    env.PUNCHLIST_SOFFICE = soffice;
     env.PUNCHLIST_OFFICE = 'required';
   } catch (error) {
     console.error(`check:all stopped: ${error.message}`);
