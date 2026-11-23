@@ -5,7 +5,7 @@
  */
 import { z } from 'zod';
 import { define } from '../command';
-import { DealId, Tombstone, CLASH_KINDS } from '../../domain/model';
+import { DealId, Tombstone, CLASH_KINDS, type Question } from '../../domain/model';
 import { ok, fail, notFound, rejected } from '../../domain/result';
 import { bucketOf, type State } from '../state';
 import { sameContent } from '../../domain/versions';
@@ -16,6 +16,30 @@ const titleOf = (snap: unknown) => { const x = (snap ?? {}) as { text?: unknown;
 const current = (s: State, kind: string, id: string) => bucketOf(s, kind)?.[id];
 /** the deal a choice is filed under: '' for the firm's list, which belongs to no deal and so keeps no history entry of its own */
 const DealOrNone = z.union([DealId, z.literal('')]);
+
+type Version = State['conflicts'][string]['versions'][number];
+type QuestionDraft = NonNullable<Question['draft']>;
+/** how far a draft got: a written reply beats a failed one, which beats one still pending */
+const draftProgress = (d: QuestionDraft) => {
+  if (d.status === 'found' || d.status === 'none') return 2;
+  return d.status === 'failed' ? 1 : 0;
+};
+
+/**
+ * The record a choice keeps. A question's draft is the app's, and never conflicts with a person's change
+ * (docs/decisions.md, "A question's draft never conflicts with a person's change"; "Closing a question never discards a
+ * draft"). So when the kept version never saw the draft that the versions set aside carry, the draft goes with it,
+ * and a reply held while the question had two versions lands on whichever version is kept (#22). Two different drafts
+ * are crossing drafts: they stay the person's choice, and nothing is carried. Only the `draft` field is added.
+ */
+function withCarriedDraft(kind: string, kept: Version, aside: Version[]): Version['data'] {
+  const keeps = kept.data;
+  if (kind !== 'question' || !keeps || (keeps as Question).draft) return keeps;
+  const drafts = aside.flatMap((v) => (v.data as Question | null)?.draft ?? []);
+  if (!drafts.length || new Set(drafts.map((d) => d.opId)).size > 1) return keeps;
+  const furthest = drafts.reduce((a, b) => (draftProgress(b) > draftProgress(a) ? b : a));
+  return { ...(keeps as Question), draft: furthest };
+}
 
 export const ResolveConflict = define({
   name: 'ResolveConflict',
@@ -56,11 +80,15 @@ export const ResolveConflict = define({
         });
       }
       // Kept a version that is not deleted: it stands, and the note that it was deleted goes, its words kept as an entry
-      const made = keepAside(c.kind, c.dealId, c.id, [...aside.map(asideOf), ...notes], [kept.data], state.tombstones);
-      const cleared = sameAsKept(state, c.id, kept.data).filter((e) => !made.ids.includes(e.id));
+      const keeps = withCarriedDraft(c.kind, kept, aside);
+      const made = keepAside(c.kind, c.dealId, c.id, [...aside.map(asideOf), ...notes], [keeps], state.tombstones);
+      const cleared = sameAsKept(state, c.id, keeps).filter((e) => !made.ids.includes(e.id));
       return ok({
         dealId: c.dealId,
-        upserts: [{ kind: c.kind, record: { ...kept.data!, rev: cur.rev, updatedAt: ctx.at }, expectedRev: cur.rev, resolves }, ...made.upserts],
+        upserts: [
+          { kind: c.kind, record: { ...keeps!, rev: cur.rev, updatedAt: ctx.at }, expectedRev: cur.rev, resolves },
+          ...made.upserts,
+        ],
         removes: [...(tomb ? [{ kind: 'tombstone' as const, id: c.id, rev: null }] : []), ...cleared.map((e) => ({ kind: 'tombstone' as const, id: e.id, rev: null }))],
         index: { dealId: c.dealId, add: [...(tomb ? [{ kind: c.kind, id: c.id }] : []), ...made.ids.map((id) => ({ kind: 'tombstone' as const, id }))], remove: [...(tomb ? [{ kind: 'tombstone' as const, id: c.id }] : []), ...cleared.map((e) => ({ kind: 'tombstone' as const, id: e.id }))] },
         audit, inverse: reopen(made.ids, cleared),
