@@ -1084,12 +1084,56 @@ describe('a data room that cannot be reached for a while', () => {
     const bytes = fs.readFileSync(path.join(__dirname, '../fixtures/data-room-away/backend', rel));
     return { rel, bytes };
   });
-  /** a data room at deal scale: N agreements in twelve subfolders, indexed on one PC, which is the only one that has read it */
-  async function big() {
+  /** the one run of the real indexer, shared by every case below */
+  let indexed: Promise<string> | null = null;
+  /** The data room and its index, made once through the real indexer: the folders each case starts from (#98). */
+  async function indexedOnce() {
     const root = tmp();
     const vdr = path.join(root, 'vdr');
     for (const f of files) put(vdr, f.rel, f.bytes);
     const a = pc(root, 'office'); await indexAll(a, vdr); expect(a.docs.records('d1').length).toBe(N);
+    return root;
+  }
+  /** A writable copy of the indexed data room, its records and this PC's fingerprints pointed at the copied files. */
+  async function copyOfIndexed() {
+    const from = await (indexed ??= indexedOnce());
+    const root = tmp();
+    fs.cpSync(from, root, { recursive: true });
+    for (const dir of ['shared', 'local-office']) {
+      for (const name of fs.readdirSync(path.join(root, dir))) {
+        const file = path.join(root, dir, name);
+        // paths appear as they are and, in JSON on Windows, with their backslashes escaped
+        const text = fs.readFileSync(file, 'utf8').replaceAll(from, root);
+        fs.writeFileSync(file, text.replaceAll(JSON.stringify(from).slice(1, -1), JSON.stringify(root).slice(1, -1)));
+      }
+    }
+    const hashesFile = path.join(root, 'local-office', 'hashes.json');
+    const hashes = JSON.parse(fs.readFileSync(hashesFile, 'utf8'));
+    const prints = Object.entries<{ size: number; mtimeMs: number; hash: string }>(hashes);
+    expect(prints.length).toBe(N);
+    for (const [file, print] of prints) {
+      const copied = fs.statSync(file);
+      expect([copied.size, hashBytes(new Uint8Array(fs.readFileSync(file)))]).toEqual([print.size, print.hash]);
+      print.mtimeMs = copied.mtimeMs;
+    }
+    fs.writeFileSync(hashesFile, JSON.stringify(hashes));
+    // no fingerprint waits to be merged in over the refreshed ones
+    const pendingPrints = path.join(root, 'local-office', 'hashes-new.jsonl');
+    expect(fs.existsSync(pendingPrints) ? fs.readFileSync(pendingPrints, 'utf8').trim() : '').toBe('');
+    // listings.json is left as copied: its print holds the old times, so a copy's next look lists the folder in full
+    return root;
+  }
+  /**
+   * a data room at deal scale: N agreements in twelve subfolders, indexed on one PC, which is the only one that has
+   * read it
+   */
+  async function big() {
+    const root = await copyOfIndexed();
+    const vdr = path.join(root, 'vdr');
+    const a = pc(root, 'office');
+    // the copy starts with every document of the data room, each at its place in the copied folder
+    const records = a.docs.records('d1').map((r) => `${r.folder}|${r.rel}`).sort();
+    expect(records).toEqual(files.map((f) => `${vdr}|${f.rel}`).sort());
     const ids = files.map((f) => idOf(f.bytes)); const said = () => fs.readFileSync(path.join(root, 'shared', 'docs-office-d1.jsonl'), 'utf8');
     const open = async (i: number) => a.docs.page('d1', { doc: `Agreement ${i}.pdf`, docId: ids[i] }, 'p. 1');
     return { root, vdr, a, files, ids, said, open };
