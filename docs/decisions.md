@@ -44,6 +44,11 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - The Findings page has **New Finding** as its one button and a ⋯ menu with **Import…**, **Export…**, and **Deleted…**; its filter menu holds Workstream and Reviewed. The list doesn't mark who raised a finding. It is grouped by workstream (A to Z, with "No workstream" last), and open findings marked "May be out of date" come first in each group.
 - Finding and question pages use the slim rail (the sidebar folded to icons) and the queue strip.
 - "Project " is added in front of a deal name that lacks it. A name that starts with that word in any capitalization, followed by anything other than a letter, accent, or digit, has the word rewritten as "Project" and the rest kept as typed; misspellings are not corrected. Deals may share a name; they are told apart by counterparty, then by creation date, in the sidebar, Add Deal, and search.
+- Search and the sidebar keep the distinguishing words in shortened counterparty labels (#492).
+  An ellipsis marks a shortened suffix after those words (#791).
+  Search keeps the meaningful name after “Project” and the full question number or page range (#495).
+- Search ellipsizes an oversized single counterparty word (#494) and keeps the start of right-to-left deal names (#490).
+- Search uses the usual separator spacing after an ellipsized single-word counterparty (#790).
 - The New Deal form has Name and Counterparty; Structure, Sector, and Technology pick lists; and Folders. × closes it, and there is no Cancel. **Create** stays unavailable until there is a name.
 - Before a new deal is made, a duplicate check asks "Is this Project X?" when the folders' files, or the name and counterparty, match a team deal; nothing is refused.
 - Each deal has a Deleted list for findings and questions, showing who deleted each and when, with **Restore**. A deleted record reached by a link says so and offers **Restore**; a question being typed on a deleted finding's page stays there, with **Log Question** off (#340). A deleted question's number is never reused. An imported issues list can be removed from the Deleted list.

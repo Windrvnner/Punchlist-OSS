@@ -3,6 +3,7 @@
  * questions. Pure over state; the palette loads unvisited deals' records first.
  */
 import type { Store } from './store';
+import type { TwinFocus } from './dealLabel';
 import { type State, type UiState, dealQuestions, dealFindings, dealHash, dealTwinLabels } from './state';
 import { conversationDocs, docIndex } from './conversations';
 import { docKey } from '../domain/model';
@@ -10,9 +11,26 @@ import type { Item } from '../domain/checklist';
 import { isMine } from './commands/members';
 
 export type HitKind = 'deal' | 'finding' | 'item' | 'question' | 'document';
-/** Where a hit inside a deal is: the deal's name, what tells it from a deal of the same name, and the place in it ("Q7", "p. 4"). */
-export interface Place { deal: string; twin: string; at: string }
-export interface Hit { /** the hover, where it says more than `where` */ tip?: string; key: string; kind: HitKind; title: string; where: string; hash: string; /** set on hits inside a deal */ place?: Place; ui?: Partial<UiState>; /** set on document hits */ doc?: { doc: string; docId: string } }
+// The deal, its disambiguator and the place within the deal (for example, Q7 or p. 4).
+export interface Place {
+  deal: string;
+  twin: string;
+  focus?: TwinFocus;
+  at: string;
+}
+
+export interface Hit {
+  key: string;
+  kind: HitKind;
+  title: string;
+  where: string;
+  hash: string;
+  tip?: string;
+  place?: Place;
+  twinFocus?: TwinFocus;
+  ui?: Partial<UiState>;
+  doc?: { doc: string; docId: string };
+}
 export const MAX_HITS = 12;
 /** How many of each type show before "+N more". */
 export const GROUP_SHOWN = 5;
@@ -100,14 +118,25 @@ function gather(s: State, query: string, itemsShown: number): { hits: Hit[]; ite
   const itemsOf = itemsByDeal(s.items);
   for (const d of Object.values(s.deals).filter((x) => isMine(s, x.id))) {   // the person's own deals: others are joined through Add deal
     // a deal that shares its name says on its second line only what differs, as the sidebar does; the hover gives both
-    if (!l || has(d.name, d.target, d.counterparty, d.product, d.sector, d.technology)) out.push({ key: d.id, kind: 'deal', title: d.name, where: twinOf(d, true) || d.sector, tip: twinOf(d) || d.sector, hash: dealHash(s.prefs, d.id) });
+    if (!l || has(d.name, d.target, d.counterparty, d.product, d.sector, d.technology)) {
+      const focus = twinOf(d, 'focus');
+      out.push({
+        key: d.id, kind: 'deal', title: d.name, where: twinOf(d, true) || d.sector,
+        tip: twinOf(d) || d.sector, ...(focus && { twinFocus: focus }), hash: dealHash(s.prefs, d.id),
+      });
+    }
     if (!l) continue;
     // a hit inside a deal names it, and where another deal has the same name, its counterparty and the day it was made
     // whole in `where` (the hover); the row, short of room, shows only what differs, as the sidebar does
-    let twins: [string, string] | undefined;   // worked out on the deal's first hit only: most deals have none on a keystroke
+    // Work out the labels only for deals with a match.
+    let twins: [string, string, TwinFocus?] | undefined;
     const inDeal = (place = ''): Pick<Hit, 'where' | 'place'> => {
-      const [twin, short] = twins ??= [twinOf(d), twinOf(d, true)]; const at = place.replace(/\s+/g, ' ').trim();
-      return { where: [d.name, twin, at].filter(Boolean).join(' · '), place: { deal: d.name, twin: short, at } };
+      const [twin, short, focus] = twins ??= [twinOf(d), twinOf(d, true), twinOf(d, 'focus')];
+      const at = place.replace(/\s+/g, ' ').trim();
+      return {
+        where: [d.name, twin, at].filter(Boolean).join(' · '),
+        place: { deal: d.name, twin: short, ...(focus && { focus }), at },
+      };
     };
     for (const f of dealFindings(s, d.id)) {
       const hash = `finding-${d.id}-${f.id}`;
