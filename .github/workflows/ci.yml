@@ -1,50 +1,75 @@
-# Run by hand only (Actions > CI > Run workflow). The same checks run locally with `npm run check:all` before
-# every merge.
+# Runs the steps of `npm run check:all` on every pull request and every push to main, split into jobs that run at
+# the same time. Nothing here reads a model key: every step uses the mock backend and stand-in model.
 name: CI
 
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# a newer run for the same pull request replaces its run still going; every other run has a group of its own, so
+# runs on main are never cancelled or dropped from the queue
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # types, lint, secrets, attribution, readability hints, and the unit, backend and end-to-end tests
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          # the attribution and readability checks compare the branch with main
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
+      # the tests that convert Word and spreadsheet files need LibreOffice at /usr/bin/soffice
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-calc
       - run: npm ci
-      - run: npm run typecheck
-      # lint errors only; the formatter is off by decision
-      - run: npx biome lint --diagnostic-level=error .
-      - run: node scripts/check-secrets.mjs --all
-      - run: npm test
-      - run: npm run build
+      - run: npm run check
 
+  # the browser suites against the built app, in four groups at once
   browser:
-    needs: check
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
+      # the layout checks measure the app with Inter in place of Segoe UI (tests/browser/fonts.conf)
+      - run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-inter
+          sudo cp tests/browser/fonts.conf /etc/fonts/conf.d/56-prefer-inter.conf
+          fc-match "Segoe UI" | grep -q Inter
       - run: npm ci
-      - run: npm run build
+      - run: npm exec -- vite build
       # the suites drive the runner's Google Chrome (/usr/bin/google-chrome) through Playwright
-      - run: npm run browser -- --jobs 2
+      - run: npm run browser -- --jobs 2 --shard ${{ matrix.shard }}/4
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: browser-logs
+          name: browser-logs-${{ matrix.shard }}
           path: out/browser/*.log
+          if-no-files-found: ignore
 
-  # the built Electron app end to end on temporary folders, on a virtual display
+  # the built desktop app end to end on temporary folders, on a virtual display
   desktop:
-    needs: check
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -52,11 +77,16 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: xvfb-run -a npm run desktop:test
+      - run: npm exec -- vite build
+      - run: node scripts/desktop-build.mjs
+      - run: xvfb-run -a node tests/desktop/smoke.spec.mjs
+      - run: xvfb-run -a node tests/desktop/signin.spec.mjs
 
-  # the Windows installer, kept as a download on the run (without LibreOffice, which is copied in on a release PC)
+  # the Windows installer, kept as a download on the run (without LibreOffice, which is copied in on a release PC);
+  # built only when the workflow is started by hand
   installer:
-    needs: check
+    if: github.event_name == 'workflow_dispatch'
+    needs: [check, browser, desktop]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
