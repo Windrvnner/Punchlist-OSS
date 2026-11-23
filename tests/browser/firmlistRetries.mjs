@@ -1,4 +1,4 @@
-// The checklist review at deal size, with duplicate replies held until the test releases them (#378).
+// The checklist review at deal size, with model replies held until the test releases them (#378).
 async function openReview(page) {
   const agreements = ['equipment supply agreement', 'construction contract', 'interconnection agreement', 'site lease',
     'maintenance agreement', 'power purchase agreement', 'credit agreement', 'insurance policy'];
@@ -42,7 +42,7 @@ async function openReview(page) {
     kept: document.querySelector(`#cl-pairs [data-remove="${removeAt}"]`)?.checked,
     missed: document.querySelector('#cl-missed')?.textContent,
   }), pair.b);
-  return { page, finish, next, retry, calls, review, pair, itemCount: rows.length };
+  return { page, finish, next, retry, calls, review, pair, rows, itemCount: rows.length };
 }
 
 const failed = (kind) => ({ ok: false, error: { kind, message: kind } });
@@ -112,12 +112,71 @@ async function overlappingRetries({ page, retry, next, finish, calls, review, pa
     JSON.stringify(final));
 }
 
+async function backDuringWording({ page, next, finish, calls }, say) {
+  const back = page.getByRole('button', { name: 'Back', exact: true });
+  const wording = page.locator('#cl-reword-retry');
+  await back.click();
+  await page.check('#cl-askreword');
+  await page.evaluate((failure) => {
+    store.services.ai.reword = () => Promise.resolve(failure);
+  }, failed('failed'));
+  await next.click();
+  await finish(failed('failed'));
+  await page.evaluate(() => {
+    store.services.ai.reword = () => new Promise((resolve) => { window.__finishWording = resolve; });
+  });
+  await wording.click();
+  const before = (await calls()).length;
+  await back.click();
+  const waiting = await next.isDisabled() && /^Asking /.test(await page.locator('#cl-line').textContent());
+  await next.evaluate((button) => button.click());
+  const after = (await calls()).length;
+  await page.evaluate(() => window.__finishWording({
+    ok: true, value: [{ at: 0, text: 'Old wording reply', why: 'Overtaken by Back' }],
+  }));
+  await next.click();
+  await finish(failed('failed'));
+  say('Next waits for Wording Retry when duplicates also failed, and Back discards the old wording reply',
+    waiting && before === after && await wording.isVisible(), JSON.stringify({ waiting, before, after }));
+}
+
+async function replaceDuringRetry({ page, next, retry, finish, calls, rows }, say) {
+  await retry.click();
+  const before = (await calls()).length;
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await page.uncheck('#cl-askreword');
+  await page.click('#cl-back');
+  const pasted = 'Provide the final interconnection study.';
+  await page.fill('#cl-paste', `- ${pasted}`);
+  await page.click('#cl-paste-next');
+  await page.locator('.imprev').getByText(pasted, { exact: true }).waitFor();
+  await page.click('#cl-back');
+  const first = 'Provide the equipment acceptance certificate for each commissioned substation.';
+  await page.setInputFiles('#cl-file', {
+    name: 'Replacement checklist.csv', mimeType: 'text/csv', buffer: Buffer.from(['Item', first, ...rows].join('\n')),
+  });
+  await page.locator('.imprev').getByText(first, { exact: true }).waitFor();
+  const waiting = await next.isDisabled() && /^Asking /.test(await page.locator('#cl-line').textContent());
+  await next.evaluate((button) => button.click());
+  const after = (await calls()).length;
+  await finish(failed('unreachable'));
+  await next.click();
+  await finish({ ok: true, value: { pairs: [] } });
+  const latest = (await calls()).at(-1);
+  say('Pasting and file replacement work during Retry, and Next waits to review the replacement',
+    waiting && before === after && latest.count === rows.length + 1 && latest.only === undefined
+      && await page.locator('#cl-line').textContent() === 'Import 2,163 items',
+    JSON.stringify({ waiting, before, after, latest }));
+}
+
 export async function checkDuplicateRetries(start, say) {
   const { ctx, page } = await start();
   const review = await openReview(page);
   await wholeFailure(review, say);
   await partialFailure(review, say);
   await overlappingRetries(review, say);
+  await backDuringWording(review, say);
+  await replaceDuringRetry(review, say);
   say('no errors during duplicate retries', page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }
