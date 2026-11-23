@@ -18,10 +18,10 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # types, lint, secrets, attribution, readability hints, and the unit, backend and end-to-end tests
-  check:
+  # types, lint, secrets, attribution, and readability hints
+  static:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,14 +31,42 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
+      - run: npm ci
+      - run: npm run check:static
+
+  # the unit, backend and end-to-end tests, in three groups at once
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
       # the tests that convert Word and spreadsheet files need LibreOffice at /usr/bin/soffice
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-calc
       - run: npm ci
       # as in check:all: LibreOffice must convert a workbook, and its tests then run on it rather than skip
       - run: node scripts/office-check.mjs
-      - run: npm run check
+      - run: npm test -- --shard ${{ matrix.shard }}/3
         env:
           PUNCHLIST_OFFICE: required
+
+  # the required check named "check": passes only when the static checks and every unit test group passed
+  check:
+    if: always()
+    needs: [static, unit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          echo "static: ${{ needs.static.result }}, unit: ${{ needs.unit.result }}"
+          test "${{ needs.static.result }}" = success && test "${{ needs.unit.result }}" = success
 
   # the browser suites against the built app, in four groups at once
   browser:
