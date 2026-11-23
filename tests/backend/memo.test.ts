@@ -87,7 +87,7 @@ async function scriptedScaleMemo(
   testCase: (typeof ratingCases)[number], summarize: (call: Call, attempt: number) => unknown = summaryFromPrompt,
   docs?: AiDocs,
 ) {
-  const findings = 'closedOnly' in testCase ? scaleMemoInput.findings.filter((f) => f.status === 'closed')
+  const findings = 'closedOnly' in testCase ? scaleMemoInput.findings.map((f) => ({ ...f, status: 'closed' as const }))
     : scaleMemoInput.findings;
   const ratings = Object.fromEntries(SCALE_FINDINGS.slice(0, testCase.rated).map((f): [string, Rating] => [
     f.id, 'firstRating' in testCase ? testCase.firstRating : 'Low',
