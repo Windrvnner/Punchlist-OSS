@@ -2,62 +2,17 @@
 // and the actions under an answer, as icons.
 import { launchChrome } from './chrome.mjs';
 import { openOnFindings } from './landing.mjs';
+import { openCopy, saveIndexedDeal } from './savedDeal.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, String(note).slice(0, 300)); };
 const browser = await launchChrome();
 openOnFindings(browser);
-/** Fills an empty session storage with the saved entries; runs in the page before the app. */
-function restoreSession(entries) {
-  if (sessionStorage.length) return;
-  for (const [key, value] of Object.entries(entries)) sessionStorage.setItem(key, value);
-}
-/** A new browser context at this size and scheme, on the start page; with `saved`, holding that saved state. */
-async function fresh(width = 1280, height = 736, colorScheme = 'light', saved = undefined) {
-  const storageState = saved?.state;
-  const ctx = await browser.newContext({ viewport: { width, height }, colorScheme, storageState });
-  // the tab's own session storage (its install id and change files) is not in a storageState: put back, so the copy
-  // is the PC that made the deal rather than another one
-  if (saved) await ctx.addInitScript(restoreSession, saved.session);
-  const page = await ctx.newPage();
-  page.errors = [];
-  page.on('pageerror', (e) => page.errors.push(e.message));
-  await page.goto(URL);
-  // with a deal in the saved state the app may open on it, so the ready app is waited for rather than the start page
-  if (storageState) await page.waitForFunction(() => window.store?.get().boot.stage === 'ready');
-  else await page.waitForSelector('#fr-new');
-  return { ctx, page };
-}
-async function indexedDeal(page) {
-  await page.click('#fr-new'); await page.fill('#nd-name', 'Proseware'); await page.click('#nd-paste'); await page.fill('#nd-path', 'reports'); await page.press('#nd-path', 'Enter'); await page.waitForSelector('.ndrow'); await page.click('#nd-create'); await page.waitForSelector('#nd-create', { state: 'detached' });
-  await page.waitForFunction(() => Object.values(store.get().findings).length === 3, null, { timeout: 30000 });
-  return page.evaluate(() => Object.keys(store.get().deals)[0]);
-}
-// The indexed deal the scenarios start from is made once through the real new-deal flow, then copied into each
-// scenario's own context (#96). The new-deal, indexing and first-pass steps keep their own tests (regress.spec.mjs).
-const indexed = await (async () => {
-  const { ctx, page } = await fresh();
-  const id = await indexedDeal(page);
-  // copied only once nothing is in flight, so no copy boots with an interrupted save
-  await page.waitForFunction(() => !Object.values(store.get().ops).some((op) => op.state === 'pending'));
-  const state = await ctx.storageState();
-  const session = await page.evaluate(() => ({ ...sessionStorage }));
-  await ctx.close();
-  return { id, state, session };
-})();
+// The indexed deal the scenarios start from is made once, then copied into each scenario's own context (savedDeal.mjs).
+const indexed = await saveIndexedDeal(browser);
 /** A fresh context holding a copy of the indexed deal, checked to start as it was made. */
-async function freshDeal(width, height, colorScheme) {
-  const { ctx, page } = await fresh(width, height, colorScheme, indexed);
-  await page.goto(`${URL}#deal-${indexed.id}`);
-  await page.waitForFunction(() => Object.values(store.get().findings).length === 3, null, { timeout: 30000 });
-  const start = await page.evaluate(() => {
-    const state = store.get();
-    return {
-      deals: Object.keys(state.deals), questions: Object.keys(state.questions).length,
-      threads: Object.keys(state.threads).length,
-      unsettled: Object.values(state.ops).filter((op) => op.state === 'pending' || op.state === 'interrupted').length,
-    };
-  });
-  const asMade = start.deals.join() === indexed.id && !start.questions && !start.threads && !start.unsettled;
+async function freshDeal(width = 1280, height = 736, colorScheme = 'light') {
+  const hash = `#deal-${indexed.id}`;
+  const { ctx, page, start, asMade } = await openCopy(browser, indexed, { width, height, colorScheme, hash });
   say('the copied deal starts as it was made', asMade, JSON.stringify(start));
   return { ctx, page, id: indexed.id };
 }
