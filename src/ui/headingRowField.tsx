@@ -5,6 +5,8 @@ import { keptImport, keepImport } from './keptImports';
 
 type Heading = Pick<ImportTable, 'sheet' | 'headerRow' | 'lastRow'>;
 type ReadRow = (row: number, accept: (heading: Heading) => void) => Promise<void>;
+// The numeric forms accepted by a native number input, including integral decimals and exponents.
+const NUMBER_TEXT = /^-?(?:(\d+)(?:\.(\d+))?|\.(\d+))(?:[eE]([+-]?\d+))?$/;
 
 /** Keep an unused heading row in the field while the preview shows the accepted table (#380). */
 export function HeadingRowField({ id, importKey, table, sheet = table.sheet, read, disabled, onEdit }: {
@@ -16,11 +18,13 @@ export function HeadingRowField({ id, importKey, table, sheet = table.sheet, rea
   disabled?: boolean;
   onEdit?: () => void;
 }) {
-  const { text, pick, reason } = useHeadingDraft(importKey, table, sheet, read, onEdit);
+  const { text, row, pick, reason } = useHeadingDraft(importKey, table, sheet, read, onEdit);
   const noteId = `${id}-unused`;
   return (
     <label><span>Row</span>
-      <input class="field" id={id} inputMode="numeric" aria-label="Heading row" value={text}
+      <input class="field" id={id} inputMode="numeric" role="spinbutton" aria-label="Heading row" value={text}
+        aria-valuemin={1} aria-valuemax={table.lastRow} aria-valuenow={row ?? table.headerRow}
+        aria-valuetext={row === null ? (text || 'Empty') : undefined}
         disabled={disabled} onInput={(e) => void pick(e.currentTarget.value)}
         onKeyDown={(e) => {
           if (sheet === table.sheet) stepRow(e, table.lastRow, pick);
@@ -92,7 +96,7 @@ function useHeadingDraft(importKey: string, table: Heading, sheet: string, read:
   let reason: string | undefined;
   if (row === null) reason = `Enter a whole row from 1 to ${num(lastRow)}`;
   else if (!reading && sheet === table.sheet && row !== headerRow) reason = `The preview uses row ${num(headerRow)}`;
-  return { text, pick, reason };
+  return { text, row, pick, reason };
 }
 
 type HeadingDraft = Pick<Heading, 'sheet' | 'headerRow'> & { text: string };
@@ -111,17 +115,28 @@ function keepHeadingText(key: string, { sheet, headerRow }: Heading, text: strin
 /** Preserve the number field's keyboard stepping without giving up its raw input text. */
 function stepRow(event: KeyboardEvent, lastRow: number, pick: (text: string) => Promise<void>) {
   if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
-  const row = rowNumber((event.currentTarget as HTMLInputElement).value, lastRow);
-  if (row === null) return;
-  const next = row + (event.key === 'ArrowUp' ? 1 : -1);
   event.preventDefault();
-  if (next >= 1 && next <= lastRow) void pick(String(next));
+  const text = (event.currentTarget as HTMLInputElement).value;
+  const stepper = document.createElement('input');
+  stepper.type = 'number';
+  stepper.min = '1';
+  stepper.max = String(lastRow);
+  if (NUMBER_TEXT.test(text) && Number.isFinite(Number(text))) stepper.value = text;
+  if (event.key === 'ArrowUp') stepper.stepUp();
+  else stepper.stepDown();
+  const next = rowNumber(stepper.value, lastRow);
+  if (next !== null && next !== rowNumber(text, lastRow)) void pick(stepper.value);
 }
 
 /** The text field keeps incomplete numbers that a native number input exposes as an empty value. */
 function rowNumber(text: string, lastRow: number): number | null {
-  // Use the same numeric forms as a number input, including integral decimals and exponents.
-  if (!/^-?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text)) return null;
+  const number = NUMBER_TEXT.exec(text);
+  if (!number) return null;
   const value = Number(text);
-  return Number.isInteger(value) && value >= 1 && value <= lastRow ? value : null;
+  if (!Number.isInteger(value) || value < 1 || value > lastRow) return null;
+  // A decimal near an integer can round to that integer as a Number. Check the original digits.
+  const [, whole = '', fraction, fractionOnly = '', exponent = '0'] = number;
+  const afterDot = fraction ?? fractionOnly;
+  const decimalPlaces = afterDot.length - Number(exponent);
+  return decimalPlaces > 0 && /[1-9]/.test((whole + afterDot).slice(-decimalPlaces)) ? null : value;
 }

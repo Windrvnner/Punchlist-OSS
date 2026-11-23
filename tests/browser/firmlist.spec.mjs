@@ -1,7 +1,8 @@
 // The firm's checklist: bringing a list in from Settings, its review, the pick lists on Overview, and Undo.
 // Runs on the mock services, whose rewording and duplicate check stand in for the fast model.
 import { launchChrome } from './chrome.mjs';
-import { checkHeadingRecovery, checkHeadingRow, checkKeptHeading, headingWorkbook } from './headingRow.mjs';
+import { checkChooseColumns, checkHeadingRecovery, checkHeadingRow, checkKeptHeading, headingWorkbook }
+  from './headingRow.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
@@ -39,14 +40,16 @@ const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().ite
   };
   await open();
   await page.evaluate(() => { window.__fail = { readList: true }; });
+  const titled = await headingWorkbook(page, 'cl', { headingAtSix: true });
+  const autoDetected = await checkChooseColumns(page, titled, 6);
+  await page.click('#cl-back');
   const fixture = await headingWorkbook(page, 'cl');
-  await page.click('#cl-bycolumns');
-  await page.waitForSelector('#cl-header');
+  const detectorFailed = await checkChooseColumns(page, fixture, 1, 'The file is locked');
   await page.click('[data-layer=broad]');
   const recovery = await checkHeadingRecovery(page, 'cl', fixture);
   const { invalid, ...checks } = await checkHeadingRow(page, 'cl', fixture, '#cl-asksame');
   const kept = await checkKeptHeading(page, 'cl', fixture, open);
-  const result = { ...checks, ...recovery, ...kept };
+  const result = { ...checks, ...recovery, ...kept, autoDetected, detectorFailed };
   say('checklist heading-row edits preserve typed text and the accepted preview',
     fixture.lastRow >= 2000 && invalid.every(Boolean) && Object.values(result).every(Boolean) && !page.errors.length,
     JSON.stringify({ invalid, ...result, errors: page.errors }));

@@ -173,6 +173,7 @@ export function readStep(view: ImportView, lines: string[]) {
 /** What the footer says while the model reads the list, and once it has: what Next will take. */
 function readLine({ work, source, target }: ImportView, lines: string[], reading: boolean): string {
   const count = source.tied?.count;
+  if (work.busy === 'reading') return 'Reading the file';
   if (reading || work.busy === 'reviewing') return `Asking ${SERVICE}`;
   if (work.error) return work.error;
   if (target.split) return target.splitSays;

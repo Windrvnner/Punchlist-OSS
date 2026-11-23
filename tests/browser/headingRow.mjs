@@ -8,7 +8,7 @@ const sites = Array.from({ length: 18 }, (_, index) => `Site ${index + 1}`);
 const preview = '.imprev:not(.imchg) tbody';
 const unused = '.imwhere .efstate.fail';
 
-export async function headingWorkbook(page, prefix, supplementOnly = false) {
+export async function headingWorkbook(page, prefix, { supplementOnly = false, headingAtSix = false } = {}) {
   const qa = prefix === 'im';
   const name = qa ? 'Lender Q&A.xlsx' : 'Solar diligence checklist.xlsx';
   const headings = qa ? ['#', 'Question', 'Response'] : ['Section', 'Item'];
@@ -17,7 +17,9 @@ export async function headingWorkbook(page, prefix, supplementOnly = false) {
       ? [String(index + 1), `${site}: Could you provide the latest evidence for this requirement? ${item}`,
         index % 3 ? 'The current version is filed in the site diligence folder.' : '']
       : [site, item]);
-  const grid = [headings, rows[0], headings, ...rows.slice(1)];
+  const grid = headingAtSix
+    ? [['Checklist for project finance'], [], [], [], [], headings, ...rows]
+    : [headings, rows[0], headings, ...rows.slice(1)];
   const supplement = { name: 'Supplement', grid: [[], [], [], headings, rows.at(-1)] };
   const sheets = supplementOnly ? [supplement] : [{ name: 'Main', grid }, supplement];
   await page.evaluate(([name, sheets]) => { window.__sheets = { [name]: sheets }; }, [name, sheets]);
@@ -60,13 +62,36 @@ const ready = (page, prefix) => page.waitForFunction(
 );
 const firstRow = (page) => page.locator(`${preview} tr`).first().textContent();
 
-async function checkStepping(field, waitFirst, focused) {
-  await field.fill('1');
+/** The columns-by-hand view opens once heading detection settles, including a failed detection. */
+export async function checkChooseColumns(page, fixture, heading, failure) {
+  const choose = page.locator('#cl-bycolumns');
+  const field = page.locator('#cl-header');
+  const summary = page.locator('#cl-line');
+  await choose.waitFor();
+  await holdRead(page, { sheet: 'Main' }, failure);
+  await choose.click();
+  await waitForRead(page);
+  const pending = await field.count() === 0 && await choose.isDisabled()
+    && await page.locator('#cl-next').isDisabled() && await summary.textContent() === 'Reading the file';
+  await finishRead(page);
+  const opened = await field.inputValue() === String(heading) && await field.isEditable()
+    && (await firstRow(page)).includes(fixture.first);
+  return pending && opened && (!failure || (await summary.textContent()).includes(failure));
+}
+
+async function checkStepping(field, waitFirst, focused, lastRow) {
+  await field.fill('0');
+  await field.press('ArrowUp');
+  const recovered = await field.inputValue() === '1' && await focused();
+  const spinbutton = field.page().getByRole('spinbutton', { name: 'Heading row' });
+  const accessible = await spinbutton.count() === 1 && await spinbutton.getAttribute('aria-valuemin') === '1'
+    && await spinbutton.getAttribute('aria-valuemax') === String(lastRow)
+    && await spinbutton.getAttribute('aria-valuenow') === '1';
   await field.press('ArrowUp');
   const steppedUp = await field.inputValue() === '2';
   await field.press('ArrowDown');
   await waitFirst();
-  return steppedUp && await field.inputValue() === '1' && await focused();
+  return recovered && accessible && steppedUp && await field.inputValue() === '1' && await focused();
 }
 
 export async function checkHeadingRow(page, prefix, fixture, toggle) {
@@ -83,13 +108,14 @@ export async function checkHeadingRow(page, prefix, fixture, toggle) {
   const initiallyReady = await action.isEnabled();
   await holdRead(page, { headerRow: 3 });
   const invalid = [];
-  for (const value of ['', '0', '-1', '1.5', '-01.50', String(fixture.lastRow + 1)]) {
+  const badRows = ['', '0', '-1', '1.5', '-01.50', '2.9999999999999999', String(fixture.lastRow + 1)];
+  for (const value of badRows) {
     await field.fill(value);
     await page.locator(toggle).click();
     invalid.push(await field.inputValue() === value && await note.isVisible() && await body.textContent() === initial);
   }
   const noReads = await page.evaluate(() => window.__headingReads.length === 0);
-  const keyboard = await checkStepping(field, () => waitPreview(fixture.first), focused);
+  const keyboard = await checkStepping(field, () => waitPreview(fixture.first), focused, fixture.lastRow);
   await field.fill('3');
   await waitForRead(page);
   await field.fill('3.5');
@@ -178,7 +204,7 @@ export async function checkKeptHeading(page, prefix, fixture, reopen) {
   // A new file can have the same name, sheet and heading as the old import.
   await page.click(`#${prefix}-back`);
   if (prefix === 'cl') await page.evaluate(() => { window.__fail = { readList: true }; });
-  await headingWorkbook(page, prefix, true);
+  await headingWorkbook(page, prefix, { supplementOnly: true });
   if (prefix === 'cl') await page.click('#cl-bycolumns');
   const replaced = await field.inputValue() === '4' && !(await page.locator(unused).isVisible());
   return { afterClose, afterReload, replaced };

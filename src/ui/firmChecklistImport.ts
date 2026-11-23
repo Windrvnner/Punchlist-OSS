@@ -132,9 +132,9 @@ function useListFile(store: Store, work: Work, key: string, left: ChecklistKept 
   };
   // the fallback when the model could not read a table: its columns chosen by hand
   const chooseColumns = () => {
-    if (!table) return;
-    setByColumns(true);
-    void readForColumns(store, work, table, take);
+    if (!table || work.busy) return;
+    // Wait for heading detection before showing the editable row (#380).
+    void readTableAgain(store, work, table, { sheet: table.sheet }, true, take, () => setByColumns(true));
   };
   // what is pasted stays in the box until it is sent, and after "change"
   const pasted = () => {
@@ -167,23 +167,18 @@ function resetFileHeading(key: string, setByColumns: (byColumns: boolean) => voi
   keepImport(key, { headingDraft: null });
 }
 
-/** Reads the sheet again, for its columns to be chosen by hand. */
-async function readForColumns(store: Store, work: Work, table: ImportTable, take: (read: ImportTable) => void) {
-  const mine = work.newToken();
-  const read = await readImportBytes(store, table.name, table.bytes, { sheet: table.sheet });
-  if (read.ok && work.isLatest(mine)) take(read.value);
-}
-
 /** Reads a table's file again for another sheet or heading row: an error is said in the footer, and the table kept. */
 async function readTableAgain(
   store: Store, work: Work, table: ImportTable, opts: { sheet?: string; headerRow?: number },
   byColumns: boolean,
   take: (read: ImportTable) => void,
+  onSettled?: () => void,
 ) {
   const mine = byColumns ? work.begin('reading') : work.newToken();
   const read = await readImportBytes(store, table.name, table.bytes, byColumns ? opts : { ...opts, headerRow: 1 });
   if (!work.isLatest(mine)) return;
   if (byColumns) work.setBusy('');
+  onSettled?.();
   if (!read.ok) {
     work.setError(`Could not read ${table.name}: ${read.error.message}`);
     return;
