@@ -97,9 +97,12 @@ function isProseI(offset: number, text: string): boolean {
   return /[?!]$/.test(before);
 }
 
-/** A misread or mistyped character can turn Is into ls. Roman identifiers keep their letters. */
+/**
+ * A misread or mistyped character can turn Is into ls. Roman identifiers keep their letters. The word I, however it was
+ * read, is i, so a class L that opens a sentence is not it (#127).
+ */
 function repairWord(word: string, offset: number, text: string): string {
-  if ((word === 'I' || word === 'i') && isProseI(offset, text)) return 'l';
+  if (/^[Iil|]$/.test(word) && isProseI(offset, text)) return 'i';
   if (word.length < 2 || ROMAN_NUMERAL.test(word)) return word;
   return word.replace(/[I|]/g, 'l');
 }
@@ -128,16 +131,21 @@ export function canMatchNumber(a: string, b: string): boolean {
 
 /** Roman identifiers are case-insensitive; ordinary words keep their existing number fallback. */
 function identifierCollisionKey(text: string): string {
-  const identifiers = text.normalize('NFKC').replace(QUESTION_WORD,
-    (word) => ROMAN_NUMERAL.test(word) ? word.replace(/i/gi, 'l') : word);
+  const identifiers = text.normalize('NFKC').replace(QUESTION_WORD, collisionWord);
   return misreadKey(identifiers.replace(/[I|]/g, 'l')).replace(/\p{M}/gu, '');
+}
+
+/** A word as the collision key reads it: a lone I, i, l or | is L, whichever word it is (#127); i in a numeral is l. */
+function collisionWord(word: string): string {
+  if (/^[Iil|]$/.test(word)) return 'L';
+  return ROMAN_NUMERAL.test(word) ? word.replace(/i/gi, 'l') : word;
 }
 
 /** a word or number of a question; a point or comma inside a number stays in it ("I.1", "1,500") */
 const QUESTION_TOKEN = /[\p{L}\p{M}\p{N}|]+(?:[.,][\p{L}\p{M}\p{N}|]+)*/gu;
 /** words a letter or numeral after them names: Class a, Tranche ii, part e */
-const NAMING_WORDS = new Set(('annex appendix article block class clause exhibit facility item lot paragraph part '
-  + 'phase schedule section series tier tranche unit').split(' '));
+const NAMING_WORDS = new Set(('annex appendix article block class clause exhibit facility item limb lot paragraph '
+  + 'part phase rule schedule section series tier tranche unit').split(' '));
 
 /**
  * The identifiers a question names, as they are compared (#125, #127, #128): anything with a digit, a Roman numeral in
@@ -155,15 +163,15 @@ export function identifiers(text: string): string[] {
 }
 
 /**
- * A word as an identifier, or undefined for an ordinary word. A lone I, i, l or | that opens a sentence before a
- * lowercase word is the word "I" however it was read: a misread "l understand" names what "I understand" does.
+ * A word as an identifier, or undefined for an ordinary word. A lone I, i, l or | before a lowercase word is the word
+ * "I" however it was read ("I understand", "can I send"), unless a naming word comes before it ("Class I shares").
  */
 function identifierForm(token: string, offset: number, text: string): string | undefined {
   if (/\p{N}/u.test(token)) return numberForm(token);
-  if (/^[Iil|]$/.test(token) && isProseI(offset, text)) return 'i';
+  if (namedLetter(token, offset, text)) return token.toLowerCase();
+  if (/^[Iil|]$/.test(token) && /^\s*\p{Ll}/u.test(text.slice(offset + 1))) return undefined;   // the word I
   const capitals = /^\p{Lu}+$/u.test(token);
   if (capitals && (token.length <= 5 || ROMAN_NUMERAL.test(token))) return token.toLowerCase();
-  if (namedLetter(token, offset, text)) return token.toLowerCase();
   return undefined;
 }
 
@@ -171,28 +179,33 @@ function identifierForm(token: string, offset: number, text: string): string | u
 function namedLetter(token: string, offset: number, text: string): boolean {
   if (!/^\p{L}$/u.test(token) && !ROMAN_NUMERAL.test(token)) return false;
   if (text[offset - 1] === '(' && text[offset + token.length] === ')') return true;
-  const before = /(\p{L}+)\s+$/u.exec(text.slice(Math.max(0, offset - 20), offset));
+  const before = /(\p{L}+)[\s\-:.]+$/u.exec(text.slice(Math.max(0, offset - 20), offset));
   return !!before && NAMING_WORDS.has(before[1].toLowerCase());
 }
 
 /**
  * A number as an identifier: a letter read for a digit in it, or an l or | before it, is that digit (l00, 2O24, I00,
- * O.5). A capital I or O before a single digit, or an I before a point and a digit, is a letter: Facility I1 is not
- * Facility 11, nor O1 01, nor I.1 1.1 (#128).
+ * O.5). An I, l, | or O before a single digit, or an I, l or | before a point and a digit, is a letter, read alike
+ * however it was scanned: Facility I1 is Facility l1, but not Facility 11, nor O1 01, nor I.1 1.1 (#128).
  */
 function numberForm(token: string): string {
-  const letter = /^(?:[IO]\d|I\.\d)(?![\d.,])/.test(token) ? token[0].toLowerCase() : '';
-  const digits = token.slice(letter.length)
+  const lead = /^(?:[IOol|]\d|[Il|]\.\d)(?![\d.,])/.test(token) ? token[0] : '';
+  const letter = lead === '' ? '' : /[Oo]/.test(lead) ? 'o' : 'i';
+  const digits = token.slice(lead.length)
     .replace(/[lI|](?=[\d.,])|(?<=[\d.,])[lI|]/g, '1')
     .replace(/[oO](?=[\d.,])|(?<=[\d.,])[oO]/g, '0');
   return letter + digits.toLowerCase();
 }
 
-/** What two wordings' identifiers are compared on: the identifiers, and the words with only case, spacing and
- * punctuation taken out, which say the same whenever the identifiers do ("FY 2024" and "FY2024", "SPA" and "spa"). */
+/**
+ * What two wordings' identifiers are compared on: the identifiers, and the words with only case, spacing and
+ * punctuation taken out, which say the same whenever the identifiers do ("FY 2024" and "FY2024", "SPA" and "spa").
+ * A point or comma inside a number stays: Section 1.10 is not Section 11.0.
+ */
 export interface IdentifierSig { plain: string; ids: string[] }
 export function identifierSig(text: string): IdentifierSig {
-  return { plain: text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}]/gu, ''), ids: identifiers(text) };
+  const plain = text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}.,]|(?<!\p{N})[.,]|[.,](?!\p{N})/gu, '');
+  return { plain, ids: identifiers(text) };
 }
 
 /**

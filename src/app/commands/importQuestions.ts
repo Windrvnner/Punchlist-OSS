@@ -117,9 +117,8 @@ export const ImportQuestions = define({
       const take = (idx: number, q?: Question) => { if (q) { matchOf.set(idx, q.id); taken.add(q.id); } };
       for (const pool of [live, dead]) for (const [idx, row] of input.rows.entries()) {
         if (matchOf.has(idx) || row.n == null) continue;
-        const mine = (pool.byOwn.get(`${keys[idx]}\0${row.n}`) ?? [])
-          .filter((q) => !taken.has(q.id) && sameParty(row, q) && alike(idx, q));
-        take(idx, mine.length ? mine.reduce((b, q) => (fit(row, q) > fit(row, b) ? q : b)) : undefined);
+        const open = (q: Question) => !taken.has(q.id) && sameParty(row, q) && alike(idx, q);
+        take(idx, bestFit(pool.byOwn.get(`${keys[idx]}\0${row.n}`), open, (q) => fit(row, q)));
       }
       // In each tier, rows that only one question fits that well choose before rows that several fit as well, so a vaguer
       // row does not take the one question a fuller row fits. One pass of each, so a large file stays quick; a chain of
@@ -245,6 +244,12 @@ export const ImportQuestions = define({
     });
   },
 });
+
+/** Of the questions in `list` that are `open` to a row, the one it fits best, the first of equals; or none. */
+function bestFit(list: Question[] | undefined, open: (q: Question) => boolean, fitOf: (q: Question) => number) {
+  const mine = (list ?? []).filter(open);
+  return mine.length ? mine.reduce((best, q) => (fitOf(q) > fitOf(best) ? q : best)) : undefined;
+}
 
 /** Whether row `idx` and a question name the same identifiers, each worked out once (#125, #127, #128). */
 function identifierMatcher(rows: ImportRow[], questions: Question[]) {
