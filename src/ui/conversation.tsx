@@ -15,7 +15,7 @@ import {
   scopeHash, newConv, type Scope,
 } from '../app/conversations';
 import { isOwnFiles, ownFilesId, type Deal, type Question, type Source } from '../domain/model';
-import { attachFiles } from '../app/attachments';
+import { attachFiles, filesSendable } from '../app/attachments';
 import { type Attachment, type Message, type State , isReading, askAbout, askAcross } from '../app/state';
 import { keptDrafts, isText } from './keptDrafts';
 import { DocPanel } from './docPanel';
@@ -351,12 +351,15 @@ type Sending = {
  * or on a deal's pages to add a question or an unresolved item, is done as asked instead of being asked of the model.
  */
 async function sendTyped({ store, scope, key, slot, launch, target, chips, readOnly, box, setText }: Sending) {
-  const typed = (drafts.get(key) ?? '').trim();
-  if (!typed || readOnly) return;
+  if (!(drafts.get(key) ?? '').trim() || readOnly) return;
   if (chips.some((chip) => chip.state === 'pending')) {
     store.toast('Still attaching — send when it finishes');
     return;
   }
+  if (!(await chipsSendable(store, key, chips))) return;
+  // read after the files are checked, so anything typed meanwhile goes too
+  const typed = (drafts.get(key) ?? '').trim();
+  if (!typed) return;
   setText('');
   if (launch) box.current?.blur();
   if (navIntent(store, typed)) return;
@@ -374,6 +377,24 @@ async function sendTyped({ store, scope, key, slot, launch, target, chips, readO
     location.hash = scopeHash(scope);   // the new conversation opens, with its question in it
   }
   void ask(store, scope, typed);
+}
+
+/** the conversations whose files are being checked before a send, so a second Enter meanwhile sends nothing twice */
+const checking = new Set<string>();
+
+/** Whether the composer's files can all be sent from this PC (#671); the person is told of any that can't. */
+async function chipsSendable(store: Store, key: string, chips: Attachment[]) {
+  const ready = chips.filter((chip) => chip.state === 'done' && chip.doc && chip.docId);
+  if (!ready.length) return true;
+  if (checking.has(key)) return false;
+  checking.add(key);
+  try {
+    const files = ready.map((chip) => ({ dealId: chip.dealId, doc: chip.doc!, docId: chip.docId! }));
+    for (const dealId of new Set(files.map((file) => file.dealId))) {
+      if (!(await filesSendable(store, dealId, files.filter((file) => file.dealId === dealId)))) return false;
+    }
+    return true;
+  } finally { checking.delete(key); }
 }
 
 export function Composer({ scope: given, launch, placeholder: placeholderGiven, examples }: {

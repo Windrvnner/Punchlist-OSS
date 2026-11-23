@@ -44,6 +44,8 @@ export const removeAttachment = (store: Store, id: string) => store.ui((ui) => (
 
 /** each copy's deleted deal by the copy's id, while the app runs: a file attached as a copy is made is carried later */
 const copiedFrom = new WeakMap<Store, Map<string, string>>();
+/** the carrying under way, so a send made meanwhile waits for it rather than find its file missing */
+const carrying = new WeakMap<Store, Promise<unknown>>();
 
 /** The attachment, moved to the copy's ids when its deal was kept as a copy; else as it was. */
 function movedAttachment(attachment: Attachment, ids: Record<string, string>): Attachment {
@@ -68,6 +70,36 @@ export function followCopies(store: Store): () => void {
     for (const [was, now] of deals) from.set(now, was);
     const docs = store.services.docs;
     if (!docs.carryAttached) return;
-    for (const [was, now] of deals) void docs.carryAttached(was, now);
+    const carried = deals.map(([was, now]) => docs.carryAttached!(was, now));
+    carrying.set(store, Promise.all([carrying.get(store), ...carried]));
   });
+}
+
+/** Of these documents of a deal, those this PC can't send now. A file attached as a copy was made is carried first. */
+async function unsendableOf(store: Store, dealId: string, docIds: string[]): Promise<string[]> {
+  const docs = store.services.docs;
+  if (!docs.unsendable || !docIds.length) return [];
+  await carrying.get(store);
+  const first = await docs.unsendable(dealId, docIds);
+  // not checked (the shared folder can't be reached just now): the send goes ahead and says so itself if it fails
+  if (!first.ok || !first.value.length) return [];
+  const original = copiedFrom.get(store)?.get(dealId);
+  if (!original || !docs.carryAttached) return first.value;
+  await docs.carryAttached(original, dealId);
+  const again = await docs.unsendable(dealId, first.value);
+  return again.ok ? again.value : first.value;
+}
+
+/**
+ * Whether attached files can all go with a message (#671). When one can no longer be sent from this PC (its copy in
+ * the shared folder was removed, or has not synced here yet), nothing is sent and a notice names it, rather than the
+ * message going without it.
+ */
+export async function filesSendable(store: Store, dealId: string, files: { doc: string; docId: string }[]) {
+  const missing = await unsendableOf(store, dealId, files.map((file) => file.docId));
+  if (!missing.length) return true;
+  const names = [...new Set(files.filter((file) => missing.includes(file.docId)).map((file) => file.doc))];
+  const more = names.length > 1 ? ` and ${names.length - 1} more` : '';
+  store.toast(`Couldn’t find ${names[0]}${more} · attach ${names.length > 1 ? 'them' : 'it'} again`);
+  return false;
 }
