@@ -359,14 +359,22 @@ const apart = (a, b) => !a || !b || a.r <= b.l || b.r <= a.l || a.b <= b.t || b.
 
   // "Use as response" asks first when a response is already there
   const qid = await page.evaluate(() => store.get().ui.selectedQuestion);
+  const qn = await page.evaluate((q) => store.get().questions[q].n, qid);
   await page.click('#q-discuss'); await page.waitForSelector('#pask'); await page.fill('#pask', 'When does it expire?'); await page.press('#pask', 'Enter'); await page.waitForSelector('.msgs .ai:not(.pending):not(.failed)', { timeout: 10000 });
   await page.click('.msgs .ai .acts button[aria-label="Use as response"]'); await page.waitForSelector('.card.confirm');
   const ask1 = await page.evaluate((q) => ({ text: document.querySelector('.card.confirm p').textContent, focus: document.activeElement.id, still: store.get().questions[q].response }), qid);
   await page.click('#use-keep'); await page.waitForSelector('.card.confirm', { state: 'detached' });
   const kept = await page.evaluate((q) => store.get().questions[q].response, qid);
   await page.click('.msgs .ai .acts button[aria-label="Use as response"]'); await page.click('#use-replace'); await page.waitForFunction((q) => store.get().questions[q].response !== 'Held by the project company; expires 2041.', qid);
+  const replacementNotice = `Response to Q${qn} replaced`;
+  await page.waitForFunction((text) => {
+    return document.querySelector('#toast .ttext')?.textContent === text;
+  }, replacementNotice);
   const replaced = await page.evaluate(() => document.querySelector('#toast .ttext')?.textContent);
-  say('use-as-response-asks-before-replacing', /already has a response\. Replace it/.test(ask1.text) && ask1.focus === 'use-replace' && ask1.still === 'Held by the project company; expires 2041.' && kept === ask1.still && /Response to Q\d+ replaced/.test(replaced), JSON.stringify({ ask1, replaced }));
+  say('use-as-response-asks-before-replacing',
+    /already has a response\. Replace it/.test(ask1.text) && ask1.focus === 'use-replace'
+    && ask1.still === 'Held by the project company; expires 2041.' && kept === ask1.still
+    && replaced === replacementNotice, JSON.stringify({ ask1, replaced }));
 
   // Search and Settings by mouse while the rail is folded
   const folded = await page.evaluate(() => ({ search: !!document.getElementById('rt-search'), settings: !!document.getElementById('rt-settings'), railField: !!document.querySelector('.rail #pal-in') }));
