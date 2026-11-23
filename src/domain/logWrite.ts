@@ -123,7 +123,7 @@ export function overlap(a: string, b: string): number {
 
 /** A number must not undo the wording key's protection of distinct identifiers or marks. */
 export function canMatchNumber(a: string, b: string): boolean {
-  if (!sameIdentifiers(identifierSig(a), identifierSig(b))) return false;   // Tranche II is not Tranche IV (#125)
+  if (!exactIdentifiers(identifierSig(a), identifierSig(b))) return false;   // Tranche II is not Tranche IV (#125)
   if (key(a) !== key(b) && misreadKey(a) !== misreadKey(b)
     && identifierCollisionKey(a) === identifierCollisionKey(b)) return false;
   return overlap(a, b) >= 0.6;
@@ -220,6 +220,13 @@ export function identifierSig(text: string): IdentifierSig {
 export function sameIdentifiers(a: IdentifierSig, b: IdentifierSig): boolean {
   if (a.plain === b.plain) return true;
   return !(namesOther(a.ids, b.ids) && namesOther(b.ids, a.ids));
+}
+/**
+ * Whether two wordings name exactly the same identifiers, for a match by number alone: there the words differ, and a
+ * row that adds or drops an identifier (Tranche II) may be another question, so it is a question of its own (#125).
+ */
+export function exactIdentifiers(a: IdentifierSig, b: IdentifierSig): boolean {
+  return a.plain === b.plain || (!namesOther(a.ids, b.ids) && !namesOther(b.ids, a.ids));
 }
 /** whether `ids` names an identifier, counted with its repeats, that `others` does not */
 function namesOther(ids: readonly string[], others: readonly string[]): boolean {

@@ -6,7 +6,7 @@ import { SetResponse } from '../../src/app/commands/questions';
 import { ImportQuestions } from '../../src/app/commands/importQuestions';
 import { dealQuestions } from '../../src/app/state';
 import { previewImport } from '../../src/app/transfer';
-import { matchRows, identifiers, identifierSig, sameIdentifiers } from '../../src/domain/logWrite';
+import { matchRows, identifiers, identifierSig, sameIdentifiers, exactIdentifiers } from '../../src/domain/logWrite';
 import type { Question } from '../../src/domain/model';
 import { dealList } from '../backend/dealList';
 import { make, deal, sheet, mapping, fileRow } from './importKit';
@@ -76,17 +76,17 @@ const REWORDED: [string, string] = ['Please confirm Tranche II outstanding debt 
 /** [saved wording, incoming wording]: one question reworded under its own number, an article or the word I in one */
 const PRONOUN: [string, string][] = [
   ['I understand the SPA is signed; please send the final version and the disclosure letter.',
-    'We understand the SPA is signed; please send the final version and the disclosure letter (DL).'],
+    'We understand the SPA is signed; please send the final version and the disclosure letter.'],
   ['Can I get a copy of the signed facility agreement and the fee letter?',
-    'Can we get a copy of the signed facility agreement and the fee letter from the CFO?'],
+    'Can we get a copy of the signed facility agreement and the fee letter now?'],
   ['Please confirm whether I should send the board minutes and the shareholder register.',
-    'Please confirm whether we should send the board minutes and the shareholder register to the VDR.'],
+    'Please confirm whether we should send the board minutes and the shareholder register now.'],
   ['Please provide a schedule of all material leases and their expiry dates.',
-    'Please provide the schedule of all material leases and their expiry dates (VDR).'],
+    'Please provide the schedule of all material leases and their expiry dates.'],
   ['Is there a facility agreement in place for the acquisition financing?',
-    'Is there the facility agreement in place for the acquisition financing (SFA)?'],
+    'Is there the facility agreement in place for the acquisition financing?'],
   ['Please send the list for each item. I understand it is in the data room.',
-    'Please send the list for each item. We understand it is in the data room folder 3.'],
+    'Please send the list for each item. We understand it is in the data room folder.'],
 ];
 
 /** a deal holding `text` as question 1, with a typed response: the deal and the question as saved */
@@ -140,7 +140,13 @@ describe('a misread or reworded row naming the same identifiers is still the que
   }
   it('a prose word that reads as a numeral is no identifier', () => matches(
     'Please confirm revenue mix by segment and region for the group',
-    'Please confirm revenue by segment and region for the group in FY24', 1));
+    'Please confirm revenue by segment and region for the group', 1));
+  it('a reworded row that drops an identifier is a question of its own', async () => {
+    const { store, dealId, original } = await saved(REWORDED[0]);
+    const rows = fileRow(1, 'Please confirm the outstanding debt for review', 'New answer');
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows })).ok).toBe(true);
+    expect(store.get().questions[original.id]).toEqual(original);
+  });
   it('but not under another number, as before', async () => {
     const { store, dealId, original } = await saved(REWORDED[0]);
     const rows = fileRow(2, REWORDED[1], 'New answer');
@@ -164,6 +170,7 @@ describe('the identifiers a question names', () => {
     const same = (a: string, b: string) => sameIdentifiers(identifierSig(a), identifierSig(b));
     expect(same('Tranche II', 'Tranche IV')).toBe(false);
     expect(same('Class A and Tranche II', 'Tranche II')).toBe(true);
+    expect(exactIdentifiers(identifierSig('Class A and Tranche II'), identifierSig('Tranche II'))).toBe(false);
     expect(same('the facility', 'Facility B')).toBe(true);
     expect(same('the FY 2024 accounts', 'the FY2024 accounts')).toBe(true);
   });
