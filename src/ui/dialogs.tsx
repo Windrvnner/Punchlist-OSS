@@ -400,7 +400,8 @@ export function DeleteDealDialog() {
     const r = await store.dispatch(DeleteDeal, { dealId: d.id, typedName: dd.typed, ...(dd.seen ? { seen: dd.seen } : {}) }, { idempotencyKey: 'dd-go', quiet: true });
     if (!r.ok) { store.ui({ deleteDeal: { ...dd, error: r.error.message } }); return; }
     close();
-    store.toast(`${label} deleted`, undefined, { glyph: 'done' });
+    // a long name gives way in the notice, so what tells it from its twin and the word "deleted" stay in view
+    store.toast(`${label} deleted`, undefined, { glyph: 'done' }, undefined, d.name);
     location.hash = 'deals';
   };
   if (dd.sure) return (
@@ -417,7 +418,8 @@ export function DeleteDealDialog() {
   return (
     <Modal key="name" onClose={close} label="Delete this deal?" blur className="sdlg dddlg">
       <div class="shead"><h2 id="dd-title">Delete this deal?</h2><button type="button" class="x" aria-label="Close" title="Close (Esc)" onClick={close}><Icon name="close" size={15} /></button></div>
-      <p class="ddtext"><b>{label}</b> will be deleted with its findings and its Q&amp;A.
+      {/* the name in bold, what tells it from its twin after it in plain text: the name is what is typed */}
+      <p class="ddtext"><b>{d.name}</b>{label.slice(d.name.length)} will be deleted with its findings and its Q&amp;A.
         Type <b>{d.name}</b> to continue.</p>
       <input class="field in" id="dd-name" placeholder="Deal name" aria-label="Deal name" value={dd.typed} onInput={(e) => store.ui({ deleteDeal: { ...dd, typed: (e.currentTarget as HTMLInputElement).value, error: '' } })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); next(); } }} />   {/* without preventDefault the same key press would go on to the button the second pop-up puts the focus on */}
       <div class="xfoot"><span class="grow" /><button type="button" class="btn sm pri" id="dd-next" disabled={!named} onClick={next}>Continue</button></div>

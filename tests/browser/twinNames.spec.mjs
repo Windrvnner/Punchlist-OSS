@@ -44,9 +44,20 @@ async function shot(page, name) {
 const text = (page, selector) => page.$eval(selector, (el) => el.textContent.replace(/\s+/g, ' ').trim());
 /** clears the notices shown, so the next one read is the one an action puts up */
 const clearNotices = (page) => page.evaluate(() => store.ui({ toasts: [] }));
+/** a notice's words as read aloud, what shows of them, and whether its title shows whole */
 const notice = async (page) => {
   await page.waitForSelector('#toast .ttext');
-  return text(page, '#toast .ttext');
+  return page.$eval('#toast .ttext', (el) => {
+    const without = (selector) => {
+      const copy = el.cloneNode(true);
+      for (const part of copy.querySelectorAll(selector)) part.remove();
+      return copy.textContent.replace(/\s+/g, ' ').trim();
+    };
+    const title = el.querySelector('.ttitle');
+    return { said: without('[aria-hidden="true"]'), shown: without('.sr-only'),
+      whole: !!title && title.scrollWidth <= title.clientWidth + 1
+        && !title.querySelector('.tcut')?.textContent.endsWith('…') };
+  });
 };
 /** the dialog's title fits inside it: it wraps, never runs past the edge */
 const fits = (page) => page.$eval('.dddlg h2', (h) => h.scrollWidth <= h.clientWidth
@@ -105,19 +116,24 @@ async function checkWording() {
   const removed = await removeFromMine(page, ids.Wingtip, 'twin');
   say('#27 Remove from My Deals names the twin, and its Undo brings it back',
     removed.asked === 'Remove Project Kestrel (Wingtip) from your deals?'
-    && removed.told === 'Project Kestrel (Wingtip) removed from your deals' && removed.fit, JSON.stringify(removed));
+    && removed.told.said === 'Project Kestrel (Wingtip) removed · From your deals'
+    && removed.told.whole && removed.fit, JSON.stringify(removed));
   const gone = await deleteDeal(page, ids.Wingtip, 'twin');
   say('#27 Delete Deal names the twin in both dialogs and the notice; the name alone confirms it',
     gone.first === 'Project Kestrel (Wingtip) will be deleted with its findings and its Q&A.'
       + ' Type Project Kestrel to continue.'
-    && gone.second === 'Delete Project Kestrel (Wingtip) for good?' && gone.told === 'Project Kestrel (Wingtip) deleted'
-    && gone.fit, JSON.stringify(gone));
+    && gone.second === 'Delete Project Kestrel (Wingtip) for good?'
+    && gone.told.said === 'Project Kestrel (Wingtip) deleted' && gone.told.whole && gone.fit, JSON.stringify(gone));
   const long = await deleteDeal(page, ids[LONG_PARTY], 'long');
   say('#27 a long name and counterparty wrap inside the dialog', long.fit
     && long.second === `Delete Project ${LONG} (${LONG_PARTY}) for good?`, JSON.stringify(long));
+  say('#27 a long name gives way in the notice, never what tells it apart or "deleted"',
+    long.told.said === `Project ${LONG} (${LONG_PARTY}) deleted`
+    && long.told.shown.endsWith(`… (${LONG_PARTY}) deleted`), JSON.stringify(long.told));
   const single = await deleteDeal(page, ids['Project Coho'], 'single');
   say('#27 a deal with a name of its own reads as before', single.second === 'Delete Project Coho for good?'
-    && single.told === 'Project Coho deleted' && single.first.startsWith('Project Coho will be deleted')
+    && single.told.said === 'Project Coho deleted' && single.told.whole
+    && single.first.startsWith('Project Coho will be deleted')
     && !page.errors.length, JSON.stringify({ single, errors: page.errors }));
   await ctx.close();
 }
