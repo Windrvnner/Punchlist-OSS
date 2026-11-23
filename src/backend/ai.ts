@@ -2850,6 +2850,16 @@ export function nodeAi(o: AiOptions) {
   const mine = new Map<string, Mine>();
   /** set once this backend closes */
   let closing = false;
+  /** this PC's own heartbeat, to tell a sleep from a long wait on the model: when it last beat, and last woke */
+  const awake = { beat: nowMs(), woke: Number.NEGATIVE_INFINITY };
+  /** a beat; a gap longer than a lapse since the last one was a sleep */
+  function beat() {
+    const now = nowMs();
+    if (now - awake.beat > T.lapse) awake.woke = now;
+    awake.beat = now;
+  }
+  const heart = setInterval(beat, T.watch);
+  (heart as { unref?: () => void }).unref?.();
   /** the most merges followed from one round to the round it ended in, in case the lines ever loop */
   const MERGES_MAX = 50;
   const preparing = new Set<string>();                                           // openings this PC is preparing now
@@ -2958,12 +2968,13 @@ export function nodeAi(o: AiOptions) {
    * Before anything from a batch is written: has this PC slept, or rejoined, since it took the batch? A merge of its
    * round into another is neither: the batch's lines count for the kept round, so they are written (#795).
    */
-  async function guard(dealId: string, took: Mine, epoch: number) {
+  async function guard(dealId: string, took: Mine, epoch: number, takenAt: number) {
     const { st, want } = followMerges(took, epoch);
     if (closing || st.left) throw STALE;                   // this PC has left the round (it closed, or gave up)
     if (mine.get(dealId) !== st) {                         // the round has ended, or this PC has moved on from it
-      // it slept since it last renewed there (it renews until it sees the round end), or a later round began
-      const slept = nowMs() - st.lastRenew > T.lapse;
+      // it slept since it took the batch (it no longer renews there), or a later round began
+      beat();
+      const slept = awake.woke > takenAt;
       if (took === st || slept || st.epoch !== want || !await lastRound(dealId, st.round)) throw STALE;
       return;
     }
@@ -3037,10 +3048,12 @@ export function nodeAi(o: AiOptions) {
       const { facts, todo, owners } = myWork(dealId, v, R, ob);
       if (!todo.length) { await finishIfDone(dealId, v, R); return 'done'; }
       const ts = pickBatch(R, todo, facts, owners.length); const units = [...new Set(ts.map((t) => `${R.def.id}:${t.u}`))];
-      await claim(dealId, units); const epoch = st.epoch;
+      await claim(dealId, units);
+      const epoch = st.epoch;
+      const takenAt = nowMs();
       try {
         if (!x || xFor !== R.pieces.length) { const c = await open(dealId, R); if (!c.ok) throw Object.assign(new Error(c.error.message), { kind: c.error.kind, code: c.error.kind === 'unreachable' ? 'unreachable' : undefined }); x = c.value; xFor = R.pieces.length; }
-        guards.set(dealId, () => guard(dealId, st, epoch));
+        guards.set(dealId, () => guard(dealId, st, epoch, takenAt));
         await runBatch(dealId, R, ts, x, facts);
         serviceAnswered(st);
       } catch (e) { if (e !== STALE) throw e; }
@@ -3506,6 +3519,7 @@ export function nodeAi(o: AiOptions) {
       if (watchAll) { clearInterval(watchAll); watchAll = null; }
       reportSweeps.close();
       closing = true;                          // nothing more from a batch still out, whichever round it counts for
+      clearInterval(heart);
       const said: Promise<unknown>[] = [];
       for (const [dealId, st] of [...mine]) {
         if (st.timer) clearInterval(st.timer);
