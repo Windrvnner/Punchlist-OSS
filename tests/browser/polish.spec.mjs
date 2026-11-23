@@ -1,5 +1,6 @@
 // Small layout and look fixes, each checked on the built app: the numbers are the GitHub issues they answer.
 import { launchChrome } from './chrome.mjs';
+import { openRename } from './dealMenu.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
 const browser = await launchChrome();
@@ -130,6 +131,170 @@ for (const scheme of ['dark', 'light']) {
   }
   if (page.errors.length) say(`${scheme}:596-no-page-errors`, false, page.errors.join(' | '));
   await ctx.close();
+}
+
+async function checkRailLoading(page, at) {
+  await page.addInitScript(() => { window.__down = true; });
+  await page.goto(URL);
+  await page.waitForSelector('.netbar');
+  const bars = page.locator('#rail-nav .ph i');
+  const styles = () => bars.evaluateAll((items) => items.map((item) => {
+    const style = getComputedStyle(item);
+    return { radius: style.borderRadius, pulse: style.animationName };
+  }));
+  const loading = await styles();
+  const hidden = await page.locator('#rail-nav .ph[aria-hidden="true"]').count() === 1;
+  const links = await page.getByRole('navigation', { name: 'Primary' }).getByRole('link').count();
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const reduced = await styles();
+  await page.evaluate(() => { window.__down = false; });
+  await page.click('.netbar .tundo');
+  await page.waitForSelector('#rail-nav a[href="#deals"]');
+  say(`${at}:612-rail-loading-bars`, loading.length === 5 && hidden && links === 0
+    && loading.every(({ radius, pulse }) => radius === '6px' && pulse === 'phpulse')
+    && reduced.every(({ pulse }) => pulse === 'none') && await bars.count() === 0, JSON.stringify(loading));
+}
+
+async function seedVisualPolish(page) {
+  return page.evaluate(async () => {
+    const run = (name, input) => store.dispatch(store.commandNamed(name), input, { quiet: true });
+    await run('CreateDeal', { name: 'Datum', folders: [] });
+    const dealId = Object.values(store.get().deals)[0].id;
+    for (const title of ['First finding', 'Current finding']) {
+      await run('CreateFinding', { dealId, title, workstream: 'Legal' });
+    }
+    const findings = Object.keys(store.get().findings);
+    for (const findingId of findings) {
+      await run('SetFindingStatus', { dealId, findingId, status: 'closed', note: 'Agreed' });
+    }
+    await run('CreateQuestion', { dealId, text: 'Confirm the lock-up ratio.' });
+    const questionId = Object.keys(store.get().questions)[0];
+    await run('DeleteQuestion', { dealId, questionId });
+    return { dealId, findingId: findings[1], questionId };
+  });
+}
+
+async function checkComposerInsets(page, at, dealId, findingId) {
+  const measure = (form) => page.locator(form + ' .send').evaluate((send) => {
+    const card = send.closest('form').getBoundingClientRect();
+    const rect = send.getBoundingClientRect();
+    return { right: card.right - rect.right, bottom: card.bottom - rect.bottom, size: rect.width };
+  });
+  const home = await measure('#homeask');
+  await page.goto(URL + '#overview-' + dealId);
+  const closed = await measure('#dask');
+  await page.locator('#dask textarea').focus();
+  await page.locator('#dask.open').waitFor();
+  const deal = await measure('#dask');
+  await page.goto(URL + `#finding-${dealId}-${findingId}`);
+  const conversation = await measure('#pcomposer');
+  const equal = ({ right, bottom, size }) => Math.abs(right - bottom) < 0.5 && size === 32;
+  say(`${at}:613-open-composers-inset-send-evenly`, [home, deal, conversation].every(equal) && closed.size === 36,
+    JSON.stringify({ home, closed, deal, conversation }));
+}
+
+async function checkSelection(locator) {
+  return locator.evaluate((element) => {
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      element.focus();
+      element.select();
+    } else {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+    }
+    const selection = getComputedStyle(element, '::selection');
+    const sample = document.createElement('span');
+    sample.style.forcedColorAdjust = 'none';
+    sample.style.backgroundColor = 'var(--accent)';
+    sample.style.color = 'var(--accent-ink)';
+    element.after(sample);
+    const expected = getComputedStyle(sample);
+    const ok = selection.backgroundColor === expected.backgroundColor && selection.color === expected.color;
+    sample.remove();
+    return ok;
+  });
+}
+
+async function checkClosedTicks(page, at) {
+  await page.evaluate(() => store.ui({ findingFilter: { ...store.get().ui.findingFilter, status: 'all' } }));
+  const marks = await page.locator('.g.done:not(.on) i').evaluate((other) => {
+    const current = document.querySelector('.g.on.done i');
+    const sample = document.createElement('i');
+    sample.style.transition = 'none';
+    sample.style.backgroundColor = 'color-mix(in srgb, var(--ink-3) 55%, transparent)';
+    other.after(sample);
+    const gray = getComputedStyle(sample).backgroundColor;
+    sample.style.backgroundColor = 'var(--accent)';
+    const accent = getComputedStyle(sample).backgroundColor;
+    sample.remove();
+    return { current: getComputedStyle(current).backgroundColor, other: getComputedStyle(other).backgroundColor,
+      accent, gray };
+  });
+  say(`${at}:615-current-closed-tick-stays-accent`, marks.current === marks.accent && marks.other === marks.gray,
+    JSON.stringify(marks));
+}
+
+async function checkFallbackLinks(page, at, dealId, questionId) {
+  const missing = 'Z'.repeat(26);
+  const targets = [
+    ['overview-d_' + missing, '.fr-line a', '#deals'],
+    ['chat-d_' + missing, '#gone a', '#deals'],
+    [`finding-${dealId}-f_${missing}`, '#gone a', dealId],
+    [`q-${dealId}-q_${missing}`, '#gone a', dealId],
+    [`q-${dealId}-${questionId}`, '#gone a', dealId],
+  ];
+  const checks = [];
+  for (const [route, selector, destination] of targets) {
+    await page.goto(URL + '#' + route);
+    const link = page.locator(selector);
+    const result = await link.evaluate((anchor) => {
+      const sample = document.createElement('span');
+      sample.style.color = 'var(--accent)';
+      anchor.after(sample);
+      const actual = { color: getComputedStyle(anchor).color, accent: getComputedStyle(sample).color,
+        underline: getComputedStyle(anchor).textDecorationLine, href: anchor.getAttribute('href') };
+      sample.remove();
+      return actual;
+    });
+    await link.focus();
+    await page.keyboard.press('Enter');
+    await page.waitForURL((url) => url.hash === result.href);
+    await link.waitFor({ state: 'detached' });
+    checks.push(result.color === result.accent && result.underline === 'underline'
+      && result.href.endsWith(destination));
+  }
+  await page.goto(URL + `#q-${dealId}-${questionId}`);
+  await page.click('#gone-restore');
+  await page.waitForFunction((id) => !!store.get().questions[id], questionId);
+  say(`${at}:620-fallback-links-use-accent-and-keep-navigation`, checks.every(Boolean), JSON.stringify(checks));
+}
+
+for (const [width, height] of [[1280, 736], [1024, 640]]) {
+  for (const colorScheme of ['dark', 'light']) {
+    const at = `${colorScheme}-${width}x${height}`;
+    const ctx = await browser.newContext({ viewport: { width, height }, colorScheme });
+    const page = await ctx.newPage();
+    await checkRailLoading(page, at);
+    const { dealId, findingId, questionId } = await seedVisualPolish(page);
+    await checkComposerInsets(page, at, dealId, findingId);
+    await checkClosedTicks(page, at);
+    const staticText = await checkSelection(page.locator('.opening .qtxt'));
+    const composer = page.locator('#pcomposer textarea');
+    await composer.fill('Selected words');
+    const editableText = await checkSelection(composer);
+    await page.goto(URL + '#overview-' + dealId);
+    await openRename(page);
+    const rename = page.locator('#deal-name');
+    const dealName = await checkSelection(rename);
+    await page.emulateMedia({ forcedColors: 'active' });
+    const forced = await checkSelection(rename);
+    await page.emulateMedia({ forcedColors: 'none' });
+    say(`${at}:614-text-selection-uses-theme-colors`, staticText && editableText && dealName && forced);
+    await checkFallbackLinks(page, at, dealId, questionId);
+    await ctx.close();
+  }
 }
 
 await browser.close();
