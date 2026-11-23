@@ -4,6 +4,7 @@
  * nothing. Folders still being read when the form went are kept as paths and read again when it opens (#113).
  */
 import type { DealKinds } from '../app/state';
+import { pathKey } from '../app/commands/deals';
 import { keptDrafts } from './keptDrafts';
 
 type KeptFolder = { path: string; label: string; files: number; size: string };
@@ -52,4 +53,17 @@ export function keepNewDeal(draft: KeptNewDeal | null) {
 export function hasNewDealDraft(d: KeptNewDeal) {
   const picked = Object.values(d.kinds ?? {}).some((v) => v?.trim()) || !!d.counterparty?.trim();
   return !!(d.name.trim() || d.folders.length || d.path.trim() || d.reading?.length || picked);
+}
+
+/**
+ * A folder whose read ended after its form closed joins the kept draft, so it is there when the form opens again; one
+ * that could not be read stays waiting, and is read again then (#113).
+ */
+export function keepLateRead(path: string, folder: KeptFolder | null) {
+  const draft = keptNewDeal();
+  if (!draft || !folder) return;
+  const same = (p: string) => pathKey(p) === pathKey(path);
+  const stillWaiting = (draft.reading ?? []).filter((p) => !same(p));
+  const folders = draft.folders.some((f) => same(f.path)) ? draft.folders : [...draft.folders, folder];
+  keepNewDeal({ ...draft, folders, reading: stillWaiting });
 }
