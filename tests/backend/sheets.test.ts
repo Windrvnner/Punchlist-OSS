@@ -8,13 +8,18 @@ import { libreOfficeSheets } from '../../src/backend/spreadsheets';
 import { questionsSheet, prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { Question } from '../../src/domain/model';
 import { hasOffice as has, soffice } from './officePrerequisites';
+import { cachedWorkbook } from './workbookCache';
 
 // a LibreOffice settings folder of its own, so test runs side by side never share one
 const lo = libreOfficeConverter({ soffice, profile: fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-sheets-test-lo-')) });
+// related cases share each workbook's conversion
+const workbook = cachedWorkbook(lo);
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-sheets-test-'));
 /** an .xlsx written the way the app writes an export, then turned into `ext` by LibreOffice as a person's own file would be */
 async function fileOf(ext: string, sheets: [string, (string | number)[][]][]): Promise<string> {
-  const dir = tmp(); const x = path.join(dir, 'book.xlsx'); fs.writeFileSync(x, await lo.workbook!(spreadsheetDocument(sheets.map(([name, rows]) => ({ name, rows })))));
+  const dir = tmp();
+  const x = path.join(dir, 'book.xlsx');
+  fs.writeFileSync(x, await workbook(spreadsheetDocument(sheets.map(([name, rows]) => ({ name, rows })))));
   if (ext === 'xlsx') return x;
   execFileSync(soffice, [`-env:UserInstallation=file://${dir}/p`, '--headless', '--convert-to', ext, '--outdir', dir, x], { stdio: 'ignore' });
   return path.join(dir, `book.${ext}`);
