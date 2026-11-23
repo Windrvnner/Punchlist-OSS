@@ -148,6 +148,7 @@ function rewordingLocked({ listReview, work }: ImportView, at: number) {
 
 function wordingSelection(view: ImportView, { rewords }: Review) {
   const { useReword, setUseReword } = view.listReview;
+  const count = plural(rewords.length, 'suggestion');
   const eligible = rewords.map(({ at }) => at).filter((at) => !rewordingLocked(view, at));
   const allChecked = eligible.length > 0 && eligible.every((at) => useReword.has(at));
   // #377: Retain checkmarks on locked rows so restoring a removed item also restores its wording choice.
@@ -161,9 +162,9 @@ function wordingSelection(view: ImportView, { rewords }: Review) {
   });
   return (
     <label class="xcheck" style="min-height:24px" title="Select or clear all available wording suggestions">
-      <input id="cl-reword-all" type="checkbox" aria-label="All wording suggestions" aria-controls="cl-rewords"
+      <input id="cl-reword-all" type="checkbox" aria-label={`${count}, select or clear all`} aria-controls="cl-rewords"
         checked={allChecked} disabled={!eligible.length} onChange={(event) => setAll(event.currentTarget.checked)} />
-      <b>{plural(rewords.length, 'suggestion')}</b>
+      <b>{count}</b>
     </label>
   );
 }

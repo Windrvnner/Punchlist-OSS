@@ -374,7 +374,7 @@ function wordingMarks(page) {
 }
 
 async function bulkWording(page) {
-  const heading = page.getByRole('checkbox', { name: 'All wording suggestions', exact: true });
+  const heading = page.getByRole('checkbox', { name: '300 suggestions, select or clear all', exact: true });
   say('Wording has one heading checkbox and it starts unticked',
     await page.locator('.rv-h input[type=checkbox]').count() === 1 && !await heading.isChecked());
   const first = page.locator('[data-reword="0"]');
