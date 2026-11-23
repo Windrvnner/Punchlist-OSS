@@ -85,11 +85,37 @@ async function partialFailure({ page, retry, finish, review, pair }, say) {
       && improved.pairs === 2 && improved.kept, JSON.stringify(improved));
 }
 
+async function overlappingRetries({ page, retry, next, finish, calls, review, pair }, say) {
+  await retry.click();
+  const beforeBack = await calls();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await next.click();
+  if (await next.isEnabled()) {
+    await page.check('#cl-askreword');
+    await next.click();
+    await page.uncheck('#cl-askreword');
+  }
+  const afterNext = await calls();
+  await finish(failed('unreachable'));
+  const stayed = await next.isVisible();
+  say('Next from Back sends no second duplicate request while Retry is in flight, even after changing the choices',
+    stayed && afterNext.length === beforeBack.length && JSON.stringify(beforeBack.at(-1)?.only) === '[0]',
+    JSON.stringify({ before: beforeBack.length, after: afterNext.length, only: beforeBack.at(-1)?.only }));
+  await (stayed ? next : retry).click();
+  await finish({ ok: true, value: { pairs: [pair] } });
+  const final = await review();
+  say('a successful retry restores the import count and keeps the checked removal',
+    !final.reason && !final.missed && final.pairs === 2 && final.kept
+      && final.footer === 'Import 2,161 items · 1 removed',
+    JSON.stringify(final));
+}
+
 export async function checkDuplicateRetries(start, say) {
   const { ctx, page } = await start();
   const review = await openReview(page);
   await wholeFailure(review, say);
   await partialFailure(review, say);
+  await overlappingRetries(review, say);
   say('no errors during duplicate retries', page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }
