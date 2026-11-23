@@ -86,6 +86,26 @@ jobs:
       - run: xvfb-run -a node tests/desktop/smoke.spec.mjs
       - run: xvfb-run -a node tests/desktop/signin.spec.mjs
 
+  # the same desktop checks on Windows, where the app runs, to catch Windows-only faults (paths, file locks, line
+  # endings); with the desktop's and the backend's Node tests, which work on the real folders
+  desktop-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm exec -- vite build
+      - run: node scripts/desktop-build.mjs
+      - run: node tests/desktop/smoke.spec.mjs
+      - if: ${{ !cancelled() }}
+        run: node tests/desktop/signin.spec.mjs
+      - if: ${{ !cancelled() }}
+        run: npx vitest run tests/desktop tests/backend
+
   # the Windows installer, kept as a download on the run (without LibreOffice, which is copied in on a release PC);
   # built only when the workflow is started by hand
   installer:
