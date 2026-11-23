@@ -280,6 +280,52 @@ const ask = async (page, words, nth) => {
   await ctx.close();
 }
 
+{ // #340: a question being typed on a finding's page stays in sight, kept and editable, when the finding is deleted
+  const { ctx, page, id, fid } = await findingPage();
+  await page.click('#f-ask');
+  await page.fill('#f-ask-text', 'Half-typed question');
+  await run(page, 'DeleteFinding', { dealId: id, findingId: fid });
+  await page.waitForSelector('#gone');
+  const seen = () => page.evaluate(() => ({
+    text: document.querySelector('#f-ask-text')?.value ?? null,
+    logOff: document.querySelector('#f-ask-log')?.disabled ?? null,
+    why: document.querySelector('#f-ask-log')?.title ?? null,
+    linked: document.querySelector('.clink')?.textContent ?? null,
+  }));
+  const deleted = await seen();
+  if (deleted.text !== null) await page.fill('#f-ask-text', 'Half-typed question, finished after the delete');
+  await page.reload();
+  await page.waitForSelector('#gone');
+  const reloaded = await seen();
+  await page.click('#gone-restore');
+  await page.waitForSelector('#f-edit');
+  const restored = await page.evaluate(() => document.querySelector('#f-ask-text')?.value ?? null);
+  say('#340 a question being typed stays in sight on the deleted finding\'s page, and Restore brings it back',
+    deleted.text === 'Half-typed question' && deleted.logOff && deleted.why === 'This finding was deleted'
+    && /^Linked to “.+”$/.test(deleted.linked) && reloaded.text === 'Half-typed question, finished after the delete'
+    && restored === reloaded.text && !page.errors.length,
+    JSON.stringify({ deleted, reloaded, restored, errors: page.errors }));
+  // deleted on another PC without seeing this one: the finding shows its two versions, and the question stays in sight
+  await page.evaluate((f) => __peer.remove(f, { by: 'jdoe', from: 'PC B' }), fid);
+  await page.waitForFunction((f) => !!store.get().conflicts[f], fid);
+  await page.waitForTimeout(300);
+  const twoVersions = await seen();
+  if (twoVersions.text !== null) await page.click('#f-ask-cancel');
+  const cleared = await seen();
+  // deleted with nothing being typed: the page that says so shows no card
+  const other = await page.evaluate(([d, f]) => Object.values(store.get().findings)
+    .find((x) => x.dealId === d && x.id !== f).id, [id, fid]);
+  await page.goto(`${URL}#finding-${id}-${other}`);
+  await page.waitForSelector('#f-edit');
+  await run(page, 'DeleteFinding', { dealId: id, findingId: other });
+  await page.waitForSelector('#gone');
+  const none = await seen();
+  say('#340 in two versions the question stays in sight; Cancel clears it; nothing typed shows no card',
+    twoVersions.text === restored && cleared.text === null && none.text === null && !page.errors.length,
+    JSON.stringify({ twoVersions, cleared, none, errors: page.errors }));
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter(([, ok]) => !ok).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);
