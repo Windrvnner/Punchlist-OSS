@@ -15,7 +15,7 @@ import {
   scopeHash, newConv, filesDealOf, type Scope,
 } from '../app/conversations';
 import { isOwnFiles, type Deal, type Question, type Source } from '../domain/model';
-import { attachFiles, filesSendable } from '../app/attachments';
+import { attachFiles, dealCopied, filesSendable } from '../app/attachments';
 import { type Attachment, type Message, type State , isReading, askAbout, askAcross } from '../app/state';
 import { keptDrafts, isText } from './keptDrafts';
 import { DocPanel } from './docPanel';
@@ -356,6 +356,8 @@ async function sendTyped({ store, scope, key, slot, launch, target, chips, readO
     return;
   }
   if (!(await chipsSendable(store, key))) return;
+  // the deal was kept as a copy during the check (#117): its text and files are on the copy now, to be sent from there
+  if (target && dealCopied(store, target.dealId)) return;
   // read after the files are checked, so anything typed meanwhile goes too
   const typed = (drafts.get(key) ?? '').trim();
   if (!typed) return;
@@ -395,9 +397,7 @@ async function filesOk(store: Store, chips: Attachment[]) {
 }
 
 /**
- * Whether the composer's files can all go now. A file that finishes attaching during the check is checked too. When a
- * checked file has moved meanwhile (its deal was kept as a copy, #117), nothing is sent here: the text and files are
- * on the copy, to be sent from there.
+ * Whether the composer's files can all go now. A file that finishes attaching during the check is checked too.
  */
 async function chipsSendable(store: Store, key: string) {
   if (checking.has(key)) return false;
@@ -410,8 +410,7 @@ async function chipsSendable(store: Store, key: string) {
       for (const chip of fresh) checked.add(chip.id);
       fresh = readyChips(store, key).filter((chip) => !checked.has(chip.id));
     }
-    const moved = store.get().ui.attachments.some((chip) => checked.has(chip.id) && chip.conv !== key);
-    return !moved;
+    return true;
   } finally {
     checking.delete(key);
   }

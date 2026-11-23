@@ -72,9 +72,14 @@ export function followCopies(store: Store): () => void {
     const docs = store.services.docs;
     if (!docs.carryAttached) return;
     const carried = deals.map(([was, now]) => docs.carryAttached!(was, now));
-    carrying.set(store, Promise.all([carrying.get(store), ...carried]));
+    // a carry that fails is tried again at the next send; it never stops a send by itself
+    carrying.set(store, Promise.all([carrying.get(store), ...carried]).catch(() => undefined));
   });
 }
+
+/** Whether a deal has been kept here as a copy (deleted on another PC) while the app runs. */
+export const dealCopied = (store: Store, dealId: string) =>
+  [...(copiedFrom.get(store)?.values() ?? [])].includes(dealId);
 
 /** Of these documents of a deal, those this PC can't send now. A file attached as a copy was made is carried first. */
 async function unsendableOf(store: Store, dealId: string, docIds: string[]): Promise<string[]> {
@@ -103,9 +108,9 @@ export async function filesSendable(store: Store, dealId: string, files: { doc: 
   // one file is named, its name giving way when the line is too short; several are counted, and named on hover
   const [only] = names;
   if (names.length === 1) {
-    store.toast(`Couldn’t find ${only} to send: attach it again`, undefined, false, undefined, only);
+    store.toast(`Couldn’t find ${only} — attach it again`, undefined, false, undefined, only);
   } else {
-    store.toast(`Couldn’t find ${names.length} files to send: attach them again`, undefined, false, names.join(', '));
+    store.toast(`Couldn’t find ${names.length} files — attach them again`, undefined, false, names.join(', '));
   }
   return false;
 }
