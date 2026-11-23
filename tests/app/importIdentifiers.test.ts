@@ -6,7 +6,7 @@ import { SetResponse } from '../../src/app/commands/questions';
 import { ImportQuestions } from '../../src/app/commands/importQuestions';
 import { dealQuestions } from '../../src/app/state';
 import { previewImport } from '../../src/app/transfer';
-import { matchRows, identifiers, sameIdentifiers } from '../../src/domain/logWrite';
+import { matchRows, identifiers, identifierSig, sameIdentifiers } from '../../src/domain/logWrite';
 import type { Question } from '../../src/domain/model';
 import { dealList } from '../backend/dealList';
 import { make, deal, sheet, mapping, fileRow } from './importKit';
@@ -27,6 +27,13 @@ const DISTINCT: [string, string][] = [
   ['Please provide the signed SPA and disclosure letter.', 'Please provide the signed SHA and disclosure letter.'],
   ['Please confirm the consent requirements for Facility 2.',
     'Please confirm the consent requirements for Facility 4.'],
+  ['Please confirm the consents required under clause 4(a) of the facility agreement.',
+    'Please confirm the consents required under clause 4(b) of the facility agreement.'],
+  ['Please confirm the distribution rights for class a shares.',
+    'Please confirm the distribution rights for class b shares.'],
+  ['Please provide the list in Schedule 3 part e of the SPA.',
+    'Please provide the list in Schedule 3 part f of the SPA.'],
+  ['Please confirm the tranche a margin and fees.', 'Please confirm the tranche b margin and fees.'],
   ['Please confirm the distribution rights for Class IA shares.',
     'Please confirm the distribution rights for Class LA shares.'],
 ];
@@ -41,6 +48,13 @@ const SAME: [string, string][] = [
   ['Is the arrangement fee 100 bps for Tranche II?', 'Is the arrangement fee l00 bps for Tranche II?'],
   ['Please confirm the 2024 audited accounts for Facility A.',
     'Please confirm the 2O24 audited accounts for Facility A.'],
+  ['Please confirm the FY 2024 audited accounts are final.', 'Please confirm the FY2024 audited accounts are final.'],
+  ['Is the revolving facility commitment 25 m or more?', 'Is the revolving facility commitment 25m or more?'],
+  ['Please confirm the interest rate on the Class A.1 notes.',
+    'Please confirm the interest rate on the Class A1 notes.'],
+  ['Has the SPA been signed by the cfo yet?', 'Has the spa been signed by the CFO yet?'],
+  ['Is the arrangement fee I00 bps?', 'Is the arrangement fee 100 bps?'],
+  ['Is the commitment fee O.5% per annum?', 'Is the commitment fee 0.5% per annum?'],
 ];
 
 /** Tranche II outstanding debt reworded, the identifier kept: matched by its number only */
@@ -93,6 +107,9 @@ describe('a misread or reworded row naming the same identifiers is still the que
     it(`${before} / ${incoming}, number ${n}`, () => matches(before, incoming, n));
   }
   it('a question reworded under its own number, its identifier kept', () => matches(...REWORDED, 1));
+  it('a prose word that reads as a numeral is no identifier', () => matches(
+    'Please confirm revenue mix by segment and region for the group',
+    'Please confirm revenue by segment and region for the group in FY24', 1));
   it('but not under another number, as before', async () => {
     const { store, dealId, original } = await saved(REWORDED[0]);
     const rows = fileRow(2, REWORDED[1], 'New answer');
@@ -102,18 +119,21 @@ describe('a misread or reworded row naming the same identifiers is still the que
 });
 
 describe('the identifiers a question names', () => {
-  it('are numbers, Roman numerals, single capitals and short capital codes, compared as they read', () => {
+  it('are numbers, capital numerals, letters and codes, and letters a clause or class names, as they read', () => {
     expect(identifiers('Is the O&M fee for Facility I1 under the SPA 2O24 or l00?'))
       .toEqual(['100', '2024', 'i1', 'm', 'o', 'spa']);
     expect(identifiers('I understand the phase I report is final.')).toEqual(['i', 'i']);
-    expect(identifiers('l understand the Class ii terms.')).toEqual(['i', 'ii']);
+    expect(identifiers('l understand the Class ii terms under clause 4(b).')).toEqual(['4', 'b', 'i', 'ii']);
+    expect(identifiers('Please confirm revenue mix by segment, 25 m or more.')).toEqual(['25']);
+    expect(identifiers('Is it I00, O.5, I.1 or O1?')).toEqual(['0.5', '100', 'i.1', 'o1']);
     expect(identifiers('Please provide the signed agreement.')).toEqual([]);
   });
-  it('differ only when each wording names one the other does not', () => {
-    expect(sameIdentifiers(['ii'], ['iv'])).toBe(false);
-    expect(sameIdentifiers(['a', 'ii'], ['ii'])).toBe(true);
-    expect(sameIdentifiers([], ['b'])).toBe(true);
-    expect(sameIdentifiers(['i', 'spa'], ['i', 'spa'])).toBe(true);
+  it('differ only when each wording names one the other does not, however it is spaced or capitalized', () => {
+    const same = (a: string, b: string) => sameIdentifiers(identifierSig(a), identifierSig(b));
+    expect(same('Tranche II', 'Tranche IV')).toBe(false);
+    expect(same('Class A and Tranche II', 'Tranche II')).toBe(true);
+    expect(same('the facility', 'Facility B')).toBe(true);
+    expect(same('the FY 2024 accounts', 'the FY2024 accounts')).toBe(true);
   });
 });
 
