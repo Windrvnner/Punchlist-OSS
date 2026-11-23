@@ -12,7 +12,8 @@ import { ask, convKey, type Scope } from '../../src/app/conversations';
 import { CreateDeal } from '../../src/app/commands/deals';
 import { registry } from '../../src/app/commands/undo';
 import type { KeptMessage } from '../../src/ports';
-import { Mem } from './reviewKit';
+import { Mem, Tearing } from './reviewKit';
+import { wholeLines } from '../../src/backend/ownFile';
 import { composeBackend } from '../../src/backend/compose';
 import { StandInService } from '../../src/backend/service';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
@@ -300,5 +301,36 @@ describe('conversations in the synced folder', () => {
     const later = clock(); store.setThread('all:c1', [...store.get().threads['all:c1'], { id: 'q2', role: 'me', text: 'Asked at home', state: 'done', at: later }, { id: 'a2', role: 'ai', text: 'Answered.', state: 'done', at: later }]);
     await new Promise((r) => setTimeout(r, 5)); await office.load(); const there = await office.load();
     expect(there.ok && there.value['all:c1'].map((m) => m.role)).toEqual(['me', 'ai', 'me', 'ai']);
+  });
+  it('a save cut short by a full disk is saved whole once there is room and survives a rollback (#126)', async () => {
+    const shared = new Mem();
+    const local = new Tearing();
+    const file = 'talk-office-0.jsonl';
+    const log = conversationLog({ shared, local, installId: 'office', user: () => 'adoe', clock });
+    const ask = (n: number) => `For contract ${n}, is revenue recognized on delivery or on acceptance? See §4.2.`;
+    const answer = (n: number) => `Contract ${n} recognizes revenue on acceptance; 12% is deferred.`;
+    const turn = (n: number, at: string) => [msg(`q${n}`, 'me', ask(n), at), msg(`a${n}`, 'ai', answer(n), at)];
+    let thread: KeptMessage[] = [];
+    for (let n = 1; n <= 150; n++) {
+      thread = [...thread, ...turn(n, clock())];
+      expect((await log.save('deal:d1:c1', thread)).ok).toBe(true);
+    }
+    const kept = local.files.get(file)!;
+    thread = [...thread, ...turn(151, clock())];
+    local.tear = 330;                                                   // the first line and part of the second
+    local.refuseWrites = true;                                          // and then the disk is full
+    expect((await log.save('deal:d1:c1', thread)).ok).toBe(false);
+    expect(local.files.get(file)!.slice(kept.length)).toMatch(/^\{.*"q151".*\n\{/);   // not cut off yet
+    await log.load();                                       // a look at the folder meanwhile takes none of it
+    local.refuseWrites = false;
+    expect((await log.save('deal:d1:c1', thread)).ok).toBe(true);
+    const ids = wholeLines(local.files.get(file)!).map((l) => JSON.parse(l).m.id);
+    expect(ids.length).toBe(302);
+    expect(ids.slice(-2)).toEqual(['q151', 'a151']);
+    shared.files.set(file, kept.split('\n').slice(0, 40).join('\n') + '\n');     // the sync client rolled back
+    await log.load();
+    const home = conversationLog({ shared, local: new Mem(), installId: 'home', user: () => 'adoe', clock });
+    const there = await home.load();
+    expect(there.ok && there.value['deal:d1:c1'].map((m) => m.id)).toEqual(thread.map((m) => m.id));
   });
 });
