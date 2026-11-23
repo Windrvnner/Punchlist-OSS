@@ -809,6 +809,10 @@ describe('deal memo model replies', () => {
     { name: 'one 100,000-character token', paragraphs: ['', '  ', `${'x'.repeat(100_000)} [1]`] },
     { name: '202 words separated by citation markers', paragraphs: ['Ratio.[1]Term '.repeat(101)] },
     {
+      name: '201 words after removing a finding ID',
+      paragraphs: [`${'covenant '.repeat(199)}${lockUp.id}. [1]`],
+    },
+    {
       name: 'three paragraphs in a single string',
       paragraphs: [`${creditWords} [1]\r\n\r\n${termWords} [2]\n \nThe ratios differ. [1]`],
     },

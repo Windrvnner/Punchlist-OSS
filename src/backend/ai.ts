@@ -378,12 +378,13 @@ function memoRiskParagraphs(value: unknown): string[] {
 }
 
 /** Bound the write-up even when malformed text fits the word count (#659). */
-function memoRiskFits(paragraphs: string[]): boolean {
+function memoRiskFits(paragraphs: string[], ids: Set<string>): boolean {
   if (!paragraphs.length || paragraphs.length > 2) return false;
   const text = paragraphs.join(' ');
   if (text.length > MEMO_RISK_TEXT_CHARS) return false;
   if (text.split(/\s+/).some((token) => token.length > MEMO_RISK_TOKEN_CHARS)) return false;
-  const words = withoutMemoMarks(text, ' ').match(/\S+/g) ?? [];
+  const prose = paragraphs.map((paragraph) => withoutMemoMarks(unid(paragraph, ids), ' ')).join(' ');
+  const words = prose.match(/\S+/g) ?? [];
   return words.length > 0 && words.length <= MEMO_RISK_WORDS;
 }
 
@@ -397,10 +398,10 @@ function readCorrection(
 }
 
 /** Send unusable write-ups through the document reader's retry policy (#659). */
-function memoRiskReadOptions(escalate: string, advises: (text: string) => boolean) {
+function memoRiskReadOptions(escalate: string, advises: (text: string) => boolean, ids: Set<string>) {
   const usable = (reply: Record<string, unknown>) => {
     const paragraphs = memoRiskParagraphs(reply.paragraphs);
-    return memoRiskFits(paragraphs) && !paragraphs.some(advises);
+    return memoRiskFits(paragraphs, ids) && !paragraphs.some(advises);
   };
   const wrong = 'it is empty, contains oversized text, gives advice or a judgment, or exceeds '
     + `the limit of two paragraphs and ${MEMO_RISK_WORDS} words`;
@@ -1615,7 +1616,7 @@ export function nodeAi(o: AiOptions) {
       const writeUp = async (g: (typeof key)[number]): Promise<RiskGroup> => {
         const fs = g.findings.map((id) => byId.get(id)!);
         const ask = `Write up this risk on the deal for a deal memo read by a managing director at an investment bank. It is rated ${g.rating} (${g.rating === 'High' ? d.high : g.rating === 'Medium' ? d.medium : d.low}) and brings together these findings:\n${fs.map((f) => `- ${f.title} (${f.workstream || 'no workstream'}): ${plain(f).slice(f.title.length + 2)}`).join('\n')}\n\nWrite one or two paragraphs, at most 200 words in all, of plain banker's prose: what the issue is; the evidence, with the figures, terms and dates the documents give, each sentence cited; and which figures, terms or dates elsewhere in the deal's documents it touches (the base case, the financing terms, the timetable, or closing), named as the documents give them. Facts only: no advice, no recommendation, no next steps, no mitigants, no judging or comparative words (such as weak, loose, overstated or adequate), and no conclusions of your own beyond what the documents say. Do not say what is still open or which questions were asked: the memo adds the questions still unanswered after it. Name no person. Never write an id.`;
-        const options = memoRiskReadOptions(m.thorough, advises);
+        const options = memoRiskReadOptions(m.thorough, advises, ids);
         const sourceIds = fs.flatMap((f) => (f.sources ?? []).map((s) => s.docId)).filter((id): id is string => !!id);
         const r = await read('memoRisk', [dealId], m.standard, ask, fs.map(plain).join(' '), { [dealId]: sourceIds },
           MEMO_RISK_SHAPE, options);
