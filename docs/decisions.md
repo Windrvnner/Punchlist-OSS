@@ -210,6 +210,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A copied install is detected and stops writing. A build never changes a record written by a newer version.
 - A damaged undo journal (each PC's record of its actions, used for Undo and to recover interrupted work) is set aside, and its complete entries are still offered.
 - A deal's analysis is split between the PCs that have the deal open, in rounds (a round is one shared run of checks on the deal, split into pieces of work) that any PC can take over. A requested check that an abandoned round doesn't cover writes that round off.
+- Two rounds of one kind open at once become the one with the lower id. A batch still running in the other counts
+  for the kept round, unless a later check has begun (#795).
 - The check line names who is working.
 - A check waiting on the model service says so after 2 minutes and resumes by itself; a check waiting on a sign-in says that instead.
 - Attachments are kept in the shared folder under their document's id. A file attached on Home is kept with the person's conversations.

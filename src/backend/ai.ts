@@ -1230,10 +1230,11 @@ export function nodeAi(o: AiOptions) {
   }
   const seen = new Map<string, number>();                                       // the highest `n` read or written for each deal
   /** while a batch of a round runs: throws if this PC slept or rejoined since it took the batch, so nothing is written from it (see `guard`) */
-  const guards = new Map<string, () => void>();
+  const guards = new Map<string, () => Promise<void>>();
   async function say(dealId: string, line: Omit<CheckLine, 'v' | 'at' | 'n'>, unguarded = false) {
     // only what a batch settles is held back when the PC has slept or rejoined: lines that say who is in a round, and what it is, are always written
-    if (!unguarded && (line.item || line.glanced || line.verified || line.sample || line.skipped)) guards.get(dealId)?.();
+    const settles = line.item || line.glanced || line.verified || line.sample || line.skipped;
+    if (!unguarded && settles) await guards.get(dealId)?.();
     if (!seen.has(dealId)) await lines(dealId);
     const n = (seen.get(dealId) ?? 0) + 1; seen.set(dealId, n);
     const at = clock(); const text = JSON.stringify({ v: 1, at, n, pc: o.installId ?? 'local', ...line }) + '\n'; const name = checksName(dealId);
@@ -2228,7 +2229,7 @@ export function nodeAi(o: AiOptions) {
       // already there (raised by another PC, or by this one before a restart) is named, not written again.
       const fixed = round ? findingIdFor(dealId, round.def.docs, it.id) : undefined;
       if (fixed) { const mine = latest.get(it.id); if (mine?.result === 'finding' && mine.finding && mine.round && round!.ids.has(mine.round)) return note(it, 'finding', mine.finding); const had = await o.repo.get('finding', fixed); if (had.ok && had.value) return note(it, 'finding', fixed); }
-      guards.get(dealId)?.();
+      await guards.get(dealId)?.();
       const id = fixed ?? `f_${(o.newId ?? ulid)()}`; const now = clock();
       // a closed finding never takes a new problem; the new one names it
       const data = {
@@ -2828,7 +2829,26 @@ export function nodeAi(o: AiOptions) {
   const COULD_NOT = 'The check could not finish';
   const SERVICE_AWAY = `${SERVICE} can’t be reached. The check resumes once ${SERVICE} is back.`;
   /** what this PC is doing in a deal's round */
-  interface Mine { round: string; epoch: number; lastRenew: number; rejoin: boolean; timer: ReturnType<typeof setInterval> | null; running: Promise<unknown> | null; ticking: boolean; tries: number; failingSince?: number; nextTry?: number; /** the last batch failed because nobody is signed in to the model service, not because it is out of reach */ signedOut?: boolean; noOwnerSince?: number; left: boolean }
+  interface Mine {
+    round: string;
+    epoch: number;
+    lastRenew: number;
+    rejoin: boolean;
+    timer: ReturnType<typeof setInterval> | null;
+    running: Promise<unknown> | null;
+    ticking: boolean;
+    tries: number;
+    failingSince?: number;
+    nextTry?: number;
+    /** the last batch failed because nobody is signed in to the model service, not because it is out of reach */
+    signedOut?: boolean;
+    noOwnerSince?: number;
+    left: boolean;
+    /** this round was merged into another: the entry, and the epoch, this PC went on with there (#795) */
+    merged?: { st: Mine; epoch: number };
+    /** this PC has closed */
+    closed?: boolean;
+  }
   const mine = new Map<string, Mine>();
   const preparing = new Set<string>();                                           // openings this PC is preparing now
   const background = new Set<Promise<unknown>>();
@@ -2924,15 +2944,43 @@ export function nodeAi(o: AiOptions) {
     let marked = false;
     if (nd === 'standard' && v && !v.stands) {
       const why = R.def.kind === 'first' ? (also.length ? `${x.recs.find((r) => r.docId === also[0])?.name ?? 'A document'} arrived` : null) : CHECK_REASON;
-      if (why) { guards.get(dealId)?.(); marked = await mark(f.id, why, undefined, !!f.closed); }   // a closed one is marked as one that may need reopening
+      if (why) {
+        await guards.get(dealId)?.();
+        // a closed one is marked as one that may need reopening
+        marked = await mark(f.id, why, undefined, !!f.closed);
+      }
     }
     await say(dealId, { verified: { round: R.def.id, stage: nd === 'fast' ? 'fast' : 'standard', findings: [{ finding: f.id, stands: v ? v.stands : null, marked }] } });
   }
-  /** before anything from a batch is written: has this PC slept, or rejoined, since it took the batch? */
-  function guard(dealId: string, epoch: number) {
-    const st = mine.get(dealId); if (!st || st.left) throw STALE;                 // this PC has left the round (it closed, or gave up): nothing more from it
+  /**
+   * Before anything from a batch is written: has this PC slept, or rejoined, since it took the batch? A merge of its
+   * round into another is neither: the batch's lines count for the kept round, so they are written (#795).
+   */
+  async function guard(dealId: string, took: Mine, epoch: number) {
+    let st = took;
+    let want = epoch;
+    for (; st.merged; st = st.merged.st) {
+      if (st.epoch !== want) throw STALE;
+      want = st.merged.epoch;
+    }
+    if (st.closed || st.left) throw STALE;                 // this PC has left the round (it closed, or gave up)
+    if (mine.get(dealId) !== st) {                         // the round has ended, or this PC has moved on from it
+      if (took === st || st.epoch !== want || !await lastRound(dealId, st.round)) throw STALE;
+      return;
+    }
     if (nowMs() - st.lastRenew > T.lapse) { st.epoch++; st.rejoin = true; }
-    if (st.epoch !== epoch) throw STALE;
+    if (st.epoch !== want) throw STALE;
+  }
+  /**
+   * Whether the round a merged batch's lines count for, once it has ended, is still the deal's latest: the batch is
+   * written then, and not once a later round has begun, whose results it would otherwise take the place of (#795).
+   */
+  async function lastRound(dealId: string, roundId: string) {
+    const v = view(await lines(dealId));
+    let R = v.rounds.get(roundId);
+    for (let i = 0; R?.end?.kind === 'merged' && i < 50; i++) R = v.rounds.get(R.end.into);
+    const kept = R;
+    return !!kept && ![...v.rounds.values()].some((x) => !kept.ids.has(x.def.id) && x.n > kept.n) && !liveOpening(v);
   }
   /** say this PC is still in the round; after a gap longer than a lapse (it slept) that is a new epoch */
   async function renew(dealId: string, R: RoundState) {
@@ -2942,11 +2990,18 @@ export function nodeAi(o: AiOptions) {
     st.lastRenew = nowMs(); st.rejoin = false;
     await say(dealId, { member: { round: R.def.id, pc: me, ...whoAmI(), epoch: st.epoch, ok: needs.every((id) => have.has(id)) } });
   }
-  async function join(dealId: string, R: RoundState) {
+  /** this PC in round R; `merged`: because the round it was in was merged into R */
+  async function join(dealId: string, R: RoundState, merged = false) {
     const st = mine.get(dealId);
     if (st && st.round === R.def.id && !st.left) { if (st.rejoin) await renew(dealId, R); return; }
     if (st?.timer) clearInterval(st.timer);
-    mine.set(dealId, { round: R.def.id, epoch: (st?.epoch ?? 0) + 1, lastRenew: nowMs(), rejoin: true, timer: null, running: null, ticking: false, tries: 0, left: false });   // until its member line is written, the next look writes it
+    // until its member line is written, the next look writes it
+    const next: Mine = {
+      round: R.def.id, epoch: (st?.epoch ?? 0) + 1, lastRenew: nowMs(), rejoin: true,
+      timer: null, running: null, ticking: false, tries: 0, left: false,
+    };
+    if (st && merged) st.merged = { st: next, epoch: next.epoch };   // a batch still out there writes here (#795)
+    mine.set(dealId, next);
     await renew(dealId, R);
     const timer = setInterval(() => void tick(dealId), T.watch); (timer as { unref?: () => void }).unref?.(); mine.get(dealId)!.timer = timer;
   }
@@ -2968,7 +3023,7 @@ export function nodeAi(o: AiOptions) {
       await claim(dealId, units); const epoch = st.epoch;
       try {
         if (!x || xFor !== R.pieces.length) { const c = await open(dealId, R); if (!c.ok) throw Object.assign(new Error(c.error.message), { kind: c.error.kind, code: c.error.kind === 'unreachable' ? 'unreachable' : undefined }); x = c.value; xFor = R.pieces.length; }
-        guards.set(dealId, () => guard(dealId, epoch));
+        guards.set(dealId, () => guard(dealId, st, epoch));
         await runBatch(dealId, R, ts, x, facts);
         serviceAnswered(st);
       } catch (e) { if (e !== STALE) throw e; }
@@ -3017,13 +3072,23 @@ export function nodeAi(o: AiOptions) {
     const st = mine.get(dealId); if (!st || st.ticking) return; st.ticking = true;
     try {
       const { v, ob, touch } = await look(dealId); const R = v.rounds.get(st.round); if (!R) return;
-      if (R.end?.kind === 'merged') { const W = v.rounds.get(R.end.into); if (W && !W.end) await join(dealId, W); else stopWatch(dealId); return; }
+      if (R.end?.kind === 'merged') {
+        const W = v.rounds.get(R.end.into);
+        if (W && !W.end) await join(dealId, W, true);
+        else stopWatch(dealId);
+        return;
+      }
       if (R.end) { stopWatch(dealId); afterEnd(dealId, v, R, ob); return; }
       if (st.left) { if (!othersIn(dealId, R, ob)) await say(dealId, { abandoned: { round: R.def.id } }); stopWatch(dealId); return; }
       if (st.rejoin || nowMs() - st.lastRenew >= T.renew) await renew(dealId, R);
       // two rounds of the same kind open at once: the lower id is kept, and this one is merged into it, its own pieces with it
       const W = openRounds(v).find((y) => y !== R && y.def.kind === R.def.kind && y.def.id < R.def.id);
-      if (W && (R.def.by === me || !ob.live(R.def.by, T.lapse))) { await say(dealId, { merged: { round: R.def.id, into: W.def.id, extra: R.pieces.filter((p) => !W.pieces.some((q) => q.key === p.key)) } }); await join(dealId, W); return; }
+      if (W && (R.def.by === me || !ob.live(R.def.by, T.lapse))) {
+        const extra = R.pieces.filter((p) => !W.pieces.some((q) => q.key === p.key));
+        await say(dealId, { merged: { round: R.def.id, into: W.def.id, extra } });
+        await join(dealId, W, true);
+        return;
+      }
       // a round no member that holds its documents can work, for a lapse, is abandoned
       if (!ownersIn(dealId, R, ob).length) { st.noOwnerSince ??= nowMs(); if (nowMs() - st.noOwnerSince >= T.lapse) { await say(dealId, { abandoned: { round: R.def.id } }); stopWatch(dealId); } return; }
       st.noOwnerSince = undefined;
@@ -3424,7 +3489,12 @@ export function nodeAi(o: AiOptions) {
       if (watchAll) { clearInterval(watchAll); watchAll = null; }
       reportSweeps.close();
       const said: Promise<unknown>[] = [];
-      for (const [dealId, st] of [...mine]) { if (st.timer) clearInterval(st.timer); mine.delete(dealId); said.push(say(dealId, { left: { round: st.round, pc: me } }, true).catch(() => undefined)); }
+      for (const [dealId, st] of [...mine]) {
+        if (st.timer) clearInterval(st.timer);
+        st.closed = true;
+        mine.delete(dealId);
+        said.push(say(dealId, { left: { round: st.round, pc: me } }, true).catch(() => undefined));
+      }
       return Promise.allSettled(said).then(() => undefined);
     },
     /** every call made since the app started, by what it was for and which model took it */
