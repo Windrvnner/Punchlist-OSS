@@ -99,7 +99,7 @@ function readTimes() {
   return timesIn(TIMES);
 }
 
-/** The times by suite in a JSON file; none when it is missing or not an object, so a broken file costs only order. */
+/** The times by suite in a JSON file; none when it is missing or not an object, so a broken file never stops a run. */
 function timesIn(file) {
   try {
     const times = JSON.parse(fs.readFileSync(file, 'utf8'));
