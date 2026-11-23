@@ -69,15 +69,17 @@ function sizeBefore(local: Folder, name: string) {
   return local.read(name) === null ? 0 : -1;
 }
 
-/** Make the local copy end where its last whole line ends, before anything is added to it. Throws when it cannot. */
+/** Make the local copy end where its last whole line ends. Throws when a failed append cannot be taken back. */
 function mendLocal(local: Folder, name: string) {
   takeBackFailed(local, name);
   const checked = checkedEnds.get(local) ?? new Set<string>();
   if (checked.has(name)) return;
   // a run that stopped part way through an append (a crash, a power cut) may have left the start of a line
-  const text = local.read(name) ?? '';
-  if (!text.endsWith('\n') && text) local.write(name, text.slice(0, text.lastIndexOf('\n') + 1));
-  checkedEnds.set(local, checked.add(name));
+  try {
+    const text = local.read(name) ?? '';
+    if (!text.endsWith('\n') && text) local.write(name, text.slice(0, text.lastIndexOf('\n') + 1));
+    checkedEnds.set(local, checked.add(name));
+  } catch { /* a file held for a moment: the append goes ahead, and the end is checked at the next one */ }
 }
 
 /** Whether the local copy still holds part of a failed append: its lines must not be read as written. */

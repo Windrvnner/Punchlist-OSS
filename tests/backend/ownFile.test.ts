@@ -126,6 +126,20 @@ describe('own files', () => {
     expect(local.files.get('f')).toBe('one\ntwo\nthree\n');
   });
 
+  it('a file held for a moment when its end is checked is still appended to, and checked at the next append', () => {
+    const shared = new Tearing();
+    const local = new Tearing();
+    local.files.set('f', 'one\n');
+    const read = vi.spyOn(local, 'read').mockImplementationOnce(() => {
+      throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+    });
+    appendOwn(shared, local, 'f', 'two\n');
+    local.files.set('f', `${local.files.get('f')}{"v":1,"cut`);       // a run that stopped part way
+    appendOwn(shared, local, 'f', 'three\n');
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(local.files.get('f')).toBe('one\ntwo\nthree\n');
+  });
+
   it('the start of a line left by a run that stopped part way is cut off before the next append', () => {
     const shared = new Tearing();
     const local = new Tearing();
