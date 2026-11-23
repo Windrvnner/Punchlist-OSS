@@ -6,7 +6,10 @@ import { nodeAi, type AiDocs } from '../../src/backend/ai';
 import { StandInService } from '../../src/backend/service';
 import { StoreKeeper } from '../../src/backend/storeKeeper';
 import type { Folder } from '../../src/backend/logRepository';
+import { memoContent, type Rating } from '../../src/domain/memo';
+import { memoDocument } from '../../src/domain/memoDoc';
 import { memRepo, type MemRepo } from '../adapters/memRepo';
+import { scaleMemoInput } from '../fixtures/memoScale';
 
 class Mem implements Folder { files = new Map<string, string>(); list() { return [...this.files.keys()]; } size(n: string) { return this.files.get(n)?.length ?? -1; } read(n: string) { return this.files.get(n) ?? null; } append(n: string, t: string) { this.files.set(n, (this.files.get(n) ?? '') + t); } write(n: string, t: string) { this.files.set(n, t); } }
 type Call = { model: string; prompt: string };
@@ -27,6 +30,47 @@ async function deal(repo: MemRepo) { val(await repo.transaction({ writes: [{ kin
 async function finding(repo: MemRepo, id: string, title: string, extra: object = {}, rev: number | null = null) { val(await repo.transaction({ writes: [{ kind: 'finding', id, data: { id, dealId: 'd1', title, workstream: 'Technical', status: 'open', body: ['As written. [1]'], sources: [], ...extra }, expectedRev: rev }], index: { dealId: 'd1', add: [{ kind: 'finding', id }] } })); }
 /** rate every finding the ask lists as given, by id */
 const by = (given: Record<string, string>) => (c: Call) => ({ ratings: [...c.prompt.matchAll(/^(f_\w+) \(/gm)].map((m) => ({ id: m[1], rating: given[m[1]] })) });
+
+const SCALE_FINDINGS = scaleMemoInput.findings.filter((f) => f.status === 'open');
+const UNRESOLVED = 'there are open findings with unresolved ratings';
+const HIGH_RISKS = 'each of these High risks in one sentence';
+const NO_HIGH = 'that no open risk is rated High';
+const NO_OPEN = 'that it has no open findings';
+
+function summaryFromPrompt({ prompt }: Call) {
+  const risks: string[] = [];
+  if (prompt.includes(UNRESOLVED)) risks.push('Open findings have unresolved ratings.');
+  if (prompt.includes(HIGH_RISKS)) risks.push('The model uses a higher yield than the advisor’s estimate.');
+  if (prompt.includes(NO_HIGH)) risks.push('No open risk is rated High.');
+  if (prompt.includes(NO_OPEN)) risks.push('The deal has no open findings.');
+  return { paragraphs: ['The proposed financing is for a solar project with battery storage.', risks.join(' ')] };
+}
+
+const ratingCases = [
+  { name: 'all missing', rated: 0, expected: [UNRESOLVED] },
+  { name: 'some missing', rated: 4, expected: [UNRESOLVED] },
+  { name: 'some missing with a known High', rated: 1, firstRating: 'High', expected: [UNRESOLVED, HIGH_RISKS] },
+  { name: 'all present', rated: SCALE_FINDINGS.length, expected: [NO_HIGH] },
+  { name: 'no open findings', rated: 0, closedOnly: true, expected: [NO_OPEN] },
+] as const;
+
+async function scriptedScaleMemo(testCase: (typeof ratingCases)[number]) {
+  const findings = 'closedOnly' in testCase ? scaleMemoInput.findings.filter((f) => f.status === 'closed')
+    : scaleMemoInput.findings;
+  const ratings = Object.fromEntries(SCALE_FINDINGS.slice(0, testCase.rated).map((f): [string, Rating] => [
+    f.id, 'firstRating' in testCase ? testCase.firstRating : 'Low',
+  ]));
+  const rate = by(ratings);
+  const s = setup((call) => ({ ratings: rate(call).ratings.filter((row) => row.rating) }), summaryFromPrompt);
+  await deal(s.repo);
+  for (const f of findings) await finding(s.repo, f.id, f.title, { ...f, dealId: 'd1' });
+  const result = val(await s.ai.memo!('d1'));
+  const content = memoContent({
+    ...scaleMemoInput, findings, summary: result.summary, ratings: result.ratings, groups: result.risks,
+  });
+  const [pageOne] = memoDocument(content, 'AI').split('<text:h text:style-name="HBreak"');
+  return { actualRatings: result.ratings, expectedRatings: ratings, sums: s.sums, pageOne };
+}
 
 describe('the deal memo’s ratings and summary', () => {
   it('rates each open finding against the definitions, and with none rates nothing but still says what the deal is', async () => {
@@ -83,6 +127,31 @@ describe('the deal memo’s ratings and summary', () => {
     for (let k = 0; k < 45; k++) await finding(s.repo, `f_${k}`, `Finding ${k}`);
     const m = val(await s.ai.memo!('d1'));
     expect(Object.keys(m.ratings).length).toBe(45); expect(s.rates.map((c) => c.prompt.match(/^f_\w+ \(/gm)!.length)).toEqual([40, 5]);
+  });
+
+  it.each(ratingCases)('reports the state of open-finding ratings at scale with $name', async (testCase) => {
+    const { actualRatings, expectedRatings, sums, pageOne } = await scriptedScaleMemo(testCase);
+    expect(SCALE_FINDINGS.length).toBeGreaterThanOrEqual(40);
+    expect(new Set(SCALE_FINDINGS.map((f) => f.workstream)).size).toBeGreaterThan(3);
+    expect(actualRatings).toEqual(expectedRatings);
+    expect(sums).toHaveLength(1);
+    const instructions = [UNRESOLVED, HIGH_RISKS, NO_HIGH, NO_OPEN].filter((text) => sums[0].prompt.includes(text));
+    expect(instructions).toEqual(testCase.expected);
+
+    const hasMissing = !('closedOnly' in testCase) && testCase.rated < SCALE_FINDINGS.length;
+    if (hasMissing) {
+      expect(pageOne).toContain('Open findings have unresolved ratings.');
+      expect(pageOne).toContain(`, ${SCALE_FINDINGS.length - testCase.rated} unrated.`);
+      expect(pageOne).not.toMatch(/no open (finding|risk) is rated High/i);
+    } else {
+      expect(pageOne).not.toMatch(/unrated|unresolved ratings/);
+    }
+    if ('firstRating' in testCase) {
+      expect(sums[0].prompt).toContain(SCALE_FINDINGS[0].title);
+      expect(pageOne).toContain('The model uses a higher yield than the advisor’s estimate.');
+    }
+    const count = 'closedOnly' in testCase ? 'No open findings.' : `${SCALE_FINDINGS.length} open findings`;
+    expect(pageOne).toContain(count);
   });
 
   it('keeps a summary that reports what a document requires', async () => {
