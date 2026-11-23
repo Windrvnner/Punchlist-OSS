@@ -16,7 +16,7 @@
 import type { Folder } from './logRepository';
 import type { ConversationStore, KeptMessage } from '../ports';
 import { ok, fail } from '../domain/result';
-import { appendOwn, healOwn, wholeLines } from './ownFile';
+import { appendOwn, healOwn, holdsFailedAppend, readOwn, wholeLines } from './ownFile';
 
 export interface ConversationLogOptions {
   shared: Folder; local: Folder;
@@ -69,8 +69,11 @@ export function conversationLog(o: ConversationLogOptions): ConversationStore & 
     }
     return out;
   };
+  type Readable = Pick<Folder, 'size' | 'read'>;
+  /** This PC's copy of its own files, without a failed save not yet cut off (`readOwn`). */
+  const ownCopy = { size: (name: string) => o.local.size(name), read: (name: string) => readOwn(o.local, name) };
   /** Pass each line of one file to `each`, unless the file is missing or its size is the one in `sizes` from the last read: an unchanged file is not opened. */
-  const readChanged = (folder: Folder, sizes: Map<string, number>, name: string, each: (l: Line) => void) => {
+  const readChanged = (folder: Readable, sizes: Map<string, number>, name: string, each: (l: Line) => void) => {
     const size = folder.size(name); if (size < 0 || sizes.get(name) === size) return;
     for (const l of parse(folder.read(name) ?? '')) each(l);
     sizes.set(name, size);
@@ -86,7 +89,11 @@ export function conversationLog(o: ConversationLogOptions): ConversationStore & 
     let names: string[] = []; try { names = o.shared.list(); } catch { /* looked at again next time */ }
     for (const name of names) if (FILE.test(name)) { try { readChanged(o.shared, seen, name, (l) => { if (take(l) && l.by === me) mine = true; }); } catch { /* read again next time */ } }
     // and what only the local copy holds (the shared folder could not be read)
-    for (const name of o.local.list()) { const m = FILE.exec(name); if (m && m[1] === o.installId) readChanged(o.local, seenLocal, name, take); }
+    // (without a failed save's lines that cannot be cut off yet: they would count as saved and not be saved again)
+    for (const name of o.local.list()) {
+      const m = FILE.exec(name);
+      if (m && m[1] === o.installId) readChanged(ownCopy, seenLocal, name, take);
+    }
     return mine;
   };
   const threads = (): Record<string, KeptMessage[]> => {
@@ -123,7 +130,8 @@ export function conversationLog(o: ConversationLogOptions): ConversationStore & 
         return ok(undefined);
       } catch (e) {
         // this PC's copy could not be written, so nothing was, anywhere: the numbers are used again, and the failure says so (`failed`)
-        seq = before;
+        // unless part of it is still there, to be cut off later: a number it holds is not given to another line (#126)
+        if (!holdsFailedAppend(o.local, own(file))) seq = before;
         return fail({ kind: 'failed' as const, message: (e as { code?: string })?.code === 'ENOSPC' ? 'The disk is full' : 'This PC’s copy of the conversation could not be written' });
       }
     },

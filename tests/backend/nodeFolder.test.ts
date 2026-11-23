@@ -139,3 +139,29 @@ describe('a folder on disk, when a file is held by another program', () => {
     expect(() => f.append('changes.jsonl', 'one\n')).toThrow(/EBUSY/); expect(n.tried).toBe(1);
   });
 });
+
+describe('a folder on disk, when the disk takes only part of a write (#126)', () => {
+  /** The next write takes only the first two bytes of what it is given, and says so without an error. */
+  const shortWrite = () => {
+    const real = fs.writeSync.bind(fs) as (...a: any[]) => number;
+    const short = (fd: number, data: string | Buffer, at?: number) => {
+      const bytes = typeof data === 'string' ? Buffer.from(data) : data.subarray(at ?? 0);
+      return real(fd, bytes.subarray(0, 2));
+    };
+    return vi.spyOn(fs, 'writeSync').mockImplementationOnce(short as any);
+  };
+
+  it('writes the rest after a short write, so the line is whole', () => {
+    const dir = tmp();
+    shortWrite();
+    nodeFolder(dir, []).append('f', 'naïve – résumé\n');
+    expect(fs.readFileSync(path.join(dir, 'f'), 'utf8')).toBe('naïve – résumé\n');
+  });
+
+  it('throws when the disk takes nothing more, rather than report a short line as saved', () => {
+    const dir = tmp();
+    shortWrite().mockImplementationOnce((() => 0) as any);
+    expect(() => nodeFolder(dir, []).append('f', 'two\n')).toThrow('ENOSPC');
+    expect(fs.readFileSync(path.join(dir, 'f'), 'utf8')).toBe('tw');
+  });
+});
