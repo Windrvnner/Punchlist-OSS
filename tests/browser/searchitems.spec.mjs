@@ -106,34 +106,55 @@ async function loadingUsesMyDeals() {
   await ctx.close();
 }
 
+async function searchWhileDealIsHeld(page, open, held, phrase) {
+  await page.goto(URL + '#overview-' + open);
+  await page.reload();
+  await page.waitForFunction((id) => store.get().dealLoad[id] === 'loaded', open);
+  await holdDeal(page, held);
+  await search(page, phrase);
+}
+
 async function selectionSurvivesLoading() {
   const { ctx, page, k, o } = await start();
-  const phrase = 'Financial model has been audited';
-  const created = await page.evaluate(([dealId, title]) =>
-    store.dispatch(store.commandNamed('CreateFinding'), { dealId, title, workstream: 'Legal' }, { quiet: true }),
-  [o, phrase]);
-  if (!created.ok) throw new Error(JSON.stringify(created.error));
-  const original = page.locator('#pal-res [data-kind=item] button').filter({ hasText: 'Project Proseware' }).first();
+  const races = [
+    { phrase: 'Financial model has been audited', pointer: false, finding: true },
+    { phrase: 'lease term', pointer: true, finding: true },
+    { phrase: LAST, pointer: false, finding: false },
+  ];
+  for (const { phrase, finding } of races) {
+    if (!finding) continue;
+    const created = await page.evaluate(([dealId, title]) =>
+      store.dispatch(store.commandNamed('CreateFinding'), { dealId, title, workstream: 'Legal' }, { quiet: true }),
+    [o, phrase]);
+    if (!created.ok) throw new Error(JSON.stringify(created.error));
+  }
+  const ownItems = page.locator('#pal-res [data-kind=item] button').filter({ hasText: 'Project Proseware' });
   const selected = page.locator('#pal-res [aria-selected=true]');
   const outcomes = [];
-  for (const pointer of [false, true]) {
-    await page.goto(URL + '#overview-' + k);
-    await page.reload();
-    await page.waitForFunction((id) => store.get().dealLoad[id] === 'loaded', k);
-    await holdDeal(page, o);
-    await search(page, phrase);
+  for (const { phrase, pointer, finding } of races) {
+    await searchWhileDealIsHeld(page, k, o, phrase);
+    const original = ownItems.nth(pointer ? 1 : 0);
     await original.waitFor();
     if (pointer) await original.hover();
+    const wanted = await original.textContent();
+    const pointed = await selected.textContent();
     await page.evaluate(() => window.releaseSearchRead());
-    await page.locator('#pal-res [data-kind=finding]').waitFor();
+    await page.waitForFunction((id) => store.get().dealLoad[id] === 'loaded', o);
+    if (finding) await page.locator('#pal-res [data-kind=finding]').waitFor();
     const kept = await selected.textContent();
     await page.keyboard.press('Enter');
     await page.waitForSelector('#pal-drop', { state: 'detached' });
     const hash = await page.evaluate(() => location.hash);
-    outcomes.push(kept.includes('Project Proseware') && hash === `#checklist-${k}`);
+    outcomes.push(wanted === pointed && kept === wanted && hash === `#checklist-${k}`);
   }
-  say('#501 Search keeps keyboard and pointer selections through a late finding', outcomes.every(Boolean),
-    JSON.stringify(outcomes));
+  await search(page, LAST);
+  await ownItems.first().hover();
+  await page.evaluate((dealId) =>
+    store.dispatch(store.commandNamed('SetDealMember'), { dealId, on: false }, { quiet: true }), k);
+  const fallback = await selected.textContent();
+  outcomes.push(fallback.includes('Project Wingtip'));
+  say('#501 Search preserves the selected hit through late results and falls back when it disappears',
+    outcomes.every(Boolean), JSON.stringify(outcomes));
   await ctx.close();
 }
 
