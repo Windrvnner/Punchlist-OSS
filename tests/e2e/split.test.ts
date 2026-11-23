@@ -337,12 +337,14 @@ describe('two PCs share a deal\'s checks', () => {
       await until('the laptop to finish the round', () => [...roundsOf(p.sync.B, p.dealId).values()].some((r) => r.end?.kind === 'done'), 30000);
       expect(tally(p).size).toBe(100); expect(logOf(p.sync.B, p.dealId).some((l) => l.left && l.pc === p.B.backend.installId)).toBe(false);
     } finally { p.close(); }
-    // alone, with the service away for less than the time a person is kept waiting: the check ends as usual
-    let off = false; const q = await pair({ items: 30, one: true, scriptA: { delay: 10, down: () => off } });
+    // alone, with the service away for one call: the check ends as usual, even when the rest of it, once the service is
+    // back, takes longer than the time a person is kept waiting (#131). Two items a call keep the rest well over that time.
+    let off = false; const q = await pair({ items: 30, one: true, batch: 2, scriptA: { delay: 40, down: () => { const was = off; off = false; return was; } } });
     try {
       val(await aiOf(q.A).firstPass(q.dealId)); await allEnded(q);
-      off = true; const r = q.A.backend.ai.checkAll!({ dealId: q.dealId, deep: true }); setTimeout(() => { off = false; }, FAST.giveUp! / 3);
+      off = true; const at = Date.now(); const r = q.A.backend.ai.checkAll!({ dealId: q.dealId, deep: true });
       expect(val(await r)).toMatchObject({ items: 30, unchecked: { items: 0, findings: 0 } });
+      expect(Date.now() - at).toBeGreaterThan(FAST.giveUp!);                                                 // the rest did outlast the wait
     } finally { q.close(); }
   }, 90000);
 
