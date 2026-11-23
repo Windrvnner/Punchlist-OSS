@@ -3,15 +3,18 @@
 // Prints each stage's time and the difference, then exits 1 if anything that passed before is missing, skipped or
 // failing after: a Vitest test, a desktop smoke check, a whole stage, or a browser suite or its count of checks. A
 // browser check's line holds its ID and often a note that changes between runs, so the PASS lines seen only before are
-// listed for a person to read rather than counted as lost. Exits 2 when a folder holds no run.
+// listed for a person to read rather than counted as lost. Exits 2 when a folder holds no run or is outside out/gate/.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { insideGate } from './gate-dir.mjs';
 
-/** One run's files; a file a run did not write (its stage never ran) reads as null. */
+/** One run's files; a file a run did not write (its stage never ran), or a folder outside out/gate/, reads as null. */
 export function readGate(dir) {
+  const root = insideGate(dir);
   const read = (name) => {
-    const file = path.join(dir, name);
+    if (!root) return null;
+    const file = path.join(root, name);
     return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
   };
   const gate = read('gate.json');
@@ -106,7 +109,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const runs = [beforeDir, afterDir].map(readGate);
   const empty = [beforeDir, afterDir].filter((dir, i) => !runs[i].gate);
   if (empty.length) {
-    console.error(`No run recorded (no gate.json) in: ${empty.join(', ')}`);
+    console.error(`No run recorded (no gate.json under out/gate/) in: ${empty.join(', ')}`);
     process.exit(2);
   }
   const { lines, problems } = compareGates(runs[0], runs[1]);

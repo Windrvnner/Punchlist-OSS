@@ -5,6 +5,8 @@
 // while others are running is run once more on its own; if it passes then, that is reported as such, not hidden.
 // Exit code 0 only if every suite passed (alone or alongside). Logs go to out/browser/<suite>.log.
 import { spawn } from 'node:child_process'; import fs from 'node:fs'; import http from 'node:http';
+import path from 'node:path';
+import { insideGate } from './gate-dir.mjs';
 
 const args = process.argv.slice(2); const j = args.indexOf('--jobs'); const jobs = j >= 0 ? Math.max(1, +args[j + 1] || 1) : 5;
 const shardAt = args.indexOf('--shard');
@@ -157,7 +159,7 @@ if (bad.length) process.exit(1);
 
 /** Under check:all, each requested suite's result for scripts/gate-compare.mjs; an unrun suite has total 0. */
 function writeGateResult() {
-  const dir = process.env.PUNCHLIST_GATE_DIR;
+  const dir = insideGate(process.env.PUNCHLIST_GATE_DIR);
   if (!dir) return;
   const byName = new Map(results.map((result) => [result.name, result]));
   const entries = suites.map((name) => {
@@ -167,5 +169,5 @@ function writeGateResult() {
     return { name, passed, total, secs, rerun: !!result.rerun, firstFails: result.firstFails ?? [], lines };
   });
   const secs = Math.round((Date.now() - started) / 1000);
-  fs.writeFileSync(`${dir}/browser.json`, JSON.stringify({ jobs, secs, suites: entries }, null, 2));
+  fs.writeFileSync(path.join(dir, 'browser.json'), JSON.stringify({ jobs, secs, suites: entries }, null, 2));
 }

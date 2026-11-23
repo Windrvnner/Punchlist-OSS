@@ -1,9 +1,10 @@
 import { defineConfig, configDefaults } from 'vitest/config';
 import preact from '@preact/preset-vite';
 import path from 'node:path';
+import { insideGate } from './scripts/gate-dir.mjs';
 const live = process.env.PUNCHLIST_LIVE === '1';
 // check:all sets this folder so the run leaves a machine-readable result (scripts/gate-compare.mjs)
-const gateDir = process.env.PUNCHLIST_GATE_DIR;
+const gateDir = insideGate(process.env.PUNCHLIST_GATE_DIR);
 const aiCheck = ['claude', 'north', 'openai'].includes(process.env.PUNCHLIST_AI_CHECK ?? '');
 export default defineConfig({ plugins: [preact()], test: { include: [
     'tests/domain/**/*.test.ts', 'tests/adapters/**/*.test.ts', 'tests/app/**/*.test.ts', 'tests/backend/**/*.test.ts',

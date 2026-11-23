@@ -2,6 +2,7 @@
 // signed in on a test key, with no model service reachable. Run: node tests/desktop/smoke.spec.mjs (on Linux it needs a display: xvfb-run -a).
 import { _electron as electron } from 'playwright';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { createHash } from 'node:crypto';
+import { insideGate } from '../../scripts/gate-dir.mjs';
 
 const results = [];
 const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
@@ -292,7 +293,7 @@ fs.rmSync(root, { recursive: true, force: true });
 const failed = results.filter(([, ok]) => !ok);
 console.log(`\n${results.length - failed.length}/${results.length} passed`);
 // under check:all, the check IDs for scripts/gate-compare.mjs
-const gateDir = process.env.PUNCHLIST_GATE_DIR;
+const gateDir = insideGate(process.env.PUNCHLIST_GATE_DIR);
 const checks = results.map(([id, ok]) => ({ id, ok }));
 if (gateDir) fs.writeFileSync(path.join(gateDir, 'smoke.json'), JSON.stringify({ checks }, null, 2));
 process.exit(failed.length ? 1 : 0);

@@ -1,12 +1,16 @@
 // @vitest-environment node
 // The check:all comparison: a faster run passes only if every test, check and stage that passed before still passes.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 const script = path.resolve('scripts/gate-compare.mjs');
+// the comparison reads only folders under out/gate/, as check:all writes them
+fs.mkdirSync(path.resolve('out/gate'), { recursive: true });
+const gateRoot = fs.mkdtempSync(path.resolve('out/gate/test-'));
+afterAll(() => fs.rmSync(gateRoot, { recursive: true, force: true }));
 const vitestTests = ['keeps the draft', 'saves the log', 'reopens the deal'];
 
 const suite = (name: string, checks: number, secs: number) =>
@@ -22,7 +26,7 @@ function run(change: (files: Record<string, any>) => void = () => {}, secs = 100
     'smoke.json': { checks: [{ id: 'boots', ok: true }, { id: 'folder-recovers', ok: true }] },
   };
   change(files);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-'));
+  const dir = fs.mkdtempSync(path.join(gateRoot, 'run-'));
   for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), JSON.stringify(content));
   return dir;
 }
@@ -81,8 +85,16 @@ describe('the check:all comparison', () => {
     expect(result.stdout).toContain('drafts: PASS the draft is kept');
   });
 
+  it('refuses a folder outside out/gate/, even one holding a run', () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-'));
+    fs.cpSync(run(), outside, { recursive: true });
+    const result = compare(outside, run());
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('No run recorded');
+  });
+
   it('refuses a folder with no recorded run rather than reporting the same coverage', () => {
-    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-'));
+    const empty = fs.mkdtempSync(path.join(gateRoot, 'run-'));
     const result = compare(empty, run());
     expect(result.status).toBe(2);
     expect(result.stderr).toContain('No run recorded');

@@ -57,8 +57,9 @@ command, seconds and exit status), `vitest.json`, `browser.json` (each suite's c
 `smoke.json` (the desktop smoke check IDs). A change that speeds up the tests shows it keeps coverage with
 `node scripts/gate-compare.mjs <before> <after>`, which prints each stage's difference and exits 1 if any Vitest test,
 smoke check or stage that passed before is missing, skipped or failing after, or if a browser suite has fewer checks
-or passes. It lists the browser PASS lines seen only before, since their notes can change between runs. Standalone
-commands write nothing there.
+or passes. It lists the browser PASS lines seen only before, since their notes can change between runs. Both folders
+must be under `out/gate/`; the scripts read and write run folders nowhere else. Standalone commands write nothing
+there.
 
 ### Linux test runner troubleshooting
 
