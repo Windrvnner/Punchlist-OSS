@@ -11,8 +11,11 @@ const browser = await launchChrome();
 openOnFindings(browser);
 const PAGES = 320; const bytes = longPdf(PAGES);
 
-async function reading({ pdf = true, size = [1280, 736], recordRuntime = false } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: size[0], height: size[1] } }); const page = await ctx.newPage(); page.errors = []; page.on('pageerror', (e) => page.errors.push(e.message));
+async function reading({ pdf = true, size = [1280, 736], recordRuntime = false, colorScheme } = {}) {
+  const ctx = await browser.newContext({ viewport: { width: size[0], height: size[1] }, colorScheme });
+  const page = await ctx.newPage();
+  page.errors = [];
+  page.on('pageerror', (e) => page.errors.push(e.message));
   if (recordRuntime) await ctx.addInitScript(() => {
     const send = Worker.prototype.postMessage;
     Worker.prototype.postMessage = function (message, ...options) {
@@ -195,6 +198,99 @@ for (const size of [[1280, 736], [1024, 640]]) {
   for (let i = 0; i < 12; i++) await page.keyboard.press('Control+=');
   const top = await page.evaluate(() => document.querySelector('#zoom-in').disabled);
   say(`zoom-in-stops-at-the-largest-${size[0]}`, top, String(top));
+  await ctx.close();
+}
+
+// Sample what Chromium actually paints. Reuse the same screenshot for every strip in a frame.
+async function readingPixels(page, boxes) {
+  const png = await page.screenshot();
+  return page.evaluate(async ({ png, boxes }) => {
+    const image = new Image();
+    image.src = 'data:image/png;base64,' + png;
+    await image.decode();
+    const context = new OffscreenCanvas(image.width, image.height).getContext('2d');
+    context.drawImage(image, 0, 0);
+    return boxes.map(([x, y, width, height]) => Array.from(context.getImageData(x, y, width, height).data));
+  }, { png: png.toString('base64'), boxes });
+}
+
+async function paneShadow(page, height) {
+  const { left, bottom, middle, fits } = await page.evaluate(() => {
+    const view = document.querySelector('.view.chatview').getBoundingClientRect();
+    const pane = (document.querySelector('.reading-pane') ?? document.querySelector('.chat')).getBoundingClientRect();
+    const rail = document.querySelector('.rail').getBoundingClientRect();
+    const paper = document.querySelector('.docbody .page').getBoundingClientRect();
+    const composer = document.getElementById('pcomposer').getBoundingClientRect();
+    const fits = document.documentElement.scrollWidth === innerWidth && document.body.scrollWidth === innerWidth &&
+      rail.right < pane.left && pane.right < paper.left && composer.left >= pane.left &&
+      composer.right <= pane.right && composer.bottom <= pane.bottom;
+    return { left: Math.round(view.left), bottom: Math.round(view.bottom),
+      middle: Math.round(pane.left + pane.width / 2), fits };
+  });
+  const [outer, inner, upper, lower] = await readingPixels(page, [
+    [left - 1, height - 210, 1, 20], [left, height - 210, 1, 20],
+    [middle - 10, bottom - 1, 20, 1], [middle - 10, bottom, 20, 1],
+  ]);
+  const lightness = (strip) => strip.reduce((sum, value, i) => sum + (i % 4 === 3 ? 0 : value), 0) / 60;
+  return { side: +(lightness(outer) - lightness(inner)).toFixed(1),
+    bottom: +(lightness(lower) - lightness(upper)).toFixed(1), fits };
+}
+
+async function paneMaterials(page) {
+  return page.evaluate(() => {
+    const material = (element) => {
+      const style = getComputedStyle(element);
+      return [style.backgroundColor, style.backdropFilter, style.border, style.borderRadius, style.boxShadow,
+        getComputedStyle(element, '::after').backgroundImage];
+    };
+    const reference = JSON.stringify(material(document.querySelector('.rail')));
+    const pane = document.querySelector('.reading-pane') ?? document.querySelector('.chat');
+    const composer = document.querySelector('#pcomposer');
+    return { pane: JSON.stringify(material(pane)) === reference,
+      composer: JSON.stringify(material(composer)) === reference };
+  });
+}
+
+async function placeholderContrast(page) {
+  const { color, box } = await page.locator('#pask').evaluate((input) => {
+    const { left, top, width, height } = input.getBoundingClientRect();
+    return { color: getComputedStyle(input, '::placeholder').color.match(/\d+/g).map(Number),
+      box: [Math.ceil(left + 4), Math.ceil(top + 1), Math.floor(Math.min(width - 8, 200)), Math.floor(height - 2)] };
+  });
+  const style = await page.addStyleTag({ content: '#pask::placeholder{opacity:0}' });
+  const [background] = await readingPixels(page, [box]);
+  await style.evaluate((node) => node.remove());
+  const luminance = (red, green, blue) => {
+    const linear = (value) => value <= 10 ? value / 3294.6 : ((value / 255 + 0.055) / 1.055) ** 2.4;
+    return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue) + 0.05;
+  };
+  const ink = luminance(...color);
+  let lowest = Infinity;
+  for (let i = 0; i < background.length; i += 4) {
+    const pixel = luminance(background[i], background[i + 1], background[i + 2]);
+    lowest = Math.min(lowest, Math.max(ink, pixel) / Math.min(ink, pixel));
+  }
+  return lowest;
+}
+
+// #437 reuses the rail's pane glass. #442 checks both formerly clipped shadow edges, one pixel at a time.
+for (const colorScheme of ['dark', 'light']) {
+  const { ctx, page } = await reading({ pdf: false, colorScheme });
+  for (const [width, height] of [[1280, 736], [1024, 640], [1440, 900]]) {
+    await page.setViewportSize({ width, height });
+    await page.mouse.move(width - 2, 1);
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.waitForTimeout(525);
+    if (width !== 1440) {
+      const glass = await paneMaterials(page);
+      const contrast = await placeholderContrast(page);
+      say(`reading-pane-and-composer-use-pane-glass-437-${colorScheme}-${width}`,
+        glass.pane && glass.composer && contrast >= 4.5, JSON.stringify({ ...glass, contrast: +contrast.toFixed(2) }));
+    }
+    const shadow = await paneShadow(page, height);
+    say(`reading-pane-shadow-falls-off-beyond-view-442-${colorScheme}-${width}`,
+      Math.abs(shadow.side) <= 2 && Math.abs(shadow.bottom) <= 2 && shadow.fits, JSON.stringify(shadow));
+  }
   await ctx.close();
 }
 
