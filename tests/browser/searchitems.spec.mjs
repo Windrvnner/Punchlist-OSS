@@ -37,6 +37,127 @@ async function start(size = [1280, 736], scheme = 'dark') {
 const groups = (page) => page.evaluate(() => [...document.querySelectorAll('#pal-res .pgrp')].map((g) => [g.dataset.kind, g.querySelector('.plbl').textContent, g.querySelectorAll('button:not(.pmore)').length]));
 const search = async (page, q) => { await page.keyboard.press('Control+k'); await page.fill('#pal-in', q); await page.waitForSelector('#pal-res .pgrp, #pal-res .empty'); await page.waitForTimeout(150); };
 
+// Hold one mock record read until the test releases it, without changing its contents.
+const holdDeal = (page, id) => page.evaluate((id) => {
+  const repo = store.services.repo;
+  const list = repo.list.bind(repo);
+  const held = new Promise((resolve) => { window.releaseSearchRead = resolve; });
+  repo.list = async (kind, dealId) => {
+    if (kind === 'question' && dealId === id) await held;
+    return list(kind, dealId);
+  };
+}, id);
+
+// Supply a deal-scale log through the browser's mock reader, without consuming localStorage quota.
+async function seedQuestions(page, id) {
+  await page.evaluate(([id, wordings]) => {
+    const repo = store.services.repo;
+    const list = repo.list.bind(repo);
+    repo.list = async (kind, dealId) => {
+      const read = await list(kind, dealId);
+      if (!read.ok || kind !== 'question' || dealId !== id) return read;
+      const question = read.value.find(({ envelope }) => envelope.data.text.includes('lease term'));
+      if (!question) throw new Error('Missing mock question template');
+      const rows = wordings.map((text, index) => ({
+        ...question,
+        envelope: {
+          ...question.envelope,
+          data: { ...question.envelope.data, id: `q_${String(index + 1).padStart(26, '0')}`, n: index + 1, text },
+        },
+      }));
+      return { ...read, value: rows };
+    };
+  }, [id, general().map(({ text }) => `Please confirm: ${text}`)]);
+}
+
+async function loadingUsesMyDeals() {
+  const { ctx, page, k, o } = await start();
+  const neverAdded = 'd_00000000000000000000000001';
+  await page.evaluate(async ([removed, neverAdded]) => {
+    await store.dispatch(store.commandNamed('SetDealMember'), { dealId: removed, on: false }, { quiet: true });
+    const data = { ...store.get().deals[removed], id: neverAdded };
+    const result = await store.services.repo.transaction({
+      writes: [{ kind: 'deal', id: neverAdded, data, expectedRev: null }],
+      index: { dealId: '_', add: [{ kind: 'deal', id: neverAdded }] },
+    });
+    if (!result.ok) throw new Error(JSON.stringify(result.error));
+  }, [o, neverAdded]);
+  const created = await page.evaluate((dealId) => store.dispatch(store.commandNamed('CreateQuestion'),
+    { dealId, text: 'Please confirm the lease term.', workstream: 'Legal' }, { quiet: true }), k);
+  if (!created.ok) throw new Error(JSON.stringify(created.error));
+  await page.goto(URL + '#deals');
+  await page.reload();
+  await page.waitForFunction(([mine, unadded]) =>
+    store.get().boot.stage === 'ready' && !!store.get().deals[mine] && !!store.get().deals[unadded], [k, neverAdded]);
+  await seedQuestions(page, k);
+  await holdDeal(page, k);
+  await search(page, 'zzzzqqq');
+  const loading = await page.textContent('#pal-res .empty');
+  await page.evaluate(() => window.releaseSearchRead());
+  await page.waitForFunction((id) => store.get().dealLoad[id] === 'loaded', k);
+  const done = await page.textContent('#pal-res .empty');
+  const ownOnly = await page.evaluate(([removed, unadded]) =>
+    [removed, unadded].every((id) => store.get().dealLoad[id] === undefined), [o, neverAdded]);
+  await page.fill('#pal-in', 'lease term');
+  const question = page.locator('#pal-res [data-kind=question] button:not(.pmore)').first();
+  const match = await question.waitFor({ timeout: 3000 }).then(() => true, () => false);
+  const finished = loading === 'Searching' && done === 'No matches.' && ownOnly && match;
+  say('#491 Search completes after My Deals are read', finished, JSON.stringify({ loading, done, ownOnly, match }));
+  await ctx.close();
+}
+
+async function searchWhileDealIsHeld(page, open, held, phrase) {
+  await page.goto(URL + '#overview-' + open);
+  await page.reload();
+  await page.waitForFunction((id) => store.get().dealLoad[id] === 'loaded', open);
+  await holdDeal(page, held);
+  await search(page, phrase);
+}
+
+async function selectionSurvivesLoading() {
+  const { ctx, page, k, o } = await start();
+  const races = [
+    { phrase: 'Financial model has been audited', pointer: false, finding: true },
+    { phrase: 'lease term', pointer: true, finding: true },
+    { phrase: LAST, pointer: false, finding: false },
+  ];
+  for (const { phrase, finding } of races) {
+    if (!finding) continue;
+    const created = await page.evaluate(([dealId, title]) =>
+      store.dispatch(store.commandNamed('CreateFinding'), { dealId, title, workstream: 'Legal' }, { quiet: true }),
+    [o, phrase]);
+    if (!created.ok) throw new Error(JSON.stringify(created.error));
+  }
+  const ownItems = page.locator('#pal-res [data-kind=item] button').filter({ hasText: 'Project Proseware' });
+  const selected = page.locator('#pal-res [aria-selected=true]');
+  const outcomes = [];
+  for (const { phrase, pointer, finding } of races) {
+    await searchWhileDealIsHeld(page, k, o, phrase);
+    const original = ownItems.nth(pointer ? 1 : 0);
+    await original.waitFor();
+    if (pointer) await original.hover();
+    const wanted = await original.textContent();
+    const pointed = await selected.textContent();
+    await page.evaluate(() => window.releaseSearchRead());
+    await page.waitForFunction((id) => store.get().dealLoad[id] === 'loaded', o);
+    if (finding) await page.locator('#pal-res [data-kind=finding]').waitFor();
+    const kept = await selected.textContent();
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('#pal-drop', { state: 'detached' });
+    const hash = await page.evaluate(() => location.hash);
+    outcomes.push(wanted === pointed && kept === wanted && hash === `#checklist-${k}`);
+  }
+  await search(page, LAST);
+  await ownItems.first().hover();
+  await page.evaluate((dealId) =>
+    store.dispatch(store.commandNamed('SetDealMember'), { dealId, on: false }, { quiet: true }), k);
+  const fallback = await selected.textContent();
+  outcomes.push(fallback.includes('Project Wingtip'));
+  say('#501 Search preserves the selected hit through late results and falls back when it disappears',
+    outcomes.every(Boolean), JSON.stringify(outcomes));
+  await ctx.close();
+}
+
 async function selectedExpansion(page, oldCount) {
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve())));
   return page.evaluate((before) => {
@@ -134,6 +255,155 @@ async function selectedExpansion(page, oldCount) {
   await ctx.close();
 }
 
+await loadingUsesMyDeals();
+await selectionSurvivesLoading();
+
+const QUESTION = 'Who guarantees delivery under the direct agreement?';
+const FILTER = { status: 'closed', workstream: 'Financial', text: 'permit' };
+const DEFAULT_FILTER = { status: 'all', workstream: '', text: '' };
+const sameFilter = (a, b) => a.status === b.status && a.workstream === b.workstream && a.text === b.text;
+const itemIn = (page, deal) =>
+  page.locator('#pal-res [data-kind=item] button:not(.pmore)').filter({ hasText: deal }).first();
+
+async function chooseQuestion(page, dealId, origin, pointer = false) {
+  await page.goto(URL + '#' + origin);
+  await page.waitForFunction((hash) => location.hash === '#' + hash, origin);
+  await page.waitForSelector('#view');
+  await page.evaluate((qaFilter) => store.ui({ qaFilter, selectedQuestion: null }), FILTER);
+  await search(page, QUESTION);
+  const result = page.locator('#pal-res [data-kind=question] button:not(.pmore)').first();
+  await result.waitFor();
+  if (pointer) await result.click();
+  else await page.keyboard.press('Enter');
+  await page.waitForFunction((id) =>
+    location.hash === '#qa-' + id && document.querySelector('.qpanel textarea.qtext')?.value.includes('guarantees'),
+  dealId);
+  return page.evaluate(() => store.get().ui.qaFilter);
+}
+
+async function keepsQaFilters(page, k, o) {
+  const fromQa = await chooseQuestion(page, k, 'qa-' + k);
+  const chosenVisible = await page.locator('.md .li.on').isVisible();
+  await page.focus('.qpanel textarea.qtext');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.qpanel', { state: 'detached' });
+  const afterEscape = await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => {
+    resolve({ filter: store.get().ui.qaFilter, focus: !!document.activeElement?.closest('.trk-tools') });
+  })));
+  const sameDeal = await chooseQuestion(page, k, 'overview-' + k);
+  const fromHome = await chooseQuestion(page, k, 'deals');
+  const otherDeal = await chooseQuestion(page, k, 'qa-' + o);
+  const keptFilters = [fromQa, afterEscape.filter, sameDeal].every((filter) => sameFilter(filter, FILTER));
+  const resetFilters = [fromHome, otherDeal].every((filter) => sameFilter(filter, DEFAULT_FILTER));
+  say('#497 Search keeps same-deal Q&A filters and opens out-of-filter questions',
+    chosenVisible && afterEscape.focus && keptFilters && resetFilters,
+    JSON.stringify({ fromQa, afterEscape, sameDeal, fromHome, otherDeal }));
+}
+
+async function revealsOpenChecklistRow(page, k) {
+  await page.goto(URL + '#overview-' + k);
+  await search(page, LAST);
+  await itemIn(page, 'Project Proseware').click();
+  await page.waitForSelector('#ck-detail');
+  const outcomes = [];
+  for (const pointer of [false, true]) {
+    await page.locator('#ck-rows').evaluate((list) => { list.scrollTop = 0; });
+    await search(page, LAST);
+    const item = itemIn(page, 'Project Proseware');
+    await item.waitFor();
+    if (pointer) await item.click();
+    else {
+      await item.hover();
+      await page.keyboard.press('Enter');
+    }
+    await page.waitForSelector('#pal-drop', { state: 'detached' });
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    outcomes.push(await page.evaluate(() => {
+      const list = document.querySelector('#ck-rows').getBoundingClientRect();
+      const row = document.querySelector('#ck-rows .ckrow.on').getBoundingClientRect();
+      return row.top >= Math.max(0, list.top) && row.bottom <= Math.min(innerHeight, list.bottom);
+    }));
+  }
+  say('#496 Search reveals the already-open Checklist row', outcomes.every(Boolean), JSON.stringify(outcomes));
+}
+
+async function focusConflictedQuestion(page, dealId) {
+  const conflict = await page.evaluate(async ([dealId, text, qaFilter]) => {
+    const question = Object.values(store.get().questions).find((q) => q.dealId === dealId && q.text === text);
+    const saved = await store.dispatch(store.commandNamed('SetResponse'), {
+      dealId, questionId: question.id, response: 'The draft names the operator.',
+    }, { quiet: true });
+    if (!saved.ok) throw new Error(JSON.stringify(saved.error));
+    const result = await __peer.edit(question.id, { response: 'The revision names the sponsor.' });
+    store.ui({ selectedQuestion: null, qaFilter });
+    return { result, id: question.id };
+  }, [dealId, QUESTION, DEFAULT_FILTER]);
+  if (conflict.result !== 'conflict') throw new Error('Could not seed the mock conflict: ' + conflict.result);
+  await page.waitForFunction((id) => !!store.get().conflicts[id], conflict.id);
+  await search(page, QUESTION);
+  await page.locator('#pal-res [data-kind=question] button:not(.pmore)').first().waitFor();
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.qpanel.conflict');
+  const focused = await page.evaluate(() => document.activeElement?.matches('.qpanel.conflict'));
+  await page.keyboard.press('Tab');
+  const continued = await page.evaluate(() => !!document.activeElement?.closest('.qpanel.conflict'));
+  return focused && continued;
+}
+
+async function focusesKeyboardResults(page, k, o) {
+  const inQuestion = () => page.evaluate(() => !!document.activeElement?.closest('.qpanel'));
+  await chooseQuestion(page, k, 'qa-' + k);
+  const samePage = await inQuestion();
+  await page.keyboard.press('Tab');
+  const next = await page.evaluate(() => !!document.activeElement?.closest('#view'));
+  await chooseQuestion(page, k, 'qa-' + o);
+  const otherDeal = await inQuestion();
+  await chooseQuestion(page, k, 'qa-' + k, true);
+  const pointer = await inQuestion();
+  const conflict = await focusConflictedQuestion(page, k);
+  await page.goto(URL + '#checklist-' + k);
+  await search(page, LAST);
+  await itemIn(page, 'Project Proseware').hover();
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('#ck-detail');
+  const checklist = await page.evaluate(() => document.activeElement?.matches('#ck-rows .ckrow.on'));
+  say('#498 keyboard Search moves focus to the opened question or Checklist row',
+    samePage && next && otherDeal && !pointer && conflict && checklist,
+    JSON.stringify({ samePage, next, otherDeal, pointer, conflict, checklist }));
+}
+
+{
+  const { ctx, page, k, o } = await start();
+  const created = await page.evaluate(([dealId, text]) =>
+    store.dispatch(store.commandNamed('CreateQuestion'), { dealId, text, workstream: 'Legal' }, { quiet: true }),
+  [k, QUESTION]);
+  if (!created.ok) throw new Error(JSON.stringify(created.error));
+  await page.goto(URL + '#deals');
+  await page.reload();
+  await page.waitForFunction(() => store.get().boot.stage === 'ready');
+  await page.evaluate(([id, target, questions]) => {
+    const repo = store.services.repo;
+    const list = repo.list.bind(repo);
+    repo.list = async (kind, dealId) => {
+      const read = await list(kind, dealId);
+      if (!read.ok || kind !== 'question' || dealId !== id) return read;
+      const sample = read.value.find(({ envelope }) => envelope.data.text === target);
+      const extra = questions.map(({ text }, index) => ({
+        ...sample,
+        envelope: {
+          ...sample.envelope,
+          data: { ...sample.envelope.data, id: `q_${String(index + 10).padStart(26, '0')}`, n: index + 10, text },
+        },
+      }));
+      return { ...read, value: [...read.value, ...extra] };
+    };
+  }, [k, QUESTION, general()]);
+  await keepsQaFilters(page, k, o);
+  await revealsOpenChecklistRow(page, k);
+  await focusesKeyboardResults(page, k, o);
+  await ctx.close();
+}
+
 for (const [w, h] of SHOTS ? [[1280, 736], [1024, 640]] : []) for (const scheme of ['dark', 'light']) {
   const { ctx, page, k } = await start([w, h], scheme);
   await page.waitForSelector('#toast', { state: 'detached', timeout: 15000 }).catch(() => {});   // the deals' "created" notices gone
@@ -146,6 +416,16 @@ for (const [w, h] of SHOTS ? [[1280, 736], [1024, 640]] : []) for (const scheme 
   for (let i = 0; i < n; i++) await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter'); await page.waitForSelector('#ck-detail'); await page.waitForTimeout(600);
   await page.screenshot({ path: `${SHOTS}/2-item-opened-${scheme}-${w}x${h}.png` });
+  await page.evaluate(([dealId, text]) =>
+    store.dispatch(store.commandNamed('CreateQuestion'), { dealId, text, workstream: 'Legal' }, { quiet: true }),
+  [k, QUESTION]);
+  await chooseQuestion(page, k, 'qa-' + k);
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: `${SHOTS}/3-question-opened-${scheme}-${w}x${h}.png` });
+  await search(page, 'zzzzqqq');
+  await page.locator('#pal-res .empty').filter({ hasText: 'No matches.' }).waitFor();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: `${SHOTS}/4-no-matches-${scheme}-${w}x${h}.png` });
   await ctx.close();
 }
 

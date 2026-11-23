@@ -29,6 +29,12 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Home is the ask composer alone ("Ask across your deals…"), with no deal list, count, or dashboard cards.
 - The sidebar lists deals only, grouped by Deal status (Live, Monitoring, Pitch, and Closed; the Pitch group is headed "Pitches"). Groups fold and stay folded, and a group appears once it has a deal.
 - Search is one field in the sidebar (Ctrl K). Its results are grouped as Deals, Findings, Checklist Items, Questions, and Documents, and an item opens on its deal's Checklist (#2).
+- A Search question keeps the current deal's Q&A filters. From Home or a different deal it opens with All (#497).
+- Choosing an open Checklist item in Search reveals its row again (#496).
+- Keyboard selection in Search moves focus to the opened question or Checklist row (#498).
+  When a question closes and its row is hidden by the active filter, focus returns to the Q&A filters.
+- Search shows “No matches.” once it finishes reading My Deals and finds no results (#491).
+- Search keeps the highlighted result when more records arrive, while that result is still listed (#501).
 - A deal's pages are Overview, Findings, Checklist, and Q&A; **Settings** → **Deals Open On** picks which page opens first (Overview by default). No new tabs are added.
 - The deal header holds Deal status and one ⋯ menu with **Check Again** (showing "Last checked [date]"), **Deal Memo…**, **Rename**, and, set apart, **Delete Deal…**.
 - The counterparty sits alone at the top right of every deal page. Structure, Sector, and Technology appear on Overview only.
@@ -211,6 +217,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - The New Deal form is kept on its PC as it changes, folders still being read included, until the deal is created, so closing, reloading, or restarting loses nothing (#55, #113). Once Create is pressed, the form stays open until the deal is made or Create fails (#36).
 - No design may lose or hide typed work. Every version not kept is listed under Deleted as "Superseded by" the person who chose, and can be restored.
 - Text typed into a new finding (New finding or **Add as finding**) while **Create Finding** is saving goes to the finding made: its page opens in Edit with that text. A form that held only what was sent closes (#115).
+- A form closed and opened again while its save is out shares one kept draft with it: the save settles that draft once when it lands, and the form on screen then closes only if nothing typed is kept, so the typing is in one place (#771).
 - A save that lands after its deal was deleted elsewhere goes to the recovered copy, removed fields included, unless the copy changed those fields or the save left out a field it never saw; then it is refused. A save to a deleted deal's member, or after its recovered copy was deleted, is refused (#664, #222).
 - A change that arrives before a change it builds on is held back without pausing the deal; one more than a day old is let go as a choice. A deal can't be deleted while such changes are on their way.
 - The connection status card shows only when something is wrong. The avatar's dot is the accent color or red, and OneDrive being unavailable for 15 minutes produces one notice.

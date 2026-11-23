@@ -93,6 +93,13 @@ const wordsOf = (folded: string) => folded.split(/[^\p{L}\p{N}]+/u);
 /** how well a folded title answers the query: it starts with it (0), a word does (1), or it holds it elsewhere (2) */
 const rankOf = (t: string, l: string) => t.startsWith(l) ? 0 : wordsOf(t).some((w) => w.startsWith(l)) ? 1 : 2;
 
+// #497: opening a question from the current deal keeps that deal's Q&A filters.
+function questionSearchPatch(route: UiState['route'], dealId: string, questionId: string): Partial<UiState> {
+  const selectedQuestion = questionId;
+  if ('dealId' in route && route.dealId === dealId) return { selectedQuestion };
+  return { selectedQuestion, qaFilter: { status: 'all', workstream: '', text: '' } };
+}
+
 /** Every match, best first within its type (titles that start with the query, then a word that does, then the rest), checklist items after the other types. */
 export const allHits = (s: State, query: string): Hit[] => gather(s, query, Infinity).hits;
 
@@ -148,7 +155,13 @@ function gather(s: State, query: string, itemsShown: number): { hits: Hit[]; ite
     const make = (it: { id: string; text: string }): Hit => ({ key: `item|${d.id}|${it.id}`, kind: 'item', title: it.text, ...(here ??= inDeal()), hash: `checklist-${d.id}`, ui: { selectedChecklist: it.id, checklistFilter: 'all' } });
     const list = own.length || !Array.isArray(rows) ? own : rows;
     if (list.length) { const x = indexOf(list, `${list === own ? 'items' : 'rows'}|${d.id}`); for (const i of matching(x, l, lq)) { found[itemRank(x, i, l)].push({ it: x.items[i], make }); items++; } }
-    for (const q of dealQuestions(s, d.id)) if (has(q.text, 'q' + q.n, q.response)) out.push({ key: q.id, kind: 'question', title: q.text || `Q${q.n}`, ...inDeal(`Q${q.n}`), hash: `qa-${d.id}`, ui: { selectedQuestion: q.id, qaFilter: { status: 'all', workstream: '', text: '' } } });
+    for (const q of dealQuestions(s, d.id)) {
+      if (!has(q.text, 'q' + q.n, q.response)) continue;
+      out.push({
+        key: q.id, kind: 'question', title: q.text || `Q${q.n}`, ...inDeal(`Q${q.n}`), hash: `qa-${d.id}`,
+        ui: questionSearchPatch(s.ui.route, d.id, q.id),
+      });
+    }
   }
   if (!l) return { hits: out, items: 0 };
   const rank = (h: Hit) => rankOf(fold(h.title), l);
