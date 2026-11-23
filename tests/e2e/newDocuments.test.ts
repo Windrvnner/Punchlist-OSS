@@ -32,6 +32,12 @@ function model() {
     return JSON.stringify({ text: 'Nothing.', sources: [] });
   });
 }
+// A changed folder is read once its listing holds still this long. These cases add whole files at once, so they wait
+// 20 ms instead of the product's 2 s; tests/backend/folderLook.test.ts keeps the files-still-copying cases (#101).
+const SETTLE_MS = 20;
+/** the office PC every case starts, on the stand-in model */
+const officePc = (root: string, more: { timing?: { giveUp: number } } = {}) =>
+  pcApp(root, 'Office', { service: model(), checklist: LIST, settleMs: SETTLE_MS, ...more });
 const roots: string[] = []; afterAll(() => { for (const r of roots) fs.rmSync(r, { recursive: true, force: true }); });
 function dataRoom() {
   const root = tmp(); roots.push(root); const vdr = path.join(root, 'vdr');
@@ -46,7 +52,7 @@ const has = (pc: any, dealId: string, name: string) => (pc.backend.docs as any).
 
 describe('documents added to a data room after it was indexed', () => {
   it('Check again reads them first: the gap they fill is satisfied, a document removed is gone, and the deal’s counts follow', async () => {
-    const { root, vdr } = dataRoom(); const A = await pcApp(root, 'Office', { service: model(), checklist: LIST });
+    const { root, vdr } = dataRoom(); const A = await officePc(root);
     const dealId = await indexed(A, 'Proseware', vdr);
     const s1 = Object.entries(await rowsOf(A, dealId)).find(([, v]) => v !== 'satisfied'); expect(s1).toBeTruthy();   // the audit is a gap
     put(vdr, '01 Finance/Model audit report.pdf', pdf('the financial model has been audited', 4));            // the sponsor uploads it
@@ -61,11 +67,11 @@ describe('documents added to a data room after it was indexed', () => {
   }, 120000);
 
   it('opening the deal reads them, after a restart too; and the timer reads them with the deal not open', async () => {
-    const { root, vdr } = dataRoom(); const A = await pcApp(root, 'Office', { service: model(), checklist: LIST });
+    const { root, vdr } = dataRoom(); const A = await officePc(root);
     const dealId = await indexed(A, 'Proseware', vdr); await A.backend.close();
     put(vdr, '01 Finance/Model audit report.pdf', pdf('the financial model has been audited', 4));
     const was = FOLDER_CHECK.every; FOLDER_CHECK.every = 60 * 60_000;
-    const B = await pcApp(root, 'Office', { service: model(), checklist: LIST }); const stop = watchFolders(B.store);
+    const B = await officePc(root); const stop = watchFolders(B.store);
     try {
       expect(has(B, dealId, 'Model audit report.pdf')).toBe(false);
       B.store.ui({ route: { name: 'overview', dealId } } as any);                                                 // the deal is opened
@@ -80,7 +86,7 @@ describe('documents added to a data room after it was indexed', () => {
   }, 120000);
 
   it('a folder added to the deal while a look is ending is not marked as indexed; a run that never ends holds a check up for checkFolderWait only', async () => {
-    const { root, vdr } = dataRoom(); const A = await pcApp(root, 'Office', { service: model(), checklist: LIST });
+    const { root, vdr } = dataRoom(); const A = await officePc(root);
     const dealId = await indexed(A, 'Proseware', vdr); await A.backend.idle();
     const other = path.join(root, 'other'); put(other, 'x.pdf', pdf('other doc')); put(vdr, '01 Finance/New.pdf', pdf('new doc'));
     const docs: any = A.store.services.docs; const realPoll = docs.poll; let fired = false;
@@ -91,7 +97,7 @@ describe('documents added to a data room after it was indexed', () => {
   }, 120000);
 
   it('a run that never ends holds a check up for checkFolderWait only', async () => {
-    const { root, vdr } = dataRoom(); const A = await pcApp(root, 'Office', { service: model(), checklist: LIST });
+    const { root, vdr } = dataRoom(); const A = await officePc(root);
     const dealId = await indexed(A, 'Proseware', vdr); await A.backend.idle();
     const docs: any = A.store.services.docs; const realF = docs.freshen, realPoll = docs.poll, was = FOLDER_CHECK.checkWait; FOLDER_CHECK.checkWait = 1500;
     docs.freshen = async () => ({ ok: true, value: 'running' });
@@ -103,7 +109,7 @@ describe('documents added to a data room after it was indexed', () => {
   }, 120000);
 
   it('Check again that finds a new document reads it once: its first pass waits for the check and then has nothing to ask', async () => {
-    const { root, vdr } = dataRoom(); const A = await pcApp(root, 'Office', { service: model(), checklist: LIST });
+    const { root, vdr } = dataRoom(); const A = await officePc(root);
     const dealId = await indexed(A, 'Proseware', vdr);
     const ai: any = A.backend.ai; const real = ai.firstPass; const log: string[] = []; ai.firstPass = (id: string) => { log.push('first pass'); const at = seen.calls; return real(id).then((r: unknown) => { log.push(`its calls: ${seen.calls - at}`); return r; }); };
     const check = ai.checkAll; ai.checkAll = async (i: any) => { log.push('check'); const r = await check(i); log.push('check ended'); return r; };
@@ -118,7 +124,7 @@ describe('documents added to a data room after it was indexed', () => {
 
   it('Check again that does not finish, or a "Check the N left out" that is refused, leaves the new document to its first pass', async () => {
     const { root, vdr } = dataRoom();
-    const A = await pcApp(root, 'Office', { service: model(), checklist: LIST, timing: { giveUp: 100 } });
+    const A = await officePc(root, { timing: { giveUp: 100 } });
     const dealId = await indexed(A, 'Proseware', vdr);
     const ai = A.backend.ai as ReturnType<typeof nodeAi>;
     const check = ai.checkAll;
@@ -157,7 +163,7 @@ describe('documents added to a data room after it was indexed', () => {
   }, 120000);
 
   it('an app closed before the check ends runs the first pass it owes when it opens again', async () => {
-    const { root, vdr } = dataRoom(); const A = await pcApp(root, 'Office', { service: model(), checklist: LIST });
+    const { root, vdr } = dataRoom(); const A = await officePc(root);
     const dealId = await indexed(A, 'Proseware', vdr);
     const itemIds = Object.keys(await rowsOf(A, dealId));
     expect(itemIds).toHaveLength(2);
@@ -170,7 +176,7 @@ describe('documents added to a data room after it was indexed', () => {
     expect(has(A, dealId, 'Model audit report.pdf')).toBe(true);
     expect(JSON.parse(fs.readFileSync(path.join(A.dirs.local, 'owed.json'), 'utf8'))).toContain(dealId);
     await A.backend.close();
-    const B = await pcApp(root, 'Office', { service: model(), checklist: LIST });
+    const B = await officePc(root);
     try {
       await B.backend.idle();
       const rows = await rowsOf(B, dealId);
@@ -183,7 +189,7 @@ describe('documents added to a data room after it was indexed', () => {
   it('a run that never ends on one deal holds up no other deal’s look; counts a look could not write are put right by the next', async () => {
     const root = tmp(); roots.push(root); const one = path.join(root, 'one'), two = path.join(root, 'two');
     for (let i = 0; i < 5; i++) { put(one, `a${i}.pdf`, pdf(`a ${i}`)); put(two, `b${i}.pdf`, pdf(`b ${i}`)); }
-    const A = await pcApp(root, 'Office', { service: model(), checklist: LIST });
+    const A = await officePc(root);
     const d1 = await indexed(A, 'One', one), d2 = await indexed(A, 'Two', two); await A.backend.idle();
     const docs: any = A.store.services.docs; const realPoll = docs.poll; const was = { ...FOLDER_CHECK };
     // deal One's run never ends, as far as this PC can tell

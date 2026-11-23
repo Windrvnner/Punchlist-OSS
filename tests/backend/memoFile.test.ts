@@ -6,8 +6,8 @@ import { libreOfficeSheets } from '../../src/backend/spreadsheets';
 import { memoDocument } from '../../src/domain/memoDoc';
 import { sampleMemo } from '../fixtures/memoSample';
 import { scaleMemo } from '../fixtures/memoScale';
+import { hasOffice as has, soffice } from './officePrerequisites';
 
-const soffice = '/usr/bin/soffice'; const has = fs.existsSync(soffice);
 const lo = libreOfficeConverter({ soffice, profile: fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-memo-test-lo-')) });
 
 describe.skipIf(!has)('the deal memo through LibreOffice', () => {

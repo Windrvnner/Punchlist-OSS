@@ -8,9 +8,8 @@ import { editLog } from '../../src/backend/spreadsheets';
 import { nodeQaLogs } from '../../src/backend/qaLogs';
 import { readZip, partText, setPart, writeZip } from '../../src/backend/zipParts';
 import { sha256 } from '../../src/backend/qaLogFolder';
-import { hasMetricFont, soffice } from './officePrerequisites';
+import { hasMetricFont, hasOffice as has, soffice } from './officePrerequisites';
 
-const has = fs.existsSync(soffice);
 const lo = libreOfficeConverter({ soffice, profile: fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-edit-test-lo-')) });
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-edit-test-'));
 

@@ -7,9 +7,9 @@ import { exportDocument, spreadsheetDocument, parseCsv, sheetPart, tableFrom } f
 import { libreOfficeSheets } from '../../src/backend/spreadsheets';
 import { questionsSheet, prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { Question } from '../../src/domain/model';
+import { hasOffice as has, soffice } from './officePrerequisites';
 import { cachedWorkbook } from './workbookCache';
 
-const soffice = '/usr/bin/soffice'; const has = fs.existsSync(soffice);
 // a LibreOffice settings folder of its own, so test runs side by side never share one
 const lo = libreOfficeConverter({ soffice, profile: fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-sheets-test-lo-')) });
 // related cases share each workbook's conversion

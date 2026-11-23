@@ -8,8 +8,8 @@ import { nodeQaLogs } from '../../src/backend/qaLogs';
 import { logWrite } from '../../src/domain/logWrite';
 import { suggestMapping } from '../../src/domain/importExport';
 import type { Question } from '../../src/domain/model';
+import { hasOffice as has, soffice } from './officePrerequisites';
 
-const soffice = '/usr/bin/soffice'; const has = fs.existsSync(soffice);
 const N = 2000; const COLS = ['No.', 'Question', 'Submitted by', 'Response', 'Status'];
 const text = (i: number) => `Question ${i}: what is the position on item ${i * 7919 % 10007} of the ${['tax', 'legal', 'technical', 'commercial'][i % 4]} review?`;
 const answer = (i: number) => `Answer ${i}, as agreed with counsel on October ${1 + (i % 28)}`;

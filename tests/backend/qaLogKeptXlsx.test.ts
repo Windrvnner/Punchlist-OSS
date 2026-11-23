@@ -9,9 +9,9 @@ import { keptEdits } from '../../src/backend/qaLogFolder';
 import { editXlsx } from '../../src/backend/xlsxEdit';
 import { exportDocument } from '../../src/domain/sheets';
 import { readZip, partText, setPart, writeZip } from '../../src/backend/zipParts';
+import { hasOffice as has, soffice } from './officePrerequisites';
 import { cachedWorkbook } from './workbookCache';
 
-const soffice = '/usr/bin/soffice'; const has = fs.existsSync(soffice);
 const lo = libreOfficeConverter({ soffice, profile: fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-test-lo-')) });
 const N = 2000; const FILE = 'Proseware Q&A log.xlsx'; const SHEET = 'Q&A log';
 const q = (i: number) => `Question ${i}: please confirm item ${i}.`;

@@ -63,6 +63,8 @@ export interface BackendOptions {
   now?: () => number;
   /** how failed AI calls are asked again (src/backend/retry.ts): the control file's values unless set; tests give no waits */
   retry?: AiOptions['retry'];
+  /** how long a changed data room folder must stay the same before it is read (default 2 s); tests give a short one */
+  settleMs?: number;
 }
 
 export interface Backend {
@@ -115,6 +117,7 @@ export function composeBackend(o: BackendOptions): Backend {
   const index = wordIndex(local);                 // each PC's own, in its local folder
   const docs = nodeDocuments({
     index, shared, local, sharedPath: o.sharedPath, installId, keeper, clock, workPath: path.join(o.workPath, 'work'), convert: o.convert, folders, foldersNow,
+    settleMs: o.settleMs,
     // a deal whose folders have all been indexed has its first pass, as the product does; one a check is about to read waits for it (below)
     onIndexed: (dealId, how) => (how?.forCheck ? owe(dealId) : track(ai.firstPass(dealId))),
   });
