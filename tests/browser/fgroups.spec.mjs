@@ -63,8 +63,24 @@ const read = (page) => page.evaluate(() => {
   return { groups, rows: document.querySelectorAll('.flagrow').length, first: document.querySelector('.flags > *')?.classList.contains('fgroup') };
 });
 
+// The 120 findings are written once; each size and color scheme after the first reloads the same page (#97).
+const { ctx, page, id } = await setup(1280, 736, 'dark');
+/** The page at this size and scheme, reloaded on the deal, with the Open filter and all 120 findings in place. */
+async function reloadAs(w, h, scheme) {
+  await page.setViewportSize({ width: w, height: h });
+  await page.emulateMedia({ colorScheme: scheme });
+  await page.goto(`${URL}#deal-${id}`); await page.reload();
+  await page.waitForFunction(() => document.querySelectorAll('.flagrow').length > 50, null, { timeout: 30000 });
+  const start = await page.evaluate(() => ({
+    findings: Object.keys(store.get().findings).length, rows: document.querySelectorAll('.flagrow').length,
+    groups: document.querySelectorAll('.fgroup').length,
+  }));
+  say(`${w}-${scheme}: the reloaded list starts from the 120 findings, 90 open, under 9 headings`,
+    start.findings === 120 && start.rows === 90 && start.groups === 9, JSON.stringify(start));
+}
 for (const [w, h] of [[1280, 736], [1024, 640]]) for (const scheme of ['dark', 'light']) {
-  const { ctx, page, id } = await setup(w, h, scheme); const T = `${w}-${scheme}:`;
+  if (w !== 1280 || scheme !== 'dark') await reloadAs(w, h, scheme);
+  page.errors = []; const T = `${w}-${scheme}:`;
   const open = await read(page);
   const heads = open.groups.map((g) => g.head);
   say(`${T} one heading per workstream, A to Z, then none`, JSON.stringify(heads) === JSON.stringify(ORDER) && open.first, JSON.stringify(heads));
@@ -132,8 +148,8 @@ for (const [w, h] of [[1280, 736], [1024, 640]]) for (const scheme of ['dark', '
     say('the queue has one stop for Tab after arrows then Next, and after arrows, a search and clearing it', afterArrows.length === 1 && afterNext.length === 1 && searched.length === 1 && cleared.length === 1, JSON.stringify({ afterArrows, afterNext, searched, cleared }));
   }
   say(`${T} no errors on the page`, page.errors.length === 0, JSON.stringify(page.errors));
-  await ctx.close();
 }
+await ctx.close();
 
 await browser.close();
 const failed = results.filter(([, ok]) => !ok).length; console.log(`\n${results.length - failed}/${results.length} passed`); process.exit(failed ? 1 : 0);
