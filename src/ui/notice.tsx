@@ -15,8 +15,7 @@ export interface NoticeAction { label: string; run: () => void; id?: string }
 // A notice's title or detail can be clipped within the text container (#564).
 function noticeTextOverflows(el: HTMLElement): boolean {
   const overflows = (part: Element) => part.scrollWidth > part.clientWidth;
-  const shortened = !!el.querySelector('.tcut[data-shortened], .tbody[hidden]');   // a part that gave way to fit (#27)
-  return shortened || overflows(el) || Array.from(el.querySelectorAll('.ttitle, .tbody')).some(overflows);
+  return overflows(el) || Array.from(el.querySelectorAll('.ttitle, .tbody')).some(overflows);
 }
 
 /**
@@ -56,41 +55,9 @@ export function NoticeWords({ text, cut }: { text: string; cut?: string }) {
   return (
     <>
       <b class="ttitle"><Part text={title} cut={cut} /></b>
-      {body && <><span class="sr-only"> · </span><Detail><Part text={body} cut={cut} /></Detail></>}
+      {body && <><span class="sr-only"> · </span><span class="tbody"><Part text={body} cut={cut} /></span></>}
     </>
   );
-}
-
-/**
- * The detail gives way first, to an ellipsis; where not even its first word would show, it is left out rather than
- * shown as a stub of letters (#27). The whole text is still on hover and read aloud.
- */
-function Detail({ children }: { children: ComponentChildren }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const fit = () => {
-      el.hidden = false;
-      if (el.scrollWidth <= el.clientWidth) return;
-      el.hidden = el.clientWidth < firstWordWidth(el);
-    };
-    fit();
-    addEventListener('resize', fit);
-    return () => removeEventListener('resize', fit);
-  });
-  return <span class="tbody" ref={ref}>{children}</span>;
-}
-
-/** how wide the first word of an element's text is drawn, with the ellipsis that would follow it */
-function firstWordWidth(el: HTMLElement): number {
-  const node = el.firstChild;
-  if (!(node instanceof Text)) return 0;
-  const end = node.data.indexOf(' ');
-  const range = document.createRange();
-  range.setStart(node, 0);
-  range.setEnd(node, end < 0 ? node.data.length : end);
-  return range.getBoundingClientRect().width + 12;      // and room for "…"
 }
 
 /** One part of a notice's words, with its `cut` shortened to fit where it holds it. */
@@ -130,14 +97,14 @@ function twinParts(text: string): { name: string[]; twin: string[] } | null {
 }
 
 /**
- * Shorter forms of a part that gives way, longest first, each cut at a whole word. A deal's name with its twin line in
- * brackets, "Project Name (Twin)", gives up words of the name first, down to "Project" and one more, then words of
+ * Shorter forms of a deal's name with its twin line in brackets, "Project Name (Twin)", longest first, each cut at a
+ * whole word; none for other text, which is cut at a letter as before. The label gives up words of the name first, down to "Project" and one more, then words of
  * the twin line, so what tells the deal from its twin stays as long as it can (#27). The name may hold brackets of its
  * own: the twin line is the last bracket.
  */
 export function shorterForms(text: string): string[] {
   const parts = twinParts(text);
-  if (!parts) return fewerWords(text.split(' '), 1);
+  if (!parts) return [];
   const { name, twin } = parts;
   const least = name[0] === 'Project' ? 2 : 1;
   const shortName = name.length > least ? `${name.slice(0, least).join(' ')}…` : name.join(' ');
@@ -171,9 +138,9 @@ export function glyphOf(text: string, action?: string): Glyph {
 }
 
 /**
- * The part of a notice that gives way when the line does not fit: it is cut at a whole word (see shorterForms), or,
- * where even the shortest of those does not fit, at a whole character (see letterCut), trimmed, and ending in "…"
- * right before the words after it. CSS's own ellipsis leaves a gap there (the room a cut character would
+ * The part of a notice that gives way when the line does not fit: a deal named apart from its twin is cut at a whole
+ * word (see shorterForms); other text, or a label none of whose shorter forms fits, at a whole character (see
+ * letterCut), trimmed, and ending in "…" right before the words after it. CSS's own ellipsis leaves a gap there (the room a cut character would
  * have taken, and a space when the cut falls after one), so it is only the fallback. Screen readers get the whole
  * text.
  */
@@ -192,9 +159,7 @@ function Cut({ text }: { text: string }) {
       return text.getBoundingClientRect().width <= el.getBoundingClientRect().width + 0.01;
     };
     const fit = () => {
-      delete el.dataset.shortened;
       if (fits(text)) return;
-      el.dataset.shortened = '';
       const byWords = shorterForms(text).find(fits);
       if (byWords) return;                  // fits() has put it in place
       const { head, tail } = letterCut(text);

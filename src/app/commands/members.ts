@@ -32,10 +32,8 @@ export const SetDealMember = define({
       index: { dealId: '_', add: [{ kind: 'member', id }] },          // kept with the list of deals, so start-up reads them together
       audit: [],                                                       // a person's own list: nothing about the deal itself changed
       inverse: { command: 'SetDealMember', input: { dealId: d.id, on: !input.on } },
-      // the notice's title says what happened to which deal; "your deals" is its detail, which gives way first, and
-      // then the deal's name and twin line give way at their end, never the verb (#27)
-      message: input.on ? `${label} added · To your deals` : `${label} removed · From your deals`,
-      messageCut: label,
+      message: input.on ? `${label} added to your deals` : `${label} removed from your deals`,
+      ...(label === d.name ? {} : { messageCut: label }),     // a twin's longer label gives way before the verb (#27)
     });
   },
 });

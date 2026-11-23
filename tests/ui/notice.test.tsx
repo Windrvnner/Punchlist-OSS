@@ -13,7 +13,7 @@ it('shortens a twin-named deal by its name first, then its twin line, at whole w
     'Project Northwind… (Fabrikam Partners…)',
     'Project Northwind… (Fabrikam…)',
   ]);
-  expect(shorterForms('Quarterly board pack')).toEqual(['Quarterly board…', 'Quarterly…']);
+  expect(shorterForms('Quarterly board pack')).toEqual([]);      // other text is cut at a letter, as before
   expect(shorterForms('Project Coho (Wingtip)')).toEqual([]);
 });
 

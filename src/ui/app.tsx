@@ -380,7 +380,7 @@ function Notices() {
       <div class="toasts" role="status" ref={box} onMouseEnter={sync} onMouseLeave={sync} onFocusIn={sync} onFocusOut={() => requestAnimationFrame(sync)}>
         {shown.map((t) => (
           <Notice key={t.id} id={t === newest ? 'toast' : undefined} glyph={t.glyph ?? glyphOf(t.text, t.action?.label)}
-            tip={t.more ?? (!t.cut && said(t.text) !== t.text ? t.text : undefined)} full={t.text}
+            tip={t.more ?? (t.cut || said(t.text) !== t.text ? t.text : undefined)} full={t.text}
             actions={t.action ? [{ label: t.action.label, run: () => run(t) }] : []}
             onClose={() => store.dismissToast(t.id)}>
             {/* the whole text on hover when it is shortened: a long deal name, or a line that doesn't fit */}
