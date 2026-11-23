@@ -26,6 +26,8 @@ import { localYmd, CHECK_REASON } from '../domain/model';
 import { splitCited, toParagraphs } from '../domain/cite';
 import { SERVICE, AI_LABEL } from '../control';
 import { keptDrafts, hasTexts } from './keptDrafts';
+import { asStored, editDrafts, keepAsEdit, newFindingDrafts, sameAsSent } from './findingDrafts';
+import type { EditDraft } from './findingDrafts';
 import { SourceChips } from './research';
 import { CitedEditor } from './citedEditor';
 import { MenuChoice, workstreamOptions, type MenuOption } from './filterMenu';
@@ -284,16 +286,6 @@ export function FindingsSection({ deal: d }: { deal: Deal }) {
  * finding, another tab or another deal, or pressing Escape, keeps it, and it comes back when the finding is opened again.
  * Cancel, Save, or the change being made clears it.
  */
-type EditDraft = {
-  title: string; ws: string; body: string;
-  base: { title: string; workstream: string; body: string[] };
-};
-const isEditDraft = (v: unknown): v is EditDraft => hasTexts('title', 'ws', 'body')(v)
-  && hasTexts('title', 'workstream')((v as EditDraft).base)
-  && Array.isArray((v as EditDraft).base.body)
-  && (v as EditDraft).base.body.every((x) => typeof x === 'string');
-// each kept across a restart too
-const editDrafts = keptDrafts('finding-edit', isEditDraft);
 const isNoteDraft = (v: unknown): v is { status: 'open' | 'closed'; text: string } => hasTexts('text', 'status')(v) && (v.status === 'open' || v.status === 'closed');
 const noteDrafts = keptDrafts('closing-note', isNoteDraft);
 /** a summary's "N more" opens its finding with the focus on the full list of sources: the page that mounts for it takes the wish;
@@ -303,12 +295,6 @@ let wantSources: string | null = null;
 
 /** the Detail label's tooltip in the finding editor */
 const CITE_TIP = 'A tag after a sentence names the source it cites. It moves with its sentence.';
-
-/** a form's three fields, as typed */
-type Typed = { title: string; ws: string; body: string };
-/** Whether a form still holds exactly what a save sent: then the save lands it and the form closes (#32, #115). */
-const sameAsSent = (d: Typed, sent: Typed) =>
-  d.title === sent.title && d.ws === sent.ws && d.body === sent.body;
 
 function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
   const store = useStore();
@@ -384,12 +370,6 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
   );
 }
 
-/**
- * A new finding half written, by deal: leaving the page (another tab, another deal) or pressing Escape keeps it, and
- * the form comes back with it when the Findings page is opened again. Cancel or creating the finding clears it.
- */
-const newFindingDrafts = keptDrafts('new-finding', hasTexts('title', 'ws', 'body'));   // kept across a restart too
-
 function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void }) {
   const store = useStore();
   const kept = newFindingDrafts.get(d.id);
@@ -438,17 +418,6 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
     </div>
   );
 }
-
-/** Text typed into a new finding since its Create was sent: an open edit of the finding made, from what was sent
- *  (#115). */
-export function keepAsEdit(made: Finding, typed: Typed, sent: EditDraft['base']) {
-  editDrafts.set(made.id, { ...typed, base: asStored(sent) });
-}
-
-/** What a save sent, as the finding stores it: its title trimmed, as the commands trim it, so the next Save's
- *  comparison with the finding is not thrown by a space typed at the end */
-const asStored = (sent: EditDraft['base']): EditDraft['base'] =>
-  ({ title: sent.title.trim(), workstream: sent.workstream, body: sent.body });
 
 /** the finding a CreateFinding made, by what its write wrote */
 export function createdFinding(store: ReturnType<typeof useStore>, opId: string): Finding | undefined {

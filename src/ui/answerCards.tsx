@@ -2,7 +2,8 @@
 import { useRef, useState } from 'preact/hooks';
 import { useAppState, useStore } from './hooks';
 import type { Store } from '../app/store';
-import { createdFinding, findingHref, keepAsEdit } from './findings';
+import { createdFinding, findingHref } from './findings';
+import { keepAsEdit } from './findingDrafts';
 import { hasTexts, keptDrafts } from './keptDrafts';
 import { focusCard, closeOnEscape } from './focus';
 import { workstreamChoices } from '../domain/order';
