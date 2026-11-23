@@ -37,7 +37,10 @@ function book(o: { rows: string[]; before?: string; after?: string; table?: stri
 async function write(file: string, steps: SheetEdit[], sheet = 'Log') {
   const out = path.join(tmp(), 'out.xlsx'); const bytes = editXlsx(fs.readFileSync(file), sheet, steps); fs.writeFileSync(out, bytes);
   const z = readZip(bytes);
-  return { wrong: writtenAsMeant(await lo.sheets!(file), await lo.sheets!(out), sheet, steps), xml: partText(z, 'xl/worksheets/sheet1.xml')!, table: partText(z, 'xl/tables/table1.xml'), after: await lo.sheets!(out) };
+  // the written file is read once and that one reading both checked and returned (#102)
+  const after = await lo.sheets!(out);
+  const wrong = writtenAsMeant(await lo.sheets!(file), after, sheet, steps);
+  return { wrong, xml: partText(z, 'xl/worksheets/sheet1.xml')!, table: partText(z, 'xl/tables/table1.xml'), after };
 }
 const add = (after: number, ...cells: [number, string | number][]): SheetEdit[] => [{ kind: 'rows', after, count: 1 }, ...cells.map(([col, value]) => ({ kind: 'cell' as const, row: after + 1, col, value }))];
 
@@ -115,10 +118,13 @@ describe.skipIf(!has)('the LibreOffice path (.xls, .ods)', () => {
       const x = book({ name: 'Lender&apos;s &quot;Q&amp;A&quot;', rows: [`<row r="2">${n('A2', 1)}${t('B2', 'DSCR?')}</row>`, `<row r="3" hidden="1">${n('A3', 2)}${t('B3', 'EPC?')}</row>`] });
       const dir = path.dirname(x);
       execFileSync(soffice, [`-env:UserInstallation=file://${dir}/p`, '--headless', '--convert-to', ext, '--outdir', dir, x], { stdio: 'ignore' });
-      const f = path.join(dir, `log.${ext}`); const sheet = (await lo.sheets!(f))[0].name;
+      const f = path.join(dir, `log.${ext}`);
+      // the log as sent is read once: its sheet name and what the written log is checked against (#102)
+      const before = await lo.sheets!(f);
+      const sheet = before[0].name;
       const steps = add(2, [0, 3], [1, 'a\tb\nc \\n =1+1']);
       const bytes = await lo.edit!(f, sheet, steps); const out = path.join(tmp(), `out.${ext}`); fs.writeFileSync(out, bytes);
-      expect(writtenAsMeant(await lo.sheets!(f), await lo.sheets!(out), sheet, steps)).toBeNull();
+      expect(writtenAsMeant(before, await lo.sheets!(out), sheet, steps)).toBeNull();
       const xlsx = path.join(tmp(), 'o'); execFileSync(soffice, [`-env:UserInstallation=file://${dir}/p`, '--headless', '--convert-to', 'xlsx', '--outdir', xlsx, out], { stdio: 'ignore' });
       const xml = partText(readZip(fs.readFileSync(path.join(xlsx, 'out.xlsx'))), 'xl/worksheets/sheet1.xml')!;
       expect(xml.match(/<row r="4"[^>]*>/)![0]).not.toMatch(/hidden="1"|hidden="true"/);

@@ -9,6 +9,7 @@ import { keptEdits } from '../../src/backend/qaLogFolder';
 import { editXlsx } from '../../src/backend/xlsxEdit';
 import { exportDocument } from '../../src/domain/sheets';
 import { readZip, partText, setPart, writeZip } from '../../src/backend/zipParts';
+import { cachedWorkbook } from './workbookCache';
 
 const soffice = '/usr/bin/soffice'; const has = fs.existsSync(soffice);
 const lo = libreOfficeConverter({ soffice, profile: fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-test-lo-')) });
@@ -27,11 +28,13 @@ const withFormula = (bytes: Uint8Array, row: number) => {
   expect(out).not.toBe(xml); setPart(z, part, out); return writeZip(z);
 };
 
+// related cases share each workbook's conversion
+const workbook = cachedWorkbook(lo);
 describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
   afterEach(() => vi.restoreAllMocks());
   it('comes back into the workbook, a formula stays as it is, and their version goes to the archive', async () => {
     const rows: (string | number)[][] = [['No.', 'Question', 'Response', 'Notes'], ...Array.from({ length: N }, (_, k) => [k + 1, q(k + 1), '', ''])];
-    const made = await lo.workbook!(exportDocument(SHEET, rows));
+    const made = await workbook(exportDocument(SHEET, rows));
     const base = withFormula(made, 12);
     const sroe = editXlsx(base, SHEET, [{ kind: 'cell', row: 7, col: 2, value: 'sroe on 7' }, { kind: 'cell', row: 1500, col: 3, value: 'sroe: chase' }]);
     const lroe = editXlsx(base, SHEET, [{ kind: 'cell', row: 9, col: 2, value: 'ldoe on 9' }]);
@@ -58,7 +61,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
 
   it('a change of theirs to a formula cell is reported, not written, and the formula stays', async () => {
     const rows: (string | number)[][] = [['No.', 'Question', 'Response', 'Notes'], ...Array.from({ length: N }, (_, k) => [k + 1, q(k + 1), '', ''])];
-    const base = withFormula(await lo.workbook!(exportDocument(SHEET, rows)), 12);
+    const base = withFormula(await workbook(exportDocument(SHEET, rows)), 12);
     // sroe typed over the formula
     const z = readZip(base); const part = 'xl/worksheets/sheet1.xml'; setPart(z, part, partText(z, part)!.replace(/<c r="D13"><f>[^<]*<\/f><v>[^<]*<\/v><\/c>/, '<c r="D13" t="inlineStr"><is><t>sroe typed over it</t></is></c>')); const sroe = writeZip(z);
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-xlsx-')); fs.mkdirSync(path.join(folder, '01. Archive'));
@@ -71,7 +74,9 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
   }, 240_000);
   it('a formula they typed is not written, and the edit counts as not fully merged', async () => {
     const rows: (string | number)[][] = [['No.', 'Question', 'Response', 'Notes'], ...Array.from({ length: N }, (_, k) => [k + 1, q(k + 1), '', ''])];
-    const base = withFormula(await lo.workbook!(exportDocument(SHEET, rows)), 12); const sroe = withFormula(base, 20);   // sroe put =LEN(B21) in D21
+    const base = withFormula(await workbook(exportDocument(SHEET, rows)), 12);
+    // sroe put =LEN(B21) in D21
+    const sroe = withFormula(base, 20);
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-xlsx-')); fs.mkdirSync(path.join(folder, '01. Archive'));
     fs.writeFileSync(path.join(folder, '01. Archive', 'Proseware Q&A log 2026-11-17 1000.xlsx'), base);
     fs.writeFileSync(path.join(folder, '~Proseware Q&A log 0a1b2c3d.old'), sroe); fs.writeFileSync(path.join(folder, FILE), base);
@@ -84,7 +89,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     const H = ['Workstream', 'Priority', 'Submitted by', 'Question', 'Status', 'Response'];
     const rows: (string | number)[][] = [H, ...Array.from({ length: N }, (_, k) => ['Finance', 'High', 'Lender A', q(k + 1), 'Open', ''])];
     rows[1201] = ['Finance', 'High', 'Lender B', q(1200), 'Open', ''];                 // Lender B asks what Lender A asks in row 1200
-    const base = await lo.workbook!(exportDocument(SHEET, rows));
+    const base = await workbook(exportDocument(SHEET, rows));
     const sroe = editXlsx(base, SHEET, [{ kind: 'cell', row: 1200, col: 5, value: 'sroe: for Lender A only' }]);
     const lroe = editXlsx(base, SHEET, [{ kind: 'cell', row: 1200, col: 3, value: 'ldoe put another question here' }]);
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-xlsx-')); fs.mkdirSync(path.join(folder, '01. Archive'));
@@ -102,7 +107,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
   ] as const) it(`with no number column, an answer for Lender A never goes into a row with no submitter: ${name}`, async () => {
     const H = ['Workstream', 'Priority', 'Submitted by', 'Question', 'Status', 'Response'];
     const { base: b, lroe: l } = change([H, ...Array.from({ length: N }, (_, k) => ['Finance', 'High', 'Lender A', q(k + 1), 'Open', ''])]);
-    const base = await lo.workbook!(exportDocument(SHEET, b)); const lroe = await lo.workbook!(exportDocument(SHEET, l));
+    const base = await workbook(exportDocument(SHEET, b)); const lroe = await workbook(exportDocument(SHEET, l));
     const sroe = editXlsx(base, SHEET, [{ kind: 'cell', row: 700, col: 5, value: 'sroe: for Lender A only' }]);
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-xlsx-')); fs.mkdirSync(path.join(folder, '01. Archive'));
     fs.writeFileSync(path.join(folder, '01. Archive', 'Proseware Q&A log 2026-11-17 1000.xlsx'), base);
@@ -119,7 +124,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     const H = ['Question', 'Submitted by', 'Workstream', 'Status', 'Response']; const CAP = 'Provide the cap table.';
     const rows: string[][] = [H, ...Array.from({ length: N }, (_, k) => [q(k + 1), k % 2 ? 'Lender A' : 'Lender B', 'Legal', 'Open', ''])];
     rows[100] = [CAP, '', 'Legal', 'Open', '']; rows[900] = [CAP, '', 'Legal', 'Open', 'Draft from the data room'];
-    const base = await lo.workbook!(exportDocument(SHEET, rows));
+    const base = await workbook(exportDocument(SHEET, rows));
     const sroe = editXlsx(base, SHEET, [{ kind: 'cell', row: 900, col: 4, value: 'Final answer, sroe' }]);
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-xlsx-')); fs.mkdirSync(path.join(folder, '01. Archive'));
     fs.writeFileSync(path.join(folder, '01. Archive', 'Proseware Q&A log 2026-11-17 1000.xlsx'), base);
@@ -140,7 +145,8 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     const H = ['No.', 'Question', 'Submitted by', 'Workstream', 'Status', 'Response'];
     const rows: (string | number)[][] = [H, ...Array.from({ length: N }, (_, k) => [k + 1, q(k + 1), 'Lender A', 'Legal', 'Open', ''])];
     rows[700] = ['', 'List material contracts.', 'Lender B', 'Legal', 'Open', '']; rows[1500] = [1500, 'List material contracts.', 'Lender B', 'Finance', 'Open', ''];
-    const base = await lo.workbook!(exportDocument(SHEET, rows)); const lroe = await lo.workbook!(exportDocument(SHEET, rows.filter((_, i) => i !== 700)));
+    const base = await workbook(exportDocument(SHEET, rows));
+    const lroe = await workbook(exportDocument(SHEET, rows.filter((_, i) => i !== 700)));
     const sroe = editXlsx(base, SHEET, [{ kind: 'cell', row: 700, col: 5, value: 'sroe: Legal contracts list in 4.2' }]);
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-xlsx-')); fs.mkdirSync(path.join(folder, '01. Archive'));
     fs.writeFileSync(path.join(folder, '01. Archive', 'Proseware Q&A log 2026-11-17 1000.xlsx'), base);
@@ -152,7 +158,8 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
   }, 240_000);
   for (const ext of ['.ods', '.xls']) it(`comes back into a ${ext} log, written through LibreOffice`, async () => {
     const rows: (string | number)[][] = [['No.', 'Question', 'Response', 'Notes'], ...Array.from({ length: N }, (_, k) => [k + 1, q(k + 1), '', ''])];
-    const work = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-conv-')); fs.writeFileSync(path.join(work, 'log.xlsx'), await lo.workbook!(exportDocument(SHEET, rows)));
+    const work = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-conv-'));
+    fs.writeFileSync(path.join(work, 'log.xlsx'), await workbook(exportDocument(SHEET, rows)));
     execFileSync(soffice, [`-env:UserInstallation=file://${work}/profile`, '--headless', '--convert-to', ext.slice(1), '--outdir', work, path.join(work, 'log.xlsx')], { stdio: 'ignore' });
     const baseFile = path.join(work, `log${ext}`); const base = fs.readFileSync(baseFile);
     const sroe = await lo.edit!(baseFile, SHEET, [{ kind: 'cell', row: 7, col: 2, value: 'sroe on 7' }, { kind: 'cell', row: 9, col: 2, value: 'sroe on 9' }]);
@@ -174,7 +181,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
   // a formula the team keeps (here the length of each question) gives another value where they reworded one
   for (const ext of ['.ods', '.xls']) it(`never writes over a formula in a ${ext} log, nor takes a formula's new value for their change`, async () => {
     const rows: (string | number)[][] = [['No.', 'Question', 'Response', 'Notes'], ...Array.from({ length: N }, (_, k) => [k + 1, q(k + 1), '', ''])];
-    let x = await lo.workbook!(exportDocument(SHEET, rows)); for (const r of [7, 8, 9]) x = withFormula(x, r);
+    let x = await workbook(exportDocument(SHEET, rows)); for (const r of [7, 8, 9]) x = withFormula(x, r);
     const work = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-conv-')); fs.writeFileSync(path.join(work, 'log.xlsx'), x);
     execFileSync(soffice, [`-env:UserInstallation=file://${work}/profile`, '--headless', '--convert-to', ext.slice(1), '--outdir', work, path.join(work, 'log.xlsx')], { stdio: 'ignore' });
     const baseFile = path.join(work, `log${ext}`); const base = fs.readFileSync(baseFile);
@@ -192,7 +199,8 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
   it('a question they put in above formula rows makes no formula row below it a clash', async () => {
     const qs = Array.from({ length: N }, (_, k) => (k % 3 ? q(k + 1) : `${q(k + 1)} Longer.`));
     const book = async (list: [number, string][]) => {
-      const x = await lo.workbook!(exportDocument(SHEET, [['No.', 'Question', 'Response', 'Notes'], ...list.map(([n, t]) => [n, t, '', ''])]));
+      const logRows = [['No.', 'Question', 'Response', 'Notes'], ...list.map(([n, t]) => [n, t, '', ''])];
+      const x = await workbook(exportDocument(SHEET, logRows));
       const z = readZip(x); const part = 'xl/worksheets/sheet1.xml';   // every Notes cell the length of its question, as a team might keep
       setPart(z, part, partText(z, part)!.replace(/<c r="D(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g, (m, n) => (+n > 1 ? `<c r="D${n}"><f>LEN(B${n})</f><v>${list[+n - 2][1].length}</v></c>` : m)));
       return writeZip(z);
