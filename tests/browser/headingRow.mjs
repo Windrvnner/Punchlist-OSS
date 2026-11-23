@@ -178,8 +178,7 @@ export async function checkHeadingRecovery(page, prefix, fixture) {
   await holdRead(page, { sheet: 'Main' });
   await sheet.selectOption('Main');
   await waitForRead(page);
-  await field.fill('2');
-  await field.press('ArrowUp');
+  await field.fill('3');
   await finishRead(page);
   await page.evaluate(() => window.__finishOldHeading());
   await ready(page, prefix);
