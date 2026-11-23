@@ -149,3 +149,12 @@ export function useMinuteTick() {
   const [, set] = useState(0);
   useEffect(() => { const t = setInterval(() => set((n) => n + 1), 60_000); return () => clearInterval(t); }, []);
 }
+
+/** Whether the component is still on screen: a save that lands after it went must not move the person (#115). */
+export function useShown() {
+  const shown = useRef(true);
+  useEffect(() => () => {
+    shown.current = false;
+  }, []);
+  return shown;
+}

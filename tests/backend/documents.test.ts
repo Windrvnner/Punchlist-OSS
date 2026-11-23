@@ -769,6 +769,42 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     expect(fs.readFileSync(opened!)).toEqual(Buffer.from(FA));
   });
 
+  it('files attached on a deal deleted elsewhere become its copy’s, once, and open on another PC (#117)', async () => {
+    const { root, vdr } = room();
+    const svc = new StandInService();
+    const office = pc(root, 'office', svc), home = pc(root, 'home', svc);
+    await indexAll(office, vdr);
+    const names = Array.from({ length: 8 }, (_, i) => `Lender consent ${i + 1}.pdf`);
+    const attached: { doc: string; docId: string }[] = [];
+    for (const name of names) attached.push(val(await office.docs.attach('d1', { name, bytes: pdf(name, 2) })));
+    const fromHome = val(await home.docs.attach('d1', { name: 'Side letter.pdf', bytes: pdf('side letter', 1) }));
+    const journals = () => office.shared.list().filter((name) => name.endsWith('.jsonl'));
+    const journal = () => journals().map((name) => office.shared.read(name)).join('');
+    val(await office.docs.carryAttached!('d1', 'd2'));
+    const carried = office.docs.records('d2');
+    // the attached files, this PC's and the other's, and none of the data room's (the copy indexes those again)
+    expect(carried.map((r) => r.name).sort()).toEqual([...names, 'Side letter.pdf'].sort());
+    const first = attached[0].docId;
+    expect(carried.find((r) => r.docId === first)).toMatchObject({ rel: `d1/office/${first}.pdf` });
+    const before = journal();
+    val(await office.docs.carryAttached!('d1', 'd2'));
+    expect(journal()).toBe(before);                                               // carried once
+    expect(val(await office.docs.unsendable!('d2', [...attached.map((a) => a.docId), fromHome.docId]))).toEqual([]);
+    const page = val(await home.docs.page('d2', attached[7], 'p. 2')) as { url: string };
+    const opened = home.docs.fileFor(page.url.slice('punchlist-doc://'.length))!;
+    expect(fs.readFileSync(opened)).toEqual(Buffer.from(pdf(names[7], 2)));
+  });
+
+  it('a file whose copy in the shared folder is gone is named as one that cannot be sent (#671)', async () => {
+    const { root } = room();
+    const office = pc(root, 'office');
+    const kept = val(await office.docs.attach('d1', { name: 'Term sheet.pdf', bytes: pdf('term sheet', 2) }));
+    const gone = val(await office.docs.attach('d1', { name: 'Fee letter.pdf', bytes: pdf('fee letter', 1) }));
+    fs.rmSync(path.join(root, 'shared', 'attachments', 'd1', 'office', `${gone.docId}.pdf`));
+    const never = 'doc_000000000000000000000000';
+    expect(val(await office.docs.unsendable!('d1', [kept.docId, gone.docId, never]))).toEqual([gone.docId, never]);
+  });
+
   it('a file with a name too long to fit beside its id attaches, kept under its id and known by its own name', async () => {
     const { root } = room(); const a = pc(root, 'office'); const name = LONG.replace(/\.docx$/, '.pdf'); const bytes = pdf('redline', 2);
     const r = val(await a.docs.attach('d1', { name, bytes })); expect(r.doc).toBe(name);

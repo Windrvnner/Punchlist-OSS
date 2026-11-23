@@ -347,6 +347,13 @@ export interface DocumentService {
   page(dealId: string, doc: DocumentRef, loc: string): Promise<Result<PageView>>;
   /** index one file into the deal; returns its id and the name it is indexed under */
   attach(dealId: string, file: { name: string; bytes: Uint8Array }): Promise<Result<{ doc: string; docId: string }>>;
+  /**
+   * A deal deleted on another PC has been kept here as a copy: the files attached on the deal become the copy's too
+   * (#117). Left out, a copy has no attached files of its own.
+   */
+  carryAttached?(fromDealId: string, toDealId: string): Promise<Result<void>>;
+  /** Of these documents, those whose file this PC can't send now (#671). Left out, every document is sendable. */
+  unsendable?(dealId: string, docIds: string[]): Promise<Result<string[]>>;
   /** ids of the documents loaded in this user's store right now, across all deals. Read-only; changes as the store rotates. */
   cached(): Promise<Result<string[]>>;
   /**
