@@ -18,7 +18,7 @@ import { dealFindings, versionsWord, listedFindings, findingListed, workstreamHe
 import { NO_WORKSTREAM } from '../app/state';
 import { ConflictView } from './conflict';
 import { AskFirst } from './dialogs';
-import { FindingLinks } from './findingAsk';
+import { FindingLinks, askKept } from './findingAsk';
 import { CreateFinding, EditFinding, SetFindingStatus, ReviewFinding, DeleteFinding, TITLE_MAX } from '../app/commands/findings';
 import { reassess, previousVersion } from '../app/findings';
 import type { Deal, Finding, Source } from '../domain/model';
@@ -458,7 +458,9 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
   if (s.conflicts[f.id]) {
     // the stepper only on the finding's own page: from the side pane it would leave the page behind
     const clash = <ConflictView conflict={s.conflicts[f.id]} stepper={!pane} />;
-    return <div class="opening"><div class="lbl fmeta"><span>{f.workstream}</span></div>{clash}</div>;
+    // #340: a question being typed stays in sight while the finding is in two versions
+    const typing = askKept(f.id) && <FindingLinks key={f.id} dealId={dealId} f={f} pane={pane} />;
+    return <div class="opening"><div class="lbl fmeta"><span>{f.workstream}</span></div>{clash}{typing}</div>;
   }
   const audit = s.audit[f.id] ?? [];
   const undone = new Set(audit.map((a) => a.undoes).filter(Boolean));
