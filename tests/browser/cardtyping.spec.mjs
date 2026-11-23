@@ -1,4 +1,4 @@
-// Text typed into a finding's cards is never lost: while Save is still out (#32), and on a finding's page when the
+// Text typed into a finding's cards is never lost: while Save or Create Finding is still out (#32, #115), and on a finding's page when the
 // finding is deleted under a question being typed (#340). At deal scale: a log of 2,000 questions in the deal.
 import { launchChrome } from './chrome.mjs';
 import { openOnFindings } from './landing.mjs';
@@ -125,6 +125,57 @@ const titleOf = (page, fid) => page.evaluate((f) => store.get().findings[f]?.tit
     && await page.evaluate(() => document.querySelector('#fe-title').value) === 'Second title';
   say('#32 a second Save after typing during the first never overwrites another PC\'s change',
     (bothKept || askedInstead) && !page.errors.length, JSON.stringify({ settled, now, err, errors: page.errors }));
+  await ctx.close();
+}
+
+/** the deal's findings with a title */
+const titled = (page, dealId, title) => page.evaluate(([d, t]) => Object.values(store.get().findings)
+  .filter((f) => f.dealId === d && f.title === t && !f.deleted), [dealId, title]);
+
+{ // #115: text typed into a new finding while Create Finding is out goes to that finding, as an open edit of it
+  const { ctx, page, id } = await findingPage();
+  await page.goto(`${URL}#deal-${id}`);
+  await page.click('#f-new');
+  await page.fill('#af-title', 'Step-in period is short');
+  await page.selectOption('#af-ws', 'Legal');
+  await page.fill('#af-body', 'The direct agreement gives 20 days.');
+  await holdNext(page, 'CreateFinding');
+  await page.click('#af-create');
+  await page.fill('#af-title', 'Step-in period is too short');
+  await page.fill('#af-body', 'The direct agreement gives 20 days; lenders asked for 60.');
+  await page.evaluate(() => window.resume());
+  await page.waitForSelector('#fe-title', { timeout: 5000 }).catch(() => {});
+  const made = await titled(page, id, 'Step-in period is short');
+  const opened = await page.evaluate(() => ({
+    hash: location.hash, title: document.querySelector('#fe-title')?.value ?? null,
+    body: document.querySelector('#fe-body')?.innerText.trim() ?? null, form: !!document.querySelector('#af-title'),
+  }));
+  const onIt = made.length === 1 && opened.hash.endsWith(made[0].id);
+  say('#115 the finding is made as sent, and its page opens in Edit with what was typed since',
+    onIt && opened.title === 'Step-in period is too short'
+    && opened.body === 'The direct agreement gives 20 days; lenders asked for 60.' && !page.errors.length,
+    JSON.stringify({ made: made.length, opened, errors: page.errors }));
+  if (onIt) await page.click('#fe-save');
+  await page.waitForSelector('#fe-title', { state: 'detached', timeout: 5000 }).catch(() => {});
+  const after = made.length ? await page.evaluate((f) => store.get().findings[f], made[0].id) : null;
+  const all = await page.evaluate((d) => Object.values(store.get().findings).filter((f) => f.dealId === d).length, id);
+  // a new form on the Findings page starts empty: the later text went to the finding, not back into the form
+  await page.goto(`${URL}#deal-${id}`);
+  await page.click('#f-new');
+  const fresh = await page.evaluate(() => document.querySelector('#af-title').value);
+  say('#115 one Save puts the later text on that same finding, and no second finding is made',
+    after?.title === 'Step-in period is too short' && after.body.join() === 'The direct agreement gives 20 days; lenders '
+    + 'asked for 60.' && all === 4 && fresh === '' && !page.errors.length,
+    JSON.stringify({ after: after && { title: after.title, body: after.body }, all, fresh, errors: page.errors }));
+  // control: nothing typed during Create closes the form on the Findings page, as before
+  await page.fill('#af-title', 'Deposit not posted');
+  await page.selectOption('#af-ws', 'Tax');
+  await page.click('#af-create');
+  await page.waitForSelector('#af-title', { state: 'detached', timeout: 5000 }).catch(() => {});
+  const stayed = await page.evaluate(() => ({ hash: location.hash, form: !!document.querySelector('#af-title') }));
+  say('#115 a Create with nothing typed during it closes the form and stays on Findings',
+    stayed.hash === `#deal-${id}` && !stayed.form && (await titled(page, id, 'Deposit not posted')).length === 1,
+    JSON.stringify(stayed));
   await ctx.close();
 }
 
