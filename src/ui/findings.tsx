@@ -325,7 +325,12 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
   const [error, setError] = useState('');   // why Save was refused: said beside the buttons, and the edit stays open
   const draft = useRef(start); const base = useRef(start.base);
   // remembered as it is typed (not after the next draw), so leaving the finding straight after typing keeps it
-  const remember = (patch: Partial<EditDraft>) => { draft.current = { ...draft.current, ...patch }; editDrafts.set(f.id, draft.current); };
+  // the base kept with the draft wins: a save sent from this edit before it was closed and opened again moves it on
+  const keptBase = () => editDrafts.get(f.id)?.base ?? base.current;
+  const remember = (patch: Partial<EditDraft>) => {
+    draft.current = { ...draft.current, base: keptBase(), ...patch };
+    editDrafts.set(f.id, draft.current);
+  };
   const setTitle = (v: string) => { setTitleState(v); remember({ title: v }); }; const setWs = (v: string) => { setWsState(v); remember({ ws: v }); };
   const setBody = (v: string) => {
     setBodyState(v);
@@ -341,11 +346,12 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
   const save = async () => {
     if (busy) return; setBusy(true);
     const edit = {
-      dealId: f.dealId, findingId: f.id, title, workstream: ws, body: toParagraphs(body), base: base.current,
+      dealId: f.dealId, findingId: f.id, title, workstream: ws, body: toParagraphs(body), base: keptBase(),
     };
     const sent = { title, ws, body };
     const r = await store.dispatch(EditFinding, edit, { idempotencyKey: 'f-edit-' + f.id });
     setBusy(false);
+    if (cancelled.current) return;   // cancelled while the save was out: an edit opened since is left alone
     if (!r.ok) {
       const field = r.error.kind === 'invalid' ? Object.values(r.error.fields ?? {})[0] : undefined;
       setError(field ?? r.error.message);
@@ -360,9 +366,10 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
   // field the finding held, or the one written over it), so the next Save writes only what changed since, and a change
   // made elsewhere meanwhile is still kept or asked about, never written over
   const keepTypingAfter = (sent: EditDraft['base']) => {
-    if (cancelled.current) return;   // Cancel pressed while the save was out: what was typed goes, as Cancel says
     base.current = asStored(sent);
-    remember({ base: base.current });
+    draft.current = { ...draft.current, base: base.current };
+    // only the base moves: an edit opened again meanwhile keeps what it has typed
+    editDrafts.set(f.id, { ...(editDrafts.get(f.id) ?? draft.current), base: base.current });
   };
   return (
     <div class="card addf fedit" data-holds-work onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onDone(); } }}>
@@ -405,7 +412,7 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
     const input = { dealId: d.id, title, workstream: ws, body: toParagraphs(body), origin: 'human' as const };
     const r = await store.dispatch(CreateFinding, input, { idempotencyKey: 'f-create-' + d.id });
     setBusy(false);
-    if (!r.ok) return;
+    if (!r.ok || cancelled.current) return;   // cancelled while it was out: a form opened since is left alone
     if (sameAsSent(draft.current, sent)) discard();
     else editCreated(createdFinding(store, r.value.opId), { title, workstream: ws, body: input.body });
   };
@@ -413,7 +420,7 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
   // since becomes an open edit of it, measured from what was sent, so one Save puts it on that finding. Unless the
   // finding cannot be found: then the form stays as it is, and nothing typed is lost
   const editCreated = (made: Finding | undefined, sent: EditDraft['base']) => {
-    if (!made || cancelled.current) return;
+    if (!made) return;
     keepAsEdit(made, draft.current, sent);
     discard();
     if (shown.current) location.hash = findingHref(made);

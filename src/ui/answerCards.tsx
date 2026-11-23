@@ -36,13 +36,20 @@ function useCardDraft(drafts: Map<string, CardDraft>, answerId: string, start: C
     else drafts.set(answerId, next);
   };
   const forget = () => drafts.delete(answerId);
+  // Cancel lets the draft go, and a save still out then leaves alone a card opened again since
+  const cancelled = useRef(false);
+  const cancel = () => {
+    cancelled.current = true;
+    forget();
+  };
   /** after a save of `sent` lands: whether nothing was typed since, and then the draft is let go */
   const landed = (sent: CardDraft) => {
+    if (cancelled.current) return false;
     const same = now.current.text === sent.text && now.current.ws === sent.ws;
     if (same) forget();
     return same;
   };
-  return { typed, change, forget, landed, now };
+  return { typed, change, forget, cancel, cancelled, landed, now };
 }
 
 /** The workstream a new question or finding goes in, chosen from the firm's list. */
@@ -81,7 +88,7 @@ export function QuestionCard({ scope, answerId, initial, onDone }: {
     if (result.ok && draft.landed(sent)) onDone();
   };
   const cancel = () => {
-    draft.forget();
+    draft.cancel();
     onDone();
   };
   return (
@@ -134,23 +141,24 @@ export function FindingCard({ dealId, answerId, text, sources, onDone }: {
       store.toast(result.error.message);
       return;
     }
-    if (!draft.landed(sent) && !editMade(createdFinding(store, result.value.opId), finding)) return;
-    onDone();
+    // cancelled while it was out: the finding is made all the same, and said so; a card opened since stays open
+    if (!draft.cancelled.current) {
+      if (!draft.landed(sent) && !editMade(createdFinding(store, result.value.opId), finding)) return;
+      onDone();
+    }
     toastCreated(store, dealId, finding.title);
   };
   // #115's decision for this card too: what was typed since Create was sent becomes an open edit of the finding made,
   // which its toast's Open shows. A finding that cannot be found leaves the card open with the typing
   const editMade = (made: Finding | undefined, sent: { title: string; workstream: string; body: string[] }) => {
-    if (!made || cancelled.current) return false;
+    if (!made) return false;
     const typed = { title: draft.now.current.text, ws: draft.now.current.ws, body: made.body.join('\n\n') };
     keepAsEdit(made, typed, { title: sent.title, workstream: sent.workstream, body: sent.body });
     draft.forget();
     return true;
   };
-  const cancelled = useRef(false);
   const cancel = () => {
-    cancelled.current = true;
-    draft.forget();
+    draft.cancel();
     onDone();
   };
   return (
