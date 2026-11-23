@@ -400,9 +400,9 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
   // #115 (decision: typing during Create goes to the new finding): the finding is made as sent, and what was typed
   // since becomes an open edit of it, measured from what was sent, so one Save puts it on that finding. Unless the
   // finding cannot be found: then the form stays as it is, and nothing typed is lost
-  const editCreated = (made: Finding | undefined, sent: { title: string; workstream: string; body: string[] }) => {
+  const editCreated = (made: Finding | undefined, sent: EditDraft['base']) => {
     if (!made) return;
-    editDrafts.set(made.id, { ...draft.current, base: sent });
+    keepAsEdit(made, draft.current, sent);
     discard();
     if (shown.current) location.hash = findingHref(made);
   };
@@ -420,8 +420,13 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
   );
 }
 
+/** Text typed into a new finding since its Create was sent: an open edit of the finding made, from what was sent (#115). */
+export function keepAsEdit(made: Finding, typed: Typed, sent: EditDraft['base']) {
+  editDrafts.set(made.id, { ...typed, base: sent });
+}
+
 /** the finding a CreateFinding made, by what its write wrote */
-function createdFinding(store: ReturnType<typeof useStore>, opId: string): Finding | undefined {
+export function createdFinding(store: ReturnType<typeof useStore>, opId: string): Finding | undefined {
   const state = store.get();
   const written = Object.keys(state.ops[opId]?.resultRevs ?? {});
   return written.map((id) => state.findings[id]).find(Boolean);
