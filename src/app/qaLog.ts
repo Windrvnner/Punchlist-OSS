@@ -11,7 +11,7 @@ import type { Store } from './store';
 import { localYmd, type QaLog, type Question } from '../domain/model';
 import { dealQuestions, dealTwin, qaKept } from './state';
 import { logWrite, logHolds, matchRows, cellValue, readLogCells, holds } from '../domain/logWrite';
-import { KeepQaLog, SetQaLogFolder, RecordQaLogExport, ChooseQaVersion, TakeFromQaLog } from './commands/qaLogs';
+import { KeepQaLog, SetQaLogFolder, RecordQaLogExport, ChooseQaVersion, TakeFromQaLog, fileTaken } from './commands/qaLogs';
 import { questionsSheet, suggestMapping, type Mapping, type ImportField } from '../domain/importExport';
 import { ok, fail, type Result } from '../domain/result';
 import { cell, type KeptAsk } from '../domain/keptMerge';
@@ -39,6 +39,12 @@ export function logChoice(store: Store, dealId: string, path: string | null): 's
   const had = logOf(store, dealId); if (had) return samePath(had.folder) === samePath(at.folder) && samePath(had.file) === samePath(at.file) ? 'same' : null;
   const inside = (f: string) => { const a = samePath(at.folder), b = samePath(f); return a === b || a.startsWith(`${b}\\`); };
   return store.get().deals[dealId]?.folders.some((f) => inside(f.path)) ? null : 'new';
+}
+
+/** One file is one deal's Q&A log: why `path` can't be imported into this deal, or null when it can (#38) */
+export function logTakenBy(store: Store, dealId: string, path: string | null): string | null {
+  const at = path ? placeOf(path) : null;
+  return at ? fileTaken(store.get(), dealId, at.file, at.folder, 'Choose another file') : null;
 }
 
 /**

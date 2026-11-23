@@ -10,7 +10,7 @@ import { dealQuestions } from '../app/state';
 import { readImportFile, readImportBytes, proposeLayout, previewImport, type ImportTable } from '../app/transfer';
 import { prepareImport, importCounts, type Mapping, type ImportRow } from '../domain/importExport';
 import { ImportQuestions } from '../app/commands/importQuestions';
-import { keepImportedLog } from '../app/qaLog';
+import { keepImportedLog, logTakenBy } from '../app/qaLog';
 import { SERVICE } from '../control';
 import {
   keptImport, keepImport, saveImport, dropImport, importKey, useKeptImportsReady, useFreshOnCrash,
@@ -236,16 +236,22 @@ function useQaImportActions(store: Store, dealId: string, qa: QaImportState, pla
   };
 
   const run = () => runImport(store, dealId, qa, plan, keeping);
-  return { close, startOver, changeFile, run, ...fileReading(store, qa) };
+  return { close, startOver, changeFile, run, ...fileReading(store, dealId, qa) };
 }
 export type QaImportActions = ReturnType<typeof useQaImportActions>;
 
 /** Reading the file: the file the person picks, the model's proposal of its layout, and another sheet or heading row */
-function fileReading(store: Store, qa: QaImportState) {
+function fileReading(store: Store, dealId: string, qa: QaImportState) {
   const { table, busy, token, setBusy, setError, setTable, setMapping } = qa;
 
   const load = async (file: File) => {
     if (busy) return;
+    // another deal's Q&A log is refused before it is read (#38)
+    const taken = logTakenBy(store, dealId, store.services.fs.pathFor?.(file) ?? null);
+    if (taken) {
+      setError(taken);
+      return;
+    }
     const mine = ++token.current;
     setBusy('reading');
     setError('');
@@ -314,6 +320,9 @@ async function runImport(store: Store, dealId: string, qa: QaImportState, plan: 
   qa.setError('');
   qa.setRestart(false);
   try {
+    // a kept import not sent yet, of a file another deal has made its log since, imports nothing (#38)
+    const taken = savedSubmission(qa.key) ? null : logTakenBy(store, dealId, qa.path);
+    if (taken) { qa.setError(taken); return; }
     const chosen = await chooseSubmission(store, qa, prepared?.rows ?? []);
     if (!chosen.ok) { qa.setError(chosen.error.message); return; }
     const submission = chosen.value;

@@ -25,18 +25,30 @@ export const KeepQaLog = define({
     const d = state.deals[input.dealId]; if (!d) return fail(notFound('Deal not found', input.dealId));
     const had = d.qaLogs.find((l) => l.name === input.log.name);
     const log = QaLog.parse({ ...had, ...input.log });
+    // one file is one deal's log, even when two PCs import it into two deals at once (#38)
+    const taken = fileTaken(state, d.id, log.file, log.folder, 'Choose another file');
+    if (taken) return fail(rejected(taken));
     return ok({ dealId: d.id, upserts: [{ kind: 'deal', record: withLogs(d, [...d.qaLogs.filter((l) => l.name !== log.name), log], ctx.at), expectedRev: d.rev }], audit: [], inverse: { command: 'RestoreQaLogs', input: { dealId: d.id, logs: d.qaLogs } } });
   },
 });
 
+/** a path as Windows compares it: case and slash direction don't matter, nor a separator at the end */
+const windowsPath = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLocaleLowerCase('en-US');
+
 /**
  * Two deals may share a name, and so may their logs' files: one file is one deal's log, or each would write the other's
- * answers into it. Why `file` in `folder` cannot be this deal's log, or null when it can.
+ * answers into it. Why `file` in `folder` cannot be this deal's log, or null when it can; `next` says what to do instead.
  */
-function fileTaken(state: { deals: Record<string, Deal> }, dealId: string, file: string, folder: string): string | null {
-  const same = (a: string, b: string) => a.replace(/[\\/]+$/, '').toLocaleLowerCase('en-US') === b.replace(/[\\/]+$/, '').toLocaleLowerCase('en-US');
-  const taken = Object.values(state.deals).find((x) => x.id !== dealId && x.qaLogs.some((l) => same(l.folder, folder) && same(l.file, file)));
-  return taken ? `${taken.name}${taken.counterparty ? ` (${taken.counterparty})` : ''} already uses “${file}” in this folder as its Q&A log. Choose another folder` : null;
+export function fileTaken(
+  state: { deals: Record<string, Deal> }, dealId: string, file: string, folder: string, next = 'Choose another folder',
+): string | null {
+  const same = (a: string, b: string) => windowsPath(a) === windowsPath(b);
+  const sameFile = (l: QaLog) => same(l.folder, folder) && same(l.file, file);
+  const taken = Object.values(state.deals).find((x) => x.id !== dealId && x.qaLogs.some(sameFile));
+  if (!taken) return null;
+  // the file named as the other deal holds it, however it was typed here
+  const named = taken.qaLogs.find(sameFile)!.file;
+  return `${taken.name}${taken.counterparty ? ` (${taken.counterparty})` : ''} already uses “${named}” in this folder as its Q&A log. ${next}`;
 }
 
 /** The folder the log is in, when it has moved; the file keeps its name. What the app wrote stays: it is about the log's cells. */
