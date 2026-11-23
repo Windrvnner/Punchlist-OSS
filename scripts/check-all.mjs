@@ -5,9 +5,11 @@
 // It never makes paid model calls: every step runs without the Claude key or the live-run switch, even when the shell
 // holds them (npm run e2e:live is the one way to run the live tests).
 import { spawnSync } from 'node:child_process';
+import { usableOffice } from './office-check.mjs';
 
 // by any spelling: Windows treats environment names without regard to case
 const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !['PUNCHLIST_AI_KEY', 'PUNCHLIST_LIVE'].includes(k.toUpperCase())));
+requireOffice();
 const display = process.platform !== 'linux' || !!process.env.DISPLAY;
 const steps = [
   ['npm', ['run', 'check']],
@@ -25,3 +27,16 @@ for (const [cmd, args] of steps) {
   if (r.status !== 0) { console.error(`\ncheck:all stopped: ${cmd} ${args.join(' ')} failed`); process.exit(r.status ?? 1); }
 }
 console.log('\ncheck:all passed');
+
+/** LibreOffice must convert spreadsheets before the run; the tests that need it then run on it, never skip (#85). */
+function requireOffice() {
+  try {
+    const { soffice, version } = usableOffice(env);
+    console.log(`LibreOffice ${soffice}: ${version}`);
+    env.PUNCHLIST_SOFFICE = soffice;
+    env.PUNCHLIST_OFFICE = 'required';
+  } catch (error) {
+    console.error(`check:all stopped: ${error.message}`);
+    process.exit(1);
+  }
+}
