@@ -20,11 +20,13 @@ import { dropKept, type ChecklistChoices, type ChecklistKept, type Keeper } from
 export type Busy = '' | 'reading' | 'asking' | 'reviewing' | 'importing';
 
 /**
- * One file read or model call at a time: what is under way, and the error the footer shows. Each read or call takes a
- * new `token`; leaving or going back bumps it too, so an answer that comes back after either is dropped.
+ * Each read or model call takes a new `token`. Leaving or going back bumps it too, so a late answer is dropped.
+ * A retry can still be in flight after Back, while the person chooses and reads another source.
  */
 export function useWork() {
-  const [busy, setBusy] = useState<Busy>('');
+  const [activity, setBusy] = useState<Busy>('');
+  const [retrying, setRetrying] = useState(false);
+  const busy = activity || (retrying ? 'reviewing' : '');
   const [error, setError] = useState('');
   const token = useRef(0);
   /** a new token: any answer still to come for an older one is dropped */
@@ -36,14 +38,14 @@ export function useWork() {
     setError('');
     return mine;
   };
-  /** Drops the pending answer. A duplicate retry keeps its busy state until its call returns. */
-  const drop = (keepBusy = false) => {
+  /** Drops the pending answer and clears the activity associated with it. */
+  const drop = () => {
     newToken();
-    if (!keepBusy) setBusy('');
+    setBusy('');
   };
   /** whether nothing newer has started, or the dialog been left, since `mine` began */
   const isLatest = (mine: number) => token.current === mine;
-  return { busy, setBusy, error, setError, newToken, begin, drop, isLatest };
+  return { busy, activity, setBusy, setRetrying, error, setError, newToken, begin, drop, isLatest };
 }
 export type Work = ReturnType<typeof useWork>;
 
@@ -101,7 +103,7 @@ function useListFile(store: Store, work: Work, left: ChecklistKept | null) {
     setMapping(suggestChecklistColumns(read.columns, read.rows));
   };
   const load = async (file: File) => {
-    if (work.busy) return;
+    if (work.activity) return;
     const mine = work.begin('reading');
     const read = await readListFile(store, file);
     if (!work.isLatest(mine)) return;
@@ -120,7 +122,7 @@ function useListFile(store: Store, work: Work, left: ChecklistKept | null) {
     }
   };
   const reread = (opts: { sheet?: string; headerRow?: number }) => {
-    if (!table || work.busy) return;
+    if (!table || work.activity) return;
     void readTableAgain(store, work, table, byColumns ? opts : { ...opts, headerRow: 1 }, take);
   };
   // the fallback when the model could not read a table: its columns chosen by hand
@@ -131,7 +133,7 @@ function useListFile(store: Store, work: Work, left: ChecklistKept | null) {
   };
   // what is pasted stays in the box until it is sent, and after "change"
   const pasted = () => {
-    if (!paste.trim() || work.busy) return;
+    if (!paste.trim() || work.activity) return;
     setTable(null);
     setByColumns(false);
     work.setError('');
@@ -256,8 +258,7 @@ export function useListReview(
 
   // A model that cannot be asked leaves its part out and says so; the list can still be brought in.
   const next = async () => {
-    if (!prepared || !prepared.items.length || !target.named || work.busy) return;
-    if (retries.asking.current === 'duplicates') return;
+    if (!prepared || !prepared.items.length || !target.named || work.busy || retries.asking.current) return;
     const texts = prepared.items.map((item) => item.text);
     const sig = askedAbout(texts, askReword, askSame, generalTexts);
     if (review && askedFor.current === sig) {
@@ -289,8 +290,7 @@ export function useListReview(
   };
   return {
     ...choices, review, shown: made.shown, askedFor, ...toBringIn,
-    next, retry: retries.retry, retryWording: retries.retryWording, reset,
-    backToList: () => made.backToList(retries.asking.current === 'duplicates'),
+    next, retry: retries.retry, retryWording: retries.retryWording, reset, backToList: made.backToList,
   };
 }
 
@@ -300,8 +300,8 @@ function useMadeReview(work: Work, left: ChecklistKept | null) {
   const [shown, setShown] = useState(!!left?.choices?.shown);
   const askedFor = useRef(left?.choices?.askedFor ?? '');
   /** Back from the review: drops any answer still to come, and keeps the review for Next */
-  const backToList = (keepBusy: boolean) => {
-    work.drop(keepBusy);
+  const backToList = () => {
+    work.drop();
     setShown(false);
     work.setError('');
   };
@@ -357,13 +357,22 @@ function useReviewRetries(
 ) {
   const ai = store.services.ai;
   // `asking` stops a second press in the same frame, before busy shows, from paying for a second call
-  const asking = useRef<'duplicates' | 'wording' | null>(null);
+  const asking = useRef(false);
+  const beginRetry = () => {
+    asking.current = true;
+    work.setRetrying(true);
+    work.setError('');
+    return work.newToken();
+  };
+  const finishRetry = () => {
+    asking.current = false;
+    work.setRetrying(false);
+  };
   // The duplicate check missed some items last time (a part the service did not answer): Next asks about those alone
   // again, and adds what it finds.
   const askMissed = async (was: Review, texts: string[], missedAt: number[]) => {
     if (work.busy || asking.current || !ai.sameMeaning) return false;
-    asking.current = 'duplicates';
-    const mine = work.begin('reviewing');
+    const mine = beginRetry();
     try {
       const sameReply = await ai.sameMeaning({ items: texts, against: generalTexts, only: missedAt });
       if (!work.isLatest(mine)) return false;
@@ -373,8 +382,7 @@ function useReviewRetries(
       if (reason) work.setError(`${reason} again`);
       return true;
     } finally {
-      asking.current = null;
-      work.setBusy((busy) => busy === 'reviewing' ? '' : busy);
+      finishRetry();
     }
   };
   // Retry beside the duplicates line does what Back then Next does: asks about the missed items alone, or all of them
@@ -390,20 +398,21 @@ function useReviewRetries(
   const retryWording = async () => {
     if (!review || work.busy || asking.current || !ai.reword) return;
     const was = review;
-    asking.current = 'wording';
-    const mine = work.begin('reviewing');
-    const rewordReply = await ai.reword({ items: was.items.map((item) => item.text) }).finally(() => {
-      asking.current = null;
-    });
-    if (!work.isLatest(mine)) return;
-    work.setBusy('');
-    // failed again: the line gives this failure's reason, and the footer says it was asked again
-    if (!rewordReply.ok) {
-      setReview({ ...was, asked: { ...was.asked, reword: failedAs(rewordReply) } });
-      work.setError(`${NOT_DONE[failedAs(rewordReply)]} again`);
-      return;
+    const mine = beginRetry();
+    try {
+      const rewordReply = await ai.reword({ items: was.items.map((item) => item.text) });
+      if (!work.isLatest(mine)) return;
+      // failed again: the line gives this failure's reason, and the footer says it was asked again
+      if (!rewordReply.ok) {
+        const reason = failedAs(rewordReply);
+        setReview({ ...was, asked: { ...was.asked, reword: reason } });
+        work.setError(`${NOT_DONE[reason]} again`);
+        return;
+      }
+      setReview(withRewordings(was, rewordReply.value));
+    } finally {
+      finishRetry();
     }
-    setReview(withRewordings(was, rewordReply.value));
   };
   return { asking, askMissed, retry, retryWording };
 }

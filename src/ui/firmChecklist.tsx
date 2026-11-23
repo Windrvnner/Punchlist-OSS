@@ -180,7 +180,7 @@ function ImportChecklistDialog(props: ImportProps & { fresh: boolean }) {
     stopChoosing: () => setChoosingHere(false),
     bringItIn: () => void listReview.run(fileName),
   };
-  if (!table && !text) return pickStep(view);
+  if (!table && !text) return pickStep({ ...view, work: { ...work, busy: work.activity } });
   // from the mapping or the review alike, and Back returns to that step as it was left
   if (choosingHere && split) return chooseStep(view, split);
   if (review && listReview.shown) return reviewStep(view, review);
