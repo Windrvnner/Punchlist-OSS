@@ -12,7 +12,7 @@ import { CreateQuestion, UseAsResponse } from './commands/questions';
 import { mayAddress } from '../domain/suggest';
 import { withoutMarkers } from '../domain/cite';
 import type { Research } from '../ports';
-import { bareDealName } from './commands/deals';
+import { bareDealName, cleanName } from './commands/deals';
 
 /**
  * A conversation about a deal, or across deals, has its own id (`conv`): each question asked from a deal page's ask
@@ -76,16 +76,20 @@ const mid = () => `m${Date.now().toString(36)}${(seq++).toString(36)}`;
 
 // #500: only the explicit verb and page suffix are syntax; a deal name can contain punctuation or Unicode.
 function typedDealDestination(store: Store, text: string) {
-  const command = /^(?:take me to|go to|open|show me|show|switch to|jump to)\s+(.+)$/i.exec(text);
+  const command = /^(?:take me to|go to|open|show me|show|switch to|jump to)\s+(.+)$/is.exec(text);
   if (!command) return;
-  const target = command[1].replace(/^the\s+/i, '');
+  const target = cleanName(command[1]);
   const lookup = (name: string) => {
     const key = bareDealName(name.trim(), 'navigation').toLowerCase();
     if (!key) return;
     return Object.values(store.get().deals).find((candidate) =>
       bareDealName(candidate.name, 'navigation').toLowerCase() === key);
   };
-  const named = (name: string) => lookup(name) ?? lookup(name.replace(/['’]s$/i, ''));
+  const possessive = (name: string) => lookup(name.replace(/['’]s$/i, '')) ?? lookup(name);
+  const named = (name: string) => {
+    const withoutArticle = name.replace(/^the\s+/i, '');
+    return possessive(withoutArticle) ?? (withoutArticle !== name ? possessive(name) : undefined);
+  };
   const suffix = /^(.+?)\s+(q ?& ?a|questions|findings|checklist|overview)$/i.exec(target);
   const deal = suffix && named(suffix[1]);
   return deal ? { deal, page: suffix[2].toLowerCase() } : { deal: named(target), page: '' };
