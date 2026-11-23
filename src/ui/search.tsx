@@ -5,6 +5,8 @@ import { useAppState, useStore } from './hooks';
 import { Icon } from './icons';
 import { DocName } from './docName';
 import { CachedMark } from './cached';
+import type { Store } from '../app/store';
+import { revealChecklistRow } from './checklist';
 import { navigate } from './nav';
 import { searchGroups, loadAllForSearch, GROUP_PAGE, type Hit, type HitGroup, type HitKind } from '../app/search';
 import { Marked } from './searchMark';
@@ -63,7 +65,7 @@ export function SearchBox({ float }: { float?: boolean }) {
       return;
     }
     leave(false);
-    navigate(store, item.hit.hash, item.hit.ui ?? {});
+    if (!revealOpenChecklistHit(store, item.hit)) navigate(store, item.hit.hash, item.hit.ui ?? {});
   };
   const onKey = (e: KeyboardEvent) => {
     if (e.isComposing) return;
@@ -114,6 +116,14 @@ export function SearchBox({ float }: { float?: boolean }) {
       {!active && <kbd>Ctrl K</kbd>}
     </div>);
   return <>{float ? createPortal(field, document.body) : field}{panel}</>;
+}
+
+// #496: choosing the open Checklist item again keeps its filter and brings its row back into view.
+function revealOpenChecklistHit(store: Store, hit: Hit): boolean {
+  const id = hit.ui?.selectedChecklist;
+  if (!id || location.hash !== '#' + hit.hash || store.get().ui.selectedChecklist !== id) return false;
+  revealChecklistRow(document.getElementById('ck-rows'), id);
+  return true;
 }
 
 // When the last page is revealed, its group no longer has a Show More row (#628).

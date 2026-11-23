@@ -104,6 +104,17 @@ function CkHead({ filters, on, offOpen, seg, acts, more }: { filters: [UiState['
     </span>}{more}</span>}</div>;
 }
 
+// #496: reselecting a Search hit can reveal the open item without changing the selection.
+export function revealChecklistRow(list: HTMLElement | null, itemId: string) {
+  const row = list?.querySelector<HTMLElement>(`[data-item="${CSS.escape(itemId)}"]`);
+  if (!list || !row || document.activeElement === row) return;
+  const viewport = list.getBoundingClientRect();
+  const bounds = row.getBoundingClientRect();
+  if (bounds.top < Math.max(0, viewport.top) || bounds.bottom > Math.min(innerHeight, viewport.bottom)) {
+    row.scrollIntoView({ block: 'center' });
+  }
+}
+
 /**
  * Every checklist item of the deal and what its check came to, as a list with the item that is open beside it, like the
  * Q&A log. A line says how the item stands in a few words; opening it shows the whole of it: what a gap needs, the
@@ -121,11 +132,7 @@ export function ChecklistPage({ dealId }: { dealId: string }) {
   const listedNow = Array.isArray(s.checklists[dealId]);
   useEffect(() => {
     const id = s.ui.selectedChecklist; if (!id) return;
-    const f = requestAnimationFrame(() => {
-      const l = listRef.current, r = l?.querySelector<HTMLElement>(`[data-item="${id}"]`); if (!l || !r || document.activeElement === r) return;
-      const a = l.getBoundingClientRect(), b = r.getBoundingClientRect();
-      if (b.top < Math.max(0, a.top) || b.bottom > Math.min(innerHeight, a.bottom)) r.scrollIntoView({ block: 'center' });
-    });
+    const f = requestAnimationFrame(() => revealChecklistRow(listRef.current, id));
     return () => cancelAnimationFrame(f);
   }, [s.ui.selectedChecklist, listedNow]);
   const inherited = useContext(ReadOnlyContext);
