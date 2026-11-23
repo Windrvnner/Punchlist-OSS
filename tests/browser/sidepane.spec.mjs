@@ -13,7 +13,9 @@ async function fresh(width = 1280, height = 736, colorScheme = 'light', storageS
   page.errors = [];
   page.on('pageerror', (e) => page.errors.push(e.message));
   await page.goto(URL);
-  await page.waitForSelector('#fr-new');
+  // with a deal in the saved state the app may open on it, so the ready app is waited for rather than the start page
+  if (storageState) await page.waitForFunction(() => window.store?.get().boot.stage === 'ready');
+  else await page.waitForSelector('#fr-new');
   return { ctx, page };
 }
 async function indexedDeal(page) {
