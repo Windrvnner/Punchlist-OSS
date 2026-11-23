@@ -5,19 +5,15 @@ const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
 const browser = await launchChrome();
 const SHOTS = process.env.SHOTS || '';
+const WORKBOOK_NAME = 'Construction Cost and Funding Schedule v12.xlsx';
 /** the reading bar and the drafts list stay inside the document pane, and nothing in the bar wraps */
 const fits = (page) => page.evaluate(() => {
   const pane = document.querySelector('.docpanel').getBoundingClientRect(); const inside = (el) => { if (!el) return true; const r = el.getBoundingClientRect(); return r.left >= pane.left - 1 && r.right <= pane.right + 1 && r.top >= 0; };
   return inside(document.querySelector('.docnav')) && inside(document.querySelector('.dl')) && document.querySelector('#doc-drafts').getBoundingClientRect().height <= 31;
 });
 
-async function chipsInReadingMode(page, selected, shot) {
-  const chips = page.locator('.msgs .ai:not(.pending) .rsch-chip');
-  await chips.nth(selected).click();
-  await page.waitForSelector('.docpanel .page:not(.ph-page)');
-  // Let the layout settle after the reader opens and narrows the conversation.
-  await page.waitForTimeout(500);
-  const measurements = await chips.evaluateAll((items) => items.map((chip) => {
+function measureChips(chips) {
+  return chips.evaluateAll((items) => items.map((chip) => {
     const name = chip.querySelector('.docnm');
     const head = name.querySelector('.dnh');
     const tail = name.querySelector('.dnt');
@@ -36,8 +32,10 @@ async function chipsInReadingMode(page, selected, shot) {
     const textFits = (part) => {
       const text = textBounds(part);
       const box = part.getBoundingClientRect();
-      return text.left >= box.left - 0.5 && text.right <= box.right + 0.5
-        && box.right <= bounds.right && Math.abs((text.top + text.bottom - bounds.top - bounds.bottom) / 2) <= 1;
+      const midY = (text.top + text.bottom) / 2;
+      return text.left >= box.left - 0.5 && text.right <= Math.min(box.right, bounds.right) + 0.5
+        && Math.abs(midY - (bounds.top + bounds.bottom) / 2) <= 1
+        && part.contains(document.elementFromPoint(text.right - 1, midY));
     };
     const tailClipped = tail && textBounds(tail).width > tail.getBoundingClientRect().width + 0.5;
     const ellipsis = tailClipped
@@ -50,9 +48,20 @@ async function chipsInReadingMode(page, selected, shot) {
       fits: bounds.height === 28 && bounds.left >= column.left && bounds.right <= column.right + 0.5
         && chip.scrollWidth <= chip.clientWidth && nameOverflow <= 1 && locationGap >= 5.5,
       nameOverflow, locationGap,
+      chipOverflow: chip.scrollWidth - chip.clientWidth, chipRight: bounds.right,
+      locationRight: textBounds(location).right, tagRight: tag ? textBounds(tag).right : null,
       detailsFit: [location, tag].filter(Boolean).every(textFits),
     };
   }));
+}
+
+async function chipsInReadingMode(page, selected, shot) {
+  const chips = page.locator('.msgs .ai:not(.pending) .rsch-chip');
+  await chips.nth(selected).click();
+  await page.waitForSelector('.docpanel .page:not(.ph-page)');
+  // Let the layout settle after the reader opens and narrows the conversation.
+  await page.waitForTimeout(500);
+  const measurements = await measureChips(chips);
   if (shot) {
     const viewport = page.viewportSize();
     await page.setViewportSize({ ...viewport, width: viewport.width + 1 });
@@ -70,15 +79,20 @@ async function chipsInReadingMode(page, selected, shot) {
   return { measurements, tooltip, fullName: measurements[hover]?.name ?? '' };
 }
 
-async function crampedNameTooltip(page) {
-  const doc = 'Construction Cost and Funding Schedule v12.xlsx';
-  const loc = "'WORKING CAPITAL RECONCILIATION'!Z515";
-  await page.evaluate((source) => {
+async function workbookChip(page, index, loc) {
+  await page.evaluate(({ index, doc, loc }) => {
     const answer = Object.values(store.get().threads).flat().find((item) => item.sources?.some((src) => src.precedent));
-    Object.assign(answer.sources[0], source);
+    Object.assign(answer.sources[index], { doc, loc });
     store.ui({ doc: 1 });
-  }, { doc, loc });
-  const name = page.getByRole('button', { name: `Open ${doc}, ${loc}`, exact: true }).locator('.docnm');
+  }, { index, doc: WORKBOOK_NAME, loc });
+  const chip = page.getByRole('button', { name: `Open ${WORKBOOK_NAME}, ${loc}`, exact: true });
+  await chip.waitFor();
+  return chip;
+}
+
+async function crampedNameTooltip(page) {
+  const chip = await workbookChip(page, 0, "'WORKING CAPITAL RECONCILIATION'!Z515");
+  const name = chip.locator('.docnm');
   const point = await name.evaluate((node) => {
     const box = node.getBoundingClientRect();
     const visible = box.width > 0 ? box : node.querySelector('.dnh').getBoundingClientRect();
@@ -89,7 +103,7 @@ async function crampedNameTooltip(page) {
   if (!point) return false;
   await page.mouse.move(...point);
   await page.waitForSelector('.tip');
-  return (await page.textContent('.tip')) === doc;
+  return (await page.textContent('.tip')) === WORKBOOK_NAME;
 }
 
 for (const [scheme, w, h] of [['dark', 1280, 736], ['light', 1280, 736], ['dark', 1024, 640], ['light', 1024, 640]]) {
@@ -150,6 +164,12 @@ for (const [scheme, w, h] of [['dark', 1280, 736], ['light', 1280, 736], ['dark'
   say(`${tag}:precedent-chip`, pre.length === 2 && pre[0][0] === '' && pre[1][0] === 'precedent' && pre[1][1] === "Another project's document, not this deal's terms." && pre.every((c) => c[2]), JSON.stringify(pre));
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/E-precedent-${tag}.png` });
   const precedent = await chipsInReadingMode(page, 1, SHOTS && `${SHOTS}/441-precedent-${tag}.png`);
+  const taggedWorkbooks = [];
+  // On main, only the funding model's pill edge has 5px of overflow. Both tags' text fits.
+  for (const [loc, maxOverflow] of [["'DEBT FUNDING MODEL'!AA15", 5], ["'DEBT SERVICE MODEL'!AA15", 0]]) {
+    const [workbook] = await measureChips(await workbookChip(page, 1, loc));
+    taggedWorkbooks.push({ ...workbook, maxOverflow });
+  }
   const crampedTip = await crampedNameTooltip(page);
   const shown = [...blackline.measurements, ...precedent.measurements];
   const details = shown.map(({ name, location, tag: badge }) => [name, location, badge]);
@@ -163,8 +183,10 @@ for (const [scheme, w, h] of [['dark', 1280, 736], ['light', 1280, 736], ['dark'
     JSON.stringify(details) === JSON.stringify(expected)
     && shown.every(({ fits, detailsFit, ellipsis, label, name, location }) =>
       fits && detailsFit && ellipsis && label === `Open ${name}, ${location}`)
-    && [blackline, precedent].every(({ tooltip, fullName }) => fullName && tooltip === fullName) && crampedTip,
-    JSON.stringify({ blackline, precedent, crampedTip }));
+    && [blackline, precedent].every(({ tooltip, fullName }) => fullName && tooltip === fullName) && crampedTip
+    && taggedWorkbooks.every(({ chipOverflow, maxOverflow, detailsFit, tag: badge }) =>
+      chipOverflow <= maxOverflow && detailsFit && badge === 'precedent'),
+    JSON.stringify({ blackline, precedent, crampedTip, taggedWorkbooks }));
   say(`${tag}:no-page-errors`, page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }
