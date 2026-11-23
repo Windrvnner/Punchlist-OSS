@@ -376,4 +376,27 @@ describe('conversations in the synced folder', () => {
     const there = await home.load();
     expect(there.ok && there.value['deal:d1:cB']?.map((m) => m.id)).toEqual(['b1']);
   });
+  it('a save after a failed read of this PC\'s copy does not reuse a number, so every PC shows the message (#759)', async () => {
+    const shared = new Mem();
+    const local = new Mem();
+    const at = clock();
+    const ask = (id: string, text: string) => msg(id, 'me', text, at);
+    const thread = [ask('m1', 'Is the earn-out capped?'), ask('m2', 'Who holds the escrow?')];
+    const open = () => conversationLog({ shared, local, installId: 'pc', user: () => 'adoe', clock });
+    expect((await open().save('deal:d1:c1', thread)).ok).toBe(true);
+    const restarted = open();
+    const read = local.read.bind(local);
+    let busy = true;                                                   // this PC's copy is held open for a moment
+    local.read = (name: string) => {
+      if (busy) { busy = false; throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }); }
+      return read(name);
+    };
+    const more = [...thread, ask('m3', 'Is the lease assignable?')];
+    expect((await restarted.save('deal:d1:c1', more)).ok).toBe(false);
+    expect((await restarted.save('deal:d1:c1', more)).ok).toBe(true);
+    const seqs = wholeLines(shared.files.get('talk-pc-0.jsonl')!).map((l) => JSON.parse(l).seq);
+    expect(seqs).toEqual([0, 1, 2]);
+    const home = await conversationLog({ shared, local: new Mem(), installId: 'home', user: () => 'adoe', clock }).load();
+    expect(home.ok && home.value['deal:d1:c1'].map((m) => m.id)).toEqual(['m1', 'm2', 'm3']);
+  });
 });
