@@ -7,6 +7,8 @@ import { DocName } from './docName';
 import { ReadOnlyContext } from './editField';
 import { FoldersBody, FoldersActs } from './foldersParts';
 import { versionsWord, dealHash, type DealKinds } from '../app/state';
+import { keepNewDeal } from './newDealKept';
+import { useNewDealDraft } from './useNewDealDraft';
 import { firmOf } from '../domain/checklist';
 import { PickList } from './pickList';
 import { CreateDeal, AddFolders, RemoveFolder, RestoreFolder, DeleteDeal } from '../app/commands/deals';
@@ -118,12 +120,6 @@ export function fitLabel(name: string) {
   return (cut > 0 ? s.slice(0, cut) : s.slice(0, FOLDER_LABEL_MAX)).trim();
 }
 
-/**
- * A new deal half filled in when the dialog was dismissed (Escape, or a click outside it): the name, the folders and a
- * typed path come back the next time the dialog opens, so nothing typed is thrown away by a stray key.
- */
-let keptNewDeal: { name: string; folders: NonNullable<ReturnType<typeof useAppState>['ui']['newDeal']>['folders']; path: string; kinds?: DealKinds; counterparty?: string } | null = null;
-
 /** Keep it puts the focus back on the × that asked, once the Folders dialog is back */
 const backTo = (path: string) => requestAnimationFrame(() => {
   const xs = [...document.querySelectorAll<HTMLElement>('#folders .fdrow .x')];
@@ -139,22 +135,34 @@ const enterToBrowse = (e: KeyboardEvent) => {
 export function NewDealDialog() {
   const store = useStore(); const s = useAppState();
   const nd = s.ui.newDeal!; const existing = nd.forDeal ? s.deals[nd.forDeal] : null;
-  const [path, setPath] = useState(''); const [pasting, setPasting] = useState(false); const [scanning, setScanning] = useState(false);
+  const [path, setPath] = useState('');
+  const [pasting, setPasting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   // a folder's × asks first, in place of this dialog as the deal-twin ask is, and Keep it comes back to it
   const [removing, setRemoving] = useState<{ path: string; label: string } | null>(null);
   const set = (patch: Partial<typeof nd>) => store.ui((ui) => ({ newDeal: ui.newDeal ? { ...ui.newDeal, ...patch } : null }));
-  const close = () => { keptNewDeal = null; store.ui({ newDeal: null }); };
+  // closed with its work done: a deal made, or folders added to one. Only the New deal form keeps a draft to let go of
+  const close = () => {
+    if (!existing) keepNewDeal(null);
+    store.ui({ newDeal: null });
+  };
   // once Create has been pressed the deal is being written and cannot be called back: Escape, the × and a click outside
   // wait for it, rather than closing as if canceled while the deal is made anyway
   const creating = () => !!store.get().ui.newDeal?.busy;
-  // dismissed rather than canceled: keep what was typed for the next time the dialog opens
-  const picked = Object.values(nd.kinds ?? {}).some((v) => v?.trim()) || !!nd.counterparty?.trim();
-  const dismiss = () => { if (creating()) return; const kept = !existing && (nd.name.trim() || nd.folders.length || path.trim() || picked) ? { name: nd.name, folders: nd.folders, path, kinds: nd.kinds, counterparty: nd.counterparty } : null; close(); keptNewDeal = kept; };
-  useLayoutEffect(() => {
-    if (existing || nd.name || nd.folders.length || !keptNewDeal) return;
-    const k = keptNewDeal; keptNewDeal = null; set({ name: k.name, folders: k.folders, kinds: k.kinds, counterparty: k.counterparty }); if (k.path) { setPath(k.path); setPasting(true); }
-  }, []);
+  // the New deal form is kept on this PC as it changes, folders still to be read included (#55, #113)
+  const putBack = (fields: Partial<typeof nd>, typed: string) => {
+    set(fields);
+    setPath(typed);
+    setPasting(!!typed);
+  };
+  const kept = useNewDealDraft({ nd, path, restore: putBack, read: (p) => addPath(p) });
+  const scanning = kept.waiting.length > 0;
+  // dismissed rather than canceled: what was typed comes back the next time the dialog opens
+  const dismiss = () => {
+    if (creating()) return;
+    if (!existing) kept.keepNow();
+    store.ui({ newDeal: null });
+  };
   const norm = pathKey;
   const taken = () => [...nd.folders.map((f) => f.label), ...(existing?.folders ?? []).map((f) => f.label)];
   // the deal's own details are in a clash: its folder labels are read-only until that clears
@@ -174,12 +182,14 @@ export function NewDealDialog() {
     const me = pathKey(f.path); const w = nd.folders.find((x) => pathKey(x.path).startsWith(me + '\\') || me.startsWith(pathKey(x.path) + '\\'));
     return w ? `${w.label || w.path}, waiting to be added, overlaps ${f.label || f.path}` : null;
   };
-  const reading = useRef(new Set<string>());           // folders being read just now, by normalized path
   const addPath = async (p: string, label?: string) => {
     p = p.trim(); if (!p) return;
     // read afresh, not from this render: a second Enter or drop while the first was being read saw the list without it
     const listed = () => (store.get().ui.newDeal?.folders ?? nd.folders).some((f) => norm(f.path) === norm(p)) || !!existing?.folders.some((f) => norm(f.path) === norm(p));
-    if (listed() || reading.current.has(norm(p))) { store.toast('That folder is already on the list'); return; }
+    if (listed() || kept.isReading(p)) {
+      store.toast('That folder is already on the list');
+      return;
+    }
     // a folder inside one already on the list, or holding one, would be read twice: it is refused, with the folder it overlaps
     const inside = (a: string, b: string) => { const x = norm(a).replace(/\\/g, '/'), y = norm(b).replace(/\\/g, '/'); return x.startsWith(y + '/'); };
     const over = [...(store.get().ui.newDeal?.folders ?? nd.folders), ...(existing?.folders ?? [])].find((f) => inside(p, f.path) || inside(f.path, p));
@@ -187,13 +197,14 @@ export function NewDealDialog() {
     // a removed folder's path brings it back as it was, from what was already indexed, rather than reading it again
     const gone = existing?.removed.find((f) => norm(f.path) === norm(p));
     if (gone) return await restore(gone);                 // refused (the deal is in two versions): what was typed stays, and the notice says why
-    reading.current.add(norm(p)); setScanning(true);
+    kept.started(p);
     const r = await store.services.docs.scanFolder(p);
-    reading.current.delete(norm(p)); setScanning(reading.current.size > 0);
+    const folder = r.ok ? { path: p, label: label ? fitLabel(label) : guessLabel(p, taken()), ...r.value } : null;
+    if (!kept.finished(p, folder)) return false;       // this dialog has closed meanwhile
     if (!r.ok) { set({ error: `Couldn’t read ${p}` }); return false; }
     set({ error: '' });
     if (listed()) return true;
-    store.ui((ui) => ui.newDeal ? { newDeal: { ...ui.newDeal, folders: [...ui.newDeal.folders, { path: p, label: label ? fitLabel(label) : guessLabel(p, taken()), ...r.value }] } } : {});
+    store.ui((ui) => ui.newDeal ? { newDeal: { ...ui.newDeal, folders: [...ui.newDeal.folders, folder!] } } : {});
     return true;
   };
   // what was typed stays in the field unless it was added: a path that could not be read can be corrected, not retyped.
@@ -208,7 +219,11 @@ export function NewDealDialog() {
     requestAnimationFrame(() => document.getElementById('nd-path')?.focus());
   };
   const browse = async () => {
-    if (store.services.fs.pickFolders) { const r = await store.services.fs.pickFolders(); if (r.ok) for (const p of r.value) await addPath(p); return; }
+    if (store.services.fs.pickFolders) {
+      const r = await store.services.fs.pickFolders();
+      if (r.ok) await kept.readEach(r.value);     // all of them kept from the moment they are chosen (#113)
+      return;
+    }
     fileRef.current?.click();
   };
   const onFiles = (e: Event) => {
@@ -224,18 +239,23 @@ export function NewDealDialog() {
     const files = [...(e.dataTransfer?.files ?? [])];
     const items = [...(e.dataTransfer?.items ?? [])].map((i) => (i as any).webkitGetAsEntry?.()).filter(Boolean);
     const names = store.services.fs.pathFor ? files.map((f) => store.services.fs.pathFor!(f)) : items.length ? items.map((en: any) => en.name) : files.map((f) => f.name);
-    for (const n of names) await addPath(n);
+    await kept.readEach(names);                   // all of them kept from the moment they are dropped (#113)
   };
   // a new deal needs a name before it can be created: until then the button is off, and pointing at it says why
   const needName = !existing && !nd.name.trim();
   const create = async (anyway = false) => {
-    if (nd.busy || scanning) return;                      // a folder still being read is part of what is being created
+    if (creating() || kept.busy()) return;     // a folder still being read is part of what is being created
     if (needName) return;
+    // held from the press, the typed path's read included, so Escape cannot close it before the deal is made (#36);
+    // kept in the store, so a second click before the next render is turned away
+    set({ busy: true, error: '' });
     // a path typed but not yet added is part of the deal: add it first (unless it is already listed), and stop if it cannot be read
     const typed = path.trim(); const listed = (p: string) => nd.folders.some((f) => norm(f.path) === norm(p)) || !!existing?.folders.some((f) => norm(f.path) === norm(p));
-    if (typed && !listed(typed) && !(await addPath(typed))) return;
+    if (typed && !listed(typed) && !(await addPath(typed))) {
+      set({ busy: false });
+      return;
+    }
     if (typed) setPath('');
-    set({ busy: true, error: '' });
     const folders = store.get().ui.newDeal?.folders ?? nd.folders;   // read afresh: the typed path may have just been added
     if (existing) {
       const r = await store.dispatch(AddFolders, { dealId: existing.id, folders }, { idempotencyKey: 'nd-create', quiet: true });   // a refusal is said in the dialog, once
