@@ -52,7 +52,8 @@ describe('what each piece still needs', () => {
     const looked = (pairs: [string, boolean][], pc = 'a') =>
       L({ glanced: { round: 'r', items: pairs.map(([id, same]) => ({ item: id, same })) } }, pc);
     const flagged = looked([['i0', false], ['i1', true]]);
-    let v = view([L({ plan: P }), flagged]); let R = v.rounds.get('r')!;
+    let v = view([L({ plan: P }), flagged]);
+    let R = v.rounds.get('r')!;
     // the second block's looks are not in yet, perhaps on the other PC: its flags could still join this call
     expect(R.pieces.map((p) => need(R, factsOf(v, R), p))).toEqual(['wait', 'wait', 'glance', 'glance']);
     v = view([...v.lines, looked([['i2', false], ['i3', true]], 'b')]);
@@ -61,7 +62,8 @@ describe('what each piece still needs', () => {
     // a look skipped (the item left the checklist) is not waited for
     const skipped = L({ skipped: { round: 'r', key: 'item:i2', why: 'It is no longer on the checklist' } });
     v = view([L({ plan: P }), flagged, skipped, looked([['i3', true]])]);
-    R = v.rounds.get('r')!; expect(need(R, factsOf(v, R), items[0])).toBe('check');
+    R = v.rounds.get('r')!;
+    expect(need(R, factsOf(v, R), items[0])).toBe('check');
   });
 
   it('the sample is drawn by hash from the round id: the same on every PC, whoever did the looks; and a different round draws differently', () => {
