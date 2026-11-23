@@ -89,18 +89,20 @@ async function overlappingRetries({ page, retry, next, finish, calls, review, pa
   await retry.click();
   const beforeBack = await calls();
   await page.getByRole('button', { name: 'Back', exact: true }).click();
-  await next.click();
-  if (await next.isEnabled()) {
-    await page.check('#cl-askreword');
-    await next.click();
-    await page.uncheck('#cl-askreword');
-  }
+  await next.waitFor();
+  const waiting = await next.isDisabled() && /^Asking /.test(await page.locator('#cl-line').textContent());
+  await next.evaluate((button) => button.click());
+  await page.check('#cl-askreword');
+  const changed = await next.isDisabled();
+  await next.evaluate((button) => button.click());
+  await page.uncheck('#cl-askreword');
   const afterNext = await calls();
   await finish(failed('unreachable'));
   const stayed = await next.isVisible();
   say('Next from Back sends no second duplicate request while Retry is in flight, even after changing the choices',
-    stayed && afterNext.length === beforeBack.length && JSON.stringify(beforeBack.at(-1)?.only) === '[0]',
-    JSON.stringify({ before: beforeBack.length, after: afterNext.length, only: beforeBack.at(-1)?.only }));
+    stayed && waiting && changed && afterNext.length === beforeBack.length
+      && JSON.stringify(beforeBack.at(-1)?.only) === '[0]',
+    JSON.stringify({ waiting, changed, before: beforeBack.length, after: afterNext.length }));
   await (stayed ? next : retry).click();
   await finish({ ok: true, value: { pairs: [pair] } });
   const final = await review();

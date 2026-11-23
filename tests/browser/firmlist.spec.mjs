@@ -194,7 +194,7 @@ const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().ite
   say('Retry while the service is down leaves the review unchanged, check mark kept, and the line says so', down.pairs === 10 && down.checked === true && down.missed && /could not be reached again$/.test(down.line), JSON.stringify(down));
   // Back while Retry waits drops its answer, so the setup page does not report a request the person no longer sees
   await page.evaluate(() => { document.querySelector('#cl-retry').click(); document.querySelector('#cl-line ~ .btn:not(.pri)').click(); });
-  await page.waitForSelector('#cl-next'); await page.waitForTimeout(600);
+  await page.waitForSelector('#cl-next:enabled');
   const backed = await page.evaluate(() => ({ line: document.querySelector('#cl-line').textContent, next: !document.querySelector('#cl-next').disabled }));
   say('Back while Retry waits leaves no "again" line on the setup page, and Next can be pressed', !/again/.test(backed.line) && backed.next, JSON.stringify(backed));
   await page.evaluate(() => { window.__down = false; });
