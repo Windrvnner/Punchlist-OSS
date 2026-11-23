@@ -62,7 +62,8 @@ function movedAttachment(attachment: Attachment, ids: Record<string, string>): A
  */
 export function followCopies(store: Store): () => void {
   return store.onRenamed((ids) => {
-    const deals = Object.entries(ids).filter(([was, now]) => was !== now && !!store.get().deals[now]);
+    // the deal's own id among its records' (a deal's id starts d_), whether or not the copy has loaded yet
+    const deals = Object.entries(ids).filter(([was, now]) => was !== now && was.startsWith('d_'));
     if (!deals.length) return;
     store.ui((ui) => ({ attachments: ui.attachments.map((attachment) => movedAttachment(attachment, ids)) }));
     const from = copiedFrom.get(store) ?? new Map<string, string>();
@@ -99,7 +100,12 @@ export async function filesSendable(store: Store, dealId: string, files: { doc: 
   const missing = await unsendableOf(store, dealId, files.map((file) => file.docId));
   if (!missing.length) return true;
   const names = [...new Set(files.filter((file) => missing.includes(file.docId)).map((file) => file.doc))];
-  const more = names.length > 1 ? ` and ${names.length - 1} more` : '';
-  store.toast(`Couldn’t find ${names[0]}${more} · attach ${names.length > 1 ? 'them' : 'it'} again`);
+  // one file is named, its name giving way when the line is too short; several are counted, and named on hover
+  const [only] = names;
+  if (names.length === 1) {
+    store.toast(`Couldn’t find ${only} to send: attach it again`, undefined, false, undefined, only);
+  } else {
+    store.toast(`Couldn’t find ${names.length} files to send: attach them again`, undefined, false, names.join(', '));
+  }
   return false;
 }

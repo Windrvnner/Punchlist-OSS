@@ -12,9 +12,9 @@ import { FindingOpening } from './findings';
 import { SidePane } from './sidePane';
 import {
   ask, convKey, dealIdOf, suggestions, conversationDocs, findDoc, navIntent, questionIntent, unresolvedIntent,
-  scopeHash, newConv, type Scope,
+  scopeHash, newConv, filesDealOf, type Scope,
 } from '../app/conversations';
-import { isOwnFiles, ownFilesId, type Deal, type Question, type Source } from '../domain/model';
+import { isOwnFiles, type Deal, type Question, type Source } from '../domain/model';
 import { attachFiles, filesSendable } from '../app/attachments';
 import { type Attachment, type Message, type State , isReading, askAbout, askAcross } from '../app/state';
 import { keptDrafts, isText } from './keptDrafts';
@@ -306,10 +306,9 @@ function useComposerPlace(form: RefObject<HTMLFormElement | null>, launch: Launc
  * no deal; with nobody signed in, Home attaches nothing.
  */
 function attachTarget(state: State, scope: Scope, key: string): AttachTarget | null {
-  if (scope.kind !== 'all') {
-    return { dealId: scope.dealId, findingId: scope.kind === 'finding' ? scope.findingId : undefined, conv: key };
-  }
-  return state.user ? { dealId: ownFilesId(state.user.name), conv: key } : null;
+  const dealId = filesDealOf(state, scope);
+  if (!dealId) return null;
+  return { dealId, findingId: scope.kind === 'finding' ? scope.findingId : undefined, conv: key };
 }
 
 /** What the empty box says: what a follow-up would be on, or which deal or deals a question is asked about. */
@@ -356,7 +355,7 @@ async function sendTyped({ store, scope, key, slot, launch, target, chips, readO
     store.toast('Still attaching — send when it finishes');
     return;
   }
-  if (!(await chipsSendable(store, key, chips))) return;
+  if (!(await chipsSendable(store, key))) return;
   // read after the files are checked, so anything typed meanwhile goes too
   const typed = (drafts.get(key) ?? '').trim();
   if (!typed) return;
@@ -382,19 +381,40 @@ async function sendTyped({ store, scope, key, slot, launch, target, chips, readO
 /** the conversations whose files are being checked before a send, so a second Enter meanwhile sends nothing twice */
 const checking = new Set<string>();
 
-/** Whether the composer's files can all be sent from this PC (#671); the person is told of any that can't. */
-async function chipsSendable(store: Store, key: string, chips: Attachment[]) {
-  const ready = chips.filter((chip) => chip.state === 'done' && chip.doc && chip.docId);
-  if (!ready.length) return true;
+/** the files in a conversation's composer that are ready to go */
+const readyChips = (store: Store, key: string) => store.get().ui.attachments
+  .filter((chip) => chip.conv === key && chip.state === 'done' && chip.doc && chip.docId);
+
+/** Whether these files can all be sent from this PC (#671), deal by deal; the person is told of any that can't. */
+async function filesOk(store: Store, chips: Attachment[]) {
+  const files = chips.map((chip) => ({ dealId: chip.dealId, doc: chip.doc!, docId: chip.docId! }));
+  for (const dealId of new Set(files.map((file) => file.dealId))) {
+    if (!(await filesSendable(store, dealId, files.filter((file) => file.dealId === dealId)))) return false;
+  }
+  return true;
+}
+
+/**
+ * Whether the composer's files can all go now. A file that finishes attaching during the check is checked too. When a
+ * checked file has moved meanwhile (its deal was kept as a copy, #117), nothing is sent here: the text and files are
+ * on the copy, to be sent from there.
+ */
+async function chipsSendable(store: Store, key: string) {
   if (checking.has(key)) return false;
   checking.add(key);
   try {
-    const files = ready.map((chip) => ({ dealId: chip.dealId, doc: chip.doc!, docId: chip.docId! }));
-    for (const dealId of new Set(files.map((file) => file.dealId))) {
-      if (!(await filesSendable(store, dealId, files.filter((file) => file.dealId === dealId)))) return false;
+    const checked = new Set<string>();
+    let fresh = readyChips(store, key);
+    while (fresh.length) {
+      if (!(await filesOk(store, fresh))) return false;
+      for (const chip of fresh) checked.add(chip.id);
+      fresh = readyChips(store, key).filter((chip) => !checked.has(chip.id));
     }
-    return true;
-  } finally { checking.delete(key); }
+    const moved = store.get().ui.attachments.some((chip) => checked.has(chip.id) && chip.conv !== key);
+    return !moved;
+  } finally {
+    checking.delete(key);
+  }
 }
 
 export function Composer({ scope: given, launch, placeholder: placeholderGiven, examples }: {

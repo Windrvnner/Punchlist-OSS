@@ -144,20 +144,30 @@ export async function ask(store: Store, scope: Scope, text: string) {
   await answer(store, scope, pending.id, text, prior, sent);
 }
 
+/** Where a conversation's files go: its deal, or on Home the person's own files; null when nobody is signed in. */
+export function filesDealOf(state: State, scope: Scope): string | null {
+  if (scope.kind !== 'all') return scope.dealId;
+  return state.user ? ownFilesId(state.user.name) : null;
+}
+
 /** A reply that failed, with the conversation as it is now; null when it no longer is (retried meanwhile, or gone). */
 function failedReply(store: Store, key: string, messageId: string) {
-  const list = store.get().threads[key] ?? []; const i = list.findIndex((m) => m.id === messageId);
+  const list = store.get().threads[key] ?? [];
+  const i = list.findIndex((m) => m.id === messageId);
   return i >= 1 && list[i].role === 'ai' && list[i].state === 'failed' ? { list, i } : null;
 }
 
 export async function retry(store: Store, scope: Scope, messageId: string) {
   const ro = store.readOnly(); if (ro) { store.toast(ro); return; }
-  const key = convKey(scope); const before = failedReply(store, key, messageId); if (!before) return;
+  const key = convKey(scope);
+  const before = failedReply(store, key, messageId);
+  if (!before) return;
   // the files that went with the question go again, or nothing is asked (#671)
   const files = before.list[before.i - 1].attached ?? [];
-  const filesDeal = scope.kind === 'all' ? store.get().user && ownFilesId(store.get().user!.name) : scope.dealId;
+  const filesDeal = filesDealOf(store.get(), scope);
   if (filesDeal && files.length && !(await filesSendable(store, filesDeal, files))) return;
-  const now = failedReply(store, key, messageId); if (!now) return;
+  const now = failedReply(store, key, messageId);
+  if (!now) return;
   const { list, i } = now;
   store.setThread(key, list.map((m) => (m.id === messageId ? { ...m, state: 'pending' as const } : m)));
   await answer(store, scope, messageId, list[i - 1].text, list.slice(0, i - 1), list[i - 1].attached ?? []);
