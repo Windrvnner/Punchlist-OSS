@@ -18,6 +18,47 @@ async function start(scheme, limit) {
 const popMarks = (page) => page.evaluate(() => [...document.querySelectorAll('.opening .ref .pop i.psrc')].map((i) => [i.querySelector('.docnm').textContent + (i.querySelector('.loc')?.textContent ?? ''), !!i.querySelector('.cmark')]));
 const openFinding = async (page, id, n) => { await page.goto(URL + '#deal-' + id); await page.waitForSelector('.flagrow'); await page.click(`.flagrow:nth-of-type(${n})`).catch(() => page.locator('.flagrow').nth(n - 1).click()); await page.waitForSelector('.opening .ref .rb'); };
 
+async function samplePreview(page, name, number) {
+  await page.waitForFunction((n) => document.querySelector('.docbody .page .pg')?.textContent === `Page ${n}`, number);
+  const paper = page.locator('.docbody .page');
+  const title = await paper.locator('h4').textContent();
+  const message = await paper.locator(':scope > p').allTextContents();
+  const cached = await page.locator('.docnav .cmark').count() === 1;
+  const controls = await page.locator('.docnav button#doc-close, .pgstack button:not(:disabled)').count() === 6;
+  await page.click('#doc-close');
+  return title === name && message[0] === 'Preview unavailable for this sample document.' && cached && controls;
+}
+
+async function samplePreviews(page, area) {
+  const citations = page.locator(`${area} .ref .rb`);
+  await citations.first().click();
+  const report = await samplePreview(page, 'Technical advisor report', 41);
+  await citations.nth(1).click();
+  const memorandum = await samplePreview(page, 'Information memorandum', 22);
+  return [report, memorandum];
+}
+
+// #443: the newly indexed demo's sample citations explain the missing preview wherever reading mode opens.
+{ const { ctx, page, id } = await start('light');
+  await page.locator('.flagrow').filter({ hasText: 'Technical report and information memorandum disagree' }).click();
+  const finding = await samplePreviews(page, '.opening');
+  await page.fill('#pask', 'Why does this matter?');
+  await page.press('#pask', 'Enter');
+  const chat = await samplePreviews(page, '.msgs .ai:not(.pending):not(.failed)');
+  await page.goto(URL + '#checklist-' + id);
+  await page.getByRole('option', { name: /Technical advisor confirms the energy yield/ }).click();
+  const source = page.locator('#ck-sources .ckopen');
+  const number = Number((await source.locator('.clc').textContent()).replace('p. ', ''));
+  await source.click();
+  const direct = await samplePreview(page, 'Technical advisor report', number);
+  await page.getByRole('option', { name: /Operating assumptions agree across the advisors’ reports/ }).click();
+  await page.click('#ck-open-finding');
+  const linked = await samplePreviews(page, '.opening');
+  say('demo-citations-explain-the-unavailable-preview',
+    direct && [...finding, ...chat, ...linked].every(Boolean), JSON.stringify({ finding, chat, direct, linked }));
+  await ctx.close();
+}
+
 // 1 everything the first pass read is loaded: every cited document carries the mark
 { const { ctx, page, id } = await start('light');
   await page.waitForFunction(() => Object.keys(store.get().cached).length === 6, null, { timeout: 5000 }).catch(() => {});
