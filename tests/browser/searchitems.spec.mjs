@@ -169,9 +169,10 @@ async function keepsQaFilters(page, k, o) {
   const sameDeal = await chooseQuestion(page, k, 'overview-' + k);
   const fromHome = await chooseQuestion(page, k, 'deals');
   const otherDeal = await chooseQuestion(page, k, 'qa-' + o);
+  const keptFilters = [fromQa, afterEscape.filter, sameDeal].every((filter) => sameFilter(filter, FILTER));
+  const resetFilters = [fromHome, otherDeal].every((filter) => sameFilter(filter, DEFAULT_FILTER));
   say('#497 Search keeps same-deal Q&A filters and opens out-of-filter questions',
-    chosenVisible && afterEscape.focus && [fromQa, afterEscape.filter, sameDeal].every((filter) => sameFilter(filter, FILTER)) &&
-      [fromHome, otherDeal].every((filter) => sameFilter(filter, DEFAULT_FILTER)),
+    chosenVisible && afterEscape.focus && keptFilters && resetFilters,
     JSON.stringify({ fromQa, afterEscape, sameDeal, fromHome, otherDeal }));
 }
 

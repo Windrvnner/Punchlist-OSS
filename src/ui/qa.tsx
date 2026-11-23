@@ -1,4 +1,3 @@
-import { focusSearchResult } from './nav';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { RefObject } from 'preact';
 import { useAppState, useStore, fmtDate, useDismiss } from './hooks';
@@ -31,6 +30,7 @@ import { Modal } from './dialogs';
 import { placeKept } from './placeKept';
 import { showTip, hideTip } from './tip';
 import { openResolve, inTwoVersions } from './resolve';
+import { focusSearchResult } from './nav';
 
 export { WORKSTREAMS };
 const PRIORITIES = ['High', 'Medium', 'Low'];
@@ -158,30 +158,7 @@ export function QaPage({ dealId }: { dealId: string }) {
   useLayoutEffect(() => { const l = listRef.current; if (tuck && l && l.scrollTop < 24) setTuck(0); }, [list.length, tuck]);
 
   const select = (id: string) => store.ui({ selectedQuestion: id });
-  const focusRow = (id: string, afterClose = false) => requestAnimationFrame(() => {
-    const row = listRef.current?.querySelector<HTMLElement>(`.li[data-q="${id}"]`);
-    // #498: closing an out-of-filter Search result leaves a keyboard stop on the Q&A toolbar.
-    const filter = afterClose ? document.querySelector<HTMLElement>('.trk-tools [data-qaf][aria-pressed="true"]') : null;
-    (row ?? filter)?.focus();
-  });
-  // Enter on the row already open goes into it: to the Response, or while a draft is coming to its first button, else the
-  // Question, rather than a dozen Shift+Tabs back up the page. A click (detail > 0) only opens.
-  const intoPanel = () => (
-    document.querySelector<HTMLElement>('.qpanel textarea.rtext:not(:disabled)') ??
-    document.querySelector<HTMLElement>('.qpanel .qright button:not(:disabled)') ??
-    document.querySelector<HTMLElement>('.qpanel textarea.qtext:not(:disabled)') ??
-    document.querySelector<HTMLElement>('.qpanel')
-  )?.focus();
-  useLayoutEffect(() => {
-    if (sel && s.ui.searchFocus === sel.id) focusSearchResult(store, sel.id, intoPanel);
-  }, [sel?.id, s.ui.searchFocus]);
-  const close = () => {
-    if (!sel) return;
-    const id = sel.id;
-    setCursor(id);
-    store.ui({ selectedQuestion: null });
-    focusRow(id, true);
-  };
+  const { focusRow, close } = useQaFocus(listRef, sel?.id ?? null, setCursor, s.ui.searchFocus);
   const escClose = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); close(); } };
   // the open question's place in the list, and a step to the one before or after it (the panel's arrows)
   const selAt = sel ? list.findIndex((r) => r.id === sel.id) : -1;
@@ -262,6 +239,47 @@ export function QaPage({ dealId }: { dealId: string }) {
       </section>
     </div>
   );
+}
+
+const ACTIVE_QA_FILTER = '.trk-tools [data-qaf][aria-pressed="true"]';
+
+function focusQaRow(list: RefObject<HTMLDivElement | null>, id: string, afterClose: boolean) {
+  requestAnimationFrame(() => {
+    const row = list.current?.querySelector<HTMLElement>(`.li[data-q="${id}"]`);
+    // #498: closing an out-of-filter Search result leaves a keyboard stop on the Q&A toolbar.
+    const filter = afterClose ? document.querySelector<HTMLElement>(ACTIVE_QA_FILTER) : null;
+    (row ?? filter)?.focus();
+  });
+}
+
+// Enter on the row already open goes into it: to the Response, or while a draft is coming to its first button, else the
+// Question, rather than a dozen Shift+Tabs back up the page. A click (detail > 0) only opens.
+function intoPanel() {
+  const target = document.querySelector<HTMLElement>('.qpanel textarea.rtext:not(:disabled)') ??
+    document.querySelector<HTMLElement>('.qpanel .qright button:not(:disabled)') ??
+    document.querySelector<HTMLElement>('.qpanel textarea.qtext:not(:disabled)') ??
+    document.querySelector<HTMLElement>('.qpanel');
+  target?.focus();
+}
+
+// #498: move focus once the Search result has rendered, and return it to the list or toolbar on close.
+function useQaFocus(
+  list: RefObject<HTMLDivElement | null>, selectedId: string | null, setCursor: (id: string) => void,
+  searchFocus: string | null,
+) {
+  const store = useStore();
+  useLayoutEffect(() => {
+    if (selectedId && searchFocus === selectedId) focusSearchResult(store, selectedId, intoPanel);
+  }, [selectedId, searchFocus]);
+
+  const focusRow = (id: string) => focusQaRow(list, id, false);
+  const close = () => {
+    if (!selectedId) return;
+    setCursor(selectedId);
+    store.ui({ selectedQuestion: null });
+    focusQaRow(list, selectedId, true);
+  };
+  return { focusRow, close };
 }
 
 /**
