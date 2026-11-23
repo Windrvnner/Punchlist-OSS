@@ -97,7 +97,8 @@ describe('restoring a question whose number another question holds', () => {
     okd(await B.store.dispatch(SetResponse, { dealId, questionId: answered, response: FROM_B }));
     await syncAll(A, B);
     for (const X of [A, B]) {
-      expect((await X.store.dispatch(RestoreQuestion, { dealId, questionId: answered })).ok).toBe(false);
+      const refused = await X.store.dispatch(RestoreQuestion, { dealId, questionId: answered });
+      expect(refused.ok ? '' : refused.error.message).toBe('Q2500 has two versions. Choose one first');
       expect(X.store.get().conflicts[answered]).toBeDefined();
     }
     await syncAll(A, B);
