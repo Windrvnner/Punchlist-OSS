@@ -35,10 +35,12 @@ describe('splitting the suites into CI groups', () => {
   });
 
   it('splits only the named suites, and the same way on every call', () => {
-    const named = ['checklist', 'lostwork', 'qapanel', 'keyboard', 'toolbars'];
-    const groups = groupsOf(named, 2, ciTimes);
+    // times of its own, so the expected groups hold when the kept CI times change
+    const times = { checklist: 410, lostwork: 233, qapanel: 197, keyboard: 178, toolbars: 7 };
+    const named = Object.keys(times);
+    const groups = groupsOf(named, 2, times);
     expect(groups.flat().sort()).toEqual([...named].sort());
-    expect(groupsOf(named, 2, ciTimes)).toEqual(groups);
+    expect(groupsOf(named, 2, times)).toEqual(groups);
     expect(groups).toEqual([['checklist', 'keyboard'], ['lostwork', 'qapanel', 'toolbars']]);
   });
 
