@@ -120,6 +120,7 @@ export function overlap(a: string, b: string): number {
 
 /** A number must not undo the wording key's protection of distinct identifiers or marks. */
 export function canMatchNumber(a: string, b: string): boolean {
+  if (!sameIdentifiers(identifiers(a), identifiers(b))) return false;   // Tranche II is not Tranche IV (#125)
   if (key(a) !== key(b) && misreadKey(a) !== misreadKey(b)
     && identifierCollisionKey(a) === identifierCollisionKey(b)) return false;
   return overlap(a, b) >= 0.6;
@@ -132,6 +133,56 @@ function identifierCollisionKey(text: string): string {
   return misreadKey(identifiers.replace(/[I|]/g, 'l')).replace(/\p{M}/gu, '');
 }
 
+/** a word or number of a question; a point or comma inside a number stays in it ("I.1", "1,500") */
+const QUESTION_TOKEN = /[\p{L}\p{M}\p{N}|]+(?:[.,][\p{L}\p{M}\p{N}|]+)*/gu;
+
+/**
+ * The identifiers a question names, as they are compared (#125, #127, #128): anything with a digit, a Roman numeral, a
+ * single capital letter, and a code of up to five capitals. Sorted, so two lists compare in one walk.
+ */
+export function identifiers(text: string): string[] {
+  const normal = text.normalize('NFKC');
+  const found: string[] = [];
+  for (const match of normal.matchAll(QUESTION_TOKEN)) {
+    const form = identifierForm(match[0], match.index, normal);
+    if (form !== undefined) found.push(form);
+  }
+  return found.sort();
+}
+
+/**
+ * A word as an identifier, or undefined for an ordinary word. A lone I, i, l or | that opens a sentence before a
+ * lowercase word is the word "I" however it was read: a misread "l understand" names what "I understand" does.
+ */
+function identifierForm(token: string, offset: number, text: string): string | undefined {
+  if (/\p{N}/u.test(token)) return numberForm(token);
+  if (/^[Iil|]$/.test(token) && isProseI(offset, text)) return 'i';
+  if (ROMAN_NUMERAL.test(token) || /^\p{Lu}{1,5}$/u.test(token)) return token.toLowerCase();
+  return undefined;
+}
+
+/** A number as an identifier: a letter read for a digit inside or after it, or an l or | before it, is that digit (l00,
+ * 2O24). A capital I or O that starts it is a letter: Facility I1 is not Facility 11, nor O1 01 (#128). */
+function numberForm(token: string): string {
+  return token.replace(/(?<=[\d.,])[lI|]|[l|](?=[\d.,])/g, '1').replace(/(?<=[\d.,])[oO]/g, '0').toLowerCase();
+}
+
+/**
+ * Whether two wordings can be one question as far as their identifiers go: not when each names one the other does not
+ * (Class I and Class L, Facility I1 and Facility 11). One that only adds an identifier, or drops one, is a rewording.
+ */
+export function sameIdentifiers(a: readonly string[], b: readonly string[]): boolean {
+  let i = 0;
+  let j = 0;
+  let onlyA = false;
+  let onlyB = false;
+  while (i < a.length || j < b.length) {
+    if (j >= b.length || (i < a.length && a[i] < b[j])) { onlyA = true; i++; }
+    else if (i >= a.length || b[j] < a[i]) { onlyB = true; j++; }
+    else { i++; j++; }
+  }
+  return !(onlyA && onlyB);
+}
 
 /**
  * Which row of the log stands for each question: the row with the same words, failing that the row with its number; each
@@ -171,10 +222,18 @@ export function matchRows(table: Pick<ReadTable, 'rows'>, mapping: Mapping, ques
   // then a row of its own party, then a row naming no one (any row, for a question naming no one)
   // (a row still naming the party the app last wrote for a question is tried only once every question has had its own
   // party's rows, so it never takes another question's row)
+  // a row of the question's words that names another identifier is not its row (#127, #128)
+  const rowIds = table.rows.map((r) => identifiers(cell(r, 'text')));
+  const rowFor = (pass: 'own' | 'party' | 'was' | 'blank', q: Question) => {
+    const k = misreadKey(q.text), p = qParty(q), was = sentParty(q), ids = identifiers(q.text);
+    const alike = (i: number) => sameIdentifiers(rowIds[i], ids);
+    if (pass === 'own') return firstFree(`n\0${k}\0${q.n}`, (i) => sameParty(i, q) && alike(i));
+    if (pass === 'party') return p ? firstFree(`p\0${k}\0${p}`, alike) : undefined;
+    if (pass === 'was') return p && was && was !== p ? firstFree(`p\0${k}\0${was}`, alike) : undefined;
+    return firstFree(p ? `p\0${k}\0` : `k\0${k}`, alike);
+  };
   for (const pass of ['own', 'party', 'was', 'blank'] as const) for (const q of questions) {
-    if (rowOf.has(q.id)) continue;
-    const k = misreadKey(q.text), p = qParty(q), was = sentParty(q);
-    take(q, pass === 'own' ? firstFree(`n\0${k}\0${q.n}`, (i) => sameParty(i, q)) : pass === 'party' ? (p ? firstFree(`p\0${k}\0${p}`) : undefined) : pass === 'was' ? (p && was && was !== p ? firstFree(`p\0${k}\0${was}`) : undefined) : firstFree(p ? `p\0${k}\0` : `k\0${k}`));
+    if (!rowOf.has(q.id)) take(q, rowFor(pass, q));
   }
   // then by number, but only a row of the question's party whose meaningful words are mostly the question's (in doubt,
   // no match: the question gets a row of its own): the counterparty's own question 4 is not the app's question 4

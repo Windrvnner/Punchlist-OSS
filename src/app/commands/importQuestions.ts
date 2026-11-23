@@ -1,9 +1,9 @@
 /**
  * Import a prepared table into a deal's Q&A log as one transaction: every row
  * lands or none does. Merge matches each row to a question by its wording, then
- * its number, never another party's, brings back a deleted question a row matches, and takes only the
- * non-empty incoming fields; append always adds. Status comes only from a
- * mapped Status column. Undo restores each touched question to exactly what it
+ * its number, never another party's nor one naming another identifier (#125), brings back a
+ * deleted question a row matches, and takes only the non-empty incoming fields; append always adds.
+ * Status comes only from a mapped Status column. Undo restores each touched question to exactly what it
  * was before the batch — once, however many rows named it — and removes the
  * ones the batch created.
  */
@@ -13,7 +13,8 @@ import { Question, Finding, Tombstone, DealId, QuestionId, FindingId, QuestionSt
 import { setResponse, setQuestionStatus, checkQuestion } from '../../domain/transitions';
 import { numbering } from './questions';
 import { sameText, sameWords, type ImportRow } from '../../domain/importExport';
-import { misreadKey, canMatchNumber } from '../../domain/logWrite';
+import { misreadKey, canMatchNumber, identifiers, sameIdentifiers }
+  from '../../domain/logWrite';
 import { ok, fail, notFound, rejected } from '../../domain/result';
 import { dealQuestions, nextQuestionNumber } from '../state';
 import { derivedId } from '../../domain/derivedId';
@@ -87,12 +88,30 @@ export const ImportQuestions = define({
       };
       const live = index([...originals.values()]), dead = index([...gone.values()]);
       const keys = input.rows.map((row) => misreadKey(row.text));
+      // a question of the row's words that names another identifier is not the row's (#127, #128)
+      const rowIds = input.rows.map((row) => identifiers(row.text));
+      const questionIds = new Map([...originals.values(), ...gone.values()]
+        .map((q) => [q.id, identifiers(q.text)]));
+      const alike = (idx: number, q: Question) => sameIdentifiers(rowIds[idx], questionIds.get(q.id)!);
+      // a list walked past the questions already taken at its start
+      const skipTaken = (e: { list: Question[]; at: number }) => {
+        while (e.at < e.list.length && taken.has(e.list[e.at].id)) e.at++;
+      };
+      // the first two questions of a list not yet taken that name no other identifier than the row: the first is the
+      // pick, a second says another fits as well
+      const firstTwo = (pool: ReturnType<typeof index>, at: string, idx: number) => {
+        const e = pool.byFit.get(at); if (!e) return [];
+        skipTaken(e);
+        const two: Question[] = [];
+        for (let j = e.at; j < e.list.length && two.length < 2; j++) {
+          if (!taken.has(e.list[j].id) && alike(idx, e.list[j])) two.push(e.list[j]);
+        }
+        return two;
+      };
       // the question of the row's words it agrees with most in the other fields, and in how many (a party that differs is
       // never a candidate); of equal ones, the first in the log
       const bestOf = (pool: ReturnType<typeof index>, idx: number) => {
         const row = input.rows[idx], vals = othersOf(row), party = partyOf(row); let found: { q: Question; fit: number; rivals: Set<string> } | undefined;
-        // the first two questions of a list not yet taken: the first is the pick, a second says another fits as well
-        const firstTwo = (at: string) => { const e = pool.byFit.get(at); if (!e) return []; while (e.at < e.list.length && taken.has(e.list[e.at].id)) e.at++; const two: Question[] = []; for (let j = e.at; j < e.list.length && two.length < 2; j++) if (!taken.has(e.list[j].id)) two.push(e.list[j]); return two; };
         for (let mask = 0; mask < 8; mask++) {
           if (vals.some((v, b) => mask & (1 << b) && !v)) continue;
           const n = [0, 1, 2].filter((b) => mask & (1 << b)).length;
@@ -100,7 +119,7 @@ export const ImportQuestions = define({
           const tries: [string, number][] = party ? [[`p\0${party}\0${keys[idx]}\0${sig}`, n + 1], [`p\0\0${keys[idx]}\0${sig}`, n]] : [[`a\0${keys[idx]}\0${sig}`, n]];
           for (const [at, f] of tries) {
             if (found && f < found.fit) continue;
-            const two = firstTwo(at); if (!two.length) continue;
+            const two = firstTwo(pool, at, idx); if (!two.length) continue;
             if (!found || f > found.fit) found = { q: two[0], fit: f, rivals: new Set() };
             else if (order.get(two[0].id)! < order.get(found.q.id)!) found.q = two[0];
             for (const q of two) found.rivals.add(q.id);
@@ -117,7 +136,8 @@ export const ImportQuestions = define({
       const take = (idx: number, q?: Question) => { if (q) { matchOf.set(idx, q.id); taken.add(q.id); } };
       for (const pool of [live, dead]) for (const [idx, row] of input.rows.entries()) {
         if (matchOf.has(idx) || row.n == null) continue;
-        const mine = (pool.byOwn.get(`${keys[idx]}\0${row.n}`) ?? []).filter((q) => !taken.has(q.id) && sameParty(row, q));
+        const mine = (pool.byOwn.get(`${keys[idx]}\0${row.n}`) ?? [])
+          .filter((q) => !taken.has(q.id) && sameParty(row, q) && alike(idx, q));
         take(idx, mine.length ? mine.reduce((b, q) => (fit(row, q) > fit(row, b) ? q : b)) : undefined);
       }
       // In each tier, rows that only one question fits that well choose before rows that several fit as well, so a vaguer

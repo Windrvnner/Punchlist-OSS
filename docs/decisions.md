@@ -81,6 +81,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - On import, real date cells are read as dates and plain numbers are not. An ambiguous date is settled by the row's other date, its neighbors, and the rule that no date is in the future; otherwise it is left blank and listed.
 - Marking imported questions that have a response as Answered is optional and off by default.
 - Merge matches a row by wording first, then by number; a row that matches a deleted question brings it back. A row that names who submitted it never matches another party's question. "Will overwrite" is shown field by field first.
+- Merge never matches a row to a question when each names an identifier the other does not: anything with a digit, a Roman numeral, a single capital letter, or a code of up to five capitals (Class A and Class B, Tranche II and IV, Facility I1 and 11). Such a row is a question of its own (#125, #127, #128).
 - The same list imported on two PCs makes one set of questions, with ids derived from the deal, number, party, and wording.
 - Two questions with the same number are both kept and marked; a person renumbers one.
 - Export has no finding or link columns and always carries every column of the log.
