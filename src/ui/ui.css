@@ -818,11 +818,11 @@ body.qopen .g,body.qopen .g.on{height:24px!important}
 .ckdet .cktitle{font:600 17px/1.35 var(--body);letter-spacing:-.15px;color:var(--ink);margin:12px 0 2px;max-width:60ch}
 .ckdet .ckp{margin:0 0 2px;max-width:60ch;overflow-wrap:anywhere}
 /* the dotted link between records: the Checklist pane's finding, a finding's checklist item, and what a question was
-   asked for (#298), and the way back from a deleted record (#340) */
-.ckdet .ckp a,.flinks .dtxt a,.qlbl .qfor a,#gone a{
+   asked for (#298) */
+.ckdet .ckp a,.flinks .dtxt a,.qlbl .qfor a{
   color:var(--ink);text-decoration:underline dotted var(--ink-3);text-underline-offset:4px;
   text-decoration-thickness:1px}
-.ckdet .ckp a:hover,.flinks .dtxt a:hover,.qlbl .qfor a:hover,#gone a:hover{text-decoration-color:var(--accent)}
+.ckdet .ckp a:hover,.flinks .dtxt a:hover,.qlbl .qfor a:hover{text-decoration-color:var(--accent)}
 .qlbl .qfor a{color:inherit}
 .ckdet #ck-ask,.ckdet .ckask,.flinks #f-ask,.flinks .fask{margin-top:14px}
 .flinks .lbl{margin-top:12px}.flinks .fask .lbl{margin-top:0}
