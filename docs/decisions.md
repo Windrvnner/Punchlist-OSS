@@ -29,6 +29,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Home is the ask composer alone ("Ask across your deals…"), with no deal list, count, or dashboard cards.
 - The sidebar lists deals only, grouped by Deal status (Live, Monitoring, Pitch, and Closed; the Pitch group is headed "Pitches"). Groups fold and stay folded, and a group appears once it has a deal.
 - Search is one field in the sidebar (Ctrl K). Its results are grouped as Deals, Findings, Checklist Items, Questions, and Documents, and an item opens on its deal's Checklist (#2).
+- A Search question keeps the current deal's Q&A filters. From Home or a different deal it opens with All (#497).
 - A deal's pages are Overview, Findings, Checklist, and Q&A; **Settings** → **Deals Open On** picks which page opens first (Overview by default). No new tabs are added.
 - The deal header holds Deal status and one ⋯ menu with **Check Again** (showing "Last checked [date]"), **Deal Memo…**, **Rename**, and, set apart, **Delete Deal…**.
 - The counterparty sits alone at the top right of every deal page. Structure, Sector, and Technology appear on Overview only.
