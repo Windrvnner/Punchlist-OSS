@@ -286,7 +286,8 @@ function wentOnFrom(restore: Ver, later: Ver, graph: VersionGraph): boolean {
     const version = walk.pop()!;
     if (seen.has(version.ver)) continue;
     seen.add(version.ver);
-    if (version !== restore && !version.del && sameDeletion(version) && sameContent(version.data, restore.data)) return true;
+    const twin = version !== restore && !version.del && sameDeletion(version);
+    if (twin && sameContent(version.data, restore.data)) return true;
     walk.push(...standingParents(graph, version));
   }
   return false;

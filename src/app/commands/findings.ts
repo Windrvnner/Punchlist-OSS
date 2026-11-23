@@ -293,7 +293,8 @@ export const ApplyReassessment = define({
  * The "May be out of date" mark after a document is attached. A mark set for another reason (a check, a cited document
  * gone from the data room, another document) is left as it is, as a response leaves one (transitions.ts): the next
  * update must still read it, and an update running now must not take the document's mark for the only news (#327).
- * A mark from responses, or none, gives way to the document's; responses are compared on their own when an update lands.
+ * A mark from responses, or none, gives way to the document's: responses are compared on their own when an update
+ * lands.
  */
 function attachMark(f: Finding, doc: string): Pick<Finding, 'updated' | 'updatedWhy' | 'updatedOn'> {
   if (f.updated && !f.updatedOn) return { updated: true, updatedWhy: f.updatedWhy, updatedOn: undefined };

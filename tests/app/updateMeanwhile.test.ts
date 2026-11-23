@@ -56,14 +56,23 @@ async function world(reply: { body: string[]; sources: Source[] }) {
   /** another PC marks the finding for a reason of its own, as the backend's check does, and the change syncs here */
   const markElsewhere = async (why: string) => {
     const { updatedOn: _was, ...data } = f();
-    repo.peer.change('finding', findingId, { ...data, updated: true, updatedWhy: why, updatedAt: ELSEWHERE.at }, ELSEWHERE);
-    await repo.sync(); await settle(); await settle();
+    const marked = { ...data, updated: true, updatedWhy: why, updatedAt: ELSEWHERE.at };
+    repo.peer.change('finding', findingId, marked, ELSEWHERE);
+    await repo.sync();
+    await settle();
+    await settle();
     expect(f().updatedWhy).toBe(why);
   };
-  return { store, dealId, findingId, linked, f, press, answer, last, markElsewhere };
+  /** a person attaches a document to the finding */
+  const attach = (source: Source) => store.dispatch(AttachDocumentToFinding, {
+    dealId, findingId, doc: source.doc, docId: source.docId,
+  });
+  return { store, dealId, findingId, linked, f, press, answer, last, markElsewhere, attach };
 }
 const GONE = 'A document it cites is no longer in the data room';
 const AM3 = { doc: 'EPC amendment 3.pdf', loc: 'p. 2', docId: 'doc_am3' };
+/** a reply that cites amendment 3 */
+const CITES_AM3 = { body: ['Amendment 3 lifts the cap. [1]'], sources: [AM3] };
 const NEW = { body: ['The liability cap is 20% of the contract price. [1]'], sources: [{ doc: 'EPC contract.pdf', loc: 'p. 82', docId: 'doc_epc' }] };
 
 describe('Update from documents while a person works on the finding', () => {
@@ -142,33 +151,42 @@ describe('Update from documents while a person works on the finding', () => {
   }, 120000);
 
   it('keeps a mark set elsewhere while it ran when a document it cites is attached afterwards (#327)', async () => {
-    const w = await world({ body: ['Amendment 3 lifts the cap. [1]'], sources: [AM3] }); const { done } = await w.press();
+    const w = await world(CITES_AM3);
+    const { done } = await w.press();
     await w.markElsewhere(GONE);
-    await w.store.dispatch(AttachDocumentToFinding, { dealId: w.dealId, findingId: w.findingId, doc: AM3.doc, docId: AM3.docId });
-    expect(w.f()).toMatchObject({ updated: true, updatedWhy: GONE });              // the attach does not hide the other reason
+    await w.attach(AM3);
+    expect(w.f()).toMatchObject({ updated: true, updatedWhy: GONE });   // the attach does not hide the other reason
     expect(w.f().sources.map((x) => x.doc)).toEqual(['EPC contract.pdf', AM3.doc]);
-    w.answer(); await done;
-    expect(w.f()).toMatchObject({ body: ['Amendment 3 lifts the cap. [1]'], updated: true, updatedWhy: GONE });
+    w.answer();
+    await done;
+    expect(w.f()).toMatchObject({ body: CITES_AM3.body, updated: true, updatedWhy: GONE });
     // the other way round: attached first, marked elsewhere after
-    const r = await world({ body: ['Amendment 3 lifts the cap. [1]'], sources: [AM3] }); const { done: d2 } = await r.press();
-    await r.store.dispatch(AttachDocumentToFinding, { dealId: r.dealId, findingId: r.findingId, doc: AM3.doc, docId: AM3.docId });
+    const r = await world(CITES_AM3);
+    const { done: d2 } = await r.press();
+    await r.attach(AM3);
     await r.markElsewhere(GONE);
-    r.answer(); await d2;
+    r.answer();
+    await d2;
     expect(r.f()).toMatchObject({ updated: true, updatedWhy: GONE });
   }, 240000);
 
   it('clears a mark it read when the only news is a document it cites; one it does not cite keeps the mark (#327)',
     async () => {
     // marked elsewhere before the update began, so the update reads the reason; then the cited document is attached
-    const w = await world({ body: ['Amendment 3 lifts the cap. [1]'], sources: [AM3] }); await w.markElsewhere(GONE);
+    const w = await world(CITES_AM3);
+    await w.markElsewhere(GONE);
     const { done } = await w.press();
-    await w.store.dispatch(AttachDocumentToFinding, { dealId: w.dealId, findingId: w.findingId, doc: AM3.doc, docId: AM3.docId });
-    w.answer(); await done;
+    await w.attach(AM3);
+    w.answer();
+    await done;
     expect(w.f()).toMatchObject({ updated: false, updatedWhy: '' });
     // the same, but the reply does not cite the attached document: it has not read it, so the mark stays
-    const r = await world(NEW); await r.markElsewhere(GONE); const { done: d2 } = await r.press();
-    await r.store.dispatch(AttachDocumentToFinding, { dealId: r.dealId, findingId: r.findingId, doc: AM3.doc, docId: AM3.docId });
-    r.answer(); await d2;
+    const r = await world(NEW);
+    await r.markElsewhere(GONE);
+    const { done: d2 } = await r.press();
+    await r.attach(AM3);
+    r.answer();
+    await d2;
     expect(r.f()).toMatchObject({ updated: true, updatedWhy: GONE });
     expect(r.f().sources.map((x) => x.doc)).toEqual(['EPC contract.pdf', AM3.doc]);
   }, 240000);

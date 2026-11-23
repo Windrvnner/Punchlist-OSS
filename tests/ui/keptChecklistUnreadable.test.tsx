@@ -21,12 +21,13 @@ const choices: KeptNow['choices'] = {
   mapping: { item: 0, section: null }, layer: 'broad', name: '', askReword: false, askSame: false, shown: false,
   useReword: new Set(), remove: new Set(), readFailed: '', byColumns: false, bringIn: new Set(),
 };
-const table: ImportTable = { name: 'list.csv', columns: ['Item'], rows: [['Corporate records']], bytes: new Uint8Array(1) } as
-  unknown as ImportTable;
+const table = {
+  name: 'list.csv', columns: ['Item'], rows: [['Corporate records']], bytes: new Uint8Array(1),
+} as unknown as ImportTable;
 
 /** The import dialog's keeping, as the dialog wires it, with the paste box and list it is given */
-function Keeping(props: { paste: string; table?: ImportTable | null; fresh?: boolean; seen?: (left: unknown) => void }) {
-  const keeper = useKeeper(undefined, undefined, props.fresh ?? false);
+function Keeping(props: { paste: string; table?: ImportTable | null; seen?: (left: unknown) => void }) {
+  const keeper = useKeeper(undefined, undefined, false);
   props.seen?.(keeper.left);
   const now: KeptNow = {
     paste: props.paste, table: props.table ?? null, text: null, reads: null, review: null,
