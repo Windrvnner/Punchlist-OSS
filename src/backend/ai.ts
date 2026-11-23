@@ -406,18 +406,22 @@ function memoSummaryPrompt(
 
 /** An unrated finding prevents a blanket conclusion about High ratings (#661). */
 function memoSummaryRejection(unrated: number, advises: (text: string) => boolean) {
-  const noHighRating = new RegExp(
-    '\\b(?:no|none of(?: the)?|zero) (?:(?:open|rated) )?(?:findings?|risks?) '
-      + '[^.!?,;]{0,40}\\b(?:(?:rated|classified as|considered) high|high (?:risks?|ratings?))\\b',
+  const denial = /\b(?:no|none|not|never|neither|zero|without|0)\b/i;
+  const highRating = new RegExp(
+    '\\b(?:(?:rated|classified as|assessed as|considered) high|'
+      + 'high(?:[- ]rated)? (?:findings?|risks?|ratings?|severity|category))\\b',
     'i',
   );
-  const noHighRisk = new RegExp(
-    '\\b(?:no|zero|without) (?:open )?high(?:[- ]rated|[- ]risk)? (?:open )?(?:findings?|risks?|ratings?)\\b',
-    'i',
-  );
+  const absentRating = /\b(?:not|never) (?:been )?(?:rated|assigned|identified|found|recorded)\b/i;
+  const deniesHigh = (sentence: string) => {
+    const category = sentence.search(/\bHigh\b/);
+    const high = category < 0 ? sentence.search(highRating) : category;
+    const negative = sentence.search(denial);
+    return high >= 0 && negative >= 0 && (negative < high || absentRating.test(sentence));
+  };
   return (paragraphs: string[]): string => {
-    const text = paragraphs.join(' ').replace(/\s+/g, ' ');
-    if (unrated && (noHighRating.test(text) || noHighRisk.test(text))) {
+    const sentences = paragraphs.join(' ').replace(/\s+/g, ' ').split(/(?<=[.!?])\s+/);
+    if (unrated && sentences.some(deniesHigh)) {
       return 'That claims there are no High risks while ratings are unresolved. State that ratings are unresolved.';
     }
     return paragraphs.some(advises) ? 'That gives advice or a judgment. Write it again with facts only.' : '';
@@ -1169,6 +1173,10 @@ export function nodeAi(o: AiOptions) {
   /** the chat agent */
   const agent = chatAgent(agentKit, agentOpts);
 
+  function readCanRetry(model: string, again: { escalate: string; retrySharedModel?: boolean } | undefined): boolean {
+    return !!again && (model !== again.escalate || again.retrySharedModel === true);
+  }
+
   /**
    * One question, read from documents, in up to two rounds: the second only if the model says what is missing and
    * something answers to it. With `again`, a reply that cannot be used is sent back to the same model with what is
@@ -1188,7 +1196,9 @@ export function nodeAi(o: AiOptions) {
       }
     } catch (e) { return failure(e, 'The documents could not be read'); }
     if (!sent.length) return ok({ reply: {}, sent });
-    let using = model; let pool: Sent[] | undefined;                              // the documents chosen, kept from the first refusal of a request as too long
+    let using = model;
+    let pool: Sent[] | undefined;
+    let canRetry = readCanRetry(model, again);
     for (let round = 1; ; round++) {
       let reply: Record<string, unknown> | null;
       try {
@@ -1200,10 +1210,14 @@ export function nodeAi(o: AiOptions) {
         const inAll = deals.reduce((sum, d) => sum + o.docs.records(d).length, 0);
         const prompt = `Documents:\n${listing}\n\nThese are ${sent.length} of the ${inAll} documents in ${deals.length > 1 ? 'these data rooms' : 'the data room'}: the ones chosen as likeliest to bear on this. You have not seen the others, so do not say what the data room as a whole does or does not contain; say what these documents show.\n\n${ask}\n\nReply as JSON: ${shape}${round === 1 ? ' If a document you were not given is needed to answer, add "need": ["a few words describing it"].' : ''}`;
         reply = await askJson({ kind, model: using, system: RULES, files, prompt }, keys, shape);
-        if (again && using !== again.escalate && (!reply || !again.usable(reply))) {
+        if (again && canRetry && (!reply || !again.usable(reply))) {
           // the same model, a second time: with its own reply and what is wrong with it, or the question again if there was nothing to read
           reply = await askJson({ kind, model: using, system: RULES, files, prompt: reply ? `${prompt}\n\nYou replied:\n${JSON.stringify(reply)}\n\nThat cannot be used: ${again.wrong}. Send the whole reply again, put right.` : prompt }, keys, shape, false);
-          if (!reply || !again.usable(reply)) { using = again.escalate; reply = await askJson({ kind, model: using, system: RULES, files, prompt }, keys, shape, false); }
+          if (!reply || !again.usable(reply)) {
+            canRetry = false;
+            using = again.escalate;
+            reply = await askJson({ kind, model: using, system: RULES, files, prompt }, keys, shape, false);
+          }
         }
       } catch (e) {
         // a request the service refuses as too long is asked again with the likeliest half of the documents, down to one (limits.ts)
@@ -1256,18 +1270,21 @@ export function nodeAi(o: AiOptions) {
       return summary;
     }
 
+    const options = {
+      escalate: tiers.thorough,
+      usable(reply: Record<string, unknown>) {
+        const paragraphs = parasOf(reply);
+        return paragraphs.length > 0 && !rejectSummary(paragraphs);
+      },
+      wrong: unrated
+        ? 'it is empty, gives advice or a judgment, or denies High findings while ratings are unresolved'
+        : 'it is empty, or it gives advice or a judgment: write it again with facts only',
+      retrySharedModel: unrated > 0,
+    };
     try {
       const fromDocs = await read('memoSummary', [dealId], tiers.standard, prompt,
         `${facts} project description capacity sponsor offtake financing structure`, {},
-        '{"paragraphs": ["…", "…"], "sources": [...]}', {
-          escalate: tiers.thorough,
-          usable(reply) {
-            const paragraphs = parasOf(reply);
-            return paragraphs.length > 0 && !rejectSummary(paragraphs);
-          },
-          wrong: 'it is empty, or it gives advice or a judgment: write it again with facts only'
-            + (unrated ? ', and state that ratings are unresolved' : ''),
-        });
+        '{"paragraphs": ["…", "…"], "sources": [...]}', options);
       if (!fromDocs.ok && fromDocs.error.kind === 'unreachable') {
         const stopped = Object.assign(new Error(fromDocs.error.message), { code: 'unreachable' });
         return failure(stopped, `${SERVICE} did not answer`);
