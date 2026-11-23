@@ -156,9 +156,20 @@ describe('the deal memo’s ratings and summary', () => {
     expect(pageOne).toContain(count);
   });
 
-  it('uses the unrated count when summary retries still claim there are no High findings', async () => {
-    const missing = ratingCases[0];
-    const wrong = { paragraphs: ['No open finding is rated High.'] };
+  const unsupportedConclusions = [
+    ['No open finding is rated High.', ratingCases[0]],
+    ['None of the open findings has a High rating.', ratingCases[0]],
+    ['No open findings have been rated High.', ratingCases[0]],
+    ['There are no findings with a High risk rating.', ratingCases[0]],
+    ['The deal has zero High-rated findings.', ratingCases[0]],
+    [
+      'Ratings for some findings remain unresolved. None of the open findings has a High rating.',
+      ratingCases[2],
+    ],
+  ] as const;
+
+  it.each(unsupportedConclusions)('refuses the unsupported conclusion %s', async (conclusion, missing) => {
+    const wrong = { paragraphs: [conclusion] };
     const recovered = await scriptedScaleMemo(missing, (call, attempt) =>
       attempt < 3 ? wrong : summaryFromPrompt(call));
     const fallback = await scriptedScaleMemo(missing, () => wrong);
@@ -166,7 +177,7 @@ describe('the deal memo’s ratings and summary', () => {
       expect(sums.map((call) => call.model)).toEqual(['standard', 'standard', 'thorough']);
       expect(sums[1].prompt).toContain('while ratings are unresolved');
       expect(pageOne).not.toContain(wrong.paragraphs[0]);
-      expect(pageOne).toContain('42 unrated.');
+      expect(pageOne).toContain(`${SCALE_FINDINGS.length - missing.rated} unrated.`);
     }
     expect(recovered.pageOne).toContain('Open findings have unresolved ratings.');
   });

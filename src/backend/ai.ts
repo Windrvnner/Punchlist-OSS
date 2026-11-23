@@ -406,8 +406,15 @@ function memoSummaryPrompt(
 
 /** An unrated finding prevents a blanket conclusion about High ratings (#661). */
 function memoSummaryRejection(unrated: number, advises: (text: string) => boolean) {
-  const noHighRating = /\b(?:no|none of the) (?:open )?(?:findings?|risks?) (?:is |are )?rated high\b/i;
-  const noHighRisk = /\bno high(?:-rated|[- ]risk)? (?:open )?(?:findings?|risks?)\b/i;
+  const noHighRating = new RegExp(
+    '\\b(?:no|none of(?: the)?|zero) (?:(?:open|rated) )?(?:findings?|risks?) '
+      + '[^.!?,;]{0,40}\\b(?:(?:rated|classified as|considered) high|high (?:risks?|ratings?))\\b',
+    'i',
+  );
+  const noHighRisk = new RegExp(
+    '\\b(?:no|zero|without) (?:open )?high(?:[- ]rated|[- ]risk)? (?:open )?(?:findings?|risks?|ratings?)\\b',
+    'i',
+  );
   return (paragraphs: string[]): string => {
     const text = paragraphs.join(' ').replace(/\s+/g, ' ');
     if (unrated && (noHighRating.test(text) || noHighRisk.test(text))) {
