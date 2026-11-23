@@ -83,10 +83,11 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Marking imported questions that have a response as Answered is optional and off by default.
 - Merge matches a row by wording first, then by number; a row that matches a deleted question brings it back. A row that names who submitted it never matches another party's question. "Will overwrite" is shown field by field first.
 - The same list imported on two PCs makes one set of questions, with ids derived from the deal, number, party, and wording.
-- Two questions with the same number are both kept and marked; a person renumbers one.
+- Two questions with the same number are both kept and marked; a person renumbers one. Undo, Restore, and a kept
+  version's Restore bring a deleted question back under its own number, even when another question holds it (#13, #116).
 - Export has no finding or link columns and always carries every column of the log.
 - No person in the app is named in a prompt, export, spreadsheet, or the memo. An accepted AI draft exports as "AI draft, accepted on" a date, and findings export the date reviewed but not the reviewer. Who responded from outside the firm is kept.
-- Each deal has one consolidated Q&A log, in the team's own folder and format; the app keeps no copy and never gates it.
+- Each deal has one consolidated Q&A log, in the team's own folder and format; the app keeps no copy and never gates it. One file is one deal's Q&A log: a file another deal already uses as its log can't be imported into a second deal (#38).
 - An import can make a spreadsheet the deal's log ("Make this the deal's Q&A log", checked for a file with two or more parties). If there is no log, the first update creates one in the app's layout, in a folder a person picks. A later party's file only adds and updates questions and is never written to.
 - Updates add no columns and never write to a formula cell. To reply to one party, use Export filtered by Submitted By.
 - **Update Q&A Log** brings every column up to date and first saves the old version to the folder's archive; it never deletes anything else. A log open elsewhere is retried every 30 seconds for 20 minutes; the notice names who has it open only when the lock file does.

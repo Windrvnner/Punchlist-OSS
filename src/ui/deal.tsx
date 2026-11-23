@@ -14,6 +14,7 @@ import { EditField, ReadOnlyContext, readDeal } from './editField';
 import { ConflictView } from './conflict';
 import { runMemo } from '../app/memo';
 import { keptDrafts, hasTexts } from './keptDrafts';
+import { num } from './counts';
 
 /**
  * A new deal name being typed, by deal, kept on this PC as it is typed until it is saved or let go: `text`, and `base`, the
@@ -84,7 +85,12 @@ export function PageTop({ deal: d, route, placeholder, noAsk = false }: { deal: 
         <span class="tfacts"><ReadOnlyContext.Provider value={locked}><EditField keep={`${d.id}:counterparty`} read={readDeal(d.id, 'counterparty')} label="Counterparty" placeholder="Counterparty" className="edit inl" cap={{ cls: 'lift', icon: <Icon name="building" size={14} /> }} value={d.counterparty} rev={d.rev} maxLength={80} commit={(v, over) => store.dispatch(EditDeal, { dealId: d.id, counterparty: v }, { quiet: true, over })} /></ReadOnlyContext.Provider></span></div>
       <div class="headrow">
         <DealName deal={d} renaming={renaming} open={() => setRenaming(true)} done={renamed} />
-        <div class="dtabs">{DEAL_PAGES.map(([page, label]) => { const n = page === 'findings' ? openF : page === 'qa' ? open : 0; return <a key={page} href={`#${pageHash(page, d.id)}`} class={route === page ? 'on' : ''} aria-current={route === page ? 'page' : undefined}>{label}{n ? <span>{n}<i> open</i></span> : null}</a>; })}</div>
+        <div class="dtabs">{DEAL_PAGES.map(([page, label]) => {
+          const count = page === 'findings' ? openF : page === 'qa' ? open : 0;
+          return <a key={page} href={`#${pageHash(page, d.id)}`} class={route === page ? 'on' : ''}
+            aria-current={route === page ? 'page' : undefined}>{label}{count
+              ? <span>{num(count)}<i> open</i></span> : null}</a>;
+        })}</div>
         <DealActions deal={d} renaming={renaming} rename={() => setRenaming(true)} />
       </div>
       {/* on Q&A an open question takes the ask box's place, at the top of the page (design G) */}
@@ -243,7 +249,7 @@ export function Stalled({ deal: d }: { deal: Deal }) {
   // the line says where it stopped and why; what happens next is on the button's hover (no explainer text on screen)
   const next = wait === 'away' ? (got ? 'It will resume when the data room can be reached.' : 'It will start when the data room can be reached.') : wait === 'retry' ? 'It will be tried again automatically.' : undefined;
   return <p class="loadfail" id="ix-stalled" role="status">{got
-    ? `Indexing stopped at ${got.toLocaleString()} of ${of.toLocaleString()} files.` :
+    ? `Indexing stopped at ${num(got)} of ${num(of)} files.` :
     'Indexing has not started.'}{s.ui.indexWhy[d.id] ? ` ${s.ui.indexWhy[d.id]}` : ''} <button type="button"
     class="tundo" id="ix-resume" title={next} onClick={() => void resumeIndexing(store, d.id)}>{wait ? 'Retry Now' : got
     ? 'Resume' : 'Start Indexing'}</button></p>;

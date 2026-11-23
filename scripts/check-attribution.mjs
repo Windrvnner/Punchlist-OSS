@@ -1,4 +1,4 @@
-// Fails when a tracked text file or a commit message of this branch holds AI-tool attribution: a trailer, a footer,
+// Fails when a tracked text file or a commit message of this branch holds AI-tool attribution: a trailer, a header,
 // or a link to an AI chat session (aiAttribution.mjs lists them). Prints file names and commit ids only.
 // Commits are those the branch adds to main; with no main to compare with, or none added (on main itself), the
 // latest 200.
@@ -49,6 +49,6 @@ function commitProblems() {
 
 const problems = [...fileProblems(), ...commitProblems()];
 if (problems.length) {
-  console.error(`Refused: no AI-tool attribution, footers, or chat-session links.\n  ${problems.join('\n  ')}`);
+  console.error(`Refused: no AI-tool trailers, headers, or chat-session links.\n  ${problems.join('\n  ')}`);
   process.exit(1);
 }

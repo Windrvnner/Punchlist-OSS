@@ -96,7 +96,7 @@ function GoneLine({ scope, deal, restore }: {
         <button type="button" class="linkb" id="gone-restore" onClick={() => restore(deleted)}>Restore it</button>
         {' or go '}
       </> : <>{noLongerHere(scope)}{' '}</>}
-      <a href={deal ? `#${dealHash(state.prefs, deal.id)}` : '#deals'}>{back}</a>
+      <a class="linkb" href={deal ? `#${dealHash(state.prefs, deal.id)}` : '#deals'}>{back}</a>
     </p>
   );
 }
