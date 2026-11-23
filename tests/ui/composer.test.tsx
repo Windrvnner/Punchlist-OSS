@@ -12,7 +12,7 @@ import { CreateQuestion, DeleteQuestion } from '../../src/app/commands/questions
 import { registry } from '../../src/app/commands/undo';
 import { StoreContext } from '../../src/ui/hooks';
 import { Composer } from '../../src/ui/conversation';
-import { attachFiles, MAX_ATTACHED } from '../../src/app/attachments';
+import { attachFiles, followCopies, MAX_ATTACHED } from '../../src/app/attachments';
 import { convKey } from '../../src/app/conversations';
 import { ok } from '../../src/domain/result';
 import type { DocumentService } from '../../src/ports';
@@ -105,7 +105,7 @@ describe('files that can no longer be sent (#671)', () => {
       hold = new Promise((r) => { release = r; });
       return () => { hold = null; release(); };
     };
-    return { ...m, chips, asked, lose, holdChecks, checked };
+    return { ...m, conv, chips, asked, lose, holdChecks, checked };
   }
 
   it('sends nothing, keeps the text and every chip, and names what is missing', async () => {
@@ -115,7 +115,7 @@ describe('files that can no longer be sent (#671)', () => {
     expect(m.asked()).toEqual([]);
     expect(m.box().value).toBe('Do the consents cover the change of control?');
     expect(m.chips()).toHaveLength(MAX_ATTACHED);
-    expect(m.toasts().at(-1)).toBe('Couldn’t find Consent 3.pdf and 1 more · attach them again');
+    expect(m.toasts().at(-1)).toBe('Couldn’t find 2 files to send: attach them again');
     // once the file is back, the same message goes with all of them
     m.lose();
     await m.press();
@@ -136,5 +136,21 @@ describe('files that can no longer be sent (#671)', () => {
     expect(m.checked).toHaveLength(1);
     expect(m.asked().map((x) => x.text)).toEqual(['Do the consents cover the change of control?']);
     expect(m.box().value).toBe('');
+  });
+
+  it('when the deal is kept as a copy during the check, nothing goes to the deleted deal (#117)', async () => {
+    const m = await attachedAll('Fennel');
+    await m.store.dispatch(CreateDeal, { name: 'Fennel (recovered)', folders: [] });
+    const copyId = Object.values(m.store.get().deals).find((d) => d.id !== m.dealId)!.id;
+    const stop = followCopies(m.store);
+    const release = m.holdChecks();
+    await m.enter('Do the consents cover the change of control?');
+    await act(() => m.store.tookCopy(m.dealId, copyId, { [m.dealId]: copyId }));
+    release();
+    await settle(40);
+    expect(m.asked()).toEqual([]);
+    const onCopy = convKey({ kind: 'deal', dealId: copyId });
+    expect(m.chips().map((chip) => chip.conv)).toEqual(Array(MAX_ATTACHED).fill(onCopy));
+    stop();
   });
 });
