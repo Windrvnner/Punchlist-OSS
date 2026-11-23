@@ -42,10 +42,13 @@ describe('two PCs share a deal\'s checks', () => {
     try {
       const a = aiOf(p.A).firstPass(p.dealId);
       await until('the office to be part-way', () => checks(p.svcA).length >= 2);
-      // the office waits on its next call until the laptop has joined its round, as pair's `meet` does from the start, so that
-      // "half-way" holds on a busy machine too: otherwise the office could finish everything before the laptop joins (GitHub #131)
-      const bId = p.B.backend.installId; const joined = () => logOf(p.sync.A, p.dealId).some((l) => l.member?.pc === bId);
-      p.svcA.set({ delay: 60, hold: () => (joined() ? undefined : until('the laptop to join the round', joined, 30000)) });
+      // the office waits on its next call until the laptop has joined its round and checked a block of its own, so that
+      // "half-way" holds on a busy machine too: otherwise the office could finish every block left before the laptop's
+      // first batch (#131)
+      const bId = p.B.backend.installId;
+      const working = () => logOf(p.sync.A, p.dealId).some((l) => l.member?.pc === bId) && checks(p.svcB).length > 0;
+      const laptopWorking = () => until('the laptop to join the round and check a block', working, 30000);
+      p.svcA.set({ delay: 60, hold: () => (working() ? undefined : laptopWorking()) });
       await aiOf(p.B).firstPass(p.dealId); await a; await allEnded(p);
       // at most one block twice: the laptop can claim the block the office has just claimed before that claim reaches it, the known
       // limit in docs/decisions.md ("two PCs that claim the same work within one OneDrive sync delay can both run it"); seen on a busy machine (GitHub #131)
