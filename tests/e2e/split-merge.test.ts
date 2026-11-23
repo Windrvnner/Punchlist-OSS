@@ -4,6 +4,7 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import fs from 'node:fs';
 import { pair, aiOf, roots, checks, logOf, roundsOf, allEnded, until, numOf, type Pair } from './splitKit';
+import { rowsOf as rows } from './splitKit';
 import { itemsIn } from '../backend/reviewKit';
 
 afterAll(() => { for (const r of roots) fs.rmSync(r, { recursive: true, force: true }); });
@@ -11,8 +12,6 @@ const val = <T>(r: { ok: true; value: T } | { ok: false; error: { message: strin
   if (!r.ok) throw new Error(r.error.message);
   return r.value;
 };
-const rows = async (P: Pair['A'], dealId: string) => val(await P.backend.ai.checklist!(dealId))
-  .map((r) => `${r.id}:${r.result}${r.findingId ? `:${r.findingId}` : ''}`).sort();
 const ITEMS = 400;
 /** the item the office raises a finding on, in its first block; the laptop passes it */
 const FOUND = 3;
@@ -20,11 +19,12 @@ const FOUND = 3;
 const checksFound = (c: { model: string; prompt: string }) =>
   itemsIn(c as Parameters<typeof itemsIn>[0]).some((it) => numOf(it.text) === FOUND);
 
-type Release = 'merged' | 'done' | 'later';
+type Release = 'merged' | 'done' | 'later' | 'closed';
 /**
  * The laptop opens its round first, so the office's round is the one merged away. The office's first block waits
  * until the office has written the merge (`merged`), until the kept round has ended too (`done`), or until a later
- * check has run after that (`later`), then raises a finding on item 3, which the laptop has already passed.
+ * check has run after that (`later`), or until the office has closed after that (`closed`), then raises a finding on
+ * item 3, which the laptop has already passed.
  */
 async function mergeWhileOut(release: Release) {
   let merging = false;
@@ -39,7 +39,10 @@ async function mergeWhileOut(release: Release) {
   });
   const aId = p.A.backend.installId;
   const mergedByOffice = () => logOf(p.sync.A, p.dealId).some((l) => l.merged && l.pc === aId);
-  const keptDone = () => { p.net.now(); return [...roundsOf(p.sync.A, p.dealId).values()].some((r) => r.end?.kind === 'done'); };
+  const keptDone = () => {
+    p.net.now();
+    return [...roundsOf(p.sync.A, p.dealId).values()].some((r) => r.end?.kind === 'done');
+  };
   const laterDone = () => {
     p.net.now();
     return [...roundsOf(p.sync.A, p.dealId).values()].some((r) => r.def.kind !== 'first' && r.end?.kind === 'done');
@@ -48,6 +51,7 @@ async function mergeWhileOut(release: Release) {
     await until('the office to merge its round away', mergedByOffice, 30000);
     if (release !== 'merged') await until('the kept round to end', keptDone, 60000);
     if (release === 'later') await until('the later check to end', laterDone, 60000);
+    if (release === 'closed') await p.A.backend.close();
   };
   p.net.pause('both');
   const b = aiOf(p.B).firstPass(p.dealId);
@@ -103,6 +107,19 @@ describe('a batch still out when its round is merged away (#795)', () => {
       await allEnded(p, 60000);
       const ra = await settled(p, () => true);
       expect(ra.find((r) => r.startsWith(`c${FOUND}:`))).toBe(`c${FOUND}:satisfied`);   // as the later check left it
+    } finally { p.close(); }
+  }, 120000);
+
+  it('once the PC has closed, it is not written', async () => {
+    const { p, both } = await mergeWhileOut('closed');
+    try {
+      await Promise.allSettled([both]);
+      await until('every round to end', () => {
+        p.net.now();
+        return [...roundsOf(p.sync.A, p.dealId).values()].every((r) => r.end);
+      }, 60000);
+      const aId = p.A.backend.installId;
+      expect(logOf(p.sync.A, p.dealId).filter((l) => l.pc === aId && l.item)).toEqual([]);
     } finally { p.close(); }
   }, 120000);
 });
