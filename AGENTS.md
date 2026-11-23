@@ -32,13 +32,16 @@ npx vitest run [path/to/file.test.ts]        # unit, backend, and end-to-end tes
 npm run check                                # type-check, lint, secrets check, readability hints, and unit tests
 npm run build                                # build into dist/
 npm run browser -- --jobs 2 [suites]         # browser suites against dist/ on port 4178 (set PUNCHLIST_PORT to change it)
-npm run check:all                            # everything, including the desktop app: run before every merge
+npm run check:all                            # everything CI runs, including the desktop app, on this machine
 npm run e2e:live [-- tests/e2e/live-agent.test.ts]  # live tests on the real model (paid): only when asked for
 npm run ai:check -- <openai|claude|north>    # the AI check on a live service, with the key in PUNCHLIST_AI_KEY: only when asked for
 ```
 
 - `npm run check` takes about 10 minutes. Timing-sensitive tests fail on a busy machine (for example, `tests/e2e/split.test.ts` occasionally; see #131). Re-run a failing file on its own before you treat the failure as real. The browser runner automatically re-runs a suite that fails under load, this time on its own with no other suites running.
-- CI on GitHub runs the steps of `npm run check:all` as parallel jobs on every pull request and push to `main`. Still run it locally before a merge. Run `npm run package` only when every test passes.
+- CI on GitHub runs the steps of `npm run check:all` as parallel jobs on every pull request and push to `main`. Its
+  required checks (`check`, `desktop`, and `browser (1)` to `browser (4)`) are the test gate for merging; a local
+  `npm run check:all` is optional. Start or re-run the workflow on GitHub whenever it helps. Run `npm run package`
+  only when every test passes.
 
 ## Code
 
@@ -60,8 +63,8 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
 
 - Never commit or push directly to `main`.
 - Do each task on its own new branch (for example, `feat/short-description`) and open a pull request into `main`.
-- Merge a pull request only after its adversarial review and a full local `npm run check:all`, following the merge
-  order. Squash-merge it on GitHub, then delete its branch.
+- Merge a pull request only after its adversarial review and once the required GitHub checks pass on its latest
+  commit, following the merge order. Squash-merge it on GitHub, then delete its branch.
 - If a pull request makes existing documentation inaccurate, update the affected documentation in that pull
   request before merging.
 - Before merging, require an independent adversarial review for the smallest fix, bugs, oversights, and weak tests.
