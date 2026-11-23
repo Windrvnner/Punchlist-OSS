@@ -130,7 +130,7 @@ export function conversationLog(o: ConversationLogOptions): ConversationStore & 
         return ok(undefined);
       } catch (e) {
         // this PC's copy could not be written, so nothing was, anywhere: the numbers are used again, and the failure says so (`failed`)
-        // unless part of it is still there, to be cut off later: a number it holds is never given to another line (#126)
+        // unless part of it is still there, to be cut off later: a number it holds is not given to another line (#126)
         if (!holdsFailedAppend(o.local, own(file))) seq = before;
         return fail({ kind: 'failed' as const, message: (e as { code?: string })?.code === 'ENOSPC' ? 'The disk is full' : 'This PC’s copy of the conversation could not be written' });
       }

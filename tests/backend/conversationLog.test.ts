@@ -356,7 +356,7 @@ describe('conversations in the synced folder', () => {
     const shared = new Mem();
     let local = new Tearing();
     const open = (folder: Mem) => conversationLog({
-      shared, local: folder, installId: 'pc', user: () => 'adoe', clock, segmentBytes: 400,      // a file two lines long
+      shared, local: folder, installId: 'pc', user: () => 'adoe', clock, segmentBytes: 400,   // a file two lines long
     });
     const log = open(local);
     const at = clock();
@@ -372,7 +372,8 @@ describe('conversations in the synced folder', () => {
     local = restarted;
     await open(local).load();
     shared.files = new Map([...shared.files].sort());                  // listed by name, as a disk lists them
-    const there = await conversationLog({ shared, local: new Mem(), installId: 'home', user: () => 'adoe', clock }).load();
+    const home = conversationLog({ shared, local: new Mem(), installId: 'home', user: () => 'adoe', clock });
+    const there = await home.load();
     expect(there.ok && there.value['deal:d1:cB']?.map((m) => m.id)).toEqual(['b1']);
   });
 });
