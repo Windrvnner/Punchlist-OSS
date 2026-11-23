@@ -1,5 +1,5 @@
 import { titleStyle } from './titleStyle';
-import { Fragment, type ComponentChildren } from 'preact';
+import { Fragment, type ComponentChildren, type RefObject } from 'preact';
 import { createPortal } from 'preact/compat';
 import { askAbout, itemStanding, conflictLabel, versionsWord, offFindingCount } from '../app/state';
 import type { ItemKind, State } from '../app/state';
@@ -115,6 +115,23 @@ export function revealChecklistRow(list: HTMLElement | null, itemId: string) {
   }
 }
 
+// #498: give keyboard Search focus to the selected row once the Checklist has rendered it.
+function useItemSearchFocus(
+  listRef: RefObject<HTMLDivElement | null>, selectedId: string | undefined, listedNow: boolean,
+  searchFocus: string | null,
+) {
+  const store = useStore();
+  useLayoutEffect(() => {
+    if (!selectedId || searchFocus !== selectedId) return;
+    const list = listRef.current;
+    const row = list?.querySelector<HTMLElement>(`[data-item="${CSS.escape(selectedId)}"]`);
+    if (row) focusSearchResult(store, selectedId, () => {
+      revealChecklistRow(list, selectedId);
+      row.focus({ preventScroll: true });
+    });
+  }, [selectedId, searchFocus, listedNow]);
+}
+
 /**
  * Every checklist item of the deal and what its check came to, as a list with the item that is open beside it, like the
  * Q&A log. A line says how the item stands in a few words; opening it shows the whole of it: what a gap needs, the
@@ -181,15 +198,7 @@ export function ChecklistPage({ dealId }: { dealId: string }) {
   // one stop for Tab in the list: the open item, else the first; the arrow keys, Home and End move through the items
   const at = sel && shown.some((r) => r.id === sel.id) ? sel.id : shown[0]?.id;
   const focusRow = (id: string) => listRef.current?.querySelector<HTMLElement>(`[data-item="${id}"]`)?.focus();
-  useLayoutEffect(() => {
-    if (!sel || s.ui.searchFocus !== sel.id) return;
-    const list = listRef.current;
-    const row = list?.querySelector<HTMLElement>(`[data-item="${CSS.escape(sel.id)}"]`);
-    if (row) focusSearchResult(store, sel.id, () => {
-      revealChecklistRow(list, sel.id);
-      row.focus({ preventScroll: true });
-    });
-  }, [sel?.id, s.ui.searchFocus, listedNow]);
+  useItemSearchFocus(listRef, sel?.id, listedNow, s.ui.searchFocus);
   const close = () => { const id = sel?.id; store.ui({ selectedChecklist: null }); if (id) requestAnimationFrame(() => focusRow(id)); };
   const onKey = (e: KeyboardEvent) => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key) || !shown.length) return;
