@@ -73,4 +73,18 @@ describe('the check:all comparison', () => {
     expect(result.stderr).toContain('Stage failed: npm run check');
     expect(result.stderr).toContain('Smoke check missing: boots');
   });
+
+  it('lists a browser check whose line is gone, even when the suite keeps its count', () => {
+    const withLine = (line: string) => run((files) => { files['browser.json'].suites[0].lines = [line]; });
+    const result = compare(withLine('PASS the draft is kept'), withLine('PASS another check'));
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('drafts: PASS the draft is kept');
+  });
+
+  it('refuses a folder with no recorded run rather than reporting the same coverage', () => {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-'));
+    const result = compare(empty, run());
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('No run recorded');
+  });
 });

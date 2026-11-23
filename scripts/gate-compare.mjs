@@ -1,7 +1,9 @@
 // Compares two check:all runs (out/gate/<time>/ folders) to prove a speed-up kept every test:
 //   node scripts/gate-compare.mjs <before-dir> <after-dir>
 // Prints each stage's time and the difference, then exits 1 if anything that passed before is missing, skipped or
-// failing after: a Vitest test, a desktop smoke check, a browser suite or any of its checks, or a whole stage.
+// failing after: a Vitest test, a desktop smoke check, a whole stage, or a browser suite or its count of checks. A
+// browser check's line holds its ID and often a note that changes between runs, so the PASS lines seen only before are
+// listed for a person to read rather than counted as lost. Exits 2 when a folder holds no run.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -52,6 +54,14 @@ function lostCoverage(before, after) {
   return problems;
 }
 
+/** The PASS lines of each browser suite seen before and not after: a renamed or dropped check, or only a new note. */
+function browserLinesGone(before, after) {
+  const linesAfter = new Set((after.browser?.suites ?? []).flatMap((suite) => suite.lines ?? []));
+  return (before.browser?.suites ?? []).flatMap((suite) => (suite.lines ?? [])
+    .filter((line) => line.startsWith('PASS ') && !linesAfter.has(line))
+    .map((line) => `${suite.name}: ${line.slice(0, 160)}`));
+}
+
 /** Each stage's seconds before and after, and the stages that passed before and failed or never ran after. */
 function stageTimes(before, after) {
   const lines = [];
@@ -78,8 +88,12 @@ function retriesAndTimeouts(run) {
 /** The report lines and the problems found between two runs. */
 export function compareGates(before, after) {
   const stages = stageTimes(before, after);
+  const gone = browserLinesGone(before, after);
   const lines = ['   before    after     diff  stage', ...stages.lines,
     `Before: ${retriesAndTimeouts(before)}. After: ${retriesAndTimeouts(after)}.`];
+  if (gone.length) {
+    lines.push('Browser PASS lines seen only before (check the IDs):', ...gone.map((line) => `  ${line}`));
+  }
   return { lines, problems: [...stages.problems, ...lostCoverage(before, after)] };
 }
 
@@ -89,7 +103,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.error('Usage: node scripts/gate-compare.mjs <before-dir> <after-dir>');
     process.exit(2);
   }
-  const { lines, problems } = compareGates(readGate(beforeDir), readGate(afterDir));
+  const runs = [beforeDir, afterDir].map(readGate);
+  const empty = [beforeDir, afterDir].filter((dir, i) => !runs[i].gate);
+  if (empty.length) {
+    console.error(`No run recorded (no gate.json) in: ${empty.join(', ')}`);
+    process.exit(2);
+  }
+  const { lines, problems } = compareGates(runs[0], runs[1]);
   console.log(lines.join('\n'));
   for (const problem of problems) console.error(`LOST ${problem}`);
   console.log(problems.length ? `\n${problems.length} problems: coverage or stages were lost` : '\nSame coverage');

@@ -55,8 +55,10 @@ The Store is the object that holds the app's state and runs its commands; see [a
 Each `npm run check:all` run writes its stage times and test results to `out/gate/<time>/`: `gate.json` (each stage's
 command, seconds and exit status), `vitest.json`, `browser.json` (each suite's checks, time and re-runs) and
 `smoke.json` (the desktop smoke check IDs). A change that speeds up the tests shows it keeps coverage with
-`node scripts/gate-compare.mjs <before> <after>`, which prints each stage's difference and exits 1 if any test, check,
-suite or stage that passed before is missing, skipped or failing after. Standalone commands write nothing there.
+`node scripts/gate-compare.mjs <before> <after>`, which prints each stage's difference and exits 1 if any Vitest test,
+smoke check or stage that passed before is missing, skipped or failing after, or if a browser suite has fewer checks
+or passes. It lists the browser PASS lines seen only before, since their notes can change between runs. Standalone
+commands write nothing there.
 
 ### Linux test runner troubleshooting
 
