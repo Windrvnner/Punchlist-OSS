@@ -51,11 +51,16 @@ Punchlist uses one type family, the computer's own interface font, as native app
 | Section headings (`h2`), deal names in lists | 600, letter-spacing −0.2px | 18px |
 | An open finding's, item's or question's title | 600, letter-spacing −0.15px | 17px / 1.35 |
 | List row titles (findings, deals, feed) | 600 | 14px |
+| Overview column names | 500 | 14px |
+| Overview fact labels | 600, `--ink-2` | 13px |
 | Body | 400 | 14px / 1.5 |
 | Tables, panes, menus, buttons | 400 to 500 | 13px (12px on small buttons) |
 | Section labels (Findings, Show in the List) | 600, `--ink-2`, Apple title style, never all capitals | 13px |
 | Column heads | 600, `--ink-2`, Apple title style | 11px |
 | Trail, meta lines | 400, `--ink-2` | 12–13px |
+
+The table gives the default sizes. [Controls](#controls) specifies 12.5px for composer buttons and native selects.
+Overview progress counts and source popover rows also use 12.5px as specified in their sections.
 
 Numbers that line up use tabular figures (`.num`). All text is en-US.
 
