@@ -21,7 +21,10 @@ async function open() {
   return { ctx, page };
 }
 
-/** holds every folder read until `window.releaseScans()`; `window.scansHeld()` counts the reads waiting */
+/**
+ * holds every folder read until `window.releaseScans()`, or the newest until `window.releaseNewest()`;
+ * `window.scansHeld()` counts the reads waiting
+ */
 const holdScans = (page) => page.evaluate(() => {
   const scan = store.services.docs.scanFolder.bind(store.services.docs);
   const waiting = [];
@@ -29,6 +32,7 @@ const holdScans = (page) => page.evaluate(() => {
   window.releaseScans = () => {
     for (const go of waiting.splice(0)) go();
   };
+  window.releaseNewest = () => waiting.pop()?.();
   store.services.docs.scanFolder = async (...args) => {
     await new Promise((go) => waiting.push(go));
     return scan(...args);
@@ -303,6 +307,33 @@ async function failedReadGivesBack() {
   await ctx.close();
 }
 
+/** #113: a folder read again and removed in a form opened since stays removed when the first read ends late */
+async function removedStaysRemoved() {
+  const { ctx, page } = await open();
+  await holdScans(page);
+  await reopen(page);
+  await page.fill('#nd-name', 'Zed');
+  await chooseFolder(page, 'D:\\Example\\Gone');
+  await page.waitForFunction(() => window.scansHeld() === 1);
+  await dismiss(page);
+  await reopen(page);
+  await page.waitForFunction(() => window.scansHeld() === 2);
+  await page.evaluate(() => window.releaseNewest());
+  await rowsShown(page, 1);
+  await page.click('.ndrow .x');
+  await rowsShown(page, 0);
+  await dismiss(page);
+  await page.evaluate(() => window.releaseScans());
+  await page.waitForTimeout(300);
+  await reload(page);
+  await reopen(page);
+  await page.waitForTimeout(500);
+  const back = await form(page);
+  say('#113 a folder removed in a later form stays removed when its first read ends late', back.name === 'Zed'
+    && !back.folders.length && !page.errors.length, JSON.stringify(back));
+  await ctx.close();
+}
+
 await keptAcrossReload();
 await keptOnlyWhileFilled();
 await chosenWhileReading();
@@ -311,6 +342,7 @@ await severalChosen();
 await createHoldsTheForm();
 await createReadAcrossReload();
 await failedReadGivesBack();
+await removedStaysRemoved();
 await browser.close();
 const failed = results.filter(([, ok]) => !ok).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);

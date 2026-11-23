@@ -57,12 +57,13 @@ export function hasNewDealDraft(d: KeptNewDeal) {
 
 /**
  * A folder whose read ended after its form closed joins the kept draft, so it is there when the form opens again; one
- * that could not be read stays waiting, and is read again then (#113).
+ * that could not be read stays waiting, and is read again then (#113). Only a folder the draft still waits for joins.
  */
 export function keepLateRead(path: string, folder: KeptFolder | null) {
   const draft = keptNewDeal();
-  if (!draft || !folder) return;
   const same = (p: string) => pathKey(p) === pathKey(path);
+  // a folder no longer waiting was read again, or removed, by a form opened since: the read ending late is old news
+  if (!draft || !folder || !(draft.reading ?? []).some(same)) return;
   const stillWaiting = (draft.reading ?? []).filter((p) => !same(p));
   const folders = draft.folders.some((f) => same(f.path)) ? draft.folders : [...draft.folders, folder];
   keepNewDeal({ ...draft, folders, reading: stillWaiting });
