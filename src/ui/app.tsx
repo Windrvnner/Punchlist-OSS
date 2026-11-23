@@ -37,6 +37,7 @@ import { renameKept } from './keptDrafts';
 import { keepAttachments } from './keptAttachments';
 import { staleKept } from './editField';
 import { isReading, dealHash, dealTwin } from '../app/state';
+import { num } from './counts';
 
 const GROUPS: [State['deals'][string]['group'], string][] = (['live', 'monitor', 'pitch', 'closed'] as const).map((g) => [g, GROUP_HEADING[g]]);
 
@@ -208,7 +209,7 @@ function NotFound() {
       <div class="center">
         <h1 class="ttl">That deal isn’t here</h1>
         <p class="fr-line">
-          It may have been deleted. <a href="#deals">Back to Home</a>
+          It may have been deleted. <a class="linkb" href="#deals">Back to Home</a>
         </p>
       </div>
     </div>
@@ -236,6 +237,7 @@ function Rail() {
   }, [cur, curGroup]);
   const scope = scopeOfRoute(r);
   const queued = scope && (scope.kind === 'finding' || scope.kind === 'question') && scopeValid(s, scope) === true ? scope : null;
+  const booting = s.boot.stage !== 'ready';
   return (
     <aside class="rail glass pane">
       <div class="brand"><span class="mark" id="brand-mark" aria-hidden="true"><Icon name="mark" size={16} /></span><button type="button" id="new-deal" class="plus" title={ro ?? 'Add deal'} aria-label="Add deal" disabled={!!ro} onClick={() => store.ui({ addDeal: true })}><Icon name="plus" size={16} /></button></div>
@@ -245,7 +247,11 @@ function Rail() {
         <button type="button" class="railx" id="rt-settings" aria-label="Settings" title="Settings" aria-haspopup="dialog" onClick={() => store.ui({ settings: true })}><Icon name="gear" size={15} /></button>
       </div>}
       <nav id="rail-nav" aria-label="Primary">
-        {queued ? <QueueStrip scope={queued} /> : isReading(s.ui) ? <a href="#deals" class="railx" title="Home" aria-label="Home"><Icon name="home" size={16} /></a> : <>
+        {booting ? <div class="ph" aria-hidden="true"><i /><i /><i /><i /><i /></div>
+          : queued ? <QueueStrip scope={queued} />
+          : isReading(s.ui) ? <a href="#deals" class="railx" title="Home" aria-label="Home">
+            <Icon name="home" size={16} />
+          </a> : <>
         <a href="#deals" class={r.name === 'home' ? 'on' : ''} aria-current={r.name === 'home' ? 'page' : undefined}>Home</a>
         {/* a group shows once it has a deal */}
         {GROUPS.map(([g, label]) => (
@@ -284,7 +290,7 @@ function RailGroup({ label, deals, open, toggle, cur }: {
     <div>
       <button type="button" class="grp-h" aria-expanded={open} onClick={toggle}>
         <span class={`tri ${open ? 'open' : ''}`}><Icon name="chevr" size={12} /></span>
-        {label}<span class="cnt">{deals.length}</span>
+        {label}<span class="cnt">{num(deals.length)}</span>
       </button>
       {open && deals.map(row)}
     </div>

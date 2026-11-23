@@ -56,6 +56,22 @@ async function twoPcs() {
   return { a, b, dealId };
 }
 
+/**
+ * A 40-point list imported on PC A, removed there, and the removal synced to PC B: `id` is one of its findings in
+ * Deleted on both, and `undo` presses Undo on A's removal notice.
+ */
+async function removedOnA() {
+  const { a, b, dealId } = await twoPcs();
+  await a.store.dispatch(ImportIssuesList, { dealId, doc: DOC, list: LIST, points: points() });
+  await syncAll(a, b);
+  const removal = await a.store.dispatch(RemoveIssuesList, { dealId, doc: DOC });
+  if (!removal.ok) throw new Error(removal.error.message);
+  await syncAll(a, b);
+  const id = Object.values(b.store.get().tombstones).find((t) => t.kind === 'finding' && t.dealId === dealId)!.id;
+  const undo = () => a.store.dispatch(Undo, { opId: removal.value.opId });
+  return { a, b, dealId, id, undo };
+}
+
 describe('the same issues list imported on two PCs before they sync', () => {
   it('holds each point once', async () => {
     const { a, b, dealId } = await twoPcs();
@@ -371,5 +387,51 @@ describe('an issues list removed on one PC while another changes it', () => {
     expect(u.ok).toBe(true);
     await syncAll(a, b);
     for (const p of [a, b]) { expect(findingsOf(p, dealId).length).toBe(40); expect(Object.keys(p.store.get().conflicts).length).toBe(0); }
+  });
+  it('a finding put back and changed on the other PC before the removal\'s Undo reaches it stays as that PC has it, '
+    + 'with nothing to choose (#401)', async () => {
+    for (const order of ['undo first', 'edit first'] as const) {
+      const { a, b, dealId, id, undo } = await removedOnA();
+      if (order === 'undo first') expect((await undo()).ok).toBe(true);
+      expect((await b.store.dispatch(RestoreFinding, { dealId, findingId: id })).ok).toBe(true);
+      const theirs = { title: 'broe’s title', workstream: 'Legal', body: ['What broe found in the side letter.'] };
+      expect((await b.store.dispatch(EditFinding, { dealId, findingId: id, ...theirs })).ok).toBe(true);
+      if (order === 'edit first') expect((await undo()).ok).toBe(true);
+      await syncAll(a, b);
+      await syncAll(a, b);
+      for (const p of [a, b]) {
+        expect(Object.keys(p.store.get().conflicts)).toEqual([]);
+        expect(p.store.get().findings[id]).toMatchObject(theirs);
+        expect(findingsOf(p, dealId).length).toBe(40);
+      }
+    }
+  });
+  it('the removal\'s Undo and a change made since on each PC to a finding put back on the other are still two '
+    + 'versions (#401)', async () => {
+    const { a, b, dealId, id, undo } = await removedOnA();
+    expect((await b.store.dispatch(RestoreFinding, { dealId, findingId: id })).ok).toBe(true);
+    const was = b.store.get().findings[id];
+    await b.store.dispatch(EditFinding, { dealId, findingId: id, title: 'broe’s title', workstream: was.workstream,
+      body: was.body });
+    expect((await undo()).ok).toBe(true);
+    await a.store.dispatch(EditFinding, { dealId, findingId: id, title: 'aroe’s title', workstream: was.workstream,
+      body: was.body });
+    await syncAll(a, b);
+    for (const p of [a, b]) expect(p.store.get().conflicts[id]).toBeTruthy();   // two people's words: a person chooses
+  });
+  it('a finding put back and deleted again on the other PC before the removal\'s Undo reaches it stays in Deleted, '
+    + 'with nothing to choose (#401)', async () => {
+    const { a, b, dealId, id, undo } = await removedOnA();
+    expect((await b.store.dispatch(RestoreFinding, { dealId, findingId: id })).ok).toBe(true);
+    expect((await b.store.dispatch(DeleteFinding, { dealId, findingId: id })).ok).toBe(true);
+    expect((await undo()).ok).toBe(true);
+    await syncAll(a, b);
+    await syncAll(a, b);
+    for (const p of [a, b]) {
+      expect(Object.keys(p.store.get().conflicts)).toEqual([]);
+      expect(p.store.get().findings[id]).toBeUndefined();
+      expect(p.store.get().tombstones[id]).toBeTruthy();
+      expect(findingsOf(p, dealId).length).toBe(39);
+    }
   });
 });

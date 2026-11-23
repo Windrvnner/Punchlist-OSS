@@ -11,7 +11,9 @@ import { mockAi, mockDocuments, mockSession } from '../../src/adapters/mocks';
 import { CreateDeal } from '../../src/app/commands/deals';
 import { SetResponse } from '../../src/app/commands/questions';
 import { ImportQuestions } from '../../src/app/commands/importQuestions';
-import { KeepQaLog, SetQaLogFolder, RecordQaLogExport, RestoreQaLogs } from '../../src/app/commands/qaLogs';
+import {
+  KeepQaLog, SetQaLogFolder, RecordQaLogExport, RestoreQaLogs, TakeFromQaLog, RestoreQuestionSnapshots,
+} from '../../src/app/commands/qaLogs';
 import { registry } from '../../src/app/commands/undo';
 import { dealQuestions, FIRM } from '../../src/app/state';
 import { keepImportedLog, exportQaLog, logOf } from '../../src/app/qaLog';
@@ -20,7 +22,8 @@ import { nodeQaLogs } from '../../src/backend/qaLogs';
 import { ok } from '../../src/domain/result';
 
 const COMMANDS = [
-  CreateDeal, ImportQuestions, SetResponse, KeepQaLog, SetQaLogFolder, RecordQaLogExport, RestoreQaLogs,
+  CreateDeal, ImportQuestions, SetResponse, KeepQaLog, SetQaLogFolder, RecordQaLogExport, RestoreQaLogs, TakeFromQaLog,
+  RestoreQuestionSnapshots,
 ];
 for (const c of COMMANDS) registry.set(c.name, c);
 let t = 0; const clock = { now: () => new Date(Date.UTC(2026, 10, 17, 10, 0, 0, t++)).toISOString() };
@@ -105,4 +108,41 @@ describe('a Q&A log update whose working files are busy as it tidies up', () => 
     const again = await exportQaLog(store, dealId); expect(again.ok && again.value.status).toBe('written');
     expect([fresh, other, theirs, dated, csv].map((f) => fs.existsSync(f))).toEqual([true, true, true, true, true]);
   }, 60_000);
+});
+
+describe('a Q&A log update while responses are typed in the app (#40)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('100 lender edits and 10 app edits made during the update: 10 in two versions, 90 taken in', async () => {
+    const { folder, store, dealId } = await setup();
+    const byN = new Map(dealQuestions(store.get(), dealId).map((q) => [q.n, q]));
+    const answer = (n: number, response: string) =>
+      store.dispatch(SetResponse, { dealId, questionId: byN.get(n)!.id, response });
+    for (let i = 1; i <= 100; i++) await answer(i, `Answer ${i}`);
+    expect((await exportQaLog(store, dealId)).ok).toBe(true);
+    // the lender revises rows 1-100 in the file
+    const lines = fs.readFileSync(path.join(folder, FILE), 'utf8').split('\r\n');
+    for (let i = 1; i <= 100; i++) lines[i] = `${i},${text(i)},Answer ${i} revised by the lender`;
+    fs.writeFileSync(path.join(folder, FILE), lines.join('\r\n'));
+    later();
+    await answer(500, 'Answer 500');                                                     // so it saves
+    const save = store.services.qaLogs!.save;
+    store.services.qaLogs!.save = async (req) => {
+      const saved = await save(req);
+      for (let i = 1; i <= 10; i++) {
+        const typed = await answer(i, `App answer ${i}`);
+        expect(typed.ok).toBe(true);
+      }
+      return saved;
+    };
+    const r = await exportQaLog(store, dealId);
+    const ten = Array.from({ length: 10 }, (_, k) => k + 1);
+    expect(r.ok && r.value).toMatchObject({ status: 'written', changed: 90, kept: ten });
+    const response = (i: number) => store.get().questions[byN.get(i)!.id].response;
+    expect([response(1), response(10), response(11), response(100)]).toEqual([
+      'App answer 1', 'App answer 10', 'Answer 11 revised by the lender', 'Answer 100 revised by the lender',
+    ]);
+    expect([row(folder, 1), row(folder, 10)])
+      .toEqual([`1,${text(1)},Answer 1 revised by the lender`, `10,${text(10)},Answer 10 revised by the lender`]);
+  }, 120_000);
 });
