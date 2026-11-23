@@ -5,7 +5,15 @@ import { openDelete } from './dealMenu.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, ok ? '' : note); };
 const browser = await launchChrome();
-async function fresh(scheme = 'light', w = 1280, h = 736) { const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme }); const page = await ctx.newPage(); page.errors = []; page.on('pageerror', (e) => page.errors.push(e.message)); await page.goto(URL); await page.waitForSelector('#fr-new'); return { ctx, page }; }
+async function fresh(scheme = 'light', w = 1280, h = 736, locale = 'en-US') {
+  const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme, locale });
+  const page = await ctx.newPage();
+  page.errors = [];
+  page.on('pageerror', (e) => page.errors.push(e.message));
+  await page.goto(URL);
+  await page.waitForSelector('#fr-new');
+  return { ctx, page };
+}
 async function newDeal(page, name, paths, button = '#fr-new') {
   await page.click(button); await page.waitForSelector('#nd-name, #add-new'); if (await page.$('#add-new')) await page.click('#add-new'); await page.fill('#nd-name', name);
   if (paths.length) { await page.click('#nd-paste'); for (let i = 0; i < paths.length; i++) { await page.fill('#nd-path', paths[i]); await page.press('#nd-path', 'Enter'); await page.waitForFunction((n) => document.querySelectorAll('.ndrow').length === n, i + 1); } }
@@ -341,6 +349,76 @@ for (const scheme of ['light', 'dark']) { const { ctx, page } = await fresh(sche
   say(`checking-says-it-waits-for-sign-in-${scheme}`, signIn === 'Waiting for Intelligence sign-in. The check resumes once someone signs in', signIn);
   say(`no-page-errors-checking-${scheme}`, page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close(); }
+
+// Fill the rendered state with deal-scale counts without indexing thousands of files or writing thousands of records.
+for (const [scheme, width, height] of [['light', 1280, 736], ['dark', 1024, 640]]) {
+  const { ctx, page } = await fresh(scheme, width, height, 'de-DE');
+  const id = await newDeal(page, 'Large deal', []);
+  await page.waitForFunction((dealId) => {
+    const { dealLoad, progress, checklists } = store.get();
+    return dealLoad[dealId] === 'loaded' && progress[dealId] && checklists[dealId];
+  }, id);
+  await page.evaluate((dealId) => {
+    const state = store.get();
+    const deal = state.deals[dealId];
+    const deals = { ...state.deals };
+    const members = { ...state.members };
+    const findings = {};
+    const questions = {};
+    const actor = encodeURIComponent(state.user.name.trim().toLowerCase());
+    for (let index = 1; index <= 2000; index++) {
+      const suffix = String(index).padStart(26, '0');
+      const otherId = `d_${suffix}`;
+      deals[otherId] = { ...deal, id: otherId, name: `Project ${index}`, group: 'monitor' };
+      members[`m_${otherId}_${actor}`] = { on: true };
+      questions[`q_${suffix}`] = { dealId, n: index, status: index <= 1000 ? 'open' : 'closed' };
+      if (index <= 1001) findings[`f_${suffix}`] = { dealId, status: 'open' };
+    }
+    const folders = [{ path: 'reports', label: 'Reports', files: 2000, indexed: 1277 }];
+    deals[dealId] = { ...deal, stage: 'indexing', folders };
+    store.set({
+      ...state, deals, members, findings, questions,
+      firmList: { general: { name: 'General', layer: 'broad', items: Array(2000).fill({}) } },
+      progress: { [dealId]: { folders: [], checklist: { items: 2000, gaps: 1277, findings: 0,
+        unsettled: 0, satisfied: 723 } } },
+      checklists: {},
+      ui: { ...state.ui, indexStalled: [dealId], settings: true },
+    });
+  }, id);
+  const counts = await page.evaluate(() => {
+    const text = (selector) => document.querySelector(selector)?.textContent.trim();
+    return {
+      locale: navigator.language,
+      settings: text('#s-checklist'),
+      findings: text('.dtabs a[href^="#deal-"] span'),
+      questions: text('.dtabs a[href^="#qa-"] span'),
+      groups: [...document.querySelectorAll('#rail-nav .grp-h .cnt')].map((element) => element.textContent),
+      questionTotal: text('#ov-qa .tot'),
+      checklist: text('#ov-checklist .tot'),
+      resolve: text('#ov-checklist .plab .lo'),
+      gaps: text('#ov-checklist .plab .sub a'),
+      documents: text('#ov-docs .dcrow .rd'),
+      stopped: text('#ix-stalled'),
+    };
+  });
+  await page.evaluate(() => {
+    const state = store.get();
+    const general = state.firmList.general;
+    store.set({ ...state, firmList: { general: { ...general, items: general.items.slice(0, 1) } } });
+  });
+  const oneItem = await page.textContent('#s-checklist');
+  say(`settings-tab-and-sidebar-counts-have-thousands-commas-${scheme}`, counts.locale === 'de-DE'
+    && counts.settings === 'General · 2,000 items Open' && counts.findings === '1,001 open'
+    && counts.questions === '1,000 open' && counts.groups.join('|') === '1|2,000', JSON.stringify(counts));
+  say(`settings-uses-the-singular-for-one-checklist-item-${scheme}`, oneItem === 'General · 1 item Open', oneItem);
+  say(`overview-and-stopped-indexing-use-en-us-counts-${scheme}`, counts.locale === 'de-DE'
+    && counts.questionTotal === '2,000 in all' && counts.checklist === '2,000 in all'
+    && counts.resolve === '1,277 to resolve' && counts.gaps === '1,277 gaps'
+    && counts.documents === '1,277 of 2,000 indexed · stopped'
+    && counts.stopped === 'Indexing stopped at 1,277 of 2,000 files. Resume', JSON.stringify(counts));
+  say(`no-page-errors-count-formatting-${scheme}`, page.errors.length === 0, JSON.stringify(page.errors));
+  await ctx.close();
+}
 
 await browser.close();
 const failed = results.filter(([, ok]) => !ok).length; console.log(`\n${results.length - failed}/${results.length} passed`); process.exit(failed ? 1 : 0);

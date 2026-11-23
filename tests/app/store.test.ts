@@ -202,12 +202,18 @@ describe('Store', () => {
     let answer!: () => void; (a.services.ai as any).draft = () => new Promise((r) => { answer = () => r({ ok: false, error: { kind: 'failed', message: 'stopped' } }); });
     await a.dispatch(RequestDraft, { dealId, questionId: qid });
     try {
-      const other = () => makeStore(kv, memRepo(clock.now, { shared: kv.shared })).store;           // another PC on the same shared folder
-      const b = other(); await b.boot(); await b.loadDeal(dealId);
+      // another PC on the same shared folder, with its own disk and local store
+      const pcB = { disk: disk(), local: new MemoryLocal() };
+      const other = (pc = { disk: disk(), local: new MemoryLocal() }) =>
+        makeStore(kv, memRepo(clock.now, { shared: kv.shared, local: pc.disk.local }), pc.local).store;
+      const b = other(pcB); await b.boot(); await b.loadDeal(dealId);
       expect(b.get().questions[qid].draft?.status).toBe('pending');
       t += 16 * 60_000;                                                                               // a quarter of an hour on, nothing came back
-      const c = other(); await c.boot(); await c.loadDeal(dealId);
-      expect(c.get().questions[qid].draft?.status).toBe('failed');
+      // a PC that first sees it now waits its own 15 minutes (#24)
+      const fresh = other(); await fresh.boot(); await fresh.loadDeal(dealId);
+      expect(fresh.get().questions[qid].draft?.status).toBe('pending');
+      const bLater = other(pcB); await bLater.boot(); await bLater.loadDeal(dealId);
+      expect(bLater.get().questions[qid].draft?.status).toBe('failed');
     } finally { answer(); }
   });
 

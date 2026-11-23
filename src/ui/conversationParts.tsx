@@ -16,6 +16,7 @@ import { addToSources } from '../app/attachments';
 import { RestoreQuestion } from '../app/commands/questions';
 import { RestoreFinding } from '../app/commands/findings';
 import { dealHash, type Message } from '../app/state';
+import { KeptAsk } from './findingAsk';
 
 const Sep = () => <span class="sep">›</span>;
 
@@ -75,7 +76,11 @@ export function NotHere({ scope, deal, loading, trail }: {
         <button type="button" class="tundo" onClick={() => void store.retryDeal(deal.id)}>Retry</button>
       </p>
     );
-  } else body = <GoneLine scope={scope} deal={deal} restore={(gone) => restoreRecord(store, gone)} />;
+  } else body = <>
+    <GoneLine scope={scope} deal={deal} restore={(gone) => restoreRecord(store, gone)} />
+    {scope.kind === 'finding' && deal && <KeptAsk dealId={deal.id} findingId={scope.findingId}
+      title={state.tombstones[scope.findingId]?.title ?? ''} />}
+  </>;
   return <div class="chatwrap"><div class="chat"><div class="chathead">{trail}</div>{body}</div></div>;
 }
 
@@ -96,7 +101,7 @@ function GoneLine({ scope, deal, restore }: {
         <button type="button" class="linkb" id="gone-restore" onClick={() => restore(deleted)}>Restore it</button>
         {' or go '}
       </> : <>{noLongerHere(scope)}{' '}</>}
-      <a href={deal ? `#${dealHash(state.prefs, deal.id)}` : '#deals'}>{back}</a>
+      <a class="linkb" href={deal ? `#${dealHash(state.prefs, deal.id)}` : '#deals'}>{back}</a>
     </p>
   );
 }

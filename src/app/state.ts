@@ -26,12 +26,28 @@ export const pageHash = (page: Landing, dealId: string) => `${DEAL_PAGES.find((p
 /** The address a deal opens on: the page the person chose in Settings. */
 export const dealHash = (prefs: Pick<Prefs, 'landing'>, dealId: string) => pageHash(prefs.landing, dealId);
 /** A file waiting to go with the next message of one conversation (`conv` is that conversation's key). */
-export interface Attachment { id: string; name: string; dealId: string; findingId?: string; conv: string; state: 'pending' | 'done'; doc?: string; docId?: string }
+export interface Attachment {
+  id: string; name: string; dealId: string; findingId?: string; conv: string;
+  state: 'pending' | 'done'; doc?: string; docId?: string;
+  /** its file could not be found when the message was to be sent: it must be attached again (#671) */
+  missing?: boolean;
+}
 /** 'failed' can be retried; 'missing' is the backend saying the file is not in the deal's folders */
 export type PageState = 'loading' | 'failed' | { kind: 'missing'; message: string } | PageView;
 
 /** One version of a record in a clash. `data` is null when what was stored could not be read. */
-export interface ConflictVersion { id: string; by: string; from: string; at: string; /** written on this PC */ here?: boolean; /** this version is the record deleted (it has no data) */ deleted?: boolean; data: Question | Finding | Deal | Item | ListRecord | null; /** exactly what was stored, kept so that nothing is lost when a version cannot be read */ raw: unknown }
+export interface ConflictVersion {
+  id: string; by: string; from: string; at: string;
+  /** written on this PC */
+  here?: boolean;
+  /** this version is the record deleted (it has no data) */
+  deleted?: boolean;
+  data: Question | Finding | Deal | Item | ListRecord | null;
+  /** exactly what was stored, kept so that nothing is lost when a version cannot be read */
+  raw: unknown;
+  /** of a question's version: every draft request its history held (`Version.drafts`) */
+  drafts?: string[];
+}
 /** A record with versions nobody has chosen between. It belongs to that one record and to nothing else. */
 /** `dealId` is '' for the firm's list, which belongs to no deal. */
 export interface Conflict { kind: ClashKind; id: string; dealId: string; versions: ConflictVersion[] }
