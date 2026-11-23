@@ -265,10 +265,9 @@ export function useListReview(
       await showAgain(review, texts, sig);
       return;
     }
-    const mine = work.begin('reviewing');
-    const [rewordReply, sameReply] = await askModel(store, texts, { askReword, askSame }, generalTexts);
-    if (!work.isLatest(mine)) return;
-    work.setBusy('');
+    const replies = await retries.ask(() => askModel(store, texts, { askReword, askSame }, generalTexts));
+    if (!replies) return;
+    const [rewordReply, sameReply] = replies;
     if (sigNow.current !== sig) return;   // the choices changed while the model was asked
     const fresh = makeReview({
       items: prepared.items, earlierItems: target.replaces?.items, generalTexts, askReword, askSame,
@@ -351,39 +350,39 @@ function withFailedPairs(was: Review, reason: Asked): Review {
   return { ...was, sameMissed: { ...was.sameMissed, kind } };
 }
 
-/** Asking the model again for what the review is missing, keeping what the person checked as it was. */
+/** Fresh reviews and retries share one in-flight guard. Retries keep the person's check marks. */
 function useReviewRetries(
   store: Store, work: Work, review: Review | null, setReview: (review: Review) => void, generalTexts: string[],
 ) {
   const ai = store.services.ai;
-  // `asking` stops a second press in the same frame, before busy shows, from paying for a second call
+  // The ref guards same-frame presses on every review path.
   const asking = useRef(false);
-  const beginRetry = () => {
+  const ask = async <T>(call: () => Promise<T>): Promise<T | undefined> => {
+    if (work.busy || asking.current) return;
     asking.current = true;
     work.setRetrying(true);
-    work.setError('');
-    return work.newToken();
-  };
-  const finishRetry = () => {
-    asking.current = false;
-    work.setRetrying(false);
+    const mine = work.begin('reviewing');
+    try {
+      const reply = await call();
+      if (work.isLatest(mine)) return reply;
+    } finally {
+      asking.current = false;
+      work.setRetrying(false);
+      if (work.isLatest(mine)) work.setBusy('');
+    }
   };
   // The duplicate check missed some items last time (a part the service did not answer): Next asks about those alone
   // again, and adds what it finds.
   const askMissed = async (was: Review, texts: string[], missedAt: number[]) => {
-    if (work.busy || asking.current || !ai.sameMeaning) return false;
-    const mine = beginRetry();
-    try {
-      const sameReply = await ai.sameMeaning({ items: texts, against: generalTexts, only: missedAt });
-      if (!work.isLatest(mine)) return false;
-      const updated = sameReply.ok ? withMissedPairs(was, sameReply.value) : withFailedPairs(was, failedAs(sameReply));
-      setReview(updated);
-      const reason = NOT_DONE[updated.sameMissed?.kind ?? updated.asked.same];
-      if (reason) work.setError(`${reason} again`);
-      return true;
-    } finally {
-      finishRetry();
-    }
+    const sameMeaning = ai.sameMeaning;
+    if (!sameMeaning) return false;
+    const sameReply = await ask(() => sameMeaning.call(ai, { items: texts, against: generalTexts, only: missedAt }));
+    if (!sameReply) return false;
+    const updated = sameReply.ok ? withMissedPairs(was, sameReply.value) : withFailedPairs(was, failedAs(sameReply));
+    setReview(updated);
+    const reason = NOT_DONE[updated.sameMissed?.kind ?? updated.asked.same];
+    if (reason) work.setError(`${reason} again`);
+    return true;
   };
   // Retry beside the duplicates line does what Back then Next does: asks about the missed items alone, or all of them
   // when the check failed outright, and keeps the review on screen while it waits. Back drops its answer: Next
@@ -396,25 +395,20 @@ function useReviewRetries(
   // The wording suggestions failed (decisions: Retries): Retry asks for them again, and adds them unchecked beside any
   // taken last time.
   const retryWording = async () => {
-    if (!review || work.busy || asking.current || !ai.reword) return;
-    const was = review;
-    const mine = beginRetry();
-    try {
-      const rewordReply = await ai.reword({ items: was.items.map((item) => item.text) });
-      if (!work.isLatest(mine)) return;
-      // failed again: the line gives this failure's reason, and the footer says it was asked again
-      if (!rewordReply.ok) {
-        const reason = failedAs(rewordReply);
-        setReview({ ...was, asked: { ...was.asked, reword: reason } });
-        work.setError(`${NOT_DONE[reason]} again`);
-        return;
-      }
-      setReview(withRewordings(was, rewordReply.value));
-    } finally {
-      finishRetry();
+    const reword = ai.reword;
+    if (!review || !reword) return;
+    const reply = await ask(() => reword.call(ai, { items: review.items.map((item) => item.text) }));
+    if (!reply) return;
+    // failed again: the line gives this failure's reason, and the footer says it was asked again
+    if (!reply.ok) {
+      const reason = failedAs(reply);
+      setReview({ ...review, asked: { ...review.asked, reword: reason } });
+      work.setError(`${NOT_DONE[reason]} again`);
+      return;
     }
+    setReview(withRewordings(review, reply.value));
   };
-  return { asking, askMissed, retry, retryWording };
+  return { ask, asking, askMissed, retry, retryWording };
 }
 
 /** The items as checked in the review, and bringing them in. */
