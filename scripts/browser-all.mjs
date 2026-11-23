@@ -66,13 +66,23 @@ async function appIsReady() {
   return ready;
 }
 
+/**
+ * Why a suite ended without a summary (#157, #163): its exit, its last line of output, and whether the app server was
+ * still answering, so a run under load says whether the suite crashed, timed out, or lost its server.
+ */
+async function noResultReason(code, signal, out) {
+  const last = out.trim().split('\n').filter((line) => line.trim()).at(-1)?.slice(0, 160) ?? 'no output';
+  const exit = signal ? `signal ${signal}` : `exit ${code}`;
+  return `${exit}; server ${(await up()) ? 'up' : 'down'}; last line: ${last}`;
+}
+
 /** A successful exit without a positive, complete suite summary is missing coverage. */
-function suiteResult(name, code, out, started) {
+function suiteResult(name, code, out, started, reason = '') {
   const summary = [...out.matchAll(/^(\d+)\/(\d+) passed\r?$/gm)].at(-1);
   const passed = summary ? Number(summary[1]) : 0;
   const total = summary ? Number(summary[2]) : 0;
   const valid = Number.isSafeInteger(passed) && Number.isSafeInteger(total) && total > 0 && passed <= total;
-  if (!valid) out += `\nFAIL ${name}: missing or invalid positive test summary\n`;
+  if (!valid) out += `\nFAIL ${name}: missing or invalid positive test summary (${reason})\n`;
   fs.writeFileSync(`out/browser/${name}.log`, out);
   return {
     name, code: code === 0 && valid && passed === total ? 0 : code || 1,
@@ -91,10 +101,11 @@ const run = async (name) => {
     child.stdout.on('data', (part) => (out += part));
     child.stderr.on('data', (part) => (out += part));
     child.on('error', (error) => { out += `\nFAIL ${name}: could not start: ${error.message}\n`; });
-    child.on('close', (code, signal) => {
+    child.on('close', async (code, signal) => {
+      const reason = await noResultReason(code, signal, out);
       if (signal) out += `\nBrowser suite terminated by signal ${signal}\n`;
       else if (code) out += `\nBrowser suite exited with code ${code}\n`;
-      done(suiteResult(name, code, out, started));
+      done(suiteResult(name, code, out, started, reason));
     });
   });
 };
@@ -116,6 +127,7 @@ for (const result of results.filter((entry) => entry.code !== 0)) {
   const again = await run(result.name);
   if (!again) break;
   const first = result.fails.map((failure) => failure.split(' ')[1]).join(', ') || 'no result';
+  if (!result.total) console.log(`     ${result.name}: ${result.fails.at(-1) ?? 'no result'}`);
   console.log(`${again.code === 0 ? 'ok  ' : 'FAIL'} ${again.name.padEnd(14)} ${again.passed}/${again.total}`
     + `  ${again.secs}s  (on its own, after failing alongside others: ${first})`);
   Object.assign(result, again, { rerun: true, firstFails: result.fails });
