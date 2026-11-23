@@ -16,6 +16,7 @@ import {
   type Asked, type ListTarget, type Review,
 } from './firmChecklistReview';
 import { dropKept, type ChecklistChoices, type ChecklistKept, type Keeper } from './firmChecklistKept';
+import { keepImport } from './keptImports';
 
 export type Busy = '' | 'reading' | 'asking' | 'reviewing' | 'importing';
 
@@ -59,8 +60,8 @@ function itemsAsRead(byColumns: boolean, table: ImportTable | null, mapping: Che
  * document's text or a pasted list, as lines. `byColumns` is the fallback for a table the model could not read: the
  * columns chosen by hand, as before.
  */
-export function useListSource(store: Store, work: Work, left: ChecklistKept | null) {
-  const file = useListFile(store, work, left);
+export function useListSource(store: Store, work: Work, { key, left }: Keeper) {
+  const file = useListFile(store, work, key, left);
   const { table, text, mapping, byColumns } = file;
   const lines = useMemo(
     () => (text ? text.lines : table ? tableLines(table.columns, table.rows) : null),
@@ -90,7 +91,7 @@ const NO_MAPPING: ChecklistMapping = { item: null, section: null, subsection: nu
  * The file or paste the list comes from. `text` is a document's or a paste's lines ('' names a paste); `paste` is what
  * is typed in the box, kept through "change" so nothing typed is lost.
  */
-function useListFile(store: Store, work: Work, left: ChecklistKept | null) {
+function useListFile(store: Store, work: Work, key: string, left: ChecklistKept | null) {
   const [table, setTable] = useState<ImportTable | null>(left?.table ?? null);
   const [mapping, setMapping] = useState<ChecklistMapping>(left?.choices?.mapping ?? NO_MAPPING);
   const [text, setText] = useState<{ name: string; lines: string[] } | null>(left?.text ?? null);
@@ -111,6 +112,7 @@ function useListFile(store: Store, work: Work, left: ChecklistKept | null) {
       work.setError(`Could not read ${file.name}: ${read.error.message}`);
       return;
     }
+    keepImport(key, { headingDraft: null });
     setByColumns(false);
     if ('table' in read.value) {
       setText(null);
@@ -138,6 +140,7 @@ function useListFile(store: Store, work: Work, left: ChecklistKept | null) {
   // what is pasted stays in the box until it is sent, and after "change"
   const pasted = () => {
     if (!paste.trim() || work.busy) return;
+    keepImport(key, { headingDraft: null });
     setTable(null);
     setByColumns(false);
     work.setError('');
@@ -156,7 +159,7 @@ function useListFile(store: Store, work: Work, left: ChecklistKept | null) {
   };
   return {
     table, mapping, setMapping, text, paste, setPaste, byColumns, wantedSheet: sheetRead?.sheet,
-    load, reread, chooseColumns, pasted, forget, reset,
+    load, reread, chooseColumns, pasted, forget, reset, importKey: key,
   };
 }
 

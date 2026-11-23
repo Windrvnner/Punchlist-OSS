@@ -269,7 +269,8 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
     }
     const submitted = savedSubmission(qa.key);
     if (submitted) void store.releaseImport(submitted.key);
-    keepImport(qa.key, { submission: null }); // Choosing a new file deliberately replaces the previous import.
+    // Choosing a new file replaces the previous import, including an unused heading (#380).
+    keepImport(qa.key, { submission: null, headingDraft: null });
     setTable(read.value);
     setMapping(read.value.mapping);
     qa.setPath(store.services.fs.pathFor?.(file) ?? null);
@@ -300,7 +301,7 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
   // the person says where the table really starts: another sheet, or another heading row
   // A later choice replaces a pending read. Import waits for it and uses the accepted table (#63, #380).
   const reread = async (where: Rereading, accept?: (read: ImportTable) => void) => {
-    if (!table || (busy && busy !== 'reading')) return;
+    if (!table || busy === 'importing') return;
     const mine = ++token.current;   // a later choice wins over a slower earlier read
     setBusy('reading');
     qa.setWantedSheet(where.sheet);
@@ -317,7 +318,14 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
     accept?.(again.value);
   };
 
-  return { load, canAsk, askAi, reread };
+  return { load, canAsk, askAi, reread, cancelProposal: () => cancelProposal(qa) };
+}
+
+/** A manual heading edit takes over from an outstanding layout proposal (#380). */
+function cancelProposal(qa: QaImportState) {
+  if (qa.busy !== 'asking') return;
+  qa.token.current++;
+  qa.setBusy('');
 }
 
 /** Keep a correlated submission before writing rows, until its log choice has finished too. */

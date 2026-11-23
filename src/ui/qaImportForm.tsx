@@ -51,7 +51,7 @@ export function QaImportForm({ store, dealId, qa, plan, actions }: {
       {logChoice(store, dealId, qa.path) === 'new' && (
         <MakeLogRow makeLog={qa.makeLog} importing={importing} onPick={onMakeLog} />
       )}
-      <HeadingsRow table={table} busy={busy} wantedSheet={qa.wantedSheet} actions={actions} />
+      <HeadingsRow importKey={qa.key} table={table} busy={busy} wantedSheet={qa.wantedSheet} actions={actions} />
       <ColumnsRow table={table} mapping={mapping} importing={importing} onMap={onMap} />
       <PreviewRow table={table} mapping={mapping} prepared={plan.prepared} />
       <ModeRow mode={mode} importing={importing} onPick={qa.setMode} />
@@ -97,8 +97,8 @@ function MakeLogRow({ makeLog, importing, onPick }: {
 }
 
 /** Where the table is: its sheet and heading row, which the person can change or ask the model to find */
-function HeadingsRow({ table, busy, wantedSheet, actions }: {
-  table: ImportTable; busy: Busy; wantedSheet?: string; actions: QaImportActions;
+function HeadingsRow({ importKey, table, busy, wantedSheet, actions }: {
+  importKey: string; table: ImportTable; busy: Busy; wantedSheet?: string; actions: QaImportActions;
 }) {
   const importing = busy === 'importing';
   const sheet = (busy === 'reading' && wantedSheet) || table.sheet;
@@ -110,7 +110,8 @@ function HeadingsRow({ table, busy, wantedSheet, actions }: {
           {table.sheets.map((sheet) => <option key={sheet} value={sheet}>{sheet}</option>)}
         </select>
       </label>}
-      <HeadingRowField id="im-header" table={table} sheet={sheet} disabled={importing}
+      <HeadingRowField id="im-header" importKey={importKey} table={table} sheet={sheet} disabled={importing}
+        onEdit={actions.cancelProposal}
         read={(headerRow, accept) => actions.reread({ sheet, headerRow }, accept)} />
       {actions.canAsk && (
         <button type="button" class="linkb" id="im-ask" disabled={!!busy} onClick={() => void actions.askAi(table)}>

@@ -250,7 +250,7 @@ function headingsRow(source: ListSource, table: Table) {
           {sheetOptions(table.sheets)}
         </select>
       </label>}
-      <HeadingRowField id="cl-header" table={table} sheet={sheet}
+      <HeadingRowField id="cl-header" importKey={source.importKey} table={table} sheet={sheet}
         read={(headerRow, accept) => source.reread({ sheet, headerRow }, accept)} />
     </div></div>
   );

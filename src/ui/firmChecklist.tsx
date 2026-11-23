@@ -138,7 +138,7 @@ function ImportChecklistDialog(props: ImportProps & { fresh: boolean }) {
   const keeper = useKeeper(props.layer, props.name, props.fresh);
   const kept = keeper.left?.choices;
   const work = useWork();
-  const source = useListSource(store, work, keeper.left);
+  const source = useListSource(store, work, keeper);
   useDroppedFile(source, props.dropped, props.taken);
   const [layer, setLayer] = useState<Layer>(kept?.layer ?? props.layer ?? 'broad');
   const [name, setName] = useState(kept?.name ?? props.name ?? '');

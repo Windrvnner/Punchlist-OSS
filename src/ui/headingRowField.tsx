@@ -1,19 +1,22 @@
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { ImportTable } from '../app/transfer';
 import { num } from './counts';
+import { keptImport, keepImport } from './keptImports';
 
 type Heading = Pick<ImportTable, 'sheet' | 'headerRow' | 'lastRow'>;
 type ReadRow = (row: number, accept: (heading: Heading) => void) => Promise<void>;
 
 /** Keep an unused heading row in the field while the preview shows the accepted table (#380). */
-export function HeadingRowField({ id, table, sheet = table.sheet, read, disabled }: {
+export function HeadingRowField({ id, importKey, table, sheet = table.sheet, read, disabled, onEdit }: {
   id: string;
+  importKey: string;
   table: Heading;
   sheet?: string;
   read: ReadRow;
   disabled?: boolean;
+  onEdit?: () => void;
 }) {
-  const { text, pick, reason } = useHeadingDraft(table, sheet, read);
+  const { text, pick, reason } = useHeadingDraft(importKey, table, sheet, read, onEdit);
   const noteId = `${id}-unused`;
   return (
     <label><span>Row</span>
@@ -29,16 +32,23 @@ export function HeadingRowField({ id, table, sheet = table.sheet, read, disabled
   );
 }
 
-function useHeadingDraft(table: Heading, sheet: string, read: ReadRow) {
+function useHeadingDraft(importKey: string, table: Heading, sheet: string, read: ReadRow, onEdit?: () => void) {
   const { headerRow, lastRow } = table;
-  const [text, setText] = useState(String(headerRow));
+  const [text, setText] = useState(() => keptHeadingText(importKey, table));
+  const latestText = useRef(text);
   const [reading, setReading] = useState(false);
   const base = useRef(table);
   const queuedSheet = useRef<string | null>(null);
   const pending = useRef<{ sheet: string; row: number } | null>(null);
 
-  const pick = async (typed: string) => {
+  const keepText = (typed: string) => {
+    latestText.current = typed;
     setText(typed);
+    keepHeadingText(importKey, table, typed);
+  };
+  const pick = async (typed: string) => {
+    onEdit?.();
+    keepText(typed);
     // Bounds belong to the accepted sheet. Wait for the selected sheet before reading its row.
     if (sheet !== table.sheet) {
       queuedSheet.current = sheet;
@@ -54,6 +64,7 @@ function useHeadingDraft(table: Heading, sheet: string, read: ReadRow) {
     await read(row, (accepted) => {
       // A read from this field updates the preview and leaves the latest typed text in place.
       base.current = accepted;
+      keepHeadingText(importKey, accepted, latestText.current);
     });
     if (pending.current === request) {
       pending.current = null;
@@ -61,15 +72,19 @@ function useHeadingDraft(table: Heading, sheet: string, read: ReadRow) {
     }
   };
   useLayoutEffect(() => {
+    if (pending.current && pending.current.sheet !== sheet) {
+      pending.current = null;
+      setReading(false);
+    }
     if (base.current.sheet === table.sheet && base.current.headerRow === headerRow) {
       if (sheet === table.sheet) queuedSheet.current = null;
       return;
     }
     base.current = table;
-    if (queuedSheet.current === table.sheet) void pick(text);
+    if (queuedSheet.current === table.sheet) void pick(latestText.current);
     else {
       queuedSheet.current = null;
-      setText(String(headerRow));
+      keepText(String(headerRow));
     }
   });
 
@@ -78,6 +93,19 @@ function useHeadingDraft(table: Heading, sheet: string, read: ReadRow) {
   if (row === null) reason = `Enter a whole row from 1 to ${num(lastRow)}`;
   else if (!reading && sheet === table.sheet && row !== headerRow) reason = `The preview uses row ${num(headerRow)}`;
   return { text, pick, reason };
+}
+
+type HeadingDraft = Pick<Heading, 'sheet' | 'headerRow'> & { text: string };
+
+function keptHeadingText(key: string, { sheet, headerRow }: Heading) {
+  const draft = keptImport(key)?.headingDraft as Partial<HeadingDraft> | null | undefined;
+  return draft?.sheet === sheet && draft.headerRow === headerRow && typeof draft.text === 'string'
+    ? draft.text : String(headerRow);
+}
+
+function keepHeadingText(key: string, { sheet, headerRow }: Heading, text: string) {
+  const headingDraft: HeadingDraft | null = text === String(headerRow) ? null : { sheet, headerRow, text };
+  keepImport(key, { headingDraft });
 }
 
 /** Preserve the number field's keyboard stepping without giving up its raw input text. */
@@ -92,6 +120,8 @@ function stepRow(event: KeyboardEvent, lastRow: number, pick: (text: string) => 
 
 /** The text field keeps incomplete numbers that a native number input exposes as an empty value. */
 function rowNumber(text: string, lastRow: number): number | null {
+  // Use the same numeric forms as a number input, including integral decimals and exponents.
+  if (!/^-?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text)) return null;
   const value = Number(text);
-  return /^\d+$/.test(text) && value >= 1 && value <= lastRow ? value : null;
+  return Number.isInteger(value) && value >= 1 && value <= lastRow ? value : null;
 }
