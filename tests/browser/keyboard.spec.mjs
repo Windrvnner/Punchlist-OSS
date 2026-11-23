@@ -170,7 +170,8 @@ for (const scheme of ['dark', 'light']) {
     const waitingCount = await page.$eval('#folders-waiting .cnt', (e) => e.textContent);
     say(`${scheme}:waiting-folder-count-uses-the-right-singular-${files}`, waitingCount === expected, waitingCount);
   }
-  await page.keyboard.press('Escape'); await page.waitForSelector('#nd-title', { state: 'detached' });
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#nd-title', { state: 'detached' });
   say(`${scheme}:folders-opens-on-choose-folders`, fdFocus === '#nd-browse' && (await active(page)) === '#f-folders', JSON.stringify({ fdFocus, back: await active(page) }));
   await page.focus('#new-deal'); await page.keyboard.press('Enter'); await page.waitForSelector('#add-new'); await page.focus('#add-new'); await page.keyboard.press('Enter'); await page.waitForSelector('#nd-name'); await page.focus('#nd-paste'); await page.keyboard.press('Enter'); await page.waitForSelector('#nd-path'); await page.waitForTimeout(80);
   const pathPlaceholder = await page.getAttribute('#nd-path', 'placeholder');
