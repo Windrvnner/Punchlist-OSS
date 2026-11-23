@@ -296,7 +296,7 @@ function fitThread(chat: HTMLElement, gap: number, reading: boolean) {
   const fromEnd = chat.scrollHeight - chat.clientHeight - top;
   chat.style.setProperty('--thread-padding', padding);
   chat.style.setProperty('--composer-cover', cover);
-  chat.scrollTop = reading && (top === 0 || fromEnd > 1) ? top : chat.scrollHeight - chat.clientHeight - fromEnd;
+  chat.scrollTop = reading && fromEnd > 1 ? top : chat.scrollHeight - chat.clientHeight - fromEnd;
 }
 
 /** The composer under a conversation is placed on every render and when the window changes size; an ask box is not. */

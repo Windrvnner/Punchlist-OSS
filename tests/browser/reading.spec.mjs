@@ -277,16 +277,16 @@ async function readingContrast(page, selector, pseudo = '') {
   return lowest;
 }
 
-async function longAnswer(page, dealId, findingId) {
-  await page.evaluate(([dealId, findingId]) => {
+async function putAnswer(page, dealId, findingId, passages = 20) {
+  await page.evaluate(([dealId, findingId, passages]) => {
     const terms = 'The agreement uses the distribution lock-up ratio from the signed term sheet. ' +
       'The draft has a lower figure, so confirm the applicable threshold with the counterparty.';
     const at = new Date().toISOString();
     store.setThread(`f:${dealId}:${findingId}`, [
       { id: 'lock-up-question', role: 'me', text: 'Which distribution threshold applies?', state: 'done', at },
-      { id: 'lock-up-answer', role: 'ai', text: Array(20).fill(terms).join(' '), state: 'done', at },
+      { id: 'lock-up-answer', role: 'ai', text: Array(passages).fill(terms).join(' '), state: 'done', at },
     ]);
-  }, [dealId, findingId]);
+  }, [dealId, findingId, passages]);
   await page.waitForSelector('.msgs .acts button');
 }
 
@@ -370,12 +370,37 @@ async function composerOcclusion(page, note) {
     clear && anchored && endGap && extent && focus, JSON.stringify({ clear, pixels, anchored, gaps, extent, focus }));
 }
 
+async function shortAnswerStaysAtEnd(page, dealId, findingId) {
+  await putAnswer(page, dealId, findingId, 3);
+  const beforeResize = await readingScroll(page, 0);
+  const { width, height } = page.viewportSize();
+  // Start with the whole answer visible, with enough extra room for the original 34px gap.
+  await page.setViewportSize({ width, height: height + Math.round(55 - beforeResize.endGap) });
+  await page.waitForFunction(() => {
+    const thread = document.querySelector('.chat');
+    return thread.scrollHeight === thread.clientHeight;
+  });
+  const before = await readingScroll(page, 0);
+  await fillComposer(page, tallDraft);
+  const after = await readingScroll(page);
+  const pinned = before.max === 0 && after.max > 50 && after.top === after.max && after.endGap >= 34;
+  await fillComposer(page, '');
+  await page.setInputFiles('#pcomposer input[type=file]', {
+    name: 'side-letter.pdf', mimeType: 'application/pdf', buffer: Buffer.from('Mock attachment'),
+  });
+  await page.waitForSelector('#pcomposer .chip.att:not(.pending)');
+  const attached = await readingScroll(page);
+  const pinWithFile = attached.max > 0 && attached.top === attached.max && attached.endGap >= 34;
+  say('reading-keeps-a-short-answer-in-view-as-composer-grows-438', pinned && pinWithFile,
+    JSON.stringify({ before, after, attached }));
+}
+
 // #437 reuses the rail's pane glass. #442 checks both formerly clipped shadow edges, one pixel at a time.
 for (const colorScheme of ['dark', 'light']) {
   const { ctx, page, id, fid } = await reading();
   await page.emulateMedia({ colorScheme });
   await page.waitForFunction((theme) => document.documentElement.dataset.theme === theme, colorScheme);
-  await longAnswer(page, id, fid);
+  await putAnswer(page, id, fid);
   for (const [width, height] of [[1280, 736], [1024, 640], [1440, 900]]) {
     await page.setViewportSize({ width, height });
     await page.mouse.move(width - 2, 1);
@@ -398,6 +423,7 @@ for (const colorScheme of ['dark', 'light']) {
     say(`reading-pane-shadow-falls-off-beyond-view-442-${colorScheme}-${width}`,
       Math.abs(shadow.side) <= 2 && Math.abs(shadow.bottom) <= 2 && shadow.fits, JSON.stringify(shadow));
     if (width !== 1440) await composerOcclusion(page, `${colorScheme}-${width}`);
+    if (width === 1440 && colorScheme === 'dark') await shortAnswerStaysAtEnd(page, id, fid);
   }
   await ctx.close();
 }
