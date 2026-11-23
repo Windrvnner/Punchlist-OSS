@@ -321,10 +321,13 @@ for (const scheme of ['light', 'dark']) { const { ctx, page } = await fresh(sche
   await ctx.close(); }
 
 // Fill the rendered state with deal-scale counts without indexing thousands of files or writing thousands of records.
-{
-  const { ctx, page } = await fresh('light', 1280, 736, 'de-DE');
+for (const [scheme, width, height] of [['light', 1280, 736], ['dark', 1024, 640]]) {
+  const { ctx, page } = await fresh(scheme, width, height, 'de-DE');
   const id = await newDeal(page, 'Large deal', []);
-  await page.waitForSelector('.dtabs');
+  await page.waitForFunction((dealId) => {
+    const { dealLoad, progress, checklists } = store.get();
+    return dealLoad[dealId] === 'loaded' && progress[dealId] && checklists[dealId];
+  }, id);
   await page.evaluate((dealId) => {
     const state = store.get();
     const deal = state.deals[dealId];
@@ -333,12 +336,12 @@ for (const scheme of ['light', 'dark']) { const { ctx, page } = await fresh(sche
     const findings = {};
     const questions = {};
     const actor = encodeURIComponent(state.user.name.trim().toLowerCase());
-    for (let index = 1; index <= 1277; index++) {
+    for (let index = 1; index <= 2000; index++) {
       const suffix = String(index).padStart(26, '0');
       const otherId = `d_${suffix}`;
       deals[otherId] = { ...deal, id: otherId, name: `Project ${index}`, group: 'monitor' };
       members[`m_${otherId}_${actor}`] = { on: true };
-      questions[`q_${suffix}`] = { dealId, n: index, status: 'open' };
+      questions[`q_${suffix}`] = { dealId, n: index, status: index <= 1000 ? 'open' : 'closed' };
       if (index <= 1001) findings[`f_${suffix}`] = { dealId, status: 'open' };
     }
     const folders = [{ path: 'reports', label: 'Reports', files: 2000, indexed: 1277 }];
@@ -360,20 +363,30 @@ for (const scheme of ['light', 'dark']) { const { ctx, page } = await fresh(sche
       findings: text('.dtabs a[href^="#deal-"] span'),
       questions: text('.dtabs a[href^="#qa-"] span'),
       groups: [...document.querySelectorAll('#rail-nav .grp-h .cnt')].map((element) => element.textContent),
+      questionTotal: text('#ov-qa .tot'),
       checklist: text('#ov-checklist .tot'),
+      resolve: text('#ov-checklist .plab .lo'),
       gaps: text('#ov-checklist .plab .sub a'),
       documents: text('#ov-docs .dcrow .rd'),
       stopped: text('#ix-stalled'),
     };
   });
-  say('settings-tab-and-sidebar-counts-have-thousands-commas', counts.locale === 'de-DE'
+  await page.evaluate(() => {
+    const state = store.get();
+    const general = state.firmList.general;
+    store.set({ ...state, firmList: { general: { ...general, items: general.items.slice(0, 1) } } });
+  });
+  const oneItem = await page.textContent('#s-checklist');
+  say(`settings-tab-and-sidebar-counts-have-thousands-commas-${scheme}`, counts.locale === 'de-DE'
     && counts.settings === 'General · 2,000 items Open' && counts.findings === '1,001 open'
-    && counts.questions === '1,277 open' && counts.groups.join('|') === '1|1,277', JSON.stringify(counts));
-  say('overview-and-stopped-indexing-use-en-us-counts', counts.locale === 'de-DE'
-    && counts.checklist === '2,000 in all' && counts.gaps === '1,277 gaps'
+    && counts.questions === '1,000 open' && counts.groups.join('|') === '1|2,000', JSON.stringify(counts));
+  say(`settings-uses-the-singular-for-one-checklist-item-${scheme}`, oneItem === 'General · 1 item Open', oneItem);
+  say(`overview-and-stopped-indexing-use-en-us-counts-${scheme}`, counts.locale === 'de-DE'
+    && counts.questionTotal === '2,000 in all' && counts.checklist === '2,000 in all'
+    && counts.resolve === '1,277 to resolve' && counts.gaps === '1,277 gaps'
     && counts.documents === '1,277 of 2,000 indexed · stopped'
     && counts.stopped === 'Indexing stopped at 1,277 of 2,000 files. Resume', JSON.stringify(counts));
-  say('no-page-errors-count-formatting', page.errors.length === 0, JSON.stringify(page.errors));
+  say(`no-page-errors-count-formatting-${scheme}`, page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }
 
