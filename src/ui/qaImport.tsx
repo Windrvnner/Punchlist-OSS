@@ -298,8 +298,7 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
   };
 
   // the person says where the table really starts: another sheet, or another heading row
-  // a reread waits for nothing but an import or a proposal; a later choice replaces a pending one, and Import waits
-  // for it, so what is imported is always the sheet and heading row shown (#63)
+  // A later choice replaces a pending read. Import waits for it and uses the accepted table (#63, #380).
   const reread = async (where: Rereading, accept?: (read: ImportTable) => void) => {
     if (!table || (busy && busy !== 'reading')) return;
     const mine = ++token.current;   // a later choice wins over a slower earlier read

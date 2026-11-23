@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-// A heading row or sheet chosen in the Q&A import is read again before Import can go: what is imported is always the
-// rows of the heading shown, never the last table read (#63).
+// Import waits for a pending sheet or heading choice to be read. A failed read marks the choice unused and keeps
+// the accepted table available (#63, #380).
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
