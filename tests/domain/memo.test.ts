@@ -51,13 +51,24 @@ describe('the deal memo’s content', () => {
 
   it('closes a risk on the questions still unanswered on its findings, and never says its next step', () => {
     const f = finding('F', { next: 'Ask the sponsor to rerun the model.' }); const g = finding('G');
-    const qs = [question(14, { linkedFinding: f.id, received: '2026-10-30' }), question(9, { linkedFinding: f.id, status: 'answered', response: 'Execution expected by year end.', responded: '2026-11-12' }), question(3, { linkedFinding: f.id, status: 'closed' }), question(20), question(21, { linkedFinding: g.id, received: '2025-12-01' })];
-    expect(stillOpen([f.id], qs, '2026-11-15')).toBe('Q14 (Oct 30) is still unanswered.');   // answered and closed ones are not open
+    const qs = [
+      question(14, { linkedFinding: f.id, received: '2026-10-30', response: 'The carrier has only provided a draft.' }),
+      question(9, {
+        linkedFinding: f.id, status: 'answered', response: 'Execution expected by year end.', responded: '2026-11-12',
+      }),
+      question(3, { linkedFinding: f.id, status: 'closed' }), question(20),
+      question(21, { linkedFinding: g.id, received: '2025-12-01' }),
+    ];
+    expect(stillOpen([f.id], qs, '2026-11-15')).toBe('Q14 (Oct 30) is still unanswered.');
+    // A typed response does not change Open status.
     expect(stillOpen([f.id, g.id], qs, '2026-11-15')).toBe('Q14 (Oct 30) and Q21 (Dec 1, 2025) are still unanswered.');
     expect(stillOpen([g.id, f.id, 'f_x'], [...qs, question(30, { linkedFinding: g.id })], '2026-11-15')).toBe('Q14 (Oct 30), Q21 (Dec 1, 2025) and Q30 are still unanswered.');
     expect(stillOpen(['f_x'], qs, '2026-11-15')).toBe('');
     const m = memoContent(input({ findings: [f], questions: qs, ratings: { [f.id]: 'High' } }));
+    expect(m.risks[0].open).toBe('Q14 (Oct 30) is still unanswered.');
     expect(JSON.stringify(m)).not.toContain('rerun');
+    expect(JSON.stringify(m.risks)).not.toContain('The carrier has only provided a draft.');
+    expect(JSON.stringify(m.risks)).not.toContain('Execution expected by year end.');
   });
 
   it('lists findings and questions with no workstream as "No workstream", apart from one actually named Other', () => {

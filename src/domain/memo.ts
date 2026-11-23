@@ -77,11 +77,13 @@ const weight = (g: { High: number; Medium: number; Low: number }) => g.High * RI
 /** most rows in the risk-at-a-glance table, the folded row included: what fits on the first page with the longest summary */
 export const GLANCE_ROWS = 12;
 /**
- * What is still open on a risk, as the closing sentence of its write-up: the questions asked on its findings that have no
- * response yet, each with the day it was received. Empty when none is open; what the responses said is in the write-up.
+ * What is still open on a risk: questions on its findings that remain Open, each with the day it was received. Empty
+ * when none is open; typed responses do not change a question's status.
  */
 export function stillOpen(findings: string[], questions: Question[], today: string): string {
-  const qs = questions.filter((q) => q.linkedFinding && findings.includes(q.linkedFinding) && q.status === 'open' && !q.response.trim()).sort((a, b) => a.n - b.n);
+  const qs = questions
+    .filter((q) => q.linkedFinding && findings.includes(q.linkedFinding) && q.status === 'open')
+    .sort((a, b) => a.n - b.n);
   if (!qs.length) return '';
   const each = qs.map((q) => `Q${q.n}${q.received ? ` (${shortDate(q.received, today)})` : ''}`);
   const list = each.length === 1 ? each[0] : `${each.slice(0, -1).join(', ')} and ${each[each.length - 1]}`;

@@ -241,6 +241,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Use test fixtures and stand-ins for routine verification.
 - `npm run check:all` first proves LibreOffice converts a two-sheet workbook and then requires it: its LibreOffice
   tests fail rather than skip. A plain test run still skips them without LibreOffice (#85).
+- The required GitHub checks (`check`, `desktop`, and `browser (1)` to `browser (4)`) passing on a pull request's
+  latest commit, with its adversarial review, gate its merge; a local `npm run check:all` is optional (#710).
 - Built work is shown with a short screen recording and single, distinctly named screenshots.
 - Before building the installer, set the organization name, model provider, and other shared settings in
   `src/control.ts`. Each person signs in after installation.
