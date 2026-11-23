@@ -127,9 +127,9 @@ async function checkWording() {
   const long = await deleteDeal(page, ids[LONG_PARTY], 'long');
   say('#27 a long name and counterparty wrap inside the dialog', long.fit
     && long.second === `Delete Project ${LONG} (${LONG_PARTY}) for good?`, JSON.stringify(long));
-  say('#27 a long name gives way in the notice, never what tells it apart or "deleted"',
-    long.told.said === `Project ${LONG} (${LONG_PARTY}) deleted`
-    && long.told.shown.endsWith(`… (${LONG_PARTY}) deleted`), JSON.stringify(long.told));
+  say('#27 a long name and twin line give way at their end in the notice, never "deleted"',
+    long.told.said === `Project ${LONG} (${LONG_PARTY}) deleted` && long.told.shown.startsWith('Project Northwind')
+    && long.told.shown.endsWith('… deleted'), JSON.stringify(long.told));
   const single = await deleteDeal(page, ids['Project Coho'], 'single');
   say('#27 a deal with a name of its own reads as before', single.second === 'Delete Project Coho for good?'
     && single.told.said === 'Project Coho deleted' && single.told.whole

@@ -400,8 +400,8 @@ export function DeleteDealDialog() {
     const r = await store.dispatch(DeleteDeal, { dealId: d.id, typedName: dd.typed, ...(dd.seen ? { seen: dd.seen } : {}) }, { idempotencyKey: 'dd-go', quiet: true });
     if (!r.ok) { store.ui({ deleteDeal: { ...dd, error: r.error.message } }); return; }
     close();
-    // a long name gives way in the notice, so what tells it from its twin and the word "deleted" stay in view
-    store.toast(`${label} deleted`, undefined, { glyph: 'done' }, undefined, d.name);
+    // the name and what tells it from its twin give way at their end, so "deleted" stays in view
+    store.toast(`${label} deleted`, undefined, { glyph: 'done' }, undefined, label);
     location.hash = 'deals';
   };
   if (dd.sure) return (

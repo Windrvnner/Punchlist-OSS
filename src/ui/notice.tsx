@@ -15,7 +15,8 @@ export interface NoticeAction { label: string; run: () => void; id?: string }
 // A notice's title or detail can be clipped within the text container (#564).
 function noticeTextOverflows(el: HTMLElement): boolean {
   const overflows = (part: Element) => part.scrollWidth > part.clientWidth;
-  return overflows(el) || Array.from(el.querySelectorAll('.ttitle, .tbody')).some(overflows);
+  const shortened = !!el.querySelector('.tcut[data-shortened]');      // a part that gave way to fit (#27)
+  return shortened || overflows(el) || Array.from(el.querySelectorAll('.ttitle, .tbody')).some(overflows);
 }
 
 /**
@@ -104,7 +105,9 @@ function Cut({ text }: { text: string }) {
       return text.getBoundingClientRect().width <= el.getBoundingClientRect().width + 0.01;
     };
     const fit = () => {
+      delete el.dataset.shortened;
       if (fits(text)) return;
+      el.dataset.shortened = '';
       const g = graphemes(text);
       const at = (n: number) => `${g.slice(0, n).join('').trimEnd()}…`;
       let lo = 0;
