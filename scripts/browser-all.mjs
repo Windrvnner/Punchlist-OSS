@@ -7,6 +7,7 @@
 // longest last time start first (out/browser/times.json).
 import { spawn } from 'node:child_process'; import fs from 'node:fs'; import http from 'node:http';
 import path from 'node:path';
+import { noResultReason, summaryOf } from './browser-reason.mjs';
 import { insideGate } from './gate-dir.mjs';
 
 const args = process.argv.slice(2); const j = args.indexOf('--jobs'); const jobs = j >= 0 ? Math.max(1, +args[j + 1] || 1) : 5;
@@ -118,12 +119,9 @@ function rememberTimes(passed) {
 }
 
 /** A successful exit without a positive, complete suite summary is missing coverage. */
-function suiteResult(name, code, out, started) {
-  const summary = [...out.matchAll(/^(\d+)\/(\d+) passed\r?$/gm)].at(-1);
-  const passed = summary ? Number(summary[1]) : 0;
-  const total = summary ? Number(summary[2]) : 0;
-  const valid = Number.isSafeInteger(passed) && Number.isSafeInteger(total) && total > 0 && passed <= total;
-  if (!valid) out += `\nFAIL ${name}: missing or invalid positive test summary\n`;
+function suiteResult(name, code, out, started, reason = '') {
+  const { passed, total, valid } = summaryOf(out);
+  if (!valid) out += `\nFAIL ${name}: missing or invalid positive test summary (${reason})\n`;
   fs.writeFileSync(`out/browser/${name}.log`, out);
   return {
     name, code: code === 0 && valid && passed === total ? 0 : code || 1,
@@ -144,10 +142,13 @@ const run = async (name) => {
     child.stdout.on('data', (part) => (out += part));
     child.stderr.on('data', (part) => (out += part));
     child.on('error', (error) => { out += `\nFAIL ${name}: could not start: ${error.message}\n`; });
-    child.on('close', (code, signal) => {
+    child.on('close', async (code, signal) => {
+      // the server is asked only when the suite left no summary, so a passing suite's time is not held up
+      const serverUp = summaryOf(out).valid ? true : await servesThisBuild().catch(() => false);
+      const reason = noResultReason(code, signal, out, serverUp);
       if (signal) out += `\nBrowser suite terminated by signal ${signal}\n`;
       else if (code) out += `\nBrowser suite exited with code ${code}\n`;
-      done(suiteResult(name, code, out, started));
+      done(suiteResult(name, code, out, started, reason));
     });
   });
 };
@@ -163,6 +164,8 @@ await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, async () 
     results.push(result);
     console.log(`${result.code === 0 ? 'ok  ' : 'FAIL'} ${name.padEnd(14)}`
       + ` ${result.passed}/${result.total}  ${result.secs}s`);
+    // a suite with no summary says why at once, even if the server is gone before it could run again
+    if (!result.total) console.log(`     ${result.fails.at(-1) ?? 'no result'}`);
   }
 }));
 const passedAlongside = results.filter((result) => result.code === 0).map(({ name, secs }) => ({ name, secs }));
