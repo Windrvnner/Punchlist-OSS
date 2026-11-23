@@ -48,14 +48,17 @@ export function conversationLog(o: ConversationLogOptions): ConversationStore & 
   /** person → conversation → message id → its newest line; only the person signed in (`heldFor`) has any */
   const byPerson = new Map<string, Map<string, Map<string, Line>>>(); let heldFor: string | undefined;
   let seq = -1; let file = 0;
-  /** the highest number read from this PC's own files: a save that fails never numbers below it (#759) */
+  /** the highest number in this PC's own lines, read or just written: a failed save never goes below it (#759) */
   let highestRead = -1;
 
   const own = (n: number) => `talk-${o.installId}-${n}.jsonl`;
   const take = (l: Line) => {
     const id = `${l.pc}.${l.seq}`; if (ids.has(id)) return false;
     ids.add(id);
-    if (l.pc === o.installId) { highestRead = Math.max(highestRead, l.seq); seq = Math.max(seq, l.seq); }
+    if (l.pc === o.installId) {
+      highestRead = Math.max(highestRead, l.seq);
+      seq = Math.max(seq, l.seq);
+    }
     if (l.by !== heldFor) return false;
     let convs = byPerson.get(l.by); if (!convs) byPerson.set(l.by, (convs = new Map()));
     let msgs = convs.get(l.key); if (!msgs) convs.set(l.key, (msgs = new Map()));
