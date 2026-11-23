@@ -73,8 +73,6 @@ verdict, and no criteria in your own words.
 
 - The author fixes the class of problem, not only the reported case, and attacks the fix at deal scale with the
   repo's realistic data before asking for re-review.
-- The author fixes the small minor findings in code the pull request already touches in the same pull request. Those
-  fixes get no review round of their own.
 - After three rounds, one short fresh-context review of only the fixes since round three is allowed. If it still
   finds a blocker, the work is cut or split instead of starting another round.
 - A pull request that passes with no blockers and whose required GitHub checks pass on its latest commit is merged,
