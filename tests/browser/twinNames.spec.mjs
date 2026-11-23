@@ -41,10 +41,16 @@ async function shot(page, name) {
   await page.screenshot({ path: `${SHOTS}/${name}-${scheme}-${width}x${height}.png` });
 }
 
-/** a notice's shortened name ends at a whole word of the full text */
-const cutAtWord = (told) => {
-  const kept = told.shown.slice(0, told.shown.indexOf('…'));
-  return told.said.startsWith(`${kept} `);
+/** a part shown whole, or cut after a whole word of it */
+const keptWords = (shown, full) => shown === full || (shown.endsWith('…') && full.startsWith(`${shown.slice(0, -1)} `));
+/**
+ * A deal named "Name (Twin)" in a notice gives way at whole words, the name's first, and keeps "Project" and one more
+ * word of the name and the first word of its twin line.
+ */
+const cutAtWords = (told, name, twin) => {
+  const [, shownName, shownTwin] = told.shown.match(/^(.*?) \((.*)\) deleted$/) ?? [];
+  return !!shownName && keptWords(shownName, name) && keptWords(shownTwin, twin)
+    && shownName.split(' ').length >= 2 && shownTwin.startsWith(twin.split(' ')[0]);
 };
 const text = (page, selector) => page.$eval(selector, (el) => el.textContent.replace(/\s+/g, ' ').trim());
 /** clears the notices shown, so the next one read is the one an action puts up */
@@ -135,9 +141,9 @@ async function checkWording() {
   const long = await deleteDeal(page, ids[LONG_PARTY], 'long');
   say('#27 a long name and counterparty wrap inside the dialog', long.fit
     && long.second === `Delete Project ${LONG} (${LONG_PARTY}) for good?`, JSON.stringify(long));
-  say('#27 a long name and twin line give way at their end in the notice, never "deleted"',
-    long.told.said === `Project ${LONG} (${LONG_PARTY}) deleted` && long.told.shown.startsWith('Project Northwind')
-    && long.told.shown.endsWith('… deleted') && cutAtWord(long.told), JSON.stringify(long.told));
+  say('#27 a long name, then its twin line, give way at whole words in the notice, never "deleted"',
+    long.told.said === `Project ${LONG} (${LONG_PARTY}) deleted`
+    && cutAtWords(long.told, `Project ${LONG}`, LONG_PARTY), JSON.stringify(long.told));
   const single = await deleteDeal(page, ids['Project Coho'], 'single');
   say('#27 a deal with a name of its own reads as before', single.second === 'Delete Project Coho for good?'
     && single.told.said === 'Project Coho deleted' && single.told.whole

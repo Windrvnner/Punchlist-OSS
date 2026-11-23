@@ -104,11 +104,28 @@ function Part({ text, cut }: { text: string; cut?: string }) {
   );
 }
 
-/** where a cut at `n` characters ends a whole word: at the last space before it, where there is one (#27) */
-function wordEnd(g: string[], n: number) {
-  if (g[n] === ' ') return n;
-  const space = g.slice(0, n).lastIndexOf(' ');
-  return space > 0 ? space : n;
+/** the first words of `words`, from all but the last down to `least`, each ending in "…" */
+const fewerWords = (words: string[], least: number) => {
+  const count = Math.max(words.length - least, 0);
+  return Array.from({ length: count }, (_, i) => `${words.slice(0, words.length - 1 - i).join(' ')}…`);
+};
+
+/**
+ * Shorter forms of a part that gives way, longest first, each cut at a whole word. A deal's name with its twin line in
+ * brackets, "Project Name (Twin)", gives up words of the name first, down to "Project" and one more, then words of
+ * the twin line, so what tells the deal from its twin stays as long as it can (#27).
+ */
+export function shorterForms(text: string): string[] {
+  const open = text.indexOf(' (');
+  if (open < 0 || !text.endsWith(')')) return fewerWords(text.split(' '), 1);
+  const name = text.slice(0, open).split(' ');
+  const twin = text.slice(open + 2, -1).split(' ');
+  const least = name[0] === 'Project' ? 2 : 1;
+  const shortName = name.length > least ? `${name.slice(0, least).join(' ')}…` : name.join(' ');
+  return [
+    ...fewerWords(name, least).map((n) => `${n} (${twin.join(' ')})`),
+    ...fewerWords(twin, 1).map((t) => `${shortName} (${t})`),
+  ];
 }
 
 /** words that say something did not happen */
@@ -124,7 +141,8 @@ export function glyphOf(text: string, action?: string): Glyph {
 }
 
 /**
- * The part of a notice that gives way when the line does not fit: it is cut at a whole character, trimmed, and
+ * The part of a notice that gives way when the line does not fit: it is cut at a whole word (see shorterForms), or,
+ * where even the shortest of those does not fit, at a whole character, trimmed, and
  * ends in "…" right before the words after it. CSS's own ellipsis leaves a gap there (the room a cut character would
  * have taken, and a space when the cut falls after one), so it is only the fallback. Screen readers get the whole
  * text.
@@ -147,6 +165,8 @@ function Cut({ text }: { text: string }) {
       delete el.dataset.shortened;
       if (fits(text)) return;
       el.dataset.shortened = '';
+      const byWords = shorterForms(text).find(fits);
+      if (byWords) return;                  // fits() has put it in place
       const g = graphemes(text);
       const at = (n: number) => `${g.slice(0, n).join('').trimEnd()}…`;
       let lo = 0;
@@ -156,7 +176,7 @@ function Cut({ text }: { text: string }) {
         if (fits(at(m))) lo = m;
         else hi = m - 1;
       }
-      el.textContent = at(wordEnd(g, lo));
+      el.textContent = at(lo);
     };
     fit();
     addEventListener('resize', fit);
