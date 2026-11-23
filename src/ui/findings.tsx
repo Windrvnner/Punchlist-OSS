@@ -351,19 +351,16 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
     const sent = { title, ws, body };
     const r = await store.dispatch(EditFinding, edit, { idempotencyKey: 'f-edit-' + f.id });
     setBusy(false);
+    if (cancelled.current) return;   // cancelled while the save was out: an edit opened since is left alone
     if (!r.ok) {
       const field = r.error.kind === 'invalid' ? Object.values(r.error.fields ?? {})[0] : undefined;
-      if (!cancelled.current) setError(field ?? r.error.message);
+      setError(field ?? r.error.message);
       return;
     }
-    // what is typed now, here or in an edit closed and opened again while the save was out (the kept draft is the
-    // same for both): anything other than what was sent stays open
-    const typedNow = editDrafts.get(f.id);
-    if (typedNow && !sameAsSent(typedNow, sent)) keepTypingAfter(edit);
-    else if (!cancelled.current) {
+    if (sameAsSent(draft.current, sent)) {
       editDrafts.delete(f.id);
       onDone();
-    }
+    } else keepTypingAfter(edit);
   };
   // #32: more was typed while Save was out. The edit stays open with it, now measured from what that save sent (each
   // field the finding held, or the one written over it), so the next Save writes only what changed since, and a change
@@ -416,17 +413,15 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
     const r = await store.dispatch(CreateFinding, input, { idempotencyKey: 'f-create-' + d.id });
     setBusy(false);
     if (!r.ok || cancelled.current) return;   // cancelled while it was out: a form opened since is left alone
-    // what is typed now, here or in the form closed and opened again while Create was out
-    const typedNow = newFindingDrafts.get(d.id) ?? draft.current;
-    if (sameAsSent(typedNow, sent)) discard();
-    else editCreated(createdFinding(store, r.value.opId), typedNow, { title, workstream: ws, body: input.body });
+    if (sameAsSent(draft.current, sent)) discard();
+    else editCreated(createdFinding(store, r.value.opId), { title, workstream: ws, body: input.body });
   };
   // #115 (decision: typing during Create goes to the new finding): the finding is made as sent, and what was typed
   // since becomes an open edit of it, measured from what was sent, so one Save puts it on that finding. Unless the
   // finding cannot be found: then the form stays as it is, and nothing typed is lost
-  const editCreated = (made: Finding | undefined, typedNow: Typed, sent: EditDraft['base']) => {
+  const editCreated = (made: Finding | undefined, sent: EditDraft['base']) => {
     if (!made) return;
-    keepAsEdit(made, typedNow, sent);
+    keepAsEdit(made, draft.current, sent);
     discard();
     if (shown.current) location.hash = findingHref(made);
   };
