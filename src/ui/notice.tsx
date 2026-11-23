@@ -98,9 +98,9 @@ function twinParts(text: string): { name: string[]; twin: string[] } | null {
 
 /**
  * Shorter forms of a deal's name with its twin line in brackets, "Project Name (Twin)", longest first, each cut at a
- * whole word; none for other text, which is cut at a letter as before. The label gives up words of the name first, down to "Project" and one more, then words of
- * the twin line, so what tells the deal from its twin stays as long as it can (#27). The name may hold brackets of its
- * own: the twin line is the last bracket.
+ * whole word; none for other text, which is cut at a letter as before. The label gives up words of the name first,
+ * down to "Project" and one more, then words of the twin line, so what tells the deal from its twin stays as long as
+ * it can (#27). The name may hold brackets of its own: the twin line is the last bracket.
  */
 export function shorterForms(text: string): string[] {
   const parts = twinParts(text);
@@ -140,9 +140,9 @@ export function glyphOf(text: string, action?: string): Glyph {
 /**
  * The part of a notice that gives way when the line does not fit: a deal named apart from its twin is cut at a whole
  * word (see shorterForms); other text, or a label none of whose shorter forms fits, at a whole character (see
- * letterCut), trimmed, and ending in "…" right before the words after it. CSS's own ellipsis leaves a gap there (the room a cut character would
- * have taken, and a space when the cut falls after one), so it is only the fallback. Screen readers get the whole
- * text.
+ * letterCut), trimmed, and ending in "…" right before the words after it. CSS's own ellipsis leaves a gap there
+ * (the room a cut character would have taken, and a space when the cut falls after one), so it is only the fallback.
+ * Screen readers get the whole text.
  */
 function Cut({ text }: { text: string }) {
   const ref = useRef<HTMLSpanElement>(null);
