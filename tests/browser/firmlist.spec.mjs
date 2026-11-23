@@ -54,11 +54,25 @@ const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().ite
   await page.keyboard.press('Escape');
   // the same file brought in again: the rewording taken last time comes back checked, so the old wording is not added beside it
   await bring(page, csv, 'technology', 'Solar', async () => {
-    const again = await page.evaluate(() => ({ checked: [...document.querySelectorAll('#cl-rewords input:checked')].map((i) => i.dataset.reword), tip: document.querySelector('#cl-rewords [data-reword="2"]')?.closest('label')?.title }));
+    const again = await page.evaluate(() => ({
+      checked: [...document.querySelectorAll('#cl-rewords input:checked')].map((i) => i.dataset.reword),
+      tip: document.querySelector('#cl-rewords [data-reword="2"]')?.closest('label')?.title,
+    }));
     say('importing the same file again offers the earlier rewording checked, with why in its tooltip',
       JSON.stringify(again.checked) === '["2"]' && /last imported/.test(again.tip ?? ''), JSON.stringify(again));
     await page.click('#cl-pairs [data-remove="4"]');
+    await page.evaluate(() => {
+      const dialog = document.querySelector('.imdlg');
+      new MutationObserver((_, observer) => {
+        if (document.querySelector('#cl-line')?.textContent !== 'Importing') return;
+        const all = document.querySelector('#cl-reword-all');
+        window.wordingLocked = !!all?.disabled && !document.querySelector('[data-reword]:enabled');
+        observer.disconnect();
+      }).observe(dialog, { childList: true, subtree: true, characterData: true });
+    });
   });
+  say('the heading and individual wording checkboxes are disabled during Import',
+    await page.evaluate(() => window.wordingLocked === true));
   const relisted = await page.evaluate(() => Object.values(store.get().firmList).find((l) => l.layer !== 'broad').items.map((i) => [i.text, i.was ?? '']));
   say('the list brought in again keeps the rewording and the file’s own wording beside it', JSON.stringify(relisted.map(([t]) => t)) === JSON.stringify(lists[1][2]) && relisted[2][1] === 'Inverter supply / LTSA in place', JSON.stringify(relisted));
   await page.keyboard.press('Escape');
