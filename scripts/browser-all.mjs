@@ -3,7 +3,8 @@
 //   --shard 2/4 runs only the second of four groups of suites (every fourth suite), for parallel CI jobs
 // Each suite starts its own browser and shares nothing with the others, so they can run side by side. A suite that fails
 // while others are running is run once more on its own; if it passes then, that is reported as such, not hidden.
-// Exit code 0 only if every suite passed (alone or alongside). Logs go to out/browser/<suite>.log.
+// Exit code 0 only if every suite passed (alone or alongside). Logs go to out/browser/<suite>.log; the suites that took
+// longest last time start first (out/browser/times.json).
 import { spawn } from 'node:child_process'; import fs from 'node:fs'; import http from 'node:http';
 import path from 'node:path';
 import { insideGate } from './gate-dir.mjs';
@@ -83,6 +84,39 @@ async function appIsReady() {
   return ready;
 }
 
+// Each suite's time in the last run, so the next starts the longest first and no slot idles while one runs alone at
+// the end (#103). Suites with no time yet go first, in name order; reporting stays in the order suites finish.
+const TIMES = 'out/browser/times.json';
+
+/** The times kept from earlier runs, by suite; none before the first run or after out/ is cleared. */
+function readTimes() {
+  try {
+    const times = JSON.parse(fs.readFileSync(TIMES, 'utf8'));
+    return times && typeof times === 'object' && !Array.isArray(times) ? times : {};
+  } catch {
+    return {};
+  }
+}
+
+/** The suites ordered by their last time, longest first; unknown ones first. */
+function longestFirst(names) {
+  const times = readTimes();
+  const known = (name) => (Number.isFinite(times[name]) ? times[name] : Infinity);
+  return [...names].sort((a, b) => known(b) - known(a) || (a < b ? -1 : 1));
+}
+
+/**
+ * Keeps the time of each suite that passed alongside the others, beside those kept before. A suite that failed keeps
+ * its earlier time: a crash or a run on its own would rank it shorter than it is.
+ */
+function rememberTimes(passed) {
+  const times = readTimes();
+  for (const result of passed) times[result.name] = result.secs;
+  // written whole and then moved into place, so a run reading it never sees half a file
+  fs.writeFileSync(`${TIMES}.tmp`, JSON.stringify(times, null, 2));
+  fs.renameSync(`${TIMES}.tmp`, TIMES);
+}
+
 /** A successful exit without a positive, complete suite summary is missing coverage. */
 function suiteResult(name, code, out, started) {
   const summary = [...out.matchAll(/^(\d+)\/(\d+) passed\r?$/gm)].at(-1);
@@ -117,7 +151,9 @@ const run = async (name) => {
     });
   });
 };
-const started = Date.now(); const queue = [...suites]; const results = [];
+const started = Date.now();
+const queue = longestFirst(suites);
+const results = [];
 await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, async () => {
   while (!stopped) {
     const name = queue.shift();
@@ -129,6 +165,7 @@ await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, async () 
       + ` ${result.passed}/${result.total}  ${result.secs}s`);
   }
 }));
+const passedAlongside = results.filter((result) => result.code === 0).map(({ name, secs }) => ({ name, secs }));
 for (const result of results.filter((entry) => entry.code !== 0)) {
   if (stopped) break;
   fs.copyFileSync(`out/browser/${result.name}.log`, `out/browser/${result.name}.first.log`);
@@ -140,6 +177,7 @@ for (const result of results.filter((entry) => entry.code !== 0)) {
   Object.assign(result, again, { rerun: true, firstFails: result.fails });
 }
 server?.kill();
+rememberTimes(passedAlongside);
 const completed = new Set(results.map((result) => result.name));
 const unrun = suites.filter((name) => !completed.has(name));
 if (unrun.length) console.error(`Not run (${unrun.length}/${suites.length} suites): ${unrun.join(', ')}`);
