@@ -18,6 +18,19 @@ const pause = (ms: number) => { Atomics.wait(new Int32Array(new SharedArrayBuffe
  */
 const REST_MS = 10_000;
 
+/**
+ * Write all of `text`: a nearly full disk may take only part of one write without an error, and the rest is written
+ * after it. A write that takes nothing throws, so a short write is never reported as saved (#126).
+ */
+function writeAll(fd: number, text: string) {
+  const bytes = Buffer.from(text, 'utf8');
+  for (let done = 0; done < bytes.length;) {
+    const written = fs.writeSync(fd, bytes, done, bytes.length - done);
+    if (written <= 0) throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
+    done += written;
+  }
+}
+
 export function nodeFolder(dir: string, waits = BUSY_WAITS): Folder {
   fs.mkdirSync(dir, { recursive: true });
   const resting = new Map<string, number>();                                // file name → until when it is tried once per write
@@ -53,7 +66,15 @@ export function nodeFolder(dir: string, waits = BUSY_WAITS): Folder {
     size: (name) => { try { return fs.statSync(at(name)).size; } catch { return -1; } },
     read: (name) => { try { return fs.readFileSync(at(name), 'utf8'); } catch (e: any) { if (e?.code === 'ENOENT') return null; throw e; } },
     // only the opening is tried again: a write that fails part way may have left part of the line, which the caller deals with
-    append: (name, text) => { const fd = whenFree(name, budget(name), () => fs.openSync(at(name), 'a')); try { fs.writeSync(fd, text); fs.fsyncSync(fd); } finally { fs.closeSync(fd); } },
+    append: (name, text) => {
+      const fd = whenFree(name, budget(name), () => fs.openSync(at(name), 'a'));
+      try {
+        writeAll(fd, text);
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+    },
     // written beside the file, forced to the disk, and moved over it, so a crash or a power cut leaves the old file or the
     // new one, never half of one: without the flush, Windows may put the move on disk before the new text
     write: (name, text) => {
