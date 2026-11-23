@@ -37,7 +37,7 @@ describe('splitting the suites into CI groups', () => {
   it('splits only the named suites, and the same way on every call', () => {
     const named = ['checklist', 'lostwork', 'qapanel', 'keyboard', 'toolbars'];
     // fixed times, since npm run browser:times rewrites the kept ones
-    const times = { checklist: 410, keyboard: 178, lostwork: 233, qapanel: 197, toolbars: 30, other: 500 };
+    const times = { checklist: 410, keyboard: 178, lostwork: 233, qapanel: 197, toolbars: 30 };
     const groups = groupsOf(named, 2, times);
     expect(groups.flat().sort()).toEqual([...named].sort());
     expect(groupsOf(named, 2, times)).toEqual(groups);

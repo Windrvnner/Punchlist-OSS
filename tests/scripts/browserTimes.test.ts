@@ -100,6 +100,8 @@ describe('the command', () => {
     expect(keptIn(repo)).toBe(kept);
     fs.writeFileSync(path.join(repo, timesFile), 'null');
     expect(() => runIn(repo)).toThrow(/does not hold a JSON object/);
+    fs.rmSync(path.join(repo, timesFile));
+    expect(() => runIn(repo)).toThrow(/does not hold a JSON object/);
     fs.rmSync(repo, { recursive: true, force: true });
   });
 });

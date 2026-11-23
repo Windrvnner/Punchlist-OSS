@@ -74,9 +74,8 @@ function fail(message) {
   process.exit(2);
 }
 
-/** The JSON object in a file; a missing file is empty when `missingIsEmpty`, and anything else unreadable stops. */
-function readObject(file, missingIsEmpty = false) {
-  if (missingIsEmpty && !fs.existsSync(file)) return {};
+/** The JSON object in a file; a missing or unreadable file stops the command, since nothing could be scaled. */
+function readObject(file) {
   try {
     const value = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (value && typeof value === 'object' && !Array.isArray(value)) return value;
@@ -99,7 +98,7 @@ function runResults(arg) {
 /** Rewrites the kept CI times from the named run, or the latest one, and lists what changed. */
 function main(arg) {
   const { run, results } = runResults(arg);
-  const kept = readObject(SUITE_TIMES, true);
+  const kept = readObject(SUITE_TIMES);
   const measured = measuredTimes(Array.isArray(results.suites) ? results.suites : []);
   if (!Object.keys(measured).length) fail(`No suite passed in ${path.relative(process.cwd(), run)}; nothing to update`);
   const { times, scale } = updatedTimes(kept, measured, browserSuites());
