@@ -7,6 +7,22 @@ const results = []; const say = (id, ok, note = '') => { results.push([id, ok]);
 const browser = await launchChrome();
 const LIST = 'Credit Agreement Issues List – Sponsor counsel (Nov 14).pdf';
 
+/**
+ * The text of the tooltip that `show` brings up over the page's `.ilh` mark, once the page has finished arriving (its
+ * own focus step after a navigation has run). A tooltip that does not come fails its check, with what the page looked
+ * like, rather than ending the suite with no result (#142).
+ */
+async function tipAfter(page, show) {
+  await page.waitForFunction(() => document.activeElement && document.activeElement !== document.body);
+  await page.evaluate(() => { document.querySelector('.ilh').dataset.asked = '1'; });
+  await show();
+  const tip = await page.waitForSelector('.tip', { timeout: 10000 }).catch(() => null);
+  if (tip) return tip.innerText();
+  const seen = await page.evaluate(() => ({ sameMark: document.querySelector('.ilh')?.dataset.asked === '1', focus: document.activeElement?.id, hash: location.hash }));
+  console.log('no tooltip:', JSON.stringify(seen));
+  return '';
+}
+
 for (const [w, h, scheme] of [[1280, 736, 'dark'], [1024, 640, 'light']]) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme }); const page = await ctx.newPage(); page.errors = [];
   page.on('pageerror', (e) => page.errors.push(e.message));
@@ -115,15 +131,13 @@ for (const [w, h, scheme] of [[1280, 736, 'dark'], [1024, 640, 'light']]) {
   say(`every finding a point is on says so in its row (${w})`, after.marked === 160 && after.meta.endsWith(' · #2 on issues list') && after.joined?.join() === '1' && !!after.older?.endsWith(' · #1 on issues list'), JSON.stringify(after));
   // the finding's page: the mark, and the list and the point's words on hover
   await page.goto(`${URL}#finding-${dealId}-${ids[0]}`); await page.waitForSelector('.ilh');
-  await page.hover('.ilh'); await page.waitForSelector('.tip');
-  const tip = await page.evaluate(() => ({ mark: document.querySelector('.ilh').textContent, tip: document.querySelector('.tip').innerText }));
+  const tip = { tip: await tipAfter(page, () => page.hover('.ilh')), mark: await page.textContent('.ilh') };
   say(`the finding's page shows its point, with the list and the words on hover (${w})`, tip.mark === '#1 on issues list' && tip.tip.startsWith('Credit Agreement Issues List – Sponsor counsel (Nov 14)\n#1 · Point 1: the clause'), JSON.stringify(tip));
   say(`the mark is plain text, not a button (${w})`, await page.evaluate(() => document.querySelector('.ilh').tagName === 'SPAN' && getComputedStyle(document.querySelector('.ilh')).textDecorationLine === 'none'));
   // a finding on several points: every point shows some of its words, a line each under the list's name
   const many = await page.evaluate(() => Object.values(store.get().findings).find((f) => (f.onLists?.length ?? 0) > 1)?.id);
   await page.goto(`${URL}#finding-${dealId}-${many}`); await page.waitForSelector('.ilh');
-  await page.focus('.ilh'); await page.waitForSelector('.tip');
-  const tip2 = await page.evaluate(() => ({ mark: document.querySelector('.ilh').textContent, lines: document.querySelector('.tip').innerText.split('\n') }));
+  const tip2 = { lines: (await tipAfter(page, () => page.focus('.ilh'))).split('\n'), mark: await page.textContent('.ilh') };
   say(`several points: the list's name, then each point's number and words on a line (${w})`, /^#\d+, #\d+ on issues list$/.test(tip2.mark) && tip2.lines.length === 3 && tip2.lines[0] === LIST.replace(/\.pdf$/, '') && tip2.lines.slice(1).every((l) => /^#\d+ · \S/.test(l) && l.length <= 90), JSON.stringify(tip2));
   // the same list chosen again: every point is already raised, by the point its finding holds, whatever the model says
   await page.goto(`${URL}#deal-${dealId}`); await page.waitForSelector('.flagrow');
