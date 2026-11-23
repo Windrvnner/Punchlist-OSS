@@ -289,23 +289,27 @@ const openEdit = async (page) => {
 
 const cursor = (ref) => ref.evaluate((node) => getComputedStyle(node).cursor);
 
-async function openCitation(page, ref, key) {
+async function openCitation(page, ref, activation = 'click') {
   const pointer = await cursor(ref);
   const pop = ref.locator('..').locator('.pop');
   await ref.hover();
   await pop.waitFor();
   const name = await pop.locator('.psrc .docnm').first().textContent();
   const place = (await pop.locator('.psrc .loc').first().textContent()).replace(/^ · /, '');
-  await page.mouse.move(2, 2);
   let focused = true;
-  if (key) {
+  if (activation === 'popover') {
+    await pop.locator('.pfoot').click();
+  } else if (activation === 'click') {
+    await ref.click();
+  } else {
+    await page.mouse.move(2, 2);
     await page.keyboard.press('Shift+Tab');
     await ref.focus();
     await pop.waitFor();
     focused = await ref.evaluate((node) =>
       node.matches(':focus-visible') && getComputedStyle(node).outlineStyle === 'solid');
-    await page.keyboard.press(key);
-  } else await ref.click();
+    await page.keyboard.press(activation);
+  }
   await page.waitForFunction(([doc, loc]) => document.querySelector('.docnav .docname .docnm')?.textContent === doc
     && document.querySelector('.docnav .loc')?.textContent === loc, [name, place]);
   return { pointer, focused, name, place };
@@ -363,7 +367,7 @@ async function openCitation(page, ref, key) {
   const checklistCursor = await cursor(source);
   await source.click();
   await page.waitForSelector('#from-item');
-  const fromChecklist = await openCitation(page, await ask());
+  const fromChecklist = await openCitation(page, await ask(), 'popover');
   const interactive = [fromFinding, fromChat, fromQa, fromChecklist];
   say('only-interactive-citations-get-the-pointer-cursor', findingCursors.length >= 4
     && findingCursors.every((value) => value === 'pointer') && checklistCursor === 'pointer'
