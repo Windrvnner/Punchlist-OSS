@@ -62,11 +62,14 @@ function appendLocal(local: Folder, name: string, text: string) {
   }
 }
 
-/** The size in bytes to cut a failed append back to: -1 when a file that is there could not be measured. */
+/** The size in bytes to cut a failed append back to: -1 for a file there that can be neither measured nor read. */
 function sizeBefore(local: Folder, name: string) {
   const size = local.size(name);
   if (size >= 0) return size;
-  return local.read(name) === null ? 0 : -1;
+  try {
+    const text = local.read(name);
+    return text === null ? 0 : new TextEncoder().encode(text).length;
+  } catch { return -1; }
 }
 
 /** Make the local copy end where its last whole line ends. Throws when a failed append cannot be taken back. */
@@ -82,16 +85,25 @@ function mendLocal(local: Folder, name: string) {
   } catch { /* a file held for a moment: the append goes ahead, and the end is checked at the next one */ }
 }
 
-/** Whether the local copy still holds part of a failed append: its lines must not be read as written. */
-export const holdsFailedAppend = (local: Folder, name: string) => failedAppends.get(local)?.has(name) ?? false;
+/** The local copy's text without what a failed append not yet taken back left in it: only lines that were written. */
+export function readOwn(local: Pick<Folder, 'read'>, name: string): string | null {
+  const text = local.read(name);
+  const size = failedAppends.get(local as Folder)?.get(name);
+  return text === null || size === undefined ? text : beforeFailed(text, size);
+}
+
+/** `text` without a failed append that began at `size` bytes; -1 when the size was not known. */
+function beforeFailed(text: string, size: number) {
+  // not measured: only the start of a line is known to be the failed append's
+  return size < 0 ? text.slice(0, text.lastIndexOf('\n') + 1) : firstBytes(text, size);
+}
 
 /** Cut a failed append back off the local copy: sizes are in bytes, as on a disk. Throws when it cannot. */
 function takeBackFailed(local: Folder, name: string) {
   const size = failedAppends.get(local)?.get(name);
   if (size === undefined) return;
   const text = local.read(name) ?? '';
-  // not measured: only the start of a line is known to be the failed append's
-  const kept = size < 0 ? text.slice(0, text.lastIndexOf('\n') + 1) : firstBytes(text, size);
+  const kept = beforeFailed(text, size);
   if (kept !== text) local.write(name, kept);
   failedAppends.get(local)?.delete(name);
 }

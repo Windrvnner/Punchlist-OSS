@@ -116,14 +116,20 @@ describe('own files', () => {
     expect(shared.files.get('f')).toBe('café\n');
   });
 
-  it('a file whose size cannot be read loses only the failed part, never the lines before it', () => {
+  it('a file that cannot be measured is read to measure it; failing that, it loses only a part line', () => {
     const shared = new Tearing();
     const local = new Tearing();
     appendOwn(shared, local, 'f', 'one\ntwo\n');
     local.size = () => -1;                                              // the disk would not say how big the file is
     local.tear = 6;
     expect(() => appendOwn(shared, local, 'f', 'three\nfour\n')).toThrow('ENOSPC');
-    expect(local.files.get('f')).toBe('one\ntwo\nthree\n');
+    expect(local.files.get('f')).toBe('one\ntwo\n');
+    vi.spyOn(local, 'read').mockImplementationOnce(() => {
+      throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+    });
+    local.tear = 6;
+    expect(() => appendOwn(shared, local, 'f', 'three\nfour\n')).toThrow('ENOSPC');
+    expect(local.files.get('f')).toBe('one\ntwo\nthree\n');            // never a line from before the append
   });
 
   it('a file held for a moment when its end is checked is still appended to, and checked at the next append', () => {

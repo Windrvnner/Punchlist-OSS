@@ -333,4 +333,23 @@ describe('conversations in the synced folder', () => {
     const there = await home.load();
     expect(there.ok && there.value['deal:d1:c1'].map((m) => m.id)).toEqual(thread.map((m) => m.id));
   });
+  it('while a failed save cannot be cut off, the lines saved before it are still read here (#126)', async () => {
+    const shared = new Mem();
+    const local = new Tearing();
+    let who = 'adoe';
+    const log = conversationLog({ shared, local, installId: 'pc', user: () => who, clock });
+    const at = clock();
+    const first = msg('m1', 'me', 'Is the earn-out capped?', at);
+    expect((await log.save('deal:d1:c1', [first])).ok).toBe(true);
+    shared.list = () => { throw new Error('The folder cannot be reached'); };
+    local.tear = 5;
+    local.refuseWrites = true;
+    const answer = msg('m2', 'ai', 'Yes, at 20% of the price.', at);
+    expect((await log.save('deal:d1:c1', [first, answer])).ok).toBe(false);
+    who = 'kdoe';                                                      // another person signs in and out again
+    await log.load();
+    who = 'adoe';
+    const back = await log.load();
+    expect(back.ok && back.value).toEqual({ 'deal:d1:c1': [first] });
+  });
 });
