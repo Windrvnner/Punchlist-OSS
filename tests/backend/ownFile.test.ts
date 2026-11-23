@@ -146,6 +146,21 @@ describe('own files', () => {
     expect(local.files.get('f')).toBe('one\ntwo\nthree\n');
   });
 
+  it('a part line left by a stopped run that cannot be cut off yet refuses the next append (#126)', () => {
+    const shared = new Tearing();
+    const local = new Tearing();                                        // a new run: nothing is known about the file
+    shared.files.set('f', 'one\n');
+    local.files.set('f', 'one\ntw');
+    local.refuseWrites = true;                                          // too full to rewrite the file, not to append
+    expect(() => appendOwn(shared, local, 'f', 'three\n')).toThrow('ENOSPC');
+    expect([local.files.get('f'), shared.files.get('f')]).toEqual(['one\ntw', 'one\n']);
+    local.refuseWrites = false;
+    appendOwn(shared, local, 'f', 'three\n');
+    shared.files.set('f', 'one\n');                                     // the sync client put back an older copy
+    healOwn(shared, local, 'f');
+    expect([local.files.get('f'), shared.files.get('f')]).toEqual(['one\nthree\n', 'one\nthree\n']);
+  });
+
   it('the start of a line left by a run that stopped part way is cut off before the next append', () => {
     const shared = new Tearing();
     const local = new Tearing();

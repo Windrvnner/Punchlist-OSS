@@ -78,11 +78,12 @@ function mendLocal(local: Folder, name: string) {
   const checked = checkedEnds.get(local) ?? new Set<string>();
   if (checked.has(name)) return;
   // a run that stopped part way through an append (a crash, a power cut) may have left the start of a line
-  try {
-    const text = local.read(name) ?? '';
-    if (!text.endsWith('\n') && text) local.write(name, text.slice(0, text.lastIndexOf('\n') + 1));
-    checkedEnds.set(local, checked.add(name));
-  } catch { /* a file held for a moment: the append goes ahead, and the end is checked at the next one */ }
+  let text: string;
+  try { text = local.read(name) ?? ''; }
+  catch { return; }                 // a file held for a moment: the append goes ahead, and its end is checked next time
+  // a part line found here is cut off before anything is added, or nothing is (this throws when it cannot be cut)
+  if (!text.endsWith('\n') && text) local.write(name, text.slice(0, text.lastIndexOf('\n') + 1));
+  checkedEnds.set(local, checked.add(name));
 }
 
 /** The local copy's text without what a failed append not yet taken back left in it: only lines that were written. */
