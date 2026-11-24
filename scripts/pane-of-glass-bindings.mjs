@@ -9,18 +9,20 @@ function propertyKey(property) {
   return typeof key === 'string' || typeof key === 'number' ? String(key) : null;
 }
 
+function propertyValue(entry, key) {
+  if (entry.type === 'SpreadElement') return objectEntry(unwrapped(entry.argument), key);
+  const name = propertyKey(entry);
+  if (name === null) return null;
+  if (name !== key) return missing;
+  return entry.kind === 'init' ? entry.value : null;
+}
+
 function objectEntry(object, key) {
   if (object?.type !== 'ObjectExpression' || key === null) return null;
   // A later spread or computed key can override an earlier literal property.
   for (const entry of object.properties.toReversed()) {
-    if (entry.type === 'SpreadElement') {
-      const value = objectEntry(unwrapped(entry.argument), key);
-      if (value !== missing) return value;
-    } else {
-      const name = propertyKey(entry);
-      if (name === null) return null;
-      if (name === key) return entry.kind === 'init' ? entry.value : null;
-    }
+    const value = propertyValue(entry, key);
+    if (value !== missing) return value;
   }
   return key in Object.prototype ? null : missing;
 }

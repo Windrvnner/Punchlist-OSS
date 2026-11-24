@@ -112,6 +112,40 @@ describe('UI dependency checks', () => {
     expect(result.stderr).toContain(`${file} import (lines 2, 5, 8): 3 exceeds`);
   });
 
+  it('resolves value bindings when a type shares the name and when literals are destructured', () => {
+    const repo = fixture();
+    const file = 'src/ui/modules.ts';
+    repo.write(file, [
+      "type ModuleName = 'node:path'",
+      "const ModuleName: ModuleName = 'node:path'",
+      'export const builtIn = () => import(ModuleName)',
+      '',
+      "const { entry } = { entry: 'node:path' } as const",
+      'export const fromObject = () => import(entry)',
+      "const { ports: [reader] } = { ports: ['../backend/lenient'] }",
+      'export const nested = () => import(reader)',
+      "const { log: local } = { log: './table' }",
+      'export const page = () => import(local)',
+      'function child() {',
+      "  const ModuleName = './table'",
+      '  return import(ModuleName)',
+      '}',
+      'function supplied({ entry }: { entry: string }) { return import(entry) }',
+      "const { target } = { target: 'node:fs', ...runtimeOptions }",
+      'export const unknown = () => import(target)',
+      "const { plugin: source } = { ...runtimeOptions, plugin: 'node:fs' }",
+      'export const overridden = () => import(source)',
+      "const { route = '../backend/lenient' } = {}",
+      'export const withDefault = () => import(route)',
+      'interface PageName { url: string }',
+      "const PageName = './table'",
+      'export const localPage = () => import(PageName)',
+    ].join('\n'));
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 3, 6, 8, 19, 21): 5 exceeds`);
+  });
+
   it('resolves imports in TypeScript classes with decorators and auto-accessors', () => {
     const repo = fixture();
     const file = 'src/ui/picker.ts';
