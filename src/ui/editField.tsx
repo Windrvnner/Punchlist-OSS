@@ -73,7 +73,8 @@ export function EditField({
 }: EditFieldProps) {
   const input = useFieldInput(value, rev, keep, type, commit, debounceMs, onText, read, multiline);
   const {
-    draft, focused, half, held, ref, locked, status, external, onInput, onBlur, onFocus, onKeyUp,
+    draft, focused, half, held, ref, locked, status, external, onInput, onCompositionStart, onCompositionEnd,
+    onBlur, onFocus, onKeyUp,
     onKey, flush, draftRef, takeTheirs,
   } = input;
 
@@ -88,7 +89,8 @@ export function EditField({
   // dir: text in Hebrew or Arabic runs right to left as it is typed.
   const common = {
     ref: ref as any, value: draft, placeholder, dir: 'auto' as const, 'aria-label': label,
-    onInput, onBlur, onKeyUp, onFocus, maxLength, onKeyDown: onKey, readOnly: !!locked && !held,
+    onInput, onCompositionStart, onCompositionEnd, onBlur, onKeyUp, onFocus, maxLength, onKeyDown: onKey,
+    readOnly: !!locked && !held,
     title: locked ?? undefined,
     class: `ef ${className ?? ''} ${locked ? 'idle' : status} ${external && !locked ? 'external' : ''}`,
   };
@@ -196,6 +198,7 @@ function useLocalInput(start: string, value: string, type: 'text' | 'date') {
   const untouched = useRef(false);
   const ref = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
   const date = useDateInput(type, ref);
+  const composing = useRef(false);
   const timer = useRef<number | null>(null);
   const stopTimer = () => {
     if (timer.current === null) return false;
@@ -205,7 +208,7 @@ function useLocalInput(start: string, value: string, type: 'text' | 'date') {
   };
   return {
     ...date, draft, draftRef, setDraft, focused, focusedRef, setFocused, held, setHeld, atFocus, halfAtFocus,
-    notSavedAtFocus, untouched, ref, timer, stopTimer,
+    notSavedAtFocus, untouched, ref, composing, timer, stopTimer,
   };
 }
 type LocalInput = ReturnType<typeof useLocalInput>;
@@ -242,6 +245,7 @@ function useFieldSave(
   const saver = useRef<FieldSave | undefined>(undefined);
   const save = saver.current ??= new FieldSave(record, keep, kept, {
     text: () => input.draftRef.current,
+    composing: () => input.composing.current,
     partial: () => input.halfRef.current,
     partialNow: input.halfTyped,
     locked: () => !!locked.current,
@@ -268,6 +272,30 @@ function markHalf(input: LocalInput, save: FieldSave) {
 }
 
 type Flush = (text: string, chosen?: boolean) => Promise<unknown>;
+
+function compositionEvents(input: LocalInput, typed: (text: string) => void) {
+  // #239: let the browser finish the candidate before the field can save it.
+  const onCompositionStart = () => {
+    input.composing.current = true;
+    input.stopTimer();
+  };
+  const onCompositionEnd = (event: CompositionEvent) => {
+    input.composing.current = false;
+    typed((event.currentTarget as HTMLInputElement).value);
+  };
+  const onInput = (event: Event) => {
+    if ((event as InputEvent).isComposing) onCompositionStart();
+    typed((event.currentTarget as HTMLInputElement).value);
+  };
+  return { onInput, onCompositionStart, onCompositionEnd };
+}
+
+function isCompositionKey(event: KeyboardEvent, composing: boolean) {
+  if (!composing && !event.isComposing && event.keyCode !== 229) return false;
+  if (event.key === 'Enter' || event.key === 'Escape') event.stopPropagation();
+  return true;
+}
+
 function inputEvents(
   input: LocalInput, save: FieldSave, { commit, flush, debounceMs, multiline, locked }: {
     commit: FieldCommit; flush: Flush; debounceMs: number; multiline?: boolean; locked: string | null;
@@ -280,7 +308,6 @@ function inputEvents(
     untouched.current = false;
     if (save.typed(text)) timer.current = window.setTimeout(() => void flush(draftRef.current), debounceMs);
   };
-  const onInput = (event: Event) => typed((event.currentTarget as HTMLInputElement).value);
   const onFocus = () => {
     const text = draftRef.current;
     atFocus.current = text;
@@ -309,6 +336,7 @@ function inputEvents(
     if (halfTyped() !== halfRef.current && ref.current) typed(ref.current.value);
   };
   const onKey = (event: KeyboardEvent) => {
+    if (isCompositionKey(event, input.composing.current)) return;
     if (event.key === 'Enter' && !multiline) {
       event.preventDefault();
       untouched.current = false;
@@ -326,7 +354,7 @@ function inputEvents(
     if (notSavedAtFocus.current) untouched.current = true;
     save.escape(text, notSavedAtFocus.current, commit);
   };
-  return { onInput, onBlur, onFocus, onKeyUp, onKey };
+  return { ...compositionEvents(input, typed), onBlur, onFocus, onKeyUp, onKey };
 }
 
 function useFieldLifecycle({

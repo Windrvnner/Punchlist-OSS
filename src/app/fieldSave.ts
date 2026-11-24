@@ -37,6 +37,7 @@ export type FieldAtFocus = Pick<FieldSaveView, 'byItself' | 'reason'> & {
 /** The input supplies its live text and browser state. Save policy only returns changes for it to show. */
 export type FieldInput = {
   text(): string;
+  composing?(): boolean;
   partial(): boolean;
   partialNow(): boolean;
   locked(): boolean;
@@ -119,7 +120,7 @@ export class FieldSave {
     if (this.input.partial()) return false;
     if (this.keep !== undefined && (unsavedFields.has(this.keep) || this.view.external)) this.keepText(text);
     else if (this.input.locked() && text !== this.seen.value) this.keepText(text);
-    return !this.view.external;
+    return !this.view.external && !this.input.composing?.();
   }
 
   receive(record: FieldValue) {
@@ -179,6 +180,7 @@ export class FieldSave {
   }
 
   async save(text: string, commit: FieldCommit, chosen = false): Promise<FieldSaveOutcome | undefined> {
+    if (this.input.composing?.()) return undefined;
     this.input.stopTimer();
     if (!this.shouldSend(text, chosen)) return undefined;
     this.show({ status: 'saving', external: false });
@@ -322,7 +324,7 @@ export class FieldSave {
   unmount(commit: FieldCommit) {
     this.keepCurrent();
     const text = this.input.text();
-    if (this.input.stopTimer() && text !== this.seen.value && !this.input.partial()
+    if (this.input.stopTimer() && text !== this.seen.value && !this.input.partial() && !this.input.composing?.()
       && !this.view.external && !this.input.locked() && this.base === this.seen.value) {
       void commit(text, this.base);
     }
@@ -333,7 +335,7 @@ export class FieldSave {
   }
 
   reconnect(commit: FieldCommit) {
-    if (this.view.status !== 'failed' || !this.view.byItself || this.view.external) return;
+    if (this.view.status !== 'failed' || !this.view.byItself || this.view.external || this.input.composing?.()) return;
     this.resending = true;
     void this.save(this.input.text(), commit);
   }
