@@ -9,21 +9,33 @@
  */
 import type { Store } from './store';
 import { localYmd, type QaLog, type Question } from '../domain/model';
-import { dealQuestions, dealTwin, qaKept } from './state';
+import { dealQuestions, dealTwin, qaChanged, qaKept } from './state';
 import { logWrite, logHolds, matchRows, cellValue, readLogCells, holds } from '../domain/logWrite';
 import {
   KeepQaLog, SetQaLogFolder, RecordQaLogExport, ChooseQaVersion, TakeFromQaLog, fileTaken, windowsPath as samePath,
 } from './commands/qaLogs';
 import { questionsSheet, suggestMapping, type Mapping, type ImportField } from '../domain/importExport';
-import { ok, fail, type Result } from '../domain/result';
+import { ok, fail, invalid, type Result } from '../domain/result';
 import { cell, type KeptAsk } from '../domain/keptMerge';
 import type { SheetEdit } from '../domain/sheets';
+import type { QaLogFiles } from '../ports';
 
 /** a log's name: its file's name without the extension, and without " - vCurrent" */
 export const logName = (file: string) => file.replace(/\.[^.]+$/, '').replace(/\s+-\s+vCurrent$/i, '').trim() || 'Q&A log';
 
 /** the deal's log, if it has one */
 export const logOf = (store: Store, dealId: string): QaLog | undefined => store.get().deals[dealId]?.qaLogs[0];
+
+/** Opening a changed question marks its current log update seen and forgets marks from older updates. */
+export function markQaLogSeen(store: Store, questionId: string) {
+  const state = store.get();
+  const updateOf = (id: string) => state.deals[state.questions[id]?.dealId]?.qaLogs[0]?.last?.at;
+  const at = updateOf(questionId);
+  const question = state.questions[questionId];
+  if (at === undefined || !question || !qaChanged(state, question).length) return;
+  const current = Object.fromEntries(Object.entries(state.prefs.qaSeen).filter(([id, when]) => updateOf(id) === when));
+  store.setPrefs({ qaSeen: { ...current, [questionId]: at } });
+}
 
 /** a file's folder and name, from its full path ("X:\Deals\Proseware\Q&A log.xlsx") */
 const placeOf = (full: string) => { const i = Math.max(full.lastIndexOf('\\'), full.lastIndexOf('/')); return i > 0 ? { folder: full.slice(0, i), file: full.slice(i + 1) } : null; };
@@ -170,6 +182,52 @@ export type ExportOutcome =
  */
 export type PlaceKept = (ask: KeptAsk[]) => Promise<number[] | null>;
 
+export const NEW_KEPT_ROW = -1;
+export const LEAVE_KEPT_OUT = -2;
+
+/** Each existing row can take at most one of the edits being placed. */
+export function keptRowTaken(asks: KeptAsk[], choices: (number | undefined)[], edit: number, candidate: number) {
+  const row = asks[edit]?.rows[candidate]?.row;
+  return row !== undefined && choices.some((choice, index) =>
+    index !== edit && choice !== undefined && asks[index]?.rows[choice]?.row === row);
+}
+
+function validKeptPlacement(asks: KeptAsk[], choices: number[]) {
+  return choices.length === asks.length && asks.every((ask, edit) => {
+    const choice = choices[edit];
+    return choice === NEW_KEPT_ROW || choice === LEAVE_KEPT_OUT ||
+      (Number.isInteger(choice) && !!ask.rows[choice] && !keptRowTaken(asks, choices, edit, choice));
+  });
+}
+
+type LogTable = Extract<Awaited<ReturnType<QaLogFiles['read']>>, { ok: true }>['value'];
+type KeptLogEdits = NonNullable<LogTable['kept']>;
+
+/** Place each retained edit where chosen. Edits left out will be filed in the archive. */
+function placeLogEdits(kept: KeptLogEdits, choices: number[], below: number) {
+  const picked: SheetEdit[] = [];
+  const own: SheetEdit[] = [];
+  const clashes = [...kept.clashes];
+  const out = new Set<string>();
+  let nextNewRow = below + 1;
+  for (const [index, edit] of (kept.ask ?? []).entries()) {
+    if (choices[index] === LEAVE_KEPT_OUT) {
+      out.add(edit.file);
+      continue;
+    }
+    const target = edit.rows[choices[index]];
+    if (target) {
+      picked.push(...target.steps);
+      if (target.clash && !clashes.includes(target.row)) clashes.push(target.row);
+      continue;
+    }
+    const row = nextNewRow++;
+    own.push({ kind: 'rows', after: row - 1, count: 1 }, ...edit.add.map(({ col, value }) => cell(row, col, value)));
+  }
+  const files = kept.files.map((file) => out.has(file.name) ? { ...file, left: true as const } : file);
+  return { picked, own, kept: { ...kept, files, clashes: clashes.sort((left, right) => left - right) } };
+}
+
 /** what the update compared for each question it takes cells for, so a later edit is never replaced (#40) */
 function comparedValues(qs: Question[], taken: Record<string, Record<string, string>>) {
   const byId = new Map(qs.map((q) => [q.id, q] as const));
@@ -205,18 +263,17 @@ export async function exportQaLog(store: Store, dealId: string, place?: PlaceKep
   // A row of a kept edit the log can't say for sure goes where the person says: into a row (a cell both
   // changed keeps the log's, and is reported), as a row of its own below the update's own, or left out (then the notice
   // says the edit was not fully merged). Closing the ask leaves the whole update for later, so it is asked again.
-  const picked: SheetEdit[] = [], own: SheetEdit[] = [];
+  let picked: SheetEdit[] = [];
+  let own: SheetEdit[] = [];
   if (kept?.ask?.length) {
-    const chose = place ? await place(kept.ask) : null; if (!chose) return ok({ status: 'canceled' });
-    const below = table.value.lastRow - 1 + w.steps.reduce((n, s) => n + (s.kind === 'rows' ? s.count : 0), 0); const clashes = [...kept.clashes];
-    const out = new Set<string>();                                                  // files with a row left out
-    kept.ask.forEach((a, i) => {
-      if (chose[i] === -2) { out.add(a.file); return; }
-      const at = a.rows[chose[i]];
-      if (at) { picked.push(...at.steps); if (at.clash && !clashes.includes(at.row)) clashes.push(at.row); return; }
-      const row = below + 1 + own.filter((s) => s.kind === 'rows').length; own.push({ kind: 'rows', after: row - 1, count: 1 }, ...a.add.map((c) => cell(row, c.col, c.value)));
-    });
-    kept = { ...kept, clashes: clashes.sort((x, y) => x - y), files: kept.files.map((f) => (out.has(f.name) ? { ...f, left: true as const } : f)) };
+    const choices = place ? await place(kept.ask) : null;
+    if (!choices) return ok({ status: 'canceled' });
+    if (!validKeptPlacement(kept.ask, choices)) {
+      return fail(invalid('Each kept edit needs its own log row or placement'));
+    }
+    const below = table.value.lastRow - 1 + w.steps.reduce((count, step) =>
+      count + (step.kind === 'rows' ? step.count : 0), 0);
+    ({ kept, picked, own } = placeLogEdits(kept, choices, below));
   }
   const steps = [...(kept?.steps ?? []), ...picked, ...w.steps, ...own];
   // nothing to write (a log just made holds everything) leaves the file alone; what it holds of ours is still recorded
