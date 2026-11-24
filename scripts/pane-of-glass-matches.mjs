@@ -1,17 +1,12 @@
 // Match syntax, so examples in comments, strings, regexes and JSX text never count as UI dependencies.
 import { posix } from 'node:path';
 import { parseSync, Visitor } from 'vite';
+import { literalText, unwrapped } from './pane-of-glass-syntax.mjs';
 import { localConstLookup } from './pane-of-glass-constants.mjs';
 
 const storageNames = new Set(['localStorage', 'sessionStorage', 'indexedDB']);
 const layerPath = /^(?:backend|adapters|desktop|shell)(?:\/|$)/;
 const externalModule = /^(?:node:|(?:electron|fs|path)(?:\/|$))/;
-
-function literalText(node) {
-  if (typeof node?.value === 'string') return node.value;
-  if (node?.type === 'TemplateLiteral' && !node.expressions.length) return node.quasis[0].value.cooked;
-  return null;
-}
 
 function concatenate(left, right) {
   return left.flatMap((prefix) => right.map((suffix) => prefix + suffix));
@@ -51,15 +46,6 @@ function forbiddenModule(file, name) {
 function propertyNames(key, computed) {
   if (!computed && (key.type === 'Identifier' || key.type === 'JSXIdentifier')) return [key.name];
   return stringValues(key);
-}
-
-// Assertions, parentheses and optional chains leave the underlying path or member unchanged.
-function unwrapped(node) {
-  while (['TSNonNullExpression', 'TSAsExpression', 'TSTypeAssertion', 'TSSatisfiesExpression',
-    'ChainExpression', 'ParenthesizedExpression'].includes(node?.type)) {
-    node = node.expression;
-  }
-  return node;
 }
 
 // Only a direct identifier argument follows const aliases. Keep the diagnostic at the import site.
