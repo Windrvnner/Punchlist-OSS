@@ -1,8 +1,32 @@
 // Resolve a local const on the TypeScript tree Vite already parsed.
 import { createRequire } from 'node:module';
-import { parseSync, transformSync } from 'rolldown/utils';
+import { parseSync, transformSync, Visitor } from 'rolldown/utils';
 
 const require = createRequire(import.meta.url);
+
+// The scope manager expects one name per namespace. Each segment shares the original
+// declaration's source span so the bundler decides whether the whole chain emits a value.
+function scopesFor(program) {
+  const { analyze } = require('@typescript-eslint/scope-manager');
+  const restore = [];
+  new Visitor({
+    TSModuleDeclaration(node) {
+      const { id, body } = node;
+      if (id.type !== 'TSQualifiedName') return;
+      restore.push(() => Object.assign(node, { id, body }));
+      while (node.id.type === 'TSQualifiedName') {
+        const { left, right } = node.id;
+        node.body = { ...node, id: right };
+        node.id = left;
+      }
+    },
+  }).visit(program);
+  try {
+    return analyze(program, { sourceType: 'module', lib: [], jsxPragma: null }).scopes;
+  } finally {
+    for (const reset of restore) reset();
+  }
+}
 
 function definesValue(definition, file, source) {
   if (!definition.isVariableDefinition) return false;
@@ -17,7 +41,8 @@ function definesValue(definition, file, source) {
 
 function constInitializer(variable, file, source) {
   const values = variable.defs.filter((def) => definesValue(def, file, source));
-  if (!values.length && variable.defs.length) return undefined; // Erased; keep looking in the enclosing scope.
+  // An erased declaration leaves the enclosing binding visible.
+  if (!values.length && variable.defs.length) return undefined;
   if (values.length !== 1) return null;
   const { name, node, parent } = values[0];
   if (node.type !== 'VariableDeclarator' || node.id !== name || parent.kind !== 'const') return null;
@@ -25,10 +50,8 @@ function constInitializer(variable, file, source) {
 }
 
 export function localConstLookup(program, file, source) {
-  const { analyze } = require('@typescript-eslint/scope-manager');
-  const { scopes } = analyze(program, { sourceType: 'module', lib: [], jsxPragma: null });
   const references = new Map();
-  for (const scope of scopes) {
+  for (const scope of scopesFor(program)) {
     for (const ref of scope.references) {
       if (ref.isValueReference) references.set(ref.identifier, ref.resolved);
     }

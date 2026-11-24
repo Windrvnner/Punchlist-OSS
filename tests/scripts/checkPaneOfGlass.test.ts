@@ -34,6 +34,20 @@ function fixture(baseline: Baseline = {}) {
   return { dir, write, setBaseline, baselineText, run: (...args: string[]) => check(dir, ...args) };
 }
 
+function loadCompiledFixture(repo: ReturnType<typeof fixture>, file: string, loader: string) {
+  repo.write('package.json', '{"type":"module"}');
+  repo.write('build/checklist.mjs', "export const caption = 'Checklist'");
+  const compiler = path.resolve('node_modules/typescript/bin/tsc');
+  const args = [compiler, '--ignoreConfig', '--strict', '--isolatedModules', '--target', 'ES2022',
+    '--module', 'ESNext', '--moduleResolution', 'bundler', '--skipLibCheck', '--outDir', 'build', file];
+  const options = { cwd: repo.dir, encoding: 'utf8' } as const;
+  const emit = spawnSync(process.execPath, args, options);
+  expect(emit.status, emit.stdout + emit.stderr).toBe(0);
+  const run = spawnSync(process.execPath, ['--input-type=module', '-e', loader], options);
+  expect(run.status, run.stderr).toBe(0);
+  return run.stdout.trim();
+}
+
 afterEach(() => {
   for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
@@ -144,9 +158,6 @@ describe('UI dependency checks', () => {
   it('resolves runtime constants across erased TypeScript namespaces', () => {
     const repo = fixture();
     const file = 'src/ui/page.ts';
-    const compiler = path.resolve('node_modules/typescript/bin/tsc');
-    repo.write('package.json', '{"type":"module"}');
-    repo.write('build/checklist.mjs', "export const caption = 'Checklist'");
     const loader = [
       "import { load, Panel, Other } from './build/page.js'",
       "const builtIn = await import('node:path')",
@@ -168,19 +179,50 @@ describe('UI dependency checks', () => {
         '}',
       ];
       repo.write(file, source.join('\n'));
-      const args = [compiler, '--ignoreConfig', '--isolatedModules', '--target', 'ES2022', '--module', 'ESNext',
-        '--moduleResolution', 'bundler', '--skipLibCheck', '--outDir', 'build', file];
-      const cwd = repo.dir;
-      const emit = spawnSync(process.execPath, args, { cwd, encoding: 'utf8' });
-      expect(emit.status, emit.stdout + emit.stderr).toBe(0);
-      const run = spawnSync(process.execPath, ['--input-type=module', '-e', loader], { cwd, encoding: 'utf8' });
-      expect(run.status, run.stderr).toBe(0);
       const local = name === './checklist.mjs';
-      expect(run.stdout.trim()).toBe(local ? 'Checklist,Checklist,Checklist' : 'node:path,node:path,Checklist');
+      const loaded = loadCompiledFixture(repo, file, loader);
+      expect(loaded).toBe(local ? 'Checklist,Checklist,Checklist' : 'node:path,node:path,Checklist');
       const result = repo.run();
       expect(result.status, result.stderr).toBe(local ? 0 : 1);
       if (!local) expect(result.stderr).toContain(`${file} import (lines 3, 6): 2 exceeds`);
     }
+  });
+
+  it('keeps emitted dotted namespaces in scope and resolves names across erased dotted namespaces', () => {
+    const repo = fixture();
+    const file = 'src/ui/page.ts';
+    const source = [
+      "const page = 'node:path'",
+      'export namespace Panel {',
+      "  namespace page.meta { export const caption = 'Checklist' }",
+      "  page.toString = () => './checklist.mjs'",
+      '  export const load = () => import(page as unknown as string)',
+      '}',
+      'export namespace Erased {',
+      '  namespace page.meta.labels { export type Caption = string }',
+      '  export const load = () => import(page)',
+      '}',
+      "const meta = 'node:path'",
+      'export namespace Nested {',
+      '  export namespace rows.meta {',
+      "    export const toString = () => './checklist.mjs'",
+      '    export const load = () => import(meta as unknown as string)',
+      '  }',
+      '  export const outside = () => import(meta)',
+      '}',
+    ].join('\n');
+    const loader = [
+      "import { Panel, Erased, Nested } from './build/page.js'",
+      "const builtIn = await import('node:path')",
+      'const pages = await Promise.all([Panel.load(), Erased.load(), Nested.rows.meta.load(), Nested.outside()])',
+      "console.log(pages.map(page => page === builtIn ? 'node:path' : page.caption).join(','))",
+    ].join('\n');
+    repo.write(file, source);
+    expect(loadCompiledFixture(repo, file, loader)).toBe('Checklist,node:path,Checklist,node:path');
+    expect(repo.run().stderr).toContain(`${file} import (lines 9, 17): 2 exceeds`);
+    repo.write(file, source.replaceAll('node:path', './checklist.mjs'));
+    expect(loadCompiledFixture(repo, file, loader)).toBe('Checklist,Checklist,Checklist,Checklist');
+    expect(repo.run().status).toBe(0);
   });
 
   it('checks computed member and destructuring keys and each read in a dotted JSX tag', () => {
