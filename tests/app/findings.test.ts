@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Store } from '../../src/app/store';
 import { memRepo, disk } from '../adapters/memRepo';
 import { mockAi, mockDocuments, mockSession, mockFirstPass } from '../../src/adapters/mocks';
@@ -25,6 +25,14 @@ function make(kv = disk()) {
   return { store, kv, repo };
 }
 async function deal(store: Store, name = 'Datum') { await store.boot(); await store.dispatch(CreateDeal, { name, folders: [] }); const id = Object.values(store.get().deals).find((d) => d.name === `Project ${name}`)!.id; await store.loadDeal(id); return id; }
+
+async function findingToReview(store: Store) {
+  const dealId = await deal(store);
+  await store.dispatch(CreateFinding, {
+    dealId, title: 'Distribution test omits the reserve shortfall', workstream: 'Legal',
+  });
+  return dealFindings(store.get(), dealId)[0];
+}
 
 describe('findings', () => {
   it('a detail a person rewrites is their own words, not cited by every source', async () => {
@@ -129,6 +137,55 @@ describe('findings', () => {
     expect(store.get().findings[f.id].reviewed?.by).toBe('jdoe');
     await store.dispatch(ReviewFinding, { dealId, findingId: f.id, reviewed: false });
     expect(store.get().findings[f.id].reviewed).toBeNull();
+  });
+
+  it('Undo restores the reviewer and time from the review cleared on this PC (#337)', async () => {
+    const { store, repo } = make();
+    const finding = await findingToReview(store);
+    const reviewed = { by: 'Prior reviewer', at: '2026-11-01T08:00:00.000Z' };
+    repo.peer.change('finding', finding.id, { ...finding, reviewed }, { ...reviewed, from: 'PC B' });
+    await repo.sync();
+    await vi.waitFor(() => expect(store.get().findings[finding.id].reviewed).toEqual(reviewed));
+
+    const target = { dealId: finding.dealId, findingId: finding.id };
+    const cleared = await store.dispatch(ReviewFinding, { ...target, reviewed: false });
+    if (!cleared.ok) throw new Error(cleared.error.message);
+    expect(store.get().findings[finding.id].reviewed).toBeNull();
+    const undone = await store.undo(cleared.value.opId);
+    expect(undone.ok).toBe(true);
+    expect(store.get().findings[finding.id].reviewed).toEqual(reviewed);
+    const saved = await repo.get('finding', finding.id);
+    expect(saved.ok && saved.value?.envelope.data).toMatchObject({ reviewed });
+  });
+
+  it('Undo removes a newly given review (#337)', async () => {
+    const { store } = make();
+    const finding = await findingToReview(store);
+    const target = { dealId: finding.dealId, findingId: finding.id };
+    const given = await store.dispatch(ReviewFinding, { ...target, reviewed: true });
+    if (!given.ok) throw new Error(given.error.message);
+    expect(store.get().findings[finding.id].reviewed).not.toBeNull();
+    expect((await store.undo(given.value.opId)).ok).toBe(true);
+    expect(store.get().findings[finding.id].reviewed).toBeNull();
+  });
+
+  it('Undo cannot restore a review or overwrite a finding edited on another PC after clearing it (#337)', async () => {
+    const { store, repo } = make();
+    const finding = await findingToReview(store);
+    const target = { dealId: finding.dealId, findingId: finding.id };
+    await store.dispatch(ReviewFinding, { ...target, reviewed: true });
+    const cleared = await store.dispatch(ReviewFinding, { ...target, reviewed: false });
+    if (!cleared.ok) throw new Error(cleared.error.message);
+
+    const before = store.get().findings[finding.id];
+    const title = 'Distribution test was corrected in the revised agreement';
+    const editor = { by: 'Other PC user', from: 'PC B', at: clock.now() };
+    repo.peer.change('finding', finding.id, { ...before, title }, editor);
+    await repo.sync();
+    await vi.waitFor(() => expect(store.get().findings[finding.id].title).toBe(title));
+    const undone = await store.undo(cleared.value.opId);
+    expect(undone.ok ? '' : undone.error.message).toMatch(/changed since/i);
+    expect(store.get().findings[finding.id]).toMatchObject({ title, reviewed: null });
   });
 
   it('a response on a linked question offers reassessment; reassess replaces the body, clears the mark, keeps the previous assessment in the audit, and can be undone', async () => {
