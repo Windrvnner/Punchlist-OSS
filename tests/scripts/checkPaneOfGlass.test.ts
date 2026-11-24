@@ -4,6 +4,7 @@ import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wri
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { build } from 'vite';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const script = path.resolve('scripts/check-pane-of-glass.mjs');
@@ -83,6 +84,66 @@ describe('UI dependency checks', () => {
     expect(result.status).toBe(1);
     for (const diagnostic of expected) expect(result.stderr).toContain(diagnostic);
     expect(result.stderr).toContain('"The frontend is a pane of glass" in CLAUDE.md');
+  });
+
+  it('checks eager and lazy Vite glob imports against the included files', () => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    for (const layer of ['backend', 'adapters', 'desktop', 'shell', 'ui']) {
+      repo.write(`src/${layer}/lenient.ts`, 'export const available = true');
+    }
+    repo.write('src/backend/.hidden.ts', 'export const hidden = true');
+    repo.write(file, [
+      "export const eager = import.meta.glob('../backend/lenient.ts', { eager: true })",
+      "export const views = import.meta.glob('../{ui,adapters}/**/*.ts')",
+      "export const shell = import.meta.glob(['/src/*/lenient.ts', '!/src/backend/**'])",
+      "export const desktop = import.meta.glob('./lenient.ts', { base: '../desktop' })",
+      "export const local = import.meta.glob('./*.ts')",
+      "export const clean = import.meta.glob(['../{ui,backend}/*.ts', '!../backend/**'])",
+      "export const missing = import.meta.glob('../backend/missing*.ts')",
+      `export const quoted = "import.meta.glob('../backend/lenient.ts')"`,
+      "export const other = index.glob('../backend/lenient.ts')",
+      "export const caseFold = import.meta.glob('../backend/*.TS', { caseSensitive: false })",
+      "export const visible = import.meta.glob(['../backend/*.ts', '!../backend/lenient.ts'])",
+      "const hidden = import.meta.glob(['./*.ts', '!./lenient.ts'], { base: '/src/backend', exhaustive: true })",
+    ].join('\n'));
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 1, 2, 3, 4, 10, 12): 6 exceeds`);
+  });
+
+  it('agrees with Vite on a UI-only glob whose base is asserted as const', async () => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    repo.write('src/backend/lenient.ts', 'export const read = true');
+    repo.write('src/ui/backend/lenient.ts', 'export const preview = true');
+    const options = "{ eager: true, base: '/src/ui/nested' } as const";
+    const local = `export const pages = import.meta.glob('../backend/lenient.ts', (${options}))`;
+    repo.write(file, local);
+    const modules: string[] = [];
+    await build({
+      root: repo.dir, configFile: false, envDir: false, logLevel: 'silent',
+      build: { write: false, lib: { entry: path.join(repo.dir, file), formats: ['es'] } },
+      plugins: [{
+        name: 'record-bundled-modules',
+        generateBundle(_options, bundle) {
+          for (const chunk of Object.values(bundle)) {
+            if (chunk.type === 'chunk') modules.push(...chunk.moduleIds);
+          }
+        },
+      }],
+    });
+    const sources = modules.map((id) => path.relative(repo.dir, id).split(path.sep).join('/'));
+    expect(sources).toContain('src/ui/backend/lenient.ts');
+    expect(sources).not.toContain('src/backend/lenient.ts');
+    repo.write(file, [
+      local,
+      "const readers = import.meta.glob('./lenient.ts' as const, { base: ('../backend' as const) } as const)",
+      "const patterns = import.meta.glob([('../backend/lenient.ts' as const)] satisfies string[])",
+    ].join('\n'));
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 2, 3): 2 exceeds`);
   });
 
   it('checks computed member and destructuring keys and each read in a dotted JSX tag', () => {
@@ -223,7 +284,7 @@ describe('the remaining UI exceptions', () => {
 
   it('passes the committed baseline on the repository sources', () => {
     const repo = fixture();
-    cpSync('src/ui', path.join(repo.dir, 'src/ui'), { recursive: true });
+    cpSync('src', path.join(repo.dir, 'src'), { recursive: true });
     copyFileSync(baselineFile, path.join(repo.dir, baselineFile));
     const result = repo.run();
     expect(result.stderr).toBe('');
