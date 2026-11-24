@@ -8,14 +8,16 @@ import { CreateQuestion } from '../../src/app/commands/questions';
 import { findingHistory } from '../../src/app/findings';
 import { initialState, type State } from '../../src/app/state';
 import { derivedId } from '../../src/domain/derivedId';
-import type { AuditEntry } from '../../src/domain/model';
+import { Question, type AuditEntry } from '../../src/domain/model';
 import { scaleMemoInput } from '../fixtures/memoScale';
+import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { make } from './importKit';
 
 const at = '2026-11-17T10:00:00.000Z';
 const funding = 'The draw conditions do not match the signed term sheet';
-const { deal, findings, questions } = scaleMemoInput;
+const { deal, findings } = scaleMemoInput;
 const finding = findings[0];
+const questions = portfolioQuestions();
 
 function audit(kind: AuditEntry['kind'], op: string, fields: Partial<AuditEntry> = {}): AuditEntry {
   return { kind, opId: derivedId('op', [op]), recordId: finding.id, dealId: deal.id, actor: 'adoe', at, ...fields };
@@ -29,18 +31,9 @@ function dealRecords(state: State, dealId: string) {
       state.findings[id] = { ...record, id, dealId, title: `${site} site: ${record.title}` };
     }
   }
-  const phases = ['at first draw', 'at testing', 'at completion', 'at conversion', 'at refinancing'];
-  const regions = ['coastal', 'upland', 'central'];
-  let number = 0;
-  for (const region of regions) {
-    for (const phase of phases) {
-      for (const record of questions) {
-        const id = derivedId('q', [dealId, region, phase, record.id]);
-        const text = `For the ${region} site ${phase}: ${record.text}`;
-        number += 1;
-        state.questions[id] = { ...record, id, dealId, n: number, text };
-      }
-    }
+  for (const [index, text] of questions.entries()) {
+    const id = derivedId('q', [dealId, text]);
+    state.questions[id] = Question.parse({ id, dealId, n: index + 1, rev: 1, createdAt: at, updatedAt: at, text });
   }
 }
 
@@ -105,7 +98,7 @@ it('looks up the exact deal, question and two same-title findings after the crea
   expect(original).toMatchObject({ title: funding, body: firstBody });
   expect(created).toMatchObject({ title: funding, body: secondBody });
   expect(created?.id).not.toBe(original?.id);
-  expect(openedQuestion).toMatchObject({ dealId, text, n: questions.length * 15 + 1 });
+  expect(openedQuestion).toMatchObject({ dealId, text, n: questions.length + 1 });
   expect(createdRecord(state, question.value.opId, 'findings')).toBeUndefined();
   expect(createdRecord(state, 'missing', 'questions')).toBeUndefined();
 });
