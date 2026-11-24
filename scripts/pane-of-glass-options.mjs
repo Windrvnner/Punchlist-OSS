@@ -29,6 +29,7 @@ function keyReader(node, key) {
 }
 
 function recordReader(properties) {
+  let prototype;
   const fields = properties.map((part) => {
     if (part.type === 'SpreadElement') {
       const read = dataReader(part.argument);
@@ -36,11 +37,22 @@ function recordReader(properties) {
     }
     if (part.kind !== 'init' || part.method) throw new Error('Non-data property');
     const key = keyReader(part, part.key);
-    if (!part.computed && key() === '__proto__') throw new Error('Custom prototype');
     const read = dataReader(part.value);
+    if (!part.computed && key() === '__proto__') {
+      prototype = read;
+      return () => [];
+    }
     return () => [[key(), read()]];
   });
-  return () => Object.fromEntries(fields.flatMap((field) => field()));
+  return () => {
+    const record = Object.fromEntries(fields.flatMap((field) => field()));
+    if (!prototype) return record;
+    const base = prototype();
+    // The prototype is itself checked data. Member lookups still require an own property.
+    if (base === null || typeof base === 'object') return Object.setPrototypeOf(record, base);
+    // JavaScript ignores a primitive supplied as an object literal's prototype.
+    return record;
+  };
 }
 
 function arrayReader(elements) {
@@ -56,12 +68,15 @@ function arrayReader(elements) {
   };
 }
 
+const shortCircuit = Symbol('optional chain');
+const primitiveGlobals = { undefined, NaN, Infinity };
+
 function memberReader(node) {
   const receiver = dataReader(node.object);
   const property = keyReader(node, node.property);
   return () => {
     const owner = receiver();
-    if (node.optional && (owner === null || owner === undefined)) return undefined;
+    if (owner === shortCircuit || (node.optional && (owner === null || owner === undefined))) return shortCircuit;
     const key = property();
     const descriptor = Object.getOwnPropertyDescriptor(owner, key);
     if (descriptor && Object.hasOwn(descriptor, 'value')) return descriptor.value;
@@ -72,8 +87,11 @@ function memberReader(node) {
 
 // Check the syntax of every branch. Read only the chosen values, as JavaScript does for &&, ||, ?? and ?:.
 function dataReader(expression) {
-  const node = unwrapped(expression);
+  const node = unwrapped(expression, 'ChainExpression');
   switch (node.type) {
+    case 'Identifier':
+      if (!Object.hasOwn(primitiveGlobals, node.name)) break;
+      return () => primitiveGlobals[node.name];
     case 'Literal':
       if (node.regex) break;
       return () => node.value;
@@ -83,6 +101,13 @@ function dataReader(expression) {
       return arrayReader(node.elements);
     case 'MemberExpression':
       return memberReader(node);
+    case 'ChainExpression': {
+      const read = dataReader(node.expression);
+      return () => {
+        const value = read();
+        return value === shortCircuit ? undefined : value;
+      };
+    }
     case 'TemplateLiteral': {
       const raw = node.quasis.map((part) => part.value.cooked);
       const values = node.expressions.map(dataReader);

@@ -138,7 +138,9 @@ describe('UI dependency checks', () => {
     }
   });
 
-  it.each(['ui', 'backend'])('retains compound options that select a %s file', (layer) => {
+  it.each([
+    ['ui', true], ['ui', false], ['backend', true], ['backend', false],
+  ] as const)('retains compound options that select a %s file (eager %s)', (layer, eager) => {
     const repo = fixture();
     const file = 'src/ui/readers.ts';
     repo.write('src/ui/part.ts', 'export const term = true');
@@ -153,12 +155,19 @@ describe('UI dependency checks', () => {
       `base: { choices: [,, ...['../${layer}']] }.choices[1 + 1]`,
       `base: { '[object Object]': '../${layer}' }[{}]`, `base: { ['a,b']: '../${layer}' }[['a', 'b']]`,
       `base: '../${layer}' || null.path`, `base: false && null.path ? null.path : '../${layer}'`,
+      `base: { branch: null }.branch?.folder.name ?? '../${layer}'`,
+      `base: { branch: { folder: { name: '../${layer}' } } }.branch?.folder.name ?? '../ui'`,
+      `base: { primary: undefined, fallback: '../${layer}' }.fallback`,
+      `base: { __proto__: null, fallback: '../${layer}' }.fallback`,
+      `base: { __proto__: undefined, fallback: '../${layer}' }.fallback`,
+      `base: { __proto__: { fallback: '../ui' }, fallback: '../${layer}' }.fallback`,
     ];
-    const source = bases.flatMap((base, index) => ['true', 'false'].map((eager) =>
-      `export const read${index}${eager} = import.meta.glob('./part.ts', { ${base}, eager: ${eager} })`));
+    const source = bases.map((base, index) =>
+      `export const read${index} = import.meta.glob('./part.ts', { ${base}, eager: ${eager} })`);
     const unsafe = [
-      '{ eager: globalThis.process.exit(7) }', '{ [globalThis.process.exit(8)]: true }',
+      '{ query: { seen: globalThis.process.exitCode = 7 } }', '{ [globalThis.process.exit(8)]: true }',
       '{ base: { get path() { globalThis.process.exit(9) } }.path }',
+      "{ base: { __proto__: { location: '../backend' } }.location }",
     ];
     for (const [index, options] of unsafe.entries()) {
       source.push(`export const deferred${index} = import.meta.glob('./part.ts', ${options})`);
@@ -167,8 +176,8 @@ describe('UI dependency checks', () => {
     const result = repo.run();
     expect(result.status, result.stderr).toBe(layer === 'ui' ? 0 : 1);
     if (layer === 'backend') {
-      const lines = Array.from({ length: 32 }, (_, index) => index + 1).join(', ');
-      expect(result.stderr).toContain(`${file} import (lines ${lines}): 32 exceeds`);
+      const lines = Array.from({ length: 22 }, (_, index) => index + 1).join(', ');
+      expect(result.stderr).toContain(`${file} import (lines ${lines}): 22 exceeds`);
     }
   });
 

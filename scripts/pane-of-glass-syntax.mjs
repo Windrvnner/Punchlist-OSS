@@ -5,9 +5,10 @@ export function literalText(node) {
 }
 
 // Assertions, parentheses and optional chains leave the underlying path or member unchanged.
-export function unwrapped(node) {
-  while (['TSNonNullExpression', 'TSAsExpression', 'TSTypeAssertion', 'TSSatisfiesExpression',
-    'ChainExpression', 'ParenthesizedExpression'].includes(node?.type)) {
+export function unwrapped(node, stopBefore) {
+  const wrappers = ['TSNonNullExpression', 'TSAsExpression', 'TSTypeAssertion', 'TSSatisfiesExpression',
+    'ChainExpression', 'ParenthesizedExpression'];
+  while (wrappers.includes(node?.type) && node.type !== stopBefore) {
     node = node.expression;
   }
   return node;
