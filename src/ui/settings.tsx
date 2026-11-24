@@ -42,8 +42,8 @@ export function SettingsDialog() {
     <Modal onClose={close} label="Settings" blur className="sdlg setdlg">
       <div class="shead"><h2 id="s-title">Settings</h2>{VERSION && <span class="sver" id="s-version">Version {VERSION}</span>}<button type="button" class="x" id="s-close" aria-label="Close" title="Close (Esc)" onClick={close}><Icon name="close" size={15} /></button></div>
       <div class="srow"><div class="k">Account</div><div class="who"><span class="avatar" id="s-ini">{u?.initials ?? ''}</span><b id="s-name">{u?.name ?? ''}</b></div></div>
-      {store.services.signin && <SignInRow signin={store.services.signin} />}
-      {store.services.place && <SharedFolderRow place={store.services.place} />}
+      {s.can.signin && <SignInRow signin={store.services.signin!} />}
+      {s.can.place && <SharedFolderRow place={store.services.place!} />}
       <div class="srow"><div class="k">Appearance</div><div class="seg" id="s-theme" role="group" aria-label="Appearance">{([['system', 'Match Windows'], ['light', 'Light'], ['dark', 'Dark']] as const).map(([k, l]) => <button type="button" key={k} data-theme-pick={k} {...(k === 'system' ? { 'data-autofocus': true } : {})} class={s.prefs.theme === k ? 'on' : ''} aria-pressed={s.prefs.theme === k} onClick={() => store.setPrefs({ theme: k })}>{l}</button>)}</div></div>
       <div class="srow"><div class="k">Deals Open On</div><div class="seg" id="s-landing" role="group"
         aria-label="Deals open on">{DEAL_PAGES.map(([k, l]) => <button type="button" key={k} data-landing={k}

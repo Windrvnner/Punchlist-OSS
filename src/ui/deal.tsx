@@ -154,8 +154,8 @@ function DealMenu({ deal: d, lit, rename }: { deal: Deal; lit: boolean; rename: 
   const making = s.ui.memoBusy.includes(d.id);
   const busy = making ? 'Making the deal memo' : undefined;
   return <MoreMenu id="deal-more" menuId="deal-menu" lit={lit} busy={busy} items={(done) => <>
-    {store.services.ai.checkAll && <CheckAgain deal={d} signedOut={signedOut} done={done} />}
-    {store.services.ai.memo && <MenuItem id="deal-memo" off={making} why={making ? null : signedOut}
+    {s.can.checkAll && <CheckAgain deal={d} signedOut={signedOut} done={done} />}
+    {s.can.memo && <MenuItem id="deal-memo" off={making} why={making ? null : signedOut}
       onClick={() => act(done, () => void runMemo(store, d.id))}>{busy ? `${busy}…` : 'Deal Memo…'}</MenuItem>}
     <MenuItem id="deal-rename" why={locked} onClick={() => act(done, rename)}>Rename</MenuItem>
     <div class="msep" />

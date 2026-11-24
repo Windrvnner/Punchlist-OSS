@@ -85,7 +85,10 @@ const closedText = (at: string) => { const w = whenText(at); return `Closed ${/^
  * (decisions.md, Findings). New finding stays the one visible button.
  */
 function FindingsMore({ dealId, empty, restorable }: { dealId: string; empty: boolean; restorable: boolean }) {
-  const store = useStore(); const [open, setOpen] = useState(false); const wrap = useRef<HTMLSpanElement>(null);
+  const store = useStore();
+  const { can } = useAppState();
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLSpanElement>(null);
   useDismiss(open, () => setOpen(false), '.fhead .fmore');
   // focus the ⋯ button first, so closing the dialog returns there
   const openDialog = (kind: 'importIssues' | 'exportFindings' | 'deleted') => {
@@ -96,7 +99,7 @@ function FindingsMore({ dealId, empty, restorable }: { dealId: string; empty: bo
       <button type="button" class={`btn sm ico ${open ? 'on' : ''}`} id="f-more" aria-label="More" title="More"
         aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="more" size={16} /></button>
       {open && <div class="colmenu glass" role="menu">
-        {store.services.ai.issuesList && <button type="button" class="mi" role="menuitem" id="f-import"
+        {can.issuesList && <button type="button" class="mi" role="menuitem" id="f-import"
           onClick={() => openDialog('importIssues')}>Import…</button>}
         <button type="button" class="mi" role="menuitem" id="f-export" disabled={empty}
           onClick={() => openDialog('exportFindings')}>Export…</button>
@@ -126,7 +129,7 @@ function StatusMenu({ status, choose }: { status: string; choose: (x: 'open' | '
  */
 export function CheckLine({ deal: d }: { deal: Deal }) {
   const store = useStore(); const s = useAppState(); const c = s.checks[d.id]; const ro = useContext(ReadOnlyContext);
-  if (!store.services.ai.checkAll) return null;
+  if (!s.can.checkAll) return null;
   const on = (iso: string) => fmtDate(localYmd(iso)); const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
   const out = c?.left ? [c.left.items ? n(c.left.items, 'checklist item', 'checklist items') : '', c.left.findings ? n(c.left.findings, 'finding', 'findings') : ''].filter(Boolean).join(' and ') : '';
   const deep = !!c?.offerDeep && !c.left && !c.failedAt;
