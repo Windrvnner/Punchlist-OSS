@@ -1,7 +1,8 @@
 import { titleStyle } from './titleStyle';
 import { Fragment, type ComponentChildren, type RefObject } from 'preact';
 import { createPortal } from 'preact/compat';
-import { askAbout, itemStanding, conflictLabel, versionsWord, offFindingCount } from '../app/state';
+import { askAbout, itemStanding, versionsWord, offFindingCount } from '../app/state';
+import { checklistQuestionTarget } from '../app/checklistQuestion';
 import type { ItemKind, State } from '../app/state';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useAppState, useStore, fmtDate, useToSidebarBottom, useDismiss } from './hooks';
@@ -16,8 +17,8 @@ import { MoreMenu, MenuItem, ChoiceCheck } from './moreMenu';
 import { CreateQuestion } from '../app/commands/questions';
 import { RestoreFinding } from '../app/commands/findings';
 import { localYmd, type Finding } from '../domain/model';
-import { AskCard, AskedList, askedAbout, STATUS, useLogQuestion } from './askCounterparty';
-import { keptDrafts, isText } from './keptDrafts';
+import { AskCard, AskedList, askedAbout, STATUS } from './askCounterparty';
+import { useChecklistDraft } from './checklistDraft';
 import { AddDealItems, SetItemsOff, offeredItems, unlistedItems } from '../app/commands/checklist';
 
 type Kind = ItemKind;
@@ -351,16 +352,6 @@ function Row({ r, dealId, wide, flaggedAbove, unlisted, on, off, tab, group, ope
   );
 }
 
-/** The open item, whole. */
-/**
- * Questions half typed in the Checklist pane, by deal and item: moving to another item, closing the pane or pressing
- * Escape keeps the text, and the box comes back with it when the item is opened again. Cancel or logging the question
- * clears it.
- */
-const askDrafts = keptDrafts('checklist-ask', isText);   // kept across a restart too
-// the finding each kept question was started on, by the same key: it stays the question's finding once the item is turned off
-const askOn = keptDrafts('checklist-ask-on', isText);
-
 /**
  * The open item, whole. A turned-off item (`off`) is shown in the same pane, so a question being typed about its finding
  * stays in place, text and focus, when the item is turned off here or on another PC: it shows the findings its checks
@@ -395,9 +386,15 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
     moreMenu.current?.querySelector<HTMLElement>('.mi')?.focus();
     return () => { document.removeEventListener('mousedown', away, true); document.removeEventListener('keydown', key, true); window.removeEventListener('resize', shut); };
   }, [more]);
-  const st = itemStanding(s, dealId, r); const k = st.kind; const f = off ? (raised.find((x) => x.id === askOn.get(`${dealId}:${r.id}`) && x.status === 'open') ?? raised[0]) : r.findingId ? s.findings[r.findingId] : undefined;
+  const st = itemStanding(s, dealId, r);
+  const k = st.kind;
+  const f = st.finding;
   const d = s.deals[dealId]; const pane = useToSidebarBottom<HTMLDivElement>();
-  const asked = askedAbout(s, dealId, r.id, f);
+  const draftKey = `${dealId}:${r.id}`;
+  const draft = useChecklistDraft(draftKey, f?.id);
+  const { asking, text, setText, kept, findingId, begin, stopAsking, busy } = draft;
+  const target = checklistQuestionTarget(s, r, off, findingId);
+  const asked = askedAbout(s, dealId, r.id, off && findingId ? s.findings[findingId] : f);
   // a turned-off item also lists what was asked about it as a gap, apart from its findings' questions
   const askedAsGap = off ? askedAbout(s, dealId, r.id, undefined).filter((q) => !q.linkedFinding) : [];
   // a question can be asked about a flagged item's open finding, or about a gap (linking design, section 6), never about
@@ -406,23 +403,12 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
   // a question being typed stays on screen whatever happens meanwhile (lost work first): another PC may ask about the gap,
   // the item may stop being a gap or be turned off; Log question then says why it is off, and Cancel lets it go. Set aside
   // with Escape, it is kept, and Ask stays offered while it is, so it can always be brought back
-  const kept = !!askDrafts.get(`${dealId}:${r.id}`);
   const offerAsk = !off && ((canAsk && !(k === 'gap' && asked.length)) || kept);
-  // why a question cannot be asked about the finding just now: the deal is read-only, or the finding is in two versions
-  const why = ro ?? (st.versions ? `${conflictLabel(s, st.versions)} has ${versionsWord(st.versions.versions.length).toLowerCase()}. Choose one first` : null);
-  // a question about a finding can be logged while the finding is open, even once the item is turned off; one
-  // about a gap while the item is a gap
-  const aboutFinding = r.result === 'finding' || (off && (!!f || !!askOn.get(`${dealId}:${r.id}`)));      // the finding a kept question was started on
-  const logWhy = why ?? (aboutFinding ? (!f ? 'Its finding is no longer here' : f.status !== 'open' ? 'Its finding is closed' : null) : off ? 'This item is turned off' : canAsk ? null : 'This item no longer needs a question');
-  const draftKey = `${dealId}:${r.id}`;
-  const [asking, setAsking] = useState(() => !!askDrafts.get(draftKey));
-  const [text, setTextState] = useState(() => askDrafts.get(draftKey) ?? '');
-  const setText = (v: string) => { setTextState(v); if (v) { askDrafts.set(draftKey, v); if (!off && r.findingId) askOn.set(draftKey, r.findingId); } else { askDrafts.delete(draftKey); askOn.delete(draftKey); } };
+  const why = ro ?? target.conflictWhy;
+  const logWhy = ro ?? target.why;
   // a document opens in the deal's conversation, which is where a page can be read and asked about; closing it comes back here,
   // with the focus on the link it was opened from (the i-th in the list), or on the item if that link is not shown any more
   const read = (src: { doc: string; docId: string; loc: string }, i: number) => navigate(store, `chat-${dealId}`, { docAside: { doc: src.doc, docId: src.docId, dealId, loc: src.loc, from: 'From the checklist', item: r.text, back: `checklist-${dealId}`, backFocus: [`#ck-sources li:nth-child(${i + 1}) .ckopen`, `#ck-rows [data-item="${r.id}"]`] } });
-  // the question card goes when its question is logged or set aside: the focus goes back to the button that opened it, not to the page
-  const stopAsking = () => { setAsking(false); requestAnimationFrame(() => { if (!document.activeElement || document.activeElement === document.body) (document.getElementById('ck-ask') ?? document.getElementById('ck-on') ?? document.getElementById('ck-more') ?? document.getElementById('ck-close'))?.focus(); }); };
   // The pane's body scrolls under its fixed header. While a question is being typed, the box's buttons stay in sight:
   // opening the box, or a line more in it, scrolls the body just enough to show them clear of its bottom fade (22px).
   const body = useRef<HTMLDivElement>(null);
@@ -438,24 +424,10 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
     if (need > room) b.style.paddingBottom = `${16 + need - room}px`;      // 16px: the body's own bottom padding
     b.scrollTop += need;
   }, [asking, text, asked.length]);      // the Asked list, growing above the box when another PC asks, pushes it down
-  // a question about a flagged item, or one kept from before the item was turned off, is asked about its finding
-  const onF = (off || k === 'finding') && f ? f : undefined;
-  // a logged question's text is let go once it lands, unless more was typed since
-  const settle = () => {
-    if (askDrafts.get(draftKey)) return;
-    setTextState('');
-    stopAsking();
-  };
-  const forget = () => {
-    askDrafts.delete(draftKey);
-    askOn.delete(draftKey);
-  };
-  const { busy, log: logQuestion } = useLogQuestion(askDrafts, draftKey, forget, settle);
   const log = async () => {
     if (busy || !text.trim() || logWhy) return;
-    const linked = { workstream: onF?.workstream ?? '', ...(onF ? { linkedFinding: onF.id } : {}), linkedItem: r.id };
-    const input = { dealId, text: text.trim(), ...linked };
-    await logQuestion(input.text, () => store.dispatch(CreateQuestion, input, { idempotencyKey: 'ck-q-' + r.id }));
+    const input = { dealId, text: text.trim(), ...target.links };
+    await draft.log(input.text, () => store.dispatch(CreateQuestion, input, { idempotencyKey: 'ck-q-' + r.id }));
   };
   // the card being typed in keeps one place in the pane, on or off, so turning the item off never takes it away or moves the focus
   // shown whenever a question is being typed, whatever happens to the item or its finding meanwhile; Escape sets it
@@ -468,7 +440,7 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
     if (canAsk) stopAsking();
   };
   const card = asking ? <AskCard ids="ck-ask" cls="ckask" counterparty={d?.counterparty ?? ''}
-    linked={onF ? onF.title : r.text} text={text} onText={setText} why={logWhy} busy={busy} onLog={() => void log()}
+    linked={target.title} text={text} onText={setText} why={logWhy} busy={busy} onLog={() => void log()}
     onCancel={cancelAsking} onEscape={escapeAsking} /> : null;
   return (
     <div class="det ckdet glass" key={r.id} id="ck-detail" ref={pane}>
@@ -514,8 +486,7 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
       {/* why it is off is on the wrapper (a disabled button takes no pointer) and read out with the button */}
       {offerAsk && !asking && <span class="needs" title={why ?? undefined}><button type="button" class="btn sm"
         id="ck-ask" disabled={!!why} aria-description={why ?? undefined}
-        onClick={() => { if (k === 'gap' && r.need && !text) setText(r.need); setAsking(true);
-        }}>Ask the Counterparty</button></span>}
+        onClick={() => begin(k === 'gap' ? r.need : undefined)}>Ask the Counterparty</button></span>}
       {r.result === 'unsettled' && r.why && <><div class="lbl">Why</div><p class="ckp" id="ck-why">{r.why}</p></>}
       {r.result === 'unsettled' && !r.why && <p class="ckp" id="ck-why">The check did not come to a result on this item.</p>}
       {r.result === 'unchecked' && <p class="ckp" id="ck-why">No check has reached this item yet.</p>}
