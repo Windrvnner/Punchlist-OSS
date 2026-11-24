@@ -2,6 +2,7 @@
 // signed in on a test key, with no model service reachable. Run: node tests/desktop/smoke.spec.mjs (on Linux it needs a display: xvfb-run -a).
 import { _electron as electron } from 'playwright';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { insideGate } from '../../scripts/gate-dir.mjs';
 
@@ -130,7 +131,12 @@ let dealId;
   await page.waitForTimeout(750);
   const child = app.process();
   const exited = once(child, 'exit');
-  child.kill('SIGKILL');
+  if (process.platform === 'win32') {
+    // Chromium child processes can keep the profile open after the main process is killed.
+    execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
+  } else {
+    child.kill('SIGKILL');
+  }
   await exited;
 
   ({ app, page } = await started());
