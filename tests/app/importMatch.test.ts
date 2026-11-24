@@ -420,6 +420,36 @@ describe('a chain of tied rows', () => {
     } });
   });
 
+  it('matches rows made unique by separate choices in file order', async () => {
+    const { store } = make();
+    const dealId = await deal(store);
+    const question = 'Please provide the detailed debt service coverage model.';
+    const originals = [
+      ['1', question, 'Lender A', 'Financial', '2026-01-01', 'Counsel', priorResponse],
+      ['2', question, 'Lender A', 'Legal', '2026-02-02', 'Credit team', priorResponse],
+      ['3', question, 'Lender A', 'Financial', '2026-03-03', 'Credit team', priorResponse],
+      ['4', question, 'Lender A', 'Technical', '2026-04-04', 'Independent engineer', priorResponse],
+    ];
+    expect((await store.dispatch(ImportQuestions, {
+      dealId, mode: 'append', rows: sheet(originalHeader, originals),
+    })).ok).toBe(true);
+    const expected = [...responses, 'The cost forecast includes the latest engineering assessment.'];
+    const rows = sheet(incomingHeader, [
+      [question, 'Lender A', '', '', 'Credit team', expected[2]],
+      [question, 'Lender A', 'Financial', '', '', expected[3]],
+      [question, 'Lender A', '', '2026-01-01', '', expected[0]],
+      [question, 'Lender A', '', '2026-02-02', '', expected[1]],
+    ]);
+    const preview = previewImport(store, dealId, 'merge', rows);
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows })).ok).toBe(true);
+    const questions = dealQuestions(store.get(), dealId);
+    expect(questions.map((item) => item.response)).toEqual(expected);
+    expect(questions[3].respondedBy).toBe('Independent engineer');
+    const previewResponses = preview.ok && preview.value.changes
+      .filter((change) => change.field === 'Response').map((change) => change.to);
+    expect(previewResponses).toEqual(expected);
+  });
+
   it('quickly previews 4,000 OCR variants that have the same eligible questions', async () => {
     const { store } = make();
     const dealId = await deal(store);
@@ -439,6 +469,42 @@ describe('a chain of tied rows', () => {
     })).ok).toBe(true);
     const start = performance.now();
     const preview = previewImport(store, dealId, 'merge', rows);
+    expect(performance.now() - start).toBeLessThan(5_000);
+    expect(preview).toMatchObject({ ok: true, value: { created: 0, updated: count } });
+  }, 120_000);
+
+  it('quickly previews equivalent OCR variants with 4,000 different identifier inventories', async () => {
+    const { store } = make();
+    const dealId = await deal(store);
+    const firstWords = 'cash flow debt terms fees tax book cost data rates plans costs'.split(' ');
+    const nextWords = 'sums dates uses caps puts bond loan sales pages parts draft chart'.split(' ');
+    const prefix = 'Please provide the cash flow and debt terms, fees, tax book, cost data, rates, plans and costs. '
+      + 'Break down the sums, dates, uses, caps, puts, bond and loan sales, pages, parts and draft chart, ';
+    const suffix = 'along with all collateral-level reconciliation schedules and allocation calculations.';
+    const [base] = sheet('Question,Submitted by,Workstream', [[prefix + suffix, 'Lender A', 'Financial']]);
+    const count = 4_000;
+    const capitalize = (text: string, words: string[], mask: number) => text.replace(/[a-z]+/g, (word) => {
+      const index = words.indexOf(word);
+      return index >= 0 && (mask & (1 << index)) ? word.toUpperCase() : word;
+    });
+    const originals = Array.from({ length: count }, (_, index) => ({
+      ...base, n: index + 1, text: capitalize(prefix, firstWords, index) + suffix,
+    }));
+    const allFirstWords = capitalize(prefix, firstWords, -1);
+    const incoming = Array.from({ length: count }, (_, index) => {
+      let bit = 0;
+      const scanned = suffix.replace(/l/g, (letter) => index & (1 << bit++) ? 'I' : letter);
+      return {
+        ...base, text: capitalize(allFirstWords, nextWords, index) + scanned,
+        response: 'The updated model reflects final tariff and reserve assumptions.',
+      };
+    });
+    expect(new Set([...originals, ...incoming].map((row) => misreadKey(row.text))).size).toBe(1);
+    expect(new Set(originals.map((row) => identifierSig(row.text).ids.join(','))).size).toBe(count);
+    expect(new Set(incoming.map((row) => identifierSig(row.text).ids.join(','))).size).toBe(count);
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: originals })).ok).toBe(true);
+    const start = performance.now();
+    const preview = previewImport(store, dealId, 'merge', incoming);
     expect(performance.now() - start).toBeLessThan(5_000);
     expect(preview).toMatchObject({ ok: true, value: { created: 0, updated: count } });
   }, 120_000);
