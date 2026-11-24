@@ -16,51 +16,24 @@ interface WaitingRows extends Witness {
   rows: Set<number>;
 }
 
-/** Rows with one candidate choose in file order, including rows made sure by an earlier choice. */
-class SureRows {
-  private readonly heap: number[] = [];
-
-  add(row: number): void {
-    let position = this.heap.length;
-    while (position > 0) {
-      const parent = Math.floor((position - 1) / 2);
-      if (this.heap[parent] <= row) break;
-      this.heap[position] = this.heap[parent];
-      position = parent;
-    }
-    this.heap[position] = row;
-  }
-
-  take(): number | undefined {
-    const first = this.heap[0];
-    const last = this.heap.pop();
-    if (last === undefined || !this.heap.length) return first;
-    let position = 0;
-    while (position * 2 + 1 < this.heap.length) {
-      const left = position * 2 + 1;
-      const right = left + 1;
-      const child = right < this.heap.length && this.heap[right] < this.heap[left] ? right : left;
-      if (this.heap[child] >= last) break;
-      this.heap[position] = this.heap[child];
-      position = child;
-    }
-    this.heap[position] = last;
-    return first;
-  }
-}
-
 /** Two available questions prove a tie. Rows can share a watch on a list that still contains two (#264). */
 class FitWorklist {
   private readonly byQuestion = new Map<string, Set<WaitingRows>>();
   private readonly bySource = new Map<FitSource, WaitingRows>();
   private readonly byRow = new Map<number, WaitingRows>();
-  readonly sure = new SureRows();
+  private readonly sure: number[] = [];
+  private nextSure = 0;
+
+  takeSure(): number | undefined {
+    if (this.nextSure < this.sure.length) return this.sure[this.nextSure++];
+    return undefined;
+  }
 
   watch(row: number, choice: FitChoice | undefined): void {
     if (!choice) return;
     const witness = choice.witness;
     if (!witness) {
-      this.sure.add(row);
+      this.sure.push(row);
       return;
     }
     let waiting = witness.source && this.bySource.get(witness.source);
@@ -102,7 +75,7 @@ class FitWorklist {
         affected.push(row);
       }
     }
-    return affected;
+    return affected.sort((left, right) => left - right);
   }
 
   private register(waiting: WaitingRows): void {
@@ -132,7 +105,8 @@ export function matchFitTier(
     for (const affected of worklist.affected(question)) worklist.watch(affected, find(affected));
   };
   const settle = () => {
-    for (let row = worklist.sure.take(); row !== undefined; row = worklist.sure.take()) {
+    // Rows already sure choose before rows that become sure as a result of their choices.
+    for (let row = worklist.takeSure(); row !== undefined; row = worklist.takeSure()) {
       const choice = find(row);
       if (choice) claim(row, choice.first);
     }
