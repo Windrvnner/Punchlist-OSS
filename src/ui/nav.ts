@@ -5,6 +5,7 @@
  */
 import type { Store } from '../app/store';
 import type { UiState } from '../app/state';
+import { lastInput } from './hooks';
 
 let pending: { hash: string; patch: Partial<UiState> } | null = null;
 
@@ -13,6 +14,14 @@ export function navigate(store: Store, hash: string, patch: Partial<UiState> = {
   pending = { hash, patch };
   location.hash = hash;
 }
+// #498: a rendered Search destination can take keyboard focus if the user has stayed at the page.
+export function focusSearchResult(store: Store, id: string, focus: () => void) {
+  if (store.get().ui.searchFocus !== id) return;
+  store.ui({ searchFocus: null });
+  const active = document.activeElement;
+  if (lastInput.kind === 'key' && (active === document.body || active?.id === 'view')) focus();
+}
+
 /** opens a deal's Checklist with one item open beside the list */
 export const openChecklistItem = (store: Store, dealId: string, itemId: string) =>
   navigate(store, `checklist-${dealId}`, { selectedChecklist: itemId });

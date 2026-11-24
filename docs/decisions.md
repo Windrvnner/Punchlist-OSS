@@ -29,6 +29,12 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Home is the ask composer alone ("Ask across your deals…"), with no deal list, count, or dashboard cards.
 - The sidebar lists deals only, grouped by Deal status (Live, Monitoring, Pitch, and Closed; the Pitch group is headed "Pitches"). Groups fold and stay folded, and a group appears once it has a deal.
 - Search is one field in the sidebar (Ctrl K). Its results are grouped as Deals, Findings, Checklist Items, Questions, and Documents, and an item opens on its deal's Checklist (#2).
+- A Search question keeps the current deal's Q&A filters. From Home or a different deal it opens with All (#497).
+- Choosing an open Checklist item in Search reveals its row again (#496).
+- Keyboard selection in Search moves focus to the opened question or Checklist row (#498).
+  When a question closes and its row is hidden by the active filter, focus returns to the Q&A filters.
+- Search shows “No matches.” once it finishes reading My Deals and finds no results (#491).
+- Search keeps the highlighted result when more records arrive, while that result is still listed (#501).
 - A deal's pages are Overview, Findings, Checklist, and Q&A; **Settings** → **Deals Open On** picks which page opens first (Overview by default). No new tabs are added.
 - The deal header holds Deal status and one ⋯ menu with **Check Again** (showing "Last checked [date]"), **Deal Memo…**, **Rename**, and, set apart, **Delete Deal…**.
 - The counterparty sits alone at the top right of every deal page. Structure, Sector, and Technology appear on Overview only.
@@ -37,7 +43,12 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Documents on Overview shows each folder's "N of M read", one Core documents row, and up to two deals, shown as "Also in Project X", that hold most of this deal's documents.
 - The Findings page has **New Finding** as its one button and a ⋯ menu with **Import…**, **Export…**, and **Deleted…**; its filter menu holds Workstream and Reviewed. The list doesn't mark who raised a finding. It is grouped by workstream (A to Z, with "No workstream" last), and open findings marked "May be out of date" come first in each group.
 - Finding and question pages use the slim rail (the sidebar folded to icons) and the queue strip.
-- "Project " is added in front of a deal name that lacks it. A name that starts with that word in any capitalization, followed by anything other than a letter, accent, or digit, has the word rewritten as "Project" and the rest kept as typed; misspellings are not corrected. Deals may share a name; they are told apart by counterparty, then by creation date, in the sidebar, Add Deal, and search.
+- "Project " is added in front of a deal name that lacks it. A name that starts with that word in any capitalization, followed by anything other than a letter, accent, or digit, has the word rewritten as "Project" and the rest kept as typed; misspellings are not corrected. Deals may share a name; they are told apart by counterparty, then by creation date, in the sidebar, Add Deal, search, and the confirmations and notices that name a deal, as "Project Kestrel (Wingtip)" (#27).
+- Search and the sidebar keep the distinguishing words in shortened counterparty labels (#492).
+  An ellipsis marks a shortened suffix after those words (#791).
+  Search keeps the meaningful name after “Project” and the full question number or page range (#495).
+- Search ellipsizes an oversized single counterparty word (#494) and keeps the start of right-to-left deal names (#490).
+- Search uses the usual separator spacing after an ellipsized single-word counterparty (#790).
 - The New Deal form has Name and Counterparty; Structure, Sector, and Technology pick lists; and Folders. × closes it, and there is no Cancel. **Create** stays unavailable until there is a name.
 - Before a new deal is made, a duplicate check asks "Is this Project X?" when the folders' files, or the name and counterparty, match a team deal; nothing is refused.
 - Each deal has a Deleted list for findings and questions, showing who deleted each and when, with **Restore**. A deleted record reached by a link says so and offers **Restore**; a question being typed on a deleted finding's page stays there, with **Log Question** off (#340). A deleted question's number is never reused. An imported issues list can be removed from the Deleted list.
@@ -84,6 +95,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - On import, real date cells are read as dates and plain numbers are not. An ambiguous date is settled by the row's other date, its neighbors, and the rule that no date is in the future; otherwise it is left blank and listed.
 - Marking imported questions that have a response as Answered is optional and off by default.
 - Merge matches a row by wording first, then by number; a row that matches a deleted question brings it back. A row that names who submitted it never matches another party's question. "Will overwrite" is shown field by field first.
+- Merge never matches a row to a question that names a different identifier: anything with a digit, a Roman numeral or code in capitals, a single capital letter, or a letter or numeral in parentheses or after a word such as class, tranche, part or clause (Class A and B, Tranche II and IV, clause 4(a) and 4(b)). A row matched by number alone names exactly the question's identifiers, in the same capitals (the SPA and the spa are two questions there); any other row is a question of its own. Otherwise spacing, capitals and punctuation alone never make identifiers differ (#125, #127, #128).
+- In a number, an I, l or O before a single digit, or an I or l before a point and a digit, is a letter (Facility I1 is l1 but not 11, Class I.1 is not 1.1); an I, l or O elsewhere in a number reads as 1 or 0 (I00, 2O24, O.5). The word I is not an identifier (#127, #128).
 - The same list imported on two PCs makes one set of questions, with ids derived from the deal, number, party, and wording.
 - Two questions with the same number are both kept and marked; a person renumbers one. Undo, Restore, and a kept
   version's Restore bring a deleted question back under its own number, even when another question holds it (#13, #116).
@@ -119,6 +132,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 
 ## Checklist
 
+- Overview and Checklist count turned-off and not-yet-checked items the same way through one selector (#830).
 - An abandoned first pass over fewer documents than the deal now holds is finished like any left round,
   not started afresh.
 - The master checklist has four layers: general, structure, sector, and technology. There is always a general list.
@@ -155,6 +169,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - There is no Conversations tab.
 - Conversations are kept per person in the shared folder and follow the person between PCs. In the app, each person sees only their own; the files are readable by anyone with access to the folder, and no encryption is planned.
 - Answers cite sources sentence by sentence with a dotted underline, without numbered markers (#636). While a finding is being edited, each citation shows as a tag of at most 30 characters after its sentence (#636). An answer can become a finding, a question, or a response.
+- Cited phrases show the pointer cursor when they open a source. Hover-only citations keep the default cursor (#440).
+- Source chips keep the cited location and tags whole. The name shortens to fit and appears in full on hover (#441).
 - Chat is an agent with search, read, and folder tools. A folder read always covers the whole folder; reading more than `limits.folderDocs` documents asks first, and **Stop** answers from what was found.
 - While chat works, it shows "Researching" with the full trace; once it has answered, it shows "Researched · N steps · N of M documents searched · time", never "read" (option D).
 - Tool calls run inline by default; the hybrid and native modes are set by `models.toolCalls`.
@@ -162,6 +178,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A chat is one conversation on the model service; past its limit, it is compacted into an uploaded transcript.
 - Each PC keeps its own word index of the data room; nothing is added to the shared folder.
 - Documents open in reading mode beside the conversation, with page keys and zoom.
+- Switching PDFs opens the cited page at the top and keeps the zoom (#447).
+- In the browser demo, a PDF without a preview shows its title, page number, and a preview status (#443).
 - Decided but not built: plain-symbol math, a named finding opening in a side pane, answer actions as icons, and a suggested open question card.
 
 ## Deal memo
@@ -169,6 +187,10 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - The deal memo is a templated memo of Findings, Checklist, and Q&A: a one-page summary, the memo itself from page two, and an appendix.
 - Risk at a glance ranks workstreams by weighted risk (High 9, Medium 3, Low 1), in at most 12 rows.
 - Key risks lists every High risk, then the oldest Medium risks up to `memo.keyRisks`, A to Z within each severity.
+- The memo keeps usable risk groups when other entries in the model's reply are malformed.
+  Each open finding has one risk, on its own if the model left it out (#658).
+- The memo limits a key risk write-up to two paragraphs and 200 words. If retries yield no usable write-up,
+  it uses the findings' own cited words (#659).
 - The memo reports facts only: no recommendation, mitigants, next steps, or judging words.
 - **Deal Memo…** in the deal header's ⋯ menu asks where to save (Word or PDF), then makes the memo; there is no review step.
 - The memo has no text in capitals, headings included.
@@ -187,6 +209,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A deleted or replaced document leaves the deal under the rules in architecture.md; nothing linked to it is deleted (#413).
 - A folder that this person may not open doesn't stop indexing, and a check that couldn't read it says "Not complete".
 - The app never deletes documents. Drafts of one agreement form a family: the newest is read first, and reading mode shows a draft's date and lists its family's drafts, any two of which can be compared. Versions in one folder count only with an explicit mark such as v3 or Rev A.
+- A document-page error and its **Retry** use the paper text color. **Retry** is always underlined (#439).
 - "Read" means given to the model in a check that came to a result.
 - Core documents are worked out on each PC without a model; see docs/core-documents-design.md.
 - When an agreement is core, its whole family is core too: schedules, exhibits, annexes, amendments, side letters, signature pages, and change orders, identified from names and paths only; see docs/core-families-design.md.
@@ -197,6 +220,9 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 
 ## Storage and sharing between PCs
 
+- For now, the app is designed around one person at a time on each deal, across any of their own PCs, syncing through
+  a shared folder such as OneDrive. This is a design focus, not a restriction: new multi-person features wait for a
+  coordination layer, such as a database backend, and nothing built now may block them (#834).
 - Records are stored as change files in the team's shared folder, and each PC writes only its own. OneDrive
   provides automatic discovery and sync. The folder picker also accepts folders outside OneDrive (#111).
 - A PC connects through the team folder's share link in the control file (`desktop.teamFolderLink`). On screen, the folder is called the "Punchlist folder", and its name defaults to Punchlist (`desktop.sharedFolder`).
@@ -206,12 +232,15 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - The New Deal form is kept on its PC as it changes, folders still being read included, until the deal is created, so closing, reloading, or restarting loses nothing (#55, #113). Once Create is pressed, the form stays open until the deal is made or Create fails (#36).
 - No design may lose or hide typed work. Every version not kept is listed under Deleted as "Superseded by" the person who chose, and can be restored.
 - Text typed into a new finding (New finding or **Add as finding**) while **Create Finding** is saving goes to the finding made: its page opens in Edit with that text. A form that held only what was sent closes (#115).
+- A form closed and opened again while its save is out shares one kept draft with it: the save settles that draft once when it lands, and the form on screen then closes only if nothing typed is kept, so the typing is in one place (#771).
 - A save that lands after its deal was deleted elsewhere goes to the recovered copy, removed fields included, unless the copy changed those fields or the save left out a field it never saw; then it is refused. A save to a deleted deal's member, or after its recovered copy was deleted, is refused (#664, #222).
 - A change that arrives before a change it builds on is held back without pausing the deal; one more than a day old is let go as a choice. A deal can't be deleted while such changes are on their way.
 - The connection status card shows only when something is wrong. The avatar's dot is the accent color or red, and OneDrive being unavailable for 15 minutes produces one notice.
 - A copied install is detected and stops writing. A build never changes a record written by a newer version.
 - A damaged undo journal (each PC's record of its actions, used for Undo and to recover interrupted work) is set aside, and its complete entries are still offered.
 - A deal's analysis is split between the PCs that have the deal open, in rounds (a round is one shared run of checks on the deal, split into pieces of work) that any PC can take over. A requested check that an abandoned round doesn't cover writes that round off.
+- Two rounds of one kind open at once become the one with the lower id. A batch still running in the other counts
+  for the kept round, unless a later check has begun (#795).
 - The check line names who is working.
 - A check waiting on the model service says so after 2 minutes and resumes by itself; a check waiting on a sign-in says that instead.
 - Attachments are kept in the shared folder under their document's id. A file attached on Home is kept with the person's conversations.

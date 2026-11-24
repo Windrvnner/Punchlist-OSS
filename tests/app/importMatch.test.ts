@@ -1,33 +1,15 @@
 // Import matching: a file row is the question with its wording first, then its number; a deleted
 // question a row matches is brought back, not copied.
 import { describe, it, expect } from 'vitest';
-import { Store } from '../../src/app/store';
-import { memRepo, disk } from '../adapters/memRepo';
-import { MemoryLocal } from '../../src/adapters/local';
-import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
-import { mockAi, mockDocuments, mockSession } from '../../src/adapters/mocks';
-import { CreateDeal } from '../../src/app/commands/deals';
-import { CreateQuestion, SetResponse, DeleteQuestion, RestoreQuestion, EditQuestionField, SetQuestionStatus } from '../../src/app/commands/questions';
-import { CreateFinding, DeleteFinding, RestoreFindingSnapshot } from '../../src/app/commands/findings';
-import { ImportQuestions, RevertImport } from '../../src/app/commands/importQuestions';
-import { RestoreQuestionSnapshot } from '../../src/app/commands/drafts';
-import { registry } from '../../src/app/commands/undo';
-import { dealQuestions, dealFindings } from '../../src/app/state';
-import { prepareImport, suggestMapping } from '../../src/domain/importExport';
+import type { Store } from '../../src/app/store';
+import { CreateQuestion, SetResponse, DeleteQuestion, RestoreQuestion, EditQuestionField }
+  from '../../src/app/commands/questions';
+import { ImportQuestions } from '../../src/app/commands/importQuestions';
+import { dealQuestions } from '../../src/app/state';
 import { previewImport } from '../../src/app/transfer';
 import { matchRows } from '../../src/domain/logWrite';
+import { make, deal, rowsFrom, sheet, mapping, fileRow } from './importKit';
 
-const COMMANDS = [CreateDeal, CreateQuestion, SetResponse, DeleteQuestion, RestoreQuestion, EditQuestionField, SetQuestionStatus, CreateFinding, DeleteFinding, RestoreFindingSnapshot, ImportQuestions, RevertImport, RestoreQuestionSnapshot];
-for (const c of COMMANDS) registry.set(c.name, c);
-let t = 0; const clock = { now: () => new Date(Date.UTC(2026, 10, 9, 10, 0, 0, t++)).toISOString() };
-let seq = 0; const ids = { next: (p: string) => `${p}_01HZZZZZZZZZZZZZZZZ${String(seq++).padStart(7, '0')}` };
-function make() {
-  const opts = { latency: [0, 0] as [number, number] }; const kv = disk(); const repo = memRepo(clock.now, kv);
-  const store = new Store({ repo, ai: mockAi(opts, repo), docs: mockDocuments(opts), fs: { pickFolders: null, pathFor: null, save: async () => ({ ok: true as const, value: 'saved' as const }) }, sheets: csvCodec, session: mockSession(opts), local: new MemoryLocal(), clock, ids }, COMMANDS);
-  return { store, kv, repo };
-}
-async function deal(store: Store) { await store.boot(); await store.dispatch(CreateDeal, { name: 'Datum', folders: [] }); const id = Object.keys(store.get().deals)[0]; await store.loadDeal(id); return id; }
-const rowsFrom = (csv: string) => { const t = readCsv(new TextEncoder().encode(csv)); if (!t.ok) throw new Error('csv'); return prepareImport(t.value.rows, suggestMapping(t.value.columns)).rows; };
 const byN = (store: Store, dealId: string) => Object.fromEntries(dealQuestions(store.get(), dealId).map((q) => [q.n, q]));
 
 const lines = (store: Store, dealId: string) => dealQuestions(store.get(), dealId).map((q) => `${q.n}: ${q.text} | ${q.response}`);
@@ -124,7 +106,6 @@ describe('a merge at the size of a real deal', () => {
 });
 
 
-const sheet = (header: string, rows: string[][]) => rowsFrom([header, ...rows.map((r) => r.map((v) => `"${v.replace(/"/g, '""')}"`).join(','))].join('\n'));
 const parties = (store: Store, dealId: string) => dealQuestions(store.get(), dealId).map((q) => `${q.n} ${q.askedBy}: ${q.text} | ${q.response}`);
 
 describe('a row from another party', () => {
@@ -346,10 +327,6 @@ describe('a chain of tied rows', () => {
   }, 120_000);
 });
 
-const mapping = suggestMapping(['Number', 'Question', 'Response', 'Submitted by', 'Workstream']);
-const fileRow = (n: number, text: string, response: string) => rowsFrom(
-  `Number,Question,Response,Submitted by,Workstream\n${n},${text},${response},Lender,Finance\n`,
-);
 
 describe('identifiers and combining marks stay distinct during Merge', () => {
   const distinct = [

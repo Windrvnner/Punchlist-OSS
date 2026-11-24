@@ -6,7 +6,7 @@ import { Icon } from './icons';
 import { DocName } from './docName';
 import { ReadOnlyContext } from './editField';
 import { FoldersBody, FoldersActs } from './foldersParts';
-import { versionsWord, dealHash, type DealKinds } from '../app/state';
+import { versionsWord, dealHash, dealLabel, type DealKinds } from '../app/state';
 import { keepNewDeal } from './newDealKept';
 import { useNewDealDraft } from './useNewDealDraft';
 import { firmOf } from '../domain/checklist';
@@ -393,18 +393,21 @@ export function DeleteDealDialog() {
   const dd = s.ui.deleteDeal; const d = dd ? s.deals[dd.dealId] : undefined;
   const close = () => store.ui({ deleteDeal: null });
   if (!dd || !d) return null;
+  const label = dealLabel(s, d);      // what the dialogs and the notice call it; the name alone is what is typed (#27)
   const named = cleanName(dd.typed) === cleanName(d.name);   // spaces and accents as the name was kept, not as they were typed
   const next = () => { if (named) store.ui({ deleteDeal: { ...dd, sure: true, error: '' } }); };
   const go = async () => {
     const r = await store.dispatch(DeleteDeal, { dealId: d.id, typedName: dd.typed, ...(dd.seen ? { seen: dd.seen } : {}) }, { idempotencyKey: 'dd-go', quiet: true });
     if (!r.ok) { store.ui({ deleteDeal: { ...dd, error: r.error.message } }); return; }
     close();
-    store.toast(`${d.name} deleted`, undefined, { glyph: 'done' });
+    // a twin's longer label gives way at its end, so "deleted" stays in view; a name of its own reads as before
+    store.toast(`${label} deleted`, undefined, { glyph: 'done' }, undefined, label === d.name ? undefined : label);
     location.hash = 'deals';
   };
   if (dd.sure) return (
-    <Modal key="sure" onClose={close} label={`Delete ${d.name} for good?`} blur className="sdlg dddlg">
-      <div class="shead"><h2 id="dd-title">Delete {d.name} for good?</h2><button type="button" class="x" aria-label="Close" title="Close (Esc)" onClick={close}><Icon name="close" size={15} /></button></div>
+    <Modal key="sure" onClose={close} label={`Delete ${label} for good?`} blur className="sdlg dddlg">
+      <div class="shead"><h2 id="dd-title">Delete {label} for good?</h2><button type="button" class="x"
+        aria-label="Close" title="Close (Esc)" onClick={close}><Icon name="close" size={15} /></button></div>
       <p class="ddtext">Its findings and its Q&amp;A will be deleted. This cannot be undone.</p>
       {dd.error && <p class="emptyline err" id="dd-err" role="alert">{dd.error}</p>}
       <div class="xfoot"><span class="grow" /><button type="button" class="btn sm" id="dd-keep" data-autofocus
@@ -415,7 +418,9 @@ export function DeleteDealDialog() {
   return (
     <Modal key="name" onClose={close} label="Delete this deal?" blur className="sdlg dddlg">
       <div class="shead"><h2 id="dd-title">Delete this deal?</h2><button type="button" class="x" aria-label="Close" title="Close (Esc)" onClick={close}><Icon name="close" size={15} /></button></div>
-      <p class="ddtext"><b>{d.name}</b> will be deleted with its findings and its Q&amp;A. Type <b>{d.name}</b> to continue.</p>
+      {/* the name in bold, what tells it from its twin after it in plain text: the name is what is typed */}
+      <p class="ddtext"><b>{d.name}</b>{label.slice(d.name.length)} will be deleted with its findings and its Q&amp;A.
+        Type <b>{d.name}</b> to continue.</p>
       <input class="field in" id="dd-name" placeholder="Deal name" aria-label="Deal name" value={dd.typed} onInput={(e) => store.ui({ deleteDeal: { ...dd, typed: (e.currentTarget as HTMLInputElement).value, error: '' } })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); next(); } }} />   {/* without preventDefault the same key press would go on to the button the second pop-up puts the focus on */}
       <div class="xfoot"><span class="grow" /><button type="button" class="btn sm pri" id="dd-next" disabled={!named} onClick={next}>Continue</button></div>
     </Modal>
