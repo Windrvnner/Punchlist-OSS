@@ -90,8 +90,10 @@ it('looks up the exact deal, question and two same-title findings after the crea
   dealRecords(store.get(), dealId);
 
   const input = { dealId, title: funding, workstream: 'Legal' };
-  const first = await store.dispatch(CreateFinding, { ...input, body: ['The term sheet requires an executed PPA.'] });
-  const second = await store.dispatch(CreateFinding, { ...input, body: ['The base case assumes the draft is enough.'] });
+  const firstBody = ['The term sheet requires an executed PPA.'];
+  const secondBody = ['The base case assumes the draft is enough.'];
+  const first = await store.dispatch(CreateFinding, { ...input, body: firstBody });
+  const second = await store.dispatch(CreateFinding, { ...input, body: secondBody });
   const text = 'Which conditions in the signed term sheet remain outstanding for first draw?';
   const question = await store.dispatch(CreateQuestion, { dealId, text });
   if (!first.ok || !second.ok || !question.ok) throw new Error('Could not create the records');
@@ -100,8 +102,8 @@ it('looks up the exact deal, question and two same-title findings after the crea
   const original = createdRecord(state, first.value.opId, 'findings');
   const created = createdRecord(state, second.value.opId, 'findings');
   const openedQuestion = createdRecord(state, question.value.opId, 'questions');
-  expect(original).toMatchObject({ title: funding, body: ['The term sheet requires an executed PPA.'] });
-  expect(created).toMatchObject({ title: funding, body: ['The base case assumes the draft is enough.'] });
+  expect(original).toMatchObject({ title: funding, body: firstBody });
+  expect(created).toMatchObject({ title: funding, body: secondBody });
   expect(created?.id).not.toBe(original?.id);
   expect(openedQuestion).toMatchObject({ dealId, text, n: questions.length * 15 + 1 });
   expect(createdRecord(state, question.value.opId, 'findings')).toBeUndefined();
