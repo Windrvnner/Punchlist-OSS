@@ -6,6 +6,7 @@
  * holds, or a new version the app can make again. An archive file is created only under a free name.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { readZip, partText } from './zipParts';
@@ -53,23 +54,30 @@ function namesFile(file: string, owned: fs.BigIntStats): boolean {
   } catch { return false; }
 }
 
-function verifyCopy(file: string, expected: string): void {
-  if (sha256(fs.readFileSync(file)) !== expected) throw new Error('The Q&A log copy did not match the original');
+function verifyCopy(file: string, expected: string): Buffer {
+  const before = copyVersion(file);
+  const bytes = fs.readFileSync(file);
+  if (sha256(bytes) !== expected || copyVersion(file) !== before) {
+    throw new Error('The Q&A log copy did not match the original');
+  }
+  return bytes;
 }
 
-/** On shares without links, only the descriptor from the exclusive create may write the new name (#21). */
+/** Include identity and write times so a concurrent edit cannot validate an earlier read (#21). */
+function copyVersion(file: string): string {
+  const stat = fs.lstatSync(file, { bigint: true });
+  if (!stat.isFile()) throw new Error('The Q&A log copy is not a regular file');
+  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+}
+
+/** A failed exclusive write cannot prove a shared name is safe to remove (#21). */
 function copyThroughNewHandle(file: string, bytes: Uint8Array, expected: string): fs.BigIntStats {
   const handle = fs.openSync(file, 'wx');
   try {
-    const owned = fs.fstatSync(handle, { bigint: true });
-    try {
-      fs.writeFileSync(handle, bytes);
-      verifyCopy(file, expected);
-      return owned;
-    } catch (error) {
-      if (namesFile(file, owned)) tidy(file);
-      throw error;
-    }
+    const identity = fs.fstatSync(handle, { bigint: true });
+    fs.writeFileSync(handle, bytes);
+    verifyCopy(file, expected);
+    return identity;
   } finally { fs.closeSync(handle); }
 }
 
@@ -79,7 +87,7 @@ function publishCopy(staged: string, file: string, bytes: Uint8Array, expected: 
     fs.linkSync(staged, file);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code ?? '';
-    if (identity.ino === 0n || !['ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EPERM'].includes(code)) throw error;
+    if (identity.ino === 0n || !['ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EPERM', 'EXDEV'].includes(code)) throw error;
     return copyThroughNewHandle(file, bytes, expected);
   }
   verifyCopy(file, expected);
@@ -88,7 +96,7 @@ function publishCopy(staged: string, file: string, bytes: Uint8Array, expected: 
 
 /** Stage and verify the bytes before claiming the first free name. A failed claim owns nothing there (#21). */
 function create(dir: string, base: string, ext: string, bytes: Uint8Array): CreatedFile {
-  const staging = fs.mkdtempSync(path.join(dir, '.qalog-'));
+  const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-qalog-Archive-'));
   const staged = path.join(staging, `${base}${ext}`);
   try {
     fs.writeFileSync(staged, bytes, { flag: 'wx' });
@@ -311,7 +319,8 @@ export function settleKept(folder: string, file: string, kept: { name: string; h
       try {
         if (!held) {
           const base = `${fit(stem, ` ${stamp(saved)} saved meanwhile${ext}`)} ${stamp(saved)} saved meanwhile`;
-          create(dir, base, ext, b);
+          const filed = create(dir, base, ext, b);
+          verifyCopy(path.join(dir, filed.name), k.hash);
         }
         fs.rmSync(f); gone.push(k.name);
       } catch { if (k.name.endsWith('.old')) fs.renameSync(f, path.join(folder, `${k.name.slice(0, -4)}.${k.left ? 'left' : 'kept'}`)); }   // not merged again; filed later
