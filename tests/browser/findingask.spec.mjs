@@ -3,7 +3,7 @@
 // both; what is typed is never lost; and an open question on the Q&A page says what it was asked for. At deal scale:
 // a log of 2,000 questions beside the ones asked here.
 import { launchChrome } from './chrome.mjs';
-import { holdNext } from './cardPage.mjs';
+import { holdNext, recheckFinding } from './cardPage.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = [];
 const say = (id, ok, note = '') => {
@@ -277,6 +277,66 @@ async function askedFor(page, questionId) {
   say('logging the kept question settles its reopened card and saves it against the second finding',
     pending && both.join() === [f.id, second].join() && !page.errors.length,
     JSON.stringify({ pending, both, errors: page.errors }));
+  await ctx.close();
+}
+
+// Emptying the card while Log is pending, with and without a replacement on the rechecked item.
+for (const replaceDraft of [false, true]) {
+  const { ctx, page, id, f } = await findingPage();
+  const words = 'Please confirm the terms in the executed distribution covenant.';
+  const title = 'Distribution test uses the six months before the payment date';
+  const second = await page.evaluate(([first, title]) => __peer.add(first, { title }), [f.id, title]);
+  await page.click('#f-item a');
+  const itemId = await page.locator('#ck-rows .ckrow.on').getAttribute('data-item');
+  const row = page.locator(`#ck-rows [data-item="${itemId}"]`);
+  const saved = async () => (await linked(page)).filter((question) => question.text === words);
+  const card = () => page.evaluate(() => ({
+    text: document.querySelector('#ck-ask-text')?.value,
+    linked: document.querySelector('#ck-detail .clink')?.textContent,
+  }));
+  await page.click('#ck-ask');
+  await page.fill('#ck-ask-text', words);
+  await holdNext(page, 'CreateQuestion');
+  await page.click('#ck-ask-log');
+  await page.waitForFunction(() => !!window.resume);
+  await page.fill('#ck-ask-text', '');
+  if (!replaceDraft) {
+    await page.evaluate(() => window.resume());
+    await page.waitForSelector('#ck-ask');
+    const first = await saved();
+    await recheckFinding(page, id, itemId, second);
+    await page.click('#ck-ask');
+    const fresh = await card();
+    say('an emptied card closes when Log lands, and the next Ask starts on the rechecked finding',
+      first.length === 1 && first[0].linkedFinding === f.id && fresh.text === ''
+      && fresh.linked === `Linked to “${title}”`);
+    await ctx.close();
+    continue;
+  }
+  await page.click('#ck-close');
+  await recheckFinding(page, id, itemId, second);
+  await row.click();
+  await page.click('#ck-ask');
+  await page.fill('#ck-ask-text', words);
+  const replacement = await card();
+  await page.evaluate(() => window.resume());
+  await page.waitForFunction(() => !document.querySelector('#ck-ask-log')?.disabled);
+  const landed = await saved();
+  const after = await card();
+  await page.click('#ck-close');
+  await row.click();
+  const reopened = await card();
+  say('clearing the old card and reusing the words on a second finding preserves the replacement after Log',
+    replacement.linked === `Linked to “${title}”` && after.text === words && after.linked === replacement.linked
+    && reopened.text === words && reopened.linked === replacement.linked
+    && landed.length === 1 && landed[0].linkedFinding === f.id);
+  if (reopened.text === words) {
+    await page.click('#ck-ask-log');
+    await page.waitForSelector('#ck-ask-text', { state: 'detached' });
+    const both = await saved();
+    say('the replacement can then be logged once against its own finding',
+      both.length === 2 && both[0].linkedFinding === f.id && both[1].linkedFinding === second);
+  }
   await ctx.close();
 }
 

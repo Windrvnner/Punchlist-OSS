@@ -1,3 +1,5 @@
+import { checklistDrafts } from '../app/checklistDrafts';
+
 /**
  * Text typed into a form that is not a record yet (the composer and ask box, a new finding, a finding's edit, a closing
  * note, a question asked from the Checklist, the New deal form) lives in a map in memory, per thing it belongs to, so
@@ -75,12 +77,19 @@ export function renameKept(ids: Record<string, string>, stale: (v: unknown) => u
   for (const [was, now] of Object.entries(ids)) renamed.set(was, now); staleOf = stale;
   // the map's own lookups would move the old key too: the plain ones reach it
   for (const m of maps.values()) for (const [k, v] of [...m]) { const to = moveKey(k); if (to === k) continue; Map.prototype.delete.call(m, k); if (!Map.prototype.has.call(m, to)) m.set(k, v); }
+  keptChecklistQuestions.followCopy();
 }
 
 /** shape checks for the values the maps hold */
 export const isText = (v: unknown): v is string => typeof v === 'string';
 export const hasTexts = <K extends string>(...keys: K[]) => (v: unknown): v is Record<K, string> =>
   !!v && typeof v === 'object' && keys.every((k) => typeof (v as Record<string, unknown>)[k] === 'string');
+
+export const keptChecklistQuestions = checklistDrafts({
+  texts: keptDrafts('checklist-ask', isText),
+  targets: keptDrafts('checklist-ask-on', isText),
+  movedId: moveKey,
+});
 
 if (typeof window !== 'undefined') {
   window.addEventListener('pagehide', saveKeptDrafts);

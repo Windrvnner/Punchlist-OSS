@@ -408,6 +408,13 @@ export interface LocalStore {
   watch?(onChange: (key: string) => void): () => void;
 }
 
+/** Existing kept maps for Checklist questions. Record IDs follow a deal when it is recovered as a copy. */
+export interface ChecklistDraftMaps {
+  texts: Map<string, string>;
+  targets: Map<string, string>;
+  movedId: (id: string) => string;
+}
+
 /** One message of a conversation, as it is kept. An answer still waiting (`pending`) is never kept in the synced folder; the window's local store keeps it, so another window shows it waiting. */
 export interface KeptMessage { id: string; role: 'me' | 'ai'; text: string; sources?: Source[]; state: 'done' | 'pending' | 'failed'; at: string; attached?: { doc: string; docId: string }[]; /** what the chat agent did for this answer */ research?: Research; /** the model service's conversation as this answer left it */ thread?: ModelThread }
 /**
