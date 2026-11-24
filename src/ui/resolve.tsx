@@ -128,12 +128,11 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
 
   const draft = async () => {
     if (!s.can.merge || !q) return;
-    const merge = store.services.ai.merge!;
     const id = q.id;
     setPick('merged'); setMerged((m) => ({ text: m.text, busy: true, error: '' }));
     if (drafting.has(id)) return;   // already being written: its reply is the one to wait for
     drafting.add(id); const before = merges.get(id)?.text ?? '';
-    const r = await merge({ dealId, question: q.text, app: appText, log: logText });
+    const r = await store.services.ai.merge!({ dealId, question: q.text, app: appText, log: logText });
     drafting.delete(id);
     // a reply is dropped when the question was resolved meanwhile, or its merged text was changed (nothing typed is ever replaced)
     const use = r.ok && still(id) && (merges.get(id)?.text ?? '') === before;
@@ -190,7 +189,6 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
   const side = (k: string) => fields[k] ?? (pick === 'log' ? 'log' : 'app');
   const mergedReady = pick !== 'merged' || (!merged.busy && !!merged.text.trim());
   const canKeep = !!pick && !busy && mergedReady && Object.keys(kept).length > 0;
-  const againOn = pick === 'merged' && s.can.merge;
   const appWhen = [editor, fmtDateTime(q.updatedAt)].filter(Boolean).join(' · ');
   const version = (which: 'app' | 'log') => {
     const on = pick === which; const n = which === 'app' ? 1 : 2;
@@ -236,8 +234,8 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
         </> : <p class="emptyline" id="rsv-done">Resolved</p>}
       </div>
       <ResolveFoot at={at} total={queue.length} left={inTwoVersions(s, dealId).length}
-        onStep={(by) => go(queue[at + by])} again={againOn ? () => void draft() : null} againOff={merged.busy || busy}
-        canKeep={canKeep} picked={!!pick} onKeep={() => void keep()} />
+        onStep={(by) => go(queue[at + by])} again={pick === 'merged' && s.can.merge ? () => void draft() : null}
+        againOff={merged.busy || busy} canKeep={canKeep} picked={!!pick} onKeep={() => void keep()} />
     </Modal>
   );
 }

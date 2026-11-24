@@ -52,15 +52,19 @@ it.each(optionalPorts)('reflects the %s port appearing and disappearing after St
   expect(store.get().can).toEqual({ ...allOffered, [port]: false });
 });
 
-it('refreshes checklist rows only where the service is available', async () => {
+it('loads the deal and only refreshes checklist rows where the service is available', async () => {
   const { store } = make();
   const dealId = 'Project Fern';
+  const load = vi.spyOn(store, 'loadDeal').mockResolvedValue(undefined);
   const checklist = vi.fn(async () => ok([]));
   store.services.ai.checklist = checklist;
-  await store.refreshChecklist(dealId);
+  await store.loadDealWithChecklist(dealId);
+  expect(load).toHaveBeenCalledExactlyOnceWith(dealId);
   expect(checklist).toHaveBeenCalledExactlyOnceWith(dealId);
   expect(store.get().checklists[dealId]).toEqual([]);
   delete store.services.ai.checklist;
-  await store.refreshChecklist('Project Larch');
+  await store.loadDealWithChecklist('Project Larch');
+  expect(load).toHaveBeenLastCalledWith('Project Larch');
+  expect(checklist).toHaveBeenCalledExactlyOnceWith(dealId);
   expect(store.get().checklists).toEqual({ [dealId]: [] });
 });

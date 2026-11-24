@@ -40,10 +40,7 @@ export function QaPage({ dealId }: { dealId: string }) {
   const ro = useContext(ReadOnlyContext);                 // why nothing on this deal can be changed just now, if it cannot: what cannot be used is shown as off, with the reason on hover
   const d = s.deals[dealId];
   // the checklist too, where the deal has one: a question whose item it has settled is offered to be closed
-  useEffect(() => {
-    void store.loadDeal(dealId);
-    void store.refreshChecklist(dealId);
-  }, [dealId]);
+  useEffect(() => { void store.loadDealWithChecklist(dealId); }, [dealId]);
   if (!d) return null;
   const load = s.dealLoad[dealId];
   const rows = dealQuestions(s, dealId);

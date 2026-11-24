@@ -1482,6 +1482,11 @@ export class Store {
 
   private dealLoads = new Map<string, Promise<void>>();
   private gapsAsked = new Set<string>();             // deals whose gaps and unread responses this session has asked for, so callers that come together ask once
+  /** Load the deal and, where available, the checklist rows that can settle its questions. */
+  async loadDealWithChecklist(dealId: string): Promise<void> {
+    await Promise.all([this.loadDeal(dealId), this.refreshChecklist(dealId)]);
+  }
+
   /**
    * Load a deal's records once. Concurrent callers share the same load. The gaps are fetched once a session, and only
    * for callers that show them (the deal pages), not for search across deals; asked once even when callers come together.
