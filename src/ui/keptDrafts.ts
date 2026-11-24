@@ -47,7 +47,16 @@ let staleOf: (v: unknown) => unknown = (v) => v;
 
 /** a map that asks for a save whenever it changes */
 class KeptMap<V> extends Map<string, V> {
-  override set(k: string, v: V) { const to = moveKey(k); super.set(to, to === k ? v : staleOf(v) as V); soon(); return this; }
+  constructor(private readonly movedValue: (value: V, ids: ReadonlyMap<string, string>) => V = (v) => staleOf(v) as V) {
+    super();
+  }
+  override set(k: string, v: V) {
+    const to = moveKey(k);
+    const value = to === k ? v : this.movedValue(v, renamed);
+    super.set(to, value);
+    soon();
+    return this;
+  }
   override get(k: string) { return super.get(moveKey(k)); }
   override has(k: string) { return super.has(moveKey(k)); }
   override delete(k: string) { const had = super.delete(moveKey(k)); if (had) soon(); return had; }
@@ -56,10 +65,12 @@ class KeptMap<V> extends Map<string, V> {
 
 /**
  * A map of drafts named `name`, holding what the app left at its last close. `valid` says whether a stored value has the
- * map's shape. The name must be unique and stay the same from build to build.
+ * map's shape. The name stays the same from build to build. A map of record references can remap its values on recovery.
  */
-export function keptDrafts<V>(name: string, valid: (v: unknown) => v is V): Map<string, V> {
-  const m = new KeptMap<V>();
+export function keptDrafts<V>(
+  name: string, valid: (v: unknown) => v is V, movedValue?: (value: V, ids: ReadonlyMap<string, string>) => V,
+): Map<string, V> {
+  const m = new KeptMap<V>(movedValue);
   const saved = left[name];
   if (Array.isArray(saved)) for (const e of saved) if (Array.isArray(e) && e.length === 2 && typeof e[0] === 'string' && valid(e[1])) Map.prototype.set.call(m, e[0], e[1]);
   maps.set(name, m as Map<string, unknown>);

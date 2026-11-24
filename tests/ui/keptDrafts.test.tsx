@@ -41,6 +41,18 @@ describe('drafts kept across a restart', () => {
     m.delete('d_old:name'); expect(m.has('d_new:name')).toBe(false);
   });
 
+  it('moves a question’s original finding with its item when a deal is recovered', async () => {
+    let drafts = await load();
+    const targets = drafts.keptDrafts('checklist-ask-on', drafts.isText, (id, moved) => moved.get(id) ?? id);
+    targets.set('deal:item', 'original');
+    drafts.renameKept({ deal: 'copy', item: 'copied-item', original: 'copied-finding' });
+    expect(targets.get('copy:copied-item')).toBe('copied-finding');
+    targets.set('deal:item', 'original');
+    drafts.saveKeptDrafts();
+    drafts = await load();
+    expect(drafts.keptDrafts('checklist-ask-on', drafts.isText).get('copy:copied-item')).toBe('copied-finding');
+  });
+
   it('keep what a map not made yet this session left', async () => {
     localStorage.setItem(KEY, JSON.stringify({ 'test-later': [['a', 'left']] }));
     const k = await load();
