@@ -7,7 +7,7 @@ import { DocName } from './docName';
 import { ReadOnlyContext } from './editField';
 import { FoldersBody, FoldersActs } from './foldersParts';
 import { versionsWord, dealHash, dealLabel, type DealKinds } from '../app/state';
-import { keepNewDeal } from './newDealKept';
+import { keepNewDeal } from '../app/newDealDraft';
 import { useNewDealDraft } from './useNewDealDraft';
 import { firmOf } from '../domain/checklist';
 import { PickList } from './pickList';
