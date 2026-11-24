@@ -4,7 +4,9 @@ This is the design for the rebuilt deal screen: a conversation on the left and a
 Tasks, Diligence, Q&A, and the items a person opens. None of it is built yet. Its decisions are in
 [decisions.md](decisions.md), under "Deal screen". Where this page and the decisions differ, the decisions win.
 
-The mock-up is [deal-screen/mock.html](deal-screen/mock.html), with its icons in
+The mock-up is [deal-screen/mock.html](deal-screen/mock.html). Its styles are in the four `deal-screen/mock-*.css`
+files and its script in the six `deal-screen/mock-*.js` files, which mock.html loads in order: shared parts, the
+sidebar, the conversation, the pane, Q&A, and the screens themselves. Its icons are in
 [deal-screen/icons.js](deal-screen/icons.js). It uses the app's tokens and built stylesheet and sample data only. The
 source document page ([deal-screen/guarantee-p4.png](deal-screen/guarantee-p4.png)) is a generated sample, not a
 real deal document. When this design is built, this page and the `deal-screen/` folder are removed.
