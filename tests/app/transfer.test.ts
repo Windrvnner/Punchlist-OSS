@@ -176,9 +176,14 @@ describe('Q&A Merge when the file has character decoding damage', () => {
   const question = 'What’s the lock-up ratio — tested when?';
   const response = 'It’s 1.25x — tested semi-annually';
   const damage = (value: string) => value.replace(/[’—]/g, '?');
+  const wrongEncoding = (value: string) => new TextDecoder('windows-1252').decode(new TextEncoder().encode(value));
+  const partialEncoding = (value: string) => wrongEncoding(value).replace(/[\u0081\u008D\u008F\u0090\u009D]/g, '�');
+  const currency = 'The lender’s reserve is payable in Kč.';
 
   it.each([
     ['replacement marks', response, damage(response)],
+    ['misdecoded bytes and an unreadable byte', currency, partialEncoding(currency)],
+    ['a lost narrow no-break space', 'The reserve is USD 2\u202Fmillion.', 'The reserve is USD 2?million.'],
     [
       'flattened quotes and different-length replacement runs',
       'The lender’s reserve — capped at 2½ months.',
@@ -225,14 +230,14 @@ describe('Q&A Merge when the file has character decoding damage', () => {
     const clean = portfolioQuestions().map((ask, index) => [
       String(index + 1),
       `For the counterparty’s review — ${ask}`,
-      'It’s in the latest schedule — no changes since closing.',
+      'It’s in the latest schedule — the Kč amount is due in 2\u202Fweeks.',
     ]);
     expect((await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: rowsFrom(clean) })).ok).toBe(true);
     const originals = structuredClone(dealQuestions(store.get(), dealId));
     const reads = [damage, (text: string) => text.replace(/[’—]/g, '\uFFFD'),
       (text: string) => text.replace(/’/g, "'").replace(/—/g, '-'),
       (text: string) => text.replace(/’/g, "'").replace(/—/g, '??'),
-      (text: string) => new TextDecoder('windows-1252').decode(new TextEncoder().encode(text))];
+      wrongEncoding, partialEncoding, (text: string) => text.replace(/\u202F/g, '?')];
     const changed = clean.map((row, index) => row.map(reads[index % reads.length]));
     changed[0] = [
       clean[0][0],
@@ -272,6 +277,23 @@ describe('Q&A Merge when the file has character decoding damage', () => {
     expect(dealQuestions(store.get(), dealId)).toMatchObject([{ id: before.id, text: question, response }]);
     expect((await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: damaged })).ok).toBe(true);
     expect(dealQuestions(store.get(), dealId)[1]).toMatchObject({ text: damage(question), response: damage(response) });
+  });
+
+  it('imports an amount edit before a question mark that was already present', async () => {
+    const { store } = make();
+    await store.boot();
+    await store.dispatch(CreateDeal, { name: 'Deal', folders: [] });
+    const [dealId] = Object.keys(store.get().deals);
+    await store.loadDeal(dealId);
+    const initial = rowsFrom([['1', 'Confirm the reserve cap.', 'Pending confirmation: 2½?']]);
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: initial })).ok).toBe(true);
+    const edited = 'Pending confirmation: 2?';
+    const rows = rowsFrom([['1', 'Confirm the reserve cap.', edited]]);
+    expect(previewImport(store, dealId, 'merge', rows)).toMatchObject({ ok: true, value: {
+      updated: 1, changes: [{ n: 1, field: 'Response', to: edited }],
+    } });
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows })).ok).toBe(true);
+    expect(dealQuestions(store.get(), dealId)[0].response).toBe(edited);
   });
 });
 

@@ -69,21 +69,40 @@ export function damagedImportText(saved: string, incoming: string): boolean {
   const read = sheetSpacing(mojibake(incoming));
   if (original === read) return true;
   if (read === sheetSpacing(mojibake(saved))) return false;
-  if (!/[^\x00-\x7F]|\u0060/.test(original)) return false;
-  return matchesDamagedRead(original, read);
+  if (!/[^\x00-\x7F]|\u0060/.test(saved)) return false;
+  return matchesDamagedRead(saved, read) || matchesUnreadBytes(saved, read);
+}
+
+/** Check the wrong encoding even when an unreadable byte made the incoming cell impossible to decode back. */
+function matchesUnreadBytes(saved: string, read: string): boolean {
+  if (!read.includes('\uFFFD')) return false;
+  const wrong = new TextDecoder('windows-1252').decode(new TextEncoder().encode(saved));
+  const withLoss = wrong.replace(/[\u0081\u008D\u008F\u0090\u009D]/g, '\uFFFD');
+  return withLoss !== wrong && matchesDamagedRead(withLoss, read);
 }
 
 /** Check every possible end of a replacement run before comparing the punctuation or words after it. */
 function matchesDamagedRead(original: string, read: string): boolean {
-  const parts = read.split(/([?\uFFFD]+)/);
-  let offsets = new Set([0]);
+  const parts = read.split(/([?\uFFFD]+| )/);
+  let offsets = whitespaceEnds(original, new Set([0])).add(0);
   for (const [index, part] of parts.entries()) {
-    offsets = index % 2 === 0
-      ? literalEnds(original, part, offsets)
-      : replacementEnds(original, part, offsets);
+    if (part === ' ') offsets = whitespaceEnds(original, offsets);
+    else if (index % 2 === 0) offsets = literalEnds(original, part, offsets);
+    else offsets = replacementEnds(original, part, offsets);
     if (!offsets.size) return false;
   }
-  return offsets.has(original.length);
+  const lastWord = original.trimEnd().length;
+  return Array.from(offsets).some((end) => end >= lastWord);
+}
+
+/** A regular space can match the sheet's spacing. A replacement mark may instead be a lost Unicode space. */
+function whitespaceEnds(original: string, starts: Set<number>): Set<number> {
+  const ends = new Set<number>();
+  for (const start of starts) {
+    let at = start;
+    while (/\s/.test(original[at] ?? '') && !ends.has(at + 1)) ends.add(++at);
+  }
+  return ends;
 }
 
 function literalEnds(original: string, read: string, starts: Set<number>): Set<number> {
@@ -115,7 +134,8 @@ function replacementEnds(original: string, read: string, starts: Set<number>): S
   const ends = literalEnds(original, read, starts);
   const first = Math.min(...starts);
   const last = Math.max(...starts);
-  const marksToKeep = read.length - read.replace(/\?/g, '').length;
+  // Leave a replacement mark for the lost glyph after accounting for any literal question marks.
+  const marksToKeep = Math.min(read.length - 1, read.length - read.replace(/\?/g, '').length);
   let marks = 0;
   let marksAtStart: number | undefined;
   let marksBeforeLoss: number | undefined;
