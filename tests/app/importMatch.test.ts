@@ -8,6 +8,7 @@ import { ImportQuestions } from '../../src/app/commands/importQuestions';
 import { dealQuestions } from '../../src/app/state';
 import { previewImport } from '../../src/app/transfer';
 import { matchRows } from '../../src/domain/logWrite';
+import { PORTFOLIO_ASSETS, portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { make, deal, rowsFrom, sheet, mapping, fileRow } from './importKit';
 
 const byN = (store: Store, dealId: string) => Object.fromEntries(dealQuestions(store.get(), dealId).map((q) => [q.n, q]));
@@ -219,33 +220,7 @@ describe('4,000 rows into 4,000 questions all in the same words', () => {
 // lender's own list merged into it: numbered its own way, much of it asked by the others too, some of it its own questions
 // reworded or answered since, and a few the team had deleted.
 describe('a lender\'s list merged into a full log', () => {
-  const ASSETS = [
-    'Contoso Solar', 'Wingtip Wind', 'Woodgrove Storage', 'Litware Solar', 'Tailspin Wind', 'Adatum Storage',
-    'Northwind Solar', 'Trey Wind', 'Coho Solar', 'Relecloud Storage', 'Lucerne Solar', 'Alpine Wind',
-  ];
-  const ASKS = [
-    (a: string) => `Provide the executed EPC contract for ${a}, with all amendments and change orders.`,
-    (a: string) => `Confirm whether the interconnection agreement for ${a} has been assigned to the project company.`,
-    (a: string) => `What is the P50 net capacity factor assumed for ${a}, and who prepared the energy yield report?`,
-    (a: string) => `Provide the PPA for ${a}, including the offtaker's credit support and any termination notices.`,
-    (a: string) => `List all permits held for ${a} and confirm none are subject to appeal.`,
-    (a: string) => `Describe any liquidated damages paid or claimed under the ${a} construction contract.`,
-    (a: string) => `Provide the title report and survey for the ${a} site.`,
-    (a: string) => `Has ${a} experienced any curtailment above 3% in the last 24 months?`,
-    (a: string) => `Provide the O&M agreement for ${a} and the last 12 monthly performance reports.`,
-    (a: string) => `Confirm the tax equity flip date and current partnership allocations for ${a}.`,
-    (a: string) => `What insurance claims have been made for ${a} since COD?`,
-    (a: string) => `Provide the decommissioning plan and bond for ${a}.`,
-    (a: string) => `Confirm whether any lender consents are needed for the sale of ${a}.`,
-    (a: string) => `Provide the land lease for ${a}, with the rent schedule and extension options.`,
-    (a: string) => `Is there any pending or threatened litigation involving ${a}?`,
-    (a: string) => `Provide the warranty schedule for the major equipment at ${a}.`,
-    (a: string) => `Describe the environmental studies performed at ${a} and any open remediation.`,
-    (a: string) => `Provide the operating budget for ${a} for FY2026 and actuals for FY2024 and FY2025.`,
-  ];
-  const YEARS = ['FY2024', 'FY2025', 'H1 2026', 'Q3 2026', 'the hold period', 'the construction period', 'the first operating year', 'the last refinancing', 'the sale process', 'the current fiscal year', 'the budget year'];
-  // 12 assets x 18 asks x 11 periods = 2,376 distinct questions
-  const all: string[] = []; for (const y of YEARS) for (const a of ASSETS) for (const ask of ASKS) all.push(ask(a).replace(/\.$|\?$/, (p) => ` (for ${y})${p}`));
+  const all = portfolioQuestions();
   const PARTIES = ['Lender A', 'Lender B', 'Bidder C'];
 
   it('adds the lender\'s new questions, updates only its own, brings back its deleted ones, and leaves every other party\'s question as it was', async () => {
@@ -264,7 +239,11 @@ describe('a lender\'s list merged into a full log', () => {
     // gives twice is two questions under one number, marked)
     const ownB = dealQuestions(store.get(), dealId).filter((q) => q.askedBy === 'Lender B').slice(0, 600);
     const others = [...before.values()].filter((q) => q.askedBy !== 'Lender B').slice(0, 500);
-    const fresh = Array.from({ length: 300 }, (_, k) => `Provide the ${['tax', 'legal', 'technical'][k % 3]} memo on item ${k + 1} of the Lender B request list for ${ASSETS[k % 12]}.`);
+    const fresh = Array.from({ length: 300 }, (_, index) => {
+      const workstream = ['tax', 'legal', 'technical'][index % 3];
+      const asset = PORTFOLIO_ASSETS[index % PORTFOLIO_ASSETS.length];
+      return `Provide the ${workstream} memo on item ${index + 1} of the Lender B request list for ${asset}.`;
+    });
     const inFile = new Set([...ownB, ...others, ...binned].map((q) => q.n));
     const taken = [...before.values()].map((q) => q.n).filter((n) => !inFile.has(n)).slice(0, 300);
     const reword = (t: string) => t.replace('Provide the', 'Please provide the').replace('Confirm whether', 'Please confirm whether').replace(/\?$/, ', please?');

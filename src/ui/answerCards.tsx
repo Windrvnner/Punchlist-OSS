@@ -3,7 +3,7 @@ import { useRef, useState } from 'preact/hooks';
 import { useSaveOut } from './saveOut';
 import { useAppState, useStore } from './hooks';
 import type { Store } from '../app/store';
-import { createdFinding, findingHref } from './findings';
+import { findingHref } from './findings';
 import { keepAsEdit } from './findingDrafts';
 import { hasTexts, keptDrafts } from './keptDrafts';
 import { focusCard, closeOnEscape } from './focus';
@@ -13,7 +13,7 @@ import { dealIdOf, type Scope } from '../app/conversations';
 import { toParagraphs, withoutMarkers } from '../domain/cite';
 import { CreateQuestion } from '../app/commands/questions';
 import { CreateFinding, TITLE_MAX } from '../app/commands/findings';
-import { dealFindings } from '../app/state';
+import { createdRecord } from '../app/createdRecord';
 import type { Finding, Source } from '../domain/model';
 
 /** What a card holds as typed: the question or the finding's title, and its workstream. */
@@ -149,10 +149,10 @@ export function FindingCard({ dealId, answerId, text, sources, onDone }: {
         return false;
       }
       // cancelled while it was out: the finding is made all the same, and said so; a card opened since stays open
-      const made = createdFinding(store, result.value.opId);
+      const made = createdRecord(store.get(), result.value.opId, 'findings');
       const closes = !cancelled() && (draft.landed(sent) || editMade(made, finding, onScreen));
       // after the finding made is opened, so the toast knows whether to offer Open
-      toastCreated(store, dealId, finding.title);
+      toastCreated(store, made);
       return closes;
     });
   };
@@ -195,15 +195,15 @@ export function FindingCard({ dealId, answerId, text, sources, onDone }: {
 }
 
 /** "Finding created", with a way to open it. */
-function toastCreated(store: Store, dealId: string, title: string) {
-  const created = dealFindings(store.get(), dealId).find((finding) => finding.title === title);
+function toastCreated(store: Store, created: Finding | undefined) {
+  const href = created && findingHref(created);
   // already open in Edit (#115): Open would only take the person where they are
-  if (created && location.hash === findingHref(created)) {
+  if (!href || location.hash === href) {
     store.toast('Finding created');
     return;
   }
   const open = () => {
-    location.hash = findingHref(created!).slice(1);
+    location.hash = href.slice(1);
   };
-  store.toast('Finding created', created ? { label: 'Open', run: open } : undefined);
+  store.toast('Finding created', { label: 'Open', run: open });
 }

@@ -13,6 +13,7 @@ import { ConflictView } from './conflict';
 import { AskFirst } from './dialogs';
 import { AskedFor } from './askedFor';
 import { CreateQuestion, EditQuestionField, SetQuestionStatus, SetResponse, DeleteQuestion, RenumberQuestion } from '../app/commands/questions';
+import { createdRecord } from '../app/createdRecord';
 import { EditDeal } from '../app/commands/deals';
 import { RequestDraft, DiscardDraft, AcceptDraft } from '../app/commands/drafts';
 import { draftAll, stopDraftAll, eligibleForDraft, typingIn } from '../app/drafting';
@@ -203,7 +204,7 @@ export function QaPage({ dealId }: { dealId: string }) {
     const r = await store.dispatch(CreateQuestion, { dealId, text: '', workstream }, { idempotencyKey: 'qa-add' });
     setAdding(false);
     if (!r.ok) return;
-    const qid = store.get().ops[r.value.opId]?.targets.find((t) => store.get().questions[t]);
+    const qid = createdRecord(store.get(), r.value.opId, 'questions')?.id;
     // the filter is left as the person set it: the open question is listed whatever the filter, marked if outside it
     if (qid) { store.ui({ selectedQuestion: qid }); requestAnimationFrame(() => (document.querySelector('.det textarea.qtext') as HTMLElement | null)?.focus()); }
   };
