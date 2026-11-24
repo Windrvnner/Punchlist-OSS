@@ -38,22 +38,25 @@ export function localBindings(program) {
     for (const ref of scope.references) bindings.set(ref.identifier, ref.resolved);
   }
   const stableContainer = containerReads(program);
-  function resolveVariable(reference, seen) {
+  function resolveVariable(reference, seen, capture) {
     const variable = bindings.get(reference);
     if (reference.name === 'undefined' && !variable?.defs.length) return missing;
     const definition = fixedDeclaration(variable);
     if (!definition || seen.has(variable)) return null;
-    const next = (ref) => resolve(ref, new Set(seen).add(variable));
+    const visited = new Set(seen).add(variable);
+    const next = (ref) => resolve(ref, visited);
     const { node, name } = definition;
     const initial = boundValue(node.id, node.init, name, next);
-    const value = next(initial);
+    // A direct alias keeps the key selected by its eventual destructuring or member read.
+    const alias = node.id === name && initial?.type === 'Identifier';
+    const value = alias ? resolve(initial, visited, capture) : next(initial);
     if (value?.type === 'ObjectExpression' || value?.type === 'ArrayExpression') {
-      if (!stableContainer(variable, reference, value)) return null;
+      if (!stableContainer(variable, reference, value, capture)) return null;
     }
     return value;
   }
 
-  function resolve(expression, seen = new Set()) {
+  function resolve(expression, seen = new Set(), capture = unwrapped(expression)) {
     const reference = unwrapped(expression);
     if (reference?.type === 'ConditionalExpression' || reference?.type === 'LogicalExpression') {
       const branch = selectedBranch(reference, (part) => resolve(part, seen));
@@ -64,7 +67,7 @@ export function localBindings(program) {
       const visited = new Set(seen).add(reference);
       return resolve(memberValue(resolve(reference.object, visited), reference), visited);
     }
-    return reference?.type === 'Identifier' ? resolveVariable(reference, seen) : reference;
+    return reference?.type === 'Identifier' ? resolveVariable(reference, seen, capture) : reference;
   }
   return resolve;
 }

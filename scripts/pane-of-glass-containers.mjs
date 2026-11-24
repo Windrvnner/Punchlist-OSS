@@ -51,11 +51,11 @@ export function containerReads(program) {
     return !keys.includes(propertyKey(member.property, member.computed));
   }
 
-  return (variable, use, value) => {
+  return (variable, use, value, capture) => {
     if (variable.defs.some((def) => exported.has(def.node))) return false;
     const parts = value.type === 'ArrayExpression' ? value.elements : value.properties.map((part) => part.value);
     const flat = parts.every((part) => literalValue(part) !== undefined);
-    const keys = selectedKeys(patterns.get(use), members.get(use));
+    const keys = selectedKeys(patterns.get(capture), members.get(capture));
     return variable.references.every((ref) => {
       if (!ref.isRead() || !ref.isValueReference || ref.identifier === use) return true;
       return (flat && patterns.has(ref.identifier)) || readsMember(ref.identifier, value, keys);

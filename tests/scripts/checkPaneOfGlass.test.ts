@@ -197,14 +197,15 @@ describe('UI dependency checks', () => {
       'export const open = () => import(reader)',
       "const details = { module: 'node:path', heading: currentHeading() }",
       'export const label = details.heading',
-      'const { module: page } = details',
+      'const detailPages = details',
+      'const { module: page } = detailPages',
       'export const show = () => import(page)',
       'export const direct = () => import(paths.entry)',
     ].join('\n');
     repo.write(file, source);
     const result = repo.run();
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(`${file} import (lines 3, 8, 12, 13): 4 exceeds`);
+    expect(result.stderr).toContain(`${file} import (lines 3, 8, 13, 14): 4 exceeds`);
 
     repo.write(file, [
       source.replaceAll('node:path', './checklist').replace('../backend/lenient', './findings'),
