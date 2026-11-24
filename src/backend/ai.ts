@@ -52,7 +52,7 @@ import { createHash } from 'node:crypto';
 import { ListRecord, Item, firmOf, orderItems } from '../domain/checklist';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ulid } from 'ulid';
-import { readJson, unfinished, list as listOf, strings, int, pageOf, word, tagNumber } from './lenient';
+import { readJson, unfinished, list as listOf, strings, int, pageOf, word, tagNumber, isObject } from './lenient';
 import type { LineRead } from '../domain/listRead';
 import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK } from './limits';
 import { UNREAD_REPLY, UNUSABLE_REPLY, UNREACHED, CUT_ON_IT, CUT_BEFORE_IT, UNUSABLE_ON_IT } from './limits';
@@ -355,6 +355,67 @@ export function unid(text: string, ids: Set<string>): string {
     return t;
   }
 }
+
+/** Ignore malformed entries individually so a usable group beside one still stands (#658). */
+function memoGroupRows(value: unknown, ids: Set<string>): RiskGroup[] {
+  return listOf(value).filter(isObject).map((row) => ({
+    title: unid(strings(row.title)[0] ?? '', ids).slice(0, 160),
+    findings: strings(row.findings),
+  })).filter((group) => group.findings.length);
+}
+
+const withoutMemoMarks = (text: string, space = '') => text.replace(/\s*\[\d+\]/g, space)
+  .replace(/\{([^{}|]+)\|[^{}]*\}/g, '$1').trim();
+const MEMO_RISK_WORDS = 200;
+const MEMO_RISK_TEXT_CHARS = 4_000;
+const MEMO_RISK_TOKEN_CHARS = 256;
+const MEMO_RISK_SHAPE = '{"paragraphs": ["one paragraph per string, with [n] markers"], "sources": [...]}';
+
+/** Count paragraph breaks inside strings, including the separator used to fit citations across paragraphs (#659). */
+function memoRiskParagraphs(value: unknown): string[] {
+  return strings(value).flatMap((paragraph) => paragraph.split(/\r?\n[^\S\r\n]*\r?\n|\u0000/))
+    .map((paragraph) => paragraph.trim()).filter(Boolean);
+}
+
+/** Bound the write-up even when malformed text fits the word count (#659). */
+function memoRiskFits(paragraphs: string[], ids: Set<string>): boolean {
+  if (!paragraphs.length || paragraphs.length > 2) return false;
+  const text = paragraphs.join(' ');
+  // Control characters discarded by the document builder can hide unbroken text (#659).
+  const invalidText = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/;
+  if (text.length > MEMO_RISK_TEXT_CHARS || invalidText.test(text)) return false;
+  const scrubbed = paragraphs.map((paragraph) => unid(paragraph, ids));
+  // Citation fitting can join adjacent text when it removes an invalid marker (#659).
+  const withoutCitations = scrubbed.map((paragraph) => withoutMemoMarks(paragraph)).join(' ');
+  // Only ordinary document whitespace can separate printed words (#659).
+  const oversized = (value: string) => value.split(/[ \t\r\n]+/).some((token) => token.length > MEMO_RISK_TOKEN_CHARS);
+  if (oversized(text) || oversized(withoutCitations)) return false;
+  const prose = scrubbed.map((paragraph) => withoutMemoMarks(paragraph, ' ')).join(' ');
+  const words = prose.match(/\S+/g) ?? [];
+  return words.length > 0 && words.length <= MEMO_RISK_WORDS;
+}
+
+function readCorrection(
+  prompt: string, reply: Record<string, unknown> | null, again: { wrong: string; maxEcho?: number },
+): string {
+  if (!reply) return prompt;
+  const previous = JSON.stringify(reply);
+  const echo = previous.length <= (again.maxEcho ?? Infinity) ? `\n\nYou replied:\n${previous}` : '';
+  return `${prompt}${echo}\n\nThat cannot be used: ${again.wrong}. Send the whole reply again, put right.`;
+}
+
+/** Send unusable write-ups through the document reader's retry policy (#659). */
+function memoRiskReadOptions(escalate: string, advises: (text: string) => boolean, ids: Set<string>) {
+  const usable = (reply: Record<string, unknown>) => {
+    const paragraphs = memoRiskParagraphs(reply.paragraphs);
+    return memoRiskFits(paragraphs, ids) && !paragraphs.some(advises);
+  };
+  const wrong = 'it is empty, contains oversized text, gives advice or a judgment, or exceeds '
+    + `the limit of two paragraphs and ${MEMO_RISK_WORDS} words`;
+  // Keep an oversized reply from making the correction request too long (#659).
+  return { escalate, usable, wrong, maxEcho: MEMO_RISK_TEXT_CHARS, retrySharedModel: true };
+}
+
 /**
  * LaTeX-style notation in a text, which the model is told not to write (plain symbols such as
  * + − × ÷ * / = % are fine): the pieces found, none when there are none. A $ before a figure is money, not notation:
@@ -1121,6 +1182,20 @@ export function nodeAi(o: AiOptions) {
   /** the chat agent */
   const agent = chatAgent(agentKit, agentOpts);
 
+  /** A memo correction that does not fit goes to Thorough with the original request (#659). */
+  async function askCorrection(input: Ask, keys: string[], shape: string) {
+    try {
+      return await askJson(input, keys, shape, false);
+    } catch (error) {
+      if (input.kind === 'memoRisk' && isTooLong(error)) return null;
+      throw error;
+    }
+  }
+
+  function readCanRetry(model: string, again: { escalate: string; retrySharedModel?: boolean } | undefined): boolean {
+    return !!again && (model !== again.escalate || again.retrySharedModel === true);
+  }
+
   /**
    * One question, read from documents, in up to two rounds: the second only if the model says what is missing and
    * something answers to it. With `again`, a reply that cannot be used is sent back to the same model with what is
@@ -1140,7 +1215,9 @@ export function nodeAi(o: AiOptions) {
       }
     } catch (e) { return failure(e, 'The documents could not be read'); }
     if (!sent.length) return ok({ reply: {}, sent });
-    let using = model; let pool: Sent[] | undefined;                              // the documents chosen, kept from the first refusal of a request as too long
+    let using = model;
+    let pool: Sent[] | undefined;
+    let canRetry = readCanRetry(model, again);
     for (let round = 1; ; round++) {
       let reply: Record<string, unknown> | null;
       try {
@@ -1152,10 +1229,14 @@ export function nodeAi(o: AiOptions) {
         const inAll = deals.reduce((sum, d) => sum + o.docs.records(d).length, 0);
         const prompt = `Documents:\n${listing}\n\nThese are ${sent.length} of the ${inAll} documents in ${deals.length > 1 ? 'these data rooms' : 'the data room'}: the ones chosen as likeliest to bear on this. You have not seen the others, so do not say what the data room as a whole does or does not contain; say what these documents show.\n\n${ask}\n\nReply as JSON: ${shape}${round === 1 ? ' If a document you were not given is needed to answer, add "need": ["a few words describing it"].' : ''}`;
         reply = await askJson({ kind, model: using, system: RULES, files, prompt }, keys, shape);
-        if (again && using !== again.escalate && (!reply || !again.usable(reply))) {
-          // the same model, a second time: with its own reply and what is wrong with it, or the question again if there was nothing to read
-          reply = await askJson({ kind, model: using, system: RULES, files, prompt: reply ? `${prompt}\n\nYou replied:\n${JSON.stringify(reply)}\n\nThat cannot be used: ${again.wrong}. Send the whole reply again, put right.` : prompt }, keys, shape, false);
-          if (!reply || !again.usable(reply)) { using = again.escalate; reply = await askJson({ kind, model: using, system: RULES, files, prompt }, keys, shape, false); }
+        if (again && canRetry && (!reply || !again.usable(reply))) {
+          const correction = readCorrection(prompt, reply, again);
+          reply = await askCorrection({ kind, model: using, system: RULES, files, prompt: correction }, keys, shape);
+          if (!reply || !again.usable(reply)) {
+            canRetry = false;
+            using = again.escalate;
+            reply = await askJson({ kind, model: using, system: RULES, files, prompt }, keys, shape, false);
+          }
         }
       } catch (e) {
         // a request the service refuses as too long is asked again with the likeliest half of the documents, down to one (limits.ts)
@@ -1546,31 +1627,29 @@ export function nodeAi(o: AiOptions) {
       // the model's own advice, to the reader or to the deal's own side. A document's terms or recommendation, reported, is a fact:
       // "the borrower should maintain a DSCR of 1.20x" passes, "the lenders should insist on it" does not.
       const advises = (t: string) => /\b((we|you|lenders?|investors?|the (lenders?|bank|investors?|buyer|team|deal team)) (should|ought to|must|need to)|we (recommend|suggest|advise|urge)|(is|are) (recommended|advisable|advised)|it would be (prudent|advisable|wise)|consider (asking|requiring|seeking|obtaining|negotiating))\b/i.test(t);
-      const noMarks = (p: string) => p.replace(/\s*\[\d+\]/g, '').replace(/\{([^{}|]+)\|[^{}]*\}/g, '$1').trim();
-      // Key risks are not findings: related open findings are grouped into risks, and each key risk is written
-      // up from the documents. A grouping or a write-up that cannot be had leaves that part as before (each finding its own
-      // risk, in its own words), so the memo is still made; only a service that cannot be reached stops it.
+      // Grouping or write-up failures fall back to the findings. An unreachable service stops the memo.
       let groups: RiskGroup[] = [];
       if (open.length > 1) {
         try {
           const rows = open.map((f) => `${f.id} (${f.workstream || 'no workstream'}, ${ratings[f.id] ?? 'unrated'}): ${f.title}`);
           const reply = await askJson<{ risks?: unknown }>({ kind: 'memoGroups', model: m.standard, system: JSON_ONLY, prompt: `These are the open findings on a deal, each with its workstream and risk rating:\n${rows.join('\n')}\n\nGroup them into the deal's risks for a memo to a senior banker. A risk is one underlying problem for the deal; findings that are evidence of the same problem, or that bear on the same term, figure or approval, go together, even across workstreams. A finding unlike any other is a risk on its own. Put every finding in exactly one risk. Give each risk a short plain title of your own (at most 12 words) that says what the problem is, as a fact, with no judging words.\nReply as JSON: {"risks": [{"title": "…", "findings": ["id", "id"]}]}` }, ['risks']);
-          groups = listOf(reply?.risks).map((x) => x as { title?: unknown; findings?: unknown }).map((x) => ({ title: unid(strings(x.title)[0] ?? '', ids).slice(0, 160), findings: strings(x.findings).map((id) => id.trim()) })).filter((g) => g.findings.length);
+          groups = memoGroupRows(reply?.risks, ids);
         } catch (e) { if (unreachable(e)) return failure(e, `${SERVICE} did not answer`); groups = []; }
       }
       const byId = new Map(open.map((f) => [f.id, f]));
       const grouped = riskGroups(open.map((f) => ({ id: f.id, title: f.title, raisedAt: f.raisedAt ?? '' })), ratings, groups);
       const { key } = keyRisksOf(grouped, d.keyRisks);
-      /** one key risk written up from its findings' documents and what the search adds (read, as a draft is). Responses are left
-       *  out, so the memo never paraphrases a reply or sees who sent it (answered replies are not shown). */
+      // Write-ups use findings and documents only. Q&A responses and responder names stay out.
       const writeUp = async (g: (typeof key)[number]): Promise<RiskGroup> => {
         const fs = g.findings.map((id) => byId.get(id)!);
         const ask = `Write up this risk on the deal for a deal memo read by a managing director at an investment bank. It is rated ${g.rating} (${g.rating === 'High' ? d.high : g.rating === 'Medium' ? d.medium : d.low}) and brings together these findings:\n${fs.map((f) => `- ${f.title} (${f.workstream || 'no workstream'}): ${plain(f).slice(f.title.length + 2)}`).join('\n')}\n\nWrite one or two paragraphs, at most 200 words in all, of plain banker's prose: what the issue is; the evidence, with the figures, terms and dates the documents give, each sentence cited; and which figures, terms or dates elsewhere in the deal's documents it touches (the base case, the financing terms, the timetable, or closing), named as the documents give them. Facts only: no advice, no recommendation, no next steps, no mitigants, no judging or comparative words (such as weak, loose, overstated or adequate), and no conclusions of your own beyond what the documents say. Do not say what is still open or which questions were asked: the memo adds the questions still unanswered after it. Name no person. Never write an id.`;
-        const usable = (reply: Record<string, unknown>) => { const ps = strings(reply.paragraphs); return ps.some((p) => p.trim()) && !ps.some(advises); };
-        const r = await read('memoRisk', [dealId], m.standard, ask, fs.map((f) => plain(f)).join(' '), { [dealId]: fs.flatMap((f) => (f.sources ?? []).map((x) => x.docId)).filter((x): x is string => !!x) }, '{"paragraphs": ["one paragraph per string, with [n] markers"], "sources": [...]}', { escalate: m.thorough, usable, wrong: 'it is empty, or it gives advice or a judgment: write it again with facts only' });
+        const options = memoRiskReadOptions(m.thorough, advises, ids);
+        const sourceIds = fs.flatMap((f) => (f.sources ?? []).map((s) => s.docId)).filter((id): id is string => !!id);
+        const r = await read('memoRisk', [dealId], m.standard, ask, fs.map(plain).join(' '), { [dealId]: sourceIds },
+          MEMO_RISK_SHAPE, options);
         if (!r.ok) { if (r.error.kind === 'unreachable') throw Object.assign(new Error(r.error.message), { code: 'unreachable' }); return g; }
-        if (!usable(r.value.reply) || !r.value.sent.length) return g;
-        const paras = strings(r.value.reply.paragraphs).map((p) => unid(p, ids).trim()).filter(Boolean).slice(0, 3);
+        if (!options.usable(r.value.reply) || !r.value.sent.length) return g;
+        const paras = memoRiskParagraphs(r.value.reply.paragraphs).map((p) => unid(p, ids).trim()).filter(Boolean);
         const out = fit(paras.join('\n\u0000\n'), r.value.reply.sources as Cited[], r.value.sent, false, true);
         return { ...g, body: out.text.split(/\s*\u0000\s*/).filter(Boolean), sources: out.sources };
       };
@@ -1585,7 +1664,8 @@ export function nodeAi(o: AiOptions) {
       const facts = deal ? [deal.name, deal.counterparty, deal.product, deal.sector, deal.technology].filter(Boolean).join('; ') : '';
       const highs = grouped.filter((g) => g.rating === 'High');
       const prompt = `Write the summary of a deal memo for a managing director at an investment bank, about this deal${facts ? ` (${facts})` : ''}: two paragraphs, at most 170 words in all. First what the project and the financing are, with the figures the documents give (size, capacity, location, sponsor, offtake, structure, timetable). Then ${highs.length ? `each of these High risks in one sentence:\n${highs.map((g) => `- ${g.title}: ${g.findings.map((id) => `(${byId.get(id)!.workstream || 'no workstream'}) ${plain(byId.get(id)!)}`).join(' ')}`).join('\n')}\n` : open.length ? 'that no open risk is rated High. ' : 'that it has no open findings. '}Facts only: no advice, no recommendation, no next steps, and no judgment of how the deal or the work is going. Name no person. Never write an id.`;
-      const parasOf = (reply: { paragraphs?: unknown } | null) => strings(reply?.paragraphs).map((p) => unid(noMarks(p), ids)).filter(Boolean).slice(0, 2);
+      const parasOf = (reply: { paragraphs?: unknown } | null) => strings(reply?.paragraphs)
+        .map((p) => unid(withoutMemoMarks(p), ids)).filter(Boolean).slice(0, 2);
       let summary: string[] = [];
       try {
         // read from the core documents, as a draft is; with none indexed, from the deal's facts and risks alone, as before

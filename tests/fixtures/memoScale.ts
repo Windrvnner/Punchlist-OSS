@@ -1,7 +1,7 @@
 // A made-up deal at realistic scale, for the deal memo: 2,000 checklist items, 42 open findings across 15 workstreams,
 // 140 questions to the counterparty, and the risks as the model groups and writes them up. The write-ups and summary are
 // stand-ins written to the prompts in src/backend/ai.ts (memo), so the layout can be judged at scale without a model.
-import { memoContent, type Rating, type RiskGroup } from '../../src/domain/memo';
+import { memoContent, type MemoInput, type Rating, type RiskGroup } from '../../src/domain/memo';
 import { Deal, Finding, Question, type Source } from '../../src/domain/model';
 
 const D = 'd_01HZZZZZZZZZZZZZZZZZZZZZZZ';
@@ -128,8 +128,12 @@ const summary = [
   'Four risks rate High. Debt is sized on an energy yield 75 kWh/kWp above the technical advisor’s figure, and the model has no P90 case. 25% of the capacity has no offtake but is modeled as contracted. The interconnection agreement is unsigned, $40 million of network upgrades are unallocated, and the utility’s timetable is five months behind the EPC schedule. Delay damages are capped at 10% of the EPC price against an estimated 15% exposure, and the parent guarantee is unsigned.',
 ];
 
+export const scaleMemoInput: MemoInput = {
+  deal, firm: '[firm name]', today: '2026-11-18', findings: [...Object.values(F), ...closedF], questions: qs, checklist,
+  summary, ratings, keyRisks: 8,
+};
+
 /** the made-up deal's memo content, at scale */
 export const scaleMemo = (withGroups = true) => memoContent({
-  deal, firm: '[firm name]', today: '2026-11-18', findings: [...Object.values(F), ...closedF], questions: qs, checklist,
-  summary, ratings, keyRisks: 8, ...(withGroups ? { groups } : {}),
+  ...scaleMemoInput, ...(withGroups ? { groups } : {}),
 });
