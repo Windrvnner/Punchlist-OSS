@@ -241,6 +241,92 @@ describe('UI dependency checks', () => {
     expect(repo.run().stderr).toContain(`${file} import (lines 3, 5, 7): 3 exceeds`);
   });
 
+  it('checks the primitive captured before a later write or sibling destructuring', () => {
+    const repo = fixture();
+    const file = 'src/ui/checklistEntry.ts';
+    const source = [
+      "const caption = () => 'Checklist'",
+      "const manifest = { target: 'node:path', label: caption() }",
+      'const { label } = manifest',
+      'const { target } = manifest',
+      "manifest.target = './checklist.mjs'",
+      'export const load = () => import(target)',
+      "const paths = { target: 'node:path', caption: caption() }",
+      "paths.caption = 'Open findings'",
+      'const before = paths.target',
+      'updatePaths(paths)',
+      'export const open = () => import(before)',
+      "const panel = { entry: 'node:path' }",
+      'const { entry } = panel',
+      "function change() { panel.entry = './checklist.mjs' }",
+      'change()',
+      'export const original = () => import(entry)',
+    ].join('\n');
+    repo.write('src/ui/checklist.mjs', "export const title = 'Checklist'");
+    repo.write(file, source);
+    expect(repo.run().stderr).toContain(`${file} import (lines 6, 11, 16): 3 exceeds`);
+    repo.write(file, [
+      source.replaceAll('node:path', './checklist.mjs'),
+      "const current = { target: 'node:path' }",
+      'function pick() { return current.target }',
+      "current.target = './checklist.mjs'",
+      'const { target: afterWrite } = current',
+      'export const after = () => import(afterWrite)',
+      'export const deferred = () => import(pick())',
+    ].join('\n'));
+    expect(repo.run().status).toBe(0);
+  });
+
+  it('resolves fixed keys, rest bindings and spreads from the values present at a lookup', () => {
+    const repo = fixture();
+    const file = 'src/ui/readerEntries.ts';
+    const source = [
+      "const key = 'target'",
+      "const { [key]: byName } = { target: 'node:path' }",
+      'export const computed = () => import(byName)',
+      "const { heading, ...rest } = { heading: 'Checklist', target: 'node:path' }",
+      'export const remainder = () => import(rest.target)',
+      "const localPages = ['./checklist.mjs']",
+      "const [, second] = [...localPages, 'node:path']",
+      'export const spread = () => import(second)',
+      "const [, ...tail] = [...localPages, 'node:path']",
+      'export const arrayTail = () => import(tail[0])',
+      "const registry = { [key]: 'node:path' }",
+      'export const member = () => import(registry[key])',
+      "const prefix = 'tar'",
+      "const { [`${prefix}get`]: fromTemplate } = { ['tar' + 'get']: 'node:path' }",
+      'export const templated = () => import(fromTemplate)',
+    ].join('\n');
+    repo.write('src/ui/checklist.mjs', "export const title = 'Checklist'");
+    repo.write(file, source);
+    expect(repo.run().stderr).toContain(`${file} import (lines 3, 5, 8, 10, 12, 15): 6 exceeds`);
+    repo.write(file, [
+      source.replaceAll('node:path', './checklist.mjs'),
+      "const { [key]: removed, ...remaining } = { target: 'node:path', page: './checklist.mjs' }",
+      "export const local = () => import(remaining.target ?? './checklist.mjs')",
+      "const [, unknown] = [...getRuntimePages(), 'node:path']",
+      'export const selected = () => import(unknown)',
+    ].join('\n'));
+    expect(repo.run().status).toBe(0);
+  });
+
+  it('selects fixed conditional and logical branches inside an import template', () => {
+    const repo = fixture();
+    const file = 'src/ui/checklistEntry.ts';
+    const source = [
+      'const local = true',
+      "const page = `${local ? './' : 'node:'}checklist.mjs`",
+      'export const load = () => import(page)',
+      "const base = './'",
+      "export const open = () => import((base || 'node:') + 'checklist.mjs')",
+    ].join('\n');
+    repo.write('src/ui/checklist.mjs', "export const title = 'Checklist'");
+    repo.write(file, source);
+    expect(repo.run().status).toBe(0);
+    repo.write(file, source.replace('= true', '= false').replace("base = './'", "base = ''"));
+    expect(repo.run().stderr).toContain(`${file} import (lines 3, 5): 2 exceeds`);
+  });
+
   it('resolves imports in TypeScript classes with decorators and auto-accessors', () => {
     const repo = fixture();
     const file = 'src/ui/picker.ts';
