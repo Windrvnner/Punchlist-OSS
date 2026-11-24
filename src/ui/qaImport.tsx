@@ -12,9 +12,8 @@ import { prepareImport, importCounts, type Mapping, type ImportRow } from '../do
 import { ImportQuestions } from '../app/commands/importQuestions';
 import { keepImportedLog, logTakenBy } from '../app/qaLog';
 import { SERVICE } from '../control';
-import {
-  keptImport, keepImport, saveImport, dropImport, importKey, useKeptImportsReady, useFreshOnCrash,
-} from './keptImports';
+import { keptImport, keepImport, dropImport, importKey, finishKeptSubmission } from '../app/keptImports';
+import { useKeptImportsReady, useFreshOnCrash } from './keptImports';
 import { Operation } from '../domain/model';
 import { fail, ok } from '../domain/result';
 import { QaImportForm } from './qaImportForm';
@@ -345,24 +344,12 @@ async function runImport(store: Store, dealId: string, qa: QaImportState, plan: 
     }
     const chosen = await chooseSubmission(store, qa, prepared?.rows ?? []);
     if (!chosen.ok) { qa.setError(chosen.error.message); return; }
-    const submission = chosen.value;
-    if (!(await saveImport(qa.key, { submission }))) {
-      qa.setError('Couldn’t keep this import on this PC. Nothing was imported.');
-      return;
-    }
-    const imported = await resumeSubmission(store, dealId, submission);
-    if (!imported.ok) { qa.setError(`Couldn’t import: ${imported.error.message}`); return; }
-    const log = await makeTheLog(store, dealId, submission);
-    if (!log.ok) { qa.setError(`Imported, but the Q&A log could not be kept: ${log.error.message}`); return; }
-    if (!(await saveImport(qa.key, { submission: { ...submission, done: true } }))) {
-      qa.setError('Imported, but completion could not be kept on this PC. Retry to finish.');
-      return;
-    }
-    if (!(await store.releaseImport(submission.key))) {
-      qa.setError('Imported, but completion could not be recorded. Retry to finish.');
-      return;
-    }
-    dropImport(qa.key);
+    const completed = await finishKeptSubmission(qa.key, chosen.value, {
+      importRows: (submission) => resumeSubmission(store, dealId, submission),
+      keepLog: (submission) => makeTheLog(store, dealId, submission),
+      release: (key) => store.releaseImport(key),
+    });
+    if (!completed.ok) { qa.setError(completed.error.message); return; }
     store.ui({ dialog: null });
   } finally {
     qa.setBusy('');
