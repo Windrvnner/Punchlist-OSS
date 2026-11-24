@@ -411,6 +411,19 @@ export interface LocalStore {
   watch?(onChange: (key: string) => void): () => void;
 }
 
+/** One named part of an import, such as its file, model reading, choices or check marks. */
+export interface KeptImportPart { key: string; part: string; value: unknown }
+export type KeptImportChange = KeptImportPart | { key: string; drop: true };
+export type KeptImportRead = KeptImportPart[] | 'memory' | 'unavailable';
+
+/** Per-machine storage for import drafts. A write commits all its parts together in call order. */
+export interface KeptImports {
+  /** Memory fallback permits submission only when there is no store. An unavailable store cannot checkpoint. */
+  read(onLateOpen: () => void): Promise<KeptImportRead>;
+  /** Replace is used when a blocked connection opens after the app has continued with its own snapshot. */
+  write(changes: readonly KeptImportChange[], replace?: boolean): Promise<boolean>;
+}
+
 /** Existing kept maps for Checklist questions. Record IDs follow a deal when it is recovered as a copy. */
 export interface ChecklistDraftMaps {
   texts: Map<string, string>;

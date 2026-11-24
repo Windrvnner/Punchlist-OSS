@@ -402,7 +402,11 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
   const listed = !fewDocuments(f.sources);
   const raised = f.origin !== 'ai' && f.raisedBy ? `Raised by ${f.raisedBy} · ${fmtDate(localYmd(f.raisedAt))}` : `identified ${whenText(f.raisedAt).toLowerCase()}`;
   const commit = async (status: 'open' | 'closed', text: string) => { const r = await store.dispatch(SetFindingStatus, { dealId, findingId, status, note: text.trim() || undefined }, { idempotencyKey: 'fst-' + f.id }); if (r.ok) setNote(null); };
-  const del = async () => { const r = await store.dispatch(DeleteFinding, { dealId, findingId }, { idempotencyKey: 'fdel-' + f.id }); if (r.ok) location.hash = afterDeletingFinding(dealId); };
+  const del = async () => {
+    const result = await store.dispatch(DeleteFinding, { dealId, findingId }, { idempotencyKey: 'fdel-' + f.id });
+    // #763: the deleted page names the draft and can restore the finding with its edit.
+    if (result.ok && !editDrafts.has(f.id)) location.hash = afterDeletingFinding(dealId);
+  };
   return (
       <div class="opening">
         <div class="lbl fmeta"><span>{f.workstream}{dot(f)}{raised}{f.reviewed ? ` · reviewed by ${f.reviewed.by}, ${fmtDate(localYmd(f.reviewed.at))}` : ''}{last ? ` · ${lastText} · ${whenText(last.at).toLowerCase()}` : ''}<OnListMark f={f} /></span>
