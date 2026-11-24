@@ -204,6 +204,49 @@ describe('UI dependency checks', () => {
     expect(repo.run().status).toBe(0);
   });
 
+  it('reads a caption into a display field and respects the receiver of a specialized method', () => {
+    const repo = fixture();
+    const file = 'src/ui/readerSettings.ts';
+    const source = [
+      "const paths = { entry: 'node:path', title: 'Checklist' }",
+      "const display = { title: '' };",
+      '({ title: display.title } = paths)',
+      'const { entry } = paths',
+      'export const fromDisplay = () => import(entry)',
+      'function select<T>(this: { entry: string }, entry: T & string) {',
+      '  this.entry = entry',
+      '}',
+      "const settings = { entry: 'node:path', select };",
+      "(settings.select<string>)('./checklist.mjs')",
+      'const { entry: selected } = settings',
+      'export const fromSettings = () => import(selected)',
+      'function label<T>(this: { entry: string }, text: TemplateStringsArray) { this.entry = text[0] }',
+      "const tagged = { entry: 'node:path', label };",
+      '(tagged.label<string>)`./checklist.mjs`',
+      'const { entry: labeled } = tagged',
+      'export const fromTag = () => import(labeled)',
+      "const mutable = { entry: 'node:path', title: 'Checklist' }",
+      "const view = { set title(_title: string) { mutable.entry = './checklist.mjs' } };",
+      '({ title: view.title } = mutable)',
+      'const { entry: updated } = mutable',
+      'export const fromSetter = () => import(updated)',
+    ].join('\n');
+    const loader = [
+      "import { fromDisplay, fromSettings, fromTag, fromSetter } from './build/readerSettings.js'",
+      "const builtIn = await import('node:path')",
+      'const modules = await Promise.all([fromDisplay(), fromSettings(), fromTag(), fromSetter()])',
+      "console.log(modules.map(page => page === builtIn ? 'node:path' : page.caption).join(','))",
+    ].join('\n');
+    repo.write(file, source);
+    expect(loadCompiledFixture(repo, file, loader)).toBe('node:path,Checklist,Checklist,Checklist');
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 5): 1 exceeds`);
+    repo.write(file, source.replaceAll('node:path', './checklist.mjs'));
+    expect(loadCompiledFixture(repo, file, loader)).toBe('Checklist,Checklist,Checklist,Checklist');
+    expect(repo.run().status).toBe(0);
+  });
+
   it('allows a record import selected by a write, an escaped reference or a getter', () => {
     const repo = fixture();
     const file = 'src/ui/checklistReader.ts';

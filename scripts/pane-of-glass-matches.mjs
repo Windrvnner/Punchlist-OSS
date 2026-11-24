@@ -2,6 +2,7 @@
 import { posix } from 'node:path';
 import { parseSync, Visitor } from 'vite';
 import { localConstLookup } from './pane-of-glass-constants.mjs';
+import { unwrapped } from './pane-of-glass-syntax.mjs';
 
 const storageNames = new Set(['localStorage', 'sessionStorage', 'indexedDB']);
 const layerPath = /^(?:backend|adapters|desktop|shell)(?:\/|$)/;
@@ -53,22 +54,13 @@ function propertyNames(key, computed) {
   return stringValues(key);
 }
 
-// Assertions, parentheses and optional chains leave the underlying path or member unchanged.
-function unwrapped(node) {
-  while (['TSNonNullExpression', 'TSAsExpression', 'TSTypeAssertion', 'TSSatisfiesExpression',
-    'ChainExpression', 'ParenthesizedExpression'].includes(node?.type)) {
-    node = node.expression;
-  }
-  return node;
-}
-
 // Only a direct identifier argument follows const aliases. Keep the diagnostic at the import site.
 function dynamicImportSource(program, file, source) {
   let lookup;
   return (argument) => {
     let node = unwrapped(argument);
     if (node.type !== 'Identifier') return argument;
-    lookup ??= localConstLookup(program, file, source, unwrapped);
+    lookup ??= localConstLookup(program, file, source);
     const seen = new Set();
     while (node?.type === 'Identifier' && !seen.has(node)) {
       seen.add(node);

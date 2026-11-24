@@ -49,7 +49,7 @@ function constDefinition(variable, file, source) {
   return node.type === 'VariableDeclarator' && parent.kind === 'const' ? values[0] : null;
 }
 
-export function localConstLookup(program, file, source, unwrapped) {
+export function localConstLookup(program, file, source) {
   const references = new Map();
   for (const scope of scopesFor(program)) {
     for (const ref of scope.references) {
@@ -73,7 +73,7 @@ export function localConstLookup(program, file, source, unwrapped) {
     const definition = definitionFor(identifier);
     if (!definition) return null;
     if (definition.node.id === definition.name) return definition.node.init;
-    capture ??= recordCaptures(program, references, definitionFor, unwrapped);
+    capture ??= recordCaptures(program, references, definitionFor);
     return capture(definition);
   };
 }

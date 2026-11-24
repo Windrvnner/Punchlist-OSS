@@ -1,5 +1,6 @@
 // Recognize the string copied by a simple property binding on a local data record.
 import { Visitor } from 'vite';
+import { unwrapped } from './pane-of-glass-syntax.mjs';
 
 function keyName(key, computed) {
   if (!computed && (key.type === 'Identifier' || key.type === 'JSXIdentifier')) return key.name;
@@ -20,30 +21,35 @@ function propertiesOf(literal) {
 }
 
 function simplePattern(pattern, properties) {
-  return pattern?.type === 'ObjectPattern' && pattern.properties.every((part) =>
-    part.type === 'Property' && part.value.type === 'Identifier' && properties.has(keyName(part.key, part.computed)));
+  if (pattern?.type !== 'ObjectPattern') return false;
+  return pattern.properties.every((part) => {
+    if (part.type !== 'Property' || !properties.has(keyName(part.key, part.computed))) return false;
+    // Assignments may copy into a display field. markTarget checks the destination independently.
+    const target = unwrapped(part.value);
+    return target.type === 'Identifier' || target.type === 'MemberExpression';
+  });
 }
 
 // Computed keys in an assignment target are reads. Only its assigned leaves are writes.
-function markTarget(target, effects, unwrapped) {
+function markTarget(target, effects) {
   const node = unwrapped(target);
   if (!node) return;
   if (node.type === 'ObjectPattern') {
-    for (const part of node.properties) markTarget(part.value ?? part.argument, effects, unwrapped);
+    for (const part of node.properties) markTarget(part.value ?? part.argument, effects);
   } else if (node.type === 'ArrayPattern') {
-    for (const part of node.elements) markTarget(part, effects, unwrapped);
+    for (const part of node.elements) markTarget(part, effects);
   } else if (node.type === 'AssignmentPattern' || node.type === 'RestElement') {
-    markTarget(node.left ?? node.argument, effects, unwrapped);
+    markTarget(node.left ?? node.argument, effects);
   } else {
     effects.add(node);
   }
 }
 
-function recordUses(program, unwrapped) {
+function recordUses(program) {
   const members = new Map();
   const patterns = new Map();
   const effects = new Set();
-  const write = (target) => markTarget(target, effects, unwrapped);
+  const write = (target) => markTarget(target, effects);
   const exported = new Set();
   const typeNames = new Set();
   const blocks = new Map();
@@ -117,8 +123,8 @@ function capturedValue(properties, pattern, name) {
   return part ? properties.get(keyName(part.key, part.computed)) : null;
 }
 
-export function recordCaptures(program, references, definitionFor, unwrapped) {
-  const uses = recordUses(program, unwrapped);
+export function recordCaptures(program, references, definitionFor) {
+  const uses = recordUses(program);
   const byName = Map.groupBy(references.values(), (ref) => ref.identifier.name);
   return ({ node, name }) => {
     const source = unwrapped(node.init);
