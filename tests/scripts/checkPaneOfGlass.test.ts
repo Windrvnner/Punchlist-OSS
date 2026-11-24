@@ -162,6 +162,11 @@ describe('UI dependency checks', () => {
     { args: "'../backend/*.ts'", wrapper: 'Object.keys', dev: [], prod: [] },
     { args: "'../backend/part.ts'", wrapper: '(Object.keys)', dev: [], prod: [] },
     { args: "'../backend/part.ts'", wrapper: '(Object.keys as typeof Object.keys)', dev: [], prod: [] },
+    { args: "'../backend/part.ts'", wrapper: '(Object).keys', dev: [], prod: [] },
+    { args: "'../backend/part.ts'", wrapper: '(Object as typeof Object).keys', dev: [], prod: [] },
+    { args: "'../backend/part.ts'", wrapper: 'Object["keys"]', dev: [backend], prod: [backend] },
+    { args: "'../backend/part.ts'", wrapper: 'Object.keys?.', dev: [backend], prod: [backend] },
+    { args: "'../backend/[[:alpha:]]*.ts'", wrapper: 'globalThis.Object.keys', dev: [], prod: [] },
     { args: "'../backend/part.ts'", wrapper: '(Object.values)', dev: [backend], prod: [backend] },
     { args: "['preact', '../backend/part.ts']", dev: [backend], prod: [backend] },
     { args: "['preact', './part.ts']", dev: [ui], prod: [ui] },
@@ -182,6 +187,64 @@ describe('UI dependency checks', () => {
     const result = repo.run();
     expect(result.status).toBe(forbidden ? 1 : 0);
     if (forbidden) expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
+  });
+
+  const termGlob = "import.meta.glob('../backend/part.ts', { eager: true })";
+  it.each([
+    { expression: `Object.keys(${termGlob}['../backend/part.ts'])`, dev: [], prod: [backend] },
+    { expression: `Object.keys(${termGlob} || {})`, dev: [], prod: [backend] },
+    { expression: "Object.keys(import.meta.glob('../backend/[[:alpha:]]*.ts') || {})", dev: [], prod: [] },
+    { expression: "(import.meta.glob)('../backend/part.ts')", dev: [backend], prod: [backend] },
+    { expression: "import.meta.glob?.('../backend/part.ts') ?? {}", dev: [], prod: [] },
+  ])('retains the original expression $expression', async ({ expression, dev, prod }) => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    repo.write(backend, 'export const term = true');
+    repo.write(file, `export const readers = ${expression}`);
+    expect(await viteSources(repo.dir, file)).toEqual({ dev, prod });
+    const forbidden = [...dev, ...prod].includes(backend);
+    const result = repo.run();
+    expect(result.status).toBe(forbidden ? 1 : 0);
+    if (forbidden) expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
+  });
+
+  it('keeps a glob assignable to a private field when checking a class method', async () => {
+    const repo = fixture();
+    const file = 'src/ui/reader.ts';
+    repo.write(backend, 'export const term = true');
+    repo.write(file, [
+      'export class Reader {',
+      '  #tables = {}',
+      "  refresh() { this.#tables = import.meta.glob('../backend/part.ts') }",
+      '}',
+    ].join('\n'));
+    expect(await viteSources(repo.dir, file)).toEqual({ dev: [backend], prod: [backend] });
+    expect(repo.run().stderr).toContain(`${file} import (lines 3): 1 exceeds`);
+  });
+
+  it('neutralizes unrelated glob options in the same expression', () => {
+    const repo = fixture();
+    repo.write('src/ui/part.ts', 'export const title = "Checklist"');
+    repo.write('src/ui/readers.ts', [
+      "export const calls = choose(import.meta.glob('./part.ts'),",
+      "  import.meta.glob('./part.ts', { eager: (() => { throw Error('option executed') })() }))",
+    ].join('\n'));
+    const result = repo.run();
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+  });
+
+  it('preserves the arity of an asserted keys call in each Vite mode', async () => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    const target = 'src/backend/part.ts';
+    repo.write(target, 'export const read = true');
+    repo.write(file, [
+      'type Keys = (entry: object, ...rest: unknown[]) => string[]',
+      "export const names = (Object.keys as Keys)(import.meta.glob('../backend/part.ts'), true)",
+    ].join('\n'));
+    expect(await viteSources(repo.dir, file)).toEqual({ dev: [], prod: [target] });
+    expect(repo.run().stderr).toContain(`${file} import (lines 2): 1 exceeds`);
   });
 
   it.each(['ui', 'backend'])('uses the full filename for a %s module containing #', async (layer) => {
