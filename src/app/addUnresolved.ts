@@ -1,14 +1,16 @@
 import { SERVICE } from '../control';
-import type { Question } from '../domain/model';
 import { fail, ok, type Result } from '../domain/result';
 import type { AiService } from '../ports';
-import { AddUnresolved } from './commands/addUnresolved';
-import { unresolvedPoints, type Unresolved } from './state';
+import { AddUnresolved, UNRESOLVED_LINK_CHANGED } from './commands/addUnresolved';
+import { unresolvedPoints, unresolvedTargets, type State, type Unresolved } from './state';
 import type { Store } from './store';
+import {
+  canLinkUnresolved, isApprovedLink, linkApproval, unresolvedPointFingerprint,
+  type ApprovedLinks, type UnresolvedLink,
+} from './unresolvedLinks';
 
 type DraftedPoint = Unresolved & { text: string };
-type SuggestedLink = { point: Unresolved; q: Question };
-type SelectedUnresolved = { points: DraftedPoint[]; links: SuggestedLink[] };
+type SelectedUnresolved = { points: DraftedPoint[]; links: UnresolvedLink[] };
 export type UnresolvedPreview = SelectedUnresolved & { out: Unresolved[] };
 export const UNREAD_CHECKLIST = 'Couldn’t load the checklist';
 
@@ -71,12 +73,13 @@ export async function prepareUnresolved(
   store: Store,
   dealId: string,
   progress?: { count: (count: number) => void; signal: AbortSignal },
+  approved?: ApprovedLinks,
 ): Promise<Result<UnresolvedPreview> | undefined> {
   await store.refreshChecklist(dealId);
   if (progress?.signal.aborted) return;
   const state = store.get();
   if (!Array.isArray(state.checklists[dealId])) return fail({ kind: 'failed', message: UNREAD_CHECKLIST });
-  const { points, links } = unresolvedPoints(state, dealId);
+  const { points, links } = unresolvedPoints(state, dealId, approved);
   progress?.count(points.length);
   if (!points.length) return ok({ points: [], links: [], out: [] });
   const result = await phrasePoints(store, dealId, points);
@@ -92,7 +95,7 @@ export async function retryUnresolved(store: Store, dealId: string, out: Unresol
   const result = await phrasePoints(store, dealId, out);
   if (!result.ok) return;
   const text = new Map(out.map((point, index) => [point.key, result.value[index]]));
-  const order = new Map(unresolvedPoints(store.get(), dealId).points.map((point, index) => [point.key, index]));
+  const order = new Map(unresolvedTargets(store.get(), dealId).map((point, index) => [point.key, index]));
   return (preview: UnresolvedPreview | null): UnresolvedPreview | null => {
     if (!preview) return preview;
     const retried = drafts(preview.out, preview.out.map((point) => text.get(point.key) ?? null));
@@ -105,31 +108,46 @@ export async function retryUnresolved(store: Store, dealId: string, out: Unresol
 export function selectUnresolved(
   preview: UnresolvedPreview | null,
   off: ReadonlySet<string>,
-  linked: ReadonlySet<string>,
-): SelectedUnresolved {
-  return {
-    points: preview?.points.filter((p) => !off.has(p.key)) ?? [],
-    links: preview?.links.filter((l) => linked.has(l.q.id)) ?? [],
-  };
+  linked: ApprovedLinks,
+) {
+  const links = preview?.links.filter((link) => isApprovedLink(link, linked.get(link.point.key))) ?? [];
+  const linkedPoints = new Set(links.map((link) => link.point.key));
+  const points = preview?.points.filter((point) => !off.has(point.key) && !linkedPoints.has(point.key)) ?? [];
+  return { points, links, linkedPoints, draftPoints: new Set(points.map((point) => point.key)) };
 }
+
+type Changed = { kind: 'changed'; count: number; keys: ReadonlySet<string>; invalidLinks: ReadonlySet<string> };
 
 export function narrowUnresolved(
   preview: UnresolvedPreview | null,
-  keys: ReadonlySet<string>,
+  { keys, invalidLinks }: Changed,
 ): UnresolvedPreview | null {
   return preview && {
-    points: preview.points.filter((p) => keys.has(p.key)),
-    links: preview.links.filter((l) => keys.has(l.point.key)),
-    out: preview.out.filter((p) => keys.has(p.key)),
+    points: preview.points.filter((point) => keys.has(point.key)),
+    links: preview.links.filter((link) => keys.has(link.point.key) && !invalidLinks.has(link.point.key)),
+    out: preview.out.filter((point) => keys.has(point.key)),
   };
 }
 
 const target = (p: Unresolved) => (p.kind === 'finding' ? { linkedFinding: p.findingId } : { linkedItem: p.itemId });
 
-type Submitted =
-  | { kind: 'added' }
-  | { kind: 'failed'; message: string }
-  | { kind: 'changed'; count: number; keys: ReadonlySet<string> };
+type Submitted = { kind: 'added' } | { kind: 'failed'; message: string } | Changed;
+
+function changedUnresolved(state: State, dealId: string, selected: SelectedUnresolved): Changed {
+  const targets = new Map(unresolvedTargets(state, dealId).map((point) => [point.key, point]));
+  const keys = new Set(targets.keys());
+  const invalidLinks = new Set<string>();
+  for (const link of selected.links) {
+    const point = targets.get(link.point.key);
+    const q = state.questions[link.q.id];
+    // If the target changed, its draft also belongs to the older wording. Offer it afresh on reopen.
+    if (point && unresolvedPointFingerprint(point) !== unresolvedPointFingerprint(link.point)) keys.delete(point.key);
+    const eligible = q?.dealId === dealId && canLinkUnresolved(q, !!state.conflicts[q.id]);
+    if (!point || !eligible || !isApprovedLink({ point, q }, linkApproval(link))) invalidLinks.add(link.point.key);
+  }
+  const count = invalidLinks.size + selected.points.filter((point) => !targets.has(point.key)).length;
+  return { kind: 'changed', count, keys, invalidLinks };
+}
 
 export async function submitUnresolved(store: Store, dealId: string, selected: SelectedUnresolved): Promise<Submitted> {
   await store.refreshChecklist(dealId);
@@ -137,14 +155,22 @@ export async function submitUnresolved(store: Store, dealId: string, selected: S
   if (!Array.isArray(state.checklists[dealId])) {
     return { kind: 'failed', message: `${UNREAD_CHECKLIST}, so nothing was added` };
   }
-  const keys = new Set(unresolvedPoints(state, dealId).points.map((p) => p.key));
-  const picked = [...selected.points, ...selected.links.map((l) => l.point)];
-  const changed = picked.filter((p) => !keys.has(p.key)).length;
-  if (changed) return { kind: 'changed', count: changed, keys };
+  const changed = changedUnresolved(state, dealId, selected);
+  if (changed.count) return changed;
   const result = await store.dispatch(AddUnresolved, {
     dealId,
-    add: selected.points.map((p) => ({ text: p.text, workstream: p.workstream, ...target(p) })),
-    link: selected.links.map((l) => ({ questionId: l.q.id, ...target(l.point) })),
-  }, { idempotencyKey: 'add-unresolved-' + dealId, quiet: false });
-  return result.ok ? { kind: 'added' } : { kind: 'failed', message: result.error.message };
+    add: selected.points.map((point) => ({ text: point.text, workstream: point.workstream, ...target(point) })),
+    link: selected.links.map((link) => ({
+      questionId: link.q.id, ...target(link.point), approval: linkApproval(link).fingerprint,
+    })),
+  }, {
+    idempotencyKey: 'add-unresolved-' + dealId,
+    quietRefusal: (error) => error.message === UNRESOLVED_LINK_CHANGED,
+  });
+  if (result.ok) return { kind: 'added' };
+  if (result.error.message === UNRESOLVED_LINK_CHANGED) {
+    const latest = changedUnresolved(store.get(), dealId, selected);
+    if (latest.count) return latest;
+  }
+  return { kind: 'failed', message: result.error.message };
 }
