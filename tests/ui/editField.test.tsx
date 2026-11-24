@@ -671,6 +671,43 @@ describe('EditField', () => {
       expect(f.text()).not.toMatch(/Changed elsewhere/); expect(f.commits.map((c) => c.v)).toEqual(['Contoso ', 'Contoso Corp']);
     });
 
+    it.each(['Seller under the sale agreement', ' Seller under the sale agreement '])(
+      'Escape after Keep Mine restores the stored choice for %j',
+      async (chosen) => {
+        const stored = chosen.trim();
+        const f = host('Seller under the term sheet', false, (value) => value.trim());
+        const input = (value: string) => act(() => {
+          f.el().value = value;
+          f.el().dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        const pressEscape = () => act(() => {
+          f.el().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        });
+
+        await f.type(chosen);
+        f.rec.value = 'Seller under the transfer agreement';
+        f.rec.rev++;
+        await f.draw();
+        const keep = [...f.root.querySelectorAll('button')].find((button) => button.textContent === 'Keep Mine')!;
+        await act(() => { keep.click(); });
+        await input('Seller under the amended sale agreement');
+        await pressEscape();
+        expect(f.el().value).toBe('Seller under the amended sale agreement');
+        expect(f.commits.map(({ v }) => v)).toEqual([chosen]);
+        await act(async () => { f.commits[0].resolve(true); });
+        await f.draw();
+        await f.settle(0);
+        expect(f.el().value).toBe('Seller under the amended sale agreement');
+
+        await pressEscape();
+        await f.settle();
+        expect(f.el().value).toBe(stored);
+        expect(f.rec.value).toBe(stored);
+        expect(f.commits.map(({ v }) => v)).toEqual([chosen]);
+        await f.hide();
+      },
+    );
+
     it('Escape on "Changed elsewhere" keeps the typed text, leaves the choice open and closes what holds the field', async () => {
       const f = host('abc', false); let closed = 0;
       const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') closed++; }; document.addEventListener('keydown', onEsc);

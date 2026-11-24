@@ -30,6 +30,7 @@ async function field() {
   const { restoreFieldDraft, unsavedFields } = await import('../../src/app/fieldDrafts');
   const key = 'q_credit:question';
   let text = original;
+  const adopted: string[] = [];
   const input: FieldInput = {
     text: () => text,
     partial: () => false,
@@ -39,7 +40,7 @@ async function field() {
     stopTimer: () => false,
     markPartial: () => {},
     replaceText: (value) => { text = value; },
-    adoptBase: () => {},
+    adoptBase: (value) => { adopted.push(value); },
     landedEntryText: () => {},
     show: () => {},
   };
@@ -54,7 +55,7 @@ async function field() {
     text = value;
     save.typed(text);
   };
-  return { save, type, pending, commit, key, restoreFieldDraft, unsavedFields, text: () => text };
+  return { save, type, pending, commit, key, restoreFieldDraft, unsavedFields, adopted, text: () => text };
 }
 
 it('settles a normalized save without dropping newer typed text', async () => {
@@ -97,6 +98,66 @@ it('recognizes a stale queued field write and keeps the newer text until the per
   await expect(chosen).resolves.toEqual({ kind: 'saved', written: true });
   await vi.runAllTimersAsync();
   expect(restoreFieldDraft(key, laterEdit)).toBeUndefined();
+});
+
+it('uses the stored choice for Escape when a second save lands before the choice settles', async () => {
+  const draft = await field();
+  const { save, type, pending, commit, adopted } = draft;
+  type(` ${firstEdit} `);
+  const peerText = 'Confirm the conditions to the initial facility draw.';
+  save.receive({ value: peerText, rev: 2 });
+  const choice = save.save(draft.text(), commit, true);
+  type(laterEdit);
+  const later = save.save(draft.text(), commit);
+
+  save.receive({ value: firstEdit, rev: 3 });
+  pending[0].resolve({ ok: true });
+  await choice;
+  save.receive({ value: laterEdit, rev: 4 });
+  pending[1].resolve({ ok: true });
+  await later;
+  await vi.runAllTimersAsync();
+
+  expect(adopted).toEqual([firstEdit]);
+  expect(save.base).toBe(laterEdit);
+  expect(draft.text()).toBe(laterEdit);
+  expect(save.view.external).toBe(false);
+});
+
+it('does not adopt a refused choice when a newer edit has arrived from another PC', async () => {
+  const draft = await field();
+  const { save, type, pending, commit, adopted } = draft;
+  type(firstEdit);
+  const peerText = 'Confirm the conditions to the initial facility draw.';
+  save.receive({ value: peerText, rev: 2 });
+  const choice = save.save(draft.text(), commit, true);
+  const newerPeerText = peerText + ' Include the signing deliverables.';
+  save.receive({ value: newerPeerText, rev: 3 });
+  type(peerText);
+  pending[0].resolve({ ok: false, error: { kind: 'conflict', message: CHANGED_ELSEWHERE } });
+  await choice;
+
+  expect(adopted).toEqual([]);
+  expect(save.seen.value).toBe(newerPeerText);
+  expect(draft.text()).toBe(peerText);
+  expect(save.view.external).toBe(true);
+});
+
+it.each(['unreachable', 'rejected'])('keeps the choice when Keep Mine returns %s', async (kind) => {
+  const draft = await field();
+  const { save, type, pending, commit, adopted } = draft;
+  type(firstEdit);
+  const peerText = 'Confirm the conditions to the initial facility draw.';
+  save.receive({ value: peerText, rev: 2 });
+  const choice = save.save(draft.text(), commit, true);
+  pending[0].resolve({ ok: false, error: { kind, message: 'This edit could not be saved.' } });
+  await choice;
+
+  expect(adopted).toEqual([]);
+  expect(save.seen.value).toBe(peerText);
+  expect(draft.text()).toBe(firstEdit);
+  expect(save.view.external).toBe(true);
+  expect(draft.restoreFieldDraft(draft.key, peerText)).toMatchObject({ text: firstEdit, rev: -1 });
 });
 
 it('returns a typed refusal and restores the draft with everything typed after the send', async () => {
