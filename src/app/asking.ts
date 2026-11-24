@@ -1,7 +1,11 @@
 import type { Finding, Question } from '../domain/model';
 import type { ItemStanding, NamedItem, State } from './state';
 
-export type AskBlock = 'closed-finding' | 'off-item';
+type AskBlock = 'closed-finding' | 'off-item';
+const FINDING_BLOCK_WORDS: Record<AskBlock, string> = {
+  'closed-finding': 'This finding is closed',
+  'off-item': 'Its checklist item is turned off',
+};
 
 /** A new linked question is for an open finding or a gap on an active item. */
 export function askBlock(status: Finding['status'] | undefined, itemOff: boolean): AskBlock | null {
@@ -10,8 +14,9 @@ export function askBlock(status: Finding['status'] | undefined, itemOff: boolean
 }
 
 export function findingAskTarget(finding: Finding, item: NamedItem | null) {
+  const block = askBlock(finding.status, !!item?.off);
   return {
-    block: askBlock(finding.status, !!item?.off),
+    why: block ? FINDING_BLOCK_WORDS[block] : null,
     links: {
       workstream: finding.workstream,
       linkedFinding: finding.id,

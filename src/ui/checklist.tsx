@@ -396,8 +396,10 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
   }, [asking, text, asked.length]);      // the Asked list, growing above the box when another PC asks, pushes it down
   const log = async () => {
     if (busy || !text.trim() || logWhy) return;
-    const input = { dealId, text: text.trim(), ...target.links };
-    await draft.log(input.text, () => store.dispatch(CreateQuestion, input, { idempotencyKey: 'ck-q-' + r.id }));
+    const trimmed = text.trim();
+    await draft.log(trimmed, () => store.dispatch(CreateQuestion, {
+      dealId, text: trimmed, askOrigin: { kind: 'checklist', itemId: r.id, findingId: target.links.linkedFinding },
+    }, { idempotencyKey: 'ck-q-' + r.id }));
   };
   // the card being typed in keeps one place in the pane, on or off, so turning the item off never takes it away or moves the focus
   // shown whenever a question is being typed, whatever happens to the item or its finding meanwhile; Escape sets it

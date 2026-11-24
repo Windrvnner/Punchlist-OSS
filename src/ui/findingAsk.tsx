@@ -3,7 +3,7 @@
  * questions asked about it or its item, and Ask the counterparty, with the Checklist pane's card.
  */
 import { useContext, useEffect, useState } from 'preact/hooks';
-import { askedAbout, findingAskTarget, type AskBlock } from '../app/asking';
+import { askedAbout, findingAskTarget } from '../app/asking';
 import { findingItem } from '../app/state';
 import { CreateQuestion } from '../app/commands/questions';
 import type { Finding } from '../domain/model';
@@ -17,11 +17,6 @@ import { openChecklistItem } from './nav';
 const askDrafts = keptDrafts('finding-ask', isText);
 /** whether a question is being typed on a finding's page */
 export const askKept = (findingId: string) => !!askDrafts.get(findingId);
-
-const ASK_BLOCK_WORDS: Record<AskBlock, string> = {
-  'closed-finding': 'This finding is closed',
-  'off-item': 'Its checklist item is turned off',
-};
 
 /** The question being typed on a finding's page, kept as it is typed, and set aside or cleared. */
 function useAskDraft(findingId: string) {
@@ -81,13 +76,15 @@ export function FindingLinks({ dealId, f, pane }: { dealId: string; f: Finding; 
   }, [dealId]);
   const item = findingItem(s, f);
   const asked = askedAbout(s, dealId, item?.id ?? null, f);
-  const { block, links } = findingAskTarget(f, item);
-  const why = ro || (block ? ASK_BLOCK_WORDS[block] : null);
-  const offer = !pane && (!block || draft.kept);
+  const target = findingAskTarget(f, item);
+  const why = ro || target.why;
+  const offer = !pane && (!target.why || draft.kept);
   const log = async () => {
     if (draft.busy || !draft.text.trim() || why) return;
     const text = draft.text.trim();
-    await draft.log(text, () => store.dispatch(CreateQuestion, { dealId, text, ...links },
+    await draft.log(text, () => store.dispatch(CreateQuestion, {
+      dealId, text, askOrigin: { kind: 'finding', findingId: f.id },
+    },
       { idempotencyKey: 'f-q-' + f.id }));
   };
   // Escape sets the question aside only where Ask the counterparty can bring it back, as on the Checklist
