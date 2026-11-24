@@ -8,7 +8,7 @@
  */
 import { useLayoutEffect, useRef } from 'preact/hooks';
 import type { Source } from '../domain/model';
-import { markerPieces, markerSafeEnd, withoutMarkers } from '../domain/cite';
+import { type MarkerPiece, markerPieces, remapMarkerPieces, takeMarkerPieces, withoutMarkers } from '../domain/cite';
 import { TEXT_MAX } from '../domain/importExport';
 import { docTitle, displayName, graphemes } from './docName';
 import { showTip, hideTip } from './tip';
@@ -35,8 +35,8 @@ function citationTag(marker: string, source: Source): HTMLSpanElement {
 }
 
 /** Text with markers as the nodes the editor shows: the words as text, each marker as its tag. */
-function citedNodes(text: string, sources: Source[]): Node[] {
-  return markerPieces(text, sources.length).map((piece) =>
+function citedNodes(pieces: MarkerPiece[], sources: Source[]): Node[] {
+  return pieces.map((piece) =>
     piece.ref ? citationTag(piece.text, sources[piece.ref - 1]) : document.createTextNode(piece.text));
 }
 
@@ -68,14 +68,15 @@ function selectedText(): string {
 }
 
 /** what the box still has room for: whole characters only, so a letter or an emoji is never cut in half */
-function fitTo(text: string, room: number, sourceCount: number): string {
-  if (text.length <= room) return text;
-  let out = '';
-  for (const letter of graphemes(text)) {
-    if (out.length + letter.length > room) break;
-    out += letter;
+function fitTo(pieces: MarkerPiece[], room: number): MarkerPiece[] {
+  const text = pieces.map((piece) => piece.text).join('');
+  if (text.length <= room) return pieces;
+  let end = 0;
+  for (const character of graphemes(text)) {
+    if (end + character.length > room) break;
+    end += character.length;
   }
-  return out.slice(0, markerSafeEnd(text, out.length, sourceCount));
+  return takeMarkerPieces(pieces, end);
 }
 
 /**
@@ -84,13 +85,15 @@ function fitTo(text: string, room: number, sourceCount: number): string {
  * text, as the box's own are; a break at its very end goes in as the browser's own, so what is typed next starts
  * the new line.
  */
-function insertCited(text: string, box: HTMLElement, sources: Source[]) {
+function insertCited(pieces: MarkerPiece[], box: HTMLElement, sources: Source[]) {
   const room = TEXT_MAX - editorText(box).length + selectedText().length;
-  const fitted = fitTo(text.replace(/\r\n?/g, '\n'), Math.max(0, room), sources.length);
+  const fitting = fitTo(pieces, Math.max(0, room));
+  const fitted = fitting.map((piece) => piece.text).join('');
   const words = fitted.replace(/\n+$/, '');
   if (words) {
     const holder = document.createElement('div');
-    holder.append(...citedNodes(words, sources));
+    const inline = words.length === fitted.length ? fitting : takeMarkerPieces(fitting, words.length);
+    holder.append(...citedNodes(inline, sources));
     document.execCommand('insertHTML', false, holder.innerHTML);
   }
   if (fitted.length > words.length) document.execCommand('insertLineBreak');
@@ -112,36 +115,26 @@ function readClip(raw: string): CitedClip | null {
   }
 }
 
-/** A copied passage's markers numbered for this finding's sources. One naming a source it does not cite is left
- *  out, so a sentence never shows a source it was not cited from. */
-function clipForFinding(clip: CitedClip, sources: Source[]): string {
-  let out = '';
-  for (const piece of markerPieces(clip.text, clip.sources.length)) {
-    const from = piece.ref ? clip.sources[piece.ref - 1] : null;
-    const at = from ? sources.findIndex((x) => x.docId === from.docId && x.loc === from.loc) : -1;
-    if (!from) out += piece.text;
-    else if (at >= 0) out += `[${at + 1}]`;
-    else out = out.replace(/[ \t]+$/, '');   // the space before a marker left out goes with it
-  }
-  return out;
-}
-
-/** What a paste or a drop brings: a passage copied in the app with its citations, else its plain text, else the
- *  words of formatted text that has no plain text. */
-function incomingText(data: DataTransfer | null, sources: Source[]): string {
-  if (!data) return '';
-  const clip = readClip(data.getData(CITED_TYPE));
-  if (clip) return clipForFinding(clip, sources);
-  const plain = data.getData('text/plain');
-  if (plain) return plain;
-  const page = new DOMParser().parseFromString(data.getData('text/html'), 'text/html');
+function markupWords(markup: string): string {
+  const page = new DOMParser().parseFromString(markup, 'text/html');
   for (const code of Array.from(page.querySelectorAll('script, style'))) code.remove();
   return page.body.textContent ?? '';
 }
 
+const pasteLines = (text: string) => text.replace(/\r\n?/g, '\n');
+
+/** Preserve the roles in a native passage. External text uses the receiving editor's source count. */
+function incomingPieces(data: DataTransfer | null, sources: Source[]): MarkerPiece[] {
+  if (!data) return [];
+  const clip = readClip(data.getData(CITED_TYPE));
+  if (clip) return remapMarkerPieces(pasteLines(clip.text), clip.sources, sources);
+  const text = data.getData('text/plain') || markupWords(data.getData('text/html'));
+  return markerPieces(pasteLines(text), sources.length);
+}
+
 function pasteCited(event: ClipboardEvent, box: HTMLElement, sources: Source[]) {
   event.preventDefault();
-  insertCited(incomingText(event.clipboardData, sources), box, sources);
+  insertCited(incomingPieces(event.clipboardData, sources), box, sources);
 }
 
 /** Text dropped from outside goes in where it is dropped, as a paste would. */
@@ -157,7 +150,7 @@ function dropCited(event: DragEvent, box: HTMLElement, sources: Source[]) {
     getSelection()?.removeAllRanges();
     getSelection()?.addRange(at);
   }
-  insertCited(incomingText(event.dataTransfer, sources), box, sources);
+  insertCited(incomingPieces(event.dataTransfer, sources), box, sources);
 }
 
 /**
@@ -211,7 +204,7 @@ type CitedEditorProps = { id: string; label: string; text: string; sources: Sour
 export function CitedEditor({ id, label, text, sources, onText }: CitedEditorProps) {
   const box = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    box.current?.replaceChildren(...citedNodes(text, sources));
+    box.current?.replaceChildren(...citedNodes(markerPieces(text, sources.length), sources));
   }, []);
   const changed = () => {
     if (box.current) onText(editorText(box.current));
