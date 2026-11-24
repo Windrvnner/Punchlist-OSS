@@ -1,17 +1,14 @@
 // Match syntax, so examples in comments, strings, regexes and JSX text never count as UI dependencies.
 import { posix } from 'node:path';
 import { parseSync, Visitor } from 'vite';
+import { globSources } from './pane-of-glass-globs.mjs';
+import { globImports } from './pane-of-glass-vite.mjs';
+import { literalText, unwrapped } from './pane-of-glass-syntax.mjs';
 import { localConstLookup } from './pane-of-glass-constants.mjs';
 
 const storageNames = new Set(['localStorage', 'sessionStorage', 'indexedDB']);
 const layerPath = /^(?:backend|adapters|desktop|shell)(?:\/|$)/;
 const externalModule = /^(?:node:|(?:electron|fs|path)(?:\/|$))/;
-
-function literalText(node) {
-  if (typeof node?.value === 'string') return node.value;
-  if (node?.type === 'TemplateLiteral' && !node.expressions.length) return node.quasis[0].value.cooked;
-  return null;
-}
 
 function concatenate(left, right) {
   return left.flatMap((prefix) => right.map((suffix) => prefix + suffix));
@@ -53,15 +50,6 @@ function propertyNames(key, computed) {
   return stringValues(key);
 }
 
-// Assertions, parentheses and optional chains leave the underlying path or member unchanged.
-function unwrapped(node) {
-  while (['TSNonNullExpression', 'TSAsExpression', 'TSTypeAssertion', 'TSSatisfiesExpression',
-    'ChainExpression', 'ParenthesizedExpression'].includes(node?.type)) {
-    node = node.expression;
-  }
-  return node;
-}
-
 // Only a direct identifier argument follows const aliases. Keep the diagnostic at the import site.
 function dynamicImportSource(program, file, source) {
   let lookup;
@@ -78,7 +66,7 @@ function dynamicImportSource(program, file, source) {
   };
 }
 
-export function matchesIn(file, source) {
+export async function matchesIn(file, source, checkGlobs) {
   const parsed = parseSync(file, source, { range: true });
   if (parsed.errors.length) throw new Error(`${file}: ${parsed.errors[0].message}`);
   const offsets = {};
@@ -133,6 +121,15 @@ export function matchesIn(file, source) {
     },
   }).visit(parsed.program);
 
+  const globs = checkGlobs ? globSources(parsed.program, source) : [];
+  for (const { node, code } of globs) {
+    const ids = await globImports(file, code);
+    if (ids.some((id) => id.startsWith('src/') && forbiddenModule(file, id))) record('import', node);
+  }
+  return matchingLines(offsets, source);
+}
+
+function matchingLines(offsets, source) {
   const lines = {};
   for (const kind of Object.keys(offsets).sort()) {
     lines[kind] = [...offsets[kind]].sort((a, b) => a - b)

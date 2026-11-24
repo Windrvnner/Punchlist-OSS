@@ -128,16 +128,16 @@ describe('UI dependency checks', () => {
       `export const relative = import.meta.env.BASE_URL === './' ? import.meta.glob('../${layer}/{term}.ts') : {}`,
       `export const absolute = import.meta.env.BASE_URL !== './' ? import.meta.glob('../${layer}/{term}.ts') : {}`,
       `export const stale = __APP_VERSION__ !== '${version}' ? import.meta.glob('../${layer}/{term}.ts') : {}`,
-      `export const based = import.meta.glob('./term.ts', { base: '../${layer}', query: { page: -1, raw: true } })`,
+      `export const based = import.meta.glob('./term.ts', { base: '../${layer}', query: { [0]: -1, raw: true } })`,
       `export const basedLazy = import.meta.glob('./term.ts', { 'base': '../${layer}', eager: false })`,
-      `export const available = import.meta ? import.meta.glob('../${layer}/{term}.ts') : {}`,
       'const __paneMeta = false',
+      `export const available = import.meta ? import.meta.glob('../${layer}/{term}.ts') : {}`,
     ].join('\n'));
     const result = repo.run();
     const folded = existsSync(path.join(repo.dir, 'src/BACKEND/term.ts'));
     expect(result.status, result.stderr).toBe(layer === 'ui' ? 0 : 1);
     if (layer === 'backend') {
-      const lines = [1, 2, 3, 5, 6, 7, 9, ...(folded ? [12] : []), 13, 14, 15, 17, 20, 21, 22];
+      const lines = [1, 2, 3, 5, 6, 7, 9, ...(folded ? [12] : []), 13, 14, 15, 17, 20, 21, 23];
       expect(result.stderr).toContain(`${file} import (lines ${lines.join(', ')}): ${lines.length} exceeds`);
     }
   });
