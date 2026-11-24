@@ -1,5 +1,6 @@
 import type { Finding } from '../domain/model';
-import { findingCounts } from './dealCounts';
+import { conflictVersionCount, findingCounts } from './dealCounts';
+import { removableIssuesLists, visibleDeletedNotes } from './deletedView';
 import { findingListed, findingWorkstreams, listedFindings, workstreamHead, type State } from './state';
 
 type FindingStatus = State['ui']['findingFilter']['status'];
@@ -11,7 +12,7 @@ function statusShown(status: FindingStatus, counts: ReturnType<typeof findingCou
   return status;
 }
 
-function visibleRows(findings: Finding[]) {
+function visibleRows(findings: Finding[], state: Pick<State, 'conflicts'>) {
   const groups = new Map<string, number>();
   for (const finding of findings) {
     const name = workstreamHead(finding);
@@ -20,7 +21,11 @@ function visibleRows(findings: Finding[]) {
   return findings.map((finding, index) => {
     const name = workstreamHead(finding);
     const startsGroup = index === 0 || workstreamHead(findings[index - 1]) !== name;
-    return { finding, heading: startsGroup ? { name, count: groups.get(name)! } : undefined };
+    return {
+      finding,
+      heading: startsGroup ? { name, count: groups.get(name)! } : undefined,
+      conflictVersions: conflictVersionCount(state, finding.id),
+    };
   });
 }
 
@@ -41,6 +46,8 @@ export function findingsView(state: State, dealId: string) {
     statusOptions,
     showStatus: many || counts.closed > 0 || counts.reassess > 0 || status !== 'open',
     workstreams: findingWorkstreams(all),
-    rows: visibleRows(all.filter((finding) => findingListed(state, finding, filter))),
+    rows: visibleRows(all.filter((finding) => findingListed(state, finding, filter)), state),
+    restorable: visibleDeletedNotes(state, dealId, 'finding').length > 0
+      || removableIssuesLists(state, dealId).length > 0,
   };
 }

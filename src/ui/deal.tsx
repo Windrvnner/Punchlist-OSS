@@ -10,7 +10,7 @@ import { dealNameRoom, EditDeal, GROUP_LABEL } from '../app/commands/deals';
 import { MoreMenu, MenuItem } from './moreMenu';
 import { Pick } from './qa';
 import { resumeIndexing } from '../app/indexing';
-import { findingCounts, indexingTotals, questionCounts } from '../app/dealCounts';
+import { conflictVersionCount, findingCounts, indexingTotals, questionCounts } from '../app/dealCounts';
 import { EditField, ReadOnlyContext, readDeal } from './editField';
 import { ConflictView } from './conflict';
 import { runMemo } from '../app/memo';
@@ -59,8 +59,10 @@ function openDelete(store: ReturnType<typeof useStore>, dealId: string) {
 }
 
 export function useDealLock(d: Deal): string | null {
-  const s = useAppState(); const inherited = useContext(ReadOnlyContext); const clash = s.conflicts[d.id];
-  return clash ? `${d.name} has ${versionsWord(clash.versions.length).toLowerCase()}. Choose one first` : inherited;
+  const s = useAppState();
+  const inherited = useContext(ReadOnlyContext);
+  const versions = conflictVersionCount(s, d.id);
+  return versions === undefined ? inherited : `${d.name} has ${versionsWord(versions).toLowerCase()}. Choose one first`;
 }
 
 function indexingLabel(stalled: boolean, indexed: number) {

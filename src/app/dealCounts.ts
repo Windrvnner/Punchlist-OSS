@@ -50,6 +50,10 @@ export function questionCounts(state: Pick<State, 'questions'>, dealId: string) 
   return counts;
 }
 
+export function conflictVersionCount(state: Pick<State, 'conflicts'>, recordId: string) {
+  return state.conflicts[recordId]?.versions.length;
+}
+
 export function indexingTotals(state: Pick<State, 'indexing'>, deal: Pick<Deal, 'id' | 'folders'>) {
   const folders = liveFolders(state, deal);
   return { folders: folders.length, ...folderIndexCounts(folders) };
