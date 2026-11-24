@@ -333,6 +333,28 @@ it.each([1, 2])('accepts an original save after a legacy receipt and %i unrelate
   }, { draft: lateDraft });
 });
 
+it.each([0, 1])('accepts a revision below a legacy receipt with %i later edits (#774)', async (count) => {
+  await withRecoveredQuestion(async ({ B, copied, lateWrite, lateTransaction }) => {
+    await editRecoveredWording(B, copied, [recoveredWording[0]]);
+    const response = 'The signed guarantee is now in the closing binder.';
+    const saved = okd(await lateWrite({ response: 'The draft guarantee is in the security package.' }));
+    const next = lateTransaction({ response });
+    const write = next.writes[0];
+    expect(saved.value[write.id]).toBeGreaterThan(Number(write.expectedRev));
+    await editRecoveredWording(B, copied, recoveredWording.slice(1, 1 + count));
+    await B.repo.close();
+    removeForwardingField(B, 'recoveredReceipt');
+    const restarted = await restartRepository(B);
+    try {
+      expect(await restarted.transaction(next)).toMatchObject({ ok: true });
+      const current = okd(await restarted.get('question', copied.id)).value.envelope.data;
+      expect(current).toMatchObject({ text: recoveredWording[count], response });
+    } finally {
+      await restarted.close();
+    }
+  });
+});
+
 it('removes a draft from the recovered copy when a late Discard Draft arrives (#664)', async () => {
   await withRecoveredQuestion(async ({ B, copied, lateWithout }) => {
     expect(copied.draft?.text).toBe('AI response to discard');

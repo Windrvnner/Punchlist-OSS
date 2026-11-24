@@ -21,7 +21,7 @@ import { Combined, isLine, recKey, type Line, type RecChange, type RecState } fr
 import type { Ver } from './changeLines';
 import { shareOwn, wholeLines } from './ownFile';
 import { LocalChanges } from './localChanges';
-import { recoveredWriteClashes } from './recoveredWrite';
+import { legacyReceiptCouldBeAsEarlyAs, recoveredWriteClashes } from './recoveredWrite';
 import {
   changedOnto, recoveredDeal, recoveredId, recoveredIds, remap, removedFields, type Had,
 } from '../domain/recovered';
@@ -1253,7 +1253,8 @@ export class LogRepository implements Repository {
     }
     if (head && matches.length === 1 && matches[0] === head && revision === now.rev) return ok(head);
     // An unknown older receipt cannot authorize a change against whichever record happens to match its number.
-    const legacy = forwarded.filter((v) => !v.recoveredReceipt);
+    const legacy = forwarded.filter((v) =>
+      !v.recoveredReceipt && legacyReceiptCouldBeAsEarlyAs(v, revision, (id) => this.view.version(id)));
     if (matches.length || this.couldBeLegacyReceipt(legacy, heads, revision, now.rev)
       || (forwarded.length && revision > originalRev)) return fail({ kind: 'rejected', message: DEAL_DELETED });
     return ok(null);
