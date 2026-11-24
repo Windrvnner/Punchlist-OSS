@@ -81,6 +81,18 @@ async function checkCounterpartyComposition(page, dealId) {
     await waitForValue(confirmed);
     expected.push(confirmed);
   }
+  await field.selectText();
+  const unconfirmed = 'しはらい';
+  await session.send('Input.imeSetComposition', {
+    text: unconfirmed, selectionStart: unconfirmed.length, selectionEnd: unconfirmed.length,
+  });
+  await field.blur();
+  await page.waitForTimeout(750); // Chromium ends composition synchronously as part of the blur.
+  const { value, edits } = await counterpartyEdits(page, dealId);
+  const retry = page.getByRole('button', { name: 'Not saved · Retry', exact: true });
+  const held = await field.inputValue() === unconfirmed && await retry.isVisible();
+  say('ime-blur-keeps-unconfirmed-draft', held && value === expected.at(-1) &&
+    JSON.stringify(edits) === JSON.stringify(expected), JSON.stringify({ value, edits, held }));
   await session.detach();
   return expected;
 }

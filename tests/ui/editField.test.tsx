@@ -77,6 +77,30 @@ describe('EditField', () => {
     unsavedFields.delete(keep);
   });
 
+  it('keeps the composition ended by blur until explicit Retry', async () => {
+    const editor = mount('Borrowing entity', false);
+    const field = editor.el();
+    await act(() => {
+      field.focus();
+      field.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      compositionInput(field, 'しはらい', true);
+      field.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: field.value }));
+      field.blur();
+    });
+    await editor.settle();
+    await act(() => {
+      field.focus();
+      field.blur();
+    });
+    expect(editor.commits).toHaveLength(0);
+    const retry = editor.host.querySelector<HTMLButtonElement>('button.fail');
+    expect(retry?.textContent).toBe('Not saved · Retry');
+    await act(() => retry?.click());
+    expect(editor.commits.map(({ v }) => v)).toEqual(['しはらい']);
+    await act(() => render(null, editor.host));
+    editor.host.remove();
+  });
+
   it('offers a choice if a peer edits during composition and only saves the confirmed choice', async () => {
     const editor = mount('Borrowing entity', false);
     const field = editor.el();
@@ -85,7 +109,7 @@ describe('EditField', () => {
       field.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
       compositionInput(field, 'ほしょう', true);
     });
-    editor.rec.value = 'Guarantor';
+    editor.rec.value = 'ほしょう';
     editor.rec.rev++;
     await editor.draw();
     await act(() => {
