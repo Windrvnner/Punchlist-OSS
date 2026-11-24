@@ -367,6 +367,7 @@ export function saveLog(o: { folder: string; file: string; bytes: Uint8Array; wa
   let staged: StagedArchive | undefined;
   // the archive file that holds the version moved aside byte for byte, once one is known to: only then may that version go
   let holds = '';
+  let published = false;
   try {
     fs.writeFileSync(tmp, o.bytes, { flag: 'wx' });
     try { tidyLeftovers(o.folder, o.file, dir, fs.statSync(tmp).ctimeMs); } catch { /* tidying never fails a save */ }
@@ -396,6 +397,7 @@ export function saveLog(o: { folder: string; file: string; bytes: Uint8Array; wa
       if ((e as NodeJS.ErrnoException).code === 'EEXIST' || fs.existsSync(at)) return { status: 'later' };
       fs.renameSync(tmp, at);
     }
+    published = true;
     return { status: 'written', archive };
   } catch (e) {
     if (['EBUSY', 'EPERM', 'EACCES'].includes((e as NodeJS.ErrnoException).code ?? '')) {   // open in Excel
@@ -410,10 +412,9 @@ export function saveLog(o: { folder: string; file: string; bytes: Uint8Array; wa
     // recorded. A working file another program holds stays until the next save.
     tidy(tmp);
     if (staged) tidyStage(staged.file);
-    // The version moved aside goes back when nothing took the log's name, and goes once the archive holds it. Otherwise it
-    // stays as it is, under its aside name: it may hold an edit that is nowhere else.
+    // After publication, another PC may already have moved the new log aside for its own save (#280).
     if (fs.existsSync(aside)) {
-      if (!fs.existsSync(at)) fs.renameSync(aside, at);
+      if (!published && !fs.existsSync(at)) fs.renameSync(aside, at);
       else if (holds) tidyArchivedAside(aside, path.join(dir, holds));
     }
   }
