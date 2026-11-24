@@ -1,3 +1,4 @@
+import { distinguishingWords } from '../../src/app/dealLabel';
 // Deals with the same name are told apart by their counterparty and the day they were made.
 import { describe, it, expect } from 'vitest';
 import { dealTwin, dealLabel } from '../../src/app/state';
@@ -36,4 +37,14 @@ describe('telling same-named deals apart', () => {
     expect(dealLabel({ deals: { [b.id]: b, [d.id]: d } as any }, d)).toBe('Project Kestrel (Mar 2, 2025)');
     expect(dealLabel({ deals: { [d.id]: d, [e.id]: e } as any }, d)).toBe('Project Kestrel (Wingtip, Mar 2, 2025)');
   });
+});
+
+it('keeps the later distinguishing occurrence of a repeated phrase (#492)', () => {
+  const prefix = 'Fund IV Fund V Example Infrastructure Partners ';
+  const labels = [prefix + 'Fund IV (Lux) SCSp', prefix + 'Fund V (Lux) SCSp'];
+  for (const [index, label] of labels.entries()) {
+    const focus = distinguishingWords(label, labels);
+    expect(focus?.start).toBe(prefix.length);
+    expect(label.slice(focus?.start, focus?.end)).toBe(index ? 'Fund V' : 'Fund IV');
+  }
 });
