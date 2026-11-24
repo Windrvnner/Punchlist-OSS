@@ -55,6 +55,7 @@ const refused = [
   `Co-authored-by: Open.Windrvnner-${agent} <a@example.com>`,
   `Co-authored-by: (Windrvnner-${agent})`,
   `Co-authored-by: X Windrvnner-${agent} <a@example.com>`,
+  `Co-authored-by: Windrvnner-${agent}\rjunk <a@example.com>`,
   `${tool}-Session: x`,
   `_Requested by **Name** · thread_`,
   `<!-- ${['claude-projects', 'attribution'].join('-')}: {} -->`,

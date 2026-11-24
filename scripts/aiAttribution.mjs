@@ -23,8 +23,10 @@ function codingAgentNameOtherThanOwn() {
     const kept = OWN_AGENT_PREFIX.slice(-length);
     forms.push(`([^<]*[^<${OWN_AGENT_PREFIX.at(-length - 1)}])?${kept}${agent}`);
   }
-  forms.push(`[^<]*[^< \t][^<]*${OWN_AGENT_PREFIX}${agent}`);
-  forms.push(`[ \t]*${OWN_AGENT_PREFIX}${CODING_AGENT}[ \t]*[^ \t\r<]`);
+  forms.push(`[ \t]*[^< \t][^<]*${OWN_AGENT_PREFIX}${agent}`);
+  // A carriage return counts as the end of the line only when it is the last character. `.` is not used after it
+  // because JavaScript's `.` never matches a carriage return and `git grep`'s does.
+  forms.push(`[ \t]*${OWN_AGENT_PREFIX}${CODING_AGENT}[ \t]*([^ \t\r<]|\r(\r|[^\r]))`);
   return `(${forms.join('|')})`;
 }
 
