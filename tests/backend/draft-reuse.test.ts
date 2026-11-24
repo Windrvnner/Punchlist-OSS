@@ -95,11 +95,15 @@ describe('a draft reuses an answer already given to another party', () => {
     expect(full.text).toBe(`${quarter} ${longStop}`);
     expect(full.sources.map((source) => source.loc)).toEqual(['p. 14', 'p. 16']);
 
-    reply = { ...reply, text: quarter, sources: [sources[0]] };
-    const only = val(await s.ai.draft(draft));
-    expect(only.status).toBe('found');
-    expect(only.text).toBe(quarter);
-    expect(only.sources.map((source) => source.loc)).toEqual(['p. 14']);
+    const dates = ['Q3 2027', 'Q3-2027', 'Q3/2027', 'Q3 (2027)', 'Q3, 2027', '2027 Q3'];
+    for (const date of dates) {
+      const text = `Commercial operation is expected in ${date}. [1]`;
+      reply = { ...reply, text, sources: [sources[0]] };
+      const only = val(await s.ai.draft(draft));
+      expect(only.status, date).toBe('found');
+      expect(only.text, date).toBe(text);
+      expect(only.sources.map((source) => source.loc), date).toEqual(['p. 14']);
+    }
   });
 
   it('renumbers surviving sources after removing a genuine earlier-question credit (#286)', async () => {
@@ -130,6 +134,23 @@ describe('a draft reuses an answer already given to another party', () => {
     const draft = val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW }));
     expect(draft.status).toBe('found');
     expect(draft.text).toBe(retained);
+    expect(draft.sources.map((source) => source.loc)).toEqual(['p. 14']);
+  });
+
+  it.each([
+    ['a clause beginning with a year', 'As answered in Q3, 2027 capital spending is capped at $20 million.'],
+    ['a closing quote', 'As answered in Q3, “the target is still provisional.”'],
+  ])('removes the credit before %s and keeps the next cited sentence (#286)', async (_case, credit) => {
+    const retained = 'Commercial operation is expected in Q3 2027.';
+    const text = `${credit} [1] ${retained} [2]`;
+    const sources = [{ doc: 'D1', page: 9 }, { doc: 'D1', page: 14 }];
+    const s = setup((call) => isDraft(call) ? { status: 'found', text, sources, reused: ['R1'] } : {}, { d1: [FA] });
+    await deal(s.repo);
+    await questions(s.repo, [{ ...Q12, n: 3 }]);
+
+    const draft = val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW }));
+    expect(draft.status).toBe('found');
+    expect(draft.text).toBe(`As answered to Lender B (Q3): ${Q12.response}\n\n${retained} [1]`);
     expect(draft.sources.map((source) => source.loc)).toEqual(['p. 14']);
   });
 

@@ -1,8 +1,16 @@
 import { markerPieces } from '../domain/cite';
 import type { Source } from '../domain/model';
 
-const DATED_QUARTER = /\bQ[1-4](?:\s*[-–—/]\s*Q[1-4])*\s*(?:of\s+|,\s*)?(?:FY\s*)?(?:[12]\d{3}|['’]\d{2})\b/gi;
-const YEAR_FIRST_QUARTER = /\b(?:FY\s*)?[12]\d{3}\s+Q[1-4]\b/gi;
+const QUARTERS = String.raw`Q[1-4](?:\s*[-–—/]\s*Q[1-4])*`;
+const YEAR = String.raw`(?:[12]\d{3}|FY\s*(?:[12]\d{3}|\d{2})|['’]\d{2})\b`;
+const DATED_QUARTER = new RegExp(
+  String.raw`\b${QUARTERS}\s*(?:\(\s*${YEAR}\s*\)|(?:[-–—/]\s*|of\s+)?${YEAR})`,
+  'gi',
+);
+// A comma can end a credit. In "As answered in Q3, 2027 costs …", the year begins a new clause.
+const COMMA_QUARTER = new RegExp(String.raw`\b${QUARTERS},\s*${YEAR}(?=\s*(?:[.,;:!?)]|$))`, 'gi');
+const YEAR_FIRST_QUARTER = new RegExp(String.raw`\b${YEAR}\s*(?:[-–—/]\s*)?${QUARTERS}\b`, 'gi');
+const SENTENCE_BREAK = /(?<=[.!?]["'”’)\]]*(?:\s*\[\d+\]["'”’)\]]*)*)\s+(?!\[)/;
 
 /** Keep the model's own wording apart from credits to earlier questions (#286). */
 export function withoutDraftCredits(
@@ -10,9 +18,11 @@ export function withoutDraftCredits(
   shownNumbers: number[],
 ): { text: string; sources: Source[] } {
   const credits = shownNumbers.length ? new RegExp(`\\bQ(?:${shownNumbers.join('|')})\\b`) : null;
-  const sentences = reply.text.split(/(?<=[.!?](?:\s*\[\d+\])*)\s+(?!\[)/);
+  const sentences = reply.text.split(SENTENCE_BREAK);
   const kept = credits ? sentences.filter((sentence) => {
-    const withoutDates = sentence.replace(DATED_QUARTER, ' ').replace(YEAR_FIRST_QUARTER, ' ');
+    const withoutDates = sentence.replace(DATED_QUARTER, ' ')
+      .replace(COMMA_QUARTER, ' ')
+      .replace(YEAR_FIRST_QUARTER, ' ');
     return !credits.test(withoutDates);
   }) : sentences;
   const keptText = kept.join(' ').trim();
