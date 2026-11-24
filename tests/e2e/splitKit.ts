@@ -136,3 +136,9 @@ export async function allEnded(p: Pair, ms = 20000) {
 /** a PC's checks, with the entries the app does not call itself (the first pass, settled, close) */
 export const aiOf = (P: PcApp) => P.backend.ai as unknown as ReturnType<typeof nodeAi>;
 export { until, fs, path };
+/** the checklist rows a PC shows, as `id:result[:finding]`, sorted */
+export async function rowsOf(P: PcApp, dealId: string) {
+  const r = await P.backend.ai.checklist!(dealId);
+  if (!r.ok) throw new Error(r.error.message);
+  return r.value.map((row) => `${row.id}:${row.result}${row.findingId ? `:${row.findingId}` : ''}`).sort();
+}

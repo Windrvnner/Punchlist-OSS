@@ -10,6 +10,8 @@ Dependencies point inward, following these rules:
 - `app` never imports `backend`, `adapters`, or `ui`.
 - `adapters` and `backend` implement the ports.
 - `ui` reads `domain` helpers but changes records only through `app`.
+- `ui` never imports `backend`, `adapters`, `desktop`, or `shell`, and reaches services and storage only through `app`;
+  the exceptions still being moved are listed in `scripts/pane-of-glass-baseline.json` (#833).
 - `logRepository.ts` and `changeLog.ts` are bundled into the browser build, so they must stay free of Node imports.
 
 The source tree is organized as follows:
@@ -167,7 +169,7 @@ The code is in `src/backend/ai.ts`, `agent.ts`, and `lenient.ts`.
 
 The first pass checks a deal's documents against the checklist once the deal's folders finish indexing. A person can ask for another check, either quick or deep. Each item comes out as satisfied, a finding (with a source that opens), a gap, or not settled, and a run never stops to ask anything (`firstPass` and `checkAll` in `src/backend/ai.ts`).
 
-Results go into per-PC `checks-<install>-<deal>.jsonl` files, ordered by a running number rather than by the clock, so every PC shows the same results. Each check runs as a round (`src/backend/rounds.ts`): one shared run of checks on one deal, which every PC with the deal can take part in. The PC that starts a round writes the list of pieces of work. Each PC works out its own share from the same lines, using rendezvous hashing over the members that are active. Work that costs a model call is claimed first, and a member that is quiet for 15 minutes has its work taken over. If every member leaves a round, any PC that has the deal open and holds its documents finishes it.
+Results go into per-PC `checks-<install>-<deal>.jsonl` files, ordered by a running number rather than by the clock, so every PC shows the same results. Each check runs as a round (`src/backend/rounds.ts`): one shared run of checks on one deal, which every PC with the deal can take part in. The PC that starts a round writes the list of pieces of work. Each PC works out its own share from the same lines, using rendezvous hashing over the members that are active. Work that costs a model call is claimed first, and a member that is quiet for 15 minutes has its work taken over. If every member leaves a round, any PC that has the deal open and holds its documents finishes it. Two PCs that open a round of the same kind while out of sync merge them into the round with the lower id; a batch still running in the merged round writes its results for the kept round, even once that has ended, unless a later round has begun.
 
 New documents or responses go to the fast model, which says what they could change, with the standard model confirming any doubts, before a finding is marked to reassess.
 
@@ -182,6 +184,8 @@ A deal's checklist is made up of its own item records, linked to the findings an
 - **A deal's items** (kind `item`) are only ever added, never removed. An item's ID is `i_` derived from the deal and its wording's `key()` (`norm()`, with case folded and any trailing period removed), so the same wording added on two PCs is one item. The wording, `from` (the list and its `rev`), and the section are bookkeeping fields. Turned off (`off`) is the only field a person sets, and a write of bookkeeping fields alone folds into a concurrent change of `off` (#19).
 - **Items are added** when a deal is created; when a deal gets a new structure, sector, or technology (in the same change); by a bring-in; and by "Add them" when the master checklist's lists hold items the deal lacks. "Add them" is offered only on a loaded deal that is not marked Closed and not in two versions, and only while this PC's copy of each list the items name is at least as new as the `rev` they name (`offeredItems`). Picking another list swaps lists: items that only the old list held are turned off and marked `offBySwap`, and they are turned back on when a list that holds them returns.
 - **Order:** Items are ordered by layer (general, structure, sector, technology), then in the order of the master checklist's lists for that layer (`orderItems`). An item whose wording is not in the current master checklist lists for the deal's layers shows an icon (`unlistedItems`).
+- **The Checklist page** reads its rows, groups, filter counts and each turned-off item's findings from
+  `src/app/checklistView.ts`.
 - **The checks** read a deal's items that are turned on, in this order. A deal with no items is checked against the checklist the backend was given.
 - **Links:** A question records the item it was asked for (`linkedItem`), which is set by **Ask the Counterparty** and **Add All Unresolved to Q&A…**. A finding raised by a check records its item (`itemId`). A check matches a problem to a finding by its item, never by its title, and a reworded item is a new item. A finding names its item by that ID or, failing that, by the check line that names it (`findingItem` in `src/app/state.ts`).
 - **An item's standing** (`state.ts`) is worked out as follows. Items that are turned off are left out of the counts.

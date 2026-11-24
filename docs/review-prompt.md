@@ -27,6 +27,9 @@ verdict, and no criteria in your own words.
 >   skips, weakens, or pads with a longer timeout counts as the regression it hides.
 > - Privacy: screens name no vendor (the service name and AI label come from the control file), and nothing names a
 >   person, firm, or deployment. Never read `.env` or `~/.config/`, and run the live model tests only when asked for.
+> - Pane of glass: anything the diff adds to `src/ui` beyond showing state, sending commands, and calling `src/app`
+>   functions. When the addition serves a workflow, check that the workflow runs from a test with no component
+>   rendered.
 > - Scope: name everything the diff does that the issue didn't ask for, at the top of the review.
 >
 > A finding blocks the merge only when it is one of these:
@@ -43,16 +46,20 @@ verdict, and no criteria in your own words.
 >    a coding tool's plain "Generated with" footer (the tool's name, with at most a link to its product page): it
 >    never blocks a merge and is not reported.
 > 6. New or changed code that is hard for a person to read, by the rules under "Readable code" in CLAUDE.md (the
->    hints from `scripts/check-readability.mjs` help).
+>    hints from `scripts/check-readability.mjs` help), or new or changed code in `src/ui` that breaks the "pane of
+>    glass" rule there: a model call, business rule, data transform, list or count rule, retry, or persistence in a
+>    screen.
 > 7. A breach of the clean-contributions rule in CLAUDE.md, in new or changed text in the diff, every commit message
 >    in `git log main..HEAD`, the pull request and its comments, or issues it files or edits: personal information,
 >    internal or private links, references to non-public systems or services, text copied from third-party
 >    documentation, wording that is not provider-neutral, or a change not described in technical terms.
 > 8. Existing documentation that the changes in the pull request make inaccurate.
 >
-> Anything else is minor: file it as a GitHub issue (after checking for an existing one, reproduced on the current
-> build, with its template and labels) instead of asking for another round. File every other problem you notice the
-> same way, including ones outside this change; never dismiss one as pre-existing without filing it.
+> Anything else is minor. A minor finding that is small and in code the pull request already touches is fixed in
+> the same pull request, without a review round of its own. File every other minor finding (in other code, or too
+> big to fix here) as a GitHub issue (after checking for an existing one, reproduced on the current build, with its
+> template and labels) instead of asking for another round. Treat every other problem you notice the same way,
+> including ones outside this change; never dismiss one as pre-existing without fixing or filing it.
 >
 > For a change to a screen, open every screenshot and check it against docs/design.md and the matching approved
 > screen side by side, in dark and light, at 1280x736 and 1024x640. Measure alignment in pixels (text and icons
@@ -64,7 +71,8 @@ verdict, and no criteria in your own words.
 > skipped. Re-run a failing file on its own before you treat the failure as real.
 >
 > Post the review on the pull request as a comment review, and follow the same no-attribution rule in it. List the
-> blockers first, each with how to reproduce it, then the issues you filed. End with "Blockers: none" or the count.
+> blockers first, each with how to reproduce it, then the minor findings to fix in this pull request, then the issues
+> you filed. End with "Blockers: none" or the count.
 
 ## Rounds
 

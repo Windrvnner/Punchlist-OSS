@@ -2,13 +2,15 @@
  * Ask the counterparty (linking design, sections 6 and 13): the card a linked question is typed in, and the list of the
  * questions already asked. Shared by the Checklist's open item and a finding's page.
  */
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { logQuestionDraft, questionDraftAt, questionLogKey } from '../app/logQuestionDraft';
 import { dealQuestions } from '../app/state';
 import { TEXT_MAX } from '../domain/importExport';
 import type { Finding, Question } from '../domain/model';
 import { closeOnEscape, focusCard } from './focus';
 import { useStore } from './hooks';
+import { moveKey } from './keptDrafts';
 import { navigate } from './nav';
+import { pendingSaveKeys, useSaveOut } from './saveOut';
 
 /** a question's status, as a list of asked questions says it */
 export const STATUS: Record<Question['status'], string> = { open: 'open', answered: 'answered', closed: 'closed' };
@@ -43,42 +45,29 @@ export function AskedList({ dealId, qs, id }: { dealId: string; qs: Question[]; 
   );
 }
 
-/** Questions still saving, by the key their text is kept under. */
-const saving = new Map<string, Promise<unknown>>();
-
 /**
  * Log question for a card whose text is kept in `drafts` under `key`. Log stays off while the save runs, also on a card
  * drawn again for the same key meanwhile (the person went to another finding and back). Once the save lands, the kept
  * text is let go (`forget`) only if it is still the text logged, so words typed since are kept; then the card on screen
- * is told (`settle`), and closes if nothing is kept.
+ * is told (`settle`), and closes if nothing is kept. Cancel leaves any card opened since for the same key alone (#843).
  */
-export function useLogQuestion(drafts: Map<string, string>, key: string, forget: () => void, settle: () => void) {
-  const [busy, setBusy] = useState(() => saving.has(key));
-  const shown = useRef(true);
-  const landed = () => {
-    if (!shown.current) return;
-    setBusy(false);
+export function useLogQuestion(
+  drafts: Map<string, string>, key: string, forget: (currentKey: string) => void, settle: () => void,
+  captureTarget?: () => () => boolean,
+) {
+  const saveKey = questionLogKey(key, pendingSaveKeys(), moveKey);
+  const out = useSaveOut(saveKey, (current: boolean) => {
+    if (current) settle();
+  });
+  const draft = questionDraftAt(key, moveKey, drafts, forget);
+  const log = (text: string, dispatch: () => Promise<{ ok: boolean }>) =>
+    out.send((cancelled) => logQuestionDraft(text, draft, dispatch, cancelled, captureTarget?.()));
+  const cancel = () => {
+    out.cancel();
+    draft.forget();
     settle();
   };
-  // a card drawn while its question is still saving hears when it lands, or finds it landed already
-  useEffect(() => {
-    const pending = saving.get(key);
-    if (pending) void pending.then(landed);
-    else if (busy) landed();
-    return () => {
-      shown.current = false;
-    };
-  }, []);
-  const log = async (text: string, send: () => Promise<{ ok: boolean }>) => {
-    setBusy(true);
-    const pending = send();
-    saving.set(key, pending);
-    const res = await pending;
-    saving.delete(key);
-    if (res.ok && drafts.get(key)?.trim() === text) forget();
-    landed();
-  };
-  return { busy, log };
+  return { busy: out.busy, log, cancel };
 }
 
 /** What the card shows and does; `ids` prefixes its fields' ids (`ck-ask` gives ck-ask-text, ck-ask-log and so on). */

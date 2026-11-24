@@ -1,4 +1,4 @@
-import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { GROUP_HEADING } from '../app/commands/deals';
 import { commandLabel } from '../app/commandLabels';
 import { StoreContext, useAppState, useStore, lastInput, nameDir } from './hooks';
@@ -28,6 +28,7 @@ import { FirmChecklistDialog } from './firmChecklist';
 import { LocateDialog } from './relink';
 import { PlaceKeptDialog } from './placeKept';
 import { SearchBox } from './search';
+import { TwinLabel } from './dealLabel';
 import { homeExamples } from './homeExamples';
 import { AccountRow } from './connection';
 import { ReadOnlyContext, SignedOutContext } from './editField';
@@ -37,7 +38,7 @@ import { renameKept } from './keptDrafts';
 import { keepAttachments } from './keptAttachments';
 import { followCopies } from '../app/attachments';
 import { staleKept } from './editField';
-import { isReading, dealHash, dealTwin } from '../app/state';
+import { isReading, dealHash, dealTwinLabels } from '../app/state';
 import { num } from './counts';
 
 const GROUPS: [State['deals'][string]['group'], string][] = (['live', 'monitor', 'pitch', 'closed'] as const).map((g) => [g, GROUP_HEADING[g]]);
@@ -70,7 +71,8 @@ function Shell() {
       const deal = (r: State['ui']['route']) => ('dealId' in r && r.dealId ? r.dealId : null);
       // list filters and the selected question belong to one deal: moving to another deal starts clean
       const fresh = deal(route) !== deal(was) ? { findingFilter: { status: 'open' as const, workstream: '', text: '', reviewed: '' as const }, qaFilter: { status: 'open' as const, workstream: '', text: '' }, checklistFilter: 'all' as const, selectedQuestion: null, selectedChecklist: null } : {};
-      store.ui({ route, doc: null, docAside: null, side: null, queueSearch: '', dialog: null, ...fresh, ...takeNavPatch() });
+      store.ui({ route, doc: null, docAside: null, side: null, queueSearch: '', dialog: null,
+        searchFocus: null, ...fresh, ...takeNavPatch() });
       // the link or button that was pressed is gone with the old page: focus goes to what opened the document being closed, else to the new page, not to nowhere
       const backTo = takeFocusAfter();
       requestAnimationFrame(() => { const back = backTo.map((sel) => document.querySelector<HTMLElement>(sel)).find(Boolean); if (back) back.focus(); else if (!document.activeElement || document.activeElement === document.body) document.getElementById('view')?.focus({ preventScroll: true }); });
@@ -274,15 +276,17 @@ function RailGroup({ label, deals, open, toggle, cur }: {
   label: string; deals: State['deals'][string][]; open: boolean; toggle: () => void; cur: string | null;
 }) {
   const s = useAppState();
+  const twinOf = useMemo(() => dealTwinLabels(Object.values(s.deals)), [s.deals]);
   if (!deals.length) return null;
   const row = (d: State['deals'][string]) => {
-    const twin = dealTwin(s, d);
+    const twin = twinOf(d);
+    const label = twin ? `${d.name} · ${twin}` : d.name;
     return (
       <div class="drow" key={d.id}>
         <a href={`#${dealHash(s.prefs, d.id)}`} class={`dealrow ${cur === d.id ? 'on' : ''}`}
-          aria-current={cur === d.id ? 'true' : undefined} title={twin ? `${d.name} · ${twin}` : d.name}>
+          aria-current={cur === d.id ? 'true' : undefined} title={label} aria-label={twin ? label : undefined}>
           <span class="dn1" dir={nameDir(d.name)}>{d.name}</span>
-          {twin && <span class="dtw">{dealTwin(s, d, true)}</span>}
+          {twin && <span class="dtw"><TwinLabel text={twinOf(d, true)} focus={twinOf(d, 'focus')} /></span>}
         </a>
         <DealMore dealId={d.id} />
       </div>

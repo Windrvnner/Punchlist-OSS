@@ -2,6 +2,7 @@
 // one slide through on hover or on open, and nothing else on the row pushed out or wrapped.
 import { launchChrome } from './chrome.mjs';
 import { openOnFindings } from './landing.mjs';
+import { ITEMS } from '../fixtures/pastedList.ts';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
 const browser = await launchChrome();
@@ -172,8 +173,20 @@ for (const [w, h] of [[1280, 736], [1024, 640]]) {
       // what tells two deals apart is short (a three-letter counterparty, or the day alone) beside a never-cut place
       for (const counterparty of ['QRS', 'XYZ', '', '', 'FABRIKAM ABC', 'Contoso Group', 'Fabrikam Infrastructure Partners Fund IV (Lux) SCSp']) { const b4 = new Set(Object.keys(store.get().deals)); await store.dispatch(C('CreateDeal'), { name: { '': 'Lamna Two', 'FABRIKAM ABC': 'Lamna', 'Contoso Group': 'Northwind Capital Infrastructure Holdings Refinancing', 'Fabrikam Infrastructure Partners Fund IV (Lux) SCSp': 'Northwind Capital Infrastructure Holdings Refinancing' }[counterparty] ?? 'Lamna', folders: [], ...(counterparty ? { counterparty } : {}) }, { quiet: true }); const dealId = Object.keys(store.get().deals).find((id) => !b4.has(id)); await store.dispatch(C('CreateFinding'), { dealId, title: 'Lamna lease schedule', workstream: 'Legal', sources: [{ doc: counterparty.length > 3 ? 'Lamna leases B, the schedule of rents, renewal dates, CAM charges and restoration costs.xlsx' : 'Lamna leases.xlsx', docId: `h-${dealId}`, loc: { '': 'pp. 1120-1185', 'FABRIKAM ABC': 'Sheet1!WM100', 'Contoso Group': 'pp. 112-118', 'Fabrikam Infrastructure Partners Fund IV (Lux) SCSp': 'Sources and Uses (Base Case)!$AB$1234' }[counterparty] ?? 'Sheet1!A1:B2' }] }, { quiet: true }); }
       // a counterparty that nearly fills the line, beside a page range: the counterparty is cut, never the pages
-      const AD = 'Contoso Sovereign Wealth Trust Infrastructure Co-Investment Vehicle III (Luxembourg) SCSp';
-      for (const counterparty of ['Contoso Sovereign Wealth Trust Infrastructure Co-Investment Vehicle III (Lux 76', 'Oak', AD.slice(0, 66), AD.slice(0, 78)]) { const b4 = new Set(Object.keys(store.get().deals)); await store.dispatch(C('CreateDeal'), { name: 'Liberty', folders: [], counterparty }, { quiet: true }); const dealId = Object.keys(store.get().deals).find((id) => !b4.has(id)); await store.dispatch(C('CreateFinding'), { dealId, title: 'Liberty lease break', workstream: 'Legal', sources: [{ doc: 'Liberty lease.pdf', docId: `w-${dealId}`, loc: 'pp. 1120-1185' }] }, { quiet: true }); }
+      const AD = 'Sovereign Wealth Trust Infrastructure Co-Investment Vehicle III (Luxembourg) SCSp';
+      const counterparties = [
+        'Contoso Sovereign Wealth Trust Infrastructure Co-Investment Vehicle III (Lux 76',
+        'Oak', ('Widewater ' + AD).slice(0, 66), ('Northwind ' + AD).slice(0, 78),
+      ];
+      for (const counterparty of counterparties) {
+        const before = new Set(Object.keys(store.get().deals));
+        await store.dispatch(C('CreateDeal'), { name: 'Liberty', folders: [], counterparty }, { quiet: true });
+        const dealId = Object.keys(store.get().deals).find((id) => !before.has(id));
+        await store.dispatch(C('CreateFinding'), {
+          dealId, title: 'Liberty lease break', workstream: 'Legal',
+          sources: [{ doc: 'Liberty lease.pdf', docId: `w-${dealId}`, loc: 'pp. 1120-1185' }],
+        }, { quiet: true });
+      }
       // a place of medium length beside a short deal name: there is room for it whole
       await store.dispatch(C('CreateFinding'), { dealId: ids[2], title: 'Returns differ', workstream: 'Financial', sources: [{ doc: 'Q.xlsx', docId: 'q-solo', loc: 'Tab!A1:B20000' }] }, { quiet: true });
       for (const dealId of ids) for (let i = 0; i < 150; i++) await store.dispatch(C('CreateQuestion'), { dealId, text: `Diligence request ${i}` }, { quiet: true });   // three-digit numbers, as on a real deal
@@ -241,10 +254,11 @@ for (const [w, h] of [[1280, 736], [1024, 640]]) {
     const rangeWhole = (r) => r.at === 'pp. 1120-1185' && r.atShown && r.atWhole && r.atRight;
     const whole = (r) => r.oneLine && r.inside && (!r.at || rangeWhole(r));
     const cutByWords = (r) => r.twinCut > 0 && sound({ ...r, twinCut: 0 });
+    const cutLiberty = liberty.filter((row) => row.at && row.twin.startsWith('Contoso Sovereign'));
     say(`${w} beside a counterparty that nearly fills the line, the page range stays whole, `
-      + 'the deal keeps its first word, and the counterparty is cut by words with no gap',
+      + 'the deal keeps its meaningful name, and the counterparty is cut by words with no gap',
     liberty.every(whole) && liberty.filter((r) => r.at).length === 4
-      && liberty.filter((r) => r.at && r.twin.startsWith('Contoso Sovereign')).every(cutByWords)
+      && cutLiberty.length === 1 && cutLiberty.every(cutByWords)
       && liberty.filter((r) => r.twin === 'Oak').every((r) => sound(r)), JSON.stringify(liberty));
     await page.fill('#pal-in', 'epc contract'); await page.waitForFunction(() => document.querySelectorAll('#pal-res button:not(.pmore)').length === 5);
     const long = await read();
@@ -256,6 +270,239 @@ for (const [w, h] of [[1280, 736], [1024, 640]]) {
     say(`${w} a same-named deal's own hit gives its counterparty, the hover adds the day`, JSON.stringify(deals) === JSON.stringify([['Northwind Capital Partners International', `Northwind Capital Partners International · ${made[0]}`], ['Tailwind Infrastructure', `Tailwind Infrastructure · ${made[1]}`]]), JSON.stringify(deals));
     await ctx.close();
   } }
+
+const ARABIC = 'مشروع الرياح البحرية الكبير في شمال البحر';
+const HEBREW = 'פרויקט אגירת אנרגיה ימית עם חיבור לתחנות משנה צפוניות';
+const FUND = 'Example Infrastructure Partners Fund';
+const REPEATED_FUND = 'Fund IV Fund V Example Infrastructure Partners Fund';
+const UNBROKEN = 'ExampleCoInvestmentInfrastructureCoInvestmentVehicleIIILuxembourgSCSp';
+const SAMPLE_PARTY = 'Widewater Worldwide Wind Infrastructure Co-Investment Vehicle III (Lux) SCSp';
+const LONG_DEAL = 'Supercalifragilisticexpialidocious-Offshore-Wind-Portfolio-Refinancing';
+const REFERENCE = 'pp. 1120-1185';
+
+async function seedSearchLabels(page) {
+  await page.evaluate(async ({ arabic, hebrew, fund, repeated, word, counterparty, longDeal, loc }) => {
+    const run = (name, input) => store.dispatch(store.commandNamed(name), input, { quiet: true });
+    const labels = [
+      ['Maple Wind Portfolio', fund + ' IV (Lux) SCSp', 'covenant compliance'],
+      ['Maple Wind Portfolio', fund + ' V (Lux) SCSp', 'covenant compliance'],
+      ['Meadow Storage Portfolio', repeated + ' IV (Lux) SCSp', 'Reserve fund test'],
+      ['Meadow Storage Portfolio', repeated + ' V (Lux) SCSp', 'Reserve fund test'],
+      ['Sample A', counterparty, 'Sample A lease'],
+      ['Sample A', 'Elm', 'Sample A lease'],
+      ['Project - Sample Name with a Long Series of Terms', 'W'.repeat(75), 'Punctuated deal lease'],
+      ['Project - Sample Name with a Long Series of Terms', 'Elm', 'Punctuated deal lease'],
+      ['Telecommunication Offshore Wind Portfolio', counterparty, 'Telecommunication lease'],
+      ['Telecommunication Offshore Wind Portfolio', 'W'.repeat(75), 'Telecommunication lease'],
+      ['Telecommunication Offshore Wind Portfolio', 'Elm', 'Telecommunication lease'],
+      [longDeal, word, 'Zebra edge finding'],
+      [longDeal, 'Oak', 'Zebra edge finding'],
+      [arabic, 'W'.repeat(74), 'connection signature'],
+      [arabic, 'Elm', 'connection signature'],
+      [hebrew, 'Oak', 'Hebrew connection'],
+    ];
+    for (const [name, party, title] of labels) {
+      const before = new Set(Object.keys(store.get().deals));
+      const created = await run('CreateDeal', { name, counterparty: party, folders: [] });
+      if (!created.ok) throw new Error(JSON.stringify(created.error));
+      const dealId = Object.keys(store.get().deals).find((id) => !before.has(id));
+      if (title === 'covenant compliance' || title.includes('connection')) {
+        await run('CreateQuestion', { dealId, text: title });
+      } else {
+        await run('CreateFinding', {
+          dealId, title, workstream: 'Legal', sources: [{ doc: title + '.pdf', docId: dealId, loc }],
+        });
+      }
+    }
+  }, { arabic: ARABIC, hebrew: HEBREW, fund: FUND, repeated: REPEATED_FUND, word: UNBROKEN, counterparty: SAMPLE_PARTY,
+    longDeal: LONG_DEAL, loc: REFERENCE });
+}
+
+async function loadSearchLog(page) {
+  const sections = [
+    'the array', 'the substation', 'the access roads', 'the cable route', 'the battery yard', 'the control building',
+    'the met stations', 'the laydown area', 'the switchyard', 'the water supply', 'the collection system',
+    'the inverter pads', 'the drainage', 'the gen-tie', 'the fencing', 'the backup supply',
+    'the communications network',
+  ];
+  const texts = sections.flatMap((section) => ITEMS.map(({ t }) => `${section}: ${t}`)).slice(0, 2001);
+  const imported = await page.evaluate((texts) => {
+    const dealId = Object.values(store.get().deals).find(({ name }) => name === 'Project Maple Wind Portfolio').id;
+    const rows = texts.map((text) => ({
+      n: null, text, askedBy: '', received: '', workstream: 'Legal', priority: '',
+      response: '', respondedBy: '', responded: '', status: 'open',
+    }));
+    return store.dispatch(store.commandNamed('ImportQuestions'), { dealId, mode: 'append', rows }, { quiet: true });
+  }, texts);
+  if (!imported.ok) throw new Error(JSON.stringify(imported.error));
+  await page.waitForFunction(() => Object.keys(store.get().questions).length >= 2001);
+}
+
+// A text run is readable when its range fits inside the clipped label.
+const fitsText = (locator, text) => locator.evaluate((root, text) => {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const offset = node.textContent.indexOf(text);
+    if (offset < 0) continue;
+    const range = document.createRange();
+    range.setStart(node, offset);
+    range.setEnd(node, offset + text.length);
+    const box = range.getBoundingClientRect();
+    let parent = node.parentElement;
+    while (parent && root.contains(parent)) {
+      const style = getComputedStyle(parent);
+      const edges = parent.getBoundingClientRect();
+      if (style.overflowX !== 'visible' && (box.left < edges.left - 1 || box.right > edges.right + 1)) return false;
+      parent = parent.parentElement;
+    }
+    return true;
+  }
+  return false;
+}, text);
+
+// #495: the browser can hide an entire inline-block to make room for an enclosing ellipsis.
+async function fitsLongNamePrefix(label, prefix) {
+  if (!await fitsText(label, prefix)) return false;
+  return label.evaluate((element, prefix) => {
+    const word = [...element.querySelectorAll('.ww')].find((candidate) => candidate.textContent.includes(prefix));
+    if (!word) return false;
+    if (getComputedStyle(word).display !== 'inline-block' || element.scrollWidth <= element.clientWidth) return true;
+    const canvas = document.createElement('canvas').getContext('2d');
+    canvas.font = getComputedStyle(element).font;
+    const ellipsis = canvas.measureText('…').width;
+    return word.getBoundingClientRect().right <= element.getBoundingClientRect().right - ellipsis;
+  }, prefix);
+}
+
+// #790: measure the space the browser leaves after the last grapheme and the painted ellipsis.
+function singleWordEllipsisGap(word) {
+  return word.evaluate((element) => {
+    const text = element.firstChild;
+    const range = document.createRange();
+    const canvas = document.createElement('canvas').getContext('2d');
+    const { fontWeight, fontSize, fontFamily } = getComputedStyle(element);
+    canvas.font = `${fontWeight} ${fontSize} ${fontFamily}`;
+    const ellipsis = canvas.measureText('…').width;
+    const wordBox = element.getBoundingClientRect();
+    const width = wordBox.width;
+    const deal = element.closest('.where.parts').querySelector('.wdeal').getBoundingClientRect();
+    let used = ellipsis;
+    for (let end = 1; end <= text.length; end++) {
+      range.setStart(text, 0);
+      range.setEnd(text, end);
+      const next = range.getBoundingClientRect().width + ellipsis;
+      if (next > width + 0.25) break;
+      used = next;
+    }
+    return deal.left - wordBox.left - used;
+  });
+}
+
+async function searchLabel(page, query, kind, full = '') {
+  await page.fill('#pal-in', query);
+  const label = page.locator(`#pal-res [data-kind=${kind}] .where`).filter({ hasText: full }).first();
+  await label.waitFor();
+  return label;
+}
+
+// #791: a clipped suffix needs enough room to paint its complete ellipsis.
+function showsTwinSuffix(label, mustClip = false) {
+  return label.locator('.twin-label>span:last-child').evaluate((tail, mustClip) => {
+    if (tail.scrollWidth <= tail.clientWidth) return !mustClip;
+    const style = getComputedStyle(tail);
+    const pen = document.createElement('canvas').getContext('2d');
+    pen.font = style.font;
+    const bounds = tail.getBoundingClientRect();
+    return style.textOverflow === 'ellipsis' && bounds.width >= pen.measureText('…').width &&
+      bounds.right <= tail.parentElement.getBoundingClientRect().right + 0.5;
+  }, mustClip);
+}
+
+const labelChecks = { 490: [], 492: [], 494: [], 495: [], 790: [], 791: [] };
+for (const [width, height] of [[1280, 736], [1024, 640]]) {
+  for (const colorScheme of ['dark', 'light']) {
+    const ctx = await browser.newContext({ viewport: { width, height }, colorScheme });
+    const page = await ctx.newPage();
+    await page.goto(URL);
+    await page.waitForSelector('#fr-new');
+    await seedSearchLabels(page);
+    if (width === 1280 && colorScheme === 'dark') await loadSearchLog(page);
+    await page.goto(URL + '#deals');
+    const shot = async (name) => {
+      if (!SHOTS) return;
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: `${SHOTS}/${name}-${colorScheme}-${width}x${height}.png` });
+    };
+
+    await shot('492-sidebar');
+    const maple = page.locator('.dealrow').filter({ hasText: 'Project Maple Wind Portfolio' });
+    for (const roman of ['IV', 'V']) {
+      const rail = maple.locator('.dtw').filter({ hasText: FUND + ' ' + roman + ' (Lux) SCSp' });
+      await rail.scrollIntoViewIfNeeded();
+      labelChecks[791].push(await showsTwinSuffix(rail, true));
+    }
+    await shot('791-sidebar-suffix');
+    await page.keyboard.press('Control+k');
+    for (const roman of ['IV', 'V']) {
+      const token = 'Fund ' + roman + ' (';
+      const rail = page.locator('.dealrow .dtw').filter({ hasText: token }).first();
+      const found = await searchLabel(page, 'covenant compliance', 'question', token);
+      const searchTwin = await fitsText(found.locator('.wtwin'), roman);
+      const railTwin = await fitsText(rail, roman);
+      const full = (await found.getAttribute('title')).includes(FUND + ' ' + roman + ' (Lux) SCSp');
+      labelChecks[492].push(searchTwin && railTwin && full);
+    }
+    await shot('492-funds');
+    for (const roman of ['IV', 'V']) {
+      const full = REPEATED_FUND + ' ' + roman + ' (Lux) SCSp';
+      const repeated = await searchLabel(page, 'Reserve fund test.pdf', 'document', full);
+      const rail = page.locator('.dealrow .dtw').filter({ hasText: full }).first();
+      const distinction = 'Fund ' + roman;
+      labelChecks[492].push(await fitsText(repeated.locator('.twin-focus'), distinction) &&
+        await fitsText(rail.locator('.twin-focus'), distinction));
+      labelChecks[791].push(await showsTwinSuffix(repeated.locator('.wtwin')));
+    }
+    await shot('791-search-suffix');
+
+    const sample = await searchLabel(page, 'Sample A lease.pdf', 'document', SAMPLE_PARTY);
+    labelChecks[495].push(await fitsText(sample.locator('.wdeal'), 'Sample') &&
+      await fitsText(sample.locator('.wdeal'), ' A') && await fitsText(sample.locator('.wat'), REFERENCE));
+    await shot('495-name-and-pages');
+    const punctuated = await searchLabel(page, 'Punctuated deal lease.pdf', 'document', 'WWWW');
+    labelChecks[495].push(await fitsText(punctuated.locator('.wdeal'), 'Sample') &&
+      await fitsText(punctuated.locator('.wat'), REFERENCE));
+    for (const counterparty of [SAMPLE_PARTY, 'WWWW']) {
+      const longWord = await searchLabel(page, 'communication lease', 'document', counterparty);
+      labelChecks[495].push(await fitsLongNamePrefix(longWord.locator('.wdeal'), 'Telecommun') &&
+        await fitsText(longWord.locator('.wat'), REFERENCE));
+    }
+    await shot('495-long-word-and-pages');
+
+    const unbroken = await searchLabel(page, 'Zebra edge finding.pdf', 'document', UNBROKEN);
+    const ellipsis = await unbroken.locator('.wtwin .ww').evaluate((word) =>
+      getComputedStyle(word).textOverflow === 'ellipsis' && word.scrollWidth > word.clientWidth);
+    labelChecks[494].push(ellipsis && await fitsText(unbroken.locator('.wat'), REFERENCE) &&
+      (await unbroken.getAttribute('title')).includes(UNBROKEN));
+    const gap = await singleWordEllipsisGap(unbroken.locator('.wtwin .ww'));
+    labelChecks[790].push(gap >= -0.25 && gap <= 1.5);
+    await shot('494-unbroken');
+
+    const rtl = await searchLabel(page, 'connection signature', 'question', 'WWWW');
+    const rtlName = rtl.locator('.wdeal');
+    const direction = await rtlName.evaluate((deal) =>
+      getComputedStyle(deal.querySelector('[dir]') ?? deal).direction);
+    labelChecks[490].push(direction === 'rtl' && await fitsText(rtlName, 'مشروع') &&
+      await fitsText(rtl.locator('.wat'), 'Q1'));
+    await shot('490-right-to-left');
+    const hebrew = await searchLabel(page, 'Hebrew connection', 'question');
+    labelChecks[490].push(await fitsText(hebrew.locator('.wdeal'), 'פרויקט') &&
+      await fitsText(hebrew.locator('.wat'), 'Q1'));
+    await ctx.close();
+  }
+}
+for (const [issue, outcomes] of Object.entries(labelChecks)) {
+  say(`#${issue} Search labels at both sizes in both themes`, outcomes.every(Boolean), JSON.stringify(outcomes));
+}
 
 await browser.close();
 const failed = results.filter(([, ok]) => !ok).length; console.log(`\n${results.length - failed}/${results.length} passed`); process.exit(failed ? 1 : 0);

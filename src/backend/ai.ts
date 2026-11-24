@@ -52,7 +52,7 @@ import { createHash } from 'node:crypto';
 import { ListRecord, Item, firmOf, orderItems } from '../domain/checklist';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ulid } from 'ulid';
-import { readJson, unfinished, list as listOf, strings, int, pageOf, word, tagNumber } from './lenient';
+import { readJson, unfinished, list as listOf, strings, int, pageOf, word, tagNumber, isObject } from './lenient';
 import type { LineRead } from '../domain/listRead';
 import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK } from './limits';
 import { UNREAD_REPLY, UNUSABLE_REPLY, UNREACHED, CUT_ON_IT, CUT_BEFORE_IT, UNUSABLE_ON_IT } from './limits';
@@ -355,6 +355,67 @@ export function unid(text: string, ids: Set<string>): string {
     return t;
   }
 }
+
+/** Ignore malformed entries individually so a usable group beside one still stands (#658). */
+function memoGroupRows(value: unknown, ids: Set<string>): RiskGroup[] {
+  return listOf(value).filter(isObject).map((row) => ({
+    title: unid(strings(row.title)[0] ?? '', ids).slice(0, 160),
+    findings: strings(row.findings),
+  })).filter((group) => group.findings.length);
+}
+
+const withoutMemoMarks = (text: string, space = '') => text.replace(/\s*\[\d+\]/g, space)
+  .replace(/\{([^{}|]+)\|[^{}]*\}/g, '$1').trim();
+const MEMO_RISK_WORDS = 200;
+const MEMO_RISK_TEXT_CHARS = 4_000;
+const MEMO_RISK_TOKEN_CHARS = 256;
+const MEMO_RISK_SHAPE = '{"paragraphs": ["one paragraph per string, with [n] markers"], "sources": [...]}';
+
+/** Count paragraph breaks inside strings, including the separator used to fit citations across paragraphs (#659). */
+function memoRiskParagraphs(value: unknown): string[] {
+  return strings(value).flatMap((paragraph) => paragraph.split(/\r?\n[^\S\r\n]*\r?\n|\u0000/))
+    .map((paragraph) => paragraph.trim()).filter(Boolean);
+}
+
+/** Bound the write-up even when malformed text fits the word count (#659). */
+function memoRiskFits(paragraphs: string[], ids: Set<string>): boolean {
+  if (!paragraphs.length || paragraphs.length > 2) return false;
+  const text = paragraphs.join(' ');
+  // Control characters discarded by the document builder can hide unbroken text (#659).
+  const invalidText = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/;
+  if (text.length > MEMO_RISK_TEXT_CHARS || invalidText.test(text)) return false;
+  const scrubbed = paragraphs.map((paragraph) => unid(paragraph, ids));
+  // Citation fitting can join adjacent text when it removes an invalid marker (#659).
+  const withoutCitations = scrubbed.map((paragraph) => withoutMemoMarks(paragraph)).join(' ');
+  // Only ordinary document whitespace can separate printed words (#659).
+  const oversized = (value: string) => value.split(/[ \t\r\n]+/).some((token) => token.length > MEMO_RISK_TOKEN_CHARS);
+  if (oversized(text) || oversized(withoutCitations)) return false;
+  const prose = scrubbed.map((paragraph) => withoutMemoMarks(paragraph, ' ')).join(' ');
+  const words = prose.match(/\S+/g) ?? [];
+  return words.length > 0 && words.length <= MEMO_RISK_WORDS;
+}
+
+function readCorrection(
+  prompt: string, reply: Record<string, unknown> | null, again: { wrong: string; maxEcho?: number },
+): string {
+  if (!reply) return prompt;
+  const previous = JSON.stringify(reply);
+  const echo = previous.length <= (again.maxEcho ?? Infinity) ? `\n\nYou replied:\n${previous}` : '';
+  return `${prompt}${echo}\n\nThat cannot be used: ${again.wrong}. Send the whole reply again, put right.`;
+}
+
+/** Send unusable write-ups through the document reader's retry policy (#659). */
+function memoRiskReadOptions(escalate: string, advises: (text: string) => boolean, ids: Set<string>) {
+  const usable = (reply: Record<string, unknown>) => {
+    const paragraphs = memoRiskParagraphs(reply.paragraphs);
+    return memoRiskFits(paragraphs, ids) && !paragraphs.some(advises);
+  };
+  const wrong = 'it is empty, contains oversized text, gives advice or a judgment, or exceeds '
+    + `the limit of two paragraphs and ${MEMO_RISK_WORDS} words`;
+  // Keep an oversized reply from making the correction request too long (#659).
+  return { escalate, usable, wrong, maxEcho: MEMO_RISK_TEXT_CHARS, retrySharedModel: true };
+}
+
 /**
  * LaTeX-style notation in a text, which the model is told not to write (plain symbols such as
  * + − × ÷ * / = % are fine): the pieces found, none when there are none. A $ before a figure is money, not notation:
@@ -1121,6 +1182,20 @@ export function nodeAi(o: AiOptions) {
   /** the chat agent */
   const agent = chatAgent(agentKit, agentOpts);
 
+  /** A memo correction that does not fit goes to Thorough with the original request (#659). */
+  async function askCorrection(input: Ask, keys: string[], shape: string) {
+    try {
+      return await askJson(input, keys, shape, false);
+    } catch (error) {
+      if (input.kind === 'memoRisk' && isTooLong(error)) return null;
+      throw error;
+    }
+  }
+
+  function readCanRetry(model: string, again: { escalate: string; retrySharedModel?: boolean } | undefined): boolean {
+    return !!again && (model !== again.escalate || again.retrySharedModel === true);
+  }
+
   /**
    * One question, read from documents, in up to two rounds: the second only if the model says what is missing and
    * something answers to it. With `again`, a reply that cannot be used is sent back to the same model with what is
@@ -1140,7 +1215,9 @@ export function nodeAi(o: AiOptions) {
       }
     } catch (e) { return failure(e, 'The documents could not be read'); }
     if (!sent.length) return ok({ reply: {}, sent });
-    let using = model; let pool: Sent[] | undefined;                              // the documents chosen, kept from the first refusal of a request as too long
+    let using = model;
+    let pool: Sent[] | undefined;
+    let canRetry = readCanRetry(model, again);
     for (let round = 1; ; round++) {
       let reply: Record<string, unknown> | null;
       try {
@@ -1152,10 +1229,14 @@ export function nodeAi(o: AiOptions) {
         const inAll = deals.reduce((sum, d) => sum + o.docs.records(d).length, 0);
         const prompt = `Documents:\n${listing}\n\nThese are ${sent.length} of the ${inAll} documents in ${deals.length > 1 ? 'these data rooms' : 'the data room'}: the ones chosen as likeliest to bear on this. You have not seen the others, so do not say what the data room as a whole does or does not contain; say what these documents show.\n\n${ask}\n\nReply as JSON: ${shape}${round === 1 ? ' If a document you were not given is needed to answer, add "need": ["a few words describing it"].' : ''}`;
         reply = await askJson({ kind, model: using, system: RULES, files, prompt }, keys, shape);
-        if (again && using !== again.escalate && (!reply || !again.usable(reply))) {
-          // the same model, a second time: with its own reply and what is wrong with it, or the question again if there was nothing to read
-          reply = await askJson({ kind, model: using, system: RULES, files, prompt: reply ? `${prompt}\n\nYou replied:\n${JSON.stringify(reply)}\n\nThat cannot be used: ${again.wrong}. Send the whole reply again, put right.` : prompt }, keys, shape, false);
-          if (!reply || !again.usable(reply)) { using = again.escalate; reply = await askJson({ kind, model: using, system: RULES, files, prompt }, keys, shape, false); }
+        if (again && canRetry && (!reply || !again.usable(reply))) {
+          const correction = readCorrection(prompt, reply, again);
+          reply = await askCorrection({ kind, model: using, system: RULES, files, prompt: correction }, keys, shape);
+          if (!reply || !again.usable(reply)) {
+            canRetry = false;
+            using = again.escalate;
+            reply = await askJson({ kind, model: using, system: RULES, files, prompt }, keys, shape, false);
+          }
         }
       } catch (e) {
         // a request the service refuses as too long is asked again with the likeliest half of the documents, down to one (limits.ts)
@@ -1230,10 +1311,11 @@ export function nodeAi(o: AiOptions) {
   }
   const seen = new Map<string, number>();                                       // the highest `n` read or written for each deal
   /** while a batch of a round runs: throws if this PC slept or rejoined since it took the batch, so nothing is written from it (see `guard`) */
-  const guards = new Map<string, () => void>();
+  const guards = new Map<string, () => Promise<void>>();
   async function say(dealId: string, line: Omit<CheckLine, 'v' | 'at' | 'n'>, unguarded = false) {
     // only what a batch settles is held back when the PC has slept or rejoined: lines that say who is in a round, and what it is, are always written
-    if (!unguarded && (line.item || line.glanced || line.verified || line.sample || line.skipped)) guards.get(dealId)?.();
+    const settles = line.item || line.glanced || line.verified || line.sample || line.skipped;
+    if (!unguarded && settles) await guards.get(dealId)?.();
     if (!seen.has(dealId)) await lines(dealId);
     const n = (seen.get(dealId) ?? 0) + 1; seen.set(dealId, n);
     const at = clock(); const text = JSON.stringify({ v: 1, at, n, pc: o.installId ?? 'local', ...line }) + '\n'; const name = checksName(dealId);
@@ -1546,31 +1628,29 @@ export function nodeAi(o: AiOptions) {
       // the model's own advice, to the reader or to the deal's own side. A document's terms or recommendation, reported, is a fact:
       // "the borrower should maintain a DSCR of 1.20x" passes, "the lenders should insist on it" does not.
       const advises = (t: string) => /\b((we|you|lenders?|investors?|the (lenders?|bank|investors?|buyer|team|deal team)) (should|ought to|must|need to)|we (recommend|suggest|advise|urge)|(is|are) (recommended|advisable|advised)|it would be (prudent|advisable|wise)|consider (asking|requiring|seeking|obtaining|negotiating))\b/i.test(t);
-      const noMarks = (p: string) => p.replace(/\s*\[\d+\]/g, '').replace(/\{([^{}|]+)\|[^{}]*\}/g, '$1').trim();
-      // Key risks are not findings: related open findings are grouped into risks, and each key risk is written
-      // up from the documents. A grouping or a write-up that cannot be had leaves that part as before (each finding its own
-      // risk, in its own words), so the memo is still made; only a service that cannot be reached stops it.
+      // Grouping or write-up failures fall back to the findings. An unreachable service stops the memo.
       let groups: RiskGroup[] = [];
       if (open.length > 1) {
         try {
           const rows = open.map((f) => `${f.id} (${f.workstream || 'no workstream'}, ${ratings[f.id] ?? 'unrated'}): ${f.title}`);
           const reply = await askJson<{ risks?: unknown }>({ kind: 'memoGroups', model: m.standard, system: JSON_ONLY, prompt: `These are the open findings on a deal, each with its workstream and risk rating:\n${rows.join('\n')}\n\nGroup them into the deal's risks for a memo to a senior banker. A risk is one underlying problem for the deal; findings that are evidence of the same problem, or that bear on the same term, figure or approval, go together, even across workstreams. A finding unlike any other is a risk on its own. Put every finding in exactly one risk. Give each risk a short plain title of your own (at most 12 words) that says what the problem is, as a fact, with no judging words.\nReply as JSON: {"risks": [{"title": "…", "findings": ["id", "id"]}]}` }, ['risks']);
-          groups = listOf(reply?.risks).map((x) => x as { title?: unknown; findings?: unknown }).map((x) => ({ title: unid(strings(x.title)[0] ?? '', ids).slice(0, 160), findings: strings(x.findings).map((id) => id.trim()) })).filter((g) => g.findings.length);
+          groups = memoGroupRows(reply?.risks, ids);
         } catch (e) { if (unreachable(e)) return failure(e, `${SERVICE} did not answer`); groups = []; }
       }
       const byId = new Map(open.map((f) => [f.id, f]));
       const grouped = riskGroups(open.map((f) => ({ id: f.id, title: f.title, raisedAt: f.raisedAt ?? '' })), ratings, groups);
       const { key } = keyRisksOf(grouped, d.keyRisks);
-      /** one key risk written up from its findings' documents and what the search adds (read, as a draft is). Responses are left
-       *  out, so the memo never paraphrases a reply or sees who sent it (answered replies are not shown). */
+      // Write-ups use findings and documents only. Q&A responses and responder names stay out.
       const writeUp = async (g: (typeof key)[number]): Promise<RiskGroup> => {
         const fs = g.findings.map((id) => byId.get(id)!);
         const ask = `Write up this risk on the deal for a deal memo read by a managing director at an investment bank. It is rated ${g.rating} (${g.rating === 'High' ? d.high : g.rating === 'Medium' ? d.medium : d.low}) and brings together these findings:\n${fs.map((f) => `- ${f.title} (${f.workstream || 'no workstream'}): ${plain(f).slice(f.title.length + 2)}`).join('\n')}\n\nWrite one or two paragraphs, at most 200 words in all, of plain banker's prose: what the issue is; the evidence, with the figures, terms and dates the documents give, each sentence cited; and which figures, terms or dates elsewhere in the deal's documents it touches (the base case, the financing terms, the timetable, or closing), named as the documents give them. Facts only: no advice, no recommendation, no next steps, no mitigants, no judging or comparative words (such as weak, loose, overstated or adequate), and no conclusions of your own beyond what the documents say. Do not say what is still open or which questions were asked: the memo adds the questions still unanswered after it. Name no person. Never write an id.`;
-        const usable = (reply: Record<string, unknown>) => { const ps = strings(reply.paragraphs); return ps.some((p) => p.trim()) && !ps.some(advises); };
-        const r = await read('memoRisk', [dealId], m.standard, ask, fs.map((f) => plain(f)).join(' '), { [dealId]: fs.flatMap((f) => (f.sources ?? []).map((x) => x.docId)).filter((x): x is string => !!x) }, '{"paragraphs": ["one paragraph per string, with [n] markers"], "sources": [...]}', { escalate: m.thorough, usable, wrong: 'it is empty, or it gives advice or a judgment: write it again with facts only' });
+        const options = memoRiskReadOptions(m.thorough, advises, ids);
+        const sourceIds = fs.flatMap((f) => (f.sources ?? []).map((s) => s.docId)).filter((id): id is string => !!id);
+        const r = await read('memoRisk', [dealId], m.standard, ask, fs.map(plain).join(' '), { [dealId]: sourceIds },
+          MEMO_RISK_SHAPE, options);
         if (!r.ok) { if (r.error.kind === 'unreachable') throw Object.assign(new Error(r.error.message), { code: 'unreachable' }); return g; }
-        if (!usable(r.value.reply) || !r.value.sent.length) return g;
-        const paras = strings(r.value.reply.paragraphs).map((p) => unid(p, ids).trim()).filter(Boolean).slice(0, 3);
+        if (!options.usable(r.value.reply) || !r.value.sent.length) return g;
+        const paras = memoRiskParagraphs(r.value.reply.paragraphs).map((p) => unid(p, ids).trim()).filter(Boolean);
         const out = fit(paras.join('\n\u0000\n'), r.value.reply.sources as Cited[], r.value.sent, false, true);
         return { ...g, body: out.text.split(/\s*\u0000\s*/).filter(Boolean), sources: out.sources };
       };
@@ -1585,7 +1665,8 @@ export function nodeAi(o: AiOptions) {
       const facts = deal ? [deal.name, deal.counterparty, deal.product, deal.sector, deal.technology].filter(Boolean).join('; ') : '';
       const highs = grouped.filter((g) => g.rating === 'High');
       const prompt = `Write the summary of a deal memo for a managing director at an investment bank, about this deal${facts ? ` (${facts})` : ''}: two paragraphs, at most 170 words in all. First what the project and the financing are, with the figures the documents give (size, capacity, location, sponsor, offtake, structure, timetable). Then ${highs.length ? `each of these High risks in one sentence:\n${highs.map((g) => `- ${g.title}: ${g.findings.map((id) => `(${byId.get(id)!.workstream || 'no workstream'}) ${plain(byId.get(id)!)}`).join(' ')}`).join('\n')}\n` : open.length ? 'that no open risk is rated High. ' : 'that it has no open findings. '}Facts only: no advice, no recommendation, no next steps, and no judgment of how the deal or the work is going. Name no person. Never write an id.`;
-      const parasOf = (reply: { paragraphs?: unknown } | null) => strings(reply?.paragraphs).map((p) => unid(noMarks(p), ids)).filter(Boolean).slice(0, 2);
+      const parasOf = (reply: { paragraphs?: unknown } | null) => strings(reply?.paragraphs)
+        .map((p) => unid(withoutMemoMarks(p), ids)).filter(Boolean).slice(0, 2);
       let summary: string[] = [];
       try {
         // read from the core documents, as a draft is; with none indexed, from the deal's facts and risks alone, as before
@@ -2228,7 +2309,7 @@ export function nodeAi(o: AiOptions) {
       // already there (raised by another PC, or by this one before a restart) is named, not written again.
       const fixed = round ? findingIdFor(dealId, round.def.docs, it.id) : undefined;
       if (fixed) { const mine = latest.get(it.id); if (mine?.result === 'finding' && mine.finding && mine.round && round!.ids.has(mine.round)) return note(it, 'finding', mine.finding); const had = await o.repo.get('finding', fixed); if (had.ok && had.value) return note(it, 'finding', fixed); }
-      guards.get(dealId)?.();
+      await guards.get(dealId)?.();
       const id = fixed ?? `f_${(o.newId ?? ulid)()}`; const now = clock();
       // a closed finding never takes a new problem; the new one names it
       const data = {
@@ -2828,8 +2909,39 @@ export function nodeAi(o: AiOptions) {
   const COULD_NOT = 'The check could not finish';
   const SERVICE_AWAY = `${SERVICE} can’t be reached. The check resumes once ${SERVICE} is back.`;
   /** what this PC is doing in a deal's round */
-  interface Mine { round: string; epoch: number; lastRenew: number; rejoin: boolean; timer: ReturnType<typeof setInterval> | null; running: Promise<unknown> | null; ticking: boolean; tries: number; failingSince?: number; nextTry?: number; /** the last batch failed because nobody is signed in to the model service, not because it is out of reach */ signedOut?: boolean; noOwnerSince?: number; left: boolean }
+  interface Mine {
+    round: string;
+    epoch: number;
+    lastRenew: number;
+    rejoin: boolean;
+    timer: ReturnType<typeof setInterval> | null;
+    running: Promise<unknown> | null;
+    ticking: boolean;
+    tries: number;
+    failingSince?: number;
+    nextTry?: number;
+    /** the last batch failed because nobody is signed in to the model service, not because it is out of reach */
+    signedOut?: boolean;
+    noOwnerSince?: number;
+    left: boolean;
+    /** this round was merged into another: the entry, and the epoch, this PC went on with there (#795) */
+    merged?: { st: Mine; epoch: number };
+  }
   const mine = new Map<string, Mine>();
+  /** set once this backend closes */
+  let closing = false;
+  /** this PC's own heartbeat, to tell a sleep from a long wait on the model: when it last beat, and last woke */
+  const awake = { beat: nowMs(), woke: Number.NEGATIVE_INFINITY };
+  /** a beat; a gap longer than a lapse since the last one was a sleep */
+  function beat() {
+    const now = nowMs();
+    if (now - awake.beat > T.lapse) awake.woke = now;
+    awake.beat = now;
+  }
+  const heart = setInterval(beat, T.watch);
+  (heart as { unref?: () => void }).unref?.();
+  /** the most merges followed from one round to the round it ended in, in case the lines ever loop */
+  const MERGES_MAX = 50;
   const preparing = new Set<string>();                                           // openings this PC is preparing now
   const background = new Set<Promise<unknown>>();
   const later = (go: () => Promise<unknown>) => { const p = go().catch(() => undefined); background.add(p); void p.finally(() => background.delete(p)); };
@@ -2924,15 +3036,51 @@ export function nodeAi(o: AiOptions) {
     let marked = false;
     if (nd === 'standard' && v && !v.stands) {
       const why = R.def.kind === 'first' ? (also.length ? `${x.recs.find((r) => r.docId === also[0])?.name ?? 'A document'} arrived` : null) : CHECK_REASON;
-      if (why) { guards.get(dealId)?.(); marked = await mark(f.id, why, undefined, !!f.closed); }   // a closed one is marked as one that may need reopening
+      if (why) {
+        await guards.get(dealId)?.();
+        // a closed one is marked as one that may need reopening
+        marked = await mark(f.id, why, undefined, !!f.closed);
+      }
     }
     await say(dealId, { verified: { round: R.def.id, stage: nd === 'fast' ? 'fast' : 'standard', findings: [{ finding: f.id, stands: v ? v.stands : null, marked }] } });
   }
-  /** before anything from a batch is written: has this PC slept, or rejoined, since it took the batch? */
-  function guard(dealId: string, epoch: number) {
-    const st = mine.get(dealId); if (!st || st.left) throw STALE;                 // this PC has left the round (it closed, or gave up): nothing more from it
+  /**
+   * Before anything from a batch is written: has this PC slept, or rejoined, since it took the batch? A merge of its
+   * round into another is neither: the batch's lines count for the kept round, so they are written (#795).
+   */
+  async function guard(dealId: string, took: Mine, epoch: number, takenAt: number) {
+    const { st, want } = followMerges(took, epoch);
+    if (closing || st.left) throw STALE;                   // this PC has left the round (it closed, or gave up)
+    if (mine.get(dealId) !== st) {                         // the round has ended, or this PC has moved on from it
+      // it slept since it took the batch (it no longer renews there), or a later round began
+      beat();
+      const slept = awake.woke > takenAt;
+      if (took === st || slept || st.epoch !== want || !await lastRound(dealId, st.round)) throw STALE;
+      return;
+    }
     if (nowMs() - st.lastRenew > T.lapse) { st.epoch++; st.rejoin = true; }
-    if (st.epoch !== epoch) throw STALE;
+    if (st.epoch !== want) throw STALE;
+  }
+  /** the entry a batch's lines now count for, through any merges since it was taken, and the epoch it must have */
+  function followMerges(took: Mine, epoch: number) {
+    let st = took;
+    let want = epoch;
+    for (; st.merged; st = st.merged.st) {
+      if (st.epoch !== want) throw STALE;                  // it slept, or rejoined, before the merge
+      want = st.merged.epoch;
+    }
+    return { st, want };
+  }
+  /**
+   * Whether the round a merged batch's lines count for, once it has ended, is still the deal's latest: the batch is
+   * written then, and not once a later round has begun, whose results it would otherwise take the place of (#795).
+   */
+  async function lastRound(dealId: string, roundId: string) {
+    const v = view(await lines(dealId));
+    let R = v.rounds.get(roundId);
+    for (let i = 0; R?.end?.kind === 'merged' && i < MERGES_MAX; i++) R = v.rounds.get(R.end.into);
+    const kept = R;
+    return !!kept && ![...v.rounds.values()].some((x) => !kept.ids.has(x.def.id) && x.n > kept.n) && !liveOpening(v);
   }
   /** say this PC is still in the round; after a gap longer than a lapse (it slept) that is a new epoch */
   async function renew(dealId: string, R: RoundState) {
@@ -2942,13 +3090,28 @@ export function nodeAi(o: AiOptions) {
     st.lastRenew = nowMs(); st.rejoin = false;
     await say(dealId, { member: { round: R.def.id, pc: me, ...whoAmI(), epoch: st.epoch, ok: needs.every((id) => have.has(id)) } });
   }
-  async function join(dealId: string, R: RoundState) {
+  /** this PC in round R; `merged`: the round it was in has just been merged into R, which `R.ids` may not show yet */
+  async function join(dealId: string, R: RoundState, merged = false) {
     const st = mine.get(dealId);
     if (st && st.round === R.def.id && !st.left) { if (st.rejoin) await renew(dealId, R); return; }
     if (st?.timer) clearInterval(st.timer);
-    mine.set(dealId, { round: R.def.id, epoch: (st?.epoch ?? 0) + 1, lastRenew: nowMs(), rejoin: true, timer: null, running: null, ticking: false, tries: 0, left: false });   // until its member line is written, the next look writes it
+    // until its member line is written, the next look writes it
+    const next: Mine = {
+      round: R.def.id, epoch: (st?.epoch ?? 0) + 1, lastRenew: nowMs(), rejoin: true,
+      timer: null, running: null, ticking: false, tries: 0, left: false,
+    };
+    if (st && (merged || R.ids.has(st.round))) linkMerged(st, next);
+    mine.set(dealId, next);
     await renew(dealId, R);
     const timer = setInterval(() => void tick(dealId), T.watch); (timer as { unref?: () => void }).unref?.(); mine.get(dealId)!.timer = timer;
+  }
+  /**
+   * A batch still out in a round merged into another writes there (#795), unless this PC slept first: then that is a
+   * new epoch, as `renew` would make it, and the batch is stale.
+   */
+  function linkMerged(st: Mine, next: Mine) {
+    if (nowMs() - st.lastRenew > T.lapse) st.epoch++;
+    st.merged = { st: next, epoch: next.epoch };
   }
   function stopWatch(dealId: string) { const st = mine.get(dealId); if (st?.timer) clearInterval(st.timer); mine.delete(dealId); }
   /** This PC's share of a round: batch after batch of what it owns, until it owns nothing undone. Runs in the deal's lane. */
@@ -2965,10 +3128,12 @@ export function nodeAi(o: AiOptions) {
       const { facts, todo, owners } = myWork(dealId, v, R, ob);
       if (!todo.length) { await finishIfDone(dealId, v, R); return 'done'; }
       const ts = pickBatch(R, todo, facts, owners.length); const units = [...new Set(ts.map((t) => `${R.def.id}:${t.u}`))];
-      await claim(dealId, units); const epoch = st.epoch;
+      await claim(dealId, units);
+      const epoch = st.epoch;
+      const takenAt = nowMs();
       try {
         if (!x || xFor !== R.pieces.length) { const c = await open(dealId, R); if (!c.ok) throw Object.assign(new Error(c.error.message), { kind: c.error.kind, code: c.error.kind === 'unreachable' ? 'unreachable' : undefined }); x = c.value; xFor = R.pieces.length; }
-        guards.set(dealId, () => guard(dealId, epoch));
+        guards.set(dealId, () => guard(dealId, st, epoch, takenAt));
         await runBatch(dealId, R, ts, x, facts);
         serviceAnswered(st);
       } catch (e) { if (e !== STALE) throw e; }
@@ -3017,13 +3182,23 @@ export function nodeAi(o: AiOptions) {
     const st = mine.get(dealId); if (!st || st.ticking) return; st.ticking = true;
     try {
       const { v, ob, touch } = await look(dealId); const R = v.rounds.get(st.round); if (!R) return;
-      if (R.end?.kind === 'merged') { const W = v.rounds.get(R.end.into); if (W && !W.end) await join(dealId, W); else stopWatch(dealId); return; }
+      if (R.end?.kind === 'merged') {
+        const W = v.rounds.get(R.end.into);
+        if (W && !W.end) await join(dealId, W, true);
+        else stopWatch(dealId);
+        return;
+      }
       if (R.end) { stopWatch(dealId); afterEnd(dealId, v, R, ob); return; }
       if (st.left) { if (!othersIn(dealId, R, ob)) await say(dealId, { abandoned: { round: R.def.id } }); stopWatch(dealId); return; }
       if (st.rejoin || nowMs() - st.lastRenew >= T.renew) await renew(dealId, R);
       // two rounds of the same kind open at once: the lower id is kept, and this one is merged into it, its own pieces with it
       const W = openRounds(v).find((y) => y !== R && y.def.kind === R.def.kind && y.def.id < R.def.id);
-      if (W && (R.def.by === me || !ob.live(R.def.by, T.lapse))) { await say(dealId, { merged: { round: R.def.id, into: W.def.id, extra: R.pieces.filter((p) => !W.pieces.some((q) => q.key === p.key)) } }); await join(dealId, W); return; }
+      if (W && (R.def.by === me || !ob.live(R.def.by, T.lapse))) {
+        const extra = R.pieces.filter((p) => !W.pieces.some((q) => q.key === p.key));
+        await say(dealId, { merged: { round: R.def.id, into: W.def.id, extra } });
+        await join(dealId, W, true);
+        return;
+      }
       // a round no member that holds its documents can work, for a lapse, is abandoned
       if (!ownersIn(dealId, R, ob).length) { st.noOwnerSince ??= nowMs(); if (nowMs() - st.noOwnerSince >= T.lapse) { await say(dealId, { abandoned: { round: R.def.id } }); stopWatch(dealId); } return; }
       st.noOwnerSince = undefined;
@@ -3423,8 +3598,14 @@ export function nodeAi(o: AiOptions) {
     close(): Promise<void> {
       if (watchAll) { clearInterval(watchAll); watchAll = null; }
       reportSweeps.close();
+      closing = true;                          // nothing more from a batch still out, whichever round it counts for
+      clearInterval(heart);
       const said: Promise<unknown>[] = [];
-      for (const [dealId, st] of [...mine]) { if (st.timer) clearInterval(st.timer); mine.delete(dealId); said.push(say(dealId, { left: { round: st.round, pc: me } }, true).catch(() => undefined)); }
+      for (const [dealId, st] of [...mine]) {
+        if (st.timer) clearInterval(st.timer);
+        mine.delete(dealId);
+        said.push(say(dealId, { left: { round: st.round, pc: me } }, true).catch(() => undefined));
+      }
       return Promise.allSettled(said).then(() => undefined);
     },
     /** every call made since the app started, by what it was for and which model took it */
