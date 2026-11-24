@@ -1,8 +1,9 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { RefObject } from 'preact';
 import { useAppState, useStore, fmtDate, useDismiss } from './hooks';
-import { EditField, ReadOnlyContext, readQuestion, keepsUnsaved, unsavedText, unsavedBase } from './editField';
-import { CHANGED_ELSEWHERE } from '../app/changedElsewhere';
+import { EditField, ReadOnlyContext } from './editField';
+import { readQuestion, keepsUnsaved, unsavedText, unsavedBase } from '../app/fieldDrafts';
+import { isChangedElsewhere } from '../app/changedElsewhere';
 import { Icon } from './icons';
 import { ChoiceCheck } from './moreMenu';
 import { PageTop } from './deal';
@@ -608,7 +609,7 @@ function headerInUse(head: HTMLElement): boolean {
  */
 function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted }: { q: Question; busy?: boolean; onClose: () => void; onKeyDown: (e: KeyboardEvent) => void; pos: number; of: number; step: (by: number) => void; nextId: string | null; onDeleted: (id: string) => void }) {
   const store = useStore(); const s = useAppState(); const ro = useContext(ReadOnlyContext); const nav = useNavRoom(q.id); const panel = usePanelFit<HTMLElement>(q.id);   // the header's lines are known before the panel is sized
-  const field = (f: 'text' | 'askedBy' | 'received' | 'workstream' | 'priority' | 'respondedBy' | 'responded') => (value: string, over?: string) => store.dispatch(EditQuestionField, { dealId: q.dealId, questionId: q.id, field: f, value }, { quiet: true, over }).then((r) => { if (!r.ok && r.error.kind !== 'storageFull' && r.error.message !== CHANGED_ELSEWHERE) store.toast(r.error.message); return r; });   // changed elsewhere: the field says so itself
+  const field = (name: EditableQuestionField) => questionFieldCommit(store, q, name);
   const setStatus = (status: QuestionStatus) => void store.dispatch(SetQuestionStatus, { dealId: q.dealId, questionId: q.id, status });
   // Delete asks first; an ask left open for another question is not carried over to this one
   const [asking, setAsking] = useState(false); useLayoutEffect(() => setAsking(false), [q.id]);
@@ -733,6 +734,19 @@ function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted 
   );
 }
 
+type EditableQuestionField = 'text' | 'askedBy' | 'received' | 'workstream' | 'priority' | 'respondedBy' | 'responded';
+
+function questionFieldCommit(store: ReturnType<typeof useStore>, question: Question, field: EditableQuestionField) {
+  const { dealId, id: questionId } = question;
+  return async (value: string, over?: string) => {
+    const result = await store.dispatch(EditQuestionField, { dealId, questionId, field, value }, { quiet: true, over });
+    if (!result.ok && result.error.kind !== 'storageFull' && !isChangedElsewhere(result.error)) {
+      store.toast(result.error.message);
+    }
+    return result;
+  };
+}
+
 /** Text typed into a question's response box that could not be saved, kept while the box is not on screen. */
 const typedResponse = (q: Question) => { const t = unsavedText(`${q.id}:response`); return t !== undefined && t !== q.response && !!t.trim(); };
 
@@ -790,11 +804,15 @@ function DraftActions({ q, typed, over, elsewhere = false }: { q: Question; type
     const now = store.get().questions[q.id];
     if (now && asked.typed !== now.response) {
       const r = await store.dispatch(SetResponse, { dealId: q.dealId, questionId: q.id, response: asked.typed }, { quiet: true, over: asked.over });
-      if (!r.ok) { store.toast(r.error.message === CHANGED_ELSEWHERE ? elsewhereSaid : 'Your text couldn’t be saved, so the draft wasn’t used. Nothing was changed.'); return; }
+      if (!r.ok) {
+        store.toast(isChangedElsewhere(r.error) ? elsewhereSaid
+          : 'Your text couldn’t be saved, so the draft wasn’t used. Nothing was changed.');
+        return;
+      }
     }
     // what is replaced is what the person confirmed replacing: a coworker's change that synced in meanwhile is not
     const r = await store.dispatch(AcceptDraft, { dealId: q.dealId, questionId: q.id, replace: true, over: asked.typed }, { idempotencyKey: 'take-' + q.id, quiet: true });
-    if (!r.ok) store.toast(r.error.message === CHANGED_ELSEWHERE ? elsewhereSaid : r.error.message);
+    if (!r.ok) store.toast(isChangedElsewhere(r.error) ? elsewhereSaid : r.error.message);
     return r;
   };
   const b = (label: string, run: () => void, pri = false) => <span class="needs" title={ro ?? undefined}><button type="button" class={`btn sm${pri ? ' pri' : ''}`} disabled={!!ro} title={ro ?? undefined} onClick={run}>{label}</button></span>;

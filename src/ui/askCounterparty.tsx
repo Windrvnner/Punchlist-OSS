@@ -9,7 +9,8 @@ import { closeOnEscape, focusCard } from './focus';
 import { useStore } from './hooks';
 import { moveKey } from '../app/keptText';
 import { navigate } from './nav';
-import { pendingSaveKeys, useSaveOut } from './saveOut';
+import { pendingSaveKeys } from '../app/saveOut';
+import { useSaveOut } from './saveOut';
 
 /** a question's status, as a list of asked questions says it */
 export const STATUS: Record<Question['status'], string> = { open: 'open', answered: 'answered', closed: 'closed' };

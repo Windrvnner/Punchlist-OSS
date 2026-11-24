@@ -3,11 +3,16 @@
 import { toParagraphs } from '../domain/cite';
 import type { Finding } from '../domain/model';
 import type { Failure, Result } from '../domain/result';
-import { hasTexts, keptDrafts } from '../app/keptText';
+import { CreateFinding, EditFinding, trimmedFindingTitle } from './commands/findings';
+import { hasTexts, keptDrafts } from './keptText';
+import { createdRecord } from './createdRecord';
+import type { Store } from './store';
 
 /** An open edit of a finding: what is typed, and the finding as the edit began (`base`). */
 export type EditDraft = {
-  title: string; ws: string; body: string;
+  title: string;
+  ws: string;
+  body: string;
   base: { title: string; workstream: string; body: string[] };
 };
 const isEditDraft = (v: unknown): v is EditDraft => hasTexts('title', 'ws', 'body')(v)
@@ -26,7 +31,27 @@ const sameAsSent = (d: Typed, sent: Typed) =>
 /** Each edit's save still out, by finding: what it sent, with the base it was measured from. An edit opened after
  *  Cancel, before that save lands, starts from it, so it is measured from it as the finding will be; with nothing
  *  typed in it, it closes when the save lands, as the finding then holds what it showed (#771). */
-export const editsOut = new Map<string, EditDraft>();
+const editsOut = new Map<string, EditDraft>();
+export const editBeingSaved = (findingId: string) => editsOut.get(findingId);
+
+export async function saveFindingEdit(
+  store: Store, { dealId, id }: Pick<Finding, 'dealId' | 'id'>, sent: EditDraft, cancelled: () => boolean,
+): Promise<string | null> {
+  const edit = { dealId, findingId: id, ...sentAsFinding(sent), base: sent.base };
+  editsOut.set(id, sent);
+  const result = await store.dispatch(EditFinding, edit, { idempotencyKey: 'f-edit-' + id })
+    .finally(() => editsOut.delete(id));
+  return landEdit(id, sent, result, cancelled());
+}
+
+export async function saveNewFinding(
+  store: Store, dealId: string, sent: Typed, cancelled: () => boolean,
+): Promise<Finding | null | undefined> {
+  const input = { dealId, ...sentAsFinding(sent), origin: 'human' as const };
+  const result = await store.dispatch(CreateFinding, input, { idempotencyKey: 'f-create-' + dealId });
+  if (!result.ok || cancelled()) return undefined;
+  return landCreated(dealId, sent, createdRecord(store.get(), result.value.opId, 'findings'));
+}
 
 /**
  * #32 and #771: an edit's save has landed. The kept draft, which an edit closed and opened again meanwhile shares, is
@@ -34,7 +59,7 @@ export const editsOut = new Map<string, EditDraft>();
  * field as stored), so the next Save writes only what changed since, and a change made elsewhere meanwhile is still
  * kept or asked about. A refusal keeps the draft and is said, unless Cancel let it go. Returns the refusal to say.
  */
-export function landEdit(findingId: string, sent: EditDraft, r: Result<unknown>, cancelled: boolean): string | null {
+function landEdit(findingId: string, sent: EditDraft, r: Result<unknown>, cancelled: boolean): string | null {
   const typedNow = editDrafts.get(findingId);
   const typedSince = typedNow && !sameAsSent(typedNow, sent) ? typedNow : null;
   if (r.ok && typedSince) editDrafts.set(findingId, { ...typedSince, base: asStored(sentAsFinding(sent)) });
@@ -65,7 +90,7 @@ export const newFindingDrafts = keptDrafts('new-finding', hasTexts('title', 'ws'
  * form, so a second Create cannot make it twice. Unless the finding cannot be found: then the form keeps it. Returns
  * the finding the typing went to.
  */
-export function landCreated(dealId: string, sent: Typed, made: Finding | undefined): Finding | null {
+function landCreated(dealId: string, sent: Typed, made: Finding | undefined): Finding | null {
   const typedNow = newFindingDrafts.get(dealId);
   if (!typedNow || sameAsSent(typedNow, sent)) {
     newFindingDrafts.delete(dealId);
@@ -86,4 +111,4 @@ export function keepAsEdit(made: Finding, typed: Typed, sent: EditDraft['base'])
 /** What a save sent, as the finding stores it: its title trimmed, as the commands trim it, so the next Save's
  *  comparison with the finding is not thrown by a space typed at the end */
 const asStored = (sent: EditDraft['base']): EditDraft['base'] =>
-  ({ title: sent.title.trim(), workstream: sent.workstream, body: sent.body });
+  ({ title: trimmedFindingTitle.parse(sent.title), workstream: sent.workstream, body: sent.body });
