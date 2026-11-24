@@ -16,6 +16,7 @@ import { ReadOnlyContext } from './editField';
 import { MoreMenu, MenuItem, ChoiceCheck } from './moreMenu';
 import { CreateQuestion } from '../app/commands/questions';
 import { RestoreFinding } from '../app/commands/findings';
+import { findingHistory } from '../app/findings';
 import { localYmd, type Finding } from '../domain/model';
 import { AskCard, AskedList, askedAbout, STATUS } from './askCounterparty';
 import { useChecklistDraft } from './checklistDraft';
@@ -34,11 +35,6 @@ const FILTER_LABEL = { all: 'All', ...LABEL, off: 'Turned Off' };
 const SHORT: Partial<Record<UiState['checklistFilter'], string>> = { person: 'By a Person', gone: 'Deleted' };
 /** the same, for one item */
 const ONE: Record<Kind, string> = { finding: 'Flagged', gone: 'Finding deleted', gap: 'Gap', open: 'Not settled', person: 'Resolved by a person', satisfied: 'Satisfied' };
-/** who closed a finding, from its history: the latest closing that was not undone, or nothing until the history is loaded */
-const closedBy = (s: Pick<State, 'audit'>, f: Finding): string => {
-  const audit = s.audit[f.id] ?? []; const undone = new Set(audit.map((a) => a.undoes).filter(Boolean));
-  return [...audit].reverse().find((a) => a.kind === 'status' && a.to === 'closed' && !undone.has(a.opId) && !a.undoes)?.actor.split(' · ')[0] ?? '';
-};
 
 /**
  * What a gap rests on: it was not found in the documents read, counted, with their names as the tooltip; a document
@@ -290,7 +286,7 @@ function Row({ r, dealId, wide, flaggedAbove, unlisted, on, off, tab, group, ope
   const store = useStore(); const s = useAppState(); const st = itemStanding(s, dealId, r); const k = st.kind; const f = r.findingId ? s.findings[r.findingId] : undefined;
   const asked = askedAbout(s, dealId, r.id, f).map((q) => `Q${q.n} ${STATUS[q.status]}`).join(' · ');
   useEffect(() => { if (k === 'person' && f) void store.loadAudit(f.id); }, [k, f?.id]);   // who closed its finding
-  const by = k === 'person' && f ? closedBy(s, f) : '';
+  const by = k === 'person' && f ? findingHistory(s, f.id).closedBy : '';
   const first = r.sources?.[0]; const where = first ? `${first.doc}, ${first.loc}${r.sources!.length > 1 ? ` and ${r.sources!.length - 1} more` : ''}` : r.docs.slice(0, 2).map((x) => x.name).join(', ') + (r.docs.length > 2 ? ` and ${r.docs.length - 2} more` : '');
   return (
     <button type="button" class={`li ckrow ${on ? 'on' : ''} ${off ? 'off' : ''}`} role="option" aria-selected={on} data-item={r.id} data-result={off ? 'off' : r.result} tabIndex={tab ? 0 : -1} aria-description={group} onClick={open}>

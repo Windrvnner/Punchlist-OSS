@@ -6,6 +6,31 @@
  */
 import { SERVICE } from '../control';
 import type { CheckState, Someone } from '../ports';
+import type { State } from './state';
+import type { Store } from './store';
+
+/** Follow a local or shared check while the caller is showing it. */
+export function watchCheck(store: Pick<Store, 'get' | 'subscribe' | 'refreshChecked'>, dealId: string): () => void {
+  let busy = false;
+  let shared = false;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const update = (state: State) => {
+    const check = state.checks[dealId];
+    const nextBusy = !!check?.busy;
+    const nextShared = !!check?.checking;
+    if (nextBusy === busy && nextShared === shared) return;
+    busy = nextBusy;
+    shared = nextShared;
+    clearInterval(timer);
+    if (busy || shared) timer = setInterval(() => void store.refreshChecked(dealId), 3000);
+  };
+  const unsubscribe = store.subscribe(update);
+  update(store.get());
+  return () => {
+    unsubscribe();
+    clearInterval(timer);
+  };
+}
 
 const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
 const count = (n: number) => WORDS[n] ?? String(n);
