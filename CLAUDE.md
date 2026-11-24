@@ -45,12 +45,15 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
 
 ## Code
 
-- **The frontend is a pane of glass.** `src/ui` shows state, sends commands, and calls `src/app` functions.
-  Model calls, business rules, data transforms, list membership and counts, retries, and persistence live in
-  `src/app` or `src/backend`. They reach storage and services only through `src/ports`, so workflows run without a
-  window. The UI never imports the backend, adapters, desktop, or shell.
-  `npm run check` fails when `src/ui` gains such an import, a service or repository call, or browser storage
-  (`scripts/check-pane-of-glass.mjs`).
+- **The frontend is a pane of glass.** `src/ui` only shows state, sends commands, and calls `src/app` functions. It
+  makes no AI or model calls and holds no business rules, data transforms, retries, or persistence (no `localStorage`
+  or IndexedDB), and it doesn't decide which items a list shows, how they are grouped, or what is counted. Those live
+  in `src/app` (commands, selectors in `src/app/state.ts`, and workflow functions) or `src/backend`, reaching storage
+  and services only through `src/ports`, so that every workflow can run without a window. The UI never imports the
+  backend, adapters, desktop, or shell. Formatting a value for display, and screen-only state such as focus, an open
+  menu, or scroll position, stay in `src/ui`. New or changed UI code that breaks this is a review blocker. Existing
+  code that breaks it is tracked in #829 and #830 and moved in separate pull requests. `npm run check` fails when
+  `src/ui` gains such an import, a service or repository call, or browser storage (`scripts/check-pane-of-glass.mjs`).
 - **Readable code.** Every change must be easy for a person to review on GitHub. New or changed code that breaks the rules below is a review blocker, just like lost work or a crash. Code that a pull request did not touch never is.
   - Put one statement on each line, and keep lines to 120 characters at most, comments included.
   - Keep new functions to about 60 lines and files to about 500. Don't grow a function that is already past that limit; add a named helper instead.
