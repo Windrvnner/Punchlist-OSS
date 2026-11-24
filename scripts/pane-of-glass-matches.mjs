@@ -12,14 +12,32 @@ function literalText(node) {
   return null;
 }
 
-// Keep the fixed prefix of a dynamic import. A placeholder marks the first unknown part of its path.
-function modulePath(node) {
-  if (node?.type === 'TemplateLiteral' && node.expressions.length) return node.quasis[0].value.cooked + '*';
-  if (node?.type === 'BinaryExpression' && node.operator === '+') {
-    const left = literalText(node.left);
-    return left === null ? modulePath(node.left) : left + (modulePath(node.right) ?? '*');
+function joinedPaths(left, right) {
+  return left.flatMap((prefix) => right.map((suffix) => prefix + suffix));
+}
+
+function templatePaths(node) {
+  let paths = [node.quasis[0].value.cooked];
+  for (const [index, expression] of node.expressions.entries()) {
+    const tail = node.quasis[index + 1].value.cooked;
+    paths = joinedPaths(paths, modulePaths(expression)).map((path) => path + tail);
   }
-  return literalText(node);
+  return paths;
+}
+
+// Only inspect syntax. A placeholder preserves the known parts of a path around a runtime value.
+function modulePaths(expression) {
+  if (!expression) return [];
+  const node = unwrapped(expression);
+  const text = literalText(node);
+  if (text !== null) return [text];
+  if (node.type === 'TemplateLiteral') return templatePaths(node);
+  if (node.type === 'BinaryExpression' && node.operator === '+') {
+    return joinedPaths(modulePaths(node.left), modulePaths(node.right));
+  }
+  if (node.type === 'ConditionalExpression') return [...modulePaths(node.consequent), ...modulePaths(node.alternate)];
+  if (node.type === 'LogicalExpression') return [...modulePaths(node.left), ...modulePaths(node.right)];
+  return ['*'];
 }
 
 function forbiddenModule(file, name) {
@@ -34,13 +52,13 @@ function propertyName(key, computed) {
   return literalText(key);
 }
 
-// TypeScript assertions and optional chains can surround a repository access.
-function member(node) {
+// Assertions, parentheses and optional chains leave the underlying path or member unchanged.
+function unwrapped(node) {
   while (['TSNonNullExpression', 'TSAsExpression', 'TSTypeAssertion', 'TSSatisfiesExpression',
     'ChainExpression', 'ParenthesizedExpression'].includes(node.type)) {
     node = node.expression;
   }
-  return node.type === 'MemberExpression' ? node : null;
+  return node;
 }
 
 export function matchesIn(file, source) {
@@ -51,15 +69,16 @@ export function matchesIn(file, source) {
     (offsets[kind] ??= new Set()).add(node.start);
   }
   function checkModule(node) {
-    const name = modulePath(node);
-    if (name && forbiddenModule(file, name)) record('import', node);
+    if (modulePaths(node).some((name) => forbiddenModule(file, name))) record('import', node);
   }
   function checkMember(node) {
     const name = propertyName(node.property, node.computed);
     if (name === 'services') record('services', node.property);
     if (storageNames.has(name)) record('storage', node.property);
-    const target = member(node.object);
-    if (target && propertyName(target.property, target.computed) === 'repo') record('repo', target.property);
+    const target = unwrapped(node.object);
+    if (target.type === 'MemberExpression' && propertyName(target.property, target.computed) === 'repo') {
+      record('repo', target.property);
+    }
   }
   function checkPattern(node) {
     for (const entry of node.properties) {

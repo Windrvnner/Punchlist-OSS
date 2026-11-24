@@ -62,6 +62,10 @@ describe('UI dependency checks', () => {
         "const fs = import('fs/promises')",
         'const table = import(`../../backend/${tableName}.ts`)',
         "const table = import('../../backend/' + tableName)",
+        "const table = import(available ? './table' : '../../backend/table')",
+        "const table = import((available ? '../../backend/' : './') + tableName)",
+        "const table = import(`../../${available ? 'backend' : 'ui'}/table`)",
+        "const table = import(optionalPath ?? '../../backend/table')",
       ],
       storage: ['localStorage.getItem(key)', 'indexedDB.open(key)', 'window.sessionStorage.length'],
       services: ['store.services.ai.phrase(point)', 'const { services: ports } = store', 'store?.services'],
@@ -105,13 +109,14 @@ describe('UI dependency checks', () => {
       'const pattern = /localStorage/',
       'const title = <b>store.services.repo and localStorage</b>',
       'const choices = { services: true }',
+      "const table = import(checked ? './table' : '../app/table')",
     ].join('\n');
     repo.write('src/ui/view.test.tsx', examples);
     repo.write('src/ui/nested/view.test.ts', examples);
     repo.write(page, clean);
     expect(repo.run().status).toBe(0);
     repo.write(page, clean + '\nconst value = <b>{`${store.services}`}</b>');
-    expect(repo.run().stderr).toContain(`${page} services (lines 8)`);
+    expect(repo.run().stderr).toContain(`${page} services (lines 9)`);
   });
 });
 
