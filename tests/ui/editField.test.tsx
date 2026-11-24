@@ -358,13 +358,46 @@ describe('EditField', () => {
       if (rec.value !== over && rec.value !== wrote) return res({ ok: false, error: { kind: 'conflict', message: CHANGED_ELSEWHERE } });
       if (rec.value !== v) { rec.value = v; rec.rev++; wrote = v; } res({ ok: true });
     } }));
-    const draw = () => act(() => { render(<EditField label="Counterparty" keep={keep} multiline={multiline} value={rec.value} rev={rec.rev} commit={commit} debounceMs={20} />, host); });
+    const draw = (locked: string | null = null) => act(() => {
+      render(<ReadOnlyContext.Provider value={locked}>
+        <EditField label="Counterparty" keep={keep} multiline={multiline} value={rec.value}
+          rev={rec.rev} commit={commit} debounceMs={20} />
+      </ReadOnlyContext.Provider>, host);
+    });
     const el = () => host.querySelector(multiline ? 'textarea' : 'input') as HTMLInputElement;
     const typeBlur = (v: string) => act(() => { el().dispatchEvent(new FocusEvent('focus')); el().value = v; el().dispatchEvent(new Event('input', { bubbles: true })); el().dispatchEvent(new FocusEvent('blur')); });
     const go = async (i: number, away?: boolean) => { await act(async () => { sent[i].go(away); }); await draw(); };
     const elsewhere = async (v: string) => { rec.value = v; rec.rev++; await draw(); };
     return { host, rec, sent, draw, el, unmount: () => act(() => { render(null, host); }), typeBlur, go, elsewhere, button: (t: string) => [...host.querySelectorAll('button')].find((b) => b.textContent === t)! };
   }
+
+  it.each([
+    ['The deal has two versions. Choose one first.', 'deal:unlock-after-conflict'],
+    ['Sign in to Intelligence to make changes', 'deal:unlock-after-sign-in'],
+  ])('waits for Retry on a reopened field after clearing "%s"', async (reason, keep) => {
+    const original = 'The borrower under the signed agreement';
+    const kept = 'The guarantor named in the accession deed';
+    const f = queued(original, keep);
+    await f.draw();
+    await f.typeBlur(kept);
+    await f.go(0, true);
+    await f.unmount();
+    await f.draw();
+    expect(f.button('Not saved · Retry')).toBeDefined();
+
+    await f.draw(reason);
+    expect(f.el().readOnly).toBe(true);
+    await f.draw();
+    expect(f.sent.map(({ v }) => v)).toEqual([kept]);
+    expect(f.rec.value).toBe(original);
+    expect(f.el().value).toBe(kept);
+
+    await act(async () => { f.button('Not saved · Retry').click(); });
+    expect(f.sent[1]).toMatchObject({ v: kept, over: original });
+    await f.go(1);
+    expect(f.rec.value).toBe(kept);
+    await f.unmount();
+  });
 
   it('several changes read at once while the field\'s save is out, value unchanged, then the save fails: "Changed elsewhere", not Retry', async () => {
     const f = queued('abc'); await f.draw();

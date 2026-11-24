@@ -77,12 +77,16 @@ const ls = (alpha: number) => n(0.299, alpha, 1.7);
  */
 const TOKENS = {
   // background, text in three strengths, the accent and the text on it, red, the document page, notices, a turned-off button;
-  // the light theme's accent (and the glow it lit) is a graphite of the neutral, not the sand
+  // the accent (and the glow it lights) is a gray of the neutral in both themes, light in the dark one and graphite
+  // in the light one, so both are black and white; colors.accent sets only the document page's highlight and mark
+  // (#873)
   surface: [n(0.172, 1, 0.66), n(0.916, 1, 0.9)], ink: [n(0.937, 1, 0.4), n(0.222)], 'ink-2': [n(0.736), n(0.474)], 'ink-3': [n(0.673, 1, 0.77), n(0.484, 1, 0.8)],
-  accent: [a(0.831), n(0.3, 1, 1.28)], 'accent-ink': [a(0.196, 1, 0.25), W()], high: [r(0.722, 1, 0.74), r(0.502)],
+  accent: [n(0.831, 1, 1), n(0.3, 1, 1.28)], 'accent-ink': [n(0.196, 1, 0.25), W()],
+  high: [r(0.722, 1, 0.74), r(0.502)],
   paper: [n(0.959, 1, 0.3), n(0.994, 1, 0.3)], 'paper-ink': [n(0.226), n(0.226)], toast: [n(0.937, 1, 0.4), n(0.222)], 'toast-ink': [n(0.178, 1, 0), W()], off: [n(0.937, 1, 0.4), n(0.222)],
   // the lit surface behind the glass, the glass, and the cards, menus and tables on it
-  'light-a': [a(0.827, 0.16, 0.9), W(0.9)], 'light-b': [n(0.665, 0.14, 7.15), n(0.843, 0.55)], 'light-c': [W(0.05), n(0.848, 0.35, 1.6)],
+  'light-a': [n(0.827, 0.16, 0.9), W(0.9)], 'light-b': [n(0.665, 0.14, 7.15), n(0.843, 0.55)],
+  'light-c': [W(0.05), n(0.848, 0.35, 1.6)],
   glass: [W(0.055), W(0.5)], 'glass-2': [W(0.085), W(0.66)], 'glass-solid': [n(0.217, 0.78, 0.61), W(0.8)], 'glass-edge': [W(0.13), W(0.85)],
   'glass-sheen': [W(0.07), W(0.6)], spec: [W(0.32), W()], card: [W(0.04), W(0.45)], 'card-edge': [W(0.09), n(0.275, 0.08, 0.65)], 'card-hover': [W(0.07), W(0.7)],
   menu: [n(0.226, 0.97, 0.81), W(0.97)], 'menu-solid': [n(0.226, 1, 0.81), n(0.988, 1, 0.1)], capsule: [n(0.217, 0.84, 0.61), W(0.86)], 'th-bg': [n(0.204, 1, 0.61), n(0.952, 1, 0.8)],
@@ -100,8 +104,12 @@ const TOKENS = {
   shadow: [[['0 20px 60px', K(0.45)], ['0 2px 6px', K(0.3)]], [['0 20px 50px', ls(0.16)], ['0 2px 6px', ls(0.08)]]],
   'shadow-pop': [[['0 14px 40px', K(0.4)]], [['0 14px 40px', ls(0.18)]]], 'shadow-page': [[['0 30px 70px', K(0.45)]], [['0 30px 70px', ls(0.22)]]],
   'shadow-dlg': [[['0 40px 100px', K(0.6)]], [['0 40px 100px', ls(0.28)]]],
-  // on a dark room a white page reads as lit: a hairline and a soft warm glow give it its depth
-  'shadow-sheet': [[['0 0 0 1px', W(0.18)], ['0 0 36px', a(0.96, 0.1, 0.75)], ['0 0 150px', a(0.96, 0.2, 0.75)], ['0 26px 70px', K(0.7)]], [['0 0 0 1px', ls(0.07)], ['0 30px 70px', ls(0.22)]]],
+  // on a dark room a white page reads as lit: a hairline and a soft glow of the neutral give it its depth
+  'shadow-sheet': [
+    [['0 0 0 1px', W(0.18)], ['0 0 36px', n(0.96, 0.1, 0.75)], ['0 0 150px', n(0.96, 0.2, 0.75)],
+      ['0 26px 70px', K(0.7)]],
+    [['0 0 0 1px', ls(0.07)], ['0 30px 70px', ls(0.22)]],
+  ],
 } satisfies Record<string, [Token, Token]>;
 export type ColorName = keyof typeof TOKENS;
 export const COLOR_NAMES = Object.keys(TOKENS) as ColorName[];
@@ -143,8 +151,8 @@ const PAIRS: [ColorName, ColorName[], number][] = [
 
 /**
  * What is wrong with the base colors, one line each: empty when fine. Text must stay readable on what it sits on in
- * both themes, and the accent and red must be colors, not grays, and far enough apart in hue that "in progress" and
- * "needs you" never look alike (never two shades of one color meaning different things).
+ * both themes, and the accent and red must be colors, not grays, and far enough apart in hue that a document page's
+ * highlight and mark (which take the accent) never look like "needs you".
  */
 export function paletteProblems(values: Control = control): string[] {
   const out: string[] = [];

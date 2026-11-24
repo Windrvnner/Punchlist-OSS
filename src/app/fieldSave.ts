@@ -64,7 +64,7 @@ export class FieldSave {
   base: string;
   seen: FieldValue;
   private baseRev: number;
-  private restored: boolean;
+  private retryDraft: string | undefined;
   private gone = false;
   private jumped = false;
   private byJump = false;
@@ -83,7 +83,7 @@ export class FieldSave {
     this.base = draft?.base ?? record.value;
     const external = !!draft && (draft.base !== record.value || draft.rev !== record.rev);
     this.baseRev = external ? -1 : record.rev;
-    this.restored = !!draft;
+    this.retryDraft = draft?.text;
     this.view = { external, status: draft && !external ? 'failed' : 'idle', byItself: false, reason: '' };
   }
 
@@ -129,6 +129,7 @@ export class FieldSave {
     this.show({ status: 'idle' });
     this.input.stopTimer();
     if (this.input.partial()) return false;
+    this.retryDraft = undefined;
     if (this.keep !== undefined && (unsavedFields.has(this.keep) || this.view.external)) this.keepText(text);
     else if (this.input.locked() && text !== this.seen.value) this.keepText(text);
     return !this.view.external;
@@ -206,6 +207,7 @@ export class FieldSave {
     const choice = chosen && this.view.external;
     this.input.stopTimer();
     if (!this.shouldSend(text, chosen)) return undefined;
+    if (text === this.retryDraft) this.retryDraft = undefined;
     this.show({ status: 'saving', external: false });
     const attempt: FieldAttempt = {
       text, over: this.base, again: this.resending, choice, baselineVersion: this.baselineVersion,
@@ -373,6 +375,7 @@ export class FieldSave {
       void this.save(text, commit);
       return;
     }
+    if (entry.status === 'failed' && !entry.byItself) this.retryDraft = text;
     const back = () => {
       if (this.input.text() !== text || this.view.external) return;
       this.keepText(text);
@@ -403,12 +406,10 @@ export class FieldSave {
   }
 
   lockChanged(locked: boolean, commit: FieldCommit) {
-    if (this.restored) {
-      this.restored = false;
-      return;
-    }
-    if (!locked && !this.input.focused() && this.input.text() !== this.seen.value) {
-      void this.save(this.input.text(), commit);
+    const text = this.input.text();
+    // A read-only lock cannot submit a restored draft. Older save results can still finish during new typing (#229).
+    if (!locked && text !== this.retryDraft && !this.input.focused() && text !== this.seen.value) {
+      void this.save(text, commit);
     }
   }
 }
