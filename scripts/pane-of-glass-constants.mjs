@@ -1,14 +1,21 @@
 // Read bindings from the same TypeScript tree used for the rest of the guard. Literal imports skip scope analysis.
 import { createRequire } from 'node:module';
+import { boundValue } from './pane-of-glass-bindings.mjs';
 
 const require = createRequire(import.meta.url);
 
+function definesValue(definition) {
+  if (!definition.isVariableDefinition) return false;
+  return definition.node.importKind !== 'type' && definition.parent?.importKind !== 'type';
+}
+
 function fixedInitializer(variable) {
-  if (variable.defs.length !== 1) return null;
-  const { node } = variable.defs[0];
-  if (node.type !== 'VariableDeclarator' || node.id.type !== 'Identifier') return null;
+  const definitions = variable.defs.filter(definesValue);
+  if (definitions.length !== 1) return null;
+  const { node, name } = definitions[0];
+  if (node.type !== 'VariableDeclarator') return null;
   if (variable.references.some((ref) => ref.isWrite() && !ref.init)) return null;
-  return node.init;
+  return boundValue(node.id, node.init, name);
 }
 
 export function localConstants(program) {
