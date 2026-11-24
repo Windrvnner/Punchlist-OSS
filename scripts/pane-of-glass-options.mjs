@@ -43,6 +43,19 @@ function recordReader(properties) {
   return () => Object.fromEntries(fields.flatMap((field) => field()));
 }
 
+function arrayReader(elements) {
+  const readers = elements.map((part) => part && dataReader(part.type === 'SpreadElement' ? part.argument : part));
+  return () => {
+    const items = [];
+    for (const [index, read] of readers.entries()) {
+      if (!read) items.length++;
+      else if (elements[index].type === 'SpreadElement') items.push(...read());
+      else items.push(read());
+    }
+    return items;
+  };
+}
+
 function memberReader(node) {
   const receiver = dataReader(node.object);
   const property = keyReader(node, node.property);
@@ -66,6 +79,8 @@ function dataReader(expression) {
       return () => node.value;
     case 'ObjectExpression':
       return recordReader(node.properties);
+    case 'ArrayExpression':
+      return arrayReader(node.elements);
     case 'MemberExpression':
       return memberReader(node);
     case 'TemplateLiteral': {

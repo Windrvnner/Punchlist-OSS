@@ -148,17 +148,27 @@ describe('UI dependency checks', () => {
       `['base']: '../${layer}'`, `base: '../${layer}', query: { offset: -1 }`,
       "base: `../${'" + layer + "'}`", `base: { ...{ ...{ location: '../${layer}' } } }.location`,
       `base: { ...{ bundle: { location: '../${layer}' } } }.bundle.location`,
+      `base: { 1: '../${layer}' }[1]`, `base: { ['loc' + 'ation']: '../${layer}' }['loc' + 'ation']`,
+      `base: { ['loc' + 2 ** 3]: '../${layer}' }[{ selected: 'loc8' }.selected]`,
+      `base: { choices: [,, ...['../${layer}']] }.choices[1 + 1]`,
+      `base: { '[object Object]': '../${layer}' }[{}]`, `base: { ['a,b']: '../${layer}' }[['a', 'b']]`,
+      `base: '../${layer}' || null.path`, `base: false && null.path ? null.path : '../${layer}'`,
     ];
     const source = bases.flatMap((base, index) => ['true', 'false'].map((eager) =>
       `export const read${index}${eager} = import.meta.glob('./part.ts', { ${base}, eager: ${eager} })`));
-    source.push("export const deferred = import.meta.glob('./part.ts', { eager: process.exit(7) })");
-    source.push("export const computed = import.meta.glob('./part.ts', { [process.exit(8)]: true })");
+    const unsafe = [
+      '{ eager: globalThis.process.exit(7) }', '{ [globalThis.process.exit(8)]: true }',
+      '{ base: { get path() { globalThis.process.exit(9) } }.path }',
+    ];
+    for (const [index, options] of unsafe.entries()) {
+      source.push(`export const deferred${index} = import.meta.glob('./part.ts', ${options})`);
+    }
     repo.write(file, source.join('\n'));
     const result = repo.run();
     expect(result.status, result.stderr).toBe(layer === 'ui' ? 0 : 1);
     if (layer === 'backend') {
-      const lines = '1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16';
-      expect(result.stderr).toContain(`${file} import (lines ${lines}): 16 exceeds`);
+      const lines = Array.from({ length: 32 }, (_, index) => index + 1).join(', ');
+      expect(result.stderr).toContain(`${file} import (lines ${lines}): 32 exceeds`);
     }
   });
 

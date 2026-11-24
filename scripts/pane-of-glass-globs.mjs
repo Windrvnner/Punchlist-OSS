@@ -1,53 +1,7 @@
 // Vite's development transform evaluates glob options. Only hand it expressions built entirely from data.
 import { Visitor } from 'vite';
+import { dataOptions } from './pane-of-glass-options.mjs';
 import { literalText, unwrapped } from './pane-of-glass-syntax.mjs';
-
-function dataProperty(part) {
-  if (part.type === 'SpreadElement') return dataValue(part.argument);
-  return part.kind === 'init' && !part.method && (!part.computed || dataValue(part.key)) && dataValue(part.value);
-}
-
-function literalObject(node) {
-  const value = unwrapped(node);
-  return value?.type === 'ObjectExpression' && value.properties.every(dataProperty);
-}
-
-function propertyKey(node) {
-  const key = node.key ?? node.property;
-  return node.computed ? literalText(unwrapped(key)) : key.name ?? literalText(key);
-}
-
-// Search from the last property back because later properties and spreads replace earlier ones.
-function ownValue(receiver, key) {
-  const object = unwrapped(receiver);
-  if (object?.type === 'MemberExpression') {
-    return ownValue(ownValue(object.object, propertyKey(object)), key);
-  }
-  if (object?.type !== 'ObjectExpression' || key === null) return;
-  for (const part of object.properties.toReversed()) {
-    if (part.type === 'SpreadElement') {
-      const value = ownValue(part.argument, key);
-      if (value) return value;
-    } else if (propertyKey(part) === key && (key !== '__proto__' || part.computed)) {
-      return part.value;
-    }
-  }
-}
-
-function dataValue(node) {
-  const value = unwrapped(node);
-  if (literalText(value) !== null || ['boolean', 'number'].includes(typeof value?.value)) return true;
-  if (value.type === 'TemplateLiteral') return value.expressions.every(dataValue);
-  if (value.type === 'UnaryExpression') return value.operator !== 'delete' && dataValue(value.argument);
-  if (value.type === 'BinaryExpression' || value.type === 'LogicalExpression') {
-    return dataValue(value.left) && dataValue(value.right);
-  }
-  if (value.type === 'ConditionalExpression') {
-    return [value.test, value.consequent, value.alternate].every(dataValue);
-  }
-  if (value.type !== 'MemberExpression') return literalObject(value);
-  return dataValue(value.object) && Boolean(ownValue(value.object, propertyKey(value)));
-}
 
 function globMeta(node) {
   let callee = unwrapped(node.callee);
@@ -63,7 +17,7 @@ function staticGlob(node) {
   if (!meta || node.arguments.length > 2) return;
   const [argument, options] = node.arguments.map(unwrapped);
   const patterns = argument?.type === 'ArrayExpression' ? argument.elements : [argument];
-  if (patterns.every((part) => literalText(unwrapped(part)) !== null) && (!options || literalObject(options))) {
+  if (patterns.every((part) => literalText(unwrapped(part)) !== null) && (!options || dataOptions(options))) {
     return { node, meta };
   }
 }
