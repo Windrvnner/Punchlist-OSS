@@ -146,3 +146,31 @@ it('reopens the kept choices after a committed Append loses its reply, without a
     await reopened.repo.close();
   }
 });
+
+it('previews a control-only question from the file and submits only the sanitized rows', async () => {
+  await useKeptPort();
+  const app = recoveryApp();
+  try {
+    const dealId = await recoveryDeal(app);
+    const question = 'Confirm the interconnection agreement remains in force.';
+    const shown = ['1', '\u007f', 'Lender counsel accepted the covenant', '2026-09-30'];
+    const file = await csvFile([
+      ['Number', 'Question', 'Response', 'Received'], shown, ['2', question, '', '2026-10-01'],
+    ]);
+    const picked = await loadQaImport(app.store, dealId, file);
+    if (!picked.ok) throw new Error(picked.error.message);
+    const { table, path } = picked.value;
+    const choices = choicesFor(table, path);
+    const { prepared, previewRows } = prepareQaImport(table, choices.mapping);
+    expect(previewRows).toHaveLength(2);
+    expect(previewRows[0]).toMatchObject({ cells: shown, dates: { received: '2026-09-30' } });
+    expect(prepared.skipped).toBe(1);
+    expect(prepared.rows.map((row) => row.text)).toEqual([question]);
+    const submitted = await submitQaImport(app.store, dealId, { table, choices }, prepared.rows);
+    expect(submitted).toEqual(ok(undefined));
+    expect(dealQuestions(app.store.get(), dealId).map((row) => row.text)).toEqual([question]);
+  } finally {
+    app.store.closing();
+    await app.repo.close();
+  }
+});

@@ -1,6 +1,8 @@
 import { Operation } from '../domain/model';
 import { fail, ok, type Result } from '../domain/result';
-import { importCounts, prepareImport, type ImportRow, type Mapping, type Prepared } from '../domain/importExport';
+import {
+  importCounts, parseDate, prepareImport, type ImportRow, type Mapping, type Prepared,
+} from '../domain/importExport';
 import { ImportQuestions } from './commands/importQuestions';
 import { dropImport, finishKeptSubmission, importKey, keepImport, keptImport } from './keptImports';
 import { keepImportedLog, logTakenBy } from './qaLog';
@@ -106,16 +108,26 @@ export interface QaPreviewRow {
   dates: Pick<ImportRow, 'received' | 'responded'>;
 }
 
-/** Use the same parsed rows and date readings for the preview and the submission. */
+/** Use the import's contextual date readings wherever the preview shows a prepared row. */
 export function prepareQaImport(table: ImportTable, mapping: Mapping) {
   const prepared = prepareImport(table.rows, mapping, table.lines);
-  const cellsByLine = new Map(table.rows.map((row, at) => [table.lines?.[at] ?? at + 2, row]));
-  // A space-only question is kept by the importer but stays out of the visible sample.
-  const previewRows: QaPreviewRow[] = prepared.rows.filter((row) => row.text.trim()).slice(0, 5).map((row) => ({
-    cells: cellsByLine.get(row.line!)!,
-    dates: { received: row.received, responded: row.responded },
-  }));
-  return { prepared, previewRows };
+  return { prepared, previewRows: previewQaRows(table, mapping, prepared) };
+}
+
+/** Preserve the preview's original file sample, including control-only text that preparation skips (#925). */
+function previewQaRows(table: ImportTable, mapping: Mapping, prepared: Prepared): QaPreviewRow[] {
+  const questionColumn = mapping.text;
+  if (questionColumn == null) return [];
+  const previewRows: QaPreviewRow[] = [];
+  for (const [at, cells] of table.rows.entries()) {
+    if (!String(cells[questionColumn] ?? '').trim()) continue;
+    const line = table.lines?.[at] ?? at + 2;
+    const row = prepared.rows.find((candidate) => candidate.line === line);
+    const date = (field: 'received' | 'responded') => row?.[field] ?? parseDate(cells[mapping[field] ?? -1]) ?? '';
+    previewRows.push({ cells, dates: { received: date('received'), responded: date('responded') } });
+    if (previewRows.length === 5) break;
+  }
+  return previewRows;
 }
 
 export function summarizeQaImport(
