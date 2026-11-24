@@ -166,6 +166,7 @@ The rest of the project is documented in these places:
 - [decisions.md](decisions.md) lists the decisions in force.
 - [requirements.md](requirements.md) covers Windows setup, including the model provider, organization name, OneDrive folder, and checks after installation.
 - [linking-design.md](linking-design.md) describes the parts, not yet built, of the design that links checklist items to findings and Q&A questions (#2).
+- [deal-screen-design.md](deal-screen-design.md) holds the mock-up and screens, not yet built, of the rebuilt deal screen.
 - [design.md](design.md) describes how the app looks, with reference screenshots.
 - [review-prompt.md](review-prompt.md) is the adversarial review prompt for every pull request.
 - The detailed contracts are the TSDoc comments in `src/ports/index.ts` and `src/backend/*.ts`, and the tests.

@@ -308,6 +308,25 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Each thing lives in one place: decisions here; bugs and Build list items (with their designs) as GitHub issues; review notes on pull requests; how the app works in the docs; the detailed contract in code comments and tests; and history in git. There are no Markdown review files or running logs.
 - The README covers what the app is and does, screenshots of the real app, and how to install and use it; developer setup is in docs/development.md.
 
+## Deal screen
+
+These decisions are for the rebuilt deal screen in [deal-screen-design.md](deal-screen-design.md) and are not built yet (#881). Once built, they replace the sidebar's Deal status groups (Pages and navigation), **Past Conversations** in every composer (Conversations), and **Keep It** in confirms (Working rules). How the deal's Overview, Findings, and Checklist pages and the deal header fit the new screen is open.
+
+- A deal shows its conversation on the left and, when opened, one pane on the right. The pane's tabs are Tasks, Diligence, and Q&A, always in that order, followed by any opened finding, document, or task, each with ×.
+- The selected tab is 1.5 times as wide as each other tab, and the rest share the bar equally. A hairline separates unselected tabs, the selected tab sits raised, and tabs show no counts. An unselected tab too narrow for its name drops its icon before shortening the word. The Diligence tab uses the Checklist's icon.
+- The sidebar folds to its slim rail while the pane is open and comes back when it closes. A sidebar pinned open stays, and the conversation narrows; the pane gives way only to keep the conversation at least 400px wide.
+- The sidebar lists deals in one list, ordered by when the person last worked on each deal, with no Deal status groups.
+- A deal's ⋯ menu offers **Archive Deal**, which asks first in the app's confirm dialog. Archived deals fold under **Archived**; a dot marks an archived deal whose data room changed, with its update line ("4 new files · 11:20 AM"). An archived deal's ⋯ menu offers **Unarchive Deal**.
+- The conversation title in the breadcrumb is a button that opens the deal's past conversations. **Past Conversations** leaves the composer.
+- The check of the data room against the checklist is called Diligence (**Run Diligence**, the Diligence tab), and the list of running and finished work is called Tasks. The Diligence tab shows the Checklist's own marks and groups.
+- Tasks belong to the deal, not to a conversation: they keep running and stay in Tasks when the person switches conversations, and a task's result card stays in the conversation that started it (#875).
+- Tasks are grouped as Needs Input, Running, and Completed. Each task is one row: an outline kind icon, its name, its count ("1,284 of 2,148" or "Step 3 of 5"), and, while it runs, a thin bar of the same width on every row. A round × stops it; a finished task opens from a round arrow. There are no time-remaining estimates (elapsed time may show), and an open-ended task's current file shows on hover.
+- A task's card in the chat has a fixed width and the same bar, and opens the task with **Open**. A finished task keeps its reply box.
+- Work in progress shows a small ring beside words naming the live step, never a spinner alone; on a tab, the ring sits beside the tab's name.
+- An opened question sits in a card with its question, response, sources, links, and status, beside the conversation, never covering it. A draft response is marked with a **Draft** badge.
+- A source document opens in the pane in reading mode's viewer, with page navigation and zoom and no passage highlighting.
+- Confirm dialogs say **Cancel**, not **Keep It** (#867).
+
 ## Built, awaiting confirmation
 
 These decisions are built and wait to be confirmed:
