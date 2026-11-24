@@ -8,9 +8,9 @@ import { readLogCells, holds } from '../domain/logWrite';
 import type { ImportField } from '../domain/importExport';
 // the one A to Z order every list a person picks from uses
 import { byName, NO_WORKSTREAM, workstreamChoices } from '../domain/order';
-import { addresser } from '../domain/suggest';
 import { capabilities, type Capabilities } from './capabilities';
 import { askBlock } from './asking';
+import { canLinkUnresolved, suggestUnresolvedLinks, type ApprovedLinks } from './unresolvedLinks';
 
 export type BootStage = 'session' | 'deals' | 'journal' | 'ready';
 
@@ -425,34 +425,57 @@ export function settledQuestions(s: Pick<State, 'questions' | 'findings' | 'tomb
   return out;
 }
 
-/**
- * What "Add all unresolved to Q&A" offers (linking design, section 13): each gap, and each open finding, that no question
- * has been asked about yet, and for each, the open question with no response and no link that may already ask it (by the
- * telling words they share; at most one each, and each question offered once). A finding in two versions is left out, and so is a turned-off item, with the findings raised on it.
- */
-export interface Unresolved { key: string; kind: 'gap' | 'finding'; what: string; need: string; itemId?: string; findingId?: string; workstream: string }
-export function unresolvedPoints(s: Pick<State, 'questions' | 'findings' | 'tombstones' | 'conflicts' | 'dealLoad' | 'checklists' | 'items'>, dealId: string): { points: Unresolved[]; links: { point: string; q: Question }[] } {
-  const qs = dealQuestions(s as State, dealId); const rows = s.checklists[dealId];
-  const askedItems = new Set(qs.map((q) => q.linkedItem?.id).filter(Boolean)); const askedFindings = new Set(qs.map((q) => q.linkedFinding).filter(Boolean));
+/** An open finding or checklist gap for which no question has been asked. */
+export interface Unresolved {
+  key: string;
+  kind: 'gap' | 'finding';
+  what: string;
+  need: string;
+  itemId?: string;
+  findingId?: string;
+  workstream: string;
+}
+
+type UnresolvedState = Pick<
+  State, 'questions' | 'findings' | 'tombstones' | 'conflicts' | 'dealLoad' | 'checklists' | 'items'
+>;
+
+function unresolvedGaps(state: UnresolvedState, dealId: string, askedItems: ReadonlySet<string | undefined>) {
+  const rows = state.checklists[dealId];
+  if (!Array.isArray(rows)) return [];
+  const gaps: Unresolved[] = [];
+  for (const row of rows) {
+    if (askedItems.has(row.id) || askBlock(undefined, !!state.items[row.id]?.off)) continue;
+    if (itemStanding(state, dealId, row).kind !== 'gap') continue;
+    gaps.push({
+      key: 'i:' + row.id, kind: 'gap', what: row.text, need: row.need ?? '', itemId: row.id, workstream: '',
+    });
+  }
+  return gaps;
+}
+
+export function unresolvedTargets(s: UnresolvedState, dealId: string, qs = dealQuestions(s as State, dealId)) {
+  const askedItems = new Set(qs.map((q) => q.linkedItem?.id).filter(Boolean));
+  const askedFindings = new Set(qs.map((q) => q.linkedFinding).filter(Boolean));
   const points: Unresolved[] = [];
   for (const f of dealFindings(s as State, dealId)) {
     const item = f.itemId ? s.items[f.itemId] : undefined;
     const asked = askedFindings.has(f.id) || (f.itemId && askedItems.has(f.itemId));
     if (askBlock(f.status, !!item?.off) || s.conflicts[f.id] || asked) continue;
-    // a finding says no more than its title of what would settle it
-    const need = '';
-    points.push({ key: 'f:' + f.id, kind: 'finding', what: f.title, need, findingId: f.id, workstream: f.workstream });
+    // A finding's title is the only input used to suggest a link to it.
+    points.push({
+      key: 'f:' + f.id, kind: 'finding', what: f.title, need: '', findingId: f.id, workstream: f.workstream,
+    });
   }
-  if (Array.isArray(rows)) for (const r of rows) {
-    if (askedItems.has(r.id) || askBlock(undefined, !!s.items[r.id]?.off)) continue;
-    if (itemStanding(s, dealId, r).kind !== 'gap') continue;
-    points.push({ key: 'i:' + r.id, kind: 'gap', what: r.text, need: r.need ?? '', itemId: r.id, workstream: '' });
-  }
-  const pool = qs.filter((q) => q.status === 'open' && !q.response.trim() && !q.linkedItem && !q.linkedFinding && !s.conflicts[q.id] && q.text.trim());
-  const taken = new Set<string>(); const links: { point: string; q: Question }[] = [];
-  const likely = addresser(pool);
-  for (const p of points) { const q = likely(`${p.what} ${p.need}`).find((x) => !taken.has(x.id)); if (q) { taken.add(q.id); links.push({ point: p.key, q }); } }
-  return { points, links };
+  return [...points, ...unresolvedGaps(s, dealId, askedItems)];
+}
+
+/** An unresolved point gets at most one suggestion, and each eligible question is offered once. */
+export function unresolvedPoints(s: UnresolvedState, dealId: string, approved?: ApprovedLinks) {
+  const questions = dealQuestions(s as State, dealId);
+  const points = unresolvedTargets(s, dealId, questions);
+  const pool = questions.filter((q) => canLinkUnresolved(q, !!s.conflicts[q.id]));
+  return { points, links: suggestUnresolvedLinks(points, pool, approved) };
 }
 
 /** A checklist item as a finding or a question names it: its id, its wording, and whether it is turned off. */
