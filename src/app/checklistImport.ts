@@ -14,6 +14,7 @@ import { alphabetical } from '../domain/order';
 import type { AiService } from '../ports';
 import type { Capabilities } from './capabilities';
 import { dropImport, keptImport, saveImport } from './keptImports';
+import type { checklistRequests } from './listRead';
 import { ok, fail, type Result } from '../domain/result';
 import { Undo } from './commands/undo';
 import { EditDeal } from './commands/deals';
@@ -279,7 +280,7 @@ function itemsToBringIn(
 
 type ReviewOptions = Pick<ReviewInput, 'askReword' | 'askSame'>;
 
-export function checklistReviewPlan(
+function checklistReviewPlan(
   can: Pick<Capabilities, 'reword' | 'sameMeaning'>, items: ListItem[], target: ListTarget, options: ReviewOptions,
   review: Review | null, askedFor: string,
 ) {
@@ -289,7 +290,7 @@ export function checklistReviewPlan(
   const needsCall = cached
     ? can.sameMeaning && hasMissedDuplicates(cached)
     : (options.askReword && can.reword) || (options.askSame && can.sameMeaning);
-  return { texts, signature, cached, needsCall };
+  return { can, items, target, options, texts, signature, cached, needsCall };
 }
 
 function hasMissedDuplicates(review: Review) {
@@ -297,7 +298,7 @@ function hasMissedDuplicates(review: Review) {
 }
 
 /** Build the review from the same choices whether it can ask the model or only check wording locally. */
-export function reviewChecklist(
+function reviewChecklist(
   can: Pick<Capabilities, 'reword' | 'sameMeaning'>, items: ListItem[], target: ListTarget, options: ReviewOptions,
   replies: readonly [RewordReply | null, SameMeaningReply | null] = [null, null],
 ) {
@@ -309,18 +310,25 @@ export function reviewChecklist(
 }
 
 /** The wording and duplicate requests run concurrently, and only for choices the model offers. */
-export function requestChecklistReview(store: Store, texts: string[], options: ReviewOptions, generalTexts: string[]) {
+async function requestChecklistReview(store: Store, texts: string[], options: ReviewOptions, generalTexts: string[]) {
   const { can } = store.get();
   const { ai } = store.services;
-  const rewording = options.askReword && can.reword ? ai.reword!({ items: texts }) : null;
-  const duplicates = options.askSame && can.sameMeaning
+  const reword = async () => options.askReword && can.reword ? ai.reword!({ items: texts }) : null;
+  const compare = async () => options.askSame && can.sameMeaning
     ? ai.sameMeaning!({ items: texts, against: generalTexts })
     : null;
-  return Promise.all([rewording, duplicates]);
+  const calls = [reword(), compare()] as const;
+  try {
+    return await Promise.all(calls);
+  } catch (error) {
+    // A thrown request does not release the review while its parallel request is still in flight.
+    await Promise.allSettled(calls);
+    throw error;
+  }
 }
 
 /** Retries ask for the missed rows only, or all rows after a failed full request. */
-export async function retryChecklistDuplicates(
+async function retryChecklistDuplicates(
   store: Store, review: Review, generalTexts: string[], items = review.items.map((item) => item.text),
 ) {
   const only = review.sameMissed?.at ?? items.map((_, at) => at);
@@ -333,12 +341,93 @@ export async function retryChecklistDuplicates(
   return { review: { ...review, sameMissed: { ...review.sameMissed, kind: reason } }, failure: reason };
 }
 
-export async function retryChecklistWording(store: Store, review: Review) {
+async function retryChecklistWording(store: Store, review: Review) {
   const items = review.items.map((item) => item.text);
   const reply = await store.services.ai.reword!({ items });
   if (reply.ok) return { review: withRewordings(review, reply.value), failure: null };
   const reason = failedAs(reply);
   return { review: { ...review, asked: { ...review.asked, reword: reason } }, failure: reason };
+}
+
+type ReviewPlan = ReturnType<typeof checklistReviewPlan>;
+type ReviewFailure = 'unreachable' | 'failed';
+
+export type ChecklistReviewChange =
+  | { kind: 'open' }
+  | { kind: 'fresh'; review: Review; checked: Set<number>; signature: string }
+  | { kind: 'retry'; review: Review; failure: ReviewFailure | null; open: boolean };
+
+type ShowReview = (change: ChecklistReviewChange) => void;
+type ChecklistRequests = ReturnType<typeof checklistRequests>;
+interface ReviewRequestEvents {
+  started(): void;
+  settled(isCurrent: boolean): void;
+}
+
+/** All model review requests share one flight until the reply settles, even after Back (#378). */
+function checklistReviewFlight(requests: ChecklistRequests, events: ReviewRequestEvents) {
+  let pending = false;
+  async function ask<T>(call: () => Promise<T>, apply: (reply: T) => void) {
+    if (pending) return;
+    pending = true;
+    const ticket = requests.newToken();
+    let reply: T;
+    try {
+      events.started();
+      reply = await call();
+    } finally {
+      pending = false;
+      events.settled(requests.isLatest(ticket));
+    }
+    if (requests.isLatest(ticket)) apply(reply);
+  }
+  return { ask, get pending() { return pending; } };
+}
+
+/** The current review, including retries and the local review that can open while an older model reply is pending. */
+export function checklistReviewSession(store: Store, requests: ChecklistRequests, events: ReviewRequestEvents) {
+  const flight = checklistReviewFlight(requests, events);
+  let signature = '';
+  function plan(
+    items: ListItem[] | null, target: ListTarget, options: ReviewOptions, review: Review | null, askedFor: string,
+  ) {
+    const next = items && checklistReviewPlan(store.get().can, items, target, options, review, askedFor);
+    signature = next?.signature ?? '';
+    return next && { ...next, waiting: !!next.texts.length && next.needsCall && flight.pending };
+  }
+  async function askModel<T>(call: () => Promise<T>, show: (reply: T) => void) {
+    const askedFor = signature;
+    await flight.ask(call, (reply) => {
+      if (signature === askedFor) show(reply);
+    });
+  }
+  function duplicates(review: Review, generalTexts: string[], show: ShowReview, open = false, texts?: string[]) {
+    if (!store.get().can.sameMeaning) return;
+    return askModel(() => retryChecklistDuplicates(store, review, generalTexts, texts), (next) => {
+      show({ kind: 'retry', ...next, open });
+    });
+  }
+  function wording(review: Review, show: ShowReview) {
+    if (!store.get().can.reword) return;
+    return askModel(() => retryChecklistWording(store, review), (next) => {
+      show({ kind: 'retry', ...next, open: false });
+    });
+  }
+  function next(plan: ReviewPlan, show: ShowReview) {
+    const { can, items, target, options, texts, cached, needsCall } = plan;
+    if (!texts.length || !target.named || signature !== plan.signature) return;
+    if (cached) {
+      if (!needsCall) return show({ kind: 'open' });
+      return duplicates(cached, target.generalTexts, show, true, texts);
+    }
+    const fresh = (replies?: readonly [RewordReply | null, SameMeaningReply | null]) => {
+      const result = reviewChecklist(can, items, target, options, replies);
+      show({ kind: 'fresh', ...result, signature: plan.signature });
+    };
+    if (!needsCall) return fresh();
+    return askModel(() => requestChecklistReview(store, texts, options, target.generalTexts), fresh);
+  }
+  return { plan, next, duplicates, wording };
 }
 
 export function checklistReviewCounts(review: Review) {

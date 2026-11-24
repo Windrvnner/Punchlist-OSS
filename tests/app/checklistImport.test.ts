@@ -3,8 +3,8 @@ import { expect, it, vi } from 'vitest';
 import { MemoryKeptImports } from '../../src/adapters/keptImports';
 import { csvCodec } from '../../src/adapters/spreadsheet';
 import {
-  checklistReviewCounts, checklistReviewPlan, checklistSelection, checklistShelf, checklistWordingChoices, listTarget,
-  requestChecklistReview, retryChecklistDuplicates, retryChecklistWording, reviewChecklist, submitChecklist,
+  checklistReviewCounts, checklistReviewSession, checklistSelection, checklistShelf, checklistWordingChoices,
+  listTarget, submitChecklist, type ChecklistReviewChange,
 } from '../../src/app/checklistImport';
 import { importKey, initializeKeptImports, keptImport, keptImportsReady, saveImport } from '../../src/app/keptImports';
 import {
@@ -21,6 +21,14 @@ const HEADING = 'Portfolio project diligence';
 const NOTE = 'Cover note for counsel';
 const OPTIONS = { askReword: true, askSame: true };
 const READ_EVENTS = { started: () => {}, finished: () => {} };
+const REVIEW_EVENTS = { started: () => {}, settled: () => {} };
+
+function shownReview<Kind extends ChecklistReviewChange['kind']>(
+  change: ChecklistReviewChange | undefined, kind: Kind,
+) {
+  if (change?.kind !== kind) throw new Error(`Expected a ${kind} review`);
+  return change as Extract<ChecklistReviewChange, { kind: Kind }>;
+}
 
 function value<T>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T {
   if (!result.ok) throw new Error(result.error.message);
@@ -88,15 +96,18 @@ it('ties out, reviews, and brings in a pasted portfolio checklist without a comp
     const { reword, sameMeaning, pair } = modelReview(app);
     const state = store.get();
     const target = listTarget(state, firmOf(state.firmList), 'broad', '');
-    const plan = checklistReviewPlan(state.can, prepared.items, target, OPTIONS, null, '');
+    const session = checklistReviewSession(store, checklistRequests(), REVIEW_EVENTS);
+    const show = vi.fn<(change: ChecklistReviewChange) => void>();
+    const plan = session.plan(prepared.items, target, OPTIONS, null, '')!;
     expect(plan.needsCall).toBe(true);
-    const replies = await requestChecklistReview(store, plan.texts, OPTIONS, target.generalTexts);
-    const { review } = reviewChecklist(state.can, prepared.items, target, OPTIONS, replies);
+    await session.next(plan, show);
+    const { review } = shownReview(show.mock.lastCall?.[0], 'fresh');
     expect(checklistReviewCounts(review)).toEqual({ suggestions: 2, duplicates: 1, missed: 1 });
     expect(review.pairs).toEqual([{ a: 0, b: 2_376, inAgainst: false, why: 'Worded the same' }]);
     expect(reword).toHaveBeenCalledWith({ items: plan.texts });
-    expect(checklistReviewPlan(state.can, prepared.items, target, OPTIONS, review, plan.signature).cached).toBe(review);
-    const retried = await retryChecklistDuplicates(store, review, target.generalTexts);
+    expect(session.plan(prepared.items, target, OPTIONS, review, plan.signature)?.cached).toBe(review);
+    await session.duplicates(review, target.generalTexts, show);
+    const retried = shownReview(show.mock.lastCall?.[0], 'retry');
     expect(retried.review.pairs).toEqual([...review.pairs, pair]);
     expect(sameMeaning).toHaveBeenLastCalledWith({ items: plan.texts, against: [], only: [3] });
     const remove = new Set([2_376]);
@@ -109,7 +120,8 @@ it('ties out, reviews, and brings in a pasted portfolio checklist without a comp
 
     const refreshed = { at: 3, text: 'List current permits and appeals', why: 'Use a direct request' };
     reword.mockResolvedValueOnce(ok([refreshed]));
-    const wording = await retryChecklistWording(store, retried.review);
+    await session.wording(retried.review, show);
+    const wording = shownReview(show.mock.lastCall?.[0], 'retry');
     expect(wording.review.rewords).toEqual([...retried.review.rewords, refreshed]);
     expect(wording.review.pairs).toEqual(retried.review.pairs);
     const key = importKey.checklist();
@@ -171,9 +183,11 @@ it('re-reads a portfolio spreadsheet by hand after the model fails, preserving i
     const target = listTarget(state, firmOf(state.firmList), 'technology', 'Renewables');
     const options = { ...OPTIONS, askReword: false };
     store.services.ai.sameMeaning = async () => ok({ pairs: [] });
-    const plan = checklistReviewPlan(state.can, prepared.items, target, options, null, '');
-    const replies = await requestChecklistReview(store, plan.texts, options, target.generalTexts);
-    const { review } = reviewChecklist(state.can, prepared.items, target, options, replies);
+    const session = checklistReviewSession(store, checklistRequests(), REVIEW_EVENTS);
+    const show = vi.fn<(change: ChecklistReviewChange) => void>();
+    const plan = session.plan(prepared.items, target, options, null, '')!;
+    await session.next(plan, show);
+    const { review } = shownReview(show.mock.lastCall?.[0], 'fresh');
     expect(review.pairs).toEqual([{ a: 0, b: 2_376, inAgainst: false, why: 'Worded the same' }]);
     const selected = checklistSelection(review, new Set([2_376]), new Set());
     expect(selected.counts).toEqual({ items: 2_376, reworded: 0, split: 0, removed: 1 });
@@ -273,6 +287,140 @@ it('preserves the stored checklist and choices after a refused headless submissi
     initializeKeptImports(port);
     await keptImportsReady;
     expect(keptImport(key)).toEqual(snapshot);
+  } finally {
+    app.store.closing();
+    await app.repo.close();
+  }
+});
+
+it('serializes model reviews across a changed portfolio source and opens local review immediately (#378)', async () => {
+  const app = await readyApp();
+  try {
+    const { store } = app;
+    const items = portfolioQuestions().map((text) => ({ text }));
+    const revised = [{ text: 'Provide the signed disbursement approvals for the refinancing.' }, ...items.slice(1)];
+    const failed = { kind: 'unreachable' as const, at: [3, 8, 34] };
+    type Compare = NonNullable<typeof store.services.ai.sameMeaning>;
+    let finish!: (reply: Awaited<ReturnType<Compare>>) => void;
+    const holding = new Promise<Awaited<ReturnType<Compare>>>((resolve) => { finish = resolve; });
+    const compare = vi.fn<Compare>(async () => ok({ pairs: [] }))
+      .mockResolvedValueOnce(ok({ pairs: [], missed: failed }))
+      .mockReturnValueOnce(holding);
+    store.services.ai.sameMeaning = compare;
+    const wording = vi.fn<NonNullable<typeof store.services.ai.reword>>(async () => ok([]));
+    store.services.ai.reword = wording;
+    const state = store.get();
+    const target = listTarget(state, firmOf(state.firmList), 'broad', '');
+    const requests = checklistRequests();
+    const events = { started: vi.fn(), settled: vi.fn() };
+    const session = checklistReviewSession(store, requests, events);
+    const show = vi.fn<(change: ChecklistReviewChange) => void>();
+    const plan = session.plan(items, target, OPTIONS, null, '')!;
+    await session.next(plan, show);
+    const { review } = shownReview(show.mock.lastCall?.[0], 'fresh');
+
+    const retry = session.duplicates(review, target.generalTexts, show);
+    expect(compare.mock.lastCall?.[0].only).toEqual(failed.at);
+    const pending = session.plan(revised, target, OPTIONS, review, plan.signature)!;
+    expect(pending.waiting).toBe(true);
+    await session.next(pending, show);
+    await session.wording(review, show);
+    expect(compare).toHaveBeenCalledTimes(2);
+    expect(wording).toHaveBeenCalledTimes(1);
+
+    const local = session.plan(revised, target, { askReword: false, askSame: false }, review, plan.signature)!;
+    expect(local.waiting).toBe(false);
+    session.next(local, show);
+    const { review: localReview } = shownReview(show.mock.lastCall?.[0], 'fresh');
+    expect(localReview).toMatchObject({ items: revised, asked: { reword: 'off', same: 'off' } });
+    finish(fail({ kind: 'failed', message: 'The held review failed' }));
+    await retry;
+    expect(show).toHaveBeenCalledTimes(2);
+
+    const next = session.plan(revised, target, OPTIONS, review, plan.signature)!;
+    expect(next.waiting).toBe(false);
+    await session.next(next, show);
+    expect(compare.mock.lastCall?.[0]).toEqual({ items: revised.map(({ text }) => text), against: [] });
+    expect(show).toHaveBeenCalledTimes(3);
+    expect(events.started).toHaveBeenCalledTimes(3);
+  } finally {
+    app.store.closing();
+    await app.repo.close();
+  }
+});
+
+it('keeps duplicate retry failures and cancels an older wording reply after Back (#378)', async () => {
+  const app = await readyApp();
+  try {
+    const { store } = app;
+    const items = portfolioQuestions().map((text) => ({ text }));
+    const partial = { kind: 'unreachable' as const, at: [3, 8, 34] };
+    const pair = { a: 0, b: 1, inAgainst: false, why: 'Both request contract records' };
+    store.services.ai.sameMeaning = vi.fn<NonNullable<typeof store.services.ai.sameMeaning>>()
+      .mockResolvedValueOnce(ok({ pairs: [pair], missed: partial }))
+      .mockResolvedValueOnce(fail({ kind: 'failed', message: 'The retry failed' }));
+    store.services.ai.reword = vi.fn<NonNullable<typeof store.services.ai.reword>>()
+      .mockResolvedValueOnce(fail({ kind: 'unreachable', message: 'The model is unavailable' }))
+      .mockResolvedValueOnce(ok([{ at: 6, text: 'Obtain the site title report', why: 'Use a direct request' }]));
+    const state = store.get();
+    const target = listTarget(state, firmOf(state.firmList), 'broad', '');
+    const requests = checklistRequests();
+    const events = { started: vi.fn(), settled: vi.fn() };
+    const session = checklistReviewSession(store, requests, events);
+    const show = vi.fn<(change: ChecklistReviewChange) => void>();
+    const plan = session.plan(items, target, OPTIONS, null, '')!;
+    await session.next(plan, show);
+    const { review } = shownReview(show.mock.lastCall?.[0], 'fresh');
+    expect(review.asked.reword).toBe('unreachable');
+    const cached = session.plan(items, target, OPTIONS, review, plan.signature)!;
+    await session.next(cached, show);
+    const { review: retried, failure, open } = shownReview(show.mock.lastCall?.[0], 'retry');
+    expect(retried).toMatchObject({ pairs: [pair], sameMissed: { at: partial.at, kind: 'failed' } });
+    expect({ failure, open }).toEqual({ failure: 'failed', open: true });
+
+    const wording = session.wording(retried, show);
+    requests.newToken();
+    await wording;
+    expect(show).toHaveBeenCalledTimes(2);
+    expect(events.settled).toHaveBeenLastCalledWith(false);
+  } finally {
+    app.store.closing();
+    await app.repo.close();
+  }
+});
+
+it('holds the app review until both model requests settle when one throws', async () => {
+  const app = await readyApp();
+  try {
+    const { store } = app;
+    const items = portfolioQuestions().map((text) => ({ text }));
+    const failure = new Error('The model connection closed unexpectedly');
+    type Compare = NonNullable<typeof store.services.ai.sameMeaning>;
+    let finish!: (reply: Awaited<ReturnType<Compare>>) => void;
+    const holding = new Promise<Awaited<ReturnType<Compare>>>((resolve) => { finish = resolve; });
+    const compare = vi.fn<Compare>().mockReturnValue(holding);
+    store.services.ai.sameMeaning = compare;
+    store.services.ai.reword = vi.fn<NonNullable<typeof store.services.ai.reword>>().mockRejectedValue(failure);
+    const state = store.get();
+    const target = listTarget(state, firmOf(state.firmList), 'broad', '');
+    const events = { started: vi.fn(), settled: vi.fn() };
+    const session = checklistReviewSession(store, checklistRequests(), events);
+    const show = vi.fn<(change: ChecklistReviewChange) => void>();
+    const plan = session.plan(items, target, OPTIONS, null, '')!;
+    const rejected = expect(session.next(plan, show)).rejects.toBe(failure);
+    await new Promise<void>((tick) => { setImmediate(tick); });
+
+    const waiting = session.plan(items, target, OPTIONS, null, '')!;
+    expect(waiting.waiting).toBe(true);
+    await session.next(waiting, show);
+    expect(compare).toHaveBeenCalledTimes(1);
+    expect(events.settled).not.toHaveBeenCalled();
+
+    finish(ok({ pairs: [] }));
+    await rejected;
+    expect(session.plan(items, target, OPTIONS, null, '')?.waiting).toBe(false);
+    expect(events.settled).toHaveBeenCalledExactlyOnceWith(true);
+    expect(show).not.toHaveBeenCalled();
   } finally {
     app.store.closing();
     await app.repo.close();

@@ -7,8 +7,8 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Store } from '../app/store';
 import type { ImportTable } from '../app/transfer';
 import {
-  checklistReviewPlan, checklistSelection, failedAs, requestChecklistReview, reviewChecklist, retryChecklistDuplicates,
-  retryChecklistWording, submitChecklist, undoBringIn, type Asked, type ListTarget, type Review,
+  checklistReviewSession, checklistSelection, failedAs, submitChecklist, undoBringIn,
+  type Asked, type ChecklistReviewChange, type ListTarget, type Review,
 } from '../app/checklistImport';
 import {
   checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistReading, checklistRequests,
@@ -231,50 +231,63 @@ export type ListSource = ReturnType<typeof useListSource>;
 export function useListReview(
   store: Store, work: Work, prepared: { items: ListItem[] } | null, target: ListTarget, keeper: Keeper,
 ) {
-  const { can } = store.get();
   const left = keeper.left;
   const choices = useReviewChoices(store, left?.choices);
   const { askReword, askSame, useReword, remove } = choices;
   const made = useMadeReview(work, left);
   const { review, setReview, setShown, askedFor } = made;
-  /** for "start over": no review, and the choices as a new import starts them */
+  const session = useReviewSession(store, work);
+  const plan = session.plan(prepared?.items ?? null, target, { askReword, askSame }, review, askedFor.current);
+  const toBringIn = useBringIn(store, work, target, keeper, { review, remove, useReword });
+
+  const show = (change: ChecklistReviewChange) => {
+    if (change.kind === 'fresh') {
+      work.setError('');
+      setReview(change.review);
+      choices.setUseReword(change.checked);
+      choices.setRemove(new Set());
+      askedFor.current = change.signature;
+    }
+    if (change.kind === 'retry') {
+      setReview(change.review);
+      if (change.failure) work.setError(`${NOT_DONE[change.failure]} again`);
+    }
+    if (change.kind !== 'retry' || change.open) setShown(true);
+  };
+  const next = () => {
+    if (plan && !work.busy) return session.next(plan, show);
+  };
+  const retry = () => {
+    if (review && !work.busy) return session.duplicates(review, target.generalTexts, show);
+  };
+  const retryWording = () => {
+    if (review && !work.busy) return session.wording(review, show);
+  };
   const reset = () => {
     choices.reset();
     made.clear();
   };
-  /** what the review would be asked about now, as the person last left the choices: one asked for others isn't shown */
-  const sigNow = useRef('');
-  const options = { askReword, askSame };
-  const plan = prepared && checklistReviewPlan(can, prepared.items, target, options, review, askedFor.current);
-  sigNow.current = plan?.signature ?? '';
-  const retries = useReviewRetries(store, work, review, setReview, target.generalTexts);
-  const waiting = !!plan?.texts.length && plan.needsCall && retries.pending;
-  const toBringIn = useBringIn(store, work, target, keeper, { review, remove, useReword });
-
-  const next = async () => {
-    if (!prepared || !plan?.texts.length || !target.named || work.busy) return;
-    const { texts, signature, cached, needsCall } = plan;
-    if (cached) {
-      if (needsCall && !(await retries.askMissed(cached, texts))) return;
-      if (sigNow.current === signature) setShown(true);
-      return;
-    }
-    const replies = needsCall
-      ? await retries.ask(() => requestChecklistReview(store, texts, options, target.generalTexts))
-      : [null, null] as const;
-    if (!replies || sigNow.current !== signature) return;
-    work.setError('');
-    const fresh = reviewChecklist(can, prepared.items, target, options, replies);
-    setReview(fresh.review);
-    choices.setUseReword(fresh.checked);
-    choices.setRemove(new Set());
-    askedFor.current = signature;
-    setShown(true);
-  };
   return {
-    ...choices, review, shown: made.shown, askedFor, waiting, ...toBringIn,
-    next, retry: retries.retry, retryWording: retries.retryWording, reset, backToList: made.backToList,
+    ...choices, review, shown: made.shown, askedFor, waiting: plan?.waiting ?? false, ...toBringIn,
+    next, retry, retryWording, reset, backToList: made.backToList,
   };
+}
+
+/** Pending changes redraw the footer even after Back clears the screen's busy state. */
+function useReviewSession(store: Store, work: Work) {
+  const [, setPending] = useState(false);
+  const [session] = useState(() => checklistReviewSession(store, work, {
+    started: () => {
+      setPending(true);
+      work.setBusy('reviewing');
+      work.setError('');
+    },
+    settled: (isCurrent) => {
+      setPending(false);
+      if (isCurrent) work.setBusy('');
+    },
+  }));
+  return session;
 }
 
 /** The review as last made, whether it is on screen, and what it was asked about. */
@@ -315,49 +328,6 @@ function useReviewChoices(store: Store, kept: ChecklistChoices | undefined) {
     askReword, setAskReword, askSame, setAskSame, useReword, setUseReword, remove, setRemove,
     flipReword, flipRemove, reset,
   };
-}
-
-/** Fresh reviews and retries share one in-flight guard. Retries keep the person's check marks. */
-function useReviewRetries(
-  store: Store, work: Work, review: Review | null, setReview: (review: Review) => void, generalTexts: string[],
-) {
-  const { can } = store.get();
-  // The ref guards same-frame presses. Only Next needs to know a model call is still pending after Back.
-  const asking = useRef(false);
-  const [pending, setPending] = useState(false);
-  const ask = async <T>(call: () => Promise<T>): Promise<T | undefined> => {
-    if (work.busy || asking.current) return;
-    asking.current = true;
-    setPending(true);
-    const mine = work.begin('reviewing');
-    try {
-      const reply = await call();
-      if (work.isLatest(mine)) return reply;
-    } finally {
-      asking.current = false;
-      setPending(false);
-      if (work.isLatest(mine)) work.setBusy('');
-    }
-  };
-  const askMissed = async (was: Review, texts?: string[]) => {
-    if (!can.sameMeaning) return false;
-    const result = await ask(() => retryChecklistDuplicates(store, was, generalTexts, texts));
-    if (!result) return false;
-    setReview(result.review);
-    if (result.failure) work.setError(`${NOT_DONE[result.failure]} again`);
-    return true;
-  };
-  const retry = async () => {
-    if (review) await askMissed(review);
-  };
-  const retryWording = async () => {
-    if (!review || !can.reword) return;
-    const result = await ask(() => retryChecklistWording(store, review));
-    if (!result) return;
-    setReview(result.review);
-    if (result.failure) work.setError(`${NOT_DONE[result.failure]} again`);
-  };
-  return { ask, pending, askMissed, retry, retryWording };
 }
 
 /** The items as checked in the review, and bringing them in. */
