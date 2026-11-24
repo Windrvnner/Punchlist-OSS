@@ -1,0 +1,125 @@
+/* The points the first screens left open (mock-open-questions.js): only what the app's and the mock-up's own
+   styles do not already give. */
+
+/* the deal's ⋯ menu: its date sits at the right of its item, in the menu's quiet ink */
+.x-headmenu {
+  position: fixed;
+  z-index: 40;
+  width: 248px;
+  box-sizing: border-box;
+}
+.x-headmenu .mi {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.x-mmeta {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* Home's page hides under its past conversations, so nothing shows through the list's glass */
+.x-empty.x-dim {
+  visibility: hidden;
+}
+
+/* Deal Details: the New Deal form's grid without its folders */
+.x-details .ndpicks + .ndpicks {
+  margin-top: 14px;
+}
+.x-fieldpick {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  text-align: left;
+  cursor: default;
+}
+
+/* Folders: the core documents and a deal sharing these files sit under the folders, set off by a hairline */
+.x-folders .fdbody {
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+}
+.x-folders .fdgroup {
+  margin: 0;
+  padding: 0;
+}
+.x-sharedgrp {
+  border-top: 1px solid var(--line);
+}
+.x-shared {
+  min-height: 44px;
+}
+.x-shared .x-sname {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+/* the Diligence tab's Findings button ends the filter row */
+.x-rhead .x-findbtn {
+  margin-left: auto;
+  gap: 6px;
+}
+
+/* in a narrow pane the Findings button keeps only its flag, named in its tooltip */
+@container (max-width:470px) {
+  .x-rhead .x-findbtn .l {
+    display: none;
+  }
+  .x-rhead .x-findbtn {
+    width: 28px;
+    padding: 0;
+    justify-content: center;
+  }
+}
+
+/* the Findings tab: the status filter, then Filter, then New Finding and ⋯ at the right */
+.x-ftools {
+  margin-bottom: 6px;
+}
+.x-ftools .x-qact {
+  margin-left: auto;
+}
+.x-ftools .btn.sm {
+  gap: 6px;
+}
+.x-frow .t small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.x-frow .t {
+  -webkit-line-clamp: 3;
+}
+.x-stale {
+  color: var(--high);
+}
+.x-frow .mk.k-finding:before {
+  height: 34px;
+}
+
+/* a past conversation with a new result shows the archived deals' dot before its time, so times stay aligned */
+.pastpop .pm .x-upd {
+  margin-right: -4px;
+}
+
+/* a long deal list scrolls inside the sidebar, with the search field and the account row in place */
+.rail.x-scale nav {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.rail.x-scale .x-dealscroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+}
+.rail.x-scale .rsearch {
+  flex: none;
+}

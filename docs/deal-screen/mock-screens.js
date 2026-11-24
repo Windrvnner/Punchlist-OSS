@@ -2,7 +2,8 @@
 
 // the sidebar folds to its rail while a pane is open, so the conversation keeps its width, and comes back when the
 // pane closes; `side=1` shows it pinned open
-const sidebarFolded = hashParams.get('side') !== '1' && !['empty', 'active'].includes(screen);
+const sidebarFolded = hashParams.get('side') !== '1'
+  && !['empty', 'active', ...FULL_SIDEBAR_SCREENS].includes(screen);
 // below this width the Q&A table cuts its cells, so the pane shows the one-column list instead
 const QA_TABLE_MIN = 560;
 const qaTableFits = () => fittedPaneWidth(paneWidth('wide')) >= QA_TABLE_MIN;
@@ -62,6 +63,7 @@ function emptyDeal() {
 }
 
 function screenHtml() {
+  if (screen in OPEN_QUESTION_SCREENS) return OPEN_QUESTION_SCREENS[screen]();
   const stage = (content) => `<section class="stage"><div class="x-stage">${content}</div></section>`;
   if (screen === 'empty') return sidebar() + stage(emptyDeal());
   if (screen === 'active') {
@@ -140,3 +142,4 @@ for (const scroller of document.querySelectorAll('.x-scroll:not(.x-top)')) scrol
 markCutTabsAndWrappedSteps();
 if (hashParams.get('tip')) showAnswerActionTooltip();
 for (const list of document.querySelectorAll('.pastpop')) placePastConversations(list);
+placeOpenQuestionScreens();
