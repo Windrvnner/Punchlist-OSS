@@ -2,7 +2,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { matchesIn } from './pane-of-glass-matches.mjs';
+import { forbiddenSource, matchesIn } from './pane-of-glass-matches.mjs';
 
 const baselinePath = 'scripts/pane-of-glass-baseline.json';
 const lower = process.argv.includes('--lower');
@@ -11,13 +11,14 @@ const read = (file) => readFileSync(file, 'utf8');
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' });
 
 function uiSource(file) {
-  return /\.tsx?$/.test(file) && !basename(file).includes('.test.');
+  return file.startsWith('src/ui/') && /\.tsx?$/.test(file) && !basename(file).includes('.test.');
 }
 
 function scan(files, contents) {
   const found = {};
+  const forbiddenFiles = files.filter(forbiddenSource);
   for (const file of files.filter(uiSource).sort()) {
-    const lines = matchesIn(file, contents(file));
+    const lines = matchesIn(file, contents(file), forbiddenFiles);
     if (Object.keys(lines).length) found[file] = lines;
   }
   return found;
@@ -45,7 +46,7 @@ function committedBaseline() {
     const counts = committedCounts(at);
     if (counts) return counts;
     // On the branch introducing the check, main's source is the record of its existing exceptions.
-    const files = git('ls-tree', '-r', '-z', '--name-only', at, '--', 'src/ui').split('\0');
+    const files = git('ls-tree', '-r', '-z', '--name-only', at, '--', 'src').split('\0');
     return countsFor(scan(files, (file) => git('show', `${at}:${file}`)));
   }
   // Exported sources have no history. In a Git checkout, HEAD alone cannot prove a committed allowance is valid.
@@ -78,7 +79,7 @@ function compareFile(file, lines, baseline, committed) {
   return problems;
 }
 
-const files = readdirSync('src/ui', { recursive: true, withFileTypes: true })
+const files = readdirSync('src', { recursive: true, withFileTypes: true })
   .filter((entry) => entry.isFile())
   .map((entry) => `${entry.parentPath.replaceAll('\\', '/')}/${entry.name}`);
 const found = scan(files, read);
