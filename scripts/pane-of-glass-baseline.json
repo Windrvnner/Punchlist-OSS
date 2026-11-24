@@ -16,10 +16,6 @@
   "src/ui/pastList.tsx": {
     "services": 1
   },
-  "src/ui/qaImport.tsx": {
-    "repo": 1,
-    "services": 4
-  },
   "src/ui/resolve.tsx": {
     "repo": 1,
     "services": 2
