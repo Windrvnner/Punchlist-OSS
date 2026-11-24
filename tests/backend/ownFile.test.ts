@@ -36,6 +36,42 @@ describe('own files', () => {
     local.refuse = true; expect(() => appendOwn(shared, local, 'f', 'three\n', true)).toThrow(); expect(shared.files.get('f')).toBe('one\ntwo\n');
   });
 
+  it('puts back a complete local line after two torn appends leave the shared file the same size (#784)', () => {
+    const dirs = [1, 2].map(() => fs.mkdtempSync(path.join(os.tmpdir(), 'own-file-')));
+    const [shared, local] = dirs.map((dir) => nodeFolder(dir, []));
+    const name = 'notes.jsonl';
+    const intact = JSON.stringify({ note: 'Confirm the scope of the guarantee.' });
+    const lost = JSON.stringify({ note: 'The repayment schedule includes a bullet payment.' });
+    const tornFirst = '{"note":"The minimum cash covenant resets after each quarterly measurement.';
+    const tornSecond = '{"note":"The operating account remains pledged until maturity.';
+    const broken = tornFirst.slice(0, 23) + tornSecond.slice(0, lost.length + 1 - 23);
+    try {
+      appendOwn(shared, local, name, `${intact}\n${lost}\n`);
+      const earlierDate = new Date('2025-01-01T00:00:00Z');
+      const sharedPath = path.join(dirs[0], name);
+      fs.utimesSync(sharedPath, earlierDate, earlierDate);
+      healOwn(shared, local, name);
+      const read = vi.spyOn(shared, 'read');
+      healOwn(shared, local, name);
+      expect(read).not.toHaveBeenCalled();
+      read.mockRestore();
+      fs.writeFileSync(sharedPath, `${intact}\n${broken}`);
+      fs.utimesSync(sharedPath, earlierDate, earlierDate);
+      expect(shared.size(name)).toBe(local.size(name));
+
+      healOwn(shared, local, name);
+
+      const repaired = shared.read(name) ?? '';
+      expect(repaired).toContain(broken);
+      expect(wholeLines(repaired).filter((line) => !line.includes(broken))).toEqual([intact, lost]);
+      expect(local.read(name)).toBe(`${intact}\n${lost}\n`);
+      healOwn(shared, local, name);
+      expect(shared.read(name)).toBe(repaired);
+    } finally {
+      for (const dir of dirs) fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('the check log: results lost from the synced copy are back when it is read again, and every PC reads them', async () => {
     const shared = new Mem(), local = new Mem(); const repo = memRepo();
     await repo.transaction({ writes: [{ kind: 'deal', id: 'd1', data: { id: 'd1', name: 'Proseware' }, expectedRev: null }], index: { dealId: '_', add: [{ kind: 'deal', id: 'd1' }] } });
