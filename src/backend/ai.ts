@@ -1545,8 +1545,17 @@ export function nodeAi(o: AiOptions) {
   const alikeWords = (t: string, dealId: string) => new Set([...words(t, dealId), ...words(t.replace(/(\p{L})[-\u2010\u2011\u2013](?=\p{L})/gu, '$1'), dealId)]);
   /** Only an accepted draft keeps markers for that question's sources (#287). */
   function priorResponse(response: string, provenance?: Provenance): string {
-    const sourceCount = provenance?.origin === 'ai' ? provenance.sources?.length ?? 0 : 0;
-    return fitText(withoutMarkers(response, sourceCount));
+    if (provenance?.origin !== 'ai') return fitText(response);
+    const sources = provenance.sources ?? [];
+    const start = sources[0]?.draftCitationStart ?? 0;
+    const quoted = response.slice(0, start);
+    return fitText(quoted + withoutMarkers(response.slice(start), sources.length));
+  }
+  /** A draft's own markers can share numbers with literal brackets in the earlier responses (#287). */
+  function draftSources(sources: Source[], quotation: string): Source[] {
+    if (!quotation) return sources;
+    const draftCitationStart = quotation.length + 2;
+    return sources.map((source) => ({ ...source, draftCitationStart }));
   }
   /**
    * The responses on a deal to questions that read like this one, likeliest first: every other question a person marked
@@ -1629,7 +1638,12 @@ export function nodeAi(o: AiOptions) {
       const kept = out.sources.some((x) => mainIn(r.value.sent, x)) ? out.text.split(/(?<=[.!?](?:\s*\[\d+\])*)\s+(?!\[)/).filter((x) => !names.test(x)).join(' ').trim() : '';
       const own = kept.charAt(0).toUpperCase() + kept.slice(1);
       if (!quoted.length && !own) return ok({ status: 'none', text: '', sources: [] });             // a draft rests on a document it cites or on an earlier response it names
-      return ok({ status: 'found', text: [...quoted, own].filter(Boolean).join('\n\n'), sources: own ? out.sources : [] });
+      const quotation = quoted.join('\n\n');
+      return ok({
+        status: 'found',
+        text: [quotation, own].filter(Boolean).join('\n\n'),
+        sources: own ? draftSources(out.sources, quotation) : [],
+      });
     },
     async reassess(i) {
       const f = await record<{ title: string; body: string[]; sources: Source[] }>('finding', i.findingId); if (!f) return fail({ kind: 'notFound', message: 'No such finding' });
