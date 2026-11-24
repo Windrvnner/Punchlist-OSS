@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
-  copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync,
+  copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync,
+  symlinkSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -140,6 +141,42 @@ describe('UI dependency checks', () => {
       const lines = [1, 2, 3, 5, 6, 7, 9, ...(folded ? [12] : []), 13, 14, 15, 17, 20, 21, 23];
       expect(result.stderr).toContain(`${file} import (lines ${lines.join(', ')}): ${lines.length} exceeds`);
     }
+  });
+
+  it('matches the browser application build when production folds an environment condition', () => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    const conditions = [
+      ['development', "process.env.NODE_ENV === 'development'"],
+      ['production', "process.env.NODE_ENV === 'production'"],
+      ['globalDev', "globalThis.process.env.NODE_ENV === 'development'"],
+      ['globalProd', "globalThis.process.env.NODE_ENV === 'production'"],
+      ['client', '!import.meta.env.SSR'],
+      ['server', 'import.meta.env.SSR'],
+    ];
+    const rows = conditions.map(([name, condition]) => {
+      repo.write(`src/backend/${name}.ts`, `export const term = '${name}'`);
+      return `  ${condition} ? import.meta.glob('../backend/{${name}}.ts') : {},`;
+    });
+    repo.write(file, ['export const readers = [', ...rows, ']'].join('\n'));
+    const script = 'import { readers } from "/src/ui/readers.ts"; console.log(readers)';
+    repo.write('index.html', `<script type="module">${script}</script>`);
+    repo.write('desktop.html', '<title>Desktop</title>');
+
+    const cli = path.resolve('node_modules/vite/bin/vite.js');
+    const config = path.resolve('vite.config.ts');
+    const app = spawnSync(process.execPath, [cli, 'build', '--config', config], {
+      cwd: repo.dir, encoding: 'utf8', env: { ...process.env, NODE_ENV: 'production' },
+    });
+    expect(app.status, app.stderr).toBe(0);
+    const assets = path.join(repo.dir, 'dist/assets');
+    const sources: string[] = readdirSync(assets).filter((name) => name.endsWith('.js.map')).flatMap((name) =>
+      JSON.parse(readFileSync(path.join(assets, name), 'utf8')).sources);
+    const selected = conditions.filter(([name]) => sources.some((id) => id.endsWith(`/src/backend/${name}.ts`)));
+    expect(selected.map(([name]) => name)).toEqual(['production', 'globalProd', 'client']);
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 3, 5, 6): 3 exceeds`);
   });
 
   it.each(['ui', 'backend'])('resolves a workspace export to its real %s module', (layer) => {

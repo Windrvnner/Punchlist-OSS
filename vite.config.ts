@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import preact from '@preact/preset-vite';
-import { browserOptions } from './scripts/vite-browser-options.mjs';
+import { browserOptions, browserTarget } from './scripts/vite-browser-options.mjs';
 import type { Plugin } from 'vite';
 import { assertControl } from './src/control';
 import { colorCss } from './src/palette';
@@ -22,8 +22,8 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     rollupOptions: { input: { index: 'index.html', desktop: 'desktop.html' } },
-    target: 'chrome120',
-    cssTarget: 'chrome120',
+    target: browserTarget,
+    cssTarget: browserTarget,
     sourcemap: true,
   },
 });

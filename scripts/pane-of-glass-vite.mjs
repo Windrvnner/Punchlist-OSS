@@ -1,7 +1,7 @@
 // Resolve against the checkout's real packages and links, without loading any dependency's contents.
 import path from 'node:path';
 import { build, createServer, normalizePath } from 'vite';
-import { browserOptions } from './vite-browser-options.mjs';
+import { browserOptions, browserTarget } from './vite-browser-options.mjs';
 
 async function servedIds(config, file) {
   const server = await createServer({
@@ -23,7 +23,8 @@ async function builtIds(config, entry) {
   const ids = [];
   await build({
     ...config,
-    build: { write: false, lib: { entry, formats: ['es'], fileName: 'entry' } },
+    // App builds replace environment conditions before resolving imports. Library mode preserves them.
+    build: { write: false, target: browserTarget, rolldownOptions: { input: entry } },
     plugins: [...config.plugins, {
       name: 'glob-dependencies', enforce: 'pre',
       async resolveId(id, importer, options) {
