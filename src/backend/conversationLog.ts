@@ -89,15 +89,29 @@ export function conversationLog(o: ConversationLogOptions): ConversationStore & 
     // another person signed in: everything is read again for them (it is rare, and only their lines are kept)
     if (me !== heldFor) { ids.clear(); byPerson.clear(); seen.clear(); seenLocal.clear(); heldFor = me; }
     // this PC's own files first: lines the sync lost are put back from the local copy
-    for (const name of o.local.list()) { const m = FILE.exec(name); if (m && m[1] === o.installId) { healOwn(o.shared, o.local, name); file = Math.max(file, +m[2]); } }
+    const refused = new Map<string, unknown>();
+    for (const name of o.local.list()) {
+      const match = FILE.exec(name);
+      if (!match || match[1] !== o.installId) continue;
+      const failure = healOwn(o.shared, o.local, name);
+      if (failure) refused.set(name, failure.error);
+      file = Math.max(file, +match[2]);
+    }
     // a shared folder that cannot be read now costs only the other PCs' lines: this PC's are read from its own copy below
     let names: string[] = []; try { names = o.shared.list(); } catch { /* looked at again next time */ }
     for (const name of names) if (FILE.test(name)) { try { readChanged(o.shared, seen, name, (l) => { if (take(l) && l.by === me) mine = true; }); } catch { /* read again next time */ } }
     // and what only the local copy holds (the shared folder could not be read)
     // (without a failed save's lines that cannot be cut off yet: they would count as saved and not be saved again)
+    const readLocal = {
+      size: ownCopy.size,
+      read(name: string) {
+        if (refused.has(name)) throw refused.get(name);
+        return ownCopy.read(name);
+      },
+    };
     for (const name of o.local.list()) {
       const m = FILE.exec(name);
-      if (m && m[1] === o.installId) readChanged(ownCopy, seenLocal, name, take);
+      if (m && m[1] === o.installId) readChanged(readLocal, seenLocal, name, take);
     }
     return mine;
   };

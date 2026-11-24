@@ -3,8 +3,8 @@
  *
  * Every line goes to a copy on this PC first and to the shared folder second, so a line in the shared file is always in
  * the local copy too. When the sync client loses lines from the shared copy (it puts back an older copy, say), they are put
- * back from the local one; this is checked whenever the file is about to be read or written, and costs a size check while
- * the two agree. The change files (`logRepository.ts`) and conversations (`conversationLog.ts`) are kept the same way.
+ * back from the local one. Changed copies are compared by line, including when their sizes agree.
+ * The change files (`logRepository.ts`) and conversations (`conversationLog.ts`) are kept the same way.
  */
 import type { Folder } from './logRepository';
 
@@ -127,24 +127,59 @@ export function shareOwn(shared: Pick<Folder, 'append'> & Partial<Pick<Folder, '
   }
 }
 
+export interface FileStamp {
+  fileStamp?(name: string): string | undefined;
+}
+
+type SharedCopy = Pick<Folder, 'append' | 'read'> & FileStamp;
+type ComparedCopy = { shared: SharedCopy; stamp: string };
+const comparedCopies = new WeakMap<Folder, Map<string, ComparedCopy>>();
+
+/** After a comparison, use both file stamps to avoid reopening unchanged copies on each poll (#784). */
+function copyStamp(shared: SharedCopy, local: Folder & FileStamp, name: string): string | undefined {
+  const here = local.fileStamp?.(name);
+  const there = shared.fileStamp?.(name);
+  if (here !== undefined && there !== undefined) return JSON.stringify([here, there]);
+}
+
+function missingLines(localText: string, sharedText: string): string[] {
+  if (sharedText === localText) return [];
+  const shared = new Set(wholeLines(sharedText));
+  return wholeLines(localText).filter((line) => !shared.has(line));
+}
+
 /**
  * Put back into the shared copy any line of this PC's own file that the local copy has and the shared copy has lost.
- * Only a size that differs is looked into, unless `whole` asks for the two to be compared anyway. With `endTorn`, a last
- * line in the shared copy with no line end is ended: only this PC writes the file, so it is part of a write that failed,
- * and the next line must not be glued onto it.
+ * A torn shared line is marked incomplete before restoring missing lines. `endTorn` also marks it without a repair.
+ * Return a refused local read so a caller reading the same copy can report it with its existing retry behavior.
  */
 export function healOwn(
-  shared: Pick<Folder, 'append' | 'read' | 'size'>, local: Folder | undefined,
+  shared: SharedCopy, local: (Folder & FileStamp) | undefined,
   name: string, how: { whole?: boolean; endTorn?: boolean } = {},
 ) {
   if (!local) return;
   try {
-    takeBackFailed(local, name);                                     // a failed append is never shared
-    if (!how.whole) { const here = local.size(name); if (here < 0 || shared.size(name) === here) return; }
+    takeBackFailed(local, name);
+    const stamp = how.whole || how.endTorn ? undefined : copyStamp(shared, local, name);
+    if (!how.whole && stamp === undefined && local.size(name) < 0) return;
+    const checked = comparedCopies.get(local);
+    const previous = checked?.get(name);
+    if (stamp !== undefined && previous?.shared === shared && previous.stamp === stamp) return;
+
     const text = shared.read(name) ?? '';
-    const lead = how.endTorn && text && !text.endsWith('\n') ? '\n' : '';
-    const mine = wholeLines(local.read(name) ?? '');           // a last line with no end is what a failed write left
-    const there = new Set(text.split('\n').filter(Boolean));
-    const lost = mine.filter((l) => !there.has(l)); if (lost.length || lead) shared.append(name, lead + (lost.length ? lost.join('\n') + '\n' : ''));
+    let localText: string | null;
+    try {
+      localText = local.read(name);
+    } catch (error) {
+      return { error };
+    }
+    const lost = missingLines(localText ?? '', text);
+    const torn = text.length > 0 && !text.endsWith('\n');
+    if (lost.length || (torn && how.endTorn)) {
+      const lead = torn ? ' (incomplete append)\n' : '';
+      shared.append(name, lead + lost.map((line) => line + '\n').join(''));
+    } else if (stamp !== undefined && copyStamp(shared, local, name) === stamp) {
+      comparedCopies.set(local, (checked ?? new Map<string, ComparedCopy>()).set(name, { shared, stamp }));
+    }
   } catch { /* tried again at the next read or write */ }
 }
