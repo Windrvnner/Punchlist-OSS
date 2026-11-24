@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
 import { checklistQuestionTarget } from '../../src/app/checklistQuestion';
+import { checklistDrafts } from '../../src/app/checklistDrafts';
 import { initialState } from '../../src/app/state';
 import { derivedId } from '../../src/domain/derivedId';
 import type { ChecklistRow } from '../../src/ports';
@@ -49,12 +50,30 @@ it('uses the original finding after a recheck or turn-off, including when it is 
   expect(checklistQuestionTarget(state, row, false, period.id).links.linkedFinding).toBe(period.id);
 });
 
-it('keeps an item-only draft on the gap even if a check raises a finding meanwhile', () => {
+it('uses the current item result until a draft has an original finding', () => {
   const state = checkedPortfolio();
   const gap = { ...row, result: 'gap' as const, findingId: undefined };
   expect(checklistQuestionTarget(state, gap, false)).toMatchObject({ title: row.text, why: null });
   expect(checklistQuestionTarget(state, gap, true).why).toBe('This item is turned off');
   expect(checklistQuestionTarget(state, row, false)).toMatchObject({
-    title: row.text, why: 'This item no longer needs a question', links: { linkedFinding: undefined },
+    title: period.title, why: null, links: { linkedFinding: period.id },
   });
+});
+
+it('captures the finding before typing and preserves it across an edit, a cleared box and a reopened pane', () => {
+  const state = checkedPortfolio();
+  const drafts = checklistDrafts({ texts: new Map(), targets: new Map(), movedId: (id) => id });
+  const draft = drafts.open(row.id);
+  draft.begin(ratio.id);
+  const question = 'Which lock-up ratio applies on the first distribution date?';
+  draft.write(question, period.id);
+  draft.write('');
+  draft.write(question, period.id);
+  const reopened = drafts.open(row.id);
+  expect(reopened.begin(period.id)).toBe(question);
+  expect(checklistQuestionTarget(state, row, false, reopened.findingId).links.linkedFinding).toBe(ratio.id);
+  reopened.clear();
+  expect(drafts.open(row.id).text).toBe('');
+  reopened.begin(period.id);
+  expect(reopened.findingId).toBe(period.id);
 });

@@ -173,6 +173,37 @@ const rowTexts = (page) => page.evaluate(() => [...document.querySelectorAll('#c
   await ctx.close();
 }
 
+// Show a completed check naming a different finding for the same item.
+function recheckFinding(page, dealId, itemId, findingId) {
+  return page.evaluate(([dealId, itemId, findingId]) => {
+    const state = store.get();
+    const rows = state.checklists[dealId].map((row) => row.id === itemId ? { ...row, findingId } : row);
+    store.set({ ...state, checklists: { ...state.checklists, [dealId]: rows } });
+  }, [dealId, itemId, findingId]);
+}
+
+async function checkConflictedDraft(page, dealId, itemId, original, other) {
+  await recheckFinding(page, dealId, itemId, original.id);
+  await page.click('#ck-ask');
+  const words = 'Please identify the test at the first distribution date.';
+  await page.fill('#ck-ask-text', words);
+  await page.evaluate((id) => __peer.edit(id, { status: 'closed' }), original.id);
+  await page.waitForFunction((id) => !!store.get().conflicts[id], original.id);
+  await recheckFinding(page, dealId, itemId, other);
+  await page.press('#ck-ask-text', 'Escape');
+  const ask = page.locator('#ck-ask');
+  const canReopen = await ask.isEnabled();
+  say('a kept question can be opened while its own finding has two versions', canReopen);
+  if (canReopen) {
+    await ask.click();
+    const log = page.locator('#ck-ask-log');
+    say('the reopened question keeps its text and original finding, with Log blocked by that finding’s conflict',
+      await page.inputValue('#ck-ask-text') === words
+      && (await page.textContent('#ck-detail .clink')).includes(original.title)
+      && await log.isDisabled() && (await log.getAttribute('title')).includes('Choose one first'));
+  }
+}
+
 { // #840: a second open finding cannot take over a question about a covenant.
   const { ctx, page, id } = await start();
   const checklistItem = await item(page, FLAGGED);
@@ -220,11 +251,7 @@ const rowTexts = (page) => page.evaluate(() => [...document.querySelectorAll('#c
   await page.waitForFunction(() => document.getElementById('ck-ask-log')?.disabled === false);
   await page.click('#ck-on');
   await page.waitForSelector('#ck-more');
-  await page.evaluate(([dealId, itemId, findingId]) => {
-    const state = store.get();
-    const rows = state.checklists[dealId].map((row) => row.id === itemId ? { ...row, findingId } : row);
-    store.set({ ...state, checklists: { ...state.checklists, [dealId]: rows } });
-  }, [id, checklistItem.id, other]);
+  await recheckFinding(page, id, checklistItem.id, other);
   await page.fill('#ck-ask-text', '');
   await page.fill('#ck-ask-text', text);
   say('editing after a new check leaves the draft on its original finding',
@@ -236,6 +263,7 @@ const rowTexts = (page) => page.evaluate(() => [...document.querySelectorAll('#c
   const otherOpen = await page.evaluate((id) => store.get().findings[id]?.status === 'open', other);
   say('reopening the original finding allows logging once with its original links', otherOpen && questions.length === 1
     && questions[0].linkedFinding === original.id && questions[0].linkedItem?.id === checklistItem.id);
+  await checkConflictedDraft(page, id, checklistItem.id, original, other);
   await ctx.close();
 }
 
