@@ -6,7 +6,9 @@ import { CHANGED_ELSEWHERE } from '../app/changedElsewhere';
 import { Icon } from './icons';
 import { ChoiceCheck } from './moreMenu';
 import { PageTop } from './deal';
-import { dealQuestions, sharedNumbers, nextQuestionNumber, settledQuestions, qaVersions, qaChanged, qaListed, qaKept, type State } from '../app/state';
+import { dealQuestions, sharedNumbers, nextQuestionNumber, qaVersions, qaChanged, qaListed, qaKept, type State }
+  from '../app/state';
+import { settledQuestion } from '../app/settledView';
 import { qaWorkstreamChoices, workstreamForNew } from '../app/state';
 import { SettledLine, CloseThisQuestion } from './closeSettled';
 import { ConflictView } from './conflict';
@@ -662,8 +664,7 @@ function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted 
     ((fromBox ? null : panel.current?.querySelector<HTMLElement>('.qright .racts button:not(:disabled)')) ?? panel.current)?.focus({ preventScroll: true });
   }, [q.id, area]);
 
-  // the response's corner also offers Close this question while the checklist has settled its item (Draft from documents: `offer`, above)
-  const settled = settledQuestions(s, q.dealId).close.some((x) => x.q.id === q.id);
+  const settled = settledQuestion(s, q);
   return (
     <section class="det qpanel glass" key={q.id} inert={busy} aria-busy={busy} aria-label={`Q${q.n}`} ref={panel} tabIndex={-1} onKeyDown={onKeyDown}>
       <div class="qph">
@@ -717,7 +718,8 @@ function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted 
               title={ro ?? 'Draft from Documents'} aria-label="Draft from Documents"
               onClick={() => { void store.dispatch(RequestDraft, { dealId: q.dealId, questionId: q.id },
               { idempotencyKey: 'draft-' + q.id }); }}><span class="long">Draft from Documents</span><span
-              class="short">Draft</span></button></span>}{settled && <CloseThisQuestion q={q} ro={ro} />}</span>}
+              class="short">Draft</span></button></span>}{settled && <CloseThisQuestion q={q} ro={ro}
+              settled={settled} />}</span>}
         </div>
         {/* the box keeps one place in the tree whether a draft is under it or not, so it is never drawn afresh mid-typing */}
         {drafting ? <DraftBox q={q} />

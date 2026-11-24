@@ -7,8 +7,9 @@ import { useEffect, useMemo, useState } from 'preact/hooks';
 import { useAppState, useStore } from './hooks';
 import { Icon } from './icons';
 import { Modal } from './dialogs';
-import { settledQuestions } from '../app/state';
-import { SetQuestionsStatus } from '../app/commands/questions';
+import { closeSettledQuestions } from '../app/commands/closeSettled';
+import { settledChecklistAvailable, settledPreview, settledQuestionCount, settledQuestionIds } from '../app/settledView';
+import type { Settled } from '../app/state';
 import type { Question } from '../domain/model';
 
 const unchecked = new Map<string, Set<string>>();
@@ -17,7 +18,8 @@ const plural = (n: number) => `${n.toLocaleString('en-US')} question${n === 1 ? 
 /** The line above the Q&A table, while any question not closed has its item settled. */
 export function SettledLine({ dealId }: { dealId: string }) {
   const store = useStore(); const s = useAppState();
-  const n = useMemo(() => settledQuestions(s, dealId).close.length, [s.questions, s.checklists[dealId], s.findings, s.conflicts, s.dealLoad[dealId], s.items]);
+  const n = useMemo(() => settledQuestionCount(s, dealId),
+    [s.questions, s.checklists[dealId], s.findings, s.conflicts, s.dealLoad[dealId], s.items]);
   if (!n) return null;
   return <p class="loadfail qnote" id="qa-settled" role="status">{n === 1 ? 'One open question is' : `${n.toLocaleString('en-US')} open questions are`} settled on the checklist. <button type="button" class="tundo" id="qa-settled-review" onClick={() => store.ui({ dialog: { kind: 'closeSettled', dealId } })}>Review</button></p>;
 }
@@ -29,30 +31,32 @@ export function SettledLine({ dealId }: { dealId: string }) {
 export function CloseSettledDialog({ dealId }: { dealId: string }) {
   const store = useStore(); const s = useAppState();
   const [fresh, setFresh] = useState(false); const [busy, setBusy] = useState(false);
-  const [offered] = useState(() => new Set(settledQuestions(store.get(), dealId).close.map((x) => x.q.id)));
+  const [offered] = useState(() => settledQuestionIds(store.get(), dealId));
   // unchecked questions are kept per deal, so a stray click outside loses none of them (lost work first)
   const [off, setOffNow] = useState<Set<string>>(unchecked.get(dealId) ?? new Set()); const setOff = (o: Set<string>) => { setOffNow(o); unchecked.set(dealId, o); };
   const [tries, setTries] = useState(0);
   useEffect(() => { let live = true; setFresh(false); void store.refreshChecklist(dealId).finally(() => { if (live) setFresh(true); }); return () => { live = false; }; }, [dealId, tries]);
   // a checklist that could not be read says so, with Retry, rather than an empty list that says nothing is settled
-  const failed = fresh && !Array.isArray(s.checklists[dealId]);
-  const { close, left } = useMemo(() => settledQuestions(s, dealId), [s.questions, s.checklists[dealId], s.findings, s.conflicts, s.dealLoad[dealId], s.items]);
-  const now = new Set(close.map((x) => x.q.id));
-  const dropped = [...offered].filter((id) => !now.has(id) && s.questions[id] && !left.some((l) => l.q.id === id)).map((id) => { const q = s.questions[id] as Question; return { q, why: q.status !== 'open' ? `${q.status.charAt(0).toUpperCase()}${q.status.slice(1)} since` : 'Its item is no longer settled' }; });
-  const out = [...left, ...dropped].sort((a, b) => a.q.n - b.q.n);
-  const picked = close.filter((x) => !off.has(x.q.id));
+  const failed = fresh && !settledChecklistAvailable(s, dealId);
+  const { close, out, pickedIds } = useMemo(() => settledPreview(s, dealId, offered, off),
+    [s.questions, s.checklists[dealId], s.findings, s.conflicts, s.dealLoad[dealId], s.items, offered, off]);
   const shut = () => { if (!busy) store.ui({ dialog: null }); };
   const [moved, setMoved] = useState(0); const [wrote, setFailed] = useState('');   // why the close was refused, said in the footer
   // the checklist is read again just before writing (section 13): if any checked question is no longer settled, nothing is
   // closed; the list now shows it under Left out, and the footer says so, for the person to look and press again
   const run = async () => {
-    if (busy || !picked.length) return; setBusy(true); setMoved(0); setFailed('');
-    await store.refreshChecklist(dealId);
-    if (!Array.isArray(store.get().checklists[dealId])) { setBusy(false); return; }   // the list now says the checklist couldn't be read; nothing is closed
-    const still = new Set(settledQuestions(store.get(), dealId).close.map((x) => x.q.id)); const gone = picked.filter((x) => !still.has(x.q.id)).length;
-    if (gone) { setBusy(false); setMoved(gone); return; }
-    const r = await store.dispatch(SetQuestionsStatus, { dealId, set: picked.map((x) => ({ questionId: x.q.id, status: 'closed' as const })) }, { idempotencyKey: 'close-settled-' + dealId });
-    setBusy(false); if (r.ok) { unchecked.delete(dealId); store.ui({ dialog: null }); } else setFailed(r.error.message);
+    if (busy || !pickedIds.length) return;
+    setBusy(true);
+    setMoved(0);
+    setFailed('');
+    const outcome = await closeSettledQuestions(store, dealId, pickedIds, 'close-settled-' + dealId);
+    setBusy(false);
+    if (outcome.kind === 'changed') setMoved(outcome.count);
+    if (outcome.kind === 'failed') setFailed(outcome.message);
+    if (outcome.kind === 'closed') {
+      unchecked.delete(dealId);
+      store.ui({ dialog: null });
+    }
   };
   return (
     <Modal onClose={shut} label="Close settled questions" blur className={`sdlg xdlg lnkdlg ${!failed && (!fresh || close.length + out.length > 8) ? 'tall' : ''}`}>
@@ -72,10 +76,10 @@ export function CloseSettledDialog({ dealId }: { dealId: string }) {
       </div>
       {!failed && <div class="xfoot"><span id="cs-count" class={moved || wrote ? 'err' : ''}
         role={moved || wrote ? 'alert' : undefined}>{wrote || (moved
-        ? `${plural(moved)} changed since, so nothing was closed` : fresh && !failed ? plural(picked.length)
+        ? `${plural(moved)} changed since, so nothing was closed` : fresh ? plural(pickedIds.length)
         : '')}</span><span class="grow" /><button class="btn sm pri" type="button" id="cs-go"
-        disabled={!fresh || !picked.length || busy} onClick={() => void run()}>{picked.length
-        ? `Close ${plural(picked.length)}` : 'Close Questions'}</button></div>}
+        disabled={!fresh || !pickedIds.length || busy} onClick={() => void run()}>{pickedIds.length
+        ? `Close ${plural(pickedIds.length)}` : 'Close Questions'}</button></div>}
     </Modal>
   );
 }
@@ -85,16 +89,17 @@ export function CloseSettledDialog({ dealId }: { dealId: string }) {
  * it is the tooltip, after the button's full name (a short window shows "Close Q3"); the page number is kept with its "p."
  * so it never stands alone on a line.
  */
-export function CloseThisQuestion({ q, ro }: { q: Question; ro: string | null }) {
-  const store = useStore(); const s = useAppState();
-  const x = settledQuestions(s, q.dealId).close.find((c) => c.q.id === q.id); if (!x) return null;
-  const tip = ro ?? `Close this question · ${x.item}: ${x.where === 'finding closed' ? 'its finding was closed' : `satisfied · ${x.where.replace(/ /g, (m, i) => (i > x.where.lastIndexOf(',') ? ' ' : m))}`}`;
+export function CloseThisQuestion({ q, ro, settled }: { q: Question; ro: string | null; settled: Settled }) {
+  const store = useStore();
+  const { item, where } = settled;
+  const evidence = where === 'finding closed' ? 'its finding was closed'
+    : `satisfied · ${where.replace(/ /g, (space, index) => (index > where.lastIndexOf(',') ? ' ' : space))}`;
+  const tip = ro ?? `Close this question · ${item}: ${evidence}`;
   // the checklist is read again first: an item another PC has since found a gap or flagged is not closed, and the button goes
   const close = async () => {
-    await store.refreshChecklist(q.dealId);
-    if (!Array.isArray(store.get().checklists[q.dealId])) { store.toast(`Couldn’t load the checklist, so Q${q.n} was not closed`); return; }
-    if (!settledQuestions(store.get(), q.dealId).close.some((c) => c.q.id === q.id)) { store.toast(`Q${q.n}’s item is no longer settled, so it was not closed`); return; }
-    await store.dispatch(SetQuestionsStatus, { dealId: q.dealId, set: [{ questionId: q.id, status: 'closed' }] }, { idempotencyKey: 'close-settled-' + q.id });
+    const outcome = await closeSettledQuestions(store, q.dealId, [q.id], 'close-settled-' + q.id);
+    if (outcome.kind === 'checklist-unavailable') store.toast(`Couldn’t load the checklist, so Q${q.n} was not closed`);
+    if (outcome.kind === 'changed') store.toast(`Q${q.n}’s item is no longer settled, so it was not closed`);
   };
   // why it is off, on a read-only deal, is on the wrapper: a disabled button takes no pointer
   return <span class="needs" id="q-close-wrap" title={ro ?? undefined}><button type="button" class="btn sm"
