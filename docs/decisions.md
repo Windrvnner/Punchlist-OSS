@@ -90,6 +90,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Emptying a response is announced in a notice with **Undo**.
 - A response on a question linked to a finding marks that finding; a response on an unlinked question is checked once against the open findings.
 - Import finds the table and its columns by the app's own rules and asks the model only when no question column is found. Nothing is imported until the person clicks **Import**, and the whole import is one Undo.
+- Q&A and checklist imports keep an unused heading row as typed and mark it “Not used.” The preview stays on the
+  last accepted table until another sheet or heading row is read (#380).
 - **Undo Last Import…** in the Q&A page's ⋯ menu takes back this PC's last import after a confirmation, with no Undo after it, and leaves alone questions changed since the import.
 - A responder column is read as the response's author.
 - On import, real date cells are read as dates and plain numbers are not. An ambiguous date is settled by the row's other date, its neighbors, and the rule that no date is in the future; otherwise it is left blank and listed.
@@ -154,6 +156,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - An item that is no longer in the current master checklist lists gets an icon, for information only (#2).
 - Linking the Checklist, Findings, and Q&A follows docs/linking-design.md, which covers only what is not yet built (#2). The next step is letting a person mark a gap resolved, with its source and with Undo. The rest waits until it is requested.
 - Each list in the master checklist is its own shared record. Bringing a list in adds its items to every deal that uses it and is not marked Closed. A deal's items are append-only; swapping a list asks first when items would be turned off.
+- The Wording heading checkbox selects or clears every available suggestion, and each row keeps its own checkbox (#377).
 - A rewording accepted when a list was brought in is offered again the next time.
 - In an open checklist import, a review that needs the model waits for a pending review request. The Duplicates line
   and footer show the latest retry failure, and a partial check keeps its pairs and checked removals (#378).
@@ -296,6 +299,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 [CLAUDE.md](../CLAUDE.md) covers how to work on the app: commits, checks, mock-ups, readable code, and asking before design decisions. Beyond it, these rules apply:
 
 - Keep friction low, with as few controls and steps as possible.
+- The attribution check allows a `Co-authored-by` trailer naming exactly the repository's own coding-agent identity (set in `scripts/aiAttribution.mjs`) and refuses every other AI co-author trailer (#877).
 - Never guess identities. Never cite finding codes.
 - Deleting a finding or a question asks first ("Delete Q38?", with **Keep It** or **Delete**), as do removing a folder and a list swap that turns items off; each keeps its Undo.
 - Close every gap as soon as it is found; fix confirmed Critical and Major issues rather than stopping to report them.

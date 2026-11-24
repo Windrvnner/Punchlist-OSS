@@ -16,6 +16,7 @@ import {
   type Asked, type ListTarget, type Review,
 } from './firmChecklistReview';
 import { dropKept, type ChecklistChoices, type ChecklistKept, type Keeper } from './firmChecklistKept';
+import { keepImport } from './keptImports';
 
 export type Busy = '' | 'reading' | 'asking' | 'reviewing' | 'importing';
 
@@ -59,8 +60,8 @@ function itemsAsRead(byColumns: boolean, table: ImportTable | null, mapping: Che
  * document's text or a pasted list, as lines. `byColumns` is the fallback for a table the model could not read: the
  * columns chosen by hand, as before.
  */
-export function useListSource(store: Store, work: Work, left: ChecklistKept | null) {
-  const file = useListFile(store, work, left);
+export function useListSource(store: Store, work: Work, { key, left }: Keeper) {
+  const file = useListFile(store, work, key, left);
   const { table, text, mapping, byColumns } = file;
   const lines = useMemo(
     () => (text ? text.lines : table ? tableLines(table.columns, table.rows) : null),
@@ -90,12 +91,13 @@ const NO_MAPPING: ChecklistMapping = { item: null, section: null, subsection: nu
  * The file or paste the list comes from. `text` is a document's or a paste's lines ('' names a paste); `paste` is what
  * is typed in the box, kept through "change" so nothing typed is lost.
  */
-function useListFile(store: Store, work: Work, left: ChecklistKept | null) {
+function useListFile(store: Store, work: Work, key: string, left: ChecklistKept | null) {
   const [table, setTable] = useState<ImportTable | null>(left?.table ?? null);
   const [mapping, setMapping] = useState<ChecklistMapping>(left?.choices?.mapping ?? NO_MAPPING);
   const [text, setText] = useState<{ name: string; lines: string[] } | null>(left?.text ?? null);
   const [paste, setPaste] = useState(left?.paste ?? '');
   const [byColumns, setByColumns] = useState(!!left?.choices?.byColumns);
+  const [sheetRead, setSheetRead] = useState<{ sheet?: string }>();
   const take = (read: ImportTable) => {
     setTable(read);
     setMapping(suggestChecklistColumns(read.columns, read.rows));
@@ -110,7 +112,6 @@ function useListFile(store: Store, work: Work, left: ChecklistKept | null) {
       work.setError(`Could not read ${file.name}: ${read.error.message}`);
       return;
     }
-    setByColumns(false);
     if ('table' in read.value) {
       setText(null);
       take(read.value.table);
@@ -118,29 +119,36 @@ function useListFile(store: Store, work: Work, left: ChecklistKept | null) {
       setTable(null);
       setText({ name: file.name, lines: read.value.lines });
     }
+    resetFileHeading(key, setByColumns);
   };
-  const reread = (opts: { sheet?: string; headerRow?: number }) => {
-    if (!table || work.busy) return;
-    void readTableAgain(store, work, table, byColumns ? opts : { ...opts, headerRow: 1 }, take);
+  const reread = async (opts: { sheet?: string; headerRow?: number }, accept?: (read: ImportTable) => void) => {
+    if (!table || (work.busy && !(byColumns && work.busy === 'reading'))) return;
+    if (byColumns && opts.headerRow === undefined) setSheetRead(opts);
+    await readTableAgain(store, work, table, opts, byColumns, (read) => {
+      take(read);
+      accept?.(read);
+    });
+    setSheetRead((latest) => latest === opts ? undefined : latest);
   };
   // the fallback when the model could not read a table: its columns chosen by hand
   const chooseColumns = () => {
-    if (!table) return;
-    setByColumns(true);
-    void readForColumns(store, work, table, take);
+    if (!table || work.busy) return;
+    // Wait for heading detection before showing the editable row (#380).
+    void readTableAgain(store, work, table, { sheet: table.sheet }, true, take, () => setByColumns(true));
   };
   // what is pasted stays in the box until it is sent, and after "change"
   const pasted = () => {
     if (!paste.trim() || work.busy) return;
     setTable(null);
-    setByColumns(false);
     work.setError('');
     setText({ name: '', lines: pastedLines(paste) });
+    resetFileHeading(key, setByColumns);
   };
   const forget = () => {
     setTable(null);
     setText(null);
     setByColumns(false);
+    setSheetRead(undefined);
   };
   const reset = () => {
     forget();
@@ -148,26 +156,29 @@ function useListFile(store: Store, work: Work, left: ChecklistKept | null) {
     setMapping(NO_MAPPING);
   };
   return {
-    table, mapping, setMapping, text, paste, setPaste, byColumns,
-    load, reread, chooseColumns, pasted, forget, reset,
+    table, mapping, setMapping, text, paste, setPaste, byColumns, wantedSheet: sheetRead?.sheet,
+    load, reread, chooseColumns, pasted, forget, reset, importKey: key,
   };
 }
 
-/** Reads the sheet again, for its columns to be chosen by hand. */
-async function readForColumns(store: Store, work: Work, table: ImportTable, take: (read: ImportTable) => void) {
-  const mine = work.newToken();
-  const read = await readImportBytes(store, table.name, table.bytes, { sheet: table.sheet });
-  if (read.ok && work.isLatest(mine)) take(read.value);
+/** A successfully replaced source starts without the previous table's heading draft (#380). */
+function resetFileHeading(key: string, setByColumns: (byColumns: boolean) => void) {
+  setByColumns(false);
+  keepImport(key, { headingDraft: null });
 }
 
 /** Reads a table's file again for another sheet or heading row: an error is said in the footer, and the table kept. */
 async function readTableAgain(
   store: Store, work: Work, table: ImportTable, opts: { sheet?: string; headerRow?: number },
+  byColumns: boolean,
   take: (read: ImportTable) => void,
+  onSettled?: () => void,
 ) {
-  const mine = work.newToken();
-  const read = await readImportBytes(store, table.name, table.bytes, opts);
+  const mine = byColumns ? work.begin('reading') : work.newToken();
+  const read = await readImportBytes(store, table.name, table.bytes, byColumns ? opts : { ...opts, headerRow: 1 });
   if (!work.isLatest(mine)) return;
+  if (byColumns) work.setBusy('');
+  onSettled?.();
   if (!read.ok) {
     work.setError(`Could not read ${table.name}: ${read.error.message}`);
     return;

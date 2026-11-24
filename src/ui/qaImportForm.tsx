@@ -9,12 +9,13 @@ import { checkedOf, chosenOf } from './fieldValue';
 import { showTip, hideTip } from './tip';
 import { num, plural } from './counts';
 import { titleStyle } from './titleStyle';
+import { HeadingRowField } from './headingRowField';
 import { IMPORT_FIELDS, parseDate, type Mapping, type ImportField, type Prepared } from '../domain/importExport';
 import { logChoice } from '../app/qaLog';
 import { SERVICE, AI_LABEL } from '../control';
 import type { ImportTable, ImportChange } from '../app/transfer';
 import type { Store } from '../app/store';
-import type { Busy, ImportMode, ImportPlan, QaImportActions, QaImportState, Rereading } from './qaImport';
+import type { Busy, ImportMode, ImportPlan, QaImportActions, QaImportState } from './qaImport';
 
 /** The changes the "Will overwrite" table lists; the rest are counted under it */
 const CHANGES_LISTED = 200;
@@ -50,7 +51,7 @@ export function QaImportForm({ store, dealId, qa, plan, actions }: {
       {logChoice(store, dealId, qa.path) === 'new' && (
         <MakeLogRow makeLog={qa.makeLog} importing={importing} onPick={onMakeLog} />
       )}
-      <HeadingsRow table={table} busy={busy} wanted={qa.wanted} actions={actions} />
+      <HeadingsRow importKey={qa.key} table={table} busy={busy} wantedSheet={qa.wantedSheet} actions={actions} />
       <ColumnsRow table={table} mapping={mapping} importing={importing} onMap={onMap} />
       <PreviewRow table={table} mapping={mapping} prepared={plan.prepared} />
       <ModeRow mode={mode} importing={importing} onPick={qa.setMode} />
@@ -96,30 +97,22 @@ function MakeLogRow({ makeLog, importing, onPick }: {
 }
 
 /** Where the table is: its sheet and heading row, which the person can change or ask the model to find */
-function HeadingsRow({ table, busy, wanted, actions }: {
-  table: ImportTable; busy: Busy; wanted: Rereading; actions: QaImportActions;
+function HeadingsRow({ importKey, table, busy, wantedSheet, actions }: {
+  importKey: string; table: ImportTable; busy: Busy; wantedSheet?: string; actions: QaImportActions;
 }) {
   const importing = busy === 'importing';
-  // while a reread is pending its fields show the choice being read, not the table read before it, and a choice is
-  // compared with that one, so going back to the row already read replaces the pending read (#63)
-  const shown = busy === 'reading' ? { ...table, ...wanted } : table;
-  const pickRow = (e: Event) => {
-    const row = +(e.currentTarget as HTMLInputElement).value;
-    const valid = Number.isInteger(row) && row >= 1 && row <= table.lastRow;
-    if (valid && row !== shown.headerRow) void actions.reread({ sheet: shown.sheet, headerRow: row });
-  };
+  const sheet = (busy === 'reading' && wantedSheet) || table.sheet;
   return (
     <div class="srow"><div class="k">Headings</div><div class="imwhere">
       {table.sheets.length > 1 && <label><span>Sheet</span>
-        <select class="field" id="im-sheet" aria-label="Sheet" value={shown.sheet} disabled={importing}
+        <select class="field" id="im-sheet" aria-label="Sheet" value={sheet} disabled={importing}
           onChange={(e) => void actions.reread({ sheet: chosenOf(e) })}>
           {table.sheets.map((sheet) => <option key={sheet} value={sheet}>{sheet}</option>)}
         </select>
       </label>}
-      <label><span>Row</span>
-        <input class="field" id="im-header" type="number" aria-label="Heading row" min={1} max={table.lastRow} step={1}
-          value={shown.headerRow} disabled={importing} onInput={pickRow} />
-      </label>
+      <HeadingRowField id="im-header" importKey={importKey} table={table} sheet={sheet} disabled={importing}
+        onEdit={actions.cancelProposal}
+        read={(headerRow, accept) => actions.reread({ sheet, headerRow }, accept)} />
       {actions.canAsk && (
         <button type="button" class="linkb" id="im-ask" disabled={!!busy} onClick={() => void actions.askAi(table)}>
           {busy === 'asking' ? `Asking ${SERVICE}` : `Ask ${SERVICE} to Find the Table`}

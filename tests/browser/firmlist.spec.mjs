@@ -1,6 +1,10 @@
 // The firm's checklist: bringing a list in from Settings, its review, the pick lists on Overview, and Undo.
 // Runs on the mock services, whose rewording and duplicate check stand in for the fast model.
 import { launchChrome } from './chrome.mjs';
+import {
+  checkChooseColumns, checkHeadingRecovery, checkHeadingRow, checkKeptHeading, checkMouseStep, checkPendingSheetStep,
+  headingWorkbook,
+} from './headingRow.mjs';
 import { checkDuplicateRetries } from './firmlistRetries.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
@@ -30,6 +34,33 @@ async function bring(page, file, layer, name, beforeGo = async () => {}) {
 const read = (page) => page.waitForFunction(() => !/^Asking/.test(document.querySelector('#cl-line')?.textContent ?? 'Asking'), null, { timeout: 30000 });
 const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().items).filter((i) => i.dealId === d).map((i) => [i.text, i.off]).sort(), id);
 
+{ // #380: the columns-by-hand fallback keeps the typed row separate from the accepted checklist preview.
+  const { ctx, page } = await start();
+  const open = async () => {
+    await page.click('#u-menu');
+    await page.click('#s-checklist-open');
+    await page.click('#fl-import');
+  };
+  await open();
+  await page.evaluate(() => { window.__fail = { readList: true }; });
+  const titled = await headingWorkbook(page, 'cl', { headingAtSix: true });
+  const autoDetected = await checkChooseColumns(page, titled, 6);
+  await page.click('#cl-back');
+  const fixture = await headingWorkbook(page, 'cl');
+  const detectorFailed = await checkChooseColumns(page, fixture, 1, 'The file is locked');
+  await page.click('[data-layer=broad]');
+  const recovery = await checkHeadingRecovery(page, 'cl', fixture);
+  const mouseStep = await checkMouseStep(page, 'cl', fixture);
+  const pendingSheetStep = await checkPendingSheetStep(page, 'cl');
+  const { invalid, ...checks } = await checkHeadingRow(page, 'cl', fixture, '#cl-asksame');
+  const kept = await checkKeptHeading(page, 'cl', fixture, open);
+  const result = { ...checks, ...recovery, ...kept, mouseStep, pendingSheetStep, autoDetected, detectorFailed };
+  say('checklist heading-row edits preserve typed text and the accepted preview',
+    fixture.lastRow >= 2000 && invalid.every(Boolean) && Object.values(result).every(Boolean) && !page.errors.length,
+    JSON.stringify({ invalid, ...result, errors: page.errors }));
+  await ctx.close();
+}
+
 { // The general list goes to the deal at once; the review offers wording and duplicates, and changes only what is checked
   const { ctx, page, id } = await start();
   await bring(page, general, 'broad', '');
@@ -55,11 +86,25 @@ const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().ite
   await page.keyboard.press('Escape');
   // the same file brought in again: the rewording taken last time comes back checked, so the old wording is not added beside it
   await bring(page, csv, 'technology', 'Solar', async () => {
-    const again = await page.evaluate(() => ({ checked: [...document.querySelectorAll('#cl-rewords input:checked')].map((i) => i.dataset.reword), tip: document.querySelector('#cl-rewords [data-reword="2"]')?.closest('label')?.title }));
+    const again = await page.evaluate(() => ({
+      checked: [...document.querySelectorAll('#cl-rewords input:checked')].map((i) => i.dataset.reword),
+      tip: document.querySelector('#cl-rewords [data-reword="2"]')?.closest('label')?.title,
+    }));
     say('importing the same file again offers the earlier rewording checked, with why in its tooltip',
       JSON.stringify(again.checked) === '["2"]' && /last imported/.test(again.tip ?? ''), JSON.stringify(again));
     await page.click('#cl-pairs [data-remove="4"]');
+    await page.evaluate(() => {
+      const dialog = document.querySelector('.imdlg');
+      new MutationObserver((_, observer) => {
+        if (document.querySelector('#cl-line')?.textContent !== 'Importing') return;
+        const all = document.querySelector('#cl-reword-all');
+        window.wordingLocked = !!all?.disabled && !document.querySelector('[data-reword]:enabled');
+        observer.disconnect();
+      }).observe(dialog, { childList: true, subtree: true, characterData: true });
+    });
   });
+  say('the heading and individual wording checkboxes are disabled during Import',
+    await page.evaluate(() => window.wordingLocked === true));
   const relisted = await page.evaluate(() => Object.values(store.get().firmList).find((l) => l.layer !== 'broad').items.map((i) => [i.text, i.was ?? '']));
   say('the list brought in again keeps the rewording and the file’s own wording beside it', JSON.stringify(relisted.map(([t]) => t)) === JSON.stringify(lists[1][2]) && relisted[2][1] === 'Inverter supply / LTSA in place', JSON.stringify(relisted));
   await page.keyboard.press('Escape');
@@ -346,11 +391,76 @@ await checkDuplicateRetries(start, say);
   }
 }
 
-{ // Wording suggestions that failed after the quiet retries (decisions: Retries) say so with Retry, which asks again and keeps the check marks; at deal size
+async function openChecklistImport(page) {
+  await page.click('#u-menu');
+  await page.click('#s-checklist-open');
+  await page.click('#fl-import');
+}
+
+function wordingMarks(page) {
+  return page.evaluate(() => ({
+    line: document.querySelector('#cl-line').textContent,
+    all: document.querySelector('#cl-reword-all')?.checked,
+    reword: [...document.querySelectorAll('[data-reword]:checked')].map((box) => +box.dataset.reword),
+    remove: [...document.querySelectorAll('[data-remove]:checked')].map((box) => +box.dataset.remove),
+    rows: document.querySelectorAll('[data-reword]').length,
+  }));
+}
+
+async function bulkWording(page) {
+  const heading = page.getByRole('checkbox', { name: '300 suggestions, select or clear all', exact: true });
+  say('Wording has one heading checkbox and it starts unticked',
+    await page.locator('.rv-h input[type=checkbox]').count() === 1 && !await heading.isChecked());
+  const first = page.locator('[data-reword="0"]');
+  const removeFirst = page.locator('[data-remove="0"]');
+  await removeFirst.check();
+  await heading.press('Space', { timeout: 3000 });
+  const all = await wordingMarks(page);
+  say('Space selects all 299 eligible wordings with the effective totals', all.all && all.reword.length === 299
+    && !all.reword.includes(0) && await first.isDisabled() && all.remove.join() === '0'
+    && all.line === 'Import 2,101 items · 298 reworded · 1 split · 1 removed', all.line);
+  await removeFirst.uncheck();
+  await first.check();
+  await removeFirst.check();
+  await heading.click();
+  const cleared = await wordingMarks(page);
+  say('clearing the heading preserves the checked, disabled wording and its removal', cleared.all === false
+    && cleared.reword.join() === '0' && await first.isDisabled() && cleared.remove.join() === '0'
+    && cleared.line === 'Import 2,100 items · 1 removed', cleared.line);
+  await heading.click();
+  const exceptions = [14, 21, 700];
+  for (const at of exceptions) await page.locator(`[data-reword="${at}"]`).uncheck();
+  const some = await wordingMarks(page);
+  say('individual exceptions update the heading and effective totals', some.all === false && some.reword.length === 297
+    && exceptions.every((at) => !some.reword.includes(at)) && some.reword.includes(0) && some.remove.join() === '0'
+    && some.line === 'Import 2,101 items · 295 reworded · 1 split · 1 removed', some.line);
+}
+
+{ // Retry wording suggestions at deal size, then select or clear them in bulk and retain individual exceptions.
   const { ctx, page } = await start();
-  const rows = [...Array.from({ length: 2100 }, (_, i) => (i % 7 ? `Item ${i + 1}: the report on part ${i + 1} is delivered` : `Item ${i + 1}: the LTSA on part ${i + 1} runs 5 yrs`)), 'Item 1: the LTSA on part 1 runs 5 yrs'];   // the last row repeats the first: offered for removal, never a rewording
+  const conditions = [
+    'Grid connection agreement caps reinforcement costs',
+    'Title report identifies easements for the cable route',
+    'Construction budget includes a reserve for equipment delivery delays',
+    'Interconnection permit sets out the conditions for energization',
+    'Insurance policy covers losses from business interruption',
+    'Purchase agreement allocates responsibility for change orders',
+  ];
+  const shorthand = [
+    'LTSA sets minimum availability and scheduled outage allowances',
+    'O&M agreement identifies who can approve emergency repairs',
+    'IE report validates the construction schedule contingency',
+    'Turbine warranty runs for five yrs after commercial operation',
+    'Reserve covenant requires coverage of ≥ six months',
+  ];
+  const rows = Array.from({ length: 2100 }, (_, at) => {
+    const requirement = at % 7 ? conditions[at % 7 - 1] : shorthand[(at / 7) % shorthand.length];
+    return `Facility ${at + 1}: ${requirement}`;
+  });
+  rows[7] += '; the access indemnity is signed';
+  rows.push(rows[0]);   // offered for removal, with no wording suggestion
   const f = path.join(dir, 'Wording.csv'); fs.writeFileSync(f, ['Item', ...rows].join('\n'));
-  await page.click('#u-menu'); await page.waitForSelector('#s-checklist-open'); await page.click('#s-checklist-open'); await page.waitForSelector('#fl-import'); await page.click('#fl-import');
+  await openChecklistImport(page);
   await page.setInputFiles('#cl-file', f); await page.waitForSelector('#cl-next'); await page.click('[data-layer=broad]');
   await page.evaluate(() => { window.__fail = { reword: true }; }); await page.click('#cl-next'); await page.waitForSelector('#cl-go');
   const failed = await page.evaluate(() => ({ head: document.querySelector('.rv-h').textContent, retry: document.querySelector('#cl-reword-retry')?.textContent ?? '', tip: document.querySelector('#cl-reword-retry')?.title ?? '', rows: document.querySelectorAll('#cl-rewords .rv-row').length }));
@@ -364,18 +474,24 @@ await checkDuplicateRetries(start, say);
   const twice = await page.evaluate(() => ({ reworded: [...document.querySelectorAll('#cl-rewords [data-reword]')].map((x) => +x.dataset.reword).filter((at) => at === 0 || at === 2100), removable: !!document.querySelector('#cl-pairs [data-remove="2100"]') }));
   say('Retry that works shows the suggestions unchecked, takes Retry away and leaves the duplicates as they were', after.rows === 300 && after.checked === 0 && !after.retry && /^300 suggestions/.test(after.head) && after.pairs === pairsBefore && pairsBefore === 1, JSON.stringify(after));
   say('a repeated row is offered for removal, and only its first copy a rewording', JSON.stringify(twice.reworded) === '[0]' && twice.removable, JSON.stringify(twice));
-  // a reload keeps the review of 2,101 items and its check marks, with nothing asked again
-  for (const at of [7, 14, 700]) await page.click(`#cl-rewords [data-reword="${at}"]`); await page.click('#cl-pairs [data-remove="2100"]');
-  const checkMarks = () => page.evaluate(() => ({ line: document.querySelector('#cl-line').textContent, reword: [...document.querySelectorAll('#cl-rewords input:checked')].map((x) => x.dataset.reword), remove: [...document.querySelectorAll('#cl-pairs input:checked')].map((x) => x.dataset.remove), rows: document.querySelectorAll('#cl-rewords .rv-row').length }));
-  const before = await checkMarks();
+  await bulkWording(page);
+  const before = JSON.stringify(await wordingMarks(page));
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.imdlg', { state: 'detached' });
+  await openChecklistImport(page);
+  await page.waitForSelector('#cl-go');
+  say('Escape keeps bulk and individual wording choices', JSON.stringify(await wordingMarks(page)) === before);
+  await page.click('#cl-line ~ .btn:not(.pri)');
+  await page.click('#cl-next');
+  await page.waitForSelector('#cl-go');
+  say('Back and Next keep bulk and individual wording choices', JSON.stringify(await wordingMarks(page)) === before);
   await page.reload(); await page.waitForSelector('#ov-details');
   await page.evaluate(() => { window.__fail = { reword: true, sameMeaning: true, readList: true }; });   // nothing may be asked again: a call would fail and show
-  await page.click('#u-menu'); await page.waitForSelector('#s-checklist-open'); await page.click('#s-checklist-open'); await page.waitForSelector('#fl-import'); await page.click('#fl-import');
-  const reviewBack = await page.waitForSelector('#cl-go', { timeout: 5000 }).then(() => true, () => false); const afterReload = reviewBack ? await checkMarks() : null;
-  say('a reload keeps the review and its check marks, asking nothing again',
-    reviewBack && JSON.stringify(afterReload) === JSON.stringify(before)
-      && before.line === 'Import 2,100 items · 3 reworded · 1 removed',
-    JSON.stringify({ before, afterReload }));
+  await openChecklistImport(page);
+  await page.waitForSelector('#cl-go', { timeout: 5000 });
+  const afterReload = await wordingMarks(page);
+  say('a reload keeps the review and its check marks, asking nothing again', JSON.stringify(afterReload) === before
+    && afterReload.line === 'Import 2,101 items · 295 reworded · 1 split · 1 removed', afterReload.line);
   // Back, then start over: asks first, then clears the import, after a reload too
   await page.evaluate(() => { window.__fail = {}; });
   await page.click('#cl-line ~ .btn:not(.pri)'); await page.waitForSelector('#cl-restart'); await page.click('#cl-restart'); await page.waitForSelector('#cl-restart-ask');

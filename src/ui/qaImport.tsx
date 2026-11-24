@@ -23,7 +23,7 @@ import type { Store } from '../app/store';
 /** What the dialog is doing while the person waits */
 export type Busy = '' | 'reading' | 'importing' | 'asking';
 /** a sheet or heading row chosen in the import and being read */
-export type Rereading = { sheet?: string; headerRow?: number };
+type Rereading = { sheet?: string; headerRow?: number };
 /** What happens to questions the file already holds: changed in place, or added again as new ones */
 export type ImportMode = 'merge' | 'append';
 
@@ -142,8 +142,8 @@ function useQaImportState(dealId: string, fresh: boolean) {
     if (!touched.current) setMakeLog(parties >= 2);
   }, [parties, table]);
   const [busy, setBusy] = useState<Busy>('');
-  // the sheet or heading row a reread is reading: shown in its field until the read settles (#63)
-  const [wanted, setWanted] = useState<Rereading>({});
+  // the sheet a reread is reading: shown in its picker until the read settles (#63)
+  const [wantedSheet, setWantedSheet] = useState<string>();
   const [error, setError] = useState('');
   const [restart, setRestart] = useState(false);   // "start over" asks first, in the footer
   const fileRef = useRef<HTMLInputElement>(null);
@@ -152,8 +152,8 @@ function useQaImportState(dealId: string, fresh: boolean) {
   const token = useRef(0);
   return {
     key, table, setTable, mapping, setMapping, path, setPath, mode, setMode, answered, setAnswered,
-    makeLog, setMakeLog, touched, busy, setBusy, wanted, setWanted, error, setError, restart, setRestart, fileRef,
-    token,
+    makeLog, setMakeLog, touched, busy, setBusy, wantedSheet, setWantedSheet,
+    error, setError, restart, setRestart, fileRef, token,
   };
 }
 export type QaImportState = ReturnType<typeof useQaImportState>;
@@ -269,7 +269,7 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
     }
     const submitted = savedSubmission(qa.key);
     if (submitted) void store.releaseImport(submitted.key);
-    keepImport(qa.key, { submission: null }); // Choosing a new file deliberately replaces the previous import.
+    keepImport(qa.key, { submission: null, headingDraft: null }); // A newly read file replaces the previous import.
     setTable(read.value);
     setMapping(read.value.mapping);
     qa.setPath(store.services.fs.pathFor?.(file) ?? null);
@@ -298,13 +298,12 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
   };
 
   // the person says where the table really starts: another sheet, or another heading row
-  // a reread waits for nothing but an import or a proposal; a later choice replaces a pending one, and Import waits
-  // for it, so what is imported is always the sheet and heading row shown (#63)
-  const reread = async (where: Rereading) => {
-    if (!table || (busy && busy !== 'reading')) return;
+  // A later choice replaces a pending read. Import waits for it and uses the accepted table (#63, #380).
+  const reread = async (where: Rereading, accept?: (read: ImportTable) => void) => {
+    if (!table || busy === 'importing') return;
     const mine = ++token.current;   // a later choice wins over a slower earlier read
     setBusy('reading');
-    qa.setWanted(where);
+    qa.setWantedSheet(where.sheet);
     const again = await readImportBytes(store, table.name, table.bytes, where);
     if (token.current !== mine) return;
     setBusy('');
@@ -315,9 +314,17 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
     setError('');
     setTable(again.value);
     setMapping(again.value.mapping);
+    accept?.(again.value);
   };
 
-  return { load, canAsk, askAi, reread };
+  return { load, canAsk, askAi, reread, cancelProposal: () => cancelProposal(qa) };
+}
+
+/** A manual heading edit takes over from an outstanding layout proposal (#380). */
+function cancelProposal(qa: QaImportState) {
+  if (qa.busy !== 'asking') return;
+  qa.token.current++;
+  qa.setBusy('');
 }
 
 /** Keep a correlated submission before writing rows, until its log choice has finished too. */
