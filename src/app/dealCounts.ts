@@ -3,20 +3,23 @@ import { offFindingCount, type State } from './state';
 
 /** Overview keeps the progress report while the Checklist's filter counts are unavailable. */
 export function checklistStandingCounts(state: State, dealId: string) {
-  const progress = state.progress[dealId]?.checklist;
-  if (!progress) return null;
   const { counts } = checklistRows(state, dealId);
-  if (!progress.items && !counts.off) return null;
-  const read = Array.isArray(state.checklists[dealId]);
-  const standing = read ? counts : {
-    ...counts, finding: progress.findings, gap: progress.gaps,
-    open: progress.unsettled, satisfied: progress.satisfied,
-  };
-  const toResolve = standing.finding + standing.gap + standing.gone;
-  const settled = standing.satisfied + standing.person;
+  let standing = counts;
+  if (Array.isArray(state.checklists[dealId])) {
+    if (!counts.all) return null;
+  } else {
+    const progress = state.progress[dealId]?.checklist;
+    if (!progress || (!progress.items && !counts.off)) return null;
+    const { findings, gaps, satisfied, unsettled } = progress;
+    standing = {
+      ...counts, all: findings + gaps + satisfied + unsettled,
+      finding: findings, gap: gaps, open: unsettled, satisfied,
+    };
+  }
   return {
-    ...standing, toResolve, settled,
-    all: read ? counts.all : toResolve + standing.open + settled,
+    ...standing,
+    toResolve: standing.finding + standing.gap + standing.gone,
+    settled: standing.satisfied + standing.person,
     offOpen: offFindingCount(state, dealId),
   };
 }

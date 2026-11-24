@@ -76,21 +76,31 @@ it('keeps the reported standings until the checklist rows arrive, including afte
   expect(checklistStandingCounts(state, dealId)).toEqual(reported);
   state.checklists[dealId] = 'failed';
   expect(checklistStandingCounts(state, dealId)).toEqual(reported);
+  delete state.progress[dealId];
+  expect(checklistStandingCounts(state, dealId)).toBeNull();
   state.checklists[dealId] = checked;
   expect(checklistStandingCounts(state, dealId)).toMatchObject({ all: 2160, gap: 1, open: 21 });
 });
 
-it('keeps the column in place for all-off lists and while progress and checklist rows arrive separately', () => {
+it('shows a completed checklist with new active items even when progress is missing or reports zero', () => {
   const state = checklistDeal();
-  delete state.progress[dealId];
-  expect(checklistStandingCounts(state, dealId)).toBeNull();
-  state.progress[dealId] = { folders: [], checklist: { items: 0, findings: 0, gaps: 0, unsettled: 0, satisfied: 0 } };
-  state.checklists[dealId] = [];
-  expect(checklistStandingCounts(state, dealId)).toMatchObject({ all: 2160, open: 2157, off: 3 });
-  for (const item of Object.values(state.items)) item.off = true;
-  expect(checklistStandingCounts(state, dealId)).toMatchObject({ all: 2160, open: 0, off: 2160 });
-  // Even a stale zero report keeps the column hidden when no items are off.
   for (const item of Object.values(state.items)) item.off = false;
-  expect(checklistView(state, dealId).counts.open).toBe(2160);
+  state.checklists[dealId] = [];
+  const expected = { all: 2160, open: 2160, off: 0, toResolve: 0, settled: 0 };
+  expect(checklistView(state, dealId).counts).toMatchObject({ all: 2160, open: 2160, off: 0 });
+  delete state.progress[dealId];
+  expect(checklistStandingCounts(state, dealId)).toMatchObject(expected);
+  state.progress[dealId] = { folders: [], checklist: { items: 0, findings: 0, gaps: 0, unsettled: 0, satisfied: 0 } };
+  expect(checklistStandingCounts(state, dealId)).toMatchObject(expected);
+});
+
+it('shows only turned-off items and drops an empty completed checklist despite stale positive progress', () => {
+  const state = checklistDeal();
+  for (const item of Object.values(state.items)) item.off = true;
+  expect(checklistStandingCounts(state, dealId)).toMatchObject({
+    all: 2160, off: 2160, offOpen: 118, open: 0, toResolve: 0, settled: 0,
+  });
+  state.items = {};
+  state.checklists[dealId] = [];
   expect(checklistStandingCounts(state, dealId)).toBeNull();
 });
