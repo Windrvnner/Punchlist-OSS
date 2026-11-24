@@ -46,11 +46,18 @@ npm run installer       # build the Windows installer into out/installer (on Win
 | `npm run browser:times` | Rewrites `tests/browser/suite-times.json` from the suite times of the latest `npm run check:all`. |
 | `npm run typecheck` | Type-checks with TypeScript, with no output files. |
 | `npm run lint` | Runs Biome (lint only, no formatter). |
-| `npm run check` | Runs the type-check, Biome, the secrets check and the AI-attribution check on every tracked file (the attribution check also reads the branch's commit messages), readability hints for the changed code (never failing), and the unit tests. |
-| `npm run check:static` | Runs everything in `check` except the unit tests. |
+| `npm run check` | Runs the static checks and the unit tests. |
+| `npm run check:static` | Runs the type and lint checks, then the source checks described below. |
 | `npm run check:all` | Runs `check`, the build, browser suites, and desktop smoke and sign-in checks. CI on GitHub runs the same steps as parallel jobs on every pull request and push to `main`, and the desktop checks on Windows as well; their required checks gate merging, so a local run is optional. |
 | `npm run screens` | Takes screenshots of every main screen into `out/` (add `-- 1440x900 --pdfs <folder>` for options). Needs `npm run serve`. |
 | `npm run package` | Optional local release ZIP containing the app, source, and `docs/`, written to `out/punchlist-<version>.zip`. |
+
+The static checks scan tracked files for secrets and attribution, and commit messages for attribution.
+After readability hints, `scripts/check-pane-of-glass.mjs` checks UI imports, service and repository access,
+and browser storage against the counts in `scripts/pane-of-glass-baseline.json`. If a change removes an access,
+run `node scripts/check-pane-of-glass.mjs --lower` and commit the lower baseline in the same pull request.
+The guard compares that baseline with the branch point on `main`. If the checkout lacks that history,
+the diagnostic gives the Git command to fetch it.
 
 The GitHub Actions workflow also builds the Windows installer when it is started by hand.
 
