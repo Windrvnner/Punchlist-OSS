@@ -197,6 +197,91 @@ it('keeps a draft discarded in the copy absent after restart and a stale draft s
 
 const lateDraft = { status: 'found' as const, text: 'AI response to discard', sources: [], forWording: 'wording' };
 
+it('uses the returned revision for a second forwarded save that removes a draft (#774)', async () => {
+  await withRecoveredQuestion(async ({ B, copied, lateTransaction }) => {
+    const first = lateTransaction({ response: 'The signed guarantee is available in the security package.' });
+    const write = first.writes[0];
+    const revision = okd(await B.repo.transaction(first)).value[write.id];
+    expect(revision).not.toBe(write.expectedRev);
+    const { draft: _draft, ...withoutDraft } = write.data as Question;
+    write.expectedRev = revision;
+    write.data = withoutDraft;
+
+    expect(await B.repo.transaction(first)).toMatchObject({ ok: true });
+    const saved = okd(await B.repo.get('question', copied.id)).value.envelope.data;
+    expect(saved).not.toHaveProperty('draft');
+    expect(saved).toMatchObject({ response: withoutDraft.response });
+  }, { draft: lateDraft });
+});
+
+it('restores a draft after a forwarded removal and a repository restart (#774)', async () => {
+  await withRecoveredQuestion(async ({ B, copied, lateWithout, lateTransaction }) => {
+    const restore = lateTransaction({});
+    const write = restore.writes[0];
+    const revision = okd(await lateWithout('draft')).value[write.id];
+    expect(revision).not.toBe(write.expectedRev);
+    write.expectedRev = revision;
+    const restarted = await restartRepository(B);
+    try {
+      expect(await restarted.transaction(restore)).toMatchObject({ ok: true });
+      const saved = okd(await restarted.get('question', copied.id)).value.envelope.data;
+      expect(saved).toMatchObject({ draft: lateDraft });
+    } finally {
+      await restarted.close();
+    }
+  }, { draft: lateDraft });
+});
+
+it('refuses a second save whose revision could name the original or the copy (#774)', async () => {
+  await withRecoveredQuestion(async ({ B, copied, lateTransaction }) => {
+    const first = lateTransaction({ response: 'The historical statements have been reconciled.' });
+    const putBack = lateTransaction({});
+    const write = putBack.writes[0];
+    const revision = okd(await B.repo.transaction(first)).value[write.id];
+    expect(revision).toBe(write.expectedRev);
+
+    expect(await B.repo.transaction(putBack)).toMatchObject({ ok: false });
+    const saved = okd(await B.repo.get('question', copied.id)).value.envelope.data;
+    expect(saved).toMatchObject({ response: 'The historical statements have been reconciled.' });
+  });
+});
+
+it('refuses a forwarded receipt after a newer save in the copy (#774)', async () => {
+  await withRecoveredQuestion(async ({ B, copied, copyId, lateTransaction }) => {
+    const first = lateTransaction({ response: 'The draft covenant certificate is available.' });
+    const putBack = lateTransaction({});
+    const write = putBack.writes[0];
+    write.expectedRev = okd(await B.repo.transaction(first)).value[write.id];
+    const newer = 'The signed covenant certificate has replaced the draft.';
+    const current = okd(await B.repo.get('question', copied.id)).value;
+    const data = { ...current.envelope.data, dealId: copyId, response: newer };
+    okd(await B.repo.transaction({ writes: [{ kind: 'question', id: copied.id, data, expectedRev: current.rev }] }));
+
+    expect(await B.repo.transaction(putBack)).toMatchObject({ ok: false });
+    const saved = okd(await B.repo.get('question', copied.id)).value.envelope.data;
+    expect(saved).toMatchObject({ response: newer, draft: lateDraft });
+  }, { draft: lateDraft });
+});
+
+it('preserves a direct edit already in the copy when a follow-up uses the forwarded receipt (#774)', async () => {
+  await withRecoveredQuestion(async ({ B, copied, copyId, lateTransaction }) => {
+    const newer = 'Provide the executed guarantee and its schedule of secured obligations.';
+    okd(await B.store.dispatch(EditQuestionField, {
+      dealId: copyId, questionId: copied.id, field: 'text', value: newer,
+    }));
+    const first = lateTransaction({ response: 'A draft is available in the security package.' });
+    const putBack = lateTransaction({});
+    const write = putBack.writes[0];
+    const revision = okd(await B.repo.transaction(first)).value[write.id];
+    expect(revision).not.toBe(write.expectedRev);
+    write.expectedRev = revision;
+
+    expect(await B.repo.transaction(putBack)).toMatchObject({ ok: true });
+    const saved = okd(await B.repo.get('question', copied.id)).value.envelope.data;
+    expect(saved).toMatchObject({ text: newer, response: '' });
+  });
+});
+
 it('removes a draft from the recovered copy when a late Discard Draft arrives (#664)', async () => {
   await withRecoveredQuestion(async ({ B, copied, lateWithout }) => {
     expect(copied.draft?.text).toBe('AI response to discard');
