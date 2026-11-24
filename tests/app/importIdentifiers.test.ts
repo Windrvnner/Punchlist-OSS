@@ -128,6 +128,12 @@ describe('a row naming another identifier is a question of its own', () => {
   it('keeps class. a and class. b separate even when both use the same question number (#778)', () => apart(
     'Please confirm the distribution rights for class. a shares.',
     'Please confirm the distribution rights for class. b shares.', 1));
+  it('keeps a Roman clause suffix separate from a decimal digit (#778)', () => apart(
+    'Please confirm the notice required under clause 4. I(a) of the agreement.',
+    'Please confirm the notice required under clause 4.1(a) of the agreement.', 1));
+  it('keeps a spaced decimal clause separate from its joined digits (#778)', () => apart(
+    'Please confirm the notice required under clause 4. 12(b) of the agreement.',
+    'Please confirm the notice required under clause 412(b) of the agreement.', 1));
 });
 
 describe('a misread or reworded row naming the same identifiers is still the question', () => {
@@ -147,6 +153,15 @@ describe('a misread or reworded row naming the same identifiers is still the que
   it('matches a reworded question by number when the clause identifier is spaced differently (#778)', () => matches(
     'Please confirm the consents required under clause 4.b of the facility agreement.',
     'Please confirm all consents required under clause 4. b of the facility agreement.', 1));
+  const dottedClauses = [['4.I', '4. I'], ['4.12(b)', '4. 12(b)'], ['4.b.12', '4. b . 12']];
+  for (const [compact, spaced] of dottedClauses) {
+    it(`matches a reworded question with clause ${compact} or ${spaced} (#778)`, () => matches(
+      `Please confirm the consents required under clause ${compact} of the facility agreement.`,
+      `Please confirm all consents required under clause ${spaced} of the facility agreement.`, 1));
+  }
+  it('keeps a sentence-start I as prose even when the space is missing (#778)', () => matches(
+    'Please send the list for each item.I understand it is in the data room.',
+    'Please send the list for each item. We understand it is in the data room folder.', 1));
   for (const [before, incoming] of PRONOUN) {
     it(`the word I is no identifier: ${incoming}`, () => matches(before, incoming, 1));
   }

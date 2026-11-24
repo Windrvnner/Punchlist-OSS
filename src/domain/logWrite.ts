@@ -82,11 +82,18 @@ const ROMAN_NUMERAL = /^(?=.)m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|
 export function misreadKey(s: string): string {
   return identifierText(s)
     .replace(/[\u2010-\u2015\u2212]/g, '-')                                             // dash shapes are one dash
-    .replace(/[^\s]*\d[^\s]*/g, (t) => t.replace(/[lI|](?=[\d.,]|$)|(?<=[\d.,])[lI|]/g, '1').replace(/[oO](?=[\d.,])|(?<=[\d.,])[oO]/g, '0'))   // l00, 2O24
+    .replace(/[^\s]*\d[^\s]*/g, repairNumberWord)
     .replace(QUESTION_WORD, repairWord)
     .toLowerCase()
     .replace(/(\d)\.(?=\d)/g, '$1\u0000').replace(/(\d),(?=\d)/g, '$1\u0001')            // a point or comma inside a number is kept, each as itself: 1,500 is not 1.500
     .replace(/[^\p{L}\p{M}\p{N}\u0000\u0001\-+()$€£¥<>/%:=|]/gu, '');
+}
+
+/** In a named clause, a dotted letter stays a letter through OCR repair (#778). */
+function repairNumberWord(word: string, offset: number, text: string): string {
+  if (isNamedDottedLetter(word, offset, text)) return word;
+  return word.replace(/[lI|](?=[\d.,]|$)|(?<=[\d.,])[lI|]/g, '1')
+    .replace(/[oO](?=[\d.,])|(?<=[\d.,])[oO]/g, '0');
 }
 
 /** Repair initial I or i before a lowercase word. A period could belong to an abbreviation. */
@@ -146,19 +153,38 @@ const QUESTION_TOKEN = /[\p{L}\p{M}\p{N}|]+(?:[.,][\p{L}\p{M}\p{N}|]+)*/gu;
 /** words a letter or numeral after them names: Class a, Tranche ii, part e */
 const NAMING_WORDS = new Set(('annex appendix article block class clause exhibit facility item limb lot paragraph '
   + 'part phase rule schedule section series tier tranche unit').split(' '));
-const DOTTED_SUFFIX = /(?<!\s)\s*\.(\s*)(\p{L}+)(?![\p{L}\p{M}\p{N}|])/gu;
-const DOTTED_NAME_BEFORE = /(?<![\p{L}\p{M}\p{N}|])(\p{L}+)(\s+\p{N}+(?:[.,]\p{N}+)*)?$/u;
+const DOTTED_SUFFIX = /(?<!\s)\s*\.\s*([\p{L}\p{N}]+)(?![\p{L}\p{M}\p{N}|])/gu;
+const DOTTED_PART = /\p{N}+|[ivxlcdm]+|\p{L}/iu.source;
+const DOTTED_NAME_BEFORE = new RegExp(
+  String.raw`(?<![\p{L}\p{M}\p{N}|])(\p{L}+)([\s:-]+\p{N}+(?:\s*[.,]\s*(?:${DOTTED_PART}))*)?$`, 'iu',
+);
+const DOTTED_NUMBER_LETTER = /^\p{N}+(?:[.,]\p{N}+)*\.(\p{L}+)(?![\p{L}\p{M}\p{N}|])/u;
+const CLAUSE_CONTINUES = /^\s+(?:of|in|under|above|below|for|to|from|and|or)\b/iu;
 
 /** Read dotted labels alike for both wording and identifier comparison (#778). */
 function identifierText(text: string): string {
-  return text.normalize('NFKC').replace(DOTTED_SUFFIX, (match, spacing, letter, offset, normalized) => {
-    if (!identifierLetter(letter)) return match;
-    // After a sentence's full stop, "I understand" is still prose.
-    if (spacing && letter === 'I' && couldBePronounI(letter, normalized.slice(offset + match.length))) return match;
-    const name = DOTTED_NAME_BEFORE.exec(normalized.slice(0, offset));
-    if (!name || !NAMING_WORDS.has(name[1].toLowerCase())) return match;
-    return name[2] ? `.${letter}` : ` ${letter}`;
+  return text.normalize('NFKC').replace(DOTTED_SUFFIX, (match, suffix, offset, normalized) => {
+    const numeric = /^\p{N}+$/u.test(suffix);
+    if (!numeric && !identifierLetter(suffix)) return match;
+    const name = dottedNameBefore(normalized, offset);
+    if (!name || (numeric && !name[2])) return match;
+    const after = normalized.slice(offset + match.length);
+    // "item.I understand" is prose. In "clause 4. I of", the clause reference continues after I.
+    if (suffix === 'I' && couldBePronounI(suffix, after) && !(name[2] && CLAUSE_CONTINUES.test(after))) return match;
+    return name[2] ? `.${suffix}` : ` ${suffix}`;
   });
+}
+
+function dottedNameBefore(text: string, offset: number): RegExpExecArray | null {
+  const name = DOTTED_NAME_BEFORE.exec(text.slice(0, offset).trimEnd());
+  return name && NAMING_WORDS.has(name[1].toLowerCase()) ? name : null;
+}
+
+function isNamedDottedLetter(token: string, offset: number, text: string): boolean {
+  const suffix = DOTTED_NUMBER_LETTER.exec(token)?.[1];
+  if (!suffix || !identifierLetter(suffix)) return false;
+  const name = dottedNameBefore(text, offset);
+  return !!name && !name[2];
 }
 
 const identifierLetter = (token: string) => /^\p{L}$/u.test(token) || ROMAN_NUMERAL.test(token);
@@ -170,10 +196,13 @@ const couldBePronounI = (token: string, after: string) => /^[Iil|]$/.test(token)
  * naming word ("(a)", "class b", "tranche ii"). Sorted, so two lists compare in one walk.
  */
 export function identifiers(text: string): string[] {
-  const normal = identifierText(text);
+  return identifiersIn(identifierText(text));
+}
+
+function identifiersIn(text: string): string[] {
   const found: string[] = [];
-  for (const match of normal.matchAll(QUESTION_TOKEN)) {
-    const form = identifierForm(match[0], match.index, normal);
+  for (const match of text.matchAll(QUESTION_TOKEN)) {
+    const form = identifierForm(match[0], match.index, text);
     if (form !== undefined) found.push(form);
   }
   return found.sort();
@@ -184,7 +213,9 @@ export function identifiers(text: string): string[] {
  * "I" however it was read ("I understand", "can I send"), unless a naming word comes before it ("Class I shares").
  */
 function identifierForm(token: string, offset: number, text: string): string | undefined {
-  if (/\p{N}/u.test(token)) return numberForm(token);
+  if (/\p{N}/u.test(token)) {
+    return isNamedDottedLetter(token, offset, text) ? token.toLowerCase() : numberForm(token);
+  }
   if (namedLetter(token, offset, text)) return token.toLowerCase();
   if (couldBePronounI(token, text.slice(offset + 1))) return undefined;
   const capitals = /^\p{Lu}+$/u.test(token);
@@ -226,8 +257,9 @@ function numberForm(token: string): string {
  */
 export interface IdentifierSig { plain: string; ids: string[] }
 export function identifierSig(text: string): IdentifierSig {
-  const plain = text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}.,]|(?<!\p{N})[.,]|[.,](?!\p{N})/gu, '');
-  return { plain, ids: identifiers(text) };
+  const normalized = identifierText(text);
+  const plain = normalized.toLowerCase().replace(/[^\p{L}\p{M}\p{N}.,]|(?<!\p{N})[.,]|[.,](?!\p{N})/gu, '');
+  return { plain, ids: identifiersIn(normalized) };
 }
 
 /**
