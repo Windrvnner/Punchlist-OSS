@@ -94,6 +94,7 @@ function readInstalled(text: string): { saved: Installed; damaged: boolean } {
 const INSTALL = 'install.json', SPARE = 'install.spare.json';
 /** the install id in a change file's name (`changes-<id>-<deal>-<number>.jsonl`), or null */
 const idOfFile = (name: string) => /^changes-(.+)-[A-Za-z0-9_]+-\d{4,}\.jsonl$/.exec(name)?.[1] ?? null;
+const idOfPlaceFile = (name: string) => /^place-(.+)\.json$/.exec(name)?.[1];
 
 /** A file's whole lines under an id (one cut off, or ended by healing a torn write, is passed over). */
 function linesOf(text: string, id: string): { l: string; at: string }[] {
@@ -107,12 +108,13 @@ function linesOf(text: string, id: string): { l: string; at: string }[] {
   });
 }
 
-/** Whether a folder record (`place-<id>.json`) marks its id as left after a copy was found (#29). */
-function leftIn(record: string | null): boolean {
+type PlaceRecord = { place?: unknown; machine?: unknown; left?: unknown; previous?: unknown };
+
+function readPlaceRecord(text: string | null): PlaceRecord {
   try {
-    return JSON.parse(record ?? 'null')?.left === true;
+    return JSON.parse(text ?? 'null') ?? {};
   } catch {
-    return false;
+    return {};
   }
 }
 
@@ -426,8 +428,7 @@ export class LogRepository implements Repository {
     }
     // another shared folder: this PC's id there (a new one the first time), so what it wrote in the last folder stays out of this one
     if (id && o.place && saved.place && saved.place !== o.place) id = this.ids[o.place] ?? '';
-    // No id known for this folder, and what this PC kept about itself lost, now or before: the id its own change files
-    // there give, so it carries on under it with its undo journal
+    // Recover a missing id for this folder from its change files or its carried Undo journal.
     if (!id && !copied && this.lost) id = this.ownId(saved) ?? '';
     if (!id) id = (o.newId ?? (() => globalThis.crypto.randomUUID()))();
     this.id = id; if (o.place) this.ids[o.place] = id;
@@ -442,7 +443,7 @@ export class LogRepository implements Repository {
       this.keepPlaceRecord(carry, true);
     }
     const now = this.install(id);
-    this.keepPlaceRecord(id);
+    this.keepPlaceRecord(id, false, this.previous ?? undefined);
     this.keepInstall(JSON.stringify(now), texts);
     this.changes = new LocalChanges(o.local, id);
     this.ownLines = new Set(this.changes.ownLines(id));
@@ -606,9 +607,10 @@ export class LogRepository implements Repository {
     // does not hold up the start, since install.json holds all of it (the spare is written first, so it is never behind)
     for (const r of read) if (r?.damaged) { try { this.keepAside(r.name, r.text); } catch (e) { if (r.name !== SPARE || whole?.name !== INSTALL) throw e; } }
     if (whole) return { saved: whole.saved, lost: false, texts };
-    // neither there, or nothing whole in either and no change files kept here (cut off at the very first write): a new install
-    const kept = () => { try { return o.local.list().some((n) => CHANGE_FILE.test(n)); } catch { return true; } };
-    if (!read.some((r) => r && Object.keys(r.saved).length) && !kept()) return { saved: {}, lost: false, texts };
+    // Neither copy contains recognizable metadata, and no local change or journal was written: a new install.
+    if (!read.some((r) => r && Object.keys(r.saved).length) && !this.hasInstallHistory()) {
+      return { saved: {}, lost: false, texts };
+    }
     // neither is whole: what is whole in one of them, install.json first, so that its ids and folders are never mixed with
     // the other's (which may be a write behind); the machine, the same in both, from either
     const [main, spare] = read; const one = main && (main.saved.id || main.saved.ids) ? main : (spare ?? main);
@@ -619,6 +621,26 @@ export class LogRepository implements Repository {
     // this folder's id as the map of them still gives it, when the one at the top was lost
     if (o.place && !saved.id && saved.ids?.[o.place]) { saved.id = saved.ids[o.place]; saved.place = o.place; }
     return { saved, lost: true, texts };
+  }
+
+  private hasInstallHistory(): boolean {
+    try {
+      const names = new Set(this.o.local.list());
+      if ([...names].some((name) => CHANGE_FILE.test(name))) return true;
+      if (!this.o.place) return false;
+      for (const name of names) {
+        const id = idOfPlaceFile(name);
+        if (id && this.hasPlaceJournal(id, names)) return true;
+      }
+      return false;
+    } catch {
+      return true;
+    }
+  }
+
+  private hasPlaceJournal(id: string, localNames: ReadonlySet<string>): boolean {
+    const name = `ops-${id}.json`;
+    return this.o.journal ? this.o.journal.read(name) != null : localNames.has(name);
   }
   /** Keep a damaged file's text aside before it is written again, once: a start tried again does not keep another copy. Throws when it cannot be kept. */
   private keepAside(name: string, text: string) {
@@ -636,8 +658,8 @@ export class LogRepository implements Repository {
     if (was[0] !== text) this.o.local.write(INSTALL, text);
   }
   /**
-   * This PC's id in this shared folder, from its own change files, when what it kept about itself is lost. An id is
-   * taken only when it is recorded for this folder (`place-<id>.json`, on the desktop, which names its folder), with a copy
+   * Recover this PC's id in this shared folder when its install metadata is lost. A written id is taken only when
+   * it is recorded for this folder (`place-<id>.json`, on the desktop, which names its folder), with a copy
    * kept here of every file it has in the folder, and no whole line there under that id that the copies here do not hold:
    * its lines are written here first, so such a line is another PC writing under that id (this local folder was copied from
    * it). An id it is known to use in another folder, or to have left behind in one, is passed over. Of several, the one
@@ -649,6 +671,11 @@ export class LogRepository implements Repository {
     // with a named folder, only an id recorded for it (place-<id>.json): its files and lines cannot tell a copy of the folder from it
     const mine = (i: string) => { if (!o.place) return true; try { return JSON.parse(o.local.read(`place-${i}.json`) ?? 'null')?.place === o.place; } catch { return false; } };
     const localNames = o.local.list();
+    const journals = this.journalPlaceRecords(localNames);
+    // The successor proves retirement even if marking the old record as left was refused (#750).
+    for (const { previous } of journals.values()) {
+      if (isText(previous)) not.add(previous);
+    }
     const kept = new Map<string, string[]>();
     for (const name of localNames) {
       const candidate = idOfFile(name);
@@ -681,21 +708,37 @@ export class LogRepository implements Repository {
       if (!ahead) found.push([i, here]);
     }
     const written = found.sort((a, b) => (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : 0))[0]?.[0];
-    return written ?? this.unwrittenJournalId(localNames, sharedNames, not);
+    return written ?? this.unwrittenJournalId(journals, localNames, sharedNames, not);
+  }
+
+  /** Only folder records with local journals are recovery candidates. */
+  private journalPlaceRecords(localNames: string[]): Map<string, PlaceRecord> {
+    const { local, place } = this.o;
+    const machine = this.o.machine?.();
+    const journals = new Map<string, PlaceRecord>();
+    if (!place || !machine) return journals;
+    const names = new Set(localNames);
+    for (const name of names) {
+      const id = idOfPlaceFile(name);
+      if (!id || !this.hasPlaceJournal(id, names)) continue;
+      const record = readPlaceRecord(local.read(name));
+      if (record.place === place && record.machine === machine) journals.set(id, record);
+    }
+    return journals;
   }
 
   /** A replacement id can have a carried Undo journal before it writes any changes (#750). */
-  private unwrittenJournalId(localNames: string[], sharedNames: string[], excluded: Set<string>): string | null {
-    const { local, place } = this.o;
-    const machine = this.o.machine?.();
-    if (!place || !machine) return null;
-    const journal = this.o.journal ?? local;
+  private unwrittenJournalId(
+    journals: ReadonlyMap<string, PlaceRecord>,
+    localNames: string[],
+    sharedNames: string[],
+    excluded: ReadonlySet<string>,
+  ): string | null {
     const changes = [...localNames, ...sharedNames].filter((name) => CHANGE_FILE.test(name));
     let candidate: string | null = null;
-    for (const name of localNames) {
-      const id = /^place-(.+)\.json$/.exec(name)?.[1];
-      if (!id || excluded.has(id) || changes.some((file) => file.startsWith(`changes-${id}-`))) continue;
-      if (!this.activePlaceRecord(local.read(name), machine) || journal.read(`ops-${id}.json`) == null) continue;
+    for (const [id, record] of journals) {
+      if (record.left === true || excluded.has(id)) continue;
+      if (changes.some((file) => file.startsWith(`changes-${id}-`))) continue;
       // There is no change history to tell which of two apparently active journals is this one's.
       if (candidate) return null;
       candidate = id;
@@ -712,16 +755,8 @@ export class LogRepository implements Repository {
     const here = this.o.machine?.();
     if (!this.o.place || !here) return false;
     try {
-      return this.activePlaceRecord(this.o.local.read(`place-${id}.json`), here);
-    } catch {
-      return false;
-    }
-  }
-
-  private activePlaceRecord(text: string | null, machine: string): boolean {
-    try {
-      const record = JSON.parse(text ?? 'null');
-      return record?.place === this.o.place && record.machine === machine && record.left !== true;
+      const record = readPlaceRecord(this.o.local.read(`place-${id}.json`));
+      return record.place === this.o.place && record.machine === here && record.left !== true;
     } catch {
       return false;
     }
@@ -733,16 +768,20 @@ export class LogRepository implements Repository {
    * with no file left in the shared folder can still be taken back on this PC (#29). An id left after a copy was found
    * is marked, and the mark is never dropped, so it is never taken back that way: the copy may still be writing under
    * it. Tried again at each start until it is there (the left id while it is the last id in this folder).
+   * A successor also records its predecessor in case the old record is held when the journal is carried (#750).
    */
-  private keepPlaceRecord(id: string, left = false) {
+  private keepPlaceRecord(id: string, left = false, previous?: string) {
     const here = this.o.machine?.();
     if (!this.o.place) return;
     try {
       const name = `place-${id}.json`;
       const kept = this.o.local.read(name);
+      const saved = readPlaceRecord(kept);
       const machine = here ? { machine: here } : {};
-      const mark = left || leftIn(kept) ? { left: true } : {};
-      const record = JSON.stringify({ place: this.o.place, ...machine, ...mark });
+      const mark = left || saved.left === true ? { left: true } : {};
+      const predecessor = previous ?? saved.previous;
+      const retired = isText(predecessor) && predecessor !== id ? { previous: predecessor } : {};
+      const record = JSON.stringify({ place: this.o.place, ...machine, ...mark, ...retired });
       if (kept !== record) this.o.local.write(name, record);
     } catch { /* the next start */ }
   }
