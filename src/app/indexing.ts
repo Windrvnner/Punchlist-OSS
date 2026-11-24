@@ -115,6 +115,24 @@ function coreDocuments(
   return core;
 }
 
+export type FolderProgressNotice = { kind: 'away' | 'empty'; label?: { count: number; all: boolean } };
+
+function summaryNotice(away: number, empty: number, folders: number): FolderProgressNotice | undefined {
+  if (away) return { kind: 'away', label: { count: away, all: away === folders } };
+  if (empty) return { kind: 'empty', label: { count: empty, all: empty === folders } };
+  return undefined;
+}
+
+function folderNotice(
+  away: boolean, empty: boolean, summary: FolderProgressNotice | undefined, grouped: boolean,
+): FolderProgressNotice | undefined {
+  // When the summary names inaccessible folders, an empty folder still gets its own label.
+  if (away) return grouped ? { kind: 'away' } : summary;
+  if (!empty) return undefined;
+  if (summary?.kind === 'away') return { kind: 'empty', label: { count: 1, all: true } };
+  return grouped ? { kind: 'empty' } : summary;
+}
+
 /** Overview's reading progress follows the deal's folder order and shows the state of folders on this PC. */
 export function folderProgress(
   state: Pick<State, 'deals' | 'indexing' | 'progress' | 'ui'>, deal: Pick<Deal, 'id' | 'folders' | 'stage'>,
@@ -122,7 +140,7 @@ export function folderProgress(
   const progress = state.progress[deal.id];
   const reading = progress?.folders ?? [];
   const { away, empty } = unavailableFolders(state.ui.missingFolders, deal.id);
-  const rows = liveFolders(state, deal).map((folder) => ({
+  const folders = liveFolders(state, deal).map((folder) => ({
     key: folder.path,
     name: folder.label || folder.path,
     title: folder.path,
@@ -130,18 +148,25 @@ export function folderProgress(
     away: away.has(folder.path),
     empty: empty.has(folder.path),
   }));
-  const awayCount = rows.filter((row) => row.away).length;
-  const emptyCount = rows.filter((row) => row.empty).length;
-  const total = rows.length > 1 ? readingTotals(rows) : null;
-  const core = coreDocuments(reading, away, empty, awayCount > 0 || emptyCount > 0);
+  const awayCount = folders.filter((folder) => folder.away).length;
+  const emptyCount = folders.filter((folder) => folder.empty).length;
+  const grouped = folders.length > 1;
+  const summary = summaryNotice(awayCount, emptyCount, folders.length);
+  const rows = folders.map(({ away, empty, ...row }) => ({
+    ...row, notice: folderNotice(away, empty, summary, grouped),
+  }));
+  const total = grouped ? { ...readingTotals(rows), notice: summary } : null;
+  const core = coreDocuments(reading, away, empty, Boolean(summary));
   // Only the first two reported matches are considered, even if one of those deals is no longer present.
   const alsoIn = (progress?.alsoIn ?? []).slice(0, 2).flatMap(({ dealId, docs, of }) => {
     const match = state.deals[dealId];
     return match ? [{ deal: match, docs, of: Math.max(of, docs) }] : [];
   });
   return {
-    rows, total, folderCount: rows.length, awayCount, emptyCount, core, alsoIn,
-    stopped: deal.stage === 'indexing' && state.ui.indexStalled.includes(deal.id),
+    rows, total, folderCount: folders.length, core, alsoIn,
+    showLocate: Boolean(summary),
+    showFolders: awayCount === 0,
+    stopped: indexingStopped(state, deal),
   };
 }
 

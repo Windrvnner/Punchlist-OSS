@@ -6,7 +6,7 @@ import { AI_LABEL } from '../control';
 import type { Deal } from '../domain/model';
 import { askAbout, dealHash, dealTwin, type UiState } from '../app/state';
 import { checklistListCounts, checklistStandingCounts, findingCounts, questionCounts } from '../app/dealCounts';
-import { folderProgress, overviewStatus } from '../app/indexing';
+import { folderProgress, overviewStatus, type FolderProgressNotice } from '../app/indexing';
 import { openLocate } from '../app/relink';
 import { PageTop, Stalled, NoRoom, INDEXING_LINE, INDEXING_TIP, useDealLock } from './deal';
 import { EditField, ReadOnlyContext, readDeal } from './editField';
@@ -257,29 +257,14 @@ const pct = (n: number, of: number) => (of > 0 ? Math.min(100, Math.max(n ? 1 : 
 
 type FolderProgress = ReturnType<typeof folderProgress>;
 type FolderRow = FolderProgress['rows'][number];
-type FolderNotice = { kind: 'away' | 'empty'; label?: string; tip?: string };
-
-function emptyFolderNotice(emptyCount: number, folderCount: number): FolderNotice {
+function folderNoticeText({ kind, label }: FolderProgressNotice) {
+  if (!label) return {};
+  const { count, all } = label;
+  if (kind === 'away') return { text: all ? 'Not on this PC' : `${num(count)} not on this PC` };
   return {
-    kind: 'empty',
-    label: emptyCount === folderCount ? 'Files not found' : `Files not found in ${num(emptyCount)}`,
-    tip: emptyCount > 1 ? EMPTIES_TIP : EMPTY_TIP,
+    text: all ? 'Files not found' : `Files not found in ${num(count)}`,
+    tip: count > 1 ? EMPTIES_TIP : EMPTY_TIP,
   };
-}
-
-function folderNotice(row: FolderRow, progress: FolderProgress): FolderNotice | undefined {
-  const { awayCount, emptyCount, folderCount, total } = progress;
-  const summary = !row.key;
-  const showLabel = summary || !total;
-  if (awayCount) {
-    if (row.empty) return { kind: 'empty', label: 'Files not found', tip: EMPTY_TIP };
-    if (!summary && !row.away) return undefined;
-    if (!showLabel) return { kind: 'away' };
-    const label = awayCount === folderCount ? 'Not on this PC' : `${num(awayCount)} not on this PC`;
-    return { kind: 'away', label };
-  }
-  if (!emptyCount || (!summary && !row.empty)) return undefined;
-  return showLabel ? emptyFolderNotice(emptyCount, folderCount) : { kind: 'empty' };
 }
 
 function documentStatus(row: FolderRow, stopped: boolean) {
@@ -301,13 +286,14 @@ function FolderDocumentBar({ row, live }: { row: FolderRow; live: boolean }) {
 
 function FolderDocumentRow({ row, progress }: { row: FolderRow; progress: FolderProgress }) {
   const className = `dcrow ${row.key && progress.total ? 'part' : ''}`;
-  const notice = folderNotice(row, progress);
+  const { notice } = row;
   const title = row.title || undefined;
   if (notice) {
     const marker = notice.kind === 'away' ? { 'data-away': '' } : { 'data-empty': '' };
+    const { text, tip } = folderNoticeText(notice);
     return <div class={className} data-folder={row.key} {...marker}>
       <span class="fn awayfn" title={title}>{row.name}</span>
-      <span class={`rd ${notice.label ? 'away' : ''}`} title={notice.tip}>{notice.label}</span>
+      <span class={`rd ${text ? 'away' : ''}`} title={tip}>{text}</span>
     </div>;
   }
   const live = row.indexing && !progress.stopped;
@@ -347,19 +333,19 @@ function Documents({ deal: d }: { deal: Deal }) {
   const store = useStore();
   const s = useAppState();
   const progress = folderProgress(s, d);
-  const { rows, total, folderCount, awayCount, emptyCount, core, alsoIn } = progress;
+  const { rows, total, folderCount, core, alsoIn, showLocate, showFolders } = progress;
   const display = total
-    ? [{ ...total, key: '', name: `${folderCount} folders`, title: '', away: false, empty: false }, ...rows]
+    ? [{ ...total, key: '', name: `${folderCount} folders`, title: '' }, ...rows]
     : rows;
   return <>
     <div class="lbl flagsl">
       <span role="heading" aria-level={2}>Documents</span>
       <span class="lblacts">
-        {(awayCount || emptyCount) > 0 && <button type="button" class="btn sm act" id="f-locate"
+        {showLocate && <button type="button" class="btn sm act" id="f-locate"
           aria-haspopup="dialog" onClick={() => openLocate(store)}>
           <Icon name="folder" size={14} /><span>Locate…</span>
         </button>}
-        {!awayCount && <button type="button" class="btn sm act" id="f-folders" aria-haspopup="dialog"
+        {showFolders && <button type="button" class="btn sm act" id="f-folders" aria-haspopup="dialog"
           onClick={() => store.ui({ newDeal: { name: d.name, folders: [], error: '', busy: false, forDeal: d.id } })}>
           <Icon name="folder" size={14} /><span>Folders</span>
         </button>}
