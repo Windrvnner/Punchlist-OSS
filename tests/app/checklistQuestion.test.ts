@@ -92,17 +92,43 @@ it('clears the checklist text and finding at the recovered key when the original
   card.begin(state.findings[ratio.id].id);
   card.write(question);
   const sent = questionDraftAt(original, movedId, texts, card.clear);
-  const saving = logQuestionDraft(question, sent, async () => ({ ok: true }), () => false);
+  const saving = logQuestionDraft(question, sent, async () => ({ ok: true }), () => false, card.captureTarget());
+  moved.set(ratio.id, 'copied-ratio');
+  moved.set('copied-ratio', 'latest-ratio');
   moved.set(original, 'copied-item');
   moved.set('copied-item', 'latest-item');
   for (const kept of [texts, targets]) {
     kept.set('latest-item', kept.get(original)!);
     kept.delete(original);
   }
+  drafts.followCopy();
   const other = drafts.open('distribution-period');
   other.begin(period.id);
   other.write(question);
   expect(await saving).toBe(true);
   expect([...texts]).toEqual([['distribution-period', question]]);
   expect([...targets]).toEqual([['distribution-period', period.id]]);
+});
+
+it('keeps identical text reopened on a different finding while the earlier log is still out', async () => {
+  const state = checkedPortfolio();
+  const drafts = checklistDrafts({ texts: new Map(), targets: new Map(), movedId: (id) => id });
+  const first = drafts.open(row.id);
+  const words = 'When will the executed agreement reflect the distribution test?';
+  first.begin(ratio.id);
+  first.write(words);
+  const sent = questionDraftAt(row.id, (key) => key, drafts.texts, first.clear);
+  const saving = logQuestionDraft(words, sent, async () => ({ ok: true }), () => false, first.captureTarget());
+  first.write('');
+  const second = drafts.open(row.id);
+  second.begin(period.id);
+  second.write(words);
+  expect(await saving).toBe(false);
+  const reopened = drafts.open(row.id);
+  expect(reopened.text).toBe(words);
+  expect(checklistQuestionTarget(state, row, false, reopened.findingId).links.linkedFinding).toBe(period.id);
+  const later = questionDraftAt(row.id, (key) => key, drafts.texts, reopened.clear);
+  expect(await logQuestionDraft(words, later, async () => ({ ok: true }), () => false, reopened.captureTarget()))
+    .toBe(true);
+  expect(drafts.open(row.id).text).toBe('');
 });

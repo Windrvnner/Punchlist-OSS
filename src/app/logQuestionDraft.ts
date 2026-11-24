@@ -30,9 +30,10 @@ export function questionLogKey(draftKey: string, pending: Iterable<string>, move
 /** Whether to settle the card on screen. A save sent before Cancel lands but leaves any new draft alone (#843). */
 export async function logQuestionDraft(
   text: string, draft: QuestionDraft, dispatch: () => Promise<{ ok: boolean }>, cancelled: () => boolean,
+  sameTarget?: () => boolean,
 ): Promise<boolean> {
   const result = await dispatch();
-  if (cancelled()) return false;
+  if (cancelled() || (sameTarget && !sameTarget())) return false;
   if (result.ok && draft.read()?.trim() === text) draft.forget();
   return true;
 }

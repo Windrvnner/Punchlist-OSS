@@ -4,6 +4,7 @@ import { latestKey } from './logQuestionDraft';
 /** The draft text and finding IDs use their existing maps so questions typed before an update also reopen. */
 export function checklistDrafts({ texts, targets, movedId }: ChecklistDraftMaps) {
   const latest = (key: string) => latestKey(key, movedId);
+  const latestFinding = (id?: string) => id && latest(id);
   const open = (key: string) => {
     const currentKey = () => latest(key);
     let original = targets.get(currentKey());
@@ -23,7 +24,12 @@ export function checklistDrafts({ texts, targets, movedId }: ChecklistDraftMaps)
     };
     return {
       get text() { return texts.get(currentKey()) ?? ''; },
-      get findingId() { return original ? latest(original) : undefined; },
+      get findingId() { return latestFinding(original); },
+      // Identical words can belong to a new question on a different finding while the first Log is pending.
+      captureTarget() {
+        const sent = targets.get(currentKey());
+        return () => latestFinding(sent) === latestFinding(targets.get(currentKey()));
+      },
       begin(currentId?: string, suggested?: string) {
         const kept = texts.get(currentKey());
         if (kept) return kept;

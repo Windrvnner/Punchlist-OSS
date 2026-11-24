@@ -27,7 +27,8 @@ export function useChecklistDraft(key: string, currentFindingId?: string) {
     setTextState('');
     stopAsking();
   };
-  const { busy, log, cancel } = useLogQuestion(keptChecklistQuestions.texts, key, draft.clear, settle);
+  const { busy, log, cancel } = useLogQuestion(keptChecklistQuestions.texts, key, draft.clear, settle,
+    draft.captureTarget);
   const findingId = asking || kept ? draft.findingId : undefined;
   return { asking, text, setText, kept, findingId, begin, stopAsking, busy, log, cancel };
 }

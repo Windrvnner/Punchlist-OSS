@@ -53,6 +53,7 @@ export function AskedList({ dealId, qs, id }: { dealId: string; qs: Question[]; 
  */
 export function useLogQuestion(
   drafts: Map<string, string>, key: string, forget: (currentKey: string) => void, settle: () => void,
+  captureTarget?: () => () => boolean,
 ) {
   const saveKey = questionLogKey(key, pendingSaveKeys(), moveKey);
   const out = useSaveOut(saveKey, (current: boolean) => {
@@ -60,7 +61,7 @@ export function useLogQuestion(
   });
   const draft = questionDraftAt(key, moveKey, drafts, forget);
   const log = (text: string, dispatch: () => Promise<{ ok: boolean }>) =>
-    out.send((cancelled) => logQuestionDraft(text, draft, dispatch, cancelled));
+    out.send((cancelled) => logQuestionDraft(text, draft, dispatch, cancelled, captureTarget?.()));
   const cancel = () => {
     out.cancel();
     draft.forget();
