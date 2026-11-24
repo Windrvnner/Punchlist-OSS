@@ -6,18 +6,19 @@ import { checklistQuestionTarget } from './checklistQuestion';
 import { findingItem, namedItem, type State } from './state';
 
 export const AskOrigin = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('finding'), findingId: FindingId, itemId: z.string().min(1).optional() }),
+  z.object({ kind: z.literal('finding'), findingId: FindingId, itemId: z.string().min(1).nullable() }),
   z.object({ kind: z.literal('checklist'), itemId: z.string().min(1), findingId: FindingId.optional() }),
 ]);
 
-function fromFinding(state: State, dealId: string, findingId: string, itemId?: string) {
+function fromFinding(state: State, dealId: string, findingId: string, itemId: string | null) {
   const finding = state.findings[findingId];
   if (finding?.dealId !== dealId) return fail(notFound('That finding is not on this deal', findingId));
   const item = findingItem(state, finding);
   const target = findingAskTarget(finding, item);
   if (target.why) return fail(rejected(target.why));
-  if (itemId && item?.id !== itemId) return fail(rejected('The checklist item changed or could not be read'));
-  return ok(target.links);
+  if (itemId !== null && item?.id !== itemId) return fail(rejected('The checklist item changed or could not be read'));
+  // A row that appeared while the ask waited cannot add a link the person did not submit.
+  return ok({ ...target.links, linkedItem: itemId ?? undefined });
 }
 
 function fromChecklist(state: State, dealId: string, itemId: string, findingId?: string) {

@@ -83,7 +83,7 @@ export function FindingLinks({ dealId, f, pane }: { dealId: string; f: Finding; 
     if (draft.busy || !draft.text.trim() || why) return;
     const text = draft.text.trim();
     await draft.log(text, () => store.dispatch(CreateQuestion, {
-      dealId, text, askOrigin: { kind: 'finding', findingId: f.id, itemId: target.links.linkedItem },
+      dealId, text, askOrigin: { kind: 'finding', findingId: f.id, itemId: target.links.linkedItem ?? null },
     },
       { idempotencyKey: 'f-q-' + f.id }));
   };

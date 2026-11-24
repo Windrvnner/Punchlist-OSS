@@ -215,7 +215,9 @@ it('refuses a queued ask after its finding closes and keeps the question text he
   const created = store.dispatch(CreateQuestion, { dealId, text: 'Provide the exposure summary for the new asset.' });
   await pending.held;
   const ask = logQuestionDraft(text, draft, async () => {
-    const result = await store.dispatch(CreateQuestion, { dealId, text, askOrigin: { kind: 'finding', findingId } });
+    const result = await store.dispatch(CreateQuestion, {
+      dealId, text, askOrigin: { kind: 'finding', findingId, itemId: null },
+    });
     expect(result).toMatchObject({ ok: false, error: { message: 'This finding is closed' } });
     return result;
   }, () => false);
@@ -227,7 +229,9 @@ it('refuses a queued ask after its finding closes and keeps the question text he
   expect(Object.values(store.get().questions).some((question) => question.text === text)).toBe(false);
 });
 
-async function linkedAskFor(screen: 'checklist' | 'finding', store: Store, dealId: string) {
+const askCases = ['checklist', 'linked finding', 'unlinked finding'] as const;
+
+async function askFor(screen: typeof askCases[number], store: Store, dealId: string) {
   if (screen === 'checklist') {
     const items = [{ text: agreement.text, from: [{ layer: 'deal' as const, value: '' }] }];
     expect((await store.dispatch(AddDealItems, { dealId, items })).ok).toBe(true);
@@ -239,13 +243,35 @@ async function linkedAskFor(screen: 'checklist' | 'finding', store: Store, dealI
   // This earlier finding has no own item ID. Its check row names the association.
   const findingId = Object.keys(store.get().findings)[0];
   const row: ChecklistRow = { ...agreement, result: 'finding', findingId };
-  return { row, origin: { kind: screen, findingId, itemId: row.id } };
+  return { row, origin: { kind: 'finding' as const, findingId, itemId: screen === 'linked finding' ? row.id : null } };
 }
 
-it.each(['checklist', 'finding'] as const)('retries a linked %s ask from Home after a restart', async (screen) => {
-  const { store, repo, kv, dealId, rows } = await closeFixture();
-  const { row, origin } = await linkedAskFor(screen, store, dealId);
+it('leaves a queued finding ask unlinked when a check names its item before the write', async () => {
+  const { store, repo, dealId, rows } = await closeFixture();
+  const { row, origin } = await askFor('unlinked finding', store, dealId);
+  const finding = store.get().findings[row.findingId!];
+  expect(findingItem(store.get(), finding)).toBeNull();
+  const pending = holdNextQuestionWrite(repo);
+  const created = store.dispatch(CreateQuestion, { dealId, text: 'Provide the portfolio insurance certificates.' });
+  await pending.held;
+  const text = 'Which lender consent is needed before the first draw?';
+  const ask = store.dispatch(CreateQuestion, { dealId, text, askOrigin: origin });
   rows([row]);
+  await store.refreshChecklist(dealId);
+  const namedItemId = findingItem(store.get(), finding)?.id;
+  pending.release();
+  expect(namedItemId).toBe(row.id);
+  expect((await created).ok).toBe(true);
+  expect((await ask).ok).toBe(true);
+  const saved = Object.values(store.get().questions).find((question) => question.text === text);
+  expect(saved?.linkedFinding).toBe(finding.id);
+  expect(saved?.linkedItem).toBeUndefined();
+});
+
+it.each(askCases)('retries the %s ask from Home with its original association', async (screen) => {
+  const { store, repo, kv, dealId, rows } = await closeFixture();
+  const { row, origin } = await askFor(screen, store, dealId);
+  rows(origin.itemId === null ? [] : [row]);
   await store.refreshChecklist(dealId);
   const text = 'Can you provide the executed direct agreement and the lender consents?';
   const held = holdRecoveryWrite({ store, repo, saved: kv }, (tx) => tx.writes.some(({ kind }) => kind === 'question'));
@@ -260,8 +286,9 @@ it.each(['checklist', 'finding'] as const)('retries a linked %s ask from Home af
   await reopened.boot();
   expect(reopened.get().checklists[dealId]).toBeUndefined();
   const [operation] = reopened.interruptedOps();
+  expect(operation.input).toMatchObject({ askOrigin: origin });
   const questionsWithText = () => Object.values(reopened.get().questions).filter((question) => question.text === text);
-  if (screen === 'finding') {
+  if (screen === 'linked finding') {
     reopened.services.ai.checklist = async () => fail({ kind: 'failed', message: 'The checklist is unavailable' });
     expect((await reopened.retryOp(operation.id))?.ok).toBe(false);
     expect(questionsWithText()).toEqual([]);
@@ -271,5 +298,6 @@ it.each(['checklist', 'finding'] as const)('retries a linked %s ask from Home af
   }
   reopened.services.ai.checklist = async () => ok([row]);
   expect((await reopened.retryOp(operation.id))?.ok).toBe(true);
-  expect(questionsWithText()).toMatchObject([{ linkedItem: { id: row.id }, linkedFinding: row.findingId }]);
+  expect(questionsWithText()).toMatchObject([{ linkedFinding: row.findingId }]);
+  expect(questionsWithText()[0].linkedItem?.id).toBe(origin.itemId ?? undefined);
 });
