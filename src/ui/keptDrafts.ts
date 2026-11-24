@@ -65,7 +65,7 @@ class KeptMap<V> extends Map<string, V> {
 
 /**
  * A map of drafts named `name`, holding what the app left at its last close. `valid` says whether a stored value has the
- * map's shape. The name stays the same from build to build. A map of record references can remap its values on recovery.
+ * map's shape. The name stays the same from build to build. Record references can follow a recovered deal.
  */
 export function keptDrafts<V>(
   name: string, valid: (v: unknown) => v is V, movedValue?: (value: V, ids: ReadonlyMap<string, string>) => V,

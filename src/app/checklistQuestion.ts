@@ -1,5 +1,16 @@
+import type { Finding } from '../domain/model';
 import type { ChecklistRow } from '../ports';
 import { conflictLabel, versionsWord, type State } from './state';
+
+/** Turning an item off blocks a gap question. An open finding can still receive the question started on it. */
+function targetUnavailable(row: ChecklistRow, off: boolean, findingId: string | undefined, finding?: Finding) {
+  if (findingId) {
+    if (!finding) return 'Its finding is no longer here';
+    return finding.status === 'open' ? null : 'Its finding is closed';
+  }
+  if (off) return 'This item is turned off';
+  return row.result === 'gap' ? null : 'This item no longer needs a question';
+}
 
 /** #840: the card names, validates and logs the finding the draft started on, even after the item is rechecked. */
 export function checklistQuestionTarget(state: State, row: ChecklistRow, off: boolean, findingId?: string) {
@@ -9,14 +20,7 @@ export function checklistQuestionTarget(state: State, row: ChecklistRow, off: bo
   const conflictWhy = conflict
     ? `${conflictLabel(state, conflict)} has ${versionsWord(conflict.versions.length).toLowerCase()}. Choose one first`
     : null;
-  let why = conflictWhy;
-  if (!why && findingId) {
-    if (!finding) why = 'Its finding is no longer here';
-    else if (finding.status !== 'open') why = 'Its finding is closed';
-  } else if (!findingId) {
-    if (off) why = 'This item is turned off';
-    else if (row.result !== 'gap') why = 'This item no longer needs a question';
-  }
+  const why = conflictWhy ?? targetUnavailable(row, off, findingId, finding);
   return {
     title: finding?.title ?? gone?.title ?? row.text, why, conflictWhy,
     links: { linkedItem: row.id, linkedFinding: findingId, workstream: finding?.workstream ?? '' },
