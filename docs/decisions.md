@@ -311,12 +311,13 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 
 ## Deal screen
 
-These decisions are for the rebuilt deal screen in [deal-screen-design.md](deal-screen-design.md) and are not built yet (#881). Once built, they replace the sidebar's Deal status groups (Pages and navigation), **Past Conversations** in every composer (Conversations), and **Keep It** in confirms (Working rules). How the deal's Overview, Findings, and Checklist pages and the deal header fit the new screen is open.
+These decisions are for the rebuilt deal screen in [deal-screen-design.md](deal-screen-design.md) and are not built yet (#881). Once built, they replace Deal status wherever it appears (Pages and navigation, Working rules), **Past Conversations** in every composer (Conversations), and **Keep It** in confirms (Working rules). How the deal's Overview, Findings, and Checklist pages and the deal header fit the new screen is open.
 
 - A deal shows its conversation on the left and, when opened, one pane on the right. The pane's tabs are Tasks, Diligence, and Q&A, always in that order, followed by any opened finding, document, or task, each with ×.
 - The selected tab is 1.5 times as wide as each other tab, and the rest share the bar equally. A hairline separates unselected tabs, the selected tab sits raised, and tabs show no counts. An unselected tab too narrow for its name drops its icon before shortening the word. The Diligence tab uses the Checklist's icon.
 - The sidebar folds to its slim rail while the pane is open and comes back when it closes. A sidebar pinned open stays, and the conversation narrows; the pane gives way only to keep the conversation at least 400px wide.
-- The sidebar lists deals in one list, ordered by when the person last worked on each deal, with no Deal status groups.
+- A deal has no Deal status. The sidebar lists deals in one list, ordered by when the person last worked on each
+  deal, and **Archive Deal** hides one.
 - A deal's ⋯ menu offers **Archive Deal**, which asks first in the app's confirm dialog. Archived deals fold under **Archived**; a dot marks an archived deal whose data room changed, with its update line ("4 new files · 11:20 AM"). An archived deal's ⋯ menu offers **Unarchive Deal**.
 - The conversation title in the breadcrumb is a button that opens the deal's past conversations. **Past Conversations** leaves the composer.
 - The check of the data room against the checklist is called Diligence (**Run Diligence**, the Diligence tab), and the list of running and finished work is called Tasks. The Diligence tab shows the Checklist's own marks and groups.

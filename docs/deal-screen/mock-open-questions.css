@@ -6,19 +6,6 @@
   visibility: hidden;
 }
 
-/* Deal Details: the New Deal form's grid without its folders */
-.x-details .ndpicks + .ndpicks {
-  margin-top: 14px;
-}
-.x-fieldpick {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  text-align: left;
-  cursor: default;
-}
-
 /* Folders: the core documents and a deal sharing these files sit under the folders, set off by a hairline */
 .x-folders .fdgroup {
   margin: 0;

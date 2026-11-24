@@ -41,17 +41,15 @@ const DEAL_INFO_FOLDERS = '<div class="x-infofolders"><span class="lbl">Folders<
   + '<span>7 folders · 5,176 of 5,190 files indexed</span><button type="button" class="btn sm">Edit</button>'
   + '</div></div>';
 
-/** Deal Info: the New Deal form's fields plus Deal status, the folders line, and Delete Deal set apart. */
+/** Deal Info: the New Deal form's fields, the folders line, and Delete Deal set apart. */
 function dealInfoDialog() {
-  const status = '<div><span class="lbl">Deal status</span><button type="button" class="field x-fieldpick"'
-    + ' aria-haspopup="menu">Live</button></div>';
   return '<div class="scrim blur"><div class="dlg nddlg x-details" role="dialog" aria-label="Deal Info">'
     + '<div class="shead"><h2>Deal Info</h2><button type="button" class="x" aria-label="Close"'
     + ` title="Close (Esc)">${icon('close', 15)}</button></div>`
     + `<div class="ndtop">${dealField('Name', 'Project Proseware')}${dealField('Counterparty', COUNTERPARTY)}</div>`
     + `<div class="ndpicks">${dealField('Structure', 'Project finance')}${dealField('Sector', 'Renewables')}`
     + `${dealField('Technology', 'Offshore wind')}</div>`
-    + `<div class="ndpicks">${status}</div>${DEAL_INFO_FOLDERS}`
+    + DEAL_INFO_FOLDERS
     + '<div class="acts x-infoacts"><button type="button" class="btn sm x-delete">Delete Deal</button></div>'
     + '</div></div>';
 }
