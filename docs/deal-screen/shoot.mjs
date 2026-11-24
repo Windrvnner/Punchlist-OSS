@@ -11,7 +11,9 @@ import { launchChrome } from '../../tests/browser/chrome.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const unknown = args.filter((arg) => !/^\d+x\d+$/.test(arg) && arg !== 'dark' && arg !== 'light');
-if (unknown.length > 0) throw new Error(`Unknown arguments: ${unknown.join(' ')}. Use [width]x[height] and light or dark.`);
+if (unknown.length > 0) {
+  throw new Error(`Unknown arguments: ${unknown.join(' ')}. Use [width]x[height] and light or dark.`);
+}
 const sizeArg = args.find((arg) => /^\d+x\d+$/.test(arg)) || '1280x736';
 const [width, height] = sizeArg.split('x').map(Number);
 const theme = args.includes('dark') ? 'dark' : 'light';
