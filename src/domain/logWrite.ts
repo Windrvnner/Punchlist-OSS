@@ -218,12 +218,8 @@ export function identifierSig(text: string): IdentifierSig {
  * (Class I and Class L, Facility I1 and Facility 11). One that only adds an identifier, or drops one, is a rewording.
  */
 export function sameIdentifiers(a: IdentifierSig, b: IdentifierSig): boolean {
-  return a.plain === b.plain || compatibleIdentifierSets(a.ids, b.ids);
-}
-
-/** One set of identifiers, including repeats, can add to or omit identifiers from the other. */
-export function compatibleIdentifierSets(a: readonly string[], b: readonly string[]): boolean {
-  return !(namesOther(a, b) && namesOther(b, a));
+  if (a.plain === b.plain) return true;
+  return !(namesOther(a.ids, b.ids) && namesOther(b.ids, a.ids));
 }
 /**
  * Whether two wordings name exactly the same identifiers, for a match by number alone: there the words differ, and a
