@@ -64,3 +64,33 @@ it('counts the same standings as the Checklist when a check predates additions a
   expect(counts).toEqual({ all: 2160, finding: 117, gone: 1, person: 1, gap: 1, open: 21, satisfied: 2016, off: 3 });
   expect(checklistStandingCounts(state, dealId)).toEqual({ ...counts, toResolve: 119, settled: 2017, offOpen: 1 });
 });
+
+it('keeps the reported standings until the checklist rows arrive, including after a failed read', () => {
+  const state = checklistDeal();
+  const checked = state.checklists[dealId];
+  delete state.checklists[dealId];
+  const reported = {
+    all: 2140, finding: 120, gap: 2, open: 2, satisfied: 2016, person: 0, gone: 0, off: 3,
+    offOpen: 1, toResolve: 122, settled: 2016,
+  };
+  expect(checklistStandingCounts(state, dealId)).toEqual(reported);
+  state.checklists[dealId] = 'failed';
+  expect(checklistStandingCounts(state, dealId)).toEqual(reported);
+  state.checklists[dealId] = checked;
+  expect(checklistStandingCounts(state, dealId)).toMatchObject({ all: 2160, gap: 1, open: 21 });
+});
+
+it('keeps the column in place for all-off lists and while progress and checklist rows arrive separately', () => {
+  const state = checklistDeal();
+  delete state.progress[dealId];
+  expect(checklistStandingCounts(state, dealId)).toBeNull();
+  state.progress[dealId] = { folders: [], checklist: { items: 0, findings: 0, gaps: 0, unsettled: 0, satisfied: 0 } };
+  state.checklists[dealId] = [];
+  expect(checklistStandingCounts(state, dealId)).toMatchObject({ all: 2160, open: 2157, off: 3 });
+  for (const item of Object.values(state.items)) item.off = true;
+  expect(checklistStandingCounts(state, dealId)).toMatchObject({ all: 2160, open: 0, off: 2160 });
+  // Even a stale zero report keeps the column hidden when no items are off.
+  for (const item of Object.values(state.items)) item.off = false;
+  expect(checklistView(state, dealId).counts.open).toBe(2160);
+  expect(checklistStandingCounts(state, dealId)).toBeNull();
+});

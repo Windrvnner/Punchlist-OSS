@@ -7,14 +7,16 @@ export function checklistStandingCounts(state: State, dealId: string) {
   if (!progress) return null;
   const { counts } = checklistRows(state, dealId);
   if (!progress.items && !counts.off) return null;
-  const standing = Array.isArray(state.checklists[dealId]) ? counts : {
-    ...counts, all: progress.items, finding: progress.findings, gap: progress.gaps,
+  const read = Array.isArray(state.checklists[dealId]);
+  const standing = read ? counts : {
+    ...counts, finding: progress.findings, gap: progress.gaps,
     open: progress.unsettled, satisfied: progress.satisfied,
   };
+  const toResolve = standing.finding + standing.gap + standing.gone;
+  const settled = standing.satisfied + standing.person;
   return {
-    ...standing,
+    ...standing, toResolve, settled,
+    all: read ? counts.all : toResolve + standing.open + settled,
     offOpen: offFindingCount(state, dealId),
-    toResolve: standing.finding + standing.gap + standing.gone,
-    settled: standing.satisfied + standing.person,
   };
 }
