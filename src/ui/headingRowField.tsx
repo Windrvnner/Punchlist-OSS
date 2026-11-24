@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { ImportTable } from '../app/transfer';
 import { num } from './counts';
-import { keptImport, keepImport } from './keptImports';
+import { keptImport, keepImport } from '../app/keptImports';
 
 type Heading = Pick<ImportTable, 'sheet' | 'headerRow' | 'lastRow'>;
 type ReadRow = (row: number, accept: (heading: Heading) => void) => Promise<void>;

@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+// @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 type PendingTransaction = {
@@ -25,7 +25,9 @@ async function indexedImportStore() {
   const request: { result: typeof database; onsuccess?: () => void } = { result: database };
   vi.stubGlobal('indexedDB', { open: () => request });
   vi.stubGlobal('IDBKeyRange', { bound: () => ({}) });
-  const imports = await import('../../src/ui/keptImports');
+  const imports = await import('../../src/app/keptImports');
+  const { IndexedKeptImports } = await import('../../src/adapters/keptImports');
+  imports.initializeKeptImports(new IndexedKeptImports());
   request.onsuccess!();
   cursor.onsuccess!();
   await imports.keptImportsReady;
