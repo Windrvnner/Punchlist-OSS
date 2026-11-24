@@ -1,8 +1,5 @@
 // The deal screen mock-up: builds the screen named in the page's hash, then places what depends on layout.
 
-// the sidebar folds to its rail while a pane is open, so the conversation keeps its width, and comes back when the
-// pane closes; `side=1` shows it pinned open
-const sidebarFolded = hashParams.get('side') !== '1' && !['empty', 'active'].includes(screen);
 // below this width the Q&A table cuts its cells, so the pane shows the one-column list instead
 const QA_TABLE_MIN = 560;
 const qaTableFits = () => fittedPaneWidth(paneWidth('wide')) >= QA_TABLE_MIN;
@@ -19,7 +16,7 @@ const PANE_SCREENS = {
   // the conversation that started it
   switch: () => [conversation([TURN_BOARD_TASK_RUNNING],
     { title: CONVERSATION_TITLES.boardResolutions, open: true, top: true }),
-  pane(paneTabs([TASKS_TAB, runningDiligenceTab], 'tasks'), TASKS_LIST, paneWidth())],
+    pane(paneTabs([TASKS_TAB, runningDiligenceTab], 'tasks'), TASKS_LIST, paneWidth())],
   report: () => [inPermitsChat([TURN_PERMITS, TURN_DILIGENCE_DONE]),
     pane(paneTabs([TASKS_TAB, DILIGENCE_TAB], 'diligence'), diligenceReport(false), paneWidth())],
   issue: () => [inPermitsChat([TURN_PERMITS, TURN_DILIGENCE_DONE, TURN_GUARANTEE_CAP]),

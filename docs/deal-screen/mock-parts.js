@@ -8,6 +8,9 @@ document.documentElement.dataset.theme = hashParams.get('theme') || 'dark';
 const windowWidth = innerWidth;
 const narrowWindow = windowWidth <= 1180;
 const sidebarWidth = narrowWindow ? 208 : 236;
+// the sidebar folds to its rail while a pane is open, so the conversation keeps its width, and comes back when the
+// pane closes; `side=1` shows it pinned open
+const sidebarFolded = hashParams.get('side') !== '1' && !['empty', 'active'].includes(screen);
 
 /** An icon from icons.js as an SVG, at the given size and stroke width. */
 function icon(name, size = 16, strokeWidth = 1.75) {
