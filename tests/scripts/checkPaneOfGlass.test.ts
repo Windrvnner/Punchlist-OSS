@@ -85,6 +85,31 @@ describe('UI dependency checks', () => {
     expect(result.stderr).toContain('"The frontend is a pane of glass" in CLAUDE.md');
   });
 
+  it('checks computed member and destructuring keys and each read in a dotted JSX tag', () => {
+    const repo = fixture();
+    const file = 'src/ui/access.tsx';
+    const lines = [
+      "const model = store[('services' as const)].ai",
+      "const saved = window[(('localStorage'))].getItem(key)",
+      "const { [('services' satisfies string)]: ports } = store",
+      "const { [(`indexedDB` as const)]: database } = window",
+      "const audit = ports[('repo' as const)].audit",
+      'const slot = <store.services />',
+      'const view = <store.services.repo.View></store.services.repo.View>',
+      'const value = <sessionStorage.Value />',
+      'const id = <window.indexedDB.Id />',
+      "const service = store[useModel ? 'services' : 'state']",
+      "const title = store[('title' as const)]",
+      'const label = <span title="store.services">localStorage</span>',
+    ];
+    repo.write(file, lines.join('\n'));
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} services (lines 1, 3, 6, 7, 10): 5 exceeds`);
+    expect(result.stderr).toContain(`${file} storage (lines 2, 4, 8, 9): 4 exceeds`);
+    expect(result.stderr).toContain(`${file} repo (lines 5, 7): 2 exceeds`);
+  });
+
   it('resolves a relative layer name from the importing file', () => {
     const repo = fixture();
     repo.write('src/ui/components/shell.ts', 'export const title = "Settings"');

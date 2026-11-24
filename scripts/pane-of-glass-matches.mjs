@@ -12,31 +12,31 @@ function literalText(node) {
   return null;
 }
 
-function joinedPaths(left, right) {
+function concatenate(left, right) {
   return left.flatMap((prefix) => right.map((suffix) => prefix + suffix));
 }
 
-function templatePaths(node) {
-  let paths = [node.quasis[0].value.cooked];
+function templateValues(node) {
+  let values = [node.quasis[0].value.cooked];
   for (const [index, expression] of node.expressions.entries()) {
     const tail = node.quasis[index + 1].value.cooked;
-    paths = joinedPaths(paths, modulePaths(expression)).map((path) => path + tail);
+    values = concatenate(values, stringValues(expression)).map((value) => value + tail);
   }
-  return paths;
+  return values;
 }
 
-// Only inspect syntax. A placeholder preserves the known parts of a path around a runtime value.
-function modulePaths(expression) {
+// Only inspect syntax. A placeholder preserves the known parts of a string around a runtime value.
+function stringValues(expression) {
   if (!expression) return [];
   const node = unwrapped(expression);
   const text = literalText(node);
   if (text !== null) return [text];
-  if (node.type === 'TemplateLiteral') return templatePaths(node);
+  if (node.type === 'TemplateLiteral') return templateValues(node);
   if (node.type === 'BinaryExpression' && node.operator === '+') {
-    return joinedPaths(modulePaths(node.left), modulePaths(node.right));
+    return concatenate(stringValues(node.left), stringValues(node.right));
   }
-  if (node.type === 'ConditionalExpression') return [...modulePaths(node.consequent), ...modulePaths(node.alternate)];
-  if (node.type === 'LogicalExpression') return [...modulePaths(node.left), ...modulePaths(node.right)];
+  if (node.type === 'ConditionalExpression') return [...stringValues(node.consequent), ...stringValues(node.alternate)];
+  if (node.type === 'LogicalExpression') return [...stringValues(node.left), ...stringValues(node.right)];
   return ['*'];
 }
 
@@ -47,9 +47,9 @@ function forbiddenModule(file, name) {
   return target.startsWith('src/') && layerPath.test(target.slice('src/'.length));
 }
 
-function propertyName(key, computed) {
-  if (!computed && key.type === 'Identifier') return key.name;
-  return literalText(key);
+function propertyNames(key, computed) {
+  if (!computed && (key.type === 'Identifier' || key.type === 'JSXIdentifier')) return [key.name];
+  return stringValues(key);
 }
 
 // Assertions, parentheses and optional chains leave the underlying path or member unchanged.
@@ -69,23 +69,31 @@ export function matchesIn(file, source) {
     (offsets[kind] ??= new Set()).add(node.start);
   }
   function checkModule(node) {
-    if (modulePaths(node).some((name) => forbiddenModule(file, name))) record('import', node);
+    if (stringValues(node).some((name) => forbiddenModule(file, name))) record('import', node);
+  }
+  function checkProperty(key, computed) {
+    const names = propertyNames(key, computed);
+    if (names.includes('services')) record('services', key);
+    if (names.some((name) => storageNames.has(name))) record('storage', key);
   }
   function checkMember(node) {
-    const name = propertyName(node.property, node.computed);
-    if (name === 'services') record('services', node.property);
-    if (storageNames.has(name)) record('storage', node.property);
+    checkProperty(node.property, node.computed);
     const target = unwrapped(node.object);
-    if (target.type === 'MemberExpression' && propertyName(target.property, target.computed) === 'repo') {
-      record('repo', target.property);
+    if (target.type !== 'MemberExpression' && target.type !== 'JSXMemberExpression') return;
+    if (propertyNames(target.property, target.computed).includes('repo')) record('repo', target.property);
+  }
+  // A dotted JSX tag reads its component once, when opened. Its closing tag repeats the name.
+  function checkTag(node) {
+    let tag = node.name;
+    while (tag.type === 'JSXMemberExpression') {
+      checkMember(tag);
+      tag = tag.object;
     }
+    if (tag !== node.name && storageNames.has(tag.name)) record('storage', tag);
   }
   function checkPattern(node) {
     for (const entry of node.properties) {
-      if (entry.type !== 'Property') continue;
-      const name = propertyName(entry.key, entry.computed);
-      if (name === 'services') record('services', entry.key);
-      if (storageNames.has(name)) record('storage', entry.key);
+      if (entry.type === 'Property') checkProperty(entry.key, entry.computed);
     }
   }
   const moduleSource = (node) => checkModule(node.source);
@@ -100,6 +108,7 @@ export function matchesIn(file, source) {
       if (node.callee.type === 'Identifier' && node.callee.name === 'require') checkModule(node.arguments[0]);
     },
     MemberExpression: checkMember,
+    JSXOpeningElement: checkTag,
     ObjectPattern: checkPattern,
     Identifier(node) {
       if (storageNames.has(node.name)) record('storage', node);
