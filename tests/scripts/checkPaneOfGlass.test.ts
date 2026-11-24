@@ -39,26 +39,34 @@ function fixture(baseline: Baseline = {}, prefix = 'pane-of-glass-') {
 
 async function viteSources(root: string, file: string) {
   const config = { root, configFile: false, envDir: false, logLevel: 'silent' } as const;
-  const server = await createServer({ ...config, server: { middlewareMode: true, watch: null, ws: false } });
   const dev: string[] = [];
   const prod: string[] = [];
+  const originalMode = process.env.NODE_ENV;
   try {
-    const client = server.environments.client;
-    await client.transformRequest('/' + file);
-    const entry = await client.moduleGraph.getModuleByUrl('/' + file);
-    for (const module of entry!.importedModules) dev.push(module.id!);
+    process.env.NODE_ENV = 'development';
+    const server = await createServer({ ...config, server: { middlewareMode: true, watch: null, ws: false } });
+    try {
+      const client = server.environments.client;
+      await client.transformRequest('/' + file);
+      const entry = await client.moduleGraph.getModuleByUrl('/' + file);
+      for (const module of entry!.importedModules) dev.push(module.id!);
+    } finally {
+      await server.close();
+    }
+    process.env.NODE_ENV = 'production';
+    await build({
+      ...config, build: { write: false, lib: { entry: path.join(root, file), formats: ['es'] } },
+      plugins: [{
+        name: 'record-bundled-modules',
+        generateBundle(_options, bundle) {
+          for (const chunk of Object.values(bundle)) if (chunk.type === 'chunk') prod.push(...chunk.moduleIds);
+        },
+      }],
+    });
   } finally {
-    await server.close();
+    if (originalMode === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalMode;
   }
-  await build({
-    ...config, build: { write: false, lib: { entry: path.join(root, file), formats: ['es'] } },
-    plugins: [{
-      name: 'record-bundled-modules',
-      generateBundle(_options, bundle) {
-        for (const chunk of Object.values(bundle)) if (chunk.type === 'chunk') prod.push(...chunk.moduleIds);
-      },
-    }],
-  });
   const names = (ids: string[]) => ids.map((id) => path.relative(root, id).split(path.sep).join('/'))
     .filter((id) => id.startsWith('src/') && id !== file).map((id) => id.toLowerCase()).sort();
   return { dev: names(dev), prod: names(prod) };
@@ -195,7 +203,10 @@ describe('UI dependency checks', () => {
     { expression: `Object.keys(${termGlob} || {})`, dev: [], prod: [backend] },
     { expression: "Object.keys(import.meta.glob('../backend/[[:alpha:]]*.ts') || {})", dev: [], prod: [] },
     { expression: "(import.meta.glob)('../backend/part.ts')", dev: [backend], prod: [backend] },
+    { expression: "(import.meta.glob<{term: string}>)('../backend/part.ts')", dev: [backend], prod: [backend] },
     { expression: "import.meta.glob?.('../backend/part.ts') ?? {}", dev: [], prod: [] },
+    { expression: "import.meta.env.DEV ? import.meta.glob('../backend/{part}.ts') : {}", dev: [], prod: [] },
+    { expression: "import.meta.env.PROD ? import.meta.glob('../backend/{part}.ts') : {}", dev: [], prod: [backend] },
   ])('retains the original expression $expression', async ({ expression, dev, prod }) => {
     const repo = fixture();
     const file = 'src/ui/readers.ts';
@@ -206,6 +217,19 @@ describe('UI dependency checks', () => {
     const result = repo.run();
     expect(result.status).toBe(forbidden ? 1 : 0);
     if (forbidden) expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
+  });
+
+  it.each(['ui', 'backend'])('retains yield in a generator condition around a %s glob', async (layer) => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    const target = `src/${layer}/term.ts`;
+    repo.write(target, 'export const term = true');
+    const glob = `import.meta.glob('../${layer}/term.ts')`;
+    repo.write(file, `export function* steps() { return (yield 'Checklist') ? ${glob} : {} }`);
+    expect(await viteSources(repo.dir, file)).toEqual({ dev: [target], prod: [target] });
+    const result = repo.run();
+    expect(result.status).toBe(layer === 'backend' ? 1 : 0);
+    if (layer === 'backend') expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
   });
 
   it('keeps a glob assignable to a private field when checking a class method', async () => {

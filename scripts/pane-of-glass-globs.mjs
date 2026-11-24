@@ -96,5 +96,6 @@ export function probeEntry(glob, project, file) {
   // The snapshot has the source filenames and no application exports. A namespace import selects the same files.
   delete options.import;
   const args = glob.node.arguments.length > 1 ? argument + ', ' + JSON.stringify(options) : argument;
-  return 'export const files = ' + glob.render(glob.prefix + args + glob.suffix);
+  // The expression can include yield, await, or new.target from its enclosing function.
+  return 'export async function* files() { return (' + glob.render(glob.prefix + args + glob.suffix) + ') }';
 }

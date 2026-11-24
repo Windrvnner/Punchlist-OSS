@@ -1,7 +1,7 @@
 // Assertions, parentheses and optional chains leave the underlying path or member unchanged.
 export function unwrapped(node) {
   while (['TSNonNullExpression', 'TSAsExpression', 'TSTypeAssertion', 'TSSatisfiesExpression',
-    'ChainExpression', 'ParenthesizedExpression'].includes(node?.type)) {
+    'TSInstantiationExpression', 'ChainExpression', 'ParenthesizedExpression'].includes(node?.type)) {
     node = node.expression;
   }
   return node;

@@ -44,11 +44,25 @@ async function builtModules(config, file) {
 }
 
 async function selectedModules(config, file) {
-  // Keep the imports of either working transform, including when the other mode rejects the expression.
-  const runs = await Promise.allSettled([servedModules(config, file), builtModules(config, file)]);
-  const graphs = runs.filter((run) => run.status === 'fulfilled');
-  if (!graphs.length) throw runs[0].reason;
-  return graphs.flatMap((run) => run.value);
+  // Vite reads NODE_ENV independently when its dev server and build are launched from the CLI.
+  const originalMode = process.env.NODE_ENV;
+  const graphs = [];
+  let error;
+  try {
+    for (const [mode, transform] of [['development', servedModules], ['production', builtModules]]) {
+      process.env.NODE_ENV = mode;
+      try {
+        graphs.push(await transform(config, file));
+      } catch (failure) {
+        error ??= failure;
+      }
+    }
+  } finally {
+    if (originalMode === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = originalMode;
+  }
+  if (!graphs.length) throw error;
+  return graphs.flat();
 }
 
 function forbiddenModuleIds(root, files, forbidden) {

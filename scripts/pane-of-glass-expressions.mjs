@@ -10,7 +10,7 @@ function surroundingExpression(node) {
 }
 
 function inert(node) {
-  if (node.type === 'MetaProperty') return '({})';
+  if (node.type === 'MetaProperty' && node.meta.name !== 'import') return '({})';
   if (node.type === 'PrivateIdentifier') return '__globPrivate';
   if (node.type === 'Super') return '__globSuper';
   if (node.type === 'Identifier' && node.name === 'require') return '__globRequire';
