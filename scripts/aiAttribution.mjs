@@ -3,7 +3,33 @@
 // name, with at most a link to its product page (#729). The repository check (check-attribution.mjs) and other
 // checks use this list. Patterns work as JavaScript regular expressions and as `git grep -E` (extended) patterns,
 // matched ignoring case. Some are written in pieces so this file does not match its own check.
-const NAMES = 'Cla' + 'ude|Anthropic|ChatGPT|Copilot|Cod' + 'ex|Gemini|Cursor|Sonnet|Opus|Haiku';
+const NAMES = 'Cla' + 'ude|Anthropic|ChatGPT|Copilot|Gemini|Cursor|Sonnet|Opus|Haiku';
+const CODING_AGENT = 'Cod' + 'ex';
+// The repository's own coding-agent identity, the one co-author name for the agent that is allowed (#877).
+const OWN_AGENT_PREFIX = 'Windrvnner-';
+
+/**
+ * The name part of a co-author trailer, from just after its colon, that names the coding agent as anything other
+ * than exactly OWN_AGENT_PREFIX + the agent's name (#877). That is the agent's name after nothing but the colon or a
+ * non-word character other than a hyphen, after a hyphenated prefix that is not OWN_AGENT_PREFIX, after
+ * OWN_AGENT_PREFIX with anything but spaces before it, or the exact name with more after it than spaces or an email.
+ * Spelled out letter by letter because `git grep -E` has no lookbehind or lookahead. `<` is left out everywhere so
+ * the match stays in the name, before its email address.
+ */
+function codingAgentNameOtherThanOwn() {
+  const agent = `${CODING_AGENT}\\b`;
+  const forms = [`([^<]*[^-<A-Za-z0-9_])?${agent}`];
+  for (let length = 1; length < OWN_AGENT_PREFIX.length; length += 1) {
+    const kept = OWN_AGENT_PREFIX.slice(-length);
+    forms.push(`([^<]*[^<${OWN_AGENT_PREFIX.at(-length - 1)}])?${kept}${agent}`);
+  }
+  forms.push(`[ \t]*[^< \t][^<]*${OWN_AGENT_PREFIX}${agent}`);
+  // A carriage return counts as the end of the line only when it is the last character. `.` is not used after it
+  // because JavaScript's `.` never matches a carriage return and `git grep`'s does.
+  forms.push(`[ \t]*${OWN_AGENT_PREFIX}${CODING_AGENT}[ \t]*([^ \t\r<]|\r(\r|[^\r]))`);
+  return `(${forms.join('|')})`;
+}
+
 // Every path on the chat site except the product page itself: `code`, then only closing punctuation (or a slash),
 // then the end of the line, a space, a tab, or a carriage return. Spelled out letter by letter because `git grep -E`
 // has no lookahead. `]` is left out of the set because the two expression syntaxes escape it differently.
@@ -24,7 +50,11 @@ export const AI_ATTRIBUTION_PATTERNS = [
   },
   { name: 'a hidden attribution comment', pattern: 'claude-projects-' + 'attribution' },
   { name: 'a "requested by" header', pattern: '^[ >_]*Requested by +\\*\\*' },
-  { name: 'an AI co-author trailer', pattern: '^[ >]*Co-Authored-By *:[^<]*\\b(' + NAMES + ')\\b' },
+  {
+    name: 'an AI co-author trailer',
+    pattern:
+      '^[ >]*Co-Authored-By *:([^<]*\\b(' + NAMES + ')\\b|' + codingAgentNameOtherThanOwn() + ')',
+  },
   { name: 'an AI session trailer', pattern: '^[ >]*(' + 'Cla' + 'ude|Cod' + 'ex|AI)-Session *:' },
 ];
 const COMPILED = AI_ATTRIBUTION_PATTERNS.map(({ name, pattern }) => ({ name, regex: new RegExp(pattern, 'i') }));

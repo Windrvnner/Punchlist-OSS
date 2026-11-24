@@ -92,8 +92,9 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
 - Use the contributor's own Git identity for commits. No AI-tool trailers, "Requested by" headers, or links to an
   AI chat, session, project, or thread appear in commits, pull requests, issues, or comments. A coding tool's plain
   "Generated with" footer (the tool's name, with at most a link to its product page) is allowed and never blocks a
-  merge. `scripts/check-attribution.mjs` (part of `npm run check`) enforces this for tracked files and the branch's
-  commit messages.
+  merge, and so is a `Co-authored-by` trailer for the repository's own coding-agent identity (as named in
+  `scripts/aiAttribution.mjs`). `scripts/check-attribution.mjs` (part of `npm run check`) enforces this for tracked
+  files and the branch's commit messages.
 
 ## Secrets and the model key
 
