@@ -318,12 +318,13 @@ const askDrafts = keptDrafts('checklist-ask', isText);   // kept across a restar
 const askOn = keptDrafts('checklist-ask-on', isText);
 
 function useChecklistDetail(state: State, dealId: string, row: ChecklistRow, off: boolean) {
-  const draftFindingId = askOn.get(`${dealId}:${row.id}`);
+  const draftKey = `${dealId}:${row.id}`;
+  const draftFindingId = askOn.get(draftKey);
   const findings = useMemo(
     () => checklistFindings(state, dealId, row, off, draftFindingId),
     [state.findings, dealId, row, off, draftFindingId],
   );
-  return { ...findings, standing: itemStanding(state, dealId, row), draftFindingId };
+  return { ...findings, standing: itemStanding(state, dealId, row), draftKey, draftFindingId };
 }
 
 /** The result of a check that raised a finding, including the option to restore a deleted finding. */
@@ -363,7 +364,7 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
     const res = await store.dispatch(SetItemsOff, { dealId, on: [r.id] }, { idempotencyKey: 'ck-on-' + r.id }); if (!res.ok) return;
     requestAnimationFrame(() => { const a = document.activeElement; if (!a || a === document.body) document.getElementById('ck-more')?.focus(); });
   };
-  const { raised, finding, standing, draftFindingId } = useChecklistDetail(s, dealId, r, off);
+  const { raised, finding, standing, draftKey, draftFindingId } = useChecklistDetail(s, dealId, r, off);
   const { kind, versions } = standing;
   // the ⋯ menu is drawn on the page itself, under its button: inside the glass pane, the pane's text paints through it
   const [at, setAt] = useState<{ top: number; right: number } | null>(null); const moreBtn = useRef<HTMLButtonElement>(null); const moreMenu = useRef<HTMLDivElement>(null);
@@ -392,7 +393,7 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
   // a question being typed stays on screen whatever happens meanwhile (lost work first): another PC may ask about the gap,
   // the item may stop being a gap or be turned off; Log question then says why it is off, and Cancel lets it go. Set aside
   // with Escape, it is kept, and Ask stays offered while it is, so it can always be brought back
-  const kept = !!askDrafts.get(`${dealId}:${r.id}`);
+  const kept = !!askDrafts.get(draftKey);
   const offerAsk = !off && ((canAsk && !(kind === 'gap' && asked.length)) || kept);
   // why a question cannot be asked about the finding just now: the deal is read-only, or the finding is in two versions
   const why = ro ?? (versions
@@ -405,7 +406,6 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
     : finding.status !== 'open' ? 'Its finding is closed' : null;
   const logWhy = why ?? (aboutFinding ? findingWhy
     : off ? 'This item is turned off' : canAsk ? null : 'This item no longer needs a question');
-  const draftKey = `${dealId}:${r.id}`;
   const [asking, setAsking] = useState(() => !!askDrafts.get(draftKey));
   const [text, setTextState] = useState(() => askDrafts.get(draftKey) ?? '');
   const setText = (v: string) => { setTextState(v); if (v) { askDrafts.set(draftKey, v); if (!off && r.findingId) askOn.set(draftKey, r.findingId); } else { askDrafts.delete(draftKey); askOn.delete(draftKey); } };
