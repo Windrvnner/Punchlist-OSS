@@ -26,15 +26,22 @@ export function memoItems(s: State, dealId: string): MemoItem[] | null {
   });
 }
 
-/**
- * Ask where to save the memo, then make it there. `canceled` when the person closes the dialog; `working` is called
- * once the memo is being made, `written` with the id of the file written to the place picked.
- */
+type MemoWrite = { id: string; bytes: Uint8Array };
+
+async function writeMemo(store: Store, memo: MemoWrite): Promise<Result<'saved'>> {
+  try {
+    return await store.services.fs.writePicked!(memo.id, memo.bytes);
+  } catch {
+    return fail({ kind: 'failed', message: 'Couldn’t save the file' });
+  }
+}
+
+/** Ask where to save the memo, then make it there. `writing` receives the converted bytes before the picked write. */
 export async function makeMemo(
   store: Store,
   dealId: string,
   working: () => void = () => {},
-  written: (id: string) => void = () => {},
+  writing: (memo: MemoWrite) => void = () => {},
 ): Promise<Result<'saved' | 'canceled'>> {
   const { ai, sheets, fs } = store.services;
   const at = store.get().deals[dealId]; if (!at) return fail({ kind: 'notFound', message: 'Deal not found' });
@@ -60,21 +67,62 @@ export async function makeMemo(
   // without LibreOffice (the browser stand-in) the memo is saved as the OpenDocument text it was laid out as
   if (!sheets.document) return fs.save(`${name}.fodt`, new TextEncoder().encode(fodt), 'application/vnd.oasis.opendocument.text');
   const made = await sheets.document(fodt); if (!made.ok) return made;
-  if (pick?.value) { const w = await fs.writePicked!(pick.value.id, pick.value.ext === 'pdf' ? made.value.pdf : made.value.docx); if (w.ok) written(pick.value.id); return w; }
+  if (pick?.value) {
+    const { id, ext } = pick.value;
+    const memo = { id, bytes: ext === 'pdf' ? made.value.pdf : made.value.docx };
+    writing(memo);
+    return writeMemo(store, memo);
+  }
   return fs.save(`${name}.docx`, made.value.docx, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
 }
 
+function memoSaved(store: Store, file?: string) {
+  const { openPicked } = store.services.fs;
+  const open = file && openPicked ? {
+    label: 'Open',
+    run: () => void openPicked(file).then((result) => {
+      if (!result.ok) store.toast(result.error.message);
+    }),
+  } : undefined;
+  store.toast('Deal memo saved', open);
+}
+
+/** A picked-file failure keeps the already converted memo and retries only that write (#656). */
+function memoNotSaved(store: Store, memo: MemoWrite, message: string) {
+  const retry = async () => {
+    const result = await writeMemo(store, memo);
+    if (result.ok) memoSaved(store, memo.id);
+    else memoNotSaved(store, memo, result.error.message);
+  };
+  store.toast(message, { label: 'Retry', run: () => void retry() }, { glyph: 'warn' });
+}
+
 const pressed = new Set<string>();   // deals whose memo is under way, from the press (the dialog included) to the notice
-/** The Deal memo button: the save dialog, then the deal's button spins while it is made, then a notice says how it went. One at a time per deal. */
+/** Show progress from the save dialog through the first write, one memo at a time per deal. */
 export async function runMemo(store: Store, dealId: string): Promise<void> {
   if (pressed.has(dealId)) return;
   pressed.add(dealId);
-  let r: Result<'saved' | 'canceled'>; let file = '';
-  try { r = await makeMemo(store, dealId, () => store.ui((u) => ({ memoBusy: [...u.memoBusy, dealId] })), (id) => { file = id; }); } catch { r = fail({ kind: 'failed', message: 'Couldn’t make the deal memo' }); }
-  pressed.delete(dealId); store.ui((u) => ({ memoBusy: u.memoBusy.filter((x) => x !== dealId) }));
-  const { openPicked } = store.services.fs;
-  const open = file && openPicked ? { label: 'Open', run: () => void openPicked(file).then((o) => { if (!o.ok) store.toast(o.error.message); }) } : undefined;
-  if (r.ok) { if (r.value === 'saved') store.toast('Deal memo saved', open); return; }
+  const attempt: { memo?: MemoWrite } = {};
+  let result: Result<'saved' | 'canceled'>;
+  try {
+    const working = () => store.ui((ui) => ({ memoBusy: [...ui.memoBusy, dealId] }));
+    result = await makeMemo(store, dealId, working, (memo) => { attempt.memo = memo; });
+  } catch {
+    result = fail({ kind: 'failed', message: 'Couldn’t make the deal memo' });
+  } finally {
+    pressed.delete(dealId);
+    store.ui((ui) => ({ memoBusy: ui.memoBusy.filter((id) => id !== dealId) }));
+  }
+  if (result.ok) {
+    if (result.value === 'saved') memoSaved(store, attempt.memo?.id);
+    return;
+  }
+  if (attempt.memo) {
+    memoNotSaved(store, attempt.memo, result.error.message);
+    return;
+  }
   const retry = { label: 'Retry', run: () => void runMemo(store, dealId) };
-  store.toast(r.error.kind === 'unreachable' ? `Couldn’t make the deal memo: ${SERVICE} could not be reached` : 'Couldn’t make the deal memo', retry);
+  const message = result.error.kind === 'unreachable' ? `Couldn’t make the deal memo: ${SERVICE} could not be reached`
+    : 'Couldn’t make the deal memo';
+  store.toast(message, retry);
 }
