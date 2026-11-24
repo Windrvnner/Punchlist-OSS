@@ -1,9 +1,13 @@
 // @vitest-environment node
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
+  symlinkSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { builtReaderSources, servedReaderSources } from './viteReaderSources';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const script = path.resolve('scripts/check-pane-of-glass.mjs');
@@ -97,6 +101,130 @@ describe('UI dependency checks', () => {
     expect(result.status).toBe(1);
     for (const diagnostic of expected) expect(result.stderr).toContain(diagnostic);
     expect(result.stderr).toContain('"The frontend is a pane of glass" in CLAUDE.md');
+  });
+
+  it.each(['ui', 'backend'])('reports globs that import the %s layer in either Vite mode', (layer) => {
+    const repo = fixture();
+    const file = 'src/ui/checklistReader.ts';
+    const target = `../${layer}/term.ts`;
+    const version = JSON.parse(readFileSync('package.json', 'utf8')).version;
+    repo.write('src/ui/term.ts', 'export const term = "Checklist"');
+    repo.write('src/backend/term.ts', 'export const term = "Checklist"');
+    repo.write(file, [
+      `import '${target}'`,
+      `export const eager = import.meta.glob('${target}', { eager: true, import: 'term' })`,
+      `export const lazy = import.meta.glob('${target}')`,
+      `export const keys = (Object.keys)(import.meta.glob('${target}'))`,
+      `export const text = import.meta.glob('${target}', { query: '?raw' })`,
+      `export const url = import.meta.glob('${target}', { as: 'url' })`,
+      `export function Reader() { return new.target ? {} : import.meta.glob('../${layer}/{term}.ts') }`,
+      `export const dev = import.meta.env.DEV ? import.meta.glob('../${layer}/{term}.ts') : {}`,
+      `export function* steps() { return (yield 'Checklist') ? import.meta.glob('${target}') : {} }`,
+      "export const local = import.meta.glob(['../{backend,ui}/term.ts', '!../backend/**'])",
+      "export const pairs = import.meta.glob('../[!b]*/term.ts')",
+      `export const folded = import.meta.glob('../${layer.toUpperCase()}/*.ts', { caseSensitive: false })`,
+      `export const typed = (import.meta.glob<{ term: string }>)('${target}')`,
+      `export const common = require('${target}')`,
+      `import direct = require('${target}')`,
+      'export { direct }',
+      `export const relative = import.meta.env.BASE_URL === './' ? import.meta.glob('../${layer}/{term}.ts') : {}`,
+      `export const absolute = import.meta.env.BASE_URL !== './' ? import.meta.glob('../${layer}/{term}.ts') : {}`,
+      `export const stale = __APP_VERSION__ !== '${version}' ? import.meta.glob('../${layer}/{term}.ts') : {}`,
+      `export const based = import.meta.glob('./term.ts', { base: '../${layer}', query: { [0]: -1, raw: true } })`,
+      `export const basedLazy = import.meta.glob('./term.ts', { 'base': '../${layer}', eager: false })`,
+      'const __paneMeta = false',
+      `export const available = import.meta ? import.meta.glob('../${layer}/{term}.ts') : {}`,
+    ].join('\n'));
+    const result = repo.run();
+    const folded = existsSync(path.join(repo.dir, 'src/BACKEND/term.ts'));
+    expect(result.status, result.stderr).toBe(layer === 'ui' ? 0 : 1);
+    if (layer === 'backend') {
+      const lines = [1, 2, 3, 5, 6, 7, 9, ...(folded ? [12] : []), 13, 14, 15, 17, 20, 21, 23];
+      expect(result.stderr).toContain(`${file} import (lines ${lines.join(', ')}): ${lines.length} exceeds`);
+    }
+  });
+
+  it('matches the browser application build when production folds an environment condition', () => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    const conditions = [
+      ['development', "process.env.NODE_ENV === 'development'"],
+      ['production', "process.env.NODE_ENV === 'production'"],
+      ['globalDev', "globalThis.process.env.NODE_ENV === 'development'"],
+      ['globalProd', "globalThis.process.env.NODE_ENV === 'production'"],
+      ['client', '!import.meta.env.SSR'],
+      ['server', 'import.meta.env.SSR'],
+    ];
+    const rows = conditions.map(([name, condition]) => {
+      repo.write(`src/backend/${name}.ts`, `export const term = '${name}'`);
+      return `  ${condition} ? import.meta.glob('../backend/{${name}}.ts') : {},`;
+    });
+    repo.write(file, ['export const readers = [', ...rows, ']'].join('\n'));
+    const sources = builtReaderSources(repo.dir);
+    const selected = conditions.filter(([name]) => sources.some((id) => id.endsWith(`/src/backend/${name}.ts`)));
+    expect(selected.map(([name]) => name)).toEqual(['production', 'globalProd', 'client']);
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 3, 5, 6): 3 exceeds`);
+  });
+
+  describe.each(['ui', 'backend'])('browser preset aliases into the %s layer', (layer) => {
+    const other = layer === 'ui' ? 'backend' : 'ui';
+    const file = 'src/ui/readers.ts';
+
+    function aliasedReader() {
+      const repo = fixture();
+      for (const place of [layer, other]) repo.write(`src/${place}/term.ts`, 'export const term = "Checklist"');
+      const exports = { '.': './term.ts', './test-utils': './term.ts', './jsx-runtime': './term.ts' };
+      for (const name of ['react', 'react-dom', 'preact']) {
+        const aliased = name === 'preact';
+        const paths = aliased ? { ...exports, './compat': './term.ts', './*': './other.js' } : exports;
+        repo.write(`node_modules/${name}/other.js`, 'export const ready = true');
+        repo.write(`node_modules/${name}/package.json`, JSON.stringify({ name, exports: paths }));
+        const entry = path.join(repo.dir, 'node_modules', name, 'term.ts');
+        symlinkSync(`../../src/${aliased ? layer : other}/term.ts`, entry);
+      }
+      const packages = ['react', 'react-dom', 'react/jsx-runtime', 'react-dom/test-utils'];
+      const calls = packages.map((name) => `  import.meta.glob('${name}'),`);
+      repo.write(file, ['export const readers = [', ...calls, ']'].join('\n'));
+      return repo;
+    }
+
+    function checkTerms(ids: string[]) {
+      expect(ids.some((id) => id.endsWith(`/src/${layer}/term.ts`))).toBe(true);
+      expect(ids.some((id) => id.endsWith(`/src/${other}/term.ts`))).toBe(false);
+    }
+
+    it('serves the aliased module in development', async () => {
+      checkTerms(await servedReaderSources(aliasedReader().dir, file));
+    });
+    it('bundles the aliased module in production', () => {
+      checkTerms(builtReaderSources(aliasedReader().dir));
+    });
+    it('checks the aliased package export at each original call', () => {
+      const result = aliasedReader().run();
+      expect(result.status, result.stderr).toBe(layer === 'ui' ? 0 : 1);
+      if (layer === 'backend') expect(result.stderr).toContain(`${file} import (lines 2, 3, 4, 5): 4 exceeds`);
+    });
+  });
+
+  it.each(['ui', 'backend'])('resolves a workspace export to its real %s module', (layer) => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    repo.write('src/manifest.json', '\ufeff' + JSON.stringify({ type: 'module' }));
+    symlinkSync('src/manifest.json', path.join(repo.dir, 'package.json'), 'file');
+    repo.write(`src/${layer}/term.ts`, 'export const term = true');
+    const name = 'deal-terms';
+    repo.write(`packages/${name}/package.json`, JSON.stringify({ name, exports: { './check': './internal/term.ts' } }));
+    const internal = path.join(repo.dir, 'packages', name, 'internal');
+    mkdirSync(internal);
+    symlinkSync(`../../../src/${layer}/term.ts`, path.join(internal, 'term.ts'), 'file');
+    mkdirSync(path.join(repo.dir, 'node_modules'));
+    symlinkSync('../packages/' + name, path.join(repo.dir, 'node_modules', name), 'dir');
+    repo.write(file, "export const readers = import.meta.glob('deal-terms/check')");
+    const result = repo.run();
+    expect(result.status, result.stderr).toBe(layer === 'ui' ? 0 : 1);
+    if (layer === 'backend') expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
   });
 
   it('reports the direct dynamic import of a local string constant and allows the UI equivalent', () => {
