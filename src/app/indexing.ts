@@ -25,7 +25,7 @@ export const liveFolders = (s: { indexing: Record<string, { folders: Folder[] }>
   s.indexing[d.id] ? withProgress(d.folders, s.indexing[d.id].folders) : d.folders;
 
 /** Once loaded, checklist rows give the gaps' needs directly, without matching titles. */
-export function overviewGaps(
+function overviewGaps(
   state: Pick<State, 'checklists' | 'gaps'>, dealId: string,
 ): { key: string; title: string; need?: string }[] {
   const rows = state.checklists[dealId];
@@ -36,6 +36,21 @@ export function overviewGaps(
     .map((row) => ({ key: row.id, title: row.text, need: row.need }));
 }
 
+/** A first pass that has yet to produce findings has no gaps or standing to show. */
+export function overviewStatus(
+  state: Pick<State, 'checklists' | 'gaps' | 'findings' | 'ui'>, deal: Pick<Deal, 'id' | 'stage' | 'folders'>,
+) {
+  const noFindings = !Object.values(state.findings).some((finding) => finding.dealId === deal.id);
+  const indexing = deal.stage === 'indexing';
+  const waiting = indexing && noFindings;
+  return {
+    waiting,
+    noRoom: noFindings && deal.folders.length === 0,
+    stopped: indexing && state.ui.indexStalled.includes(deal.id),
+    gaps: waiting ? [] : overviewGaps(state, deal.id),
+  };
+}
+
 function unavailableFolders(missing: FolderSearch | null, dealId: string) {
   const ours = (folders: { dealId: string; folder: string }[]) =>
     folders.filter((folder) => folder.dealId === dealId).map((folder) => folder.folder);
@@ -44,12 +59,18 @@ function unavailableFolders(missing: FolderSearch | null, dealId: string) {
   return { away, empty };
 }
 
+function stillIndexing(folder: Pick<Folder, 'files' | 'indexed'>) {
+  return folder.indexed < folder.files;
+}
+
 function readingRow(folder: Folder, progress: DealProgress['folders']) {
   // Once indexing is complete, read counts come from checklist progress, where identical copies count once.
-  const reading = folder.indexed < folder.files ? undefined : progress.find((row) => row.folder === folder.path);
+  const indexing = stillIndexing(folder);
+  const reading = indexing ? undefined : progress.find((row) => row.folder === folder.path);
   return {
     files: folder.files,
     indexed: folder.indexed,
+    indexing,
     read: reading?.read,
     docs: reading?.files ?? folder.files,
     copies: reading?.copies ?? 0,
@@ -64,8 +85,10 @@ export function folderIndexCounts(folders: Pick<Folder, 'files' | 'indexed'>[]) 
 }
 
 function readingTotals(rows: ReturnType<typeof readingRow>[]) {
+  const totals = folderIndexCounts(rows);
   return {
-    ...folderIndexCounts(rows),
+    ...totals,
+    indexing: stillIndexing(totals),
     read: rows.every((row) => row.read !== undefined) ? rows.reduce((sum, row) => sum + (row.read ?? 0), 0) : undefined,
     docs: rows.reduce((sum, row) => sum + row.docs, 0),
     copies: 0,

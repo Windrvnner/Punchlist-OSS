@@ -6,7 +6,7 @@ import { AI_LABEL } from '../control';
 import type { Deal } from '../domain/model';
 import { askAbout, dealHash, dealTwin, type UiState } from '../app/state';
 import { checklistListCounts, checklistStandingCounts, findingCounts, questionCounts } from '../app/dealCounts';
-import { folderProgress, overviewGaps } from '../app/indexing';
+import { folderProgress, overviewStatus } from '../app/indexing';
 import { openLocate } from '../app/relink';
 import { PageTop, Stalled, NoRoom, INDEXING_LINE, INDEXING_TIP, useDealLock } from './deal';
 import { EditField, ReadOnlyContext, readDeal } from './editField';
@@ -27,16 +27,13 @@ export function OverviewPage({ dealId }: { dealId: string }) {
   const d = s.deals[dealId];
   useEffect(() => { void store.loadDeal(dealId); void store.refreshChecklist(dealId); }, [dealId]);   // the checklist's rows say what each gap needs
   if (!d) return null;
-  const none = !findingCounts(s, d.id).total;
-  const indexing = d.stage === 'indexing'; const stopped = indexing && s.ui.indexStalled.includes(d.id);
-  const waiting = none && indexing;                       // nothing found yet and the first pass has not run: there is nothing to sum up
-  const gaps = waiting ? [] : overviewGaps(s, d.id);
+  const { waiting, noRoom, stopped, gaps } = overviewStatus(s, d);
   return (
     <div class="home top wide">
       <PageTop deal={d} route="overview" placeholder={askAbout(d.name)} />
       <Details deal={d} />
       <Stalled deal={d} />
-      {none && !d.folders.length ? <NoRoom deal={d} /> : <>
+      {noRoom ? <NoRoom deal={d} /> : <>
         {!waiting && <Standing deal={d} />}
         {!waiting && <CheckLine deal={d} />}
         <section class={`twocol ov ${gaps.length ? '' : 'solo'} ${waiting ? 'first' : 'under'}`}>
@@ -285,8 +282,8 @@ function folderNotice(row: FolderRow, progress: FolderProgress): FolderNotice | 
   return showLabel ? emptyFolderNotice(emptyCount, folderCount) : { kind: 'empty' };
 }
 
-function documentStatus(row: FolderRow, indexing: boolean, stopped: boolean) {
-  if (indexing) {
+function documentStatus(row: FolderRow, stopped: boolean) {
+  if (row.indexing) {
     const status = `${num(row.indexed)} of ${num(row.files)} indexed`;
     if (!stopped) return status;
     return `${status} · ${row.indexed ? 'stopped' : 'not started'}`;
@@ -313,12 +310,11 @@ function FolderDocumentRow({ row, progress }: { row: FolderRow; progress: Folder
       <span class={`rd ${notice.label ? 'away' : ''}`} title={notice.tip}>{notice.label}</span>
     </div>;
   }
-  const indexing = row.indexed < row.files;
-  const live = indexing && !progress.stopped;
-  const status = documentStatus(row, indexing, progress.stopped);
-  const countingReads = !indexing && row.read !== undefined;
+  const live = row.indexing && !progress.stopped;
+  const status = documentStatus(row, progress.stopped);
+  const countingReads = row.read !== undefined;
   return <div class={className} data-folder={row.key}>
-    <span class="fn" title={title}>{row.name}{!indexing && row.copies > 0 &&
+    <span class="fn" title={title}>{row.name}{row.copies > 0 &&
       <span class="copies">{`${num(row.copies)} ${row.copies === 1 ? 'copy' : 'copies'} counted once`}</span>}</span>
     <FolderDocumentBar row={row} live={live} />
     <span class="rd" title={countingReads ? READ_TIP : undefined}>{status}</span>
