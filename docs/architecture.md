@@ -10,6 +10,8 @@ Dependencies point inward, following these rules:
 - `app` never imports `backend`, `adapters`, or `ui`.
 - `adapters` and `backend` implement the ports.
 - `ui` reads `domain` helpers but changes records only through `app`.
+- `ui` never imports `backend`, `adapters`, `desktop`, or `shell`, and reaches services and storage only through `app`;
+  the exceptions still being moved are listed in `scripts/pane-of-glass-baseline.json` (#833).
 - `logRepository.ts` and `changeLog.ts` are bundled into the browser build, so they must stay free of Node imports.
 
 The source tree is organized as follows:
