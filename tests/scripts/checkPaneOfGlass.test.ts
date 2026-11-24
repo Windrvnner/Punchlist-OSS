@@ -85,6 +85,58 @@ describe('UI dependency checks', () => {
     expect(result.stderr).toContain('"The frontend is a pane of glass" in CLAUDE.md');
   });
 
+  it('checks fixed local import paths in their declaring scope', () => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    repo.write(file, [
+      "const moduleName = 'node:path'",
+      'export const loadPath = () => import(moduleName)',
+      "const directory = '../backend/'",
+      "const reader = `${directory}lenient.ts` as const",
+      "export function load() { const directory = './'; return import(reader) }",
+      "export function local() { const moduleName = './table'; return import(moduleName) }",
+      'export const supplied = (moduleName: string) => import(moduleName)',
+      "export const late = () => import(adapter)",
+      "const adapter = useShared ? '../adapters/shared' : './local'",
+      "const help = 'node:fs'",
+      "let changing = './table'",
+      'changing = suppliedName',
+      'export const open = () => import(changing)',
+      "const first = second + ''",
+      'const second = first',
+      'export const loop = () => import(first)',
+    ].join('\n'));
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 2, 5, 8): 3 exceeds`);
+  });
+
+  it('checks eager and lazy Vite glob imports against the included files', () => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    for (const layer of ['backend', 'adapters', 'desktop', 'shell', 'ui']) {
+      repo.write(`src/${layer}/lenient.ts`, 'export const available = true');
+    }
+    repo.write('src/backend/.hidden.ts', 'export const hidden = true');
+    repo.write(file, [
+      "export const eager = import.meta.glob('../backend/lenient.ts', { eager: true })",
+      "export const views = import.meta.glob('../{ui,adapters}/**/*.ts')",
+      "export const shell = import.meta.glob(['/src/*/lenient.ts', '!/src/backend/**'])",
+      "export const desktop = import.meta.glob('./lenient.ts', { base: '../desktop' })",
+      "export const local = import.meta.glob('./*.ts')",
+      "export const clean = import.meta.glob(['../{ui,backend}/*.ts', '!../backend/**'])",
+      "export const missing = import.meta.glob('../backend/missing*.ts')",
+      `export const quoted = "import.meta.glob('../backend/lenient.ts')"`,
+      "export const other = index.glob('../backend/lenient.ts')",
+      "export const caseFold = import.meta.glob('../backend/*.TS', { caseSensitive: false })",
+      "export const visible = import.meta.glob(['../backend/*.ts', '!../backend/lenient.ts'])",
+      "const hidden = import.meta.glob(['./*.ts', '!./lenient.ts'], { base: '/src/backend', exhaustive: true })",
+    ].join('\n'));
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 1, 2, 3, 4, 10, 12): 6 exceeds`);
+  });
+
   it('checks computed member and destructuring keys and each read in a dotted JSX tag', () => {
     const repo = fixture();
     const file = 'src/ui/access.tsx';
@@ -223,7 +275,7 @@ describe('the remaining UI exceptions', () => {
 
   it('passes the committed baseline on the repository sources', () => {
     const repo = fixture();
-    cpSync('src/ui', path.join(repo.dir, 'src/ui'), { recursive: true });
+    cpSync('src', path.join(repo.dir, 'src'), { recursive: true });
     copyFileSync(baselineFile, path.join(repo.dir, baselineFile));
     const result = repo.run();
     expect(result.stderr).toBe('');
