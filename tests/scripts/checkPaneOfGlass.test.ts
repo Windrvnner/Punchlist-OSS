@@ -145,6 +145,80 @@ describe('UI dependency checks', () => {
     expect(result.stderr).toContain(`${file} import (lines 3, 6, 8, 19, 21): 5 exceeds`);
   });
 
+  it('follows named literal containers and applies defaults only to missing or undefined values', () => {
+    const repo = fixture();
+    const file = 'src/ui/modulePaths.ts';
+    const source = [
+      "const paths = { entry: 'node:path' } as const",
+      'const { entry } = paths',
+      'export const loadConfiguredPath = () => import(entry)',
+      '',
+      "const { fallback = 'node:path' } = { fallback: undefined }",
+      'export const loadDefaultPath = () => import(fallback)',
+      "const modules = ['node:path'] as const",
+      'const alias = modules',
+      'const [fromArray] = alias',
+      'export const loadArrayPath = () => import(fromArray)',
+    ].join('\n');
+    repo.write(file, source);
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 3, 6, 10): 3 exceeds`);
+
+    repo.write(file, [
+      source.replaceAll('node:path', './table'),
+      'function supplied(undefined: string) {',
+      "  const { target = 'node:path' } = { target: undefined }",
+      '  return import(target)',
+      '}',
+      "const changing = { target: 'node:path' }",
+      "Object.assign(changing, { target: './table' })",
+      'const { target } = changing',
+      'export const changed = () => import(target)',
+      'const cycle = other',
+      'const other = cycle',
+      'const { unknown } = cycle',
+      'export const unresolved = () => import(unknown)',
+    ].join('\n'));
+    expect(repo.run().status).toBe(0);
+  });
+
+  it('keeps a captured import path when the UI reads a sibling property', () => {
+    const repo = fixture();
+    const file = 'src/ui/checklistReader.ts';
+    const source = [
+      "const paths = { entry: 'node:path', title: 'Checklist' } as const",
+      'const { entry } = paths',
+      'export const load = () => import(entry)',
+      'export const title = paths.title',
+      "const headings = ['../backend/lenient', 'Open findings'] as const",
+      'export const heading = headings[1]',
+      'const [reader] = headings',
+      'export const open = () => import(reader)',
+      "const details = { module: 'node:path', heading: currentHeading() }",
+      'export const label = details.heading',
+      'const { module: page } = details',
+      'export const show = () => import(page)',
+      'export const direct = () => import(paths.entry)',
+    ].join('\n');
+    repo.write(file, source);
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 3, 8, 12, 13): 4 exceeds`);
+
+    repo.write(file, [
+      source.replaceAll('node:path', './checklist').replace('../backend/lenient', './findings'),
+      "const editable = { entry: 'node:path', title: 'Checklist' }",
+      "editable.entry = './checklist'",
+      'const { entry: changed } = editable',
+      'export const changedPage = () => import(changed)',
+      "function supplied(page: 'node:path') { return import(page) }",
+      "const annotated = runtimePage as 'node:path'",
+      'export const fromState = () => import(annotated)',
+    ].join('\n'));
+    expect(repo.run().status).toBe(0);
+  });
+
   it('resolves imports in TypeScript classes with decorators and auto-accessors', () => {
     const repo = fixture();
     const file = 'src/ui/picker.ts';
