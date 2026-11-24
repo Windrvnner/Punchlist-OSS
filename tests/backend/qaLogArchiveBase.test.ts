@@ -36,12 +36,12 @@ function logBytes(answer: (index: number) => string): Buffer {
   return Buffer.from(['No.,Question,Response', ...rows, ''].join('\r\n'));
 }
 
-function saveWithArchiveCollision(folder: string) {
+function saveWithArchiveCollision(folder: string, foreignHoldsEdit: boolean) {
   const original = path.join(folder, file);
   const base = logBytes((index) => index < 120 ? draft : '');
   const current = logBytes((index) => index < 120 ? final : index < 240 ? currentAnswer : '');
   const kept = logBytes((index) => index < 120 ? draft : index < 240 ? keptAnswer : index === 240 ? addedAnswer : '');
-  const foreignBase = logBytes((index) => index < 120 ? final : '');
+  const foreignBase = foreignHoldsEdit ? kept : logBytes((index) => index < 120 ? final : '');
   fs.writeFileSync(original, base);
   fs.writeFileSync(path.join(folder, foreign), foreignBase);
   const rename = fs.renameSync;
@@ -83,16 +83,22 @@ afterEach(() => {
   for (const dir of folders.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-it.each(['unchanged', 'changed before read', 'changed during copy'])('verifies a colliding archive %s', async (change) => {
+const cases = [
+  'unchanged', 'changed before read', 'changed during copy', 'removed during copy', 'copied by another log',
+];
+
+it.each(cases)('uses a verified base (%s)', async (change) => {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-log-base-'));
   folders.push(folder);
-  const { expectedBase, competingBase, kept } = saveWithArchiveCollision(folder);
-  const changed = change !== 'unchanged';
+  const foreignHoldsEdit = change === 'copied by another log';
+  const { expectedBase, competingBase, kept } = saveWithArchiveCollision(folder, foreignHoldsEdit);
+  const changed = change !== 'unchanged' && !foreignHoldsEdit;
   const copy = fs.copyFileSync;
   if (change === 'changed before read') copy(competingBase, expectedBase);
-  if (change === 'changed during copy') {
+  if (change === 'changed during copy' || change === 'removed during copy') {
     vi.spyOn(fs, 'copyFileSync').mockImplementation((from, to, mode) => {
-      if (from === expectedBase) copy(competingBase, expectedBase);
+      if (from === expectedBase && change === 'changed during copy') copy(competingBase, expectedBase);
+      if (from === expectedBase && change === 'removed during copy') fs.rmSync(expectedBase);
       copy(from, to, mode);
     });
   }

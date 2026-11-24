@@ -119,6 +119,26 @@ describe('saving the log', () => {
       expect(list(d)).toEqual(['01. Archive', FILE]);
       expect(list(path.join(d, '01. Archive')).map((f) => fs.readFileSync(path.join(d, '01. Archive', f), 'utf8'))).toEqual(['theirs + sroe\'s edit']);
     });
+    it('cleans up a held aside using the archive copy for its own save', () => {
+      const folder = withLog();
+      raced(folder);
+      const remove = fs.rmSync;
+      vi.spyOn(fs, 'rmSync').mockImplementation((file, options) => {
+        if (String(file).endsWith('.old')) throw Object.assign(new Error('Held working file'), { code: 'EBUSY' });
+        remove(file, options);
+      });
+      expect(save(folder, 'Updated log')).toEqual({ status: 'later' });
+      vi.restoreAllMocks();
+      const held = asides(folder);
+      expect(held).toHaveLength(1);
+
+      later();
+      expect(save(folder, 'Updated log').status).toBe('written');
+      expect(asides(folder)).toEqual([]);
+      const archive = path.join(folder, '01. Archive');
+      const filed = list(archive).filter((file) => file.includes('saved meanwhile'));
+      expect(filed.map((file) => read(archive, file))).toEqual(held);
+    });
     it('when the save gives up after a new file took the log\'s name: the version they replaced stays in the archive', () => {
       const d = withLog(); const real = fs.renameSync;
       vi.spyOn(fs, 'linkSync').mockImplementation(() => { throw Object.assign(new Error('ENOTSUP'), { code: 'ENOTSUP' }); });   // a share with no links

@@ -115,7 +115,8 @@ describe('a Q&A log update whose working files are busy as it tidies up', () => 
     await store.dispatch(SetResponse, { dealId, questionId: q5.id, response: 'Answer v2' });
     later();
     const again = await exportQaLog(store, dealId); expect(again.ok && again.value.status).toBe('written');
-    expect([fresh, other, theirs, dated, workbook].map((f) => fs.existsSync(f))).toEqual([true, true, true, true, true]);
+    expect([fresh, other, theirs, dated, workbook].map((f) => fs.existsSync(f)))
+      .toEqual([true, true, true, true, true]);
   }, 60_000);
 });
 
