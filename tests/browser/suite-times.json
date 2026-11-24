@@ -36,6 +36,7 @@
   "readonly": 24,
   "regress": 33,
   "relink": 41,
+  "reopensave": 40,
   "resolve": 18,
   "review": 77,
   "searchitems": 16,
@@ -45,5 +46,6 @@
   "surfaces": 45,
   "toolbars": 7,
   "transfer": 41,
+  "twinNames": 30,
   "undoimport": 4
 }
