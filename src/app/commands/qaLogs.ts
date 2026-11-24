@@ -3,7 +3,7 @@
  * and what the last update wrote. The file itself is the team's, on their drive (QaLogFiles).
  */
 import { z } from 'zod';
-import { define } from '../command';
+import { define, type Upsert } from '../command';
 import { DealId, QaLog, Question, QuestionId, QuestionStatus, Finding, type Deal } from '../../domain/model';
 import { setResponse, editQuestionField, checkQuestion } from '../../domain/transitions';
 import { ok, fail, notFound, rejected, type Result } from '../../domain/result';
@@ -111,7 +111,10 @@ export const ChooseQaVersion = define({
     // a choice made against an update that another has replaced since is about cells the person no longer sees
     if (log.last.at !== input.of) return fail(rejected('The Q&A log was updated since. Open the question again'));
     const q = state.questions[input.questionId]; if (!q || q.dealId !== d.id) return fail(notFound('Question not found', input.questionId));
-    const r = applyVersion(state, q, input.set, ctx, input.origin); if (!r.ok) return r; const { finding } = r.value; const linked = q.linkedFinding ? state.findings[q.linkedFinding] : undefined;
+    const linked = q.linkedFinding ? state.findings[q.linkedFinding] : undefined;
+    const r = applyVersion(q, input.set, ctx, linked, input.origin);
+    if (!r.ok) return r;
+    const { finding } = r.value;
     const had = q.logPick?.of === input.of ? q.logPick.sent : {};
     const next: Question = { ...r.value.next, logPick: { of: input.of, sent: { ...had, ...input.sent } }, updatedAt: ctx.at };
     // nothing is thrown away: the app's version, when the log's or a merged one is taken over it, is listed
@@ -152,8 +155,16 @@ export const RestoreQaVersion = define({
  * Answered taken with it finds one, its finding's mark with it; a status is taken as it is,
  * as a version is put back. Fails when the result is not a valid question.
  */
-function applyVersion(state: { findings: Record<string, Finding> }, q: Question, set: Record<string, string>, ctx: { at: string; actor: string }, origin: 'ai' | 'human' = 'human'): Result<{ next: Question; finding?: Finding }> {
-  const tx = { at: ctx.at, actor: ctx.actor }; let next: Question = q; const linked = q.linkedFinding ? state.findings[q.linkedFinding] : undefined; let finding: Finding | undefined;
+function applyVersion(
+  q: Question,
+  set: Record<string, string>,
+  ctx: { at: string; actor: string },
+  linked: Finding | undefined,
+  origin: 'ai' | 'human' = 'human',
+): Result<{ next: Question; finding?: Finding }> {
+  const tx = { at: ctx.at, actor: ctx.actor };
+  let next = q;
+  let finding: Finding | undefined;
   if (set.response !== undefined) {
     const r = setResponse(next, set.response, set.response.trim() ? { origin, sources: [], actor: ctx.actor, at: ctx.at } : undefined, linked, tx); if (!r.ok) return r;
     next = r.value.question.record; finding = r.value.finding?.record;
@@ -194,20 +205,38 @@ export const TakeFromQaLog = define({
   }),
   targets: (s, i) => [...Object.keys(i.set), ...Object.keys(i.set).map((id) => s.questions[id]?.linkedFinding).filter((x): x is string => !!x)],
   plan(state, input, ctx) {
-    const upserts: any[] = []; const snapshots: Question[] = []; const findings: Finding[] = []; const skipped: string[] = [];
+    const upserts: Upsert[] = [];
+    const snapshots: Question[] = [];
+    // Apply responses to the same finding in order, then write one revision for the entire update (#336).
+    const findingEdits = new Map<string, { original: Finding; latest: Finding }>();
     for (const [id, all] of Object.entries(input.set)) {
-      const q = state.questions[id]; if (!q || q.dealId !== input.dealId) continue;
-      const set = stillAsCompared(q, all, input.expect?.[id]);
+      const question = state.questions[id];
+      if (!question || question.dealId !== input.dealId) continue;
+      const set = stillAsCompared(question, all, input.expect?.[id]);
       if (!Object.keys(set).length) continue;
-      const r = applyVersion(state, q, set, ctx); if (!r.ok) { skipped.push(id); continue; }
-      if (r.value.next === q) continue;
-      upserts.push({ kind: 'question', record: r.value.next, expectedRev: q.rev }); snapshots.push(q);
-      const linked = q.linkedFinding ? state.findings[q.linkedFinding] : undefined;
-      if (r.value.finding && linked) { upserts.push({ kind: 'finding', record: r.value.finding, expectedRev: linked.rev }); findings.push(linked); }
+      const original = question.linkedFinding ? state.findings[question.linkedFinding] : undefined;
+      const linked = original && (findingEdits.get(original.id)?.latest ?? original);
+      const applied = applyVersion(question, set, ctx, linked);
+      if (!applied.ok || applied.value.next === question) continue;
+      upserts.push({ kind: 'question', record: applied.value.next, expectedRev: question.rev });
+      snapshots.push(question);
+      const { finding } = applied.value;
+      if (finding && original) findingEdits.set(original.id, { original, latest: finding });
+    }
+    const findings: Finding[] = [];
+    for (const { original, latest } of findingEdits.values()) {
+      upserts.push({ kind: 'finding', record: latest, expectedRev: original.rev });
+      findings.push(original);
     }
     if (!upserts.length) return ok({ upserts: [], audit: [] });
-    return ok({ dealId: input.dealId, upserts, audit: snapshots.map((q) => ({ kind: 'edited', recordId: q.id, dealId: input.dealId, text: 'Changed in the Q&A log' })),
-      inverse: { command: 'RestoreQuestionSnapshots', input: { dealId: input.dealId, snapshots, findings } } });
+    return ok({
+      dealId: input.dealId,
+      upserts,
+      audit: snapshots.map((q) => ({
+        kind: 'edited', recordId: q.id, dealId: input.dealId, text: 'Changed in the Q&A log',
+      })),
+      inverse: { command: 'RestoreQuestionSnapshots', input: { dealId: input.dealId, snapshots, findings } },
+    });
   },
 });
 
