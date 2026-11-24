@@ -16,11 +16,10 @@
 .x-trail .sep{color:var(--ink-3)}
 .x-trail .t{overflow:hidden;text-overflow:ellipsis;min-width:0}
 .x-head .x-acts{margin-left:auto;display:flex;align-items:center;gap:6px;flex:none}
-.x-head .hsel{display:inline-flex;align-items:center;gap:4px}
-.x-head .hsel .chev{opacity:.7;display:inline-grid}
+
 .btn.sm.ico{width:28px;padding:0}
 .x-toggle{position:relative}
-.x-toggle .dot{position:absolute;top:4px;right:4px;width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--surface)}
+
 .x-scroll{flex:1 1 auto;min-height:0;overflow:auto;scrollbar-width:none;padding:6px 20px 150px;-webkit-mask-image:linear-gradient(to bottom,transparent 0,transparent 30px,var(--mask) 64px);mask-image:linear-gradient(to bottom,transparent 0,transparent 30px,var(--mask) 64px)}
 .x-col{max-width:740px;margin:0 auto}
 .x .msgs{gap:16px;padding-top:4px}
@@ -41,7 +40,7 @@
 .x-card{display:flex;align-items:center;gap:12px;margin-top:10px;padding:10px 12px 10px 14px;border-radius:var(--r-card);background:var(--card);border:1px solid var(--line);font-size:13px;max-width:min(520px,100%);box-sizing:border-box;min-width:0}
 .x-card .k{display:flex;flex-direction:column;min-width:0;flex:1 1 auto;gap:1px}
 .x-card .k > span:not(.x-live){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.x-card .k b{font-weight:600;color:var(--ink)}
+
 .x-card .k span{color:var(--ink-2);font-size:12px}
 .x-card .btn{margin-left:auto;flex:none}
 .x-ring{flex:none;display:grid;place-items:center;color:var(--accent)}
@@ -63,58 +62,22 @@
 .x-pane>.inner{display:flex;flex-direction:column;min-height:0;height:100%;border-radius:inherit;overflow:hidden;position:relative;z-index:1}
 .x-grip{position:absolute;left:-8px;top:50%;width:4px;height:40px;margin-top:-20px;border-radius:999px;background:var(--tick);z-index:3}
 .x-grip.drag{background:var(--ink-3)}
-.x-tabs{flex:none;display:flex;align-items:flex-end;height:46px;padding:0 10px 0 16px;box-shadow:inset 0 -1px 0 var(--line);gap:8px;min-width:0}
-.x-tab{display:inline-flex;align-items:center;gap:6px;padding:0 2px 11px;border-bottom:2px solid transparent;font-size:13px;color:var(--ink-2);white-space:nowrap;min-width:0;flex:0 1 auto}
-.x-tab .l{overflow:hidden;text-overflow:ellipsis;min-width:0}
-.x-tab .n{font-size:12px;color:var(--ink-3);flex:none}
-.x-tab .run{width:6px;height:6px;border-radius:50%;background:var(--accent);flex:none}
-.x-tab .x{display:grid;place-items:center;color:var(--ink-3);flex:none;margin-left:1px;margin-top:-1px}
-.x-tab .x svg{display:block}
-.x-tab.on{color:var(--ink);border-bottom-color:var(--accent)}
-.x-tab.on .n{color:var(--ink-2)}
-.x-tabrow{display:flex;align-items:flex-end;gap:12px;min-width:0;flex:1 1 auto;overflow:hidden;align-self:stretch}
-.x-tab.pin{flex:none}
-.x-tab:not(.on){flex-shrink:0}
-.x-tab:not(.pin):not(.on) .n{display:none}
-.x-tab.on{flex-shrink:1;min-width:90px}
-.x-tabs .end{margin-left:auto;align-self:center;flex:none;padding-left:4px}
+
 .x-pbody{flex:1 1 auto;min-height:0;overflow:hidden;padding:14px 18px 18px;position:relative}
 .x-lbl{font-size:13px;font-weight:600;color:var(--ink-2);display:flex;align-items:baseline;gap:6px;margin:4px 0 8px}
 .x-lbl .n{font-weight:500;color:var(--ink-3);font-variant-numeric:tabular-nums}
-/* Background tab */
-.x-task{padding:12px 4px 12px 2px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:20px minmax(0,1fr) auto;column-gap:10px;align-items:start}
-.x-task:last-child{border-bottom:0}
-.x-task .ic{padding-top:2px;color:var(--ink-3);display:grid;place-items:center}
-.x-task .ic.on{color:var(--accent)}
-.x-task .ic svg{display:block}
-.x-task .tt{font-size:13.5px;font-weight:600;color:var(--ink);line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.x-task .mm{font-size:12px;color:var(--ink-2);line-height:18px;margin-top:1px;font-variant-numeric:tabular-nums}
-.x-task .mm .hi{color:var(--high);font-weight:500}
-.x-task .act{align-self:start;margin-top:-4px}
-.x-task .x-bar,.x-task .x-steps{grid-column:2/4}
-.x-bar{height:4px;border-radius:999px;background:var(--bar-track);margin:8px 0 2px;overflow:hidden}
-.x-bar i{display:block;height:100%;border-radius:inherit;background:var(--accent)}
-.x-steps{margin:10px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--ink-2);line-height:18px}
-.x-steps li{display:grid;grid-template-columns:14px minmax(0,1fr);gap:8px;align-items:start}
-.x-steps li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.x-steps li i{display:grid;place-items:center;height:18px;color:var(--ink-3)}
-.x-steps li i svg{display:block}
-.x-steps li.now{color:var(--ink)}
-.x-steps li.now i{color:var(--accent)}
-.x-steps li.hit i{color:var(--high)}
-.x-steps .pip{width:6px;height:6px;border-radius:50%;background:currentColor}
+
 /* report */
 .x-rhead{display:flex;align-items:center;gap:8px;margin:0 0 6px}
 .x-rhead .seg{flex:none}
-.x-rhead .end{margin-left:auto;display:flex;gap:8px}
-.x-meta{font-size:12px;color:var(--ink-2);margin:0 0 10px 2px;font-variant-numeric:tabular-nums}
+
 .x-grp{font-size:13px;font-weight:600;color:var(--ink-2);padding:12px 0 6px 12px;display:flex;gap:6px;align-items:baseline}
 .x-grp .n{font-weight:500;color:var(--ink-3)}
 .x-row{display:grid;grid-template-columns:14px minmax(0,1fr) auto;column-gap:14px;align-items:center;min-height:36px;padding:7px 10px 7px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--ink);border-radius:0}
 .x-row .mk{min-height:18px}
 .x-row .t{line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .x-row .s{font-size:12px;color:var(--ink-2);white-space:nowrap;display:inline-flex;align-items:center}
-.x-row.on{background:var(--glass-2);border-radius:var(--r-ctl);box-shadow:inset 0 1px 0 var(--spec),0 0 0 1px var(--glass-edge);border-bottom-color:transparent}
+
 /* issue */
 .x-issue .top{display:flex;align-items:center;gap:8px;margin:2px 0 10px}
 .x-issue .top .m{font-size:13px;font-weight:600;color:var(--ink-2);line-height:28px}
@@ -131,11 +94,7 @@
 /* document */
 .x-docstage{position:absolute;inset:0;overflow:hidden;padding:18px 18px 0;display:flex;justify-content:center}
 .x-page{background:var(--paper);color:var(--paper-ink);width:100%;max-width:560px;padding:40px 44px;box-shadow:var(--shadow-page);font:13.5px/1.7 "Times New Roman",Times,serif;min-height:720px}
-.x-page .hd{display:flex;justify-content:space-between;font:11px/1 var(--body);color:var(--paper-muted);border-bottom:1px solid var(--paper-rule);padding-bottom:8px;margin-bottom:18px}
-.x-page h3{font:700 14px/1.3 var(--body);color:var(--paper-ink);margin:0 0 12px;letter-spacing:.2px}
-.x-page p{margin:0 0 10px;display:grid;grid-template-columns:34px minmax(0,1fr)}
-.x-page p.sub{grid-template-columns:34px 28px minmax(0,1fr)}
-.x-page mark{background:var(--paper-hl);color:var(--paper-ink);padding:1px 0}
+
 .x-docnav{position:absolute;left:50%;transform:translateX(-50%);bottom:14px;display:flex;align-items:center;gap:4px;padding:5px 6px;border-radius:999px;background:var(--capsule);backdrop-filter:blur(24px) saturate(150%);border:1px solid var(--glass-edge);box-shadow:inset 0 1px 0 var(--spec),var(--shadow-pop);white-space:nowrap;max-width:calc(100% - 28px)}
 .x-docnav>button{width:30px;height:30px;border:0;border-radius:999px;background:none;color:var(--ink-2);display:grid;place-items:center;flex:none}
 .x-docnav>button svg{display:block}
@@ -145,7 +104,7 @@
 /* Q&A */
 .x-qact{display:flex;align-items:center;gap:8px}
 .x-qtools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 10px}
-.x-qtools .field{flex:1 1 120px;min-width:80px;height:32px;font-size:13px;display:flex;align-items:center;color:var(--ink-3)}
+
 .x-table{font-size:13px}
 .x-th,.x-tr{display:grid;grid-template-columns:48px 60px 112px minmax(0,1.3fr) minmax(0,1fr) 70px;column-gap:14px;padding:0 8px 0 4px}
 .x-th{font-size:11px;font-weight:600;color:var(--ink-2);height:30px;align-items:center;border-bottom:1px solid var(--line)}
@@ -153,31 +112,14 @@
 .x-tr .n,.x-th .n{font-variant-numeric:tabular-nums}
 .x-tr .q{color:var(--ink);line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .x-tr .r{line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.x-tr .d{font-variant-numeric:tabular-nums;white-space:nowrap}
 
 .x-tr.on{background:var(--card);border-radius:var(--r-ctl)}
 @container (max-width:700px){.x-th,.x-tr{grid-template-columns:48px 60px minmax(0,1.2fr) minmax(0,1fr) 70px}.x-th .ws,.x-tr .ws{display:none}}
 @container (max-width:520px){.x-th,.x-tr{grid-template-columns:48px minmax(0,1.2fr) minmax(0,1fr) 70px}.x-th .p,.x-tr .p{display:none}}
 @container (max-width:760px){.x-qtools .wide{display:none}}
 @container (max-width:560px){.x-qtools .field,.x-qtools .seg .c{display:none}}
-.x-foot{position:absolute;left:0;right:0;bottom:0;height:44px;display:flex;align-items:center;padding:0 18px;font-size:12px;color:var(--ink-3);border-top:1px solid var(--line);background:var(--glass);backdrop-filter:blur(28px) saturate(150%);font-variant-numeric:tabular-nums}
-/* tab treatment B: compact chips (an alternative) */
-.x-chips{flex:none;display:flex;align-items:center;gap:6px;overflow:hidden;height:48px;padding:0 10px;box-shadow:inset 0 -1px 0 var(--line);min-width:0}
-.x-chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:500;color:var(--ink-2);white-space:nowrap;min-width:0;flex:none;background:var(--card);box-shadow:0 0 0 1px var(--line) inset}
-.x-chip svg{display:block;flex:none}
-.x-chip .ic{display:grid;place-items:center;flex:none;color:var(--ink-3)}
-.x-chip .ic.run{color:var(--accent)}
-.x-chip:not(.on) .ic.run .x-ring{color:var(--ink-3)}
-.x-chip .l{overflow:hidden;text-overflow:ellipsis;min-width:0}
-.x-chip .n{color:var(--ink-3);font-variant-numeric:tabular-nums;flex:none}
-.x-chip .x{display:grid;place-items:center;color:var(--ink-3);flex:none;margin-right:-3px}
-.x-chip.on{background:var(--glass-2);box-shadow:inset 0 1px 0 var(--spec),0 0 0 1px var(--glass-edge);color:var(--ink);flex:0 1 auto}
-.x-chip.on .ic{color:var(--ink-2)}
-.x-chip.on .ic.run{color:var(--accent)}
 
-.x-chips.io .x-chip:not(.on) .l,.x-chips.io .x-chip:not(.on) .n{display:none}
-.x-chips.io .x-chip:not(.on){width:28px;padding:0;justify-content:center}
-/* tab treatment S: tabs share the bar's width (the chosen treatment) */
+/* the pane's tab bar: tabs share the bar's width */
 .x-strip{flex:none;display:flex;align-items:center;height:50px;padding:0 10px;box-shadow:inset 0 -1px 0 var(--line);min-width:0}
 .x-strip .trk{display:flex;gap:2px;padding:3px;width:100%;min-width:0;border-radius:999px;background:color-mix(in srgb,var(--ink) 6%,transparent);box-shadow:inset 0 0 0 1px var(--line)}
 .x-stab{flex:1 1 0;min-width:30px;display:flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:500;color:var(--ink-2);white-space:nowrap;overflow:hidden}
@@ -186,69 +128,20 @@
 .x-stab .l{overflow:hidden;text-overflow:ellipsis;min-width:0}
 .x-stab .n{color:var(--ink-3);flex:none}
 .x-stab .x{display:grid;place-items:center;color:var(--ink-3);flex:none;margin-left:auto}
-.x-strip .trk.allico .x-stab.on{flex:1 1 auto;max-width:none}
+
 .x-stab.on{flex:0 0 auto;max-width:68%;min-width:120px;background:var(--glass-2);box-shadow:inset 0 1px 0 var(--spec),0 0 0 1px var(--glass-edge),0 1px 3px var(--inset-edge);color:var(--ink);justify-content:flex-start}
 .x-stab.on .ic{color:var(--ink-2)}
 .x-stab:not(.on) .ic .x-ring{color:var(--accent)}
 .x-stab.on .ic .x-ring{color:var(--accent)}
-.x-strip .trk.one{width:auto}.x-strip .trk.one .x-stab{flex:none}
-/* a lone tab fits its name */
-.x-strip .trk.one .x-stab.on{min-width:max-content;padding-right:14px}
-/* a chat card's mark sits on its title line, as in the task list */
-.x .x-card > .x-ring{align-self:flex-start;margin-top:1px}
+
 .x-stab.tight .n{display:none}
-.x-stab.ico .l,.x-stab.ico .n{display:none}
-.x-stab.ico{padding:0;flex:0 0 34px}
-/* a running tab keeps its name beside the ring */
-.x-stab.keep{flex:0 0 auto}
-.x-stab.keep .n{display:none}
-/* tab treatment A: segmented */
-.x-segtabs{flex:none;display:flex;align-items:center;height:52px;padding:0 10px;box-shadow:inset 0 -1px 0 var(--line);min-width:0}
-.x-segtabs .seg{min-width:0;max-width:100%}
-.x-segtabs .seg button{display:inline-flex;align-items:center;gap:5px;min-width:0;max-width:150px;overflow:hidden;flex:0 1 auto}
-.x-segtabs .seg button span{overflow:hidden;text-overflow:ellipsis;min-width:0}
-.x-segtabs .seg button i{width:6px;height:6px;border-radius:50%;background:var(--accent);flex:none}
-/* tab treatment C: browser-style strip */
-.x-btabs{flex:none;display:flex;align-items:flex-end;gap:2px;height:44px;padding:0 10px;min-width:0;position:relative;overflow:hidden}
-.x-btabs::after{content:"";position:absolute;left:0;right:0;bottom:0;border-bottom:1px solid var(--line)}
-.x-btab{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:10px 10px 0 0;font-size:12px;font-weight:500;color:var(--ink-2);white-space:nowrap;min-width:34px;flex:0 1 auto;position:relative;z-index:1;border:1px solid transparent;border-bottom:0}
-.x-btab svg{display:block;flex:none}
-.x-btab .ic{display:grid;place-items:center;color:var(--ink-3)}
-.x-btab .l{overflow:hidden;text-overflow:ellipsis;min-width:0}
-.x-btab .n{color:var(--ink-3)}
-.x-btab:not(.on) .n{display:none}
-.x-btab.ico .l{display:none}
-.x-btab.ico{flex:none;padding:0 10px}
-.x-btab{overflow:hidden}
-.x-btab .x{display:grid;place-items:center;color:var(--ink-3);margin-right:-3px}
-.x-btab.on{background:var(--glass-2);border-color:var(--glass-edge);box-shadow:inset 0 1px 0 var(--spec);color:var(--ink);flex:0 0 auto;max-width:60%;height:36px;margin-bottom:-1px;z-index:2}
-.x-btab:not(.on)+.x-btab:not(.on)::before{content:"";position:absolute;left:-2px;top:10px;height:14px;border-left:1px solid var(--line)}
-@container (max-width:400px){.x-btab:not(.on) .l,.x-btab:not(.on) .n{display:none}
-.x-btab.ico .l{display:none}
-.x-btab.ico{flex:none;padding:0 10px}}
-/* switcher (not offered) */
-.x-switch{flex:none;display:flex;align-items:center;gap:8px;height:48px;padding:0 10px;box-shadow:inset 0 -1px 0 var(--line);min-width:0;position:relative;z-index:5}
-.x-switch .pick{display:inline-flex;align-items:center;gap:6px;min-width:0;max-width:calc(100% - 44px)}
-.x-switch .pick .l{overflow:hidden;text-overflow:ellipsis;min-width:0}
-.x-switch .pick .chev{display:inline-grid;opacity:.7;flex:none}
-.x-switch .pick>svg{flex:none;color:var(--ink-2)}
-.x-switch .end{margin-left:auto;display:flex;gap:8px}
-.x-menu{position:absolute;z-index:80;width:300px;padding:8px;border-radius:12px;background:var(--glass-2);border:1px solid var(--glass-edge);backdrop-filter:blur(12px) saturate(150%);box-shadow:inset 0 1px 0 var(--spec),inset 0 -1px 0 var(--inset-edge),var(--shadow-pop);background-image:linear-gradient(135deg,var(--glass-sheen),transparent 40%)}
-:root[data-theme="light"] .x-menu{background:color-mix(in srgb,var(--menu-solid) 36%,transparent)}
-.x-menu .mi{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border-radius:8px;font-size:13px;color:var(--ink);white-space:nowrap}
-.x-menu .mi svg{display:block;flex:none;color:var(--ink-2)}
-.x-menu .mi .l{overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1 1 auto}
-.x-menu .mi .n{color:var(--ink-3);font-variant-numeric:tabular-nums}
-.x-menu .mi.ch{background:var(--mi-chosen)}
-.x-menu .mi .ck{display:grid;place-items:center;width:14px;flex:none}
-.x-menu .mi .x-ring svg{color:var(--accent)}
-.x-menu hr{border:0;border-top:1px solid var(--line);margin:6px 2px}
+
 /* in-process marks */
 .x-work{display:inline-flex;align-items:center;gap:6px;color:var(--ink-2);font-size:12px;white-space:nowrap}
 .x-work .x-ring,.x-status .x-ring{color:var(--accent)}
 .x-status{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-2);margin:0 0 10px;padding:0 2px;min-width:0}
 .x-status span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.x-tr .aim{color:var(--accent);font-weight:500}
+
 /* Q&A item, opened above the list as on today's Q&A page */
 .x-qcard{border-radius:var(--r-card);background:var(--glass-2);box-shadow:inset 0 1px 0 var(--spec),0 0 0 1px var(--glass-edge);padding:12px 14px 14px;margin:0 0 12px}
 .x-qcard .hd{display:flex;align-items:center;gap:8px}
@@ -261,7 +154,7 @@
 .x-qcard .cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:18px;margin-top:8px}
 @container (max-width:560px){.x-qcard .cols{grid-template-columns:minmax(0,1fr);gap:10px}.x-qcard .hd .pos{display:none}}
 .x-qcard .lb{font-size:13px;font-weight:500;color:var(--ink-2);display:flex;align-items:center;gap:8px;margin:0 0 6px}
-.x-qcard .lb .aim{color:var(--accent);font-size:12px;font-weight:500}
+
 .x-qcard .lb .sub{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:400;color:var(--ink-2)}
 .x-qcard .lb .sub svg{display:block;color:var(--ink-3)}
 .x-qcard .resp{border:1px solid var(--line);background:var(--card);border-radius:var(--r-ctl);padding:8px 11px;font-size:13.5px;line-height:1.55}
@@ -282,34 +175,20 @@
 .rail .brand .x-sidetog + .plus{margin-left:6px}
 .x-slim{padding-top:8px}
 .x-slim .railx{border-radius:50%}
-/* sidebar: a deal's conversations under it */
-.rail a.dealrow.open{font-weight:500}
+
 @media(max-width:1180px){#app:not(.slim){grid-template-columns:208px minmax(0,1fr)}}
 .x-tv{display:flex;flex-direction:column;height:100%;min-height:0}
 .x-tv .sc{flex:1 1 auto;min-height:0;overflow:hidden;padding:0 2px}
-.x-tv .top{display:flex;align-items:center;gap:8px;min-height:28px}
-.x-tv .st{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums}
-.x-tv .st .x-ring{color:var(--accent)}
-.x-tv .top .end{margin-left:auto;display:flex;gap:6px}
+
 .x-tv h2{font-size:17px;font-weight:600;letter-spacing:-.01em;margin:6px 0 4px;color:var(--ink)}
-.x-tv .ask{font-size:13px;color:var(--ink-2);margin:0 0 12px}
-.x-tv .x-lbl{margin-top:14px}
-.x-tv .x-steps{margin:0}
-.x-tv .x-steps li.todo{color:var(--ink-3)}
-.x-tv .x-steps li.now span{white-space:normal}
-.x-tv .x-steps .sub{display:block;color:var(--ink-3);font-size:12px}
+
 .x-tv p{font-size:13.5px;line-height:1.45;margin:4px 0 8px;color:var(--ink)}
 .x-tv .acts2{display:flex;gap:8px;margin-top:10px}
-.x-tv .fold{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-2)}
+
 .x-tv .steer{flex:none;padding-top:10px}
 .x-tv .steer .askbox{padding:12px 12px 10px;gap:6px}
 .x-tv .steer textarea{flex:1}
 
-/* the conversation folded to a strip while the pane takes the room */
-.x-cstrip{flex:0 0 48px;display:flex;flex-direction:column;align-items:center;gap:8px;padding:8px 0 12px;min-height:0}
-.x-cstrip .sp{flex:1}
-.x-cstrip .btn.ico{flex:none}
-.x-cstrip .dot{width:6px;height:6px;border-radius:50%;background:var(--accent)}
 /* Q&A in the roomy pane: the list beside the opened question */
 .x-qlist{margin-top:4px}
 .x-qlist .x-lrow{grid-template-columns:48px minmax(0,1fr) auto;padding:10px 10px}
@@ -319,21 +198,17 @@
 .x-qitem .x-qcard .cols{grid-template-columns:minmax(0,1fr);gap:16px;margin-top:14px}
 .x-qitem .x-qcard .qt{font-size:15px;line-height:1.5}
 .x-qitem .x-qcard .draft,.x-qitem .x-qcard .resp{font-size:14px;line-height:1.5}
-.x-qsplit{display:grid;grid-template-columns:minmax(260px,0.9fr) minmax(0,1.25fr);gap:14px;height:calc(100% - 52px);min-height:0}
-.x-qsplit .lst{min-height:0;overflow:hidden}
+
 .x-lrow{display:grid;grid-template-columns:44px minmax(0,1fr) 72px;column-gap:10px;padding:9px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--ink-2);align-items:start}
 .x-lrow .n{font-variant-numeric:tabular-nums;color:var(--ink-3)}
 .x-lrow .q{color:var(--ink);line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .x-lrow .st{text-align:right}
 .x-lrow .w{display:flex;align-items:center;gap:5px;justify-content:flex-end;color:var(--ink-2)}
 .x-lrow .w .x-ring{color:var(--accent)}
-.x-lrow.on{background:var(--glass-2);border-radius:var(--r-ctl);box-shadow:inset 0 1px 0 var(--spec),0 0 0 1px var(--glass-edge);border-bottom-color:transparent}
-.x-qsplit .det{min-height:0;overflow:hidden}
-.x-qsplit .det .x-qcard{margin:0;background:none;box-shadow:none;padding:4px 6px 0}
+
 .x-qcard .hd .pos{white-space:nowrap}
 .x .btn.sm.ico{flex:none;width:28px;height:28px}
-.x-qsplit{grid-template-columns:minmax(300px,.8fr) minmax(0,1.2fr)}
-.x-qsplit .det .x-qcard .cols{grid-template-columns:minmax(0,1fr);gap:14px}
+
 /* reading mode's page and zoom stack, in the pane */
 .x-pgstack{position:absolute;right:16px;bottom:72px;display:flex;flex-direction:column;align-items:center;padding:4px}
 .x-pgstack>button{display:grid;place-items:center}
@@ -353,27 +228,14 @@
 .x-live .lv{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .x-live .mt{flex:none;white-space:nowrap}
 .x-live .mt::before{content:"\00a0·\00a0"}
-/* when the count and time wrap under the step, they start the line without a separator */
-.x-live.wrapped .mt::before{content:none}
-.x-live.wrapped .mt{flex-basis:100%}
-.x-card .x-live .lv{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+
 .x-pbody .x-lbl{margin-top:16px}
 .x-tgroup{border-radius:var(--r-card);background:var(--card);box-shadow:inset 0 0 0 1px var(--line);overflow:hidden}
-.x-trow{position:relative;display:grid;grid-template-columns:16px minmax(0,1fr) auto;column-gap:12px;align-items:start;padding:11px 14px 11px 16px;font-size:13px}
-/* rows in a group are split by a hairline inset to the text, as in a desktop grouped list */
-.x-trow + .x-trow::before{content:"";position:absolute;top:0;left:44px;right:0;height:1px;background:var(--line)}
-.x-trow .mk2{display:grid;place-items:center;height:18px;color:var(--ink-3)}
-.x-trow .mk2 svg{display:block}
-.x-trow .mk2 .x-ring,.x-trow .mk2 .ask{color:var(--accent);display:grid}
-.x-trow .tx{min-width:0}
-.x-trow .nm{display:block;color:var(--ink);font-weight:500;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.x-trow .ln{display:block;color:var(--ink-3);font-size:12px;line-height:17px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.x-trow .kind{display:inline-flex;align-items:center;gap:3px;height:18px;color:var(--ink-3);font-size:12px;white-space:nowrap}
-.x-trow .kind svg{display:block}
+
 /* the live step below a running task's steps: ring, elapsed time, and steps done */
 .x-spin{display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:12px;color:var(--ink-3)}
 .x-tv .me{margin:6px 0 12px auto;max-width:85%;padding:9px 13px;border-radius:16px;background:var(--card);box-shadow:inset 0 0 0 1px var(--line);font-size:13.5px;line-height:1.45;width:fit-content}
-.x-spin .x-ring{color:var(--accent)}
+
 .x-tv .nar{color:var(--ink);margin:10px 0 8px}
 /* steps are plain one-line rows */
 .x-tool{display:flex;align-items:center;gap:10px;height:26px;padding:0 2px;margin:0;font-size:13px;color:var(--ink)}
@@ -398,7 +260,7 @@
 .x-qitem .x-lbl{margin-top:18px}
 .x-qitem .lnk{font-size:13.5px;text-decoration:underline dotted var(--ink-3);text-underline-offset:4px;text-decoration-thickness:1px}
 .x-stab:not(.on):not(.ico){justify-content:flex-start}
-.x-tr .r > .aim{display:block}
+
 .x-qcard .x-lbl{margin-top:12px}
 .x-qcard .lnk{font-size:13.5px;text-decoration:underline dotted var(--ink-3);text-underline-offset:4px;text-decoration-thickness:1px}
 .x-lrow small .w{display:inline-flex;vertical-align:-2px;justify-content:flex-start}
@@ -452,7 +314,7 @@
 .x-prow + .x-prow::before{content:"";position:absolute;top:0;left:56px;right:0;height:1px;background:var(--line)}
 .x-prow .tx{min-width:0}
 .x-prow .nm{display:block;color:var(--ink);font-weight:500;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.x-prow .ln{display:block;color:var(--ink-3);font-size:12px;line-height:16px;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+
 .x-prow .tr{display:flex;align-items:center}
 .x-pcard{align-items:center;padding:10px 12px}
 .x-pcard .k{gap:0}
@@ -468,7 +330,6 @@
 .x-pbar{height:3px;margin:5px 0 2px}
 .x-pcard{width:min(420px,100%);padding:8px 10px;gap:10px}
 .x-pcard .k{display:block}
-/* critic pass */
 .x-strip .trk.x-even{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)}
 .x-strip .trk.x-even .x-stab{box-sizing:border-box}
 .x-strip .trk.x-even .x-stab+.x-stab::before{height:16px;background:color-mix(in srgb,var(--ink) 30%,transparent)}
@@ -493,13 +354,13 @@ const ring = (p, s = 16) => { const r = 6.5, c = 2 * Math.PI * r; return `<svg w
 const params = new URLSearchParams(location.hash.slice(1));
 const S = params.get('s') || 'empty';
 document.documentElement.dataset.theme = params.get('theme') || 'dark';
-if (params.get('tan') !== '1') document.documentElement.classList.add('x-bw');
+document.documentElement.classList.add('x-bw');
 const W = innerWidth;
 const narrow = W <= 1180;
 
 const CONVS = ['Permits and diligence', 'Lock-up ratio against the term sheet', 'Offtaker position on the revenue contract', 'Insurance advisor report gaps', 'Debt sizing and sculpting', 'Board resolutions for the financing', 'Hedging strategy letter'];
 // deals in the order the person last worked on them; archived deals are hidden under Archived, whose dot shows that
-// one of them has new files (decision pending: replaces the status groups)
+// one of them has new files
 const ARCH = params.get('arch') === '1';
 const DEALS = ['Project Proseware', 'Project Halyard', 'Project Trey', 'Project Wingtip', 'Project Kestrel'];
 const ARCHIVED = [['Project Tern', '4 new files · 11:20 AM'], ['Project Lapwing', ''], ['Project Plover', '']];
@@ -547,7 +408,7 @@ function head(title, opts = {}) {
   return `<div class="x-head"><div class="x-trail"><b>Project Proseware</b><span class="sep">›</span>${histBtn(title)}</div>${PAST ? pastPop() : ''}
   <div class="x-acts"><button class="btn sm ico" title="More">${I('more', 16)}</button>${opts.toggle === false ? '' : `<button class="btn sm ico x-toggle ${opts.open ? 'on' : ''}" title="${opts.open ? 'Hide pane' : 'Show pane'}" aria-label="${opts.open ? 'Hide pane' : 'Show pane'}">${I('panel', 15)}${opts.dot ? '<i class="dot"></i>' : ''}</button>`}</div></div>`;
 }
-// conversations are reached from the composer's Past Conversations, as the app does (docs/decisions.md, Conversations)
+// the conversation title in the breadcrumb opens this deal's past conversations
 const PAST = params.get('past') === '1';
 const PAST_ROWS = [
   ['Today', 'Permits and diligence', '3:04 PM', 'Four permits are still open. Two of them are conditions precedent to financial close.'],
@@ -618,26 +479,8 @@ function conv(parts, opts = {}) {
   return `<section class="x-conv">${head(opts.title, opts)}<div class="x-scroll ${opts.top ? 'x-top' : ''}"><div class="x-col"><div class="msgs">${lastActs(parts.join(''))}</div></div></div>
   <div class="x-composer">${composer('Ask a follow-up…')}</div></section>`;
 }
-const TABSTYLE = params.get('tabs') || 'S';
 const TICON = { bg: 'stack', rep: 'cklist', iss: 'flag', doc: 'doc', qa: 'sheet', thr: 'logedit' };
 const tabIcon = (t, s) => (t.run ? `<span class="x-ring">${ring(t.run === true ? .6 : t.run, s)}</span>` : I(TICON[t.k], s));
-function chipTabs(tabs) {
-  return `<div class="x-chips ${TABSTYLE === 'D' ? 'io' : ''}">${tabs.map((t) => `<span class="x-chip ${t.on ? 'on' : ''}" title="${t.l}"><span class="ic ${t.run ? 'run' : ''}">${tabIcon(t, 13)}</span><span class="l">${t.l}</span>${t.n ? `<span class="n">${t.n}</span>` : ''}${t.on ? `<span class="x">${I('close', 12, 2)}</span>` : ''}</span>`).join('')}</div>`;
-}
-function segTabs(tabs) {
-  return `<div class="x-segtabs"><div class="seg">${tabs.map((t) => `<button class="${t.on ? 'on' : ''}">${t.run ? '<i></i>' : ''}<span>${t.l}</span></button>`).join('')}</div></div>`;
-}
-function switchTabs(tabs) {
-  const cur = tabs.find((t) => t.on);
-  const plain = (l) => l.replace('&amp;', '&');
-  const sorted = [...tabs].sort((a, b) => plain(a.l).localeCompare(plain(b.l)));
-  const items = sorted.map((t) => `<div class="mi ${t.on ? 'ch' : ''}">${tabIcon(t, 14)}<span class="l">${t.l}</span>${t.n ? `<span class="n">${t.n}</span>` : ''}<span class="ck">${t.on ? I('check', 14) : ''}</span></div>`).join('');
-  return `<div class="x-switch"><button class="btn sm pick">${I(TICON[cur.k], 14)}<span class="l">${cur.l}</span><span class="chev">${I('chev', 13)}</span></button><span class="end"><button class="btn sm ico" title="Close">${I('close', 14)}</button></span>
-  <div class="x-menu">${items}</div></div>`;
-}
-function browserTabs(tabs) {
-  return `<div class="x-btabs">${tabs.map((t) => `<span class="x-btab ${t.on ? 'on' : ''}" title="${t.l}"><span class="ic">${tabIcon(t, 13)}</span><span class="l">${t.l}</span>${t.n ? `<span class="n">${t.n}</span>` : ''}${t.on ? `<span class="x">${I('close', 12, 2)}</span>` : ''}</span>`).join('')}</div>`;
-}
 function sharedTabs(tabs) {
   return `<div class="x-strip"><div class="trk x-even" style="grid-template-columns:${tabs.map((t) => (t.on ? 'minmax(0,1.5fr)' : 'minmax(0,1fr)')).join(' ')}">${tabs.map((t) => `<span class="x-stab ${t.on ? 'on' : ''}" title="${t.l}"><span class="ic">${tabIcon(t, 13)}</span><span class="l">${t.l}</span>${t.n ? `<span class="n">${t.n}</span>` : ''}${t.on && !CORE.includes(t.k) ? `<span class="x">${I('close', 12, 2)}</span>` : ''}</span>`).join('')}</div></div>`;
 }
@@ -647,12 +490,10 @@ const fitPane = (pw) => (slim ? pw : Math.min(pw, W - 16 - (narrow ? 208 : 236) 
 const QA_TABLE_MIN = 560;
 function pane(tabs, body, pw, grip = '') {
   pw = fitPane(pw);
-  const head = TABSTYLE === 'S' ? sharedTabs(tabs) : TABSTYLE === 'A' ? segTabs(tabs) : TABSTYLE === 'C' ? browserTabs(tabs) : chipTabs(tabs);
-  return `<section class="x-pane glass pane" style="--pw:${pw}px"><i class="x-grip ${grip}"></i><div class="inner">${head}<div class="x-pbody">${body}</div></div></section>`;
+  return `<section class="x-pane glass pane" style="--pw:${pw}px"><i class="x-grip ${grip}"></i><div class="inner">${sharedTabs(tabs)}<div class="x-pbody">${body}</div></div></section>`;
 }
 
-/* Background tab */
-/* Background, as agent lists show it: grouped by state, one line of what each is doing or found, and its age */
+/* Tasks: grouped by state, one line of what each is doing or found */
 const STOP = circ('close', 'Stop');
 const SHOW = circ('chevr', 'Open');
 const bg = `<div class="x-lbl">Needs Input</div>
@@ -702,7 +543,6 @@ const GROUPS = [
   ['Permits and Consents', 14, [['Grid connection permit is not yet granted', 'Problem'], ['Water abstraction license ends before the debt tenor', 'Problem'], ['Environmental permit condition report', 'Not Found'], ['Aviation clearance', 'Not Found']]],
   ['Revenue and Offtake', 11, [['Contracted capacity is below the base case', 'Problem'], ['Curtailment compensation is capped at 2% a year', 'Problem']]],
 ];
-const BUSY = new Set([2, 6, 10]);
 function report(onIdx, busy) {
   // the Checklist page's own rows and marks: a flagged item's stripe, a gap's dashed ring (checklist.tsx, Row)
   const all = GROUPS.flatMap(([, , items]) => items);
@@ -777,7 +617,6 @@ function qa(open) {
   ${open ? (open === 'ans' ? cardWithLinks(qcardAns, QLINKS.q87) : cardWithLinks(qcard, QLINKS.q433)) : ''}<div class="x-table"><div class="x-th"><span class="n">#</span><span class="p">Priority</span><span class="ws">Submitted By</span><span>Question</span><span class="r">Response</span><span>Status</span></div>${rows}</div>`;
 }
 
-
 /* Q&A beside the conversation: a list of questions, and one question opened in its place */
 const QNUM = [412, 1, 3, 433, 5, 450, 61, 72, 468, 97, 87, 471, 118, 480, 143, 492];
 const QBY = ['Lender A','Lender A','Lender B','Lender A','Lender B','Model auditor','Insurance advisor','Lender A','Technical advisor','Lender B','Lender A','Lender B','Lender A','Lender B','Insurance advisor','Lender A'];
@@ -824,9 +663,8 @@ function paneWidth(kind) {
 }
 
 let app = '';
-// the sidebar collapses only when the person hides it, and the app remembers the choice
 // the sidebar folds to its rail while a pane is open, so the conversation keeps its width, and comes back when the pane closes
-let slim = params.get('side') === '0' || (params.get('side') !== '1' && !['empty', 'active'].includes(S));
+let slim = params.get('side') !== '1' && !['empty', 'active'].includes(S);
 if (S === 'empty') {
   app = sidebar(null) + `<section class="stage"><div class="x-stage"><section class="x-conv">${head('', { toggle: true })}<div class="x-empty"><div class="center"><h1 class="ttl">What would you like to know?</h1>${composer('Which permits are still open on Project Proseware?')}</div></div></section></div></section>`;
 } else if (S === 'active') {
@@ -847,7 +685,7 @@ if (S === 'empty') {
     p = pane(tabs([BG, REPORT], 'rep'), report(-1), paneWidth());
   } else if (S === 'issue') {
     c = conv([T1, T2done, T3], { title: CONVS[0], open: true });
-    p = pane(tabs(params.get('more') ? [BG, REPORT, QA, ISSUE, DOC] : [BG, REPORT, ISSUE], 'iss'), issue, paneWidth());
+    p = pane(tabs([BG, REPORT, ISSUE], 'iss'), issue, paneWidth());
   } else if (S === 'doc') {
     c = conv([T1, T2done, T3], { title: CONVS[0], open: true });
     p = pane(tabs([BG, REPORT, DOC], 'doc'), doc.replace('class="x-docstage"', 'class="x-docstage wide"'), Math.round((W - 48 - (narrow ? 208 : 236)) * 0.6));
@@ -886,22 +724,10 @@ document.body.insertAdjacentHTML('beforeend', dealMenu() + archivedToast() + arc
 for (const m of document.querySelectorAll('.x-dealmenu')) { const b = document.querySelector('.dmore.open').getBoundingClientRect(); Object.assign(m.style, { left: (b.right - 180) + 'px', top: (b.bottom + 6) + 'px' }); }
 // a short conversation stays at its start
 for (const el of document.querySelectorAll('.x-scroll:not(.x-top)')) el.scrollTop = el.scrollHeight;
-// shared-width tabs: words give way to an ellipsis, then counts, then unchosen tabs show only their icon
-for (const trk of document.querySelectorAll('.x-strip .trk:not(.x-even),.x-btabs')) {
-  const all = [...trk.querySelectorAll('.x-stab:not(.on),.x-btab:not(.on)')];
-  all.filter((t) => t.querySelector('.x-ring')).forEach((t) => t.classList.add('keep'));
-  const rest = all.filter((t) => !t.classList.contains('keep'));
-  const cut = (t) => { const l = t.querySelector('.l'); return l && l.scrollWidth > l.clientWidth; };
-  if (rest.some((t) => t.clientWidth < 120 || cut(t))) rest.forEach((t) => t.classList.add('tight'));
-  if (rest.some((t) => { const l = t.querySelector('.l'); return l && l.scrollWidth > l.clientWidth; })) { rest.forEach((t) => t.classList.add('ico')); trk.classList.add('allico'); }
-}
+// a cut tab drops its count, then (unselected) its icon
 for (const t of document.querySelectorAll('.trk.x-even .x-stab')) { const l = t.querySelector('.l'); if (l && l.scrollWidth > l.clientWidth) t.classList.add('tight'); }
 for (const ln of document.querySelectorAll('.x-live')) { const [lv, mt] = ln.children; if (mt.offsetTop > lv.offsetTop) ln.classList.add('wrapped'); }
 if (params.get('tip')) { const btns = document.querySelectorAll('.acts .ib'); const b = btns[btns.length - 1]; if (b) { const a = b.getBoundingClientRect(); const t = document.createElement('div'); t.className = 'tip'; t.textContent = b.title; document.body.appendChild(t); const r = t.getBoundingClientRect(); Object.assign(t.style, { left: Math.max(12, Math.min(a.left, innerWidth - r.width - 12)) + 'px', top: (a.top - r.height - 8) + 'px' }); } }
-// tabs keep their words while they fit, then the unchosen ones shrink to their icons (name on hover)
-for (const row of document.querySelectorAll('.x-chips:not(.io)')) if (row.scrollWidth > row.clientWidth) row.classList.add('io');
-// popups are lifted out of the pane so their glass blurs the page, as the app's popups are (design.md, As built)
-for (const m of document.querySelectorAll('.x-menu')) { const b = m.parentElement.querySelector('.pick').getBoundingClientRect(); document.body.appendChild(m); Object.assign(m.style, { position: 'fixed', left: b.left + 'px', top: (b.bottom + 6) + 'px' }); }
 // Past Conversations is lifted out of the ask box so its glass blurs the page, and fits the room above the composer
 // ending on a whole conversation, as pastList.tsx fitToRoom does
 for (const pop of document.querySelectorAll('.pastpop')) {
