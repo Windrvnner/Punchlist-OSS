@@ -44,3 +44,5 @@ export function foldedValue(node, resolve) {
   }
   return node;
 }
+
+export const missing = Symbol('missing literal entry');

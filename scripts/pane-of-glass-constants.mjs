@@ -1,8 +1,8 @@
 // Resolve references on Vite's TypeScript syntax tree. A type can share a name with an unrelated runtime value.
 import { createRequire } from 'node:module';
 import { containerReads } from './pane-of-glass-containers.mjs';
-import { foldedValue, literalValue, unwrapped } from './pane-of-glass-syntax.mjs';
-import { boundValue, memberValue, missing } from './pane-of-glass-bindings.mjs';
+import { foldedValue, literalValue, missing, unwrapped } from './pane-of-glass-syntax.mjs';
+import { boundValue, entryValue, propertyKey } from './pane-of-glass-bindings.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -44,9 +44,9 @@ export function localBindings(program) {
     const definition = fixedDeclaration(variable);
     if (!definition || seen.has(variable)) return null;
     const visited = new Set(seen).add(variable);
-    const next = (ref) => resolve(ref, visited);
+    const next = (ref, key) => resolve(ref, visited, { use: unwrapped(ref), key });
     const { node, name } = definition;
-    const initial = boundValue(node.id, node.init, name, next);
+    const initial = boundValue(node.id, node.init, name, next, capture.key);
     // A direct alias keeps the key selected by its eventual destructuring or member read.
     const alias = node.id === name && initial?.type === 'Identifier';
     const value = alias ? resolve(initial, visited, capture) : next(initial);
@@ -56,7 +56,7 @@ export function localBindings(program) {
     return value;
   }
 
-  function resolve(expression, seen = new Set(), capture = unwrapped(expression)) {
+  function resolve(expression, seen = new Set(), capture = { use: unwrapped(expression) }) {
     const reference = unwrapped(expression);
     if (reference?.type === 'ConditionalExpression' || reference?.type === 'LogicalExpression') {
       const branch = selectedBranch(reference, (part) => resolve(part, seen));
@@ -66,7 +66,9 @@ export function localBindings(program) {
       if (seen.has(reference)) return null;
       const visited = new Set(seen).add(reference);
       const next = (part) => resolve(part, visited);
-      return next(memberValue(next(reference.object), reference, next));
+      const key = propertyKey(reference.property, reference.computed, next);
+      const object = resolve(reference.object, visited, { use: unwrapped(reference.object), key });
+      return next(entryValue(object, key, next));
     }
     if (reference?.type === 'Identifier') return resolveVariable(reference, seen, capture);
     return reference ? foldedValue(reference, (part) => resolve(part, seen)) : reference;

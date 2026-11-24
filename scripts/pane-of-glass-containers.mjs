@@ -1,7 +1,7 @@
 // Track uses that can change a named literal before a primitive path is copied out of it.
 import { Visitor } from 'vite';
-import { entryValue, missing, propertyKey } from './pane-of-glass-bindings.mjs';
-import { literalValue, unwrapped } from './pane-of-glass-syntax.mjs';
+import { entryValue, propertyKey } from './pane-of-glass-bindings.mjs';
+import { literalValue, missing, unwrapped } from './pane-of-glass-syntax.mjs';
 
 function selectedKeys(pattern, member, resolve) {
   if (member) return [propertyKey(member.property, member.computed, resolve)];
@@ -61,7 +61,8 @@ function usesIn(program) {
 }
 
 function primitive(container, key, resolve) {
-  return literalValue(resolve(entryValue(container, key, resolve))) !== undefined;
+  const entry = resolve(entryValue(container, key, resolve));
+  return entry === missing || literalValue(entry) !== undefined;
 }
 
 function readsSelection(identifier, value, keys, uses, resolve) {
@@ -104,12 +105,15 @@ export function containerReads(program, scopeOf) {
   const uses = usesIn(program);
   return (variable, use, value, capture, resolve) => {
     if (variable.defs.some((def) => uses.exported.has(def.node))) return false;
-    const keys = selectedKeys(uses.patterns.get(capture), uses.members.get(capture), resolve);
+    const { use: location, key } = capture;
+    const keys = key === undefined
+      ? selectedKeys(uses.patterns.get(location), uses.members.get(location), resolve)
+      : [key];
     const parts = value.type === 'ArrayExpression' ? value.elements : value.properties.map((part) => part.value);
     const flat = parts.every((part) => literalValue(part) !== undefined);
-    const scope = scopeOf(capture);
+    const scope = scopeOf(location);
     const snapshots = keys.length && keys.every((key) => key !== null && primitive(value, key, resolve));
-    const captured = scope === variable.scope && snapshots && captureDeclaration(variable, capture, uses);
+    const captured = scope === variable.scope && snapshots && captureDeclaration(variable, location, uses);
     return variable.references.every((ref) => {
       if (!ref.isRead() || !ref.isValueReference || ref.identifier === use) return true;
       if (afterCapture(ref, captured, scope)) return true;
