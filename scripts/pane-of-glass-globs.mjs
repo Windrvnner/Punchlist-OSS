@@ -10,7 +10,7 @@ function globCall(node) {
 }
 
 function globKeysArgument(node) {
-  const callee = node.callee;
+  const callee = unwrapped(node.callee);
   if (callee.type === 'MemberExpression' && !callee.computed && !callee.optional && !node.optional &&
       callee.object.name === 'Object' && callee.property.name === 'keys') return unwrapped(node.arguments[0]);
 }
@@ -37,10 +37,13 @@ function literalOptions(node) {
   if (!entries) return;
   const settings = {};
   for (const [key, expression] of entries) {
-    if (key === 'query' && literalQuery(expression)) continue;
+    if (key === 'query' && literalQuery(expression)) {
+      settings.query = Object.fromEntries(plainEntries(expression).map(([name, part]) => [name, literalValue(part)]));
+      continue;
+    }
     const value = literalValue(expression);
     if (!Object.hasOwn(optionTypes, key) || typeof value !== optionTypes[key]) return;
-    if (['base', 'eager', 'exhaustive', 'caseSensitive'].includes(key)) settings[key] = value;
+    settings[key] = value;
   }
   return settings;
 }
@@ -61,7 +64,7 @@ export function collectGlob(node, source, globs, keysOnly) {
   const glob = literalGlob(node, source);
   if (glob) globs.push({ ...glob, node });
   const keys = globKeysArgument(node);
-  if (keys) keysOnly.add(keys.start);
+  if (keys) keysOnly.set(keys.start, source.slice(node.callee.start, node.callee.end));
 }
 
 export function packageName(pattern) {
@@ -74,7 +77,7 @@ function snapshotPath(value, from, project) {
   const depth = (directory) => directory.split('/').filter(Boolean).length;
   if (value.startsWith('**')) return '/' + '../'.repeat(depth(project)) + value;
   const absolute = value.startsWith('/');
-  if (!absolute && !value.startsWith('./') && !value.startsWith('../')) return;
+  if (!absolute && !value.startsWith('./') && !value.startsWith('../')) return packageName(value) ? value : undefined;
   const directory = absolute ? project : from;
   const parents = value.split(/[\\/]/).filter((part) => part === '..').length;
   if (parents <= depth(directory)) return value;
@@ -89,17 +92,17 @@ function patternSyntax({ value, syntax }, from, project) {
   if (local !== undefined) return JSON.stringify((negative ? '!' : '') + local);
 }
 
-export function probeEntry(globs, project, file, keysOnly) {
+export function probeEntry(glob, project, file, keysOnly) {
   const directory = posix.join(project, posix.dirname(file));
-  return globs.map(({ node, array, patterns, settings }, index) => {
-    const { base = '.', ...options } = settings;
-    const from = base.startsWith('/') ? posix.join(project, base) : posix.resolve(directory, base);
-    const safe = patterns.map((pattern) => patternSyntax(pattern, from, project));
-    if (safe.includes(undefined)) return '';
-    if (settings.base !== undefined) options.base = snapshotPath(base, directory, project);
-    const tagged = { ...options, import: 'default', query: `?raw&glob=${index}` };
-    const argument = array ? `[${safe.join(',')}]` : safe[0];
-    const call = `import.meta.glob(${argument}, ${JSON.stringify(tagged)})`;
-    return `export const files${index} = ${keysOnly.has(node.start) ? `Object.keys(${call})` : call}`;
-  }).join('\n');
+  const { base = '.', ...options } = glob.settings;
+  const from = base.startsWith('/') ? posix.join(project, base) : posix.resolve(directory, base);
+  const safe = glob.patterns.map((pattern) => patternSyntax(pattern, from, project)).filter(Boolean);
+  if (!safe.length) return;
+  if (glob.settings.base !== undefined) options.base = snapshotPath(base, directory, project);
+  const argument = glob.array ? `[${safe.join(',')}]` : safe[0];
+  // The snapshot has the source filenames and no application exports. A namespace import selects the same files.
+  delete options.import;
+  const call = `import.meta.glob(${argument}, ${JSON.stringify(options)})`;
+  const wrapper = keysOnly.get(glob.node.start);
+  return `export const files = ${wrapper ? `${wrapper}(${call})` : call}`;
 }

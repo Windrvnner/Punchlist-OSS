@@ -1,7 +1,8 @@
 // Keep the remaining exceptions to "The frontend is a pane of glass" in CLAUDE.md from growing.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { lstatSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
+import { treeEntries } from './pane-of-glass-snapshot.mjs';
 import { matchesIn } from './pane-of-glass-matches.mjs';
 
 const baselinePath = 'scripts/pane-of-glass-baseline.json';
@@ -14,10 +15,10 @@ function uiSource(file) {
   return file.startsWith('src/ui/') && /\.tsx?$/.test(file) && !basename(file).includes('.test.');
 }
 
-async function scan(files, contents) {
+async function scan(inventory, contents) {
   const found = {};
-  for (const file of files.filter(uiSource).sort()) {
-    const lines = await matchesIn(file, contents(file), files);
+  for (const file of inventory.files.filter(uiSource).sort()) {
+    const lines = await matchesIn(file, contents(file), inventory);
     if (Object.keys(lines).length) found[file] = lines;
   }
   return found;
@@ -36,6 +37,17 @@ function committedCounts(ref) {
   return JSON.parse(git('show', `${ref}:${baselinePath}`));
 }
 
+function committedSources(at) {
+  const files = [];
+  const links = new Map();
+  for (const record of git('ls-tree', '-r', '-z', at).split('\0').filter(Boolean)) {
+    const file = record.slice(record.indexOf('\t') + 1);
+    if (record.startsWith('120000 ')) links.set(file, git('show', `${at}:${file}`));
+    else if (file.startsWith('src/') && record.startsWith('100')) files.push(file);
+  }
+  return { files, links };
+}
+
 // Comparing the proposed baseline with main catches an edit that raises both the count and its allowance.
 async function committedBaseline() {
   for (const ref of ['origin/main', 'main']) {
@@ -45,8 +57,7 @@ async function committedBaseline() {
     const counts = committedCounts(at);
     if (counts) return counts;
     // On the branch introducing the check, main's source is the record of its existing exceptions.
-    const files = git('ls-tree', '-r', '-z', '--name-only', at, '--', 'src').split('\0');
-    return countsFor(await scan(files, (file) => git('show', `${at}:${file}`)));
+    return countsFor(await scan(committedSources(at), (file) => git('show', `${at}:${file}`)));
   }
   // Exported sources have no history. In a Git checkout, HEAD alone cannot prove a committed allowance is valid.
   if (spawnSync('git', ['rev-parse', '--show-toplevel']).status !== 0) return null;
@@ -78,10 +89,19 @@ function compareFile(file, lines, baseline, committed) {
   return problems;
 }
 
-const files = readdirSync('src', { recursive: true, withFileTypes: true })
-  .filter((entry) => entry.isFile())
-  .map((entry) => `${entry.parentPath.replaceAll('\\', '/')}/${entry.name}`);
-const found = await scan(files, read);
+const files = [];
+const links = new Map();
+for (const { file, entry } of treeEntries('src')) {
+  const name = file.replaceAll('\\', '/');
+  if (entry.isFile()) files.push(name);
+  if (entry.isSymbolicLink()) links.set(name, readlinkSync(file));
+}
+// An internal link can pass through another tracked directory before returning to src.
+function linkAt(file) {
+  if (links.has(file)) return links.get(file);
+  if (lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink()) return readlinkSync(file);
+}
+const found = await scan({ files, links, linkAt }, read);
 const baseline = JSON.parse(read(baselinePath));
 const committed = await committedBaseline();
 const problems = [];

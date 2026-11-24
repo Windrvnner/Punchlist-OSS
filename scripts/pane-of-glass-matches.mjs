@@ -66,7 +66,7 @@ export async function matchesIn(file, source, files) {
   if (parsed.errors.length) throw new Error(`${file}: ${parsed.errors[0].message}`);
   const offsets = {};
   const globs = [];
-  const keysOnly = new Set();
+  const keysOnly = new Map();
   function record(kind, node) {
     (offsets[kind] ??= new Set()).add(node.start);
   }
