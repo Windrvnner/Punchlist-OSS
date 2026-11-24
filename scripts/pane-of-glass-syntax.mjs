@@ -6,3 +6,9 @@ export function unwrapped(node) {
   }
   return node;
 }
+
+export function literalText(node) {
+  if (typeof node?.value === 'string') return node.value;
+  if (node?.type === 'TemplateLiteral' && !node.expressions.length) return node.quasis[0].value.cooked;
+  return null;
+}

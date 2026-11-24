@@ -1,11 +1,12 @@
 // Recognize the string copied by a simple property binding on a local data record.
 import { Visitor } from 'vite';
-import { unwrapped } from './pane-of-glass-syntax.mjs';
+import { literalText, unwrapped } from './pane-of-glass-syntax.mjs';
 
-function keyName(key, computed) {
+function keyName(raw, computed) {
+  const key = unwrapped(raw);
   if (!computed && (key.type === 'Identifier' || key.type === 'JSXIdentifier')) return key.name;
-  if (key.type === 'Literal' && ['string', 'number'].includes(typeof key.value)) return String(key.value);
-  return null;
+  if (typeof key.value === 'number') return String(key.value);
+  return literalText(key);
 }
 
 function propertiesOf(literal) {
@@ -20,12 +21,23 @@ function propertiesOf(literal) {
   return properties;
 }
 
+function literalData(expression) {
+  const node = unwrapped(expression);
+  return node?.type === 'Literal' || literalText(node) !== null;
+}
+
 function simplePattern(pattern, properties) {
   if (pattern?.type !== 'ObjectPattern') return false;
   return pattern.properties.every((part) => {
-    if (part.type !== 'Property' || !properties.has(keyName(part.key, part.computed))) return false;
+    if (part.type !== 'Property') return false;
+    const value = properties.get(keyName(part.key, part.computed));
+    if (!value) return false;
+    let target = unwrapped(part.value);
+    if (target.type === 'AssignmentPattern') {
+      if (!literalData(value) && !literalData(target.right)) return false;
+      target = unwrapped(target.left);
+    }
     // Assignments may copy into a display field. markTarget checks the destination independently.
-    const target = unwrapped(part.value);
     return target.type === 'Identifier' || target.type === 'MemberExpression';
   });
 }
@@ -104,11 +116,27 @@ function readsData(id, properties, uses) {
   return !uses.effects.has(member);
 }
 
+// A literal own value is defined, so JavaScript skips that property's fallback expression.
+function inactiveDefaults(refs, properties, uses) {
+  const defaults = [];
+  for (const ref of refs) {
+    const pattern = uses.patterns.get(ref.identifier);
+    if (!simplePattern(pattern, properties)) continue;
+    for (const part of pattern.properties) {
+      const value = properties.get(keyName(part.key, part.computed));
+      if (part.value.type === 'AssignmentPattern' && literalData(value)) defaults.push(part.value.right);
+    }
+  }
+  return defaults;
+}
+
 function stableAtCapture(origin, capture, scope, refs, properties, uses) {
   if (uses.exported.has(origin.node)) return false;
   const block = uses.blocks.get(origin.node);
   const ordered = block && block === uses.blocks.get(capture) && origin.node.end <= capture.start;
+  const inactive = inactiveDefaults(refs, properties, uses);
   return refs.every((ref) => {
+    if (inactive.some((expr) => expr.start <= ref.identifier.start && ref.identifier.end <= expr.end)) return true;
     if (ref.identifier === origin.name || uses.typeNames.has(ref.identifier)) return true;
     if (uses.exported.has(ref.identifier)) return false;
     // A later statement in the same execution cannot change a string already copied.

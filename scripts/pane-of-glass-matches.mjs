@@ -2,17 +2,11 @@
 import { posix } from 'node:path';
 import { parseSync, Visitor } from 'vite';
 import { localConstLookup } from './pane-of-glass-constants.mjs';
-import { unwrapped } from './pane-of-glass-syntax.mjs';
+import { literalText, unwrapped } from './pane-of-glass-syntax.mjs';
 
 const storageNames = new Set(['localStorage', 'sessionStorage', 'indexedDB']);
 const layerPath = /^(?:backend|adapters|desktop|shell)(?:\/|$)/;
 const externalModule = /^(?:node:|(?:electron|fs|path)(?:\/|$))/;
-
-function literalText(node) {
-  if (typeof node?.value === 'string') return node.value;
-  if (node?.type === 'TemplateLiteral' && !node.expressions.length) return node.quasis[0].value.cooked;
-  return null;
-}
 
 function concatenate(left, right) {
   return left.flatMap((prefix) => right.map((suffix) => prefix + suffix));
