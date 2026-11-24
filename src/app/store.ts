@@ -1101,7 +1101,7 @@ export class Store {
         // refused it (no entry), there is nothing to keep it in, and the person is told to make the change again.
         if (this.movedSince(baseRevs)) { this.toast(`${CHANGED_SINCE}; make the change again`); return; }
         this.rerun.add(opId);
-        void this.dispatch(command, input, { idempotencyKey: opts.idempotencyKey })
+        void this.retryAction(command, input, { idempotencyKey: opts.idempotencyKey })
           .finally(() => this.rerun.delete(opId));
       };
     const text = err.kind === 'conflict' ? 'Changed elsewhere — not saved ·' : `Couldn’t save ·`;
@@ -1146,7 +1146,7 @@ export class Store {
           return fail({ kind: 'unreachable', message });
         }
       }
-      const result = await this.dispatchAction(command, operation.input as any, {
+      const result = await this.retryAction(command, operation.input, {
         opId, idempotencyKey: operation.idempotencyKey,
       });
       // A retry that leaves the journal pending must still have its Retry and Discard notices (#565).
@@ -1159,6 +1159,13 @@ export class Store {
     } finally {
       this.rerun.delete(opId);
     }
+  }
+
+  /** A retried settled close needs fresh checklist rows, including after a restart. */
+  private async retryAction<I, In>(command: Command<I, In>, input: In, opts: ExecuteOptions) {
+    const dealId = (input as { dealId?: string } | null)?.dealId;
+    if (command.name === 'CloseSettledQuestions' && typeof dealId === 'string') await this.refreshChecklist(dealId);
+    return this.dispatchAction(command, input, opts);
   }
 
   /** A retained no-op import still needs a durable success before its log step can fail. */

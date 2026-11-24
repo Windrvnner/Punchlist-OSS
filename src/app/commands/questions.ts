@@ -118,9 +118,9 @@ export const SetQuestionStatus = define({
 });
 
 /**
- * Several questions' status set at once, as one change with one Undo: closing the questions the checklist has settled
- * (linking design, section 13). Each question is checked as SetQuestionStatus checks one; if any is gone or cannot move,
- * nothing is written and the refusal names it. The inverse puts every question back to the status it had.
+ * Several questions' statuses set as one change with one Undo. Each question is checked as SetQuestionStatus checks
+ * one. A refused move changes nothing. CloseSettledQuestions adds the checklist rule and uses this same status update
+ * and inverse, so Undo can reopen questions even if the checklist has changed.
  */
 export const SetQuestionsStatus = define({
   name: 'SetQuestionsStatus',
