@@ -403,12 +403,20 @@ export class Combined {
     // arrive, so a write planned against any earlier state is turned away: a draft folded in (DraftFold), a choice,
     // its withdrawal, a delete then a restore. It depends only on which lines are present, so every PC
     // agrees on it.
-    const withdrawn = mine.filter((v) => this.retracted.has(v.ver)).length;
-    const rev = live || clash ? mine.length + withdrawn : 0;
+    const rev = live || clash ? this.countedRevision(mine) : 0;
     const tips = tipVersions.map((v) => v.ver);
     const recState: RecState = { kind, id, heads: dead ? [] : heads, tips: dead ? [] : tips, live, rev };
     if (!asHad) this.cache.set(key, recState);
     return recState;
+  }
+
+  /** A deleted record reports revision zero, but its earlier revision numbers can still appear in queued writes. */
+  lastPossibleRevision(kind: RecordKind, id: string): number {
+    return this.countedRevision(this.byRec.get(recKey(kind, id)) ?? []);
+  }
+
+  private countedRevision(versions: Ver[]): number {
+    return versions.length + versions.filter((version) => this.retracted.has(version.ver)).length;
   }
 
   /**

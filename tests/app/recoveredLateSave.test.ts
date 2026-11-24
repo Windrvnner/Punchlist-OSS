@@ -77,13 +77,13 @@ async function restartRepository(pc: PC) {
   return repo;
 }
 
-/** Replay records from before routing provenance was recorded; the fixture's raw log is the only thing changed. */
-function removeRoutingMarkers(pc: PC) {
+/** Replay older records without a forwarding field; only the fixture's raw log changes. */
+function removeForwardingField(pc: PC, field: 'recoveredFrom' | 'recoveredReceipt') {
   for (const folder of [pc.shared, pc.local]) {
     for (const [name, text] of folder.files) {
       if (!name.startsWith('changes-')) continue;
       const lines = text.trimEnd().split('\n').map((line) => JSON.parse(line));
-      for (const line of lines) for (const record of line.recs) delete record.recoveredFrom;
+      for (const line of lines) for (const record of line.recs) delete record[field];
       folder.write(name, lines.map((line) => JSON.stringify(line)).join('\n') + '\n');
     }
   }
@@ -162,7 +162,7 @@ it('protects an older copied record whose update has no routing provenance', asy
   await withRecoveredQuestion(async ({ B, copied, lateWrite, lateTransaction }) => {
     okd(await lateWrite({ response: 'An older saved reply with unknown origin' }));
     await B.repo.close();
-    removeRoutingMarkers(B);
+    removeForwardingField(B, 'recoveredFrom');
     const restarted = await restartRepository(B);
     try {
       const released = await restarted.transaction(lateTransaction({ response: 'Old-window reply' }));
@@ -197,12 +197,26 @@ it('keeps a draft discarded in the copy absent after restart and a stale draft s
 
 const lateDraft = { status: 'found' as const, text: 'AI response to discard', sources: [], forWording: 'wording' };
 
+async function editRecoveredWording(pc: PC, copied: Question, wording: string[]) {
+  for (const text of wording) {
+    okd(await pc.store.dispatch(EditQuestionField, {
+      dealId: copied.dealId, questionId: copied.id, field: 'text', value: text,
+    }));
+  }
+}
+
+const recoveredWording = [
+  'Provide the executed guarantee and the security schedule.',
+  'Provide the executed guarantee and the final schedule of secured obligations.',
+];
+
 it('uses the returned revision for a second forwarded save that removes a draft (#774)', async () => {
   await withRecoveredQuestion(async ({ B, copied, lateTransaction }) => {
+    await editRecoveredWording(B, copied, recoveredWording);
     const first = lateTransaction({ response: 'The signed guarantee is available in the security package.' });
     const write = first.writes[0];
     const revision = okd(await B.repo.transaction(first)).value[write.id];
-    expect(revision).not.toBe(write.expectedRev);
+    expect(revision).toBeGreaterThan(Number(write.expectedRev));
     const { draft: _draft, ...withoutDraft } = write.data as Question;
     write.expectedRev = revision;
     write.data = withoutDraft;
@@ -210,22 +224,23 @@ it('uses the returned revision for a second forwarded save that removes a draft 
     expect(await B.repo.transaction(first)).toMatchObject({ ok: true });
     const saved = okd(await B.repo.get('question', copied.id)).value.envelope.data;
     expect(saved).not.toHaveProperty('draft');
-    expect(saved).toMatchObject({ response: withoutDraft.response });
+    expect(saved).toMatchObject({ response: withoutDraft.response, text: recoveredWording[1] });
   }, { draft: lateDraft });
 });
 
 it('restores a draft after a forwarded removal and a repository restart (#774)', async () => {
   await withRecoveredQuestion(async ({ B, copied, lateWithout, lateTransaction }) => {
+    await editRecoveredWording(B, copied, recoveredWording);
     const restore = lateTransaction({});
     const write = restore.writes[0];
     const revision = okd(await lateWithout('draft')).value[write.id];
-    expect(revision).not.toBe(write.expectedRev);
+    expect(revision).toBeGreaterThan(Number(write.expectedRev));
     write.expectedRev = revision;
     const restarted = await restartRepository(B);
     try {
       expect(await restarted.transaction(restore)).toMatchObject({ ok: true });
       const saved = okd(await restarted.get('question', copied.id)).value.envelope.data;
-      expect(saved).toMatchObject({ draft: lateDraft });
+      expect(saved).toMatchObject({ draft: lateDraft, text: recoveredWording[1] });
     } finally {
       await restarted.close();
     }
@@ -280,6 +295,42 @@ it('preserves a direct edit already in the copy when a follow-up uses the forwar
     const saved = okd(await B.repo.get('question', copied.id)).value.envelope.data;
     expect(saved).toMatchObject({ text: newer, response: '' });
   });
+});
+
+it('rejects a receipt that also names an earlier original revision with unseen work (#774)', async () => {
+  await withRecoveredQuestion(async ({ B, copied, lateTransaction }) => {
+    const response = 'The executed guarantee is in the closing binder.';
+    const first = lateTransaction({ response, draft: lateDraft });
+    const stale = lateTransaction({ text: 'Provide the executed guarantee and its security schedule.' });
+    const oldRevision = Number(stale.writes[0].expectedRev);
+    first.writes[0].expectedRev = oldRevision + 1;
+    const revision = okd(await B.repo.transaction(first)).value[first.writes[0].id];
+    expect(revision).toBe(oldRevision);
+
+    expect(await B.repo.transaction(stale)).toMatchObject({ ok: false });
+    const saved = okd(await B.repo.get('question', copied.id)).value.envelope.data;
+    expect(saved).toMatchObject({ response, draft: lateDraft });
+  }, {}, { draft: lateDraft });
+});
+
+it.each([1, 2])('accepts an original save after a legacy receipt and %i unrelated edits (#774)', async (count) => {
+  await withRecoveredQuestion(async ({ B, copied, lateWrite, lateTransaction }) => {
+    const response = 'The signed covenant certificate is in the closing binder.';
+    const receipt = okd(await lateWrite({ response: 'The draft covenant certificate is in the data room.' }));
+    const next = lateTransaction({ response });
+    expect(receipt.value[next.writes[0].id]).not.toBe(next.writes[0].expectedRev);
+    await editRecoveredWording(B, copied, recoveredWording.slice(-count));
+    await B.repo.close();
+    removeForwardingField(B, 'recoveredReceipt');
+    const restarted = await restartRepository(B);
+    try {
+      expect(await restarted.transaction(next)).toMatchObject({ ok: true });
+      const saved = okd(await restarted.get('question', copied.id)).value.envelope.data;
+      expect(saved).toMatchObject({ text: recoveredWording[1], response, draft: lateDraft });
+    } finally {
+      await restarted.close();
+    }
+  }, { draft: lateDraft });
 });
 
 it('removes a draft from the recovered copy when a late Discard Draft arrives (#664)', async () => {

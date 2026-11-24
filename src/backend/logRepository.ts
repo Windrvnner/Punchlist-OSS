@@ -1253,9 +1253,27 @@ export class LogRepository implements Repository {
     }
     if (head && matches.length === 1 && matches[0] === head && revision === now.rev) return ok(head);
     // An unknown older receipt cannot authorize a change against whichever record happens to match its number.
-    if (matches.length || forwarded.some((v) => !v.recoveredReceipt)
-      || (forwarded.length && revision !== originalRev)) return fail({ kind: 'rejected', message: DEAL_DELETED });
+    const legacy = forwarded.filter((v) => !v.recoveredReceipt);
+    if (matches.length || this.couldBeLegacyReceipt(legacy, heads, revision, now.rev)
+      || (forwarded.length && revision > originalRev)) return fail({ kind: 'rejected', message: DEAL_DELETED });
     return ok(null);
+  }
+
+  /** Each known later version lowers the highest revision an unnumbered legacy receipt could have returned. */
+  private couldBeLegacyReceipt(legacy: Ver[], heads: Ver[], revision: number, currentRev: number): boolean {
+    if (!legacy.length || revision >= currentRev) return false;
+    const remaining = new Set(legacy.map((version) => version.ver));
+    let version = heads.length === 1 ? heads[0] : undefined;
+    let highest = currentRev;
+    const seen = new Set<string>();
+    while (version && remaining.size && !seen.has(version.ver)) {
+      seen.add(version.ver);
+      if (remaining.delete(version.ver) && revision <= highest) return true;
+      if (version.base.length !== 1) break;
+      version = this.view.version(version.base[0]);
+      highest--;
+    }
+    return remaining.size > 0;
   }
 
   /** Rebase only fields that no direct edit in the copy has touched, including changes later reverted. */
@@ -1270,7 +1288,8 @@ export class LogRepository implements Repository {
     const receipt = now ? this.copyReceipt(write, now, heads, originalRev) : ok(null);
     if (!receipt.ok) return receipt;
     const base = receipt.value?.recoveredReceipt;
-    const usesReceipt = base && write.expectedRev !== originalRev;
+    // A lower receipt number can also name an earlier original revision, before an unseen field arrived.
+    const usesReceipt = base && base.rev > this.view.lastPossibleRevision(write.kind, write.id);
     const before = usesReceipt ? base.input : original;
     const data = changedOnto(before, write.data, now?.envelope.data, ids);
     if (receipt.value && !usesReceipt) {
