@@ -279,7 +279,8 @@ async function findingEditLayout(page) {
       const x = bounds.left + bounds.width / 2;
       const y = bounds.top + bounds.height / 2;
       const inView = bounds.top >= top && bounds.bottom <= bottom;
-      const hit = inView && element.contains(document.elementFromPoint(x, y));
+      const hit = inView && [bounds.top + 2, y, bounds.bottom - 2].every((point) =>
+        element.contains(document.elementFromPoint(x, point)));
       return { hit, x, y };
     };
     return { save: control('fe-save'), cancel: control('fe-cancel'), title: control('fe-title'),
@@ -375,11 +376,11 @@ async function checkCrowdedFindingEdit(page, followup) {
     'The available filing shows a consent in principle, subject to a further review of the proposed assignee.',
   ];
   const findingId = await page.evaluate(async ({ dealId, title, body }) => {
-    const source = Object.values(store.get().findings).find((finding) => finding.sources.length).sources[0];
-    await store.dispatch(store.commandNamed('CreateFinding'), {
-      dealId, title, workstream: 'Legal', body, sources: [source],
+    const finding = Object.values(store.get().findings).find((finding) => finding.sources.length);
+    await store.dispatch(store.commandNamed('EditFinding'), {
+      dealId, findingId: finding.id, title, workstream: finding.workstream, body,
     });
-    return Object.values(store.get().findings).find((finding) => finding.title === title).id;
+    return finding.id;
   }, { dealId, title, body });
   await page.goto(URL + `#finding-${dealId}-${findingId}`);
   await checkFindingEditLayouts(page, 'without-messages');
@@ -422,7 +423,7 @@ async function checkCrowdedFindingEdit(page, followup) {
   await page.waitForFunction(() => document.querySelector('#pask').getBoundingClientRect().height > 120);
   await checkFindingEditLayouts(page, 'above-expanded-composer');
   await checkCrowdedFindingEdit(page, followup);
-  await page.click('.opening .rsch-chip');
+  await page.locator('.opening .rsch-chip').first().click();
   await page.waitForSelector('.docpanel');
   await page.setInputFiles('#pcomposer input[type=file]', {
     name: 'Assignment schedule.pdf', mimeType: 'application/pdf', buffer: longPdf(1),

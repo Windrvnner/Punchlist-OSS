@@ -26,13 +26,21 @@ function revealFittedCard(field: HTMLElement, card: HTMLElement, scroller: HTMLE
   const header = scroller.querySelector('.chathead');
   const inset = header && getComputedStyle(header).position === 'sticky' ? header.getBoundingClientRect().height : 0;
   card.style.setProperty('--thread-header-height', `${inset}px`);
+  const style = getComputedStyle(card);
+  const box = card.getBoundingClientRect();
+  const actions = card.querySelector('.cacts');
+  if (actions) {
+    // A short Detail still needs a line. Keep any overflowing actions inside the card and in the thread flow.
+    const bottomInset = Number.parseFloat(style.paddingBottom) + Number.parseFloat(style.borderBottomWidth);
+    const minimum = actions.getBoundingClientRect().bottom + bottomInset - box.top;
+    if (minimum > box.height) card.style.minHeight = `${Math.ceil(minimum)}px`;
+  }
   const thread = scroller.getBoundingClientRect();
   const cardBottom = card.getBoundingClientRect().bottom;
-  const actionsBottom = card.querySelector('.cacts')?.getBoundingClientRect().bottom ?? cardBottom;
   const visibleBottom = Math.min(thread.bottom, composer.getBoundingClientRect().top);
-  const over = Math.max(0, Math.max(cardBottom, actionsBottom) - (visibleBottom - 12));
+  const over = Math.max(0, cardBottom - (visibleBottom - 12));
   // The enter animation shifts the card down until it settles. Use the final field position.
-  const transform = getComputedStyle(card).transform;
+  const transform = style.transform;
   const slide = transform === 'none' ? 0 : new DOMMatrixReadOnly(transform).m42;
   const room = field.getBoundingClientRect().top - slide - (thread.top + inset + 4);
   const top = Math.min(over, room);
