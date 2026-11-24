@@ -124,9 +124,9 @@ const REVIEW_BUTTON = (label) => `<button class="btn sm">${label}</button>`;
 // Needs Input: drafts to review, a task's question to the person, and items Diligence left out
 const NEEDS_INPUT_ROWS = [
   taskRow('sheet', 'Draft responses for open questions', '40 ready', { end: REVIEW_BUTTON('Review') }),
-  taskRow('logedit', 'Covenant headroom in the downside case', 'Step 2 of 5',
-    { end: REVIEW_BUTTON('Reply'), hoverText: 'Asks which model to use: Nov 3 or Nov 17' }),
-  taskRow('cklist', 'Diligence', '', { end: REVIEW_BUTTON('Check the 12 Left Out') }),
+  taskRow('logedit', 'Covenant headroom in the downside case', 'Asks which model to use',
+    { end: REVIEW_BUTTON('Answer'), hoverText: 'Which model should I use: Nov 3 or Nov 17?' }),
+  taskRow('cklist', 'Diligence', '12 items not checked', { end: REVIEW_BUTTON('Check Them') }),
 ];
 
 const RUNNING_ROWS = [
