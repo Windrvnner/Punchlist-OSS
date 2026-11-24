@@ -168,6 +168,7 @@ async function replaceDuringRetry({ page, next, retry, finish, calls, rows }, sa
     name, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.alloc(0),
   });
   await page.locator('.imprev').getByText(first, { exact: true }).waitFor();
+  const sheetError = await sheetErrorWhileWaiting(page, next, name);
   const sourceControls = await retrySourceRead(page, appendix);
   const waiting = await next.isDisabled() && /^Asking /.test(await page.locator('#cl-line').textContent());
   await next.evaluate((button) => button.click());
@@ -181,6 +182,22 @@ async function replaceDuringRetry({ page, next, retry, finish, calls, rows }, sa
       && await page.locator('#cl-line').textContent() === 'Import 2,163 items',
     JSON.stringify({ waiting, before, after, latest }));
   say('Sheet, list reading Retry, and Choose Columns stay available while a review retry is pending', sourceControls);
+  say('A worksheet read error shows in place of the review wait, and Next still waits', sheetError);
+}
+
+// A worksheet that cannot be read shows its error while a review request is pending, not the wait (#378).
+async function sheetErrorWhileWaiting(page, next, name) {
+  const kept = await page.evaluate((name) => {
+    const sheets = window.__sheets[name];
+    window.__sheets[name] = [];
+    return sheets;
+  }, name);
+  await page.locator('#cl-sheet').selectOption('Appendix');
+  const error = page.locator('#cl-line').filter({ hasText: /^Could not read / });
+  const shown = await error.waitFor({ timeout: 5000 }).then(() => true, () => false);
+  const waiting = await next.isDisabled();
+  await page.evaluate(({ name, kept }) => { window.__sheets[name] = kept; }, { name, kept });
+  return shown && waiting;
 }
 
 async function retrySourceRead(page, appendix) {
