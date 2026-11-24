@@ -64,6 +64,11 @@ export function collectGlob(node, source, globs, keysOnly) {
   if (keys) keysOnly.add(keys.start);
 }
 
+export function packageName(pattern) {
+  const value = pattern.replace(/^!/, '');
+  return /^(?:@[\w.-]+\/)?[\w-][\w.-]*(?=\/|$)/.exec(value)?.[0];
+}
+
 // Preserve the original paths inside the volume. Bound a path that would walk above the snapshot.
 function snapshotPath(value, from, project) {
   const depth = (directory) => directory.split('/').filter(Boolean).length;
