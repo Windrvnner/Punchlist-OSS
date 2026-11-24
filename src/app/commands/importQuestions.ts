@@ -20,6 +20,7 @@ import { derivedId } from '../../domain/derivedId';
 import { key } from '../../domain/checklist';
 import { changedSince } from './undo';
 import { matchFitTier, type FitChoice, type FitSource } from './importFit';
+import { FitLists, fitSignature, type FitCandidate, type FitSignature } from './importFitLists';
 import { commandLabel } from '../commandLabels';
 import type { Operation } from '../../domain/model';
 import type { State } from '../state';
@@ -66,10 +67,10 @@ export const ImportQuestions = define({
     const alikeIn = (a: string, b: string) => { const k = key(a); return !!k && k === key(b); };
     const fit = (row: ImportRow, q: Question) => +alikeIn(row.askedBy, q.askedBy) + +alikeIn(row.workstream, q.workstream) + +(!!row.received && row.received === q.received) + +alikeIn(row.respondedBy, q.respondedBy);
     if (input.mode === 'merge') {
-      const live = indexQuestions(originals.values());
-      const dead = indexQuestions(gone.values());
-      const keys = input.rows.map((row) => misreadKey(row.text));
       const identifiers = identifierMatcher(input.rows, [...originals.values(), ...gone.values()]);
+      const live = indexQuestions(originals.values(), identifiers.questions);
+      const dead = indexQuestions(gone.values(), identifiers.questions);
+      const keys = input.rows.map((row) => misreadKey(row.text));
       const order = new Map([...originals.values(), ...gone.values()].map((q, i) => [q.id, i]));
       // By wording, in passes from the surest: a row holding the question's own number first, deleted questions included (a
       // row numbered as a deleted question brings that one back rather than taking a live one of the same words); then rows
@@ -81,7 +82,7 @@ export const ImportQuestions = define({
         const open = (q: Question) => !taken.has(q.id) && sameParty(row, q) && identifiers.matches(idx, q);
         take(idx, bestFit(pool.byOwn.get(`${keys[idx]}\0${row.n}`), open, (q) => fit(row, q)));
       }
-      matchByFit([live.byFit, dead.byFit], input.rows, keys, identifiers, order, matchOf, taken);
+      matchByFit([live.byFit, dead.byFit], input.rows, keys, identifiers.rows, order, matchOf, taken);
       for (const [idx, row] of input.rows.entries()) {
         if (matchOf.has(idx) || row.n == null) continue;
         const alike = (q: Question) => !taken.has(q.id) && sameParty(row, q) && canMatchNumber(q.text, row.text);
@@ -208,15 +209,16 @@ function bestFit(list: Question[] | undefined, open: (q: Question) => boolean, f
 
 /** Whether row `idx` and a question name the same identifiers, each worked out once (#125, #127, #128). */
 function identifierMatcher(rows: ImportRow[], questions: Question[]) {
-  const rowSigs = rows.map((row) => identifierSig(row.text));
-  const questionSigs = new Map(questions.map((q) => [q.id, identifierSig(q.text)]));
+  const rowSigs = rows.map((row) => fitSignature(identifierSig(row.text)));
+  const questionSigs = new Map(questions.map((q) => [q.id, fitSignature(identifierSig(q.text))]));
   return {
     matches: (idx: number, q: Question) => sameIdentifiers(rowSigs[idx], questionSigs.get(q.id)!),
-    keys: rowSigs.map((signature) => signature.ids.length ? JSON.stringify(signature) : ''),
+    rows: rowSigs,
+    questions: questionSigs,
   };
 }
 
-type FitBuckets = Map<string, { list: Question[]; at: number }>;
+type FitBuckets = Map<string, FitCandidate[]>;
 
 /** A name that is only spaces or a period names no one. */
 function partyOf(row: ImportRow | Question): string {
@@ -240,26 +242,24 @@ function fieldSignatures(row: ImportRow | Question, wording: string): [string, n
 }
 
 /** Look up live or deleted questions by number and wording, and by the other fields each question gives. */
-function indexQuestions(questions: Iterable<Question>) {
+function indexQuestions(questions: Iterable<Question>, signatures: ReadonlyMap<string, FitSignature>) {
   const byN = new Map<number, Question[]>();
   const byOwn = new Map<string, Question[]>();
   const byFit: FitBuckets = new Map();
-  const add = <Key>(map: Map<Key, Question[]>, key: Key, question: Question) => {
+  const add = <Key, Value>(map: Map<Key, Value[]>, key: Key, value: Value) => {
     const list = map.get(key);
-    if (list) list.push(question);
-    else map.set(key, [question]);
+    if (list) list.push(value);
+    else map.set(key, [value]);
   };
   for (const question of questions) {
     const wording = misreadKey(question.text);
     add(byN, question.n, question);
     add(byOwn, `${wording}\0${question.n}`, question);
     const party = partyOf(question);
+    const candidate = { id: question.id, signature: signatures.get(question.id)! };
     for (const [signature] of fieldSignatures(question, wording)) {
-      for (const lookup of [`a\0${signature}`, `p\0${party}\0${signature}`]) {
-        const bucket = byFit.get(lookup);
-        if (bucket) bucket.list.push(question);
-        else byFit.set(lookup, { list: [question], at: 0 });
-      }
+      add(byFit, `a\0${signature}`, candidate);
+      add(byFit, `p\0${party}\0${signature}`, candidate);
     }
   }
   return { byN, byOwn, byFit };
@@ -297,7 +297,7 @@ function chooseFrom(sources: FitSource[], order: ReadonlyMap<string, number>): F
 }
 
 function matchByFit(
-  pools: FitBuckets[], rows: ImportRow[], wording: string[], identifiers: ReturnType<typeof identifierMatcher>,
+  pools: FitBuckets[], rows: ImportRow[], wording: string[], signatures: FitSignature[],
   order: ReadonlyMap<string, number>, matched: Map<number, string>, taken: Set<string>,
 ): void {
   const keys = rows.map((row, index) => fitKeys(row, wording[index]));
@@ -306,16 +306,17 @@ function matchByFit(
     taken.add(question);
   };
   for (const pool of pools) {
-    const lookups = new Map<string, FitSource>();
+    const lookups = new Map<string, FitLists>();
     const sourcesFor = (row: number, tier: number): FitSource[] => keys[row][tier].flatMap((bucket) => {
       const list = pool.get(bucket);
       if (!list) return [];
-      const lookup = JSON.stringify([bucket, identifiers.keys[row]]);
-      const cached = lookups.get(lookup);
-      if (cached) return [cached];
-      const source = () => firstTwo(list, taken, (question) => identifiers.matches(row, question)).map((q) => q.id);
-      lookups.set(lookup, source);
-      return [source];
+      let lookup = lookups.get(bucket);
+      if (!lookup) {
+        lookup = new FitLists(list, taken);
+        lookups.set(bucket, lookup);
+      }
+      const source = lookup.forRow(signatures[row]);
+      return source ? [source] : [];
     });
     // Earlier tiers already exhausted any higher-scoring options for the remaining rows.
     for (let tier = 4; tier >= 0; tier--) {
@@ -323,21 +324,6 @@ function matchByFit(
       matchFitTier(rows.length, find, take);
     }
   }
-}
-
-/**
- * The first two questions of a list not yet taken that `fits`: the first is the pick, a second says another fits as
- * well. The list is walked past the questions taken at its start, so a large file stays quick.
- */
-function firstTwo(e: { list: Question[]; at: number } | undefined, taken: ReadonlySet<string>,
-  fits: (q: Question) => boolean): Question[] {
-  if (!e) return [];
-  while (e.at < e.list.length && taken.has(e.list[e.at].id)) e.at++;
-  const two: Question[] = [];
-  for (let j = e.at; j < e.list.length && two.length < 2; j++) {
-    if (!taken.has(e.list[j].id) && fits(e.list[j])) two.push(e.list[j]);
-  }
-  return two;
 }
 
 export const RevertImport = define({
