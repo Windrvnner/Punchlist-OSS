@@ -281,7 +281,7 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
   // The model proposes the sheet, the heading row and the columns; the app checks the proposal against the file and
   // shows it in the same controls. If there is no usable proposal the dialog stays as it was, for the person to set by
   // hand. A read that asks goes on with its own number; the person's own ask takes the next one.
-  const canAsk = !!store.services.ai.layout;
+  const canAsk = store.get().can.layout;
   const askAi = async (asked: ImportTable, mine = ++token.current) => {
     if (!canAsk) return;
     setBusy('asking');

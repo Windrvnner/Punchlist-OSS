@@ -127,11 +127,12 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
   const appText = q?.response ?? ''; const logText = kept.response ?? '';
 
   const draft = async () => {
-    const ai = store.services.ai.merge; if (!ai || !q) return; const id = q.id;
+    if (!s.can.merge || !q) return;
+    const id = q.id;
     setPick('merged'); setMerged((m) => ({ text: m.text, busy: true, error: '' }));
     if (drafting.has(id)) return;   // already being written: its reply is the one to wait for
     drafting.add(id); const before = merges.get(id)?.text ?? '';
-    const r = await ai({ dealId, question: q.text, app: appText, log: logText });
+    const r = await store.services.ai.merge!({ dealId, question: q.text, app: appText, log: logText });
     drafting.delete(id);
     // a reply is dropped when the question was resolved meanwhile, or its merged text was changed (nothing typed is ever replaced)
     const use = r.ok && still(id) && (merges.get(id)?.text ?? '') === before;
@@ -188,7 +189,6 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
   const side = (k: string) => fields[k] ?? (pick === 'log' ? 'log' : 'app');
   const mergedReady = pick !== 'merged' || (!merged.busy && !!merged.text.trim());
   const canKeep = !!pick && !busy && mergedReady && Object.keys(kept).length > 0;
-  const againOn = pick === 'merged' && !!store.services.ai.merge;
   const appWhen = [editor, fmtDateTime(q.updatedAt)].filter(Boolean).join(' · ');
   const version = (which: 'app' | 'log') => {
     const on = pick === which; const n = which === 'app' ? 1 : 2;
@@ -218,7 +218,7 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
               option), the same card as a version. Unpicked it offers the merge, or shows the one already drafted for this question */}
           <div role="radiogroup" aria-label="Versions" onKeyDown={arrows}>
           <div class="rsv-two">{version('app')}{version('log')}</div>
-          {(pick === 'merged' || has || (resp && store.services.ai.merge)) && <div class="rsv-m">
+          {(pick === 'merged' || has || (resp && s.can.merge)) && <div class="rsv-m">
             {/* picked, the heading is the choice (its card is then the box to edit) */}
             <ChoiceHead id="rsv-mhead" picked={pick === 'merged'} name="Merged" meta={by}
               {...(pick === 'merged' ? MERGED_RADIO : {})} />
@@ -234,8 +234,8 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
         </> : <p class="emptyline" id="rsv-done">Resolved</p>}
       </div>
       <ResolveFoot at={at} total={queue.length} left={inTwoVersions(s, dealId).length}
-        onStep={(by) => go(queue[at + by])} again={againOn ? () => void draft() : null} againOff={merged.busy || busy}
-        canKeep={canKeep} picked={!!pick} onKeep={() => void keep()} />
+        onStep={(by) => go(queue[at + by])} again={pick === 'merged' && s.can.merge ? () => void draft() : null}
+        againOff={merged.busy || busy} canKeep={canKeep} picked={!!pick} onKeep={() => void keep()} />
     </Modal>
   );
 }

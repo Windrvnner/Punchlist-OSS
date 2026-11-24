@@ -5,7 +5,9 @@
  */
 import type { Store } from './store';
 import { RecordIndexingProgress } from './commands/deals';
-import type { Folder } from '../domain/model';
+import type { Deal, Folder } from '../domain/model';
+import type { DealProgress, FolderSearch } from '../ports';
+import type { State } from './state';
 import { control } from '../control';
 
 const active = new Set<string>();
@@ -21,6 +23,119 @@ export function withProgress(own: Folder[], polled: Folder[]): Folder[] {
 /** A deal's folders as they stand now: with live progress while indexing is under way. */
 export const liveFolders = (s: { indexing: Record<string, { folders: Folder[] }> }, d: { id: string; folders: Folder[] }): Folder[] =>
   s.indexing[d.id] ? withProgress(d.folders, s.indexing[d.id].folders) : d.folders;
+
+/** Once loaded, checklist rows give the gaps' needs directly, without matching titles. */
+function overviewGaps(
+  state: Pick<State, 'checklists' | 'gaps'>, dealId: string,
+): { key: string; title: string; need?: string }[] {
+  const rows = state.checklists[dealId];
+  if (!Array.isArray(rows)) {
+    return (state.gaps[dealId] ?? []).map(({ title }) => ({ key: title, title }));
+  }
+  return rows.filter((row) => row.result === 'gap')
+    .map((row) => ({ key: row.id, title: row.text, need: row.need }));
+}
+
+/** A first pass that has yet to produce findings has no gaps or standing to show. */
+export function overviewStatus(
+  state: Pick<State, 'checklists' | 'gaps' | 'findings' | 'ui'>, deal: Pick<Deal, 'id' | 'stage' | 'folders'>,
+) {
+  const noFindings = !Object.values(state.findings).some((finding) => finding.dealId === deal.id);
+  const indexing = deal.stage === 'indexing';
+  const waiting = indexing && noFindings;
+  return {
+    waiting,
+    noRoom: noFindings && deal.folders.length === 0,
+    stopped: indexing && state.ui.indexStalled.includes(deal.id),
+    gaps: waiting ? [] : overviewGaps(state, deal.id),
+  };
+}
+
+function unavailableFolders(missing: FolderSearch | null, dealId: string) {
+  const ours = (folders: { dealId: string; folder: string }[]) =>
+    folders.filter((folder) => folder.dealId === dealId).map((folder) => folder.folder);
+  const empty = new Set(ours(missing?.empty ?? []));
+  const away = new Set(ours((missing?.tops ?? []).flatMap((top) => top.folders)).filter((path) => !empty.has(path)));
+  return { away, empty };
+}
+
+function stillIndexing(folder: Pick<Folder, 'files' | 'indexed'>) {
+  return folder.indexed < folder.files;
+}
+
+function readingRow(folder: Folder, progress: DealProgress['folders']) {
+  // Once indexing is complete, read counts come from checklist progress, where identical copies count once.
+  const indexing = stillIndexing(folder);
+  const reading = indexing ? undefined : progress.find((row) => row.folder === folder.path);
+  return {
+    files: folder.files,
+    indexed: folder.indexed,
+    indexing,
+    read: reading?.read,
+    docs: reading?.files ?? folder.files,
+    copies: reading?.copies ?? 0,
+  };
+}
+
+export function folderIndexCounts(folders: Pick<Folder, 'files' | 'indexed'>[]) {
+  return {
+    files: folders.reduce((sum, folder) => sum + folder.files, 0),
+    indexed: folders.reduce((sum, folder) => sum + folder.indexed, 0),
+  };
+}
+
+function readingTotals(rows: ReturnType<typeof readingRow>[]) {
+  const totals = folderIndexCounts(rows);
+  return {
+    ...totals,
+    indexing: stillIndexing(totals),
+    read: rows.every((row) => row.read !== undefined) ? rows.reduce((sum, row) => sum + (row.read ?? 0), 0) : undefined,
+    docs: rows.reduce((sum, row) => sum + row.docs, 0),
+    copies: 0,
+  };
+}
+
+function coreDocuments(
+  progress: DealProgress['folders'], away: Set<string>, empty: Set<string>, anyUnavailable: boolean,
+) {
+  const core = { files: 0, read: 0, unavailable: 0 };
+  for (const folder of progress) {
+    core.files += folder.core;
+    core.read += folder.coreRead;
+    if (anyUnavailable && (away.has(folder.folder) || empty.has(folder.folder))) core.unavailable += folder.core;
+  }
+  return core;
+}
+
+/** Overview's reading progress follows the deal's folder order and shows the state of folders on this PC. */
+export function folderProgress(
+  state: Pick<State, 'deals' | 'indexing' | 'progress' | 'ui'>, deal: Pick<Deal, 'id' | 'folders' | 'stage'>,
+) {
+  const progress = state.progress[deal.id];
+  const reading = progress?.folders ?? [];
+  const { away, empty } = unavailableFolders(state.ui.missingFolders, deal.id);
+  const rows = liveFolders(state, deal).map((folder) => ({
+    key: folder.path,
+    name: folder.label || folder.path,
+    title: folder.path,
+    ...readingRow(folder, reading),
+    away: away.has(folder.path),
+    empty: empty.has(folder.path),
+  }));
+  const awayCount = rows.filter((row) => row.away).length;
+  const emptyCount = rows.filter((row) => row.empty).length;
+  const total = rows.length > 1 ? readingTotals(rows) : null;
+  const core = coreDocuments(reading, away, empty, awayCount > 0 || emptyCount > 0);
+  // Only the first two reported matches are considered, even if one of those deals is no longer present.
+  const alsoIn = (progress?.alsoIn ?? []).slice(0, 2).flatMap(({ dealId, docs, of }) => {
+    const match = state.deals[dealId];
+    return match ? [{ deal: match, docs, of: Math.max(of, docs) }] : [];
+  });
+  return {
+    rows, total, folderCount: rows.length, awayCount, emptyCount, core, alsoIn,
+    stopped: deal.stage === 'indexing' && state.ui.indexStalled.includes(deal.id),
+  };
+}
 
 type Why = 'away' | 'retry';
 const waiting = (store: Store, dealId: string, why: Why | null) => {

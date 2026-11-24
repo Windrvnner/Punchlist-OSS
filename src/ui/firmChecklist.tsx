@@ -155,7 +155,7 @@ function ImportChecklistDialog(props: ImportProps & { fresh: boolean }) {
   const fileName = table?.name ?? text?.name ?? '';
   const view: ImportView = {
     title: review ? `Import a Checklist · ${layer === 'broad' ? 'General' : name}` : 'Import a Checklist',
-    ai: store.services.ai, firm, work, source, listReview, target, exit, setLayer, setName,
+    can: state.can, firm, work, source, listReview, target, exit, setLayer, setName,
     change: () => {
       work.drop();
       source.forget();
