@@ -95,9 +95,12 @@ describe('a draft reuses an answer already given to another party', () => {
     expect(full.text).toBe(`${quarter} ${longStop}`);
     expect(full.sources.map((source) => source.loc)).toEqual(['p. 14', 'p. 16']);
 
-    const dates = ['Q3 2027', 'Q3-2027', 'Q3/2027', 'Q3 (2027)', 'Q3, 2027', '2027 Q3'];
+    const dates = [
+      'Q3', 'Q3 2027', 'Q3-2027', 'Q3/2027', 'Q3 (2027)', 'Q3, 2027', '2027 Q3',
+      'Q3 in 2027', 'FY 2027 (Q3)', 'Q3 of calendar year 2027',
+    ];
     for (const date of dates) {
-      const text = `Commercial operation is expected in ${date}. [1]`;
+      const text = `Commercial operation is expected by ${date}. [1]`;
       reply = { ...reply, text, sources: [sources[0]] };
       const only = val(await s.ai.draft(draft));
       expect(only.status, date).toBe('found');
@@ -140,7 +143,11 @@ describe('a draft reuses an answer already given to another party', () => {
   it.each([
     ['a clause beginning with a year', 'As answered in Q3, 2027 capital spending is capped at $20 million.'],
     ['a closing quote', 'As answered in Q3, “the target is still provisional.”'],
-  ])('removes the credit before %s and keeps the next cited sentence (#286)', async (_case, credit) => {
+    ['a dash before a year', 'As answered in Q3 — 2027 capital spending is capped at $20 million.'],
+    ['a dash without spaces', 'As answered in Q3—2027 capital spending is capped at $20 million.'],
+    ['a year before the question number', 'The minutes confirm that in 2027 Q3 was answered by the sponsor.'],
+    ['a quote and a continuation', 'The sponsor responded to Q3 with “Not yet!” before the term sheet was amended.'],
+  ])('removes a credit with %s and keeps the next cited sentence (#286)', async (_case, credit) => {
     const retained = 'Commercial operation is expected in Q3 2027.';
     const text = `${credit} [1] ${retained} [2]`;
     const sources = [{ doc: 'D1', page: 9 }, { doc: 'D1', page: 14 }];
@@ -152,6 +159,29 @@ describe('a draft reuses an answer already given to another party', () => {
     expect(draft.status).toBe('found');
     expect(draft.text).toBe(`As answered to Lender B (Q3): ${Q12.response}\n\n${retained} [1]`);
     expect(draft.sources.map((source) => source.loc)).toEqual(['p. 14']);
+  });
+
+  it('keeps paragraphs when no earlier question is shown (#286)', async () => {
+    const text = 'The engineer wrote “The permit was issued.”\n\nThe long-stop date is 31 March 2028. [1]';
+    const sources = [{ doc: 'D1', page: 14 }];
+    const s = setup((call) => isDraft(call) ? { status: 'found', text, sources } : {}, { d1: [FA] });
+    const draft = val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW }));
+    expect(draft.text).toBe(text);
+    expect(draft.sources.map((source) => source.loc)).toEqual(['p. 14']);
+  });
+
+  it('keeps the paragraph break crossed by a removed credit (#286)', async () => {
+    const first = 'Commercial operation is expected in Q3 2027.';
+    const last = 'The long-stop date is 31 March 2028.';
+    const text = `${first} [1]\n\nAs answered in Q3. [2]\n${last} [3]`;
+    const sources = [{ doc: 'D1', page: 9 }, { doc: 'D1', page: 14 }, { doc: 'D1', page: 16 }];
+    const s = setup((call) => isDraft(call) ? { status: 'found', text, sources } : {}, { d1: [FA] });
+    await deal(s.repo);
+    await questions(s.repo, [{ ...Q12, n: 3 }]);
+
+    const draft = val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW }));
+    expect(draft.text).toBe(`${first} [1]\n\n${last} [2]`);
+    expect(draft.sources.map((source) => source.loc)).toEqual(['p. 9', 'p. 16']);
   });
 
   it('a question that only shares common words, or has no response yet, or is the question itself, is not shown', async () => {
