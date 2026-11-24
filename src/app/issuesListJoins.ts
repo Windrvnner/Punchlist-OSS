@@ -27,6 +27,7 @@ const listKey = (list: string, point: string) => `${list}\u0001${point}`;
 
 function remember(index: Map<string, Finding>, key: string, finding: Finding) {
   const previous = index.get(key);
+  // Use the lowest ID so PCs agree when more than one finding holds a mark.
   if (!previous || finding.id < previous.id) index.set(key, finding);
 }
 
@@ -45,16 +46,21 @@ function findingIndex(findings: Iterable<Finding>) {
   return { byId, byDocument, byName };
 }
 
+function matchingFinding(index: ReturnType<typeof findingIndex>, list: DocumentRef, point: Point) {
+  const { byId, byDocument, byName } = index;
+  const key = pointKey(point);
+  // The same file's mark wins. An explicit join takes precedence over a revised list's mark or a model suggestion.
+  return byDocument.get(listKey(list.docId, key)) ?? byId.get(point.join ?? '')
+    ?? byName.get(listKey(list.doc, key)) ?? byId.get(point.suggestedFinding ?? '');
+}
+
 /** A numeric target denotes the earlier point whose new finding will hold the mark. */
 export function issuesListDestinations(findings: Iterable<Finding>, list: DocumentRef, points: readonly Point[]) {
-  const { byId, byDocument, byName } = findingIndex(findings);
+  const index = findingIndex(findings);
   const destinations: Destination[] = [];
   for (const point of points) {
     const text = fitText(point.text.trim());
-    const key = pointKey({ n: point.n, text });
-    // The same file's mark wins. An explicit join takes precedence over a revised list's mark or a model suggestion.
-    const finding = byDocument.get(listKey(list.docId, key)) ?? byId.get(point.join ?? '')
-      ?? byName.get(listKey(list.doc, key)) ?? byId.get(point.suggestedFinding ?? '');
+    const finding = matchingFinding(index, list, { ...point, text });
     const { after } = point;
     const earlier = after === undefined ? undefined : destinations[after];
     const reference = finding ? { join: finding.id } : earlier && after !== undefined ? { after } : undefined;

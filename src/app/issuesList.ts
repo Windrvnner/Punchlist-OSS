@@ -22,7 +22,9 @@ export async function readIssuesList(
   if (!attached.ok) return attached;
   const ai = store.services.ai;
   if (!ai.issuesList) return fail(rejected('Issues list reading is unavailable'));
-  const findings = dealFindings(store.get(), dealId).map(({ id, title, body }) => ({ id, title, text: body.join('\n\n') }));
+  const findings = dealFindings(store.get(), dealId).map(({ id, title, body }) => ({
+    id, title, text: body.join('\n\n'),
+  }));
   const doc = attached.value;
   const read = await ai.issuesList({ dealId, doc, findings, workstreams: WORKSTREAMS });
   return read.ok ? ok({ doc, points: read.value.points }) : read;

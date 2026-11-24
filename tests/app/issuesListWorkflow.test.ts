@@ -104,7 +104,9 @@ it('attaches and reads a deal-scale list, then imports every point to the destin
     const expected = target === undefined
       ? made.find((finding) => finding.onLists?.[0]?.n === point.n && finding.body[0] === point.text)?.id
       : typeof target === 'number' ? written[target] : target.id;
-    const marked = after.filter((finding) => finding.onLists?.some((mark) => mark.doc === DOC.docId && mark.n === point.n));
+    const marked = after.filter((finding) => finding.onLists?.some((mark) => (
+      mark.doc === DOC.docId && mark.n === point.n
+    )));
     expect(expected, `point ${point.n} needs a target`).toBeDefined();
     expect(marked.map(({ id }) => id), `point ${point.n}`).toEqual([expected]);
     written.push(marked[0].id);
