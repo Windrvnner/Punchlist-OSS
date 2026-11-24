@@ -5,7 +5,7 @@ import { keptImport, keepImport } from './keptImports';
 
 type Heading = Pick<ImportTable, 'sheet' | 'headerRow' | 'lastRow'>;
 type ReadRow = (row: number, accept: (heading: Heading) => void) => Promise<void>;
-// The numeric forms accepted by a native number input, including integral decimals and exponents.
+// The numeric forms a native number input accepts, including integral decimals and exponents.
 const NUMBER_TEXT = /^-?(?:(\d+)(?:\.(\d+))?|\.(\d+))(?:[eE]([+-]?\d+))?$/;
 
 /** Keep an unused heading row in the field while the preview shows the accepted table (#380). */
@@ -18,17 +18,15 @@ export function HeadingRowField({ id, importKey, table, sheet = table.sheet, rea
   disabled?: boolean;
   onEdit?: () => void;
 }) {
-  const { text, row, pick, reason } = useHeadingDraft(importKey, table, sheet, read, onEdit);
+  const { text, pick, reason } = useHeadingDraft(importKey, table, sheet, read, onEdit);
   const noteId = `${id}-unused`;
+  // The native number input keeps its step arrows and arrow keys (#380). Its max applies to the accepted sheet only,
+  // so a step taken while another sheet is read is not clamped to the old sheet's last row.
   return (
     <label><span>Row</span>
-      <input class="field" id={id} inputMode="numeric" role="spinbutton" aria-label="Heading row" value={text}
-        aria-valuemin={1} aria-valuemax={table.lastRow} aria-valuenow={row ?? table.headerRow}
-        aria-valuetext={row === null ? (text || 'Empty') : undefined}
+      <input class="field" id={id} type="number" aria-label="Heading row" min={1} step={1} value={text}
+        max={sheet === table.sheet ? table.lastRow : undefined}
         disabled={disabled} onInput={(e) => void pick(e.currentTarget.value)}
-        onKeyDown={(e) => {
-          if (sheet === table.sheet) stepRow(e, table.lastRow, pick);
-        }}
         aria-invalid={!!reason || undefined} aria-describedby={reason ? noteId : undefined} title={reason} />
       {reason && <span id={noteId} class="efstate fail" role="alert" title={reason}
         style={{ color: 'light-dark(var(--ink), var(--high))', cursor: 'default' }}>Not used</span>}
@@ -92,11 +90,12 @@ function useHeadingDraft(importKey: string, table: Heading, sheet: string, read:
     }
   });
 
-  const row = rowNumber(text, lastRow);
+  // While another sheet is read its last row is unknown, so only the accepted sheet's range is enforced.
+  const row = rowNumber(text, sheet === table.sheet ? lastRow : Number.POSITIVE_INFINITY);
   let reason: string | undefined;
   if (row === null) reason = `Enter a whole row from 1 to ${num(lastRow)}`;
   else if (!reading && sheet === table.sheet && row !== headerRow) reason = `The preview uses row ${num(headerRow)}`;
-  return { text, row, pick, reason };
+  return { text, pick, reason };
 }
 
 type HeadingDraft = Pick<Heading, 'sheet' | 'headerRow'> & { text: string };
@@ -112,23 +111,7 @@ function keepHeadingText(key: string, { sheet, headerRow }: Heading, text: strin
   keepImport(key, { headingDraft });
 }
 
-/** Preserve the number field's keyboard stepping without giving up its raw input text. */
-function stepRow(event: KeyboardEvent, lastRow: number, pick: (text: string) => Promise<void>) {
-  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
-  event.preventDefault();
-  const text = (event.currentTarget as HTMLInputElement).value;
-  const stepper = document.createElement('input');
-  stepper.type = 'number';
-  stepper.min = '1';
-  stepper.max = String(lastRow);
-  if (NUMBER_TEXT.test(text) && Number.isFinite(Number(text))) stepper.value = text;
-  if (event.key === 'ArrowUp') stepper.stepUp();
-  else stepper.stepDown();
-  const next = rowNumber(stepper.value, lastRow);
-  if (next !== null && next !== rowNumber(text, lastRow)) void pick(stepper.value);
-}
-
-/** The text field keeps incomplete numbers that a native number input exposes as an empty value. */
+/** The heading row a number input's text names, or null when it is not a whole row on the sheet. */
 function rowNumber(text: string, lastRow: number): number | null {
   const number = NUMBER_TEXT.exec(text);
   if (!number) return null;
