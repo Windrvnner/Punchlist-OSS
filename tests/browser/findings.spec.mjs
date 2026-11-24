@@ -430,7 +430,8 @@ async function checkCrowdedFindingEdit(page, followup) {
   await page.waitForSelector('#pcomposer .chip.att:not(.pending)');
   const reading = await openFindingEditor(page);
   say('finding-edit-keeps-focus-and-actions-clear-of-the-reading-breadcrumb',
-    reading.title.hit && reading.save.hit && reading.cancel.hit && reading.focus === 'fe-title', JSON.stringify(reading));
+    reading.title.hit && reading.save.hit && reading.cancel.hit && reading.focus === 'fe-title',
+    JSON.stringify(reading));
   await ctx.close();
 }
 
