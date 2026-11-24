@@ -173,5 +173,71 @@ const rowTexts = (page) => page.evaluate(() => [...document.querySelectorAll('#c
   await ctx.close();
 }
 
+{ // #840: a second open finding cannot take over a question about a covenant.
+  const { ctx, page, id } = await start();
+  const checklistItem = await item(page, FLAGGED);
+  const row = page.locator(`#ck-rows [data-item="${checklistItem.id}"]`);
+  const original = await page.evaluate((itemId) =>
+    Object.values(store.get().findings).find((finding) => finding.itemId === itemId), checklistItem.id);
+  const text = 'Please confirm the lock-up ratio in the executed credit agreement.';
+  await row.click();
+  await page.click('#ck-ask');
+  await page.fill('#ck-ask-text', text);
+  const other = await page.evaluate((id) => __peer.add(id, {
+    title: 'Distribution test uses a different measurement period', status: 'open',
+  }), original.id);
+  await turnOff(page);
+  await page.waitForSelector('#ck-on');
+  await page.evaluate((id) => __peer.change(id, { status: 'closed' }), original.id);
+  await page.waitForFunction((id) => store.get().findings[id]?.status === 'closed', original.id);
+
+  const log = page.locator('#ck-ask-log');
+  const card = async (reason) => (await page.inputValue('#ck-ask-text')) === text
+    && (await page.textContent('#ck-detail .clink')) === `Linked to “${original.title}”`
+    && await log.isDisabled() && (await log.getAttribute('title')) === reason;
+  say('a peer closing the original finding keeps the question on it and disables Log',
+    await card('Its finding is closed'));
+  await log.evaluate((button) => button.click());
+  const saved = () => page.evaluate((words) =>
+    Object.values(store.get().questions).filter((q) => q.text === words), text);
+  say('attempting to log while the other finding is open creates no question', (await saved()).length === 0);
+
+  await page.reload();
+  await row.click();
+  await page.waitForSelector('#ck-ask-text');
+  say('after restart the draft and its closed finding are still together', await card('Its finding is closed'));
+  await page.evaluate(([dealId, findingId]) =>
+    store.dispatch(store.commandNamed('DeleteFinding'), { dealId, findingId }), [id, original.id]);
+  await page.waitForFunction((id) => !!store.get().tombstones[id], original.id);
+  await page.click('#ck-close');
+  await row.click();
+  say('reopening a draft after deletion keeps its text and identifies the missing finding',
+    await card('Its finding is no longer here'));
+
+  await page.evaluate(([dealId, findingId]) =>
+    store.dispatch(store.commandNamed('RestoreFinding'), { dealId, findingId }), [id, original.id]);
+  await page.evaluate((id) => __peer.change(id, { status: 'open' }), original.id);
+  await page.waitForFunction(() => document.getElementById('ck-ask-log')?.disabled === false);
+  await page.click('#ck-on');
+  await page.waitForSelector('#ck-more');
+  await page.evaluate(([dealId, itemId, findingId]) => {
+    const state = store.get();
+    const rows = state.checklists[dealId].map((row) => row.id === itemId ? { ...row, findingId } : row);
+    store.set({ ...state, checklists: { ...state.checklists, [dealId]: rows } });
+  }, [id, checklistItem.id, other]);
+  await page.fill('#ck-ask-text', '');
+  await page.fill('#ck-ask-text', text);
+  say('editing after a new check leaves the draft on its original finding',
+    (await page.getAttribute('#ck-open-finding', 'href')).includes(other)
+    && (await page.textContent('#ck-detail .clink')).includes(original.title));
+  await log.click();
+  await page.waitForSelector('#ck-ask-text', { state: 'detached' });
+  const questions = await saved();
+  const otherOpen = await page.evaluate((id) => store.get().findings[id]?.status === 'open', other);
+  say('reopening the original finding allows logging once with its original links', otherOpen && questions.length === 1
+    && questions[0].linkedFinding === original.id && questions[0].linkedItem?.id === checklistItem.id);
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter(([, ok]) => !ok).length; console.log(`\n${results.length - failed}/${results.length} passed`); process.exit(failed ? 1 : 0);
