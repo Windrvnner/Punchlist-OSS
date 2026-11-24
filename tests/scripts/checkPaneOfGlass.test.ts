@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -84,5 +84,55 @@ describe('UI dependency checks', () => {
     expect(repo.run().status).toBe(0);
     repo.write(page, clean + '\nconst value = <b>{`${store.services}`}</b>');
     expect(repo.run().stderr).toContain(`${page} services (lines 8)`);
+  });
+});
+
+describe('the remaining UI exceptions', () => {
+  const file = 'src/ui/checklist.ts';
+  const oldFile = 'src/ui/old.ts';
+
+  it('lowers counts in sorted order and removes the entries for deleted files', () => {
+    const repo = fixture({ [oldFile]: { storage: 2 }, [file]: { services: 2, repo: 1 } });
+    repo.write(file, 'store.services.repo.list()');
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} services (lines 1): lower the baseline`);
+    expect(result.stderr).toContain(`${oldFile} storage (no matching lines): lower the baseline`);
+    expect(repo.run('--lower').status).toBe(0);
+    const expected = { [file]: { repo: 1, services: 1 } };
+    expect(repo.baselineText()).toBe(JSON.stringify(expected, null, 2) + '\n');
+    expect(repo.run().status).toBe(0);
+  });
+
+  it('refuses to raise a count even when another entry could be lowered', () => {
+    const repo = fixture({ [oldFile]: { storage: 1 }, [file]: { services: 1 } });
+    repo.write(file, 'store.services.ai\nstore.services.ids');
+    const before = repo.baselineText();
+    for (const result of [repo.run(), repo.run('--lower')]) {
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(`${file} services (lines 1, 2): 2 exceeds the baseline of 1`);
+      expect(repo.baselineText()).toBe(before);
+    }
+  });
+
+  it.each([true, false])('rejects a manual increase when main has a baseline (%s)', (hasBaseline) => {
+    const repo = fixture({ [file]: { services: 1 } });
+    repo.write(file, 'store.services.ai');
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: repo.dir });
+    git('init', '-q', '-b', 'main');
+    git('add', 'src');
+    if (hasBaseline) git('add', baselineFile);
+    git('-c', 'user.name=test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'Record existing UI');
+    repo.write(file, 'store.services.ai\nstore.services.ids');
+    repo.setBaseline({ [file]: { services: 2 } });
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} services (lines 1, 2): the baseline cannot rise above main's count of 1`);
+  });
+
+  it('passes the committed baseline on the repository sources', () => {
+    const result = check(process.cwd());
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
   });
 });
