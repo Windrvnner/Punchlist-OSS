@@ -252,6 +252,7 @@ function useFieldSave(
     adoptBase: (text) => {
       input.atFocus.current = text;
       input.notSavedAtFocus.current = null;
+      input.halfAtFocus.current = false;
     },
     landedEntryText: (text) => {
       if (text === input.atFocus.current) input.notSavedAtFocus.current = null;
@@ -316,6 +317,11 @@ function inputEvents(
     }
     // Escape can take back a one-line edit. In a text box it goes on to close the surrounding screen.
     if (event.key !== 'Escape' || save.view.external || multiline || locked) return;
+    if (save.acceptingChoice) {
+      event.stopPropagation();
+      event.preventDefault();
+      return;
+    }
     const text = atFocus.current;
     if (draftRef.current === text && (!halfTyped() || halfAtFocus.current)) return;
     event.stopPropagation();

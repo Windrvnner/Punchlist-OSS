@@ -23,6 +23,14 @@ function fieldSaveOutcome(result: FieldCommitResult): FieldSaveOutcome {
   return { kind: 'failed', unreachable: error?.kind === 'unreachable' };
 }
 
+type FieldAttempt = {
+  text: string;
+  over: string;
+  again: boolean;
+  choice: boolean;
+  matched?: boolean;
+};
+
 export type FieldSaveView = {
   status: 'idle' | 'saving' | 'failed' | 'refused';
   external: boolean;
@@ -59,9 +67,10 @@ export class FieldSave {
   private gone = false;
   private jumped = false;
   private byJump = false;
-  private inFlight: string[] = [];
+  private inFlight: FieldAttempt[] = [];
   private arrived: string[] = [];
   private saving = 0;
+  private choicesPending = 0;
   private waits = false;
   private resending = false;
 
@@ -131,8 +140,9 @@ export class FieldSave {
       this.followRevision(previous.rev);
       return;
     }
-    const expected = this.inFlight.indexOf(record.value);
+    const expected = this.inFlight.findIndex(({ text }) => text === record.value);
     if (expected >= 0) {
+      this.inFlight[expected].matched = true;
       this.inFlight = this.inFlight.slice(expected + 1);
       this.base = record.value;
       this.baseRev = record.rev;
@@ -178,18 +188,23 @@ export class FieldSave {
     return true;
   }
 
+  get acceptingChoice() {
+    return this.choicesPending > 0;
+  }
+
   async save(text: string, commit: FieldCommit, chosen = false): Promise<FieldSaveOutcome | undefined> {
+    const choice = chosen && this.view.external;
     this.input.stopTimer();
     if (!this.shouldSend(text, chosen)) return undefined;
     this.show({ status: 'saving', external: false });
-    this.inFlight.push(text);
+    const attempt: FieldAttempt = { text, over: this.base, again: this.resending, choice };
+    this.inFlight.push(attempt);
     this.saving++;
-    const again = this.resending;
+    if (choice) this.choicesPending++;
     this.resending = false;
-    const over = this.base;
-    const outcome = fieldSaveOutcome(await commit(text, over));
+    const outcome = fieldSaveOutcome(await commit(text, attempt.over));
     this.saving--;
-    this.handleOutcome(text, over, outcome, commit, again);
+    this.handleOutcome(attempt, outcome, commit);
     return outcome;
   }
 
@@ -211,27 +226,35 @@ export class FieldSave {
     }
     // A failed write still in the journal is settled even if the person took their text back to the saved value.
     if (text === this.seen.value && !this.inFlight.length && !this.waits) {
+      if (chosen) this.acceptChoice(text, text);
       if (!this.saving) this.show({ status: 'idle' });
       return false;
     }
-    return this.inFlight.at(-1) !== text;
+    return this.inFlight.at(-1)?.text !== text;
   }
 
-  private handleOutcome(text: string, over: string, outcome: FieldSaveOutcome, commit: FieldCommit, again: boolean) {
+  private handleOutcome(attempt: FieldAttempt, outcome: FieldSaveOutcome, commit: FieldCommit) {
+    const { text, again } = attempt;
     if (outcome.kind === 'changedElsewhere') {
-      this.settleAttempt(text, false, false, commit);
-      this.handleConflict(over, commit);
+      this.settleAttempt(attempt, false, false, commit);
+      this.handleConflict(attempt, commit);
       return;
     }
     if (outcome.kind === 'saved') {
       // The record's layout effect observes the write before a normalized value is matched to this attempt.
-      setTimeout(() => this.settleAttempt(text, true, outcome.written, commit), 0);
+      setTimeout(() => this.settleAttempt(attempt, true, outcome.written, commit), 0);
       if (this.keep !== undefined && unsavedFields.get(this.keep)?.text === text) this.forgetText();
       this.waits = false;
       if (!this.saving) this.show({ status: 'idle' });
       return;
     }
-    this.settleAttempt(text, false, false, commit);
+    this.settleAttempt(attempt, false, false, commit);
+    if (attempt.choice) {
+      if (outcome.kind === 'failed') this.waits = true;
+      this.keepExternal();
+      if (outcome.kind === 'refused') this.show({ reason: outcome.reason, status: 'refused' });
+      return;
+    }
     this.keepText(this.input.text());
     if (outcome.kind === 'refused') this.show({ reason: outcome.reason, status: 'refused' });
     else {
@@ -244,11 +267,16 @@ export class FieldSave {
    * Record writes land one at a time. If this save was normalized, its value is the first unmatched arrival.
    * Any later arrival is still a change from elsewhere and leaves the typed text waiting for a choice.
    */
-  private settleAttempt(text: string, saved: boolean, written: boolean, commit: FieldCommit) {
-    const exact = !this.inFlight.includes(text);
-    this.inFlight = this.inFlight.filter((value) => value !== text);
+  private settleAttempt(attempt: FieldAttempt, saved: boolean, written: boolean, commit: FieldCommit) {
+    const { text, over, choice, matched } = attempt;
+    const followed = !this.inFlight.includes(attempt);
+    this.inFlight = this.inFlight.filter((pending) => pending !== attempt);
     if (saved) this.input.landedEntryText(text);
-    if (written && !exact) this.followStoredWrite();
+    let stored = written ? text : over;
+    if (written && !followed) stored = this.followStoredWrite() ?? text;
+    // A later exact write already advanced the save base. Recover the choice without moving the base back.
+    else if (written && choice && !matched) stored = this.arrived.shift() ?? text;
+    if (choice) this.settleChoice(text, saved ? stored : undefined);
     if (this.inFlight.length) return;
     this.arrived = [];
     if (written) this.jumped = false;
@@ -266,9 +294,23 @@ export class FieldSave {
     this.baseRev = this.arrived.length ? -1 : this.seen.rev;
     const kept = this.keep === undefined ? undefined : unsavedFields.get(this.keep);
     if (kept) this.keepText(kept.text);
+    return stored;
   }
 
-  private handleConflict(over: string, commit: FieldCommit) {
+  private settleChoice(text: string, stored: string | undefined) {
+    this.choicesPending--;
+    if (stored !== undefined) this.acceptChoice(text, stored);
+  }
+
+  // Escape can undo later typing, but cannot go back through a choice that settled a change from elsewhere (#228).
+  private acceptChoice(text: string, stored: string) {
+    this.input.adoptBase(stored);
+    if (text !== stored && this.input.text() === text && this.seen.value === stored && !this.input.partial()) {
+      this.input.replaceText(stored);
+    }
+  }
+
+  private handleConflict({ over, choice }: FieldAttempt, commit: FieldCommit) {
     if (!this.saving) this.show({ status: 'idle' });
     const now = this.seen.value;
     const text = this.input.text();
@@ -278,7 +320,7 @@ export class FieldSave {
       this.forgetText();
       return;
     }
-    if (!this.input.partial() && text === over) {
+    if (!choice && !this.input.partial() && text === over) {
       this.forgetText();
       if (now !== over) {
         this.input.replaceText(now);
