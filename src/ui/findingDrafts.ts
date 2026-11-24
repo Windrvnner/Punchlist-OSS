@@ -3,7 +3,7 @@
 import { toParagraphs } from '../domain/cite';
 import type { Finding } from '../domain/model';
 import type { Failure, Result } from '../domain/result';
-import { hasTexts, keptDrafts } from './keptDrafts';
+import { hasTexts, keptDrafts } from '../app/keptText';
 
 /** An open edit of a finding: what is typed, and the finding as the edit began (`base`). */
 export type EditDraft = {

@@ -1,6 +1,7 @@
 // The hover on "#N on issues list": the list's name, then the point's words. Several points get a line each, so
 // every point shows some of its words.
 import { describe, it, expect } from 'vitest';
+import './keptTextSession';
 import { onListTip, onListText } from '../../src/ui/issuesList';
 
 describe('the issues list mark', () => {

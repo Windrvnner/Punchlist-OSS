@@ -400,6 +400,9 @@ export interface DraftRef { doc: string; docId: string; date: string | null; fol
 /** `pages` is the document's page count when it is known, for stepping through its pages in reading mode */
 export type PageView = { kind: 'pdf'; url: string | null; page: number; pages?: number } | { kind: 'sheet'; name: string; cols: string[]; rows: { r: number; cells: string[] }[]; cell?: string };
 
+/** LocalStore key for typed draft maps. A null value clears the saved drafts. */
+export const KEPT_TEXT_KEY = 'kept-drafts';
+
 /** Per-user, per-machine data that is not a record: preferences, and a cache of conversation threads (their home is the person's files in the shared folder; see ConversationStore). Never part of a transaction. */
 export interface LocalStore {
   read(key: string): unknown | null;

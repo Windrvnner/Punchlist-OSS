@@ -17,7 +17,7 @@ import {
 import { isOwnFiles, type Deal, type Question, type Source } from '../domain/model';
 import { attachFiles, dealCopied, filesSendable } from '../app/attachments';
 import { type Attachment, type Message, type State , isReading, askAbout, askAcross } from '../app/state';
-import { keptDrafts, isText } from './keptDrafts';
+import { keptDrafts, isText } from '../app/keptText';
 import { DocPanel } from './docPanel';
 import { PastList } from './pastList';
 import { useRotatingExample } from './homeExamples';

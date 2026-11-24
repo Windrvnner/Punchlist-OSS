@@ -5,7 +5,7 @@
  */
 import type { Attachment } from '../app/state';
 import type { Store } from '../app/store';
-import { hasTexts, keptDrafts } from './keptDrafts';
+import { hasTexts, keptDrafts } from '../app/keptText';
 
 type Kept = Required<Pick<Attachment, 'id' | 'name' | 'dealId' | 'conv' | 'doc' | 'docId'>> & { findingId?: string };
 const hasFields = hasTexts('id', 'name', 'dealId', 'conv', 'doc', 'docId');

@@ -34,7 +34,7 @@ import { AccountRow } from './connection';
 import { ReadOnlyContext, SignedOutContext } from './editField';
 import { SERVICE } from '../control';
 import { takeNavPatch, closeDocument, takeFocusAfter } from './nav';
-import { renameKept } from './keptDrafts';
+import { renameKept } from '../app/keptText';
 import { keepAttachments } from './keptAttachments';
 import { followCopies } from '../app/attachments';
 import { staleKept } from './editField';
