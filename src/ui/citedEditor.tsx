@@ -92,8 +92,7 @@ function insertCited(pieces: MarkerPiece[], box: HTMLElement, sources: Source[])
   const words = fitted.replace(/\n+$/, '');
   if (words) {
     const holder = document.createElement('div');
-    const inline = words.length === fitted.length ? fitting : takeMarkerPieces(fitting, words.length);
-    holder.append(...citedNodes(inline, sources));
+    holder.append(...citedNodes(markerPieces(words, sources.length), sources));
     document.execCommand('insertHTML', false, holder.innerHTML);
   }
   if (fitted.length > words.length) document.execCommand('insertLineBreak');
@@ -123,7 +122,7 @@ function markupWords(markup: string): string {
 
 const pasteLines = (text: string) => text.replace(/\r\n?/g, '\n');
 
-/** Preserve the roles in a native passage. External text uses the receiving editor's source count. */
+/** Use a native passage's original citation roles to decide whether the length cut divides a marker. */
 function incomingPieces(data: DataTransfer | null, sources: Source[]): MarkerPiece[] {
   if (!data) return [];
   const clip = readClip(data.getData(CITED_TYPE));

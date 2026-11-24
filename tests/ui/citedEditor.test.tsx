@@ -107,12 +107,15 @@ describe('the finding editor', () => {
     expect(Boolean(inserted.querySelector('.ctag'))).toBe(expected === 'See[1]');
   });
 
-  it.each([2, 3])('keeps copied literal brackets in a recipient with sources and %i characters free', async (room) => {
+  it.each([
+    [2, '[1', undefined],
+    [3, '[1]', '[1]'],
+  ])('fits a copied bracketed number with %i characters free', async (room, text, marker) => {
     const { box } = await mount(atLimit(room), [source('Facility agreement.pdf')]);
     const clip = JSON.stringify({ text: '[1] in the compliance schedule.', sources: [] });
     const inserted = capturePaste(box, { 'application/x-punchlist-cited': clip });
-    expect(editorText(inserted)).toBe('[1]'.slice(0, room));
-    expect(inserted.querySelector('.ctag')).toBeNull();
+    expect(editorText(inserted)).toBe(text);
+    expect(inserted.querySelector<HTMLElement>('.ctag')?.dataset.marker).toBe(marker);
   });
 
   it.each([

@@ -116,6 +116,17 @@ const openEdit = async (page) => {
   say('native-paste-at-limit-keeps-copied-literal-number', copiedText === `${clipboardPrefix}[1`);
   await page.keyboard.press('Control+z');
   say('undo-native-paste-at-limit', await page.locator('#fe-body').textContent() === clipboardPrefix);
+
+  await page.keyboard.press('Control+End');
+  await page.keyboard.press('Control+v');
+  await saveEdit(page);
+  const expected = `${clipboardPrefix}[1`;
+  say('save-keeps-the-clipped-literal-number', (await body(page, fid))[0] === expected
+    && await page.locator('.dtxt').first().textContent() === expected);
+  await page.click('#f-edit');
+  const editor = page.locator('#fe-body');
+  say('reopen-keeps-the-clipped-literal-number', await editor.textContent() === expected
+    && await editor.locator('.ctag').count() === 0);
   await ctx.close();
 }
 
