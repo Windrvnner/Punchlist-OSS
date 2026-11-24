@@ -154,42 +154,62 @@ const QUESTION_TOKEN = /[\p{L}\p{M}\p{N}|]+(?:[.,][\p{L}\p{M}\p{N}|]+)*/gu;
 const NAMING_WORDS = new Set(('annex appendix article block class clause exhibit facility item limb lot paragraph '
   + 'part phase rule schedule section series tier tranche unit').split(' '));
 const DOTTED_SUFFIX = /(?<!\s)\s*\.\s*([\p{L}\p{N}]+)(?![\p{L}\p{M}\p{N}|])/gu;
-const DOTTED_PART = /\p{N}+|[ivxlcdm]+|\p{L}/iu.source;
+const DOTTED_LEAD = /\p{N}+\p{L}?|[ivxlcdm]+/iu.source;
 const DOTTED_NAME_BEFORE = new RegExp(
-  String.raw`(?<![\p{L}\p{M}\p{N}|])(\p{L}+)([\s:-]+\p{N}+(?:\s*[.,]\s*(?:${DOTTED_PART}))*)?$`, 'iu',
+  String.raw`(?<![\p{L}\p{M}\p{N}|])(\p{L}+)(?:[\s:-]+(${DOTTED_LEAD})(?:\s*[.,]\s*`
+    + String.raw`(?:${DOTTED_LEAD}|(?![ivxlcdm])\p{L}))*)?$`, 'iu',
 );
-const DOTTED_NUMBER_LETTER = /^\p{N}+(?:[.,]\p{N}+)*\.(\p{L}+)(?![\p{L}\p{M}\p{N}|])/u;
-const CLAUSE_CONTINUES = /^\s+(?:of|in|under|above|below|for|to|from|and|or)\b/iu;
+const DOTTED_NUMBER_LETTER = new RegExp(
+  String.raw`^(${DOTTED_LEAD})(?:[.,]\p{N}+)*\.(\p{L}+|\p{N}+\p{L})(?![\p{L}\p{M}\p{N}|])`, 'iu',
+);
+const NUMERIC_PART = /^\p{N}+\p{L}?$/u;
+const LETTERED_NUMBER = /^\p{N}+\p{L}$/u;
+const CLOSED_NAMING_PHRASE = /(?:^|[^\p{L}])(?:a|an|any|another|by|each|every|per|that|the|this)\s*$/iu;
+const I_CONTRACTION = /^['’](?:m|d|ve|ll)\b/iu;
 
 /** Read dotted labels alike for both wording and identifier comparison (#778). */
 function identifierText(text: string): string {
   return text.normalize('NFKC').replace(DOTTED_SUFFIX, (match, suffix, offset, normalized) => {
-    const numeric = /^\p{N}+$/u.test(suffix);
+    const numeric = NUMERIC_PART.test(suffix);
     if (!numeric && !identifierLetter(suffix)) return match;
     const name = dottedNameBefore(normalized, offset);
     if (!name || (numeric && !name[2])) return match;
     const after = normalized.slice(offset + match.length);
-    // "item.I understand" is prose. In "clause 4. I of", the clause reference continues after I.
-    if (suffix === 'I' && couldBePronounI(suffix, after) && !(name[2] && CLAUSE_CONTINUES.test(after))) return match;
+    if (dottedProseI(suffix, name, normalized, after)) return `. ${suffix}`;
     return name[2] ? `.${suffix}` : ` ${suffix}`;
   });
 }
 
 function dottedNameBefore(text: string, offset: number): RegExpExecArray | null {
   const name = DOTTED_NAME_BEFORE.exec(text.slice(0, offset).trimEnd());
-  return name && NAMING_WORDS.has(name[1].toLowerCase()) ? name : null;
+  return name && NAMING_WORDS.has(name[1].toLowerCase()) && (!name[2] || dottedLead(name[2])) ? name : null;
 }
 
 function isNamedDottedLetter(token: string, offset: number, text: string): boolean {
-  const suffix = DOTTED_NUMBER_LETTER.exec(token)?.[1];
-  if (!suffix || !identifierLetter(suffix)) return false;
+  const parts = DOTTED_NUMBER_LETTER.exec(token);
+  if (!parts || !dottedLead(parts[1]) || !(identifierLetter(parts[2]) || LETTERED_NUMBER.test(parts[2]))) return false;
   const name = dottedNameBefore(text, offset);
   return !!name && !name[2];
 }
 
+const dottedLead = (token: string) => NUMERIC_PART.test(token) || ROMAN_NUMERAL.test(token);
 const identifierLetter = (token: string) => /^\p{L}$/u.test(token) || ROMAN_NUMERAL.test(token);
 const couldBePronounI = (token: string, after: string) => /^[Iil|]$/.test(token) && /^\s*\p{Ll}/u.test(after);
 
+/** "Each item. I …" has a complete noun phrase before the period. A numbered reference can have another component. */
+function dottedProseI(token: string, name: RegExpExecArray, text: string, after: string): boolean {
+  if (!/^[Iil|]$/.test(token)) return false;
+  if (I_CONTRACTION.test(after)) return true;
+  return !name[2] && CLOSED_NAMING_PHRASE.test(text.slice(0, name.index)) && /^\s*,?\s*\p{Ll}/u.test(after);
+}
+
+function isDottedProseI(token: string, offset: number, text: string): boolean {
+  if (!/^[Iil|]$/.test(token)) return false;
+  const before = text.slice(0, offset).trimEnd();
+  if (!before.endsWith('.')) return false;
+  const name = dottedNameBefore(before, before.length - 1);
+  return !!name && dottedProseI(token, name, text, text.slice(offset + token.length));
+}
 /**
  * The identifiers a question names, as they are compared (#125, #127, #128): anything with a digit, a Roman numeral in
  * capitals, a single capital letter, a code of up to five capitals, and a letter or numeral in parentheses or after a
@@ -216,6 +236,7 @@ function identifierForm(token: string, offset: number, text: string): string | u
   if (/\p{N}/u.test(token)) {
     return isNamedDottedLetter(token, offset, text) ? token.toLowerCase() : numberForm(token);
   }
+  if (isDottedProseI(token, offset, text)) return undefined;
   if (namedLetter(token, offset, text)) return token.toLowerCase();
   if (couldBePronounI(token, text.slice(offset + 1))) return undefined;
   const capitals = /^\p{Lu}+$/u.test(token);
