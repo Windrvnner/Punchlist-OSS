@@ -1,6 +1,7 @@
 // Match syntax, so examples in comments, strings, regexes and JSX text never count as UI dependencies.
 import { posix } from 'node:path';
 import { parseSync, Visitor } from 'vite';
+import { localConstants } from './pane-of-glass-constants.mjs';
 
 const storageNames = new Set(['localStorage', 'sessionStorage', 'indexedDB']);
 const layerPath = /^(?:backend|adapters|desktop|shell)(?:\/|$)/;
@@ -16,28 +17,46 @@ function concatenate(left, right) {
   return left.flatMap((prefix) => right.map((suffix) => prefix + suffix));
 }
 
-function templateValues(node) {
+function templateValues(node, resolve) {
   let values = [node.quasis[0].value.cooked];
   for (const [index, expression] of node.expressions.entries()) {
     const tail = node.quasis[index + 1].value.cooked;
-    values = concatenate(values, stringValues(expression)).map((value) => value + tail);
+    values = concatenate(values, stringValues(expression, resolve)).map((value) => value + tail);
   }
   return values;
 }
 
 // Only inspect syntax. A placeholder preserves the known parts of a string around a runtime value.
-function stringValues(expression) {
+function stringValues(expression, resolve = () => ['*']) {
   if (!expression) return [];
   const node = unwrapped(expression);
   const text = literalText(node);
   if (text !== null) return [text];
-  if (node.type === 'TemplateLiteral') return templateValues(node);
+  if (node.type === 'Identifier') return resolve(node);
+  if (node.type === 'TemplateLiteral') return templateValues(node, resolve);
   if (node.type === 'BinaryExpression' && node.operator === '+') {
-    return concatenate(stringValues(node.left), stringValues(node.right));
+    return concatenate(stringValues(node.left, resolve), stringValues(node.right, resolve));
   }
-  if (node.type === 'ConditionalExpression') return [...stringValues(node.consequent), ...stringValues(node.alternate)];
-  if (node.type === 'LogicalExpression') return [...stringValues(node.left), ...stringValues(node.right)];
+  if (node.type === 'ConditionalExpression') {
+    return [...stringValues(node.consequent, resolve), ...stringValues(node.alternate, resolve)];
+  }
+  if (node.type === 'LogicalExpression') {
+    return [...stringValues(node.left, resolve), ...stringValues(node.right, resolve)];
+  }
   return ['*'];
+}
+
+function importTargets(file, source) {
+  let constants;
+  function targets(node, seen = new Set()) {
+    return stringValues(node, (identifier) => {
+      constants ??= localConstants(file, source);
+      const initializer = constants.get(identifier.start);
+      if (!initializer || seen.has(initializer)) return ['*'];
+      return targets(initializer, new Set(seen).add(initializer));
+    });
+  }
+  return targets;
 }
 
 function forbiddenModule(file, name) {
@@ -68,8 +87,9 @@ export function matchesIn(file, source) {
   function record(kind, node) {
     (offsets[kind] ??= new Set()).add(node.start);
   }
+  const targets = importTargets(file, source);
   function checkModule(node) {
-    if (stringValues(node).some((name) => forbiddenModule(file, name))) record('import', node);
+    if (targets(node).some((name) => forbiddenModule(file, name))) record('import', node);
   }
   function checkProperty(key, computed) {
     const names = propertyNames(key, computed);

@@ -30,6 +30,8 @@
     "installer": "npm run desktop:build && electron-builder --win nsis --x64"
   },
   "devDependencies": {
+    "@babel/parser": "7.29.13",
+    "@babel/traverse": "7.29.13",
     "@biomejs/biome": "2.6.7",
     "@preact/preset-vite": "^2.10.6",
     "@types/aws4": "1.11.6",
