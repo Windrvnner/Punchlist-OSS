@@ -179,3 +179,18 @@ The rest of the project is documented in these places:
 - Commits say `(#N)`. A pull request that fixes a bug or finishes an item says `Fixes #N`, so that merging it closes the issue. Review findings go on the pull request as review comments.
 - Before a release, check its assets for unreviewed files and identifying metadata such as author fields, local paths, and build machine names.
 - Before pushing commits, check that each commit's author and committer are the intended identities, using their GitHub noreply addresses.
+
+### Batches
+
+A batch is a Build list issue with the `batch` label that lists several fixes, each worked as its own pull request.
+Its **How the batch is worked** section sets that batch's own rules. These rules hold for every batch, in addition:
+
+- Open a pull request only once its design is proved to hold where the guarantee is enforced: for example, ownership
+  is checked before a file is published, evidence before a finding is saved, and separate inputs stay separate before
+  a draft is made. When a review exposes a wrong assumption, re-examine the design rather than patching the reported
+  case.
+- Test the failing case and the nearby cases that already work on `main`, so that a fix keeps the behavior around it.
+- Check the files and dependencies a fix needs against the files the batch must not edit before starting it, and
+  again whenever a revision changes a data contract.
+- Limit work in flight. When reviews keep finding the same kind of failure, open no new pull requests until the open
+  ones are finished.
