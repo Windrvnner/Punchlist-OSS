@@ -38,7 +38,7 @@
  * Nothing here asks the person a question part-way: every call and every run ends with a result or a failure.
  */
 import { MODEL_TEXT_MAX, fitText, fitParas } from '../domain/importExport';
-import { ok, fail, type Result } from '../domain/result';
+import { ok, fail, type Failure, type Result } from '../domain/result';
 import type { AiService, Repository, CheckSummary, CheckState, DealProgress, ChecklistRow } from '../ports';
 import { WORKSTREAMS, CHECK_REASON, type Source } from '../domain/model';
 import type { ConverseInput, Conversed, ModelService } from './service';
@@ -2267,48 +2267,113 @@ export function nodeAi(o: AiOptions) {
   async function markReworded(x: { reworded: () => ChecklistItem[]; latest: Map<string, CheckLine>; renote: (it: ChecklistItem) => Promise<void> }, marked: string[]) {
     for (const it of x.reworded()) { const id = x.latest.get(it.id)!.finding!; if (await mark(id, REWORDED) && !marked.includes(id)) marked.push(id); await x.renote(it); }
   }
-  async function mark(id: string, why: string, on?: { questions: string[] }, closedToo = false): Promise<boolean> {
-    const r = await tryMark(id, why, on, true, closedToo);
-    if (r.kind === 'waits') { await owe(r.dealId, { finding: id, why, ...(on ? { questions: on.questions } : {}) }); return false; }
+  async function mark(id: string, why: string, evidence: MarkEvidence = {}, closedToo = false): Promise<boolean> {
+    const r = await tryMark(id, why, evidence, true, closedToo);
+    if (r.kind === 'waits') {
+      await owe(r.dealId, { finding: id, why, ...evidence });
+      return false;
+    }
     return r.kind === 'marked';
   }
+  const markKey = (mark: Pick<Owed, 'finding' | 'why' | 'round'>) =>
+    JSON.stringify([mark.finding, mark.why, mark.round]);
   /** what is owed on a deal: each mark not yet paid, once (a mark owed again after it was paid is owed again) */
   function owedOf(all: CheckLine[]): Owed[] {
-    const out = new Map<string, Owed>(); const key = (x: { finding: string; why: string }) => `${x.finding}\u0000${x.why}`;
-    for (const l of all) { if (l.owed) { const k = key(l.owed); const had = out.get(k); out.set(k, had ? { ...l.owed, ...(had.questions || l.owed.questions ? { questions: [...new Set([...(had.questions ?? []), ...(l.owed.questions ?? [])])] } : {}) } : l.owed); } else if (l.paid) out.delete(key(l.paid)); }
+    const out = new Map<string, Owed>();
+    for (const { owed, paid } of all) {
+      if (paid) out.delete(markKey(paid));
+      if (!owed) continue;
+      const key = markKey(owed);
+      const had = out.get(key);
+      const questions = had?.questions || owed.questions
+        ? [...new Set([...(had?.questions ?? []), ...(owed.questions ?? [])])]
+        : undefined;
+      out.set(key, questions ? { ...owed, questions } : owed);
+    }
     return [...out.values()];
   }
-  async function owe(dealId: string, x: Owed) {
-    const have = owedOf(await lines(dealId)).find((y) => y.finding === x.finding && y.why === x.why);
-    if (have && (x.questions ?? []).every((q) => have.questions?.includes(q))) return;
-    await say(dealId, { owed: x });
+  async function owe(dealId: string, owed: Owed) {
+    const key = markKey(owed);
+    const pending = owedOf(await lines(dealId)).find((mark) => markKey(mark) === key);
+    if (pending && (owed.questions ?? []).every((id) => pending.questions?.includes(id))) return;
+    await say(dealId, { owed });
   }
   /** Write the marks owed on a deal whose findings now have one version; a finding still in two versions keeps waiting. Throws as `mark` does. */
   async function payOwed(dealId: string, marked: string[]) {
-    for (const x of owedOf(await lines(dealId))) {
-      const r = await tryMark(x.finding, x.why, x.questions ? { questions: x.questions } : undefined);
-      if (r.kind === 'waits') continue;
-      if (r.kind === 'marked' && !marked.includes(x.finding)) marked.push(x.finding);
-      await say(dealId, { paid: { finding: x.finding, why: x.why } });
+    for (const owed of owedOf(await lines(dealId))) {
+      const { finding, why, round } = owed;
+      const result = await tryMark(finding, why, owed);
+      if (result.kind === 'waits') continue;
+      if (result.kind === 'marked' && !marked.includes(finding)) marked.push(finding);
+      await say(dealId, { paid: { finding, why, ...(round ? { round } : {}) } });
     }
   }
+  type MarkResult = { kind: 'marked' | 'nothing' } | { kind: 'waits'; dealId: string };
+  type MarkableFinding = Record<string, unknown> & { updatedOn?: { questions?: string[] } };
+
+  function previousMark(
+    finding: MarkableFinding, why: string, evidence: MarkEvidence, sameQuestions: boolean,
+  ): 'marked' | 'nothing' | undefined {
+    const current = finding.updated === true ? 'marked' : 'nothing';
+    // A different check round is new evidence even when it gives the same display reason (#326).
+    if (evidence.round) return finding.markedRound === evidence.round ? current : undefined;
+    if (current === 'nothing') return undefined;
+    // A response leaves a mark for another reason as it is.
+    if (evidence.questions && !finding.updatedOn) return 'marked';
+    return finding.updatedWhy === why && sameQuestions ? 'marked' : undefined;
+  }
+
+  function nextMark(finding: MarkableFinding, why: string, evidence: MarkEvidence) {
+    const { updatedOn, ...data } = finding;
+    const existing = updatedOn?.questions ?? [];
+    const questions = evidence.questions ? [...new Set([...existing, ...evidence.questions])] : undefined;
+    const kind = previousMark(finding, why, evidence, !questions || questions.length === existing.length);
+    if (kind) return { kind };
+    // Keep the fields of a record from a newer build too.
+    return {
+      data: {
+        ...data,
+        updated: true,
+        updatedWhy: why,
+        updatedAt: clock(),
+        ...(questions ? { updatedOn: { questions } } : {}),
+        ...(evidence.round ? { markedRound: evidence.round } : {}),
+      },
+    };
+  }
+  async function markFailure(error: Failure, id: string, dealId: string): Promise<MarkResult> {
+    if (error.kind === 'rejected') {
+      const current = await o.repo.get('finding', id);
+      if (current.ok && current.value?.conflict?.length) return { kind: 'waits', dealId };
+    }
+    // A failed write must leave the check unfinished so it can retry.
+    throw Object.assign(new Error(`The finding could not be marked: ${error.message}`), { kind: error.kind });
+  }
+  /** A closed finding is marked only by a check of it, as one that may need reopening. */
+  const canMark = (status: unknown, closedToo: boolean) => (status ?? 'open') === 'open'
+    || (closedToo && status === 'closed');
   /** `waits`: the finding has versions nobody has chosen between, so no mark can go on it yet. */
-  async function tryMark(id: string, why: string, on?: { questions: string[] }, again = true, closedToo = false): Promise<{ kind: 'marked' | 'nothing' } | { kind: 'waits'; dealId: string }> {
-    const r = await o.repo.get('finding', id); if (!r.ok || !r.value) return { kind: 'nothing' }; const { updatedOn: was, ...d } = r.value.envelope.data as Record<string, unknown> & { updatedOn?: { questions?: string[] } };
-    if (r.value.conflict?.length) return { kind: 'waits', dealId: String(d.dealId) };
-    if ((d.status ?? 'open') !== 'open' && !(closedToo && d.status === 'closed')) return { kind: 'nothing' };   // a closed finding is marked only by a check of it, as one that may need reopening
-    // a mark from responses adds its questions to one from responses, and leaves a mark set for another reason as it is;
-    // a mark for another reason (a check, a reworded item) takes the place of any mark, and names no question
-    if (on && d.updated === true && !was) return { kind: 'marked' };
-    const questions = on ? [...new Set([...(was?.questions ?? []), ...on.questions])] : undefined;
-    if (d.updated === true && d.updatedWhy === why && (!questions || questions.length === (was?.questions ?? []).length)) return { kind: 'marked' };
-    // the stored record as it is, with the mark added: it keeps fields this build does not know, so it may go onto a record from a newer build
-    const w = await o.repo.transaction({ writes: [{ kind: 'finding', id, data: { ...d, updated: true, updatedWhy: why, updatedAt: clock(), ...(questions ? { updatedOn: { questions } } : {}) }, expectedRev: r.value.rev, keepsSchema: true }] });
-    if (w.ok) { o.announce?.('finding', id); return { kind: 'marked' }; }
-    if (w.error.kind === 'conflict' && again) return tryMark(id, why, on, false, closedToo);               // changed a moment ago elsewhere: read it again, once
-    if (w.error.kind === 'rejected') { const now = await o.repo.get('finding', id); if (now.ok && now.value?.conflict?.length) return { kind: 'waits', dealId: String(d.dealId) }; }   // another version arrived between the read and the write
-    // Not marked, and not because there was nothing to mark: the run must not record this work as done (it would never be looked at again)
-    throw Object.assign(new Error(`The finding could not be marked: ${w.error.message}`), { kind: w.error.kind });
+  async function tryMark(
+    id: string, why: string, evidence: MarkEvidence, again = true, closedToo = false,
+  ): Promise<MarkResult> {
+    const stored = await o.repo.get('finding', id);
+    if (!stored.ok || !stored.value) return { kind: 'nothing' };
+    const { conflict, rev, envelope } = stored.value;
+    const finding = envelope.data as MarkableFinding;
+    const dealId = String(finding.dealId);
+    if (conflict?.length) return { kind: 'waits', dealId };
+    if (!canMark(finding.status, closedToo)) return { kind: 'nothing' };
+    const next = nextMark(finding, why, evidence);
+    if (next.kind) return { kind: next.kind };
+    const result = await o.repo.transaction({
+      writes: [{ kind: 'finding', id, data: next.data, expectedRev: rev, keepsSchema: true }],
+    });
+    if (result.ok) {
+      o.announce?.('finding', id);
+      return { kind: 'marked' };
+    }
+    if (result.error.kind === 'conflict' && again) return tryMark(id, why, evidence, false, closedToo);
+    return markFailure(result.error, id, dealId);
   }
 
   /**
@@ -3144,7 +3209,7 @@ export function nodeAi(o: AiOptions) {
       if (why) {
         await guards.get(dealId)?.();
         // a closed one is marked as one that may need reopening
-        marked = await mark(f.id, why, undefined, !!f.closed);
+        marked = await mark(f.id, why, { round: R.def.id }, !!f.closed);
       }
     }
     await say(dealId, { verified: { round: R.def.id, stage: nd === 'fast' ? 'fast' : 'standard', findings: [{ finding: f.id, stands: v ? v.stands : null, marked }] } });
