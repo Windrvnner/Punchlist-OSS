@@ -12,9 +12,9 @@ import { Icon } from './icons';
 import { ChoiceCheck } from './moreMenu';
 import { Ref, byDocument, fewDocuments } from './ref';
 import { DocName } from './docName';
-import { deletedOf, listsOf } from './deleted';
+import { FindingsHead } from './findingsHead';
 import { workstreamChoices } from '../domain/order';
-import { NO_WORKSTREAM, versionsWord, type State } from '../app/state';
+import { versionsWord, type State } from '../app/state';
 import { checkLeftCount, uncheckedChecklistCount } from '../app/dealCounts';
 import { findingsView } from '../app/findingsView';
 import { ConflictView } from './conflict';
@@ -32,7 +32,6 @@ import { editDrafts, editsOut, landCreated, landEdit, newFindingDrafts } from '.
 import type { EditDraft } from './findingDrafts';
 import { SourceChips } from './research';
 import { CitedEditor } from './citedEditor';
-import { MenuChoice, workstreamOptions, type MenuOption } from './filterMenu';
 
 /** The mark on an open finding that something has happened since it was written: what it says, and why. */
 export const OUT_OF_DATE = 'May be out of date';
@@ -81,122 +80,6 @@ export function Brief({ paragraphs, deal, onFinding, marked }: { paragraphs: str
 /** when a closed finding was closed, as its row says it: "Closed yesterday", "Closed 3 days ago", "Closed Nov 14" */
 const closedText = (at: string) => { const w = whenText(at); return `Closed ${/^[A-Z][a-z]{2} \d/.test(w) ? w : w[0].toLowerCase() + w.slice(1)}`; };
 
-type FindingsView = ReturnType<typeof findingsView>;
-
-function findingsStatusLabels(view: FindingsView) {
-  const { counts } = view;
-  const labels = {
-    open: `Open ${counts.open}`,
-    reassess: `To update ${counts.reassess}`,
-    closed: `Closed ${counts.closed}`,
-    all: 'All',
-  };
-  return view.statusOptions.map((status) => [status, labels[status]] as const);
-}
-
-// 0 words and status in the row · 1 icon buttons · 2 status menu · 3 status menu and icon buttons
-function useFindingsHeadMode(choice: boolean, statuses: ReturnType<typeof findingsStatusLabels>, more: boolean) {
-  const row = useRef<HTMLDivElement>(null);
-  const [mode, setMode] = useState(0);
-  const [, resized] = useState(0);
-  const seen = useRef({ w: -1, sig: '' });
-  const sig = `${choice}|${statuses.map((entry) => entry[1]).join()}|${more}`;
-  useLayoutEffect(() => {
-    const el = row.current;
-    if (!el) return;
-    if (seen.current.sig !== sig || seen.current.w !== el.clientWidth) {
-      seen.current = { w: el.clientWidth, sig };
-      if (mode !== 0) {
-        setMode(0);
-        return;
-      }
-    }
-    if (el.scrollWidth > el.clientWidth + 1 && mode < 3) setMode(mode + 1);
-  });
-  useEffect(() => {
-    const el = row.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => {
-      if (el.clientWidth !== seen.current.w) resized((count) => count + 1);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-  return { row, mode };
-}
-
-/**
- * The Findings heading and everything that acts on the list, in one row. As the row narrows it gives up only what it
- * must, in this order: everything in words; the buttons as icons; the status filter folded into the filter symbol with
- * the buttons back in words; both as icons. Which of these fits is measured, not guessed from the window's width.
- */
-function FindingsHead({ deal: d, view, adding, onNew }: {
-  deal: Deal; view: FindingsView; adding: boolean; onNew: () => void;
-}) {
-  const store = useStore();
-  const s = useAppState();
-  const { counts, filter: FF, many, showStatus: choice, workstreams: wsl } = view;
-  const set = (patch: Partial<typeof FF>) => store.ui({ findingFilter: { ...FF, ...patch } });
-  const restorable = [deletedOf(s, d.id, 'finding'), listsOf(s, d.id)].some((items) => items.length > 0);
-  const statuses = findingsStatusLabels(view);
-  const hasExtraFilters = [FF.workstream, FF.text, FF.reviewed].some(Boolean);
-  const more = many || hasExtraFilters;
-  const { row, mode } = useFindingsHeadMode(choice, statuses, more);
-  const icons = mode % 2 === 1;
-  const folded = mode >= 2 && choice;
-  const [menu, setMenu] = useState(false); useDismiss(menu, () => setMenu(false), '.fhead .fwrap');
-  const hidden = (folded && FF.status !== 'open') || hasExtraFilters;
-  return (
-    <div class="lbl flagsl fhead" ref={row} data-fhead={mode}>
-      <span class="h" role="heading" aria-level={2}>Findings</span>
-      {choice && !folded && <div class="seg">{statuses.map(([k, label]) => (
-        <button type="button" key={k} class={FF.status === k ? 'on' : ''} aria-pressed={FF.status === k}
-          data-fstatusf={k} onClick={() => set({ status: k })}>{label}</button>
-      ))}</div>}
-      {(folded || more) && <span class="fwrap">
-        <button type="button" class={`btn sm ico ${hidden ? 'on' : ''}`} id="f-filter" aria-haspopup="menu" aria-expanded={menu} title={hidden ? 'Filter (on)' : 'Filter'} aria-label={hidden ? 'Filter (on)' : 'Filter'} onClick={() => setMenu(!menu)}><Icon name="filter" size={14} /></button>
-        {/* statuses alone are a menu of choices; with the sections and the text filter it is a group of controls */}
-        {menu && <div class="colmenu fmenu" {...(more ? { role: 'group', 'aria-label': 'Filter', 'data-menu': true } : { role: 'menu' })}>
-          {folded && statuses.map(([k, l]) => <StatusChoice key={k} status={k} label={l} on={FF.status === k}
-            inMenu={!more} pick={() => {
-              set({ status: k });
-              if (!more) setMenu(false);
-            }} />)}
-          {folded && more && <div class="msep" />}
-          {more && <>
-            {/* the words first, in the menu search field Past conversations has, above a long list of workstreams */}
-            <span class="psearch"><Icon name="search" size={14} />
-              <input placeholder="Filter" aria-label="Filter findings" value={FF.text}
-                onInput={(e) => set({ text: (e.currentTarget as HTMLInputElement).value })} /></span>
-            <div class="msep" />
-            <MenuChoice title="Workstream" name="f-ws" options={workstreamOptions(wsl)} value={FF.workstream}
-              onPick={(workstream) => set({ workstream })} long pinLast={wsl.at(-1) === NO_WORKSTREAM} />
-            <div class="msep" />
-            <MenuChoice title="Reviewed" name="f-rev" options={REVIEWED} value={FF.reviewed}
-              onPick={(reviewed) => set({ reviewed })} />
-          </>}
-        </div>}
-      </span>}
-      <span class="sp" />
-      <NewFindingButton icons={icons} adding={adding} onNew={onNew} />
-      <FindingsMore dealId={d.id} empty={!counts.total} restorable={restorable} />
-    </div>
-  );
-}
-
-function NewFindingButton({ icons, adding, onNew }: { icons: boolean; adding: boolean; onNew: () => void }) {
-  const label = 'New Finding';
-  const iconLabel = icons ? { title: label, 'aria-label': label } : {};
-  return <button type="button" class={`btn sm act ${icons ? 'ico' : ''}`} id="f-new"
-    {...iconLabel} aria-expanded={adding} onClick={onNew}>
-    <Icon name="plus" size={14} />{icons ? null : <span>{label}</span>}
-  </button>;
-}
-
-/** The Reviewed section of the Findings filter menu, in the dropdown's old order. */
-const REVIEWED: MenuOption<'' | 'yes' | 'no'>[] =
-  [['', 'Reviewed or Not'], ['yes', 'Reviewed'], ['no', 'Not Reviewed']];
-
 /**
  * The Findings ⋯ menu, matching Q&A's: Import…, Export…, then the seldom used Deleted… apart from them
  * (decisions.md, Findings). New finding stays the one visible button.
@@ -223,19 +106,6 @@ function FindingsMore({ dealId, empty, restorable }: { dealId: string; empty: bo
       </div>}
     </span>
   );
-}
-
-/**
- * One status in the Findings filter: a choice in its menu, or, beside the filter's other controls, a pressed button.
- * The one on is checked (design.md, Menus).
- */
-function StatusChoice({ status, label, on, inMenu, pick }: {
-  status: string; label: string; on: boolean; inMenu: boolean; pick: () => void;
-}) {
-  const role = inMenu ? { role: 'menuitemradio' as const, 'aria-checked': on } : { 'aria-pressed': on };
-  return <button type="button" {...role} class={`mi ${on ? 'on' : ''}`} data-fstatusf={status} onClick={pick}>
-    {label}<ChoiceCheck on={on} />
-  </button>;
 }
 
 /** A finding's status menu, Open or Closed, the current one checked (design.md, Menus). */
@@ -305,8 +175,8 @@ function findingActivity(finding: Finding, questions: State['questions'], status
   return opening + (status ? `${status} · ` : '') + when;
 }
 
-function FindingListRow({ finding: f, questions, clash, showStatus }: {
-  finding: Finding; questions: State['questions']; clash?: State['conflicts'][string]; showStatus: boolean;
+function FindingListRow({ finding: f, questions, conflictVersions, showStatus }: {
+  finding: Finding; questions: State['questions']; conflictVersions?: number; showStatus: boolean;
 }) {
   const open = f.status === 'open';
   const status = open ? 'Open' : 'Closed';
@@ -319,7 +189,8 @@ function FindingListRow({ finding: f, questions, clash, showStatus }: {
       {f.reviewed && <i class="rvd" title={`Reviewed by ${f.reviewed.by}`}><Icon name="checkfill" size={13} /></i>}
     </span>
     <span class="fm" title={!open && f.note ? f.note : undefined}>
-      {clash && <><span class="cf" data-conflict>{versionsWord(clash.versions.length)}</span> · </>}
+      {conflictVersions !== undefined &&
+        <><span class="cf" data-conflict>{versionsWord(conflictVersions)}</span> · </>}
       {f.workstream}{activity}{f.onLists?.length ? ` · ${onListText(f.onLists)}` : ''}
     </span>
   </a>;
@@ -334,12 +205,14 @@ export function FindingsSection({ deal: d }: { deal: Deal }) {
   return (
     <>
       <section class={`twocol one ${many ? 'many' : ''}`}><div>
-        <FindingsHead deal={d} view={view} adding={adding} onNew={() => setAdding(true)} />
+        <FindingsHead view={view} adding={adding} onNew={() => setAdding(true)}>
+          <FindingsMore dealId={d.id} empty={!counts.total} restorable={view.restorable} />
+        </FindingsHead>
         {adding && <NewFindingCard deal={d} onDone={() => { setAdding(false); requestAnimationFrame(() => { if (!document.activeElement || document.activeElement === document.body) document.getElementById('f-new')?.focus(); }); }} />}
         <div class={`flags ${many ? 'scroll' : ''}`}>
-          {rows.length ? rows.map(({ finding, heading }) => <Fragment key={finding.id}>
+          {rows.length ? rows.map(({ finding, heading, conflictVersions }) => <Fragment key={finding.id}>
             {heading && <GroupHead name={heading.name} n={heading.count} />}
-            <FindingListRow finding={finding} questions={s.questions} clash={s.conflicts[finding.id]}
+            <FindingListRow finding={finding} questions={s.questions} conflictVersions={conflictVersions}
               showStatus={view.filter.status === 'all'} />
           </Fragment>) : <p class="emptyline" style="margin-top:14px">
             {counts.total ? 'Nothing matches.' : 'Nothing has been flagged.'}
