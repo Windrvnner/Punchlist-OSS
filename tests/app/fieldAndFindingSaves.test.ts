@@ -53,7 +53,7 @@ async function field(restored?: string) {
   }[] = [];
   const commit: FieldCommit = (value, over) => new Promise((resolve) => pending.push({ value, over, resolve }));
   const type = (value: string) => {
-    text = value;
+    input.replaceText(value);
     save.typed(text);
   };
   const lock = (next: boolean) => {
@@ -61,7 +61,10 @@ async function field(restored?: string) {
     if (locked) save.keepCurrent();
     save.lockChanged(locked, commit);
   };
-  return { save, type, lock, pending, commit, key, restoreFieldDraft, unsavedFields, text: () => text };
+  return {
+    save, type, lock, pending, commit, key, restoreFieldDraft, unsavedFields,
+    text: () => text, replaceText: input.replaceText,
+  };
 }
 
 it('unlocks without sending restored text and still sends new typing after a lock', async () => {
@@ -82,6 +85,37 @@ it('unlocks without sending restored text and still sends new typing after a loc
   pending[0].resolve({ ok: true });
   await vi.runAllTimersAsync();
   expect(restoreFieldDraft(key, laterEdit)).toBeUndefined();
+});
+
+it('sends fresh text on unlock even if an older save fails while the field is locked', async () => {
+  const { save, lock, type, pending, commit, key, restoreFieldDraft } = await field(firstEdit);
+  const retry = save.save(firstEdit, commit);
+  lock(true);
+  type(laterEdit);
+  pending[0].resolve({ ok: false, error: { kind: 'failed', message: 'The record could not be written.' } });
+  await retry;
+  expect(restoreFieldDraft(key, original)?.text).toBe(laterEdit);
+  expect(pending).toHaveLength(1);
+
+  lock(false);
+  expect(pending[1]).toMatchObject({ value: laterEdit, over: original });
+  save.receive({ value: laterEdit, rev: 2 });
+  pending[1].resolve({ ok: true });
+  await vi.runAllTimersAsync();
+  expect(restoreFieldDraft(key, laterEdit)).toBeUndefined();
+});
+
+it('waits for Retry after Escape puts back the restored draft and a lock clears', async () => {
+  const { save, lock, type, replaceText, pending, commit, key, restoreFieldDraft } = await field(firstEdit);
+  lock(false);
+  type(laterEdit);
+  replaceText(firstEdit);
+  save.escape(firstEdit, { saved: original, status: 'failed', reason: '', byItself: false }, commit);
+
+  lock(true);
+  lock(false);
+  expect(pending).toHaveLength(0);
+  expect(restoreFieldDraft(key, original)?.text).toBe(firstEdit);
 });
 
 it('settles a normalized save without dropping newer typed text', async () => {

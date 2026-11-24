@@ -55,6 +55,7 @@ export class FieldSave {
   base: string;
   seen: FieldValue;
   private baseRev: number;
+  private retryDraft: string | undefined;
   private gone = false;
   private jumped = false;
   private byJump = false;
@@ -71,6 +72,7 @@ export class FieldSave {
     this.base = draft?.base ?? record.value;
     const external = !!draft && (draft.base !== record.value || draft.rev !== record.rev);
     this.baseRev = external ? -1 : record.rev;
+    this.retryDraft = draft?.text;
     this.view = { external, status: draft && !external ? 'failed' : 'idle', byItself: false, reason: '' };
   }
 
@@ -115,6 +117,7 @@ export class FieldSave {
     this.show({ status: 'idle' });
     this.input.stopTimer();
     if (this.input.partial()) return false;
+    this.retryDraft = undefined;
     if (this.keep !== undefined && (unsavedFields.has(this.keep) || this.view.external)) this.keepText(text);
     else if (this.input.locked() && text !== this.seen.value) this.keepText(text);
     return !this.view.external;
@@ -179,6 +182,7 @@ export class FieldSave {
   async save(text: string, commit: FieldCommit, chosen = false): Promise<FieldSaveOutcome | undefined> {
     this.input.stopTimer();
     if (!this.shouldSend(text, chosen)) return undefined;
+    if (text === this.retryDraft) this.retryDraft = undefined;
     this.show({ status: 'saving', external: false });
     this.inFlight.push(text);
     this.saving++;
@@ -307,6 +311,7 @@ export class FieldSave {
       void this.save(text, commit);
       return;
     }
+    if (entry.status === 'failed' && !entry.byItself) this.retryDraft = text;
     const back = () => {
       if (this.input.text() !== text || this.view.external) return;
       this.keepText(text);
@@ -337,10 +342,9 @@ export class FieldSave {
   }
 
   lockChanged(locked: boolean, commit: FieldCommit) {
-    // A manual Retry stays a choice when a read-only lock clears (#229).
-    const waitsForRetry = this.view.status === 'failed' && !this.view.byItself;
     const text = this.input.text();
-    if (!locked && !waitsForRetry && !this.input.focused() && text !== this.seen.value) {
+    // A read-only lock cannot submit a restored draft. Older save results can still finish during new typing (#229).
+    if (!locked && text !== this.retryDraft && !this.input.focused() && text !== this.seen.value) {
       void this.save(text, commit);
     }
   }
