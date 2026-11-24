@@ -114,21 +114,21 @@ const diligenceList = () => diligenceReport(false)
 // ---- Tasks: what Needs Input holds ----
 
 // the research task's short name, so it reads whole in the pane's row and in its card
-const HEADROOM_TASK = 'Covenant headroom';
+const WATERFALL_TASK = 'Intercreditor waterfall';
 
-const TURN_HEADROOM_ASK = '<div class="me">How much covenant headroom is there in the downside case?</div>';
+const TURN_WATERFALL_ASK = '<div class="me">Does the intercreditor waterfall pay the O&amp;M reserve before senior debt?</div>';
 
-const TURN_HEADROOM_NEEDS_INPUT = `${TURN_HEADROOM_ASK}
+const TURN_WATERFALL_NEEDS_INPUT = `${TURN_WATERFALL_ASK}
 <div class="ai"><p>I’m checking that as a task. It’s in Tasks, and I’ll answer here when it’s done.</p>
-${taskCard('logedit', HEADROOM_TASK, 'Needs input')}</div>`;
+${taskCard('logedit', WATERFALL_TASK, 'Needs input')}</div>`;
 
 const REVIEW_BUTTON = (label) => `<button class="btn sm">${label}</button>`;
 
 // Needs Input: drafts to review, a task's question to the person, and items Diligence left out
 const NEEDS_INPUT_ROWS = [
   taskRow('sheet', 'Draft responses for open questions', '40 ready', { end: REVIEW_BUTTON('Review') }),
-  taskRow('logedit', HEADROOM_TASK, 'Pick a model',
-    { end: REVIEW_BUTTON('Answer'), hoverText: 'Which model should I use: Nov 3 or Nov 17?' }),
+  taskRow('logedit', WATERFALL_TASK, 'Pick a draft',
+    { end: REVIEW_BUTTON('Answer'), hoverText: 'Which draft is current: draft 5 (Nov 3) or draft 6 (Nov 17)?' }),
   taskRow('cklist', 'Diligence', '12 items not checked', { end: REVIEW_BUTTON('Check Them') }),
 ];
 
@@ -159,8 +159,8 @@ const NEEDS_INPUT_TASKS = `<div class="x-lbl">Needs Input</div><div class="x-tgr
 // every conversation, newest first, with its deal; a dot before the time marks one whose task result arrived since it
 // was last open
 const HOME_PAST_CONVERSATIONS = [
-  ['Today', 'Guarantee cap and covenants', 'Project Proseware', '4:12 PM',
-    'Headroom is 0.08x at the tightest point, in the second year of operations.', true],
+  ['Today', 'Guarantee cap and waterfall', 'Project Proseware', '4:12 PM',
+    'Draft 6 of the intercreditor agreement pays the O&amp;M reserve after senior debt service.', true],
   ['Today', 'Deals with permits that block financial close', '', '3:40 PM',
     'Two deals have open permits that are conditions precedent: Proseware and Wingtip.'],
   ['Today', 'Board resolutions for the financing', 'Project Proseware', '2:12 PM',
@@ -169,10 +169,10 @@ const HOME_PAST_CONVERSATIONS = [
     'The warranty ends in year five, while the O&amp;M contract assumes it runs to year ten.'],
   ['Earlier this week', 'Hedge counterparties across the portfolio', '', 'Mon',
     'Four banks hedge across seven deals; one bank is on five of them.'],
-  ['Earlier this week', 'Tax equity flip date', 'Project Wingtip', 'Mon',
-    'The flip is expected in year nine under the base case.'],
-  ['Older', 'Debt sizing and sculpting', 'Project Proseware', 'Nov 14',
-    'Sized at 1.30x P50 and sculpted to the DSCR, as the term sheet sets.'],
+  ['Earlier this week', 'Tax equity consents', 'Project Wingtip', 'Mon',
+    'The tax equity investor must consent to any change to the O&amp;M contract.'],
+  ['Older', 'Conditions precedent to first drawdown', 'Project Proseware', 'Nov 14',
+    '14 of the 31 conditions precedent have a signed document in the data room.'],
 ];
 
 function homePastRow([group, title, deal, when, preview, updated], index) {
@@ -238,8 +238,8 @@ const OPEN_QUESTION_SCREENS = {
   folders: () => OPEN_QUESTION_SCREENS.dealheader(),
   diligence: () => slimRail() + openQuestionStage(inPermitsChat([TURN_PERMITS, TURN_DILIGENCE_DONE])
     + pane(paneTabs([TASKS_TAB, DILIGENCE_TAB], 'diligence'), diligenceList(), paneWidth())),
-  needsinput: () => slimRail() + openQuestionStage(conversation([TURN_GUARANTEE_CAP, TURN_HEADROOM_NEEDS_INPUT],
-    { title: 'Guarantee cap and covenants', open: true })
+  needsinput: () => slimRail() + openQuestionStage(conversation([TURN_GUARANTEE_CAP, TURN_WATERFALL_NEEDS_INPUT],
+    { title: 'Guarantee cap and waterfall', open: true })
     + pane(paneTabs([TASKS_TAB], 'tasks'), NEEDS_INPUT_TASKS, paneWidth())),
   homepast: () => sidebar() + openQuestionStage(homeScreen()),
   archscale: () => sidebar() + openQuestionStage(homeScreen()),
