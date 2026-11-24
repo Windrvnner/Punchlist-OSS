@@ -1,6 +1,7 @@
 // Turning a deal's checklist items off and on, and the Turned off list (linking design, section 5), on a deal
 // holding a firm's list of 2,000 items. Runs on the mock services; the sample data room gives three findings.
 import { launchChrome } from './chrome.mjs';
+import { recheckFinding } from './cardPage.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, ok ? '' : note); };
 const browser = await launchChrome();
@@ -171,15 +172,6 @@ const rowTexts = (page) => page.evaluate(() => [...document.querySelectorAll('#c
   const title = await page.evaluate((f) => store.get().findings[f]?.title, started);
   say('a kept question stays linked to its own finding when the item is turned off while another item is open', !!title && before === after && after.includes(title), JSON.stringify({ before, after, title }));
   await ctx.close();
-}
-
-// Show a completed check naming a different finding for the same item.
-function recheckFinding(page, dealId, itemId, findingId) {
-  return page.evaluate(([dealId, itemId, findingId]) => {
-    const state = store.get();
-    const rows = state.checklists[dealId].map((row) => row.id === itemId ? { ...row, findingId } : row);
-    store.set({ ...state, checklists: { ...state.checklists, [dealId]: rows } });
-  }, [dealId, itemId, findingId]);
 }
 
 async function checkConflictedDraft(page, dealId, itemId, original, other) {
