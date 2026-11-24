@@ -24,7 +24,9 @@ export function importsForbiddenGlob(file, node, files) {
     if (option.type === 'Property') settings[option.key.name ?? literalValue(option.key)] = literalValue(option.value);
   }
   const directory = posix.resolve('/', posix.dirname(file), settings.base ?? '.');
-  const matchOptions = { dot: !!settings.exhaustive, nocase: settings.caseSensitive === false, noext: true };
+  // Vite's file matcher uses POSIX character classes (including [!x]) and disables extended globs.
+  const matchOptions = { dot: !!settings.exhaustive, nocase: settings.caseSensitive === false, noextglob: true,
+    posix: true };
   const include = [];
   const exclude = [];
   for (const pattern of patterns.map(literalValue)) {

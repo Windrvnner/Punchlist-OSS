@@ -35,6 +35,23 @@ function fixture(baseline: Baseline = {}) {
   return { dir, write, setBaseline, baselineText, run: (...args: string[]) => check(dir, ...args) };
 }
 
+async function bundledSources(root: string, file: string) {
+  const modules: string[] = [];
+  await build({
+    root, configFile: false, envDir: false, logLevel: 'silent',
+    build: { write: false, lib: { entry: path.join(root, file), formats: ['es'] } },
+    plugins: [{
+      name: 'record-bundled-modules',
+      generateBundle(_options, bundle) {
+        for (const chunk of Object.values(bundle)) {
+          if (chunk.type === 'chunk') modules.push(...chunk.moduleIds);
+        }
+      },
+    }],
+  });
+  return modules.map((id) => path.relative(root, id).split(path.sep).join('/'));
+}
+
 afterEach(() => {
   for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
@@ -120,20 +137,7 @@ describe('UI dependency checks', () => {
     const options = "{ eager: true, base: '/src/ui/nested' } as const";
     const local = `export const pages = import.meta.glob('../backend/lenient.ts', (${options}))`;
     repo.write(file, local);
-    const modules: string[] = [];
-    await build({
-      root: repo.dir, configFile: false, envDir: false, logLevel: 'silent',
-      build: { write: false, lib: { entry: path.join(repo.dir, file), formats: ['es'] } },
-      plugins: [{
-        name: 'record-bundled-modules',
-        generateBundle(_options, bundle) {
-          for (const chunk of Object.values(bundle)) {
-            if (chunk.type === 'chunk') modules.push(...chunk.moduleIds);
-          }
-        },
-      }],
-    });
-    const sources = modules.map((id) => path.relative(repo.dir, id).split(path.sep).join('/'));
+    const sources = await bundledSources(repo.dir, file);
     expect(sources).toContain('src/ui/backend/lenient.ts');
     expect(sources).not.toContain('src/backend/lenient.ts');
     repo.write(file, [
@@ -144,6 +148,22 @@ describe('UI dependency checks', () => {
     const result = repo.run();
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(`${file} import (lines 2, 3): 2 exceeds`);
+  });
+
+  it.each([
+    { pattern: '../[!b]*/part.ts', selected: 'ui', status: 0 },
+    { pattern: '../[!u]*/part.ts', selected: 'backend', status: 1 },
+  ])('agrees with Vite on the negated character class in $pattern', async ({ pattern, selected, status }) => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    repo.write('src/ui/part.ts', "export const title = 'Checklist'");
+    repo.write('src/backend/part.ts', "export const title = 'Folder reader'");
+    repo.write(file, `export const parts = import.meta.glob('${pattern}', { eager: true })`);
+    const sources = await bundledSources(repo.dir, file);
+    expect(sources.filter((id) => id.endsWith('/part.ts'))).toEqual([`src/${selected}/part.ts`]);
+    const result = repo.run();
+    expect(result.status).toBe(status);
+    if (status) expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
   });
 
   it('checks computed member and destructuring keys and each read in a dotted JSX tag', () => {
