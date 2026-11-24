@@ -55,9 +55,42 @@ export function NoticeWords({ text, cut }: { text: string; cut?: string }) {
   return (
     <>
       <b class="ttitle"><Part text={title} cut={cut} /></b>
-      {body && <><span class="sr-only"> · </span><span class="tbody"><Part text={body} cut={cut} /></span></>}
+      {body && <><span class="sr-only"> · </span>{cut ? <Detail><Part text={body} cut={cut} /></Detail>
+        : <span class="tbody"><Part text={body} cut={cut} /></span>}</>}
     </>
   );
+}
+
+/**
+ * The detail of a notice whose deal label gives way (#27): where not even its first word would show, it is drawn not
+ * at all rather than as a stub of letters. It stays in the text read aloud, and the whole text is on hover.
+ */
+function Detail({ children }: { children: ComponentChildren }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const fit = () => {
+      el.classList.remove('sr-only');
+      if (el.scrollWidth <= el.clientWidth) return;
+      el.classList.toggle('sr-only', el.clientWidth < firstWordWidth(el));
+    };
+    fit();
+    addEventListener('resize', fit);
+    return () => removeEventListener('resize', fit);
+  }, []);
+  return <span class="tbody" ref={ref}>{children}</span>;
+}
+
+/** how wide the first word of an element's text is drawn, with the ellipsis that would follow it */
+function firstWordWidth(el: HTMLElement): number {
+  const node = el.firstChild;
+  if (!(node instanceof Text)) return 0;
+  const end = node.data.indexOf(' ');
+  const range = document.createRange();
+  range.setStart(node, 0);
+  range.setEnd(node, end < 0 ? node.data.length : end);
+  return range.getBoundingClientRect().width + 12;      // and room for "…"
 }
 
 /** One part of a notice's words, with its `cut` shortened to fit where it holds it. */
@@ -69,6 +102,60 @@ function Part({ text, cut }: { text: string; cut?: string }) {
       <span>{text.slice(0, at)}</span><Cut text={cut} /><span>{text.slice(at + cut.length)}</span>
     </span>
   );
+}
+
+/** the first words of `words`, from all but the last down to `least`, each ending in "…" after no comma */
+const fewerWords = (words: string[], least: number) => {
+  const count = Math.max(words.length - least, 0);
+  const firstWords = (n: number) => words.slice(0, n).join(' ').replace(/,$/, '');
+  return Array.from({ length: count }, (_, i) => `${firstWords(words.length - 1 - i)}…`);
+};
+
+/** where the bracket that closes `text` opens, counting brackets inside it, as "Fund IV (Lux)"; -1 if none */
+function closingBracketStart(text: string) {
+  if (!text.endsWith(')')) return -1;
+  let depth = 0;
+  for (let i = text.length - 1; i >= 0; i--) {
+    if (text[i] === ')') depth++;
+    else if (text[i] === '(' && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/** a deal's name and the words of its twin line, from "Project Name (Twin)"; null for other text */
+function twinParts(text: string): { name: string[]; twin: string[] } | null {
+  const open = closingBracketStart(text);
+  if (open < 1 || text[open - 1] !== ' ') return null;
+  return { name: text.slice(0, open - 1).split(' '), twin: text.slice(open + 1, -1).split(' ') };
+}
+
+/**
+ * Shorter forms of a deal's name with its twin line in brackets, "Project Name (Twin)", longest first, each cut at a
+ * whole word; none for other text, which is cut at a letter as before. The label gives up words of the name first,
+ * down to "Project" and one more, then words of the twin line, so what tells the deal from its twin stays as long as
+ * it can (#27). The name may hold brackets of its own: the twin line is the last bracket.
+ */
+export function shorterForms(text: string): string[] {
+  const parts = twinParts(text);
+  if (!parts) return [];
+  const { name, twin } = parts;
+  const least = name[0] === 'Project' ? 2 : 1;
+  const shortName = name.length > least ? `${name.slice(0, least).join(' ')}…` : name.join(' ');
+  return [
+    ...fewerWords(name, least).map((n) => `${n} (${twin.join(' ')})`),
+    ...fewerWords(twin, 1).map((t) => `${shortName} (${t})`),
+  ];
+}
+
+/**
+ * Where none of the shorter forms fits, the part is cut at a letter: `head` gives way and `tail` stays, so a deal's
+ * name gives way and the first word of its twin line still shows (#27).
+ */
+export function letterCut(text: string): { head: string; tail: string } {
+  const parts = twinParts(text);
+  if (!parts) return { head: text, tail: '' };
+  const first = fewerWords(parts.twin, 1).at(-1) ?? parts.twin[0];
+  return { head: parts.name.join(' '), tail: ` (${first})` };
 }
 
 /** words that say something did not happen */
@@ -84,10 +171,11 @@ export function glyphOf(text: string, action?: string): Glyph {
 }
 
 /**
- * The part of a notice that gives way when the line does not fit: it is cut at a whole character, trimmed, and
- * ends in "…" right before the words after it. CSS's own ellipsis leaves a gap there (the room a cut character would
- * have taken, and a space when the cut falls after one), so it is only the fallback. Screen readers get the whole
- * text.
+ * The part of a notice that gives way when the line does not fit: a deal named apart from its twin is cut at a whole
+ * word (see shorterForms); other text, or a label none of whose shorter forms fits, at a whole character (see
+ * letterCut), trimmed, and ending in "…" right before the words after it. CSS's own ellipsis leaves a gap there
+ * (the room a cut character would have taken, and a space when the cut falls after one), so it is only the fallback.
+ * Screen readers get the whole text.
  */
 function Cut({ text }: { text: string }) {
   const ref = useRef<HTMLSpanElement>(null);
@@ -105,8 +193,11 @@ function Cut({ text }: { text: string }) {
     };
     const fit = () => {
       if (fits(text)) return;
-      const g = graphemes(text);
-      const at = (n: number) => `${g.slice(0, n).join('').trimEnd()}…`;
+      const byWords = shorterForms(text).find(fits);
+      if (byWords) return;                  // fits() has put it in place
+      const { head, tail } = letterCut(text);
+      const g = graphemes(head);
+      const at = (n: number) => `${g.slice(0, n).join('').trimEnd()}…${tail}`;
       let lo = 0;
       let hi = g.length - 1;
       while (lo < hi) {
