@@ -15,7 +15,7 @@ import {
   KeepQaLog, SetQaLogFolder, RecordQaLogExport, ChooseQaVersion, TakeFromQaLog, fileTaken, windowsPath as samePath,
 } from './commands/qaLogs';
 import { questionsSheet, suggestMapping, type Mapping, type ImportField } from '../domain/importExport';
-import { ok, fail, invalid, type Result } from '../domain/result';
+import { ok, fail, invalid, rejected, type Failure, type Result } from '../domain/result';
 import { cell, type KeptAsk } from '../domain/keptMerge';
 import type { SheetEdit } from '../domain/sheets';
 import type { QaLogFiles } from '../ports';
@@ -241,7 +241,14 @@ function comparedValues(qs: Question[], taken: Record<string, Record<string, str
  * Bring the deal's log up to date with everything the app holds (logWrite), in the file itself. A failure after the log was
  * saved still says how many kept edits it filed not fully merged.
  */
-export async function exportQaLog(store: Store, dealId: string, place?: PlaceKept): Promise<Result<ExportOutcome> & { unmerged?: number }> {
+type ExportResult = Result<ExportOutcome> & { unmerged?: number };
+
+export function exportQaLog(store: Store, dealId: string, place?: PlaceKept): Promise<ExportResult> {
+  return runLogUpdate(store, dealId, fail(rejected('Q&A log is being updated')),
+    () => writeQaLog(store, dealId, place));
+}
+
+async function writeQaLog(store: Store, dealId: string, place?: PlaceKept): Promise<ExportResult> {
   const files = store.services.qaLogs; if (!files) return fail({ kind: 'rejected', message: 'Q&A logs are updated from the desktop app' });
   let log = logOf(store, dealId); let created = false;
   if (!log) {
@@ -352,4 +359,95 @@ export async function exportQaLog(store: Store, dealId: string, place?: PlaceKep
   // a question where an edit kept aside clashed with the log is said as kept as in the file, unless it is in two versions
   const clashed = clash.filter((n) => !versions.includes(n));
   return ok({ status: 'written', archive, added: w.added, answered: w.answered, updated: w.updated, changed: Object.keys(changed).length, kept: versions, keptText, clashed, unmerged, ...(created ? { created: true as const } : {}) });
+}
+
+type WrittenLog = Extract<ExportOutcome, { status: 'written' }>;
+type UpdateCounts = Pick<WrittenLog, 'added' | 'answered' | 'updated' | 'changed' | 'unmerged'>;
+type RetryLog = () => Promise<QaLogUpdateOutcome>;
+
+export type QaLogUpdateOutcome =
+  | { kind: 'busy' | 'canceled' }
+  | { kind: 'failed'; error: Failure; unmerged: number }
+  | { kind: 'retrying'; by?: string; retry: RetryLog }
+  | { kind: 'retryLimit'; retry: RetryLog }
+  | { kind: 'created'; unmerged: number }
+  | { kind: 'updated'; counts: UpdateCounts; versions: number; clashed: number;
+      action?: { kind: 'resolve' } | { kind: 'show'; questionId: string } };
+
+type UpdateOptions = {
+  place?: PlaceKept;
+  /** Offers the outcome to the caller, also for background attempts. A waiting notice may supply its dismissal. */
+  announce?: (outcome: QaLogUpdateOutcome) => (() => void) | undefined;
+};
+type WaitingUpdate = { timer: ReturnType<typeof setTimeout>; tries: number; dismiss?: () => void };
+type LogUpdates = { running: Set<string>; waiting: Map<string, WaitingUpdate> };
+const logUpdates = new WeakMap<Store, LogUpdates>();
+const RETRY_MS = 30_000;
+const LOG_RETRIES = 40;
+
+async function runLogUpdate<T>(store: Store, dealId: string, busy: T,
+  run: (updates: LogUpdates, tries: number) => Promise<T>) {
+  let updates = logUpdates.get(store);
+  if (!updates) {
+    updates = { running: new Set(), waiting: new Map() };
+    logUpdates.set(store, updates);
+  }
+  if (updates.running.has(dealId)) return busy;
+  updates.running.add(dealId);
+  try {
+    const queued = updates.waiting.get(dealId);
+    if (queued) {
+      clearTimeout(queued.timer);
+      updates.waiting.delete(dealId);
+      queued.dismiss?.();
+    }
+    return await run(updates, queued?.tries ?? 0);
+  } finally {
+    updates.running.delete(dealId);
+  }
+}
+
+function writtenOutcome(store: Store, dealId: string, written: WrittenLog): QaLogUpdateOutcome {
+  const { created, unmerged, changed, added, answered, updated, kept, clashed } = written;
+  if (created) return { kind: 'created', unmerged };
+  const questions = dealQuestions(store.get(), dealId);
+  const clash = questions.find((question) => clashed.includes(question.n));
+  const versions = questions.some((question) => kept.includes(question.n)) ? kept.length : 0;
+  const action = versions ? { kind: 'resolve' as const }
+    : clash ? { kind: 'show' as const, questionId: clash.id } : undefined;
+  return { kind: 'updated', counts: { unmerged, changed, added, answered, updated }, versions,
+    clashed: clash ? clashed.length : 0, action };
+}
+
+/** Update now, then retry a busy file every half minute for up to 20 minutes. */
+export function updateQaLog(store: Store, dealId: string, options: UpdateOptions = {}): Promise<QaLogUpdateOutcome> {
+  return attemptQaLog(store, dealId, options, false);
+}
+
+function waitForLog(store: Store, dealId: string, options: UpdateOptions,
+  waiting: LogUpdates['waiting'], tries: number, by?: string): QaLogUpdateOutcome {
+  const retry = () => updateQaLog(store, dealId, options);
+  if (tries >= LOG_RETRIES) return { kind: 'retryLimit', retry };
+  const timer = setTimeout(() => void attemptQaLog(store, dealId, options, true), RETRY_MS);
+  waiting.set(dealId, { tries: tries + 1, timer });
+  return { kind: 'retrying', by, retry };
+}
+
+async function attemptQaLog(store: Store, dealId: string, options: UpdateOptions, automatic: boolean) {
+  const result = await runLogUpdate<QaLogUpdateOutcome>(store, dealId, { kind: 'busy' }, async ({ waiting }, tries) => {
+    // A background retry never starts a replacement log if the deal or its log has since gone.
+    if (automatic && !logOf(store, dealId)) return { kind: 'canceled' };
+    const result = await writeQaLog(store, dealId, options.place);
+    let outcome: QaLogUpdateOutcome;
+    if (!result.ok) outcome = { kind: 'failed', error: result.error, unmerged: result.unmerged ?? 0 };
+    else if (result.value.status === 'written') outcome = writtenOutcome(store, dealId, result.value);
+    else if (result.value.status === 'canceled') outcome = { kind: 'canceled' };
+    else outcome = waitForLog(store, dealId, options, waiting, tries, result.value.by);
+    const dismiss = options.announce?.(outcome);
+    const next = waiting.get(dealId);
+    if (next) next.dismiss = dismiss;
+    return outcome;
+  });
+  if (result.kind === 'busy' && !automatic) options.announce?.(result);
+  return result;
 }
