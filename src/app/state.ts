@@ -9,6 +9,7 @@ import type { ImportField } from '../domain/importExport';
 // the one A to Z order every list a person picks from uses
 import { byName, NO_WORKSTREAM, workstreamChoices } from '../domain/order';
 import { addresser } from '../domain/suggest';
+import { capabilities, type Capabilities } from './capabilities';
 
 export type BootStage = 'session' | 'deals' | 'journal' | 'ready';
 
@@ -134,6 +135,7 @@ export interface UiState {
 }
 
 export interface State {
+  can: Capabilities;
   boot: { stage: BootStage; error?: string };
   /** `down`: the backend out of reach (the bar at the top). `model`: the model service's last answer was that it could not be reached (the connection card's Intelligence row). */
   net: { down: boolean; model?: boolean };
@@ -183,7 +185,8 @@ export interface State {
   ui: UiState;
 }
 
-export const initialState = (): State => ({
+export const initialState = (can = capabilities()): State => ({
+  can,
   boot: { stage: 'session' },
   net: { down: false },
   user: null,

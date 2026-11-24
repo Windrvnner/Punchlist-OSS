@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { GLANCE_ROWS, RISK_WEIGHT, memoContent, stillOpen, longDate, type MemoInput, type Rating } from '../../src/domain/memo';
 import { Deal, Finding, Question } from '../../src/domain/model';
+import { scaleMemoInput } from '../fixtures/memoScale';
 
 const D = 'd_01HZZZZZZZZZZZZZZZZZZZZZZZ';
 const AT = '2026-11-01T10:00:00.000Z';
@@ -135,6 +136,23 @@ describe('the deal memo’s content', () => {
     const qs = [question(1, { received: '2026-10-23' }), question(2, { received: '2026-11-01' }), question(3, { status: 'answered' }), question(4, { status: 'closed' })];
     const m = memoContent(input({ checklist, questions: qs }));
     expect(m.counts).toBe('No open findings. Of 5 checklist items, 2 are settled, 1 flagged and 1 gap; 1 not settled. 2 questions to the counterparty are open; the oldest, Q1, was received 23 days ago.');
+  });
+
+  it('counts unrated open findings even when grouped into one rated risk', () => {
+    const open = scaleMemoInput.findings.filter((f) => f.status === 'open');
+    const [yieldFinding, p90, dscr] = open;
+    const groups = [{
+      title: 'Debt sizing uses the base case yield',
+      findings: [yieldFinding.id, p90.id, dscr.id],
+    }];
+    const grouped = { ...scaleMemoInput, groups };
+    const allMissing = memoContent({ ...grouped, ratings: {} });
+    expect(allMissing.counts).toMatch(/^42 open findings in 40 risks: 0 High, 0 Medium, 0 Low, 42 unrated\./);
+    const partial = memoContent({ ...grouped, ratings: { [yieldFinding.id]: 'High', f_removed: 'Low' } });
+    expect(partial.counts).toMatch(/^42 open findings in 40 risks: 1 High, 0 Medium, 0 Low, 41 unrated\./);
+    const ratings = Object.fromEntries(open.map((f) => [f.id, 'Low' as const]));
+    const complete = memoContent({ ...grouped, ratings });
+    expect(complete.counts).toMatch(/^42 open findings in 40 risks: 0 High, 0 Medium, 40 Low\./);
   });
 
   it('makes one risk of the findings the model grouped, rated as its most severe and aged as its oldest, written up in its own paragraphs', () => {

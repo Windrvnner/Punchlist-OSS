@@ -201,7 +201,7 @@ export function ChecklistPage({ dealId }: { dealId: string }) {
         <CkHead filters={filters} on={on} offOpen={offOpen} seg={Array.isArray(rows) && counts.all > 0}
           acts={counts.all > 0} more={counts.all > counts.off ? <CkMore dealId={d.id} /> : null} />
         {rows === 'failed' ? <p class="loadfail">Couldn’t load the checklist. <button type="button" class="tundo" id="ck-retry" onClick={() => void store.refreshChecklist(d.id)}>Retry</button></p>
-          : rows === undefined && store.services.ai.checklist ? <div class="ph"><i /><i /><i /><i /></div>
+          : rows === undefined && s.can.checklist ? <div class="ph"><i /><i /><i /><i /></div>
           // with nothing checked yet, the same lines as Overview and Findings: add folders, or how indexing stands
           : !counts.all ? (!d.folders.length ? <NoRoom deal={d} />
             : d.stage === 'indexing' && s.ui.indexStalled.includes(d.id) ? null
@@ -266,8 +266,10 @@ function AddThemLine({ dealId }: { dealId: string }) {
  * opens its preview. Off while the deal is read-only, with the reason on hover.
  */
 function CkMore({ dealId }: { dealId: string }) {
-  const store = useStore(); const ro = useContext(ReadOnlyContext);
-  const why = ro ?? (store.services.ai.phrase ? undefined : 'Questions can’t be phrased here');
+  const store = useStore();
+  const { can } = useAppState();
+  const ro = useContext(ReadOnlyContext);
+  const why = ro ?? (can.phrase ? undefined : 'Questions can’t be phrased here');
   const open = (done: () => void) => {
     done();
     store.ui({ dialog: { kind: 'addUnresolved', dealId } });
