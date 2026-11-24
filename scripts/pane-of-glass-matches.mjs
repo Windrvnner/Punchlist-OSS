@@ -27,7 +27,7 @@ function stringValues(expression, resolve = () => ['*']) {
   const node = unwrapped(expression);
   const text = literalValue(node);
   if (typeof text === 'string') return [text];
-  if (node.type === 'Identifier') return resolve(node);
+  if (node.type === 'Identifier' || node.type === 'MemberExpression') return resolve(node);
   if (node.type === 'TemplateLiteral') return templateValues(node, resolve);
   if (node.type === 'BinaryExpression' && node.operator === '+') {
     return concatenate(stringValues(node.left, resolve), stringValues(node.right, resolve));
@@ -44,9 +44,9 @@ function stringValues(expression, resolve = () => ['*']) {
 function importTargets(program) {
   let lookup;
   function targets(node, seen = new Set()) {
-    return stringValues(node, (identifier) => {
+    return stringValues(node, (reference) => {
       lookup ??= localBindings(program);
-      const initializer = lookup(identifier);
+      const initializer = lookup(reference);
       if (!initializer || seen.has(initializer)) return ['*'];
       return targets(initializer, new Set(seen).add(initializer));
     });

@@ -3,15 +3,15 @@ import { literalValue, unwrapped } from './pane-of-glass-syntax.mjs';
 
 export const missing = Symbol('missing literal entry');
 
-function propertyKey(property) {
-  if (!property.computed && property.key.type === 'Identifier') return property.key.name;
-  const key = literalValue(property.key);
+export function propertyKey(node, computed) {
+  if (!computed && node.type === 'Identifier') return node.name;
+  const key = literalValue(node);
   return typeof key === 'string' || typeof key === 'number' ? String(key) : null;
 }
 
 function propertyValue(entry, key) {
   if (entry.type === 'SpreadElement') return objectEntry(unwrapped(entry.argument), key);
-  const name = propertyKey(entry);
+  const name = propertyKey(entry.key, entry.computed);
   if (name === null) return null;
   if (name !== key) return missing;
   return entry.kind === 'init' ? entry.value : null;
@@ -33,6 +33,15 @@ function arrayEntry(array, index) {
   return array.elements[index] ?? missing;
 }
 
+export function memberValue(container, member) {
+  const key = propertyKey(member.property, member.computed);
+  if (container?.type === 'ArrayExpression') {
+    const index = Number(key);
+    return Number.isSafeInteger(index) && index >= 0 && String(index) === key ? arrayEntry(container, index) : null;
+  }
+  return objectEntry(container, key);
+}
+
 function contains(pattern, name) {
   return pattern && pattern.start <= name.start && name.end <= pattern.end;
 }
@@ -40,14 +49,17 @@ function contains(pattern, name) {
 export function boundValue(pattern, source, name, resolve) {
   const raw = unwrapped(source);
   if (pattern === name) return raw === missing ? null : raw;
-  const value = raw?.type === 'Identifier' ? resolve(raw) : raw;
+  const value = resolve(raw);
   if (pattern.type === 'AssignmentPattern') {
     const absent = value === missing || (value?.type === 'UnaryExpression' && value.operator === 'void');
     return boundValue(pattern.left, absent ? pattern.right : value, name, resolve);
   }
   if (pattern.type === 'ObjectPattern') {
     const entry = pattern.properties.find((part) => part.type === 'Property' && contains(part.value, name));
-    if (entry) return boundValue(entry.value, objectEntry(value, propertyKey(entry)), name, resolve);
+    if (entry) {
+      const key = propertyKey(entry.key, entry.computed);
+      return boundValue(entry.value, objectEntry(value, key), name, resolve);
+    }
   }
   if (pattern.type === 'ArrayPattern') {
     const index = pattern.elements.findIndex((part) => contains(part, name));
