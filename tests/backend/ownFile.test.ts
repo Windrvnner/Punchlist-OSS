@@ -12,6 +12,7 @@ import { nodeAi, type AiDocs } from '../../src/backend/ai';
 import { StandInService } from '../../src/backend/service';
 import { StoreKeeper } from '../../src/backend/storeKeeper';
 import { memRepo } from '../adapters/memRepo';
+import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { Mem, Tearing } from './reviewKit';
 
 class Refusing extends Mem { refuse = false; append(n: string, t: string) { if (this.refuse) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }); super.append(n, t); } }
@@ -67,6 +68,41 @@ describe('own files', () => {
       expect(local.read(name)).toBe(`${intact}\n${lost}\n`);
       healOwn(shared, local, name);
       expect(shared.read(name)).toBe(repaired);
+    } finally {
+      for (const dir of dirs) fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the comparison current through successful appends to a deal-scale file (#784)', () => {
+    const dirs = [1, 2].map(() => fs.mkdtempSync(path.join(os.tmpdir(), 'own-file-')));
+    const [shared, local] = dirs.map((dir) => nodeFolder(dir, []));
+    const name = 'notes.jsonl';
+    const rows = portfolioQuestions().map((note) => JSON.stringify({ note }) + '\n');
+    try {
+      appendOwn(shared, local, name, rows.slice(0, 2_300).join(''));
+      healOwn(shared, local, name);
+      const readShared = vi.spyOn(shared, 'read');
+      const readLocal = vi.spyOn(local, 'read');
+      for (const row of rows.slice(2_300)) {
+        appendOwn(shared, local, name, row);
+        healOwn(shared, local, name);
+      }
+      expect(readShared).not.toHaveBeenCalled();
+      expect(readLocal).not.toHaveBeenCalled();
+      expect(shared.read(name)).toBe(rows.join(''));
+      expect(local.read(name)).toBe(rows.join(''));
+
+      const added = JSON.stringify({ note: 'Confirm the revised debt service ratios.' }) + '\n';
+      const diskAppend = shared.append.bind(shared);
+      vi.spyOn(shared, 'append').mockImplementationOnce((file, text, expected) => {
+        const stamp = diskAppend(file, text, expected);
+        shared.write(file, rows.join('') + added.slice(0, -3) + ':{{');
+        return stamp;
+      });
+      appendOwn(shared, local, name, added);
+      expect(shared.size(name)).toBe(local.size(name));
+      healOwn(shared, local, name);
+      expect(wholeLines(shared.read(name) ?? '').at(-1)).toBe(added.trimEnd());
     } finally {
       for (const dir of dirs) fs.rmSync(dir, { recursive: true, force: true });
     }
