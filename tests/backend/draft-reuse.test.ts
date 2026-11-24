@@ -107,6 +107,10 @@ describe('a draft reuses an answer already given to another party', () => {
       expect(only.text, date).toBe(text);
       expect(only.sources.map((source) => source.loc), date).toEqual(['p. 14']);
     }
+
+    const text = 'The sponsor responded to Q3 budget changes with a higher contingency. [1]';
+    reply = { ...reply, text };
+    expect(val(await s.ai.draft(draft)).text).toBe(text);
   });
 
   it('renumbers surviving sources after removing a genuine earlier-question credit (#286)', async () => {
@@ -147,6 +151,7 @@ describe('a draft reuses an answer already given to another party', () => {
     ['a dash without spaces', 'As answered in Q3—2027 capital spending is capped at $20 million.'],
     ['a year before the question number', 'The minutes confirm that in 2027 Q3 was answered by the sponsor.'],
     ['a quote and a continuation', 'The sponsor responded to Q3 with “Not yet!” before the term sheet was amended.'],
+    ['a direct answer', 'The sponsor answered Q3 with the execution date from the prior draft.'],
   ])('removes a credit with %s and keeps the next cited sentence (#286)', async (_case, credit) => {
     const retained = 'Commercial operation is expected in Q3 2027.';
     const text = `${credit} [1] ${retained} [2]`;

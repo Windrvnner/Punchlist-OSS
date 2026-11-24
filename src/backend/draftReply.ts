@@ -2,7 +2,9 @@ import { markerPieces } from '../domain/cite';
 import type { Source } from '../domain/model';
 
 const QUESTION_NUMBER = /\bQ(\d+)\b/g;
-const QUESTION_LEAD = /\b(?:question|(?:answer|reply|replied|response|responded) to)\s+\(?\s*$/i;
+const QUESTION_NAME = /\bquestion\s+\(?\s*$/i;
+const ANSWER_OBJECT = /\b(?:answered|(?:answer|reply|replied|response|responded) to)\s+\(?\s*$/i;
+const QUESTION_END = /^\s*(?:[,).:;!?—–]|(?:with|in|on|by|that|before|after|above|below)\b|$)/i;
 const QUESTION_LABEL = /\bas\s+(?:previously\s+)?answered(?:\s+to\s+[^.!?()]+)?\s+\(\s*$/i;
 const QUESTION_ACTION = /^\s+(?:was|is|has been|had been)\s+(?:already\s+)?(?:asked|answered)\b/i;
 const ANSWER_CREDIT = /\bas\s+(?:(?:already|previously)\s+)?answered\s+(?:in|under)\s+$/i;
@@ -20,6 +22,13 @@ const QUOTED_END = String.raw`(?<=[.!?](?:${CLOSERS}${MARKERS}|${MARKERS}${CLOSE
 const DRAFT_BREAK = new RegExp(`(${PARAGRAPH}|${PLAIN_END}|${QUOTED_END})`, 'u');
 const lineBreaks = (text: string) => text.split('\n').length - 1;
 
+function isExplicitQuestionCredit(before: string, after: string): boolean {
+  if (QUESTION_NAME.test(before) || QUESTION_ACTION.test(after)) return true;
+  if (QUESTION_LABEL.test(before) && /^\s*\)/.test(after)) return true;
+  if (ANSWER_OBJECT.test(before) && QUESTION_END.test(after)) return true;
+  return ANSWER_CREDIT.test(before) && !YEAR_QUALIFIER.test(after);
+}
+
 function hasDraftCredit(sentence: string, shown: Set<number>): boolean {
   for (const match of sentence.matchAll(QUESTION_NUMBER)) {
     const number = Number(match[1]);
@@ -29,8 +38,7 @@ function hasDraftCredit(sentence: string, shown: Set<number>): boolean {
     // Q1 through Q4 can be calendar quarters. Remove them only with evidence of a question reference.
     const before = sentence.slice(0, match.index);
     const after = sentence.slice(match.index + match[0].length);
-    if (QUESTION_ACTION.test(after) || (QUESTION_LABEL.test(before) && /^\s*\)/.test(after))) return true;
-    if (!YEAR_QUALIFIER.test(after) && (QUESTION_LEAD.test(before) || ANSWER_CREDIT.test(before))) return true;
+    if (isExplicitQuestionCredit(before, after)) return true;
   }
   return false;
 }
