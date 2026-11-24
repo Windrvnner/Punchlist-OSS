@@ -299,7 +299,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 [CLAUDE.md](../CLAUDE.md) covers how to work on the app: commits, checks, mock-ups, readable code, and asking before design decisions. Beyond it, these rules apply:
 
 - Keep friction low, with as few controls and steps as possible.
-- The attribution check allows a `Co-authored-by` trailer for the contributor's own coding-agent identity (`Windrvnner-Codex`) and refuses every other AI co-author trailer (#877).
+- The attribution check allows a `Co-authored-by` trailer naming exactly the repository's own coding-agent identity (set in `scripts/aiAttribution.mjs`) and refuses every other AI co-author trailer (#877).
 - Never guess identities. Never cite finding codes.
 - Deleting a finding or a question asks first ("Delete Q38?", with **Keep It** or **Delete**), as do removing a folder and a list swap that turns items off; each keeps its Undo.
 - Close every gap as soon as it is found; fix confirmed Critical and Major issues rather than stopping to report them.
