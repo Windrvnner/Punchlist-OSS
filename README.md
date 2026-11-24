@@ -91,7 +91,7 @@ Punchlist has a native dark mode. By default it matches the Windows light or dar
 ## How it works
 
 - **Shared across the team.** Deals, findings, and the Q&amp;A are stored in the Punchlist folder. OneDrive provides
-  automatic folder discovery and sync. You can also select a folder manually. If two people change the same item
+  automatic folder discovery and sync. You can also select a folder manually. If two PCs change the same item
   at once, Punchlist keeps both versions until someone picks one.
 - **The data room stays where it is.** Punchlist reads documents in linked folders in place and builds a search index
   on each PC. Files you attach directly may be copied into the shared Punchlist folder.
@@ -180,7 +180,6 @@ To change the folder later, click your name at the bottom of the sidebar (beside
 1. **Add a deal.** Click **+** above the deal list, then click **New Deal**. (Before you have any deals, the home screen also shows a **New Deal** or **Add Deal** button.) Enter the deal's name and counterparty, and choose its structure, sector, and technology. To add the data room folders, click **Choose Folders…** or **Paste a Path**. Then click **Create and Start Indexing**.
 2. **Wait for indexing to finish.** The Overview shows each folder's progress. When indexing finishes, Punchlist runs its first check and fills in the findings and the checklist.
 3. **Work through the deal.** Review the findings, close the checklist's gaps, and import the Q&amp;A log. To ask about the deal, type in the box near the top of the deal's page. To ask across all deals, use the box on the home screen.
-4. **Bring in the team.** Ask each team member to click **+** above the deal list, then click **Add** next to the deal.
 
 ## For developers
 
