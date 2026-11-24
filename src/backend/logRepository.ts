@@ -94,7 +94,7 @@ function readInstalled(text: string): { saved: Installed; damaged: boolean } {
 const INSTALL = 'install.json', SPARE = 'install.spare.json';
 /** the install id in a change file's name (`changes-<id>-<deal>-<number>.jsonl`), or null */
 const idOfFile = (name: string) => /^changes-(.+)-[A-Za-z0-9_]+-\d{4,}\.jsonl$/.exec(name)?.[1] ?? null;
-const idOfPlaceFile = (name: string) => /^place-(.+)\.json$/.exec(name)?.[1];
+const idOfPlaceFile = (name: string) => /^(?:place|undo-place)-(.+)\.json$/.exec(name)?.[1];
 
 /** A file's whole lines under an id (one cut off, or ended by healing a torn write, is passed over). */
 function linesOf(text: string, id: string): { l: string; at: string }[] {
@@ -676,7 +676,9 @@ export class LogRepository implements Repository {
       const candidate = idOfFile(name);
       if (candidate && !not.has(candidate)) kept.set(candidate, [...(kept.get(candidate) ?? []), name]);
     }
-    for (const i of [...kept.keys()]) if (!mine(i)) kept.delete(i);
+    for (const candidate of kept.keys()) {
+      if (!journals.has(candidate) && !mine(candidate)) kept.delete(candidate);
+    }
     const sharedNames = o.shared.list();
     const there = new Map<string, string[]>();
     for (const name of sharedNames) {
@@ -687,7 +689,7 @@ export class LogRepository implements Repository {
     for (const [i, names] of kept) {
       const shared = there.get(i) ?? [];
       if (!shared.length) {
-        if (this.placedOnThisMachine(i)) found.push([i, this.latestKeptAt(names, i)]);
+        if (this.placedOnThisMachine(i, journals.get(i))) found.push([i, this.latestKeptAt(names, i)]);
         continue;
       }
       if (shared.some((n) => !names.includes(n))) continue;
@@ -823,8 +825,7 @@ export class LogRepository implements Repository {
   private keepPlaceRecord(id: string, left = false, previous?: string) {
     const here = this.o.machine?.();
     if (!this.o.place) return;
-    try {
-      const name = `place-${id}.json`;
+    const save = (name: string) => {
       const kept = this.o.local.read(name);
       const saved = readPlaceRecord(kept);
       const machine = here ? { machine: here } : {};
@@ -833,7 +834,13 @@ export class LogRepository implements Repository {
       const retired = isText(predecessor) && predecessor !== id ? { previous: predecessor } : {};
       const record = JSON.stringify({ place: this.o.place, ...machine, ...mark, ...retired });
       if (kept !== record) this.o.local.write(name, record);
-    } catch { /* the next start */ }
+    };
+    try {
+      save(`place-${id}.json`);
+    } catch {
+      // For a carried journal use a separate local record when Windows refuses the usual marker (#750).
+      if (previous && here) save(`undo-place-${id}.json`);
+    }
   }
 
   /** When an id last wrote, from the copies of its files kept here (#29). */
