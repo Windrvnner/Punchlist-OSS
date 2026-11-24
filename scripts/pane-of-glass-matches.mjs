@@ -1,6 +1,7 @@
 // Match syntax, so examples in comments, strings, regexes and JSX text never count as UI dependencies.
 import { posix } from 'node:path';
 import { parseSync, Visitor } from 'vite';
+import { constInitializers } from './pane-of-glass-constants.mjs';
 
 const storageNames = new Set(['localStorage', 'sessionStorage', 'indexedDB']);
 const layerPath = /^(?:backend|adapters|desktop|shell)(?:\/|$)/;
@@ -55,21 +56,38 @@ function propertyNames(key, computed) {
 // Assertions, parentheses and optional chains leave the underlying path or member unchanged.
 function unwrapped(node) {
   while (['TSNonNullExpression', 'TSAsExpression', 'TSTypeAssertion', 'TSSatisfiesExpression',
-    'ChainExpression', 'ParenthesizedExpression'].includes(node.type)) {
+    'ChainExpression', 'ParenthesizedExpression'].includes(node?.type)) {
     node = node.expression;
   }
   return node;
 }
 
+// Only a direct identifier argument follows const aliases. Keep the diagnostic at the import site.
+function dynamicImportSource(program) {
+  let initializers;
+  return (argument) => {
+    let node = unwrapped(argument);
+    if (node.type !== 'Identifier') return argument;
+    initializers ??= constInitializers(program);
+    const seen = new Set();
+    while (node?.type === 'Identifier' && !seen.has(node)) {
+      seen.add(node);
+      node = unwrapped(initializers.get(node));
+    }
+    return literalText(node) === null ? argument : node;
+  };
+}
+
 export function matchesIn(file, source) {
-  const parsed = parseSync(file, source);
+  const parsed = parseSync(file, source, { range: true });
   if (parsed.errors.length) throw new Error(`${file}: ${parsed.errors[0].message}`);
   const offsets = {};
   function record(kind, node) {
     (offsets[kind] ??= new Set()).add(node.start);
   }
-  function checkModule(node) {
-    if (stringValues(node).some((name) => forbiddenModule(file, name))) record('import', node);
+  const importSource = dynamicImportSource(parsed.program);
+  function checkModule(node, source = node) {
+    if (stringValues(source).some((name) => forbiddenModule(file, name))) record('import', node);
   }
   function checkProperty(key, computed) {
     const names = propertyNames(key, computed);
@@ -101,7 +119,7 @@ export function matchesIn(file, source) {
     ImportDeclaration: moduleSource,
     ExportNamedDeclaration: moduleSource,
     ExportAllDeclaration: moduleSource,
-    ImportExpression: moduleSource,
+    ImportExpression: (node) => checkModule(node.source, importSource(node.source)),
     TSImportType: moduleSource,
     TSExternalModuleReference: (node) => checkModule(node.expression),
     CallExpression(node) {
