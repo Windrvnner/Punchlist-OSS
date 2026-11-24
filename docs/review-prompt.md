@@ -27,6 +27,9 @@ verdict, and no criteria in your own words.
 >   skips, weakens, or pads with a longer timeout counts as the regression it hides.
 > - Privacy: screens name no vendor (the service name and AI label come from the control file), and nothing names a
 >   person, firm, or deployment. Never read `.env` or `~/.config/`, and run the live model tests only when asked for.
+> - Pane of glass: anything the diff adds to `src/ui` beyond showing state, sending commands, and calling `src/app`
+>   functions. When the addition serves a workflow, check that the workflow runs from a test with no component
+>   rendered.
 > - Scope: name everything the diff does that the issue didn't ask for, at the top of the review.
 >
 > A finding blocks the merge only when it is one of these:
@@ -43,7 +46,9 @@ verdict, and no criteria in your own words.
 >    a coding tool's plain "Generated with" footer (the tool's name, with at most a link to its product page): it
 >    never blocks a merge and is not reported.
 > 6. New or changed code that is hard for a person to read, by the rules under "Readable code" in CLAUDE.md (the
->    hints from `scripts/check-readability.mjs` help).
+>    hints from `scripts/check-readability.mjs` help), or new or changed code in `src/ui` that breaks the "pane of
+>    glass" rule there: a model call, business rule, data transform, list or count rule, retry, or persistence in a
+>    screen.
 > 7. A breach of the clean-contributions rule in CLAUDE.md, in new or changed text in the diff, every commit message
 >    in `git log main..HEAD`, the pull request and its comments, or issues it files or edits: personal information,
 >    internal or private links, references to non-public systems or services, text copied from third-party
