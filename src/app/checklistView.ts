@@ -1,6 +1,6 @@
 import { LAYERS, type Item, type ItemFrom } from '../domain/checklist';
 import type { ChecklistRow } from '../ports';
-import { itemStanding, type ItemKind, type State } from './state';
+import { itemStanding, offFindingCount, type ItemKind, type State } from './state';
 
 /** Turning an item off keeps its findings and the target of a question already being written. */
 export function checklistFindings(
@@ -38,7 +38,7 @@ function listName(item: Item | undefined) {
 }
 
 /** Group by list, section and subsection, in order of first appearance. Items with no source come last. */
-export function placeRows(state: State, rows: ChecklistRow[]) {
+function placeRows(state: State, rows: ChecklistRow[]) {
   const groups = new Map<string, { first: number; count: number }>();
   const places = rows.map((row, index) => {
     const item = state.items[row.id];
@@ -61,7 +61,7 @@ export function placeRows(state: State, rows: ChecklistRow[]) {
   return places.map(({ row, names, keys }, index) => {
     const previous = places[index - 1];
     const heads: ListHeading[] = [];
-    const path: string[] = [];
+    const groupsForRow: ListHeading[] = [];
     let newGroup = !previous;
     for (const [depth, level] of levels.entries()) {
       const text = names[depth];
@@ -69,10 +69,11 @@ export function placeRows(state: State, rows: ChecklistRow[]) {
       if (depth > 0 && !text) continue;
       const key = keys[depth];
       const count = groups.get(key)!.count;
-      path.push(`${text}, ${count}`);
-      if (newGroup) heads.push({ level, key, text, count });
+      const heading = { level, key, text, count };
+      groupsForRow.push(heading);
+      if (newGroup) heads.push(heading);
     }
-    return { row, heads, path: path.join(' · ') };
+    return { row, heads, groups: groupsForRow };
   });
 }
 
@@ -114,4 +115,37 @@ export function checklistRows(state: State, dealId: string) {
   for (const row of active) counts[kinds.get(row.id)!]++;
   const itemOrder = new Map(own.map((item, index) => [item.id, index]));
   return { active, offRows, counts, kinds, itemOrder, filters: visibleFilters(counts) };
+}
+
+export type ChecklistHeading = ListHeading | { level: 'standing'; key: string; text: ItemKind; count: number };
+
+/** With no deal items, group by standing. A single-status filter supplies its own heading. */
+function byStanding(kept: ChecklistRow[], checklist: ReturnType<typeof checklistRows>, on: Filter) {
+  const kind = (row: ChecklistRow) => checklist.kinds.get(row.id)!;
+  kept.sort((a, b) => standingOrder.indexOf(kind(a)) - standingOrder.indexOf(kind(b)));
+  return kept.map((row, index) => {
+    const text = kind(row);
+    const heading: ChecklistHeading = { level: 'standing', key: text, text, count: checklist.counts[text] };
+    const groups = on === 'all' ? [heading] : [];
+    const heads = !index || text !== kind(kept[index - 1]) ? groups : [];
+    return { row, groups, heads };
+  });
+}
+
+/** Keep the selected row in view even when it belongs to another filter. Filter badges count matching rows only. */
+export function checklistView(state: State, dealId: string) {
+  const checklist = checklistRows(state, dealId);
+  const { active, offRows, kinds, counts, itemOrder, filters } = checklist;
+  const { checklistFilter, selectedChecklist } = state.ui;
+  const on = filters.includes(checklistFilter) ? checklistFilter : 'all';
+  const kept = [...active, ...offRows].filter((row) =>
+    on === 'all' || row.id === selectedChecklist || (kinds.get(row.id) ?? 'off') === on);
+  const byList = itemOrder.size > 0;
+  const position = (row: ChecklistRow) => itemOrder.get(row.id) ?? Infinity;
+  const shown = byList
+    ? placeRows(state, kept.sort((a, b) => position(a) - position(b)))
+    : byStanding(kept, checklist, on);
+  const selected = kept.find((row) => row.id === selectedChecklist);
+  const offIds = new Set(offRows.map((row) => row.id));
+  return { counts, filters, on, shown, selected, byList, offIds, offOpen: offFindingCount(state, dealId) };
 }

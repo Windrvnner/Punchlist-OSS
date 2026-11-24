@@ -1,8 +1,8 @@
-import { checklistFindings, checklistRows, placeRows } from '../app/checklistView';
+import { checklistFindings, checklistView, type ChecklistHeading } from '../app/checklistView';
 import { titleStyle } from './titleStyle';
 import { Fragment, type ComponentChildren, type RefObject } from 'preact';
 import { createPortal } from 'preact/compat';
-import { askAbout, itemStanding, conflictLabel, versionsWord, offFindingCount } from '../app/state';
+import { askAbout, itemStanding, conflictLabel, versionsWord } from '../app/state';
 import type { ItemKind, State } from '../app/state';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useAppState, useStore, fmtDate, useToSidebarBottom, useDismiss } from './hooks';
@@ -23,7 +23,6 @@ import { AddDealItems, SetItemsOff, offeredItems, unlistedItems } from '../app/c
 
 type Kind = ItemKind;
 const CHECKLIST_INDEXING_TIP = 'The first pass starts when every folder has been indexed; items appear here as they are checked.';
-const ORDER: Kind[] = ['finding', 'gone', 'gap', 'open', 'person', 'satisfied'];           // what is flagged first, what passed last
 /** The groups are named for how the item stands. An item whose check raised a finding is flagged: "Findings" is kept for the records on the Findings page. */
 const LABEL: Record<Kind, string> = {
   finding: 'Flagged', gone: 'Finding Deleted', gap: 'Gaps', open: 'Not Settled', person: 'Resolved by a Person',
@@ -156,48 +155,40 @@ export function ChecklistPage({ dealId }: { dealId: string }) {
   }, [s.ui.selectedChecklist, listedNow]);
   const inherited = useContext(ReadOnlyContext);
   // with nothing turned off, however that came about (Turn on, an Undo, another PC), Turned off is not left chosen for later
-  const checklist = useMemo(() => checklistRows(s, dealId),
-    [dealId, s.checklists[dealId], s.items, s.findings, s.conflicts, s.tombstones, s.dealLoad[dealId]]);
-  const anyOff = checklist.counts.off > 0;
+  const view = useMemo(() => checklistView(s, dealId), [
+    dealId, s.checklists[dealId], s.items, s.findings, s.conflicts, s.tombstones, s.dealLoad[dealId],
+    s.ui.checklistFilter, s.ui.selectedChecklist,
+  ]);
+  const anyOff = view.counts.off > 0;
   useEffect(() => { if (!anyOff && s.ui.checklistFilter === 'off') store.ui({ checklistFilter: 'all' }); }, [anyOff, s.ui.checklistFilter]);
   // items no longer in the firm's list, marked with an icon (linking design, section 5): worked out again only when the
   // items, the lists or the deal's layers change, not on every move through the list (it reads every wording)
   const unlisted = useMemo(() => (d ? unlistedItems(s, d) : new Set<string>()), [s.items, s.firmList, s.conflicts, dealId, d?.product, d?.sector, d?.technology]);
   if (!d) return null;
   const rows = s.checklists[d.id];
-  const { active: list, offRows, kinds, counts, itemOrder: ord } = checklist;
-  const kindOf = (r: ChecklistRow) => kinds.get(r.id)!;
-  const filters: [Filter, string][] = checklist.filters.map((key) => [key, `${FILTER_LABEL[key]} ${counts[key]}`]);
-  const on = checklist.filters.includes(s.ui.checklistFilter) ? s.ui.checklistFilter : 'all';
-  // how many turned-off items still have an open finding (linking design, section 12), on the Turned off filter's tooltip
-  const offOpen = offFindingCount(s, d.id);
-  // the open item stays listed, and selected, when the filter would hide it, as on the Findings and Q&A pages
-  const offIds = new Set(offRows.map((r) => r.id)); const isOff = (r: ChecklistRow) => offIds.has(r.id);
-  const kept = on === 'off' ? [...offRows, ...list.filter((r) => r.id === s.ui.selectedChecklist)]
-    : [...list.filter((r) => on === 'all' || kindOf(r) === on || r.id === s.ui.selectedChecklist), ...offRows.filter((r) => on === 'all' || r.id === s.ui.selectedChecklist)];
-  // grouped by the firm's list each item comes from, then its section and subsection, in the order the
-  // check gives them; a deal with no items from the firm's lists keeps the grouping by how each item stands
-  const byList = ord.size > 0;
-  // a turned-off item keeps its place among the rest: the deal's items are in the order its lists give them
-  const placed = byList ? placeRows(s, [...kept].sort((a, b) => (ord.get(a.id) ?? Infinity) - (ord.get(b.id) ?? Infinity))) : null;
-  const shown = placed ? placed.map((x) => x.row) : kept.map((r, i) => ({ r, i })).sort((a, b) => ORDER.indexOf(kindOf(a.r)) - ORDER.indexOf(kindOf(b.r)) || a.i - b.i).map((x) => x.r);
-  const sel = list.find((r) => r.id === s.ui.selectedChecklist) ?? offRows.find((r) => r.id === s.ui.selectedChecklist) ?? null; const wide = !sel;
-  // the list's first heading shares the filters' line, so the list starts a row higher
-  const rises = !!(on === 'all' || placed) && (list.length > 0 || offRows.length > 0);
-  const flaggedAbove = !placed && (on === 'all' || on === 'finding');   // a heading or the filter already says Flagged
+  const { counts, on, shown, selected: sel, byList, offIds, offOpen } = view;
+  const filters: [Filter, string][] = view.filters.map((key) => [key, `${FILTER_LABEL[key]} ${counts[key]}`]);
+  const wide = !sel;
+  const grouped = byList || on === 'all';
+  const rises = grouped && counts.all > 0;
+  const flaggedAbove = !byList && (on === 'all' || on === 'finding');
   // items are records of their own, so a deal in two versions does not hold them: only a read-only page does
   const locked = inherited;
   // one stop for Tab in the list: the open item, else the first; the arrow keys, Home and End move through the items
-  const at = sel && shown.some((r) => r.id === sel.id) ? sel.id : shown[0]?.id;
+  const at = sel?.id ?? shown[0]?.row.id;
   const focusRow = (id: string) => listRef.current?.querySelector<HTMLElement>(`[data-item="${id}"]`)?.focus();
   useItemSearchFocus(listRef, sel?.id, listedNow, s.ui.searchFocus);
   const close = () => { const id = sel?.id; store.ui({ selectedChecklist: null }); if (id) requestAnimationFrame(() => focusRow(id)); };
   const onKey = (e: KeyboardEvent) => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key) || !shown.length) return;
-    const i = shown.findIndex((r) => r.id === (document.activeElement as HTMLElement | null)?.dataset.item); if (i < 0) return;
+    const activeId = (document.activeElement as HTMLElement | null)?.dataset.item;
+    const index = shown.findIndex(({ row }) => row.id === activeId);
+    if (index < 0) return;
     e.preventDefault();
-    const next = shown[e.key === 'Home' ? 0 : e.key === 'End' ? shown.length - 1 : Math.max(0, Math.min(shown.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
-    if (sel) store.ui({ selectedChecklist: next.id });       // with an item open, moving through the list moves what is open, as in the Q&A log
+    const last = shown.length - 1;
+    const step = Math.max(0, Math.min(last, index + (e.key === 'ArrowDown' ? 1 : -1)));
+    const next = shown[e.key === 'Home' ? 0 : e.key === 'End' ? last : step].row;
+    if (sel) store.ui({ selectedChecklist: next.id });
     focusRow(next.id);
   };
   return (
@@ -206,26 +197,29 @@ export function ChecklistPage({ dealId }: { dealId: string }) {
       <Stalled deal={d} />
       <section class={`brieflet ckpage ${rises ? 'rise' : ''}`}>
         {!inherited && Array.isArray(rows) && <AddThemLine dealId={d.id} />}
-        <CkHead filters={filters} on={on} offOpen={offOpen} seg={Array.isArray(rows) && (list.length > 0 || offRows.length > 0)} acts={list.length > 0 || offRows.length > 0} more={list.length > 0 ? <CkMore dealId={d.id} /> : null} />
+        <CkHead filters={filters} on={on} offOpen={offOpen} seg={Array.isArray(rows) && counts.all > 0}
+          acts={counts.all > 0} more={counts.all > counts.off ? <CkMore dealId={d.id} /> : null} />
         {rows === 'failed' ? <p class="loadfail">Couldn’t load the checklist. <button type="button" class="tundo" id="ck-retry" onClick={() => void store.refreshChecklist(d.id)}>Retry</button></p>
           : rows === undefined && store.services.ai.checklist ? <div class="ph"><i /><i /><i /><i /></div>
           // with nothing checked yet, the same lines as Overview and Findings: add folders, or how indexing stands
-          : !list.length && !offRows.length ? (!d.folders.length ? <NoRoom deal={d} />
+          : !counts.all ? (!d.folders.length ? <NoRoom deal={d} />
             : d.stage === 'indexing' && s.ui.indexStalled.includes(d.id) ? null
             : <p class="emptyline" id="ck-none" title={d.stage === 'indexing' ? CHECKLIST_INDEXING_TIP : undefined}>{d.stage === 'indexing' ? 'Indexing' : 'Nothing has been checked yet.'}</p>)
           : <div class={`md ck ${wide ? 'wide' : ''}`} onKeyDown={(e) => { if (e.key === 'Escape' && sel && !e.defaultPrevented) { e.preventDefault(); close(); } }}>
-              <div class={`list ckrows ${on === 'all' || placed ? 'grouped' : ''}`} id="ck-rows" role="listbox" aria-label="Checklist items" ref={listRef} onKeyDown={onKey}>{shown.map((r, i) => <Fragment key={r.id}>
-                {/* a listbox holds only its options, so the headings are not read; each option says which group it is in instead */}
-                {placed ? placed[i].heads.map((h) => <div class={GROUP_CLASS[h.level]} aria-hidden="true" key={h.key}>
-                  {h.text}<span class="n">{h.count}</span></div>)
-                  : on === 'all' && (i === 0 || kindOf(shown[i - 1]) !== kindOf(r)) && <div class="ckgroup" aria-hidden="true" key={`g-${kindOf(r)}`}>{LABEL[kindOf(r)]}<span>{counts[kindOf(r)]}</span></div>}
-                <Row key={r.id} r={r} dealId={d.id} wide={wide} flaggedAbove={flaggedAbove}
-                  unlisted={unlisted.has(r.id)} on={sel?.id === r.id} off={isOff(r)} tab={at === r.id}
-                  group={placed ? placed[i].path : on === 'all' ? `${LABEL[kindOf(r)]}, ${counts[kindOf(r)]}` :
-                  undefined} open={() => store.ui({ selectedChecklist: r.id })} />
-              </Fragment>)}</div>
+              <div class={`list ckrows ${grouped ? 'grouped' : ''}`} id="ck-rows" role="listbox"
+                aria-label="Checklist items" ref={listRef} onKeyDown={onKey}>
+                {shown.map(({ row, groups, heads }) => <Fragment key={row.id}>
+                  {heads.map((h) => <div class={GROUP_CLASS[h.level]} aria-hidden="true" key={h.key}>
+                    {headingName(h)}<span class={h.level === 'standing' ? undefined : 'n'}>{h.count}</span>
+                  </div>)}
+                  <Row key={row.id} r={row} dealId={d.id} wide={wide} flaggedAbove={flaggedAbove}
+                    unlisted={unlisted.has(row.id)} on={sel?.id === row.id} off={offIds.has(row.id)} tab={at === row.id}
+                    group={groups.map((h) => `${headingName(h)}, ${h.count}`).join(' · ') || undefined}
+                    open={() => store.ui({ selectedChecklist: row.id })} />
+                </Fragment>)}
+              </div>
               {/* drawn afresh for each item, so nothing still saving for one item touches the next one's question */}
-              {sel && <Detail key={sel.id} r={sel} dealId={d.id} off={isOff(sel)} locked={locked} onClose={close} />}
+              {sel && <Detail key={sel.id} r={sel} dealId={d.id} off={offIds.has(sel.id)} locked={locked} onClose={close} />}
             </div>}
       </section>
     </div>
@@ -241,7 +235,8 @@ function flaggedWords(saidAbove: boolean, asked: string) {
   return asked ? `Flagged · ${asked}` : 'Flagged';
 }
 
-const GROUP_CLASS = { list: 'ckgroup', section: 'cksec', subsection: 'cksub' };
+const headingName = (heading: ChecklistHeading) => heading.level === 'standing' ? LABEL[heading.text] : heading.text;
+const GROUP_CLASS = { standing: 'ckgroup', list: 'ckgroup', section: 'cksec', subsection: 'cksub' };
 const UNLISTED = 'No longer in the firm’s list';
 
 /**
