@@ -14,7 +14,8 @@ const facilities = ['solar array', 'battery yard', 'substation'];
 const items = sites.flatMap((site) => facilities.flatMap((facility) => ITEMS.map(({ t, s, sub }): Item => {
   const text = `${site}, ${facility}: ${t}`;
   return {
-    id: itemId(deal.id, text), dealId: deal.id, text, section: s, subsection: sub, from: [{ layer: 'broad', value: '' }],
+    id: itemId(deal.id, text), dealId: deal.id, text, section: s, subsection: sub,
+    from: [{ layer: 'broad', value: '' }],
     createdAt: deal.createdAt, updatedAt: deal.updatedAt, rev: 1, normV: 1, off: false,
   };
 })));
@@ -152,4 +153,27 @@ it('groups a checklist without item records by standing, keeping check order wit
   expect(heads.map(({ count }) => count)).toEqual([2, 1, 2, 1, 1, items.length - 8]);
   expect(shown.slice(0, 5).map(({ row }) => row.id)).toEqual([flagged.id, stale.id, deleted.id, legacy.id, gap.id]);
   expect(viewFor(state, 'gap').shown.map(({ groups }) => groups)).toEqual([[], []]);
+});
+
+it('keeps the draft on its open finding, otherwise choosing the oldest open finding for the off item', () => {
+  const state = checklistDeal();
+  const [first, next, closed, anotherItem, foreign] = scaleMemoInput.findings;
+  const older = { ...first, itemId: stale.id, status: 'open' as const, createdAt: '2026-07-02T00:00:00Z' };
+  const newer = { ...next, itemId: stale.id, status: 'open' as const, createdAt: '2026-07-03T00:00:00Z' };
+  const finished = { ...closed, itemId: stale.id, status: 'closed' as const, createdAt: '2026-07-01T00:00:00Z' };
+  const findings = [finished, { ...foreign, dealId: otherDeal, itemId: stale.id }, newer, older,
+    { ...anotherItem, itemId: offUnseen.id, status: 'closed' as const }];
+  state.findings = Object.fromEntries(findings.map((finding) => [finding.id, finding]));
+  const row = checkedRow(stale);
+  expect(checklistFindings(state, deal.id, row, true)).toEqual({ finding: older, raised: [older, newer, finished] });
+  expect(checklistFindings(state, deal.id, row, true, newer.id).finding).toBe(newer);
+  for (const target of [finished, foreign, anotherItem]) {
+    expect(checklistFindings(state, deal.id, row, true, target.id).finding).toBe(older);
+  }
+  expect(viewFor(state, 'off').offOpen).toBe(1);
+  const active = { ...row, findingId: newer.id };
+  expect(checklistFindings(state, deal.id, active, false)).toEqual({ finding: newer, raised: [] });
+  state.findings = { [finished.id]: finished };
+  expect(checklistFindings(state, deal.id, row, true, newer.id)).toEqual({ finding: finished, raised: [finished] });
+  expect(checklistFindings(state, deal.id, checkedRow(offUnseen), true)).toEqual({ finding: undefined, raised: [] });
 });

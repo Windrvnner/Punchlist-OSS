@@ -209,7 +209,7 @@ export function ChecklistPage({ dealId }: { dealId: string }) {
               <div class={`list ckrows ${grouped ? 'grouped' : ''}`} id="ck-rows" role="listbox"
                 aria-label="Checklist items" ref={listRef} onKeyDown={onKey}>
                 {shown.map(({ row, groups, heads }) => <Fragment key={row.id}>
-                  {heads.map((h) => <div class={GROUP_CLASS[h.level]} aria-hidden="true" key={h.key}>
+                  {heads.map((h) => <div class={GROUP_CLASS[h.level]} aria-hidden="true" key={`${h.level}-${h.key}`}>
                     {headingName(h)}<span class={h.level === 'standing' ? undefined : 'n'}>{h.count}</span>
                   </div>)}
                   <Row key={row.id} r={row} dealId={d.id} wide={wide} flaggedAbove={flaggedAbove}
@@ -219,7 +219,8 @@ export function ChecklistPage({ dealId }: { dealId: string }) {
                 </Fragment>)}
               </div>
               {/* drawn afresh for each item, so nothing still saving for one item touches the next one's question */}
-              {sel && <Detail key={sel.id} r={sel} dealId={d.id} off={offIds.has(sel.id)} locked={locked} onClose={close} />}
+              {sel && <Detail key={sel.id} r={sel} dealId={d.id} off={offIds.has(sel.id)}
+                locked={locked} onClose={close} />}
             </div>}
       </section>
     </div>

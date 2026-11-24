@@ -142,7 +142,7 @@ export function checklistView(state: State, dealId: string) {
     on === 'all' || row.id === selectedChecklist || (kinds.get(row.id) ?? 'off') === on);
   const byList = itemOrder.size > 0;
   const position = (row: ChecklistRow) => itemOrder.get(row.id) ?? Infinity;
-  const shown = byList
+  const shown: { row: ChecklistRow; groups: ChecklistHeading[]; heads: ChecklistHeading[] }[] = byList
     ? placeRows(state, kept.sort((a, b) => position(a) - position(b)))
     : byStanding(kept, checklist, on);
   const selected = kept.find((row) => row.id === selectedChecklist);
