@@ -4,9 +4,9 @@ This is the design for the rebuilt deal screen: a conversation on the left and a
 Tasks, Diligence, Q&A, and the items a person opens. None of it is built yet. Its decisions are in
 [decisions.md](decisions.md), under "Deal screen". Where this page and the decisions differ, the decisions win.
 
-The mock-up is [deal-screen/mock.html](deal-screen/mock.html). Its styles are in the four `deal-screen/mock-*.css`
-files and its script in the six `deal-screen/mock-*.js` files, which mock.html loads in order: shared parts, the
-sidebar, the conversation, the pane, Q&A, and the screens themselves. Its icons are in
+The mock-up is [deal-screen/mock.html](deal-screen/mock.html). Its styles are in the five `deal-screen/mock-*.css`
+files and its script in the seven `deal-screen/mock-*.js` files, which mock.html loads in order: shared parts, the
+sidebar, the conversation, the pane, Q&A, the open points (#888, step 3), and the screens themselves. Its icons are in
 [deal-screen/icons.js](deal-screen/icons.js). It uses the app's tokens and built stylesheet and sample data only. The
 source document page ([deal-screen/guarantee-p4.png](deal-screen/guarantee-p4.png)) is a generated sample, not a
 real deal document. When this design is built, this page and the `deal-screen/` folder are removed.
@@ -48,3 +48,18 @@ Running work animates, so a new render can differ from a kept shot in a spinner'
 | 24 | [Q&A list](deal-screen/shots/24-qa-roomy-light-1280x736.jpg) | Q&A as a one-column list beside the conversation |
 | 25 | [Q&A list, question open](deal-screen/shots/25-qa-roomy-item-light-1280x736.jpg) | An opened question in its card |
 | 26 | [Q&A list, answered](deal-screen/shots/26-qa-roomy-answered-light-1280x736.jpg) | An answered question in its card |
+
+### Open points, proposed (#888, step 3)
+
+Screens 27 to 34 propose answers to the points the screens above left open. They are not approved yet.
+
+| # | Screen | Shows |
+|---|---|---|
+| 27 | [Deal menu](deal-screen/shots/27-deal-menu-light-1280x736.jpg) | The breadcrumb's ⋯ with the deal header's controls |
+| 28 | [Deal details](deal-screen/shots/28-deal-details-light-1280x736.jpg) | Name, counterparty, Structure, Sector, Technology, and Deal status |
+| 29 | [Folders](deal-screen/shots/29-folders-light-1280x736.jpg) | Overview's Documents list in the Folders dialog |
+| 30 | [Diligence, Findings button](deal-screen/shots/30-diligence-findings-button-light-1280x736.jpg) | **Findings** at the end of the Diligence tab's filters |
+| 31 | [Findings tab](deal-screen/shots/31-findings-tab-light-1280x736.jpg) | The full list of findings as a tab, with the Findings page's controls |
+| 32 | [Needs Input](deal-screen/shots/32-tasks-needs-input-light-1280x736.jpg) | What Needs Input holds, and a task waiting for a reply |
+| 33 | [Home's past conversations](deal-screen/shots/33-home-past-conversations-light-1280x736.jpg) | Home's history button, with a conversation that has a new result |
+| 34 | [Archived at scale](deal-screen/shots/34-archived-at-scale-light-1280x736.jpg) | 28 deals and 12 archived ones, changed deals first |
