@@ -3,7 +3,7 @@ import { Fragment, type ComponentChildren, type RefObject } from 'preact';
 import { createPortal } from 'preact/compat';
 import { askAbout, itemStanding, versionsWord, offFindingCount } from '../app/state';
 import { checklistQuestionTarget } from '../app/checklistQuestion';
-import type { ItemKind, State } from '../app/state';
+import type { ItemKind, ItemStanding, State } from '../app/state';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useAppState, useStore, fmtDate, useToSidebarBottom, useDismiss } from './hooks';
 import { Icon } from './icons';
@@ -352,6 +352,28 @@ function Row({ r, dealId, wide, flaggedAbove, unlisted, on, off, tab, group, ope
   );
 }
 
+/** The result of a check that raised a finding, including the option to restore a deleted finding. */
+function FindingResult({ standing, readOnly }: { standing: ItemStanding; readOnly: string | null }) {
+  const store = useStore();
+  const { finding, versions, gone } = standing;
+  let status = '';
+  if (versions) status = titleStyle(versionsWord(versions.versions.length));
+  else if (finding) status = finding.status === 'open' ? 'Open' : 'Closed';
+  else if (gone) status = 'Deleted';
+
+  const restore = () => {
+    if (gone) void store.dispatch(RestoreFinding, { dealId: gone.dealId, findingId: gone.id },
+      { idempotencyKey: 'restore-' + gone.id });
+  };
+  return <>
+    <div class="lbl">Finding{status && ` · ${status}`}</div>
+    <p class="ckp" id="ck-finding">{finding ? <a href={findingHref(finding)}>{finding.title}</a>
+      : gone ? <>“{gone.title}” was deleted. <button type="button" class="linkb" id="ck-restore" disabled={!!readOnly}
+        title={readOnly ?? undefined} onClick={restore}>Restore it</button></>
+      : 'The finding this item raised is no longer here.'}</p>
+  </>;
+}
+
 /**
  * The open item, whole. A turned-off item (`off`) is shown in the same pane, so a question being typed about its finding
  * stays in place, text and focus, when the item is turned off here or on another PC: it shows the findings its checks
@@ -386,12 +408,11 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
     moreMenu.current?.querySelector<HTMLElement>('.mi')?.focus();
     return () => { document.removeEventListener('mousedown', away, true); document.removeEventListener('keydown', key, true); window.removeEventListener('resize', shut); };
   }, [more]);
-  const st = itemStanding(s, dealId, r);
-  const k = st.kind;
-  const f = st.finding;
+  const standing = itemStanding(s, dealId, r);
+  const { kind, finding } = standing;
   const d = s.deals[dealId]; const pane = useToSidebarBottom<HTMLDivElement>();
   const draftKey = `${dealId}:${r.id}`;
-  const draft = useChecklistDraft(draftKey, f?.id);
+  const draft = useChecklistDraft(draftKey, finding?.id);
   const { asking, text, setText, kept, findingId, begin, stopAsking, busy } = draft;
   const target = checklistQuestionTarget(s, r, off, findingId, raised[0]);
   const asked = askedAbout(s, dealId, r.id, target.askedFinding);
@@ -399,11 +420,11 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
   const askedAsGap = off ? askedAbout(s, dealId, r.id, undefined).filter((q) => !q.linkedFinding) : [];
   // a question can be asked about a flagged item's open finding, or about a gap (linking design, section 6), never about
   // a turned-off item; a gap is offered it only until a question is asked about it (section 7: "Q38 asked", or the need and Ask)
-  const canAsk = !off && ((k === 'finding' && !!f) || k === 'gap');
+  const canAsk = !off && ((kind === 'finding' && !!finding) || kind === 'gap');
   // a question being typed stays on screen whatever happens meanwhile (lost work first): another PC may ask about the gap,
   // the item may stop being a gap or be turned off; Log question then says why it is off, and Cancel lets it go. Set aside
   // with Escape, it is kept, and Ask stays offered while it is, so it can always be brought back
-  const offerAsk = !off && ((canAsk && !(k === 'gap' && asked.length)) || kept);
+  const offerAsk = !off && ((canAsk && !(kind === 'gap' && asked.length)) || kept);
   const why = ro ?? target.askWhy;
   const logWhy = ro ?? target.why;
   // a document opens in the deal's conversation, which is where a page can be read and asked about; closing it comes back here,
@@ -441,9 +462,9 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
   return (
     <div class="det ckdet glass" key={r.id} id="ck-detail" ref={pane}>
       <div class="dmeta">
-        <span class="n">{off ? 'Turned off' : ONE[k]}</span>
+        <span class="n">{off ? 'Turned off' : ONE[kind]}</span>
         <span class="grow" />
-        {!off && f && <a class="btn sm" id="ck-open-finding" href={findingHref(f)}>Open Finding</a>}
+        {!off && finding && <a class="btn sm" id="ck-open-finding" href={findingHref(finding)}>Open Finding</a>}
         {off ? <span class="needs" title={why2 ?? undefined}><button type="button" class="btn sm" id="ck-on"
           disabled={!!why2} title={why2 ?? undefined} aria-description={why2 ?? undefined}
           onClick={() => void turnOn()}>Turn On</button></span>
@@ -472,17 +493,12 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
         id="ck-need">{r.need}</p></>}
       {r.result === 'gap' && <><div class="lbl">Read Against{r.at
         ? ` · checked ${fmtDate(localYmd(r.at))}` : ''}</div><GapRead r={r} /></>}
-      {r.result === 'finding' && <>
-        <div class="lbl">Finding{st.versions ? ` · ${titleStyle(versionsWord(st.versions.versions.length))}`
-          : f ? ` · ${f.status === 'open' ? 'Open' : 'Closed'}` : st.gone ? ' · Deleted' : ''}</div>
-        {/* a deleted finding is still in the deal's Deleted list, so it can be put back here, as on its own page */}
-        <p class="ckp" id="ck-finding">{f ? <a href={findingHref(f)}>{f.title}</a> : st.gone ? <>“{st.gone.title}” was deleted. <button type="button" class="linkb" id="ck-restore" disabled={!!ro} title={ro ?? undefined} onClick={() => { const g = st.gone!; void store.dispatch(RestoreFinding, { dealId: g.dealId, findingId: g.id }, { idempotencyKey: 'restore-' + g.id }); }}>Restore it</button></> : 'The finding this item raised is no longer here.'}</p>
-      </>}
+      {r.result === 'finding' && <FindingResult standing={standing} readOnly={ro} />}
       {asked.length > 0 && <><div class="lbl">Asked</div><AskedList dealId={dealId} qs={asked} id="ck-asked" /></>}
       {/* why it is off is on the wrapper (a disabled button takes no pointer) and read out with the button */}
       {offerAsk && !asking && <span class="needs" title={why ?? undefined}><button type="button" class="btn sm"
         id="ck-ask" disabled={!!why} aria-description={why ?? undefined}
-        onClick={() => begin(k === 'gap' ? r.need : undefined)}>Ask the Counterparty</button></span>}
+        onClick={() => begin(kind === 'gap' ? r.need : undefined)}>Ask the Counterparty</button></span>}
       {r.result === 'unsettled' && r.why && <><div class="lbl">Why</div><p class="ckp" id="ck-why">{r.why}</p></>}
       {r.result === 'unsettled' && !r.why && <p class="ckp" id="ck-why">The check did not come to a result on this item.</p>}
       {r.result === 'unchecked' && <p class="ckp" id="ck-why">No check has reached this item yet.</p>}
