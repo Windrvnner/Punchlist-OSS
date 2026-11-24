@@ -384,8 +384,35 @@ describe('saving the log', () => {
 });
 
 describe('a new log', () => {
+  afterEach(() => vi.restoreAllMocks());
   it('takes the name asked for, or the first free one: it never replaces a file', () => {
     const d = withLog(); expect(createLog(d, 'Project Proseware Q&A log.xlsx', bytes('new'))).toBe('Project Proseware Q&A log.xlsx');
     expect(createLog(d, FILE, bytes('new'))).toBe('Lender A Q&A (2).xlsx'); expect(read(d)).toBe('theirs');
+  });
+  it('creates a log when the folder allows files but denies new subdirectories (#21)', () => {
+    const d = folder();
+    const mkdtemp = fs.mkdtempSync;
+    vi.spyOn(fs, 'mkdtempSync').mockImplementation(((prefix) => {
+      if (typeof prefix === 'string' && path.dirname(prefix) === d) {
+        throw Object.assign(new Error('Subdirectory creation denied'), { code: 'EACCES' });
+      }
+      return mkdtemp(prefix);
+    }) as typeof fs.mkdtempSync);
+
+    expect(createLog(d, FILE, bytes('new'))).toBe(FILE);
+    expect(read(d)).toBe('new');
+  });
+  it.skipIf(process.platform !== 'linux')('creates a log near the Linux pathname limit (#21)', () => {
+    const root = folder();
+    const limit = 4090 - FILE.length - 1;
+    let d = root;
+    try {
+      while (d.length < limit) {
+        d = path.join(d, 'd'.repeat(Math.min(200, limit - d.length - 1)));
+        fs.mkdirSync(d);
+      }
+      expect(createLog(d, FILE, bytes('new'))).toBe(FILE);
+      expect(read(d)).toBe('new');
+    } finally { fs.rmSync(root, { force: true, recursive: true }); }
   });
 });
