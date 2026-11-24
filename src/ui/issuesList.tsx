@@ -12,14 +12,10 @@ import { Modal, LeaveFoot } from './dialogs';
 import { num, plural } from './counts';
 import { FileInput, PickFileRow } from './fileDrop';
 import { showTip, hideTip } from './tip';
-import { dealFindings } from '../app/state';
-import { readIssuesList, type ReadIssuesList } from '../app/issuesList';
+import { readIssuesList, reviewIssuesList, type ReadIssuesList } from '../app/issuesList';
 import { ImportIssuesList } from '../app/commands/issuesList';
-import { fitText } from '../domain/importExport';
 import { AI_LABEL } from '../control';
-import { key as wording } from '../domain/checklist';
 import type { Finding, ListPoint } from '../domain/model';
-import type { IssuePoint } from '../ports';
 import { keptImport, keepImport, dropImport, importKey, useKeptImportsReady, useFreshOnCrash } from './keptImports';
 
 /** the files a list comes as: a PDF, a Word file or an email */
@@ -47,37 +43,6 @@ export function OnListMark({ f }: { f: Finding }) {
   const tip = (e: Event) => showTip(e.currentTarget as HTMLElement, onListTip(f.onLists!));
   const off = (e: Event) => hideTip(e.currentTarget as HTMLElement);
   return <> · <span class="ilh" id="f-onlists" tabIndex={0} aria-description={onListTip(f.onLists)} onMouseEnter={tip} onMouseLeave={off} onFocus={tip} onBlur={off}>{onListText(f.onLists)}</span></>;
-}
-
-/**
- * What Import will do with each point, worked out the way ImportIssuesList does it, so the dialog shows exactly what Import
- * makes. A point joins the finding that already holds this very point (the list brought in before), else the finding or
- * earlier point the model named. A finding deleted since the list was read is not joined, so its point counts as new.
- * Points are taken in the list's order, since a point only repeats an earlier one: one joining an earlier point goes
- * where that one goes, so its row names the finding Import will put it on. `shown` is where each would go
- * without its own checkbox (the row strikes it through when checked); `goes` is where it goes. `input` is Import's.
- */
-export function reviewOf(all: Finding[], list: { docId: string; name: string }, points: IssuePoint[], kept: Set<number>) {
-  const findings = new Map(all.map((f) => [f.id, f]));
-  // the list is its file's id: a revised list saved under the same name is another list
-  const key = (m: { doc: string; n: string; text: string }) => `${m.doc}\u0001${m.n}\u0001${wording(m.text)}`;   // as the command reads it
-  const held = new Map<string, string>(); for (const f of all) for (const m of f.onLists ?? []) if (!(held.get(key(m))! < f.id)) held.set(key(m), f.id);   // the lowest id, as the command takes
-  // and a point a list of the same name holds word for word, under the same number (a revised list repeating it)
-  const named = (m: { list: string; n: string; text: string }) => `${m.list}\u0001${m.n}\u0001${wording(m.text)}`;
-  const byName = new Map<string, string>(); for (const f of all) for (const m of f.onLists ?? []) if (!(byName.get(named(m))! < f.id)) byName.set(named(m), f.id);
-  const joins = points.map((p, k): IssuePoint['same'] => {
-    const mine = held.get(key({ doc: list.docId, n: p.n, text: fitText(p.text) })) ?? byName.get(named({ list: list.name, n: p.n, text: fitText(p.text) })); if (mine) return { finding: mine };
-    if (!p.same) return undefined;
-    return 'point' in p.same ? (p.same.point < k ? p.same : undefined) : findings.has(p.same.finding) ? p.same : undefined;
-  });
-  const shown: (Finding | number | undefined)[] = []; const goes: (Finding | number | undefined)[] = [];
-  points.forEach((_p, k) => {
-    const j = joins[k];
-    shown[k] = !j ? undefined : 'finding' in j ? findings.get(j.finding) : goes[j.point] ?? j.point;
-    goes[k] = kept.has(k) ? undefined : shown[k];
-  });
-  const input = points.map((p, k) => { const j = joins[k]; return { n: p.n, text: p.text, title: p.title, workstream: p.workstream, ...(kept.has(k) ? { own: true } : !j ? {} : 'finding' in j ? { join: j.finding } : { after: j.point }) }; });
-  return { shown, goes, input, raised: points.flatMap((_p, k) => (shown[k] !== undefined ? [k] : [])), fresh: points.flatMap((_p, k) => (goes[k] === undefined ? [k] : [])) };
 }
 
 /** the issues list as it was left: the list as the model read it, and the points checked to keep separate */
@@ -146,7 +111,7 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
   );
 
   const { points } = list;
-  const { shown, raised, fresh, input } = reviewOf(dealFindings(s, dealId), { docId: list.doc.docId, name: list.doc.doc }, points, kept);
+  const { shown, raised, fresh, input } = reviewIssuesList(s, dealId, list, kept);
   const was = (k: number): [string, string] => { const t = shown[k]!; return typeof t === 'number' ? ['Joins', `#${points[t].n} ${points[t].title}`] : [t.status === 'closed' ? 'Joins closed finding' : 'Joins', t.title]; };
   // the point numbers' column is as wide as the longest, so every title starts at the same place in both sections
   const nw = `calc(${Math.min(6, points.reduce((m, p) => Math.max(m, p.n.length), 1))}ch + .7em)`;   // the digits, and the #; a longer number is cut, and whole on hover

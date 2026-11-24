@@ -1,7 +1,8 @@
 import { WORKSTREAMS } from '../domain/model';
 import { fail, ok, rejected, type Result } from '../domain/result';
 import type { DocumentRef, IssuePoint } from '../ports';
-import { dealFindings } from './state';
+import { issuesListDestinations } from './issuesListJoins';
+import { dealFindings, type State } from './state';
 import type { Store } from './store';
 
 export interface ReadIssuesList {
@@ -25,4 +26,25 @@ export async function readIssuesList(
   const doc = attached.value;
   const read = await ai.issuesList({ dealId, doc, findings, workstreams: WORKSTREAMS });
   return read.ok ? ok({ doc, points: read.value.points }) : read;
+}
+
+/** The preview uses ImportIssuesList's join rules, with the model's matches treated as proposals. */
+export function reviewIssuesList(state: State, dealId: string, list: ReadIssuesList, kept: ReadonlySet<number>) {
+  const { doc, points } = list;
+  const proposals = points.map(({ n, text, same }, index) => ({
+    n, text, own: kept.has(index),
+    ...(!same ? {} : 'finding' in same ? { suggestedFinding: same.finding } : { after: same.point }),
+  }));
+  const destinations = issuesListDestinations(
+    dealFindings(state, dealId), { ...doc, doc: doc.doc.trim() }, proposals,
+  );
+  const shown = destinations.map((point) => point.shown);
+  const goes = destinations.map((point) => point.goes);
+  const raised = shown.flatMap((target, index) => target === undefined ? [] : [index]);
+  const fresh = goes.flatMap((target, index) => target === undefined ? [index] : []);
+  const input = points.map(({ n, text, title, workstream }, index) => ({
+    n, text, title, workstream,
+    ...(kept.has(index) ? { own: true } : destinations[index].reference),
+  }));
+  return { shown, goes, raised, fresh, input };
 }
