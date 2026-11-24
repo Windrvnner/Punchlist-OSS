@@ -113,14 +113,8 @@ const diligenceList = () => diligenceReport(false)
 
 // ---- Tasks: what Needs Input holds ----
 
-// the research task's short name, so it reads whole in the pane's row and in its card
+// a question from another conversation, left running there, that waits on the person
 const WATERFALL_TASK = 'Intercreditor waterfall';
-
-const TURN_WATERFALL_ASK = '<div class="me">Does the intercreditor waterfall pay the O&amp;M reserve before senior debt?</div>';
-
-const TURN_WATERFALL_NEEDS_INPUT = `${TURN_WATERFALL_ASK}
-<div class="ai"><p>This question runs as a task in Tasks. Its answer will appear here when it finishes.</p>
-${taskCard('logedit', WATERFALL_TASK, 'Needs input')}</div>`;
 
 // Needs Input's buttons share one width, so the status texts line up in one column
 const REVIEW_BUTTON = (label) => `<button class="btn sm x-act">${label}</button>`;
@@ -239,8 +233,7 @@ const OPEN_QUESTION_SCREENS = {
   folders: () => OPEN_QUESTION_SCREENS.dealheader(),
   diligence: () => slimRail() + openQuestionStage(inPermitsChat([TURN_PERMITS, TURN_DILIGENCE_DONE])
     + pane(paneTabs([TASKS_TAB, DILIGENCE_TAB], 'diligence'), diligenceList(), paneWidth())),
-  needsinput: () => slimRail() + openQuestionStage(conversation([TURN_GUARANTEE_CAP, TURN_WATERFALL_NEEDS_INPUT],
-    { title: 'Guarantee cap and waterfall', open: true })
+  needsinput: () => slimRail() + openQuestionStage(inPermitsChat([TURN_PERMITS, TURN_DILIGENCE_DONE])
     + pane(paneTabs([TASKS_TAB], 'tasks'), NEEDS_INPUT_TASKS, paneWidth())),
   homepast: () => sidebar() + openQuestionStage(homeScreen()),
   archscale: () => sidebar() + openQuestionStage(homeScreen()),
@@ -255,11 +248,6 @@ function showDealNameTooltip() {
   document.body.appendChild(tooltip);
   Object.assign(tooltip.style, { left: `${anchor.left}px`, top: `${anchor.bottom + 8}px` });
   document.querySelector('.x-dealname').classList.add('hover');
-}
-
-/** In the task screen, the composer is set to Thorough, the answer mode whose questions run as tasks. */
-function setComposerToThorough() {
-  document.querySelector('.x-composer .scopebtn.mode span').textContent = 'Thorough';
 }
 
 /** Home's past conversations open under the history button, as wide as the composer. */
@@ -295,7 +283,6 @@ function placeOpenQuestionScreens() {
   if (['homepast', 'archscale'].includes(screen)) selectHomeInSidebar();
   applyDealHeader();
   if (screen === 'dealheader') showDealNameTooltip();
-  if (screen === 'needsinput') setComposerToThorough();
   if (screen === 'details') document.body.insertAdjacentHTML('beforeend', dealInfoDialog());
   if (screen === 'folders') showFoldersDialog();
   if (screen === 'homepast') openHomePastList();

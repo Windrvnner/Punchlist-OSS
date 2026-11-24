@@ -31,7 +31,7 @@ Running work animates, so a new render can differ from a kept shot in a spinner'
 | 07 | [Answer action tooltip](deal-screen/shots/07-answer-action-tooltip-light-1280x736.jpg) | The answer actions, named in tooltips |
 | 08 | [Past conversations](deal-screen/shots/08-past-conversations-light-1280x736.jpg) | The conversation title's searchable menu of past conversations |
 | 09 | [Diligence running](deal-screen/shots/09-diligence-running-light-1280x736.jpg) | Tasks, with the sidebar folded to its rail |
-| 10 | [Other conversation](deal-screen/shots/10-other-conversation-tasks-kept-light-1280x736.jpg) | Tasks unchanged in another conversation of the deal |
+| 10 | [Other conversation](deal-screen/shots/10-other-conversation-tasks-kept-light-1280x736.jpg) | Another conversation, with a question left running elsewhere listed in Tasks |
 | 11 | [Diligence report](deal-screen/shots/11-diligence-report-light-1280x736.jpg) | The Diligence tab, with the Checklist's own marks |
 | 12 | [Finding](deal-screen/shots/12-finding-light-1280x736.jpg) | An opened finding as a tab after the three fixed tabs |
 | 13 | [Source document](deal-screen/shots/13-source-document-light-1280x736.jpg) | Reading mode's viewer in the pane, with no highlighting |
@@ -41,7 +41,7 @@ Running work animates, so a new render can differ from a kept shot in a spinner'
 | 17 | [Finding updating](deal-screen/shots/17-finding-updating-light-1280x736.jpg) | A finding being updated from new files |
 | 18 | [Q&A item, draft](deal-screen/shots/18-qa-item-draft-light-1280x736.jpg) | An opened question with a draft response |
 | 19 | [Q&A item, answered](deal-screen/shots/19-qa-item-answered-light-1280x736.jpg) | An opened question with its response |
-| 20 | [Task running](deal-screen/shots/20-task-running-light-1280x736.jpg) | A task's steps while it runs, and its card in the chat |
+| 20 | [Task running](deal-screen/shots/20-task-running-light-1280x736.jpg) | A task's steps while it runs, opened from Tasks |
 | 21 | [Task done](deal-screen/shots/21-task-done-light-1280x736.jpg) | A finished task's result, with its reply box |
 | 22 | [Sidebar shown, Q&A](deal-screen/shots/22-sidebar-shown-qa-light-1280x736.jpg) | Q&A beside a pinned sidebar |
 | 23 | [Sidebar shown, finding](deal-screen/shots/23-sidebar-shown-finding-light-1280x736.jpg) | A finding beside a pinned sidebar |
@@ -59,6 +59,6 @@ Screens 27 to 34 propose answers to the points the screens above left open. They
 | 28 | [Deal Info](deal-screen/shots/28-deal-info-light-1280x736.jpg) | The deal's details, its folders, and Delete Deal |
 | 29 | [Folders](deal-screen/shots/29-folders-light-1280x736.jpg) | Overview's Documents list in the Folders dialog |
 | 30 | [Diligence](deal-screen/shots/30-diligence-light-1280x736.jpg) | Every checklist item with its result, one row of filters, and **Run Diligence** |
-| 32 | [Needs Input](deal-screen/shots/32-tasks-needs-input-light-1280x736.jpg) | What Needs Input holds, and a task waiting for a reply |
+| 32 | [Needs Input](deal-screen/shots/32-tasks-needs-input-light-1280x736.jpg) | What Needs Input holds: workflows, and a question from another conversation |
 | 33 | [Home's past conversations](deal-screen/shots/33-home-past-conversations-light-1280x736.jpg) | Home's history button, with a conversation that has a new result |
 | 34 | [Archived at scale](deal-screen/shots/34-archived-at-scale-light-1280x736.jpg) | The end of a 40-deal list, with all 12 archived deals and changed ones first |

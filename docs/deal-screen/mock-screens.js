@@ -16,10 +16,10 @@ const runningDiligenceTab = { ...DILIGENCE_TAB, progress: 0.5 };
 const PANE_SCREENS = {
   running: () => [inPermitsChat([TURN_PERMITS, TURN_DILIGENCE_RUNNING]),
     pane(paneTabs([TASKS_TAB, runningDiligenceTab], 'tasks'), TASKS_LIST, paneWidth())],
-  // tasks belong to the deal: after switching conversations, Tasks still lists every task, and each card stays in
-  // the conversation that started it
-  switch: () => [conversation([TURN_BOARD_TASK_RUNNING],
-    { title: CONVERSATION_TITLES.boardResolutions, open: true, top: true }),
+  // in another conversation, Tasks still lists the question left running in the board resolutions conversation,
+  // whose answer arrives there
+  switch: () => [conversation([TURN_GUARANTEE_CAP],
+    { title: CONVERSATION_TITLES.guarantee, open: true, top: true }),
   pane(paneTabs([TASKS_TAB, runningDiligenceTab], 'tasks'), TASKS_LIST, paneWidth())],
   report: () => [inPermitsChat([TURN_PERMITS, TURN_DILIGENCE_DONE]),
     pane(paneTabs([TASKS_TAB, DILIGENCE_TAB], 'diligence'), diligenceReport(false), paneWidth())],
@@ -37,10 +37,10 @@ const PANE_SCREENS = {
     qaPane(qaTableFits() ? qaTable('drafted') : qaOpenedQuestion('drafted'))],
   qaans: () => [inPermitsChat([TURN_PERMITS, TURN_GUARANTEE_CAP, TURN_COUNTERPARTY]),
     qaPane(qaTableFits() ? qaTable('answered') : qaOpenedQuestion('answered'))],
-  taskrun: () => [inPermitsChat([TURN_PERMITS, TURN_BOARD_TASK_RUNNING]),
+  taskrun: () => [inPermitsChat([TURN_PERMITS]),
     pane(paneTabs([{ ...TASKS_TAB, progress: 0.5 }, { ...TASK_TAB, progress: 0.55 }], 'task'), TASK_RUNNING,
       paneWidth())],
-  taskdone: () => [inPermitsChat([TURN_PERMITS, TURN_BOARD_TASK_DONE]),
+  taskdone: () => [inPermitsChat([TURN_PERMITS]),
     pane(paneTabs([TASKS_TAB, TASK_TAB], 'task'), TASK_DONE, paneWidth())],
   // Q&A gets the reading width the source viewer has, and the conversation stays open beside it
   qafocus: () => [inPermitsChat([TURN_PERMITS, TURN_GUARANTEE_CAP, TURN_COUNTERPARTY]),

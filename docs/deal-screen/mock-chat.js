@@ -2,7 +2,7 @@
 
 const CONVERSATION_TITLES = {
   permits: 'Permits and diligence',
-  boardResolutions: 'Board resolutions for the financing',
+  guarantee: 'Guarantee cap',
 };
 
 // marks where an answer's actions go; only the last answer in a conversation shows them
@@ -71,18 +71,6 @@ const TURN_DRAFT_RESPONSE = `<div class="me">Draft a response to Q433 from the d
 const TURN_RECHECK = `<div class="me">Two new files arrived in 04 Legal. Check them against the checklist.</div>
 <div class="ai"><p>Checking the checklist and findings against the 2 new files. The report updates as each item is checked.</p>
 ${taskCard('cklist', 'Diligence', '1,204 of 2,148', 0.56)}</div>`;
-
-const ASK_BOARD_RESOLUTIONS = '<div class="me">Are the board resolutions for the financing current?</div>';
-
-const TURN_BOARD_TASK_RUNNING = `${ASK_BOARD_RESOLUTIONS}
-<div class="ai"><p>This question runs as a task in Tasks. Its answer will appear here when it finishes.</p>
-${taskCard('logedit', BOARD_TASK, 'Step 3 of 5', 0.5,
-    'Reading Credit agreement (draft 6).pdf')}</div>`;
-
-const TURN_BOARD_TASK_DONE = `${ASK_BOARD_RESOLUTIONS}
-<div class="ai"><p>The resolutions are out of date. The board approved draft 4 of the credit agreement, and draft 6`
-  + ' changes the facility size and adds a hedging bank. It is proposed as a finding for review.</p>\n'
-  + `${taskCard('logedit', BOARD_TASK, 'Done · 4 documents')}${ACTIONS_MARK}</div>`;
 
 /** Puts the answer actions in place of the last mark only; earlier marks stay as empty comments. */
 function withLastAnswerActions(html) {
