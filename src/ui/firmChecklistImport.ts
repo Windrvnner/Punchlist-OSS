@@ -21,8 +21,8 @@ import { keepImport } from './keptImports';
 export type Busy = '' | 'reading' | 'asking' | 'reviewing' | 'importing';
 
 /**
- * One file read or model call at a time: what is under way, and the error the footer shows. Each read or call takes a
- * new `token`; leaving or going back bumps it too, so an answer that comes back after either is dropped.
+ * Each read or model call takes a new `token`. Leaving or going back bumps it too, so a late answer is dropped.
+ * A retry can still be in flight after Back, while the person chooses and reads another source.
  */
 export function useWork() {
   const [busy, setBusy] = useState<Busy>('');
@@ -37,7 +37,7 @@ export function useWork() {
     setError('');
     return mine;
   };
-  /** drops any answer still to come, and what was under way with it */
+  /** Drops the pending answer and clears the activity associated with it. */
   const drop = () => {
     newToken();
     setBusy('');
@@ -259,29 +259,39 @@ export function useListReview(
   /** what the review would be asked about now, as the person last left the choices: one asked for others isn't shown */
   const sigNow = useRef('');
   const { generalTexts } = target;
-  sigNow.current = prepared
-    ? askedAbout(prepared.items.map((item) => item.text), askReword, askSame, generalTexts)
-    : '';
+  const texts = prepared?.items.map((item) => item.text);
+  const sig = texts ? askedAbout(texts, askReword, askSame, generalTexts) : '';
+  sigNow.current = sig;
+  const cached = review && askedFor.current === sig ? review : null;
+  const canReword = can.reword;
+  const canAskSame = can.sameMeaning;
+  const needsCall = cached
+    ? canAskSame && hasMissedDuplicates(cached)
+    : (askReword && canReword) || (askSame && canAskSame);
   const retries = useReviewRetries(store, work, review, setReview, generalTexts);
+  const waiting = !!texts?.length && needsCall && retries.pending;
   const toBringIn = useBringIn(store, work, target, keeper, { review, remove, useReword });
 
   // A model that cannot be asked leaves its part out and says so; the list can still be brought in.
   const next = async () => {
-    if (!prepared || !prepared.items.length || !target.named || work.busy) return;
-    const texts = prepared.items.map((item) => item.text);
-    const sig = askedAbout(texts, askReword, askSame, generalTexts);
-    if (review && askedFor.current === sig) {
-      await showAgain(review, texts, sig);
+    if (!prepared || !texts?.length || !target.named || work.busy) return;
+    if (cached) {
+      if (needsCall) {
+        const missedAt = cached.sameMissed?.at ?? texts.map((_, at) => at);
+        if (!(await retries.askMissed(cached, texts, missedAt))) return;
+      }
+      if (sigNow.current === sig) setShown(true);
       return;
     }
-    const mine = work.begin('reviewing');
-    const [rewordReply, sameReply] = await askModel(store, texts, { askReword, askSame }, generalTexts);
-    if (!work.isLatest(mine)) return;
-    work.setBusy('');
-    if (sigNow.current !== sig) return;   // the choices changed while the model was asked
+    const replies = needsCall
+      ? await retries.ask(() => askModel(store, texts, { askReword, askSame }, generalTexts))
+      : [null, null] as const;
+    if (!replies || sigNow.current !== sig) return;
+    const [rewordReply, sameReply] = replies;
+    work.setError('');
     const fresh = makeReview({
       items: prepared.items, earlierItems: target.replaces?.items, generalTexts, askReword, askSame,
-      canReword: can.reword, canAskSame: can.sameMeaning, rewordReply, sameReply,
+      canReword, canAskSame, rewordReply, sameReply,
     });
     setReview(fresh.review);
     choices.setUseReword(fresh.checked);
@@ -289,18 +299,15 @@ export function useListReview(
     askedFor.current = sig;
     setShown(true);
   };
-  // the duplicate check missed some items, or all of them: those alone are asked about again, and the review shown
-  // only if nothing it was asked about changed meanwhile
-  const showAgain = async (was: Review, texts: string[], sig: string) => {
-    const sameFailed = was.asked.same === 'unreachable' || was.asked.same === 'failed';
-    const missedAt = was.sameMissed?.at ?? (sameFailed ? texts.map((_, at) => at) : null);
-    if (missedAt && can.sameMeaning && !(await retries.askMissed(was, texts, missedAt))) return;
-    if (sigNow.current === sig) setShown(true);
-  };
   return {
-    ...choices, review, shown: made.shown, askedFor, ...toBringIn,
-    next, retry: retries.retry, retryWording: retries.retryWording, backToList: made.backToList, reset,
+    ...choices, review, shown: made.shown, askedFor, waiting, ...toBringIn,
+    next, retry: retries.retry, retryWording: retries.retryWording, reset, backToList: made.backToList,
   };
+}
+
+/** A duplicate check can leave some or all items unchecked. */
+function hasMissedDuplicates(review: Review) {
+  return !!review.sameMissed || review.asked.same === 'unreachable' || review.asked.same === 'failed';
 }
 
 /** The review as last made, whether it is on screen, and what it was asked about. */
@@ -354,26 +361,46 @@ function askModel(
   return Promise.all([rewording, duplicates]);
 }
 
-/** Asking the model again for what the review is missing, keeping what the person checked as it was. */
+/** A failed duplicate retry changes the reason for the rows it asked about (#378). */
+function withFailedPairs(was: Review, reason: Asked): Review {
+  if (!was.sameMissed) return { ...was, asked: { ...was.asked, same: reason } };
+  const kind = reason === 'unreachable' ? reason : 'failed';
+  return { ...was, sameMissed: { ...was.sameMissed, kind } };
+}
+
+/** Fresh reviews and retries share one in-flight guard. Retries keep the person's check marks. */
 function useReviewRetries(
   store: Store, work: Work, review: Review | null, setReview: (review: Review) => void, generalTexts: string[],
 ) {
   const { can } = store.get();
-  // `asking` stops a second press in the same frame, before busy shows, from paying for a second call
+  // The ref guards same-frame presses. Only Next needs to know a model call is still pending after Back.
   const asking = useRef(false);
+  const [pending, setPending] = useState(false);
+  const ask = async <T>(call: () => Promise<T>): Promise<T | undefined> => {
+    if (work.busy || asking.current) return;
+    asking.current = true;
+    setPending(true);
+    const mine = work.begin('reviewing');
+    try {
+      const reply = await call();
+      if (work.isLatest(mine)) return reply;
+    } finally {
+      asking.current = false;
+      setPending(false);
+      if (work.isLatest(mine)) work.setBusy('');
+    }
+  };
   // The duplicate check missed some items last time (a part the service did not answer): Next asks about those alone
   // again, and adds what it finds.
   const askMissed = async (was: Review, texts: string[], missedAt: number[]) => {
-    const mine = work.begin('reviewing');
-    const sameReply = await store.services.ai.sameMeaning!({ items: texts, against: generalTexts, only: missedAt });
-    if (!work.isLatest(mine)) return false;
-    work.setBusy('');
-    // asked again and still not answered: the review shows as it was, check marks and all, and its line says so
-    if (!sameReply.ok) {
-      work.setError(`${NOT_DONE[failedAs(sameReply)]} again`);
-      return true;
-    }
-    setReview(withMissedPairs(was, sameReply.value));
+    if (!can.sameMeaning) return false;
+    const query = { items: texts, against: generalTexts, only: missedAt };
+    const sameReply = await ask(() => store.services.ai.sameMeaning!(query));
+    if (!sameReply) return false;
+    const updated = sameReply.ok ? withMissedPairs(was, sameReply.value) : withFailedPairs(was, failedAs(sameReply));
+    setReview(updated);
+    const reason = NOT_DONE[updated.sameMissed?.kind ?? updated.asked.same];
+    if (reason) work.setError(`${reason} again`);
     return true;
   };
   // Retry beside the duplicates line does what Back then Next does: asks about the missed items alone, or all of them
@@ -387,25 +414,20 @@ function useReviewRetries(
   // The wording suggestions failed (decisions: Retries): Retry asks for them again, and adds them unchecked beside any
   // taken last time.
   const retryWording = async () => {
-    if (!review || work.busy || asking.current || !can.reword) return;
-    const was = review;
-    asking.current = true;
-    const mine = work.begin('reviewing');
-    const items = was.items.map((item) => item.text);
-    const rewordReply = await store.services.ai.reword!({ items }).finally(() => {
-      asking.current = false;
-    });
-    if (!work.isLatest(mine)) return;
-    work.setBusy('');
+    if (!review || !can.reword) return;
+    const items = review.items.map((item) => item.text);
+    const reply = await ask(() => store.services.ai.reword!({ items }));
+    if (!reply) return;
     // failed again: the line gives this failure's reason, and the footer says it was asked again
-    if (!rewordReply.ok) {
-      setReview({ ...was, asked: { ...was.asked, reword: failedAs(rewordReply) } });
-      work.setError(`${NOT_DONE[failedAs(rewordReply)]} again`);
+    if (!reply.ok) {
+      const reason = failedAs(reply);
+      setReview({ ...review, asked: { ...review.asked, reword: reason } });
+      work.setError(`${NOT_DONE[reason]} again`);
       return;
     }
-    setReview(withRewordings(was, rewordReply.value));
+    setReview(withRewordings(review, reply.value));
   };
-  return { askMissed, retry, retryWording };
+  return { ask, pending, askMissed, retry, retryWording };
 }
 
 /** The items as checked in the review, and bringing them in. */
