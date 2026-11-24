@@ -49,7 +49,8 @@ async function other(m: ReturnType<typeof start>, who: typeof PC2, kind: 'deal' 
 }
 
 // the field and the store's context come from one load of the modules, as in the app (a restart loads them again)
-type Ui = typeof import('../../src/ui/editField') & typeof import('../../src/ui/hooks');
+type Ui = typeof import('../../src/ui/editField') & typeof import('../../src/ui/hooks')
+  & typeof import('../../src/app/fieldDrafts');
 /** a field as the app shows one: under the store, drawn from its state; `shown(false)` takes it off screen */
 function screen(ui: Ui, store: Store, which: { kind: 'counterparty'; dealId: string } | { kind: 'response'; dealId: string; questionId: string }) {
   const host = document.createElement('div'); document.body.appendChild(host);
@@ -65,7 +66,11 @@ function screen(ui: Ui, store: Store, which: { kind: 'counterparty'; dealId: str
   const press = async (label: string) => { await act(async () => { [...host.querySelectorAll('button')].find((b) => b.textContent?.startsWith(label))!.click(); }); await tick(60); };
   return { host, shown, el, type, press, text: () => host.textContent ?? '' };
 }
-const load = async () => ({ ...(await import('../../src/ui/editField')), ...(await import('../../src/ui/hooks')) }) as Ui;
+const load = async (): Promise<Ui> => ({
+  ...(await import('../../src/ui/editField')),
+  ...(await import('../../src/ui/hooks')),
+  ...(await import('../../src/app/fieldDrafts')),
+});
 async function fresh() {
   localStorage.clear();
   await restartKeptText();

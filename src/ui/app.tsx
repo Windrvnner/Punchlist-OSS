@@ -37,7 +37,7 @@ import { takeNavPatch, closeDocument, takeFocusAfter } from './nav';
 import { renameKept } from '../app/keptText';
 import { keepAttachments } from './keptAttachments';
 import { followCopies } from '../app/attachments';
-import { staleKept } from './editField';
+import { staleKept } from '../app/fieldDrafts';
 import { isReading, dealHash, dealTwinLabels } from '../app/state';
 import { num } from './counts';
 

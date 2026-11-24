@@ -9,7 +9,8 @@ import { checklistListCounts, checklistStandingCounts, findingCounts, questionCo
 import { folderProgress, overviewStatus, type FolderProgressNotice } from '../app/indexing';
 import { openLocate } from '../app/relink';
 import { PageTop, Stalled, NoRoom, INDEXING_LINE, INDEXING_TIP, useDealLock } from './deal';
-import { EditField, ReadOnlyContext, readDeal } from './editField';
+import { EditField, ReadOnlyContext } from './editField';
+import { readDeal } from '../app/fieldDrafts';
 import { EditDeal } from '../app/commands/deals';
 import { CheckLine } from './findings';
 import { PickList, type PickName } from './pickList';
