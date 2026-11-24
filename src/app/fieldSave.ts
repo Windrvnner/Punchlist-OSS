@@ -250,9 +250,7 @@ export class FieldSave {
     }
     this.settleAttempt(attempt, false, false, commit);
     if (attempt.choice) {
-      if (outcome.kind === 'failed') this.waits = true;
-      this.keepExternal();
-      if (outcome.kind === 'refused') this.show({ reason: outcome.reason, status: 'refused' });
+      this.keepUnacceptedChoice(outcome);
       return;
     }
     this.keepText(this.input.text());
@@ -263,19 +261,22 @@ export class FieldSave {
     }
   }
 
+  private keepUnacceptedChoice(outcome: Extract<FieldSaveOutcome, { kind: 'failed' | 'refused' }>) {
+    if (outcome.kind === 'failed') this.waits = true;
+    this.keepExternal();
+    if (outcome.kind === 'refused') this.show({ reason: outcome.reason, status: 'refused' });
+  }
+
   /**
    * Record writes land one at a time. If this save was normalized, its value is the first unmatched arrival.
    * Any later arrival is still a change from elsewhere and leaves the typed text waiting for a choice.
    */
   private settleAttempt(attempt: FieldAttempt, saved: boolean, written: boolean, commit: FieldCommit) {
-    const { text, over, choice, matched } = attempt;
+    const { text, choice } = attempt;
     const followed = !this.inFlight.includes(attempt);
     this.inFlight = this.inFlight.filter((pending) => pending !== attempt);
     if (saved) this.input.landedEntryText(text);
-    let stored = written ? text : over;
-    if (written && !followed) stored = this.followStoredWrite() ?? text;
-    // A later exact write already advanced the save base. Recover the choice without moving the base back.
-    else if (written && choice && !matched) stored = this.arrived.shift() ?? text;
+    const stored = this.settledValue(attempt, written, followed);
     if (choice) this.settleChoice(text, saved ? stored : undefined);
     if (this.inFlight.length) return;
     this.arrived = [];
@@ -285,6 +286,14 @@ export class FieldSave {
       this.show({ external: false });
       void this.save(this.input.text(), commit);
     } else this.otherSince(this.input.text());
+  }
+
+  private settledValue({ text, over, choice, matched }: FieldAttempt, written: boolean, followed: boolean) {
+    if (!written) return over;
+    if (!followed) return this.followStoredWrite() ?? text;
+    // A later exact write already advanced the save base. Recover the choice without moving the base back.
+    if (choice && !matched) return this.arrived.shift() ?? text;
+    return text;
   }
 
   private followStoredWrite() {
