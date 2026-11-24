@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
-import { checklistFindings, checklistView } from '../../src/app/checklistView';
+import { checklistDrafts } from '../../src/app/checklistDrafts';
+import { checklistQuestionTarget } from '../../src/app/checklistQuestion';
+import { findingsRaisedOnItem, checklistView } from '../../src/app/checklistView';
 import { initialState, type State } from '../../src/app/state';
 import { itemId, type Item } from '../../src/domain/checklist';
 import type { ChecklistRow } from '../../src/ports';
@@ -160,7 +162,7 @@ it('groups a checklist without item records by standing, keeping check order wit
   expect(viewFor(state, 'gap').shown.map(({ groups }) => groups)).toEqual([[], []]);
 });
 
-it('keeps the draft on its open finding, otherwise choosing the oldest open finding for the off item', () => {
+it('lists a turned-off item’s findings in standing order while a question stays on its original finding', () => {
   const state = checklistDeal();
   const [first, next, closed, anotherItem, foreign] = scaleMemoInput.findings;
   const older = { ...first, itemId: stale.id, status: 'open' as const, createdAt: '2026-07-02T00:00:00Z' };
@@ -169,16 +171,24 @@ it('keeps the draft on its open finding, otherwise choosing the oldest open find
   const findings = [finished, { ...foreign, dealId: otherDeal, itemId: stale.id }, newer, older,
     { ...anotherItem, itemId: offUnseen.id, status: 'closed' as const }];
   state.findings = Object.fromEntries(findings.map((finding) => [finding.id, finding]));
-  const row = checkedRow(stale);
-  expect(checklistFindings(state, deal.id, row, true)).toEqual({ finding: older, raised: [older, newer, finished] });
-  expect(checklistFindings(state, deal.id, row, true, newer.id).finding).toBe(newer);
-  for (const target of [finished, foreign, anotherItem]) {
-    expect(checklistFindings(state, deal.id, row, true, target.id).finding).toBe(older);
-  }
+  const row = viewFor(state, 'off', stale.id).selected!;
+  const draft = checklistDrafts({ texts: new Map(), targets: new Map(), movedId: (id) => id }).open(stale.id);
+  draft.begin(newer.id);
+  draft.write('Which agreement governs this obligation?');
+  const raised = () => findingsRaisedOnItem(state, deal.id, row.id);
+  const card = () => checklistQuestionTarget(state, row, true, draft.findingId, raised()[0]);
+
+  expect(raised()).toEqual([older, newer, finished]);
+  expect(card()).toMatchObject({ title: newer.title, why: null, links: { linkedFinding: newer.id } });
   expect(viewFor(state, 'off').offOpen).toBe(1);
-  const active = { ...row, findingId: newer.id };
-  expect(checklistFindings(state, deal.id, active, false)).toEqual({ finding: newer, raised: [] });
+  const nowClosed = { ...newer, status: 'closed' as const };
+  state.findings[newer.id] = nowClosed;
+  expect(raised()).toEqual([older, finished, nowClosed]);
+  expect(card()).toMatchObject({
+    title: newer.title, why: 'Its finding is closed', links: { linkedFinding: newer.id },
+  });
   state.findings = { [finished.id]: finished };
-  expect(checklistFindings(state, deal.id, row, true, newer.id)).toEqual({ finding: finished, raised: [finished] });
-  expect(checklistFindings(state, deal.id, checkedRow(offUnseen), true)).toEqual({ finding: undefined, raised: [] });
+  expect(raised()).toEqual([finished]);
+  expect(card()).toMatchObject({ why: 'Its finding is no longer here', links: { linkedFinding: newer.id } });
+  expect(findingsRaisedOnItem(state, deal.id, offUnseen.id)).toEqual([]);
 });
