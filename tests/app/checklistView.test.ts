@@ -75,3 +75,81 @@ it('replaces stale results for off items and lists newly added items after the c
     expect(waiting.filters).toEqual(['all', 'off']);
   }
 });
+
+it('counts exactly the matching rows for every filter and keeps a selected exception visible', () => {
+  const state = checklistDeal();
+  const expected = {
+    all: [...items, legacy], finding: [flagged], gone: [deleted], gap: [gap, legacy], open: [added, unsettled],
+    person: [resolved], satisfied: items.slice(8), off: [stale, offUnseen],
+  };
+  expect(viewFor(state, 'all').filters).toEqual(Object.keys(expected));
+  for (const filter of viewFor(state, 'all').filters) {
+    const { counts, shown, on } = viewFor(state, filter);
+    expect(on).toBe(filter);
+    expect(counts[filter]).toBe(expected[filter].length);
+    expect(shown.length).toBe(counts[filter]);
+    expect(new Set(shown.map(({ row }) => row.id))).toEqual(new Set(expected[filter].map((item) => item.id)));
+  }
+  for (const [filter, selected] of [['off', flagged], ['finding', gap], ['gap', stale]] as const) {
+    const pinned = viewFor(state, filter, selected.id);
+    expect(pinned.shown.map(({ row }) => row.id)).toContain(selected.id);
+    expect(pinned.selected?.id).toBe(selected.id);
+    expect(pinned.shown.length).toBe(pinned.counts[filter] + 1);
+  }
+});
+
+it('hides empty optional filters, falls back to All, and keeps the standard filters on an active list', () => {
+  const state = checklistDeal();
+  state.items = {};
+  state.checklists = { [deal.id]: [legacy] };
+  const { filters, counts, on } = viewFor(state, 'off');
+  expect(filters).toEqual(['all', 'finding', 'gap', 'satisfied']);
+  expect(counts).toEqual({ all: 1, finding: 0, gone: 0, gap: 1, open: 0, person: 0, satisfied: 0, off: 0 });
+  expect(on).toBe('all');
+  state.checklists[deal.id] = [];
+  expect(viewFor(state, 'open').filters).toEqual(['all']);
+  for (const item of items) state.items[item.id] = { ...item, off: true };
+  expect(viewFor(state, 'finding').filters).toEqual(['all', 'off']);
+  expect(viewFor(state, 'finding').on).toBe('all');
+});
+
+it('puts each list, section and subsection in first-item order and counts its visible rows', () => {
+  const state = checklistDeal();
+  const product = { layer: 'product', value: 'Construction finance' } as const;
+  const sector = { layer: 'sector', value: 'Energy' } as const;
+  const technology = { layer: 'technology', value: 'Storage' } as const;
+  const onDeal = { layer: 'deal', value: '' } as const;
+  state.items[offUnseen.id].from = [sector, { layer: 'broad', value: '' }];
+  state.items[added.id].from = [technology, sector];
+  state.items[gap.id].from = [onDeal];
+  state.items[flagged.id].from = [onDeal, technology];
+  for (const [item, section, subsection] of [
+    [stale, 'Execution', 'Consents'], [resolved, 'Conditions', ''], [deleted, 'Execution', 'Waivers'],
+    [unsettled, 'Execution', 'Consents'],
+  ] as const) {
+    Object.assign(state.items[item.id], { from: [sector, product], section, subsection });
+  }
+  const { shown } = viewFor(state, 'all');
+  const lists = shown.flatMap(({ heads }) => heads.filter((head) => head.level === 'list').map((head) => head.text));
+  expect(lists).toEqual(['Construction finance', 'General', 'Energy', 'Added on This Deal', 'Storage', 'Other']);
+  expect(shown.slice(0, 4).map(({ row }) => row.id)).toEqual([stale.id, unsettled.id, deleted.id, resolved.id]);
+  const names = (heads: typeof shown[number]['groups']) => heads.map(({ text, count }) => [text, count]);
+  expect(shown.slice(0, 4).map(({ heads }) => names(heads))).toEqual([
+    [['Construction finance', 4], ['Execution', 3], ['Consents', 2]], [], [['Waivers', 1]], [['Conditions', 1]],
+  ]);
+  expect(names(shown[1].groups)).toEqual(names(shown[0].heads));
+  expect(shown.at(-1)?.row).toBe(legacy);
+  const filtered = viewFor(state, 'off', deleted.id);
+  expect(names(filtered.shown[0].heads)).toEqual([['Construction finance', 2], ['Execution', 2], ['Consents', 1]]);
+});
+
+it('groups a checklist without item records by standing, keeping check order within each standing', () => {
+  const state = checklistDeal();
+  state.items = {};
+  const { shown } = viewFor(state, 'all');
+  const heads = shown.flatMap((entry) => entry.heads);
+  expect(heads.map(({ text }) => text)).toEqual(['finding', 'gone', 'gap', 'open', 'person', 'satisfied']);
+  expect(heads.map(({ count }) => count)).toEqual([2, 1, 2, 1, 1, items.length - 8]);
+  expect(shown.slice(0, 5).map(({ row }) => row.id)).toEqual([flagged.id, stale.id, deleted.id, legacy.id, gap.id]);
+  expect(viewFor(state, 'gap').shown.map(({ groups }) => groups)).toEqual([[], []]);
+});
