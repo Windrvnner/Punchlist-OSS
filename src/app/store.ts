@@ -11,6 +11,7 @@
  */
 import { SERVICE } from '../control';
 import { commandLabel } from './commandLabels';
+import { capabilities } from './capabilities';
 import { CONNECTED } from './connection';
 import { CHANGED_ELSEWHERE } from './changedElsewhere';
 import { overLimit, TOO_LONG } from '../domain/importExport';
@@ -201,7 +202,7 @@ type ToastLinger = boolean | 'stays' | 'kept';
 type ToastStyle = { sticky?: ToastLinger; glyph?: State['ui']['toasts'][number]['glyph'] };
 
 export class Store {
-  private state: State = initialState();
+  private state: State;
   private listeners = new Map<Listener, boolean>();
   private peerRenderFrame: number | null = null;
   private commands = new Map<string, Command<any>>();
@@ -222,6 +223,7 @@ export class Store {
   private readonly windowId = globalThis.crypto.randomUUID();
 
   constructor(public readonly services: Services, commands: Command<any>[]) {
+    this.state = initialState(capabilities(services));
     this.conversations = services.conversations ?? localConversations(services.local);
     for (const c of [...commands, Undo]) this.commands.set(c.name, c);
     services.ai = this.watchModel(services.ai);
