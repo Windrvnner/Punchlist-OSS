@@ -19,6 +19,7 @@ import { dealQuestions, FIRM } from '../../src/app/state';
 import { keepImportedLog, exportQaLog, logOf } from '../../src/app/qaLog';
 import { prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { nodeQaLogs } from '../../src/backend/qaLogs';
+import { temporaryFixtureName } from '../backend/qaLogWorkingFiles';
 import { ok } from '../../src/domain/result';
 
 const COMMANDS = [
@@ -56,7 +57,7 @@ const later = () => {
   const t0 = Date.now() - 10; const st = fs.statSync;   // 10 ms: a file system's clock may lag a little behind
   vi.spyOn(fs, 'statSync').mockImplementation(((f: fs.PathLike, o?: never) => { const s = st(f, o) as fs.Stats; return s && s.ctimeMs >= t0 ? Object.assign(Object.create(Object.getPrototypeOf(s)), s, { ctimeMs: s.ctimeMs + 2 * 60_000 }) : s; }) as never);
 };
-const isWorkingFile = (name: string) => /^~qa-log-[0-9a-f]{64}\.[0-9a-f]{8}\.(tmp|old)$/.test(name);
+const isWorkingFile = (name: string) => /^~qa-log-.*\.(tmp|old)$/.test(name);
 const leftovers = (folder: string) => fs.readdirSync(folder).filter(isWorkingFile);
 
 describe('a Q&A log update whose working files are busy as it tidies up', () => {
@@ -100,18 +101,21 @@ describe('a Q&A log update whose working files are busy as it tidies up', () => 
 
   it('never takes away another PC\'s new version not yet in place, another log\'s file, or a team file named alike', async () => {
     const { folder, store, dealId, q5 } = await setup();
-    const fresh = path.join(folder, '~Proseware Q&A log 0a1b2c3d.tmp'); fs.writeFileSync(fresh, 'another PC, saving this moment');
+    const fresh = path.join(folder, temporaryFixtureName(FILE, '0a1b2c3d'));
+    fs.writeFileSync(fresh, 'another PC, saving this moment');
     await store.dispatch(SetResponse, { dealId, questionId: q5.id, response: 'Answer v1' });
     const r = await exportQaLog(store, dealId); expect(r.ok && r.value.status).toBe('written');
     expect(fs.existsSync(fresh)).toBe(true);
     // however old: another PC's new version is in no version of the log; nor is another log's file or a team file named alike
-    const other = path.join(folder, '~Other log 0a1b2c3d.tmp'); const theirs = path.join(folder, '~Proseware Q&A log notes.old');
-    const dated = path.join(folder, '~Proseware Q&A log 20261117.tmp'); const csv = path.join(folder, '~Proseware Q&A log 0a1b2c3e.tmp');
-    for (const f of [other, theirs, dated]) fs.writeFileSync(f, 'not ours'); fs.writeFileSync(csv, 'another log of this name, as .xlsx');
+    const other = path.join(folder, temporaryFixtureName('Other log.csv', '0a1b2c3d'));
+    const theirs = path.join(folder, '~Proseware Q&A log notes.old');
+    const dated = path.join(folder, '~Proseware Q&A log 20261117.tmp');
+    const workbook = path.join(folder, temporaryFixtureName(FILE.replace(/\.csv$/, '.xlsx'), '0a1b2c3e'));
+    for (const f of [other, theirs, dated, workbook]) fs.writeFileSync(f, 'not ours');
     await store.dispatch(SetResponse, { dealId, questionId: q5.id, response: 'Answer v2' });
     later();
     const again = await exportQaLog(store, dealId); expect(again.ok && again.value.status).toBe('written');
-    expect([fresh, other, theirs, dated, csv].map((f) => fs.existsSync(f))).toEqual([true, true, true, true, true]);
+    expect([fresh, other, theirs, dated, workbook].map((f) => fs.existsSync(f))).toEqual([true, true, true, true, true]);
   }, 60_000);
 });
 

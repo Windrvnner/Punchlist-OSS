@@ -57,7 +57,7 @@ const edited = (s: string, set: Record<number, string[]>, add: string[][] = []) 
   if (add.length) l.splice(l.length - 1, 0, ...add.map((r) => r.join(',')));
   return l.join('\r\n');
 };
-const kept = (folder: string) => fs.readdirSync(folder).filter((n) => /\.[0-9a-f]{8}\.(old|kept|left)$/.test(n));
+const kept = (folder: string) => fs.readdirSync(folder).filter((n) => /^~qa-log-.*\.(old|kept|left)$/.test(n));
 const archive = (folder: string) => fs.readdirSync(path.join(folder, ARC)).sort().map((n) => ({ n, s: fs.readFileSync(path.join(folder, ARC, n), 'utf8') }));
 /** the folder's clock moves on two minutes: every file made from now on reads as made then, so the ones before are old */
 const later = () => {
@@ -237,7 +237,7 @@ describe('an edit kept aside in the log\'s folder', () => {
     const l = lines(path.join(folder, FILE)); expect([l[3], l[11]]).toEqual([`3,${text(3)},sroe on 3,`, `11,${text(11)},ldoe on 11,`]);
   }, 120_000);
 
-  it('when another PC\'s copy was made in the same tick of the folder\'s clock as theirs, is not merged against either: it is filed, and said so', async () => {
+  it('uses the verified archive when copies of different bytes have the same timestamp', async () => {
     const { folder, store, dealId } = await setup(); let lroe = '';
     await raced(folder, store, dealId, (s) => edited(s, { 3: ['3', text(3), 'sroe on 3', ''] }), (s) => (lroe = edited(s, { 11: ['11', text(11), 'ldoe on 11', ''] })));
     fs.writeFileSync(path.join(folder, ARC, 'Proseware Q&A log 2026-11-17 1001.csv'), lroe);   // another PC's update, archiving ldoe's file
@@ -245,10 +245,10 @@ describe('an edit kept aside in the log\'s folder', () => {
     vi.spyOn(fs, 'statSync').mockImplementation(((f: fs.PathLike, o?: never) => { const s = st(f, o) as fs.Stats; return s && s.ctimeMs <= t ? Object.assign(Object.create(Object.getPrototypeOf(s)), s, { ctimeMs: t }) : s; }) as never);
     const real = vi.mocked(fs.statSync).getMockImplementation()!; const t0 = Date.now() + 20; while (Date.now() < t0) { /* the next files are later */ }
     vi.mocked(fs.statSync).mockImplementation(((f: fs.PathLike, o?: never) => { const s = real(f, o) as fs.Stats; return s && s.ctimeMs > t ? Object.assign(Object.create(Object.getPrototypeOf(s)), s, { ctimeMs: s.ctimeMs + 2 * 60_000 }) : s; }) as never);
-    const r = await exportQaLog(store, dealId); expect(r.ok && r.value).toMatchObject({ status: 'written', kept: [], unmerged: 1 });
-    // ldoe's answer stays
+    const r = await exportQaLog(store, dealId);
+    expect(r.ok && r.value).toMatchObject({ status: 'written', kept: [], unmerged: 0 });
     const l = lines(path.join(folder, FILE));
-    expect([l[3], l[11]]).toEqual([`3,${text(3)},,`, `11,${text(11)},ldoe on 11,`]);
+    expect([l[3], l[11]]).toEqual([`3,${text(3)},sroe on 3,`, `11,${text(11)},ldoe on 11,`]);
     expect(kept(folder)).toEqual([]);
   }, 120_000);
 

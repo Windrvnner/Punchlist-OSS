@@ -42,13 +42,13 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-xlsx-')); fs.mkdirSync(path.join(folder, '01. Archive'));
     // as the save that kept it left them: the version it read, dated in the archive, then sroe's moved aside, and ldoe's new file
     fs.writeFileSync(path.join(folder, '01. Archive', 'Proseware Q&A log 2026-11-17 1000.xlsx'), base);
-    fs.writeFileSync(path.join(folder, asideFixtureName(FILE)), sroe);
+    fs.writeFileSync(path.join(folder, asideFixtureName(FILE, { base })), sroe);
     fs.writeFileSync(path.join(folder, FILE), lroe);
     later();
     const logs = nodeQaLogs({ convert: lo });
     const r = await logs.read({ folder, file: FILE }, { sheet: SHEET, headerRow: 1, kept: { text: 1 } });
     if (!r.ok) throw new Error(r.error.message);
-    expect(r.value.kept).toMatchObject({ files: [{ name: asideFixtureName(FILE) }], clashes: [] });
+    expect(r.value.kept).toMatchObject({ files: [{ name: asideFixtureName(FILE, { base }) }], clashes: [] });
     expect(r.value.kept!.files[0].left).toBeUndefined();                              // the formula that was there is not theirs
     expect(r.value.kept!.steps).toEqual([{ kind: 'cell', row: 7, col: 2, value: 'sroe on 7' }, { kind: 'cell', row: 1500, col: 3, value: 'sroe: chase' }]);
     const s = await logs.save({ folder, file: FILE, sheet: SHEET, steps: r.value.kept!.steps, stamp: r.value.stamp });
@@ -68,7 +68,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     const z = readZip(base); const part = 'xl/worksheets/sheet1.xml'; setPart(z, part, partText(z, part)!.replace(/<c r="D13"><f>[^<]*<\/f><v>[^<]*<\/v><\/c>/, '<c r="D13" t="inlineStr"><is><t>sroe typed over it</t></is></c>')); const sroe = writeZip(z);
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-xlsx-')); fs.mkdirSync(path.join(folder, '01. Archive'));
     fs.writeFileSync(path.join(folder, '01. Archive', 'Proseware Q&A log 2026-11-17 1000.xlsx'), base);
-    fs.writeFileSync(path.join(folder, asideFixtureName(FILE)), sroe);
+    fs.writeFileSync(path.join(folder, asideFixtureName(FILE, { base })), sroe);
     fs.writeFileSync(path.join(folder, FILE), base);
     later();
     const r = await nodeQaLogs({ convert: lo }).read({ folder, file: FILE }, { sheet: SHEET, headerRow: 1, kept: { text: 1, n: 0 } });
@@ -82,7 +82,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     const sroe = withFormula(base, 20);
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-xlsx-')); fs.mkdirSync(path.join(folder, '01. Archive'));
     fs.writeFileSync(path.join(folder, '01. Archive', 'Proseware Q&A log 2026-11-17 1000.xlsx'), base);
-    fs.writeFileSync(path.join(folder, asideFixtureName(FILE)), sroe);
+    fs.writeFileSync(path.join(folder, asideFixtureName(FILE, { base })), sroe);
     fs.writeFileSync(path.join(folder, FILE), base);
     later();
     const r = await nodeQaLogs({ convert: lo }).read({ folder, file: FILE }, { sheet: SHEET, headerRow: 1, kept: { text: 1 } });
@@ -90,7 +90,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     expect(r.value.kept).toMatchObject({
       steps: [],
       clashes: [],
-      files: [{ name: asideFixtureName(FILE), left: true }],
+      files: [{ name: asideFixtureName(FILE, { base }), left: true }],
     });
   }, 240_000);
   it('with no number column, an answer for one party never goes into another party\'s row that reads alike', async () => {
@@ -102,7 +102,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     const lroe = editXlsx(base, SHEET, [{ kind: 'cell', row: 1200, col: 3, value: 'ldoe put another question here' }]);
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-xlsx-')); fs.mkdirSync(path.join(folder, '01. Archive'));
     fs.writeFileSync(path.join(folder, '01. Archive', 'Proseware Q&A log 2026-11-17 1000.xlsx'), base);
-    fs.writeFileSync(path.join(folder, asideFixtureName(FILE)), sroe);
+    fs.writeFileSync(path.join(folder, asideFixtureName(FILE, { base })), sroe);
     fs.writeFileSync(path.join(folder, FILE), lroe);
     later();
     const r = await nodeQaLogs({ convert: lo }).read({ folder, file: FILE }, { sheet: SHEET, headerRow: 1, kept: { text: 3, by: 2 } });
@@ -120,7 +120,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     const sroe = editXlsx(base, SHEET, [{ kind: 'cell', row: 700, col: 5, value: 'sroe: for Lender A only' }]);
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-xlsx-')); fs.mkdirSync(path.join(folder, '01. Archive'));
     fs.writeFileSync(path.join(folder, '01. Archive', 'Proseware Q&A log 2026-11-17 1000.xlsx'), base);
-    fs.writeFileSync(path.join(folder, asideFixtureName(FILE)), sroe);
+    fs.writeFileSync(path.join(folder, asideFixtureName(FILE, { base })), sroe);
     fs.writeFileSync(path.join(folder, FILE), lroe);
     later();
     const r = await nodeQaLogs({ convert: lo }).read({ folder, file: FILE }, { sheet: SHEET, headerRow: 1, kept: { text: 3, by: 2 } });
@@ -138,7 +138,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     const sroe = editXlsx(base, SHEET, [{ kind: 'cell', row: 900, col: 4, value: 'Final answer, sroe' }]);
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-xlsx-')); fs.mkdirSync(path.join(folder, '01. Archive'));
     fs.writeFileSync(path.join(folder, '01. Archive', 'Proseware Q&A log 2026-11-17 1000.xlsx'), base);
-    fs.writeFileSync(path.join(folder, asideFixtureName(FILE)), sroe);
+    fs.writeFileSync(path.join(folder, asideFixtureName(FILE, { base })), sroe);
     fs.writeFileSync(path.join(folder, FILE), base);
     later();
     const logs = nodeQaLogs({ convert: lo });
@@ -161,7 +161,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     const sroe = editXlsx(base, SHEET, [{ kind: 'cell', row: 700, col: 5, value: 'sroe: Legal contracts list in 4.2' }]);
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-xlsx-')); fs.mkdirSync(path.join(folder, '01. Archive'));
     fs.writeFileSync(path.join(folder, '01. Archive', 'Proseware Q&A log 2026-11-17 1000.xlsx'), base);
-    fs.writeFileSync(path.join(folder, asideFixtureName(FILE)), sroe);
+    fs.writeFileSync(path.join(folder, asideFixtureName(FILE, { base })), sroe);
     fs.writeFileSync(path.join(folder, FILE), lroe);
     later();
     const r = await nodeQaLogs({ convert: lo }).read({ folder, file: FILE }, { sheet: SHEET, headerRow: 1, kept: { text: 1, n: 0, by: 2 } });
@@ -179,7 +179,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     const file = `Proseware Q&A log${ext}`;
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-conv-')); fs.mkdirSync(path.join(folder, 'Archive'));
     fs.writeFileSync(path.join(folder, 'Archive', `Proseware Q&A log 2026-11-17 1000${ext}`), base);
-    fs.writeFileSync(path.join(folder, asideFixtureName(file)), sroe);
+    fs.writeFileSync(path.join(folder, asideFixtureName(file, { base })), sroe);
     fs.writeFileSync(path.join(folder, file), lroe);
     later();
     const logs = nodeQaLogs({ convert: lo });
@@ -201,7 +201,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     const sroe = await lo.edit!(baseFile, SHEET, [{ kind: 'cell', row: 7, col: 1, value: 'Question 7, reworded by sroe' }, { kind: 'cell', row: 7, col: 2, value: 'sroe on 7' }]);
     const file = `Proseware Q&A log${ext}`; const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-conv-')); fs.mkdirSync(path.join(folder, 'Archive'));
     fs.writeFileSync(path.join(folder, 'Archive', `Proseware Q&A log 2026-11-17 1000${ext}`), base);
-    fs.writeFileSync(path.join(folder, asideFixtureName(file)), sroe);
+    fs.writeFileSync(path.join(folder, asideFixtureName(file, { base })), sroe);
     fs.writeFileSync(path.join(folder, file), base);
     later();
     const logs = nodeQaLogs({ convert: lo });
@@ -222,7 +222,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     const numbered = qs.map((t, k): [number, string] => [k + 1, t]); const base = await book(numbered); const sroe = await book([...numbered.slice(0, 3), [2001, 'sroe put this in: any liens?'], ...numbered.slice(3)]);
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-xlsx-')); fs.mkdirSync(path.join(folder, '01. Archive'));
     fs.writeFileSync(path.join(folder, '01. Archive', 'Proseware Q&A log 2026-11-17 1000.xlsx'), base);
-    fs.writeFileSync(path.join(folder, asideFixtureName(FILE)), sroe);
+    fs.writeFileSync(path.join(folder, asideFixtureName(FILE, { base })), sroe);
     fs.writeFileSync(path.join(folder, FILE), base);
     later();
     const r = await nodeQaLogs({ convert: lo }).read({ folder, file: FILE }, { sheet: SHEET, headerRow: 1, kept: { text: 1 } }); if (!r.ok) throw new Error(r.error.message);
@@ -237,8 +237,8 @@ it('an .xlsx log’s kept edit beside an .ods log of the same name is the .xlsx 
   const xlsx = 'Proseware Q&A log.xlsx';
   const ods = 'Proseware Q&A log.ods';
   const kept = asideFixtureName(xlsx);
-  const damaged = asideFixtureName(xlsx, '0a1b2c3e');
-  const recent = asideFixtureName(xlsx, '0a1b2c3f');
+  const damaged = asideFixtureName(xlsx, { attempt: '0a1b2c3e' });
+  const recent = asideFixtureName(xlsx, { attempt: '0a1b2c3f' });
   const oldFiles = new Set([kept, damaged].map((name) => path.join(folder, name)));
   const statSync = fs.statSync;
   const spy = vi.spyOn(fs, 'statSync').mockImplementation(((file: fs.PathLike, options?: never) => {
