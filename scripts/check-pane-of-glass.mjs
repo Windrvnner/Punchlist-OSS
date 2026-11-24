@@ -2,6 +2,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { lstatSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
+import { privatePath, projectLinks } from './pane-of-glass-project-links.mjs';
 import { treeEntries } from './pane-of-glass-snapshot.mjs';
 import { matchesIn } from './pane-of-glass-matches.mjs';
 
@@ -42,7 +43,7 @@ function committedSources(at) {
   const links = new Map();
   for (const record of git('ls-tree', '-r', '-z', at).split('\0').filter(Boolean)) {
     const file = record.slice(record.indexOf('\t') + 1);
-    if (record.startsWith('120000 ')) links.set(file, git('show', `${at}:${file}`));
+    if (record.startsWith('120000 ') && !privatePath(file)) links.set(file, git('show', `${at}:${file}`));
     else if (file.startsWith('src/') && record.startsWith('100')) files.push(file);
   }
   return { files, links };
@@ -98,10 +99,13 @@ for (const { file, entry } of treeEntries('src')) {
 }
 // An internal link can pass through another tracked directory before returning to src.
 function linkAt(file) {
+  if (privatePath(file)) return;
   if (links.has(file)) return links.get(file);
   if (lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink()) return readlinkSync(file);
 }
-const found = await scan({ files, links, linkAt }, read);
+let allLinks;
+const liveLinks = () => (allLinks ??= projectLinks(links));
+const found = await scan({ files, links, linkAt, liveLinks }, read);
 const baseline = JSON.parse(read(baselinePath));
 const committed = await committedBaseline();
 const problems = [];

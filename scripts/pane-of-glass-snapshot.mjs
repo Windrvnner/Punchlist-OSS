@@ -2,6 +2,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { privatePath } from './pane-of-glass-project-links.mjs';
 import { packageName } from './pane-of-glass-globs.mjs';
 
 // Recursive readdir may traverse directory symlinks. Descend only into directory entries themselves.
@@ -50,6 +51,7 @@ function canonicalSource(file, linkAt, visiting = new Set()) {
     }
     parts.push(part);
     const alias = parts.join('/');
+    if (privatePath(alias)) return;
     const link = linkAt(alias);
     if (link === undefined) continue;
     const target = follow(alias, link, linkAt, visiting);
@@ -59,10 +61,12 @@ function canonicalSource(file, linkAt, visiting = new Set()) {
   return parts.join('/');
 }
 
-export function writeSnapshot(root, scratch, importer, { files, links, linkAt = (file) => links.get(file) }, globs) {
+export function writeSnapshot(root, scratch, importer, inventory, globs) {
+  const links = inventory.liveLinks?.() ?? inventory.links;
+  const linkAt = inventory.linkAt ?? ((file) => links.get(file));
+  const { files } = inventory;
   for (const file of files) writeStub(path.join(root, file), file.endsWith('.json') ? '{}' : '');
   for (const alias of links.keys()) {
-    if (!alias.startsWith('src/')) continue;
     const target = canonicalSource(alias, linkAt);
     if (target === undefined) continue;
     const copy = path.join(root, target);

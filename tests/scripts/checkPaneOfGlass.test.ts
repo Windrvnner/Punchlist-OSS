@@ -227,6 +227,46 @@ describe('UI dependency checks', () => {
       if (layer === 'backend') expect(result.stderr).toContain(`${file} import (lines 1, 2): 2 exceeds`);
     });
 
+  it.each(['ui', 'backend'])('resolves a project-root alias to %s in an exported or Git checkout', async (layer) => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    const target = `src/${layer}/term.ts`;
+    repo.write(target, 'export const term = true');
+    repo.write(file, "export const terms = import.meta.glob('/tables/*.ts')");
+    symlinkSync(`src/${layer}`, path.join(repo.dir, 'tables'), 'dir');
+    const selected = await viteSources(repo.dir, file);
+    expect(selected.dev).toContain(target);
+    expect(selected.prod).toContain(target);
+    for (const gitCheckout of [false, true]) {
+      if (gitCheckout) {
+        git(repo.dir, 'init', '-q', '-b', 'main');
+        git(repo.dir, 'add', 'src');
+        git(repo.dir, 'commit', '-qm', 'Record the original sources');
+      }
+      const result = repo.run();
+      expect(result.status).toBe(layer === 'backend' ? 1 : 0);
+      if (layer === 'backend') expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
+    }
+    git(repo.dir, 'add', 'tables');
+    git(repo.dir, 'commit', '-qm', 'Record the table alias');
+    if (layer === 'backend') repo.setBaseline({ [file]: { import: 1 } });
+    expect(repo.run().status).toBe(0);
+  });
+
+  it('leaves private and out-of-repository directory links outside the filename snapshot', () => {
+    const repo = fixture();
+    const outside = fixture();
+    outside.write('src/backend/term.ts', 'throw Error("outside module")');
+    repo.write('src/backend/term.ts', 'export const term = true');
+    mkdirSync(path.join(repo.dir, '.config'));
+    symlinkSync('../src/backend', path.join(repo.dir, '.config/tables'), 'dir');
+    symlinkSync(path.join(outside.dir, 'src/backend'), path.join(repo.dir, 'outside'), 'dir');
+    repo.write('src/ui/readers.ts', "const readers = import.meta.glob(['/.config/tables/*.ts', '/outside/*.ts'])");
+    const result = repo.run();
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+
   it('defers the whole call when any option needs expression evaluation', () => {
     const repo = fixture();
     const file = 'src/ui/readers.ts';
