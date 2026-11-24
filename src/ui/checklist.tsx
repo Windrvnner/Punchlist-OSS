@@ -1,3 +1,4 @@
+import { checklistFindings } from '../app/checklistView';
 import { titleStyle } from './titleStyle';
 import { Fragment, type ComponentChildren, type RefObject } from 'preact';
 import { createPortal } from 'preact/compat';
@@ -376,8 +377,10 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
     const res = await store.dispatch(SetItemsOff, { dealId, on: [r.id] }, { idempotencyKey: 'ck-on-' + r.id }); if (!res.ok) return;
     requestAnimationFrame(() => { const a = document.activeElement; if (!a || a === document.body) document.getElementById('ck-more')?.focus(); });
   };
-  // a turned-off item is not in the check's rows: its findings are the ones raised on it, the open one first
-  const raised = off ? Object.values(s.findings).filter((x) => x.dealId === dealId && x.itemId === r.id).sort((a, b) => (a.status === 'open' ? 0 : 1) - (b.status === 'open' ? 0 : 1) || a.createdAt.localeCompare(b.createdAt)) : [];
+  const draftFindingId = askOn.get(`${dealId}:${r.id}`);
+  const { raised, finding: f } = useMemo(
+    () => checklistFindings(s, dealId, r, off, draftFindingId), [s.findings, dealId, r, off, draftFindingId],
+  );
   // the ⋯ menu is drawn on the page itself, under its button: inside the glass pane, the pane's text paints through it
   const [at, setAt] = useState<{ top: number; right: number } | null>(null); const moreBtn = useRef<HTMLButtonElement>(null); const moreMenu = useRef<HTMLDivElement>(null);
   const setMore = (v: boolean) => { if (!v) { setAt(null); return; } const b = moreBtn.current!.getBoundingClientRect(); setAt({ top: b.bottom + 8, right: window.innerWidth - b.right }); };
@@ -395,7 +398,8 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
     moreMenu.current?.querySelector<HTMLElement>('.mi')?.focus();
     return () => { document.removeEventListener('mousedown', away, true); document.removeEventListener('keydown', key, true); window.removeEventListener('resize', shut); };
   }, [more]);
-  const st = itemStanding(s, dealId, r); const k = st.kind; const f = off ? (raised.find((x) => x.id === askOn.get(`${dealId}:${r.id}`) && x.status === 'open') ?? raised[0]) : r.findingId ? s.findings[r.findingId] : undefined;
+  const st = itemStanding(s, dealId, r);
+  const k = st.kind;
   const d = s.deals[dealId]; const pane = useToSidebarBottom<HTMLDivElement>();
   const asked = askedAbout(s, dealId, r.id, f);
   // a turned-off item also lists what was asked about it as a gap, apart from its findings' questions
