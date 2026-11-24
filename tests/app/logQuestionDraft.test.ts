@@ -3,8 +3,11 @@ import { expect, it } from 'vitest';
 import { CreateFinding } from '../../src/app/commands/findings';
 import { ImportQuestions } from '../../src/app/commands/importQuestions';
 import { CreateQuestion } from '../../src/app/commands/questions';
-import { logQuestionDraft } from '../../src/app/logQuestionDraft';
+import { logQuestionDraft, questionLogKey } from '../../src/app/logQuestionDraft';
 import { dealQuestions } from '../../src/app/state';
+import { itemId } from '../../src/domain/checklist';
+import { recoveredId, recoveredIds, remap } from '../../src/domain/recovered';
+import { scaleMemoInput } from '../fixtures/memoScale';
 import { ITEMS } from '../fixtures/pastedList';
 import { deal, make, sheet } from './importKit';
 
@@ -43,4 +46,31 @@ it('lands the original log and keeps a replacement with the same words until it 
   expect(await logQuestionDraft(text, draft, () => log(second), () => false)).toBe(true);
   expect(kept).toBeUndefined();
   expect(logged()).toEqual([first, second]);
+});
+
+it('finds the pending save of only the recovered checklist item, including after a second recovery', () => {
+  const dealId = scaleMemoInput.deal.id;
+  const copyId = recoveredId(dealId, 'office');
+  const items = portfolioLog().map(({ text }) => ({
+    kind: 'item' as const, id: itemId(dealId, text), versions: [{ text }],
+  }));
+  const ids = recoveredIds(dealId, copyId, items);
+  expect(ids.size).toBe(2001);
+  const move = (key: string) => remap(key.split(':'), ids).join(':');
+  const item = items[1400].id;
+  const other = items[400].id;
+  const sent = `ask:${dealId}:${item}`;
+  const saving = new Set([sent]);
+  const copied = `${copyId}:${ids.get(item)}`;
+  expect(questionLogKey(copied, saving, move)).toBe(sent);
+  const neighbor = `${copyId}:${ids.get(other)}`;
+  expect(questionLogKey(neighbor, saving, move)).toBe('ask:' + neighbor);
+  const next = recoveredId(copyId, 'laptop');
+  ids.set(copyId, next);
+  const nextItem = itemId(next, items[1400].versions[0].text);
+  const copiedAgain = `${next}:${nextItem}`;
+  ids.set(ids.get(item)!, nextItem);
+  expect(questionLogKey(copiedAgain, saving, move)).toBe(sent);
+  saving.delete(sent);
+  expect(questionLogKey(copiedAgain, saving, move)).toBe('ask:' + copiedAgain);
 });

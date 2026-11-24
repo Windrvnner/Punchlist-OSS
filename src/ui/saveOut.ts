@@ -10,6 +10,8 @@ import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 
 /** Saves still out, by their form's key, each to what it settled when it landed. */
 const saving = new Map<string, Promise<unknown>>();
+/** An Ask card on a recovered deal looks for the save still out under its original key. */
+export const pendingSaveKeys = () => saving.keys();
 /** Keys whose save still out was let go with Cancel: a form opened again since is left alone when it lands. */
 const letGo = new Set<string>();
 /** How many forms are on screen, by key: a save landing may open what it made only while one is in sight. */

@@ -280,6 +280,50 @@ async function askedFor(page, questionId) {
   await ctx.close();
 }
 
+{ // The deal is recovered while Log is writing. Cancel in the recovered finding still belongs to that save (#843).
+  const { ctx, page, id } = await findingPage();
+  const words = 'Which debt service period applies under the signed distribution test?';
+  const original = page.url();
+  await page.click('#f-ask');
+  await page.fill('#f-ask-text', words);
+  await page.evaluate(() => {
+    const repo = store.services.repo;
+    const transaction = repo.transaction.bind(repo);
+    repo.transaction = async (input) => {
+      if (!input.writes.some((write) => write.kind === 'question')) return transaction(input);
+      repo.transaction = transaction;
+      await new Promise((resume) => { window.resume = resume; });
+      const result = await transaction(input);
+      window.questionSaved = result.ok;
+      return result;
+    };
+  });
+  await page.click('#f-ask-log');
+  await page.waitForFunction(() => !!window.resume);
+  await page.evaluate((dealId) => __peer.deleteDeal(dealId, {}, true), id);
+  await page.waitForFunction((old) => location.href !== old && location.hash.startsWith('#finding-'), original);
+  await page.waitForSelector('#f-ask-text');
+  const recovered = page.url();
+  const copy = await page.evaluate(() => store.get().ui.route.dealId);
+  const inherited = await page.inputValue('#f-ask-text');
+  const busy = await page.isDisabled('#f-ask-log');
+  await page.click('#f-ask-cancel');
+  await page.click('#f-ask');
+  await page.fill('#f-ask-text', words);
+  await page.evaluate(() => window.resume());
+  await page.waitForFunction(() => window.questionSaved === true);
+  await page.waitForSelector('#f-ask-log:enabled');
+  await page.goto(`${URL}#qa-${copy}`);
+  await page.waitForSelector('.md .li');
+  await page.goto(recovered);
+  await page.waitForSelector('#f-ask-text, #f-ask');
+  const kept = await page.evaluate(() => document.querySelector('#f-ask-text')?.value);
+  say('a pending Log follows its recovered finding and leaves a replacement question there after Cancel',
+    copy !== id && inherited === words && busy && kept === words && !page.errors.length,
+    JSON.stringify({ inherited, busy, kept, errors: page.errors }));
+  await ctx.close();
+}
+
 { // closed while a question is typed (here or on another PC): the card stays with its text and Log says why it is off;
   // a closed finding offers no Ask
   const { ctx, page, id, f } = await findingPage();

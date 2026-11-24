@@ -2,14 +2,15 @@
  * Ask the counterparty (linking design, sections 6 and 13): the card a linked question is typed in, and the list of the
  * questions already asked. Shared by the Checklist's open item and a finding's page.
  */
-import { logQuestionDraft } from '../app/logQuestionDraft';
+import { logQuestionDraft, questionLogKey } from '../app/logQuestionDraft';
 import { dealQuestions } from '../app/state';
 import { TEXT_MAX } from '../domain/importExport';
 import type { Finding, Question } from '../domain/model';
 import { closeOnEscape, focusCard } from './focus';
 import { useStore } from './hooks';
+import { moveKey } from './keptDrafts';
 import { navigate } from './nav';
-import { useSaveOut } from './saveOut';
+import { pendingSaveKeys, useSaveOut } from './saveOut';
 
 /** a question's status, as a list of asked questions says it */
 export const STATUS: Record<Question['status'], string> = { open: 'open', answered: 'answered', closed: 'closed' };
@@ -51,7 +52,8 @@ export function AskedList({ dealId, qs, id }: { dealId: string; qs: Question[]; 
  * is told (`settle`), and closes if nothing is kept. Cancel leaves any card opened since for the same key alone (#843).
  */
 export function useLogQuestion(drafts: Map<string, string>, key: string, forget: () => void, settle: () => void) {
-  const out = useSaveOut('ask:' + key, (current: boolean) => {
+  const saveKey = questionLogKey(key, pendingSaveKeys(), moveKey);
+  const out = useSaveOut(saveKey, (current: boolean) => {
     if (current) settle();
   });
   const draft = { read: () => drafts.get(key), forget };
