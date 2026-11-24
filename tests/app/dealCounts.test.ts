@@ -6,9 +6,9 @@ import {
   uncheckedChecklistCount,
 } from '../../src/app/dealCounts';
 import { findingsView } from '../../src/app/findingsView';
-import { folderProgress, overviewGaps } from '../../src/app/indexing';
+import { folderProgress, overviewStatus } from '../../src/app/indexing';
 import { initialState } from '../../src/app/state';
-import { Item, itemId, ListRecord, listId } from '../../src/domain/checklist';
+import { Item, itemId, key as wording, ListRecord, listId } from '../../src/domain/checklist';
 import { derivedId } from '../../src/domain/derivedId';
 import { Finding, Folder, Question, type QuestionStatus } from '../../src/domain/model';
 import type { ChecklistRow } from '../../src/ports';
@@ -141,6 +141,8 @@ it('shares the deal’s finding counts while keeping conflicts visible in the fi
   expect(view.counts).toEqual(expected);
   expect(view.statusOptions).toEqual(['open', 'reassess', 'closed', 'all']);
   expect(view.rows).toHaveLength(119);
+  expect(view.rows.filter(({ conflictVersions }) => conflictVersions === 2)).toHaveLength(100);
+  expect(view.rows.find(({ finding }) => finding.id === findings[0].id)?.conflictVersions).toBeUndefined();
   expect(view.rows.flatMap(({ heading }) => heading ? [heading] : [])).toEqual([
     { name: 'Financial', count: 29 }, { name: 'Legal', count: 89 }, { name: 'No workstream', count: 1 },
   ]);
@@ -187,22 +189,60 @@ it('counts each live question by saved status in a deal-scale Q&A log', () => {
 
 it('uses stored gaps until checklist rows are available and keeps each row’s own need', () => {
   const state = checklistDeal();
+  const deal = state.deals[dealId];
   const rows = state.checklists[dealId] as ChecklistRow[];
   rows[120].need = 'Obtain the signed easement.';
   rows[121].need = 'Provide the complete executed lease.';
   const fallback = 'Confirm lender consent under the credit agreement.';
   state.gaps[dealId] = [{ title: fallback }];
   delete state.checklists[dealId];
-  expect(overviewGaps(state, dealId)).toEqual([{ key: fallback, title: fallback }]);
+  expect(overviewStatus(state, deal).gaps).toEqual([{ key: fallback, title: fallback }]);
   state.checklists[dealId] = 'failed';
-  expect(overviewGaps(state, dealId)).toHaveLength(1);
+  expect(overviewStatus(state, deal).gaps).toHaveLength(1);
   state.checklists[dealId] = rows;
-  expect(overviewGaps(state, dealId)).toEqual([
+  expect(overviewStatus(state, deal).gaps).toEqual([
     { key: rows[120].id, title: rows[120].text, need: 'Obtain the signed easement.' },
     { key: rows[121].id, title: rows[121].text, need: 'Provide the complete executed lease.' },
   ]);
   state.checklists[dealId] = [];
-  expect(overviewGaps(state, dealId)).toEqual([]);
+  expect(overviewStatus(state, deal).gaps).toEqual([]);
+});
+
+it('holds cached gaps until the deal’s first pass has a finding or finishes indexing', () => {
+  const state = checklistDeal();
+  const deal = { ...state.deals[dealId], stage: 'indexing' as const };
+  const title = 'Confirm the executed construction guarantee.';
+  delete state.checklists[dealId];
+  state.gaps[dealId] = [{ title }];
+  const [finding] = Object.values(state.findings);
+  state.findings = { [finding.id]: { ...finding, dealId: otherDeal.id } };
+  expect(overviewStatus(state, deal)).toMatchObject({ waiting: true, gaps: [] });
+  const gaps = [{ key: title, title }];
+  expect(overviewStatus(state, { ...deal, stage: 'ready' })).toMatchObject({ waiting: false, gaps });
+  state.findings[finding.id] = finding;
+  expect(overviewStatus(state, deal)).toMatchObject({ waiting: false, gaps });
+});
+
+it('offers Deleted for a restorable finding or removable issues list on the deal', () => {
+  const state = checklistDeal();
+  const [note] = Object.values(state.tombstones);
+  const snapshot = note.snapshot as Finding;
+  const original = state.findings;
+  expect(findingsView(state, dealId).restorable).toBe(true);
+  state.findings = { ...original, [note.id]: snapshot };
+  expect(findingsView(state, dealId).restorable).toBe(false);
+  state.findings = original;
+  state.conflicts[note.id] = { id: note.id, kind: 'finding', dealId, versions: [] };
+  expect(findingsView(state, dealId).restorable).toBe(false);
+
+  const [finding] = Object.values(original);
+  const mark = { doc: 'doc_closing_issues', n: '12', list: 'Closing issues.pdf', text: finding.title };
+  state.findings = { ...original, [finding.id]: { ...finding, onLists: [mark] } };
+  expect(findingsView(state, dealId).restorable).toBe(true);
+  const ownId = derivedId('f', [dealId, mark.doc, mark.n, wording(mark.text), '0']);
+  state.findings = { ...original, [ownId]: { ...finding, id: ownId, onLists: [mark] } };
+  // The import made this finding, and a person has edited it since. There is nothing the import can take back.
+  expect(findingsView(state, dealId).restorable).toBe(false);
 });
 
 const legal = '/Southridge/Executed agreements';
@@ -236,20 +276,22 @@ it('overlays live indexing totals and counts distinct documents once the folders
   const progress = folderProgress(state, deal);
   expect(indexingTotals(state, deal)).toEqual({ folders: 3, files: 185, indexed: 185 });
   expect(progress.rows).toEqual([
-    { key: legal, title: legal, name: 'Legal', files: 120, indexed: 120, read: 59, docs: 115, copies: 5,
-      away: false, empty: false },
-    { key: finance, title: finance, name: finance, files: 40, indexed: 40, read: 23, docs: 36, copies: 4,
-      away: false, empty: false },
-    { key: permits, title: permits, name: 'Permits', files: 25, indexed: 25, read: 10, docs: 25, copies: 0,
-      away: false, empty: false },
+    { key: legal, title: legal, name: 'Legal', files: 120, indexed: 120, indexing: false, read: 59, docs: 115,
+      copies: 5, away: false, empty: false },
+    { key: finance, title: finance, name: finance, files: 40, indexed: 40, indexing: false, read: 23, docs: 36,
+      copies: 4, away: false, empty: false },
+    { key: permits, title: permits, name: 'Permits', files: 25, indexed: 25, indexing: false, read: 10, docs: 25,
+      copies: 0, away: false, empty: false },
   ]);
-  expect(progress.total).toEqual({ files: 185, indexed: 185, read: 92, docs: 176, copies: 0 });
+  expect(progress.total).toEqual({ files: 185, indexed: 185, indexing: false, read: 92, docs: 176, copies: 0 });
   expect(progress.core).toEqual({ files: 23, read: 15, unavailable: 0 });
 
   delete state.indexing[dealId];
   expect(indexingTotals(state, deal)).toEqual({ folders: 3, files: 177, indexed: 145 });
-  expect(folderProgress(state, deal).total).toEqual({
-    files: 177, indexed: 145, read: undefined, docs: 173, copies: 0,
+  const unfinished = folderProgress(state, deal);
+  expect(unfinished.rows[0]).toMatchObject({ key: legal, indexing: true, read: undefined });
+  expect(unfinished.total).toEqual({
+    files: 177, indexed: 145, indexing: true, read: undefined, docs: 173, copies: 0,
   });
 });
 
