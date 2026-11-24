@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -157,13 +159,21 @@ describe('UI dependency checks', () => {
     { args: "'../backend/part.ts', ({ base: '/src/ui/nested' } as const)", dev: [nested], prod: [nested] },
     { args: "'./part.ts' as const, { base: ('../backend' as const) } as const", dev: [backend], prod: [backend] },
     { args: "[('../backend/part.ts' as const)] satisfies string[]", dev: [backend], prod: [backend] },
-    { args: "'../backend/*.ts'", keys: true, dev: [], prod: [] },
-  ])('checks what Vite actually imports for $args', async ({ args, keys, brackets, dev, prod }) => {
+    { args: "'../backend/*.ts'", wrapper: 'Object.keys', dev: [], prod: [] },
+    { args: "'../backend/part.ts'", wrapper: '(Object.keys)', dev: [], prod: [] },
+    { args: "'../backend/part.ts'", wrapper: '(Object.keys as typeof Object.keys)', dev: [], prod: [] },
+    { args: "'../backend/part.ts'", wrapper: '(Object.values)', dev: [backend], prod: [backend] },
+    { args: "['preact', '../backend/part.ts']", dev: [backend], prod: [backend] },
+    { args: "['preact', './part.ts']", dev: [ui], prod: [ui] },
+    { args: "['preact', '../BACKEND/*.ts'], { caseSensitive: false }", dev: [backend], prod: [backend] },
+  ])('checks what Vite actually imports for $args', async ({ args, wrapper, brackets, dev, prod }) => {
     const repo = brackets ? fixture({}, 'pane-of-glass [fixture]-') : fixture();
     const file = 'src/ui/readers.ts';
     for (const id of [backend, ui, header, nested]) repo.write(id, `export const source = '${id}'`);
+    repo.write('node_modules/preact/package.json', JSON.stringify({ name: 'preact', main: 'index.js' }));
+    repo.write('node_modules/preact/index.js', 'export const version = 1');
     const call = `import.meta.glob(${args})`;
-    repo.write(file, `export const readers = ${keys ? `Object.keys(${call})` : call}`);
+    repo.write(file, `export const readers = ${wrapper ? `${wrapper}(${call})` : call}`);
     const selected = await viteSources(repo.dir, file);
     if (args !== folded || (!brackets && !existsSync(path.join(repo.dir, 'src/BACKEND/part.ts')))) {
       expect(selected).toEqual({ dev, prod });
@@ -173,6 +183,49 @@ describe('UI dependency checks', () => {
     expect(result.status).toBe(forbidden ? 1 : 0);
     if (forbidden) expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
   });
+
+  it.each(['ui', 'backend'])('uses the full filename for a %s module containing #', async (layer) => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    const target = `src/${layer}/visible#dark.ts`;
+    repo.write(target, 'export const title = "Checklist"');
+    repo.write(file, `export const readers = import.meta.glob('../${layer}/visible#dark.ts')`);
+    expect(await viteSources(repo.dir, file)).toEqual({ dev: [target], prod: [target] });
+    const result = repo.run();
+    expect(result.status).toBe(layer === 'backend' ? 1 : 0);
+    if (layer === 'backend') expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
+  });
+
+  it('recognizes the resolved filename when Vite adds the requested query', async () => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    const target = 'src/backend/visible.ts';
+    repo.write(target, 'export const title = "Checklist"');
+    repo.write(file, "export const readers = import.meta.glob('../backend/visible.ts', { query: '?raw' })");
+    const selected = await viteSources(repo.dir, file);
+    expect(selected).toEqual({ dev: [target + '?raw'], prod: [target + '?raw'] });
+    const result = repo.run();
+    expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
+  });
+
+  it.each([['ui', 'ui'], ['ui', 'backend'], ['backend', 'ui']])(
+    'follows file and directory aliases from %s to %s', async (alias, layer) => {
+      const repo = fixture();
+      const file = 'src/ui/readers.ts';
+      const target = `src/${layer}/tables/lenient.ts`;
+      repo.write(target, 'export const read = true');
+      mkdirSync(path.join(repo.dir, 'src', alias), { recursive: true });
+      symlinkSync(`../${layer}/tables/lenient.ts`, path.join(repo.dir, 'src', alias, 'read.ts'), 'file');
+      symlinkSync(`../${layer}/tables`, path.join(repo.dir, 'src', alias, 'readers'), 'dir');
+      repo.write(file, [
+        `export const table = import.meta.glob('../${alias}/read.ts')`,
+        `export const tables = import.meta.glob('../${alias}/readers/*.ts')`,
+      ].join('\n'));
+      expect(await viteSources(repo.dir, file)).toEqual({ dev: [target], prod: [target] });
+      const result = repo.run();
+      expect(result.status).toBe(layer === 'backend' ? 1 : 0);
+      if (layer === 'backend') expect(result.stderr).toContain(`${file} import (lines 1, 2): 2 exceeds`);
+    });
 
   it('defers the whole call when any option needs expression evaluation', () => {
     const repo = fixture();
@@ -305,6 +358,25 @@ describe('the remaining UI exceptions', () => {
     expect(result.status).toBe(1);
     const diagnostic = `${file} import (lines 1): the baseline cannot rise above the committed count of 0`;
     expect(result.stderr).toContain(diagnostic);
+  });
+
+  it('keeps the committed ceiling for an import through an internal symlink chain', () => {
+    const repo = fixture({ [file]: { import: 1 } });
+    repo.write(file, "export const tables = import.meta.glob('./read.ts')");
+    repo.write('src/backend/table.ts', 'export const read = true');
+    repo.write('src/ui/view.ts', 'export const title = "Checklist"');
+    mkdirSync(path.join(repo.dir, 'tables'));
+    symlinkSync('../src/backend/table.ts', path.join(repo.dir, 'tables/read.ts'), 'file');
+    const alias = path.join(repo.dir, 'src/ui/read.ts');
+    symlinkSync('../../tables/read.ts', alias, 'file');
+    git(repo.dir, 'init', '-q', '-b', 'main');
+    git(repo.dir, 'add', 'src', 'tables');
+    git(repo.dir, 'commit', '-qm', 'Record a linked table');
+    expect(repo.run().status).toBe(0);
+    rmSync(alias);
+    symlinkSync('./view.ts', alias, 'file');
+    expect(repo.run('--lower').status).toBe(0);
+    expect(repo.baselineText()).toBe('{}\n');
   });
 
   it('requires main to verify a committed increase in a shallow single-branch clone', () => {
