@@ -83,11 +83,19 @@ afterEach(() => {
   for (const dir of folders.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-it.each([false, true])('verifies the archived base even when filenames collide (base changed: %s)', async (changed) => {
+it.each(['unchanged', 'changed before read', 'changed during copy'])('verifies a colliding archive %s', async (change) => {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-log-base-'));
   folders.push(folder);
   const { expectedBase, competingBase, kept } = saveWithArchiveCollision(folder);
-  if (changed) fs.copyFileSync(competingBase, expectedBase);
+  const changed = change !== 'unchanged';
+  const copy = fs.copyFileSync;
+  if (change === 'changed before read') copy(competingBase, expectedBase);
+  if (change === 'changed during copy') {
+    vi.spyOn(fs, 'copyFileSync').mockImplementation((from, to, mode) => {
+      if (from === expectedBase) copy(competingBase, expectedBase);
+      copy(from, to, mode);
+    });
+  }
   const logs = nodeQaLogs({});
   const opts = { sheet: 'Sheet1', headerRow: 1 };
   const read = await logs.read({ folder, file }, { ...opts, kept: { n: 0, text: 1 } });
