@@ -440,7 +440,9 @@ export class Store {
     // longer apply: it is withdrawn, and its notice stays.
     const removed = new Set((plan.removes ?? []).map((r) => r.id));
     if (removed.size) this.ui((ui) => ({ toasts: ui.toasts.map((t) => { const o = t.action?.opId ? this.state.ops[t.action.opId] : undefined; return o && ([...o.targets, ...Object.keys(o.resultRevs ?? {})].some((id) => removed.has(id)) || removed.has((o.input as { dealId?: string } | undefined)?.dealId ?? '')) ? { ...t, action: undefined } : t; }) }));   // a deal deleted takes the Undos of everything done on it
-    if (plan.message && (!opts.quiet || plan.alwaysSay)) this.toast(plan.message, plan.inverse ? { label: 'Undo', opId } : undefined);
+    if (plan.message && (!opts.quiet || plan.alwaysSay)) {
+      this.toast(plan.message, plan.inverse ? { label: 'Undo', opId } : undefined, false, undefined, plan.messageCut);
+    }
     if (plan.effect) this.startEffect(plan.effect, opId);
     void this.pruneJournal();
     return ok({ opId });
