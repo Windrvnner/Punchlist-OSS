@@ -1,10 +1,10 @@
 // @vitest-environment node
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { build } from 'vite';
+import { build, createServer } from 'vite';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const script = path.resolve('scripts/check-pane-of-glass.mjs');
@@ -50,6 +50,21 @@ async function bundledSources(root: string, file: string) {
     }],
   });
   return modules.map((id) => path.relative(root, id).split(path.sep).join('/'));
+}
+
+async function developmentSources(root: string, file: string) {
+  const server = await createServer({
+    root, configFile: false, envDir: false, logLevel: 'silent',
+    server: { middlewareMode: true, watch: null, ws: false },
+  });
+  try {
+    const client = server.environments.client;
+    await client.transformRequest('/' + file);
+    const entry = await client.moduleGraph.getModuleByUrl('/' + file);
+    return [...entry!.importedModules].map((module) => path.relative(root, module.id!).split(path.sep).join('/'));
+  } finally {
+    await server.close();
+  }
 }
 
 afterEach(() => {
@@ -164,6 +179,31 @@ describe('UI dependency checks', () => {
     const result = repo.run();
     expect(result.status).toBe(status);
     if (status) expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
+  });
+
+  it.each([
+    { patterns: "'../backend/{lenient}.ts'", buildImportsBackend: true },
+    { patterns: "['./header.ts', '../backend/{lenient}.ts']", buildImportsBackend: true },
+    { patterns: "'./{header}.ts'", buildImportsBackend: false },
+    { patterns: "'../BACKEND/*.ts'", buildImportsBackend: false },
+  ])('checks the files that either Vite mode imports for $patterns', async ({ patterns, buildImportsBackend }) => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    const backend = 'src/backend/lenient.ts';
+    repo.write(backend, 'export const read = true');
+    repo.write('src/ui/header.ts', 'export const title = "Checklist"');
+    const foldCase = patterns.includes('BACKEND');
+    const options = JSON.stringify({ eager: true, caseSensitive: !foldCase });
+    repo.write(file, `export const readers = import.meta.glob(${patterns}, ${options})`);
+    const dev = await developmentSources(repo.dir, file);
+    const prod = await bundledSources(repo.dir, file);
+    const caseAlias = foldCase && existsSync(path.join(repo.dir, 'src/BACKEND/lenient.ts'));
+    expect(dev.some((id) => id.toLowerCase() === backend)).toBe(caseAlias);
+    expect(prod.some((id) => id.toLowerCase() === backend)).toBe(caseAlias || buildImportsBackend);
+    const forbidden = caseAlias || buildImportsBackend;
+    const result = repo.run();
+    expect(result.status).toBe(forbidden ? 1 : 0);
+    if (forbidden) expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
   });
 
   it('checks computed member and destructuring keys and each read in a dotted JSX tag', () => {
