@@ -48,8 +48,8 @@ function useAskDraft(findingId: string) {
     setTextState('');
     stopAsking();
   };
-  const { busy, log } = useLogQuestion(askDrafts, findingId, () => askDrafts.delete(findingId), settle);
-  return { asking, setAsking, text, setText, stopAsking, busy, log, kept: !!askDrafts.get(findingId) };
+  const out = useLogQuestion(askDrafts, findingId, () => askDrafts.delete(findingId), settle);
+  return { asking, setAsking, text, setText, stopAsking, ...out, kept: !!askDrafts.get(findingId) };
 }
 
 /**
@@ -60,12 +60,11 @@ export function KeptAsk({ dealId, findingId, title }: { dealId: string; findingI
   const s = useAppState();
   const draft = useAskDraft(findingId);
   if (!draft.kept) return null;
-  const cancel = () => draft.setText('');
   return (
     <div class="flinks">
       <AskCard ids="f-ask" cls="fask" counterparty={s.deals[dealId]?.counterparty ?? ''} linked={title}
         text={draft.text} onText={draft.setText} why="This finding was deleted" busy={draft.busy} onLog={() => {}}
-        onCancel={cancel} onEscape={() => {}} />
+        onCancel={draft.cancel} onEscape={() => {}} />
     </div>
   );
 }
@@ -97,10 +96,6 @@ export function FindingLinks({ dealId, f, pane }: { dealId: string; f: Finding; 
   const setAside = () => {
     if (offer && !ro) draft.stopAsking();
   };
-  const cancel = () => {
-    draft.setText('');
-    draft.stopAsking();
-  };
   const openItem = (e: MouseEvent, id: string) => {
     e.preventDefault();
     openChecklistItem(store, dealId, id);
@@ -120,7 +115,7 @@ export function FindingLinks({ dealId, f, pane }: { dealId: string; f: Finding; 
       </span>}
       {draft.asking && !pane && <AskCard ids="f-ask" cls="fask" counterparty={s.deals[dealId]?.counterparty ?? ''}
         linked={f.title} text={draft.text} onText={draft.setText} why={why} busy={draft.busy} onLog={() => void log()}
-        onCancel={cancel} onEscape={setAside} />}
+        onCancel={draft.cancel} onEscape={setAside} />}
     </div>
   );
 }
