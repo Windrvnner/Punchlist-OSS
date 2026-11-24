@@ -168,34 +168,44 @@ describe('UI dependency checks', () => {
     expect(result.stderr).toContain(`${file} import (lines 3, 5, 6): 3 exceeds`);
   });
 
-  it.each(['ui', 'backend'])('follows the browser preset aliases into the %s layer', async (layer) => {
-    const repo = fixture();
+  describe.each(['ui', 'backend'])('browser preset aliases into the %s layer', (layer) => {
     const other = layer === 'ui' ? 'backend' : 'ui';
     const file = 'src/ui/readers.ts';
-    for (const place of [layer, other]) repo.write(`src/${place}/term.ts`, 'export const term = "Checklist"');
-    const exports = { '.': './term.ts', './test-utils': './term.ts', './jsx-runtime': './term.ts' };
-    for (const name of ['react', 'react-dom', 'preact']) {
-      const aliased = name === 'preact';
-      const paths = aliased ? { ...exports, './compat': './term.ts', './*': './other.js' } : exports;
-      repo.write(`node_modules/${name}/other.js`, 'export const ready = true');
-      repo.write(`node_modules/${name}/package.json`, JSON.stringify({ name, exports: paths }));
-      symlinkSync(`../../src/${aliased ? layer : other}/term.ts`, path.join(repo.dir, 'node_modules', name, 'term.ts'));
-    }
-    const packages = ['react', 'react-dom', 'react/jsx-runtime', 'react-dom/test-utils'];
-    const calls = packages.map((name) => `  import.meta.glob('${name}'),`);
-    repo.write(file, ['export const readers = [', ...calls, ']'].join('\n'));
 
-    const selected = `src/${layer}/term.ts`;
-    const rejected = `src/${other}/term.ts`;
-    const served = await servedReaderSources(repo.dir, file);
-    expect(served.some((id) => id.endsWith('/' + selected))).toBe(true);
-    expect(served.some((id) => id.endsWith('/' + rejected))).toBe(false);
-    const built = builtReaderSources(repo.dir);
-    expect(built.some((id) => id.endsWith('/' + selected))).toBe(true);
-    expect(built.some((id) => id.endsWith('/' + rejected))).toBe(false);
-    const result = repo.run();
-    expect(result.status, result.stderr).toBe(layer === 'ui' ? 0 : 1);
-    if (layer === 'backend') expect(result.stderr).toContain(`${file} import (lines 2, 3, 4, 5): 4 exceeds`);
+    function aliasedReader() {
+      const repo = fixture();
+      for (const place of [layer, other]) repo.write(`src/${place}/term.ts`, 'export const term = "Checklist"');
+      const exports = { '.': './term.ts', './test-utils': './term.ts', './jsx-runtime': './term.ts' };
+      for (const name of ['react', 'react-dom', 'preact']) {
+        const aliased = name === 'preact';
+        const paths = aliased ? { ...exports, './compat': './term.ts', './*': './other.js' } : exports;
+        repo.write(`node_modules/${name}/other.js`, 'export const ready = true');
+        repo.write(`node_modules/${name}/package.json`, JSON.stringify({ name, exports: paths }));
+        const entry = path.join(repo.dir, 'node_modules', name, 'term.ts');
+        symlinkSync(`../../src/${aliased ? layer : other}/term.ts`, entry);
+      }
+      const packages = ['react', 'react-dom', 'react/jsx-runtime', 'react-dom/test-utils'];
+      const calls = packages.map((name) => `  import.meta.glob('${name}'),`);
+      repo.write(file, ['export const readers = [', ...calls, ']'].join('\n'));
+      return repo;
+    }
+
+    function checkTerms(ids: string[]) {
+      expect(ids.some((id) => id.endsWith(`/src/${layer}/term.ts`))).toBe(true);
+      expect(ids.some((id) => id.endsWith(`/src/${other}/term.ts`))).toBe(false);
+    }
+
+    it('serves the aliased module in development', async () => {
+      checkTerms(await servedReaderSources(aliasedReader().dir, file));
+    });
+    it('bundles the aliased module in production', () => {
+      checkTerms(builtReaderSources(aliasedReader().dir));
+    });
+    it('checks the aliased package export at each original call', () => {
+      const result = aliasedReader().run();
+      expect(result.status, result.stderr).toBe(layer === 'ui' ? 0 : 1);
+      if (layer === 'backend') expect(result.stderr).toContain(`${file} import (lines 2, 3, 4, 5): 4 exceeds`);
+    });
   });
 
   it.each(['ui', 'backend'])('resolves a workspace export to its real %s module', (layer) => {
