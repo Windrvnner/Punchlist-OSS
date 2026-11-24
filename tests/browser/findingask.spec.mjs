@@ -280,7 +280,8 @@ async function askedFor(page, questionId) {
   await ctx.close();
 }
 
-{ // The old save still lands after the card is emptied and its item is checked again with a different finding.
+// Emptying the card while Log is pending, with and without a replacement on the rechecked item.
+for (const replaceDraft of [false, true]) {
   const { ctx, page, id, f } = await findingPage();
   const words = 'Please confirm the terms in the executed distribution covenant.';
   const title = 'Distribution test uses the six months before the payment date';
@@ -299,6 +300,19 @@ async function askedFor(page, questionId) {
   await page.click('#ck-ask-log');
   await page.waitForFunction(() => !!window.resume);
   await page.fill('#ck-ask-text', '');
+  if (!replaceDraft) {
+    await page.evaluate(() => window.resume());
+    await page.waitForSelector('#ck-ask');
+    const first = await saved();
+    await recheckFinding(page, id, itemId, second);
+    await page.click('#ck-ask');
+    const fresh = await card();
+    say('an emptied card closes when Log lands, and the next Ask starts on the rechecked finding',
+      first.length === 1 && first[0].linkedFinding === f.id && fresh.text === ''
+      && fresh.linked === `Linked to “${title}”`);
+    await ctx.close();
+    continue;
+  }
   await page.click('#ck-close');
   await recheckFinding(page, id, itemId, second);
   await row.click();

@@ -132,3 +132,18 @@ it('keeps identical text reopened on a different finding while the earlier log i
     .toBe(true);
   expect(drafts.open(row.id).text).toBe('');
 });
+
+it('settles an emptied card so the next question starts on the rechecked finding', async () => {
+  const state = checkedPortfolio();
+  const drafts = checklistDrafts({ texts: new Map(), targets: new Map(), movedId: (id) => id });
+  const card = drafts.open(row.id);
+  const words = 'Which distribution date first requires the amended lock-up ratio?';
+  card.begin(ratio.id);
+  card.write(words);
+  const sent = questionDraftAt(row.id, (key) => key, drafts.texts, card.clear);
+  const saving = logQuestionDraft(words, sent, async () => ({ ok: true }), () => false, card.captureTarget());
+  card.write('');
+  expect(await saving).toBe(true);
+  expect(card.begin(period.id)).toBe('');
+  expect(checklistQuestionTarget(state, row, false, card.findingId).links.linkedFinding).toBe(period.id);
+});

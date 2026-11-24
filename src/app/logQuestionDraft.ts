@@ -33,7 +33,9 @@ export async function logQuestionDraft(
   sameTarget?: () => boolean,
 ): Promise<boolean> {
   const result = await dispatch();
-  if (cancelled() || (sameTarget && !sameTarget())) return false;
-  if (result.ok && draft.read()?.trim() === text) draft.forget();
+  if (cancelled()) return false;
+  const kept = draft.read();
+  if (kept && sameTarget && !sameTarget()) return false;
+  if (result.ok && kept?.trim() === text) draft.forget();
   return true;
 }
