@@ -1179,7 +1179,7 @@ export class LogRepository implements Repository {
       if (w.expectedRev === null) for (const data of w.alongside ?? []) recs.push({ kind: w.kind, id: w.id, ver: ver(), base: [], data, schema: schemaOf(w.kind, data) });
       if (w.expectedRev === null && w.deletedAlongside) recs.push({ kind: w.kind, id: w.id, ver: ver(), base: [], del: true });
     }
-    this.markForwardedChanges(recs, moved);
+    this.markForwardedChanges(recs, moved, asked.writes);
     for (const d of deletes) recs.push({ kind: d.kind, id: d.id, ver: ver(), base: this.view.bases(d.kind, d.id, had(d.kind, d.id)), del: true, ...(d.undoesImport ? { undoesImport: true as const } : {}) });
     const line: Line = { v: 1, schema: CURRENT_SCHEMA, pc: this.id, seq, at: this.clock(), by: tx.by ?? tx.audit?.[0]?.actor ?? this.o.user(), from: this.o.label, recs,
       ...(tx.audit?.length ? { audit: tx.audit } : {}), ...(tx.index ? { index: tx.index } : {}), ...(retract.length ? { retract } : {}),
@@ -1226,12 +1226,36 @@ export class LogRepository implements Repository {
   }
 
   /** Forwarded saves must remain distinguishable from edits made directly in the recovered copy. */
-  private markForwardedChanges(records: RecChange[], moved: Map<string, string>): void {
-    const originals = new Map([...moved].map(([original, copy]) => [copy, original]));
+  private markForwardedChanges(records: RecChange[], moved: Map<string, string>, writes: Write[]): void {
+    if (!moved.size) return;
+    const forwarded = new Map(writes.flatMap((write) => {
+      const copy = moved.get(write.id);
+      return copy ? [[recKey(write.kind, copy), write] as const] : [];
+    }));
     for (const record of records) {
-      const original = originals.get(record.id);
-      if (original && !record.del) record.recoveredFrom = original;
+      const write = forwarded.get(recKey(record.kind, record.id));
+      if (!write || record.del) continue;
+      record.recoveredFrom = write.id;
+      record.recoveredReceipt = { rev: this.view.state(record.kind, record.id).rev + 1, input: write.data };
     }
+  }
+
+  /** A receipt belongs to a specific copy version, even when its number also names a revision of the original. */
+  private copyReceipt(write: Write, now: Loaded, heads: Ver[], originalRev: number): Result<Ver | null> {
+    const revision = write.expectedRev;
+    if (typeof revision !== 'number') return ok(null);
+    const forwarded = this.view.forwardedVersions(write.kind, now.id, write.id, this.id);
+    const matches = forwarded.filter((v) => v.recoveredReceipt?.rev === revision);
+    const head = heads.length === 1 ? heads[0] : undefined;
+    // An older receipt without a recorded number is usable only while its version is still the head.
+    if (head && revision === now.rev && !head.recoveredReceipt && forwarded.includes(head)) {
+      matches.push(head);
+    }
+    if (head && matches.length === 1 && matches[0] === head && revision === now.rev) return ok(head);
+    // An unknown older receipt cannot authorize a change against whichever record happens to match its number.
+    if (matches.length || forwarded.some((v) => !v.recoveredReceipt)
+      || (forwarded.length && revision !== originalRev)) return fail({ kind: 'rejected', message: DEAL_DELETED });
+    return ok(null);
   }
 
   /** Rebase only fields that no direct edit in the copy has touched, including changes later reverted. */
@@ -1240,24 +1264,40 @@ export class LogRepository implements Repository {
     if ((!now && this.view.known(write.kind, to)) || now?.conflict || write.resolves || write.beside || reopened) {
       return fail({ kind: 'rejected', message: DEAL_DELETED });
     }
-    const before = this.view.lastHad(write.kind, write.id)[0]?.data;
-    if (this.removesUnseen(write, before)) return fail({ kind: 'rejected', message: DEAL_DELETED });
+    const original = this.view.lastHad(write.kind, write.id)[0]?.data;
+    const originalRev = this.view.state(write.kind, write.id, true).rev;
     const heads = this.view.state(write.kind, to).tips.map((id) => this.view.version(id)!);
+    const receipt = now ? this.copyReceipt(write, now, heads, originalRev) : ok(null);
+    if (!receipt.ok) return receipt;
+    const base = receipt.value?.recoveredReceipt;
+    const usesReceipt = base && write.expectedRev !== originalRev;
+    const before = usesReceipt ? base.input : original;
+    const data = changedOnto(before, write.data, now?.envelope.data, ids);
+    if (receipt.value && !usesReceipt) {
+      // A colliding or older receipt cannot pick a side when the two possible bases would lead to different saves.
+      const fromReceipt = base
+        ? changedOnto(base.input, write.data, now?.envelope.data, ids)
+        : changedOnto(receipt.value.data, remap(write.data, ids), now?.envelope.data, new Map());
+      if (JSON.stringify(data) !== JSON.stringify(fromReceipt)) {
+        return fail({ kind: 'rejected', message: DEAL_DELETED });
+      }
+    }
+    if (!usesReceipt && this.removesUnseen(write, before, originalRev)) {
+      return fail({ kind: 'rejected', message: DEAL_DELETED });
+    }
     if (recoveredWriteClashes({
       originalId: write.id, had: before, wrote: write.data, heads, version: (id) => this.view.version(id),
     })) return fail({ kind: 'rejected', message: DEAL_DELETED });
-    return ok({
-      kind: write.kind, id: to, data: changedOnto(before, write.data, now?.envelope.data, ids), expectedRev: 'any',
-    });
+    return ok({ kind: write.kind, id: to, data, expectedRev: 'any' });
   }
 
   /**
    * A save that leaves out a field, prepared on an older version than this PC had: the field may have arrived after
    * the save was prepared (an AI draft), so its absence is not a person's choice to remove it (#664).
    */
-  private removesUnseen(write: Write, before: unknown): boolean {
+  private removesUnseen(write: Write, before: unknown, originalRev: number): boolean {
     if (typeof write.expectedRev !== 'number') return false;
-    const stale = write.expectedRev !== this.view.state(write.kind, write.id, true).rev;
+    const stale = write.expectedRev !== originalRev;
     return stale && removedFields(before, write.data).length > 0;
   }
 

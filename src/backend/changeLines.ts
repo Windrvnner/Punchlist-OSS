@@ -19,6 +19,8 @@ export interface RecChange {
   schema?: number;
   /** Original id for a save forwarded to a recovered copy; absent on direct edits and older lines. */
   recoveredFrom?: string;
+  /** A forwarded save returns a revision but no record. A follow-up uses the submitted data as its base (#774). */
+  recoveredReceipt?: { rev: number; input: unknown };
   /**
    * a delete that takes back a question an import made, so another PC's import of the same question still stands
    */

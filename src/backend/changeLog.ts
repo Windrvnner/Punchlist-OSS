@@ -462,6 +462,9 @@ export class Combined {
     const versions = this.byRec.get(recKey(kind, id)) ?? [];
     return versions.find((v) => v.pc === ver.pc && v.stamp === ver.stamp && !v.del);
   }
+  forwardedVersions(kind: RecordKind, id: string, originalId: string, pc: string): Ver[] {
+    return (this.byRec.get(recKey(kind, id)) ?? []).filter((v) => v.recoveredFrom === originalId && v.pc === pc);
+  }
   version(ver: string): Ver | undefined {
     return this.vers.get(ver);
   }
