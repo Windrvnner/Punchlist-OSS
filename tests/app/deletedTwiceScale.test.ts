@@ -13,6 +13,7 @@ import { ImportQuestions } from '../../src/app/commands/importQuestions';
 import { ResolveConflict } from '../../src/app/commands/conflicts';
 import { RestoreVersion } from '../../src/app/commands/keptVersions';
 import { dealQuestions } from '../../src/app/state';
+import '../ui/keptTextSession';
 import { deletedOf } from '../../src/ui/deleted';
 
 const FOLDERS = ['1.1 Corporate', '2.3 Offtake', '3.2 Construction', '4.1 Financing', '5.4 Permits', '6.2 Insurance'];

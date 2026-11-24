@@ -12,6 +12,7 @@ import { RestoreQuestionSnapshot } from '../../src/app/commands/drafts';
 import { registry } from '../../src/app/commands/undo';
 import { dealQuestions, dealFindings } from '../../src/app/state';
 import { Question, Finding, Deal, Tombstone, CURRENT_SCHEMA } from '../../src/domain/model';
+import '../ui/keptTextSession';
 import { deletedOf } from '../../src/ui/deleted';
 
 const COMMANDS = [CreateDeal, CreateQuestion, EditQuestionField, SetQuestionStatus, SetResponse, DeleteQuestion, RestoreQuestion, CreateFinding, EditFinding, RestoreQuestionSnapshot];

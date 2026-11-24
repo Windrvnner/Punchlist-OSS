@@ -12,6 +12,7 @@ import { CreateFinding, EditFinding, AttachDocumentToFinding } from '../../src/a
 import { ImportQuestions, RevertImport, UndoLastImport, lastImport } from '../../src/app/commands/importQuestions';
 import { registry, Undo } from '../../src/app/commands/undo';
 import { dealQuestions, dealFindings } from '../../src/app/state';
+import '../ui/keptTextSession';
 import { deletedOf } from '../../src/ui/deleted';
 
 const COMMANDS = [
