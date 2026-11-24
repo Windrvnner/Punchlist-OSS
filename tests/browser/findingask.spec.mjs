@@ -3,6 +3,7 @@
 // both; what is typed is never lost; and an open question on the Q&A page says what it was asked for. At deal scale:
 // a log of 2,000 questions beside the ones asked here.
 import { launchChrome } from './chrome.mjs';
+import { holdNext } from './cardPage.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = [];
 const say = (id, ok, note = '') => {
@@ -29,7 +30,7 @@ const run = (page, name, input) => page.evaluate(async ([n, i]) => {
 }, [name, input]);
 
 /** A deal whose first pass has run, with a Q&A log of 2,000 questions, opened on the lock-up finding's page. */
-async function findingPage(scheme = 'light') {
+async function findingPage(scheme = 'light', questionCount = N) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 736 }, colorScheme: scheme });
   const page = await ctx.newPage();
   page.errors = [];
@@ -45,7 +46,7 @@ async function findingPage(scheme = 'light') {
   await page.click('#nd-create');
   await page.waitForFunction(() => Object.values(store.get().findings).length === 3, null, { timeout: 30000 });
   const id = await page.evaluate(() => Object.values(store.get().deals)[0].id);
-  await run(page, 'ImportQuestions', { dealId: id, mode: 'append', rows: logRows(N) });
+  await run(page, 'ImportQuestions', { dealId: id, mode: 'append', rows: logRows(questionCount) });
   await page.evaluate(() => store.ui({ toasts: [] }));
   const f = await page.evaluate((t) => Object.values(store.get().findings).find((x) => x.title === t), LOCKUP);
   await page.goto(`${URL}#finding-${id}-${f.id}`);
@@ -220,6 +221,158 @@ async function askedFor(page, questionId) {
   say('back on a finding whose question is still saving, Log is off and words typed meanwhile are kept',
     during && after === typed && back === typed && qs.length === 1 && !page.errors.length,
     JSON.stringify({ during, after, back, qs: qs.length, errors: page.errors }));
+  await ctx.close();
+}
+
+{ // #843: a new check raises another finding on the same item while the cancelled card's Log is still out.
+  const { ctx, page, id, f } = await findingPage();
+  const words = 'Please confirm the calculation in the executed agreement.';
+  const title = 'Distribution test requires two completed measurement periods';
+  const second = await page.evaluate(([first, title]) => __peer.add(first, { title }), [f.id, title]);
+  await page.waitForFunction((fid) => !!store.get().findings[fid], second);
+  await page.click('#f-item a');
+  const itemId = await page.locator('#ck-rows .ckrow.on').getAttribute('data-item');
+  const reopen = async () => {
+    await page.click('#ck-close');
+    await page.click(`#ck-rows [data-item="${itemId}"]`);
+  };
+  const draft = () => page.evaluate(() => document.querySelector('#ck-ask-text')?.value);
+  const targets = async () => (await linked(page)).filter((q) => q.text === words).map((q) => q.linkedFinding);
+  await page.click('#ck-ask');
+  await page.fill('#ck-ask-text', words);
+  await holdNext(page, 'CreateQuestion');
+  await page.click('#ck-ask-log');
+  await page.click('#ck-ask-cancel');
+  await page.evaluate(async ([dealId, itemId, findingId]) => {
+    const ai = store.services.ai;
+    const checklist = ai.checklist.bind(ai);
+    ai.checklist = async (id) => {
+      const result = await checklist(id);
+      if (result.ok) result.value = result.value.map((row) => row.id === itemId ? { ...row, findingId } : row);
+      return result;
+    };
+    await store.refreshChecklist(dealId);
+  }, [id, itemId, second]);
+  await page.click('#ck-ask');
+  await page.fill('#ck-ask-text', words);
+  const busy = await page.isDisabled('#ck-ask-log');
+  await page.evaluate(() => window.resume());
+  await page.waitForSelector('#ck-asked');
+  await page.waitForFunction(() => !document.querySelector('#ck-ask-log')?.disabled);
+  const after = await draft();
+  await reopen();
+  const kept = await draft();
+  const linkedTo = await textOf(page, '#ck-detail .clink');
+  const saved = await targets();
+  say('a cancelled Log saves the first question and keeps identical words for the second finding',
+    busy && after === words && kept === words && linkedTo === `Linked to “${title}”` && saved.join() === f.id,
+    JSON.stringify({ busy, after, kept, linkedTo, saved }));
+  await holdNext(page, 'CreateQuestion');
+  await page.click('#ck-ask-log');
+  await reopen();
+  const pending = await page.isDisabled('#ck-ask-log');
+  await page.evaluate(() => window.resume());
+  await page.waitForSelector('#ck-ask');
+  const both = await targets();
+  say('logging the kept question settles its reopened card and saves it against the second finding',
+    pending && both.join() === [f.id, second].join() && !page.errors.length,
+    JSON.stringify({ pending, both, errors: page.errors }));
+  await ctx.close();
+}
+
+{ // The deal is recovered while Log is writing. Cancel in the recovered finding still belongs to that save (#843).
+  const { ctx, page, id } = await findingPage();
+  const words = 'Which debt service period applies under the signed distribution test?';
+  const original = page.url();
+  await page.click('#f-ask');
+  await page.fill('#f-ask-text', words);
+  await page.evaluate(() => {
+    const repo = store.services.repo;
+    const transaction = repo.transaction.bind(repo);
+    repo.transaction = async (input) => {
+      if (!input.writes.some((write) => write.kind === 'question')) return transaction(input);
+      repo.transaction = transaction;
+      await new Promise((resume) => { window.resume = resume; });
+      const result = await transaction(input);
+      window.questionSaved = result.ok;
+      return result;
+    };
+  });
+  await page.click('#f-ask-log');
+  await page.waitForFunction(() => !!window.resume);
+  await page.evaluate((dealId) => __peer.deleteDeal(dealId, {}, true), id);
+  await page.waitForFunction((old) => location.href !== old && location.hash.startsWith('#finding-'), original);
+  await page.waitForSelector('#f-ask-text');
+  const recovered = page.url();
+  const copy = await page.evaluate(() => store.get().ui.route.dealId);
+  const inherited = await page.inputValue('#f-ask-text');
+  const busy = await page.isDisabled('#f-ask-log');
+  await page.click('#f-ask-cancel');
+  await page.click('#f-ask');
+  await page.fill('#f-ask-text', words);
+  await page.evaluate(() => window.resume());
+  await page.waitForFunction(() => window.questionSaved === true);
+  await page.waitForSelector('#f-ask-log:enabled');
+  await page.goto(`${URL}#qa-${copy}`);
+  await page.waitForSelector('.md .li');
+  await page.goto(recovered);
+  await page.waitForSelector('#f-ask-text, #f-ask');
+  const kept = await page.evaluate(() => document.querySelector('#f-ask-text')?.value);
+  say('a pending Log follows its recovered finding and leaves a replacement question there after Cancel',
+    copy !== id && inherited === words && busy && kept === words && !page.errors.length,
+    JSON.stringify({ inherited, busy, kept, errors: page.errors }));
+  await ctx.close();
+}
+
+{ // Hold the acknowledgement after the save succeeds. Three copies of this log fit in native browser storage.
+  const { ctx, page, id, f } = await findingPage('light', 30);
+  const words = 'Does the signed covenant use the trailing or projected coverage ratio?';
+  await page.click('#f-ask');
+  await page.fill('#f-ask-text', words);
+  await page.evaluate(() => {
+    const dispatch = store.dispatch.bind(store);
+    store.dispatch = async (command, ...args) => {
+      const result = await dispatch(command, ...args);
+      if (command.name === 'CreateQuestion' && result.ok) {
+        store.dispatch = dispatch;
+        await new Promise((resume) => { window.resume = resume; });
+      }
+      return result;
+    };
+  });
+  await page.click('#f-ask-log');
+  await page.waitForFunction(() => !!window.resume);
+  let dealId = id;
+  for (let round = 0; round < 2; round++) {
+    if (round) await run(page, 'CreateFinding', {
+      dealId, title: 'Updated reserve covenant after recovery', workstream: 'Financial',
+    });
+    await page.evaluate((deal) => __peer.deleteDeal(deal, {}, true), dealId);
+    await page.waitForFunction((old) => Object.values(store.get().deals)
+      .some((d) => d.id !== old && d.name.endsWith('(recovered)')), dealId);
+    const copy = await page.evaluate(async ([old, title]) => {
+      const deal = Object.values(store.get().deals).find((d) => d.id !== old && d.name.endsWith('(recovered)'));
+      await store.loadDeal(deal.id);
+      const finding = Object.values(store.get().findings).find((f) => f.dealId === deal.id && f.title === title);
+      return { deal: deal.id, finding: finding.id };
+    }, [dealId, f.title]);
+    dealId = copy.deal;
+    await page.goto(`${URL}#finding-${dealId}-${copy.finding}`);
+    await page.waitForSelector('#f-ask-text');
+  }
+  const finalPage = page.url();
+  const busy = await page.isDisabled('#f-ask-log');
+  await page.evaluate(() => window.resume());
+  await page.waitForFunction(() => !document.querySelector('#f-ask-log')?.disabled);
+  await page.goto(`${URL}#qa-${dealId}`);
+  await page.waitForSelector('.md .li');
+  await page.goto(finalPage);
+  await page.waitForSelector('#f-ask-text, #f-ask');
+  const closed = await shown(page, '#f-ask');
+  const saved = await page.evaluate(([deal, words]) => Object.values(store.get().questions)
+    .filter((q) => q.dealId === deal && q.text === words).length, [dealId, words]);
+  say('a logged question leaves one record and a closed Ask card after two recoveries',
+    busy && closed && saved === 1 && !page.errors.length, JSON.stringify({ busy, closed, saved, errors: page.errors }));
   await ctx.close();
 }
 

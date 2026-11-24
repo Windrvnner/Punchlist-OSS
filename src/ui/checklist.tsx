@@ -446,11 +446,11 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
     setTextState('');
     stopAsking();
   };
-  const forget = () => {
-    askDrafts.delete(draftKey);
-    askOn.delete(draftKey);
+  const forget = (currentKey: string) => {
+    askDrafts.delete(currentKey);
+    askOn.delete(currentKey);
   };
-  const { busy, log: logQuestion } = useLogQuestion(askDrafts, draftKey, forget, settle);
+  const { busy, log: logQuestion, cancel } = useLogQuestion(askDrafts, draftKey, forget, settle);
   const log = async () => {
     if (busy || !text.trim() || logWhy) return;
     const linked = { workstream: onF?.workstream ?? '', ...(onF ? { linkedFinding: onF.id } : {}), linkedItem: r.id };
@@ -460,16 +460,12 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
   // the card being typed in keeps one place in the pane, on or off, so turning the item off never takes it away or moves the focus
   // shown whenever a question is being typed, whatever happens to the item or its finding meanwhile; Escape sets it
   // aside only where Ask the counterparty brings it back
-  const cancelAsking = () => {
-    setText('');
-    stopAsking();
-  };
   const escapeAsking = () => {
     if (canAsk) stopAsking();
   };
   const card = asking ? <AskCard ids="ck-ask" cls="ckask" counterparty={d?.counterparty ?? ''}
     linked={onF ? onF.title : r.text} text={text} onText={setText} why={logWhy} busy={busy} onLog={() => void log()}
-    onCancel={cancelAsking} onEscape={escapeAsking} /> : null;
+    onCancel={cancel} onEscape={escapeAsking} /> : null;
   return (
     <div class="det ckdet glass" key={r.id} id="ck-detail" ref={pane}>
       <div class="dmeta">
