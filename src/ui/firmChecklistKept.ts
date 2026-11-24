@@ -134,7 +134,8 @@ function keepPasteAlone(keeper: Keeper, paste: string) {
   if (keeper.setAside.current) {
     if (!paste.trim()) return;
     const nothingElse = { table: null, text: null, reads: null, review: null, choices: undefined };
-    keepImport(key, { paste, ...nothingElse });
+    const clearedHeading = keptImport(key)?.headingDraft != null ? { headingDraft: null } : {};
+    keepImport(key, { paste, ...nothingElse, ...clearedHeading });
     keeper.setAside.current = false;
     return;
   }
