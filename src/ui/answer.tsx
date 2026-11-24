@@ -214,7 +214,7 @@ function SuggestedQuestion({ question, dealId, answer, verdict, askUse }: {
       {verdict && <p class="verdict" role="status">{verdictText(verdict)}</p>}
       <div class="row">
         {/* while it checks, the button is off but keeps the focus (aria-disabled, not disabled) */}
-        {store.services.ai.addresses && <button type="button" class="btn sm ask"
+        {state.can.addresses && <button type="button" class="btn sm ask"
           title={`Check whether this answers Q${question.n}`}
           aria-disabled={verdict === 'asking' ? true : undefined} onClick={check}>
           {checkLabel(verdict)}

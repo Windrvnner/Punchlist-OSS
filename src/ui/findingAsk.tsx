@@ -78,7 +78,7 @@ export function FindingLinks({ dealId, f, pane }: { dealId: string; f: Finding; 
   // the check's rows name the item of a finding written before findings named it: read once, as the Q&A page does
   const unread = s.checklists[dealId] === undefined;
   useEffect(() => {
-    if (unread && store.services.ai.checklist) void store.refreshChecklist(dealId);
+    if (unread) void store.refreshChecklist(dealId);
   }, [dealId]);
   const item = findingItem(s, f);
   const asked = askedAbout(s, dealId, item?.id ?? null, f);
