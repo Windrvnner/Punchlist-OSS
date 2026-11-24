@@ -77,6 +77,7 @@ import { SERVICE, control } from '../control';
 import { view, openRounds, serves, factsOf, finishedAt, need, undone, blockOf, unitOf, owner, findingIdFor, docsHash, isItem, itemOf, findingOf, counts, Observer, type View, type RoundState, type RoundKind, type RoundDef, type Piece, type RLine, type PieceFacts } from './rounds';
 import { SHARE, SHARED_BY, FOLDER_PART } from './sameRoom';
 import { retrier, type RetryOptions } from './retry';
+import { withoutDraftCredits } from './draftReply';
 
 /** One thing the first pass checks. `id` is the checklist's own and must stay the same from run to run. */
 export interface ChecklistItem { id: string; text: string; /** its section and subsection headings, where its list has them: they help match it to documents (core.ts) */ heads?: string }
@@ -1608,14 +1609,16 @@ export function nodeAi(o: AiOptions) {
       // the earlier responses the model chose go in word for word, each credited: nothing is added to another party's answer, or turned round.
       // What the documents add follows, as the model wrote it, with any credit of its own taken out, so a difference between the two stays in sight.
       const quoted = reused.map((q) => `${asAnswered(q)}: ${q.response}`);
-      // a sentence of the model's that names a question it was shown is a credit in its own words: dropped, whatever the wording
-      const names = new RegExp(`\\bQ(?:${earlier.map((q) => q.n).join('|') || '0'})\\b`);
-      // a draft rests only on this deal's own documents: another project's, or a blackline against one, never answers
-      // by itself
-      const kept = out.sources.some((x) => mainIn(r.value.sent, x)) ? out.text.split(/(?<=[.!?](?:\s*\[\d+\])*)\s+(?!\[)/).filter((x) => !names.test(x)).join(' ').trim() : '';
+      const evidence = withoutDraftCredits(out, earlier.map((question) => question.n));
+      // A document from another deal or a blackline against one cannot support a draft by itself.
+      const kept = evidence.sources.some((source) => mainIn(r.value.sent, source)) ? evidence.text : '';
       const own = kept.charAt(0).toUpperCase() + kept.slice(1);
       if (!quoted.length && !own) return ok({ status: 'none', text: '', sources: [] });             // a draft rests on a document it cites or on an earlier response it names
-      return ok({ status: 'found', text: [...quoted, own].filter(Boolean).join('\n\n'), sources: own ? out.sources : [] });
+      return ok({
+        status: 'found',
+        text: [...quoted, own].filter(Boolean).join('\n\n'),
+        sources: own ? evidence.sources : [],
+      });
     },
     async reassess(i) {
       const f = await record<{ title: string; body: string[]; sources: Source[] }>('finding', i.findingId); if (!f) return fail({ kind: 'notFound', message: 'No such finding' });
