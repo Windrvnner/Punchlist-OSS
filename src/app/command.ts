@@ -46,6 +46,8 @@ export interface Plan {
   undoesSafely?: true;
   /** short confirmation for the toast; undo is offered when `inverse` exists */
   message?: string;
+  /** the part of the message that gives way when the notice is short of room, such as a long deal name (#27) */
+  messageCut?: string;
   /** the message is shown even when the action was asked for quietly: for an action that takes away what a person had entered, so that it can always be undone */
   alwaysSay?: boolean;
   /** runs after commit; its follow-up command is dispatched quietly */
