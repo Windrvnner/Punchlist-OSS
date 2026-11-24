@@ -21,7 +21,8 @@ const choices = new Map<string, { off: Set<string>; linked: Set<string> }>();
 
 export function AddUnresolvedDialog({ dealId }: { dealId: string }) {
   const store = useStore();
-  const [ready, setReady] = useState<UnresolvedPreview | null>(null); const [count, setCount] = useState<number | null>(null);
+  const [ready, setReady] = useState<UnresolvedPreview | null>(null);
+  const [count, setCount] = useState<number | null>(null);
   const [error, setError] = useState(''); const [busy, setBusy] = useState(false); const [tries, setTries] = useState(0); const [redo, setRedo] = useState(false);
   // what the person unchecked or chose to link is kept per deal, so a stray click outside loses none of it (lost work first)
   const kept0 = choices.get(dealId);
@@ -50,7 +51,16 @@ export function AddUnresolvedDialog({ dealId }: { dealId: string }) {
   const selected = selectUnresolved(ready, off, linked);
   const { points: kept, links } = selected;
   // checking a link sets aside the new question for the same point, so it is not asked twice; it can be checked again
-  const checkLink = (l: UnresolvedPreview['links'][number], on: boolean) => { const n = new Set(linked); const o = new Set(off); if (on) { n.add(l.q.id); o.add(l.point.key); } else n.delete(l.q.id); setLinked(n); setOff(o); };
+  const checkLink = (link: UnresolvedPreview['links'][number], on: boolean) => {
+    const nextLinked = new Set(linked);
+    const nextOff = new Set(off);
+    if (on) {
+      nextLinked.add(link.q.id);
+      nextOff.add(link.point.key);
+    } else nextLinked.delete(link.q.id);
+    setLinked(nextLinked);
+    setOff(nextOff);
+  };
   // and checking the new question again unchecks its link: a point is either asked anew or linked, never both
   const checkPoint = (key: string, on: boolean) => { const o = new Set(off); const n = new Set(linked); if (on) { o.delete(key); for (const l of ready?.links ?? []) if (l.point.key === key) n.delete(l.q.id); } else o.add(key); setOff(o); setLinked(n); };
   const run = async () => {
