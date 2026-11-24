@@ -13,6 +13,7 @@ const FILE = 'Lender A Q&A.xlsx';
 /** a folder holding the log, as the team keeps it */
 const withLog = (s = 'theirs', ...dirs: string[]) => { const d = folder(...dirs); fs.writeFileSync(path.join(d, FILE), s); return d; };
 const read = (d: string, f = FILE) => fs.readFileSync(path.join(d, f), 'utf8');
+
 /** the folder's clock moves on two minutes: every file made from now on reads as made then, so the ones before are old */
 const later = () => {
   const wait = Date.now() + 30; while (Date.now() < wait) { /* so the files before are 20 ms older at least */ }
@@ -254,6 +255,7 @@ describe('saving the log', () => {
     const archive = path.join(d, 'Archive', 'Lender A Q&A 2026-11-15 1612.xlsx');
     const earlierVersion = 'Please provide the current debt service reserve schedule.';
     const open = fs.openSync;
+    const link = fs.linkSync;
     const claimFails = () => {
       fs.writeFileSync(archive, earlierVersion);
       throw Object.assign(new Error('I/O error claiming the archive name'), { code: 'EIO' });
@@ -261,6 +263,10 @@ describe('saving the log', () => {
     vi.spyOn(fs, 'openSync').mockImplementation((file, flags, mode) => {
       if (file === archive && flags === 'wx') claimFails();
       return open(file, flags, mode);
+    });
+    vi.spyOn(fs, 'linkSync').mockImplementation((source, file) => {
+      if (file === archive) claimFails();
+      return link(source, file);
     });
 
     expect(() => save(d, 'ours')).toThrow('I/O error claiming the archive name');
@@ -290,9 +296,14 @@ describe('saving the log', () => {
     const archive = path.join(dir, name);
     const partial = path.join(d, 'incomplete-copy.tmp');
     const earlierVersion = 'Please clarify the notice period for voluntary prepayment.';
+    const link = fs.linkSync;
     const open = fs.openSync;
     const write = fs.writeFileSync;
     let archiveHandle: number | undefined;
+    vi.spyOn(fs, 'linkSync').mockImplementation((source, file) => {
+      if (file === archive) throw Object.assign(new Error('Hard links unavailable'), { code: 'ENOTSUP' });
+      return link(source, file);
+    });
     vi.spyOn(fs, 'openSync').mockImplementation((file, flags, mode) => {
       const handle = open(file, flags, mode);
       if (file === archive && flags === 'wx') archiveHandle = handle;

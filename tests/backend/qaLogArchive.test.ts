@@ -113,4 +113,81 @@ describe('publishing and recovering Q&A archives', () => {
     vi.restoreAllMocks();
     expect(read(d, name)).toBe(revised);
   });
+
+  it('retains the merge base if the archive stops accepting files after the log was moved (#21)', () => {
+    const d = folder('Archive');
+    const file = 'Renewable portfolio Q&A.csv';
+    const active = path.join(d, file);
+    const dir = path.join(d, 'Archive');
+    const original = 'No.,Question,Response\n1,Please provide the agreed consent timetable,To be confirmed.\n';
+    const peer = original.replace('To be confirmed.', 'The timetable was agreed at closing.');
+    const laterVersion = original.replace('To be confirmed.', 'Consent is subject to conditions.');
+    fs.writeFileSync(active, original);
+    const rename = fs.renameSync;
+    const open = fs.openSync;
+    let archiveUnavailable = false;
+    vi.spyOn(fs, 'renameSync').mockImplementation((source, target) => {
+      if (source === active) fs.writeFileSync(active, peer);
+      rename(source, target);
+      if (source === active) {
+        fs.writeFileSync(active, laterVersion);
+        archiveUnavailable = true;
+      }
+    });
+    vi.spyOn(fs, 'openSync').mockImplementation((name, flags, mode) => {
+      if (archiveUnavailable && flags === 'wx' && typeof name === 'string' && path.dirname(name) === dir) {
+        throw Object.assign(new Error('Archive is unavailable'), { code: 'EIO' });
+      }
+      return open(name, flags, mode);
+    });
+
+    expect(() => saveLog({ folder: d, file, bytes: bytes('ours'), was: sha256(bytes(original)), at })).toThrow();
+    vi.restoreAllMocks();
+    ageMovedAsideLog();
+    const [kept] = keptEdits(d, file);
+    expect(kept.hash).toBe(sha256(bytes(peer)));
+    expect(kept.base && fs.readFileSync(kept.base, 'utf8')).toBe(original);
+    expect(read(d, file)).toBe(laterVersion);
+  });
+
+  it('keeps a peer log that appears while rolling back a failed archive publication (#21)', () => {
+    const d = withLog('theirs');
+    const active = path.join(d, FILE);
+    const archive = path.join(d, 'Archive', 'Lender A Q&A 2026-11-15 1612.xlsx');
+    const exists = fs.existsSync;
+    const link = fs.linkSync;
+    const open = fs.openSync;
+    let failed = false;
+    const refuse = () => {
+      failed = true;
+      throw Object.assign(new Error('Archive publication failed'), { code: 'EIO' });
+    };
+    vi.spyOn(fs, 'linkSync').mockImplementation((source, target) => {
+      if (target === archive) refuse();
+      return link(source, target);
+    });
+    vi.spyOn(fs, 'openSync').mockImplementation((name, flags, mode) => {
+      if (name === archive && flags === 'wx') refuse();
+      return open(name, flags, mode);
+    });
+    vi.spyOn(fs, 'existsSync').mockImplementation((name) => {
+      const present = exists(name);
+      if (name === active && failed && !present) fs.writeFileSync(active, 'The conditions were waived.');
+      return present;
+    });
+
+    expect(() => save(d, 'ours')).toThrow('Archive publication failed');
+    vi.restoreAllMocks();
+    expect(read(d)).toBe('The conditions were waived.');
+    expect(list(d).filter((file) => file.endsWith('.old')).map((file) => read(d, file))).toEqual(['theirs']);
+  });
+
+  it('does not occupy a new log name when the shared write is interrupted (#21)', () => {
+    const d = folder();
+    interruptPublication(d, path.join(d, FILE));
+    expect(() => createLog(d, FILE, bytes('No.,Question,Response'))).toThrow('Interrupted shared write');
+    vi.restoreAllMocks();
+    expect(list(d)).toEqual([]);
+    expect(createLog(d, FILE, bytes('No.,Question,Response'))).toBe(FILE);
+  });
 });
