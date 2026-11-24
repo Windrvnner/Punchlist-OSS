@@ -6,13 +6,17 @@ import { restartKeptText } from './keptTextSession';
 import { EditField, ReadOnlyContext } from '../../src/ui/editField';
 import { CONNECTED } from '../../src/app/connection';
 import { CHANGED_ELSEWHERE } from '../../src/app/changedElsewhere';
+import { unsavedFields } from '../../src/app/fieldDrafts';
 
 /** A tiny host standing in for the store: the field commits, the "record" changes when the host says so. */
-function mount(initial: string, multiline = true) {
+function mount(initial: string, multiline = true, keep?: string) {
   const host = document.createElement('div'); document.body.appendChild(host);
   const rec = { value: initial, rev: 1 }; const commits: { v: string; resolve: (ok: boolean) => void }[] = [];
   const commit = (v: string) => new Promise<{ ok: boolean }>((res) => commits.push({ v, resolve: (ok) => { if (ok) { rec.value = v; rec.rev++; } res({ ok }); } }));
-  const draw = () => act(() => { render(<EditField label="Question" multiline={multiline} value={rec.value} rev={rec.rev} commit={commit} debounceMs={20} />, host); });
+  const draw = () => act(() => {
+    render(<EditField label="Question" multiline={multiline} keep={keep} value={rec.value} rev={rec.rev}
+      commit={commit} debounceMs={20} />, host);
+  });
   draw();
   const el = () => host.querySelector(multiline ? 'textarea' : 'input') as HTMLTextAreaElement;
   const type = (v: string) => act(() => { el().dispatchEvent(new FocusEvent('focus')); el().value = v; el().dispatchEvent(new Event('input', { bubbles: true })); });
@@ -20,7 +24,85 @@ function mount(initial: string, multiline = true) {
   return { host, rec, commits, draw, el, type, settle, text: () => host.textContent ?? '' };
 }
 
+function compositionInput(field: HTMLInputElement | HTMLTextAreaElement, text: string, composing: boolean) {
+  field.value = text;
+  field.dispatchEvent(new InputEvent('input', { bubbles: true, isComposing: composing }));
+}
+
 describe('EditField', () => {
+  it('waits for composition to finish before saving, including an earlier pending debounce', async () => {
+    const editor = mount('Borrowing entity', false);
+    const field = editor.el();
+    await editor.type('Borrower');
+    await act(() => {
+      field.focus();
+      field.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      compositionInput(field, 'けいやく', true);
+    });
+    await editor.settle();
+    expect(field.value).toBe('けいやく');
+    await act(() => {
+      field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(document.activeElement).toBe(field);
+    expect(editor.commits).toHaveLength(0);
+    await act(() => {
+      field.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '契約' }));
+      compositionInput(field, '契約', false);
+    });
+    await editor.settle();
+    expect(editor.commits.map(({ v }) => v)).toEqual(['契約']);
+    await act(() => render(null, editor.host));
+    editor.host.remove();
+  });
+
+  it.each(['blur', 'pagehide', 'unmount'])('keeps provisional text out of a %s save', async (exit) => {
+    const keep = `ime:${exit}`;
+    const editor = mount('Borrowing entity', true, keep);
+    const field = editor.el();
+    await act(() => {
+      field.focus();
+      field.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      compositionInput(field, 'しょうにん', true);
+      if (exit === 'blur') field.blur();
+      if (exit === 'pagehide') window.dispatchEvent(new Event('pagehide'));
+      if (exit === 'unmount') render(null, editor.host);
+    });
+    await editor.settle();
+    expect(editor.commits).toHaveLength(0);
+    if (exit === 'blur') expect(field.value).toBe('しょうにん');
+    else expect(unsavedFields.get(keep)?.text).toBe('しょうにん');
+    await act(() => render(null, editor.host));
+    editor.host.remove();
+    unsavedFields.delete(keep);
+  });
+
+  it('offers a choice if a peer edits during composition and only saves the confirmed choice', async () => {
+    const editor = mount('Borrowing entity', false);
+    const field = editor.el();
+    await act(() => {
+      field.focus();
+      field.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      compositionInput(field, 'ほしょう', true);
+    });
+    editor.rec.value = 'Guarantor';
+    editor.rec.rev++;
+    await editor.draw();
+    await act(() => {
+      compositionInput(field, '保証', true);
+      field.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '保証' }));
+    });
+    await editor.settle();
+    expect(field.value).toBe('保証');
+    expect(editor.commits).toHaveLength(0);
+    expect(editor.text()).toContain('Changed elsewhere');
+    const keep = [...editor.host.querySelectorAll('button')].find((button) => button.textContent === 'Keep Mine');
+    await act(() => keep?.click());
+    expect(editor.commits.map(({ v }) => v)).toEqual(['保証']);
+    await act(() => render(null, editor.host));
+    editor.host.remove();
+  });
+
   it('typing straight after the field appears is never overwritten', async () => {
     // rendered without act(): effects have not run yet when the first input arrives, as in a real browser frame
     const host = document.createElement('div'); document.body.appendChild(host); const sent: string[] = [];
