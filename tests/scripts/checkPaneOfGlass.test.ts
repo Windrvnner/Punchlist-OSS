@@ -1,12 +1,13 @@
 // @vitest-environment node
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
-  copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync,
+  copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
   symlinkSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { builtReaderSources, servedReaderSources } from './viteReaderSources';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const script = path.resolve('scripts/check-pane-of-glass.mjs');
@@ -159,24 +160,42 @@ describe('UI dependency checks', () => {
       return `  ${condition} ? import.meta.glob('../backend/{${name}}.ts') : {},`;
     });
     repo.write(file, ['export const readers = [', ...rows, ']'].join('\n'));
-    const script = 'import { readers } from "/src/ui/readers.ts"; console.log(readers)';
-    repo.write('index.html', `<script type="module">${script}</script>`);
-    repo.write('desktop.html', '<title>Desktop</title>');
-
-    const cli = path.resolve('node_modules/vite/bin/vite.js');
-    const config = path.resolve('vite.config.ts');
-    const app = spawnSync(process.execPath, [cli, 'build', '--config', config], {
-      cwd: repo.dir, encoding: 'utf8', env: { ...process.env, NODE_ENV: 'production' },
-    });
-    expect(app.status, app.stderr).toBe(0);
-    const assets = path.join(repo.dir, 'dist/assets');
-    const sources: string[] = readdirSync(assets).filter((name) => name.endsWith('.js.map')).flatMap((name) =>
-      JSON.parse(readFileSync(path.join(assets, name), 'utf8')).sources);
+    const sources = builtReaderSources(repo.dir);
     const selected = conditions.filter(([name]) => sources.some((id) => id.endsWith(`/src/backend/${name}.ts`)));
     expect(selected.map(([name]) => name)).toEqual(['production', 'globalProd', 'client']);
     const result = repo.run();
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(`${file} import (lines 3, 5, 6): 3 exceeds`);
+  });
+
+  it.each(['ui', 'backend'])('follows the browser preset aliases into the %s layer', async (layer) => {
+    const repo = fixture();
+    const other = layer === 'ui' ? 'backend' : 'ui';
+    const file = 'src/ui/readers.ts';
+    for (const place of [layer, other]) repo.write(`src/${place}/term.ts`, 'export const term = "Checklist"');
+    const exports = { '.': './term.ts', './test-utils': './term.ts', './jsx-runtime': './term.ts' };
+    for (const name of ['react', 'react-dom', 'preact']) {
+      const aliased = name === 'preact';
+      const paths = aliased ? { ...exports, './compat': './term.ts', './*': './other.js' } : exports;
+      repo.write(`node_modules/${name}/other.js`, 'export const ready = true');
+      repo.write(`node_modules/${name}/package.json`, JSON.stringify({ name, exports: paths }));
+      symlinkSync(`../../src/${aliased ? layer : other}/term.ts`, path.join(repo.dir, 'node_modules', name, 'term.ts'));
+    }
+    const packages = ['react', 'react-dom', 'react/jsx-runtime', 'react-dom/test-utils'];
+    const calls = packages.map((name) => `  import.meta.glob('${name}'),`);
+    repo.write(file, ['export const readers = [', ...calls, ']'].join('\n'));
+
+    const selected = `src/${layer}/term.ts`;
+    const rejected = `src/${other}/term.ts`;
+    const served = await servedReaderSources(repo.dir, file);
+    expect(served.some((id) => id.endsWith('/' + selected))).toBe(true);
+    expect(served.some((id) => id.endsWith('/' + rejected))).toBe(false);
+    const built = builtReaderSources(repo.dir);
+    expect(built.some((id) => id.endsWith('/' + selected))).toBe(true);
+    expect(built.some((id) => id.endsWith('/' + rejected))).toBe(false);
+    const result = repo.run();
+    expect(result.status, result.stderr).toBe(layer === 'ui' ? 0 : 1);
+    if (layer === 'backend') expect(result.stderr).toContain(`${file} import (lines 2, 3, 4, 5): 4 exceeds`);
   });
 
   it.each(['ui', 'backend'])('resolves a workspace export to its real %s module', (layer) => {
