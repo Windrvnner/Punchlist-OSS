@@ -2,7 +2,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { forbiddenSource, matchesIn } from './pane-of-glass-matches.mjs';
+import { matchesIn } from './pane-of-glass-matches.mjs';
 
 const baselinePath = 'scripts/pane-of-glass-baseline.json';
 const lower = process.argv.includes('--lower');
@@ -14,11 +14,10 @@ function uiSource(file) {
   return file.startsWith('src/ui/') && /\.tsx?$/.test(file) && !basename(file).includes('.test.');
 }
 
-function scan(files, contents) {
+async function scan(files, contents) {
   const found = {};
-  const forbiddenFiles = files.filter(forbiddenSource);
   for (const file of files.filter(uiSource).sort()) {
-    const lines = matchesIn(file, contents(file), forbiddenFiles);
+    const lines = await matchesIn(file, contents(file), files);
     if (Object.keys(lines).length) found[file] = lines;
   }
   return found;
@@ -38,7 +37,7 @@ function committedCounts(ref) {
 }
 
 // Comparing the proposed baseline with main catches an edit that raises both the count and its allowance.
-function committedBaseline() {
+async function committedBaseline() {
   for (const ref of ['origin/main', 'main']) {
     const base = spawnSync('git', ['merge-base', 'HEAD', ref], { encoding: 'utf8' });
     if (base.status !== 0) continue;
@@ -47,7 +46,7 @@ function committedBaseline() {
     if (counts) return counts;
     // On the branch introducing the check, main's source is the record of its existing exceptions.
     const files = git('ls-tree', '-r', '-z', '--name-only', at, '--', 'src').split('\0');
-    return countsFor(scan(files, (file) => git('show', `${at}:${file}`)));
+    return countsFor(await scan(files, (file) => git('show', `${at}:${file}`)));
   }
   // Exported sources have no history. In a Git checkout, HEAD alone cannot prove a committed allowance is valid.
   if (spawnSync('git', ['rev-parse', '--show-toplevel']).status !== 0) return null;
@@ -82,9 +81,9 @@ function compareFile(file, lines, baseline, committed) {
 const files = readdirSync('src', { recursive: true, withFileTypes: true })
   .filter((entry) => entry.isFile())
   .map((entry) => `${entry.parentPath.replaceAll('\\', '/')}/${entry.name}`);
-const found = scan(files, read);
+const found = await scan(files, read);
 const baseline = JSON.parse(read(baselinePath));
-const committed = committedBaseline();
+const committed = await committedBaseline();
 const problems = [];
 for (const file of new Set([...Object.keys(found), ...Object.keys(baseline)])) {
   const ceiling = committed ? (committed[file] ?? {}) : null;

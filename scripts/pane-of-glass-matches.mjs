@@ -1,7 +1,8 @@
 // Match syntax, so examples in comments, strings, regexes and JSX text never count as UI dependencies.
 import { posix } from 'node:path';
 import { parseSync, Visitor } from 'vite';
-import { importsForbiddenGlob } from './pane-of-glass-globs.mjs';
+import { collectGlob } from './pane-of-glass-globs.mjs';
+import { forbiddenGlobs } from './pane-of-glass-vite.mjs';
 import { literalValue, unwrapped } from './pane-of-glass-syntax.mjs';
 
 const storageNames = new Set(['localStorage', 'sessionStorage', 'indexedDB']);
@@ -36,7 +37,7 @@ function stringValues(expression) {
   return ['*'];
 }
 
-export function forbiddenSource(file) {
+function forbiddenSource(file) {
   return file.startsWith('src/') && layerPath.test(file.slice('src/'.length));
 }
 
@@ -51,10 +52,21 @@ function propertyNames(key, computed) {
   return stringValues(key);
 }
 
-export function matchesIn(file, source, forbiddenFiles) {
+function sourceLines(offsets, source) {
+  const lines = {};
+  for (const kind of Object.keys(offsets).sort()) {
+    lines[kind] = [...offsets[kind]].sort((a, b) => a - b)
+      .map((offset) => source.slice(0, offset).split(/\r\n|[\r\n\u2028\u2029]/).length);
+  }
+  return lines;
+}
+
+export async function matchesIn(file, source, files) {
   const parsed = parseSync(file, source);
   if (parsed.errors.length) throw new Error(`${file}: ${parsed.errors[0].message}`);
   const offsets = {};
+  const globs = [];
+  const keysOnly = new Set();
   function record(kind, node) {
     (offsets[kind] ??= new Set()).add(node.start);
   }
@@ -95,7 +107,7 @@ export function matchesIn(file, source, forbiddenFiles) {
     TSImportType: moduleSource,
     TSExternalModuleReference: (node) => checkModule(node.expression),
     CallExpression(node) {
-      if (importsForbiddenGlob(file, node, forbiddenFiles)) record('import', node);
+      collectGlob(node, globs, keysOnly);
       if (node.callee.type === 'Identifier' && node.callee.name === 'require') checkModule(node.arguments[0]);
     },
     MemberExpression: checkMember,
@@ -106,10 +118,9 @@ export function matchesIn(file, source, forbiddenFiles) {
     },
   }).visit(parsed.program);
 
-  const lines = {};
-  for (const kind of Object.keys(offsets).sort()) {
-    lines[kind] = [...offsets[kind]].sort((a, b) => a - b)
-      .map((offset) => source.slice(0, offset).split(/\r\n|[\r\n\u2028\u2029]/).length);
+  for (const index of await forbiddenGlobs(file, globs, keysOnly, files, forbiddenSource)) {
+    record('import', globs[index].node);
   }
-  return lines;
+
+  return sourceLines(offsets, source);
 }
