@@ -1,9 +1,10 @@
 // @vitest-environment node
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { build, createServer } from 'vite';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const script = path.resolve('scripts/check-pane-of-glass.mjs');
@@ -20,8 +21,8 @@ function check(cwd: string, ...args: string[]) {
   return spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8' });
 }
 
-function fixture(baseline: Baseline = {}) {
-  const dir = mkdtempSync(path.join(tmpdir(), 'pane-of-glass-'));
+function fixture(baseline: Baseline = {}, prefix = 'pane-of-glass-') {
+  const dir = mkdtempSync(path.join(tmpdir(), prefix));
   directories.push(dir);
   function write(file: string, source: string) {
     const destination = path.join(dir, file);
@@ -32,6 +33,33 @@ function fixture(baseline: Baseline = {}) {
   setBaseline(baseline);
   const baselineText = () => readFileSync(path.join(dir, baselineFile), 'utf8');
   return { dir, write, setBaseline, baselineText, run: (...args: string[]) => check(dir, ...args) };
+}
+
+async function viteSources(root: string, file: string) {
+  const config = { root, configFile: false, envDir: false, logLevel: 'silent' } as const;
+  const server = await createServer({ ...config, server: { middlewareMode: true, watch: null, ws: false } });
+  const dev: string[] = [];
+  const prod: string[] = [];
+  try {
+    const client = server.environments.client;
+    await client.transformRequest('/' + file);
+    const entry = await client.moduleGraph.getModuleByUrl('/' + file);
+    for (const module of entry!.importedModules) dev.push(module.id!);
+  } finally {
+    await server.close();
+  }
+  await build({
+    ...config, build: { write: false, lib: { entry: path.join(root, file), formats: ['es'] } },
+    plugins: [{
+      name: 'record-bundled-modules',
+      generateBundle(_options, bundle) {
+        for (const chunk of Object.values(bundle)) if (chunk.type === 'chunk') prod.push(...chunk.moduleIds);
+      },
+    }],
+  });
+  const names = (ids: string[]) => ids.map((id) => path.relative(root, id).split(path.sep).join('/'))
+    .filter((id) => id.startsWith('src/') && id !== file).map((id) => id.toLowerCase()).sort();
+  return { dev: names(dev), prod: names(prod) };
 }
 
 afterEach(() => {
@@ -109,6 +137,41 @@ describe('UI dependency checks', () => {
     const result = repo.run();
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(`${file} import (lines 1, 2, 3, 4, 10, 12): 6 exceeds`);
+  });
+
+  const backend = 'src/backend/part.ts';
+  const ui = 'src/ui/part.ts';
+  const header = 'src/ui/header.ts';
+  const nested = 'src/ui/backend/part.ts';
+  const folded = "'../BACKEND/*.ts', { eager: true, caseSensitive: false }";
+  it.each([
+    { args: "'../[!b]*/part.ts', { eager: true }", dev: [ui], prod: [ui] },
+    { args: "'../[!u]*/part.ts', { eager: true }", dev: [backend], prod: [backend] },
+    { args: "'../backend/{part}.ts', { eager: true }", dev: [], prod: [backend] },
+    { args: "['./header.ts', '../backend/{part}.ts']", dev: [header], prod: [backend, header] },
+    { args: "'./{header}.ts'", dev: [], prod: [header] },
+    { args: "'../backend/[[:alpha:]]*.ts'", dev: [backend], prod: [] },
+    { args: folded, dev: [], prod: [] },
+    { args: folded, brackets: true, dev: [], prod: [] },
+    { args: "['/src/{backend,ui}/part.ts', '!/src/backend/**']", brackets: true, dev: [ui], prod: [ui] },
+    { args: "'../backend/part.ts', ({ base: '/src/ui/nested' } as const)", dev: [nested], prod: [nested] },
+    { args: "'./part.ts' as const, { base: ('../backend' as const) } as const", dev: [backend], prod: [backend] },
+    { args: "[('../backend/part.ts' as const)] satisfies string[]", dev: [backend], prod: [backend] },
+    { args: "'../backend/*.ts'", keys: true, dev: [], prod: [] },
+  ])('checks what Vite actually imports for $args', async ({ args, keys, brackets, dev, prod }) => {
+    const repo = brackets ? fixture({}, 'pane-of-glass [fixture]-') : fixture();
+    const file = 'src/ui/readers.ts';
+    for (const id of [backend, ui, header, nested]) repo.write(id, `export const source = '${id}'`);
+    const call = `import.meta.glob(${args})`;
+    repo.write(file, `export const readers = ${keys ? `Object.keys(${call})` : call}`);
+    const selected = await viteSources(repo.dir, file);
+    if (args !== folded || (!brackets && !existsSync(path.join(repo.dir, 'src/BACKEND/part.ts')))) {
+      expect(selected).toEqual({ dev, prod });
+    }
+    const forbidden = selected.dev.includes(backend) || selected.prod.includes(backend);
+    const result = repo.run();
+    expect(result.status).toBe(forbidden ? 1 : 0);
+    if (forbidden) expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
   });
 
   it('defers the whole call when any option needs expression evaluation', () => {
@@ -229,6 +292,21 @@ describe('the remaining UI exceptions', () => {
     expect(result.stderr).toContain('above the committed count of 1');
   });
 
+  it('uses committed filenames to check the original ceiling for a glob import', () => {
+    const repo = fixture();
+    repo.write('vite.config.mjs', "throw new Error('The guard loaded the application config')");
+    repo.write(file, "export const readers = import.meta.glob('../backend/{part}.ts')");
+    git(repo.dir, 'init', '-q', '-b', 'main');
+    git(repo.dir, 'add', 'src');
+    git(repo.dir, 'commit', '-qm', 'Record the original files');
+    repo.write('src/backend/part.ts', 'export const read = true');
+    repo.setBaseline({ [file]: { import: 1 } });
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    const diagnostic = `${file} import (lines 1): the baseline cannot rise above the committed count of 0`;
+    expect(result.stderr).toContain(diagnostic);
+  });
+
   it('requires main to verify a committed increase in a shallow single-branch clone', () => {
     const repo = fixture({ [file]: { services: 1 } });
     repo.write(file, 'store.services.ai');
@@ -264,7 +342,7 @@ describe('the remaining UI exceptions', () => {
 
   it('passes the committed baseline on the repository sources', () => {
     const repo = fixture();
-    cpSync('src/ui', path.join(repo.dir, 'src/ui'), { recursive: true });
+    cpSync('src', path.join(repo.dir, 'src'), { recursive: true });
     copyFileSync(baselineFile, path.join(repo.dir, baselineFile));
     const result = repo.run();
     expect(result.stderr).toBe('');
