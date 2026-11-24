@@ -1,7 +1,7 @@
 // Resolve a local const on the TypeScript tree Vite already parsed.
 import { createRequire } from 'node:module';
 import { parseSync, transformSync, Visitor } from 'rolldown/utils';
-import { capturedValue } from './pane-of-glass-records.mjs';
+import { recordCaptures } from './pane-of-glass-records.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -68,10 +68,12 @@ export function localConstLookup(program, file, source, unwrapped) {
     }
     return null;
   }
+  let capture;
   return (identifier) => {
     const definition = definitionFor(identifier);
     if (!definition) return null;
     if (definition.node.id === definition.name) return definition.node.init;
-    return capturedValue(definition.node.id, unwrapped(definition.node.init), definition.name);
+    capture ??= recordCaptures(program, references, definitionFor, unwrapped);
+    return capture(definition);
   };
 }
