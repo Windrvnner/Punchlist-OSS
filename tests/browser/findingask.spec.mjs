@@ -30,7 +30,7 @@ const run = (page, name, input) => page.evaluate(async ([n, i]) => {
 }, [name, input]);
 
 /** A deal whose first pass has run, with a Q&A log of 2,000 questions, opened on the lock-up finding's page. */
-async function findingPage(scheme = 'light') {
+async function findingPage(scheme = 'light', questionCount = N) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 736 }, colorScheme: scheme });
   const page = await ctx.newPage();
   page.errors = [];
@@ -46,7 +46,7 @@ async function findingPage(scheme = 'light') {
   await page.click('#nd-create');
   await page.waitForFunction(() => Object.values(store.get().findings).length === 3, null, { timeout: 30000 });
   const id = await page.evaluate(() => Object.values(store.get().deals)[0].id);
-  await run(page, 'ImportQuestions', { dealId: id, mode: 'append', rows: logRows(N) });
+  await run(page, 'ImportQuestions', { dealId: id, mode: 'append', rows: logRows(questionCount) });
   await page.evaluate(() => store.ui({ toasts: [] }));
   const f = await page.evaluate((t) => Object.values(store.get().findings).find((x) => x.title === t), LOCKUP);
   await page.goto(`${URL}#finding-${id}-${f.id}`);
@@ -321,6 +321,58 @@ async function askedFor(page, questionId) {
   say('a pending Log follows its recovered finding and leaves a replacement question there after Cancel',
     copy !== id && inherited === words && busy && kept === words && !page.errors.length,
     JSON.stringify({ inherited, busy, kept, errors: page.errors }));
+  await ctx.close();
+}
+
+{ // Hold the acknowledgement after the save succeeds. Three copies of this log fit in native browser storage.
+  const { ctx, page, id, f } = await findingPage('light', 30);
+  const words = 'Does the signed covenant use the trailing or projected coverage ratio?';
+  await page.click('#f-ask');
+  await page.fill('#f-ask-text', words);
+  await page.evaluate(() => {
+    const dispatch = store.dispatch.bind(store);
+    store.dispatch = async (command, ...args) => {
+      const result = await dispatch(command, ...args);
+      if (command.name === 'CreateQuestion' && result.ok) {
+        store.dispatch = dispatch;
+        await new Promise((resume) => { window.resume = resume; });
+      }
+      return result;
+    };
+  });
+  await page.click('#f-ask-log');
+  await page.waitForFunction(() => !!window.resume);
+  let dealId = id;
+  for (let round = 0; round < 2; round++) {
+    if (round) await run(page, 'CreateFinding', {
+      dealId, title: 'Updated reserve covenant after recovery', workstream: 'Financial',
+    });
+    await page.evaluate((deal) => __peer.deleteDeal(deal, {}, true), dealId);
+    await page.waitForFunction((old) => Object.values(store.get().deals)
+      .some((d) => d.id !== old && d.name.endsWith('(recovered)')), dealId);
+    const copy = await page.evaluate(async ([old, title]) => {
+      const deal = Object.values(store.get().deals).find((d) => d.id !== old && d.name.endsWith('(recovered)'));
+      await store.loadDeal(deal.id);
+      const finding = Object.values(store.get().findings).find((f) => f.dealId === deal.id && f.title === title);
+      return { deal: deal.id, finding: finding.id };
+    }, [dealId, f.title]);
+    dealId = copy.deal;
+    await page.goto(`${URL}#finding-${dealId}-${copy.finding}`);
+    await page.waitForSelector('#f-ask-text');
+  }
+  const finalPage = page.url();
+  const busy = await page.isDisabled('#f-ask-log');
+  await page.evaluate(() => window.resume());
+  await page.waitForFunction(() => !document.querySelector('#f-ask-log')?.disabled);
+  await page.goto(`${URL}#qa-${dealId}`);
+  await page.waitForSelector('.md .li');
+  await page.goto(finalPage);
+  await page.waitForSelector('#f-ask-text, #f-ask');
+  const closed = await shown(page, '#f-ask');
+  const saved = await page.evaluate(([deal, words]) => Object.values(store.get().questions)
+    .filter((q) => q.dealId === deal && q.text === words).length, [dealId, words]);
+  say('a logged question leaves one record and a closed Ask card after two recoveries',
+    busy && closed && saved === 1 && !page.errors.length, JSON.stringify({ busy, closed, saved, errors: page.errors }));
   await ctx.close();
 }
 
