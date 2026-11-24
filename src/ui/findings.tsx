@@ -243,7 +243,7 @@ const CITE_TIP = 'A tag after a sentence names the source it cites. It moves wit
 
 /** Reveal the actions on the finding page, where the composer overlays the thread (#597). */
 function focusFindingEditTitle(field: HTMLInputElement | null) {
-  if (field?.closest('.chat')) focusCard(field);
+  if (field?.closest('.chat')) focusCard(field, true);
   else focusOnce(field);
 }
 

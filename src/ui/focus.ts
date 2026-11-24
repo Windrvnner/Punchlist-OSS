@@ -21,20 +21,40 @@ export const closeOnEscape = (close: () => void) => (e: KeyboardEvent) => {
   close();
 };
 
+/** Account for the sticky breadcrumb and overflowing actions when revealing a bounded editor. */
+function revealFittedCard(field: HTMLElement, card: HTMLElement, scroller: HTMLElement, composer: HTMLElement) {
+  const header = scroller.querySelector('.chathead');
+  const inset = header && getComputedStyle(header).position === 'sticky' ? header.getBoundingClientRect().height : 0;
+  card.style.setProperty('--thread-header-height', `${inset}px`);
+  const thread = scroller.getBoundingClientRect();
+  const cardBottom = card.getBoundingClientRect().bottom;
+  const actionsBottom = card.querySelector('.cacts')?.getBoundingClientRect().bottom ?? cardBottom;
+  const visibleBottom = Math.min(thread.bottom, composer.getBoundingClientRect().top);
+  const over = Math.max(0, Math.max(cardBottom, actionsBottom) - (visibleBottom - 12));
+  // The enter animation shifts the card down until it settles. Use the final field position.
+  const transform = getComputedStyle(card).transform;
+  const slide = transform === 'none' ? 0 : new DOMMatrixReadOnly(transform).m42;
+  const room = field.getBoundingClientRect().top - slide - (thread.top + inset + 4);
+  const top = Math.min(over, room);
+  if (top) scroller.scrollBy({ top });
+}
+
 /** The card scrolls up clear of the composer so its buttons can be reached. */
-function scrollClearOfComposer(field: HTMLElement) {
+function scrollClearOfComposer(field: HTMLElement, keepFieldVisible: boolean) {
   const card = field.closest('.card');
   const composer = document.getElementById('pcomposer');
-  if (!card || !composer) return;
+  if (!(card instanceof HTMLElement) || !composer) return;
   let scroller = card.parentElement;
   while (scroller && !/auto|scroll/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+  if (!scroller) return;
+  if (keepFieldVisible) return revealFittedCard(field, card, scroller, composer);
   const over = card.getBoundingClientRect().bottom - (composer.getBoundingClientRect().top - 12);
-  if (scroller && over > 0) scroller.scrollBy({ top: over });
+  if (over > 0) scroller.scrollBy({ top: over });
 }
 
 /** A card's first field takes the focus, and the card scrolls up clear of the composer. */
-export function focusCard(field: HTMLElement | null) {
+export function focusCard(field: HTMLElement | null, keepFieldVisible = false) {
   if (!field || field.dataset.f) return;
   focusOnce(field);
-  requestAnimationFrame(() => scrollClearOfComposer(field));
+  requestAnimationFrame(() => scrollClearOfComposer(field, keepFieldVisible));
 }
