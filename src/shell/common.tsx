@@ -23,6 +23,8 @@ import { pickUpIndexing } from '../app/indexing';
 import { lookForFolders } from '../app/relink';
 import { watchFolders } from '../app/folderWatch';
 import { startKeptText } from './keptText';
+import { initializeKeptImports } from '../app/keptImports';
+import { IndexedKeptImports } from '../adapters/keptImports';
 import '../styles.css';
 import '../ui/ui.css';
 
@@ -42,6 +44,7 @@ for (const c of COMMANDS) registry.set(c.name, c);
 /** Theme, focus refresh, mount, and start: the same in both shells once the Store is made. */
 export async function run(store: Store) {
   startKeptText(store.services.local);
+  initializeKeptImports(new IndexedKeptImports());
   const [{ App }, { startKeepingDrafts }] = await Promise.all([
     import('../ui/app'),
     import('../app/startKeepingDrafts'),
