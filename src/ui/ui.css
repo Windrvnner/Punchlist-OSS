@@ -70,6 +70,18 @@ a.flagrow{text-decoration:none;color:inherit}
 .docnm .dni{display:contents}
 .docnm .dnh{flex:0 1 auto;min-width:3ch;overflow:hidden;text-overflow:ellipsis}
 .docnm .dnt{flex:none}
+/* Use the 13px icon and 6px gap as part of the filename hover target without taking any extra chip width. */
+.rsch-chip>.docnm{--source-icon-space:19px;position:relative;
+  margin-inline-start:calc(-1 * var(--source-icon-space));padding-inline-start:var(--source-icon-space)}
+/* Keep the slide out of the icon and count the hover padding in its measured travel. */
+.rsch-chip>.docnm.run{overflow:clip;overflow-clip-margin:content-box}
+.rsch-chip>.docnm.run .dni{padding-inline-end:var(--source-icon-space)}
+/* Give the head the space left by the tail. A tail that cannot fit uses a leading ellipsis. */
+.rsch-chip .docnm:not(.run) .dnh{flex:1;min-width:0}
+.rsch-chip .docnm:not(.run) .dnt{flex-shrink:1;overflow:hidden;text-overflow:ellipsis;direction:rtl}
+/* Isolate the tail text in a left-to-right run so the ellipsis direction does not reorder the name. */
+.rsch-chip .docnm:not(.run) .dnt::before{content:"\2066"}
+.rsch-chip .docnm:not(.run) .dnt::after{content:"\2069"}
 /* sliding through once: the full name, clipped to the same box, moved left until its end shows */
 .docnm.run{overflow:hidden}
 .docnm.run .dni{display:inline-flex;flex:none;transform:translateX(var(--dx,0px));transition:transform var(--dur,0s) linear}
@@ -649,9 +661,11 @@ body.reading{--colw:clamp(320px,calc(100vw - 1000px),560px)}
 /* reading mode: nothing readable shows through the composer */
 body.reading .tcomp.narrow{background:var(--menu-solid);backdrop-filter:none}
 /* Retry and Resume in a line of text look like the app's other in-line actions */
-/* Retry on a page has one look, an accent word; on a notice it is the notice's underlined word, like Undo */
+/* Retry uses the accent on UI surfaces, and paper ink on a document page. */
 .loadfail .tundo,.ai.failed .tundo{background:none;border:0;padding:0;margin-left:4px;font:inherit;font-weight:500;color:var(--accent);cursor:pointer}
 .loadfail .tundo:hover,.ai.failed .tundo:hover{text-decoration:underline;text-underline-offset:3px}
+.page .loadfail .tundo{color:var(--paper-ink);text-decoration:underline;text-underline-offset:3px}
+.page .loadfail .tundo:focus-visible{outline-color:currentColor}
 /* icon buttons keep their icon whole */
 .fctl .btn.sm.ico{width:28px;height:28px;padding:0;justify-content:center}.fctl .btn.sm.ico svg{flex:none}
 .rail a.railx{padding:0}
