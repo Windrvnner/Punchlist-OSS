@@ -146,6 +146,44 @@ describe('UI dependency checks', () => {
     expect(result.stderr).toContain(`${file} import (lines 3, 6, 8, 19, 21): 5 exceeds`);
   });
 
+  it('follows named literal containers and applies defaults only to missing or undefined values', () => {
+    const repo = fixture();
+    const file = 'src/ui/modulePaths.ts';
+    const source = [
+      "const paths = { entry: 'node:path' } as const",
+      'const { entry } = paths',
+      'export const loadConfiguredPath = () => import(entry)',
+      '',
+      "const { fallback = 'node:path' } = { fallback: undefined }",
+      'export const loadDefaultPath = () => import(fallback)',
+      "const modules = ['node:path'] as const",
+      'const alias = modules',
+      'const [fromArray] = alias',
+      'export const loadArrayPath = () => import(fromArray)',
+    ].join('\n');
+    repo.write(file, source);
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 3, 6, 10): 3 exceeds`);
+
+    repo.write(file, [
+      source.replaceAll('node:path', './table'),
+      'function supplied(undefined: string) {',
+      "  const { target = 'node:path' } = { target: undefined }",
+      '  return import(target)',
+      '}',
+      "const changing = { target: 'node:path' }",
+      "Object.assign(changing, { target: './table' })",
+      'const { target } = changing',
+      'export const changed = () => import(target)',
+      'const cycle = other',
+      'const other = cycle',
+      'const { unknown } = cycle',
+      'export const unresolved = () => import(unknown)',
+    ].join('\n'));
+    expect(repo.run().status).toBe(0);
+  });
+
   it('resolves imports in TypeScript classes with decorators and auto-accessors', () => {
     const repo = fixture();
     const file = 'src/ui/picker.ts';
