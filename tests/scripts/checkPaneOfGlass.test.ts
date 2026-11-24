@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -163,18 +163,25 @@ describe('the remaining UI exceptions', () => {
     expect(result.stderr).toContain('above the committed count of 1');
   });
 
-  it('compares local edits in a shallow single-branch clone with its committed allowance', () => {
+  it('requires main to verify a committed increase in a shallow single-branch clone', () => {
     const repo = fixture({ [file]: { services: 1 } });
     repo.write(file, 'store.services.ai');
-    git(repo.dir, 'init', '-q', '-b', 'topic');
+    git(repo.dir, 'init', '-q', '-b', 'main');
     git(repo.dir, 'add', 'src', baselineFile);
     git(repo.dir, 'commit', '-qm', 'Record existing UI');
+    git(repo.dir, 'switch', '-qc', 'topic');
+    repo.write(file, 'store.services.ai\nstore.services.ids');
+    repo.setBaseline({ [file]: { services: 2 } });
+    git(repo.dir, 'commit', '-qam', 'Raise the allowance with the source count');
+
     const clone = path.join(repo.dir, 'shallow');
     git(repo.dir, 'clone', '-q', '--depth=1', '--single-branch', pathToFileURL(repo.dir).href, clone);
-    expect(git(clone, 'rev-parse', '--is-shallow-repository').trim()).toBe('true');
-    expect(check(clone).status).toBe(0);
-    writeFileSync(path.join(clone, file), 'store.services.ai\nstore.services.ids');
-    writeFileSync(path.join(clone, baselineFile), JSON.stringify({ [file]: { services: 2 } }));
+    const fetch = ['fetch', '--unshallow', 'origin', '+refs/heads/main:refs/remotes/origin/main'];
+    const missing = check(clone);
+    expect(missing.status).toBe(1);
+    expect(missing.stderr).toContain(['git', ...fetch].join(' '));
+
+    git(clone, ...fetch);
     const result = check(clone);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('the baseline cannot rise above the committed count of 1');
@@ -186,11 +193,14 @@ describe('the remaining UI exceptions', () => {
     git(repo.dir, 'init', '-q', '-b', 'topic');
     const result = repo.run();
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('Fetch origin/main');
+    expect(result.stderr).toContain('git fetch origin +refs/heads/main:refs/remotes/origin/main');
   });
 
   it('passes the committed baseline on the repository sources', () => {
-    const result = check(process.cwd());
+    const repo = fixture();
+    cpSync('src/ui', path.join(repo.dir, 'src/ui'), { recursive: true });
+    copyFileSync(baselineFile, path.join(repo.dir, baselineFile));
+    const result = repo.run();
     expect(result.stderr).toBe('');
     expect(result.status).toBe(0);
   });

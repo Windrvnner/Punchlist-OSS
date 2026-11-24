@@ -48,13 +48,11 @@ function committedBaseline() {
     const files = git('ls-tree', '-r', '-z', '--name-only', at, '--', 'src/ui').split('\0');
     return countsFor(scan(files, (file) => git('show', `${at}:${file}`)));
   }
-  // A shallow single-branch checkout may have only HEAD. Local edits still cannot raise its committed baseline.
+  // Exported sources have no history. In a Git checkout, HEAD alone cannot prove a committed allowance is valid.
   if (spawnSync('git', ['rev-parse', '--show-toplevel']).status !== 0) return null;
-  if (spawnSync('git', ['rev-parse', '--verify', 'HEAD']).status === 0) {
-    const counts = committedCounts('HEAD');
-    if (counts) return counts;
-  }
-  throw new Error('Cannot establish the committed UI baseline. Fetch origin/main and its history before checking.');
+  const shallow = git('rev-parse', '--is-shallow-repository').trim() === 'true';
+  const fetch = `git fetch ${shallow ? '--unshallow ' : ''}origin +refs/heads/main:refs/remotes/origin/main`;
+  throw new Error(`Cannot compare the UI baseline with main. Run ${fetch} and retry.`);
 }
 
 function countProblem(count, entry, limit) {
