@@ -312,6 +312,7 @@ export function saveLog(o: { folder: string; file: string; bytes: Uint8Array; wa
   const dir = archiveOf(o.folder); let archive = '';
   // the archive file that holds the version moved aside byte for byte, once one is known to: only then may that version go
   let holds = '';
+  let published = false;
   const drop = () => {   // nothing was replaced: no copy may say it was
     if (archive) { fs.rmSync(path.join(dir, archive), { force: true }); if (holds === archive) holds = ''; }
     return { status: 'later' as const };
@@ -340,6 +341,7 @@ export function saveLog(o: { folder: string; file: string; bytes: Uint8Array; wa
       if ((e as NodeJS.ErrnoException).code === 'EEXIST' || fs.existsSync(at)) return { status: 'later' };
       fs.renameSync(tmp, at);
     }
+    published = true;
     return { status: 'written', archive };
   } catch (e) {
     if (['EBUSY', 'EPERM', 'EACCES'].includes((e as NodeJS.ErrnoException).code ?? '')) {   // open in Excel
@@ -353,9 +355,11 @@ export function saveLog(o: { folder: string; file: string; bytes: Uint8Array; wa
     // Tidying up never changes the outcome: once the new version is in place the save is made, and what it wrote is
     // recorded. A working file another program holds stays until the next save.
     tidy(tmp);
-    // The version moved aside goes back when nothing took the log's name, and goes once the archive holds it. Otherwise it
-    // stays as it is, under its aside name: it may hold an edit that is nowhere else.
-    if (fs.existsSync(aside)) { if (!fs.existsSync(at)) fs.renameSync(aside, at); else if (holds) tidy(aside); }
+    // After publication, another PC may already have moved the new log aside for its own save (#280).
+    if (fs.existsSync(aside)) {
+      if (!published && !fs.existsSync(at)) fs.renameSync(aside, at);
+      else if (holds) tidy(aside);
+    }
   }
 }
 

@@ -163,6 +163,34 @@ describe('saving the log', () => {
     expect(saveLog({ folder: d, file: FILE, bytes: bytes('ours'), was: sha256(bytes('theirs')), at }).status).toBe('written'); vi.restoreAllMocks();
     expect(read(d)).toBe('ours'); expect(list(d)).toEqual(['01. Archive', FILE]);
   });
+  it.each(['link', 'rename'])('leaves a newly published log with the next save during %s cleanup (#280)', (method) => {
+    const original = 'The reserve covers three months of operating expenses.';
+    const revised = 'The reserve now covers six months of operating expenses.';
+    const d = withLog(original);
+    const active = path.join(d, FILE);
+    const peerAside = 'competing-save.old';
+    const link = fs.linkSync;
+    const rename = fs.renameSync;
+
+    vi.spyOn(fs, 'linkSync').mockImplementation((from, to) => {
+      if (method === 'rename') throw Object.assign(new Error('No hard links'), { code: 'ENOTSUP' });
+      link(from, to);
+      if (to === active) rename(active, path.join(d, peerAside));
+    });
+    if (method === 'rename') {
+      vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+        rename(from, to);
+        if (to === active && String(from).endsWith('.tmp')) rename(active, path.join(d, peerAside));
+      });
+    }
+
+    expect(save(d, revised)).toEqual({ status: 'written', archive: 'Lender A Q&A 2026-11-15 1612.xlsx' });
+    expect(read(d, peerAside)).toBe(revised);
+    expect(fs.existsSync(active)).toBe(false);
+    const archive = path.join(d, '01. Archive');
+    expect(list(archive).map((file) => read(archive, file))).toEqual([original]);
+    expect(list(d)).toEqual(['01. Archive', peerAside]);
+  });
   // a working file another program holds as the save tidies up (a sync client uploading the new version)
   it('is saved when its working files can\'t be removed yet, and they go at a save a minute later or more', () => {
     const d = withLog(); const rm = fs.rmSync;
