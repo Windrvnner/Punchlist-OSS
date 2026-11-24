@@ -126,4 +126,14 @@ describe('the finding editor', () => {
     expect(editorText(inserted)).toBe(text);
     expect(inserted.querySelector<HTMLElement>('.ctag')?.dataset.marker).toBe(marker);
   });
+
+  it('keeps a copied literal that shares the number of a renumbered citation', async () => {
+    const shared = source('Facility agreement.pdf');
+    const expected = 'See[2]; clause [2';
+    const { box } = await mount(atLimit(expected.length), [source('Fee letter.pdf'), shared]);
+    const clip = JSON.stringify({ text: 'See[1]; clause [2] applies.', sources: [shared] });
+    const inserted = capturePaste(box, { 'application/x-punchlist-cited': clip });
+    expect(editorText(inserted)).toBe(expected);
+    expect(inserted.querySelectorAll('.ctag')).toHaveLength(1);
+  });
 });
