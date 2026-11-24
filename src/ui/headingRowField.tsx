@@ -90,11 +90,12 @@ function useHeadingDraft(importKey: string, table: Heading, sheet: string, read:
     }
   });
 
-  // While another sheet is read its last row is unknown, so only the accepted sheet's range is enforced.
-  const row = rowNumber(text, sheet === table.sheet ? lastRow : Number.POSITIVE_INFINITY);
+  // While another sheet is read its last row is unknown, so only the accepted sheet's range is enforced or named.
+  const accepted = sheet === table.sheet;
+  const row = rowNumber(text, accepted ? lastRow : Number.POSITIVE_INFINITY);
   let reason: string | undefined;
-  if (row === null) reason = `Enter a whole row from 1 to ${num(lastRow)}`;
-  else if (!reading && sheet === table.sheet && row !== headerRow) reason = `The preview uses row ${num(headerRow)}`;
+  if (row === null) reason = accepted ? `Enter a whole row from 1 to ${num(lastRow)}` : 'Enter a whole row from 1';
+  else if (!reading && accepted && row !== headerRow) reason = `The preview uses row ${num(headerRow)}`;
   return { text, pick, reason };
 }
 
