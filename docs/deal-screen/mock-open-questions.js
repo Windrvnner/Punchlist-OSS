@@ -128,7 +128,7 @@ const REVIEW_BUTTON = (label) => `<button class="btn sm x-act">${label}</button>
 // Needs Input: drafts to review, a task's question to the person, and items Diligence left out
 const NEEDS_INPUT_ROWS = [
   taskRow('sheet', 'Draft responses for open questions', '40 ready', { end: REVIEW_BUTTON('Review') }),
-  taskRow('logedit', WATERFALL_TASK, 'Draft choice',
+  taskRow('logedit', WATERFALL_TASK, 'Awaiting draft selection',
     { end: REVIEW_BUTTON('Answer'), hoverText: 'Which draft is current: draft 5 (Nov 3) or draft 6 (Nov 17)?' }),
   taskRow('cklist', 'Diligence', '12 items not checked', { end: REVIEW_BUTTON('Run') }),
 ];
