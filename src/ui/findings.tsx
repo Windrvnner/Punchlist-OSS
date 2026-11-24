@@ -19,17 +19,17 @@ import { findingsView } from '../app/findingsView';
 import { ConflictView } from './conflict';
 import { AskFirst } from './dialogs';
 import { FindingLinks, askKept } from './findingAsk';
-import { CreateFinding, EditFinding, SetFindingStatus, ReviewFinding, DeleteFinding, TITLE_MAX } from '../app/commands/findings';
+import { SetFindingStatus, ReviewFinding, DeleteFinding, TITLE_MAX } from '../app/commands/findings';
 import { findingHistory, reassess, type FindingHistoryEvent } from '../app/findings';
-import { createdRecord } from '../app/createdRecord';
 import type { Deal, Finding, Source } from '../domain/model';
 import { localYmd, CHECK_REASON } from '../domain/model';
-import { splitCited, toParagraphs } from '../domain/cite';
+import { splitCited } from '../domain/cite';
 import { SERVICE, AI_LABEL } from '../control';
 import { keptDrafts, hasTexts } from '../app/keptText';
 import { useSaveOut } from './saveOut';
-import { editDrafts, editsOut, landCreated, landEdit, newFindingDrafts } from './findingDrafts';
-import type { EditDraft } from './findingDrafts';
+import {
+  editBeingSaved, editDrafts, type EditDraft, newFindingDrafts, saveFindingEdit, saveNewFinding,
+} from '../app/findingDrafts';
 import { SourceChips } from './research';
 import { CitedEditor } from './citedEditor';
 
@@ -243,7 +243,7 @@ const CITE_TIP = 'A tag after a sentence names the source it cites. It moves wit
 function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
   const store = useStore();
   // what was typed and kept, or, after Cancel while a save is out, what that save sent (#771)
-  const kept = editDrafts.get(f.id) ?? editsOut.get(f.id);
+  const kept = editDrafts.get(f.id) ?? editBeingSaved(f.id);
   // the finding as this edit began (kept with the draft, so a change made elsewhere meanwhile is still caught on Save)
   const start: EditDraft = kept ?? {
     title: f.title, ws: f.workstream, body: f.body.join('\n\n'),
@@ -284,15 +284,7 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
     if (busy) return;
     remember({});   // the kept draft holds what is sent, so the save can tell what is typed after it (#771)
     const sent = draft.current;
-    const edit = {
-      dealId: f.dealId, findingId: f.id, title, workstream: ws, body: toParagraphs(body), base: sent.base,
-    };
-    void out.send(async (cancelled) => {
-      editsOut.set(f.id, sent);
-      const r = await store.dispatch(EditFinding, edit, { idempotencyKey: 'f-edit-' + f.id })
-        .finally(() => editsOut.delete(f.id));
-      return landEdit(f.id, sent, r, cancelled());
-    });
+    void out.send((cancelled) => saveFindingEdit(store, f, sent, cancelled));
   };
   return (
     <div class="card addf fedit" data-holds-work onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onDone(); } }}>
@@ -334,13 +326,7 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
   };
   const create = () => {
     const sent = { title, ws, body };
-    const input = { dealId: d.id, title, workstream: ws, body: toParagraphs(body), origin: 'human' as const };
-    void out.send(async (cancelled) => {
-      const r = await store.dispatch(CreateFinding, input, { idempotencyKey: 'f-create-' + d.id });
-      // cancelled while it was out: a form opened since is left alone
-      if (!r.ok || cancelled()) return undefined;
-      return landCreated(d.id, sent, createdRecord(store.get(), r.value.opId, 'findings'));
-    });
+    void out.send((cancelled) => saveNewFinding(store, d.id, sent, cancelled));
   };
   return (
     <div class="card addf" data-holds-work onKeyDown={(e) =>

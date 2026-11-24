@@ -11,12 +11,13 @@ const live = (state: any, i: { dealId: string; findingId: string }): Finding | n
 
 /** the longest title a person can give a finding */
 export const TITLE_MAX = 300;
+export const trimmedFindingTitle = z.string().trim();
 
 export const CreateFinding = define({
   name: 'CreateFinding',
   input: z.object({
     dealId: DealId,
-    title: z.string().trim().min(1, 'Give the finding a title')
+    title: trimmedFindingTitle.min(1, 'Give the finding a title')
       .max(TITLE_MAX, `Keep the title under ${TITLE_MAX} characters`),
     workstream: z.string().min(1, 'Choose a workstream'),
     body: z.array(z.string()).default([]),
@@ -51,7 +52,7 @@ export const CreateFinding = define({
 export const EditFinding = define({
   name: 'EditFinding',
   input: Target.extend({
-    title: z.string().trim().min(1, 'Give the finding a title'),
+    title: trimmedFindingTitle.min(1, 'Give the finding a title'),
     workstream: z.string().min(1, 'Choose a workstream'),
     body: z.array(z.string()),
     /** the finding as the edit began: only fields the person changed from it are written, so a change made elsewhere
