@@ -83,15 +83,61 @@ async function checkStepping(field, waitFirst, focused, lastRow) {
   await field.fill('0');
   await field.press('ArrowUp');
   const recovered = await field.inputValue() === '1' && await focused();
+  // A native number input keeps the arrow keys, the step arrows, and its spinbutton role.
   const spinbutton = field.page().getByRole('spinbutton', { name: 'Heading row' });
-  const accessible = await spinbutton.count() === 1 && await spinbutton.getAttribute('aria-valuemin') === '1'
-    && await spinbutton.getAttribute('aria-valuemax') === String(lastRow)
-    && await spinbutton.getAttribute('aria-valuenow') === '1';
+  const accessible = await spinbutton.count() === 1 && await field.getAttribute('type') === 'number'
+    && await field.getAttribute('min') === '1' && await field.getAttribute('max') === String(lastRow);
   await field.press('ArrowUp');
   const steppedUp = await field.inputValue() === '2';
   await field.press('ArrowDown');
   await waitFirst();
   return recovered && accessible && steppedUp && await field.inputValue() === '1' && await focused();
+}
+
+/** A click on the upper step arrow inside the field's right edge steps the row, as on a native number input. */
+export async function checkMouseStep(page, prefix, fixture) {
+  const field = page.locator(`#${prefix}-header`);
+  const box = await field.boundingBox();
+  await field.hover();
+  await page.mouse.click(box.x + box.width - 16, box.y + box.height / 2 - 5);
+  const stepped = await field.inputValue() === '2';
+  await field.fill('1');
+  await ready(page, prefix);
+  return stepped && (await firstRow(page)).includes(fixture.first);
+}
+
+/** An arrow step while a longer sheet is read steps from the typed row, not the shorter sheet's last row. */
+export async function checkPendingSheetStep(page, prefix) {
+  const field = page.locator(`#${prefix}-header`);
+  const sheet = page.locator(`#${prefix}-sheet`);
+  await sheet.selectOption('Supplement');
+  await ready(page, prefix);
+  await page.evaluate(() => {
+    const codec = store.services.sheets;
+    const read = codec.read;
+    window.__allReads = [];
+    codec.read = (bytes, name, opts) => {
+      window.__allReads.push(opts ?? {});
+      return read(bytes, name, opts);
+    };
+    window.__restoreReads = () => { codec.read = read; };
+  });
+  await holdRead(page, { sheet: 'Main' });
+  await sheet.selectOption('Main');
+  await waitForRead(page);
+  await field.fill('8');
+  await field.press('ArrowDown');
+  // An empty max sets no upper bound on a number input.
+  const steppedDuringRead = await field.inputValue() === '7' && !(await field.getAttribute('max'));
+  await finishRead(page);
+  // Row 7 holds data rather than headings, so the import may stay unready; the read itself is what counts.
+  await page.waitForFunction(() => window.__allReads.some((read) => read.headerRow === 7));
+  const reads = await page.evaluate(() => window.__allReads.map((read) => read.headerRow).filter(Boolean));
+  const readSeven = await field.inputValue() === '7' && reads.includes(7) && !reads.includes(5);
+  await page.evaluate(() => window.__restoreReads());
+  await field.fill('1');
+  await ready(page, prefix);
+  return steppedDuringRead && readSeven;
 }
 
 export async function checkHeadingRow(page, prefix, fixture, toggle) {
