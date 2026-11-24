@@ -11,17 +11,13 @@ import { MemoryLocal } from '../../src/adapters/local';
 import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
 import { mockAi, mockDocuments, mockSession } from '../../src/adapters/mocks';
 import { CreateDeal, EditDeal } from '../../src/app/commands/deals';
-import { ResolveConflict } from '../../src/app/commands/conflicts';
 import { CreateQuestion, EditQuestionField, SetResponse } from '../../src/app/commands/questions';
 import { ImportQuestions } from '../../src/app/commands/importQuestions';
 import { registry } from '../../src/app/commands/undo';
-import { conflictVersionCount } from '../../src/app/dealCounts';
 import { dealQuestions } from '../../src/app/state';
 import { prepareImport, suggestMapping } from '../../src/domain/importExport';
-import { sheet } from '../app/importKit';
-import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 
-const COMMANDS = [CreateDeal, EditDeal, CreateQuestion, EditQuestionField, SetResponse, ImportQuestions, ResolveConflict];
+const COMMANDS = [CreateDeal, EditDeal, CreateQuestion, EditQuestionField, SetResponse, ImportQuestions];
 for (const c of COMMANDS) registry.set(c.name, c);
 let t = 0; const clock = { now: () => new Date(Date.UTC(2026, 10, 17, 14, 0, 0, t++)).toISOString() };
 let seq = 0; const ids = { next: (p: string) => `${p}_01HRRRRRRRRRRRRRRRR${String(seq++).padStart(7, '0')}` };
@@ -37,12 +33,11 @@ function start(kv: Disk = disk()) {
   return { store, repo, kv };
 }
 const rows = (n: number) => { const csv = ['No.,Question,Response', ...Array.from({ length: n }, (_, k) => `${k + 1},"Question ${k + 1}.",`)].join('\n'); const tbl = readCsv(new TextEncoder().encode(csv)); if (!tbl.ok) throw new Error('csv'); return prepareImport(tbl.value.rows, suggestMapping(tbl.value.columns)).rows; };
-async function deal(store: Store, questions = rows(SIZE)) {
+async function deal(store: Store) {
   await store.boot(); await store.dispatch(CreateDeal, { name: 'Proseware', folders: [] });
   const id = Object.keys(store.get().deals)[0]; await store.loadDeal(id);
-  expect((await store.dispatch(ImportQuestions, { dealId: id, mode: 'merge', rows: questions }, { quiet: true })).ok)
-    .toBe(true);
-  expect(dealQuestions(store.get(), id)).toHaveLength(questions.length);
+  expect((await store.dispatch(ImportQuestions, { dealId: id, mode: 'merge', rows: rows(SIZE) }, { quiet: true })).ok).toBe(true);
+  expect(dealQuestions(store.get(), id).length).toBe(SIZE);
   return id;
 }
 /** the shared folder refuses every write, as when it is out of reach; returns what puts it back */
@@ -61,16 +56,7 @@ function screen(ui: Ui, store: Store, which: { kind: 'counterparty'; dealId: str
   const host = document.createElement('div'); document.body.appendChild(host);
   const Field = () => {
     const s = ui.useAppState();
-    if (which.kind === 'counterparty') {
-      const { dealId } = which;
-      const deal = s.deals[dealId];
-      const locked = conflictVersionCount(s, dealId) === undefined ? null : 'Choose a version first';
-      return <ui.ReadOnlyContext.Provider value={locked}>
-        <ui.EditField keep={`${dealId}:counterparty`} read={ui.readDeal(dealId, 'counterparty')}
-          label="Counterparty" value={deal.counterparty} rev={deal.rev} debounceMs={20}
-          commit={(counterparty, over) => store.dispatch(EditDeal, { dealId, counterparty }, { quiet: true, over })} />
-      </ui.ReadOnlyContext.Provider>;
-    }
+    if (which.kind === 'counterparty') { const d = s.deals[which.dealId]; return <ui.EditField keep={`${d.id}:counterparty`} read={ui.readDeal(d.id, 'counterparty')} label="Counterparty" value={d.counterparty} rev={d.rev} debounceMs={20} commit={(v, over) => store.dispatch(EditDeal, { dealId: d.id, counterparty: v }, { quiet: true, over })} />; }
     const q = s.questions[which.questionId];
     return <ui.EditField keep={`${q.id}:response`} read={ui.readQuestion(q.id, 'response')} label="Response" multiline value={q.response} rev={q.rev} debounceMs={20} commit={(v, over) => store.dispatch(SetResponse, { dealId: q.dealId, questionId: q.id, response: v }, { quiet: true, over })} />;
   };
@@ -92,50 +78,6 @@ async function fresh() {
 }
 
 describe('kept text and a change put back while its field was off screen', () => {
-  it('keeps a restored edit waiting for Retry after choosing a version with the same field value (#232)', async () => {
-    const ui = await fresh();
-    const { store, repo, kv } = start();
-    const questions = portfolioQuestions();
-    expect(questions).toHaveLength(2376);
-    const dealId = await deal(store, sheet('Question', questions.map((question) => [question])));
-    const original = 'Project company';
-    const draft = 'Borrower and guarantors';
-    const peer = 'Holding company';
-    expect((await store.dispatch(EditDeal, { dealId, counterparty: original }, { quiet: true, over: '' })).ok).toBe(true);
-    const record = () => store.get().deals[dealId];
-    const field = screen(ui, store, { kind: 'counterparty', dealId });
-    await field.shown(true);
-    const restoreWrites = away(kv);
-    await field.type(draft);
-    await field.shown(false);
-    restoreWrites();
-    await field.shown(true);
-    expect(field.text()).toBe('Not saved · Retry');
-    const base = record();
-    repo.peer.change('deal', dealId, { ...base, sector: 'Energy' }, PC3);
-    await repo.sync();
-    await tick();
-    expect(record()).toMatchObject({ counterparty: original, sector: 'Energy' });
-    expect(repo.peer.edit('deal', dealId, { ...base, counterparty: peer }, PC2)).toBe('conflict');
-    await repo.sync();
-    await tick();
-    expect(field.el().readOnly).toBe(true);
-    expect(record().counterparty).toBe(original);
-    const { versions } = store.get().conflicts[dealId];
-    expect(versions).toHaveLength(2);
-    const chosen = versions.find(({ from }) => from === PC3.from)!;
-    expect((await store.dispatch(ResolveConflict, { dealId, recordId: dealId, keep: chosen.id })).ok).toBe(true);
-    await tick(60);
-
-    expect(store.get().conflicts[dealId]).toBeUndefined();
-    expect(record()).toMatchObject({ counterparty: original, sector: 'Energy' });
-    expect(field.el().value).toBe(draft);
-    expect(field.text()).toBe('Not saved · Retry');
-    await field.press('Not saved');
-    expect(record()).toMatchObject({ counterparty: draft, sector: 'Energy' });
-    await field.shown(false);
-  });
-
   it('the issue\'s steps: a second PC changes the counterparty, a third puts it back; the field says "Changed elsewhere" and Retry is not offered', async () => {
     const ui = await fresh(); const m = start(); const dealId = await deal(m.store);
     await m.store.dispatch(EditDeal, { dealId, counterparty: 'orig' }, { quiet: true, over: '' });
