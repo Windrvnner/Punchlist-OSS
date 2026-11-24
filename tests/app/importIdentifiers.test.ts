@@ -7,10 +7,11 @@ import { SetResponse } from '../../src/app/commands/questions';
 import { ImportQuestions } from '../../src/app/commands/importQuestions';
 import { dealQuestions } from '../../src/app/state';
 import { previewImport } from '../../src/app/transfer';
-import { matchRows, identifiers, identifierSig, sameIdentifiers, exactIdentifiers } from '../../src/domain/logWrite';
+import { matchRows, logWrite, identifiers, identifierSig, sameIdentifiers, exactIdentifiers }
+  from '../../src/domain/logWrite';
 import type { Question } from '../../src/domain/model';
 import { dealList } from '../backend/dealList';
-import { make, deal, sheet, mapping, fileRow } from './importKit';
+import { make, deal, sheet, mapping } from './importKit';
 
 /** [saved wording, incoming wording]: different questions that a misreading or a reworded number could join */
 const DISTINCT: [string, string][] = [
@@ -92,10 +93,14 @@ const PRONOUN: [string, string][] = [
     'Please send the list for each item. We understand it is in the data room folder.'],
 ];
 
+const logHeader = 'Number,Question,Response,Submitted by,Workstream';
+const importRow = (n: number, text: string, response: string) =>
+  sheet(logHeader, [[String(n), text, response, 'Lender', 'Finance']]);
+
 /** a deal holding `text` as question 1, with a typed response: the deal and the question as saved */
 async function saved(text: string) {
   const { store } = make(); const dealId = await deal(store);
-  const rows = fileRow(1, text, 'Imported answer');
+  const rows = importRow(1, text, 'Imported answer');
   expect((await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows })).ok).toBe(true);
   const original = dealQuestions(store.get(), dealId)[0];
   const typed = { dealId, questionId: original.id, response: 'Typed answer' };
@@ -109,7 +114,7 @@ const logRow = (n: number, text: string) => [String(n), text, 'New answer', 'Len
 async function apart(before: string, incoming: string, n: number) {
   const { store, dealId, original } = await saved(before);
   expect(matchRows({ rows: [logRow(n, incoming)] }, mapping, [original])).toEqual(new Map());
-  const rows = fileRow(n, incoming, 'New answer');
+  const rows = importRow(n, incoming, 'New answer');
   expect(previewImport(store, dealId, 'merge', rows))
     .toEqual({ ok: true, value: { created: 1, updated: 0, restored: 0, changes: [] } });
   const result = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows });
@@ -140,7 +145,7 @@ describe('a misread or reworded row naming the same identifiers is still the que
   const matches = async (before: string, incoming: string, n: number) => {
     const { store, dealId, original } = await saved(before);
     expect(matchRows({ rows: [logRow(n, incoming)] }, mapping, [original])).toEqual(new Map([[original.id, 0]]));
-    const rows = fileRow(n, incoming, 'New answer');
+    const rows = importRow(n, incoming, 'New answer');
     expect(previewImport(store, dealId, 'merge', rows)).toMatchObject({ ok: true, value: { created: 0, updated: 1 } });
     expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows })).ok).toBe(true);
     expect(dealQuestions(store.get(), dealId))
@@ -153,7 +158,9 @@ describe('a misread or reworded row naming the same identifiers is still the que
   it('matches a reworded question by number when the clause identifier is spaced differently (#778)', () => matches(
     'Please confirm the consents required under clause 4.b of the facility agreement.',
     'Please confirm all consents required under clause 4. b of the facility agreement.', 1));
-  const dottedClauses = [['4.I', '4. I'], ['4.12(b)', '4. 12(b)'], ['4.b.12', '4. b . 12']];
+  const dottedClauses = [
+    ['4.I', '4. I'], ['4.12(b)', '4. 12(b)'], ['4.b.12', '4. b . 12'], ['IV.2', 'IV. 2'], ['4.2a', '4. 2a'],
+  ];
   for (const [compact, spaced] of dottedClauses) {
     it(`matches a reworded question with clause ${compact} or ${spaced} (#778)`, () => matches(
       `Please confirm the consents required under clause ${compact} of the facility agreement.`,
@@ -162,6 +169,18 @@ describe('a misread or reworded row naming the same identifiers is still the que
   it('keeps a sentence-start I as prose even when the space is missing (#778)', () => matches(
     'Please send the list for each item.I understand it is in the data room.',
     'Please send the list for each item. We understand it is in the data room folder.', 1));
+  it('keeps a dotted Roman suffix before a verb (#778)', () => matches(
+    'Please confirm whether clause 4.I requires the borrower to obtain lender consent under the facility agreement.',
+    'Please confirm whether clause 4. I requires the borrower to obtain lender consent before signing.', 1));
+  it('keeps Class I when a period is inserted in a reworded question (#778)', () => matches(
+    'Please confirm the distribution rights for class I shares under the agreement.',
+    'Please confirm all distribution rights for class. I shares under the agreement.', 1));
+  it('keeps a contracted sentence-start I as prose (#778)', () => matches(
+    'Please send the list for each item.I’m told the signed agreements are already in the data room.',
+    'Please send the list for each item. We’re told the signed agreements are already in the data room.', 1));
+  it('keeps a sentence-start I as prose before an aside (#778)', () => matches(
+    'Please send the list for each item.I, as counsel, understand the signed agreements are in the data room.',
+    'Please send the list for each item. We, as counsel, understand the signed agreements are in the data room.', 1));
   for (const [before, incoming] of PRONOUN) {
     it(`the word I is no identifier: ${incoming}`, () => matches(before, incoming, 1));
   }
@@ -177,7 +196,7 @@ describe('a misread or reworded row naming the same identifiers is still the que
     'Please send us the cap table for review', 'Please send us the US cap table for review', 1));
   it('but not under another number, as before', async () => {
     const { store, dealId, original } = await saved(REWORDED[0]);
-    const rows = fileRow(2, REWORDED[1], 'New answer');
+    const rows = importRow(2, REWORDED[1], 'New answer');
     expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows })).ok).toBe(true);
     expect(store.get().questions[original.id]).toEqual(original);
   });
@@ -271,3 +290,38 @@ function matchedRows(incoming: string[][], questions: Question[]) {
   expect(ms).toBeLessThan(5_000);
   return rows;
 }
+
+it('keeps 120 competing responses when a large log spaces a Roman clause suffix differently (#778)', async () => {
+  const { store } = make();
+  const dealId = await deal(store);
+  const originalResponse = 'The agreement requires written consent.';
+  const appResponse = 'The assignment needs written consent before closing.';
+  const workbookResponse = 'The assignment needs notice five days before closing.';
+  const affected = 120;
+  const clause = 'Please confirm whether clause 4.I requires the borrower to obtain consent.';
+  const originalRows = dealList().items.map((ask, index) => [
+    String(index + 1), index < affected ? `${ask} ${clause}` : ask, originalResponse, 'Lender', 'Finance',
+  ]);
+  const rows = sheet(logHeader, originalRows);
+  const initial = await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows });
+  expect(initial.ok).toBe(true);
+  const questions = dealQuestions(store.get(), dealId);
+  expect(questions).toHaveLength(2400);
+  const sent = new Map(questions.map(question => [question.id, { response: originalResponse }]));
+  const appQuestions = questions.map(question => question.n <= affected
+    ? { ...question, response: appResponse }
+    : question);
+  const workbookRows = originalRows.map((row, index) => index < affected
+    ? [row[0], row[1].replace('4.I', '4. I').replace('obtain consent', 'obtain consent before signing'),
+      workbookResponse, row[3], row[4]]
+    : row);
+  const table = { cols: [0, 1, 2, 3, 4], rows: workbookRows,
+    lines: workbookRows.map((_, index) => index + 2), lastRow: workbookRows.length + 1 };
+  const written = logWrite(table, mapping, appQuestions, sent);
+  expect(written.added).toBe(0);
+  const competing = questions.slice(0, affected);
+  expect(written.kept).toEqual(competing.map(question => question.n));
+  expect(competing.map(question => written.keptText[question.id]?.response)).toEqual(
+    Array(affected).fill(workbookResponse),
+  );
+}, 30_000);
