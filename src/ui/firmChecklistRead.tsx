@@ -32,12 +32,14 @@ function nextFooter(view: ImportView, line: string, tip?: string) {
   const { split } = target;
   const why = whyNoNext(view);
   const noColumn = source.byColumns && source.mapping.item === null;
+  const waiting = listReview.waiting && !why && !noColumn;
+  const status = waiting && !work.error ? `Asking ${SERVICE}` : line;
   return (
-    <div class="xfoot">{statusLine(view, line, tip)}<span class="grow" />
+    <div class="xfoot">{statusLine(view, status, tip)}<span class="grow" />
       {split && chooseButton(view)}
       <span class="needs" title={why}>
         <button key={split ? 'held' : 'next'} class={`btn sm${split ? '' : ' pri'}`} type="button" id="cl-next"
-          title={why} disabled={!(source.prepared?.items.length) || !!why || !!work.busy || noColumn}
+          title={why} disabled={!(source.prepared?.items.length) || !!why || !!work.busy || noColumn || waiting}
           onClick={() => void listReview.next()}>Next</button>
       </span>
     </div>
