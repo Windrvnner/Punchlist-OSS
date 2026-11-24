@@ -35,7 +35,7 @@ function discover(directory, paths, links) {
   for (const entry of directoryEntries(directory)) {
     const file = posix.join(directory, entry.name);
     if (file === 'src' || entry.name === 'node_modules' || privatePath(file)) continue;
-    if (paths ? !paths.has(file) : entry.name.startsWith('.')) continue;
+    if (paths ? !paths.has(file) : entry.name.startsWith('.') && !entry.isSymbolicLink()) continue;
     if (entry.isSymbolicLink()) links.set(file, readlinkSync(file));
     else if (entry.isDirectory()) discover(file, paths, links);
   }

@@ -66,13 +66,14 @@ export function writeSnapshot(root, scratch, importer, inventory, globs) {
   const linkAt = inventory.linkAt ?? ((file) => links.get(file));
   const { files } = inventory;
   for (const file of files) writeStub(path.join(root, file), file.endsWith('.json') ? '{}' : '');
+  // A directory containing only aliases can itself be the target of an earlier alias.
+  for (const alias of links.keys()) mkdirSync(path.join(root, path.dirname(alias)), { recursive: true });
   for (const alias of links.keys()) {
     const target = canonicalSource(alias, linkAt);
     if (target === undefined) continue;
     const copy = path.join(root, target);
     if (!existsSync(copy)) continue;
     const directory = path.join(root, path.dirname(alias));
-    mkdirSync(directory, { recursive: true });
     symlinkSync(path.relative(directory, copy), path.join(root, alias), statSync(copy).isDirectory() ? 'dir' : 'file');
   }
   const packages = globs.flatMap(({ patterns }) => patterns.map(({ value }) => packageName(value)));

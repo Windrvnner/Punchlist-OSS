@@ -340,6 +340,21 @@ describe('UI dependency checks', () => {
     expect(repo.run().status).toBe(0);
   });
 
+  it.each(['ui', 'backend'])('resolves an alias to a directory containing only a %s alias', async (layer) => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    const target = `src/${layer}/term.ts`;
+    repo.write(target, 'export const term = true');
+    repo.write(file, "export const tables = import.meta.glob('/tables/*.ts')");
+    mkdirSync(path.join(repo.dir, 'views'));
+    symlinkSync('views', path.join(repo.dir, 'tables'), 'dir');
+    symlinkSync('../' + target, path.join(repo.dir, 'views/term.ts'), 'file');
+    expect(await viteSources(repo.dir, file)).toEqual({ dev: [target], prod: [target] });
+    const result = repo.run();
+    expect(result.status).toBe(layer === 'backend' ? 1 : 0);
+    if (layer === 'backend') expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
+  });
+
   it('leaves private and out-of-repository directory links outside the filename snapshot', () => {
     const repo = fixture();
     const outside = fixture();
