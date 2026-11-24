@@ -9,6 +9,8 @@
  * ordinary text and is left exactly as written: "[2019] App 12", "clause [4]", "[100] m",
  * and every bracket in text that has no sources at all.
  */
+import type { Source } from './model';
+
 export interface CitedPart { text: string; refs: number[] }
 
 // "approx. 1.25x", "cl. 27.3", "p. 6": a period after one of these does not end a sentence
@@ -57,6 +59,44 @@ export function markerSafeEnd(text: string, end: number, sourceCount: number): n
     start = next;
   }
   return end;
+}
+
+/** Keep the fitting prefix of a passage, omitting a citation that the cut divides (#343). */
+export function takeMarkerPieces(pieces: MarkerPiece[], room: number): MarkerPiece[] {
+  const fitting: MarkerPiece[] = [];
+  for (const piece of pieces) {
+    if (room <= 0) break;
+    if (piece.text.length > room) {
+      if (!piece.ref) fitting.push({ text: piece.text.slice(0, room) });
+      break;
+    }
+    fitting.push(piece);
+    room -= piece.text.length;
+  }
+  return fitting;
+}
+
+type MarkerSource = Pick<Source, 'docId' | 'loc'>;
+
+/** Number citations for the recipient while keeping the copied passage's literal brackets (#343). */
+export function remapMarkerPieces(text: string, original: MarkerSource[], recipient: MarkerSource[]): MarkerPiece[] {
+  const remapped: MarkerPiece[] = [];
+  for (const piece of markerPieces(text, original.length)) {
+    if (!piece.ref) {
+      remapped.push(piece);
+      continue;
+    }
+    const source = original[piece.ref - 1];
+    const index = recipient.findIndex((candidate) => candidate.docId === source.docId && candidate.loc === source.loc);
+    if (index >= 0) {
+      remapped.push({ text: `[${index + 1}]`, ref: index + 1 });
+      continue;
+    }
+    // The space before an unavailable citation goes with it.
+    const before = remapped.at(-1);
+    if (before && !before.ref) before.text = before.text.replace(/[ \t]+$/, '');
+  }
+  return remapped;
 }
 
 /** Typed text to stored paragraphs: one per line, blank lines dropped. */
