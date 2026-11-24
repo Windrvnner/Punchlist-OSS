@@ -2,7 +2,7 @@
  * Ask the counterparty (linking design, sections 6 and 13): the card a linked question is typed in, and the list of the
  * questions already asked. Shared by the Checklist's open item and a finding's page.
  */
-import { logQuestionDraft, questionLogKey } from '../app/logQuestionDraft';
+import { logQuestionDraft, questionDraftAt, questionLogKey } from '../app/logQuestionDraft';
 import { dealQuestions } from '../app/state';
 import { TEXT_MAX } from '../domain/importExport';
 import type { Finding, Question } from '../domain/model';
@@ -51,17 +51,19 @@ export function AskedList({ dealId, qs, id }: { dealId: string; qs: Question[]; 
  * text is let go (`forget`) only if it is still the text logged, so words typed since are kept; then the card on screen
  * is told (`settle`), and closes if nothing is kept. Cancel leaves any card opened since for the same key alone (#843).
  */
-export function useLogQuestion(drafts: Map<string, string>, key: string, forget: () => void, settle: () => void) {
+export function useLogQuestion(
+  drafts: Map<string, string>, key: string, forget: (currentKey: string) => void, settle: () => void,
+) {
   const saveKey = questionLogKey(key, pendingSaveKeys(), moveKey);
   const out = useSaveOut(saveKey, (current: boolean) => {
     if (current) settle();
   });
-  const draft = { read: () => drafts.get(key), forget };
+  const draft = questionDraftAt(key, moveKey, drafts, forget);
   const log = (text: string, dispatch: () => Promise<{ ok: boolean }>) =>
     out.send((cancelled) => logQuestionDraft(text, draft, dispatch, cancelled));
   const cancel = () => {
     out.cancel();
-    forget();
+    draft.forget();
     settle();
   };
   return { busy: out.busy, log, cancel };

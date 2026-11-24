@@ -446,9 +446,9 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
     setTextState('');
     stopAsking();
   };
-  const forget = () => {
-    askDrafts.delete(draftKey);
-    askOn.delete(draftKey);
+  const forget = (currentKey: string) => {
+    askDrafts.delete(currentKey);
+    askOn.delete(currentKey);
   };
   const { busy, log: logQuestion, cancel } = useLogQuestion(askDrafts, draftKey, forget, settle);
   const log = async () => {

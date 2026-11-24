@@ -10,6 +10,14 @@ function latestKey(key: string, move: (key: string) => string): string {
   return next === key ? key : latestKey(next, move);
 }
 
+/** Read and clear the draft where it lives when the save lands, even if its deal has been recovered again. */
+export function questionDraftAt(
+  key: string, move: (key: string) => string, texts: ReadonlyMap<string, string>, forget: (key: string) => void,
+): QuestionDraft {
+  const current = () => latestKey(key, move);
+  return { read: () => texts.get(current()), forget: () => forget(current()) };
+}
+
 /** A recovered Ask card shares the original save's busy state and Cancel, just as it shares the kept text (#843). */
 export function questionLogKey(draftKey: string, pending: Iterable<string>, move: (key: string) => string) {
   const current = latestKey('ask:' + draftKey, move);

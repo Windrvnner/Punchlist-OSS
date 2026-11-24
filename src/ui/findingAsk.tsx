@@ -48,7 +48,7 @@ function useAskDraft(findingId: string) {
     setTextState('');
     stopAsking();
   };
-  const out = useLogQuestion(askDrafts, findingId, () => askDrafts.delete(findingId), settle);
+  const out = useLogQuestion(askDrafts, findingId, (key) => askDrafts.delete(key), settle);
   return { asking, setAsking, text, setText, stopAsking, ...out, kept: !!askDrafts.get(findingId) };
 }
 
