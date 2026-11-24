@@ -387,6 +387,53 @@ describe('change files on one PC', () => {
       await again.close();
     });
 
+    const holdUnusedMarker = (local: Mem) => {
+      local.files.set('place-unused.json', JSON.stringify({ place: '/shared/other', machine: 'M1' }));
+      const read = local.read.bind(local);
+      local.read = (name) => {
+        if (name === 'place-unused.json') throw new Error('EBUSY: resource busy');
+        return read(name);
+      };
+    };
+
+    it.each([
+      { reason: 'the original writes only to its journal', journalOnly: true, carried: ['pending'] },
+      { reason: 'marking the old id as left is refused', heldRetirement: true, carried: ['op1', 'pending'] },
+      { reason: 'an unrelated marker without a journal is held', unusedMarker: true, carried: ['op1'] },
+    ])('recovers carried Undo when $reason (#750)', async ({ journalOnly, heldRetirement, unusedMarker, carried }) => {
+      const { A, local, open } = setup();
+      const place = '/shared/team';
+      const pending = {
+        kind: 'op' as const,
+        id: 'pending',
+        data: { label: 'Update the credit agreement response', state: 'pending' },
+        expectedRev: null,
+      };
+      const original = open(A, place);
+      val(await original.transaction(journalOnly ? { writes: [pending] } : add('q1', 'op1')));
+      const copy = open(A, place, clone(local));
+      val(await copy.transaction(add('q2', 'op2')));
+      const write = local.write.bind(local);
+      if (heldRetirement) local.write = (name, value) => {
+        if (name === `place-${original.id}.json`) throw new Error('EBUSY: resource busy');
+        write(name, value);
+      };
+      expect(val(await original.sync()).self.note).toBe(COPIED);
+      await original.close();
+      const moved = open(A, place);
+      if (heldRetirement) val(await moved.transaction({ writes: [pending] }));
+      expect(await ops(moved)).toEqual(carried);
+      await moved.close();
+      local.write = write;
+      loseAll(A, local);
+
+      if (unusedMarker) holdUnusedMarker(local);
+      const again = open(A, place);
+      expect({ id: again.id, ops: await ops(again) }).toEqual({ id: moved.id, ops: carried });
+      await again.close();
+      await copy.close();
+    });
+
     for (const busy of [false, true]) it(`every shared file lost: an id left after a copy was found is not taken back${
       busy ? ', though its folder record was held when the copy was found' : ''} (#29)`, async () => {
       const { A, local, open } = setup();
