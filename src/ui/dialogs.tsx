@@ -15,6 +15,7 @@ import { CreateDeal, AddFolders, RemoveFolder, RestoreFolder, DeleteDeal } from 
 import { pathKey, cleanName } from '../app/commands/deals';
 import { FOLDER_LABEL_MAX, dealNameRoom } from '../app/commands/deals';
 import { startIndexing } from '../app/indexing';
+import { createdRecord } from '../app/createdRecord';
 import { ulidIds } from '../adapters/mocks';
 import { likelyTwin } from '../app/dupes';
 import { TwinConfirm } from './twin';
@@ -271,7 +272,7 @@ export function NewDealDialog() {
     }
     const r = await store.dispatch(CreateDeal, { name: nd.name, folders, ...nd.kinds, ...(nd.counterparty?.trim() ? { counterparty: nd.counterparty } : {}) }, { idempotencyKey: 'nd-create', quiet: true });
     if (!r.ok) { set({ busy: false, error: r.error.kind === 'invalid' ? Object.values(r.error.fields ?? {})[0] ?? r.error.message : r.error.message }); return; }
-    const made = store.get().ops[r.value.opId]?.targets.find((id) => id.startsWith('d_')); const deal = made ? store.get().deals[made] : undefined;
+    const deal = createdRecord(store.get(), r.value.opId, 'deals');
     if (!deal) { set({ busy: false, error: 'The deal was created but could not be opened. Find it in the list on the left.' }); return; }
     close();
     store.toast(`${deal.name} created`, undefined, { glyph: 'done' });
