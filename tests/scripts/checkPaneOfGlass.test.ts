@@ -4,6 +4,7 @@ import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wri
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { build } from 'vite';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const script = path.resolve('scripts/check-pane-of-glass.mjs');
@@ -155,13 +156,32 @@ describe('UI dependency checks', () => {
     expect(result.stderr).toContain(`${file} import (lines 1, 2, 3, 4, 10, 12): 6 exceeds`);
   });
 
-  it('uses the effective glob base through TypeScript assertions and parentheses', () => {
+  it('agrees with Vite on a UI-only glob whose base is asserted as const', async () => {
     const repo = fixture();
     const file = 'src/ui/readers.ts';
     repo.write('src/backend/lenient.ts', 'export const read = true');
     repo.write('src/ui/backend/lenient.ts', 'export const preview = true');
+    const options = "{ eager: true, base: '/src/ui/nested' } as const";
+    const local = `export const pages = import.meta.glob('../backend/lenient.ts', (${options}))`;
+    repo.write(file, local);
+    const modules: string[] = [];
+    await build({
+      root: repo.dir, configFile: false, envDir: false, logLevel: 'silent',
+      build: { write: false, lib: { entry: path.join(repo.dir, file), formats: ['es'] } },
+      plugins: [{
+        name: 'record-bundled-modules',
+        generateBundle(_options, bundle) {
+          for (const chunk of Object.values(bundle)) {
+            if (chunk.type === 'chunk') modules.push(...chunk.moduleIds);
+          }
+        },
+      }],
+    });
+    const sources = modules.map((id) => path.relative(repo.dir, id).split(path.sep).join('/'));
+    expect(sources).toContain('src/ui/backend/lenient.ts');
+    expect(sources).not.toContain('src/backend/lenient.ts');
     repo.write(file, [
-      "const local = import.meta.glob('../backend/lenient.ts', ({ base: '/src/ui/nested' } as const))",
+      local,
       "const readers = import.meta.glob('./lenient.ts' as const, { base: ('../backend' as const) } as const)",
       "const patterns = import.meta.glob([('../backend/lenient.ts' as const)] satisfies string[])",
     ].join('\n'));
