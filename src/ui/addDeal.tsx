@@ -4,7 +4,7 @@ import { useAppState, useStore } from './hooks';
 import { Modal } from './dialogs';
 import { Icon } from './icons';
 import { SetDealMember, isMine } from '../app/commands/members';
-import { dealTwin } from '../app/state';
+import { dealTwin, dealLabel } from '../app/state';
 
 /**
  * Add deal: every deal in the shared folder, to add to your own list, and New deal beside
@@ -84,9 +84,11 @@ export function RemoveDealDialog({ dealId }: { dealId: string }) {
     if (r.ok && 'dealId' in store.get().ui.route && (store.get().ui.route as { dealId?: string }).dealId === dealId) location.hash = 'deals';   // off its own pages, which no longer have a place in the sidebar
   };
   if (!d) return null;
+  const label = dealLabel(s, d);      // says which of two same-named deals it is (#27)
   return (
-    <Modal onClose={close} label={`Remove ${d.name} from your deals?`} blur className="sdlg dddlg uldlg">
-      <div class="shead"><h2>Remove {d.name} from your deals?</h2><button type="button" class="x" aria-label="Close" title="Close (Esc)" onClick={close}><Icon name="close" size={15} /></button></div>
+    <Modal onClose={close} label={`Remove ${label} from your deals?`} blur className="sdlg dddlg uldlg">
+      <div class="shead"><h2>Remove {label} from your deals?</h2><button type="button" class="x" aria-label="Close"
+        title="Close (Esc)" onClick={close}><Icon name="close" size={15} /></button></div>
       <div class="xfoot"><span class="grow" /><button type="button" class="btn sm" id="ul-keep" data-autofocus
         onClick={close}>Keep It</button><button type="button" class="btn sm pri" id="ul-go"
         title="It stays in Add deal; nothing is deleted" onClick={() => void go()}>Remove</button></div>

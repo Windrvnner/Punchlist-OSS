@@ -1247,6 +1247,10 @@ div.rv-row{cursor:default}
 /* a menu item that cannot be used just now stays focusable, so its reason (title, aria-description) can be reached by key */
 .railmenu .mi[aria-disabled="true"]{opacity:.45;cursor:default}.railmenu .mi[aria-disabled="true"]:hover{background:none}
 .uldlg .xfoot{border-top:0;padding-top:0;margin-top:18px}   /* a title-only confirm: no rule between the question and its answers */
+/* a deal's name long enough to wrap the title: the × stays beside its first line, centered on it as before (#27) */
+.dddlg .shead{align-items:flex-start;gap:14px}
+.dddlg .shead h2{text-wrap:balance;line-height:23px;margin-top:3.5px}
+.dddlg .shead .x{flex:none}
 /* the connection card above the account row, and the dot on the avatar that says to look at it */
 .avatar{position:relative}
 .netdot{position:absolute;right:-2px;bottom:-2px;width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--surface)}
