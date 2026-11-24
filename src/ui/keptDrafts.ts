@@ -1,3 +1,5 @@
+import { checklistDrafts } from '../app/checklistDrafts';
+
 /**
  * Text typed into a form that is not a record yet (the composer and ask box, a new finding, a finding's edit, a closing
  * note, a question asked from the Checklist, the New deal form) lives in a map in memory, per thing it belongs to, so
@@ -47,16 +49,7 @@ let staleOf: (v: unknown) => unknown = (v) => v;
 
 /** a map that asks for a save whenever it changes */
 class KeptMap<V> extends Map<string, V> {
-  constructor(private readonly movedValue: (value: V, ids: ReadonlyMap<string, string>) => V = (v) => staleOf(v) as V) {
-    super();
-  }
-  override set(k: string, v: V) {
-    const to = moveKey(k);
-    const value = to === k ? v : this.movedValue(v, renamed);
-    super.set(to, value);
-    soon();
-    return this;
-  }
+  override set(k: string, v: V) { const to = moveKey(k); super.set(to, to === k ? v : staleOf(v) as V); soon(); return this; }
   override get(k: string) { return super.get(moveKey(k)); }
   override has(k: string) { return super.has(moveKey(k)); }
   override delete(k: string) { const had = super.delete(moveKey(k)); if (had) soon(); return had; }
@@ -65,12 +58,10 @@ class KeptMap<V> extends Map<string, V> {
 
 /**
  * A map of drafts named `name`, holding what the app left at its last close. `valid` says whether a stored value has the
- * map's shape. The name stays the same from build to build. Record references can follow a recovered deal.
+ * map's shape. The name must be unique and stay the same from build to build.
  */
-export function keptDrafts<V>(
-  name: string, valid: (v: unknown) => v is V, movedValue?: (value: V, ids: ReadonlyMap<string, string>) => V,
-): Map<string, V> {
-  const m = new KeptMap<V>(movedValue);
+export function keptDrafts<V>(name: string, valid: (v: unknown) => v is V): Map<string, V> {
+  const m = new KeptMap<V>();
   const saved = left[name];
   if (Array.isArray(saved)) for (const e of saved) if (Array.isArray(e) && e.length === 2 && typeof e[0] === 'string' && valid(e[1])) Map.prototype.set.call(m, e[0], e[1]);
   maps.set(name, m as Map<string, unknown>);
@@ -85,12 +76,19 @@ export function renameKept(ids: Record<string, string>, stale: (v: unknown) => u
   for (const [was, now] of Object.entries(ids)) renamed.set(was, now); staleOf = stale;
   // the map's own lookups would move the old key too: the plain ones reach it
   for (const m of maps.values()) for (const [k, v] of [...m]) { const to = moveKey(k); if (to === k) continue; Map.prototype.delete.call(m, k); if (!Map.prototype.has.call(m, to)) m.set(k, v); }
+  keptChecklistQuestions.followCopy();
 }
 
 /** shape checks for the values the maps hold */
 export const isText = (v: unknown): v is string => typeof v === 'string';
 export const hasTexts = <K extends string>(...keys: K[]) => (v: unknown): v is Record<K, string> =>
   !!v && typeof v === 'object' && keys.every((k) => typeof (v as Record<string, unknown>)[k] === 'string');
+
+export const keptChecklistQuestions = checklistDrafts({
+  texts: keptDrafts('checklist-ask', isText),
+  targets: keptDrafts('checklist-ask-on', isText),
+  movedId: moveKey,
+});
 
 if (typeof window !== 'undefined') {
   window.addEventListener('pagehide', saveKeptDrafts);

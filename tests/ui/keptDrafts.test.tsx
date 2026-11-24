@@ -43,14 +43,17 @@ describe('drafts kept across a restart', () => {
 
   it('moves a question’s original finding with its item when a deal is recovered', async () => {
     let drafts = await load();
-    const targets = drafts.keptDrafts('checklist-ask-on', drafts.isText, (id, moved) => moved.get(id) ?? id);
-    targets.set('deal:item', 'original');
+    const original = drafts.keptChecklistQuestions.open('deal:item');
+    original.begin('original');
+    original.write('Which ratio applies?');
     drafts.renameKept({ deal: 'copy', item: 'copied-item', original: 'copied-finding' });
-    expect(targets.get('copy:copied-item')).toBe('copied-finding');
-    targets.set('deal:item', 'original');
+    expect(drafts.keptChecklistQuestions.open('copy:copied-item').findingId).toBe('copied-finding');
+    original.write('Which lock-up ratio applies?');
     drafts.saveKeptDrafts();
     drafts = await load();
-    expect(drafts.keptDrafts('checklist-ask-on', drafts.isText).get('copy:copied-item')).toBe('copied-finding');
+    const reopened = drafts.keptChecklistQuestions.open('copy:copied-item');
+    expect(reopened.findingId).toBe('copied-finding');
+    expect(reopened.text).toBe('Which lock-up ratio applies?');
   });
 
   it('keep what a map not made yet this session left', async () => {
