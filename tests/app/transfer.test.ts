@@ -177,8 +177,20 @@ describe('Q&A Merge when the file has character decoding damage', () => {
   const response = 'It’s 1.25x — tested semi-annually';
   const damage = (value: string) => value.replace(/[’—]/g, '?');
 
-  it('keeps an original question and sourced draft when the file lost characters (#256)', async () => {
-    const { store } = make(disk(), response);
+  it.each([
+    ['replacement marks', response, damage(response)],
+    [
+      'flattened quotes and different-length replacement runs',
+      'The lender’s reserve — capped at 2½ months.',
+      "The lender's reserve ?? capped at 2? months.",
+    ],
+    [
+      'flattened quotes and replacement runs that offset each other',
+      'The lender’s reserve — capped at 2½–¾ months.',
+      "The lender's reserve ??? capped at 2? months.",
+    ],
+  ])('keeps an original question and sourced draft with %s (#256)', async (_name, saved, fileText) => {
+    const { store } = make(disk(), saved);
     await store.boot();
     await store.dispatch(CreateDeal, { name: 'Deal', folders: [] });
     const [dealId] = Object.keys(store.get().deals);
@@ -191,7 +203,7 @@ describe('Q&A Merge when the file has character decoding damage', () => {
     }
     expect((await store.dispatch(AcceptDraft, { dealId, questionId })).ok).toBe(true);
     const before = structuredClone(store.get().questions[questionId]);
-    const csv = `Number,Question,Response\n1,${damage(question)},${damage(response)}\n`;
+    const csv = `Number,Question,Response\n1,${damage(question)},${fileText}\n`;
     const file = await readImportFile(store, fileOf('log.csv', new TextEncoder().encode(csv)));
     if (!file.ok) throw new Error(file.error.message);
     const rows = prepareImport(file.value.rows, file.value.mapping).rows;
@@ -219,7 +231,7 @@ describe('Q&A Merge when the file has character decoding damage', () => {
     const originals = structuredClone(dealQuestions(store.get(), dealId));
     const reads = [damage, (text: string) => text.replace(/[’—]/g, '\uFFFD'),
       (text: string) => text.replace(/’/g, "'").replace(/—/g, '-'),
-      (text: string) => text.replace(/’/g, '?').replace(/—/g, '-'),
+      (text: string) => text.replace(/’/g, "'").replace(/—/g, '??'),
       (text: string) => new TextDecoder('windows-1252').decode(new TextEncoder().encode(text))];
     const changed = clean.map((row, index) => row.map(reads[index % reads.length]));
     changed[0] = [

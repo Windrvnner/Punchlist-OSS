@@ -69,20 +69,74 @@ export function damagedImportText(saved: string, incoming: string): boolean {
   const read = sheetSpacing(mojibake(incoming));
   if (original === read) return true;
   if (read === sheetSpacing(mojibake(saved))) return false;
-  if (original.length === read.length) return losesGlyphs(original, read);
-  // A run of replacement marks may stand for a different number of Unicode characters, such as a lost emoji.
-  return lostCharacters(read, original) && !lostCharacters(original, read);
+  if (!/[^\x00-\x7F]|\u0060/.test(original)) return false;
+  return matchesDamagedRead(original, read);
 }
 
-/** Check preserved and lost characters in place, so straightening one quote need not straighten all the others. */
-function losesGlyphs(original: string, read: string): boolean {
-  for (let at = 0; at < read.length; at++) {
-    const saved = original[at];
-    const incoming = read[at];
-    if (incoming === saved || incoming === straightPunctuation(saved)) continue;
-    if (!/[?\uFFFD]/.test(incoming) || !/[^\x00-\x7F\uFFFD]/.test(saved)) return false;
+/** Check every possible end of a replacement run before comparing the punctuation or words after it. */
+function matchesDamagedRead(original: string, read: string): boolean {
+  const parts = read.split(/([?\uFFFD]+)/);
+  let offsets = new Set([0]);
+  for (const [index, part] of parts.entries()) {
+    offsets = index % 2 === 0
+      ? literalEnds(original, part, offsets)
+      : replacementEnds(original, part, offsets);
+    if (!offsets.size) return false;
+  }
+  return offsets.has(original.length);
+}
+
+function literalEnds(original: string, read: string, starts: Set<number>): Set<number> {
+  const ends = new Set<number>();
+  const hasPlainPunctuation = /['"-]/.test(read);
+  for (const start of starts) {
+    const end = start + read.length;
+    if (end > original.length) continue;
+    if (original.startsWith(read, start) || (hasPlainPunctuation && matchesPunctuation(original, read, start))) {
+      ends.add(end);
+    }
+  }
+  return ends;
+}
+
+function matchesPunctuation(original: string, read: string, start: number): boolean {
+  for (let index = 0; index < read.length; index++) {
+    const saved = original[start + index];
+    if (saved !== read[index] && straightPunctuation(saved) !== read[index]) return false;
   }
   return true;
+}
+
+/**
+ * A replacement run keeps its exact literal marks or stands for unread Unicode glyphs. A span cannot drop a literal
+ * question mark. For each end, the latest possible start before a lost glyph leaves the fewest marks to preserve.
+ */
+function replacementEnds(original: string, read: string, starts: Set<number>): Set<number> {
+  const ends = literalEnds(original, read, starts);
+  const first = Math.min(...starts);
+  const last = Math.max(...starts);
+  const marksToKeep = read.length - read.replace(/\?/g, '').length;
+  let marks = 0;
+  let marksAtStart: number | undefined;
+  let marksBeforeLoss: number | undefined;
+  for (let index = first; index < original.length; index++) {
+    if (starts.has(index)) marksAtStart = marks;
+    const glyph = original[index];
+    // Known ASCII text ends this run. A question mark can also appear literally among the lost characters.
+    if (/[\x00-\x3E\x40-\x7F]/.test(glyph)) {
+      if (index >= last) break;
+      marksAtStart = undefined;
+      marksBeforeLoss = undefined;
+      continue;
+    }
+    if (glyph === '?') {
+      marks++;
+    } else if (glyph !== '\uFFFD') {
+      marksBeforeLoss = marksAtStart;
+    }
+    if (marksBeforeLoss !== undefined && marks - marksBeforeLoss <= marksToKeep) ends.add(index + 1);
+  }
+  return ends;
 }
 
 /** The text as a spreadsheet may have read it, with optional emoji preservation for replacement characters. */
