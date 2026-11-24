@@ -5,7 +5,7 @@
  * debounce. Shows pending / not-saved / updated-elsewhere beside the field.
  */
 import { TEXT_MAX } from '../domain/importExport';
-import { keptDrafts, hasTexts, saveKeptDrafts } from './keptDrafts';
+import { keptDrafts, hasTexts, saveKeptDrafts } from '../app/keptText';
 import { fmtDate, StoreContext } from './hooks';
 import type { State } from '../app/state';
 import { CONNECTED } from '../app/connection';
@@ -74,7 +74,7 @@ export const unsavedBase = (keep: string): string | undefined => unsaved.get(kee
 
 /**
  * A reload, close or crash would lose that text, and a reload or close inside the debounce the last words typed.
- * `unsaved` is kept in the window's local storage as it changes (keptDrafts.ts), so it is back after any
+ * `unsaved` is kept through the local store as it changes (keptText.ts), so it is back after any
  * restart, crash included, and shows "Not saved" for the person to decide; if the save did land, the field's value equals
  * the kept text and it is dropped. When the page goes away every field with text not yet saved also sends it at once and
  * puts it in `unsaved`, which is then written before the page is gone.

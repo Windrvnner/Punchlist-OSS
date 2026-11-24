@@ -16,7 +16,7 @@ import { chooseVersion, logOf, type VersionPick } from '../app/qaLog';
 import { cellValue } from '../domain/logWrite';
 import { IMPORT_FIELDS, type ImportField } from '../domain/importExport';
 import { AI_LABEL } from '../control';
-import { keptDrafts, hasTexts } from './keptDrafts';
+import { keptDrafts, hasTexts } from '../app/keptText';
 import type { Question } from '../domain/model';
 
 /** the cells' labels, in title style (labels are Title Case) */

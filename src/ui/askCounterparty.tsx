@@ -7,7 +7,7 @@ import { TEXT_MAX } from '../domain/importExport';
 import type { Question } from '../domain/model';
 import { closeOnEscape, focusCard } from './focus';
 import { useStore } from './hooks';
-import { moveKey } from './keptDrafts';
+import { moveKey } from '../app/keptText';
 import { navigate } from './nav';
 import { pendingSaveKeys, useSaveOut } from './saveOut';
 

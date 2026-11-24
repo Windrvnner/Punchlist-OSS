@@ -26,7 +26,7 @@ import type { Deal, Finding, Source } from '../domain/model';
 import { localYmd, CHECK_REASON } from '../domain/model';
 import { splitCited, toParagraphs } from '../domain/cite';
 import { SERVICE, AI_LABEL } from '../control';
-import { keptDrafts, hasTexts } from './keptDrafts';
+import { keptDrafts, hasTexts } from '../app/keptText';
 import { useSaveOut } from './saveOut';
 import { editDrafts, editsOut, landCreated, landEdit, newFindingDrafts } from './findingDrafts';
 import type { EditDraft } from './findingDrafts';

@@ -10,6 +10,7 @@ import { ImportQuestions } from '../../src/app/commands/importQuestions';
 import { ResolveConflict } from '../../src/app/commands/conflicts';
 import { RestoreVersion } from '../../src/app/commands/keptVersions';
 import { dealQuestions, sharedNumbers } from '../../src/app/state';
+import '../ui/keptTextSession';
 import { deletedOf } from '../../src/ui/deleted';
 
 const ANSWERED = 'Please confirm whether the offtaker must consent to a change of control of the project company.';

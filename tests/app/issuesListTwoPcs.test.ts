@@ -10,6 +10,7 @@ import { csvCodec } from '../../src/adapters/spreadsheet';
 import { CreateDeal } from '../../src/app/commands/deals';
 import { CreateFinding, EditFinding, SetFindingStatus, DeleteFinding, RestoreFinding } from '../../src/app/commands/findings';
 import { ImportIssuesList, RevertIssuesList, RemoveIssuesList, RestoreIssuesList } from '../../src/app/commands/issuesList';
+import '../ui/keptTextSession';
 import { listsOf } from '../../src/ui/deleted';
 import type { Finding } from '../../src/domain/model';
 import { ResolveConflict } from '../../src/app/commands/conflicts';

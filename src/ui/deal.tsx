@@ -14,7 +14,7 @@ import { conflictVersionCount, findingCounts, indexingTotals, questionCounts } f
 import { EditField, ReadOnlyContext, readDeal } from './editField';
 import { ConflictView } from './conflict';
 import { runMemo } from '../app/memo';
-import { keptDrafts, hasTexts } from './keptDrafts';
+import { keptDrafts, hasTexts } from '../app/keptText';
 import { num } from './counts';
 
 /**

@@ -13,6 +13,7 @@ import { EditQuestionField, RenumberQuestion, SetResponse, DeleteQuestion, Resto
 import { ResolveConflict, ReopenConflict } from '../../src/app/commands/conflicts';
 import { registry, Undo } from '../../src/app/commands/undo';
 import { dealQuestions } from '../../src/app/state';
+import '../ui/keptTextSession';
 import { deletedOf } from '../../src/ui/deleted';
 
 class Mem implements Folder {

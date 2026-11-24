@@ -35,5 +35,5 @@ if (services.signin && signin?.ok && signin.value.firstSetup && !signin.value.si
     ...services, sheets: services.sheets ?? csvCodec, local: new BrowserLocal(), clock: systemClock, ids: ulidIds,
   }, COMMANDS);
   (window as unknown as { store: Store }).store = store; // for the desktop tests and the console
-  run(store);
+  await run(store);
 }

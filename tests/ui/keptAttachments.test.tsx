@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // Files attached and not yet sent come back after a restart, as the text beside them does (#60).
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { restartKeptText } from './keptTextSession';
+import { describe, it, expect, beforeEach } from 'vitest';
 import type { Attachment } from '../../src/app/state';
 
 /** a stand-in for the store: just its attachments, and who listens to them */
@@ -22,7 +23,7 @@ function fakeStore(attachments: Attachment[] = []) {
 /** a fresh start of the app, with what the last one kept: the store it keeps attachments for */
 async function startWith(attachments: Attachment[] = []) {
   window.dispatchEvent(new Event('pagehide'));
-  vi.resetModules();
+  await restartKeptText();
   const { keepAttachments } = await import('../../src/ui/keptAttachments');
   const store = fakeStore(attachments);
   keepAttachments(store as never);

@@ -102,4 +102,4 @@ const read = async <T,>(r: T) => { await repo.sync(); return r; };
   },
 };
 
-run(store);
+await run(store);

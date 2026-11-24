@@ -22,7 +22,7 @@ import { SetDealMember } from '../app/commands/members';
 import { pickUpIndexing } from '../app/indexing';
 import { lookForFolders } from '../app/relink';
 import { watchFolders } from '../app/folderWatch';
-import { App } from '../ui/app';
+import { startKeptText } from './keptText';
 import '../styles.css';
 import '../ui/ui.css';
 
@@ -40,7 +40,9 @@ export const COMMANDS = [
 for (const c of COMMANDS) registry.set(c.name, c);
 
 /** Theme, focus refresh, mount, and start: the same in both shells once the Store is made. */
-export function run(store: Store) {
+export async function run(store: Store) {
+  startKeptText(store.services.local);
+  const { App } = await import('../ui/app');
   // Appearance: the person's choice, or Windows' when they chose to match it. The themes themselves are the tokens in styles.css.
   const sysLight = matchMedia('(prefers-color-scheme: light)');
   // written only when it changes: it runs on every change to the store, and writing even the same value restyles the
