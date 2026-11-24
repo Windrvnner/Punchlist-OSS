@@ -18,6 +18,7 @@ import { prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { MemoryLocal } from '../../src/adapters/local';
 import { ok } from '../../src/domain/result';
 import type { Source } from '../../src/domain/model';
+import { dealList } from '../backend/dealList';
 
 const COMMANDS = [CreateDeal, AddFolders, DeleteDeal, RecordIndexingProgress, CreateQuestion, EditQuestionField, SetQuestionStatus, SetResponse, DeleteQuestion, RestoreQuestion, RequestDraft, ApplyDraft, RecoverDrafts, DiscardDraft, AcceptDraft, RestoreQuestionSnapshot, CreateFinding, EditFinding, SetFindingStatus, ReviewFinding, DeleteFinding, RestoreFinding, RestoreFindingSnapshot, Reassess, ApplyReassessment, AttachDocumentToFinding, ImportQuestions, RevertImport];
 for (const c of COMMANDS) registry.set(c.name, c);
@@ -41,7 +42,8 @@ async function world(reply: { body: string[]; sources: Source[] }) {
   for (let i = 0; i < FINDINGS; i++) await store.dispatch(CreateFinding, { dealId, title: `Finding ${i}`, workstream: 'Legal', body: [`Detail of finding ${i}. [1]`], sources: [EPC], origin: 'chat' }, { quiet: true });
   const findingId = Object.values(store.get().findings).find((f) => f.title === `Finding ${FINDINGS >> 1}`)!.id;
   // the Q&A log comes in as one import; the two questions asked about the finding are added by hand
-  const rows = rowsFrom(['No.,Question', ...Array.from({ length: QUESTIONS - 2 }, (_, i) => `${i + 1},"Question ${i + 1}: what is the position on item ${i * 7919 % 10007}?"`)].join('\n'));
+  const questions = dealList().items.slice(0, QUESTIONS - 2);
+  const rows = rowsFrom(['No.,Question', ...questions.map((text, index) => `${index + 1},"${text}"`)].join('\n'));
   expect((await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows }, { quiet: true })).ok).toBe(true);
   for (const text of ['What is the liability cap under the EPC contract?', 'Has the cap been amended?']) await store.dispatch(CreateQuestion, { dealId, text, linkedFinding: findingId }, { quiet: true });
   const linked = Object.values(store.get().questions).filter((q) => q.linkedFinding === findingId);
@@ -67,7 +69,7 @@ async function world(reply: { body: string[]; sources: Source[] }) {
   const attach = (source: Source) => store.dispatch(AttachDocumentToFinding, {
     dealId, findingId, doc: source.doc, docId: source.docId,
   });
-  return { store, dealId, findingId, linked, f, press, answer, last, markElsewhere, attach };
+  return { store, repo, dealId, findingId, linked, f, press, answer, last, markElsewhere, attach };
 }
 const GONE = 'A document it cites is no longer in the data room';
 const AM3 = { doc: 'EPC amendment 3.pdf', loc: 'p. 2', docId: 'doc_am3' };
@@ -119,6 +121,55 @@ describe('Update from documents while a person works on the finding', () => {
     r.answer(); await d2;
     expect(r.f().body).toEqual(NEW.body); expect(r.f().updated).toBe(true);
   }, 240000);
+
+  it('marks a reply based on a withdrawn response and preserves the withdrawal on Undo', async () => {
+    const w = await world(NEW);
+    const questionId = w.linked[0].id;
+    const previous = w.f();
+    const { done } = await w.press();
+    const removed = await w.store.dispatch(SetResponse, { dealId: w.dealId, questionId, response: '' });
+    expect(removed.ok).toBe(true);
+    expect(w.f().updated).toBe(false);
+    w.answer();
+    await done;
+    expect(w.f()).toMatchObject({
+      body: NEW.body,
+      sources: NEW.sources,
+      updated: true,
+      updatedWhy: 'A linked response changed during the update',
+    });
+    expect(w.f().updatedOn).toBeUndefined();
+    expect((await w.store.undo(w.last('ApplyReassessment').id)).ok).toBe(true);
+    expect(w.f()).toMatchObject({ body: previous.body, sources: previous.sources, updated: false, updatedWhy: '' });
+    expect(w.store.get().questions[questionId].response).toBe('');
+  }, 120000);
+
+  it('marks new wording when the last linked response is withdrawn on another PC while the update runs', async () => {
+    const w = await world(NEW);
+    const [first, second] = w.linked;
+    await w.store.dispatch(SetResponse, {
+      dealId: w.dealId, questionId: second.id, response: 'The signed amendment keeps the liability cap at 20%.',
+    });
+    const { done } = await w.press();
+    await w.store.dispatch(SetResponse, { dealId: w.dealId, questionId: first.id, response: '' });
+    expect(w.f().updatedOn?.questions).toEqual([second.id]);
+    const peerRepo = memRepo(clock.now, { shared: w.repo.shared });
+    const peer = new Store({ ...w.store.services, repo: peerRepo, local: new MemoryLocal() }, COMMANDS);
+    await peer.boot();
+    await peer.loadDeal(w.dealId);
+    const removed = await peer.dispatch(SetResponse, { dealId: w.dealId, questionId: second.id, response: '' });
+    expect(removed.ok).toBe(true);
+    await w.repo.sync();
+    await settle();
+    expect(w.store.get().questions[second.id].response).toBe('');
+    expect(w.f().updated).toBe(false);
+    w.answer();
+    await done;
+    expect(w.f()).toMatchObject({
+      body: NEW.body, updated: true, updatedWhy: 'A linked response changed during the update',
+    });
+    expect(w.f().updatedOn).toBeUndefined();
+  }, 120000);
 
   it('replaces nothing on a finding closed while it ran, and the Undo on "Finding closed" still works', async () => {
     const w = await world(NEW); const { done } = await w.press();
