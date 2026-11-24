@@ -309,7 +309,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 
 ## Deal screen
 
-These decisions are for the rebuilt deal screen in [deal-screen-design.md](deal-screen-design.md) and are not built yet. Once built, each replaces the lines above that it contradicts.
+These decisions are for the rebuilt deal screen in [deal-screen-design.md](deal-screen-design.md) and are not built yet (#881). Once built, each replaces the lines above that it contradicts.
 
 - A deal shows its conversation on the left and, when opened, one pane on the right. The pane's tabs are Tasks, Diligence, and Q&A, always in that order, followed by any opened finding, document, or task, each with ×.
 - The selected tab is 1.5 times as wide as each other tab, and the rest share the bar equally. A hairline separates unselected tabs, the selected tab sits raised, and tabs show no counts. A tab too narrow for its name drops its icon before shortening the word.
