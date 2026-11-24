@@ -80,7 +80,7 @@ const ROMAN_NUMERAL = /^(?=.)m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|
  * Identifiers and combining marks stay distinct.
  */
 export function misreadKey(s: string): string {
-  return s.normalize('NFKC')
+  return identifierText(s)
     .replace(/[\u2010-\u2015\u2212]/g, '-')                                             // dash shapes are one dash
     .replace(/[^\s]*\d[^\s]*/g, (t) => t.replace(/[lI|](?=[\d.,]|$)|(?<=[\d.,])[lI|]/g, '1').replace(/[oO](?=[\d.,])|(?<=[\d.,])[oO]/g, '0'))   // l00, 2O24
     .replace(QUESTION_WORD, repairWord)
@@ -146,6 +146,23 @@ const QUESTION_TOKEN = /[\p{L}\p{M}\p{N}|]+(?:[.,][\p{L}\p{M}\p{N}|]+)*/gu;
 /** words a letter or numeral after them names: Class a, Tranche ii, part e */
 const NAMING_WORDS = new Set(('annex appendix article block class clause exhibit facility item limb lot paragraph '
   + 'part phase rule schedule section series tier tranche unit').split(' '));
+const DOTTED_SUFFIX = /(?<!\s)\s*\.(\s*)(\p{L}+)(?![\p{L}\p{M}\p{N}|])/gu;
+const DOTTED_NAME_BEFORE = /(?<![\p{L}\p{M}\p{N}|])(\p{L}+)(\s+\p{N}+(?:[.,]\p{N}+)*)?$/u;
+
+/** Read dotted labels alike for both wording and identifier comparison (#778). */
+function identifierText(text: string): string {
+  return text.normalize('NFKC').replace(DOTTED_SUFFIX, (match, spacing, letter, offset, normalized) => {
+    if (!identifierLetter(letter)) return match;
+    // After a sentence's full stop, "I understand" is still prose.
+    if (spacing && letter === 'I' && couldBePronounI(letter, normalized.slice(offset + match.length))) return match;
+    const name = DOTTED_NAME_BEFORE.exec(normalized.slice(0, offset));
+    if (!name || !NAMING_WORDS.has(name[1].toLowerCase())) return match;
+    return name[2] ? `.${letter}` : ` ${letter}`;
+  });
+}
+
+const identifierLetter = (token: string) => /^\p{L}$/u.test(token) || ROMAN_NUMERAL.test(token);
+const couldBePronounI = (token: string, after: string) => /^[Iil|]$/.test(token) && /^\s*\p{Ll}/u.test(after);
 
 /**
  * The identifiers a question names, as they are compared (#125, #127, #128): anything with a digit, a Roman numeral in
@@ -153,7 +170,7 @@ const NAMING_WORDS = new Set(('annex appendix article block class clause exhibit
  * naming word ("(a)", "class b", "tranche ii"). Sorted, so two lists compare in one walk.
  */
 export function identifiers(text: string): string[] {
-  const normal = text.normalize('NFKC');
+  const normal = identifierText(text);
   const found: string[] = [];
   for (const match of normal.matchAll(QUESTION_TOKEN)) {
     const form = identifierForm(match[0], match.index, normal);
@@ -169,7 +186,7 @@ export function identifiers(text: string): string[] {
 function identifierForm(token: string, offset: number, text: string): string | undefined {
   if (/\p{N}/u.test(token)) return numberForm(token);
   if (namedLetter(token, offset, text)) return token.toLowerCase();
-  if (/^[Iil|]$/.test(token) && /^\s*\p{Ll}/u.test(text.slice(offset + 1))) return undefined;   // the word I
+  if (couldBePronounI(token, text.slice(offset + 1))) return undefined;
   const capitals = /^\p{Lu}+$/u.test(token);
   if (capitals && (token.length <= 5 || ROMAN_NUMERAL.test(token))) return token.toLowerCase();
   return undefined;
@@ -180,7 +197,7 @@ function identifierForm(token: string, offset: number, text: string): string | u
  * alone or after a number ("clause 4 a"). Not before one: "a schedule" is an article.
  */
 function namedLetter(token: string, offset: number, text: string): boolean {
-  if (!/^\p{L}$/u.test(token) && !ROMAN_NUMERAL.test(token)) return false;
+  if (!identifierLetter(token)) return false;
   const before = text.slice(Math.max(0, offset - 30), offset);
   const after = text.slice(offset + token.length, offset + token.length + 30);
   if (/\(\s*$/.test(before) && /^\s*\)/.test(after)) return true;

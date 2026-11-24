@@ -125,6 +125,9 @@ describe('a row naming another identifier is a question of its own', () => {
   for (const [before, incoming] of DISTINCT) for (const n of [1, 2]) {
     it(`${before} / ${incoming}, number ${n}`, () => apart(before, incoming, n));
   }
+  it('keeps class. a and class. b separate even when both use the same question number (#778)', () => apart(
+    'Please confirm the distribution rights for class. a shares.',
+    'Please confirm the distribution rights for class. b shares.', 1));
 });
 
 describe('a misread or reworded row naming the same identifiers is still the question', () => {
@@ -141,6 +144,9 @@ describe('a misread or reworded row naming the same identifiers is still the que
     it(`${before} / ${incoming}, number ${n}`, () => matches(before, incoming, n));
   }
   it('a question reworded under its own number, its identifier kept', () => matches(...REWORDED, 1));
+  it('matches a reworded question by number when the clause identifier is spaced differently (#778)', () => matches(
+    'Please confirm the consents required under clause 4.b of the facility agreement.',
+    'Please confirm all consents required under clause 4. b of the facility agreement.', 1));
   for (const [before, incoming] of PRONOUN) {
     it(`the word I is no identifier: ${incoming}`, () => matches(before, incoming, 1));
   }
@@ -163,6 +169,17 @@ describe('a misread or reworded row naming the same identifiers is still the que
 });
 
 describe('the identifiers a question names', () => {
+  it('reads a class letter after a full stop and leaves a sentence-start I as prose (#778)', () => {
+    expect(identifiers('Please confirm the rights for class. a shares.')).toEqual(['a']);
+    expect(identifiers('Please confirm the rights for class.b shares.')).toEqual(['b']);
+    expect(identifiers('Please confirm the rights for class. l shares.')).toEqual(['l']);
+    expect(identifiers('Please send the list for each item. I understand it is in the data room.')).toEqual([]);
+  });
+  it('reads whitespace inside a dotted clause number without changing its letter (#778)', () => {
+    for (const number of ['4.b', '4. b', '4 .b', '4 . b']) {
+      expect(identifiers(`Please confirm the consents required under clause ${number}.`)).toEqual(['4.b']);
+    }
+  });
   it('are numbers, capital numerals, letters and codes, and letters a clause or class names, as they read', () => {
     expect(identifiers('Is the O&M fee for Facility I1 under the SPA 2O24 or l00?'))
       .toEqual(['100', '2024', 'i1', 'm', 'o', 'spa']);
