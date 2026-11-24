@@ -107,7 +107,7 @@ export async function matchesIn(file, source, files) {
     TSImportType: moduleSource,
     TSExternalModuleReference: (node) => checkModule(node.expression),
     CallExpression(node) {
-      collectGlob(node, globs, keysOnly);
+      collectGlob(node, source, globs, keysOnly);
       if (node.callee.type === 'Identifier' && node.callee.name === 'require') checkModule(node.arguments[0]);
     },
     MemberExpression: checkMember,

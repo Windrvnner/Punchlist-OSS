@@ -30,38 +30,50 @@ async function productionImports(config, entry) {
   return modules;
 }
 
-function writeSnapshot(root, project, files, forbidden) {
+function writeSnapshot(root, files, forbidden) {
   for (const file of files.filter(Boolean)) {
-    const stub = path.join(root, project, file);
+    const stub = path.join(root, file);
     mkdirSync(path.dirname(stub), { recursive: true });
     writeFileSync(stub, forbidden(file) ? 'forbidden' : '');
   }
+}
+
+function forbiddenImport(id, root) {
+  const [filename, query] = (id ?? '').split('?');
+  const index = new URLSearchParams(query).get('glob');
+  if (index === null) return;
+  const relative = path.relative(root, filename);
+  if (path.isAbsolute(relative) || relative.split(path.sep)[0] === '..') return;
+  if (readFileSync(filename, 'utf8') === 'forbidden') return Number(index);
 }
 
 export async function forbiddenGlobs(file, globs, keysOnly, files, forbidden) {
   if (!globs.length) return [];
   // Use the checkout's filesystem so that differently cased directory names resolve as they do in the app.
   const cwd = process.cwd();
-  const root = mkdtempSync(path.join(cwd, '.pane-of-glass-'));
-  const project = '/' + path.relative(path.parse(cwd).root, cwd).split(path.sep).join('/');
-  const entry = path.posix.join(project, file);
+  const scratch = mkdtempSync(path.join(cwd, '.pane-of-glass-'));
+  const project = path.relative(path.parse(cwd).root, cwd).split(path.sep).filter(Boolean);
+  const parentSteps = Math.max(...globs.map((glob) => glob.parentSteps));
+  // Leave enough ancestors inside the snapshot even for options that concatenate parent paths.
+  const padding = Math.max(0, parentSteps - project.length);
+  const root = path.join(scratch, 'p/'.repeat(padding), ...project);
+  const volume = '/' + '../'.repeat(project.length);
   try {
-    writeSnapshot(root, project, files, forbidden);
-    writeFileSync(path.join(root, entry), probeEntry(globs, project, file, keysOnly));
+    writeSnapshot(root, files, forbidden);
+    writeFileSync(path.join(root, file), probeEntry(globs, volume, keysOnly));
     writeFileSync(path.join(root, 'tsconfig.json'), '{}');
     writeFileSync(path.join(root, 'package.json'), '{"type":"module"}');
     const config = { root, configFile: false, envDir: false, publicDir: false, logLevel: 'silent',
       cacheDir: path.join(root, '.cache') };
-    const development = await developmentImports(config, entry);
-    const production = await productionImports(config, path.join(root, entry));
+    const development = await developmentImports(config, '/' + file);
+    const production = await productionImports(config, path.join(root, file));
     const matches = new Set();
     for (const id of [...development, ...production]) {
-      const [filename, query] = (id ?? '').split('?');
-      const index = new URLSearchParams(query).get('glob');
-      if (index !== null && readFileSync(filename, 'utf8') === 'forbidden') matches.add(Number(index));
+      const index = forbiddenImport(id, root);
+      if (index !== undefined) matches.add(index);
     }
     return [...matches];
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(scratch, { recursive: true, force: true });
   }
 }
