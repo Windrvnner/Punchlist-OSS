@@ -45,8 +45,8 @@ const TURN_DILIGENCE_RUNNING = `${ASK_DILIGENCE}
 ${taskCard('cklist', 'Diligence', '1,284 of 2,148 · 76 flagged', 0.6)}</div>`;
 
 const TURN_DILIGENCE_DONE = `${ASK_DILIGENCE}
-<div class="ai"><p>Diligence is done. Of 2,148 items, 1,912 are satisfied, 131 are to resolve and 105 are not settled`
-  + ` yet. Of those to resolve, 84 are flagged and 47 are gaps.</p>
+<div class="ai"><p>Diligence is complete. Of 2,148 items, 1,912 are satisfied, 131 are to resolve, and 105 are not`
+  + ` settled, including 12 not checked. Of those to resolve, 84 are flagged and 47 are gaps.</p>
 ${taskCard('cklist', 'Diligence', 'Done · 131 to resolve')}</div>`;
 
 const CAP_IN_DRAFT = cited('Draft 2 of the guarantee caps the guarantor’s liability at USD 25 million.');
