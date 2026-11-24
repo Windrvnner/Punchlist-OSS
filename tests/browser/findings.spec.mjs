@@ -1,5 +1,6 @@
 import { launchChrome } from './chrome.mjs';
 import { openOnFindings } from './landing.mjs';
+import { longPdf } from './longpdf.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
 const browser = await launchChrome();
@@ -267,13 +268,17 @@ for (const scheme of ['light', 'dark']) { const ctx = await browser.newContext({
 async function findingEditLayout(page) {
   return page.evaluate(() => {
     const composer = document.querySelector('#pcomposer').getBoundingClientRect();
-    const thread = document.querySelector('.chat').getBoundingClientRect();
+    const chat = document.querySelector('.chat');
+    const thread = chat.getBoundingClientRect();
+    const header = chat.querySelector('.chathead');
+    const top = getComputedStyle(header).position === 'sticky' ? header.getBoundingClientRect().bottom : thread.top;
+    const bottom = Math.min(thread.bottom, composer.top);
     const control = (id) => {
       const element = document.getElementById(id);
       const bounds = element.getBoundingClientRect();
       const x = bounds.left + bounds.width / 2;
       const y = bounds.top + bounds.height / 2;
-      const inView = bounds.top >= thread.top && bounds.bottom <= composer.top;
+      const inView = bounds.top >= top && bounds.bottom <= bottom;
       const hit = inView && element.contains(document.elementFromPoint(x, y));
       return { hit, x, y };
     };
@@ -306,12 +311,58 @@ async function checkFindingEditLayouts(page, scenario) {
   }
 }
 
+async function scrollAwayAndBack(page) {
+  const chat = page.locator('.chat');
+  const start = await chat.evaluate((thread) => thread.scrollTop);
+  await chat.evaluate((thread) => { thread.scrollTop = thread.scrollHeight; });
+  await page.waitForFunction((start) => {
+    const thread = document.querySelector('.chat');
+    const title = document.getElementById('fe-title');
+    return thread.scrollTop > start && title.getBoundingClientRect().bottom <= thread.getBoundingClientRect().top;
+  }, start);
+  await chat.evaluate((thread, start) => { thread.scrollTop = start; }, start);
+  await page.waitForFunction((start) => document.querySelector('.chat').scrollTop === start, start);
+}
+
+async function checkCrowdedFindingEdit(page, followup) {
+  const names = [
+    'Executed master services agreement and latest schedule of open orders.pdf',
+    'First amendment to agreement for the supply and distribution of equipment.pdf',
+    'Schedule of service levels and notices that will survive closing.pdf',
+    'Side letter concerning the consent rights of lenders and their successors.pdf',
+    'Executed written consent covering the transfer of the operating assets.pdf',
+    'Supply agreement assignment and transition services obligations.pdf',
+    'Consolidated purchase orders with pricing and assignment requirements.pdf',
+    'Regulatory and tax approvals required for the asset transfer.pdf',
+  ];
+  await page.setInputFiles('#pcomposer input[type=file]', names.map((name, index) => ({
+    name, mimeType: 'application/pdf', buffer: longPdf(index + 1),
+  })));
+  const files = page.locator('#pcomposer .chip.att:not(.pending)');
+  await page.waitForFunction(() => document.querySelectorAll('#pcomposer .chip.att:not(.pending)').length === 8);
+  await page.evaluate(() => store.ui({ toasts: [] }));
+  const layout = await openFindingEditor(page);
+  const detailFits = await page.locator('#fe-body').evaluate((box) => {
+    const style = getComputedStyle(box);
+    const textHeight = box.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+    return textHeight >= parseFloat(style.lineHeight);
+  });
+  say('finding-edit-keeps-focus-and-actions-visible-with-eight-unsent-files',
+    layout.title.hit && layout.save.hit && layout.cancel.hit && layout.focus === 'fe-title' && detailFits,
+    JSON.stringify(layout));
+  if (layout.cancel.hit) await page.mouse.click(layout.cancel.x, layout.cancel.y);
+  else await page.press('#fe-title', 'Escape');
+  await page.waitForSelector('#fe-title', { state: 'detached' });
+  const kept = await files.locator('button[aria-label^="Remove"]').evaluateAll((buttons) =>
+    buttons.map((button) => button.getAttribute('aria-label')));
+  say('closing-finding-edit-keeps-followup-and-attachments', (await page.inputValue('#pask')) === followup
+    && names.every((name) => kept.includes(`Remove ${name}`)));
+  for (const remove of (await files.locator('button[aria-label^="Remove"]').all()).reverse()) await remove.click();
+}
+
 { // #597: a long finding should open for editing with its actions clear of the conversation composer.
   const { ctx, page } = await fresh();
-  await page.click('#fr-new');
-  await page.fill('#nd-name', 'Asset transfer');
-  await page.click('#nd-create');
-  await page.waitForSelector('.dtabs');
+  const dealId = await indexedDeal(page, 'Asset transfer');
   const title = 'Consent required before assigning the supply agreement';
   const body = [
     'The supply agreement requires written consent before the operating assets can be assigned to another owner.',
@@ -323,11 +374,13 @@ async function checkFindingEditLayouts(page, scenario) {
     'The assignment package should include the entire signed agreement and the latest schedule of open orders.',
     'The available filing shows a consent in principle, subject to a further review of the proposed assignee.',
   ];
-  const [dealId, findingId] = await page.evaluate(async ({ title, body }) => {
-    const dealId = Object.keys(store.get().deals)[0];
-    await store.dispatch(store.commandNamed('CreateFinding'), { dealId, title, workstream: 'Legal', body });
-    return [dealId, Object.keys(store.get().findings)[0]];
-  }, { title, body });
+  const findingId = await page.evaluate(async ({ dealId, title, body }) => {
+    const source = Object.values(store.get().findings).find((finding) => finding.sources.length).sources[0];
+    await store.dispatch(store.commandNamed('CreateFinding'), {
+      dealId, title, workstream: 'Legal', body, sources: [source],
+    });
+    return Object.values(store.get().findings).find((finding) => finding.title === title).id;
+  }, { dealId, title, body });
   await page.goto(URL + `#finding-${dealId}-${findingId}`);
   await checkFindingEditLayouts(page, 'without-messages');
   await openFindingEditor(page);
@@ -348,12 +401,7 @@ async function checkFindingEditLayouts(page, scenario) {
   await openFindingEditor(page);
   const draft = 'Confirm which purchase orders are included';
   await page.fill('#fe-title', draft);
-  await page.evaluate(() => {
-    const chat = document.querySelector('.chat');
-    const start = chat.scrollTop;
-    chat.scrollTop = chat.scrollHeight;
-    chat.scrollTop = start;
-  });
+  await scrollAwayAndBack(page);
   const kept = await page.inputValue('#fe-title');
   const { cancel } = await findingEditLayout(page);
   if (cancel.hit) await page.mouse.click(cancel.x, cancel.y);
@@ -373,15 +421,16 @@ async function checkFindingEditLayouts(page, scenario) {
   await page.fill('#pask', followup);
   await page.waitForFunction(() => document.querySelector('#pask').getBoundingClientRect().height > 120);
   await checkFindingEditLayouts(page, 'above-expanded-composer');
+  await checkCrowdedFindingEdit(page, followup);
+  await page.click('.opening .rsch-chip');
+  await page.waitForSelector('.docpanel');
   await page.setInputFiles('#pcomposer input[type=file]', {
-    name: 'Assignment schedule.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4'),
+    name: 'Assignment schedule.pdf', mimeType: 'application/pdf', buffer: longPdf(1),
   });
-  await page.waitForSelector('#pcomposer .chip.att');
-  const attached = await openFindingEditor(page);
-  say('finding-edit-keeps-actions-and-focus-visible-with-an-unsent-attachment', attached.title.hit
-    && attached.save.hit && attached.cancel.hit && attached.focus === 'fe-title'
-    && (await page.inputValue('#pask')) === followup && !!(await page.$('#pcomposer .chip.att')),
-    JSON.stringify(attached));
+  await page.waitForSelector('#pcomposer .chip.att:not(.pending)');
+  const reading = await openFindingEditor(page);
+  say('finding-edit-keeps-focus-and-actions-clear-of-the-reading-breadcrumb',
+    reading.title.hit && reading.save.hit && reading.cancel.hit && reading.focus === 'fe-title', JSON.stringify(reading));
   await ctx.close();
 }
 
