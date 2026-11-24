@@ -1,6 +1,6 @@
 // Resolve against the checkout's real packages and links, without loading any dependency's contents.
 import path from 'node:path';
-import { build, createServer, normalizePath } from 'vite';
+import { build, createServer, normalizePath, resolveConfig } from 'vite';
 import { browserOptions, browserTarget } from './vite-browser-options.mjs';
 
 async function servedIds(config, file) {
@@ -41,16 +41,25 @@ async function builtIds(config, entry) {
   return ids;
 }
 
+// Take the preset's effective aliases from Vite without running its source transforms on the overlay.
+async function probeConfig(mode, entryPlugin) {
+  const { plugins, ...browser } = browserOptions();
+  const options = { ...browser, configFile: false, envDir: false, publicDir: false, logLevel: 'silent' };
+  const command = mode === 'development' ? 'serve' : 'build';
+  const resolved = await resolveConfig({ ...options, plugins }, command, mode);
+  return {
+    ...options, resolve: { alias: resolved.environments.client.resolve.alias },
+    // Keep authored CommonJS imports out of the glob's dependency graph as well.
+    define: { ...browser.define, require: 'globalThis.__paneRequire' },
+    plugins: [entryPlugin],
+  };
+}
+
 export async function globImports(file, code) {
   const entry = normalizePath(path.resolve(file));
-  const config = {
-    ...browserOptions, configFile: false, envDir: false, publicDir: false, logLevel: 'silent',
-    // Keep authored CommonJS imports out of the glob's dependency graph as well.
-    define: { ...browserOptions.define, require: 'globalThis.__paneRequire' },
-    plugins: [{
-      name: 'glob-entry', enforce: 'pre',
-      load(id) { return id === entry ? code : 'export default null'; },
-    }],
+  const entryPlugin = {
+    name: 'glob-entry', enforce: 'pre',
+    load(id) { return id === entry ? code : 'export default null'; },
   };
   // The normal CLI starts development and production in separate processes.
   const previous = process.env.NODE_ENV;
@@ -60,6 +69,7 @@ export async function globImports(file, code) {
     for (const [mode, inspect, input] of [['development', servedIds, file], ['production', builtIds, entry]]) {
       process.env.NODE_ENV = mode;
       try {
+        const config = await probeConfig(mode, entryPlugin);
         graphs.push(await inspect(config, input));
       } catch (failure) {
         error ??= failure;

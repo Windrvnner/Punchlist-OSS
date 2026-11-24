@@ -2,7 +2,6 @@
 import { posix } from 'node:path';
 import { parseSync, Visitor } from 'vite';
 import { globSources } from './pane-of-glass-globs.mjs';
-import { globImports } from './pane-of-glass-vite.mjs';
 import { literalText, unwrapped } from './pane-of-glass-syntax.mjs';
 import { localConstLookup } from './pane-of-glass-constants.mjs';
 
@@ -123,6 +122,7 @@ export async function matchesIn(file, source, checkGlobs) {
 
   const globs = checkGlobs ? globSources(parsed.program, source) : [];
   for (const { node, code } of globs) {
+    const { globImports } = await import('./pane-of-glass-vite.mjs');
     const ids = await globImports(file, code);
     if (ids.some((id) => id.startsWith('src/') && forbiddenModule(file, id))) record('import', node);
   }

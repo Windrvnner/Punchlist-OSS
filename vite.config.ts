@@ -1,5 +1,4 @@
 import { defineConfig } from 'vite';
-import preact from '@preact/preset-vite';
 import { browserOptions, browserTarget } from './scripts/vite-browser-options.mjs';
 import type { Plugin } from 'vite';
 import { assertControl } from './src/control';
@@ -16,9 +15,10 @@ const controlColors = (): Plugin => ({
 // minifier from rewriting standard properties into prefixed ones Chromium ignores
 // (it had reduced backdrop-filter to -webkit-backdrop-filter, which removed the glass blur).
 // Two pages: index.html is the browser demo on stand-in services, desktop.html the desktop app's window on the bridge.
+const browser = browserOptions();
 export default defineConfig({
-  ...browserOptions,
-  plugins: [preact(), controlColors()],
+  ...browser,
+  plugins: [...browser.plugins, controlColors()],
   build: {
     outDir: 'dist',
     rollupOptions: { input: { index: 'index.html', desktop: 'desktop.html' } },
