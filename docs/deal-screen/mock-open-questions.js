@@ -1,7 +1,8 @@
 // The deal screen mock-up: the points the first screens left open (#888, step 3). The breadcrumb shows the deal's
 // counterparty and opens Deal Info (details, folders, delete); Deal Memo sits at the header's right; the Diligence
-// tab switches between the Checklist and the Findings log, each with its own actions (Run Diligence, New Finding); Tasks shows what Needs Input holds; Home opens past conversations
-// from its own header; and the sidebar shows Archived at scale. Loads after mock-qa.js and before mock-screens.js, which calls these builders.
+// tab is the Checklist as the app shows it, with Run Diligence on its filter row; Tasks shows what Needs Input
+// holds; Home opens past conversations from its own header; and the sidebar shows Archived at scale.
+// Loads after mock-qa.js and before mock-screens.js, which calls these builders.
 
 // screens shown with the sidebar open and no pane
 const FULL_SIDEBAR_SCREENS = ['dealheader', 'details', 'folders', 'homepast', 'archscale'];
@@ -17,10 +18,10 @@ const COUNTERPARTY = 'Contoso Wind Partners';
 const dealNameButton = () => '<button type="button" class="x-dealname" title="Deal Info">'
   + `<b>Project Proseware</b><span class="x-cp">${COUNTERPARTY}</span></button>`;
 
-/** Deal Memo… at the header's right, in place of the ⋯ the first screens drew. */
-const dealMemoButton = () => iconButton('memo', 16, 'Deal Memo…');
+/** Deal Memo at the header's right, in place of the ⋯ the first screens drew. */
+const dealMemoButton = () => iconButton('memo', 16, 'Deal Memo');
 
-/** The proposed header: the name button with its counterparty, and Deal Memo… beside the pane button. */
+/** The proposed header: the name button with its counterparty, and Deal Memo beside the pane button. */
 function applyDealHeader() {
   const name = document.querySelector('.x-head .x-trail > b');
   const more = document.querySelector('.x-acts .btn[title="More"]');
@@ -35,14 +36,14 @@ function dealField(label, value) {
   return `<div><span class="lbl">${label}</span><input class="field" value="${value}" aria-label="${label}"></div>`;
 }
 
-/** Deal Info's folders line: how much of the data room is indexed, and Folders…, which opens the Folders dialog. */
+/** Deal Info's folders line: how much of the data room is indexed, and Edit, which opens the Folders dialog. */
 const DEAL_INFO_FOLDERS = '<div class="x-infofolders"><span class="lbl">Folders</span><div class="x-fl">'
-  + '<span>7 folders · 5,176 of 5,190 files indexed</span><button type="button" class="btn sm">Folders…</button>'
+  + '<span>7 folders · 5,176 of 5,190 files indexed</span><button type="button" class="btn sm">Edit</button>'
   + '</div></div>';
 
-/** Deal Info: the New Deal form's fields plus Deal status, the folders line, and Delete Deal… set apart. */
+/** Deal Info: the New Deal form's fields plus Deal status, the folders line, and Delete Deal set apart. */
 function dealInfoDialog() {
-  const status = '<div><span class="lbl">Deal Status</span><button type="button" class="field x-fieldpick"'
+  const status = '<div><span class="lbl">Deal status</span><button type="button" class="field x-fieldpick"'
     + ' aria-haspopup="menu">Live</button></div>';
   return '<div class="scrim blur"><div class="dlg nddlg x-details" role="dialog" aria-label="Deal Info">'
     + '<div class="shead"><h2>Deal Info</h2><button type="button" class="x" aria-label="Close"'
@@ -51,7 +52,7 @@ function dealInfoDialog() {
     + `<div class="ndpicks">${dealField('Structure', 'Project finance')}${dealField('Sector', 'Renewables')}`
     + `${dealField('Technology', 'Offshore wind')}</div>`
     + `<div class="ndpicks">${status}</div>${DEAL_INFO_FOLDERS}`
-    + '<div class="acts x-infoacts"><button type="button" class="btn sm x-delete">Delete Deal…</button></div>'
+    + '<div class="acts x-infoacts"><button type="button" class="btn sm x-delete">Delete Deal</button></div>'
     + '</div></div>';
 }
 
@@ -96,75 +97,21 @@ function foldersDialog() {
     + ` title="Close (Esc)">${icon('close', 15)}</button></div><div class="fdbody"><div class="fdlist">`
     + `<div class="fdgroup">${DEAL_FOLDERS.map(folderRow).join('')}</div>`
     + `<div class="fdgroup x-sharedgrp">${shared}</div></div>${FOLDER_DROP_ZONE}</div>`
-    + '<div class="acts"><button type="button" class="btn sm pri">Choose Folders…</button></div></div></div>';
+    + '<div class="acts"><button type="button" class="btn sm pri">Choose Folders</button></div></div></div>';
 }
 
-// ---- the Findings list, as a tab ----
+// ---- the Diligence tab: the Checklist as the app shows it ----
 
-// the open findings of the first two workstreams (A to Z), newest first, with "May be out of date" first in a group
-const FINDING_GROUPS = [
-  ['Commercial', 11, [
-    ['Offtaker can terminate the revenue contract on a change in law', 'May be out of date'],
-    ['Revenue contract covers less capacity than the base case assumes', 'Nov 21'],
-    ['Curtailment compensation is capped at 2% a year', 'Nov 20'],
-    ['Merchant tail price curve is above the advisor’s low case', 'Nov 20'],
-    ['Offtaker credit support falls away after year five', 'Nov 19'],
-    ['Indexation in the revenue contract lags the base case by a year', 'Nov 19'],
-    ['Grid charges are passed through only above a threshold', 'Nov 18'],
-    ['Revenue contract has no cure period for availability shortfalls', 'Nov 18'],
-    ['Balancing costs are borne by the project, not the offtaker', 'Nov 17'],
-    ['Delay damages are capped below one quarter of debt service', 'Nov 14'],
-    ['Exclusivity clause limits a second offtake agreement', 'Nov 12'],
-  ]],
-  ['Compliance', 3, [
-    ['Sanctions screening of the sponsor’s shareholders is not on file', 'Nov 20'],
-    ['Anti-bribery policy predates the current group structure', 'Nov 17'],
-    ['Know-your-customer pack for the hedging bank is incomplete', 'Nov 13'],
-  ]],
-];
-
-/** A finding in the list: the finding's own flag icon, its title, and its date; its group names its workstream. */
-function findingListRow([title, when]) {
-  const stale = when === 'May be out of date';
-  const meta = stale ? `<span class="x-stale">${when}</span>` : when;
-  return `<div class="x-row x-frow">${FLAG_MARK.replace('Flagged', 'Open')}`
-    + `<span class="t" title="${title}">${title}`
-    + `<small>${meta}</small></span><span class="s"></span></div>`;
-}
-
-function findingGroup([workstream, count, findings]) {
-  return `<div class="x-grp">${workstream}<span class="n">${count}</span></div>`
-    + findings.map(findingListRow).join('');
-}
-
-/** The Diligence tab's top row: the Checklist or Findings switch, then the chosen view's own actions. */
-function diligenceViewRow(findingsShown, actions) {
-  const choice = (label, on) => `<button class="${on ? 'on' : ''}">${label}</button>`;
-  return `<div class="x-qtools x-dview"><div class="seg">${choice('Checklist', !findingsShown)}`
-    + `${choice('Findings', findingsShown)}</div><span class="x-qact">${actions}</span></div>`;
-}
-
-// the Checklist view's action: Run Diligence, with when it last ran in its tooltip
+// Run Diligence at the end of the Checklist's one row of filters, where the heading keeps its actions (checklist.tsx,
+// CkHead), with when it last ran in its tooltip
 const RUN_DILIGENCE = '<button type="button" class="btn sm" title="Last run Nov 20">Run Diligence</button>';
 
-// the Findings page's own controls: New Finding and ⋯ (Import…, Export… and Deleted…) on the top row, then the
-// status filter and Filter (Workstream and Reviewed)
-const FINDINGS_ACTIONS = `<button class="btn sm">${icon('plus', 13)}New Finding</button>`
-  + iconButton('more', 16, 'More');
-const FINDINGS_FILTERS = '<div class="x-rhead"><div class="seg"><button class="on">Open<span class="c"> 113</span>'
-  + '</button><button>Closed<span class="c"> 21</span></button><button>All</button></div>'
-  + `${iconButton('filter', 15, 'Filter')}</div>`;
+// the filters a short row folds into Filter, as the Checklist does when its row runs short of space
+const FOLDED_FILTERS = `<span class="x-ckfold">${iconButton('filter', 15, 'Filter')}</span>`;
 
-// a flagged item's mark is the finding's flag, as in the Findings view, in place of the stripe the first screens drew
-const FLAG_MARK = `<span class="x-fmark" title="Flagged">${icon('flag', 14)}</span>`;
-
-/** The Diligence tab on its Checklist: the report under the view switch, its flagged items marked with the flag. */
-const diligenceChecklistView = () => diligenceViewRow(false, RUN_DILIGENCE)
-  + diligenceReport(false).replaceAll('<span class="mk k-finding"></span>', FLAG_MARK);
-
-/** The Diligence tab on its Findings: the whole log, open findings first by workstream. */
-const diligenceFindingsView = () => diligenceViewRow(true, FINDINGS_ACTIONS) + FINDINGS_FILTERS
-  + FINDING_GROUPS.map(findingGroup).join('');
+/** The Diligence tab: the approved report, every item with its result, and Run Diligence on its filter row. */
+const diligenceList = () => diligenceReport(false)
+  .replace(`${REPORT_FILTERS}</div>`, `${REPORT_FILTERS}${FOLDED_FILTERS}<span class="x-qact">${RUN_DILIGENCE}</span></div>`);
 
 // ---- Tasks: what Needs Input holds ----
 
@@ -288,10 +235,8 @@ const OPEN_QUESTION_SCREENS = {
     { title: CONVERSATION_TITLES.permits })),
   details: () => OPEN_QUESTION_SCREENS.dealheader(),
   folders: () => OPEN_QUESTION_SCREENS.dealheader(),
-  reportfindings: () => slimRail() + openQuestionStage(inPermitsChat([TURN_PERMITS, TURN_DILIGENCE_DONE])
-    + pane(paneTabs([TASKS_TAB, DILIGENCE_TAB], 'diligence'), diligenceChecklistView(), paneWidth())),
-  findings: () => slimRail() + openQuestionStage(inPermitsChat([TURN_PERMITS, TURN_DILIGENCE_DONE])
-    + pane(paneTabs([TASKS_TAB, DILIGENCE_TAB], 'diligence'), diligenceFindingsView(), paneWidth())),
+  diligence: () => slimRail() + openQuestionStage(inPermitsChat([TURN_PERMITS, TURN_DILIGENCE_DONE])
+    + pane(paneTabs([TASKS_TAB, DILIGENCE_TAB], 'diligence'), diligenceList(), paneWidth())),
   needsinput: () => slimRail() + openQuestionStage(conversation([TURN_GUARANTEE_CAP, TURN_HEADROOM_NEEDS_INPUT],
     { title: 'Guarantee cap and covenants', open: true })
     + pane(paneTabs([TASKS_TAB], 'tasks'), NEEDS_INPUT_TASKS, paneWidth())),

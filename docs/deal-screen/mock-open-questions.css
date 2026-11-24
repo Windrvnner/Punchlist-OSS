@@ -36,15 +36,15 @@
   color: var(--ink);
 }
 
-/* the Diligence tab's view switch and the chosen view's actions share its top row */
-.x-dview .x-qact {
+/* the Diligence tab: Run Diligence at the end of the filter row; Filter shows only once the row folds */
+.x-rhead .x-qact {
   margin-left: auto;
 }
-.x-dview .btn.sm {
-  gap: 6px;
+.x-ckfold {
+  display: none;
 }
 
-/* Deal Info: the folders line, and Delete Deal… set apart at the left of the footer */
+/* Deal Info: the folders line, and Delete Deal set apart at the left of the footer */
 .x-infofolders {
   margin-top: 14px;
 }
@@ -92,29 +92,6 @@
   min-width: 0;
 }
 
-/* the Findings view: the status filter, then Filter, then New Finding and ⋯ at the right */
-.x-frow .t small {
-  display: block;
-  margin-top: 2px;
-  font-size: 12px;
-  color: var(--ink-2);
-}
-.x-frow .t {
-  -webkit-line-clamp: 3;
-}
-.x-stale {
-  color: var(--ink-2);
-  font-style: italic;
-}
-/* an open finding's mark is the finding's own flag, in the open (red) color, at the title's line */
-.x-row .x-fmark {
-  align-self: start;
-  display: grid;
-  place-items: center;
-  height: 20px;
-  color: var(--high);
-}
-
 /* a past conversation with a new result shows the archived deals' dot before its time, so times stay aligned */
 .pastpop .pm .x-upd {
   margin-right: -4px;
@@ -134,4 +111,14 @@
 }
 .rail.x-scale .rsearch {
   flex: none;
+}
+
+/* a narrow pane folds Not Settled and Satisfied into Filter, as the Checklist folds its seldom-used filters */
+@container (max-width:480px) {
+  .x-rhead .seg button:nth-child(n+4) {
+    display: none;
+  }
+  .x-ckfold {
+    display: inline-flex;
+  }
 }

@@ -55,11 +55,10 @@ Screens 27 to 34 propose answers to the points the screens above left open. They
 
 | # | Screen | Shows |
 |---|---|---|
-| 27 | [Deal header](deal-screen/shots/27-deal-header-light-1280x736.jpg) | The deal's name and counterparty, which open Deal Info, and Deal Memo… |
-| 28 | [Deal Info](deal-screen/shots/28-deal-info-light-1280x736.jpg) | The deal's details, its folders, and Delete Deal… |
+| 27 | [Deal header](deal-screen/shots/27-deal-header-light-1280x736.jpg) | The deal's name and counterparty, which open Deal Info, and Deal Memo |
+| 28 | [Deal Info](deal-screen/shots/28-deal-info-light-1280x736.jpg) | The deal's details, its folders, and Delete Deal |
 | 29 | [Folders](deal-screen/shots/29-folders-light-1280x736.jpg) | Overview's Documents list in the Folders dialog |
-| 30 | [Diligence, Checklist](deal-screen/shots/30-diligence-checklist-view-light-1280x736.jpg) | The Checklist or Findings switch, with **Run Diligence** |
-| 31 | [Diligence, Findings](deal-screen/shots/31-diligence-findings-view-light-1280x736.jpg) | The full list of findings, with the Findings page's controls |
+| 30 | [Diligence](deal-screen/shots/30-diligence-light-1280x736.jpg) | Every checklist item with its result, one row of filters, and **Run Diligence** |
 | 32 | [Needs Input](deal-screen/shots/32-tasks-needs-input-light-1280x736.jpg) | What Needs Input holds, and a task waiting for a reply |
 | 33 | [Home's past conversations](deal-screen/shots/33-home-past-conversations-light-1280x736.jpg) | Home's history button, with a conversation that has a new result |
 | 34 | [Archived at scale](deal-screen/shots/34-archived-at-scale-light-1280x736.jpg) | The end of a 40-deal list, with all 12 archived deals and changed ones first |
