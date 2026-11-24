@@ -17,6 +17,7 @@ import { RestoreQuestion } from '../app/commands/questions';
 import { RestoreFinding } from '../app/commands/findings';
 import { dealHash, type Message } from '../app/state';
 import { KeptAsk } from './findingAsk';
+import { editDrafts } from '../app/findingDrafts';
 
 const Sep = () => <span class="sep">›</span>;
 
@@ -95,14 +96,18 @@ function GoneLine({ scope, deal, restore }: {
   const deleted = gone && gone.kind !== 'deal' ? gone : null;
   const back = deleted && deal ? `back to ${deal.name}` : deal ? `Back to ${deal.name}` : 'Back to Home';
   return (
-    <p class="emptyline" id="gone" style="margin-top:20px">
-      {deleted ? <>
-        {deleted.kind === 'finding' ? 'That finding was deleted.' : 'That question was deleted.'}{' '}
-        <button type="button" class="linkb" id="gone-restore" onClick={() => restore(deleted)}>Restore it</button>
-        {' or go '}
-      </> : <>{noLongerHere(scope)}{' '}</>}
-      <a class="linkb" href={deal ? `#${dealHash(state.prefs, deal.id)}` : '#deals'}>{back}</a>
-    </p>
+    <>
+      <p class="emptyline" id="gone" style="margin-top:20px">
+        {deleted ? <>
+          {deleted.kind === 'finding' ? 'That finding was deleted.' : 'That question was deleted.'}{' '}
+          <button type="button" class="linkb" id="gone-restore" onClick={() => restore(deleted)}>Restore it</button>
+          {' or go '}
+        </> : <>{noLongerHere(scope)}{' '}</>}
+        <a class="linkb" href={deal ? `#${dealHash(state.prefs, deal.id)}` : '#deals'}>{back}</a>
+      </p>
+      {deleted?.kind === 'finding' && editDrafts.has(deleted.id) &&
+        <p class="emptyline" id="gone-finding-edit" role="status">Unsaved finding edit kept.</p>}
+    </>
   );
 }
 
