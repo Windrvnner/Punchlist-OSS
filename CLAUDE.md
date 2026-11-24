@@ -17,6 +17,7 @@ Start with these documents:
 - [docs/decisions.md](docs/decisions.md) lists the decisions in force.
 - [docs/design.md](docs/design.md) describes how the app looks. Read it before you work on any screen.
 - [docs/linking-design.md](docs/linking-design.md) describes the parts, not yet built, of the design that links checklist items to findings and Q&A questions.
+- [docs/deal-screen-design.md](docs/deal-screen-design.md) holds the mock-up and screens, not yet built, of the rebuilt deal screen.
 - [docs/review-prompt.md](docs/review-prompt.md) is the adversarial review prompt for every pull request.
 - The repository's **Issues** tab tracks every bug and every planned feature. The planned features make up the Build list.
 
