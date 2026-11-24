@@ -15,16 +15,27 @@ import { dealQuestions, dealFindings } from '../../src/app/state';
 import { exportQuestions, exportFindings, readImportFile, previewImport } from '../../src/app/transfer';
 import { search, loadAllForSearch } from '../../src/app/search';
 import { prepareImport, suggestMapping, TEXT_MAX } from '../../src/domain/importExport';
+import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 
 const COMMANDS = [CreateDeal, CreateQuestion, EditQuestionField, SetResponse, SetQuestionStatus, CreateFinding, ReviewFinding, ImportQuestions, RevertImport, RecoverDrafts, RequestDraft, ApplyDraft, AcceptDraft];
 for (const c of COMMANDS) registry.set(c.name, c);
 let t = 0; const clock = { now: () => new Date(Date.UTC(2026, 10, 9, 10, 0, 0, t++)).toISOString() };
 let seq = 0; const ids = { next: (p: string) => `${p}_01HZZZZZZZZZZZZZZZZ${String(seq++).padStart(7, '0')}` };
-function make(kv = disk()) {
+function make(kv = disk(), draftText = 'The lock-up is 1.10x.') {
   const opts = { latency: [0, 0] as [number, number] }; const repo = memRepo(clock.now, kv);
   const saved: { name: string; bytes: Uint8Array }[] = []; const calls = { brief: 0 }; let saveResult: any = { ok: true, value: 'saved' };
   // a draft is always found, with two sources, so a test can take an AI draft as a response
-  const ai = { ...mockAi(opts, repo), draft: async () => ok({ status: 'found' as const, text: 'The lock-up is 1.10x.', sources: [{ doc: 'Credit agreement.pdf', loc: 'p. 41', docId: 'doc_fa' }, { doc: 'Model.xlsx', loc: 'CFADS!C3', docId: 'doc_model' }] }) };
+  const ai = {
+    ...mockAi(opts, repo),
+    draft: async () => ok({
+      status: 'found' as const,
+      text: draftText,
+      sources: [
+        { doc: 'Credit agreement.pdf', loc: 'p. 41', docId: 'doc_fa' },
+        { doc: 'Model.xlsx', loc: 'CFADS!C3', docId: 'doc_model' },
+      ],
+    }),
+  };
   const store = new Store({ repo, ai: { ...ai, dealBrief: (id) => { calls.brief++; return ai.dealBrief(id); } }, docs: mockDocuments(opts), fs: { pickFolders: null, pathFor: null, save: async (name, bytes) => { if (saveResult.ok && saveResult.value === 'saved') saved.push({ name, bytes }); return saveResult; } }, sheets: csvCodec, session: mockSession(opts), local: new MemoryLocal(), clock, ids }, COMMANDS);
   return { store, kv, repo, saved, calls, setSave: (r: any) => { saveResult = r; } };
 }
@@ -156,6 +167,99 @@ describe('export and import through the ports', () => {
     expect((await readImportFile(store, { name: 'big.csv', size: 21 * 1024 * 1024, arrayBuffer: async () => new ArrayBuffer(0) })).ok).toBe(false);
     expect((await readImportFile(store, fileOf('bad.xlsx', new Uint8Array([1, 2, 3, 4])))).ok).toBe(false);
     expect((await readImportFile(store, fileOf('headers-only.csv', new TextEncoder().encode('Number,Question\n')))).ok).toBe(false);
+  });
+});
+
+describe('Q&A Merge when the file has character decoding damage', () => {
+  const columns = suggestMapping(['Number', 'Question', 'Response']);
+  const rowsFrom = (cells: string[][]) => prepareImport(cells, columns).rows;
+  const question = 'What’s the lock-up ratio — tested when?';
+  const response = 'It’s 1.25x — tested semi-annually';
+  const damage = (value: string) => value.replace(/[’—]/g, '?');
+
+  it('keeps an original question and sourced draft when the file lost characters (#256)', async () => {
+    const { store } = make(disk(), response);
+    await store.boot();
+    await store.dispatch(CreateDeal, { name: 'Deal', folders: [] });
+    const [dealId] = Object.keys(store.get().deals);
+    await store.loadDeal(dealId);
+    await store.dispatch(CreateQuestion, { dealId, text: question });
+    const [{ id: questionId }] = dealQuestions(store.get(), dealId);
+    await store.dispatch(RequestDraft, { dealId, questionId });
+    for (let attempt = 0; attempt < 100 && store.get().questions[questionId].draft?.status !== 'found'; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect((await store.dispatch(AcceptDraft, { dealId, questionId })).ok).toBe(true);
+    const before = structuredClone(store.get().questions[questionId]);
+    const csv = `Number,Question,Response\n1,${damage(question)},${damage(response)}\n`;
+    const file = await readImportFile(store, fileOf('log.csv', new TextEncoder().encode(csv)));
+    if (!file.ok) throw new Error(file.error.message);
+    const rows = prepareImport(file.value.rows, file.value.mapping).rows;
+    expect(previewImport(store, dealId, 'merge', rows)).toMatchObject({
+      ok: true, value: { created: 0, updated: 0, changes: [] },
+    });
+    const result = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows });
+    if (!result.ok) throw new Error(result.error.message);
+    expect(store.get().ops[result.value.opId]?.inverse).toBeUndefined();
+    expect(store.get().questions[questionId]).toEqual(before);
+  });
+
+  it('keeps each original in a 2,376-question log without hiding genuine changes or taking away Undo', async () => {
+    const { store } = make();
+    await store.boot();
+    await store.dispatch(CreateDeal, { name: 'Deal', folders: [] });
+    const [dealId] = Object.keys(store.get().deals);
+    await store.loadDeal(dealId);
+    const clean = portfolioQuestions().map((ask, index) => [
+      String(index + 1),
+      `For the counterparty’s review — ${ask}`,
+      'It’s in the latest schedule — no changes since closing.',
+    ]);
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: rowsFrom(clean) })).ok).toBe(true);
+    const originals = structuredClone(dealQuestions(store.get(), dealId));
+    const reads = [damage, (text: string) => text.replace(/[’—]/g, '\uFFFD'),
+      (text: string) => text.replace(/’/g, "'").replace(/—/g, '-'),
+      (text: string) => text.replace(/’/g, '?').replace(/—/g, '-'),
+      (text: string) => new TextDecoder('windows-1252').decode(new TextEncoder().encode(text))];
+    const changed = clean.map((row, index) => row.map(reads[index % reads.length]));
+    changed[0] = [
+      clean[0][0],
+      clean[0][1].replace('Provide', 'provide').replace(/\.$/, '?'),
+      'A revised schedule is due in 10 business days.',
+    ];
+    const preview = previewImport(store, dealId, 'merge', rowsFrom(changed));
+    if (!preview.ok) throw new Error(preview.error.message);
+    expect(preview.value.updated).toBe(1);
+    expect(preview.value.created).toBe(0);
+    expect(preview.value.changes).toMatchObject([
+      { n: 1, field: 'Question', to: changed[0][1] },
+      { n: 1, field: 'Response', to: changed[0][2] },
+    ]);
+    const result = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: rowsFrom(changed) });
+    if (!result.ok) throw new Error(result.error.message);
+    const after = dealQuestions(store.get(), dealId);
+    expect(after[0]).toMatchObject({ id: originals[0].id, text: changed[0][1], response: changed[0][2] });
+    expect(after.slice(1)).toEqual(originals.slice(1));
+    expect((await store.undo(result.value.opId)).ok).toBe(true);
+    expect(store.get().questions[originals[0].id]).toMatchObject({
+      text: originals[0].text, response: originals[0].response, provenance: originals[0].provenance,
+    });
+  }, 20_000);
+
+  it('merges a corrected file over previously damaged wording and can still append the file as read', async () => {
+    const { store } = make();
+    await store.boot();
+    await store.dispatch(CreateDeal, { name: 'Deal', folders: [] });
+    const [dealId] = Object.keys(store.get().deals);
+    await store.loadDeal(dealId);
+    const damaged = rowsFrom([['1', damage(question), damage(response)]]);
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: damaged })).ok).toBe(true);
+    const [before] = dealQuestions(store.get(), dealId);
+    const corrected = rowsFrom([['1', question, response]]);
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: corrected })).ok).toBe(true);
+    expect(dealQuestions(store.get(), dealId)).toMatchObject([{ id: before.id, text: question, response }]);
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: damaged })).ok).toBe(true);
+    expect(dealQuestions(store.get(), dealId)[1]).toMatchObject({ text: damage(question), response: damage(response) });
   });
 });
 
