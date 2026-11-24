@@ -211,8 +211,8 @@ function stillAsCompared(q: Question, set: Record<string, string>, expected: Rec
 /**
  * An update takes in the cells only the Q&A log changed (an edit in the log is the latest), in one step:
  * `set` by question id, each field in the app's terms. The questions are marked Changed by the log's record (`changed`),
- * which the update writes. A question whose cells cannot be used as they are is left as it is (`skipped`); the next
- * update offers them again. Undo puts the questions back.
+ * which the update writes. A question whose cells cannot be used stays as it is. Undo restores the changed questions
+ * and their findings.
  */
 export const TakeFromQaLog = define({
   name: 'TakeFromQaLog',
