@@ -1,8 +1,10 @@
 // The cards an answer opens to add it as a new question or a new finding.
 import { useRef, useState } from 'preact/hooks';
-import { useAppState, useShown, useStore } from './hooks';
+import { useSaveOut } from './saveOut';
+import { useAppState, useStore } from './hooks';
 import type { Store } from '../app/store';
-import { createdFinding, findingHref, keepAsEdit } from './findings';
+import { createdFinding, findingHref } from './findings';
+import { keepAsEdit } from './findingDrafts';
 import { hasTexts, keptDrafts } from './keptDrafts';
 import { focusCard, closeOnEscape } from './focus';
 import { workstreamChoices } from '../domain/order';
@@ -16,6 +18,8 @@ import type { Finding, Source } from '../domain/model';
 
 /** What a card holds as typed: the question or the finding's title, and its workstream. */
 type CardDraft = { text: string; ws: string };
+/** What Add as finding sent to make the finding. */
+type SentFinding = { title: string; workstream: string; body: string[] };
 /** "Add as question" and "Add as finding" cards half typed, per answer: kept on Escape, leaving and a restart */
 const questionDrafts = keptDrafts('answer-question', hasTexts('text', 'ws'));
 const findingDrafts = keptDrafts('answer-finding', hasTexts('text', 'ws'));
@@ -36,20 +40,16 @@ function useCardDraft(drafts: Map<string, CardDraft>, answerId: string, start: C
     else drafts.set(answerId, next);
   };
   const forget = () => drafts.delete(answerId);
-  // Cancel lets the draft go, and a save still out then leaves alone a card opened again since
-  const cancelled = useRef(false);
-  const cancel = () => {
-    cancelled.current = true;
-    forget();
-  };
+  /** what is typed now: here, or in this answer's card closed and opened again since (they share the kept draft) */
+  const latest = () => drafts.get(answerId) ?? start;
   /** after a save of `sent` lands: whether nothing was typed since, and then the draft is let go */
   const landed = (sent: CardDraft) => {
-    if (cancelled.current) return false;
-    const same = now.current.text === sent.text && now.current.ws === sent.ws;
+    const typedNow = latest();
+    const same = typedNow.text === sent.text && typedNow.ws === sent.ws;
     if (same) forget();
     return same;
   };
-  return { typed, change, forget, cancel, cancelled, landed, now };
+  return { typed, change, forget, landed, latest };
 }
 
 /** The workstream a new question or finding goes in, chosen from the firm's list. */
@@ -76,19 +76,24 @@ export function QuestionCard({ scope, answerId, initial, onDone }: {
   const finding = scope.kind === 'finding' ? state.findings[scope.findingId] : null;
   const draft = useCardDraft(questionDrafts, answerId, { text: initial, ws: finding?.workstream ?? '' });
   const { text, ws: workstream } = draft.typed;
-  const [busy, setBusy] = useState(false);
-  // a question logged is let go once it lands, unless more was typed since: that stays for another Log, as Ask does
-  const log = async () => {
-    if (busy) return;
-    setBusy(true);
+  // a question logged is let go once it lands, unless more was typed since: that stays for another Log, as Ask does.
+  // The card on screen then, this one or this answer's card opened again since, closes (#771)
+  const out = useSaveOut('answer-question:' + answerId, (closes: boolean) => {
+    if (closes) onDone();
+  });
+  const busy = out.busy;
+  const log = () => {
     const sent = draft.typed;
     const question = { dealId, text: text.trim(), workstream, linkedFinding: finding?.id };
-    const result = await store.dispatch(CreateQuestion, question, { idempotencyKey: 'card-q-' + dealId });
-    setBusy(false);
-    if (result.ok && draft.landed(sent)) onDone();
+    void out.send(async (cancelled) => {
+      const result = await store.dispatch(CreateQuestion, question, { idempotencyKey: 'card-q-' + dealId });
+      // cancelled while it was out: a card opened since is left alone
+      return result.ok && !cancelled() && draft.landed(sent);
+    });
   };
   const cancel = () => {
-    draft.cancel();
+    out.cancel();
+    draft.forget();
     onDone();
   };
   return (
@@ -126,42 +131,46 @@ export function FindingCard({ dealId, answerId, text, sources, onDone }: {
   const plainText = withoutMarkers(text, sources.length);
   const draft = useCardDraft(findingDrafts, answerId, { text: firstSentence(plainText), ws: '' });
   const { text: title, ws: workstream } = draft.typed;
-  const [busy, setBusy] = useState(false);
-  const shown = useShown();
   // why Create is off, said on hover
   const need = !title.trim() ? 'Give the finding a title' : !workstream ? 'Choose a workstream' : null;
-  const create = async () => {
-    if (busy) return;
-    setBusy(true);
+  // the card on screen once Create lands, this one or this answer's card opened again since, closes (#771)
+  const out = useSaveOut('answer-finding:' + answerId, (closes: boolean) => {
+    if (closes) onDone();
+  });
+  const busy = out.busy;
+  const create = () => {
     const sent = draft.typed;
     const body = toParagraphs(text);
     const finding = { dealId, title: title.trim(), workstream, body, sources, origin: 'chat' as const };
-    const result = await store.dispatch(CreateFinding, finding, { idempotencyKey: 'card-f-' + dealId, quiet: true });
-    setBusy(false);
-    if (!result.ok) {
-      store.toast(result.error.message);
-      return;
-    }
-    // cancelled while it was out: the finding is made all the same, and said so; a card opened since stays open
-    if (!draft.cancelled.current) {
-      if (!draft.landed(sent) && !editMade(createdFinding(store, result.value.opId), finding)) return;
-      onDone();
-    }
-    toastCreated(store, dealId, finding.title);
+    void out.send(async (cancelled, onScreen) => {
+      const result = await store.dispatch(CreateFinding, finding, { idempotencyKey: 'card-f-' + dealId, quiet: true });
+      if (!result.ok) {
+        store.toast(result.error.message);
+        return false;
+      }
+      // cancelled while it was out: the finding is made all the same, and said so; a card opened since stays open
+      const made = createdFinding(store, result.value.opId);
+      const closes = !cancelled() && (draft.landed(sent) || editMade(made, finding, onScreen));
+      // after the finding made is opened, so the toast knows whether to offer Open
+      toastCreated(store, dealId, finding.title);
+      return closes;
+    });
   };
   // #115's decision for this card too: what was typed since Create was sent becomes an open edit of the finding made,
-  // and its page opens in Edit while the card is still in sight. A finding that cannot be found leaves the card open
-  // with the typing
-  const editMade = (made: Finding | undefined, sent: { title: string; workstream: string; body: string[] }) => {
+  // and leaves the card (#771); its page opens in Edit while a card for the answer is in sight. A finding that cannot
+  // be found leaves the card open with the typing
+  const editMade = (made: Finding | undefined, sent: SentFinding, onScreen: () => boolean) => {
     if (!made) return false;
-    const typed = { title: draft.now.current.text, ws: draft.now.current.ws, body: made.body.join('\n\n') };
+    const typedNow = draft.latest();
+    const typed = { title: typedNow.text, ws: typedNow.ws, body: made.body.join('\n\n') };
     keepAsEdit(made, typed, { title: sent.title, workstream: sent.workstream, body: sent.body });
     draft.forget();
-    if (shown.current) location.hash = findingHref(made);
+    if (onScreen()) location.hash = findingHref(made);
     return true;
   };
   const cancel = () => {
-    draft.cancel();
+    out.cancel();
+    draft.forget();
     onDone();
   };
   return (

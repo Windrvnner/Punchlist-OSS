@@ -1,6 +1,7 @@
+import { distinguishingWords } from '../../src/app/dealLabel';
 // Deals with the same name are told apart by their counterparty and the day they were made.
 import { describe, it, expect } from 'vitest';
-import { dealTwin } from '../../src/app/state';
+import { dealTwin, dealLabel } from '../../src/app/state';
 import type { Deal } from '../../src/domain/model';
 
 const deal = (id: string, name: string, counterparty: string, createdAt: string) => ({ id, name, counterparty, createdAt }) as unknown as Deal;
@@ -22,4 +23,28 @@ describe('telling same-named deals apart', () => {
     expect([dealTwin(s, a, true), dealTwin(s, b, true), dealTwin(s, c, true)]).toEqual(['Northwind LP', 'Tailwind · Nov 15, 2026', 'Mar 2, 2025']);
     expect(dealTwin({ deals: { [c.id]: c, [e.id]: e } as any }, c, true)).toBe('Tailwind · Mar 2, 2025');   // nothing short tells them apart: the whole of it
   });
+
+  it('names a deal in a confirm or notice with the sidebar line in brackets, only when it has a twin (#27)', () => {
+    const a = deal('d_a', 'Project Kestrel', 'Adatum Renewable', '2026-11-15T12:00:00.000Z');
+    const b = deal('d_b', 'Project Kestrel', 'Wingtip', '2026-11-16T12:00:00.000Z');
+    const c = deal('d_c', 'Project Coho', 'Northwind LP', '2026-11-15T12:00:00.000Z');
+    const s = { deals: { [a.id]: a, [b.id]: b, [c.id]: c } as any };
+    expect([dealLabel(s, a), dealLabel(s, b), dealLabel(s, c)])
+      .toEqual(['Project Kestrel (Adatum Renewable)', 'Project Kestrel (Wingtip)', 'Project Coho']);
+    // the same counterparty: the day; and where neither alone tells them apart, both, joined so a notice keeps it whole
+    const d = deal('d_d', 'Project Kestrel', 'Wingtip', '2025-03-02T12:00:00.000Z');
+    const e = deal('d_e', 'Project Kestrel', 'Wingtip', '2025-03-02T15:00:00.000Z');
+    expect(dealLabel({ deals: { [b.id]: b, [d.id]: d } as any }, d)).toBe('Project Kestrel (Mar 2, 2025)');
+    expect(dealLabel({ deals: { [d.id]: d, [e.id]: e } as any }, d)).toBe('Project Kestrel (Wingtip, Mar 2, 2025)');
+  });
+});
+
+it('keeps the later distinguishing occurrence of a repeated phrase (#492)', () => {
+  const prefix = 'Fund IV Fund V Example Infrastructure Partners ';
+  const labels = [prefix + 'Fund IV (Lux) SCSp', prefix + 'Fund V (Lux) SCSp'];
+  for (const [index, label] of labels.entries()) {
+    const focus = distinguishingWords(label, labels);
+    expect(focus?.start).toBe(prefix.length);
+    expect(label.slice(focus?.start, focus?.end)).toBe(index ? 'Fund V' : 'Fund IV');
+  }
 });
