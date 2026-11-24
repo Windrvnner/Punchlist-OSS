@@ -1,9 +1,8 @@
 import { Fragment } from 'preact';
 import { onListText, OnListMark } from './issuesList';
-import { LISTED } from '../app/commands/issuesList';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { TEXT_MAX } from '../domain/importExport';
-import { checkingSays } from '../app/checking';
+import { checkingSays, watchCheck } from '../app/checking';
 import { showTip, hideTip } from './tip';
 import { ReadOnlyContext } from './editField';
 import { useAppState, useStore, fmtDate, whenText , useDismiss, useMinuteTick } from './hooks';
@@ -21,7 +20,8 @@ import { ConflictView } from './conflict';
 import { AskFirst } from './dialogs';
 import { FindingLinks, askKept } from './findingAsk';
 import { CreateFinding, EditFinding, SetFindingStatus, ReviewFinding, DeleteFinding, TITLE_MAX } from '../app/commands/findings';
-import { reassess, previousVersion } from '../app/findings';
+import { findingHistory, reassess, type FindingHistoryEvent } from '../app/findings';
+import { createdRecord } from '../app/createdRecord';
 import type { Deal, Finding, Source } from '../domain/model';
 import { localYmd, CHECK_REASON } from '../domain/model';
 import { splitCited, toParagraphs } from '../domain/cite';
@@ -129,14 +129,12 @@ function StatusMenu({ status, choose }: { status: string; choose: (x: 'open' | '
  */
 export function CheckLine({ deal: d }: { deal: Deal }) {
   const store = useStore(); const s = useAppState(); const c = s.checks[d.id]; const ro = useContext(ReadOnlyContext);
-  if (!s.can.checkAll) return null;
+  useEffect(() => s.can.checkAll ? watchCheck(store, d.id) : undefined, [store, d.id, s.can.checkAll]);
   const on = (iso: string) => fmtDate(localYmd(iso)); const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
   const out = c?.left ? [c.left.items ? n(c.left.items, 'checklist item', 'checklist items') : '', c.left.findings ? n(c.left.findings, 'finding', 'findings') : ''].filter(Boolean).join(' and ') : '';
   const deep = !!c?.offerDeep && !c.left && !c.failedAt;
   // what the latest check left out can be checked on its own while the documents are the ones it checked
   const rest = checkLeftCount(c, deep);
-  // while a check runs, the line is refreshed every few seconds: who else is in it, and how it is going
-  useEffect(() => { if (!c?.busy && !c?.checking) return; const t = setInterval(() => void store.refreshChecked(d.id), 3000); return () => clearInterval(t); }, [d.id, !!c?.busy, !!c?.checking]);
   const shared = checkingSays(c?.checking, c?.busy === 'deep');
   // checklist items no check has reached yet, such as items brought in since the last one; not while the first pass is still reading
   const unchecked = uncheckedChecklistCount(s, d);
@@ -155,7 +153,7 @@ export function CheckLine({ deal: d }: { deal: Deal }) {
   // the line goes once nothing is due; if the focus was in it, it moves to the deal's ⋯, where Check again stays, not to the page
   const had = useRef(false);
   useEffect(() => { if (!said && had.current) { had.current = false; if (!document.activeElement || document.activeElement === document.body) document.getElementById('deal-more')?.focus(); } }, [!!said]);
-  if (!said) return null;                                // nothing due: no line
+  if (!s.can.checkAll || !said) return null;
   return <div class="ovcheck" id="ov-check" onFocusIn={() => { had.current = true; }} onFocusOut={(e) => { if (e.relatedTarget && !(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) had.current = false; }}>
     {said && <span ref={lineRef} class={`when ${warn ? 'warn' : ''}`} id="f-checked" role="status" {...(shared?.who ? { tabIndex: 0, 'aria-description': shared.who, onMouseEnter: (e: MouseEvent) => showTip(e.currentTarget as HTMLElement, shared.who!), onMouseLeave: (e: MouseEvent) => hideTip(e.currentTarget as HTMLElement), onFocus: (e: FocusEvent) => showTip(e.currentTarget as HTMLElement, shared.who!, 0), onBlur: (e: FocusEvent) => hideTip(e.currentTarget as HTMLElement) } : {})}>{warn && <i class="dot" aria-hidden="true" />}{said}</span>}
     {/* while a check runs the button is off but keeps the focus (aria-disabled, not disabled, which would drop the focus to the page) */}
@@ -341,7 +339,7 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
       const r = await store.dispatch(CreateFinding, input, { idempotencyKey: 'f-create-' + d.id });
       // cancelled while it was out: a form opened since is left alone
       if (!r.ok || cancelled()) return undefined;
-      return landCreated(d.id, sent, createdFinding(store, r.value.opId));
+      return landCreated(d.id, sent, createdRecord(store.get(), r.value.opId, 'findings'));
     });
   };
   return (
@@ -358,14 +356,18 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
   );
 }
 
-/** the finding a CreateFinding made, by what its write wrote */
-export function createdFinding(store: ReturnType<typeof useStore>, opId: string): Finding | undefined {
-  const state = store.get();
-  const written = Object.keys(state.ops[opId]?.resultRevs ?? {});
-  return written.map((id) => state.findings[id]).find(Boolean);
-}
+const HIST_TEXT: Record<FindingHistoryEvent['kind'], string> = {
+  edited: 'Edited', status: 'Status changed', response: 'Response received', responseWithdrawn: 'Response removed',
+  document: 'Document attached', reassessed: 'Updated', note: 'Note added',
+};
 
-const HIST_TEXT: Record<string, string> = { edited: 'Edited', status: 'Status changed', response: 'Response received', responseWithdrawn: 'Response removed', document: 'Document attached', reassessed: 'Updated', note: 'Note added' };
+function historyText(event: FindingHistoryEvent): string {
+  if (event.kind === 'status' && (event.to === 'closed' || event.to === 'open')) {
+    return `${event.to === 'closed' ? 'closed' : 'reopened'} by ${event.actor}`;
+  }
+  if (event.kind === 'note') return HIST_TEXT.note;
+  return event.text ?? HIST_TEXT[event.kind];
+}
 
 /** The finding as its page shows it. In the side pane beside a conversation (`pane`) it has no Edit or Delete: those are on its page. */
 export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: string; findingId: string; onOpen: (s: Source) => void; pane?: boolean }) {
@@ -395,16 +397,8 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
     const typing = askKept(f.id) && <FindingLinks key={f.id} dealId={dealId} f={f} pane={pane} />;
     return <div class="opening"><div class="lbl fmeta"><span>{f.workstream}</span></div>{clash}{typing}</div>;
   }
-  const audit = s.audit[f.id] ?? [];
-  const undone = new Set(audit.map((a) => a.undoes).filter(Boolean));
-  const standing = audit.filter((a) => !undone.has(a.opId));
-  // the latest thing that happened, said as what it was: a note written while closing is part of the closing, not the event
-  const newest = [...standing].reverse().find((a) => HIST_TEXT[a.kind] && (a as { text?: string }).text !== LISTED);
-  const last = newest?.kind === 'note' ? standing.find((a) => a.kind === 'status' && a.opId === newest.opId) ?? newest : newest;
-  const lastText = !last ? '' : last.kind === 'status' && (last.to === 'closed' || last.to === 'open') ? `${last.to === 'closed' ? 'closed' : 'reopened'} by ${last.actor}` : last.kind === 'note' ? HIST_TEXT.note : (last as { text?: string }).text ?? HIST_TEXT[last.kind];
-  const prev = previousVersion(standing);
-  // the review that the last update cleared, if it cleared one: kept in sight on the version it was given to
-  const wasReviewed = prev ? (standing.find((a) => a.kind === 'unreviewed' && a.opId === prev.opId)?.from as Finding['reviewed'] | undefined) ?? null : null;
+  const { last, previous: prev, previousReview: wasReviewed } = findingHistory(s, f.id);
+  const lastText = last ? historyText(last) : '';
   const busy = s.ui.reassessing.includes(f.id);
   // which sources the detail's markers point at
   const marked = new Set(f.body.flatMap((b) => splitCited(b, f.sources.length).flatMap((p) => p.refs)));
