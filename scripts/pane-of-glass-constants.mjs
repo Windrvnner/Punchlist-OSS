@@ -1,6 +1,7 @@
 // Resolve a local const on the TypeScript tree Vite already parsed.
 import { createRequire } from 'node:module';
 import { parseSync, transformSync, Visitor } from 'rolldown/utils';
+import { capturedValue } from './pane-of-glass-records.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -39,33 +40,38 @@ function definesValue(definition, file, source) {
   return parseSync('namespace.js', emitted.code).program.body.some((part) => part.type === 'VariableDeclaration');
 }
 
-function constInitializer(variable, file, source) {
+function constDefinition(variable, file, source) {
   const values = variable.defs.filter((def) => definesValue(def, file, source));
   // An erased declaration leaves the enclosing binding visible.
   if (!values.length && variable.defs.length) return undefined;
   if (values.length !== 1) return null;
-  const { name, node, parent } = values[0];
-  if (node.type !== 'VariableDeclarator' || node.id !== name || parent.kind !== 'const') return null;
-  return node.init ?? null;
+  const { node, parent } = values[0];
+  return node.type === 'VariableDeclarator' && parent.kind === 'const' ? values[0] : null;
 }
 
-export function localConstLookup(program, file, source) {
+export function localConstLookup(program, file, source, unwrapped) {
   const references = new Map();
   for (const scope of scopesFor(program)) {
     for (const ref of scope.references) {
-      if (ref.isValueReference) references.set(ref.identifier, ref.resolved);
+      if (ref.isValueReference) references.set(ref.identifier, ref);
     }
   }
   const bindings = new Map();
-  return (identifier) => {
-    const variable = references.get(identifier);
+  function definitionFor(identifier) {
+    const variable = references.get(identifier)?.resolved;
     for (let scope = variable?.scope; scope; scope = scope.upper) {
       const candidate = scope.set.get(identifier.name);
       if (!candidate) continue;
-      if (!bindings.has(candidate)) bindings.set(candidate, constInitializer(candidate, file, source));
+      if (!bindings.has(candidate)) bindings.set(candidate, constDefinition(candidate, file, source));
       const value = bindings.get(candidate);
       if (value !== undefined) return value;
     }
     return null;
+  }
+  return (identifier) => {
+    const definition = definitionFor(identifier);
+    if (!definition) return null;
+    if (definition.node.id === definition.name) return definition.node.init;
+    return capturedValue(definition.node.id, unwrapped(definition.node.init), definition.name);
   };
 }

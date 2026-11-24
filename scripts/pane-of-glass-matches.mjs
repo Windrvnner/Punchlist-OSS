@@ -68,7 +68,7 @@ function dynamicImportSource(program, file, source) {
   return (argument) => {
     let node = unwrapped(argument);
     if (node.type !== 'Identifier') return argument;
-    lookup ??= localConstLookup(program, file, source);
+    lookup ??= localConstLookup(program, file, source, unwrapped);
     const seen = new Set();
     while (node?.type === 'Identifier' && !seen.has(node)) {
       seen.add(node);
