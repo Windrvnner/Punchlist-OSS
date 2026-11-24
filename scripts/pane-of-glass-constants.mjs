@@ -1,7 +1,7 @@
 // Resolve references on Vite's TypeScript syntax tree. A type can share a name with an unrelated runtime value.
 import { createRequire } from 'node:module';
 import { containerReads } from './pane-of-glass-containers.mjs';
-import { unwrapped } from './pane-of-glass-syntax.mjs';
+import { literalValue, unwrapped } from './pane-of-glass-syntax.mjs';
 import { boundValue, memberValue, missing } from './pane-of-glass-bindings.mjs';
 
 const require = createRequire(import.meta.url);
@@ -18,6 +18,18 @@ function fixedDeclaration(variable) {
   return definitions[0].node.type === 'VariableDeclarator' ? definitions[0] : null;
 }
 
+// A fixed test selects only the branch JavaScript would use. A runtime test keeps both possible paths.
+function selectedBranch(node, resolve) {
+  const test = resolve(node.test ?? node.left);
+  const value = literalValue(test);
+  const absent = test === missing || (test?.type === 'UnaryExpression' && test.operator === 'void');
+  if (value === undefined && !absent) return node;
+  if (node.type === 'ConditionalExpression') return value ? node.consequent : node.alternate;
+  if (node.operator === '??') return value == null ? node.right : node.left;
+  if (node.operator === '||') return value ? node.left : node.right;
+  return value ? node.right : node.left;
+}
+
 export function localBindings(program) {
   const { analyze } = require('@typescript-eslint/scope-manager');
   const { scopes } = analyze(program, { sourceType: 'module', lib: [], jsxPragma: null });
@@ -28,6 +40,10 @@ export function localBindings(program) {
   const stableContainer = containerReads(program);
   function resolve(expression, seen = new Set()) {
     const reference = unwrapped(expression);
+    if (reference?.type === 'ConditionalExpression' || reference?.type === 'LogicalExpression') {
+      const branch = selectedBranch(reference, (part) => resolve(part, seen));
+      return branch === reference ? reference : resolve(branch, seen);
+    }
     if (reference?.type === 'MemberExpression') {
       if (seen.has(reference)) return null;
       const visited = new Set(seen).add(reference);

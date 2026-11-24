@@ -9,22 +9,39 @@ export function propertyKey(node, computed) {
   return typeof key === 'string' || typeof key === 'number' ? String(key) : null;
 }
 
+function setsPrototype(entry) {
+  return entry.type === 'Property' && entry.kind === 'init' && !entry.computed && !entry.method && !entry.shorthand
+    && propertyKey(entry.key, false) === '__proto__';
+}
+
 function propertyValue(entry, key) {
-  if (entry.type === 'SpreadElement') return objectEntry(unwrapped(entry.argument), key);
+  if (entry.type === 'SpreadElement') return ownEntry(unwrapped(entry.argument), key);
+  if (setsPrototype(entry)) return missing;
   const name = propertyKey(entry.key, entry.computed);
   if (name === null) return null;
   if (name !== key) return missing;
   return entry.kind === 'init' ? entry.value : null;
 }
 
-function objectEntry(object, key) {
+function ownEntry(object, key) {
   if (object?.type !== 'ObjectExpression' || key === null) return null;
   // A later spread or computed key can override an earlier literal property.
   for (const entry of object.properties.toReversed()) {
     const value = propertyValue(entry, key);
     if (value !== missing) return value;
   }
-  return key in Object.prototype ? null : missing;
+  return missing;
+}
+
+function objectEntry(object, key) {
+  const value = ownEntry(object, key);
+  if (value !== missing) return value;
+  const prototype = object.properties.find(setsPrototype);
+  if (prototype) {
+    if (literalValue(prototype.value) === null) return missing;
+    return objectEntry(unwrapped(prototype.value), key);
+  }
+  return Object.hasOwn(Object.prototype, key) ? null : missing;
 }
 
 function arrayEntry(array, index) {

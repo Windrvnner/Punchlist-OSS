@@ -219,6 +219,24 @@ describe('UI dependency checks', () => {
     expect(repo.run().status).toBe(0);
   });
 
+  it('uses the runtime branch and inherited property before applying a default import', () => {
+    const repo = fixture();
+    const file = 'src/ui/checklistPages.ts';
+    const source = [
+      'const useChecklist = true',
+      "const page = useChecklist ? './checklist' : 'node:path'",
+      'export const load = () => import(page)',
+      "const defaultPage = './checklist' || 'node:path'",
+      'export const open = () => import(defaultPage)',
+      "const { reader = 'node:path' } = { __proto__: { reader: './checklist' } }",
+      'export const show = () => import(reader)',
+    ].join('\n');
+    repo.write(file, source);
+    expect(repo.run().status).toBe(0);
+    repo.write(file, source.replaceAll('./checklist', '../backend/lenient'));
+    expect(repo.run().stderr).toContain(`${file} import (lines 3, 5, 7): 3 exceeds`);
+  });
+
   it('resolves imports in TypeScript classes with decorators and auto-accessors', () => {
     const repo = fixture();
     const file = 'src/ui/picker.ts';
