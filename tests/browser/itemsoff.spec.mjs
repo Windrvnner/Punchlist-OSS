@@ -1,6 +1,7 @@
 // Turning a deal's checklist items off and on, and the Turned off list (linking design, section 5), on a deal
 // holding a firm's list of 2,000 items. Runs on the mock services; the sample data room gives three findings.
 import { launchChrome } from './chrome.mjs';
+import { recheckFinding } from './cardPage.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, ok ? '' : note); };
 const browser = await launchChrome();
@@ -170,6 +171,91 @@ const rowTexts = (page) => page.evaluate(() => [...document.querySelectorAll('#c
   const after = await page.textContent('#ck-detail .clink');
   const title = await page.evaluate((f) => store.get().findings[f]?.title, started);
   say('a kept question stays linked to its own finding when the item is turned off while another item is open', !!title && before === after && after.includes(title), JSON.stringify({ before, after, title }));
+  await ctx.close();
+}
+
+async function checkConflictedDraft(page, dealId, itemId, original, other) {
+  await recheckFinding(page, dealId, itemId, original.id);
+  await page.click('#ck-ask');
+  const words = 'Please identify the test at the first distribution date.';
+  await page.fill('#ck-ask-text', words);
+  await page.evaluate((id) => __peer.edit(id, { status: 'closed' }), original.id);
+  await page.waitForFunction((id) => !!store.get().conflicts[id], original.id);
+  await recheckFinding(page, dealId, itemId, other);
+  await page.press('#ck-ask-text', 'Escape');
+  const ask = page.locator('#ck-ask');
+  const canReopen = await ask.isEnabled();
+  say('a kept question can be opened while its own finding has two versions', canReopen);
+  if (canReopen) {
+    await ask.click();
+    const log = page.locator('#ck-ask-log');
+    say('the reopened question keeps its text and original finding, with Log blocked by that finding’s conflict',
+      await page.inputValue('#ck-ask-text') === words
+      && (await page.textContent('#ck-detail .clink')).includes(original.title)
+      && await log.isDisabled() && (await log.getAttribute('title')).includes('Choose one first'));
+  }
+}
+
+{ // #840: a second open finding cannot take over a question about a covenant.
+  const { ctx, page, id } = await start();
+  const checklistItem = await item(page, FLAGGED);
+  const row = page.locator(`#ck-rows [data-item="${checklistItem.id}"]`);
+  const original = await page.evaluate((itemId) =>
+    Object.values(store.get().findings).find((finding) => finding.itemId === itemId), checklistItem.id);
+  const text = 'Please confirm the lock-up ratio in the executed credit agreement.';
+  await row.click();
+  await page.click('#ck-ask');
+  await page.fill('#ck-ask-text', text);
+  const other = await page.evaluate((id) => __peer.add(id, {
+    title: 'Distribution test uses a different measurement period', status: 'open',
+  }), original.id);
+  await turnOff(page);
+  await page.waitForSelector('#ck-on');
+  await page.evaluate((id) => __peer.change(id, { status: 'closed' }), original.id);
+  await page.waitForFunction((id) => store.get().findings[id]?.status === 'closed', original.id);
+
+  const log = page.locator('#ck-ask-log');
+  const card = async (reason) => (await page.inputValue('#ck-ask-text')) === text
+    && (await page.textContent('#ck-detail .clink')) === `Linked to “${original.title}”`
+    && await log.isDisabled() && (await log.getAttribute('title')) === reason;
+  say('a peer closing the original finding keeps the question on it and disables Log',
+    await card('Its finding is closed'));
+  await log.evaluate((button) => button.click());
+  const saved = () => page.evaluate((words) =>
+    Object.values(store.get().questions).filter((q) => q.text === words), text);
+  say('attempting to log while the other finding is open creates no question', (await saved()).length === 0);
+
+  await page.reload();
+  await row.click();
+  await page.waitForSelector('#ck-ask-text');
+  say('after restart the draft and its closed finding are still together', await card('Its finding is closed'));
+  await page.evaluate(([dealId, findingId]) =>
+    store.dispatch(store.commandNamed('DeleteFinding'), { dealId, findingId }), [id, original.id]);
+  await page.waitForFunction((id) => !!store.get().tombstones[id], original.id);
+  await page.click('#ck-close');
+  await row.click();
+  say('reopening a draft after deletion keeps its text and identifies the missing finding',
+    await card('Its finding is no longer here'));
+
+  await page.evaluate(([dealId, findingId]) =>
+    store.dispatch(store.commandNamed('RestoreFinding'), { dealId, findingId }), [id, original.id]);
+  await page.evaluate((id) => __peer.change(id, { status: 'open' }), original.id);
+  await page.waitForFunction(() => document.getElementById('ck-ask-log')?.disabled === false);
+  await page.click('#ck-on');
+  await page.waitForSelector('#ck-more');
+  await recheckFinding(page, id, checklistItem.id, other);
+  await page.fill('#ck-ask-text', '');
+  await page.fill('#ck-ask-text', text);
+  say('editing after a new check leaves the draft on its original finding',
+    (await page.getAttribute('#ck-open-finding', 'href')).includes(other)
+    && (await page.textContent('#ck-detail .clink')).includes(original.title));
+  await log.click();
+  await page.waitForSelector('#ck-ask-text', { state: 'detached' });
+  const questions = await saved();
+  const otherOpen = await page.evaluate((id) => store.get().findings[id]?.status === 'open', other);
+  say('reopening the original finding allows logging once with its original links', otherOpen && questions.length === 1
+    && questions[0].linkedFinding === original.id && questions[0].linkedItem?.id === checklistItem.id);
+  await checkConflictedDraft(page, id, checklistItem.id, original, other);
   await ctx.close();
 }
 
