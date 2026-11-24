@@ -155,6 +155,21 @@ describe('UI dependency checks', () => {
     expect(result.stderr).toContain(`${file} import (lines 1, 2, 3, 4, 10, 12): 6 exceeds`);
   });
 
+  it('uses the effective glob base through TypeScript assertions and parentheses', () => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    repo.write('src/backend/lenient.ts', 'export const read = true');
+    repo.write('src/ui/backend/lenient.ts', 'export const preview = true');
+    repo.write(file, [
+      "const local = import.meta.glob('../backend/lenient.ts', ({ base: '/src/ui/nested' } as const))",
+      "const readers = import.meta.glob('./lenient.ts' as const, { base: ('../backend' as const) } as const)",
+      "const patterns = import.meta.glob([('../backend/lenient.ts' as const)] satisfies string[])",
+    ].join('\n'));
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 2, 3): 2 exceeds`);
+  });
+
   it('checks computed member and destructuring keys and each read in a dotted JSX tag', () => {
     const repo = fixture();
     const file = 'src/ui/access.tsx';

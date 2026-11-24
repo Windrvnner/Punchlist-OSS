@@ -3,16 +3,11 @@ import { posix } from 'node:path';
 import { parseSync, Visitor } from 'vite';
 import { importsForbiddenGlob } from './pane-of-glass-globs.mjs';
 import { localConstants } from './pane-of-glass-constants.mjs';
+import { literalValue, unwrapped } from './pane-of-glass-syntax.mjs';
 
 const storageNames = new Set(['localStorage', 'sessionStorage', 'indexedDB']);
 const layerPath = /^(?:backend|adapters|desktop|shell)(?:\/|$)/;
 const externalModule = /^(?:node:|(?:electron|fs|path)(?:\/|$))/;
-
-function literalText(node) {
-  if (typeof node?.value === 'string') return node.value;
-  if (node?.type === 'TemplateLiteral' && !node.expressions.length) return node.quasis[0].value.cooked;
-  return null;
-}
 
 function concatenate(left, right) {
   return left.flatMap((prefix) => right.map((suffix) => prefix + suffix));
@@ -31,8 +26,8 @@ function templateValues(node, resolve) {
 function stringValues(expression, resolve = () => ['*']) {
   if (!expression) return [];
   const node = unwrapped(expression);
-  const text = literalText(node);
-  if (text !== null) return [text];
+  const text = literalValue(node);
+  if (typeof text === 'string') return [text];
   if (node.type === 'Identifier') return resolve(node);
   if (node.type === 'TemplateLiteral') return templateValues(node, resolve);
   if (node.type === 'BinaryExpression' && node.operator === '+') {
@@ -73,15 +68,6 @@ function forbiddenModule(file, name) {
 function propertyNames(key, computed) {
   if (!computed && (key.type === 'Identifier' || key.type === 'JSXIdentifier')) return [key.name];
   return stringValues(key);
-}
-
-// Assertions, parentheses and optional chains leave the underlying path or member unchanged.
-function unwrapped(node) {
-  while (['TSNonNullExpression', 'TSAsExpression', 'TSTypeAssertion', 'TSSatisfiesExpression',
-    'ChainExpression', 'ParenthesizedExpression'].includes(node.type)) {
-    node = node.expression;
-  }
-  return node;
 }
 
 export function matchesIn(file, source, forbiddenFiles) {

@@ -1,11 +1,7 @@
 // A Vite glob only imports files that exist and survive its exclusions. Match against the forbidden source files.
 import { posix } from 'node:path';
 import picomatch from 'picomatch';
-
-function literal(node) {
-  if (node?.type === 'Literal') return node.value;
-  if (node?.type === 'TemplateLiteral' && !node.expressions.length) return node.quasis[0].value.cooked;
-}
+import { literalValue, unwrapped } from './pane-of-glass-syntax.mjs';
 
 function globCall(node) {
   const callee = node.callee;
@@ -21,17 +17,17 @@ function rootPattern(pattern, directory) {
 
 export function importsForbiddenGlob(file, node, files) {
   if (!globCall(node)) return false;
-  const [argument, options] = node.arguments;
+  const [argument, options] = node.arguments.map(unwrapped);
   const patterns = argument?.type === 'ArrayExpression' ? argument.elements : [argument];
   const settings = {};
   for (const option of options?.properties ?? []) {
-    if (option.type === 'Property') settings[option.key.name ?? literal(option.key)] = literal(option.value);
+    if (option.type === 'Property') settings[option.key.name ?? literalValue(option.key)] = literalValue(option.value);
   }
   const directory = posix.resolve('/', posix.dirname(file), settings.base ?? '.');
   const matchOptions = { dot: !!settings.exhaustive, nocase: settings.caseSensitive === false, noext: true };
   const include = [];
   const exclude = [];
-  for (const pattern of patterns.map(literal)) {
+  for (const pattern of patterns.map(literalValue)) {
     if (typeof pattern !== 'string') continue;
     const negative = pattern.startsWith('!');
     const value = negative ? pattern.slice(1) : pattern;
