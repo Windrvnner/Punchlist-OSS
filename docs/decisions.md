@@ -14,6 +14,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A click on the backdrop closes a menu but never a dialog. Search results and hover popups don't dim the page; the
   connection bar and tooltips stay solid; notices use popup glass.
 - The app has dark and light themes. Every color is derived from three base colors in the control file (`colors.neutral`, `colors.accent`, and `colors.red`) and written nowhere else; icons use the text color. There is no amber, no green, and no separate AI blue, and the build stops when text would fall below WCAG AA contrast.
+- Both themes are black and white: the accent is a gray of the neutral, light in dark and graphite in light. `colors.accent` colors only the highlight and mark on a document page (#873).
 - Supported window sizes run from 1024×640 to 1536×864. Phone-sized windows and 400% zoom layouts are out of scope; ultrawide monitors are to be considered later, once everything else is settled (#5).
 - There is no all-capitals text. Labels, column heads, buttons, menu items, value capsules, and dialog titles that aren't questions use Apple's title style; sentences, tooltips, body text, and meta lines stay in sentence case (see design.md, under Type).
 - A heading has one row of controls under it, never two. A header that runs short of space drops words first, then turns buttons into icons.
@@ -331,7 +332,6 @@ Check again's place and **Check the N Left Out** (AI and models).
 - Work in progress shows a small ring beside words naming the live step, never a spinner alone; on a tab, the ring sits beside the tab's name.
 - An opened question sits in a card with its question, response, sources, links, and status, beside the conversation, never covering it. A draft response is marked with a **Draft** badge.
 - A source document opens in the pane in reading mode's viewer, with page navigation and zoom and no passage highlighting.
-- The dark theme is black and white: its accent is a light gray derived from `colors.neutral` in place of `colors.accent` (#873).
 - Confirm dialogs say **Cancel**, not **Keep It** (#867).
 - The deal's name and counterparty in the breadcrumb are one button that opens **Deal Info**: name, counterparty,
   Structure, Sector, Technology, the folders line with **Edit**, and **Delete Deal**. **Deal Memo** is an icon button

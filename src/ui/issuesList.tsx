@@ -16,7 +16,8 @@ import { readIssuesList, reviewIssuesList, type ReadIssuesList } from '../app/is
 import { ImportIssuesList } from '../app/commands/issuesList';
 import { AI_LABEL } from '../control';
 import type { Finding, ListPoint } from '../domain/model';
-import { keptImport, keepImport, dropImport, importKey, useKeptImportsReady, useFreshOnCrash } from './keptImports';
+import { keptImport, keepImport, dropImport, importKey } from '../app/keptImports';
+import { useKeptImportsReady, useFreshOnCrash } from './keptImports';
 
 /** the files a list comes as: a PDF, a Word file or an email */
 const ACCEPT = '.pdf,.docx,.msg,.eml';

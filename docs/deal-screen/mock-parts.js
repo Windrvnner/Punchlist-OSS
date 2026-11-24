@@ -11,6 +11,12 @@ const narrowWindow = windowWidth <= 1180;
 // the board resolutions task's short name, so it reads whole on its tab, its card and its row
 const BOARD_TASK = 'Resolutions';
 const sidebarWidth = narrowWindow ? 208 : 236;
+// screens shown with the sidebar open and no pane (#888, step 3)
+const FULL_SIDEBAR_SCREENS = ['dealheader', 'details', 'folders', 'homepast', 'archscale'];
+// the sidebar folds to its rail while a pane is open, so the conversation keeps its width, and comes back when the
+// pane closes; `side=1` shows it pinned open
+const sidebarFolded = hashParams.get('side') !== '1'
+  && !['empty', 'active', ...FULL_SIDEBAR_SCREENS].includes(screen);
 
 /** An icon from icons.js as an SVG, at the given size and stroke width. */
 function icon(name, size = 16, strokeWidth = 1.75) {

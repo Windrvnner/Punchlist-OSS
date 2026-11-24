@@ -4,9 +4,6 @@
 // holds; Home opens past conversations from its own header; and the sidebar shows Archived at scale.
 // Loads after mock-qa.js and before mock-screens.js, which calls these builders.
 
-// screens shown with the sidebar open and no pane
-const FULL_SIDEBAR_SCREENS = ['dealheader', 'details', 'folders', 'homepast', 'archscale'];
-
 /** The page's stage, as mock-screens.js wraps every screen. */
 const openQuestionStage = (content) => `<section class="stage"><div class="x-stage">${content}</div></section>`;
 
