@@ -1,4 +1,5 @@
 // Follow a destructuring pattern only through values present in its literal initializer.
+import { arraySlots, arrayTail } from './pane-of-glass-arrays.mjs';
 import { literalValue, missing, unwrapped } from './pane-of-glass-syntax.mjs';
 
 export function propertyKey(node, computed, resolve = unwrapped) {
@@ -45,33 +46,16 @@ function objectEntry(object, key, resolve, seen = new Set()) {
   return Object.hasOwn(Object.prototype, key) ? null : missing;
 }
 
-// Stop at the requested index: a runtime spread after it cannot shift an earlier entry.
-function arrayElements(array, resolve, limit, seen = new Set()) {
-  if (array?.type !== 'ArrayExpression' || seen.has(array)) return null;
-  const parts = [];
-  for (const part of array.elements) {
-    if (parts.length >= limit) break;
-    if (part?.type === 'SpreadElement') {
-      const tail = arrayElements(resolve(part.argument), resolve, limit - parts.length, new Set(seen).add(array));
-      if (!tail) return null;
-      for (const item of tail) parts.push(item);
-    } else {
-      parts.push(part);
-    }
-  }
-  return parts;
-}
-
 function arrayProperty(array, key, resolve, includeLength) {
   if (key === null) return null;
   if (key === 'length' && includeLength) {
-    const parts = arrayElements(array, resolve, Infinity);
+    const parts = arraySlots(array, resolve, Infinity);
     return parts ? { type: 'Literal', value: parts.length } : null;
   }
   const index = Number(key);
   if (!Number.isSafeInteger(index) || index < 0 || String(index) !== key) return missing;
-  const parts = arrayElements(array, resolve, index + 1);
-  return parts ? (parts[index] ?? missing) : null;
+  const parts = arraySlots(array, resolve, index + 1);
+  return parts ? (parts.entries.get(index) ?? missing) : null;
 }
 
 export function entryValue(container, key, resolve = unwrapped) {
@@ -148,9 +132,8 @@ function arrayBinding(pattern, source, name, resolve, selectedKey) {
   if (part.type === 'RestElement') {
     const tailIndex = Number(selectedKey);
     const key = String(tailIndex) === selectedKey && tailIndex >= 0 ? String(index + tailIndex) : undefined;
-    const elements = arrayElements(resolve(source, key), resolve, Infinity);
-    if (!elements) return null;
-    const tail = { type: 'ArrayExpression', elements: elements.slice(index) };
+    const tail = arrayTail(resolve(source, key), index, resolve);
+    if (!tail) return null;
     return boundValue(part.argument, tail, name, resolve);
   }
   const key = String(index);
