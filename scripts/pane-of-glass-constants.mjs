@@ -1,7 +1,7 @@
 // Resolve references on Vite's TypeScript syntax tree. A type can share a name with an unrelated runtime value.
 import { createRequire } from 'node:module';
 import { containerReads } from './pane-of-glass-containers.mjs';
-import { literalValue, unwrapped } from './pane-of-glass-syntax.mjs';
+import { foldedValue, literalValue, unwrapped } from './pane-of-glass-syntax.mjs';
 import { boundValue, memberValue, missing } from './pane-of-glass-bindings.mjs';
 
 const require = createRequire(import.meta.url);
@@ -68,7 +68,8 @@ export function localBindings(program) {
       const next = (part) => resolve(part, visited);
       return next(memberValue(next(reference.object), reference, next));
     }
-    return reference?.type === 'Identifier' ? resolveVariable(reference, seen, capture) : reference;
+    if (reference?.type === 'Identifier') return resolveVariable(reference, seen, capture);
+    return reference ? foldedValue(reference, (part) => resolve(part, seen)) : reference;
   }
   return resolve;
 }

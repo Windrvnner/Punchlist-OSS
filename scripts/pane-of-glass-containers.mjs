@@ -23,11 +23,17 @@ function usesIn(program) {
   const exported = new Set();
   const writeTargets = [];
   const blocks = new Map();
+  const previous = new Map();
   function declarations(block) {
+    let last;
     for (const statement of block.body) {
       const variable = statement.declaration ?? statement;
-      if (variable.type !== 'VariableDeclaration') continue;
-      for (const item of variable.declarations) blocks.set(item, block);
+      if (variable.type !== 'VariableDeclaration') last = null;
+      for (const item of variable.declarations ?? []) {
+        previous.set(item, last);
+        blocks.set(item, block);
+        last = item;
+      }
     }
   }
   new Visitor({
@@ -51,7 +57,7 @@ function usesIn(program) {
       if (node.operator === 'delete') writeTargets.push(node.argument);
     },
   }).visit(program);
-  return { patterns, members, spreads, receivers, exported, writeTargets, blocks };
+  return { patterns, members, spreads, receivers, exported, writeTargets, blocks, previous };
 }
 
 function primitive(container, key, resolve) {
@@ -73,14 +79,25 @@ function readsSelection(identifier, value, keys, uses, resolve) {
   });
 }
 
-function captureDeclaration(variable, capture, blocks) {
-  const block = blocks.get(variable.defs.find((def) => blocks.has(def.node))?.node);
+function captureDeclaration(variable, capture, uses) {
+  const created = variable.defs.find((def) => uses.blocks.has(def.node))?.node;
+  const block = uses.blocks.get(created);
   if (!block) return null;
-  for (const [declaration, owner] of blocks) {
+  for (const [declaration, owner] of uses.blocks) {
     const init = declaration.init;
-    if (owner === block && init && init.start <= capture.start && capture.end <= init.end) return declaration;
+    if (owner !== block || !init || init.start > capture.start || capture.end > init.end) continue;
+    const source = unwrapped(init);
+    const direct = source === capture || (source.type === 'MemberExpression' && unwrapped(source.object) === capture);
+    return { end: declaration.end, immediate: direct && uses.previous.get(declaration) === created };
   }
   return null;
+}
+
+function afterCapture(ref, captured, scope) {
+  if (!captured) return false;
+  if (ref.from.variableScope === scope.variableScope) return ref.identifier.start > captured.end;
+  // No deferred code can run between consecutive creation and a direct primitive capture.
+  return captured.immediate;
 }
 
 export function containerReads(program, scopeOf) {
@@ -92,11 +109,10 @@ export function containerReads(program, scopeOf) {
     const flat = parts.every((part) => literalValue(part) !== undefined);
     const scope = scopeOf(capture);
     const snapshots = keys.length && keys.every((key) => key !== null && primitive(value, key, resolve));
-    const captured = scope === variable.scope && snapshots && captureDeclaration(variable, capture, uses.blocks);
+    const captured = scope === variable.scope && snapshots && captureDeclaration(variable, capture, uses);
     return variable.references.every((ref) => {
       if (!ref.isRead() || !ref.isValueReference || ref.identifier === use) return true;
-      // A later statement cannot change a primitive already copied in this invocation.
-      if (captured && ref.from.variableScope === scope.variableScope && ref.identifier.start > captured.end) return true;
+      if (afterCapture(ref, captured, scope)) return true;
       if (flat && uses.spreads.has(ref.identifier)) return true;
       return readsSelection(ref.identifier, value, keys, uses, resolve);
     });
