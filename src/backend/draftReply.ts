@@ -1,32 +1,64 @@
 import { markerPieces } from '../domain/cite';
 import type { Source } from '../domain/model';
 
-const QUARTERS = String.raw`Q[1-4](?:\s*[-–—/]\s*Q[1-4])*`;
-const YEAR = String.raw`(?:[12]\d{3}|FY\s*(?:[12]\d{3}|\d{2})|['’]\d{2})\b`;
-const DATED_QUARTER = new RegExp(
-  String.raw`\b${QUARTERS}\s*(?:\(\s*${YEAR}\s*\)|(?:[-–—/]\s*|of\s+)?${YEAR})`,
-  'gi',
+const QUESTION_NUMBER = /\bQ(\d+)\b/g;
+const QUESTION_LEAD = /\b(?:question|(?:answer|reply|replied|response|responded) to)\s+\(?\s*$/i;
+const QUESTION_LABEL = /\bas\s+(?:previously\s+)?answered(?:\s+to\s+[^.!?()]+)?\s+\(\s*$/i;
+const QUESTION_ACTION = /^\s+(?:was|is|has been|had been)\s+(?:already\s+)?(?:asked|answered)\b/i;
+const ANSWER_CREDIT = /\bas\s+(?:(?:already|previously)\s+)?answered\s+(?:in|under)\s+$/i;
+const YEAR_QUALIFIER = new RegExp(
+  String.raw`^(?:[-/])?\s*(?:\(\s*|(?:in|of)\s+(?:(?:calendar|fiscal) year\s+)?)?`
+  + String.raw`(?:[12]\d{3}|FY\s*(?:[12]\d{3}|\d{2})|['’]\d{2})\b`,
+  'i',
 );
-// A comma can end a credit. In "As answered in Q3, 2027 costs …", the year begins a new clause.
-const COMMA_QUARTER = new RegExp(String.raw`\b${QUARTERS},\s*${YEAR}(?=\s*(?:[.,;:!?)]|$))`, 'gi');
-const YEAR_FIRST_QUARTER = new RegExp(String.raw`\b${YEAR}\s*(?:[-–—/]\s*)?${QUARTERS}\b`, 'gi');
-const SENTENCE_BREAK = /(?<=[.!?]["'”’)\]]*(?:\s*\[\d+\]["'”’)\]]*)*)\s+(?!\[)/;
+
+const MARKERS = String.raw`(?:\s*\[\d+\])*`;
+const CLOSERS = String.raw`["'”’)\]]+`;
+const PARAGRAPH = String.raw`\r?\n(?:[ \t]*\r?\n)+`;
+const PLAIN_END = String.raw`(?<=[.!?]${MARKERS})\s+(?![\s\[])`;
+const QUOTED_END = String.raw`(?<=[.!?](?:${CLOSERS}${MARKERS}|${MARKERS}${CLOSERS}))\s+(?![\s\[\p{Ll}])`;
+const DRAFT_BREAK = new RegExp(`(${PARAGRAPH}|${PLAIN_END}|${QUOTED_END})`, 'u');
+const lineBreaks = (text: string) => text.split('\n').length - 1;
+
+function hasDraftCredit(sentence: string, shown: Set<number>): boolean {
+  for (const match of sentence.matchAll(QUESTION_NUMBER)) {
+    const number = Number(match[1]);
+    if (!shown.has(number)) continue;
+    if (number > 4) return true;
+
+    // Q1 through Q4 can be calendar quarters. Remove them only with evidence of a question reference.
+    const before = sentence.slice(0, match.index);
+    const after = sentence.slice(match.index + match[0].length);
+    if (QUESTION_ACTION.test(after) || (QUESTION_LABEL.test(before) && /^\s*\)/.test(after))) return true;
+    if (!YEAR_QUALIFIER.test(after) && (QUESTION_LEAD.test(before) || ANSWER_CREDIT.test(before))) return true;
+  }
+  return false;
+}
+
+/** Preserve separators between kept sentences, including paragraph breaks crossed by a removed credit. */
+function keepDraftSentences(text: string, shown: Set<number>): string {
+  const parts = text.split(DRAFT_BREAK);
+  let kept = '';
+  let separator = '';
+  for (let index = 0; index < parts.length; index += 2) {
+    const gap = parts[index - 1] ?? '';
+    if (lineBreaks(gap) >= lineBreaks(separator)) separator = gap;
+    const sentence = parts[index];
+    if (!sentence || hasDraftCredit(sentence, shown)) continue;
+    kept += (kept ? separator : '') + sentence;
+    separator = '';
+  }
+  return kept;
+}
 
 /** Keep the model's own wording apart from credits to earlier questions (#286). */
 export function withoutDraftCredits(
   reply: { text: string; sources: Source[] },
   shownNumbers: number[],
 ): { text: string; sources: Source[] } {
-  const credits = shownNumbers.length ? new RegExp(`\\bQ(?:${shownNumbers.join('|')})\\b`) : null;
-  const sentences = reply.text.split(SENTENCE_BREAK);
-  const kept = credits ? sentences.filter((sentence) => {
-    const withoutDates = sentence.replace(DATED_QUARTER, ' ')
-      .replace(COMMA_QUARTER, ' ')
-      .replace(YEAR_FIRST_QUARTER, ' ');
-    return !credits.test(withoutDates);
-  }) : sentences;
-  const keptText = kept.join(' ').trim();
-  if (kept.length === sentences.length) return { text: keptText, sources: reply.sources };
+  if (!shownNumbers.length) return reply;
+  const keptText = keepDraftSentences(reply.text, new Set(shownNumbers));
+  if (keptText === reply.text) return reply;
 
   const pieces = markerPieces(keptText, reply.sources.length);
   const cited = new Set(markerPieces(reply.text, reply.sources.length).map((piece) => piece.ref));
