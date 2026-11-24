@@ -13,7 +13,7 @@ import { Question, Finding, Tombstone, DealId, QuestionId, FindingId, QuestionSt
 import { setResponse, setQuestionStatus, checkQuestion } from '../../domain/transitions';
 import { numbering } from './questions';
 import { sameText, sameWords, type ImportRow } from '../../domain/importExport';
-import { misreadKey, canMatchNumber, identifierSig, sameIdentifiers } from '../../domain/logWrite';
+import { misreadKey, canMatchNumber, identifierSig, sameIdentifiers, damagedImportText } from '../../domain/logWrite';
 import { ok, fail, notFound, rejected } from '../../domain/result';
 import { dealQuestions, nextQuestionNumber } from '../state';
 import { derivedId } from '../../domain/derivedId';
@@ -25,6 +25,11 @@ import type { State } from '../state';
 
 /** fields that name someone or something rather than say something: spaces around them are not part of the name */
 const IDENTITIES = new Set(['askedBy', 'respondedBy', 'workstream']);
+/** Merge keeps saved text when the incoming cell only lost characters. Spacing edits still import (#256). */
+function importsText(saved: string, incoming: string): boolean {
+  return !!incoming.trim() && !sameText(saved, incoming) && !damagedImportText(saved, incoming);
+}
+
 const Ymd = z.string().refine((v) => v === '' || isRealDate(v));
 export const ImportRowSchema = z.object({ line: z.number().int().positive().optional(), n: z.number().int().positive().nullable(), text: z.string().min(1), askedBy: z.string(), received: Ymd, workstream: z.string(), priority: z.enum(['', 'High', 'Medium', 'Low']), response: z.string(), respondedBy: z.string(), responded: Ymd, status: z.union([QuestionStatus, z.literal('')]) });
 
@@ -169,7 +174,11 @@ export const ImportQuestions = define({
         const same = (k: string, a: string, b: string) => (IDENTITIES.has(k) ? a.trim() === b.trim() : sameText(a, b));
         // A Submitted by that names no one (only a period, say) matched as naming no one, so it leaves the party as it is.
         const given = (k: string, v: string) => (k === 'askedBy' ? key(v) !== '' : v.trim() !== '');
-        for (const k of ['text', 'askedBy', 'received', 'workstream', 'priority', 'respondedBy', 'responded'] as const) if (given(k, row[k]) && !same(k, row[k], (q as any)[k])) (q as any)[k] = row[k];
+        if (importsText(q.text, row.text)) q.text = row.text;
+        for (const field of ['askedBy', 'received', 'workstream', 'priority', 'respondedBy', 'responded'] as const) {
+          const value = row[field];
+          if (given(field, value) && !same(field, value, q[field])) Object.assign(q, { [field]: value });
+        }
       } else {
         // the file's own number when no question holds it, live or deleted, or when an earlier row of this file took it (both are kept under it,
         // marked so a person renumbers one); otherwise the next free number
@@ -193,7 +202,7 @@ export const ImportQuestions = define({
         });
         numbers.set(n, id); created.push(id); audit.push({ kind: 'created', recordId: id, dealId: d.id, text: 'Imported' });
       }
-      if (row.response.trim() && !sameText(row.response, q.response)) {         // only spaces is no response, as when typed in the app
+      if (importsText(q.response, row.response)) {
         const linked = linkedOf(q);
         // the response was written by whoever the file says responded, not by the person running the import (who is in the history entry); a row that names nobody claims no author.
         // The same words with other spaces or line breaks are still the words the response came with: its origin and sources stay.

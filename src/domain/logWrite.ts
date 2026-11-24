@@ -51,17 +51,56 @@ export interface LogWrite {
 export function deMinimis(a: string, b: string): boolean {
   if (readKey(a) === readKey(b)) return true;
   const x = readKey(a, true), y = readKey(b, true);                                   // an emoji that became "?" is matched below
-  // a "?" or "\uFFFD" stands for any one character outside plain ASCII (or a run of them, as an emoji can become "??")
-  const lost = (s: string, t: string) => /[?\uFFFD]/.test(s) && new RegExp(`^${s.split(/[?\uFFFD]+/).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('(?:[^\\x00-\\x7F]+|[?\uFFFD]+)')}$`, 'u').test(t);
-  return lost(x, y) || lost(y, x);
+  return lostCharacters(x, y) || lostCharacters(y, x);
 }
-/** a text with what a misreading changes taken out: its encoding repaired, Unicode's forms of one character made one, emoji and spacing gone */
+
+/** A file may replace a Unicode character or run of characters with question marks or replacement characters. */
+function lostCharacters(read: string, original: string): boolean {
+  if (!/[?\uFFFD]/.test(read)) return false;
+  const literal = read.split(/[?\uFFFD]+/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const gaps = literal.join('(?:[^\\x00-\\x7F]+|[?\\uFFFD]+)');
+  return new RegExp('^' + gaps + '$', 'u').test(original);
+}
+
+/** An incoming Merge cell only loses characters or punctuation forms from the saved value (#256). */
+export function damagedImportText(saved: string, incoming: string): boolean {
+  const original = sheetSpacing(saved);
+  if (original === sheetSpacing(incoming)) return false;
+  const read = sheetSpacing(mojibake(incoming));
+  if (original === read) return true;
+  if (read === sheetSpacing(mojibake(saved))) return false;
+  if (original.length === read.length) return losesGlyphs(original, read);
+  // A run of replacement marks may stand for a different number of Unicode characters, such as a lost emoji.
+  return lostCharacters(read, original) && !lostCharacters(original, read);
+}
+
+/** Check preserved and lost characters in place, so straightening one quote need not straighten all the others. */
+function losesGlyphs(original: string, read: string): boolean {
+  for (let at = 0; at < read.length; at++) {
+    const saved = original[at];
+    const incoming = read[at];
+    if (incoming === saved || incoming === straightPunctuation(saved)) continue;
+    if (!/[?\uFFFD]/.test(incoming) || !/[^\x00-\x7F\uFFFD]/.test(saved)) return false;
+  }
+  return true;
+}
+
+/** The text as a spreadsheet may have read it, with optional emoji preservation for replacement characters. */
 function readKey(s: string, emoji = false): string {
-  const t = mojibake(s).normalize('NFKC')
-    .replace(/[\u2018\u2019\u201A\u201B\u2032\u00B4`]/g, "'").replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"').replace(/[\u2010-\u2015\u2212]/g, '-');
-  return (emoji ? t : t.replace(/\p{Extended_Pictographic}|\u200D|\uFE0E|\uFE0F/gu, ''))
-    .replace(/\s+/g, ' ').trim();
+  const text = straightPunctuation(mojibake(s).normalize('NFKC'));
+  return sheetSpacing(emoji ? text : text.replace(/\p{Extended_Pictographic}|\u200D|\uFE0E|\uFE0F/gu, ''));
 }
+
+function straightPunctuation(text: string): string {
+  return text.replace(/[\u2018\u2019\u201A\u201B\u2032\u00B4\u0060]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"')
+    .replace(/[\u2010-\u2015\u2212]/g, '-');
+}
+
+function sheetSpacing(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
 /** UTF-8 text that was read as Windows-1252 ("â€™", "Ã©") made what it was; anything else as it is */
 const CP1252 = '\u20AC\u0081\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u008D\u017D\u008F\u0090\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u009D\u017E\u0178';
 function mojibake(s: string): string {
