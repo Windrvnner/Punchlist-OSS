@@ -100,8 +100,59 @@ export function checklistSourceLines(text: ChecklistText | null, table: ImportTa
   return text?.lines ?? (table ? tableLines(table.columns, table.rows) : null);
 }
 
-export function readChecklist(store: Store, lines: string[]) {
-  return readList(store.services.ai, lines);
+/** Later work (a file read, a model call, or leaving) takes the place of an earlier reply. */
+export function checklistRequests() {
+  let generation = 0;
+  return { newToken: () => ++generation, isLatest: (token: number) => token === generation };
+}
+
+interface ReadSource {
+  lines: string[] | null;
+  byColumns: boolean;
+}
+
+interface KeptReading {
+  reads?: Map<number, LineRead> | null;
+  readFailed?: string;
+}
+
+interface ReadingEvents {
+  started(): void;
+  finished(reply: Result<Map<number, LineRead>>): void;
+}
+
+/** Resume an unfinished read, and ask again only when its source changes or the person chooses Retry. */
+export function checklistReading(store: Store, requests: ReturnType<typeof checklistRequests>, kept?: KeptReading) {
+  let source: ReadSource | undefined;
+  const alreadyRead = !!kept?.reads || !!kept?.readFailed;
+  const sameSource = (lines: string[] | null, byColumns: boolean) =>
+    source?.lines === lines && source.byColumns === byColumns;
+
+  async function read(events: ReadingEvents) {
+    const current = source;
+    if (!current?.lines || current.byColumns) return;
+    const ticket = requests.newToken();
+    events.started();
+    const reply = await readList(store.services.ai, current.lines);
+    if (source !== current || !requests.isLatest(ticket)) return;
+    events.finished(reply);
+    return reply;
+  }
+
+  async function sourceChanged(lines: string[] | null, byColumns: boolean, events: ReadingEvents) {
+    if (sameSource(lines, byColumns)) return;
+    const first = !source;
+    source = { lines, byColumns };
+    if (first && alreadyRead) return;
+    return read(events);
+  }
+
+  function retry(lines: string[] | null, byColumns: boolean, events: ReadingEvents) {
+    if (!sameSource(lines, byColumns)) source = { lines, byColumns };
+    return read(events);
+  }
+
+  return { sourceChanged, retry };
 }
 
 export function tieChecklistLines(lines: string[] | null, reads: Map<number, LineRead> | null, bringIn?: Set<number>) {

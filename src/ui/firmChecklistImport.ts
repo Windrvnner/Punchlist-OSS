@@ -11,8 +11,8 @@ import {
   retryChecklistWording, submitChecklist, undoBringIn, type Asked, type ListTarget, type Review,
 } from '../app/checklistImport';
 import {
-  checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistSourceLines, clearChecklistHeading,
-  loadChecklistSource, readChecklist, readChecklistColumns, tieChecklistLines,
+  checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistReading, checklistRequests,
+  checklistSourceLines, clearChecklistHeading, loadChecklistSource, readChecklistColumns, tieChecklistLines,
 } from '../app/listRead';
 import type { LineRead } from '../domain/listRead';
 import type { ChecklistMapping } from '../domain/checklistImport';
@@ -29,9 +29,8 @@ export type Busy = '' | 'reading' | 'asking' | 'reviewing' | 'importing';
 export function useWork() {
   const [busy, setBusy] = useState<Busy>('');
   const [error, setError] = useState('');
-  const token = useRef(0);
-  /** a new token: any answer still to come for an older one is dropped */
-  const newToken = () => ++token.current;
+  const [requests] = useState(checklistRequests);
+  const { newToken } = requests;
   /** a new read or call: says what it is doing, clears the error, and returns its token */
   const begin = (doing: Busy) => {
     const mine = newToken();
@@ -44,9 +43,7 @@ export function useWork() {
     newToken();
     setBusy('');
   };
-  /** whether nothing newer has started, or the dialog been left, since `mine` began */
-  const isLatest = (mine: number) => token.current === mine;
-  return { busy, setBusy, error, setError, newToken, begin, drop, isLatest };
+  return { busy, setBusy, error, setError, ...requests, begin, drop };
 }
 export type Work = ReturnType<typeof useWork>;
 
@@ -189,31 +186,29 @@ function useModelReading(
   const [reads, setReads] = useState<Map<number, LineRead> | null>(left?.reads ?? null);
   const [readFailed, setReadFailed] = useState<Asked | ''>(left?.choices?.readFailed ?? '');
   const [bringIn, setBringIn] = useState<Set<number>>(left?.choices?.bringIn ?? new Set());
-  const readNow = async () => {
-    if (!lines || byColumns) return;
-    const mine = work.begin('asking');
-    setReads(null);
-    setReadFailed('');
-    const read = await readChecklist(store, lines);
-    if (!work.isLatest(mine)) return;
-    work.setBusy('');
-    if (!read.ok) {
-      setReadFailed(failedAs(read));
-      return;
-    }
-    setReads(read.value);
-    setBringIn(new Set());
+  const [reading] = useState(() => checklistReading(store, work, {
+    reads: left?.reads, readFailed: left?.choices?.readFailed,
+  }));
+  const events: Parameters<typeof reading.retry>[2] = {
+    started: () => {
+      work.setBusy('asking');
+      work.setError('');
+      setReads(null);
+      setReadFailed('');
+    },
+    finished: (read) => {
+      work.setBusy('');
+      if (!read.ok) {
+        setReadFailed(failedAs(read));
+        return;
+      }
+      setReads(read.value);
+      setBringIn(new Set());
+    },
   };
-  // a list kept from before comes back as it was read: it is read again only if the reading had not come back
-  const wasRead = useRef(!!left?.reads || !!left?.choices?.readFailed);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: read once for each list given, not on every render
-  useEffect(() => {
-    if (wasRead.current) {
-      wasRead.current = false;
-      return;
-    }
-    if (lines && !byColumns) void readNow();
-  }, [lines, byColumns]);
+  const readNow = () => reading.retry(lines, byColumns, events);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: each change of source goes to the same app session
+  useEffect(() => { void reading.sourceChanged(lines, byColumns, events); }, [lines, byColumns]);
   /** the lines the model left out, before any is checked to bring in: the "Left out" list */
   const tiedBase = useMemo(() => tieChecklistLines(lines, reads), [lines, reads]);
   const tied = useMemo(() => tieChecklistLines(lines, reads, bringIn), [lines, reads, bringIn]);
@@ -381,7 +376,6 @@ function useBringIn(
     work.setBusy('');
     keeper.holding.current = false;
     if (!result.ok) {
-      keeper.keepNow.current();
       work.setError(`Couldn’t import: ${result.error.message}`);
       return;
     }

@@ -8,18 +8,19 @@ import {
 } from '../../src/app/checklistImport';
 import { importKey, initializeKeptImports, keptImport, keptImportsReady, saveImport } from '../../src/app/keptImports';
 import {
-  checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistSourceLines, loadChecklistSource,
-  readChecklist, readChecklistColumns, tieChecklistLines,
+  checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistReading, checklistRequests, checklistSourceLines,
+  loadChecklistSource, readChecklistColumns, tieChecklistLines,
 } from '../../src/app/listRead';
 import { firmOf, listId, norm } from '../../src/domain/checklist';
 import type { LineRead } from '../../src/domain/listRead';
-import { fail, ok } from '../../src/domain/result';
+import { fail, ok, type Result } from '../../src/domain/result';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { recoveryApp } from './recoveryKit';
 
 const HEADING = 'Portfolio project diligence';
 const NOTE = 'Cover note for counsel';
 const OPTIONS = { askReword: true, askSame: true };
+const READ_EVENTS = { started: () => {}, finished: () => {} };
 
 function value<T>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T {
   if (!result.ok) throw new Error(result.error.message);
@@ -50,7 +51,8 @@ async function preparePaste(app: Awaited<ReturnType<typeof readyApp>>, questions
   const readList = vi.fn<NonNullable<typeof app.store.services.ai.readList>>(async ({ only }) =>
     ok(only ? answers.filter(({ n }) => only.includes(n)) : answers.filter(({ n }) => n !== 4)));
   app.store.services.ai.readList = readList;
-  const reads = value(await readChecklist(app.store, lines));
+  const reading = checklistReading(app.store, checklistRequests());
+  const reads = value((await reading.sourceChanged(lines, false, READ_EVENTS))!);
   const tied = tieChecklistLines(lines, reads)!;
   const prepared = checklistItemsAsRead(false, null, { item: null, section: null }, tied)!;
   expect(readList.mock.calls.map(([request]) => request.only)).toEqual([undefined, [4]]);
@@ -152,7 +154,8 @@ it('re-reads a portfolio spreadsheet by hand after the model fails, preserving i
     expect(lines[1]).toBe('Section | Requirement | Subsection');
     const unavailable = fail({ kind: 'unreachable', message: 'Could not reach the model' });
     store.services.ai.readList = async () => unavailable;
-    expect(await readChecklist(store, lines)).toEqual(unavailable);
+    const reading = checklistReading(store, checklistRequests());
+    expect(await reading.sourceChanged(lines, false, READ_EVENTS)).toEqual(unavailable);
     const { table, mapping } = value(await readChecklistColumns(store, source.table, { headerRow: 2 }, true));
     expect(table.headerRow).toBe(2);
     expect(mapping).toEqual({ item: 1, section: 0, subsection: 2 });
@@ -178,6 +181,98 @@ it('re-reads a portfolio spreadsheet by hand after the model fails, preserving i
     const saved = store.get().firmList[listId('technology', 'Renewables')];
     expect(saved).toMatchObject({ file: table.name, items: selected.items });
     expect(checklistShelf(store.get()).totals).toEqual({ lists: 1, items: 2_376, general: false, others: 1 });
+  } finally {
+    app.store.closing();
+    await app.repo.close();
+  }
+});
+
+it('resumes unfinished reading and skips the initial read for a kept result or failure', async () => {
+  const app = await readyApp();
+  try {
+    const primary = portfolioQuestions();
+    const revised = [HEADING, ...primary.slice(1)];
+    const { store } = app;
+    const model = vi.fn<NonNullable<typeof store.services.ai.readList>>(async ({ lines }) =>
+      ok(lines.flatMap((line, at) => modelRead(line, at, lines.length))));
+    store.services.ai.readList = model;
+    const events = { started: vi.fn(), finished: vi.fn() };
+    const unfinished = checklistReading(store, checklistRequests(), { reads: null, readFailed: '' });
+    const restored = value((await unfinished.sourceChanged(primary, false, events))!);
+    expect(restored.size).toBe(primary.length);
+    expect(await unfinished.sourceChanged(primary, false, events)).toBeUndefined();
+
+    const complete = checklistReading(store, checklistRequests(), { reads: restored });
+    expect(await complete.sourceChanged(primary, false, events)).toBeUndefined();
+    const failed = checklistReading(store, checklistRequests(), { readFailed: 'unreachable' });
+    expect(await failed.sourceChanged(primary, false, events)).toBeUndefined();
+    expect(events.started).toHaveBeenCalledTimes(1);
+    expect((await complete.sourceChanged(revised, false, events))?.ok).toBe(true);
+    expect((await failed.retry(primary, false, events))?.ok).toBe(true);
+    expect(model.mock.calls.map(([input]) => input.lines)).toEqual([primary, revised, primary]);
+    expect(events.started).toHaveBeenCalledTimes(3);
+    expect(events.finished).toHaveBeenCalledTimes(3);
+  } finally {
+    app.store.closing();
+    await app.repo.close();
+  }
+});
+
+it('discards late model replies when the source changes or the dialog leaves', async () => {
+  const app = await readyApp();
+  try {
+    const { store } = app;
+    const lines = portfolioQuestions();
+    const revised = [HEADING, ...lines.slice(1)];
+    let release!: (result: Result<LineRead[]>) => void;
+    const held = new Promise<Result<LineRead[]>>((resolve) => { release = resolve; });
+    const model = vi.fn<NonNullable<typeof store.services.ai.readList>>(async ({ lines: input }) =>
+      ok(input.flatMap((line, at) => modelRead(line, at, input.length))));
+    model.mockReturnValueOnce(held);
+    store.services.ai.readList = model;
+    const requests = checklistRequests();
+    const reading = checklistReading(store, requests);
+    const events = { started: vi.fn(), finished: vi.fn() };
+    const earlier = reading.sourceChanged(lines, false, events);
+    const newer = await reading.sourceChanged(revised, false, events);
+    expect(value(newer!).get(1)?.text).toBe(HEADING);
+    release(ok(lines.flatMap((line, at) => modelRead(line, at, lines.length))));
+    expect(await earlier).toBeUndefined();
+
+    const retry = reading.retry(revised, false, events);
+    requests.newToken();
+    expect(await retry).toBeUndefined();
+    expect(events.started).toHaveBeenCalledTimes(3);
+    expect(events.finished).toHaveBeenCalledExactlyOnceWith(newer);
+  } finally {
+    app.store.closing();
+    await app.repo.close();
+  }
+});
+
+it('preserves the stored checklist and choices after a refused headless submission', async () => {
+  const app = await readyApp();
+  try {
+    const { port, store, repo } = app;
+    const questions = portfolioQuestions();
+    const paste = questions.join('\n');
+    const key = importKey.checklist('technology', 'Renewables');
+    const choices = { useReword: new Set([1, 20]), remove: new Set([8]) };
+    const snapshot = { paste, text: checklistPaste(paste), choices };
+    expect(await saveImport(key, snapshot)).toBe(true);
+    const original = repo.transaction.bind(repo);
+    repo.transaction = async (transaction) => transaction.writes.some((write) => write.kind === 'firmList')
+      ? fail({ kind: 'storageFull', message: 'The disk is full' }) : original(transaction);
+
+    const state = store.get();
+    const target = listTarget(state, firmOf(state.firmList), 'technology', 'Renewables');
+    const items = questions.map((text) => ({ text }));
+    const result = await submitChecklist(store, key, target, items, '');
+    expect(result).toMatchObject({ ok: false, error: { kind: 'storageFull' } });
+    expect(store.get().firmList[listId('technology', 'Renewables')]).toBeUndefined();
+    initializeKeptImports(port);
+    await keptImportsReady;
+    expect(keptImport(key)).toEqual(snapshot);
   } finally {
     app.store.closing();
     await app.repo.close();

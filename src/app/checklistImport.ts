@@ -13,7 +13,7 @@ import { sameWording, earlierRewordings } from '../domain/checklistImport';
 import { alphabetical } from '../domain/order';
 import type { AiService } from '../ports';
 import type { Capabilities } from './capabilities';
-import { dropImport } from './keptImports';
+import { dropImport, keptImport, saveImport } from './keptImports';
 import { ok, fail, type Result } from '../domain/result';
 import { Undo } from './commands/undo';
 import { EditDeal } from './commands/deals';
@@ -382,9 +382,20 @@ export function checklistShelf(state: State) {
   return { sections, totals: checklistTotals(lists) };
 }
 
-export function submitChecklist(store: Store, importKey: string, target: ListTarget, items: ListItem[], file: string) {
+export async function submitChecklist(
+  store: Store, importKey: string, target: ListTarget, items: ListItem[], file: string,
+) {
+  const kept = keptImport(importKey);
   // Leaving the kept snapshot behind could offer the same import again after a reload.
   dropImport(importKey);
   const name = target.layer === 'broad' ? '' : target.name;
-  return bringIn(store, { layer: target.layer, name, items, file, fileDate: '' });
+  let submitted = false;
+  try {
+    const result = await bringIn(store, { layer: target.layer, name, items, file, fileDate: '' });
+    submitted = result.ok;
+    return result;
+  } finally {
+    // A draft opened or written while this operation ran takes precedence over the older one.
+    if (!submitted && kept && !keptImport(importKey)) await saveImport(importKey, kept);
+  }
 }
