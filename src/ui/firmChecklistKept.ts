@@ -3,14 +3,14 @@
  * restart loses nothing, the model's reading and review included: opening the import again picks it up where it was
  * left. A paste alone is kept as typed. "change" keeps the list too until another is read in its place; only "start
  * over", which asks first, or bringing the list in lets it go. While it is brought in nothing is written: a failure
- * keeps it again. The storage itself is keptImports.ts.
+ * keeps it again. The storage itself is in app/keptImports.ts.
  */
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { ImportTable } from '../app/transfer';
 import type { LineRead } from '../domain/listRead';
 import type { ChecklistMapping } from '../domain/checklistImport';
 import { LAYERS, type Layer } from '../domain/checklist';
-import { keptImport, keepImport, dropImport, importKey } from './keptImports';
+import { keptImport, keepImport, dropImport, importKey } from '../app/keptImports';
 import type { Asked, Review } from './firmChecklistReview';
 
 /** Every choice and check mark, kept beside the list */

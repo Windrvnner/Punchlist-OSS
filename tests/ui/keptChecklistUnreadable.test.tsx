@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { useKeepImport, useKeeper, type KeptNow } from '../../src/ui/firmChecklistKept';
-import { dropImport, importKey, keepImport, keptImport, keptImportsReady } from '../../src/ui/keptImports';
+import { dropImport, importKey, keepImport, keptImport, keptImportsReady } from '../../src/app/keptImports';
 import type { ImportTable } from '../../src/app/transfer';
 
 const key = importKey.checklist();
