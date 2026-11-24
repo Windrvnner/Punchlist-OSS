@@ -209,10 +209,19 @@ details.fsrcs .sgp .srcbtn:hover{color:var(--ink);text-decoration-color:var(--ac
 
 /* ---- finding: edit in place ---- */
 .opening .fedit{margin-top:10px}
+.chat .fedit{
+  /* Detail uses its own scrollbar when the composer needs more of the thread (#597). */
+  max-height:calc(100dvh - var(--thread-padding,150px));
+}
+.chat .fedit > :not(.ced){flex-shrink:0}
 .opening .fedit .lbl{margin:10px 0 4px}
 /* the finding editor's detail (#636): plain text with citation tags, four to twelve lines tall as the text box was */
 .card .in.ta.ced{min-height:calc(4lh + 20px);max-height:calc(12lh + 20px);overflow:auto;
   white-space:pre-wrap;overflow-wrap:anywhere;cursor:text}
+@supports (flex-basis:calc-size(auto,size)){
+  /* Treat four lines as the preferred minimum so attachments can leave less room for Detail (#597). */
+  .chat .fedit .in.ta.ced{flex-basis:calc-size(auto,max(size,4lh + 20px));min-height:0}
+}
 .srcbtn{display:inline-flex;align-items:baseline;min-width:0;max-width:100%;padding:0;border:0;background:none;color:inherit;font:inherit;cursor:pointer;text-decoration:underline dotted;text-decoration-color:var(--ink-3);text-underline-offset:4px}
 .srcbtn:hover{color:var(--accent)}
 .srcbtn .loc{flex:none;white-space:pre}

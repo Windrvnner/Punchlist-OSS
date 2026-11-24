@@ -32,7 +32,7 @@ import {
 } from '../app/findingDrafts';
 import { SourceChips } from './research';
 import { CitedEditor } from './citedEditor';
-import { focusCard } from './focus';
+import { focusCard, focusOnce } from './focus';
 
 /** The mark on an open finding that something has happened since it was written: what it says, and why. */
 export const OUT_OF_DATE = 'May be out of date';
@@ -241,6 +241,12 @@ let wantSources: string | null = null;
 /** the Detail label's tooltip in the finding editor */
 const CITE_TIP = 'A tag after a sentence names the source it cites. It moves with its sentence.';
 
+/** Reveal the actions on the finding page, where the composer overlays the thread (#597). */
+function focusFindingEditTitle(field: HTMLInputElement | null) {
+  if (field?.closest('.chat')) focusCard(field);
+  else focusOnce(field);
+}
+
 function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
   const store = useStore();
   // what was typed and kept, or, after Cancel while a save is out, what that save sent (#771)
@@ -292,7 +298,7 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
       <div class="lbl">Title</div>
       <input
         class="in" id="fe-title" aria-label="Title" maxLength={Math.max(TITLE_MAX, f.title.length)}
-        value={title} ref={focusCard} onInput={(e) => setTitle(e.currentTarget.value)}
+        value={title} ref={focusFindingEditTitle} onInput={(e) => setTitle(e.currentTarget.value)}
       />
       <select class={`field ${ws ? '' : 'unset'}`} id="fe-ws" aria-label="Workstream" value={ws} onChange={(e) => setWs((e.currentTarget as HTMLSelectElement).value)}>{wsOptions.map((w) => <option key={w} value={w}>{w}</option>)}</select>
       {/* #636: each citation is a tag after the sentence it supports; the tooltip says so, the screen does not */}
