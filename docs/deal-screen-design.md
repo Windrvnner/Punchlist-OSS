@@ -12,8 +12,9 @@ real deal document. When this design is built, this page and the `deal-screen/` 
 ## Rendering the screens
 
 Run `npm run build`, then `node docs/deal-screen/shoot.mjs`. It writes each screen to
-[deal-screen/shots/](deal-screen/shots/), in light at 1280×736. For dark or the smaller window, pass an output folder,
-a size, and a theme, for example `node docs/deal-screen/shoot.mjs out/deal-screen 1024x640 dark`.
+[deal-screen/shots/](deal-screen/shots/), in light at 1280×736. For the dark theme or another size, pass them, for
+example `node docs/deal-screen/shoot.mjs 1024x640 dark`; those shots go to `out/deal-screen/`, which git ignores.
+Running work animates, so a new render can differ from a kept shot in a spinner's position.
 
 ## Screens
 

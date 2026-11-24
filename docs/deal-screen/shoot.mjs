@@ -1,16 +1,20 @@
 // Renders each screen of the deal screen mock-up (mock.html) to a JPEG, as kept in shots/.
 // Run `npm run build` first: the mock-up uses the app's built stylesheet, which this script serves as app.css.
-// Usage: node docs/deal-screen/shoot.mjs [output folder] [width]x[height] [light|dark]
-// With no arguments it writes the light 1280x736 shots next to this file, as kept in the repo.
+// Usage: node docs/deal-screen/shoot.mjs [width]x[height] [dark]
+// With no arguments it writes the light 1280x736 shots to shots/ beside this file, as kept in the repo. Any other size
+// or the dark theme goes to out/deal-screen/ instead.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { launchChrome } from '../../tests/browser/chrome.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const outDir = process.argv[2] || path.join(here, 'shots');
-const [width, height] = (process.argv[3] || '1280x736').split('x').map(Number);
-const theme = process.argv[4] || 'light';
+const args = process.argv.slice(2);
+const sizeArg = args.find((arg) => /^\d+x\d+$/.test(arg)) || '1280x736';
+const [width, height] = sizeArg.split('x').map(Number);
+const theme = args.includes('dark') ? 'dark' : 'light';
+const keptInRepo = width === 1280 && height === 736 && theme === 'light';
+const outDir = keptInRepo ? path.join(here, 'shots') : path.join(here, '..', '..', 'out', 'deal-screen');
 
 // Each screen's file name and the mock-up's hash parameters that set it up.
 const SCREENS = [
