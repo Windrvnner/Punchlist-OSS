@@ -327,6 +327,52 @@ describe('UI dependency checks', () => {
     expect(repo.run().stderr).toContain(`${file} import (lines 3, 5): 2 exceeds`);
   });
 
+  it.each([
+    ['an absent optional caption', [
+      "const manifest: { target: string; caption?: string } = { target: 'CHOSEN' }",
+      'export const caption = manifest.caption',
+      'const { target } = manifest',
+    ]],
+    ['a capture beside a runtime caption', [
+      "const caption = () => 'Checklist'",
+      "const manifest = { target: 'CHOSEN', caption: caption() }",
+      'const { target, caption: title } = manifest',
+      "manifest.target = './checklist.mjs'",
+    ]],
+    ['a numeric object key on an array', [
+      "const modules = ['CHOSEN'] as const",
+      'const { 0: target } = modules',
+    ]],
+    ['an equality selecting a fixed branch', [
+      "const mode = 'checklist'",
+      "const target = mode === 'checklist' ? 'CHOSEN' : 'OTHER'",
+    ]],
+  ] as const)('agrees with the runtime module for %s', (_name, setup) => {
+    const repo = fixture();
+    const file = 'src/ui/checklistEntry.ts';
+    repo.write('src/ui/checklist.mjs', "export const caption = 'Checklist'");
+    const runLoader = [
+      "import { load } from './src/ui/fixture.mts'",
+      'const loaded = await load()',
+      "console.log(loaded === await import('node:path') ? 'node:path' : loaded.caption)",
+    ].join('\n');
+    for (const chosen of ['node:path', './checklist.mjs']) {
+      const forbidden = chosen === 'node:path';
+      const lines = [...setup, 'export const load = () => import(target)'];
+      const other = forbidden ? './checklist.mjs' : 'node:path';
+      const source = lines.join('\n').replaceAll('CHOSEN', chosen).replaceAll('OTHER', other);
+      repo.write(file, source);
+      repo.write('src/ui/fixture.mts', source);
+      const args = ['--experimental-strip-types', '--input-type=module', '-e', runLoader];
+      const runtime = spawnSync(process.execPath, args, { cwd: repo.dir, encoding: 'utf8' });
+      expect(runtime.status, runtime.stderr).toBe(0);
+      expect(runtime.stdout.trim()).toBe(forbidden ? 'node:path' : 'Checklist');
+      const result = repo.run();
+      expect(result.status, result.stderr).toBe(forbidden ? 1 : 0);
+      if (forbidden) expect(result.stderr).toContain(`${file} import (lines ${lines.length}): 1 exceeds`);
+    }
+  });
+
   it('resolves imports in TypeScript classes with decorators and auto-accessors', () => {
     const repo = fixture();
     const file = 'src/ui/picker.ts';
