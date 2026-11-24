@@ -1,22 +1,24 @@
 /**
  * What the checklist import (firmChecklist.tsx) remembers and does, one hook for each part: the work under way, the
  * list being read, its review, and leaving. Each part starts as it was kept, if it was (firmChecklistKept.ts). The
- * review's sums are in firmChecklistReview.ts.
+ * review and model requests are in app/checklistImport.ts and app/listRead.ts.
  */
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { Store } from '../app/store';
-import { readImportBytes, type ImportTable } from '../app/transfer';
-import { bringIn as bringInList, undoBringIn } from '../app/checklistImport';
-import { readList, readListFile, pastedLines } from '../app/listRead';
-import { tieOut, tableLines, type LineRead, type TiedOut } from '../domain/listRead';
-import { suggestChecklistColumns, prepareChecklist, type ChecklistMapping } from '../domain/checklistImport';
-import type { ListItem } from '../domain/checklist';
+import type { ImportTable } from '../app/transfer';
 import {
-  NOT_DONE, askedAbout, broughtInSays, failedAs, itemsToBringIn, makeReview, toggled, withMissedPairs, withRewordings,
-  type Asked, type ListTarget, type Review,
-} from './firmChecklistReview';
-import { dropKept, type ChecklistChoices, type ChecklistKept, type Keeper } from './firmChecklistKept';
-import { keepImport } from '../app/keptImports';
+  checklistReviewPlan, checklistSelection, failedAs, requestChecklistReview, reviewChecklist, retryChecklistDuplicates,
+  retryChecklistWording, submitChecklist, undoBringIn, type Asked, type ListTarget, type Review,
+} from '../app/checklistImport';
+import {
+  checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistSourceLines, clearChecklistHeading,
+  loadChecklistSource, readChecklist, readChecklistColumns, tieChecklistLines,
+} from '../app/listRead';
+import type { LineRead } from '../domain/listRead';
+import type { ChecklistMapping } from '../domain/checklistImport';
+import type { ListItem } from '../domain/checklist';
+import { NOT_DONE, broughtInSays, toggled } from './firmChecklistReview';
+import type { ChecklistChoices, ChecklistKept, Keeper } from './firmChecklistKept';
 
 export type Busy = '' | 'reading' | 'asking' | 'reviewing' | 'importing';
 
@@ -48,13 +50,6 @@ export function useWork() {
 }
 export type Work = ReturnType<typeof useWork>;
 
-/** The items as read: by the model, or by the columns chosen by hand. An item keeps no note of its lines once read */
-function itemsAsRead(byColumns: boolean, table: ImportTable | null, mapping: ChecklistMapping, tied: TiedOut | null) {
-  if (byColumns) return table ? prepareChecklist(table.rows, mapping) : null;
-  if (!tied) return null;
-  return { items: tied.items.map(({ lines: _, ...item }) => item), skipped: 0 };
-}
-
 /**
  * Step 1 and the list as read. Every list is read by the model first: a spreadsheet's rows, a
  * document's text or a pasted list, as lines. `byColumns` is the fallback for a table the model could not read: the
@@ -63,13 +58,10 @@ function itemsAsRead(byColumns: boolean, table: ImportTable | null, mapping: Che
 export function useListSource(store: Store, work: Work, { key, left }: Keeper) {
   const file = useListFile(store, work, key, left);
   const { table, text, mapping, byColumns } = file;
-  const lines = useMemo(
-    () => (text ? text.lines : table ? tableLines(table.columns, table.rows) : null),
-    [text, table],
-  );
+  const lines = useMemo(() => checklistSourceLines(text, table), [text, table]);
   const reading = useModelReading(store, work, lines, byColumns, left);
   const prepared = useMemo(
-    () => itemsAsRead(byColumns, table, mapping, reading.tied),
+    () => checklistItemsAsRead(byColumns, table, mapping, reading.tied),
     [byColumns, table, mapping, reading.tied],
   );
   /** back to the first step, the paste box as it was left */
@@ -82,7 +74,8 @@ export function useListSource(store: Store, work: Work, { key, left }: Keeper) {
     file.reset();
     reading.reset();
   };
-  return { ...file, ...reading, lines, prepared, forget, reset };
+  const counts = checklistReadCounts(table, lines, file.pasteSource);
+  return { ...file, ...reading, lines, prepared, counts, forget, reset };
 }
 
 const NO_MAPPING: ChecklistMapping = { item: null, section: null, subsection: null };
@@ -98,14 +91,19 @@ function useListFile(store: Store, work: Work, key: string, left: ChecklistKept 
   const [paste, setPaste] = useState(left?.paste ?? '');
   const [byColumns, setByColumns] = useState(!!left?.choices?.byColumns);
   const [sheetRead, setSheetRead] = useState<{ sheet?: string }>();
-  const take = (read: ImportTable) => {
+  const pasteSource = useMemo(() => checklistPaste(paste), [paste]);
+  const take = (read: ImportTable, suggested: ChecklistMapping) => {
     setTable(read);
-    setMapping(suggestChecklistColumns(read.columns, read.rows));
+    setMapping(suggested);
+  };
+  const resetHeading = () => {
+    setByColumns(false);
+    clearChecklistHeading(key);
   };
   const load = async (file: File) => {
     if (work.busy) return;
     const mine = work.begin('reading');
-    const read = await readListFile(store, file);
+    const read = await loadChecklistSource(store, file);
     if (!work.isLatest(mine)) return;
     work.setBusy('');
     if (!read.ok) {
@@ -114,18 +112,18 @@ function useListFile(store: Store, work: Work, key: string, left: ChecklistKept 
     }
     if ('table' in read.value) {
       setText(null);
-      take(read.value.table);
+      take(read.value.table, read.value.mapping);
     } else {
       setTable(null);
-      setText({ name: file.name, lines: read.value.lines });
+      setText(read.value.text);
     }
-    resetFileHeading(key, setByColumns);
+    resetHeading();
   };
   const reread = async (opts: { sheet?: string; headerRow?: number }, accept?: (read: ImportTable) => void) => {
     if (!table || (work.busy && !(byColumns && work.busy === 'reading'))) return;
     if (byColumns && opts.headerRow === undefined) setSheetRead(opts);
-    await readTableAgain(store, work, table, opts, byColumns, (read) => {
-      take(read);
+    await updateTableRead(store, work, table, opts, byColumns, (read, suggested) => {
+      take(read, suggested);
       accept?.(read);
     });
     setSheetRead((latest) => latest === opts ? undefined : latest);
@@ -134,15 +132,15 @@ function useListFile(store: Store, work: Work, key: string, left: ChecklistKept 
   const chooseColumns = () => {
     if (!table || work.busy) return;
     // Wait for heading detection before showing the editable row (#380).
-    void readTableAgain(store, work, table, { sheet: table.sheet }, true, take, () => setByColumns(true));
+    void updateTableRead(store, work, table, { sheet: table.sheet }, true, take, () => setByColumns(true));
   };
   // what is pasted stays in the box until it is sent, and after "change"
   const pasted = () => {
-    if (!paste.trim() || work.busy) return;
+    if (!pasteSource || work.busy) return;
     setTable(null);
     work.setError('');
-    setText({ name: '', lines: pastedLines(paste) });
-    resetFileHeading(key, setByColumns);
+    setText(pasteSource);
+    resetHeading();
   };
   const forget = () => {
     setTable(null);
@@ -156,26 +154,20 @@ function useListFile(store: Store, work: Work, key: string, left: ChecklistKept 
     setMapping(NO_MAPPING);
   };
   return {
-    table, mapping, setMapping, text, paste, setPaste, byColumns, wantedSheet: sheetRead?.sheet,
+    table, mapping, setMapping, text, paste, setPaste, pasteSource, byColumns, wantedSheet: sheetRead?.sheet,
     load, reread, chooseColumns, pasted, forget, reset, importKey: key,
   };
 }
 
-/** A successfully replaced source starts without the previous table's heading draft (#380). */
-function resetFileHeading(key: string, setByColumns: (byColumns: boolean) => void) {
-  setByColumns(false);
-  keepImport(key, { headingDraft: null });
-}
-
-/** Reads a table's file again for another sheet or heading row: an error is said in the footer, and the table kept. */
-async function readTableAgain(
+/** Applies a table read to the current screen, leaving the table in place if the read fails. */
+async function updateTableRead(
   store: Store, work: Work, table: ImportTable, opts: { sheet?: string; headerRow?: number },
   byColumns: boolean,
-  take: (read: ImportTable) => void,
+  take: (read: ImportTable, suggested: ChecklistMapping) => void,
   onSettled?: () => void,
 ) {
   const mine = byColumns ? work.begin('reading') : work.newToken();
-  const read = await readImportBytes(store, table.name, table.bytes, byColumns ? opts : { ...opts, headerRow: 1 });
+  const read = await readChecklistColumns(store, table, opts, byColumns);
   if (!work.isLatest(mine)) return;
   if (byColumns) work.setBusy('');
   onSettled?.();
@@ -184,7 +176,7 @@ async function readTableAgain(
     return;
   }
   work.setError('');
-  take(read.value);
+  take(read.value.table, read.value.mapping);
 }
 
 /**
@@ -202,7 +194,7 @@ function useModelReading(
     const mine = work.begin('asking');
     setReads(null);
     setReadFailed('');
-    const read = await readList(store.services.ai, lines);
+    const read = await readChecklist(store, lines);
     if (!work.isLatest(mine)) return;
     work.setBusy('');
     if (!read.ok) {
@@ -223,8 +215,8 @@ function useModelReading(
     if (lines && !byColumns) void readNow();
   }, [lines, byColumns]);
   /** the lines the model left out, before any is checked to bring in: the "Left out" list */
-  const tiedBase = useMemo(() => (lines && reads ? tieOut(lines, reads) : null), [lines, reads]);
-  const tied = useMemo(() => (lines && reads ? tieOut(lines, reads, bringIn) : null), [lines, reads, bringIn]);
+  const tiedBase = useMemo(() => tieChecklistLines(lines, reads), [lines, reads]);
+  const tied = useMemo(() => tieChecklistLines(lines, reads, bringIn), [lines, reads, bringIn]);
   const flipBringIn = (line: number) => setBringIn(toggled(bringIn, line));
   const forget = () => {
     setReads(null);
@@ -258,56 +250,37 @@ export function useListReview(
   };
   /** what the review would be asked about now, as the person last left the choices: one asked for others isn't shown */
   const sigNow = useRef('');
-  const { generalTexts } = target;
-  const texts = prepared?.items.map((item) => item.text);
-  const sig = texts ? askedAbout(texts, askReword, askSame, generalTexts) : '';
-  sigNow.current = sig;
-  const cached = review && askedFor.current === sig ? review : null;
-  const canReword = can.reword;
-  const canAskSame = can.sameMeaning;
-  const needsCall = cached
-    ? canAskSame && hasMissedDuplicates(cached)
-    : (askReword && canReword) || (askSame && canAskSame);
-  const retries = useReviewRetries(store, work, review, setReview, generalTexts);
-  const waiting = !!texts?.length && needsCall && retries.pending;
+  const options = { askReword, askSame };
+  const plan = prepared && checklistReviewPlan(can, prepared.items, target, options, review, askedFor.current);
+  sigNow.current = plan?.signature ?? '';
+  const retries = useReviewRetries(store, work, review, setReview, target.generalTexts);
+  const waiting = !!plan?.texts.length && plan.needsCall && retries.pending;
   const toBringIn = useBringIn(store, work, target, keeper, { review, remove, useReword });
 
-  // A model that cannot be asked leaves its part out and says so; the list can still be brought in.
   const next = async () => {
-    if (!prepared || !texts?.length || !target.named || work.busy) return;
+    if (!prepared || !plan?.texts.length || !target.named || work.busy) return;
+    const { texts, signature, cached, needsCall } = plan;
     if (cached) {
-      if (needsCall) {
-        const missedAt = cached.sameMissed?.at ?? texts.map((_, at) => at);
-        if (!(await retries.askMissed(cached, texts, missedAt))) return;
-      }
-      if (sigNow.current === sig) setShown(true);
+      if (needsCall && !(await retries.askMissed(cached, texts))) return;
+      if (sigNow.current === signature) setShown(true);
       return;
     }
     const replies = needsCall
-      ? await retries.ask(() => askModel(store, texts, { askReword, askSame }, generalTexts))
+      ? await retries.ask(() => requestChecklistReview(store, texts, options, target.generalTexts))
       : [null, null] as const;
-    if (!replies || sigNow.current !== sig) return;
-    const [rewordReply, sameReply] = replies;
+    if (!replies || sigNow.current !== signature) return;
     work.setError('');
-    const fresh = makeReview({
-      items: prepared.items, earlierItems: target.replaces?.items, generalTexts, askReword, askSame,
-      canReword, canAskSame, rewordReply, sameReply,
-    });
+    const fresh = reviewChecklist(can, prepared.items, target, options, replies);
     setReview(fresh.review);
     choices.setUseReword(fresh.checked);
     choices.setRemove(new Set());
-    askedFor.current = sig;
+    askedFor.current = signature;
     setShown(true);
   };
   return {
     ...choices, review, shown: made.shown, askedFor, waiting, ...toBringIn,
     next, retry: retries.retry, retryWording: retries.retryWording, reset, backToList: made.backToList,
   };
-}
-
-/** A duplicate check can leave some or all items unchecked. */
-function hasMissedDuplicates(review: Review) {
-  return !!review.sameMissed || review.asked.same === 'unreachable' || review.asked.same === 'failed';
 }
 
 /** The review as last made, whether it is on screen, and what it was asked about. */
@@ -350,24 +323,6 @@ function useReviewChoices(store: Store, kept: ChecklistChoices | undefined) {
   };
 }
 
-/** The wording suggestions and the duplicates, each asked for only if checked and offered, both at once. */
-function askModel(
-  store: Store, texts: string[], ask: { askReword: boolean; askSame: boolean }, generalTexts: string[],
-) {
-  const { can } = store.get();
-  const ai = store.services.ai;
-  const rewording = ask.askReword && can.reword ? ai.reword!({ items: texts }) : null;
-  const duplicates = ask.askSame && can.sameMeaning ? ai.sameMeaning!({ items: texts, against: generalTexts }) : null;
-  return Promise.all([rewording, duplicates]);
-}
-
-/** A failed duplicate retry changes the reason for the rows it asked about (#378). */
-function withFailedPairs(was: Review, reason: Asked): Review {
-  if (!was.sameMissed) return { ...was, asked: { ...was.asked, same: reason } };
-  const kind = reason === 'unreachable' ? reason : 'failed';
-  return { ...was, sameMissed: { ...was.sameMissed, kind } };
-}
-
 /** Fresh reviews and retries share one in-flight guard. Retries keep the person's check marks. */
 function useReviewRetries(
   store: Store, work: Work, review: Review | null, setReview: (review: Review) => void, generalTexts: string[],
@@ -390,42 +345,23 @@ function useReviewRetries(
       if (work.isLatest(mine)) work.setBusy('');
     }
   };
-  // The duplicate check missed some items last time (a part the service did not answer): Next asks about those alone
-  // again, and adds what it finds.
-  const askMissed = async (was: Review, texts: string[], missedAt: number[]) => {
+  const askMissed = async (was: Review, texts?: string[]) => {
     if (!can.sameMeaning) return false;
-    const query = { items: texts, against: generalTexts, only: missedAt };
-    const sameReply = await ask(() => store.services.ai.sameMeaning!(query));
-    if (!sameReply) return false;
-    const updated = sameReply.ok ? withMissedPairs(was, sameReply.value) : withFailedPairs(was, failedAs(sameReply));
-    setReview(updated);
-    const reason = NOT_DONE[updated.sameMissed?.kind ?? updated.asked.same];
-    if (reason) work.setError(`${reason} again`);
+    const result = await ask(() => retryChecklistDuplicates(store, was, generalTexts, texts));
+    if (!result) return false;
+    setReview(result.review);
+    if (result.failure) work.setError(`${NOT_DONE[result.failure]} again`);
     return true;
   };
-  // Retry beside the duplicates line does what Back then Next does: asks about the missed items alone, or all of them
-  // when the check failed outright, and keeps the review on screen while it waits. Back drops its answer: Next
-  // asks again
   const retry = async () => {
-    if (!review || work.busy || !can.sameMeaning) return;
-    const missedAt = review.sameMissed?.at ?? review.items.map((_, at) => at);
-    await askMissed(review, review.items.map((item) => item.text), missedAt);
+    if (review) await askMissed(review);
   };
-  // The wording suggestions failed (decisions: Retries): Retry asks for them again, and adds them unchecked beside any
-  // taken last time.
   const retryWording = async () => {
     if (!review || !can.reword) return;
-    const items = review.items.map((item) => item.text);
-    const reply = await ask(() => store.services.ai.reword!({ items }));
-    if (!reply) return;
-    // failed again: the line gives this failure's reason, and the footer says it was asked again
-    if (!reply.ok) {
-      const reason = failedAs(reply);
-      setReview({ ...review, asked: { ...review.asked, reword: reason } });
-      work.setError(`${NOT_DONE[reason]} again`);
-      return;
-    }
-    setReview(withRewordings(review, reply.value));
+    const result = await ask(() => retryChecklistWording(store, review));
+    if (!result) return;
+    setReview(result.review);
+    if (result.failure) work.setError(`${NOT_DONE[result.failure]} again`);
   };
   return { ask, pending, askMissed, retry, retryWording };
 }
@@ -435,21 +371,13 @@ function useBringIn(
   store: Store, work: Work, target: ListTarget, keeper: Keeper,
   { review, remove, useReword }: { review: Review | null; remove: Set<number>; useReword: Set<number> },
 ) {
-  const rewordAt = useMemo(
-    () => new Map((review?.rewords ?? []).map((reword) => [reword.at, [reword.text, ...(reword.also ?? [])]])),
-    [review],
-  );
-  const items = review ? itemsToBringIn(review, remove, useReword, rewordAt) : [];
+  const selection = useMemo(() => checklistSelection(review, remove, useReword), [review, remove, useReword]);
   const run = async (fileName: string) => {
-    if (!review || !items.length || work.busy) return;
+    if (!review || !selection.counts.items || work.busy) return;
     work.setBusy('importing');
     work.setError('');
-    // let go of the kept import first, so a reload while it is brought in never offers it again; a failure keeps it
-    // again
     keeper.holding.current = true;
-    dropKept(keeper);
-    const name = target.layer === 'broad' ? '' : target.name;
-    const result = await bringInList(store, { layer: target.layer, name, items, file: fileName, fileDate: '' });
+    const result = await submitChecklist(store, keeper.key, target, selection.items, fileName);
     work.setBusy('');
     keeper.holding.current = false;
     if (!result.ok) {
@@ -465,7 +393,7 @@ function useBringIn(
     });
     store.toast(said, { label: 'Undo All', run: undo });
   };
-  return { rewordAt, items, run };
+  return { counts: selection.counts, run };
 }
 export type ListReview = ReturnType<typeof useListReview>;
 

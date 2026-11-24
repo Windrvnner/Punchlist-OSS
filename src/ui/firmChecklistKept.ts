@@ -11,7 +11,7 @@ import type { LineRead } from '../domain/listRead';
 import type { ChecklistMapping } from '../domain/checklistImport';
 import { LAYERS, type Layer } from '../domain/checklist';
 import { keptImport, keepImport, dropImport, importKey } from '../app/keptImports';
-import type { Asked, Review } from './firmChecklistReview';
+import type { Asked, Review } from '../app/checklistImport';
 
 /** Every choice and check mark, kept beside the list */
 export interface ChecklistChoices {

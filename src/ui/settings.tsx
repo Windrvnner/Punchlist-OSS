@@ -6,6 +6,7 @@ import { Fragment } from 'preact';
 import { DEAL_PAGES } from '../app/state';
 import { SharedFolderRow } from './connect';
 import { firmOf } from '../domain/checklist';
+import { checklistTotals } from '../app/checklistImport';
 import { SignInRow } from './signin';
 import { plural } from './counts';
 
@@ -27,9 +28,8 @@ const KEYS: [string, string, string][] = [
 const VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '';
 
 /** The firm's checklist in a line: "General and 5 lists · 237 items" */
-function checklistLine(lists: { layer: string; items: unknown[] }[]): string {
-  if (!lists.length) return 'No lists yet';
-  const general = lists.some((l) => l.layer === 'broad'); const others = lists.length - (general ? 1 : 0); const items = lists.reduce((n, l) => n + l.items.length, 0);
+function checklistLine({ lists, general, others, items }: ReturnType<typeof checklistTotals>): string {
+  if (!lists) return 'No lists yet';
   const named = general ? (others ? `General and ${plural(others, 'list')}` : 'General') : plural(others, 'list');
   return `${named} · ${plural(items, 'item')}`;
 }
@@ -38,6 +38,7 @@ export function SettingsDialog() {
   const store = useStore(); const s = useAppState();
   const close = () => store.ui({ settings: false });
   const u = s.user;
+  const checklist = checklistLine(checklistTotals(firmOf(s.firmList).lists));
   return (
     <Modal onClose={close} label="Settings" blur className="sdlg setdlg">
       <div class="shead"><h2 id="s-title">Settings</h2>{VERSION && <span class="sver" id="s-version">Version {VERSION}</span>}<button type="button" class="x" id="s-close" aria-label="Close" title="Close (Esc)" onClick={close}><Icon name="close" size={15} /></button></div>
@@ -49,7 +50,9 @@ export function SettingsDialog() {
         aria-label="Deals open on">{DEAL_PAGES.map(([k, l]) => <button type="button" key={k} data-landing={k}
         class={s.prefs.landing === k ? 'on' : ''} aria-pressed={s.prefs.landing === k}
         onClick={() => store.setPrefs({ landing: k })}>{l}</button>)}</div></div>
-      <div class="srow"><div class="k">Checklist</div><div class="imfile" id="s-checklist">{checklistLine(firmOf(s.firmList).lists)} <button type="button" class="linkb" id="s-checklist-open" onClick={() => store.ui({ settings: false, firmChecklist: { step: 'lists' } })}>Open</button></div></div>
+      <div class="srow"><div class="k">Checklist</div><div class="imfile" id="s-checklist">{checklist} <button
+        type="button" class="linkb" id="s-checklist-open"
+        onClick={() => store.ui({ settings: false, firmChecklist: { step: 'lists' } })}>Open</button></div></div>
       {s.models.length > 1 && <div class="srow" id="s-modelrow"><div class="k">Default Model</div><div class="seg"
         id="s-model" role="group" aria-label="Default model">{s.models.map((m) => <button type="button" key={m.id}
         class={s.model === m.id ? 'on' : ''} aria-pressed={s.model === m.id}

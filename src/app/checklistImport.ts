@@ -6,11 +6,18 @@
  */
 import type { Store } from './store';
 import { BringInList, AddDealItems, RegroupDealItems, SetItemsOff, dealsForBringIn, missingItems, regrouped, usableFirm } from './commands/checklist';
-import { itemId, itemsFor, listId, type FirmLayerList, type Layer } from '../domain/checklist';
+import {
+  findList, firmOf, itemId, itemsFor, key, LAYERS, listId, type FirmLayerList, type FirmList, type Layer, type ListItem,
+} from '../domain/checklist';
+import { sameWording, earlierRewordings } from '../domain/checklistImport';
+import { alphabetical } from '../domain/order';
+import type { AiService } from '../ports';
+import type { Capabilities } from './capabilities';
+import { dropImport } from './keptImports';
 import { ok, fail, type Result } from '../domain/result';
 import { Undo } from './commands/undo';
 import { EditDeal } from './commands/deals';
-import { FIRM } from './state';
+import { FIRM, versionsWord, type State } from './state';
 
 export interface BringInResult { opIds: string[]; items: number; deals: number; /** deals the items could not be added to, by name, and why */ missed: { deal: string; why: string }[] }
 
@@ -88,4 +95,296 @@ export function previewSwap(store: Store, dealId: string, field: 'product' | 'se
   // the inverse turns back on what this turns off, and off what it adds or turns on
   const back = planned.value.inverse.input as { itemsOff?: string[]; itemsOn?: string[] };
   return { off: back.itemsOn?.length ?? 0, on: back.itemsOff?.length ?? 0 };
+}
+
+/**
+ * what became of asking the model: not asked, done, or failed because it could not be reached or its reply could not
+ * be used
+ */
+export type Asked = 'off' | 'done' | 'unreachable' | 'failed';
+export const failedAs = (reply: { ok: boolean; error?: { kind: string } } | null): 'unreachable' | 'failed' =>
+  reply && !reply.ok && reply.error?.kind === 'unreachable' ? 'unreachable' : 'failed';
+type RewordReply = Awaited<ReturnType<NonNullable<AiService['reword']>>>;
+type SameMeaningReply = Awaited<ReturnType<NonNullable<AiService['sameMeaning']>>>;
+type SameMeaning = Extract<SameMeaningReply, { ok: true }>['value'];
+
+/** two items that ask for the same thing; `inAgainst` means `b` is an item of the general list, not of this one */
+export interface Pair { a: number; b: number; inAgainst: boolean; why: string }
+/** `earlier` marks a rewording a person took when this list was last brought in: it starts checked */
+export interface Rewording {
+  at: number;
+  text: string;
+  why: string;
+  earlier?: boolean;
+  /** the further items an item split into */
+  also?: string[];
+}
+export interface Review {
+  items: ListItem[];
+  rewords: Rewording[];
+  pairs: Pair[];
+  asked: { reword: Asked; same: Asked };
+  sameMissed?: { kind: 'unreachable' | 'failed'; at: number[] };
+  /** rows offered no rewording: a later copy of the same wording, or one worded as in the general list */
+  noReword?: number[];
+}
+
+export const pairKey = (pair: { a: number; b: number; inAgainst: boolean }) => `${pair.a}:${pair.b}:${pair.inAgainst}`;
+const byRow = (one: { at: number }, other: { at: number }) => one.at - other.at;
+
+/** 'The general list', or 'The Solar list' */
+export const theList = (layer: Layer, name: string) => (layer === 'broad' ? 'The general list' : `The ${name} list`);
+
+/** Which list the import brings in or replaces, as the person has chosen it so far. */
+export interface ListTarget {
+  layer: Layer;
+  name: string;
+  /** the general list needs no name; the others do, as deals will pick it */
+  named: boolean;
+  /** the list of that name the firm has now, if any */
+  replaces: ReturnType<typeof findList>;
+  /** the list in two versions, when it is: it waits for a choice before it can be brought in */
+  split: State['conflicts'][string] | undefined;
+  splitSays: string;
+  listNames: string[];
+  hasGeneral: boolean;
+  /** the general list's items, which another list's items are checked against for duplicates */
+  generalTexts: string[];
+}
+
+export function listTarget(state: State, firm: FirmList, layer: Layer, name: string): ListTarget {
+  const named = layer === 'broad' || !!key(name);
+  const replaces = findList(firm, layer, name);
+  // a list in two versions waits for a choice: said here, before its review is made, so no review is thrown away
+  const split = named ? state.conflicts[listId(layer, layer === 'broad' ? '' : name)] : undefined;
+  const versions = split ? versionsWord(split.versions.length).toLowerCase() : '';
+  const splitSays = split ? `${theList(layer, replaces?.name ?? name)} has ${versions}` : '';
+  const general = findList(firm, 'broad', '');
+  const generalTexts = layer === 'broad' ? [] : (general?.items ?? []).map((item) => item.text);
+  const listNames = alphabetical(firm.lists.filter((list) => list.layer === layer).map((list) => list.name));
+  return { layer, name, named, replaces, split, splitSays, generalTexts, listNames, hasGeneral: !!general };
+}
+
+/** What the review was asked about: a review asked for other choices is not shown again. */
+const askedAbout = (texts: string[], askReword: boolean, askSame: boolean, generalTexts: string[]) =>
+  JSON.stringify([texts, askReword, askSame, generalTexts]);
+
+/** What a new review is made from: the items, the person's choices, and the model's replies (null when not asked). */
+interface ReviewInput {
+  items: ListItem[];
+  /** the items of the list this one replaces, which hold the rewordings taken last time */
+  earlierItems: ListItem[] | undefined;
+  generalTexts: string[];
+  askReword: boolean;
+  askSame: boolean;
+  canReword: boolean;
+  canAskSame: boolean;
+  rewordReply: RewordReply | null;
+  sameReply: SameMeaningReply | null;
+}
+
+// Each look-up below goes through a Set or Map, so a list of 2,000 items and thousands of pairs takes no time
+function pairsWordedTheSame(items: ListItem[], generalTexts: string[]) {
+  const groups = sameWording(items);
+  // a later copy of the same wording is offered for removal, so it is not offered a rewording as well
+  const later = new Set(groups.flatMap((group) => group.slice(1)));
+  const same: Pair[] = groups.flatMap((group) =>
+    group.slice(1).map((b) => ({ a: group[0], b, inAgainst: false, why: 'Worded the same' })));
+  const generalAt = new Map<string, number>();
+  generalTexts.forEach((text, b) => {
+    if (!generalAt.has(key(text))) generalAt.set(key(text), b);
+  });
+  const inGeneral: Pair[] = items.flatMap((item, a) => {
+    const b = generalAt.get(key(item.text));
+    return b === undefined ? [] : [{ a, b, inAgainst: true, why: 'Worded the same as in the general list' }];
+  });
+  return { later, same, inGeneral };
+}
+
+function rewordAsked({ askReword, canReword, rewordReply }: ReviewInput): Asked {
+  if (!askReword || !canReword) return 'off';
+  return rewordReply?.ok ? 'done' : failedAs(rewordReply);
+}
+
+function sameAsked({ askSame, canAskSame, sameReply }: ReviewInput): Asked {
+  if (!askSame) return 'off';
+  return !canAskSame || sameReply?.ok ? 'done' : failedAs(sameReply);
+}
+
+/**
+ * Step 2's review: what the model proposes, and the items worded the same, which need no model. A model that could not
+ * be asked leaves its part out and says so. `checked` holds the rewordings taken last time, which start checked.
+ */
+function makeReview(input: ReviewInput): { review: Review; checked: Set<number> } {
+  const { items, rewordReply, sameReply } = input;
+  const worded = input.askSame
+    ? pairsWordedTheSame(items, input.generalTexts)
+    : { later: new Set<number>(), same: [], inGeneral: [] };
+  const found = new Set([...worded.same, ...worded.inGeneral].map(pairKey));
+  const inGeneralAt = new Set(worded.inGeneral.map((pair) => pair.a));
+  const model = sameReply?.ok ? sameReply.value.pairs.filter((pair) => !found.has(pairKey(pair))) : [];
+  const offered = (at: number) => !worded.later.has(at) && !inGeneralAt.has(at);
+  // a rewording taken last time comes back checked, in place of anything the model suggests for that row
+  const earlier = earlierRewordings(items, input.earlierItems)
+    .filter((rewording) => offered(rewording.at))
+    .map((rewording) => ({ ...rewording, why: '', earlier: true }));
+  const checked = new Set(earlier.map((rewording) => rewording.at));
+  const suggested = rewordReply?.ok
+    ? rewordReply.value.filter((rewording) => offered(rewording.at) && !checked.has(rewording.at))
+    : [];
+  const review: Review = {
+    items,
+    rewords: [...earlier, ...suggested].sort(byRow),
+    pairs: [...worded.same, ...worded.inGeneral, ...model],
+    noReword: items.flatMap((_, at) => (offered(at) ? [] : [at])),
+    asked: { reword: rewordAsked(input), same: sameAsked(input) },
+    ...(sameReply?.ok && sameReply.value.missed ? { sameMissed: sameReply.value.missed } : {}),
+  };
+  return { review, checked };
+}
+
+/** The review with what the duplicate check found when asked again about the items it missed. */
+function withMissedPairs(was: Review, again: SameMeaning): Review {
+  const have = new Set(was.pairs.map(pairKey));
+  const { sameMissed: _, ...rest } = was;
+  return {
+    ...rest,
+    asked: { ...was.asked, same: 'done' },
+    pairs: [...was.pairs, ...again.pairs.filter((pair) => !have.has(pairKey(pair)))],
+    ...(again.missed ? { sameMissed: again.missed } : {}),
+  };
+}
+
+/** The review with the wording suggestions asked for again, added beside any taken last time. */
+function withRewordings(was: Review, suggested: Rewording[]): Review {
+  const skip = new Set([...(was.noReword ?? []), ...was.rewords.map((rewording) => rewording.at)]);
+  const added = suggested.filter((rewording) => !skip.has(rewording.at));
+  return { ...was, asked: { ...was.asked, reword: 'done' }, rewords: [...was.rewords, ...added].sort(byRow) };
+}
+
+/**
+ * The items as they will be brought in. A reworded item keeps the file's own wording as `was`, so that bringing the
+ * same file in again offers the rewording checked; an item split in two becomes its items in order, each keeping
+ * the file's wording as `was`.
+ */
+function itemsToBringIn(
+  review: Review, remove: Set<number>, useReword: Set<number>, rewordAt: Map<number, string[]>,
+): ListItem[] {
+  return review.items.flatMap((item, at) => {
+    if (remove.has(at)) return [];
+    if (!useReword.has(at)) return [item];
+    return rewordAt.get(at)!.map((text) => ({ ...item, text, was: item.text }));
+  });
+}
+
+type ReviewOptions = Pick<ReviewInput, 'askReword' | 'askSame'>;
+
+export function checklistReviewPlan(
+  can: Pick<Capabilities, 'reword' | 'sameMeaning'>, items: ListItem[], target: ListTarget, options: ReviewOptions,
+  review: Review | null, askedFor: string,
+) {
+  const texts = items.map((item) => item.text);
+  const signature = askedAbout(texts, options.askReword, options.askSame, target.generalTexts);
+  const cached = review && askedFor === signature ? review : null;
+  const needsCall = cached
+    ? can.sameMeaning && hasMissedDuplicates(cached)
+    : (options.askReword && can.reword) || (options.askSame && can.sameMeaning);
+  return { texts, signature, cached, needsCall };
+}
+
+function hasMissedDuplicates(review: Review) {
+  return !!review.sameMissed || review.asked.same === 'unreachable' || review.asked.same === 'failed';
+}
+
+/** Build the review from the same choices whether it can ask the model or only check wording locally. */
+export function reviewChecklist(
+  can: Pick<Capabilities, 'reword' | 'sameMeaning'>, items: ListItem[], target: ListTarget, options: ReviewOptions,
+  replies: readonly [RewordReply | null, SameMeaningReply | null] = [null, null],
+) {
+  const [rewordReply, sameReply] = replies;
+  return makeReview({
+    items, earlierItems: target.replaces?.items, generalTexts: target.generalTexts, ...options,
+    canReword: can.reword, canAskSame: can.sameMeaning, rewordReply, sameReply,
+  });
+}
+
+/** The wording and duplicate requests run concurrently, and only for choices the model offers. */
+export function requestChecklistReview(store: Store, texts: string[], options: ReviewOptions, generalTexts: string[]) {
+  const { can } = store.get();
+  const { ai } = store.services;
+  const rewording = options.askReword && can.reword ? ai.reword!({ items: texts }) : null;
+  const duplicates = options.askSame && can.sameMeaning
+    ? ai.sameMeaning!({ items: texts, against: generalTexts })
+    : null;
+  return Promise.all([rewording, duplicates]);
+}
+
+/** Retries ask for the missed rows only, or all rows after a failed full request. */
+export async function retryChecklistDuplicates(
+  store: Store, review: Review, generalTexts: string[], items = review.items.map((item) => item.text),
+) {
+  const only = review.sameMissed?.at ?? items.map((_, at) => at);
+  const reply = await store.services.ai.sameMeaning!({ items, against: generalTexts, only });
+  if (reply.ok) return { review: withMissedPairs(review, reply.value), failure: reply.value.missed?.kind ?? null };
+  const reason = failedAs(reply);
+  if (!review.sameMissed) {
+    return { review: { ...review, asked: { ...review.asked, same: reason } }, failure: reason };
+  }
+  return { review: { ...review, sameMissed: { ...review.sameMissed, kind: reason } }, failure: reason };
+}
+
+export async function retryChecklistWording(store: Store, review: Review) {
+  const items = review.items.map((item) => item.text);
+  const reply = await store.services.ai.reword!({ items });
+  if (reply.ok) return { review: withRewordings(review, reply.value), failure: null };
+  const reason = failedAs(reply);
+  return { review: { ...review, asked: { ...review.asked, reword: reason } }, failure: reason };
+}
+
+export function checklistReviewCounts(review: Review) {
+  return {
+    suggestions: review.rewords.length,
+    duplicates: review.pairs.length,
+    missed: review.sameMissed?.at.length ?? 0,
+  };
+}
+
+export function checklistSelection(review: Review | null, remove: Set<number>, useReword: Set<number>) {
+  const rewordAt = new Map((review?.rewords ?? []).map(({ at, text, also }) => [at, [text, ...(also ?? [])]]));
+  const items = review ? itemsToBringIn(review, remove, useReword, rewordAt) : [];
+  const taken = [...useReword].filter((at) => !remove.has(at));
+  const split = taken.filter((at) => (rewordAt.get(at)?.length ?? 1) > 1).length;
+  return { items, counts: { items: items.length, reworded: taken.length - split, split, removed: remove.size } };
+}
+
+export function checklistWordingChoices(
+  review: Review, remove: Set<number>, useReword: Set<number>, importing: boolean,
+) {
+  const eligible = importing ? [] : review.rewords.map(({ at }) => at).filter((at) => !remove.has(at));
+  return { eligible, allChecked: eligible.length > 0 && eligible.every((at) => useReword.has(at)) };
+}
+
+export function checklistTotals(lists: FirmLayerList[]) {
+  const general = lists.some((list) => list.layer === 'broad');
+  const items = lists.reduce((sum, list) => sum + list.items.length, 0);
+  return { lists: lists.length, items, general, others: lists.length - (general ? 1 : 0) };
+}
+
+export function checklistShelf(state: State) {
+  const { lists } = firmOf(state.firmList);
+  const sections = LAYERS.map((layer) => {
+    const rows = lists.filter((list) => list.layer === layer).map((list) => {
+      const clash = state.conflicts[listId(list.layer, list.name)];
+      return { list, items: list.items.length, clash, versions: clash?.versions.length ?? 0 };
+    });
+    return { layer, rows, count: rows.length };
+  });
+  return { sections, totals: checklistTotals(lists) };
+}
+
+export function submitChecklist(store: Store, importKey: string, target: ListTarget, items: ListItem[], file: string) {
+  // Leaving the kept snapshot behind could offer the same import again after a reload.
+  dropImport(importKey);
+  const name = target.layer === 'broad' ? '' : target.name;
+  return bringIn(store, { layer: target.layer, name, items, file, fileDate: '' });
 }
