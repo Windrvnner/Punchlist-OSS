@@ -1,0 +1,117 @@
+/* The points the first screens left open (mock-open-questions.js): only what the app's and the mock-up's own
+   styles do not already give. */
+
+/* Home's page hides under its past conversations, so nothing shows through the list's glass */
+.x-empty.x-dim {
+  visibility: hidden;
+}
+
+/* Folders: the core documents and a deal sharing these files sit under the folders, set off by a hairline */
+.x-folders .fdgroup {
+  margin: 0;
+  padding: 0;
+}
+.x-sharedgrp {
+  border-top: 1px solid var(--line);
+}
+.x-shared {
+  min-height: 44px;
+}
+.x-shared .x-sname {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+/* the Diligence tab: Run Diligence at the end of the filter row; Filter shows only once the row folds */
+.x-rhead .x-qact {
+  margin-left: auto;
+}
+.x-ckfold {
+  display: none;
+}
+
+/* Deal Info: the folders line, and Delete Deal set apart at the left of the footer */
+.x-infofolders {
+  margin-top: 14px;
+}
+.x-fl {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.x-infoacts {
+  justify-content: flex-start;
+}
+.x-delete {
+  color: var(--high);
+}
+
+/* the breadcrumb's deal name: one button with the counterparty after the name, in quiet ink */
+.x-dealname {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  margin-left: -8px;
+  border: 0;
+  border-radius: var(--r-ctl);
+  background: none;
+  font: inherit;
+  color: var(--ink);
+  cursor: default;
+  white-space: nowrap;
+  align-self: center;
+  line-height: 28px;
+}
+.x-dealname:hover,.x-dealname.hover {
+  background: var(--card-hover);
+}
+.x-dealname .x-cp {
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* a past conversation with a new result shows the archived deals' dot before its time, so times stay aligned */
+.pastpop .pm .x-upd {
+  margin-right: -4px;
+}
+
+/* a long deal list scrolls inside the sidebar, with the search field and the account row in place */
+.rail.x-scale nav {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.rail.x-scale .x-dealscroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.rail.x-scale .rsearch {
+  flex: none;
+}
+
+/* a narrow pane folds Not Settled and Satisfied into Filter, as the Checklist folds its seldom-used filters */
+@container (max-width:480px) {
+  .x-rhead .seg button:nth-child(n+4) {
+    display: none;
+  }
+  .x-ckfold {
+    display: inline-flex;
+  }
+}
+
+/* Needs Input's buttons share one width, so the status texts before them end on one line */
+.x-act {
+  width: 72px;
+  justify-content: center;
+}

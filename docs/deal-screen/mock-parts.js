@@ -7,10 +7,20 @@ const screen = hashParams.get('s') || 'empty';
 document.documentElement.dataset.theme = hashParams.get('theme') || 'dark';
 const windowWidth = innerWidth;
 const narrowWindow = windowWidth <= 1180;
+
 const sidebarWidth = narrowWindow ? 208 : 236;
+// screens shown with the sidebar open and no pane (#888, step 3)
+const FULL_SIDEBAR_SCREENS = ['dealheader', 'details', 'folders', 'homepast', 'archscale'];
 // the sidebar folds to its rail while a pane is open, so the conversation keeps its width, and comes back when the
 // pane closes; `side=1` shows it pinned open
-const sidebarFolded = hashParams.get('side') !== '1' && !['empty', 'active'].includes(screen);
+const sidebarFolded = hashParams.get('side') !== '1'
+  && !['empty', 'active', ...FULL_SIDEBAR_SCREENS].includes(screen);
+
+// the board resolutions task's short name, so it reads whole on its tab and its row
+const BOARD_TASK = 'Resolutions';
+
+/** The page's stage, which holds every screen's conversation and pane. */
+const stage = (content) => `<section class="stage"><div class="x-stage">${content}</div></section>`;
 
 /** An icon from icons.js as an SVG, at the given size and stroke width. */
 function icon(name, size = 16, strokeWidth = 1.75) {

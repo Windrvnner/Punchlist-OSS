@@ -106,25 +106,29 @@ const PAST_CONVERSATIONS = [
   ['Today', 'Board resolutions for the financing', '2:12 PM',
     'The board approved draft 4 of the credit agreement, and draft 6 changes the facility size.'],
   ['Earlier this week', 'Lock-up ratio against the term sheet', 'Mon',
-    'The model’s 1.15x lock-up test matches the term sheet.'],
+    'The credit agreement’s 1.15x lock-up test matches the term sheet.'],
   ['Earlier this week', 'Offtaker position on the revenue contract', 'Mon',
     'The offtaker confirmed no change from the term sheet in its response to Q5.'],
   ['Earlier this week', 'Insurance advisor report gaps', 'Sun',
     'The report leaves out business interruption cover for the grid connection.'],
-  ['Older', 'Debt sizing and sculpting', 'Nov 14',
-    'Sized at 1.30x P50 and sculpted to the DSCR, as the term sheet sets.'],
+  ['Older', 'Conditions precedent to first drawdown', 'Nov 14',
+    '14 of the 31 conditions precedent have a signed document in the data room.'],
   ['Older', 'Hedging strategy letter', 'Nov 6',
     'The letter hedges 75% of the floating rate for the first seven years.'],
 ];
 
-function pastConversationRow([group, title, when, preview], index) {
-  const startsGroup = index === 0 || PAST_CONVERSATIONS[index - 1][0] !== group;
+/** A row of a past conversations list, under its group's heading when it starts one; `beforeTime` goes ahead of the
+ * time (on Home, the deal's name and the new-result dot). */
+function pastConversationRow(rows, index, beforeTime = '') {
+  const [group, title, when, preview] = rows[index];
+  const startsGroup = index === 0 || rows[index - 1][0] !== group;
   return `${startsGroup ? `<div class="pg">${group}</div>` : ''}<a href="#" class="prow ${index === 0 ? 'on' : ''}">`
-    + `<span class="pt">${title}</span><span class="pm">${when}</span><span class="pp">${preview}</span></a>`;
+    + `<span class="pt">${title}</span><span class="pm">${beforeTime}${when}</span>`
+    + `<span class="pp">${preview}</span></a>`;
 }
 
 function pastConversationsList() {
-  const rows = PAST_CONVERSATIONS.map(pastConversationRow).join('');
+  const rows = PAST_CONVERSATIONS.map((_, index) => pastConversationRow(PAST_CONVERSATIONS, index)).join('');
   return '<div class="pastpop down" role="dialog" aria-label="Past conversations"><div class="ptop">'
     + `<label class="psearch">${icon('search', 14)}<input placeholder="Search past conversations"></label>`
     + '<div class="pseg"><button type="button" class="on">This Deal</button><button type="button">All Deals</button>'

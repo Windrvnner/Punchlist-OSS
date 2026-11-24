@@ -310,12 +310,21 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 
 ## Deal screen
 
-These decisions are for the rebuilt deal screen in [deal-screen-design.md](deal-screen-design.md) and are not built yet (#881). Once built, they replace the sidebar's Deal status groups (Pages and navigation), **Past Conversations** in every composer (Conversations), and **Keep It** in confirms (Working rules). How the deal's Overview, Findings, and Checklist pages and the deal header fit the new screen is open.
+These decisions are for the rebuilt deal screen in [deal-screen-design.md](deal-screen-design.md) and are not built yet
+(#881). Once built, they replace Deal status wherever it appears (Look and feel, Pages and navigation), **Past
+Conversations** in every composer (Conversations), and **Keep It** in confirms (Working rules).
+They also replace the deal header, Overview, the Findings page, and **Deals Open On** (Pages and navigation); the
+Findings worklist beside the Checklist (Findings, Checklist); Overview's counts (Checklist); **Deal Memo…** in the ⋯
+menu (Deal memo); and Check again's place and **Check the N Left Out** (Findings, AI and models).
 
 - A deal shows its conversation on the left and, when opened, one pane on the right. The pane's tabs are Tasks, Diligence, and Q&A, always in that order, followed by any opened finding, document, or task, each with ×.
 - The selected tab is 1.5 times as wide as each other tab, and the rest share the bar equally. A hairline separates unselected tabs, the selected tab sits raised, and tabs show no counts. An unselected tab too narrow for its name drops its icon before shortening the word. The Diligence tab uses the Checklist's icon.
 - The sidebar folds to its slim rail while the pane is open and comes back when it closes. A sidebar pinned open stays, and the conversation narrows; the pane gives way only to keep the conversation at least 400px wide.
-- The sidebar lists deals in one list, ordered by when the person last worked on each deal, with no Deal status groups.
+- The checklist is the starting point for diligence, and each item's result is a finding, whether satisfied, flagged,
+  a gap, or not settled: the Diligence list and findings are one list, not two. A flagged result is closed on its
+  finding (#888).
+- A deal has no Deal status. The sidebar lists deals in one list, ordered by when the person last worked on each
+  deal, and **Archive Deal** hides one.
 - A deal's ⋯ menu offers **Archive Deal**, which asks first in the app's confirm dialog. Archived deals fold under **Archived**; a dot marks an archived deal whose data room changed, with its update line ("4 new files · 11:20 AM"). An archived deal's ⋯ menu offers **Unarchive Deal**.
 - The conversation title in the breadcrumb is a button that opens the deal's past conversations. **Past Conversations** leaves the composer.
 - The check of the data room against the checklist is called Diligence (**Run Diligence**, the Diligence tab), and the list of running and finished work is called Tasks. The Diligence tab shows the Checklist's own marks and groups.
@@ -326,6 +335,29 @@ These decisions are for the rebuilt deal screen in [deal-screen-design.md](deal-
 - An opened question sits in a card with its question, response, sources, links, and status, beside the conversation, never covering it. A draft response is marked with a **Draft** badge.
 - A source document opens in the pane in reading mode's viewer, with page navigation and zoom and no passage highlighting.
 - Confirm dialogs say **Cancel**, not **Keep It** (#867).
+- The deal's name and counterparty in the breadcrumb are one button that opens **Deal Info**: name, counterparty,
+  Structure, Sector, Technology, the folders line with **Edit**, and **Delete Deal**. **Deal Memo** is an icon button
+  at the header's right (#888).
+- Overview is retired: its counts are the Diligence and Q&A filters, its Documents list is in **Folders**, and
+  indexing runs as a task (#888).
+- **Run Diligence** sits at the end of the Diligence tab's filter row. Findings that no checklist item raised join
+  the Diligence list under Flagged (#888).
+- A deal opens on a new conversation, with the pane as the person last left it (#888).
+- A question asked in a conversation is answered in that conversation, and anything it needs from the person is
+  asked there. It appears in Tasks only once the person leaves the conversation while it runs, and stays there under
+  Completed once it finishes. Diligence, imports, indexing, Deal Memo, and draft responses always run as tasks (#888).
+- Needs Input holds drafts ready to review, items Diligence did not check ("N items not checked", **Run**), and
+  questions left running that wait on the person ("Awaiting draft selection", **Answer**). Its buttons share one
+  width (#888).
+- Home's header holds **Past Conversations**, which lists every conversation with its deal's name (#888).
+- Working on a deal means sending a message in it, starting a task on it, or changing its records, details, or
+  folders. Archived lists deals whose data room changed first, newest change first, then the rest by when they were
+  last worked on; a deal's dot and update line clear once it is opened. Archiving is kept on the person's own record
+  of the deal (#888).
+- Deleting a conversation, once allowed, leaves its tasks running, and its confirm says how many are running (#888).
+- A conversation that receives a task's result moves to the top of Past Conversations, with a dot until it is
+  opened (#888).
+- Task steps, task notices, and status text are written in a neutral voice, with no first person (#888).
 
 ## Built, awaiting confirmation
 
