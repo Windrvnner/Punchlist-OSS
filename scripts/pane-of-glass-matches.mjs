@@ -47,12 +47,12 @@ function stringValues(expression, resolve = () => ['*']) {
   return ['*'];
 }
 
-function importTargets(file, source) {
+function importTargets(program) {
   let constants;
   function targets(node, seen = new Set()) {
     return stringValues(node, (identifier) => {
-      constants ??= localConstants(file, source);
-      const initializer = constants.get(identifier.start);
+      constants ??= localConstants(program);
+      const initializer = constants.get(identifier);
       if (!initializer || seen.has(initializer)) return ['*'];
       return targets(initializer, new Set(seen).add(initializer));
     });
@@ -85,13 +85,13 @@ function unwrapped(node) {
 }
 
 export function matchesIn(file, source, forbiddenFiles) {
-  const parsed = parseSync(file, source);
+  const parsed = parseSync(file, source, { range: true });
   if (parsed.errors.length) throw new Error(`${file}: ${parsed.errors[0].message}`);
   const offsets = {};
   function record(kind, node) {
     (offsets[kind] ??= new Set()).add(node.start);
   }
-  const targets = importTargets(file, source);
+  const targets = importTargets(parsed.program);
   function checkModule(node) {
     if (targets(node).some((name) => forbiddenModule(file, name))) record('import', node);
   }

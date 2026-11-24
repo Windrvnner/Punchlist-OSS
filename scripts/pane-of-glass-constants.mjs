@@ -1,21 +1,26 @@
-// Resolve an import argument in its lexical scope. Most UI files have only literal imports and skip this pass.
+// Read bindings from the same TypeScript tree used for the rest of the guard. Literal imports skip scope analysis.
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 
-export function localConstants(file, source) {
-  const { parse } = require('@babel/parser');
-  const { default: traverse } = require('@babel/traverse');
-  const plugins = file.endsWith('.tsx') ? ['typescript', 'jsx'] : ['typescript'];
-  const ast = parse(source, { sourceType: 'module', sourceFilename: file, plugins });
+function fixedInitializer(variable) {
+  if (variable.defs.length !== 1) return null;
+  const { node } = variable.defs[0];
+  if (node.type !== 'VariableDeclarator' || node.id.type !== 'Identifier') return null;
+  if (variable.references.some((ref) => ref.isWrite() && !ref.init)) return null;
+  return node.init;
+}
+
+export function localConstants(program) {
+  const { analyze } = require('@typescript-eslint/scope-manager');
   const values = new Map();
-  traverse(ast, {
-    ReferencedIdentifier(path) {
-      const binding = path.scope.getBinding(path.node.name);
-      if (!binding?.constant || !binding.path.isVariableDeclarator()) return;
-      const { id, init } = binding.path.node;
-      if (id.type === 'Identifier' && init) values.set(path.node.start, init);
-    },
-  });
+  const { scopes } = analyze(program, { sourceType: 'module', lib: [], jsxPragma: null });
+  for (const scope of scopes) {
+    for (const variable of scope.variables) {
+      const initializer = fixedInitializer(variable);
+      if (!initializer) continue;
+      for (const ref of variable.references) values.set(ref.identifier, initializer);
+    }
+  }
   return values;
 }

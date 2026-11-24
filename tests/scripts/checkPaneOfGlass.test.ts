@@ -111,6 +111,24 @@ describe('UI dependency checks', () => {
     expect(result.stderr).toContain(`${file} import (lines 2, 5, 8): 3 exceeds`);
   });
 
+  it('resolves imports in TypeScript classes with decorators and auto-accessors', () => {
+    const repo = fixture();
+    const file = 'src/ui/picker.ts';
+    const screen = [
+      'function recordClass(_target: object) {}',
+      '@recordClass',
+      'export class Picker { accessor label = "Checklist"; }',
+      "const page = './hooks'",
+      'export const load = () => import(page)',
+    ].join('\n');
+    repo.write(file, screen);
+    expect(repo.run().status).toBe(0);
+    repo.write(file, screen.replace('./hooks', '../backend/lenient'));
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 5): 1 exceeds`);
+  });
+
   it('checks eager and lazy Vite glob imports against the included files', () => {
     const repo = fixture();
     const file = 'src/ui/readers.ts';
