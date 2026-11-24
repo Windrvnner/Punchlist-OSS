@@ -212,6 +212,40 @@ describe('UI dependency checks', () => {
     if (forbidden) expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
   });
 
+  it.each([
+    { options: "...{ base: '../backend' }", dev: 'backend', prod: 'ui' },
+    { options: "base: '../' + 'backend'", dev: 'backend', prod: 'ui' },
+    { options: "base: '../backend'", dev: 'backend', prod: 'backend' },
+    { options: "...{ base: '../ui' }", dev: 'ui', prod: 'ui' },
+    { options: "base: '../backend', ...{ base: '../ui' }", dev: 'ui', prod: 'backend' },
+    { options: "base: '../' + 'ui'", dev: 'ui', prod: 'ui' },
+  ])('preserves the options expression $options in each Vite mode', async ({ options, dev, prod }) => {
+    const repo = fixture();
+    const file = 'src/ui/reader.ts';
+    for (const layer of ['ui', 'backend']) repo.write(`src/${layer}/part.ts`, 'export const read = true');
+    for (const eager of [true, false]) {
+      repo.write(file, `export const readers = import.meta.glob('./part.ts', { ${options}, eager: ${eager} })`);
+      expect(await developmentSources(repo.dir, file)).toContain(`src/${dev}/part.ts`);
+      expect(await bundledSources(repo.dir, file)).toContain(`src/${prod}/part.ts`);
+      const result = repo.run();
+      const forbidden = dev === 'backend' || prod === 'backend';
+      expect(result.status).toBe(forbidden ? 1 : 0);
+      if (forbidden) expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
+    }
+  });
+
+  it('keeps calls and getters out of the options evaluated by the probe', () => {
+    const repo = fixture();
+    repo.write('src/ui/part.ts', 'export const title = "Checklist"');
+    repo.write('src/ui/reader.ts', [
+      "const pages = import.meta.glob('./part.ts', { eager: (() => { throw Error('called') })() })",
+      "const views = import.meta.glob('./part.ts', { ...{ get eager() { throw Error('getter') } } })",
+    ].join('\n'));
+    const result = repo.run();
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+
   it('allows glob keys that both modes enumerate without importing a module', async () => {
     const repo = fixture();
     const file = 'src/ui/readers.ts';
