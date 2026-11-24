@@ -6,10 +6,11 @@
  * holds, or a new version the app can make again. An archive file is created only under a free name.
  */
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { readZip, partText } from './zipParts';
+import { createCopy, fileArchive, sha256, stageCopy, tidy, tidyStage, verifyCopy, type StagedArchive }
+  from './qaLogArchive';
 
 /**
  * a folder name that reads as an archive: "Archive", "02 - Old", "Superseded docs", "Prior versions", "Version history" (a bare "History" may hold anything). Only "Archive" and
@@ -19,7 +20,7 @@ const ARCHIVE = /^(?:\d+[\s._-]*)?(?:(?:archived?|superseded)(?:\s.*)?|old(?: ve
 /** the longest file name most file systems and shares take, in bytes */
 const MAX_NAME = 255;
 
-export const sha256 = (b: Uint8Array) => crypto.createHash('sha256').update(b).digest('hex');
+export { sha256 } from './qaLogArchive';
 
 /** the folder's own archive, or undefined when it has none */
 function archiveIn(folder: string): string | undefined {
@@ -44,72 +45,6 @@ function fit(name: string, rest: string): string {
   let n = name; while (n && Buffer.byteLength(n + rest) > MAX_NAME - 6) n = n.slice(0, -1);   // 6: room for " (99)"
   return n.trimEnd();
 }
-function verifyCopy(file: string, expected: string): Buffer {
-  const before = copyVersion(file);
-  const bytes = fs.readFileSync(file);
-  if (sha256(bytes) !== expected || copyVersion(file) !== before) {
-    throw new Error('The Q&A log copy did not match the original');
-  }
-  return bytes;
-}
-
-/** Include identity and write times so a concurrent edit cannot validate an earlier read (#21). */
-function copyVersion(file: string): string {
-  const stat = fs.lstatSync(file, { bigint: true });
-  if (!stat.isFile()) throw new Error('The Q&A log copy is not a regular file');
-  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
-}
-
-/** A failed exclusive write cannot prove a shared name is safe to remove (#21). */
-function copyThroughNewHandle(file: string, bytes: Uint8Array): void {
-  const handle = fs.openSync(file, 'wx');
-  try {
-    fs.writeFileSync(handle, bytes);
-  } finally { fs.closeSync(handle); }
-}
-
-type StagedArchive = { file: string; bytes: Uint8Array };
-
-/** Stage in local scratch, which does not depend on permissions or path length in the archive folder (#21). */
-function stageCopy(name: string, bytes: Uint8Array, expected: string): StagedArchive {
-  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-qalog-Archive-'));
-  const file = path.join(scratch, name);
-  try {
-    fs.writeFileSync(file, bytes, { flag: 'wx' });
-    return { file, bytes: verifyCopy(file, expected) };
-  } catch (error) {
-    tidyStage(file);
-    throw error;
-  }
-}
-
-function tidyStage(file: string): void {
-  tidy(file);
-  try { fs.rmdirSync(path.dirname(file)); } catch { /* a held scratch file may remain */ }
-}
-
-/** Claim the first free name. Once published, the shared file never belongs to cleanup (#21). */
-function create(dir: string, base: string, ext: string, bytes: Uint8Array): string {
-  const expected = sha256(bytes);
-  for (let suffix = 1; ; suffix++) {
-    const name = `${base}${suffix > 1 ? ` (${suffix})` : ''}${ext}`;
-    const file = path.join(dir, name);
-    try {
-      copyThroughNewHandle(file, bytes);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST' && suffix <= 99) continue;
-      throw error;
-    }
-    verifyCopy(file, expected);
-    return name;
-  }
-}
-
-function fileArchive(dir: string, base: string, ext: string, bytes: Uint8Array): string {
-  const staged = stageCopy(`${base}${ext}`, bytes, sha256(bytes));
-  try { return create(dir, base, ext, staged.bytes); } finally { tidyStage(staged.file); }
-}
-
 /** A retained edit needs its base for the next merge. Refresh its change time after filing that base (#21). */
 function refreshAsideTime(file: string): void {
   const handle = fs.openSync(file, 'r+');
@@ -127,7 +62,7 @@ function archiveRacedEdit(o: {
   } catch (error) {
     // Leave the edit in the folder when the archive refuses it. Preserve the base where a later merge can find it.
     try {
-      create(o.dir, o.base, o.ext, o.staged.bytes);
+      createCopy(o.dir, o.base, o.ext, o.staged.bytes);
       refreshAsideTime(o.aside);
     } catch { /* the original and the edit stay in their current files */ }
     throw error;
@@ -233,9 +168,6 @@ function tidyLeftovers(folder: string, file: string, archive: string, now: numbe
   try { for (const n of fs.readdirSync(archive)) if (path.extname(n).toLowerCase() === ext.toLowerCase()) look(path.join(archive, n)); } catch { /* no archive to vouch for them */ }
   for (const l of left) if (held.has(l.hash) || (l.size === 0 && l.f.endsWith('.tmp'))) tidy(l.f);   // an empty one: a clock probe (folderNow) left held
 }
-/** removes a working file, leaving it for the next save's tidyLeftovers when another program holds it: the save itself is done */
-const tidy = (f: string) => { try { fs.rmSync(f, { force: true }); } catch { /* left for the next save */ } };
-
 /** Check again before removing the aside, in case the archive changed while the save was in progress (#21). */
 function tidyArchivedAside(aside: string, archived: string): void {
   try {
@@ -388,7 +320,7 @@ export function saveLog(o: { folder: string; file: string; bytes: Uint8Array; wa
       return { status: 'later' };
     }
     // Publish the dated archive only after confirming what this update actually moved (#21).
-    const archive = create(dir, archiveBase, ext, staged.bytes);
+    const archive = createCopy(dir, archiveBase, ext, staged.bytes);
     holds = archive;
     // The new version takes the log's name only if nobody made a file there meanwhile: a link fails on a name in use,
     // where a rename would replace it. A share that has no links (some NAS) gets a rename after one more look.
@@ -423,5 +355,5 @@ export function saveLog(o: { folder: string; file: string; bytes: Uint8Array; wa
 /** a new log in `folder`: `file`, or the first free "name (2).ext" when that is taken; never replaces a file */
 export function createLog(folder: string, file: string, bytes: Uint8Array): string {
   const ext = path.extname(file);
-  return create(folder, file.slice(0, file.length - ext.length), ext, bytes);
+  return createCopy(folder, file.slice(0, file.length - ext.length), ext, bytes);
 }
