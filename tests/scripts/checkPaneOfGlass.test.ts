@@ -122,6 +122,75 @@ describe('UI dependency checks', () => {
     }
   });
 
+  it('keeps the module captured from a literal record when the UI reads its caption', () => {
+    const repo = fixture();
+    const file = 'src/ui/checklistReader.ts';
+    const source = [
+      "const paths = { entry: 'node:path', title: 'Checklist' } as const",
+      'const { entry } = paths',
+      'export const load = () => import(entry)',
+      'export const title = paths.title',
+      'export function scoped() {',
+      "  const paths = { entry: './checklist.mjs', title: 'Open findings' }",
+      "  const title = paths['title']",
+      '  const { entry: reader } = paths',
+      '  return import(reader)',
+      '}',
+      "const caption = () => 'Checklist'",
+      "const details = { entry: 'node:path', title: caption() }",
+      'type ChecklistEntry = typeof details.entry',
+      'const headings: Record<string, string> = {}',
+      "headings[details.title.toUpperCase()] = 'Open findings'",
+      'const { title: label } = details',
+      'const { entry: selected } = details',
+      "details.entry = './checklist.mjs'",
+      'export const before = () => import(selected)',
+    ].join('\n');
+    const loader = [
+      "import { load, scoped, before } from './build/checklistReader.js'",
+      "const builtIn = await import('node:path')",
+      'const modules = await Promise.all([load(), scoped(), before()])',
+      "console.log(modules.map(page => page === builtIn ? 'node:path' : page.caption).join(','))",
+    ].join('\n');
+    repo.write(file, source);
+    expect(loadCompiledFixture(repo, file, loader)).toBe('node:path,Checklist,node:path');
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 3, 19): 2 exceeds`);
+    repo.write(file, source.replaceAll('node:path', './checklist.mjs'));
+    expect(loadCompiledFixture(repo, file, loader)).toBe('Checklist,Checklist,Checklist');
+    expect(repo.run().status).toBe(0);
+  });
+
+  it('allows a record import selected by a write, an escaped reference or a getter', () => {
+    const repo = fixture();
+    const file = 'src/ui/checklistReader.ts';
+    repo.write(file, [
+      "const paths = { entry: 'node:path' }",
+      "{ type paths = string; paths.entry = './checklist.mjs' }",
+      'const { entry: changed } = paths',
+      'export const after = () => import(changed)',
+      "const shared = { entry: 'node:path' }",
+      'const alias = shared',
+      "alias.entry = './checklist.mjs'",
+      'const { entry: current } = shared',
+      'export const fromAlias = () => import(current)',
+      "const runtime = { get entry() { return './checklist.mjs' } }",
+      'const { entry } = runtime',
+      'export const fromState = () => import(entry)',
+      "const pending = { entry: 'node:path' }",
+      'export function deferred() { const { entry } = pending; return import(entry) }',
+      "pending.entry = './checklist.mjs'",
+    ].join('\n'));
+    const loader = [
+      "import { after, fromAlias, fromState, deferred } from './build/checklistReader.js'",
+      'const modules = await Promise.all([after(), fromAlias(), fromState(), deferred()])',
+      "console.log(modules.map(page => page.caption).join(','))",
+    ].join('\n');
+    expect(loadCompiledFixture(repo, file, loader)).toBe('Checklist,Checklist,Checklist,Checklist');
+    expect(repo.run().status).toBe(0);
+  });
+
   it('follows immutable aliases in their declaring scope and ignores runtime and type-only inputs', () => {
     const repo = fixture();
     const file = 'src/ui/modulePicker.ts';
