@@ -39,6 +39,14 @@ afterEach(() => {
 });
 
 describe('UI dependency checks', () => {
+  it('runs the guard after readability in the static check', () => {
+    const { scripts } = JSON.parse(readFileSync('package.json', 'utf8'));
+    const commands = scripts['check:static'].split(' && ');
+    const readability = commands.indexOf('node scripts/check-readability.mjs');
+    expect(readability).toBeGreaterThanOrEqual(0);
+    expect(commands.indexOf('node scripts/check-pane-of-glass.mjs')).toBeGreaterThan(readability);
+  });
+
   it('reports the file, kind and line of each forbidden dependency', () => {
     const repo = fixture();
     const sources = {
