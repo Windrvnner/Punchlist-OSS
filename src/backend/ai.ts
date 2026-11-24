@@ -38,9 +38,10 @@
  * Nothing here asks the person a question part-way: every call and every run ends with a result or a failure.
  */
 import { MODEL_TEXT_MAX, fitText, fitParas } from '../domain/importExport';
+import { withoutMarkers } from '../domain/cite';
 import { ok, fail, type Result } from '../domain/result';
 import type { AiService, Repository, CheckSummary, CheckState, DealProgress, ChecklistRow } from '../ports';
-import { WORKSTREAMS, CHECK_REASON, type Source } from '../domain/model';
+import { WORKSTREAMS, CHECK_REASON, type Provenance, type Question, type Source } from '../domain/model';
 import type { ConverseInput, Conversed, ModelService } from './service';
 import type { ToolMode } from './agent';
 import { withSignInCap } from './signInToken';
@@ -1536,10 +1537,17 @@ export function nodeAi(o: AiOptions) {
 
   /** a response already given on the deal, to a question that reads like the one being drafted for */
   type Alike = { n: number; text: string; response: string; by: string; ai: boolean };
+  type AlikeQuestion = Pick<Question, 'id'> & Partial<Pick<Question,
+    'n' | 'text' | 'response' | 'askedBy' | 'status' | 'provenance'>>;
   const ALIKE = 5;                                                               // earlier responses one draft is shown at most
   const ALIKE_SHARE = 0.5;                                                       // of the question's weight in words, how much another question must share to be shown
   /** the words of a text as `words` gives them for the deal (its short names given their long form), and with each hyphenated word also written whole, so "lock-up" and "lockup" meet */
   const alikeWords = (t: string, dealId: string) => new Set([...words(t, dealId), ...words(t.replace(/(\p{L})[-\u2010\u2011\u2013](?=\p{L})/gu, '$1'), dealId)]);
+  /** Only an accepted draft keeps markers for that question's sources (#287). */
+  function priorResponse(response: string, provenance?: Provenance): string {
+    const sourceCount = provenance?.origin === 'ai' ? provenance.sources?.length ?? 0 : 0;
+    return fitText(withoutMarkers(response, sourceCount));
+  }
   /**
    * The responses on a deal to questions that read like this one, likeliest first: every other question a person marked
    * Answered or Closed (a typed response leaves a question open until a person marks it, so it may not have been given yet),
@@ -1549,15 +1557,21 @@ export function nodeAi(o: AiOptions) {
    */
   async function alike(dealId: string, questionId: string, text: string): Promise<Alike[]> {
     const mine = alikeWords(text, dealId); if (!mine.size) return [];
-    const log = (await live<{ id: string; n?: number; text?: string; response?: string; askedBy?: string; status?: string; provenance?: { origin?: string } }>('question', dealId) ?? []).filter((q) => q.id !== questionId && q.text?.trim());   // none to suggest while they cannot be read
+    const questions = await live<AlikeQuestion>('question', dealId) ?? [];
+    const log = questions.filter((q) => q.id !== questionId && q.text?.trim());
     const sets = log.map((q) => alikeWords(q.text!, dealId)); const df = new Map<string, number>();
     for (const set of sets) for (const w of set) if (mine.has(w)) df.set(w, (df.get(w) ?? 0) + 1);     // how rare a word is, counted over the whole log
     const weight = (w: string) => Math.log(1 + (log.length + 1) / ((df.get(w) ?? 0) + 1)); let whole = 0; for (const w of mine) whole += weight(w);
     const given = (q: (typeof log)[number]) => !!q.response?.trim() && (q.status === 'answered' || q.status === 'closed') && typeof q.n === 'number';
     return log.map((q, k) => { if (!given(q)) return { q, share: 0 }; let got = 0; for (const w of mine) if (sets[k].has(w)) got += weight(w); return { q, share: got / whole }; })
       .filter((x) => x.share >= ALIKE_SHARE).sort((a, b) => b.share - a.share || a.q.n! - b.q.n!).slice(0, ALIKE)
-      // a used draft keeps its [n] markers, which point at that question's own sources: taken out, so none is read against this draft's documents
-      .map(({ q }) => ({ n: q.n!, text: q.text!, response: fitText(q.response!.replace(/\s*\[\d+\]/g, '')), by: (q.askedBy ?? '').trim(), ai: q.provenance?.origin === 'ai' }));
+      .map(({ q }) => ({
+        n: q.n!,
+        text: q.text!,
+        response: priorResponse(q.response!, q.provenance),
+        by: (q.askedBy ?? '').trim(),
+        ai: q.provenance?.origin === 'ai',
+      }));
   }
   const one = (t: string) => t.replace(/\s+/g, ' ').trim();
   let briefs = new Map<string, { key: string; paragraphs: string[] }>();
