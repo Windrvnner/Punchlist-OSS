@@ -209,7 +209,11 @@ A deal's checklist is made up of its own item records, linked to the findings an
 - **An issues list** is attached and read through `src/app/issuesList.ts`. The model reads and checks each page against the
   file and proposes titles and matches (`issuesList` in `src/backend/ai.ts`). The preview and import command resolve the
   same matches through `src/app/issuesListJoins.ts`.
-- **An import in progress** (the file, the model's reading, the choices, and the check marks) is kept on each PC in IndexedDB (`src/ui/keptImports.ts`), part by part. A Q&A submission reaches IndexedDB before its operation starts, and keeps a unique journal correlation until both the rows and its Q&A log choice are finished. Reopening resumes that submission without appending its rows again.
+- **An import in progress** (the file, the model's reading, the choices, and the check marks) is kept on each PC,
+  part by part, through the `KeptImports` port. Both shells use the IndexedDB adapter. `src/app/keptImports.ts` keeps
+  the parts and coordinates Q&A submission checkpoints. A submission reaches the store before its operation starts
+  and keeps a unique journal correlation until both the rows and its Q&A log choice are finished. Reopening resumes
+  that submission without appending its rows again.
 - **The deal memo** (`src/app/memo.ts`, `src/domain/memo.ts`, `src/domain/memoDoc.ts`) asks the model only for the summary and each open finding's rating. Everything else is worked out from the records, and LibreOffice turns the result into Word and PDF files.
 
 ## Conversations
