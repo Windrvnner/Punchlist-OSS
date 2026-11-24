@@ -268,15 +268,52 @@ const isAway = (why: string | undefined) => !!why && (why.startsWith(AWAY.slice(
  * `n` puts the lines in order: each is one more than the highest this PC had read, so a later line comes later
  * whatever the clock on the PC that wrote it says.
  */
-interface CheckLine extends RLine { v: 1; at: string; item?: string; text?: string; result?: Outcome; finding?: string; run?: string; docs?: string[]; need?: string; /** for a satisfied item: the places it was settled on */ where?: { docId: string; loc: string; quote?: string }[]; /** for an item left unsettled: what stopped it, for a person to read */ why?: string; /** what the checks' search looked for to settle it, and how many documents answered each */ trail?: { q: string; n: number }[]; full?: FullCheck & { round?: string; /** when the round's work was finished, the same whichever PC writes it (rounds finishedAt) */ done?: string }; heard?: Heard; core?: unknown; /** work this PC has taken on, so another PC does not do it too; it lapses at `until` unless renewed */ claim?: Claim; /** the claimed work is over */ release?: { keys: string[]; pc: string }; /** a mark that waits for a person to choose between a finding's versions */ owed?: Owed; /** that a mark owed earlier was written, or is no longer needed */ paid?: { finding: string; why: string }; /** the deal memo's ratings of open findings: each holds while the finding's words (`key`) stay the same */ rated?: { id: string; key: string; rating: Rating }[]; n?: number }
+interface CheckLine extends RLine {
+  v: 1;
+  at: string;
+  item?: string;
+  text?: string;
+  result?: Outcome;
+  finding?: string;
+  run?: string;
+  docs?: string[];
+  need?: string;
+  /** For a satisfied item, the places it was settled on. */
+  where?: { docId: string; loc: string; quote?: string }[];
+  /** For an unsettled item, what stopped it. */
+  why?: string;
+  /** What the search looked for to settle the item and how many documents answered each search. */
+  trail?: { q: string; n: number }[];
+  /** `done` is when the round finished, the same whichever PC writes it. */
+  full?: FullCheck & { round?: string; done?: string };
+  heard?: Heard;
+  core?: unknown;
+  /** Work this PC has taken on. The claim lapses at `until` unless renewed. */
+  claim?: Claim;
+  release?: { keys: string[]; pc: string };
+  /** A mark that waits for a person to choose between a finding's versions. */
+  owed?: Owed;
+  /** A mark owed earlier was written or is no longer needed. */
+  paid?: Pick<Owed, 'finding' | 'why' | 'round'>;
+  /** The memo's rating holds while the finding's words (`key`) stay the same. */
+  rated?: { id: string; key: string; rating: Rating }[];
+  n?: number;
+}
 /** a check log line may also say what the third-party reports sweep did (reports.ts) */
 interface CheckLine { report?: ReportLine }
 /** Paid work a PC has taken on for a deal: a run of checks, or describing documents. Another PC that sees it live leaves that work alone. */
 interface Claim { keys: string[]; pc: string; label?: string; until: string }
 /** how long a claim holds without being renewed, and how often a long run renews it */
 const CLAIM_MS = control.timings.describeLapse, RENEW_MS = control.timings.describeRenew;
-/** A mark the backend could not write because the finding has versions nobody has chosen between: written by the next run, on any PC, once one is chosen. */
-interface Owed { finding: string; why: string; questions?: string[] }
+interface MarkEvidence {
+  questions?: string[];
+  round?: string;
+}
+/** A mark written by the next run on any PC after a person chooses between the finding's versions. */
+interface Owed extends MarkEvidence {
+  finding: string;
+  why: string;
+}
 /** That a response on a question linked to no finding has been looked at: `said` names the response's wording, `findings` are the open findings it was judged able to change, and `against` every open finding it has been set against, so that it is set against each once. */
 interface Heard { question: string; said: string; findings: string[]; against?: string[] }
 /** That everything on a deal was checked: by the first pass getting to the end for the first time, or by a check of everything, quick or deep. */
