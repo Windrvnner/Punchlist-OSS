@@ -105,6 +105,7 @@ describe('UI dependency checks', () => {
     const repo = fixture();
     const file = 'src/ui/checklistReader.ts';
     const target = `../${layer}/term.ts`;
+    const version = JSON.parse(readFileSync('package.json', 'utf8')).version;
     repo.write('src/ui/term.ts', 'export const term = "Checklist"');
     repo.write('src/backend/term.ts', 'export const term = "Checklist"');
     repo.write(file, [
@@ -124,12 +125,15 @@ describe('UI dependency checks', () => {
       `export const common = require('${target}')`,
       `import direct = require('${target}')`,
       'export { direct }',
+      `export const relative = import.meta.env.BASE_URL === './' ? import.meta.glob('../${layer}/{term}.ts') : {}`,
+      `export const absolute = import.meta.env.BASE_URL !== './' ? import.meta.glob('../${layer}/{term}.ts') : {}`,
+      `export const stale = __APP_VERSION__ !== '${version}' ? import.meta.glob('../${layer}/{term}.ts') : {}`,
     ].join('\n'));
     const result = repo.run();
     const folded = existsSync(path.join(repo.dir, 'src/BACKEND/term.ts'));
     expect(result.status, result.stderr).toBe(layer === 'ui' ? 0 : 1);
     if (layer === 'backend') {
-      const lines = [1, 2, 3, 5, 6, 7, 9, ...(folded ? [12] : []), 13, 14, 15];
+      const lines = [1, 2, 3, 5, 6, 7, 9, ...(folded ? [12] : []), 13, 14, 15, 17];
       expect(result.stderr).toContain(`${file} import (lines ${lines.join(', ')}): ${lines.length} exceeds`);
     }
   });
@@ -141,14 +145,21 @@ describe('UI dependency checks', () => {
     repo.write('src/backend/part.ts', 'export const term = true');
     const bases = [
       `...{ base: '../${layer}' }`, `base: '../' + '${layer}'`, `base: { checklist: '../${layer}' }.checklist`,
+      `['base']: '../${layer}'`, `base: '../${layer}', query: { offset: -1 }`,
+      "base: `../${'" + layer + "'}`", `base: { ...{ ...{ location: '../${layer}' } } }.location`,
+      `base: { ...{ bundle: { location: '../${layer}' } } }.bundle.location`,
     ];
     const source = bases.flatMap((base, index) => ['true', 'false'].map((eager) =>
       `export const read${index}${eager} = import.meta.glob('./part.ts', { ${base}, eager: ${eager} })`));
     source.push("export const deferred = import.meta.glob('./part.ts', { eager: process.exit(7) })");
+    source.push("export const computed = import.meta.glob('./part.ts', { [process.exit(8)]: true })");
     repo.write(file, source.join('\n'));
     const result = repo.run();
     expect(result.status, result.stderr).toBe(layer === 'ui' ? 0 : 1);
-    if (layer === 'backend') expect(result.stderr).toContain(`${file} import (lines 1, 2, 3, 4, 5, 6): 6 exceeds`);
+    if (layer === 'backend') {
+      const lines = '1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16';
+      expect(result.stderr).toContain(`${file} import (lines ${lines}): 16 exceeds`);
+    }
   });
 
   it.each(['ui', 'backend'])('resolves a workspace export to its real %s module', (layer) => {
