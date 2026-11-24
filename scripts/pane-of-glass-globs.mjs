@@ -70,7 +70,10 @@ function snapshotPath(value, from, project) {
   const depth = (directory) => directory.split('/').filter(Boolean).length;
   if (value.startsWith('**')) return '/' + '../'.repeat(depth(project)) + value;
   const absolute = value.startsWith('/');
-  if (!absolute && !value.startsWith('./') && !value.startsWith('../')) return packageName(value) ? value : undefined;
+  if (!absolute && !value.startsWith('./') && !value.startsWith('../')) {
+    if (value.startsWith('#') || packageName(value)) return value;
+    return;
+  }
   const directory = absolute ? project : from;
   const parents = value.split(/[\\/]/).filter((part) => part === '..').length;
   if (parents <= depth(directory)) return value;

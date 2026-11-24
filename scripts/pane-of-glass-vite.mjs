@@ -85,7 +85,6 @@ export async function forbiddenGlobs(file, globs, inventory, forbidden) {
   try {
     writeSnapshot(root, scratch, file, inventory, globs);
     writeFileSync(path.join(root, 'tsconfig.json'), '{}');
-    writeFileSync(path.join(root, 'package.json'), '{"type":"module"}');
     const config = { root, configFile: false, envDir: false, publicDir: false, logLevel: 'silent',
       cacheDir: path.join(root, '.cache') };
     const forbiddenId = forbiddenModuleIds(root, inventory.files, forbidden);

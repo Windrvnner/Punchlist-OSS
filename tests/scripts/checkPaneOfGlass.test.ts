@@ -184,6 +184,7 @@ describe('UI dependency checks', () => {
     const file = 'src/ui/readers.ts';
     for (const id of [backend, ui, header, nested]) repo.write(id, `export const source = '${id}'`);
     repo.write('node_modules/preact/package.json', JSON.stringify({ name: 'preact', main: 'index.js' }));
+    repo.write('node_modules/preact/.config/package.json', 'Private configuration');
     repo.write('node_modules/preact/index.js', 'export const version = 1');
     const call = `import.meta.glob(${args})`;
     repo.write(file, `export const readers = ${wrapper ? `${wrapper}(${call})` : call}`);
@@ -353,6 +354,45 @@ describe('UI dependency checks', () => {
     const result = repo.run();
     expect(result.status).toBe(layer === 'backend' ? 1 : 0);
     if (layer === 'backend') expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
+  });
+
+  it.each(['ui', 'backend'])('resolves public package paths and dot-prefixed aliases to %s', async (layer) => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    const directory = `src/${layer}/terms`;
+    const target = `${directory}/term.ts`;
+    repo.write(target, 'export const term = true');
+    repo.write('package.json', JSON.stringify({ type: 'module', imports: { '#terms/*': `./${directory}/*` } }));
+    repo.write(`${directory}/package.json`, JSON.stringify({ name: 'deal-terms', exports: { './*': './*' } }));
+    mkdirSync(path.join(repo.dir, 'node_modules'));
+    symlinkSync('../' + directory, path.join(repo.dir, 'node_modules/deal-terms'), 'dir');
+    symlinkSync(directory, path.join(repo.dir, '.tables'), 'dir');
+    const patterns = ['#terms/*.ts', 'deal-terms/term.ts', '/node_modules/deal-terms/*.ts', '/.tables/*.ts'];
+    for (const pattern of patterns) {
+      repo.write(file, `export const readers = import.meta.glob('${pattern}', { exhaustive: true })`);
+      const { dev, prod } = await viteSources(repo.dir, file);
+      expect(dev.map((id) => id.split('?')[0])).toEqual([target]);
+      expect(prod).toEqual([target]);
+      const result = repo.run();
+      expect(result.status).toBe(layer === 'backend' ? 1 : 0);
+      if (layer === 'backend') expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
+    }
+  });
+
+  it('compares package imports with the manifest from the committed source tree', () => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    const manifest = (layer: string) => JSON.stringify({ imports: { '#terms/*': `./src/${layer}/*` } });
+    repo.write('package.json', manifest('ui'));
+    repo.write('src/ui/term.ts', 'export const term = true');
+    repo.write('src/backend/term.ts', 'export const term = true');
+    repo.write(file, "export const readers = import.meta.glob('#terms/term.ts')");
+    git(repo.dir, 'init', '-q', '-b', 'main');
+    git(repo.dir, 'add', 'src', 'package.json');
+    git(repo.dir, 'commit', '-qm', 'Record the original sources');
+    repo.write('package.json', manifest('backend'));
+    repo.setBaseline({ [file]: { import: 1 } });
+    expect(repo.run().stderr).toContain('the baseline cannot rise above the committed count of 0');
   });
 
   it('leaves private and out-of-repository directory links outside the filename snapshot', () => {

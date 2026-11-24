@@ -41,12 +41,15 @@ function committedCounts(ref) {
 function committedSources(at) {
   const files = [];
   const links = new Map();
+  const manifests = new Set();
   for (const record of git('ls-tree', '-r', '-z', at).split('\0').filter(Boolean)) {
     const file = record.slice(record.indexOf('\t') + 1);
-    if (record.startsWith('120000 ') && !privatePath(file)) links.set(file, git('show', `${at}:${file}`));
+    if (privatePath(file)) continue;
+    if (record.startsWith('100') && basename(file) === 'package.json') manifests.add(file);
+    if (record.startsWith('120000 ')) links.set(file, git('show', `${at}:${file}`));
     else if (file.startsWith('src/') && record.startsWith('100')) files.push(file);
   }
-  return { files, links };
+  return { files, links, manifest: (file) => manifests.has(file) ? git('show', `${at}:${file}`) : undefined };
 }
 
 // Comparing the proposed baseline with main catches an edit that raises both the count and its allowance.
@@ -105,7 +108,8 @@ function linkAt(file) {
 }
 let allLinks;
 const liveLinks = () => (allLinks ??= projectLinks(links));
-const found = await scan({ files, links, linkAt, liveLinks }, read);
+const manifest = (file) => lstatSync(file, { throwIfNoEntry: false })?.isFile() ? read(file) : undefined;
+const found = await scan({ files, links, linkAt, liveLinks, manifest }, read);
 const baseline = JSON.parse(read(baselinePath));
 const committed = await committedBaseline();
 const problems = [];
