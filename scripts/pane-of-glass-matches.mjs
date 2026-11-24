@@ -1,16 +1,12 @@
 // Match syntax, so examples in comments, strings, regexes and JSX text never count as UI dependencies.
 import { posix } from 'node:path';
 import { parseSync, Visitor } from 'vite';
+import { importsForbiddenGlob } from './pane-of-glass-globs.mjs';
+import { literalValue, unwrapped } from './pane-of-glass-syntax.mjs';
 
 const storageNames = new Set(['localStorage', 'sessionStorage', 'indexedDB']);
 const layerPath = /^(?:backend|adapters|desktop|shell)(?:\/|$)/;
 const externalModule = /^(?:node:|(?:electron|fs|path)(?:\/|$))/;
-
-function literalText(node) {
-  if (typeof node?.value === 'string') return node.value;
-  if (node?.type === 'TemplateLiteral' && !node.expressions.length) return node.quasis[0].value.cooked;
-  return null;
-}
 
 function concatenate(left, right) {
   return left.flatMap((prefix) => right.map((suffix) => prefix + suffix));
@@ -29,8 +25,8 @@ function templateValues(node) {
 function stringValues(expression) {
   if (!expression) return [];
   const node = unwrapped(expression);
-  const text = literalText(node);
-  if (text !== null) return [text];
+  const text = literalValue(node);
+  if (typeof text === 'string') return [text];
   if (node.type === 'TemplateLiteral') return templateValues(node);
   if (node.type === 'BinaryExpression' && node.operator === '+') {
     return concatenate(stringValues(node.left), stringValues(node.right));
@@ -40,11 +36,14 @@ function stringValues(expression) {
   return ['*'];
 }
 
+export function forbiddenSource(file) {
+  return file.startsWith('src/') && layerPath.test(file.slice('src/'.length));
+}
+
 function forbiddenModule(file, name) {
   if (externalModule.test(name)) return true;
   if (!name.startsWith('.')) return layerPath.test(name.replace(/^\/?src\//, ''));
-  const target = posix.join(posix.dirname(file), name);
-  return target.startsWith('src/') && layerPath.test(target.slice('src/'.length));
+  return forbiddenSource(posix.join(posix.dirname(file), name));
 }
 
 function propertyNames(key, computed) {
@@ -52,16 +51,7 @@ function propertyNames(key, computed) {
   return stringValues(key);
 }
 
-// Assertions, parentheses and optional chains leave the underlying path or member unchanged.
-function unwrapped(node) {
-  while (['TSNonNullExpression', 'TSAsExpression', 'TSTypeAssertion', 'TSSatisfiesExpression',
-    'ChainExpression', 'ParenthesizedExpression'].includes(node.type)) {
-    node = node.expression;
-  }
-  return node;
-}
-
-export function matchesIn(file, source) {
+export function matchesIn(file, source, forbiddenFiles) {
   const parsed = parseSync(file, source);
   if (parsed.errors.length) throw new Error(`${file}: ${parsed.errors[0].message}`);
   const offsets = {};
@@ -105,6 +95,7 @@ export function matchesIn(file, source) {
     TSImportType: moduleSource,
     TSExternalModuleReference: (node) => checkModule(node.expression),
     CallExpression(node) {
+      if (importsForbiddenGlob(file, node, forbiddenFiles)) record('import', node);
       if (node.callee.type === 'Identifier' && node.callee.name === 'require') checkModule(node.arguments[0]);
     },
     MemberExpression: checkMember,
