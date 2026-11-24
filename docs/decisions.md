@@ -146,7 +146,9 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - **Turn Off Item** is in an item's ⋯ menu; a turned-off item stays in place, dimmed.
 - A list can be pasted in or imported from any clearly laid-out file. The model reads it, every line is accounted for, and lines left out are listed with a checkbox to bring them in. Here accuracy comes before cost: the standard model reads the list, and the thorough model retries lines it couldn't place.
 - An item that joins two conditions becomes two items, and "(if applicable)" goes only on an item that may not apply to every deal.
-- Findings is the worklist and the Checklist is the coverage record; nothing is opened or closed on the Checklist.
+- The checklist is the starting point for diligence, and each item's result is a finding, whether satisfied, flagged,
+  a gap, or not settled: the Checklist and findings are one list, not two. A flagged result is closed on its finding
+  (#888).
 - An opened gap says what is needed and which documents were read, naming any that couldn't be read.
 - A document opened from the Checklist opens in reading mode and returns to the same item.
 - A "Satisfied" result should cite a source that opens. A result the model can't place should be left not settled,
