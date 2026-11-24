@@ -217,6 +217,9 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 
 ## Storage and sharing between PCs
 
+- For now, the app is designed around one person at a time on each deal, across any of their own PCs, syncing through
+  a shared folder such as OneDrive. This is a design focus, not a restriction: new multi-person features wait for a
+  coordination layer, such as a database backend, and nothing built now may block them (#834).
 - Records are stored as change files in the team's shared folder, and each PC writes only its own. OneDrive
   provides automatic discovery and sync. The folder picker also accepts folders outside OneDrive (#111).
 - A PC connects through the team folder's share link in the control file (`desktop.teamFolderLink`). On screen, the folder is called the "Punchlist folder", and its name defaults to Punchlist (`desktop.sharedFolder`).

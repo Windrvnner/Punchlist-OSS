@@ -2,6 +2,7 @@
 import { expect, it } from 'vitest';
 import { checklistQuestionTarget } from '../../src/app/checklistQuestion';
 import { checklistDrafts } from '../../src/app/checklistDrafts';
+import { logQuestionDraft, questionDraftAt } from '../../src/app/logQuestionDraft';
 import { initialState } from '../../src/app/state';
 import { derivedId } from '../../src/domain/derivedId';
 import type { ChecklistRow } from '../../src/ports';
@@ -76,4 +77,32 @@ it('captures the finding before typing and preserves it across an edit, a cleare
   expect(drafts.open(row.id).text).toBe('');
   reopened.begin(period.id);
   expect(reopened.findingId).toBe(period.id);
+});
+
+it('clears the checklist text and finding at the recovered key when the original Log lands', async () => {
+  const state = checkedPortfolio();
+  const original = row.id;
+  const moved = new Map<string, string>();
+  const movedId = (key: string) => moved.get(key) ?? key;
+  const texts = new Map<string, string>();
+  const targets = new Map<string, string>();
+  const drafts = checklistDrafts({ texts, targets, movedId });
+  const card = drafts.open(original);
+  const question = 'What ratio applies before the first distribution?';
+  card.begin(state.findings[ratio.id].id);
+  card.write(question);
+  const sent = questionDraftAt(original, movedId, texts, card.clear);
+  const saving = logQuestionDraft(question, sent, async () => ({ ok: true }), () => false);
+  moved.set(original, 'copied-item');
+  moved.set('copied-item', 'latest-item');
+  for (const kept of [texts, targets]) {
+    kept.set('latest-item', kept.get(original)!);
+    kept.delete(original);
+  }
+  const other = drafts.open('distribution-period');
+  other.begin(period.id);
+  other.write(question);
+  expect(await saving).toBe(true);
+  expect([...texts]).toEqual([['distribution-period', question]]);
+  expect([...targets]).toEqual([['distribution-period', period.id]]);
 });

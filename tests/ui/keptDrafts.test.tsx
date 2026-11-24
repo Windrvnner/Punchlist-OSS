@@ -56,6 +56,21 @@ describe('drafts kept across a restart', () => {
     expect(reopened.text).toBe('Which lock-up ratio applies?');
   });
 
+  it('keeps an edit from the original Checklist card on its finding after two recoveries', async () => {
+    let drafts = await load();
+    const original = drafts.keptChecklistQuestions.open('deal:item');
+    original.begin('finding');
+    original.write('Which ratio applies?');
+    drafts.renameKept({ deal: 'copy', item: 'copied-item', finding: 'copied-finding' });
+    drafts.renameKept({ copy: 'latest', 'copied-item': 'latest-item', 'copied-finding': 'latest-finding' });
+    original.write('Which ratio applies on the first distribution date?', 'another-finding');
+    drafts.saveKeptDrafts();
+    drafts = await load();
+    const latest = drafts.keptChecklistQuestions.open('latest:latest-item');
+    expect(latest.text).toBe('Which ratio applies on the first distribution date?');
+    expect(latest.findingId).toBe('latest-finding');
+  });
+
   it('keep what a map not made yet this session left', async () => {
     localStorage.setItem(KEY, JSON.stringify({ 'test-later': [['a', 'left']] }));
     const k = await load();

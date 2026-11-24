@@ -44,7 +44,8 @@ const soon = () => { if (!timer) timer = setTimeout(saveKeptDrafts, SAVE_AFTER_M
 
 /** records whose ids changed (a deleted deal kept as a copy): old id → new, for each part of a key between colons */
 const renamed = new Map<string, string>();
-const moveKey = (k: string) => (renamed.size ? k.split(':').map((part) => renamed.get(part) ?? part).join(':') : k);
+export const moveKey = (key: string) =>
+  renamed.size ? key.split(':').map((part) => renamed.get(part) ?? part).join(':') : key;
 let staleOf: (v: unknown) => unknown = (v) => v;
 
 /** a map that asks for a save whenever it changes */

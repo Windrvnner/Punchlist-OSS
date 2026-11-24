@@ -432,16 +432,12 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
   // the card being typed in keeps one place in the pane, on or off, so turning the item off never takes it away or moves the focus
   // shown whenever a question is being typed, whatever happens to the item or its finding meanwhile; Escape sets it
   // aside only where Ask the counterparty brings it back
-  const cancelAsking = () => {
-    setText('');
-    stopAsking();
-  };
   const escapeAsking = () => {
     if (canAsk) stopAsking();
   };
   const card = asking ? <AskCard ids="ck-ask" cls="ckask" counterparty={d?.counterparty ?? ''}
     linked={target.title} text={text} onText={setText} why={logWhy} busy={busy} onLog={() => void log()}
-    onCancel={cancelAsking} onEscape={escapeAsking} /> : null;
+    onCancel={draft.cancel} onEscape={escapeAsking} /> : null;
   return (
     <div class="det ckdet glass" key={r.id} id="ck-detail" ref={pane}>
       <div class="dmeta">
