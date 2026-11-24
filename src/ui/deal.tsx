@@ -9,7 +9,7 @@ import { Composer } from './conversation';
 import { dealNameRoom, EditDeal, GROUP_LABEL } from '../app/commands/deals';
 import { MoreMenu, MenuItem } from './moreMenu';
 import { Pick } from './qa';
-import { resumeIndexing } from '../app/indexing';
+import { dealFirstPassStatus, indexingStopped, resumeIndexing } from '../app/indexing';
 import { conflictVersionCount, findingCounts, indexingTotals, questionCounts } from '../app/dealCounts';
 import { EditField, ReadOnlyContext, readDeal } from './editField';
 import { ConflictView } from './conflict';
@@ -173,8 +173,7 @@ function CheckAgain({ deal: d, signedOut, done }: { deal: Deal; signedOut: strin
   const s = useAppState();
   const ro = useContext(ReadOnlyContext);
   const check = s.checks[d.id];
-  const found = findingCounts(s, d.id).total > 0;
-  const first = d.stage === 'indexing' && !found ? 'Indexing' : null;
+  const first = dealFirstPassStatus(s, d).waiting ? 'Indexing' : null;
   const run = () => act(done, () => void store.checkEverything(d.id, false, false));
   return <MenuItem id="deal-check" off={!!check?.busy} why={ro ?? signedOut ?? first} onClick={run}>
     {check?.busy ? 'Checking…' : 'Check Again'}
@@ -257,7 +256,7 @@ function DealName({ deal: d, renaming, open, done }: { deal: Deal; renaming: boo
  */
 export function Stalled({ deal: d }: { deal: Deal }) {
   const store = useStore(); const s = useAppState();
-  if (d.stage !== 'indexing' || !s.ui.indexStalled.includes(d.id)) return null;
+  if (!indexingStopped(s, d)) return null;
   const { indexed: got, files: of } = indexingTotals(s, d);
   // not running and not finished: the app tries again by itself. Which line is shown depends on why it is waiting
   const wait = s.ui.indexWaiting[d.id];
@@ -284,16 +283,14 @@ export function DealPage({ dealId }: { dealId: string }) {
   const d = s.deals[dealId];
   useEffect(() => { void store.loadDeal(dealId); }, [dealId]);
   if (!d) return null;
-  const none = !findingCounts(s, d.id).total;
-  const indexing = d.stage === 'indexing'; const stopped = indexing && s.ui.indexStalled.includes(d.id);
+  const { noRoom, waiting, showIndexing } = dealFirstPassStatus(s, d);
   return (
     <div class="home top wide">
       <PageTop deal={d} route="findings" placeholder={askAbout(d.name)} />
       <Stalled deal={d} />
-      {none && !d.folders.length ? <NoRoom deal={d} />
-        : none && stopped ? null
-        : none && indexing ? <p class="emptyline" title={INDEXING_TIP}>{INDEXING_LINE}</p>
-        : <FindingsSection deal={d} />}
+      {noRoom ? <NoRoom deal={d} />
+        : showIndexing ? <p class="emptyline" title={INDEXING_TIP}>{INDEXING_LINE}</p>
+        : !waiting && <FindingsSection deal={d} />}
     </div>
   );
 }

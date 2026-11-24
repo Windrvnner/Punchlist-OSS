@@ -16,8 +16,7 @@ import { RestoreVersion, type ShownNote, type DeletedCopy } from '../app/command
  * response (or detail) that tells them apart, whole.
  */
 const plural = (n: number, w: string) => `${n.toLocaleString('en-US')} ${w}${n === 1 ? '' : 's'}`;
-export const deletedOf = (...args: Parameters<typeof visibleDeletedNotes>) =>
-  visibleDeletedNotes(...args).sort((a, b) => b.at.localeCompare(a.at));
+export const deletedOf = visibleDeletedNotes;
 
 /** One row: a deletion note or entry, or one of a note's other copies. */
 interface Row { key: string; t: ShownNote; copy?: DeletedCopy; snapshot: unknown; at: string; actor: string; from?: string }
@@ -28,8 +27,7 @@ const rowsOf = (notes: ShownNote[]): Row[] => notes.flatMap((t) => [{ key: t.id,
  * or marks on findings its points joined. The Deleted list is where an import is taken back once its notice has gone.
  */
 export const listsOf = (...args: Parameters<typeof removableIssuesLists>) => {
-  const out = [...removableIssuesLists(...args)]
-    .sort((a, b) => a.list.localeCompare(b.list) || a.at.localeCompare(b.at) || a.doc.localeCompare(b.doc));
+  const out = removableIssuesLists(...args);
   // to the second when two of them came in within the same minute
   return out.map((l) => { const twins = out.filter((o) => o !== l && bare(o.list) === bare(l.list)); return { ...l, twin: twins.length > 0, when: !l.at ? '' : twins.some((o) => o.at && fmtDateTime(o.at) === fmtDateTime(l.at)) ? fmtDateTimeSeconds(l.at) : fmtDateTime(l.at) }; });
 };

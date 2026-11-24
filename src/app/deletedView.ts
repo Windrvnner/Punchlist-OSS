@@ -12,7 +12,7 @@ export function visibleDeletedNotes(state: DeletedState, dealId: string, kind?: 
     if (kind && note.kind !== kind) return false;
     if (state.conflicts?.[(note as ShownNote).of ?? note.id]) return false;
     return !(note.kind === 'question' ? state.questions?.[note.id] : state.findings?.[note.id]);
-  });
+  }).sort((a, b) => b.at.localeCompare(a.at));
 }
 
 type ListsState = Pick<State, 'findings' | 'questions'> & Partial<Pick<State, 'threads'>>;
@@ -27,7 +27,8 @@ function removableLists(state: ListsState, dealId: string) {
     }
   }
   return [...names].map(([doc, list]) => ({ doc, list, ...removable(state, dealId, doc) }))
-    .filter(({ made, joined }) => made.length > 0 || joined.length > 0);
+    .filter(({ made, joined }) => made.length > 0 || joined.length > 0)
+    .sort((a, b) => a.list.localeCompare(b.list) || a.at.localeCompare(b.at) || a.doc.localeCompare(b.doc));
 }
 
 let listsMemo: (ListsState & { dealId: string; lists: ReturnType<typeof removableLists> }) | undefined;

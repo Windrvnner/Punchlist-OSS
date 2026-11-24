@@ -27,7 +27,7 @@ export function OverviewPage({ dealId }: { dealId: string }) {
   const d = s.deals[dealId];
   useEffect(() => { void store.loadDeal(dealId); void store.refreshChecklist(dealId); }, [dealId]);   // the checklist's rows say what each gap needs
   if (!d) return null;
-  const { waiting, noRoom, stopped, gaps } = overviewStatus(s, d);
+  const { waiting, noRoom, showIndexing, gaps } = overviewStatus(s, d);
   return (
     <div class="home top wide">
       <PageTop deal={d} route="overview" placeholder={askAbout(d.name)} />
@@ -43,7 +43,7 @@ export function OverviewPage({ dealId }: { dealId: string }) {
             <span>{g.need}</span>}</li>)}</ul></div>}
           <div><Documents deal={d} /></div>
         </section>
-        {waiting && !stopped && <p class="emptyline" title={INDEXING_TIP}>{INDEXING_LINE}</p>}
+        {showIndexing && <p class="emptyline" title={INDEXING_TIP}>{INDEXING_LINE}</p>}
       </>}
     </div>
   );

@@ -36,19 +36,27 @@ function overviewGaps(
     .map((row) => ({ key: row.id, title: row.text, need: row.need }));
 }
 
+export function indexingStopped(state: Pick<State, 'ui'>, deal: Pick<Deal, 'id' | 'stage'>) {
+  return deal.stage === 'indexing' && state.ui.indexStalled.includes(deal.id);
+}
+
+/** Overview and Findings share the first-pass state, including when the stalled notice replaces Indexing. */
+export function dealFirstPassStatus(
+  state: Pick<State, 'findings' | 'ui'>, deal: Pick<Deal, 'id' | 'stage' | 'folders'>,
+) {
+  const noFindings = !Object.values(state.findings).some((finding) => finding.dealId === deal.id);
+  const waiting = deal.stage === 'indexing' && noFindings;
+  const noRoom = noFindings && deal.folders.length === 0;
+  const stopped = indexingStopped(state, deal);
+  return { waiting, noRoom, stopped, showIndexing: waiting && !noRoom && !stopped };
+}
+
 /** A first pass that has yet to produce findings has no gaps or standing to show. */
 export function overviewStatus(
   state: Pick<State, 'checklists' | 'gaps' | 'findings' | 'ui'>, deal: Pick<Deal, 'id' | 'stage' | 'folders'>,
 ) {
-  const noFindings = !Object.values(state.findings).some((finding) => finding.dealId === deal.id);
-  const indexing = deal.stage === 'indexing';
-  const waiting = indexing && noFindings;
-  return {
-    waiting,
-    noRoom: noFindings && deal.folders.length === 0,
-    stopped: indexing && state.ui.indexStalled.includes(deal.id),
-    gaps: waiting ? [] : overviewGaps(state, deal.id),
-  };
+  const status = dealFirstPassStatus(state, deal);
+  return { ...status, gaps: status.waiting ? [] : overviewGaps(state, deal.id) };
 }
 
 function unavailableFolders(missing: FolderSearch | null, dealId: string) {
