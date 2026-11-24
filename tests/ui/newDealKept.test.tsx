@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const KEY = 'dil/1/kept-drafts';
 const load = async () => {
   await restartKeptText();
-  return import('../../src/ui/newDealKept');
+  return import('../../src/app/newDealDraft');
 };
 const folder = (n: number) => ({ path: `D:\\Deals\\Room ${n}`, label: `Room ${n}`, files: 100 + n, size: '0.3 GB' });
 const DRAFT = {
