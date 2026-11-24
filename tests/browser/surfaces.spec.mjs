@@ -62,10 +62,14 @@ for (const scheme of ['light', 'dark']) {
   say(`${scheme}:queue-titles-line-up-and-count-once`, q.head === q.title && q.search === q.title && q.cnt === 'hidden', JSON.stringify(q)); await page.mouse.move(800, 300); await page.waitForFunction(() => !document.body.classList.contains('qopen'));
   await page.click('.opening .ref .rb'); await page.waitForSelector('#doc-close', { state: 'attached' }); await page.waitForTimeout(700);
   await page.hover('.opening .ref .rb'); await page.waitForSelector('.opening .ref:hover .pop', { state: 'visible' }); await page.waitForTimeout(350); await check('reading-citation-pop', '.opening .ref:hover .pop'); await page.mouse.move(800, 300);
-  await check('reading-doc-nav', '.docnav'); await check('reading-composer', '#pcomposer'); await check('reading-conversation-column', '.chatwrap.withdoc .chat'); await check('reading-conversation-header', '.chatwrap.withdoc .chat .chathead');
+  await check('reading-doc-nav', '.docnav');
+  await check('reading-composer', '#pcomposer');
+  await check('reading-conversation-column', '.reading-pane');
+  await check('reading-conversation-header', '.reading-pane .chathead');
   // reading, the open queue leaves no strip of the conversation column or the composer showing past it
   await page.mouse.move(40, 300); await page.waitForFunction(() => document.body.classList.contains('qopen')); await page.waitForTimeout(400);
-  const under = await page.evaluate(() => ['.chatwrap.withdoc .chat', '#pcomposer'].map((x) => getComputedStyle(document.querySelector(x)).maskImage));
+  const under = await page.evaluate(() => ['.reading-pane', '#pcomposer']
+    .map((selector) => getComputedStyle(document.querySelector(selector)).maskImage));
   await page.evaluate(() => document.querySelector('#pcomposer textarea').focus()); await page.waitForTimeout(100);
   const typing = await page.evaluate(() => getComputedStyle(document.getElementById('pcomposer')).maskImage);   // a composer being typed in stays in view
   await page.evaluate(() => document.activeElement?.blur?.());
