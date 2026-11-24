@@ -156,6 +156,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - An item that is no longer in the current master checklist lists gets an icon, for information only (#2).
 - Linking the Checklist, Findings, and Q&A follows docs/linking-design.md, which covers only what is not yet built (#2). The next step is letting a person mark a gap resolved, with its source and with Undo. The rest waits until it is requested.
 - Each list in the master checklist is its own shared record. Bringing a list in adds its items to every deal that uses it and is not marked Closed. A deal's items are append-only; swapping a list asks first when items would be turned off.
+- The Wording heading checkbox selects or clears every available suggestion, and each row keeps its own checkbox (#377).
 - A rewording accepted when a list was brought in is offered again the next time.
 - In an open checklist import, a review that needs the model waits for a pending review request. The Duplicates line
   and footer show the latest retry failure, and a partial check keeps its pairs and checked removals (#378).

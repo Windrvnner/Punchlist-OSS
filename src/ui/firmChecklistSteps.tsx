@@ -127,7 +127,9 @@ function wordingRow(view: ImportView, review: Review) {
   return (
     <div class="srow top"><div class="k">Wording</div><div>
       <div class="rv-h" title={count ? 'Only checked items take the new wording' : undefined}>
-        <b>{notDone ? 'Not asked' : count ? plural(count, 'suggestion') : 'No suggestions'}</b>
+        {count > 0 && wordingSelection(view, review)}
+        {notDone && <b>Not asked</b>}
+        {!notDone && !count && <b>No suggestions</b>}
         {notDone && <span>{notDone}</span>}
         {notDone && view.can.reword && <button type="button" class="linkb" id="cl-reword-retry"
           title="Ask for them again" disabled={!!view.work.busy}
@@ -140,13 +142,40 @@ function wordingRow(view: ImportView, review: Review) {
   );
 }
 
-function rewordingRow({ listReview, work }: ImportView, review: Review, rewording: Rewording) {
+function rewordingLocked({ listReview, work }: ImportView, at: number) {
+  return listReview.remove.has(at) || work.busy === 'importing';
+}
+
+function wordingSelection(view: ImportView, { rewords }: Review) {
+  const { useReword, setUseReword } = view.listReview;
+  const count = plural(rewords.length, 'suggestion');
+  const eligible = rewords.map(({ at }) => at).filter((at) => !rewordingLocked(view, at));
+  const allChecked = eligible.length > 0 && eligible.every((at) => useReword.has(at));
+  // #377: Retain checkmarks on locked rows so restoring a removed item also restores its wording choice.
+  const setAll = (checked: boolean) => setUseReword((previous) => {
+    const next = new Set(previous);
+    for (const at of eligible) {
+      if (checked) next.add(at);
+      else next.delete(at);
+    }
+    return next;
+  });
+  return (
+    <label class="xcheck" style="min-height:24px" title="Select or clear all available wording suggestions">
+      <input id="cl-reword-all" type="checkbox" aria-label={`${count}, select or clear all`} aria-controls="cl-rewords"
+        checked={allChecked} disabled={!eligible.length} onChange={(event) => setAll(event.currentTarget.checked)} />
+      <b>{count}</b>
+    </label>
+  );
+}
+
+function rewordingRow(view: ImportView, review: Review, rewording: Rewording) {
+  const { listReview } = view;
   const { at } = rewording;
-  const locked = listReview.remove.has(at) || work.busy === 'importing';
   return (
     <label class="rv-row" key={at} title={rewording.earlier ? 'Taken when this list was last imported' : undefined}>
       <input type="checkbox" data-reword={at} checked={listReview.useReword.has(at)}
-        disabled={locked} onChange={() => listReview.flipReword(at)} />
+        disabled={rewordingLocked(view, at)} onChange={() => listReview.flipReword(at)} />
       <div>
         <div class="rv-was"><i>Was</i>{review.items[at].text}</div>
         {[rewording.text, ...(rewording.also ?? [])].map((text, k) => (
