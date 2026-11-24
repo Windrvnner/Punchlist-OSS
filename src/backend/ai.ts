@@ -1543,19 +1543,29 @@ export function nodeAi(o: AiOptions) {
   const ALIKE_SHARE = 0.5;                                                       // of the question's weight in words, how much another question must share to be shown
   /** the words of a text as `words` gives them for the deal (its short names given their long form), and with each hyphenated word also written whole, so "lock-up" and "lockup" meet */
   const alikeWords = (t: string, dealId: string) => new Set([...words(t, dealId), ...words(t.replace(/(\p{L})[-\u2010\u2011\u2013](?=\p{L})/gu, '$1'), dealId)]);
+  /** A spacing-only edit can move the boundary without changing the quoted characters (#287). */
+  function draftCitationStart(response: string, prefixLength: number | undefined): number {
+    if (prefixLength === undefined) return 0;
+    let left = prefixLength;
+    for (const token of response.matchAll(/\S+/g)) {
+      if (left < token[0].length) return token.index + left;
+      left -= token[0].length;
+    }
+    return response.length;
+  }
   /** Only an accepted draft keeps markers for that question's sources (#287). */
   function priorResponse(response: string, provenance?: Provenance): string {
     if (provenance?.origin !== 'ai') return fitText(response);
     const sources = provenance.sources ?? [];
-    const start = sources[0]?.draftCitationStart ?? 0;
+    const start = draftCitationStart(response, sources[0]?.draftCitationPrefixLength);
     const quoted = response.slice(0, start);
     return fitText(quoted + withoutMarkers(response.slice(start), sources.length));
   }
   /** A draft's own markers can share numbers with literal brackets in the earlier responses (#287). */
   function draftSources(sources: Source[], quotation: string): Source[] {
-    if (!quotation) return sources;
-    const draftCitationStart = quotation.length + 2;
-    return sources.map((source) => ({ ...source, draftCitationStart }));
+    if (withoutMarkers(quotation, sources.length) === quotation) return sources;
+    const draftCitationPrefixLength = quotation.replace(/\s/g, '').length;
+    return sources.map((source) => ({ ...source, draftCitationPrefixLength }));
   }
   /**
    * The responses on a deal to questions that read like this one, likeliest first: every other question a person marked

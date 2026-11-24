@@ -47,8 +47,8 @@ const Record = z.object({
  * the app stores it untouched and does not display or highlight it. `dealId` is needed only on answers that
  * range across deals, so the page can be fetched from the right one. `reading` marks a page of a blackline: what it
  * shows of a change is the model's reading, to be checked on the page.
- * `draftCitationStart` is where a Q&A draft's document text starts after any quoted responses.
- * Markers for a draft's sources occur only from that offset onward.
+ * `draftCitationPrefixLength` counts the non-whitespace characters of a Q&A draft's quoted responses.
+ * The draft's own source markers follow that prefix.
  */
 export const Source = z.object({
   doc: z.string().min(1),
@@ -59,7 +59,7 @@ export const Source = z.object({
   dealId: z.string().optional(),
   reading: z.literal(true).optional(),
   precedent: z.literal(true).optional(),
-  draftCitationStart: z.number().int().nonnegative().optional(),
+  draftCitationPrefixLength: z.number().int().nonnegative().optional(),
 }); // A source's other keys are dropped, including on a record from a newer build.
 export type Source = z.infer<typeof Source>;
 /** What identifies a cited document: its id. */
@@ -349,13 +349,25 @@ export type Operation = z.infer<typeof Operation>;
 /** Stored envelope: what the repository reads and writes. */
 export const Envelope = z.object({ schema: z.number().int(), kind: z.string(), rev: z.number().int().nonnegative(), updatedAt: z.string(), data: z.unknown() });
 export type Envelope = z.infer<typeof Envelope>;
-export const CURRENT_SCHEMA = 1;
+export const CURRENT_SCHEMA = 2;
+
+/** Drafts, accepted responses, and journal or deletion snapshots can carry the boundary for their citations (#287). */
+function containsDraftCitationBoundary(data: unknown): boolean {
+  if (!data || typeof data !== 'object') return false;
+  if ('docId' in data && 'draftCitationPrefixLength' in data && typeof data.draftCitationPrefixLength === 'number') {
+    return true;
+  }
+  return Object.values(data).some(containsDraftCitationBoundary);
+}
+
 /**
  * The schema a record's content needs: the lowest that can carry it. A record is marked with this, not with the schema of
- * the build that wrote it, so that an older build is kept off only the records it would get wrong. Every record needs 1
- * today; the release that adds fields older builds must not change raises CURRENT_SCHEMA and says here which records need it.
+ * the build that wrote it, so that an older build is kept off only the records it would get wrong.
  */
-export function schemaOf(_kind: string, _data: unknown): number { return 1; }
+export function schemaOf(kind: string, data: unknown): number {
+  if (kind !== 'question' && kind !== 'tombstone' && kind !== 'op') return 1;
+  return containsDraftCitationBoundary(data) ? 2 : 1;
+}
 
 /** `item`: one checklist item of a deal; `firmList`: the firm's checklist, one record (src/domain/checklist.ts); `member`: a person's place on a deal */
 export type RecordKind = 'deal' | 'question' | 'finding' | 'tombstone' | 'op' | 'audit' | 'item' | 'firmList' | 'member';
