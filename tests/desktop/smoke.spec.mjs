@@ -39,6 +39,35 @@ async function started(at) {
   return { app, page };
 }
 
+async function forceDesktopExit(app) {
+  const child = app.process();
+  const exited = once(child, 'exit');
+  if (process.platform === 'win32') {
+    // Chromium child processes can keep the profile open after the main process is killed.
+    execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
+  } else {
+    // Playwright launches Electron in its own process group.
+    process.kill(-child.pid, 'SIGKILL');
+  }
+  await exited;
+}
+
+const responseBox = '.qpanel [aria-label="Response"]';
+async function openQuestionResponse(page, dealId) {
+  await page.evaluate((id) => { location.hash = '#qa-' + id; }, dealId);
+  await page.waitForFunction(
+    (id) => store.get().dealLoad[id] === 'loaded' && document.querySelector('.qapage'),
+    dealId,
+  );
+  const questionId = await page.evaluate((id) => {
+    const question = Object.values(store.get().questions).find((record) => record.dealId === id);
+    store.ui({ selectedQuestion: question.id });
+    return question.id;
+  }, dealId);
+  await page.waitForSelector(responseBox);
+  return questionId;
+}
+
 // 0 the first start asks for the shared folder and saves nothing before; the OneDrive one is offered
 let app = await launch(); let page = await app.firstWindow();
 {
@@ -129,18 +158,34 @@ let dealId;
   await page.fill('#hask', draft);
   // Past the 400 ms draft save, before Chromium ordinarily flushes its storage.
   await page.waitForTimeout(750);
-  const child = app.process();
-  const exited = once(child, 'exit');
-  if (process.platform === 'win32') {
-    // Chromium child processes can keep the profile open after the main process is killed.
-    execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
-  } else {
-    child.kill('SIGKILL');
-  }
-  await exited;
+  await forceDesktopExit(app);
 
   ({ app, page } = await started());
   say('kept-draft-after-forced-exit', await page.inputValue('#hask') === draft);
+}
+
+// A response that could not be saved to its record survives the same forced exit (#825).
+{
+  const questionId = await openQuestionResponse(page, dealId);
+  await page.evaluate((id) => {
+    const repo = store.services.repo;
+    const transaction = repo.transaction.bind(repo);
+    repo.transaction = async (request) => request.writes?.some((write) => write.id === id)
+      ? { ok: false, error: { kind: 'unreachable', message: 'The shared folder is unavailable' } }
+      : transaction(request);
+  }, questionId);
+
+  const draft = 'The amended credit agreement requires lender consent before a change of control.';
+  await page.fill(responseBox, draft);
+  await page.waitForSelector('.qpanel .efstate.fail');
+  // Give the failed response's kept snapshot time to be written.
+  await page.waitForTimeout(500);
+  await forceDesktopExit(app);
+
+  ({ app, page } = await started());
+  await openQuestionResponse(page, dealId);
+  const saved = await page.evaluate((id) => store.get().questions[id].response, questionId);
+  say('kept-failed-response-after-forced-exit', saved === '' && await page.inputValue(responseBox) === draft);
 }
 
 // Settings shows the shared folder with Change
