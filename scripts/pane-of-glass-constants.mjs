@@ -65,7 +65,8 @@ export function localBindings(program) {
     if (reference?.type === 'MemberExpression') {
       if (seen.has(reference)) return null;
       const visited = new Set(seen).add(reference);
-      return resolve(memberValue(resolve(reference.object, visited), reference), visited);
+      const next = (part) => resolve(part, visited);
+      return next(memberValue(next(reference.object), reference, next));
     }
     return reference?.type === 'Identifier' ? resolveVariable(reference, seen, capture) : reference;
   }
