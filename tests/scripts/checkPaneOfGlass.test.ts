@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -97,6 +99,75 @@ describe('UI dependency checks', () => {
     expect(result.status).toBe(1);
     for (const diagnostic of expected) expect(result.stderr).toContain(diagnostic);
     expect(result.stderr).toContain('"The frontend is a pane of glass" in CLAUDE.md');
+  });
+
+  it.each(['ui', 'backend'])('reports globs that import the %s layer in either Vite mode', (layer) => {
+    const repo = fixture();
+    const file = 'src/ui/checklistReader.ts';
+    const target = `../${layer}/term.ts`;
+    repo.write('src/ui/term.ts', 'export const term = "Checklist"');
+    repo.write('src/backend/term.ts', 'export const term = "Checklist"');
+    repo.write(file, [
+      `import '${target}'`,
+      `export const eager = import.meta.glob('${target}', { eager: true, import: 'term' })`,
+      `export const lazy = import.meta.glob('${target}')`,
+      `export const keys = (Object.keys)(import.meta.glob('${target}'))`,
+      `export const text = import.meta.glob('${target}', { query: '?raw' })`,
+      `export const url = import.meta.glob('${target}', { as: 'url' })`,
+      `export function Reader() { return new.target ? {} : import.meta.glob('../${layer}/{term}.ts') }`,
+      `export const dev = import.meta.env.DEV ? import.meta.glob('../${layer}/{term}.ts') : {}`,
+      `export function* steps() { return (yield 'Checklist') ? import.meta.glob('${target}') : {} }`,
+      "export const local = import.meta.glob(['../{backend,ui}/term.ts', '!../backend/**'])",
+      "export const pairs = import.meta.glob('../[!b]*/term.ts')",
+      `export const folded = import.meta.glob('../${layer.toUpperCase()}/*.ts', { caseSensitive: false })`,
+      `export const typed = (import.meta.glob<{ term: string }>)('${target}')`,
+      `export const common = require('${target}')`,
+      `import direct = require('${target}')`,
+      'export { direct }',
+    ].join('\n'));
+    const result = repo.run();
+    const folded = existsSync(path.join(repo.dir, 'src/BACKEND/term.ts'));
+    expect(result.status, result.stderr).toBe(layer === 'ui' ? 0 : 1);
+    if (layer === 'backend') {
+      const lines = [1, 2, 3, 5, 6, 7, 9, ...(folded ? [12] : []), 13, 14, 15];
+      expect(result.stderr).toContain(`${file} import (lines ${lines.join(', ')}): ${lines.length} exceeds`);
+    }
+  });
+
+  it.each(['ui', 'backend'])('retains compound options that select a %s file', (layer) => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    repo.write('src/ui/part.ts', 'export const term = true');
+    repo.write('src/backend/part.ts', 'export const term = true');
+    const bases = [
+      `...{ base: '../${layer}' }`, `base: '../' + '${layer}'`, `base: { checklist: '../${layer}' }.checklist`,
+    ];
+    const source = bases.flatMap((base, index) => ['true', 'false'].map((eager) =>
+      `export const read${index}${eager} = import.meta.glob('./part.ts', { ${base}, eager: ${eager} })`));
+    source.push("export const deferred = import.meta.glob('./part.ts', { eager: process.exit(7) })");
+    repo.write(file, source.join('\n'));
+    const result = repo.run();
+    expect(result.status, result.stderr).toBe(layer === 'ui' ? 0 : 1);
+    if (layer === 'backend') expect(result.stderr).toContain(`${file} import (lines 1, 2, 3, 4, 5, 6): 6 exceeds`);
+  });
+
+  it.each(['ui', 'backend'])('resolves a workspace export to its real %s module', (layer) => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    repo.write('src/manifest.json', '\ufeff' + JSON.stringify({ type: 'module' }));
+    symlinkSync('src/manifest.json', path.join(repo.dir, 'package.json'), 'file');
+    repo.write(`src/${layer}/term.ts`, 'export const term = true');
+    const name = 'deal-terms';
+    repo.write(`packages/${name}/package.json`, JSON.stringify({ name, exports: { './check': './internal/term.ts' } }));
+    const internal = path.join(repo.dir, 'packages', name, 'internal');
+    mkdirSync(internal);
+    symlinkSync(`../../../src/${layer}/term.ts`, path.join(internal, 'term.ts'), 'file');
+    mkdirSync(path.join(repo.dir, 'node_modules'));
+    symlinkSync('../packages/' + name, path.join(repo.dir, 'node_modules', name), 'dir');
+    repo.write(file, "export const readers = import.meta.glob('deal-terms/check')");
+    const result = repo.run();
+    expect(result.status, result.stderr).toBe(layer === 'ui' ? 0 : 1);
+    if (layer === 'backend') expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
   });
 
   it('reports the direct dynamic import of a local string constant and allows the UI equivalent', () => {
