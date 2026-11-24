@@ -8,7 +8,8 @@ import { useAppState, useStore } from './hooks';
 import { Icon } from './icons';
 import { Modal } from './dialogs';
 import { closeSettledQuestions } from '../app/commands/closeSettled';
-import { settledChecklistAvailable, settledPreview, settledQuestionCount, settledQuestionIds } from '../app/settledView';
+import { settledChecklistAvailable, settledPreview, settledQuestionCount, settledQuestionIds }
+  from '../app/settledView';
 import type { Settled } from '../app/state';
 import type { Question } from '../domain/model';
 

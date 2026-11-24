@@ -111,9 +111,10 @@ async function closeFixture() {
   return { store, repo, dealId, ids, statuses, rows };
 }
 
-it('rechecks both close paths, refuses the whole stale selection and can still close and undo a fresh one', async () => {
+it('refuses stale single and bulk closes, and closes and undoes a fresh selection', async () => {
   const { store, dealId, ids, statuses, rows } = await closeFixture();
-  const run = (questionIds: string[]) => closeSettledQuestions(store, dealId, questionIds, `close-settled-${dealId}`);
+  const run = (questionIds: string[]) =>
+    closeSettledQuestions(store, dealId, questionIds, `close-settled-${dealId}`);
   const offered = settledQuestionIds(store.get(), dealId);
   expect([...offered]).toEqual(ids);
   rows([agreement, asGap(insurance)]);
