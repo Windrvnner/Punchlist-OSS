@@ -1,4 +1,4 @@
-import { checklistFindings } from '../app/checklistView';
+import { checklistFindings, placeRows } from '../app/checklistView';
 import { titleStyle } from './titleStyle';
 import { Fragment, type ComponentChildren, type RefObject } from 'preact';
 import { createPortal } from 'preact/compat';
@@ -189,7 +189,7 @@ export function ChecklistPage({ dealId }: { dealId: string }) {
   // a turned-off item keeps its place among the rest: the deal's items are in the order its lists give them
   const ord = new Map(own.map((it, i) => [it.id, i]));
   const placed = byList ? placeRows(s, [...kept].sort((a, b) => (ord.get(a.id) ?? Infinity) - (ord.get(b.id) ?? Infinity))) : null;
-  const shown = placed ? placed.map((x) => x.r) : kept.map((r, i) => ({ r, i })).sort((a, b) => ORDER.indexOf(kindOf(a.r)) - ORDER.indexOf(kindOf(b.r)) || a.i - b.i).map((x) => x.r);
+  const shown = placed ? placed.map((x) => x.row) : kept.map((r, i) => ({ r, i })).sort((a, b) => ORDER.indexOf(kindOf(a.r)) - ORDER.indexOf(kindOf(b.r)) || a.i - b.i).map((x) => x.r);
   const sel = list.find((r) => r.id === s.ui.selectedChecklist) ?? offRows.find((r) => r.id === s.ui.selectedChecklist) ?? null; const wide = !sel;
   // the list's first heading shares the filters' line, so the list starts a row higher
   const rises = !!(on === 'all' || placed) && (list.length > 0 || offRows.length > 0);
@@ -225,7 +225,8 @@ export function ChecklistPage({ dealId }: { dealId: string }) {
           : <div class={`md ck ${wide ? 'wide' : ''}`} onKeyDown={(e) => { if (e.key === 'Escape' && sel && !e.defaultPrevented) { e.preventDefault(); close(); } }}>
               <div class={`list ckrows ${on === 'all' || placed ? 'grouped' : ''}`} id="ck-rows" role="listbox" aria-label="Checklist items" ref={listRef} onKeyDown={onKey}>{shown.map((r, i) => <Fragment key={r.id}>
                 {/* a listbox holds only its options, so the headings are not read; each option says which group it is in instead */}
-                {placed ? placed[i].heads.map((h) => <div class={h.cls} aria-hidden="true" key={h.key}>{h.text}<span class="n">{h.n}</span></div>)
+                {placed ? placed[i].heads.map((h) => <div class={GROUP_CLASS[h.level]} aria-hidden="true" key={h.key}>
+                  {h.text}<span class="n">{h.count}</span></div>)
                   : on === 'all' && (i === 0 || kindOf(shown[i - 1]) !== kindOf(r)) && <div class="ckgroup" aria-hidden="true" key={`g-${kindOf(r)}`}>{LABEL[kindOf(r)]}<span>{count(kindOf(r))}</span></div>}
                 <Row key={r.id} r={r} dealId={d.id} wide={wide} flaggedAbove={flaggedAbove}
                   unlisted={unlisted.has(r.id)} on={sel?.id === r.id} off={isOff(r)} tab={at === r.id}
@@ -249,6 +250,7 @@ function flaggedWords(saidAbove: boolean, asked: string) {
   return asked ? `Flagged · ${asked}` : 'Flagged';
 }
 
+const GROUP_CLASS = { list: 'ckgroup', section: 'cksec', subsection: 'cksub' };
 const UNLISTED = 'No longer in the firm’s list';
 
 /**
@@ -286,40 +288,6 @@ function CkMore({ dealId }: { dealId: string }) {
     <MenuItem id="ck-add-unresolved" why={why} onClick={() => open(done)}>
       Add All Unresolved to Q&amp;A…
     </MenuItem>)} />;
-}
-
-const LAYER_RANK: Record<string, number> = { broad: 0, product: 1, sector: 2, technology: 3, deal: 4 };
-type Head = { cls: 'ckgroup' | 'cksec' | 'cksub'; key: string; text: string; n: number };
-/**
- * The rows under their headings: the firm's list an item comes from (the first of its lists, general first), then its
- * section, then its subsection. Each heading counts the rows under it that are shown, and comes before its first row.
- * Groups keep the order their first rows come in, which is the firm's list order; a row with no item record goes last.
- */
-function placeRows(s: Pick<State, 'items'>, rows: ChecklistRow[]): { r: ChecklistRow; heads: Head[]; path: string }[] {
-  const where = (r: ChecklistRow) => {
-    const it = s.items[r.id]; const from = it ? [...it.from].sort((a, b) => LAYER_RANK[a.layer] - LAYER_RANK[b.layer])[0] : undefined;
-    const list = !from ? 'Other' : from.layer === 'broad' ? 'General' : from.layer === 'deal' ? 'Added on This Deal'
-      : from.value;
-    return { list, sec: it?.section ?? '', sub: it?.subsection ?? '', last: !from };
-  };
-  const at = rows.map((r) => ({ r, w: where(r) }));
-  // groups in the order they first come, with rows that have no item last
-  const firsts = new Map<string, number>(); at.forEach((x, i) => { for (const k of [x.w.list, `${x.w.list}|${x.w.sec}`, `${x.w.list}|${x.w.sec}|${x.w.sub}`]) if (!firsts.has(k)) firsts.set(k, i); });
-  const rank = (x: (typeof at)[number]) => [x.w.last ? 1 : 0, firsts.get(x.w.list)!, firsts.get(`${x.w.list}|${x.w.sec}`)!, firsts.get(`${x.w.list}|${x.w.sec}|${x.w.sub}`)!];
-  const sorted = at.map((x, i) => ({ ...x, i, k: rank(x) })).sort((a, b) => a.k[0] - b.k[0] || a.k[1] - b.k[1] || a.k[2] - b.k[2] || a.k[3] - b.k[3] || a.i - b.i);
-  // the rows under each list, section and subsection, counted once: at deal scale (2,000 items) counting per row was slow
-  const counts = new Map<string, number>(); for (const x of at) for (const k of [x.w.list, `${x.w.list}|${x.w.sec}`, `${x.w.list}|${x.w.sec}|${x.w.sub}`]) counts.set(k, (counts.get(k) ?? 0) + 1);
-  return sorted.map((x, j) => {
-    const p = sorted[j - 1]?.w; const heads: Head[] = [];
-    const nl = counts.get(x.w.list)!; const ns = counts.get(`${x.w.list}|${x.w.sec}`)!; const nu = counts.get(`${x.w.list}|${x.w.sec}|${x.w.sub}`)!;
-    const newList = !p || p.list !== x.w.list; const newSec = newList || p.sec !== x.w.sec;
-    if (newList) heads.push({ cls: 'ckgroup', key: `l-${x.w.list}`, text: x.w.list, n: nl });
-    if (newSec && x.w.sec) heads.push({ cls: 'cksec', key: `s-${x.w.list}|${x.w.sec}`, text: x.w.sec, n: ns });
-    if ((newSec || p.sub !== x.w.sub) && x.w.sub) heads.push({ cls: 'cksub', key: `u-${x.w.list}|${x.w.sec}|${x.w.sub}`, text: x.w.sub, n: nu });
-    // the headings it sits under, for a screen reader: "General, 12 · Security, 4"
-    const path = [`${x.w.list}, ${nl}`, ...(x.w.sec ? [`${x.w.sec}, ${ns}`] : []), ...(x.w.sub ? [`${x.w.sub}, ${nu}`] : [])].join(' · ');
-    return { r: x.r, heads, path };
-  });
 }
 
 /**
