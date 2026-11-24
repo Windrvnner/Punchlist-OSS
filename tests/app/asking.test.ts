@@ -3,8 +3,10 @@ import { expect, it } from 'vitest';
 import { askedAbout, askedAtGap, checklistAsk, findingAskTarget } from '../../src/app/asking';
 import { CloseSettledQuestions, closeSettledQuestions } from '../../src/app/commands/closeSettled';
 import { CreateDeal } from '../../src/app/commands/deals';
-import { SetQuestionsStatus } from '../../src/app/commands/questions';
+import { CreateFinding, SetFindingStatus } from '../../src/app/commands/findings';
+import { CreateQuestion, EditQuestionField, SetQuestionsStatus } from '../../src/app/commands/questions';
 import { registry } from '../../src/app/commands/undo';
+import { logQuestionDraft, questionDraftAt } from '../../src/app/logQuestionDraft';
 import { settledPreview, settledQuestionIds } from '../../src/app/settledView';
 import { findingItem, initialState, itemStanding, unresolvedPoints } from '../../src/app/state';
 import { Store } from '../../src/app/store';
@@ -51,18 +53,20 @@ it('shares the existing finding, gap and off-item rules across the detail views 
   const target = () => findingAskTarget(state.findings[finding.id], findingItem(state, finding));
   const checklist = (off: boolean) => checklistAsk(itemStanding(state, deal.id, row), off, 0, false);
   const points = () => unresolvedPoints(state, deal.id).points.map(({ key }) => key);
-  expect(target()).toMatchObject({ block: null, links: { linkedFinding: finding.id, linkedItem: row.id } });
+  expect(target()).toMatchObject({ why: null, links: { linkedFinding: finding.id, linkedItem: row.id } });
   expect(checklist(false)).toEqual({ canAsk: true, offerAsk: true });
   expect(points()).toEqual([`f:${finding.id}`, `i:${gap.id}`]);
 
   state.findings[finding.id] = { ...finding, status: 'closed' };
-  expect(target().block).toBe('closed-finding');
+  expect(target().why).toBe('This finding is closed');
   expect(checklist(false)).toEqual({ canAsk: false, offerAsk: false });
   expect(points()).toEqual([`i:${gap.id}`]);
 
   state.findings[finding.id] = finding;
   state.items[item.id] = { ...item, off: true };
-  expect(target()).toMatchObject({ block: 'off-item', links: { linkedFinding: finding.id, linkedItem: undefined } });
+  expect(target()).toMatchObject({
+    why: 'Its checklist item is turned off', links: { linkedFinding: finding.id, linkedItem: undefined },
+  });
   expect(checklist(true)).toEqual({ canAsk: false, offerAsk: false });
   expect(points()).toEqual([`i:${gap.id}`]);
 
@@ -118,13 +122,13 @@ it('refuses stale single and bulk closes, and closes and undoes a fresh selectio
   const offered = settledQuestionIds(store.get(), dealId);
   expect([...offered]).toEqual(ids);
   rows([agreement, asGap(insurance)]);
+  const direct = await store.dispatch(CloseSettledQuestions, { dealId, questionIds: ids }, { quiet: true });
+  expect(direct).toMatchObject({ ok: false, error: { message: '1 question changed since, so nothing was closed' } });
   expect(await run(ids)).toEqual({ kind: 'changed', count: 1 });
   expect(await run([ids[1]])).toEqual({ kind: 'changed', count: 1 });
   const preview = settledPreview(store.get(), dealId, offered, new Set());
   expect(preview.pickedIds).toEqual([ids[0]]);
   expect(preview.out.map(({ q, why }) => [q.id, why])).toEqual([[ids[1], 'Its item is no longer settled']]);
-  const direct = await store.dispatch(CloseSettledQuestions, { dealId, questionIds: ids }, { quiet: true });
-  expect(direct).toMatchObject({ ok: false, error: { message: '1 question changed since, so nothing was closed' } });
   expect(statuses()).toEqual(['open', 'open']);
 
   store.services.ai.checklist = async () => fail({ kind: 'failed', message: 'The checklist could not be read' });
@@ -141,17 +145,82 @@ it('refuses stale single and bulk closes, and closes and undoes a fresh selectio
   expect(statuses()).toEqual(['open', 'open']);
 });
 
-it('refreshes a journal retry so the original selection cannot close after an item changes', async () => {
+it.each(['current', 'legacy'])('refreshes a %s retry with unchanged question revisions', async (version) => {
   const { store, repo, dealId, ids, statuses, rows } = await closeFixture();
   const writable = refuse(repo.shared, toAQuestion, quota, 1);
-  const first = await closeSettledQuestions(store, dealId, ids, `close-settled-${dealId}`);
+  const idempotencyKey = `close-settled-${dealId}`;
+  const set = ids.map((questionId) => ({ questionId, status: 'closed' as const }));
+  const first = version === 'legacy'
+    ? await store.dispatch(SetQuestionsStatus, { dealId, set }, { idempotencyKey })
+    : await store.dispatch(CloseSettledQuestions, { dealId, questionIds: ids }, { idempotencyKey });
   writable();
-  expect(first.kind).toBe('failed');
+  expect(first.ok).toBe(false);
   expect(statuses()).toEqual(['open', 'open']);
-  const close = Object.values(store.get().ops).find((op) => op.command === CloseSettledQuestions.name)!;
+  const close = Object.values(store.get().ops).find((op) => op.idempotencyKey === idempotencyKey)!;
   rows([asGap(agreement), insurance]);
-  expect(await store.retryOp(close.id)).toMatchObject({
+  store.closing();
+  const restarted = new Store({ ...store.services }, [SetQuestionsStatus, CloseSettledQuestions]);
+  await restarted.boot();
+  expect(await restarted.retryOp(close.id)).toMatchObject({
     ok: false, error: { message: '1 question changed since, so nothing was closed' },
   });
+  expect(ids.map((id) => restarted.get().questions[id].status)).toEqual(['open', 'open']);
+});
+
+function holdNextQuestionWrite(repo: ReturnType<typeof make>['repo']) {
+  const transaction = repo.transaction.bind(repo);
+  let markHeld!: () => void;
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { markHeld = resolve; });
+  const wait = new Promise<void>((resolve) => { release = resolve; });
+  repo.transaction = async (change) => {
+    if (change.writes.some(({ kind }) => kind === 'question')) {
+      repo.transaction = transaction;
+      markHeld();
+      await wait;
+    }
+    return transaction(change);
+  };
+  return { held, release };
+}
+
+it('reads the checklist after queued work finishes and refuses a selection that became stale meanwhile', async () => {
+  const { store, repo, dealId, ids, statuses, rows } = await closeFixture();
+  const pending = holdNextQuestionWrite(repo);
+  const edit = store.dispatch(EditQuestionField, {
+    dealId, questionId: ids[0], field: 'text', value: 'Provide the signed direct agreement and lender consent letters.',
+  });
+  await pending.held;
+  const close = closeSettledQuestions(store, dealId, ids, `close-settled-${dealId}`);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  rows([agreement, asGap(insurance)]);
+  pending.release();
+  expect((await edit).ok).toBe(true);
+  expect(await close).toEqual({ kind: 'changed', count: 1 });
   expect(statuses()).toEqual(['open', 'open']);
+});
+
+it('refuses a queued ask after its finding closes and keeps the question text held by the card', async () => {
+  const { store, repo, dealId } = await closeFixture();
+  expect((await store.dispatch(CreateFinding, { dealId, title: sampleFinding.title, workstream: 'Legal' })).ok)
+    .toBe(true);
+  const findingId = Object.keys(store.get().findings)[0];
+  const text = 'Which version of the lock-up ratio governs the first distribution?';
+  const key = 'kept counterparty question';
+  const drafts = new Map([[key, text]]);
+  const draft = questionDraftAt(key, (id) => id, drafts, (id) => drafts.delete(id));
+  const pending = holdNextQuestionWrite(repo);
+  const created = store.dispatch(CreateQuestion, { dealId, text: 'Provide the exposure summary for the new asset.' });
+  await pending.held;
+  const ask = logQuestionDraft(text, draft, async () => {
+    const result = await store.dispatch(CreateQuestion, { dealId, text, askOrigin: { kind: 'finding', findingId } });
+    expect(result).toMatchObject({ ok: false, error: { message: 'This finding is closed' } });
+    return result;
+  }, () => false);
+  expect((await store.dispatch(SetFindingStatus, { dealId, findingId, status: 'closed' })).ok).toBe(true);
+  pending.release();
+  expect((await created).ok).toBe(true);
+  await ask;
+  expect(drafts.get(key)).toBe(text);
+  expect(Object.values(store.get().questions).some((question) => question.text === text)).toBe(false);
 });
