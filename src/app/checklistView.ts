@@ -1,6 +1,6 @@
 import { LAYERS, type Item, type ItemFrom } from '../domain/checklist';
 import type { ChecklistRow } from '../ports';
-import type { State } from './state';
+import { itemStanding, type ItemKind, type State } from './state';
 
 /** Turning an item off keeps its findings and the target of a question already being written. */
 export function checklistFindings(
@@ -74,4 +74,44 @@ export function placeRows(state: State, rows: ChecklistRow[]) {
     }
     return { row, heads, path: path.join(' · ') };
   });
+}
+
+type Filter = State['ui']['checklistFilter'];
+const standingOrder: ItemKind[] = ['finding', 'gone', 'gap', 'open', 'person', 'satisfied'];
+
+function uncheckedRow(item: Item): ChecklistRow {
+  return { id: item.id, text: item.text, result: 'unchecked', docs: [] };
+}
+
+function visibleFilters(counts: Record<Filter, number>) {
+  const filters: Filter[] = ['all'];
+  if (counts.all > counts.off) {
+    for (const kind of standingOrder) {
+      if (counts[kind] || kind === 'finding' || kind === 'gap' || kind === 'satisfied') filters.push(kind);
+    }
+  }
+  if (counts.off) filters.push('off');
+  return filters;
+}
+
+/** A completed read can be behind the deal's own list. Include new items immediately and drop stale results for
+ * turned-off items. While loading or after a failed read, only the turned-off items are known. */
+export function checklistRows(state: State, dealId: string) {
+  const own = Object.values(state.items).filter((item) => item.dealId === dealId);
+  const checked = state.checklists[dealId];
+  const active = Array.isArray(checked) ? checked.filter((row) => !state.items[row.id]?.off) : [];
+  const seen = new Set(active.map((row) => row.id));
+  const offRows: ChecklistRow[] = [];
+  for (const item of own) {
+    if (item.off) offRows.push(uncheckedRow(item));
+    else if (Array.isArray(checked) && !seen.has(item.id)) active.push(uncheckedRow(item));
+  }
+  const counts: Record<Filter, number> = {
+    all: active.length + offRows.length, finding: 0, gone: 0, gap: 0, open: 0, person: 0, satisfied: 0,
+    off: offRows.length,
+  };
+  const kinds = new Map(active.map((row) => [row.id, itemStanding(state, dealId, row).kind]));
+  for (const row of active) counts[kinds.get(row.id)!]++;
+  const itemOrder = new Map(own.map((item, index) => [item.id, index]));
+  return { active, offRows, counts, kinds, itemOrder, filters: visibleFilters(counts) };
 }

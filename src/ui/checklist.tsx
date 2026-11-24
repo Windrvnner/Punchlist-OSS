@@ -1,4 +1,4 @@
-import { checklistFindings, placeRows } from '../app/checklistView';
+import { checklistFindings, checklistRows, placeRows } from '../app/checklistView';
 import { titleStyle } from './titleStyle';
 import { Fragment, type ComponentChildren, type RefObject } from 'preact';
 import { createPortal } from 'preact/compat';
@@ -29,6 +29,7 @@ const LABEL: Record<Kind, string> = {
   finding: 'Flagged', gone: 'Finding Deleted', gap: 'Gaps', open: 'Not Settled', person: 'Resolved by a Person',
     satisfied: 'Satisfied',
 };
+const FILTER_LABEL = { all: 'All', ...LABEL, off: 'Turned Off' };
 /** the longest filters, worded shorter where the header is narrow, so every filter stays on one row (design: one row of controls) */
 const SHORT: Partial<Record<UiState['checklistFilter'], string>> = { person: 'By a Person', gone: 'Deleted' };
 /** the same, for one item */
@@ -155,28 +156,19 @@ export function ChecklistPage({ dealId }: { dealId: string }) {
   }, [s.ui.selectedChecklist, listedNow]);
   const inherited = useContext(ReadOnlyContext);
   // with nothing turned off, however that came about (Turn on, an Undo, another PC), Turned off is not left chosen for later
-  const anyOff = Object.values(s.items).some((it) => it.dealId === dealId && it.off);
+  const checklist = useMemo(() => checklistRows(s, dealId),
+    [dealId, s.checklists[dealId], s.items, s.findings, s.conflicts, s.tombstones, s.dealLoad[dealId]]);
+  const anyOff = checklist.counts.off > 0;
   useEffect(() => { if (!anyOff && s.ui.checklistFilter === 'off') store.ui({ checklistFilter: 'all' }); }, [anyOff, s.ui.checklistFilter]);
   // items no longer in the firm's list, marked with an icon (linking design, section 5): worked out again only when the
   // items, the lists or the deal's layers change, not on every move through the list (it reads every wording)
   const unlisted = useMemo(() => (d ? unlistedItems(s, d) : new Set<string>()), [s.items, s.firmList, s.conflicts, dealId, d?.product, d?.sector, d?.technology]);
   if (!d) return null;
-  const rows = s.checklists[d.id]; const checked = Array.isArray(rows) ? rows : [];
-  // the deal's own items (linking design, section 5): those turned off stay listed in their place, dimmed, and an item on
-  // that the check's rows do not have yet (added, or turned on, a moment ago) is listed at once as not checked
-  const own = Object.values(s.items).filter((it) => it.dealId === d.id);
-  const offRows: ChecklistRow[] = own.filter((it) => it.off).map((it) => ({ id: it.id, text: it.text, result: 'unchecked', docs: [] }));
-  const listed = new Set(checked.map((r) => r.id));
-  const list = [...checked.filter((r) => !s.items[r.id]?.off), ...(Array.isArray(rows) ? own.filter((it) => !it.off && !listed.has(it.id)).map((it): ChecklistRow => ({ id: it.id, text: it.text, result: 'unchecked', docs: [] })) : [])];
-  // how each item is grouped: as it stands now (itemStanding), so an item whose finding was closed or deleted leaves Flagged for a group of its own
-  const kinds = new Map(list.map((r) => [r.id, itemStanding(s, d.id, r).kind])); const kindOf = (r: ChecklistRow) => kinds.get(r.id)!;
-  const count = (k: Kind) => list.filter((r) => kindOf(r) === k).length;
-  // All lists turned-off items too, in their place; with every item turned off the status filters would show nothing
-  const filters: [UiState['checklistFilter'], string][] = [['all', `All ${list.length + offRows.length}`],
-    ...(!list.length ? [] : ORDER.filter((k) => (k !== 'open' && k !== 'person' && k !== 'gone')
-    || count(k) > 0).map((k) => [k, `${LABEL[k]} ${count(k)}`] as [UiState['checklistFilter'], string])),
-    ...(offRows.length ? [['off', `Turned Off ${offRows.length}`] as [UiState['checklistFilter'], string]] : [])];
-  const on = filters.some(([k]) => k === s.ui.checklistFilter) ? s.ui.checklistFilter : 'all';
+  const rows = s.checklists[d.id];
+  const { active: list, offRows, kinds, counts, itemOrder: ord } = checklist;
+  const kindOf = (r: ChecklistRow) => kinds.get(r.id)!;
+  const filters: [Filter, string][] = checklist.filters.map((key) => [key, `${FILTER_LABEL[key]} ${counts[key]}`]);
+  const on = checklist.filters.includes(s.ui.checklistFilter) ? s.ui.checklistFilter : 'all';
   // how many turned-off items still have an open finding (linking design, section 12), on the Turned off filter's tooltip
   const offOpen = offFindingCount(s, d.id);
   // the open item stays listed, and selected, when the filter would hide it, as on the Findings and Q&A pages
@@ -185,9 +177,8 @@ export function ChecklistPage({ dealId }: { dealId: string }) {
     : [...list.filter((r) => on === 'all' || kindOf(r) === on || r.id === s.ui.selectedChecklist), ...offRows.filter((r) => on === 'all' || r.id === s.ui.selectedChecklist)];
   // grouped by the firm's list each item comes from, then its section and subsection, in the order the
   // check gives them; a deal with no items from the firm's lists keeps the grouping by how each item stands
-  const byList = own.length > 0;
+  const byList = ord.size > 0;
   // a turned-off item keeps its place among the rest: the deal's items are in the order its lists give them
-  const ord = new Map(own.map((it, i) => [it.id, i]));
   const placed = byList ? placeRows(s, [...kept].sort((a, b) => (ord.get(a.id) ?? Infinity) - (ord.get(b.id) ?? Infinity))) : null;
   const shown = placed ? placed.map((x) => x.row) : kept.map((r, i) => ({ r, i })).sort((a, b) => ORDER.indexOf(kindOf(a.r)) - ORDER.indexOf(kindOf(b.r)) || a.i - b.i).map((x) => x.r);
   const sel = list.find((r) => r.id === s.ui.selectedChecklist) ?? offRows.find((r) => r.id === s.ui.selectedChecklist) ?? null; const wide = !sel;
@@ -227,10 +218,10 @@ export function ChecklistPage({ dealId }: { dealId: string }) {
                 {/* a listbox holds only its options, so the headings are not read; each option says which group it is in instead */}
                 {placed ? placed[i].heads.map((h) => <div class={GROUP_CLASS[h.level]} aria-hidden="true" key={h.key}>
                   {h.text}<span class="n">{h.count}</span></div>)
-                  : on === 'all' && (i === 0 || kindOf(shown[i - 1]) !== kindOf(r)) && <div class="ckgroup" aria-hidden="true" key={`g-${kindOf(r)}`}>{LABEL[kindOf(r)]}<span>{count(kindOf(r))}</span></div>}
+                  : on === 'all' && (i === 0 || kindOf(shown[i - 1]) !== kindOf(r)) && <div class="ckgroup" aria-hidden="true" key={`g-${kindOf(r)}`}>{LABEL[kindOf(r)]}<span>{counts[kindOf(r)]}</span></div>}
                 <Row key={r.id} r={r} dealId={d.id} wide={wide} flaggedAbove={flaggedAbove}
                   unlisted={unlisted.has(r.id)} on={sel?.id === r.id} off={isOff(r)} tab={at === r.id}
-                  group={placed ? placed[i].path : on === 'all' ? `${LABEL[kindOf(r)]}, ${count(kindOf(r))}` :
+                  group={placed ? placed[i].path : on === 'all' ? `${LABEL[kindOf(r)]}, ${counts[kindOf(r)]}` :
                   undefined} open={() => store.ui({ selectedChecklist: r.id })} />
               </Fragment>)}</div>
               {/* drawn afresh for each item, so nothing still saving for one item touches the next one's question */}
