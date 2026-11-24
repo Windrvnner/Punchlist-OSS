@@ -125,3 +125,32 @@ it('stops before the model call when a file selection changes during attachment'
   expect(await readIssuesList(store, 'deal', FILE, () => current)).toBeUndefined();
   expect(read).not.toHaveBeenCalled();
 });
+
+it('preserves the explicit model join for an attached name with surrounding spaces', async () => {
+  const { store, dealId, byTitle } = await seedDeal();
+  const prior = byTitle.get(POINTS[8].title)!;
+  const proposed = byTitle.get(POINTS[0].title)!;
+  val(await store.dispatch(ImportIssuesList, {
+    dealId, doc: DOC.docId, list: DOC.doc,
+    points: POINTS.slice(0, 2).map((point) => ({ ...point, join: prior })),
+  }));
+
+  const revised = { docId: 'doc_sponsorlist15', doc: ` ${DOC.doc} ` };
+  store.services.docs.attach = async () => ok(revised);
+  store.services.ai.issuesList = async () => ok({ points: [
+    { ...POINTS[0], same: { finding: proposed } }, POINTS[1], { ...POINTS[2], same: { point: 1 } },
+  ] });
+  const list = val((await readIssuesList(store, dealId, { ...FILE, name: revised.doc }))!);
+  const review = reviewIssuesList(store.get(), dealId, list, new Set());
+  const expected = [proposed, prior, prior];
+  expect(review.goes.map((target) => typeof target === 'number' ? target : target?.id)).toEqual(expected);
+  val(await store.dispatch(ImportIssuesList, { dealId, doc: revised.docId, list: revised.doc, points: review.input }));
+
+  const findings = dealFindings(store.get(), dealId);
+  for (const [index, point] of list.points.entries()) {
+    const marked = findings.filter((finding) => finding.onLists?.some((mark) => (
+      mark.doc === revised.docId && mark.n === point.n && mark.list === DOC.doc
+    )));
+    expect(marked.map(({ id }) => id)).toEqual([expected[index]]);
+  }
+});
