@@ -18,7 +18,8 @@ import { CreateQuestion } from '../app/commands/questions';
 import { RestoreFinding } from '../app/commands/findings';
 import { findingHistory } from '../app/findings';
 import { localYmd, type Finding } from '../domain/model';
-import { AskCard, AskedList, askedAbout, STATUS } from './askCounterparty';
+import { askedAbout, askedAtGap, checklistAsk } from '../app/asking';
+import { AskCard, AskedList, STATUS } from './askCounterparty';
 import { useChecklistDraft } from './checklistDraft';
 import { checklistQuestionTarget } from '../app/checklistQuestion';
 import { AddDealItems, SetItemsOff, offeredItems, unlistedItems } from '../app/commands/checklist';
@@ -371,15 +372,8 @@ function Detail({ r, dealId, off, locked, onClose }: { r: ChecklistRow; dealId: 
   const { asking, text, setText, kept, findingId, begin, stopAsking, busy } = draft;
   const target = checklistQuestionTarget(s, r, off, findingId, raised[0]);
   const asked = askedAbout(s, dealId, r.id, target.askedFinding);
-  // a turned-off item also lists what was asked about it as a gap, apart from its findings' questions
-  const askedAsGap = off ? askedAbout(s, dealId, r.id, undefined).filter((q) => !q.linkedFinding) : [];
-  // a question can be asked about a flagged item's open finding, or about a gap (linking design, section 6), never about
-  // a turned-off item; a gap is offered it only until a question is asked about it (section 7: "Q38 asked", or the need and Ask)
-  const canAsk = !off && ((kind === 'finding' && !!finding) || kind === 'gap');
-  // a question being typed stays on screen whatever happens meanwhile (lost work first): another PC may ask about the gap,
-  // the item may stop being a gap or be turned off; Log question then says why it is off, and Cancel lets it go. Set aside
-  // with Escape, it is kept, and Ask stays offered while it is, so it can always be brought back
-  const offerAsk = !off && ((canAsk && !(kind === 'gap' && asked.length)) || kept);
+  const askedAsGap = off ? askedAtGap(s, dealId, r.id) : [];
+  const { canAsk, offerAsk } = checklistAsk(standing, off, asked.length, kept);
   const why = ro ?? target.askWhy;
   const logWhy = ro ?? target.why;
   // a document opens in the deal's conversation, which is where a page can be read and asked about; closing it comes back here,
