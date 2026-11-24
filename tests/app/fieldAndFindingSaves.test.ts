@@ -124,6 +124,29 @@ it('uses the stored choice for Escape when a second save lands before the choice
   expect(save.view.external).toBe(false);
 });
 
+it('uses the normalized choice when it matches later typing already queued for save', async () => {
+  const draft = await field();
+  const { save, type, pending, commit, adopted } = draft;
+  type(` ${firstEdit} `);
+  const peerText = 'Confirm the conditions to the initial facility draw.';
+  save.receive({ value: peerText, rev: 2 });
+  const choice = save.save(draft.text(), commit, true);
+  type(firstEdit);
+  const later = save.save(draft.text(), commit);
+
+  save.receive({ value: firstEdit, rev: 3 });
+  pending[0].resolve({ ok: true });
+  await choice;
+  pending[1].resolve({ ok: true, value: { unchanged: true } });
+  await later;
+  await vi.runAllTimersAsync();
+
+  expect(adopted).toEqual([firstEdit]);
+  expect(save.base).toBe(firstEdit);
+  expect(draft.text()).toBe(firstEdit);
+  expect(save.view.external).toBe(false);
+});
+
 it('keeps the Escape baseline when the field already followed a newer peer value', async () => {
   const draft = await field();
   const { save, type, pending, commit, adopted } = draft;

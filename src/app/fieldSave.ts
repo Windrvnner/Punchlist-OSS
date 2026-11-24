@@ -29,7 +29,7 @@ type FieldAttempt = {
   again: boolean;
   choice: boolean;
   baselineVersion: number;
-  matched?: boolean;
+  arrivalsBeforeMatch?: string[];
 };
 
 export type FieldSaveView = {
@@ -145,11 +145,7 @@ export class FieldSave {
     }
     const expected = this.inFlight.findIndex(({ text }) => text === record.value);
     if (expected >= 0) {
-      this.inFlight[expected].matched = true;
-      this.inFlight = this.inFlight.slice(expected + 1);
-      this.base = record.value;
-      this.baseRev = record.rev;
-      this.jumped = false;
+      this.followExpectedWrite(record, expected);
       return;
     }
     if (this.inFlight.length) {
@@ -163,6 +159,17 @@ export class FieldSave {
       this.show({ external: false });
       this.takeBase(record.value);
     } else this.keepExternal();
+  }
+
+  private followExpectedWrite(record: FieldValue, expected: number) {
+    // A normalized write can have the exact text of a later save. Keep the arrivals for the earlier attempts.
+    const arrivals = [...this.arrived, record.value];
+    for (const attempt of this.inFlight.slice(0, expected)) attempt.arrivalsBeforeMatch = arrivals;
+    this.arrived = [];
+    this.inFlight = this.inFlight.slice(expected + 1);
+    this.base = record.value;
+    this.baseRev = record.rev;
+    this.jumped = false;
   }
 
   private followRevision(previousRev: number) {
@@ -293,12 +300,11 @@ export class FieldSave {
     } else this.otherSince(this.input.text());
   }
 
-  private settledValue({ text, over, choice, matched }: FieldAttempt, written: boolean, followed: boolean) {
-    if (!written) return over;
-    if (!followed) return this.followStoredWrite() ?? text;
-    // A later exact write already advanced the save base. Recover the choice without moving the base back.
-    if (choice && !matched) return this.arrived.shift() ?? text;
-    return text;
+  private settledValue(attempt: FieldAttempt, written: boolean, followed: boolean) {
+    if (!written) return attempt.over;
+    if (!followed) return this.followStoredWrite() ?? attempt.text;
+    // The base already advanced to the matching arrival. Settle earlier writes without moving the base back.
+    return attempt.arrivalsBeforeMatch?.shift() ?? attempt.text;
   }
 
   private followStoredWrite() {
