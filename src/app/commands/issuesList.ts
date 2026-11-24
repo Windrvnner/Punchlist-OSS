@@ -8,11 +8,11 @@ import { z } from 'zod';
 import { define, type Upsert, type AuditDraft } from '../command';
 import { Finding, DealId, FindingId, ListPoint, Tombstone } from '../../domain/model';
 import { checkFinding } from '../../domain/transitions';
-import { fitText } from '../../domain/importExport';
 import { ok, fail, notFound, rejected } from '../../domain/result';
 import { TITLE_MAX } from './findings';
 import { derivedId } from '../../domain/derivedId';
 import { key as wording } from '../../domain/checklist';
+import { issuesListDestinations } from '../issuesListJoins';
 
 /** what a finding's history says when an import marks it: its page leaves it out of the last change, as the mark itself says it */
 export const LISTED = 'Issues list imported';
@@ -45,25 +45,13 @@ export const ImportIssuesList = define({
     if (!d) return fail(notFound('Deal not found', input.dealId));
     const work = new Map<string, Finding>(); const created: string[] = []; const of: string[] = []; const audit: AuditDraft[] = [];
     let joined = 0;
-    // The points this deal's findings are already on, by list, number and words. A point brought in again (the same list
-    // imported twice on this PC) is the point its finding already holds: it is not raised a second time.
-    // Two PCs importing the same list before they sync make the same finding: its id comes from the point (pointId).
-    // the words as the id reads them: the same list read in other capitals, or without a final period, is the same point
-    const key = (m: { doc: string; n: string; text: string }) => `${m.doc}\u0001${m.n}\u0001${wording(m.text)}`;
-    const held = new Map<string, string>(); for (const f of Object.values(state.findings)) if (f.dealId === d.id) for (const m of f.onLists ?? []) if (!(held.get(key(m))! < f.id)) held.set(key(m), f.id);   // the lowest id: the same on every PC, and in the dialog
-    // a revised list saved under the same name is a list of its own, but a point it repeats word for word, under the
-    // same number, joins the finding that holds it, as before, with no model needed
-    const named = (m: { list: string; n: string; text: string }) => `${m.list}\u0001${m.n}\u0001${wording(m.text)}`;
-    const byName = new Map<string, string>(); for (const f of Object.values(state.findings)) if (f.dealId === d.id) for (const m of f.onLists ?? []) if (!(byName.get(named(m))! < f.id)) byName.set(named(m), f.id);
+    const findings = Object.values(state.findings).filter((finding) => finding.dealId === d.id);
+    const destinations = issuesListDestinations(findings, { docId: input.doc, doc: input.list }, input.points);
     for (const [k, p] of input.points.entries()) {
       if (p.after !== undefined && p.after >= k) return fail(rejected(`Point ${p.n} joins a point after it`));
-      const mark: ListPoint = { doc: input.doc, list: input.list, n: p.n, text: fitText(p.text), at: ctx.at };
-      // the finding it joins: the one that holds this very point already; else the one it was found to repeat, open or
-      // closed, while that is still on this deal (one deleted while the list was read is not joined: the point is raised);
-      // else the one an earlier point went to. A closed finding joined stays closed: only a person reopens it.
-      const to = p.join ? state.findings[p.join] : undefined;
-      // a finding the dialog named (it has looked at the same-named list's points too) stands over that list's match
-      const id = p.own ? undefined : held.get(key(mark)) ?? (to && to.dealId === d.id ? to.id : byName.get(named(mark)) ?? (p.after !== undefined ? of[p.after] : undefined));
+      const { text, goes } = destinations[k];
+      const mark: ListPoint = { doc: input.doc, list: input.list, n: p.n, text, at: ctx.at };
+      const id = typeof goes === 'number' ? of[goes] : goes?.id;
       if (id) {
         const f = work.get(id) ?? state.findings[id];
         if (!(f.onLists ?? []).some((m) => sameMark(m, mark))) work.set(id, { ...f, onLists: [...(f.onLists ?? []), mark], updatedAt: ctx.at });

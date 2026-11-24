@@ -1,3 +1,4 @@
+// @vitest-environment node
 // The issues list dialog shows what Import will do: over random lists, the new findings it lists are the ones
 // ImportIssuesList makes, and every point lands on the finding its row names. The lists mix points a deal already holds
 // from an earlier import, repeats of findings (some closed or deleted while the list was read), chains of points
@@ -15,8 +16,8 @@ import { MemoryLocal } from '../../src/adapters/local';
 import { dealFindings } from '../../src/app/state';
 import type { Finding } from '../../src/domain/model';
 import type { IssuePoint } from '../../src/ports';
-import { reviewOf } from '../../src/ui/issuesList';
-import { issuesListClock, planIssuesListSeed } from '../app/issuesListKit';
+import { reviewIssuesList } from '../../src/app/issuesList';
+import { issuesListClock, planIssuesListSeed } from './issuesListKit';
 
 const COMMANDS = [CreateDeal, CreateFinding, DeleteFinding, SetFindingStatus, ImportIssuesList, RevertIssuesList];
 for (const c of COMMANDS) registry.set(c.name, c);
@@ -76,7 +77,11 @@ it(caseName, async () => {
     const mk = (k: number, n?: string): IssuePoint => ({ n: n ?? String(k + 1), text: `Point ${n ?? k + 1} text.`, title: `Title ${k + 1}`, workstream: 'Legal' });
     // an earlier import of some points (held)
     const first = Array.from({ length: N }, (_, k) => mk(k)).filter(() => random() < 0.4);
-    if (first.length) { const p = reviewOf(dealFindings(store.get(), dealId), { docId: DOC, name: LIST }, first, new Set()); await store.dispatch(ImportIssuesList, { dealId, doc: DOC, list: LIST, points: p.input }); }
+    const doc = { docId: DOC, doc: LIST };
+    if (first.length) {
+      const preview = reviewIssuesList(store.get(), dealId, { doc, points: first }, new Set());
+      await store.dispatch(ImportIssuesList, { dealId, doc: DOC, list: LIST, points: preview.input });
+    }
     const all0 = dealFindings(store.get(), dealId);
     const fids = all0.map((f) => f.id);
     const pts = pointsWithRepeats(N, mk, fids, random);
@@ -86,7 +91,7 @@ it(caseName, async () => {
     deleted += all0.length - remaining.length;
     const kept = new Set<number>(); for (let k = 0; k < N; k++) if (random() < 0.25) kept.add(k);
     const before = new Set(dealFindings(store.get(), dealId).map((f) => f.id));
-    const p = reviewOf(dealFindings(store.get(), dealId), { docId: DOC, name: LIST }, pts, kept);
+    const p = reviewIssuesList(store.get(), dealId, { doc, points: pts }, kept);
     const res = await store.dispatch(ImportIssuesList, { dealId, doc: DOC, list: LIST, points: p.input });
     expect(res.ok, JSON.stringify(res)).toBe(true);
     const after = dealFindings(store.get(), dealId); const made = after.filter((f) => !before.has(f.id));

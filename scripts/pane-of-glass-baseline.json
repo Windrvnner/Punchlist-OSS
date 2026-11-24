@@ -13,9 +13,6 @@
   "src/ui/firmChecklistImport.ts": {
     "services": 4
   },
-  "src/ui/issuesList.tsx": {
-    "services": 2
-  },
   "src/ui/keptDrafts.ts": {
     "storage": 2
   },
