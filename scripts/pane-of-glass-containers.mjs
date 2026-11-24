@@ -1,6 +1,6 @@
 // Track uses that can change a named literal before a primitive path is copied out of it.
 import { Visitor } from 'vite';
-import { entryValue, propertyKey } from './pane-of-glass-bindings.mjs';
+import { entryValue, propertyKey, readsPattern } from './pane-of-glass-bindings.mjs';
 import { literalValue, missing, unwrapped } from './pane-of-glass-syntax.mjs';
 
 function selectedKeys(pattern, member, resolve) {
@@ -68,7 +68,13 @@ function primitive(container, key, resolve) {
 function readsSelection(identifier, value, keys, uses, resolve) {
   const member = uses.members.get(identifier);
   if (member && uses.receivers.has(member)) return false;
-  const reads = selectedKeys(uses.patterns.get(identifier), member, resolve);
+  const pattern = uses.patterns.get(identifier);
+  if (pattern) {
+    if (!readsPattern(pattern, value, resolve)) return false;
+    // Rest and nested bindings can only copy a selected primitive. References to other entries cannot replace it.
+    if (keys.length && keys.every((key) => key !== null && primitive(value, key, resolve))) return true;
+  }
+  const reads = selectedKeys(pattern, member, resolve);
   if (!reads.length || reads.includes(null)) return false;
   const target = member && uses.writeTargets.find((part) => part.start <= member.start && member.end <= part.end);
   return reads.every((key) => {

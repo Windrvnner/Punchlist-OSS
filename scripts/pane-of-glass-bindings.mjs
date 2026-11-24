@@ -84,15 +84,40 @@ function contains(pattern, name) {
   return pattern && pattern.start <= name.start && name.end <= pattern.end;
 }
 
-// Earlier getters, computed calls and nested patterns may change a later property during destructuring.
-function mayChangeSource(part, source, resolve) {
+// Destructuring reads properties in order. Earlier getters, iterators or defaults can change a later target.
+function readsProperty(part, source, resolve) {
+  if (part.type === 'RestElement') {
+    if (source?.type === 'ArrayExpression') return true;
+    return source?.type === 'ObjectExpression' && source.properties.every((entry) => entry.kind !== 'get');
+  }
   const key = propertyKey(part.key, part.computed, resolve);
-  if (key === null) return true;
-  const previous = entryValue(source, key, resolve);
-  if (previous === null) return true;
-  if (part.value.type === 'Identifier') return false;
-  if (part.value.type !== 'AssignmentPattern') return true;
-  return literalValue(resolve(part.value.right)) === undefined && literalValue(resolve(previous)) === undefined;
+  if (key === null) return false;
+  const entry = entryValue(source, key, resolve);
+  return entry !== null && readsPattern(part.value, entry, resolve);
+}
+
+function readsDefault(pattern, raw, resolve) {
+  const value = resolve(raw);
+  const container = value?.type === 'ObjectExpression' || value?.type === 'ArrayExpression';
+  const known = literalValue(value) !== undefined || container;
+  if (known) return readsPattern(pattern.left, value, resolve);
+  // A default containing a call cannot be assumed harmless if the property may be absent.
+  if (literalValue(resolve(pattern.right)) === undefined) return false;
+  return readsPattern(pattern.left, value === missing ? pattern.right : value, resolve);
+}
+
+export function readsPattern(pattern, raw, resolve) {
+  if (pattern.type === 'Identifier') return true;
+  if (pattern.type === 'RestElement') return readsPattern(pattern.argument, raw, resolve);
+  if (pattern.type === 'AssignmentPattern') return readsDefault(pattern, raw, resolve);
+  const value = resolve(raw);
+  if (pattern.type === 'ObjectPattern') return pattern.properties.every((part) => readsProperty(part, value, resolve));
+  if (pattern.type !== 'ArrayPattern' || value?.type !== 'ArrayExpression') return false;
+  return pattern.elements.every((part, index) => {
+    if (!part) return true;
+    if (part.type === 'RestElement') return part.argument.type === 'Identifier';
+    return readsPattern(part, entryValue(value, String(index), resolve), resolve);
+  });
 }
 
 function objectBinding(pattern, source, name, resolve, selectedKey) {
@@ -112,7 +137,7 @@ function objectBinding(pattern, source, name, resolve, selectedKey) {
   const key = propertyKey(entry.key, entry.computed, resolve);
   const value = resolve(source, key);
   const earlier = pattern.properties.slice(0, pattern.properties.indexOf(entry));
-  if (earlier.some((part) => mayChangeSource(part, value, resolve))) return null;
+  if (!earlier.every((part) => readsProperty(part, value, resolve))) return null;
   return boundValue(entry.value, entryValue(value, key, resolve), name, resolve);
 }
 
