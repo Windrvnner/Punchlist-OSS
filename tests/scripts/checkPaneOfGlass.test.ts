@@ -185,8 +185,10 @@ describe('UI dependency checks', () => {
     { patterns: "'../backend/{lenient}.ts'", buildImportsBackend: true },
     { patterns: "['./header.ts', '../backend/{lenient}.ts']", buildImportsBackend: true },
     { patterns: "'./{header}.ts'", buildImportsBackend: false },
+    { patterns: "'../backend/[[:alpha:]]*.ts'", buildImportsBackend: false, devImportsBackend: true },
     { patterns: "'../BACKEND/*.ts'", buildImportsBackend: false },
-  ])('checks the files that either Vite mode imports for $patterns', async ({ patterns, buildImportsBackend }) => {
+  ])('checks the files that either Vite mode imports for $patterns', async (example) => {
+    const { patterns, buildImportsBackend, devImportsBackend = false } = example;
     const repo = fixture();
     const file = 'src/ui/readers.ts';
     const backend = 'src/backend/lenient.ts';
@@ -198,12 +200,27 @@ describe('UI dependency checks', () => {
     const dev = await developmentSources(repo.dir, file);
     const prod = await bundledSources(repo.dir, file);
     const caseAlias = foldCase && existsSync(path.join(repo.dir, 'src/BACKEND/lenient.ts'));
-    expect(dev.some((id) => id.toLowerCase() === backend)).toBe(caseAlias);
-    expect(prod.some((id) => id.toLowerCase() === backend)).toBe(caseAlias || buildImportsBackend);
-    const forbidden = caseAlias || buildImportsBackend;
+    const devImports = dev.some((id) => id.toLowerCase() === backend);
+    const prodImports = prod.some((id) => id.toLowerCase() === backend);
+    if (!caseAlias) {
+      expect(devImports).toBe(devImportsBackend);
+      expect(prodImports).toBe(buildImportsBackend);
+    }
+    const forbidden = devImports || prodImports;
     const result = repo.run();
     expect(result.status).toBe(forbidden ? 1 : 0);
     if (forbidden) expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
+  });
+
+  it('allows glob keys that both modes enumerate without importing a module', async () => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    const backend = 'src/backend/lenient.ts';
+    repo.write(backend, 'export const read = true');
+    repo.write(file, "export const names = Object.keys(import.meta.glob('../backend/*.ts'))");
+    expect(await developmentSources(repo.dir, file)).not.toContain(backend);
+    expect(await bundledSources(repo.dir, file)).not.toContain(backend);
+    expect(repo.run().status).toBe(0);
   });
 
   it('checks computed member and destructuring keys and each read in a dotted JSX tag', () => {
@@ -307,6 +324,21 @@ describe('the remaining UI exceptions', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(`${file} services (lines 1, 2): the baseline cannot rise`);
     expect(result.stderr).toContain('above the committed count of 1');
+  });
+
+  it('uses committed filenames to check the original ceiling for a glob import', () => {
+    const repo = fixture();
+    repo.write('vite.config.mjs', "throw new Error('The guard loaded the application config')");
+    repo.write(file, "export const readers = import.meta.glob('../backend/{part}.ts')");
+    git(repo.dir, 'init', '-q', '-b', 'main');
+    git(repo.dir, 'add', 'src');
+    git(repo.dir, 'commit', '-qm', 'Record the original files');
+    repo.write('src/backend/part.ts', 'export const read = true');
+    repo.setBaseline({ [file]: { import: 1 } });
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    const diagnostic = `${file} import (lines 1): the baseline cannot rise above the committed count of 0`;
+    expect(result.stderr).toContain(diagnostic);
   });
 
   it('requires main to verify a committed increase in a shallow single-branch clone', () => {
