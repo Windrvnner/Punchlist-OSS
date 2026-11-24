@@ -13,6 +13,11 @@ export function literalValue(expression) {
   if (node?.type === 'TemplateLiteral' && !node.expressions.length) return node.quasis[0].value.cooked;
 }
 
+export function definitelyObject(node) {
+  return ['ObjectExpression', 'ArrayExpression', 'FunctionExpression', 'ArrowFunctionExpression',
+    'ClassExpression', 'NewExpression'].includes(node?.type);
+}
+
 export const missing = Symbol('missing literal entry');
 const unknown = Symbol('runtime operand');
 
@@ -58,7 +63,9 @@ export function foldedValue(node, resolve) {
     return value;
   }
   if (node.type === 'UnaryExpression' && node.operator === '!') {
-    const value = operand(node.argument);
+    const fixed = resolve(node.argument, true);
+    if (definitelyObject(fixed)) return { type: 'Literal', value: false };
+    const value = operand(fixed);
     if (value !== unknown) return { type: 'Literal', value: !value };
   }
   if (node.type === 'BinaryExpression') return literalBinary(node, operand);

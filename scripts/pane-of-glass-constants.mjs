@@ -1,7 +1,7 @@
 // Resolve references on Vite's TypeScript syntax tree. A type can share a name with an unrelated runtime value.
 import { createRequire } from 'node:module';
 import { containerReads } from './pane-of-glass-containers.mjs';
-import { foldedValue, literalValue, missing, unwrapped } from './pane-of-glass-syntax.mjs';
+import { definitelyObject, foldedValue, literalValue, missing, unwrapped } from './pane-of-glass-syntax.mjs';
 import { boundValue, entryValue, propertyKey } from './pane-of-glass-bindings.mjs';
 
 const require = createRequire(import.meta.url);
@@ -21,7 +21,7 @@ function fixedDeclaration(variable) {
 // A fixed test selects only the branch JavaScript would use. A runtime test keeps both possible paths.
 function selectedBranch(node, resolve) {
   const test = resolve(node.test ?? node.left);
-  const value = literalValue(test);
+  const value = definitelyObject(test) ? true : literalValue(test);
   const absent = test === missing || (test?.type === 'UnaryExpression' && test.operator === 'void');
   if (value === undefined && !absent) return node;
   if (node.type === 'ConditionalExpression') return value ? node.consequent : node.alternate;
@@ -63,7 +63,7 @@ export function localBindings(program) {
     // A direct alias keeps the key selected by its eventual destructuring or member read.
     const alias = node.id === name && initial?.type === 'Identifier';
     const value = alias ? resolve(initial, visited, capture) : next(initial);
-    if (value?.type === 'ObjectExpression' || value?.type === 'ArrayExpression') {
+    if (!capture.truthOnly && (value?.type === 'ObjectExpression' || value?.type === 'ArrayExpression')) {
       if (!stableContainer(variable, reference, value, capture, next)) return null;
     }
     return value;
@@ -72,7 +72,7 @@ export function localBindings(program) {
   function resolve(expression, seen = new Set(), capture = { use: unwrapped(expression) }) {
     const reference = unwrapped(expression);
     if (reference?.type === 'ConditionalExpression' || reference?.type === 'LogicalExpression') {
-      const branch = selectedBranch(reference, (part) => resolve(part, seen));
+      const branch = selectedBranch(reference, (part) => resolve(part, seen, { use: unwrapped(part), truthOnly: true }));
       return branch === reference ? reference : resolve(branch, seen);
     }
     if (reference?.type === 'MemberExpression') {
@@ -84,7 +84,8 @@ export function localBindings(program) {
       return next(entryValue(object, key, next));
     }
     if (reference?.type === 'Identifier') return resolveVariable(reference, seen, capture);
-    return reference ? foldedValue(reference, (part) => resolve(part, seen)) : reference;
+    if (!reference) return reference;
+    return foldedValue(reference, (part, truthOnly) => resolve(part, seen, { use: unwrapped(part), truthOnly }));
   }
   return resolve;
 }
