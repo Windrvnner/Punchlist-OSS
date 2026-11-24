@@ -117,14 +117,18 @@ const PAST_CONVERSATIONS = [
     'The letter hedges 75% of the floating rate for the first seven years.'],
 ];
 
-function pastConversationRow([group, title, when, preview], index) {
-  const startsGroup = index === 0 || PAST_CONVERSATIONS[index - 1][0] !== group;
+/** A row of a past conversations list, under its group's heading when it starts one; `beforeTime` goes ahead of the
+ * time (on Home, the deal's name and the new-result dot). */
+function pastConversationRow(rows, index, beforeTime = '') {
+  const [group, title, when, preview] = rows[index];
+  const startsGroup = index === 0 || rows[index - 1][0] !== group;
   return `${startsGroup ? `<div class="pg">${group}</div>` : ''}<a href="#" class="prow ${index === 0 ? 'on' : ''}">`
-    + `<span class="pt">${title}</span><span class="pm">${when}</span><span class="pp">${preview}</span></a>`;
+    + `<span class="pt">${title}</span><span class="pm">${beforeTime}${when}</span>`
+    + `<span class="pp">${preview}</span></a>`;
 }
 
 function pastConversationsList() {
-  const rows = PAST_CONVERSATIONS.map(pastConversationRow).join('');
+  const rows = PAST_CONVERSATIONS.map((_, index) => pastConversationRow(PAST_CONVERSATIONS, index)).join('');
   return '<div class="pastpop down" role="dialog" aria-label="Past conversations"><div class="ptop">'
     + `<label class="psearch">${icon('search', 14)}<input placeholder="Search past conversations"></label>`
     + '<div class="pseg"><button type="button" class="on">This Deal</button><button type="button">All Deals</button>'

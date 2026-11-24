@@ -16,7 +16,7 @@ const PANE_SCREENS = {
   // whose answer arrives there
   switch: () => [conversation([TURN_GUARANTEE_CAP],
     { title: CONVERSATION_TITLES.guarantee, open: true, top: true }),
-  pane(paneTabs([TASKS_TAB, runningDiligenceTab], 'tasks'), TASKS_LIST, paneWidth())],
+    pane(paneTabs([TASKS_TAB, runningDiligenceTab], 'tasks'), TASKS_LIST, paneWidth())],
   report: () => [inPermitsChat([TURN_PERMITS, TURN_DILIGENCE_DONE]),
     pane(paneTabs([TASKS_TAB, DILIGENCE_TAB], 'diligence'), diligenceReport(false), paneWidth())],
   issue: () => [inPermitsChat([TURN_PERMITS, TURN_DILIGENCE_DONE, TURN_GUARANTEE_CAP]),
@@ -60,7 +60,6 @@ function emptyDeal() {
 
 function screenHtml() {
   if (screen in OPEN_QUESTION_SCREENS) return OPEN_QUESTION_SCREENS[screen]();
-  const stage = (content) => `<section class="stage"><div class="x-stage">${content}</div></section>`;
   if (screen === 'empty') return sidebar() + stage(emptyDeal());
   if (screen === 'active') {
     return sidebar() + stage(conversation([TURN_PERMITS], { title: CONVERSATION_TITLES.permits }));

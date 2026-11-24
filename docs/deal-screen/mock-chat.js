@@ -69,7 +69,8 @@ const TURN_DRAFT_RESPONSE = `<div class="me">Draft a response to Q433 from the d
   + ` for review and is not sent until it is accepted.</p>${ACTIONS_MARK}</div>`;
 
 const TURN_RECHECK = `<div class="me">Two new files arrived in 04 Legal. Check them against the checklist.</div>
-<div class="ai"><p>Checking the checklist and findings against the 2 new files. The report updates as each item is checked.</p>
+<div class="ai"><p>Checking the checklist and findings against the 2 new files.`
+  + ` The report updates as each item is checked.</p>
 ${taskCard('cklist', 'Diligence', '1,204 of 2,148', 0.56)}</div>`;
 
 /** Puts the answer actions in place of the last mark only; earlier marks stay as empty comments. */

@@ -4,9 +4,6 @@
 // holds; Home opens past conversations from its own header; and the sidebar shows Archived at scale.
 // Loads after mock-qa.js and before mock-screens.js, which calls these builders.
 
-/** The page's stage, as mock-screens.js wraps every screen. */
-const openQuestionStage = (content) => `<section class="stage"><div class="x-stage">${content}</div></section>`;
-
 // ---- the deal's header, Deal Info and Folders ----
 
 const COUNTERPARTY = 'Contoso Wind Partners';
@@ -104,9 +101,11 @@ const RUN_DILIGENCE = '<button type="button" class="btn sm" title="Last run Nov 
 // the filters a short row folds into Filter, as the Checklist does when its row runs short of space
 const FOLDED_FILTERS = `<span class="x-ckfold">${iconButton('filter', 15, 'Filter')}</span>`;
 
-/** The Diligence tab: the approved report, every item with its result, and Run Diligence on its filter row. */
-const diligenceList = () => diligenceReport(false)
-  .replace(`${REPORT_FILTERS}</div>`, `${REPORT_FILTERS}${FOLDED_FILTERS}<span class="x-qact">${RUN_DILIGENCE}</span></div>`);
+// the end of the filter row: the folded filters, then Run Diligence
+const DILIGENCE_FILTER_ROW_END = `${REPORT_FILTERS}${FOLDED_FILTERS}<span class="x-qact">${RUN_DILIGENCE}</span></div>`;
+
+/** The Diligence tab: the approved report, with Run Diligence on its filter row. */
+const diligenceList = () => diligenceReport(false).replace(`${REPORT_FILTERS}</div>`, DILIGENCE_FILTER_ROW_END);
 
 // ---- Tasks: what Needs Input holds ----
 
@@ -149,31 +148,32 @@ const NEEDS_INPUT_TASKS = `<div class="x-lbl">Needs Input</div><div class="x-tgr
 // ---- Home's past conversations ----
 
 // every conversation, newest first, with its deal; a dot before the time marks one whose task result arrived since it
-// was last open
+// was last open, which moves it to the top
 const HOME_PAST_CONVERSATIONS = [
-  ['Today', 'Guarantee cap and waterfall', 'Project Proseware', '4:12 PM',
-    'Draft 6 of the intercreditor agreement pays the O&amp;M reserve after senior debt service.', true],
-  ['Today', 'Deals with permits that block financial close', '', '3:40 PM',
-    'Two deals have open permits that are conditions precedent: Proseware and Wingtip.'],
-  ['Today', 'Board resolutions for the financing', 'Project Proseware', '2:12 PM',
-    'The board approved draft 4 of the credit agreement, and draft 6 changes the facility size.'],
-  ['Today', 'Turbine warranty against the O&amp;M contract', 'Project Halyard', '11:05 AM',
-    'The warranty ends in year five, while the O&amp;M contract assumes it runs to year ten.'],
-  ['Earlier this week', 'Hedge counterparties across the portfolio', '', 'Mon',
-    'Four banks hedge across seven deals; one bank is on five of them.'],
-  ['Earlier this week', 'Tax equity consents', 'Project Wingtip', 'Mon',
-    'The tax equity investor must consent to any change to the O&amp;M contract.'],
-  ['Older', 'Conditions precedent to first drawdown', 'Project Proseware', 'Nov 14',
-    '14 of the 31 conditions precedent have a signed document in the data room.'],
+  ['Today', 'Board resolutions for the financing', '4:12 PM',
+    'The board approved draft 4 of the credit agreement, and draft 6 changes the facility size.',
+    'Project Proseware', true],
+  ['Today', 'Guarantee cap', '3:52 PM',
+    'The draft has no step-down, so the gap is USD 15 million until completion.', 'Project Proseware'],
+  ['Today', 'Deals with permits that block financial close', '3:40 PM',
+    'Two deals have open permits that are conditions precedent: Proseware and Wingtip.', ''],
+  ['Today', 'Permits and diligence', '3:04 PM',
+    'Four permits are still open. Two of them are conditions precedent to financial close.', 'Project Proseware'],
+  ['Today', 'Turbine warranty against the O&amp;M contract', '11:05 AM',
+    'The warranty ends in year five, while the O&amp;M contract assumes it runs to year ten.', 'Project Halyard'],
+  ['Earlier this week', 'Hedge counterparties across the portfolio', 'Mon',
+    'Four banks hedge across seven deals; one bank is on five of them.', ''],
+  ['Earlier this week', 'Tax equity consents', 'Mon',
+    'The tax equity investor must consent to any change to the O&amp;M contract.', 'Project Wingtip'],
+  ['Older', 'Conditions precedent to first drawdown', 'Nov 14',
+    '14 of the 31 conditions precedent have a signed document in the data room.', 'Project Proseware'],
 ];
 
-function homePastRow([group, title, deal, when, preview, updated], index) {
-  const startsGroup = index === 0 || HOME_PAST_CONVERSATIONS[index - 1][0] !== group;
+/** A row of Home's past conversations, with its deal's name and any new-result dot before its time. */
+function homePastRow([, , , , deal, updated], index) {
   const dealTag = deal ? `<span class="pa">${deal}</span>` : '';
   const dot = updated ? '<i class="x-upd" title="New result"></i>' : '';
-  return `${startsGroup ? `<div class="pg">${group}</div>` : ''}<a href="#" class="prow ${index === 0 ? 'on' : ''}">`
-    + `<span class="pt">${title}</span><span class="pm">${dealTag}${dot}${when}</span>`
-    + `<span class="pp">${preview}</span></a>`;
+  return pastConversationRow(HOME_PAST_CONVERSATIONS, index, `${dealTag}${dot}`);
 }
 
 /** Past conversations on Home: every deal's and Home's own, so the list has no This Deal choice. */
@@ -224,16 +224,16 @@ function fillSidebarAtScale() {
 // ---- the screens, and what is placed once they are on the page ----
 
 const OPEN_QUESTION_SCREENS = {
-  dealheader: () => sidebar() + openQuestionStage(conversation([TURN_PERMITS],
+  dealheader: () => sidebar() + stage(conversation([TURN_PERMITS],
     { title: CONVERSATION_TITLES.permits })),
   details: () => OPEN_QUESTION_SCREENS.dealheader(),
   folders: () => OPEN_QUESTION_SCREENS.dealheader(),
-  diligence: () => slimRail() + openQuestionStage(inPermitsChat([TURN_PERMITS, TURN_DILIGENCE_DONE])
+  diligence: () => slimRail() + stage(inPermitsChat([TURN_PERMITS, TURN_DILIGENCE_DONE])
     + pane(paneTabs([TASKS_TAB, DILIGENCE_TAB], 'diligence'), diligenceList(), paneWidth())),
-  needsinput: () => slimRail() + openQuestionStage(inPermitsChat([TURN_PERMITS, TURN_DILIGENCE_DONE])
+  needsinput: () => slimRail() + stage(inPermitsChat([TURN_PERMITS, TURN_DILIGENCE_DONE])
     + pane(paneTabs([TASKS_TAB], 'tasks'), NEEDS_INPUT_TASKS, paneWidth())),
-  homepast: () => sidebar() + openQuestionStage(homeScreen()),
-  archscale: () => sidebar() + openQuestionStage(homeScreen()),
+  homepast: () => sidebar() + stage(homeScreen()),
+  archscale: () => sidebar() + stage(homeScreen()),
 };
 
 /** Shows the deal name's tooltip under it, as the app's tooltips show. */

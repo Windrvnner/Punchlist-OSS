@@ -147,9 +147,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - **Turn Off Item** is in an item's ⋯ menu; a turned-off item stays in place, dimmed.
 - A list can be pasted in or imported from any clearly laid-out file. The model reads it, every line is accounted for, and lines left out are listed with a checkbox to bring them in. Here accuracy comes before cost: the standard model reads the list, and the thorough model retries lines it couldn't place.
 - An item that joins two conditions becomes two items, and "(if applicable)" goes only on an item that may not apply to every deal.
-- The checklist is the starting point for diligence, and each item's result is a finding, whether satisfied, flagged,
-  a gap, or not settled: the Checklist and findings are one list, not two. A flagged result is closed on its finding
-  (#888).
+- Findings is the worklist and the Checklist is the coverage record; nothing is opened or closed on the Checklist.
 - An opened gap says what is needed and which documents were read, naming any that couldn't be read.
 - A document opened from the Checklist opens in reading mode and returns to the same item.
 - A "Satisfied" result should cite a source that opens. A result the model can't place should be left not settled,
@@ -313,14 +311,18 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 ## Deal screen
 
 These decisions are for the rebuilt deal screen in [deal-screen-design.md](deal-screen-design.md) and are not built yet
-(#881). Once built, they replace Deal status wherever it appears (Pages and navigation, Working rules), **Past
+(#881). Once built, they replace Deal status wherever it appears (Look and feel, Pages and navigation), **Past
 Conversations** in every composer (Conversations), and **Keep It** in confirms (Working rules).
-They also replace the deal header, Overview, the Findings page, and **Deals Open On** (Pages and navigation), and
-Check again's place and **Check the N Left Out** (AI and models).
+They also replace the deal header, Overview, the Findings page, and **Deals Open On** (Pages and navigation); the
+Findings worklist beside the Checklist (Findings, Checklist); Overview's counts (Checklist); **Deal Memo…** in the ⋯
+menu (Deal memo); and Check again's place and **Check the N Left Out** (Findings, AI and models).
 
 - A deal shows its conversation on the left and, when opened, one pane on the right. The pane's tabs are Tasks, Diligence, and Q&A, always in that order, followed by any opened finding, document, or task, each with ×.
 - The selected tab is 1.5 times as wide as each other tab, and the rest share the bar equally. A hairline separates unselected tabs, the selected tab sits raised, and tabs show no counts. An unselected tab too narrow for its name drops its icon before shortening the word. The Diligence tab uses the Checklist's icon.
 - The sidebar folds to its slim rail while the pane is open and comes back when it closes. A sidebar pinned open stays, and the conversation narrows; the pane gives way only to keep the conversation at least 400px wide.
+- The checklist is the starting point for diligence, and each item's result is a finding, whether satisfied, flagged,
+  a gap, or not settled: the Diligence list and findings are one list, not two. A flagged result is closed on its
+  finding (#888).
 - A deal has no Deal status. The sidebar lists deals in one list, ordered by when the person last worked on each
   deal, and **Archive Deal** hides one.
 - A deal's ⋯ menu offers **Archive Deal**, which asks first in the app's confirm dialog. Archived deals fold under **Archived**; a dot marks an archived deal whose data room changed, with its update line ("4 new files · 11:20 AM"). An archived deal's ⋯ menu offers **Unarchive Deal**.
@@ -342,8 +344,8 @@ Check again's place and **Check the N Left Out** (AI and models).
   the Diligence list under Flagged (#888).
 - A deal opens on a new conversation, with the pane as the person last left it (#888).
 - A question asked in a conversation is answered in that conversation, and anything it needs from the person is
-  asked there. It appears in Tasks only while it runs after the person leaves the conversation. Diligence, imports,
-  indexing, Deal Memo, and draft responses always run as tasks (#888).
+  asked there. It appears in Tasks only once the person leaves the conversation while it runs, and stays there under
+  Completed once it finishes. Diligence, imports, indexing, Deal Memo, and draft responses always run as tasks (#888).
 - Needs Input holds drafts ready to review, items Diligence did not check ("N items not checked", **Run**), and
   questions left running that wait on the person ("Awaiting draft selection", **Answer**). Its buttons share one
   width (#888).
