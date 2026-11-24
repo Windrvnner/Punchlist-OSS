@@ -38,10 +38,6 @@
 }
 
 /* Folders: the core documents and a deal sharing these files sit under the folders, set off by a hairline */
-.x-folders .fdbody {
-  max-height: calc(100vh - 220px);
-  overflow: auto;
-}
 .x-folders .fdgroup {
   margin: 0;
   padding: 0;
@@ -96,10 +92,16 @@
   -webkit-line-clamp: 3;
 }
 .x-stale {
-  color: var(--high);
+  color: var(--ink-2);
+  font-style: italic;
 }
-.x-frow .mk.k-finding:before {
-  height: 34px;
+/* an open finding's mark is the finding's own flag, in the open (red) color, at the title's line */
+.x-frow .x-fmark {
+  align-self: start;
+  display: grid;
+  place-items: center;
+  height: 20px;
+  color: var(--high);
 }
 
 /* a past conversation with a new result shows the archived deals' dot before its time, so times stay aligned */
@@ -118,7 +120,6 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
 }
 .rail.x-scale .rsearch {
   flex: none;

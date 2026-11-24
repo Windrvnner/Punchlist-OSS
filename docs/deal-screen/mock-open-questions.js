@@ -15,15 +15,15 @@ const openQuestionStage = (content) => `<section class="stage"><div class="x-sta
 
 // ---- the deal's ⋯ menu, Deal Details and Folders ----
 
-/** The deal's ⋯ menu: the deal header's controls, with Delete Deal… set apart, as the header's menu has it. */
+/** The deal's ⋯ menu: the deal header's controls A to Z, with Delete Deal… set apart, as the header's menu has it. */
 function dealDetailsMenu() {
   const item = (label, meta = '', extraClass = '') => `<button type="button" role="menuitem" class="mi ${extraClass}">`
     + `${label}${meta ? `<span class="x-mmeta">${meta}</span>` : ''}</button>`;
   return '<div class="colmenu glass x-headmenu" role="menu" aria-label="Project Proseware">'
-    + item('Run Diligence', 'Last run Nov 20')
-    + item('Deal Memo…')
     + item('Deal Details…')
+    + item('Deal Memo…')
     + item('Folders…')
+    + item('Run Diligence', 'Last run Nov 20')
     + '<div class="msep"></div>'
     + item('Delete Deal…', '', 'ddel')
     + '</div>';
@@ -94,7 +94,7 @@ function foldersDialog() {
 
 // ---- the Findings list, as a tab ----
 
-// the open findings of the first two workstreams, A to Z; those marked "May be out of date" come first in a group
+// the open findings of the first two workstreams (A to Z), newest first, with "May be out of date" first in a group
 const FINDING_GROUPS = [
   ['Commercial', 11, [
     ['Offtaker can terminate the revenue contract on a change in law', 'May be out of date'],
@@ -116,11 +116,12 @@ const FINDING_GROUPS = [
   ]],
 ];
 
-/** A finding in the list: its stripe, its title, and its date; its group already names its workstream. */
+/** A finding in the list: the finding's own flag icon, its title, and its date; its group names its workstream. */
 function findingListRow([title, when]) {
   const stale = when === 'May be out of date';
   const meta = stale ? `<span class="x-stale">${when}</span>` : when;
-  return `<div class="x-row x-frow"><span class="mk k-finding"></span><span class="t" title="${title}">${title}`
+  return `<div class="x-row x-frow"><span class="x-fmark" title="Open">${icon('flag', 14)}</span>`
+    + `<span class="t" title="${title}">${title}`
     + `<small>${meta}</small></span><span class="s"></span></div>`;
 }
 
@@ -240,7 +241,7 @@ const MORE_DEALS = ['Project Proseware', 'Project Halyard', 'Project Wingtip', '
 
 // changed deals first, newest change first, then the rest by when the person last worked on them
 const MORE_ARCHIVED = [['Project Tern', '4 new files · 11:20 AM'], ['Project Osprey', '2 new files · Yesterday'],
-  ['Project Trey', ''], ['Project Lapwing', ''], ['Project Plover', ''], ['Project Avocet', ''],
+  ['Project Petrel', ''], ['Project Lapwing', ''], ['Project Plover', ''], ['Project Avocet', ''],
   ['Project Dunlin', ''], ['Project Curlew', ''], ['Project Godwit', ''], ['Project Sanderling', ''],
   ['Project Whimbrel', ''], ['Project Turnstone', '']];
 
@@ -251,13 +252,13 @@ function fillSidebarAtScale() {
   const head = `<button type="button" class="grp-h"><span class="tri open">${icon('chevr', 12)}</span>Archived`
     + `<span class="cnt">${MORE_ARCHIVED.length}</span></button>`;
   document.querySelector('.rail .x-archgrp').innerHTML = head + MORE_ARCHIVED.map(archivedRow).join('');
-  // Home stays in place and only the deals scroll; a few of the deals above Archived stay in view
+  // Home stays in place and only the deals scroll, here to the end of Archived
   document.querySelector('.rail').classList.add('x-scale');
   const list = document.createElement('div');
   list.className = 'x-dealscroll';
   list.append(document.querySelector('.rail .x-deals'), document.querySelector('.rail .x-archgrp'));
   document.querySelector('.rail nav').append(list);
-  list.scrollTop = document.querySelector('.rail .x-archgrp').offsetTop - list.offsetTop - 110;
+  list.scrollTop = list.scrollHeight;
 }
 
 // ---- the screens, and what is placed once they are on the page ----

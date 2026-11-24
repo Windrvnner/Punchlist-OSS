@@ -62,4 +62,4 @@ Screens 27 to 34 propose answers to the points the screens above left open. They
 | 31 | [Findings tab](deal-screen/shots/31-findings-tab-light-1280x736.jpg) | The full list of findings as a tab, with the Findings page's controls |
 | 32 | [Needs Input](deal-screen/shots/32-tasks-needs-input-light-1280x736.jpg) | What Needs Input holds, and a task waiting for a reply |
 | 33 | [Home's past conversations](deal-screen/shots/33-home-past-conversations-light-1280x736.jpg) | Home's history button, with a conversation that has a new result |
-| 34 | [Archived at scale](deal-screen/shots/34-archived-at-scale-light-1280x736.jpg) | 28 deals and 12 archived ones, changed deals first |
+| 34 | [Archived at scale](deal-screen/shots/34-archived-at-scale-light-1280x736.jpg) | The end of a 40-deal list, with all 12 archived deals and changed ones first |
