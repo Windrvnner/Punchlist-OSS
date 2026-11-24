@@ -1,14 +1,15 @@
 import type { Finding } from '../domain/model';
 import type { ChecklistRow } from '../ports';
+import { askBlock } from './asking';
 import { conflictLabel, versionsWord, type State } from './state';
 
 /** Turning an item off blocks a gap question. An open finding can still receive the question started on it. */
 function targetUnavailable(row: ChecklistRow, off: boolean, findingId: string | undefined, finding?: Finding) {
   if (findingId || row.result === 'finding') {
     if (!finding) return 'Its finding is no longer here';
-    return finding.status === 'open' ? null : 'Its finding is closed';
+    return askBlock(finding.status, false) ? 'Its finding is closed' : null;
   }
-  if (off) return 'This item is turned off';
+  if (askBlock(undefined, off)) return 'This item is turned off';
   return row.result === 'gap' ? null : 'This item no longer needs a question';
 }
 
@@ -30,6 +31,7 @@ export function checklistQuestionTarget(
   const askWhy = original ? null : conflictWhy;
   return {
     askedFinding: off ? finding : currentFinding, title: finding?.title ?? gone?.title ?? row.text, why, askWhy,
+    // #840: a saved Checklist draft keeps its original item and finding links through a turn-off.
     links: { linkedItem: row.id, linkedFinding: findingId, workstream: finding?.workstream ?? '' },
   };
 }

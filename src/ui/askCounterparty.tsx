@@ -3,9 +3,8 @@
  * questions already asked. Shared by the Checklist's open item and a finding's page.
  */
 import { logQuestionDraft, questionDraftAt, questionLogKey } from '../app/logQuestionDraft';
-import { dealQuestions } from '../app/state';
 import { TEXT_MAX } from '../domain/importExport';
-import type { Finding, Question } from '../domain/model';
+import type { Question } from '../domain/model';
 import { closeOnEscape, focusCard } from './focus';
 import { useStore } from './hooks';
 import { moveKey } from './keptDrafts';
@@ -14,18 +13,6 @@ import { pendingSaveKeys, useSaveOut } from './saveOut';
 
 /** a question's status, as a list of asked questions says it */
 export const STATUS: Record<Question['status'], string> = { open: 'open', answered: 'answered', closed: 'closed' };
-
-/** the questions put to the counterparty about an item, or about a finding (the one it raised), oldest first */
-export function askedAbout(
-  s: Parameters<typeof dealQuestions>[0],
-  dealId: string,
-  itemId: string | null,
-  f: Finding | undefined,
-): Question[] {
-  const aboutItem = (q: Question) => itemId !== null && q.linkedItem?.id === itemId;
-  const aboutFinding = (q: Question) => !!f && q.linkedFinding === f.id;
-  return dealQuestions(s, dealId).filter((q) => aboutItem(q) || aboutFinding(q)).sort((a, b) => a.n - b.n);
-}
 
 /** The questions asked, each as its number (opening it on the Q&A page), its status and its words. */
 export function AskedList({ dealId, qs, id }: { dealId: string; qs: Question[]; id: string }) {
