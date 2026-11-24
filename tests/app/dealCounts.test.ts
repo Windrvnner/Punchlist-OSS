@@ -5,8 +5,9 @@ import {
   checklistListCounts, checklistStandingCounts, checkLeftCount, findingCounts, indexingTotals, questionCounts,
   uncheckedChecklistCount,
 } from '../../src/app/dealCounts';
+import { removableIssuesLists, visibleDeletedNotes } from '../../src/app/deletedView';
 import { findingsView } from '../../src/app/findingsView';
-import { folderProgress, overviewStatus } from '../../src/app/indexing';
+import { dealFirstPassStatus, folderProgress, overviewStatus } from '../../src/app/indexing';
 import { initialState } from '../../src/app/state';
 import { Item, itemId, key as wording, ListRecord, listId } from '../../src/domain/checklist';
 import { derivedId } from '../../src/domain/derivedId';
@@ -277,13 +278,15 @@ it('overlays live indexing totals and counts distinct documents once the folders
   expect(indexingTotals(state, deal)).toEqual({ folders: 3, files: 185, indexed: 185 });
   expect(progress.rows).toEqual([
     { key: legal, title: legal, name: 'Legal', files: 120, indexed: 120, indexing: false, read: 59, docs: 115,
-      copies: 5, away: false, empty: false },
+      copies: 5, notice: undefined },
     { key: finance, title: finance, name: finance, files: 40, indexed: 40, indexing: false, read: 23, docs: 36,
-      copies: 4, away: false, empty: false },
+      copies: 4, notice: undefined },
     { key: permits, title: permits, name: 'Permits', files: 25, indexed: 25, indexing: false, read: 10, docs: 25,
-      copies: 0, away: false, empty: false },
+      copies: 0, notice: undefined },
   ]);
-  expect(progress.total).toEqual({ files: 185, indexed: 185, indexing: false, read: 92, docs: 176, copies: 0 });
+  expect(progress.total).toEqual({
+    files: 185, indexed: 185, indexing: false, read: 92, docs: 176, copies: 0, notice: undefined,
+  });
   expect(progress.core).toEqual({ files: 23, read: 15, unavailable: 0 });
 
   delete state.indexing[dealId];
@@ -291,7 +294,7 @@ it('overlays live indexing totals and counts distinct documents once the folders
   const unfinished = folderProgress(state, deal);
   expect(unfinished.rows[0]).toMatchObject({ key: legal, indexing: true, read: undefined });
   expect(unfinished.total).toEqual({
-    files: 177, indexed: 145, indexing: true, read: undefined, docs: 173, copies: 0,
+    files: 177, indexed: 145, indexing: true, read: undefined, docs: 173, copies: 0, notice: undefined,
   });
 });
 
@@ -313,13 +316,90 @@ it('merges missing folders for this deal and preserves the first two reported ma
     { dealId, docs: 120, of: 185 },
   ];
   const progress = folderProgress(state, deal);
-  expect(progress).toMatchObject({ stopped: true, awayCount: 1, emptyCount: 1, folderCount: 3 });
-  expect(progress.rows.map(({ key, away, empty }) => ({ key, away, empty }))).toEqual([
-    { key: legal, away: true, empty: false }, { key: finance, away: false, empty: true },
-    { key: permits, away: false, empty: false },
+  expect(progress).toMatchObject({ stopped: true, folderCount: 3, showLocate: true, showFolders: false });
+  expect(progress.total?.notice).toEqual({ kind: 'away', label: { count: 1, all: false } });
+  expect(progress.rows.map(({ key, notice }) => ({ key, notice }))).toEqual([
+    { key: legal, notice: { kind: 'away' } },
+    { key: finance, notice: { kind: 'empty', label: { count: 1, all: true } } },
+    { key: permits, notice: undefined },
   ]);
   expect(progress.core.unavailable).toBe(20);
   expect(progress.alsoIn).toEqual([{ deal: otherDeal, docs: 140, of: 140 }]);
+});
+
+it('shares no-room, waiting and stopped decisions across the deal’s pages', () => {
+  const { state, deal } = folderDeal();
+  const [finding] = Object.values(state.findings);
+  state.findings = { [finding.id]: { ...finding, dealId: otherDeal.id } };
+  const noRoom = { ...deal, stage: 'indexing' as const, folders: [] };
+  expect(dealFirstPassStatus(state, noRoom)).toEqual({
+    noRoom: true, waiting: true, stopped: false, showIndexing: false,
+  });
+
+  deal.stage = 'indexing';
+  expect(dealFirstPassStatus(state, deal)).toEqual({
+    noRoom: false, waiting: true, stopped: false, showIndexing: true,
+  });
+  state.ui.indexStalled = [dealId];
+  const paused = { noRoom: false, waiting: true, stopped: true, showIndexing: false };
+  expect(dealFirstPassStatus(state, deal)).toEqual(paused);
+  expect(overviewStatus(state, deal)).toEqual({ ...paused, gaps: [] });
+
+  state.findings = { [finding.id]: finding };
+  expect(dealFirstPassStatus(state, deal)).toEqual({
+    noRoom: false, waiting: false, stopped: true, showIndexing: false,
+  });
+  expect(dealFirstPassStatus(state, { ...deal, stage: 'ready' })).toEqual({
+    noRoom: false, waiting: false, stopped: false, showIndexing: false,
+  });
+});
+
+it('assigns a single summary notice when all folders are away or only empty folders need notices', () => {
+  const { state, deal } = folderDeal();
+  const locations = [legal, finance, permits].map((folder) => ({ dealId, folder }));
+  state.ui.missingFolders = {
+    placed: 0, missing: 3, tops: [{ top: '/Southridge', folders: locations }],
+  };
+
+  const away = folderProgress(state, deal);
+  expect(away).toMatchObject({ showLocate: true, showFolders: false });
+  expect(away.total?.notice).toEqual({ kind: 'away', label: { count: 3, all: true } });
+  expect(away.rows.map(({ notice }) => notice)).toEqual([
+    { kind: 'away' }, { kind: 'away' }, { kind: 'away' },
+  ]);
+
+  state.ui.missingFolders = { placed: 1, missing: 2, tops: [], empty: locations.slice(0, 2) };
+  const empty = folderProgress(state, deal);
+  expect(empty).toMatchObject({ showLocate: true, showFolders: true });
+  expect(empty.total?.notice).toEqual({ kind: 'empty', label: { count: 2, all: false } });
+  expect(empty.rows.map(({ notice }) => notice)).toEqual([{ kind: 'empty' }, { kind: 'empty' }, undefined]);
+
+  deal.folders = [deal.folders[0]];
+  const onlyFolder = folderProgress(state, deal);
+  expect(onlyFolder.total).toBeNull();
+  expect(onlyFolder.rows[0].notice).toEqual({ kind: 'empty', label: { count: 1, all: true } });
+});
+
+it('supplies Deleted notes newest first and removable issues lists by name, time and file id', () => {
+  const state = checklistDeal();
+  const [deleted] = Object.values(state.tombstones);
+  const older = { ...deleted, id: derivedId('f', ['Missing loan agreement']), at: createdAt };
+  state.tombstones = { [older.id]: older, [deleted.id]: deleted };
+  expect(visibleDeletedNotes(state, dealId, 'finding').map(({ id }) => id)).toEqual([deleted.id, older.id]);
+
+  const imports = [
+    { doc: 'doc_z', list: 'Closing issues.pdf', at: updatedAt },
+    { doc: 'doc_b', list: 'Closing issues.pdf', at: createdAt },
+    { doc: 'doc_a', list: 'Closing issues.pdf', at: createdAt },
+    { doc: 'doc_c', list: 'Advisor review.pdf', at: updatedAt },
+  ];
+  const findings = Object.values(state.findings).slice(0, imports.length);
+  for (const [index, finding] of findings.entries()) {
+    finding.onLists = [{ ...imports[index], n: '12', text: finding.title }];
+  }
+  expect(removableIssuesLists(state, dealId).map(({ doc }) => doc)).toEqual([
+    'doc_c', 'doc_a', 'doc_b', 'doc_z',
+  ]);
 });
 
 it('counts the firm lists for the selected layer and the latest check’s unfinished rows', () => {
