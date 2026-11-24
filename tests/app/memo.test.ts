@@ -1,5 +1,5 @@
 // Making the deal memo from the app: one press, the model's ratings and summary, the records as they stand, and the save dialog.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Store } from '../../src/app/store';
 import { memRepo } from '../adapters/memRepo';
 import { MemoryLocal } from '../../src/adapters/local';
@@ -23,13 +23,23 @@ type Saved = { name: string; bytes: Uint8Array; kinds?: { label: string; ext: st
  * `pick`: the stand-in save dialog with two kinds, answering with the kind given, or null for canceled. `log` records
  * the order of the dialog, the model and the write.
  */
-function make(o: { pick?: 'docx' | 'pdf' | null; document?: SpreadsheetCodec['document']; ai?: Partial<AiService> } = {}) {
+function make(o: {
+  pick?: 'docx' | 'pdf' | null;
+  document?: SpreadsheetCodec['document'];
+  ai?: Partial<AiService>;
+  writePicked?: FileSystem['writePicked'];
+} = {}) {
   const opts = { latency: [0, 0] as [number, number] }; const repo = memRepo(clock.now); const saved: Saved[] = []; const log: string[] = [];
   let asked: { name: string; kinds: { label: string; ext: string }[] } | null = null;
   const fs: FileSystem = { pickFolders: null, pathFor: null, save: async (name, bytes) => { saved.push({ name, bytes }); return ok('saved' as const); },
     ...(o.pick !== undefined ? {
       pickSave: async (name: string, kinds: { label: string; ext: string }[]) => { log.push('dialog'); asked = { name, kinds }; return ok(o.pick ? { id: 'p1', ext: o.pick } : null); },
-      writePicked: async (id: string, bytes: Uint8Array) => { log.push(`write ${id}`); saved.push({ ...asked!, bytes }); return ok('saved' as const); },
+      writePicked: async (id: string, bytes: Uint8Array) => {
+        log.push(`write ${id}`);
+        const result = o.writePicked ? await o.writePicked(id, bytes) : ok('saved' as const);
+        if (result.ok) saved.push({ ...asked!, bytes });
+        return result;
+      },
       openPicked: async (id: string) => { log.push(`open ${id}`); return ok('opened' as const); },
     } : {}) };
   const ai = { ...mockAi(opts, repo), ...o.ai }; const memo = ai.memo!; ai.memo = (dealId) => { log.push('model'); return memo(dealId); };
@@ -89,6 +99,56 @@ describe('the deal memo, made from the app', () => {
     const toast = store.get().ui.toasts.at(-1)!; expect(toast.text).toBe('Deal memo saved'); expect(toast.action?.label).toBe('Open');
     (toast.action as { run: () => void }).run(); await new Promise((r) => setTimeout(r, 0));
     expect(log).toEqual(['dialog', 'model', 'write p1', 'open p1']);
+  });
+
+  it.each(['docx', 'pdf'] as const)('retries the same %s memo after the selected file refuses it', async (pick) => {
+    const openMessage = 'Couldn’t save the file · Open elsewhere';
+    const otherMessage = 'Couldn’t save the file';
+    const document = vi.fn(twoKinds);
+    const writePicked = vi.fn<NonNullable<FileSystem['writePicked']>>()
+      .mockResolvedValueOnce(fail({ kind: 'failed', message: openMessage }))
+      .mockResolvedValueOnce(fail({ kind: 'failed', message: otherMessage }))
+      .mockResolvedValueOnce(ok('saved' as const));
+    const { store, log, saved } = make({ pick, document, writePicked });
+    const dealId = await dealWith(store);
+
+    await runMemo(store, dealId);
+    const notice = () => store.get().ui.toasts.at(-1);
+    expect(notice()?.text).toBe(openMessage);
+    expect(notice()?.action?.label).toBe('Retry');
+    expect(saved).toEqual([]);
+
+    notice()?.action?.run?.();
+    await vi.waitFor(() => expect(notice()?.text).toBe(otherMessage));
+    expect(notice()?.action?.label).toBe('Retry');
+    notice()?.action?.run?.();
+    await vi.waitFor(() => expect(notice()?.text).toBe('Deal memo saved'));
+    expect(notice()?.action?.label).toBe('Open');
+    notice()?.action?.run?.();
+
+    const bytes = new Uint8Array([pick === 'pdf' ? 2 : 1]);
+    expect(writePicked.mock.calls).toEqual([['p1', bytes], ['p1', bytes], ['p1', bytes]]);
+    expect(document).toHaveBeenCalledTimes(1);
+    expect(log).toEqual(['dialog', 'model', 'write p1', 'write p1', 'write p1', 'open p1']);
+  });
+
+  it('makes the memo again after conversion fails before there are bytes to save', async () => {
+    const document = vi.fn<NonNullable<SpreadsheetCodec['document']>>()
+      .mockResolvedValueOnce(fail({ kind: 'failed', message: 'Couldn’t convert the document' }))
+      .mockImplementationOnce(twoKinds);
+    const { store, log } = make({ pick: 'docx', document });
+    const dealId = await dealWith(store);
+
+    await runMemo(store, dealId);
+    const notice = () => store.get().ui.toasts.at(-1);
+    expect(notice()?.text).toBe('Couldn’t make the deal memo');
+    expect(log).toEqual(['dialog', 'model']);
+    expect(notice()?.action?.label).toBe('Retry');
+    notice()?.action?.run?.();
+
+    await vi.waitFor(() => expect(notice()?.text).toBe('Deal memo saved'));
+    expect(document).toHaveBeenCalledTimes(2);
+    expect(log).toEqual(['dialog', 'model', 'dialog', 'model', 'write p1']);
   });
 
   it('a canceled save dialog says nothing, asks nothing of the model and never spins the button', async () => {
