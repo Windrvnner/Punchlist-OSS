@@ -466,20 +466,6 @@ function memoSummaryPrompt(
     + 'Name no person. Never write an id.';
 }
 
-/** The counts carry the ratings when some findings are unrated (#661). */
-function memoSummaryRejection(unrated: number, advises: (text: string) => boolean) {
-  const ratingLabel = new RegExp(`\\b(?:${RATINGS.join('|')})\\b`);
-  const ratingPhrase = /\b(?:high|medium|low)[- ](?:rated|risk|ratings?|severity|category)\b/i;
-  const ratedAs = /\b(?:rated|classified as|assessed as|considered) (?:high|medium|low)\b/i;
-  return (paragraphs: string[]): string => {
-    const text = paragraphs.join(' ').replace(/\s+/g, ' ');
-    if (unrated && (ratingLabel.test(text) || ratingPhrase.test(text) || ratedAs.test(text))) {
-      return 'Keep rating labels in the counts while ratings are unresolved. Describe the facts in the summary.';
-    }
-    return paragraphs.some(advises) ? 'That gives advice or a judgment. Write it again with facts only.' : '';
-  };
-}
-
 export function nodeAi(o: AiOptions) {
   const clock = o.clock ?? (() => new Date().toISOString()); const L = control.limits; const width = o.width ?? L.docsPerCall; const batch = Math.max(1, o.batch ?? L.itemsPerCall); const shortlist = Math.max(1, o.shortlist ?? L.shortlist);
   let offered: Awaited<ReturnType<ModelService['models']>> | null = null;
@@ -1312,9 +1298,9 @@ export function nodeAi(o: AiOptions) {
 
   /** Read the memo summary from its documents, or from the deal facts when none are available. */
   async function readMemoSummary(
-    dealId: string, tiers: { standard: string; thorough: string }, prompt: string, facts: string, unrated: number,
+    dealId: string, tiers: { standard: string; thorough: string }, prompt: string, facts: string,
     parasOf: (reply: { paragraphs?: unknown } | null) => string[],
-    rejectSummary: (paragraphs: string[]) => string,
+    advises: (text: string) => boolean,
   ): Promise<Result<string[]>> {
     async function withoutDocuments(): Promise<string[]> {
       const question = `${prompt}\nReply as JSON: {"paragraphs": ["…"]}`;
@@ -1322,12 +1308,12 @@ export function nodeAi(o: AiOptions) {
       const attempts = [[tiers.standard, false], [tiers.standard, true], [tiers.thorough, false]] as const;
       for (const [model, again] of attempts) {
         const correction = again && summary.length
-          ? `\n\nYou wrote:\n${summary.join('\n')}\n\n${rejectSummary(summary)}`
+          ? `\n\nYou wrote:\n${summary.join('\n')}\n\nThat gives advice or a judgment. Write it again with facts only.`
           : '';
         summary = parasOf(await askJson<{ paragraphs?: unknown }>({
           kind: 'memoSummary', model, system: JSON_ONLY, prompt: question + correction,
         }, ['paragraphs']));
-        if (summary.length && !rejectSummary(summary)) break;
+        if (summary.length && !summary.some(advises)) break;
       }
       return summary;
     }
@@ -1336,12 +1322,9 @@ export function nodeAi(o: AiOptions) {
       escalate: tiers.thorough,
       usable(reply: Record<string, unknown>) {
         const paragraphs = parasOf(reply);
-        return paragraphs.length > 0 && !rejectSummary(paragraphs);
+        return paragraphs.length > 0 && !paragraphs.some(advises);
       },
-      wrong: unrated
-        ? 'it is empty, gives advice or a judgment, or uses rating labels while ratings are unresolved'
-        : 'it is empty, or it gives advice or a judgment: write it again with facts only',
-      retrySharedModel: unrated > 0,
+      wrong: 'it is empty, or it gives advice or a judgment: write it again with facts only',
     };
     try {
       const fromDocs = await read('memoSummary', [dealId], tiers.standard, prompt,
@@ -1354,7 +1337,7 @@ export function nodeAi(o: AiOptions) {
       const summary = fromDocs.ok && fromDocs.value.sent.length
         ? parasOf(fromDocs.value.reply)
         : await withoutDocuments();
-      return ok(rejectSummary(summary) ? [] : summary);
+      return ok(summary.some(advises) ? [] : summary);
     } catch (e) {
       return unreachable(e) ? failure(e, `${SERVICE} did not answer`) : ok([]);
     }
@@ -1755,14 +1738,13 @@ export function nodeAi(o: AiOptions) {
       const got = await o.repo.get('deal', dealId); const deal = got.ok && got.value ? got.value.envelope.data as { name: string; counterparty?: string; product?: string; sector?: string; technology?: string } : null;
       const facts = deal ? [deal.name, deal.counterparty, deal.product, deal.sector, deal.technology].filter(Boolean).join('; ') : '';
       const unrated = unratedFindings(open, ratings).length;
-      const rejectSummary = memoSummaryRejection(unrated, advises);
       const prompt = memoSummaryPrompt(facts, open.length, unrated, grouped, (id) => {
         const finding = byId.get(id)!;
         return `(${finding.workstream || 'no workstream'}) ${plain(finding)}`;
       });
       const parasOf = (reply: { paragraphs?: unknown } | null) => strings(reply?.paragraphs)
         .map((p) => unid(withoutMemoMarks(p), ids)).filter(Boolean).slice(0, 2);
-      const summary = await readMemoSummary(dealId, m, prompt, facts, unrated, parasOf, rejectSummary);
+      const summary = await readMemoSummary(dealId, m, prompt, facts, parasOf, advises);
       if (!summary.ok) return summary;
       return ok({ summary: summary.value, ratings, risks });
     },
