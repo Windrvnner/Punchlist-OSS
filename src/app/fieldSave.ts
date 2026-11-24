@@ -55,7 +55,6 @@ export class FieldSave {
   base: string;
   seen: FieldValue;
   private baseRev: number;
-  private restored: boolean;
   private gone = false;
   private jumped = false;
   private byJump = false;
@@ -72,7 +71,6 @@ export class FieldSave {
     this.base = draft?.base ?? record.value;
     const external = !!draft && (draft.base !== record.value || draft.rev !== record.rev);
     this.baseRev = external ? -1 : record.rev;
-    this.restored = !!draft;
     this.view = { external, status: draft && !external ? 'failed' : 'idle', byItself: false, reason: '' };
   }
 
@@ -339,12 +337,11 @@ export class FieldSave {
   }
 
   lockChanged(locked: boolean, commit: FieldCommit) {
-    if (this.restored) {
-      this.restored = false;
-      return;
-    }
-    if (!locked && !this.input.focused() && this.input.text() !== this.seen.value) {
-      void this.save(this.input.text(), commit);
+    // A manual Retry stays a choice when a read-only lock clears (#229).
+    const waitsForRetry = this.view.status === 'failed' && !this.view.byItself;
+    const text = this.input.text();
+    if (!locked && !waitsForRetry && !this.input.focused() && text !== this.seen.value) {
+      void this.save(text, commit);
     }
   }
 }
