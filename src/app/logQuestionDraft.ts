@@ -5,7 +5,7 @@ interface QuestionDraft {
 }
 
 /** A recovered copy can itself be recovered. Each move replaces record IDs with fresh ones. */
-function latestKey(key: string, move: (key: string) => string): string {
+export function latestKey(key: string, move: (key: string) => string): string {
   const next = move(key);
   return next === key ? key : latestKey(next, move);
 }
@@ -30,9 +30,12 @@ export function questionLogKey(draftKey: string, pending: Iterable<string>, move
 /** Whether to settle the card on screen. A save sent before Cancel lands but leaves any new draft alone (#843). */
 export async function logQuestionDraft(
   text: string, draft: QuestionDraft, dispatch: () => Promise<{ ok: boolean }>, cancelled: () => boolean,
+  sameTarget?: () => boolean,
 ): Promise<boolean> {
   const result = await dispatch();
   if (cancelled()) return false;
-  if (result.ok && draft.read()?.trim() === text) draft.forget();
+  const kept = draft.read();
+  if (kept && sameTarget && !sameTarget()) return false;
+  if (result.ok && kept?.trim() === text) draft.forget();
   return true;
 }
