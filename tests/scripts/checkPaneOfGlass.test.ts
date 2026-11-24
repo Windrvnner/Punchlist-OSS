@@ -46,6 +46,8 @@ describe('UI dependency checks', () => {
         "import type { Stats } from 'fs'",
         "type Event = import('node:events').EventEmitter",
         "const fs = import('fs/promises')",
+        'const table = import(`../../backend/${tableName}.ts`)',
+        "const table = import('../../backend/' + tableName)",
       ],
       storage: ['localStorage.getItem(key)', 'indexedDB.open(key)', 'window.sessionStorage.length'],
       services: ['store.services.ai.phrase(point)', 'const { services: ports } = store', 'store?.services'],
@@ -63,6 +65,18 @@ describe('UI dependency checks', () => {
     expect(result.status).toBe(1);
     for (const diagnostic of expected) expect(result.stderr).toContain(diagnostic);
     expect(result.stderr).toContain('"The frontend is a pane of glass" in CLAUDE.md');
+  });
+
+  it('resolves a relative layer name from the importing file', () => {
+    const repo = fixture();
+    repo.write('src/ui/components/shell.ts', 'export const title = "Settings"');
+    repo.write('src/ui/components/topBar.ts', "export * from './shell'");
+    expect(repo.run().status).toBe(0);
+    repo.write('src/ui/page.ts', "import '../backend/x'");
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('src/ui/page.ts import (lines 1)');
+    expect(result.stderr).not.toContain('topBar.ts');
   });
 
   it('ignores test files, comments and literal text and checks expressions in templates and JSX', () => {

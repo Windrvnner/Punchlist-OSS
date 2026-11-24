@@ -3,13 +3,30 @@ import { posix } from 'node:path';
 import { parseSync, Visitor } from 'vite';
 
 const storageNames = new Set(['localStorage', 'sessionStorage', 'indexedDB']);
-const layerPath = /^(?:\.\.\/)*(?:\/?src\/)?(?:backend|adapters|desktop|shell)(?:\/|$)/;
+const layerPath = /^(?:backend|adapters|desktop|shell)(?:\/|$)/;
 const externalModule = /^(?:node:|(?:electron|fs|path)(?:\/|$))/;
 
 function literalText(node) {
   if (typeof node?.value === 'string') return node.value;
   if (node?.type === 'TemplateLiteral' && !node.expressions.length) return node.quasis[0].value.cooked;
   return null;
+}
+
+// Keep the fixed prefix of a dynamic import. A placeholder marks the first unknown part of its path.
+function modulePath(node) {
+  if (node?.type === 'TemplateLiteral' && node.expressions.length) return node.quasis[0].value.cooked + '*';
+  if (node?.type === 'BinaryExpression' && node.operator === '+') {
+    const left = literalText(node.left);
+    return left === null ? modulePath(node.left) : left + (modulePath(node.right) ?? '*');
+  }
+  return literalText(node);
+}
+
+function forbiddenModule(file, name) {
+  if (externalModule.test(name)) return true;
+  if (!name.startsWith('.')) return layerPath.test(name.replace(/^\/?src\//, ''));
+  const target = posix.join(posix.dirname(file), name);
+  return target.startsWith('src/') && layerPath.test(target.slice('src/'.length));
 }
 
 function propertyName(key, computed) {
@@ -34,8 +51,8 @@ export function matchesIn(file, source) {
     (offsets[kind] ??= new Set()).add(node.start);
   }
   function checkModule(node) {
-    const name = literalText(node);
-    if (name && (externalModule.test(name) || layerPath.test(posix.normalize(name)))) record('import', node);
+    const name = modulePath(node);
+    if (name && forbiddenModule(file, name)) record('import', node);
   }
   function checkMember(node) {
     const name = propertyName(node.property, node.computed);
