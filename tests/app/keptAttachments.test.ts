@@ -103,18 +103,16 @@ describe('attachments kept across a restart', () => {
   });
 
   it('restores a real recovered deal attachment and its typed text without rendering (#117)', async () => {
+    const portfolio = portfolioQuestions().map((text, index) => [`q_portfolio-${index}:text`, {
+      text, base: '', rev: 1,
+    }]);
+    local.write(KEPT_TEXT_KEY, { 'edit-field': portfolio });
     const { keptDrafts, isText, saveKeptDrafts } = await restartKeptText();
     const { startKeepingDrafts } = await import('../../src/app/startKeepingDrafts');
-    const { okd, row, syncAll, twoPcs } = await import('./pcs');
-    const { ImportQuestions } = await import('../../src/app/commands/importQuestions');
+    const { okd, syncAll, twoPcs } = await import('./pcs');
     const { EditQuestionField } = await import('../../src/app/commands/questions');
     const { DeleteDeal } = await import('../../src/app/commands/deals');
     const { A, B, dealId, qid, fid } = await twoPcs();
-    const rows = portfolioQuestions().map((question, index) => row(index + 1, question));
-    okd(await A.store.dispatch(ImportQuestions, { dealId, mode: 'append', rows }));
-    await syncAll(A, B);
-    await B.store.loadDeal(dealId, { gaps: false });
-    expect(Object.values(B.store.get().questions)).toHaveLength(rows.length + 1);
 
     const stop = startKeepingDrafts(B.store);
     const conv = `finding:${dealId}:${fid}:c_facility`;
@@ -139,6 +137,6 @@ describe('attachments kept across a restart', () => {
 
     const after = await startWith();
     expect(after.get().ui.attachments).toEqual([renamed]);
-    expect(local.read(KEPT_TEXT_KEY)).toMatchObject({ composer: [[moved.conv, draft]] });
+    expect(local.read(KEPT_TEXT_KEY)).toMatchObject({ 'edit-field': portfolio, composer: [[moved.conv, draft]] });
   });
 });
