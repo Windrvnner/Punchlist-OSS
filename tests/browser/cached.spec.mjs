@@ -8,6 +8,68 @@ const results = []; const say = (id, ok, note = '') => { results.push([id, ok]);
 const browser = await launchChrome();
 openOnFindings(browser);
 const SHOTS = process.env.SHOTS || '';
+async function paperError(page, scheme, kind) {
+  const retry = page.locator('#doc-error').getByRole('button', { name: 'Retry', exact: true });
+  const checks = [];
+  for (const [width, height] of [[1280, 736], [1024, 640]]) {
+    await page.setViewportSize({ width, height });
+    for (const forcedColors of ['none', 'active']) {
+      await page.emulateMedia({ forcedColors });
+      await page.keyboard.press('Shift+Tab');
+      const style = await retry.evaluate((button) => {
+        button.blur();
+        const canvas = document.createElement('canvas').getContext('2d');
+        const luminance = (color) => {
+          canvas.fillStyle = color;
+          canvas.fillRect(0, 0, 1, 1);
+          const channels = Array.from(canvas.getImageData(0, 0, 1, 1).data).slice(0, 3).map((channel) => {
+            const srgb = channel / 255;
+            return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+          });
+          return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+        };
+        const paper = luminance(getComputedStyle(button.closest('.page')).backgroundColor);
+        const contrast = (color) => {
+          const ink = luminance(color);
+          return (Math.max(ink, paper) + 0.05) / (Math.min(ink, paper) + 0.05);
+        };
+        const style = getComputedStyle(button);
+        const idle = { retry: contrast(style.color), underline: style.textDecorationLine.includes('underline') };
+        button.focus();
+        return {
+          ...idle, text: contrast(getComputedStyle(button.parentElement).color), ring: contrast(style.outlineColor),
+          focus: button.matches(':focus-visible') && style.outlineStyle === 'solid'
+            && parseFloat(style.outlineWidth) >= 2,
+        };
+      });
+      checks.push({ width, forcedColors, ...style });
+      if (SHOTS && kind === 'missing' && forcedColors === 'none') {
+        await page.screenshot({ path: `${SHOTS}/439-${scheme}-${width}.png`, animations: 'disabled' });
+      }
+    }
+  }
+  await page.emulateMedia({ forcedColors: 'none' });
+  await page.setViewportSize({ width: 1280, height: 736 });
+  return checks;
+}
+
+async function retryCitation(page, source, key) {
+  await page.evaluate(() => { window.__fail = {}; });
+  await page.locator('#doc-error').getByRole('button', { name: 'Retry', exact: true }).press(key);
+  await page.waitForSelector('.docbody :is(.page .pg, .sheet)', { timeout: 8000 });
+  return page.evaluate(({ doc, loc }) => {
+    const nav = document.querySelector('.docnav');
+    const headerMatches = nav.querySelector('.docname .docnm')?.textContent === doc
+      && nav.querySelector('.loc')?.textContent === loc;
+    const pageNumber = document.querySelector('.docbody .page .pg')?.textContent;
+    const sheet = document.querySelector('.docbody .sheet');
+    const cell = sheet ? [...sheet.querySelectorAll('th.hc')].map((part) => part.textContent).join('') : '';
+    const placeMatches = pageNumber ? pageNumber === loc.replace(/^p\. /, 'Page ')
+      : cell === loc.split('!').at(-1) && !!sheet?.querySelector('td.hl');
+    return headerMatches && placeMatches && !document.getElementById('doc-error');
+  }, source);
+}
+
 async function start(scheme, limit) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 736 }, colorScheme: scheme }); const page = await ctx.newPage(); page.errors = []; page.on('pageerror', (e) => page.errors.push(e.message));
   await page.goto(URL); await page.waitForSelector('#fr-new');
@@ -145,11 +207,27 @@ for (const scheme of ['dark', 'light']) {
   // a file the backend cannot find: its message, in place of the page
   await page.evaluate(() => { window.__fail = { pageMissing: true }; });
   await openFindingById(split.loaded);
-  await page.click('.opening .ref .rb'); await page.waitForSelector('#doc-error', { timeout: 8000 });
+  const refs = page.locator('.opening .ref .rb[role="button"]');
+  const cited = await page.evaluate((fid) => store.get().findings[fid].sources, split.loaded);
+  await refs.first().click();
+  await page.waitForSelector('#doc-error', { timeout: 8000 });
   const err = await page.textContent('#doc-error');
   say(`${scheme}:file-not-found-message`, /could not be found in the deal’s folders\. Retry/.test(err), err);
-  await page.evaluate(() => { window.__fail = {}; }); await page.click('#doc-error .tundo'); await page.waitForSelector('.docpanel .page:not(.ph-page), .docpanel .sheet', { timeout: 8000 });
-  say(`${scheme}:found-again-on-retry`, !(await page.$('#doc-error')));
+  const missing = await paperError(page, scheme, 'missing');
+  const recoveredMissing = await retryCitation(page, cited[0], 'Enter');
+
+  await page.click('#doc-close');
+  await page.evaluate(() => { window.__fail = { page: true }; });
+  await refs.last().click();
+  await page.waitForFunction(() =>
+    document.querySelector('#doc-error')?.textContent.includes('Couldn’t load this page.'), null, { timeout: 8000 });
+  const failedPage = await paperError(page, scheme, 'failed');
+  const recoveredFailure = await retryCitation(page, cited.at(-1), 'Space');
+  const legible = [...missing, ...failedPage].every(({ text, retry, ring, underline, focus }) =>
+    text >= 4.5 && retry >= 4.5 && ring >= 3 && underline && focus);
+  say(`${scheme}:paper-error-and-retry-stay-legible`, legible, JSON.stringify({ missing, failedPage }));
+  say(`${scheme}:found-again-on-retry`, recoveredMissing && recoveredFailure,
+    JSON.stringify({ recoveredMissing, recoveredFailure }));
   say(`${scheme}:no-page-errors`, page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }

@@ -29,7 +29,7 @@ npm ci                                       # install dependencies and the pre-
 npx tsc -p . --noEmit                        # type-check
 npx biome lint --diagnostic-level=error .    # lint (errors block commits)
 npx vitest run [path/to/file.test.ts]        # unit, backend, and end-to-end tests, or one file
-npm run check                                # type-check, lint, secrets check, readability hints, and unit tests
+npm run check                                # static checks and unit tests
 npm run build                                # build into dist/
 npm run browser -- --jobs 2 [suites]         # browser suites against dist/ on port 4178 (set PUNCHLIST_PORT to change it)
 npm run check:all                            # everything CI runs, including the desktop app, on this machine
@@ -45,6 +45,12 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
 
 ## Code
 
+- **The frontend is a pane of glass.** `src/ui` shows state, sends commands, and calls `src/app` functions.
+  Model calls, business rules, data transforms, list membership and counts, retries, and persistence live in
+  `src/app` or `src/backend`. They reach storage and services only through `src/ports`, so workflows run without a
+  window. The UI never imports the backend, adapters, desktop, or shell.
+  `npm run check` fails when `src/ui` gains such an import, a service or repository call, or browser storage
+  (`scripts/check-pane-of-glass.mjs`).
 - **Readable code.** Every change must be easy for a person to review on GitHub. New or changed code that breaks the rules below is a review blocker, just like lost work or a crash. Code that a pull request did not touch never is.
   - Put one statement on each line, and keep lines to 120 characters at most, comments included.
   - Keep new functions to about 60 lines and files to about 500. Don't grow a function that is already past that limit; add a named helper instead.

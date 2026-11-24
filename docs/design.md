@@ -89,6 +89,8 @@ Three colors carry meaning, one meaning each: red means something needs you; the
 
 The glass, lines, page details, overlays, and shadows are listed with their bases in `src/palette.ts`. The build stops, naming the base to change, when text would fall under 4.5:1 (3:1 for marks) on what it sits on.
 
+On document paper, error text and its always-underlined **Retry** use `--paper-ink`, including the focus ring (#439).
+
 Soft tints, such as `--accent-soft` and `--high-soft`, mix their color at 10–14%.
 
 ## Glass, radii, and shadows
@@ -186,6 +188,12 @@ See reference screenshots 02, 11, and 12.
 
 - **Menus** (`.colmenu`; 10): Menus open under their button, with a 12px radius, 8px padding, popup glass, and `--shadow-pop`. Items are 13px rows with 8px radius and a `--card-hover` hover; in dark the row under the pointer is lit more, `--ink` at 14%, so it stays apart from the chosen row. Groups are split by a 1px rule and headed by a section label. A single choice in a menu, in every menu that marks one, is marked by a check mark at the row's right end, the `check` icon at 14px in `--ink-2` (`ChoiceCheck`), as macOS menus mark it, not by a radio or bold, on a light highlight (`--mi-chosen`): the accent at 10% in light, `--card-hover` at 50% in dark, so it is found at a glance in a long list. A list with counts keeps room for the check mark on every row, so the counts line up. Checkboxes, for several choices, are drawn small (14px) and filled with the accent when on. An item that ends in "…" opens a dialog.
 - **Source popovers** (a cited phrase on hover or focus): A source popover has one 12.5px row per document, with the name in `--ink` and its places after a "·" in `--ink-3`; the places give way first to an ellipsis (whole in the tooltip). The one action sits under a 1px `--line` rule, in `--accent`. The popover is 360px wide and hangs 14px below the line box of the phrase's last line. A finding's name lists up to four documents, or three and "N more".
+- A cited phrase uses the pointer cursor if it opens a source. A phrase with a hover-only popover uses the default
+  cursor (#440).
+- A source chip keeps its page or location and its reading or precedent tag at full width. The document name uses the
+  shared ellipsis and full-name tooltip when it runs out of room. When the tail alone fills the slot, it keeps the
+  end of the name with a leading ellipsis. The document icon also shows the full filename on hover when space is
+  tight (#441).
 - **Order:** A dropdown menu is A to Z, with "All …" or a prompt first and a "No …" or "None" option last, which in a long menu stays in view below the scrolling choices, under a 1px rule; the scrolling part shows whole rows only. Which dropdowns keep an order of their own is in [docs/decisions.md](decisions.md).
 - **Search** (14). Results drop from the sidebar field in a popup glass panel (radius 14px, `--shadow-pop`), grouped
   under labels split by rules (Deals, Findings, Checklist Items, Questions, and Documents). The label is 13px in
