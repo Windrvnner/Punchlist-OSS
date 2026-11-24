@@ -12,14 +12,14 @@ import { Modal, LeaveFoot } from './dialogs';
 import { num, plural } from './counts';
 import { FileInput, PickFileRow } from './fileDrop';
 import { showTip, hideTip } from './tip';
-import { WORKSTREAMS } from './qa';
 import { dealFindings } from '../app/state';
+import { readIssuesList, type ReadIssuesList } from '../app/issuesList';
 import { ImportIssuesList } from '../app/commands/issuesList';
 import { fitText } from '../domain/importExport';
 import { AI_LABEL } from '../control';
 import { key as wording } from '../domain/checklist';
 import type { Finding, ListPoint } from '../domain/model';
-import type { DocumentRef, IssuePoint } from '../ports';
+import type { IssuePoint } from '../ports';
 import { keptImport, keepImport, dropImport, importKey, useKeptImportsReady, useFreshOnCrash } from './keptImports';
 
 /** the files a list comes as: a PDF, a Word file or an email */
@@ -81,7 +81,7 @@ export function reviewOf(all: Finding[], list: { docId: string; name: string }, 
 }
 
 /** the issues list as it was left: the list as the model read it, and the points checked to keep separate */
-interface ListKept { list: { doc: DocumentRef; points: IssuePoint[] }; kept: Set<number> }
+interface ListKept { list: ReadIssuesList; kept: Set<number> }
 const isListKept = (v: unknown): v is ListKept => {
   const k = v as ListKept | undefined;
   return !!k?.list?.doc && typeof k.list.doc.docId === 'string' && typeof k.list.doc.doc === 'string' && Array.isArray(k.list.points) && k.kept instanceof Set
@@ -97,7 +97,7 @@ export function IssuesListDialog({ dealId }: { dealId: string }) {
 function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: boolean }) {
   const store = useStore(); const s = useAppState();
   const KEY = importKey.issues(dealId); const [left] = useState(() => { const k = afresh ? null : keptImport(KEY); return isListKept(k) ? k : null; });
-  const [list, setList] = useState<{ doc: DocumentRef; points: IssuePoint[] } | null>(left?.list ?? null);
+  const [list, setList] = useState<ReadIssuesList | null>(left?.list ?? null);
   const [kept, setKept] = useState<Set<number>>(left?.kept ?? new Set());   // points the person keeps as their own finding
   const [busy, setBusy] = useState<'' | 'reading' | 'importing'>('');
   const [error, setError] = useState('');
@@ -116,17 +116,18 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
 
   const load = async (file: File) => {
     if (busy === 'importing') return;
-    const mine = ++token.current; setBusy('reading'); setError('');
-    const at = await store.services.docs.attach(dealId, { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });
-    if (token.current !== mine) return;                                // closed, or another file chosen, meanwhile
-    if (!at.ok) { setBusy(''); setError(`Couldn’t read ${file.name}: ${at.error.message}`); return; }
-    // every finding on the deal, open or closed: a point may repeat one a person has since closed
-    const all = dealFindings(store.get(), dealId);
-    const r = await store.services.ai.issuesList!({ dealId, doc: at.value, findings: all.map((f) => ({ id: f.id, title: f.title, text: f.body.join('\n\n') })), workstreams: WORKSTREAMS });
-    if (token.current !== mine) return;
+    const mine = ++token.current;
+    setBusy('reading');
+    setError('');
+    const read = await readIssuesList(store, dealId, file, () => token.current === mine);
+    if (!read || token.current !== mine) return;
     setBusy('');
-    if (!r.ok) { setError(`Couldn’t read ${file.name}: ${r.error.message}`); return; }
-    setList({ doc: at.value, points: r.value.points }); setKept(new Set());
+    if (!read.ok) {
+      setError(`Couldn’t read ${file.name}: ${read.error.message}`);
+      return;
+    }
+    setList(read.value);
+    setKept(new Set());
   };
   const read = (file: File) => void load(file);
   const pick = <FileInput id="il-file" accept={ACCEPT} inputRef={fileRef} onFile={read} />;
