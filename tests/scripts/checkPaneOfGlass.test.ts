@@ -85,6 +85,84 @@ describe('UI dependency checks', () => {
     expect(result.stderr).toContain('"The frontend is a pane of glass" in CLAUDE.md');
   });
 
+  it('checks fixed local import paths in their declaring scope', () => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    repo.write(file, [
+      "const moduleName = 'node:path'",
+      'export const loadPath = () => import(moduleName)',
+      "const directory = '../backend/'",
+      "const reader = `${directory}lenient.ts` as const",
+      "export function load() { const directory = './'; return import(reader) }",
+      "export function local() { const moduleName = './table'; return import(moduleName) }",
+      'export const supplied = (moduleName: string) => import(moduleName)',
+      "export const late = () => import(adapter)",
+      "const adapter = useShared ? '../adapters/shared' : './local'",
+      "const help = 'node:fs'",
+      "let changing = './table'",
+      'changing = suppliedName',
+      'export const open = () => import(changing)',
+      "const first = second + ''",
+      'const second = first',
+      'export const loop = () => import(first)',
+    ].join('\n'));
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 2, 5, 8): 3 exceeds`);
+  });
+
+  it('resolves value bindings when a type shares the name and when literals are destructured', () => {
+    const repo = fixture();
+    const file = 'src/ui/modules.ts';
+    repo.write(file, [
+      "type ModuleName = 'node:path'",
+      "const ModuleName: ModuleName = 'node:path'",
+      'export const builtIn = () => import(ModuleName)',
+      '',
+      "const { entry } = { entry: 'node:path' } as const",
+      'export const fromObject = () => import(entry)',
+      "const { ports: [reader] } = { ports: ['../backend/lenient'] }",
+      'export const nested = () => import(reader)',
+      "const { log: local } = { log: './table' }",
+      'export const page = () => import(local)',
+      'function child() {',
+      "  const ModuleName = './table'",
+      '  return import(ModuleName)',
+      '}',
+      'function supplied({ entry }: { entry: string }) { return import(entry) }',
+      "const { target } = { target: 'node:fs', ...runtimeOptions }",
+      'export const unknown = () => import(target)',
+      "const { plugin: source } = { ...runtimeOptions, plugin: 'node:fs' }",
+      'export const overridden = () => import(source)',
+      "const { route = '../backend/lenient' } = {}",
+      'export const withDefault = () => import(route)',
+      'interface PageName { url: string }',
+      "const PageName = './table'",
+      'export const localPage = () => import(PageName)',
+    ].join('\n'));
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 3, 6, 8, 19, 21): 5 exceeds`);
+  });
+
+  it('resolves imports in TypeScript classes with decorators and auto-accessors', () => {
+    const repo = fixture();
+    const file = 'src/ui/picker.ts';
+    const screen = [
+      'function recordClass(_target: object) {}',
+      '@recordClass',
+      'export class Picker { accessor label = "Checklist"; }',
+      "const page = './hooks'",
+      'export const load = () => import(page)',
+    ].join('\n');
+    repo.write(file, screen);
+    expect(repo.run().status).toBe(0);
+    repo.write(file, screen.replace('./hooks', '../backend/lenient'));
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 5): 1 exceeds`);
+  });
+
   it('checks computed member and destructuring keys and each read in a dotted JSX tag', () => {
     const repo = fixture();
     const file = 'src/ui/access.tsx';
