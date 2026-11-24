@@ -85,6 +85,62 @@ describe('UI dependency checks', () => {
     expect(result.stderr).toContain('"The frontend is a pane of glass" in CLAUDE.md');
   });
 
+  it('reports the direct dynamic import of a local string constant and allows the UI equivalent', () => {
+    const repo = fixture();
+    const file = 'src/ui/checklistReader.ts';
+    repo.write('src/ui/checklist.mjs', "export const caption = 'Checklist'");
+    const load = [
+      "import { loadPath } from './src/ui/checklistReader.ts'",
+      'const loaded = await loadPath()',
+      "console.log(loaded === await import('node:path') ? 'node:path' : loaded.caption)",
+    ].join('\n');
+    for (const name of ['./checklist.mjs', 'node:path']) {
+      const source = [`const moduleName = '${name}'`, 'export const loadPath = () => import(moduleName)'];
+      repo.write(file, source.join('\n'));
+      const args = ['--experimental-strip-types', '--input-type=module', '-e', load];
+      const runtime = spawnSync(process.execPath, args, { cwd: repo.dir, encoding: 'utf8' });
+      expect(runtime.status, runtime.stderr).toBe(0);
+      const local = name === './checklist.mjs';
+      expect(runtime.stdout.trim()).toBe(local ? 'Checklist' : 'node:path');
+      const result = repo.run();
+      expect(result.status, result.stderr).toBe(local ? 0 : 1);
+      if (!local) expect(result.stderr).toContain(`${file} import (lines 2): 1 exceeds`);
+    }
+  });
+
+  it('follows immutable aliases in their declaring scope and ignores runtime and type-only inputs', () => {
+    const repo = fixture();
+    const file = 'src/ui/modulePicker.ts';
+    repo.write('src/ui/checklist.mjs', "export const caption = 'Checklist'");
+    const source = [
+      "type page = 'node:path' | './checklist.mjs'",
+      "const page: page = 'node:path' as const",
+      'const first = page',
+      'const selected = (first satisfies string)',
+      "export function open() { const page = './checklist.mjs'; return import(selected!) }",
+      "export function local() { const page = './checklist.mjs'; return import(page) }",
+      "export function supplied(page: 'node:path') { return import(page) }",
+      "declare const fromState: 'node:path'",
+      'export const runtime = () => import(fromState)',
+      "const annotated = chooseModule() as 'node:path'",
+      'export const dynamic = () => import(annotated)',
+      "let changing = 'node:path'",
+      "changing = './checklist.mjs'",
+      'export const changed = () => import(changing)',
+      'function recordClass(_target: object) {}',
+      '@recordClass',
+      'export class Picker { accessor label = "Checklist" }',
+      "export function sameValue() { type page = './checklist.mjs'; return import(page) }",
+      'declare function chooseModule(): string',
+    ].join('\n');
+    repo.write(file, source);
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 5, 18): 2 exceeds`);
+    repo.write(file, source.replace("const page: page = 'node:path'", "const page: page = './checklist.mjs'"));
+    expect(repo.run().status).toBe(0);
+  });
+
   it('checks computed member and destructuring keys and each read in a dotted JSX tag', () => {
     const repo = fixture();
     const file = 'src/ui/access.tsx';
