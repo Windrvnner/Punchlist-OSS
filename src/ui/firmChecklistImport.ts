@@ -50,10 +50,13 @@ export type Work = ReturnType<typeof useWork>;
 /**
  * Step 1 and the list as read. Every list is read by the model first: a spreadsheet's rows, a
  * document's text or a pasted list, as lines. `byColumns` is the fallback for a table the model could not read: the
- * columns chosen by hand, as before.
+ * columns chosen by hand, as before. The paste stays as typed even when another source is shown.
  */
-export function useListSource(store: Store, work: Work, { key, left }: Keeper) {
-  const file = useListFile(store, work, key, left);
+export function useListSource(store: Store, work: Work, keeper: Keeper) {
+  const { left } = keeper;
+  const [paste, setPaste] = useState(left?.paste ?? '');
+  const pasteSource = useMemo(() => checklistPaste(paste), [paste]);
+  const file = useListFile(store, work, keeper, pasteSource);
   const { table, text, mapping, byColumns } = file;
   const lines = useMemo(() => checklistSourceLines(text, table), [text, table]);
   const reading = useModelReading(store, work, lines, byColumns, left);
@@ -69,33 +72,25 @@ export function useListSource(store: Store, work: Work, { key, left }: Keeper) {
   /** for "start over": the list, its reading and every choice cleared */
   const reset = () => {
     file.reset();
+    setPaste('');
     reading.reset();
   };
-  const counts = checklistReadCounts(table, lines, file.pasteSource);
-  return { ...file, ...reading, lines, prepared, counts, forget, reset };
+  const counts = checklistReadCounts(table, lines, pasteSource);
+  return { ...file, ...reading, lines, paste, setPaste, prepared, counts, forget, reset };
 }
 
 const NO_MAPPING: ChecklistMapping = { item: null, section: null, subsection: null };
 
-/**
- * The file or paste the list comes from. `text` is a document's or a paste's lines ('' names a paste); `paste` is what
- * is typed in the box, kept through "change" so nothing typed is lost.
- */
-function useListFile(store: Store, work: Work, key: string, left: ChecklistKept | null) {
+/** The selected file or paste and the choice of spreadsheet columns. An empty text name identifies a paste. */
+function useListFile(store: Store, work: Work, { key, left }: Keeper, pasteSource: ReturnType<typeof checklistPaste>) {
   const [table, setTable] = useState<ImportTable | null>(left?.table ?? null);
   const [mapping, setMapping] = useState<ChecklistMapping>(left?.choices?.mapping ?? NO_MAPPING);
   const [text, setText] = useState<{ name: string; lines: string[] } | null>(left?.text ?? null);
-  const [paste, setPaste] = useState(left?.paste ?? '');
   const [byColumns, setByColumns] = useState(!!left?.choices?.byColumns);
   const [sheetRead, setSheetRead] = useState<{ sheet?: string }>();
-  const pasteSource = useMemo(() => checklistPaste(paste), [paste]);
   const take = (read: ImportTable, suggested: ChecklistMapping) => {
     setTable(read);
     setMapping(suggested);
-  };
-  const resetHeading = () => {
-    setByColumns(false);
-    clearChecklistHeading(key);
   };
   const load = async (file: File) => {
     if (work.busy) return;
@@ -114,7 +109,7 @@ function useListFile(store: Store, work: Work, key: string, left: ChecklistKept 
       setTable(null);
       setText(read.value.text);
     }
-    resetHeading();
+    resetFileHeading(key, setByColumns);
   };
   const reread = async (opts: { sheet?: string; headerRow?: number }, accept?: (read: ImportTable) => void) => {
     if (!table || (work.busy && !(byColumns && work.busy === 'reading'))) return;
@@ -137,7 +132,7 @@ function useListFile(store: Store, work: Work, key: string, left: ChecklistKept 
     setTable(null);
     work.setError('');
     setText(pasteSource);
-    resetHeading();
+    resetFileHeading(key, setByColumns);
   };
   const forget = () => {
     setTable(null);
@@ -147,13 +142,17 @@ function useListFile(store: Store, work: Work, key: string, left: ChecklistKept 
   };
   const reset = () => {
     forget();
-    setPaste('');
     setMapping(NO_MAPPING);
   };
   return {
-    table, mapping, setMapping, text, paste, setPaste, pasteSource, byColumns, wantedSheet: sheetRead?.sheet,
+    table, mapping, setMapping, text, byColumns, wantedSheet: sheetRead?.sheet,
     load, reread, chooseColumns, pasted, forget, reset, importKey: key,
   };
+}
+
+function resetFileHeading(key: string, setByColumns: (byColumns: boolean) => void) {
+  setByColumns(false);
+  clearChecklistHeading(key);
 }
 
 /** Applies a table read to the current screen, leaving the table in place if the read fails. */
