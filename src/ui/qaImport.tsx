@@ -6,16 +6,15 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import { useAppState, useStore } from './hooks';
 import { Modal, DialogHead } from './dialogs';
 import { FileInput, PickFileRow } from './fileDrop';
-import { dealQuestions } from '../app/state';
-import { readImportFile, readImportBytes, proposeLayout, previewImport, type ImportTable } from '../app/transfer';
-import { prepareImport, importCounts, type Mapping, type ImportRow } from '../domain/importExport';
-import { ImportQuestions } from '../app/commands/importQuestions';
-import { keepImportedLog, logTakenBy } from '../app/qaLog';
+import { readImportBytes, proposeLayout, previewImport, type ImportTable } from '../app/transfer';
+import type { Mapping } from '../domain/importExport';
+import {
+  clearQaImport, keepQaImport, keptQaImport, loadQaImport, prepareQaImport, qaImportPartyCount,
+  replaceQaImport, submitQaImport, summarizeQaImport, type ImportMode, type QaChoices,
+} from '../app/qaImport';
 import { SERVICE } from '../control';
-import { keptImport, keepImport, dropImport, importKey, finishKeptSubmission } from '../app/keptImports';
+import { importKey } from '../app/keptImports';
 import { useKeptImportsReady, useFreshOnCrash } from './keptImports';
-import { Operation } from '../domain/model';
-import { fail, ok } from '../domain/result';
 import { QaImportForm } from './qaImportForm';
 import type { Store } from '../app/store';
 
@@ -23,29 +22,8 @@ import type { Store } from '../app/store';
 export type Busy = '' | 'reading' | 'importing' | 'asking';
 /** a sheet or heading row chosen in the import and being read */
 type Rereading = { sheet?: string; headerRow?: number };
-/** What happens to questions the file already holds: changed in place, or added again as new ones */
-export type ImportMode = 'merge' | 'append';
-
 /** The files the Q&A import reads */
 const SPREADSHEETS = '.xlsx,.xlsm,.xls,.xlsb,.ods,.csv';
-
-/** the Q&A import as it was left: the file as read, and every choice made for it */
-interface QaChoices {
-  mapping: Mapping;
-  path: string | null;
-  mode: ImportMode;
-  answered: boolean;
-  makeLog: boolean;
-  touched: boolean;
-}
-interface QaKept { table: ImportTable; choices: QaChoices }
-interface Submission {
-  key: string;
-  table: Omit<ImportTable, 'bytes'>;
-  choices: QaChoices;
-  rows: ImportRow[];
-  done?: boolean;
-}
 
 /** The Q&A import picks up where it was left on this PC: it waits the moment it takes to read what was kept */
 export function ImportDialog({ dealId }: { dealId: string }) {
@@ -83,47 +61,10 @@ function QaImportDialog({ dealId, fresh }: { dealId: string; fresh: boolean }) {
   );
 }
 
-/** Checks that what was kept is still a whole Q&A import, so a damaged or older entry starts a fresh one instead */
-function isQaKept(value: unknown): value is QaKept {
-  const kept = value as QaKept | undefined;
-  return isKeptTable(kept?.table) && isKeptChoices(kept?.choices);
-}
-
-function isKeptTable(table: ImportTable | undefined) {
-  return !!table
-    && typeof table.name === 'string'
-    && Array.isArray(table.rows) && table.rows.every(Array.isArray)
-    && Array.isArray(table.columns)
-    && Array.isArray(table.sheets)
-    && Array.isArray(table.previews)
-    && typeof table.sheet === 'string'
-    && Number.isInteger(table.headerRow)
-    && Number.isInteger(table.lastRow)
-    && (table.lines === undefined || Array.isArray(table.lines))
-    && table.bytes instanceof Uint8Array;
-}
-
-function isKeptChoices(choices: QaChoices | undefined) {
-  return !!choices
-    && !!choices.mapping && typeof choices.mapping === 'object' && 'text' in choices.mapping
-    && (choices.mode === 'merge' || choices.mode === 'append');
-}
-
-/** How many parties the Submitted by column names, in any case or spacing */
-function partyCount(table: ImportTable | null, mapping: Mapping | null) {
-  const column = mapping?.askedBy;
-  if (!table || column == null) return 0;
-  const names = table.rows.map((row) => String(row[column] ?? '').trim().toLowerCase());
-  return new Set(names.filter(Boolean)).size;
-}
-
 /** The file as read and every choice made for it, starting from what was kept on this PC unless it starts fresh */
 function useQaImportState(dealId: string, fresh: boolean) {
   const key = importKey.qa(dealId);
-  const [kept] = useState(() => {
-    const found = fresh ? null : keptImport(key);
-    return isQaKept(found) ? found : null;
-  });
+  const [kept] = useState(() => (fresh ? null : keptQaImport(key)));
   const choices = kept?.choices;
   const [table, setTable] = useState<ImportTable | null>(kept?.table ?? null);
   const [mapping, setMapping] = useState<Mapping | null>(choices?.mapping ?? null);
@@ -136,7 +77,7 @@ function useQaImportState(dealId: string, fresh: boolean) {
   // Once the person checks or unchecks it (touched), the app leaves it as they set it.
   const [makeLog, setMakeLog] = useState(!!choices?.makeLog);
   const touched = useRef(!!choices?.touched);
-  const parties = partyCount(table, mapping);
+  const parties = qaImportPartyCount(table, mapping);
   useEffect(() => {
     if (!touched.current) setMakeLog(parties >= 2);
   }, [parties, table]);
@@ -161,24 +102,17 @@ export type QaImportState = ReturnType<typeof useQaImportState>;
 function useImportPlan(store: Store, dealId: string, qa: QaImportState) {
   const state = useAppState();
   const { table, mapping, mode, answered } = qa;
-  const prepared = useMemo(
-    () => (table && mapping ? prepareImport(table.rows, mapping, table.lines) : null),
-    [table, mapping],
-  );
-  const counts = prepared ? importCounts(prepared.rows, dealQuestions(state, dealId), mode) : { add: 0, match: 0 };
-  const total = counts.add + counts.match;
-  // the import's own plan, run without committing: exactly what would be added and what would be overwritten
+  const file = useMemo(() => (table && mapping ? prepareQaImport(table, mapping) : null), [table, mapping]);
+  const prepared = file?.prepared ?? null;
+  // The same plan the command would run, without committing it.
   const dry = useMemo(
     () => (prepared?.rows.length ? previewImport(store, dealId, mode, prepared.rows, answered) : null),
     [prepared, mode, answered, state.questions, state.tombstones],
   );
-  const preview = dry?.ok ? dry.value : null;
-  const dryError = dry && !dry.ok ? dry.error.message : '';
-  const submission = savedSubmission(qa.key);
-  // Recovery validates the original operation, rather than replanning already committed rows.
   return {
-    prepared, counts, total: submission ? Math.max(total, submission.rows.length) : total,
-    preview, dryError: submission ? '' : dryError,
+    ...summarizeQaImport(state, dealId, qa.key, mode, prepared, dry),
+    prepared,
+    previewRows: file?.previewRows ?? [],
   };
 }
 export type ImportPlan = ReturnType<typeof useImportPlan>;
@@ -186,25 +120,22 @@ export type ImportPlan = ReturnType<typeof useImportPlan>;
 /**
  * Keeps the import on this PC as it changes, so closing it, a reload or a restart loses nothing: opening it again picks
  * it up where it was left. "change" keeps it too until another file is read in its place; only "start
- * over", which asks first, or the import itself lets it go. While Import runs (holding) nothing is written.
+ * over", which asks first, or the import itself lets it go.
  */
 function useKeepAsItChanges(qa: QaImportState) {
   const { key, table, mapping, path, mode, answered, makeLog, touched } = qa;
-  const holding = useRef(false);
-  const keep = () => {
-    if (!table || !mapping || holding.current) return;
-    keepImport(key, { table, choices: { mapping, path, mode, answered, makeLog, touched: touched.current } });
-  };
-  // written as soon as what is kept changes, before the next frame
-  useLayoutEffect(keep, [table, mapping, path, mode, answered, makeLog]);
-  return { holding };
+  // Hand choices to the app before the next frame.
+  useLayoutEffect(() => {
+    if (table && mapping) {
+      keepQaImport(key, table, { mapping, path, mode, answered, makeLog, touched: touched.current });
+    }
+  }, [table, mapping, path, mode, answered, makeLog]);
 }
-type Keeping = ReturnType<typeof useKeepAsItChanges>;
 
 /** What the person can do in the dialog: read a file, ask the model, read the file again, import, start over, close */
 function useQaImportActions(store: Store, dealId: string, qa: QaImportState, plan: ImportPlan) {
   const { busy, token, setBusy, setError, setTable, setMapping } = qa;
-  const keeping = useKeepAsItChanges(qa);
+  useKeepAsItChanges(qa);
 
   const close = () => {
     if (busy === 'importing') return;
@@ -214,9 +145,7 @@ function useQaImportActions(store: Store, dealId: string, qa: QaImportState, pla
 
   const startOver = () => {
     token.current++;
-    const submitted = savedSubmission(qa.key);
-    if (submitted) void store.releaseImport(submitted.key);
-    dropImport(qa.key);
+    clearQaImport(store, qa.key);
     qa.setRestart(false);
     setBusy('');
     setError('');
@@ -239,7 +168,7 @@ function useQaImportActions(store: Store, dealId: string, qa: QaImportState, pla
     qa.setRestart(false);
   };
 
-  const run = () => runImport(store, dealId, qa, plan, keeping);
+  const run = () => runImport(store, dealId, qa, plan);
   return { close, startOver, changeFile, run, ...fileReading(store, dealId, qa) };
 }
 export type QaImportActions = ReturnType<typeof useQaImportActions>;
@@ -250,31 +179,23 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
 
   const load = async (file: File) => {
     if (busy) return;
-    // another deal's Q&A log is refused before it is read (#38)
-    const taken = logTakenBy(store, dealId, store.services.fs.pathFor?.(file) ?? null);
-    if (taken) {
-      setError(taken);
-      return;
-    }
     const mine = ++token.current;
     setBusy('reading');
     setError('');
-    const read = await readImportFile(store, file);
+    const read = await loadQaImport(store, dealId, file);
     if (token.current !== mine) return;   // the dialog moved on while the file was read
     setBusy('');
     if (!read.ok) {
-      setError(`Could not read ${file.name}: ${read.error.message}`);
+      setError(read.error.message);
       return;
     }
-    const submitted = savedSubmission(qa.key);
-    if (submitted) void store.releaseImport(submitted.key);
-    keepImport(qa.key, { submission: null, headingDraft: null }); // A newly read file replaces the previous import.
-    setTable(read.value);
-    setMapping(read.value.mapping);
-    qa.setPath(store.services.fs.pathFor?.(file) ?? null);
+    replaceQaImport(store, qa.key);
+    const { table, path, askForLayout } = read.value;
+    setTable(table);
+    setMapping(table.mapping);
+    qa.setPath(path);
     qa.touched.current = false;
-    // the app's own rules found no question column: ask the model for a proposal
-    if (read.value.mapping.text == null) void askAi(read.value, mine);
+    if (askForLayout) void askAi(table, mine);
   };
 
   // The model proposes the sheet, the heading row and the columns; the app checks the proposal against the file and
@@ -326,114 +247,32 @@ function cancelProposal(qa: QaImportState) {
   qa.setBusy('');
 }
 
-/** Keep a correlated submission before writing rows, until its log choice has finished too. */
-async function runImport(store: Store, dealId: string, qa: QaImportState, plan: ImportPlan, keeping: Keeping) {
-  const { prepared, total, dryError } = plan;
-  if (qa.busy || keeping.holding.current) return;
-  if (!savedSubmission(qa.key) && (!prepared || !total || dryError)) return;
-  keeping.holding.current = true;
+/** Display the app's submission outcome and restore the original controls when requested. */
+async function runImport(store: Store, dealId: string, qa: QaImportState, plan: ImportPlan) {
+  const { table, mapping, path, mode, answered, makeLog, touched } = qa;
+  if (qa.busy || !table || !mapping || !plan.total || plan.dryError) return;
   qa.setBusy('importing');
   qa.setError('');
   qa.setRestart(false);
+  const choices = { mapping, path, mode, answered, makeLog, touched: touched.current };
   try {
-    // a kept import not sent yet, of a file another deal has made its log since, imports nothing (#38)
-    const taken = savedSubmission(qa.key) ? null : logTakenBy(store, dealId, qa.path);
-    if (taken) {
-      qa.setError(taken);
-      return;
+    const result = await submitQaImport(store, dealId, { table, choices }, plan.prepared?.rows ?? []);
+    if (result.ok) store.ui({ dialog: null });
+    else {
+      if (result.restore) restoreChoices(qa, result.restore.table, result.restore.choices);
+      qa.setError(result.error.message);
     }
-    const chosen = await chooseSubmission(store, qa, prepared?.rows ?? []);
-    if (!chosen.ok) { qa.setError(chosen.error.message); return; }
-    const completed = await finishKeptSubmission(qa.key, chosen.value, {
-      importRows: (submission) => resumeSubmission(store, dealId, submission),
-      keepLog: (submission) => makeTheLog(store, dealId, submission),
-      release: (key) => store.releaseImport(key),
-    });
-    if (!completed.ok) { qa.setError(completed.error.message); return; }
-    store.ui({ dialog: null });
   } finally {
     qa.setBusy('');
-    keeping.holding.current = false;
   }
 }
 
-/** Only a complete submission made by this build can own the retained rows. */
-function savedSubmission(key: string): Submission | null {
-  const value = keptImport(key)?.submission as Submission | undefined;
-  if (!value) return null;
-  const { bytes: _bytes, ...metadata } = (value.table ?? {}) as ImportTable;
-  const table = { ...metadata, bytes: (keptImport(key)?.table as ImportTable | undefined)?.bytes };
-  const valid = isQaKept({ table, choices: value.choices }) && typeof value.key === 'string'
-    && value.key.startsWith('qa-import:') && Array.isArray(value.rows)
-    && (value.done === undefined || typeof value.done === 'boolean');
-  return valid ? { ...value, table: metadata } : null;
-}
-
-function makeSubmission(store: Store, qa: QaImportState, rows: ImportRow[]): Submission {
-  const { bytes: _bytes, ...table } = qa.table!;
-  return {
-    key: 'qa-import:' + store.services.ids.next('op'), table, rows,
-    choices: {
-      mapping: qa.mapping!, path: qa.path, mode: qa.mode, answered: qa.answered,
-      makeLog: qa.makeLog, touched: qa.touched.current,
-    },
-  };
-}
-
-/** A refused pre-journal attempt can be changed; a started import keeps its original, visible choices. */
-async function chooseSubmission(store: Store, qa: QaImportState, rows: ImportRow[]) {
-  const saved = savedSubmission(qa.key);
-  const current = makeSubmission(store, qa, rows);
-  if (!saved) return ok(current);
-  const snapshot = (value: Submission) => [value.choices, value.table.sheet, value.table.headerRow];
-  const same = JSON.stringify(snapshot(saved)) === JSON.stringify(snapshot(current));
-  if (same) return ok(saved);
-  const found = await findSubmission(store, saved.key);
-  if (!found.ok) return found;
-  if (!found.value && !saved.done) return ok(current);
-  qa.setTable({ ...saved.table, bytes: qa.table!.bytes });
-  qa.setMapping(saved.choices.mapping);
-  qa.setPath(saved.choices.path);
-  qa.setMode(saved.choices.mode);
-  qa.setAnswered(saved.choices.answered);
-  qa.setMakeLog(saved.choices.makeLog);
-  qa.touched.current = saved.choices.touched;
-  return fail({ kind: 'rejected', message: 'This import already started. Its original choices have been restored.' });
-}
-
-async function findSubmission(store: Store, key: string) {
-  const read = await store.services.repo.list('op');
-  if (!read.ok) return read;
-  const matching = read.value.flatMap((loaded) => {
-    const parsed = Operation.safeParse(loaded.envelope.data);
-    return parsed.success && parsed.data.idempotencyKey === key ? [parsed.data] : [];
-  }).filter((operation) => operation.state !== 'discarded');
-  return ok(matching.sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0]);
-}
-
-/** A committed Append is never sent again after its reply was lost. */
-async function resumeSubmission(store: Store, dealId: string, submission: Submission) {
-  if (submission.done) return ok(undefined);
-  const found = await findSubmission(store, submission.key);
-  if (!found.ok) return found;
-  const operation = found.value;
-  if (operation?.state === 'succeeded') return ok(undefined);
-  if (operation) {
-    const result = await store.retryOp(operation.id);
-    return result ?? fail({ kind: 'rejected', message: 'This import is still running. Retry after it finishes.' });
-  }
-  const { choices, rows } = submission;
-  return store.dispatch(ImportQuestions, {
-    dealId, mode: choices.mode, rows, answerResponded: choices.answered,
-  }, { idempotencyKey: submission.key });
-}
-
-/** Finish the original file choice after row recovery, rather than importing the rows again. */
-async function makeTheLog(store: Store, dealId: string, submission: Submission) {
-  if (submission.done) return ok(undefined);
-  await store.loadDeal(dealId, { gaps: false });
-  const { table, choices } = submission;
-  const { sheet, headerRow, rows } = table;
-  const log = { path: choices.path, sheet, headerRow, mapping: choices.mapping, make: choices.makeLog, rows };
-  return keepImportedLog(store, dealId, log);
+function restoreChoices(qa: QaImportState, table: ImportTable, choices: QaChoices) {
+  qa.setTable(table);
+  qa.setMapping(choices.mapping);
+  qa.setPath(choices.path);
+  qa.setMode(choices.mode);
+  qa.setAnswered(choices.answered);
+  qa.setMakeLog(choices.makeLog);
+  qa.touched.current = choices.touched;
 }

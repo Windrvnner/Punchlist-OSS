@@ -154,8 +154,9 @@ export async function finishKeptSubmission<Submission extends { key: string; don
   key: string,
   submission: Submission,
   actions: SubmissionActions<Submission>,
+  parts: Parts = {},
 ): Promise<Result<void>> {
-  if (!(await saveImport(key, { submission }))) {
+  if (!(await saveImport(key, { ...parts, submission }))) {
     return fail({ kind: 'storageFull', message: 'Couldn’t keep this import on this PC. Nothing was imported.' });
   }
   const imported = await actions.importRows(submission);
