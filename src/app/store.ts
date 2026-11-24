@@ -1266,7 +1266,7 @@ export class Store {
       revision = loaded.value!.revision;
     }
     const prepared = guardLegacySettledClose(command, opts.idempotencyKey);
-    if (prepared.prepare) await prepared.prepare(this, input);
+    if (prepared.prepare) await prepared.prepare(this, input, { retained: revision !== null });
     const result = await this.execute(prepared, input, opId, targets, opts, revision);
     if (result.ok && result.value.unchanged && revision !== null && this.state.ops[opId]?.state !== 'succeeded') {
       await this.dropOp(opId);

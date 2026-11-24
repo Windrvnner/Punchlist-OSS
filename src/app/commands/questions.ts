@@ -31,6 +31,12 @@ export const CreateQuestion = define({
     askOrigin: AskOrigin.optional(),
   }),
   targets: (_s, i) => [numbering(i.dealId)],
+  async prepare(store, { dealId, askOrigin }, { retained }) {
+    // Retry from Home loads the deal's records, but does not read its checklist.
+    if (askOrigin && (retained || !Array.isArray(store.get().checklists[dealId]))) {
+      await store.refreshChecklist(dealId);
+    }
+  },
   plan(state, input, ctx) {
     const d = state.deals[input.dealId];
     if (!d) return fail(notFound('Deal not found', input.dealId));

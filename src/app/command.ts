@@ -61,7 +61,7 @@ export interface Command<I = unknown, In = I> {
   /** records this command will write; used to sequence operations per record */
   targets(state: State, input: I): string[];
   /** Load inputs that must be current immediately before planning, once the target queue drains. */
-  prepare?(store: Pick<Store, 'refreshChecklist'>, input: I): Promise<void>;
+  prepare?(store: Pick<Store, 'get' | 'refreshChecklist'>, input: I, context: { retained: boolean }): Promise<void>;
   plan(state: State, input: I, ctx: PlanCtx): Result<Plan>;
 }
 

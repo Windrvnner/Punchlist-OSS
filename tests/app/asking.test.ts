@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
 import { askedAbout, askedAtGap, checklistAsk, findingAskTarget } from '../../src/app/asking';
+import { AddDealItems } from '../../src/app/commands/checklist';
 import { CloseSettledQuestions, closeSettledQuestions } from '../../src/app/commands/closeSettled';
 import { CreateDeal } from '../../src/app/commands/deals';
 import { CreateFinding, SetFindingStatus } from '../../src/app/commands/findings';
@@ -10,7 +11,7 @@ import { logQuestionDraft, questionDraftAt } from '../../src/app/logQuestionDraf
 import { settledPreview, settledQuestionIds } from '../../src/app/settledView';
 import { findingItem, initialState, itemStanding, unresolvedPoints } from '../../src/app/state';
 import { Store } from '../../src/app/store';
-import type { Item } from '../../src/domain/checklist';
+import { itemId, type Item } from '../../src/domain/checklist';
 import { derivedId } from '../../src/domain/derivedId';
 import { Question } from '../../src/domain/model';
 import { fail, ok } from '../../src/domain/result';
@@ -19,6 +20,7 @@ import { quota, refuse, toAQuestion } from '../adapters/memRepo';
 import { scaleMemoInput } from '../fixtures/memoScale';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { make } from './importKit';
+import { copyRecoveryDisk, holdRecoveryWrite, recoveryApp } from './recoveryKit';
 
 const { deal, findings: [sampleFinding] } = scaleMemoInput;
 const agreement: ChecklistRow = { id: 'direct', text: 'Executed direct agreement with lender consents',
@@ -92,7 +94,7 @@ it('lists questions about an item and its finding once, by number and on the sam
 });
 
 async function closeFixture() {
-  const { store: base, repo } = make();
+  const { store: base, repo, kv } = make();
   const store = new Store({ ...base.services }, [CreateDeal, CloseSettledQuestions, SetQuestionsStatus]);
   registry.set(SetQuestionsStatus.name, SetQuestionsStatus);
   await store.boot();
@@ -112,7 +114,7 @@ async function closeFixture() {
   rows([agreement, insurance]);
   await store.refreshChecklist(dealId);
   const statuses = () => ids.map((id) => store.get().questions[id].status);
-  return { store, repo, dealId, ids, statuses, rows };
+  return { store, repo, kv, dealId, ids, statuses, rows };
 }
 
 it('refuses stale single and bulk closes, and closes and undoes a fresh selection', async () => {
@@ -223,4 +225,51 @@ it('refuses a queued ask after its finding closes and keeps the question text he
   await ask;
   expect(drafts.get(key)).toBe(text);
   expect(Object.values(store.get().questions).some((question) => question.text === text)).toBe(false);
+});
+
+async function linkedAskFor(screen: 'checklist' | 'finding', store: Store, dealId: string) {
+  if (screen === 'checklist') {
+    const items = [{ text: agreement.text, from: [{ layer: 'deal' as const, value: '' }] }];
+    expect((await store.dispatch(AddDealItems, { dealId, items })).ok).toBe(true);
+    const row = { ...asGap(agreement), id: itemId(dealId, agreement.text) };
+    return { row, origin: { kind: screen, itemId: row.id } };
+  }
+  expect((await store.dispatch(CreateFinding, { dealId, title: sampleFinding.title, workstream: 'Legal' })).ok)
+    .toBe(true);
+  // This earlier finding has no own item ID. Its check row names the association.
+  const findingId = Object.keys(store.get().findings)[0];
+  const row: ChecklistRow = { ...agreement, result: 'finding', findingId };
+  return { row, origin: { kind: screen, findingId, itemId: row.id } };
+}
+
+it.each(['checklist', 'finding'] as const)('retries a linked %s ask from Home after a restart', async (screen) => {
+  const { store, repo, kv, dealId, rows } = await closeFixture();
+  const { row, origin } = await linkedAskFor(screen, store, dealId);
+  rows([row]);
+  await store.refreshChecklist(dealId);
+  const text = 'Can you provide the executed direct agreement and the lender consents?';
+  const held = holdRecoveryWrite({ store, repo, saved: kv }, (tx) => tx.writes.some(({ kind }) => kind === 'question'));
+  const idempotencyKey = origin.kind === 'finding' ? `f-q-${origin.findingId}` : `ck-q-${row.id}`;
+  const saving = store.dispatch(CreateQuestion, { dealId, text, askOrigin: origin }, { idempotencyKey });
+  await held.entered;
+  const snapshot = copyRecoveryDisk(kv);
+  held.release();
+  expect((await saving).ok).toBe(true);
+
+  const { store: reopened } = recoveryApp(snapshot);
+  await reopened.boot();
+  expect(reopened.get().checklists[dealId]).toBeUndefined();
+  const [operation] = reopened.interruptedOps();
+  const questionsWithText = () => Object.values(reopened.get().questions).filter((question) => question.text === text);
+  if (screen === 'finding') {
+    reopened.services.ai.checklist = async () => fail({ kind: 'failed', message: 'The checklist is unavailable' });
+    expect((await reopened.retryOp(operation.id))?.ok).toBe(false);
+    expect(questionsWithText()).toEqual([]);
+    reopened.services.ai.checklist = async () => ok([{ ...row, id: insurance.id }]);
+    expect((await reopened.retryOp(operation.id))?.ok).toBe(false);
+    expect(questionsWithText()).toEqual([]);
+  }
+  reopened.services.ai.checklist = async () => ok([row]);
+  expect((await reopened.retryOp(operation.id))?.ok).toBe(true);
+  expect(questionsWithText()).toMatchObject([{ linkedItem: { id: row.id }, linkedFinding: row.findingId }]);
 });

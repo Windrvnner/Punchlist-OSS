@@ -6,15 +6,18 @@ import { checklistQuestionTarget } from './checklistQuestion';
 import { findingItem, namedItem, type State } from './state';
 
 export const AskOrigin = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('finding'), findingId: FindingId }),
+  z.object({ kind: z.literal('finding'), findingId: FindingId, itemId: z.string().min(1).optional() }),
   z.object({ kind: z.literal('checklist'), itemId: z.string().min(1), findingId: FindingId.optional() }),
 ]);
 
-function fromFinding(state: State, dealId: string, findingId: string) {
+function fromFinding(state: State, dealId: string, findingId: string, itemId?: string) {
   const finding = state.findings[findingId];
   if (finding?.dealId !== dealId) return fail(notFound('That finding is not on this deal', findingId));
-  const target = findingAskTarget(finding, findingItem(state, finding));
-  return target.why ? fail(rejected(target.why)) : ok(target.links);
+  const item = findingItem(state, finding);
+  const target = findingAskTarget(finding, item);
+  if (target.why) return fail(rejected(target.why));
+  if (itemId && item?.id !== itemId) return fail(rejected('The checklist item changed or could not be read'));
+  return ok(target.links);
 }
 
 function fromChecklist(state: State, dealId: string, itemId: string, findingId?: string) {
@@ -31,6 +34,6 @@ function fromChecklist(state: State, dealId: string, itemId: string, findingId?:
 
 /** Resolve the links from current state when the numbered write reaches its turn. */
 export function linksForAsk(state: State, dealId: string, origin: z.infer<typeof AskOrigin>) {
-  if (origin.kind === 'finding') return fromFinding(state, dealId, origin.findingId);
+  if (origin.kind === 'finding') return fromFinding(state, dealId, origin.findingId, origin.itemId);
   return fromChecklist(state, dealId, origin.itemId, origin.findingId);
 }
