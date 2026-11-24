@@ -3,7 +3,7 @@ import { useStore } from './hooks';
 import { Modal } from './dialogs';
 import { Icon } from './icons';
 import type { Store } from '../app/store';
-import type { PlaceKept } from '../app/qaLog';
+import { keptRowTaken, LEAVE_KEPT_OUT, NEW_KEPT_ROW, type PlaceKept } from '../app/qaLog';
 import type { KeptAsk } from '../domain/keptMerge';
 
 /**
@@ -21,18 +21,17 @@ export const placeKept = (store: Store, dealId: string): PlaceKept => (ask) => n
 });
 
 const shown = (v: string) => v.trim() || '—';
-const NEW = -1, OUT = -2;
 
 export function PlaceKeptDialog({ dealId }: { dealId: string }) {
   const store = useStore(); const [w] = useState(() => waiting.get(dealId));
   const [chose, setChose] = useState<(number | undefined)[]>(() => (w ? w.ask.map(() => undefined) : []));
+  const pick = (edit: number, target: number) => setChose((current) =>
+    current.map((choice, index) => index === edit ? target : choice));
   const answer = (r: number[] | null) => { if (waiting.get(dealId) === w) waiting.delete(dealId); w?.done(r); store.ui({ dialog: null }); };
   // closed some other way (the deal deleted, another dialog over it): the update is left for later, never held
   useEffect(() => () => { if (w && waiting.get(dealId) === w) { waiting.delete(dealId); w.done(null); } }, []);
   if (!w) return null;
   const many = w.ask.length > 1; const title = many ? 'Where do these edits go?' : 'Where does this edit go?';
-  // a row another edit here goes to can't take this one too
-  const taken = (i: number, k: number) => chose.some((c, j) => j !== i && c !== undefined && c >= 0 && w.ask[j].rows[c]?.row === w.ask[i].rows[k].row);
   const left = chose.filter((c) => c === undefined).length;
   return (
     <Modal onClose={() => answer(null)} label={title} blur className="sdlg pkdlg">
@@ -49,10 +48,20 @@ export function PlaceKeptDialog({ dealId }: { dealId: string }) {
                 <div class="xlist pklist" role="radiogroup" aria-label="Goes in">
                   {a.rows.map((r, k) => {
                     const cells = a.cells.map((c) => `${c.heading}: ${shown(c.rows[k])}`).join(' · ');
-                    return <label key={r.row} title={`Row ${r.line} · ${cells}`}><input type="radio" name={name} checked={chose[i] === k} disabled={taken(i, k)} onChange={() => setChose(chose.map((c, j) => (j === i ? k : c)))} /><span class="pkrow">Row {r.line.toLocaleString('en-US')}</span><span class="pkcells">{cells}</span></label>;
+                    return <label key={r.row} title={`Row ${r.line} · ${cells}`}>
+                      <input type="radio" name={name} checked={chose[i] === k}
+                        disabled={keptRowTaken(w.ask, chose, i, k)} onChange={() => pick(i, k)} />
+                      <span class="pkrow">Row {r.line.toLocaleString('en-US')}</span>
+                      <span class="pkcells">{cells}</span>
+                    </label>;
                   })}
-                  <label><input type="radio" name={name} checked={chose[i] === NEW} onChange={() => setChose(chose.map((c, j) => (j === i ? NEW : c)))} /><span class="pkrow">New row</span></label>
-                  <label title="Kept in the archive copy only"><input type="radio" name={name} checked={chose[i] === OUT} onChange={() => setChose(chose.map((c, j) => (j === i ? OUT : c)))} /><span class="pkrow">Leave out</span></label>
+                  <label><input type="radio" name={name} checked={chose[i] === NEW_KEPT_ROW}
+                    onChange={() => pick(i, NEW_KEPT_ROW)} />
+                    <span class="pkrow">New row</span></label>
+                  <label title="Kept in the archive copy only">
+                    <input type="radio" name={name} checked={chose[i] === LEAVE_KEPT_OUT}
+                      onChange={() => pick(i, LEAVE_KEPT_OUT)} />
+                    <span class="pkrow">Leave out</span></label>
                 </div>
               </div>
             </div>
