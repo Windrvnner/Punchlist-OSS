@@ -46,21 +46,24 @@ function mainBaseline() {
   return null;
 }
 
+function countProblem(count, entry, mainLimit) {
+  if (entry !== undefined && (!Number.isSafeInteger(entry) || entry <= 0)) return 'invalid baseline entry';
+  const allowed = entry ?? 0;
+  if (mainLimit !== null && allowed > mainLimit) return `the baseline cannot rise above main's count of ${mainLimit}`;
+  if (count > allowed) return `${count} exceeds the baseline of ${allowed}`;
+  if (count < allowed && !lower) return `lower the baseline in this pull request with ${lowerCommand}`;
+  return null;
+}
+
 function compareFile(file, lines, baseline, main) {
   const problems = [];
   for (const kind of new Set([...Object.keys(lines), ...Object.keys(baseline)])) {
     const matches = lines[kind] ?? [];
-    const allowed = baseline[kind] ?? 0;
-    const where = matches.length ? `lines ${matches.join(', ')}` : 'no matching lines';
-    const details = `${file} ${kind} (${where})`;
-    if (kind in baseline && (!Number.isSafeInteger(allowed) || allowed <= 0)) {
-      problems.push(`${details}: invalid baseline entry`);
-    } else if (main && allowed > (main[kind] ?? 0)) {
-      problems.push(`${details}: the baseline cannot rise above main's count of ${main[kind] ?? 0}`);
-    } else if (matches.length > allowed) {
-      problems.push(`${details}: ${matches.length} exceeds the baseline of ${allowed}`);
-    } else if (matches.length < allowed && !lower) {
-      problems.push(`${details}: lower the baseline in this pull request with ${lowerCommand}`);
+    const mainLimit = main ? (main[kind] ?? 0) : null;
+    const problem = countProblem(matches.length, baseline[kind], mainLimit);
+    if (problem) {
+      const where = matches.length ? `lines ${matches.join(', ')}` : 'no matching lines';
+      problems.push(`${file} ${kind} (${where}): ${problem}`);
     }
   }
   return problems;
