@@ -49,9 +49,9 @@ Running work animates, so a new render can differ from a kept shot in a spinner'
 | 25 | [Q&A list, question open](deal-screen/shots/25-qa-roomy-item-light-1280x736.jpg) | An opened question in its card |
 | 26 | [Q&A list, answered](deal-screen/shots/26-qa-roomy-answered-light-1280x736.jpg) | An answered question in its card |
 
-### Open points, proposed (#888, step 3)
+### Open points, settled (#888, step 3)
 
-Screens 27 to 34 propose answers to the points the screens above left open. They are not approved yet.
+Screens 27 to 30 and 32 to 34 answer the points the screens above left open, as the "Deal screen" decisions record.
 
 | # | Screen | Shows |
 |---|---|---|
