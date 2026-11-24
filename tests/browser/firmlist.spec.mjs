@@ -1,6 +1,10 @@
 // The firm's checklist: bringing a list in from Settings, its review, the pick lists on Overview, and Undo.
 // Runs on the mock services, whose rewording and duplicate check stand in for the fast model.
 import { launchChrome } from './chrome.mjs';
+import {
+  checkChooseColumns, checkHeadingRecovery, checkHeadingRow, checkKeptHeading, checkMouseStep, checkPendingSheetStep,
+  headingWorkbook,
+} from './headingRow.mjs';
 import { checkDuplicateRetries } from './firmlistRetries.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
@@ -29,6 +33,33 @@ async function bring(page, file, layer, name, beforeGo = async () => {}) {
 /** waits for the model's reading of the list to finish */
 const read = (page) => page.waitForFunction(() => !/^Asking/.test(document.querySelector('#cl-line')?.textContent ?? 'Asking'), null, { timeout: 30000 });
 const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().items).filter((i) => i.dealId === d).map((i) => [i.text, i.off]).sort(), id);
+
+{ // #380: the columns-by-hand fallback keeps the typed row separate from the accepted checklist preview.
+  const { ctx, page } = await start();
+  const open = async () => {
+    await page.click('#u-menu');
+    await page.click('#s-checklist-open');
+    await page.click('#fl-import');
+  };
+  await open();
+  await page.evaluate(() => { window.__fail = { readList: true }; });
+  const titled = await headingWorkbook(page, 'cl', { headingAtSix: true });
+  const autoDetected = await checkChooseColumns(page, titled, 6);
+  await page.click('#cl-back');
+  const fixture = await headingWorkbook(page, 'cl');
+  const detectorFailed = await checkChooseColumns(page, fixture, 1, 'The file is locked');
+  await page.click('[data-layer=broad]');
+  const recovery = await checkHeadingRecovery(page, 'cl', fixture);
+  const mouseStep = await checkMouseStep(page, 'cl', fixture);
+  const pendingSheetStep = await checkPendingSheetStep(page, 'cl');
+  const { invalid, ...checks } = await checkHeadingRow(page, 'cl', fixture, '#cl-asksame');
+  const kept = await checkKeptHeading(page, 'cl', fixture, open);
+  const result = { ...checks, ...recovery, ...kept, mouseStep, pendingSheetStep, autoDetected, detectorFailed };
+  say('checklist heading-row edits preserve typed text and the accepted preview',
+    fixture.lastRow >= 2000 && invalid.every(Boolean) && Object.values(result).every(Boolean) && !page.errors.length,
+    JSON.stringify({ invalid, ...result, errors: page.errors }));
+  await ctx.close();
+}
 
 { // The general list goes to the deal at once; the review offers wording and duplicates, and changes only what is checked
   const { ctx, page, id } = await start();

@@ -79,6 +79,16 @@ describe('a kept checklist import that cannot be shown (#381)', () => {
     expect(keptImport(key)?.choices).toBeUndefined();
   });
 
+  it('clears an unused heading when a paste replaces the saved import (#380)', async () => {
+    await keptImportsReady;
+    const headingDraft = { sheet: 'Main', headerRow: 1, text: '0' };
+    keepImport(key, { ...unreadable, headingDraft });
+    await act(() => render(<Keeping paste="" />, screen));
+    expect(keptImport(key)?.headingDraft).toEqual(headingDraft);
+    await act(() => render(<Keeping paste="Tax returns" />, screen));
+    expect(keptImport(key)).toMatchObject({ paste: 'Tax returns', headingDraft: null });
+  });
+
   it('is replaced whole by a list read in its place', async () => {
     await keptImportsReady;
     keepImport(key, unreadable);
