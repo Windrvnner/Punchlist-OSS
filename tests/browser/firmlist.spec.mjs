@@ -1,6 +1,7 @@
 // The firm's checklist: bringing a list in from Settings, its review, the pick lists on Overview, and Undo.
 // Runs on the mock services, whose rewording and duplicate check stand in for the fast model.
 import { launchChrome } from './chrome.mjs';
+import { checkDuplicateRetries } from './firmlistRetries.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
@@ -193,7 +194,7 @@ const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().ite
   say('Retry while the service is down leaves the review unchanged, check mark kept, and the line says so', down.pairs === 10 && down.checked === true && down.missed && /could not be reached again$/.test(down.line), JSON.stringify(down));
   // Back while Retry waits drops its answer, so the setup page does not report a request the person no longer sees
   await page.evaluate(() => { document.querySelector('#cl-retry').click(); document.querySelector('#cl-line ~ .btn:not(.pri)').click(); });
-  await page.waitForSelector('#cl-next'); await page.waitForTimeout(600);
+  await page.waitForSelector('#cl-next:enabled');
   const backed = await page.evaluate(() => ({ line: document.querySelector('#cl-line').textContent, next: !document.querySelector('#cl-next').disabled }));
   say('Back while Retry waits leaves no "again" line on the setup page, and Next can be pressed', !/again/.test(backed.line) && backed.next, JSON.stringify(backed));
   await page.evaluate(() => { window.__down = false; });
@@ -217,6 +218,8 @@ const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().ite
   say('no errors on the page', page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }
+
+await checkDuplicateRetries(start, say);
 
 { // A list of deal size (2,400 rows, alike in wording, 200 of them repeated) is reviewed and brought in within seconds, counted in en-US
   const { ctx, page, id } = await start();
