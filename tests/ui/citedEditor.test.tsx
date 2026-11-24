@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { markerPieces, splitCited } from '../../src/domain/cite';
 import { CitedEditor, editorText, tagLabel, TAG_MAX } from '../../src/ui/citedEditor';
+import { TEXT_MAX } from '../../src/domain/importExport';
 import type { Source } from '../../src/domain/model';
 
 const source = (doc: string): Source => ({ doc, loc: 'p. 1', docId: `doc_${doc.length}` });
@@ -65,5 +66,39 @@ describe('the finding editor', () => {
     const box = document.createElement('div');
     box.innerHTML = 'One.<span data-marker="[1]">Doc</span><div>Two.<br></div><div><br></div><p>Three.</p>';
     expect(editorText(box)).toBe('One.[1]\nTwo.\n\n\n\nThree.');
+  });
+
+  it.each([
+    ['a literal opening bracket', '[see schedule]', 1, 1, '['],
+    ['an unfinished number', '[1 left open', 2, 1, '[1'],
+    ['an out-of-range number', '[999] in the schedule', 3, 1, '[99'],
+    ['a number with no sources', '[1] in the schedule', 2, 0, '[1'],
+    ['a partial citation', 'See[1] for the source', 5, 1, 'See'],
+    ['a whole citation', 'See[1] for the source', 6, 1, 'See[1]'],
+    ['a whole grapheme', '[👍🏽 later', 3, 1, '['],
+  ])('fits a paste at the limit with %s', async (_name, pasted, room, sourceCount, expected) => {
+    const detail = 'The annual budget accompanies the compliance certificate. ';
+    const prefix = detail.repeat(Math.ceil(TEXT_MAX / detail.length));
+    const sources = sourceCount ? [source('Facility agreement.pdf')] : [];
+    const { box } = await mount(prefix.slice(0, TEXT_MAX - room), sources);
+    const inserted = document.createElement('div');
+    const exec = vi.fn((_operation: string, _ui: boolean, value: string) => {
+      inserted.innerHTML = value;
+      return true;
+    });
+    const previous = Object.getOwnPropertyDescriptor(document, 'execCommand');
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: exec });
+    try {
+      const paste = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(paste, 'clipboardData', {
+        value: { getData: (type: string) => type === 'text/plain' ? pasted : '' },
+      });
+      box.dispatchEvent(paste);
+      expect(editorText(inserted)).toBe(expected);
+      expect(Boolean(inserted.querySelector('.ctag'))).toBe(expected === 'See[1]');
+    } finally {
+      if (previous) Object.defineProperty(document, 'execCommand', previous);
+      else Reflect.deleteProperty(document, 'execCommand');
+    }
   });
 });

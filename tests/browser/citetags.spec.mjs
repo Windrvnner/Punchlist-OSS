@@ -82,6 +82,23 @@ const openEdit = async (page) => {
   await page.waitForSelector('#fe-body .ctag');
 };
 
+{ const { ctx, page } = await start();
+  await openEdit(page);
+  const limit = 32_767;
+  const detail = 'The facility agreement requires the annual budget and a compliance certificate. ';
+  const prefix = detail.repeat(Math.ceil(limit / detail.length)).slice(0, limit - 1).replace(/ $/, '.');
+  await page.locator('#fe-body').fill(prefix);
+  await page.keyboard.press('Control+End');
+  await paste(page, { 'text/plain': '[see schedule]' });
+  const clipboard = await copyAll(page);
+  const stored = JSON.parse(clipboard['application/x-punchlist-cited']).text;
+  say('paste-at-limit-keeps-literal-bracket', stored === `${prefix}[` && stored.length === limit);
+  await page.keyboard.press('Control+z');
+  const undone = await copyAll(page);
+  say('undo-paste-at-limit', JSON.parse(undone['application/x-punchlist-cited']).text === prefix);
+  await ctx.close();
+}
+
 { const { ctx, page, fid } = await start();
   await openEdit(page);
   const shown = await page.evaluate(() => document.querySelector('#fe-body').innerText);

@@ -8,7 +8,7 @@
  */
 import { useLayoutEffect, useRef } from 'preact/hooks';
 import type { Source } from '../domain/model';
-import { markerPieces, withoutMarkers } from '../domain/cite';
+import { markerPieces, markerSafeEnd, withoutMarkers } from '../domain/cite';
 import { TEXT_MAX } from '../domain/importExport';
 import { docTitle, displayName, graphemes } from './docName';
 import { showTip, hideTip } from './tip';
@@ -68,14 +68,14 @@ function selectedText(): string {
 }
 
 /** what the box still has room for: whole characters only, so a letter or an emoji is never cut in half */
-function fitTo(text: string, room: number): string {
+function fitTo(text: string, room: number, sourceCount: number): string {
   if (text.length <= room) return text;
   let out = '';
   for (const letter of graphemes(text)) {
     if (out.length + letter.length > room) break;
     out += letter;
   }
-  return out.replace(/\[\d*$/, '');   // nor a marker: one cut short is left out, not kept as words
+  return out.slice(0, markerSafeEnd(text, out.length, sourceCount));
 }
 
 /**
@@ -86,7 +86,7 @@ function fitTo(text: string, room: number): string {
  */
 function insertCited(text: string, box: HTMLElement, sources: Source[]) {
   const room = TEXT_MAX - editorText(box).length + selectedText().length;
-  const fitted = fitTo(text.replace(/\r\n?/g, '\n'), Math.max(0, room));
+  const fitted = fitTo(text.replace(/\r\n?/g, '\n'), Math.max(0, room), sources.length);
   const words = fitted.replace(/\n+$/, '');
   if (words) {
     const holder = document.createElement('div');

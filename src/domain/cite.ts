@@ -47,6 +47,18 @@ export function markerPieces(text: string, sourceCount: number): MarkerPiece[] {
   });
 }
 
+/** Move a cut inside a complete citation back to its opening bracket (#343). */
+export function markerSafeEnd(text: string, end: number, sourceCount: number): number {
+  if (!sourceCount) return end;
+  let start = 0;
+  for (const piece of markerPieces(text, sourceCount)) {
+    const next = start + piece.text.length;
+    if (next > end) return piece.ref ? start : end;
+    start = next;
+  }
+  return end;
+}
+
 /** Typed text to stored paragraphs: one per line, blank lines dropped. */
 export const toParagraphs = (text: string): string[] => text.split(/\r?\n+/).map((x) => x.trim()).filter(Boolean);
 
