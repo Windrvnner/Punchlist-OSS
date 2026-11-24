@@ -4,6 +4,7 @@
 // alongside the documents. Tested at the scale of a real log: 2,500 questions from many parties.
 import { describe, it, expect } from 'vitest';
 import { setup, doc, val, deal, type Call } from './reviewKit';
+import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import type { Repository } from '../../src/ports';
 
 const FA = doc(1, 'Credit Agreement.pdf', { summary: 'Senior credit agreement.', keywords: ['lock-up', 'distribution'] });
@@ -64,6 +65,72 @@ describe('a draft reuses an answer already given to another party', () => {
     expect(s.calls.find(isDraft)!.prompt).toContain('No document in the data room was found to bear on this.');
     const none = setup((c) => (isDraft(c) ? { status: 'found', text: 'The ratio is probably 1.20x.', sources: [] } : {}), { d1: [FA] });
     await deal(none.repo); await questions(none.repo, [Q12]); expect(val(await none.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW })).status).toBe('none');
+  });
+
+  it('keeps a dated quarter even when a similar earlier question has that number (#286)', async () => {
+    const quarter = 'Commercial operation is expected in Q3 2027. [1]';
+    const longStop = 'The long-stop date is 31 March 2028. [2]';
+    const sources = [{ doc: 'D1', page: 14 }, { doc: 'D1', page: 16 }];
+    let reply = { status: 'found', text: `${quarter} ${longStop}`, sources };
+    const s = setup((call) => isDraft(call) ? reply : {}, { d1: [FA] });
+    const earlier = {
+      n: 3,
+      text: 'When is commercial operation expected for the project?',
+      response: 'The schedule puts commercial operation in the second half of 2027.',
+      askedBy: 'Lender A',
+    };
+    const portfolio = portfolioQuestions().map((text, index) => ({
+      n: index + 100,
+      text,
+      response: '',
+      askedBy: 'Lender B',
+    }));
+    await deal(s.repo);
+    await questions(s.repo, [earlier, ...portfolio]);
+
+    const draft = { dealId: 'd1', questionId: 'q_new', questionText: earlier.text };
+    const full = val(await s.ai.draft(draft));
+    expect(shown(s.calls.find(isDraft)!).map((entry) => entry.q)).toContain(3);
+    expect(full.status).toBe('found');
+    expect(full.text).toBe(`${quarter} ${longStop}`);
+    expect(full.sources.map((source) => source.loc)).toEqual(['p. 14', 'p. 16']);
+
+    reply = { ...reply, text: quarter, sources: [sources[0]] };
+    const only = val(await s.ai.draft(draft));
+    expect(only.status).toBe('found');
+    expect(only.text).toBe(quarter);
+    expect(only.sources.map((source) => source.loc)).toEqual(['p. 14']);
+  });
+
+  it('renumbers surviving sources after removing a genuine earlier-question credit (#286)', async () => {
+    const calendar = 'The ratio applies from financial close in Q3 2027.';
+    const text = `${calendar} [2] As answered in Q3. [1] The agreement prevails. [2]`;
+    const sources = [{ doc: 'D1', page: 9 }, { doc: 'D1', page: 14 }];
+    const s = setup((call) => isDraft(call) ? { status: 'found', text, sources, reused: ['R1'] } : {}, { d1: [FA] });
+    await deal(s.repo);
+    await questions(s.repo, [{ ...Q12, n: 3 }]);
+
+    const draft = val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW }));
+    expect(draft.status).toBe('found');
+    expect(draft.text).toBe([
+      `As answered to Lender B (Q3): ${Q12.response}`,
+      `${calendar} [1] The agreement prevails. [1]`,
+    ].join('\n\n'));
+    expect(draft.sources.map((source) => source.loc)).toEqual(['p. 14']);
+  });
+
+  it('keeps a source without a sentence marker when an unrelated credit is removed (#286)', async () => {
+    const retained = 'The credit agreement sets the ratio at 1.20x.';
+    const text = `As answered in Q12. [1] ${retained}`;
+    const sources = [{ doc: 'D1', page: 9 }, { doc: 'D1', page: 14 }];
+    const s = setup((call) => isDraft(call) ? { status: 'found', text, sources } : {}, { d1: [FA] });
+    await deal(s.repo);
+    await questions(s.repo, [Q12]);
+
+    const draft = val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW }));
+    expect(draft.status).toBe('found');
+    expect(draft.text).toBe(retained);
+    expect(draft.sources.map((source) => source.loc)).toEqual(['p. 14']);
   });
 
   it('a question that only shares common words, or has no response yet, or is the question itself, is not shown', async () => {
