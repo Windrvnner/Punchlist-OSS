@@ -149,6 +149,23 @@ export const RestoreQaVersion = define({
   },
 });
 
+function applyVersionField(
+  question: Question,
+  field: string,
+  value: string,
+  ctx: { at: string; actor: string },
+): Result<Question> {
+  if (field === 'status') {
+    const status = QuestionStatus.safeParse(value);
+    if (!status.success) return fail(rejected(`“${value}” is not a status`));
+    return ok({ ...question, status: status.data, updatedAt: ctx.at });
+  }
+  const name = QuestionFieldName.safeParse(field);
+  if (!name.success) return fail(rejected(`${field} cannot be set here`));
+  const edited = editQuestionField(question, name.data, value, ctx);
+  return edited.ok ? ok(edited.value.record) : edited;
+}
+
 /**
  * A question with a version's fields set (`set`, in the app's own terms), as ChooseQaVersion and TakeFromQaLog set them: the
  * response first (`origin`: 'ai' for a merged draft used as the AI wrote it, as AcceptDraft labels one), so a status of
@@ -156,26 +173,28 @@ export const RestoreQaVersion = define({
  * as a version is put back. Fails when the result is not a valid question.
  */
 function applyVersion(
-  q: Question,
+  question: Question,
   set: Record<string, string>,
   ctx: { at: string; actor: string },
   linked: Finding | undefined,
   origin: 'ai' | 'human' = 'human',
 ): Result<{ next: Question; finding?: Finding }> {
-  const tx = { at: ctx.at, actor: ctx.actor };
-  let next = q;
+  let next = question;
   let finding: Finding | undefined;
   if (set.response !== undefined) {
-    const r = setResponse(next, set.response, set.response.trim() ? { origin, sources: [], actor: ctx.actor, at: ctx.at } : undefined, linked, tx); if (!r.ok) return r;
-    next = r.value.question.record; finding = r.value.finding?.record;
+    const provenance = set.response.trim() ? { origin, sources: [], actor: ctx.actor, at: ctx.at } : undefined;
+    const response = setResponse(next, set.response, provenance, linked, ctx);
+    if (!response.ok) return response;
+    next = response.value.question.record;
+    finding = response.value.finding?.record;
   }
-  for (const [k, v] of Object.entries(set)) {
-    if (k === 'response') continue;
-    if (k === 'status') { const st = QuestionStatus.safeParse(v); if (!st.success) return fail(rejected(`“${v}” is not a status`)); next = { ...next, status: st.data, updatedAt: ctx.at }; continue; }
-    const f = QuestionFieldName.safeParse(k); if (!f.success) return fail(rejected(`${k} cannot be set here`));
-    const r = editQuestionField(next, f.data, v, tx); if (!r.ok) return r; next = r.value.record;
+  for (const [field, value] of Object.entries(set)) {
+    if (field === 'response') continue;
+    const edited = applyVersionField(next, field, value, ctx);
+    if (!edited.ok) return edited;
+    next = edited.value;
   }
-  if (!Question.safeParse(next).success) return fail(rejected(`Q${q.n}: that version cannot be used as it is`));
+  if (!Question.safeParse(next).success) return fail(rejected(`Q${question.n}: that version cannot be used as it is`));
   const checked = checkQuestion(next); if (!checked.ok) return checked;
   return ok({ next, ...(finding ? { finding } : {}) });
 }
