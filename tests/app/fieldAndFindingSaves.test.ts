@@ -124,6 +124,28 @@ it('uses the stored choice for Escape when a second save lands before the choice
   expect(save.view.external).toBe(false);
 });
 
+it('keeps the Escape baseline when the field already followed a newer peer value', async () => {
+  const draft = await field();
+  const { save, type, pending, commit, adopted } = draft;
+  type(firstEdit);
+  const peerText = 'Confirm the conditions to the initial facility draw.';
+  save.receive({ value: peerText, rev: 2 });
+  const choice = save.save(draft.text(), commit, true);
+  save.receive({ value: firstEdit, rev: 3 });
+  pending[0].resolve({ ok: true });
+  await choice;
+
+  const newerPeerText = peerText + ' Include the signing deliverables.';
+  save.receive({ value: newerPeerText, rev: 4 });
+  expect(adopted).toEqual([newerPeerText]);
+  await vi.runAllTimersAsync();
+
+  expect(adopted).toEqual([newerPeerText]);
+  expect(save.base).toBe(newerPeerText);
+  expect(draft.text()).toBe(newerPeerText);
+  expect(save.view.external).toBe(false);
+});
+
 it('does not adopt a refused choice when a newer edit has arrived from another PC', async () => {
   const draft = await field();
   const { save, type, pending, commit, adopted } = draft;

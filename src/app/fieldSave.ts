@@ -28,6 +28,7 @@ type FieldAttempt = {
   over: string;
   again: boolean;
   choice: boolean;
+  baselineVersion: number;
   matched?: boolean;
 };
 
@@ -71,6 +72,7 @@ export class FieldSave {
   private arrived: string[] = [];
   private saving = 0;
   private choicesPending = 0;
+  private baselineVersion = 0;
   private waits = false;
   private resending = false;
 
@@ -96,6 +98,7 @@ export class FieldSave {
   }
 
   private takeBase(value: string) {
+    this.baselineVersion++;
     this.base = value;
     this.baseRev = this.seen.rev;
     this.jumped = false;
@@ -197,7 +200,9 @@ export class FieldSave {
     this.input.stopTimer();
     if (!this.shouldSend(text, chosen)) return undefined;
     this.show({ status: 'saving', external: false });
-    const attempt: FieldAttempt = { text, over: this.base, again: this.resending, choice };
+    const attempt: FieldAttempt = {
+      text, over: this.base, again: this.resending, choice, baselineVersion: this.baselineVersion,
+    };
     this.inFlight.push(attempt);
     this.saving++;
     if (choice) this.choicesPending++;
@@ -277,7 +282,7 @@ export class FieldSave {
     this.inFlight = this.inFlight.filter((pending) => pending !== attempt);
     if (saved) this.input.landedEntryText(text);
     const stored = this.settledValue(attempt, written, followed);
-    if (choice) this.settleChoice(text, saved ? stored : undefined);
+    if (choice) this.settleChoice(attempt, saved ? stored : undefined);
     if (this.inFlight.length) return;
     this.arrived = [];
     if (written) this.jumped = false;
@@ -306,9 +311,11 @@ export class FieldSave {
     return stored;
   }
 
-  private settleChoice(text: string, stored: string | undefined) {
+  private settleChoice(attempt: FieldAttempt, stored: string | undefined) {
     this.choicesPending--;
-    if (stored !== undefined) this.acceptChoice(text, stored);
+    // The field may already have followed another PC or a newer Take Theirs while this result was settling.
+    if (stored === undefined || attempt.baselineVersion !== this.baselineVersion) return;
+    this.acceptChoice(attempt.text, stored);
   }
 
   // Escape can undo later typing, but cannot go back through a choice that settled a change from elsewhere (#228).
