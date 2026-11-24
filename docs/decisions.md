@@ -325,7 +325,6 @@ These decisions are for the rebuilt deal screen in [deal-screen-design.md](deal-
 - Work in progress shows a small ring beside words naming the live step, never a spinner alone; on a tab, the ring sits beside the tab's name.
 - An opened question sits in a card with its question, response, sources, links, and status, beside the conversation, never covering it. A draft response is marked with a **Draft** badge.
 - A source document opens in the pane in reading mode's viewer, with page navigation and zoom and no passage highlighting.
-- The dark theme is black and white: its accent is a light gray derived from `colors.neutral` in place of `colors.accent` (#873).
 - Confirm dialogs say **Cancel**, not **Keep It** (#867).
 
 ## Built, awaiting confirmation
