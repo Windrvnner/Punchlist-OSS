@@ -50,6 +50,29 @@ describe('the finding editor', () => {
     });
     return { box: host.querySelector('#fe-body') as HTMLElement };
   };
+  const capturePaste = (box: HTMLElement, types: Record<string, string>) => {
+    const inserted = document.createElement('div');
+    const exec = vi.fn((_operation: string, _ui: boolean, value: string) => {
+      inserted.innerHTML = value;
+      return true;
+    });
+    const previous = Object.getOwnPropertyDescriptor(document, 'execCommand');
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: exec });
+    try {
+      const paste = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(paste, 'clipboardData', { value: { getData: (type: string) => types[type] ?? '' } });
+      box.dispatchEvent(paste);
+      return inserted;
+    } finally {
+      if (previous) Object.defineProperty(document, 'execCommand', previous);
+      else Reflect.deleteProperty(document, 'execCommand');
+    }
+  };
+
+  const atLimit = (room: number) => {
+    const detail = 'The annual budget accompanies the compliance certificate. ';
+    return detail.repeat(Math.ceil(TEXT_MAX / detail.length)).slice(0, TEXT_MAX - room);
+  };
   it('shows each marker as a tag and gives back the stored text unchanged, at a long finding\'s scale', async () => {
     const sources = Array.from({ length: 40 }, (_, i) => source(`Data room document ${i + 1}.pdf`));
     const sentence = (p: number, s: number) => `Sentence ${s} of paragraph ${p} cites. [${((p * 4 + s) % 40) + 1}]`;
@@ -77,28 +100,30 @@ describe('the finding editor', () => {
     ['a whole citation', 'See[1] for the source', 6, 1, 'See[1]'],
     ['a whole grapheme', '[👍🏽 later', 3, 1, '['],
   ])('fits a paste at the limit with %s', async (_name, pasted, room, sourceCount, expected) => {
-    const detail = 'The annual budget accompanies the compliance certificate. ';
-    const prefix = detail.repeat(Math.ceil(TEXT_MAX / detail.length));
     const sources = sourceCount ? [source('Facility agreement.pdf')] : [];
-    const { box } = await mount(prefix.slice(0, TEXT_MAX - room), sources);
-    const inserted = document.createElement('div');
-    const exec = vi.fn((_operation: string, _ui: boolean, value: string) => {
-      inserted.innerHTML = value;
-      return true;
-    });
-    const previous = Object.getOwnPropertyDescriptor(document, 'execCommand');
-    Object.defineProperty(document, 'execCommand', { configurable: true, value: exec });
-    try {
-      const paste = new Event('paste', { bubbles: true, cancelable: true });
-      Object.defineProperty(paste, 'clipboardData', {
-        value: { getData: (type: string) => type === 'text/plain' ? pasted : '' },
-      });
-      box.dispatchEvent(paste);
-      expect(editorText(inserted)).toBe(expected);
-      expect(Boolean(inserted.querySelector('.ctag'))).toBe(expected === 'See[1]');
-    } finally {
-      if (previous) Object.defineProperty(document, 'execCommand', previous);
-      else Reflect.deleteProperty(document, 'execCommand');
-    }
+    const { box } = await mount(atLimit(room), sources);
+    const inserted = capturePaste(box, { 'text/plain': pasted });
+    expect(editorText(inserted)).toBe(expected);
+    expect(Boolean(inserted.querySelector('.ctag'))).toBe(expected === 'See[1]');
+  });
+
+  it.each([2, 3])('keeps copied literal brackets in a recipient with sources and %i characters free', async (room) => {
+    const { box } = await mount(atLimit(room), [source('Facility agreement.pdf')]);
+    const clip = JSON.stringify({ text: '[1] in the compliance schedule.', sources: [] });
+    const inserted = capturePaste(box, { 'application/x-punchlist-cited': clip });
+    expect(editorText(inserted)).toBe('[1]'.slice(0, room));
+    expect(inserted.querySelector('.ctag')).toBeNull();
+  });
+
+  it.each([
+    [6, 'See[2]', '[2]'],
+    [5, 'See', undefined],
+  ])('fits a copied citation using its recipient number with %i characters free', async (room, text, marker) => {
+    const shared = source('Facility agreement.pdf');
+    const { box } = await mount(atLimit(room), [source('Fee letter.pdf'), shared]);
+    const clip = JSON.stringify({ text: 'See[1] in the facility agreement.', sources: [shared] });
+    const inserted = capturePaste(box, { 'application/x-punchlist-cited': clip });
+    expect(editorText(inserted)).toBe(text);
+    expect(inserted.querySelector<HTMLElement>('.ctag')?.dataset.marker).toBe(marker);
   });
 });

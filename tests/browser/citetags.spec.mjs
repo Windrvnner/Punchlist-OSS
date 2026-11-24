@@ -82,7 +82,7 @@ const openEdit = async (page) => {
   await page.waitForSelector('#fe-body .ctag');
 };
 
-{ const { ctx, page } = await start();
+{ const { ctx, page, fid } = await start();
   await openEdit(page);
   const limit = 32_767;
   const detail = 'The facility agreement requires the annual budget and a compliance certificate. ';
@@ -96,6 +96,26 @@ const openEdit = async (page) => {
   await page.keyboard.press('Control+z');
   const undone = await copyAll(page);
   say('undo-paste-at-limit', JSON.parse(undone['application/x-punchlist-cited']).text === prefix);
+
+  await page.click('#fe-cancel');
+  const uncitedId = await findingIn(page, 'Legal');
+  await openFinding(page, uncitedId);
+  await page.evaluate((id) => { store.get().findings[id].sources = []; }, uncitedId);
+  await page.click('#f-edit');
+  await page.locator('#fe-body').fill('[1] in the compliance schedule.');
+  await page.keyboard.press('Control+a');
+  await page.keyboard.press('Control+c');
+  await page.click('#fe-cancel');
+  await openFinding(page, fid);
+  await openEdit(page);
+  const clipboardPrefix = `${prefix.slice(0, -2)}.`;
+  await page.locator('#fe-body').fill(clipboardPrefix);
+  await page.keyboard.press('Control+End');
+  await page.keyboard.press('Control+v');
+  const copiedText = await page.locator('#fe-body').textContent();
+  say('native-paste-at-limit-keeps-copied-literal-number', copiedText === `${clipboardPrefix}[1`);
+  await page.keyboard.press('Control+z');
+  say('undo-native-paste-at-limit', await page.locator('#fe-body').textContent() === clipboardPrefix);
   await ctx.close();
 }
 
