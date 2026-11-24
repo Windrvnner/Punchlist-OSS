@@ -434,6 +434,110 @@ describe('change files on one PC', () => {
       await copy.close();
     });
 
+    it('recovers the connected folder while an unrelated journal marker is held (#750)', async () => {
+      const { A, B, local, open } = setup();
+      const archive = open(B, '/shared/archive');
+      val(await archive.transaction(add('archiveQuestion', 'archiveOp')));
+      await archive.close();
+      const team = open(A, '/shared/team');
+      val(await team.transaction(add('teamQuestion', 'teamOp')));
+      await team.close();
+      loseAll(A, local);
+
+      const read = local.read.bind(local);
+      local.read = (name) => {
+        if (name === `place-${archive.id}.json`) throw new Error('EBUSY: resource busy');
+        return read(name);
+      };
+      const recovered = open(A, '/shared/team');
+      expect(recovered.id).toBe(team.id);
+      expect(await ops(recovered)).toEqual(['teamOp']);
+      expect(await text(recovered, 'teamQuestion')).toBe('teamQuestion');
+      await recovered.close();
+    });
+
+    it.each([
+      { timing: 'before a change', afterFirstWrite: false, entries: ['op1'] },
+      { timing: 'after a change', afterFirstWrite: true, entries: ['op1', 'op3'] },
+    ])('recovers carried Undo $timing with a held folder marker (#750)', async ({ afterFirstWrite, entries }) => {
+      const { A, local, open } = setup();
+      const place = '/shared/team';
+      const original = open(A, place);
+      val(await original.transaction(add('q1', 'op1')));
+      const copy = open(A, place, clone(local));
+      val(await copy.transaction(add('q2', 'op2')));
+      expect(val(await original.sync()).self.note).toBe(COPIED);
+      await original.close();
+      await copy.close();
+
+      const write = local.write.bind(local);
+      local.write = (name, value) => {
+        if (name.startsWith('place-') && name !== `place-${original.id}.json`) throw new Error('EBUSY');
+        write(name, value);
+      };
+      const moved = open(A, place);
+      expect(await ops(moved)).toEqual(['op1']);
+      expect(local.files.has(`place-${moved.id}.json`)).toBe(false);
+      if (afterFirstWrite) val(await moved.transaction(add('q3', 'op3')));
+      await moved.close();
+      local.write = write;
+      loseAll(A, local);
+
+      const recovered = open(A, place);
+      expect(recovered.id).toBe(moved.id);
+      expect(await ops(recovered)).toEqual(entries);
+      if (afterFirstWrite) expect(await text(recovered, 'q3')).toBe('q3');
+      await recovered.close();
+    });
+
+    it('settles a recovered journal from its predecessor receipt before offering Retry (#750)', async () => {
+      const { A, local, open } = setup();
+      const place = '/shared/team';
+      const original = open(A, place);
+      const saved = add('q1', 'op1');
+      const [question, pending] = saved.writes;
+      val(await original.transaction({ writes: [pending] }));
+      const append = local.append.bind(local);
+      const write = local.write.bind(local);
+      const oldJournal = `ops-${original.id}.json`;
+      let held = false;
+      local.append = (name, value) => {
+        append(name, value);
+        held = true;
+      };
+      local.write = (name, value) => {
+        if (held && name === oldJournal) throw new Error('EBUSY');
+        write(name, value);
+      };
+      const receipt = { ...pending, data: { label: 'Add question', state: 'succeeded' }, expectedRev: 1 };
+      val(await original.transaction({ ...saved, writes: [question, receipt] }));
+      expect(local.files.get(oldJournal)).toContain('"state":"pending"');
+      local.append = append;
+      const copy = open(A, place, clone(local));
+      val(await copy.transaction(add('q2', 'op2')));
+      expect(val(await original.sync()).self.note).toBe(COPIED);
+      await original.close();
+      await copy.close();
+      local.write = write;
+
+      const read = local.read.bind(local);
+      local.read = (name) => {
+        if (name.startsWith('ops-') && name !== oldJournal && local.files.has(name)) throw new Error('EBUSY');
+        return read(name);
+      };
+      const moved = open(A, place);
+      expect(local.files.get(`ops-${moved.id}.json`)).toContain('"state":"pending"');
+      await moved.close();
+      local.read = read;
+      damage(local, () => '');
+
+      const recovered = open(A, place);
+      expect(recovered.id).toBe(moved.id);
+      expect(await text(recovered, 'q1')).toBe('q1');
+      expect(val(await recovered.get('op', 'op1'))?.envelope.data).toMatchObject({ state: 'succeeded' });
+      await recovered.close();
+    });
+
     for (const busy of [false, true]) it(`every shared file lost: an id left after a copy was found is not taken back${
       busy ? ', though its folder record was held when the copy was found' : ''} (#29)`, async () => {
       const { A, local, open } = setup();
