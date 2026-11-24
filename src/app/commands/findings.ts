@@ -215,12 +215,20 @@ const From = z.object({
   sources: z.array(Source),
   /** the "May be out of date" mark then, and the responses on the finding's questions then, each as one string to compare */
   mark: z.string(), responses: z.string(),
+  markedRound: z.string().optional(),
 });
 const markOf = (f: Finding) => JSON.stringify([f.updated, f.updatedWhy, f.updatedOn ?? null]);
 /** The responses on the questions linked to a finding (a question asked, with no response yet, is nothing to read). A reworded response leaves a mark that already names its question as it is, so the mark alone would not show it. */
 const responsesOn = (state: { questions: Record<string, { id: string; dealId: string; linkedFinding?: string; response: string }> }, f: Finding) =>
   Object.values(state.questions).filter((q) => q.dealId === f.dealId && q.linkedFinding === f.id && q.response.trim()).map((q) => `${q.id}:${wordingHash(q.response)}`).sort().join(' ');
-const startOf = (state: Parameters<typeof responsesOn>[0], f: Finding): z.infer<typeof From> => ({ body: f.body, reviewed: f.reviewed ?? null, sources: f.sources, mark: markOf(f), responses: responsesOn(state, f) });
+const startOf = (state: Parameters<typeof responsesOn>[0], finding: Finding): z.infer<typeof From> => ({
+  body: finding.body,
+  reviewed: finding.reviewed ?? null,
+  sources: finding.sources,
+  mark: markOf(finding),
+  markedRound: finding.markedRound,
+  responses: responsesOn(state, finding),
+});
 
 /** Reassess: the model re-reads the finding against the documents and responses now in the deal. Two phases like drafts. */
 export const Reassess = define({
@@ -277,7 +285,10 @@ export const ApplyReassessment = define({
     // (this only keeps a mark: one cleared meanwhile, as an emptied response clears its own, stays cleared; #328).
     // A document the reply cites it has read, so the mark that attaching it set (its last change) does not count.
     const fromCited = added.some((x) => cited.has(docKey(x)) && markOf(f) === JSON.stringify([true, `${x.doc} attached`, null]));
-    const news = !!input.from && ((markOf(f) !== input.from.mark && !fromCited) || unread.length > 0 || responsesOn(state, f) !== input.from.responses);
+    // Another check can leave the same display reason, or its mark can be followed by an attachment (#326).
+    const news = !!input.from && (f.markedRound !== input.from.markedRound
+      || (markOf(f) !== input.from.mark && !fromCited) || unread.length > 0
+      || responsesOn(state, f) !== input.from.responses);
     const mark = f.updated && news ? {} : { updated: false, updatedWhy: '', updatedOn: undefined };
     const next: Finding = { ...f, body: fitParas(input.result.body), sources, ownWords: reworded ? undefined : f.ownWords, ...mark, updatedAt: ctx.at, ...(cleared ? { reviewed: null } : {}) };
     return ok({

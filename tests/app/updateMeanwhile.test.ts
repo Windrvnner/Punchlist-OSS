@@ -54,9 +54,9 @@ async function world(reply: { body: string[]; sources: Source[] }) {
   const press = async () => { const done = reassess(store, dealId, findingId); await calling; return { done }; };
   const last = (command: string) => Object.values(store.get().ops).filter((o) => o.command === command).at(-1)!;
   /** another PC marks the finding for a reason of its own, as the backend's check does, and the change syncs here */
-  const markElsewhere = async (why: string) => {
+  const markElsewhere = async (why: string, markedRound?: string) => {
     const { updatedOn: _was, ...data } = f();
-    const marked = { ...data, updated: true, updatedWhy: why, updatedAt: ELSEWHERE.at };
+    const marked = { ...data, updated: true, updatedWhy: why, updatedAt: ELSEWHERE.at, markedRound };
     repo.peer.change('finding', findingId, marked, ELSEWHERE);
     await repo.sync();
     await settle();
@@ -70,6 +70,7 @@ async function world(reply: { body: string[]; sources: Source[] }) {
   return { store, dealId, findingId, linked, f, press, answer, last, markElsewhere, attach };
 }
 const GONE = 'A document it cites is no longer in the data room';
+const ARRIVED = 'Covenant notice.pdf arrived';
 const AM3 = { doc: 'EPC amendment 3.pdf', loc: 'p. 2', docId: 'doc_am3' };
 const AM4 = { doc: 'EPC amendment 4.pdf', loc: 'p. 1', docId: 'doc_am4' };
 /** a reply that cites amendment 3 */
@@ -77,6 +78,31 @@ const CITES_AM3 = { body: ['Amendment 3 lifts the cap. [1]'], sources: [AM3] };
 const NEW = { body: ['The liability cap is 20% of the contract price. [1]'], sources: [{ doc: 'EPC contract.pdf', loc: 'p. 82', docId: 'doc_epc' }] };
 
 describe('Update from documents while a person works on the finding', () => {
+  it('keeps the same warning when another check marked the finding while the reply was pending (#326)', async () => {
+    const update = await world(NEW);
+    await update.markElsewhere(ARRIVED, 'first-check');
+    const { done } = await update.press();
+    await update.markElsewhere(ARRIVED, 'second-check');
+    update.answer();
+    await done;
+    expect(update.f()).toMatchObject({
+      body: NEW.body, updated: true, updatedWhy: ARRIVED, markedRound: 'second-check',
+    });
+  }, 120000);
+
+  it('clears an unchanged warning after reading its check, even if a person renamed the finding (#326)', async () => {
+    const update = await world(NEW);
+    await update.markElsewhere(ARRIVED, 'first-check');
+    const { done } = await update.press();
+    await update.store.dispatch(EditFinding, {
+      dealId: update.dealId, findingId: update.findingId,
+      title: 'Liability cap', workstream: 'Legal', body: update.f().body,
+    });
+    update.answer();
+    await done;
+    expect(update.f()).toMatchObject({ body: NEW.body, title: 'Liability cap', updated: false, updatedWhy: '' });
+  }, 120000);
+
   it('keeps a source added while it ran, after the sources the new words cite, and leaves the mark so the next update reads it', async () => {
     const w = await world(NEW); const { done } = await w.press();
     await w.store.dispatch(AttachDocumentToFinding, { dealId: w.dealId, findingId: w.findingId, doc: 'EPC amendment 3.pdf', docId: 'doc_am3' });

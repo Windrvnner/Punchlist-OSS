@@ -242,6 +242,8 @@ export const Finding = Record.extend({
    * they are now, so that a question that is renumbered is still the one named. `updatedWhy` keeps the words as first written.
    */
   updatedOn: z.object({ questions: z.array(z.string()) }).loose().optional(),
+  /** The last check round that marked this finding, including after its warning has been read. */
+  markedRound: z.string().optional(),
   /** the checklist item whose check raised it, when one did */
   itemId: z.string().optional(),
   /**
