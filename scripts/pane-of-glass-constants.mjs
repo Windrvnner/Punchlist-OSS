@@ -30,6 +30,19 @@ function selectedBranch(node, resolve) {
   return value ? node.right : node.left;
 }
 
+function containerAliases(scopes) {
+  const aliases = new Map();
+  for (const scope of scopes) {
+    for (const variable of scope.variables) {
+      const declaration = fixedDeclaration(variable);
+      if (!declaration || declaration.node.id !== declaration.name) continue;
+      const source = unwrapped(declaration.node.init);
+      if (source?.type === 'Identifier') aliases.set(source, variable);
+    }
+  }
+  return aliases;
+}
+
 export function localBindings(program) {
   const { analyze } = require('@typescript-eslint/scope-manager');
   const { scopes } = analyze(program, { sourceType: 'module', lib: [], jsxPragma: null });
@@ -37,7 +50,7 @@ export function localBindings(program) {
   for (const scope of scopes) {
     for (const ref of scope.references) bindings.set(ref.identifier, ref);
   }
-  const stableContainer = containerReads(program, (ref) => bindings.get(ref)?.from);
+  const stableContainer = containerReads(program, (ref) => bindings.get(ref)?.from, containerAliases(scopes));
   function resolveVariable(reference, seen, capture) {
     const variable = bindings.get(reference)?.resolved;
     if (reference.name === 'undefined' && !variable?.defs.length) return missing;

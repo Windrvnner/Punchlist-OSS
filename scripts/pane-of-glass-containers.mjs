@@ -101,9 +101,10 @@ function afterCapture(ref, captured, scope) {
   return captured.immediate;
 }
 
-export function containerReads(program, scopeOf) {
+export function containerReads(program, scopeOf, aliases) {
   const uses = usesIn(program);
-  return (variable, use, value, capture, resolve) => {
+  function stable(variable, use, value, capture, resolve, seen = new Set()) {
+    if (seen.has(variable)) return false;
     if (variable.defs.some((def) => uses.exported.has(def.node))) return false;
     const { use: location, key } = capture;
     const keys = key === undefined
@@ -118,7 +119,10 @@ export function containerReads(program, scopeOf) {
       if (!ref.isRead() || !ref.isValueReference || ref.identifier === use) return true;
       if (afterCapture(ref, captured, scope)) return true;
       if (flat && uses.spreads.has(ref.identifier)) return true;
+      const alias = aliases.get(ref.identifier);
+      if (alias) return stable(alias, null, value, capture, resolve, new Set(seen).add(variable));
       return readsSelection(ref.identifier, value, keys, uses, resolve);
     });
-  };
+  }
+  return stable;
 }

@@ -216,6 +216,12 @@ describe('UI dependency checks', () => {
       "editable.entry = './checklist'",
       'const { entry: changed } = editableAlias',
       'export const changedPage = () => import(changed)',
+      "const shared = { page: 'node:path', caption: 'Checklist' }",
+      'const writer = shared',
+      'const pageReader = shared',
+      "writer.page = './checklist'",
+      'const { page: currentPage } = pageReader',
+      'export const current = () => import(currentPage)',
       "function supplied(page: 'node:path') { return import(page) }",
       "const annotated = runtimePage as 'node:path'",
       'export const fromState = () => import(annotated)',
@@ -330,8 +336,16 @@ describe('UI dependency checks', () => {
   it.each([
     ['an absent optional caption', [
       "const manifest: { target: string; caption?: string } = { target: 'CHOSEN' }",
-      'export const caption = manifest.caption',
+      "export const caption = manifest.caption ?? 'Checklist'",
       'const { target } = manifest',
+    ]],
+    ['sibling reads through distinct local aliases', [
+      "const manifest = { target: 'CHOSEN', caption: 'Checklist' }",
+      'const heading = manifest',
+      'const pages = manifest',
+      'const reader = pages',
+      'export const title = heading.caption',
+      'const { target } = reader',
     ]],
     ['a capture beside a runtime caption', [
       "const caption = () => 'Checklist'",
