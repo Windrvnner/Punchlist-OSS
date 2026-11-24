@@ -592,7 +592,7 @@ export class LogRepository implements Repository {
    * with no whole spare, fails the start, which is tried again, rather than being taken for a new install. A damaged file is
    * kept aside as it was (`install.damaged-<when>.json`) before it is written again, and the start fails while no copy can
    * be kept; with neither file whole, what is whole in each is read, and `lost` is set: an id that is then not known for
-   * this shared folder is looked for in this PC's own change files (`ownId`, in the constructor).
+   * this shared folder is looked for in this PC's own change files and folder records (`ownId`, in the constructor).
    */
   private installed(): { saved: Installed; lost: boolean; texts: (string | null)[] } {
     const o = this.o; const texts: (string | null)[] = []; let refused: unknown = null;
@@ -648,10 +648,19 @@ export class LogRepository implements Repository {
     const not = new Set([...Object.entries(saved.ids ?? {}).filter(([p]) => p !== o.place).map(([, i]) => i), ...Object.values(saved.lastIds ?? {}), ...(saved.place && saved.place !== o.place && saved.id ? [saved.id] : [])]);
     // with a named folder, only an id recorded for it (place-<id>.json): its files and lines cannot tell a copy of the folder from it
     const mine = (i: string) => { if (!o.place) return true; try { return JSON.parse(o.local.read(`place-${i}.json`) ?? 'null')?.place === o.place; } catch { return false; } };
-    const kept = new Map<string, string[]>(); for (const n of o.local.list()) { const i = idOfFile(n); if (i && !not.has(i)) kept.set(i, [...(kept.get(i) ?? []), n]); }
+    const localNames = o.local.list();
+    const kept = new Map<string, string[]>();
+    for (const name of localNames) {
+      const candidate = idOfFile(name);
+      if (candidate && !not.has(candidate)) kept.set(candidate, [...(kept.get(candidate) ?? []), name]);
+    }
     for (const i of [...kept.keys()]) if (!mine(i)) kept.delete(i);
-    if (!kept.size) return null;
-    const there = new Map<string, string[]>(); for (const n of o.shared.list()) { const i = idOfFile(n); if (i && kept.has(i)) there.set(i, [...(there.get(i) ?? []), n]); }
+    const sharedNames = o.shared.list();
+    const there = new Map<string, string[]>();
+    for (const name of sharedNames) {
+      const candidate = idOfFile(name);
+      if (candidate && kept.has(candidate)) there.set(candidate, [...(there.get(candidate) ?? []), name]);
+    }
     const found: [string, string][] = [];
     for (const [i, names] of kept) {
       const shared = there.get(i) ?? [];
@@ -671,7 +680,27 @@ export class LogRepository implements Repository {
       }
       if (!ahead) found.push([i, here]);
     }
-    return found.sort((a, b) => (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : 0))[0]?.[0] ?? null;
+    const written = found.sort((a, b) => (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : 0))[0]?.[0];
+    return written ?? this.unwrittenJournalId(localNames, sharedNames, not);
+  }
+
+  /** A replacement id can have a carried Undo journal before it writes any changes (#750). */
+  private unwrittenJournalId(localNames: string[], sharedNames: string[], excluded: Set<string>): string | null {
+    const { local, place } = this.o;
+    const machine = this.o.machine?.();
+    if (!place || !machine) return null;
+    const journal = this.o.journal ?? local;
+    const changes = [...localNames, ...sharedNames].filter((name) => CHANGE_FILE.test(name));
+    let candidate: string | null = null;
+    for (const name of localNames) {
+      const id = /^place-(.+)\.json$/.exec(name)?.[1];
+      if (!id || excluded.has(id) || changes.some((file) => file.startsWith(`changes-${id}-`))) continue;
+      if (!this.activePlaceRecord(local.read(name), machine) || journal.read(`ops-${id}.json`) == null) continue;
+      // There is no change history to tell which of two apparently active journals is this one's.
+      if (candidate) return null;
+      candidate = id;
+    }
+    return candidate;
   }
 
   /**
@@ -683,8 +712,16 @@ export class LogRepository implements Repository {
     const here = this.o.machine?.();
     if (!this.o.place || !here) return false;
     try {
-      const record = this.o.local.read(`place-${id}.json`);
-      return JSON.parse(record ?? 'null')?.machine === here && !leftIn(record);
+      return this.activePlaceRecord(this.o.local.read(`place-${id}.json`), here);
+    } catch {
+      return false;
+    }
+  }
+
+  private activePlaceRecord(text: string | null, machine: string): boolean {
+    try {
+      const record = JSON.parse(text ?? 'null');
+      return record?.place === this.o.place && record.machine === machine && record.left !== true;
     } catch {
       return false;
     }

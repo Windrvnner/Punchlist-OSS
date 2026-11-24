@@ -355,6 +355,38 @@ describe('change files on one PC', () => {
       expect(await text(b, 'qd')).toBe('qd');
     });
 
+    it('recovers carried Undo before the replacement id writes a change (#750)', async () => {
+      const { A, B, local, open } = setup();
+      const place = '/shared/team';
+      const original = open(A, place);
+      val(await original.transaction(add('q1', 'op1')));
+      const copy = open(A, place, clone(local));
+      val(await copy.transaction(add('q2', 'op2')));
+      expect(val(await original.sync()).self.note).toBe(COPIED);
+      await original.close();
+      await copy.close();
+
+      const moved = open(A, place);
+      expect(moved.id).not.toBe(original.id);
+      expect(await ops(moved)).toEqual(['op1']);
+      expect(local.files.has(file(moved.id, 'd1'))).toBe(false);
+      await moved.close();
+      loseAll(A, local);
+
+      const otherPlace = open(B, '/shared/other', clone(local));
+      const otherMachine = open(A, place, clone(local), 'M2');
+      for (const other of [otherPlace, otherMachine]) {
+        expect(other.id).not.toBe(moved.id);
+        expect(await ops(other)).toEqual([]);
+        await other.close();
+      }
+
+      const again = open(A, place);
+      expect(await ops(again)).toEqual(['op1']);
+      expect(again.id).toBe(moved.id);
+      await again.close();
+    });
+
     for (const busy of [false, true]) it(`every shared file lost: an id left after a copy was found is not taken back${
       busy ? ', though its folder record was held when the copy was found' : ''} (#29)`, async () => {
       const { A, local, open } = setup();
