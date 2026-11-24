@@ -56,7 +56,8 @@ const later = () => {
   const t0 = Date.now() - 10; const st = fs.statSync;   // 10 ms: a file system's clock may lag a little behind
   vi.spyOn(fs, 'statSync').mockImplementation(((f: fs.PathLike, o?: never) => { const s = st(f, o) as fs.Stats; return s && s.ctimeMs >= t0 ? Object.assign(Object.create(Object.getPrototypeOf(s)), s, { ctimeMs: s.ctimeMs + 2 * 60_000 }) : s; }) as never);
 };
-const leftovers = (folder: string) => fs.readdirSync(folder).filter((n) => /^~.* [0-9a-f]{8}\.(tmp|old)$/.test(n));
+const isWorkingFile = (name: string) => /^~qa-log-[0-9a-f]{64}\.[0-9a-f]{8}\.(tmp|old)$/.test(name);
+const leftovers = (folder: string) => fs.readdirSync(folder).filter(isWorkingFile);
 
 describe('a Q&A log update whose working files are busy as it tidies up', () => {
   afterEach(() => vi.restoreAllMocks());
@@ -65,7 +66,11 @@ describe('a Q&A log update whose working files are busy as it tidies up', () => 
     const { folder, store, dealId, q5 } = await setup();
     await store.dispatch(SetResponse, { dealId, questionId: q5.id, response: 'Answer v1' });
     // the working file and the version moved aside are each held once, as the save tries to remove them
-    const rm = fs.rmSync; vi.spyOn(fs, 'rmSync').mockImplementation(((f: fs.PathLike, o?: fs.RmOptions) => { if (/ [0-9a-f]{8}\.(tmp|old)$/.test(String(f))) throw busy(); return rm(f, o); }) as typeof fs.rmSync);
+    const rm = fs.rmSync;
+    vi.spyOn(fs, 'rmSync').mockImplementation((file, options) => {
+      if (isWorkingFile(path.basename(String(file)))) throw busy();
+      return rm(file, options);
+    });
     const first = await exportQaLog(store, dealId);
     expect(first.ok && first.value.status).toBe('written');
     expect(row(folder, 5)).toBe('5,Question 5: please confirm item 5.,Answer v1');

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -68,7 +69,7 @@ describe('recovering interrupted saves (#278)', () => {
 
   it('recovers a log with a multibyte filename near the byte limit', () => {
     const dir = folder();
-    const file = `${'環境許認可の条件及び期限'.repeat(6)} Certification schedule.csv`;
+    const file = `${'環境許認可の条件及び期限'.repeat(6)} Certification schedule v2.csv`;
     try {
       const aside = interruptAfterMove(dir, file, csv);
       expect(Buffer.byteLength(path.basename(aside))).toBeLessThanOrEqual(255);
@@ -101,4 +102,3 @@ describe('recovering interrupted saves (#278)', () => {
     }
   });
 });
-

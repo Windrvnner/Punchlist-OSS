@@ -19,6 +19,7 @@ import { keepImportedLog, exportQaLog } from '../../src/app/qaLog';
 import type { KeptAsk } from '../../src/domain/keptMerge';
 import { prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { nodeQaLogs } from '../../src/backend/qaLogs';
+import { asideFixtureName } from '../backend/qaLogWorkingFiles';
 import { ok } from '../../src/domain/result';
 
 const COMMANDS = [
@@ -56,7 +57,7 @@ const edited = (s: string, set: Record<number, string[]>, add: string[][] = []) 
   if (add.length) l.splice(l.length - 1, 0, ...add.map((r) => r.join(',')));
   return l.join('\r\n');
 };
-const kept = (folder: string) => fs.readdirSync(folder).filter((n) => / [0-9a-f]{8}\.(old|kept|left)$/.test(n));
+const kept = (folder: string) => fs.readdirSync(folder).filter((n) => /\.[0-9a-f]{8}\.(old|kept|left)$/.test(n));
 const archive = (folder: string) => fs.readdirSync(path.join(folder, ARC)).sort().map((n) => ({ n, s: fs.readFileSync(path.join(folder, ARC, n), 'utf8') }));
 /** the folder's clock moves on two minutes: every file made from now on reads as made then, so the ones before are old */
 const later = () => {
@@ -301,7 +302,8 @@ describe('an edit kept aside in the log\'s folder', () => {
 
   it('an edit of another log of the same name (an .xlsx beside this .csv) is left alone', async () => {
     const { folder, store, dealId, q } = await setup();
-    const other = path.join(folder, '~Proseware Q&A log 0a1b2c3d.old'); fs.writeFileSync(other, Buffer.from([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]));
+    const other = path.join(folder, asideFixtureName(FILE.replace(/\.csv$/, '.xlsx')));
+    fs.writeFileSync(other, Buffer.from([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]));
     later();
     await store.dispatch(SetResponse, { dealId, questionId: q(4).id, response: 'Answer 4' });
     const r = await exportQaLog(store, dealId); expect(r.ok && r.value.status).toBe('written');
