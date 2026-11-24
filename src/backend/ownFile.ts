@@ -29,11 +29,24 @@ export const dealFiles = (names: string[], kind: string, dealId: string) => { co
  * With `keep`, lines the shared folder refuses stay in the local copy for `healOwn` to share later, and the shared
  * folder's error is returned rather than thrown; it still throws, with nothing written, when the local copy cannot be.
  */
-export function appendOwn(shared: Pick<Folder, 'append'> & Partial<Pick<Folder, 'read' | 'write'>>, local: Folder | undefined, name: string, text: string, keep = false): unknown {
+export function appendOwn(
+  shared: AppendCopy, local: StampedFolder | undefined, name: string, text: string, keep = false,
+): unknown {
   if (!local) { shared.append(name, text); return; }
-  appendLocal(local, name, text);
-  if (!keep) { shareOwn(shared, local, name, text); return; }
-  try { shared.append(name, text); } catch (e) { return e; }
+  const compared = comparedCopies.get(local);
+  const previous = compared?.get(name);
+  const before = previous?.shared === shared ? previous.stamp : undefined;
+  const here = appendLocal(local, name, text, before?.here);
+  let there: string | void;
+  try {
+    there = keep ? shared.append(name, text, before?.there) : shareOwn(shared, local, name, text, false, before?.there);
+  } catch (error) {
+    if (keep) return error;
+    throw error;
+  }
+  if (previous && before && here !== undefined && there !== undefined) {
+    compared?.set(name, { shared: previous.shared, stamp: { here, there } });
+  }
 }
 
 /** Per local folder, the files whose last append failed and is not taken back yet: the size in bytes to cut each to. */
@@ -50,10 +63,10 @@ function firstBytes(text: string, size: number) {
  * it is cut off again, so the next line is not glued to it. When it cannot be cut off yet (the disk is still full),
  * no other line is added to that file until it has been.
  */
-function appendLocal(local: Folder, name: string, text: string) {
+function appendLocal(local: StampedFolder, name: string, text: string, expected?: string) {
   mendLocal(local, name);
   const before = sizeBefore(local, name);
-  try { local.append(name, text); }
+  try { return local.append(name, text, expected); }
   catch (error) {
     const failed = failedAppends.get(local) ?? new Map<string, number>();
     failedAppends.set(local, failed.set(name, before));
@@ -117,8 +130,10 @@ function takeBackFailed(local: Folder, name: string) {
  * local copy are appended to the shared one. Throws when they cannot be; then they are taken back out of the local copy. With
  * `landed`, a write that fails after all of the text reached the shared copy (a drive that drops mid-write can) counts as written.
  */
-export function shareOwn(shared: Pick<Folder, 'append'> & Partial<Pick<Folder, 'read'>>, local: Folder, name: string, text: string, landed = false) {
-  try { shared.append(name, text); }
+export function shareOwn(
+  shared: AppendCopy, local: Folder, name: string, text: string, landed = false, expected?: string,
+) {
+  try { return shared.append(name, text, expected); }
   catch (e) {
     if (landed) { let there: string | null = null; try { there = shared.read?.(name) ?? null; } catch { /* not known: treated as not written */ } if (there?.endsWith(text)) return; }
     // not shared: taken back out of the local copy, or it would be put back later as something the person was told had failed
@@ -127,19 +142,28 @@ export function shareOwn(shared: Pick<Folder, 'append'> & Partial<Pick<Folder, '
   }
 }
 
-export interface FileStamp {
+interface FileStamp {
   fileStamp?(name: string): string | undefined;
 }
 
-type SharedCopy = Pick<Folder, 'append' | 'read'> & FileStamp;
-type ComparedCopy = { shared: SharedCopy; stamp: string };
+/** An append can advance a verified file stamp using the same open file it writes. */
+type StampedAppend = { append(name: string, text: string, expected?: string): string | void };
+export type StampedFolder = Omit<Folder, 'append'> & FileStamp & StampedAppend;
+type AppendCopy = StampedAppend & Partial<Pick<Folder, 'read' | 'write'>>;
+type SharedCopy = StampedAppend & Pick<Folder, 'read'> & FileStamp;
+type CopyStamp = { here: string; there: string };
+type ComparedCopy = { shared: SharedCopy; stamp: CopyStamp };
 const comparedCopies = new WeakMap<Folder, Map<string, ComparedCopy>>();
 
 /** After a comparison, use both file stamps to avoid reopening unchanged copies on each poll (#784). */
-function copyStamp(shared: SharedCopy, local: Folder & FileStamp, name: string): string | undefined {
+function copyStamp(shared: SharedCopy, local: Folder & FileStamp, name: string): CopyStamp | undefined {
   const here = local.fileStamp?.(name);
   const there = shared.fileStamp?.(name);
-  if (here !== undefined && there !== undefined) return JSON.stringify([here, there]);
+  if (here !== undefined && there !== undefined) return { here, there };
+}
+
+function sameStamp(stamp: CopyStamp, other: CopyStamp | undefined): boolean {
+  return stamp.here === other?.here && stamp.there === other?.there;
 }
 
 function missingLines(localText: string, sharedText: string): string[] {
@@ -164,7 +188,7 @@ export function healOwn(
     if (!how.whole && stamp === undefined && local.size(name) < 0) return;
     const checked = comparedCopies.get(local);
     const previous = checked?.get(name);
-    if (stamp !== undefined && previous?.shared === shared && previous.stamp === stamp) return;
+    if (stamp && previous?.shared === shared && sameStamp(stamp, previous.stamp)) return;
 
     const text = shared.read(name) ?? '';
     let localText: string | null;
@@ -175,10 +199,11 @@ export function healOwn(
     }
     const lost = missingLines(localText ?? '', text);
     const torn = text.length > 0 && !text.endsWith('\n');
+    const localEnded = !localText || localText.endsWith('\n');
     if (lost.length || (torn && how.endTorn)) {
       const lead = torn ? ' (incomplete append)\n' : '';
       shared.append(name, lead + lost.map((line) => line + '\n').join(''));
-    } else if (stamp !== undefined && copyStamp(shared, local, name) === stamp) {
+    } else if (!torn && localEnded && stamp && sameStamp(stamp, copyStamp(shared, local, name))) {
       comparedCopies.set(local, (checked ?? new Map<string, ComparedCopy>()).set(name, { shared, stamp }));
     }
   } catch { /* tried again at the next read or write */ }

@@ -1,7 +1,6 @@
 /** A folder on disk. An append is forced to the disk before it returns, so a line the app was told is saved is saved. */
 import fs from 'node:fs'; import path from 'node:path';
-import type { Folder } from './logRepository';
-import type { FileStamp } from './ownFile';
+import type { StampedFolder } from './ownFile';
 
 /**
  * A file another program holds for a moment (a sync client uploading the line just written, a virus scanner on the journal)
@@ -30,9 +29,24 @@ function writeAll(fd: number, text: string) {
     if (written <= 0) throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
     done += written;
   }
+  return bytes.length;
 }
 
-export function nodeFolder(dir: string, waits = BUSY_WAITS): Folder & FileStamp {
+function stampOf({ size, ino, mtimeNs, ctimeNs }: fs.BigIntStats): string {
+  return `${size}:${ino}:${mtimeNs}:${ctimeNs}`;
+}
+
+function openFileStats(fd: number): fs.BigIntStats | undefined {
+  try { return fs.fstatSync(fd, { bigint: true }); } catch { return undefined; }
+}
+
+/** Use the open file's stamp, since the path may already point at a replacement (#784). */
+function grownStamp(fd: number, before: fs.BigIntStats, bytes: number): string | undefined {
+  const after = openFileStats(fd);
+  if (after?.size === before.size + BigInt(bytes)) return stampOf(after);
+}
+
+export function nodeFolder(dir: string, waits = BUSY_WAITS): StampedFolder {
   fs.mkdirSync(dir, { recursive: true });
   const resting = new Map<string, number>();                                // file name → until when it is tried once per write
   /** The waits one write may use: its steps share them, so a write holds the process for one wait in all, not one per step. */
@@ -67,17 +81,18 @@ export function nodeFolder(dir: string, waits = BUSY_WAITS): Folder & FileStamp 
     size: (name) => { try { return fs.statSync(at(name)).size; } catch { return -1; } },
     fileStamp: (name) => {
       try {
-        const { size, ino, mtimeNs, ctimeNs } = fs.statSync(at(name), { bigint: true });
-        return `${size}:${ino}:${mtimeNs}:${ctimeNs}`;
+        return stampOf(fs.statSync(at(name), { bigint: true }));
       } catch { return undefined; }
     },
     read: (name) => { try { return fs.readFileSync(at(name), 'utf8'); } catch (e: any) { if (e?.code === 'ENOENT') return null; throw e; } },
     // only the opening is tried again: a write that fails part way may have left part of the line, which the caller deals with
-    append: (name, text) => {
+    append: (name, text, expected) => {
       const fd = whenFree(name, budget(name), () => fs.openSync(at(name), 'a'));
       try {
-        writeAll(fd, text);
+        const before = expected === undefined ? undefined : openFileStats(fd);
+        const bytes = writeAll(fd, text);
         fs.fsyncSync(fd);
+        if (before && stampOf(before) === expected) return grownStamp(fd, before, bytes);
       } finally {
         fs.closeSync(fd);
       }
