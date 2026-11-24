@@ -32,6 +32,7 @@ import {
 } from '../app/findingDrafts';
 import { SourceChips } from './research';
 import { CitedEditor } from './citedEditor';
+import { focusCard } from './focus';
 
 /** The mark on an open finding that something has happened since it was written: what it says, and why. */
 export const OUT_OF_DATE = 'May be out of date';
@@ -289,7 +290,10 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
   return (
     <div class="card addf fedit" data-holds-work onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onDone(); } }}>
       <div class="lbl">Title</div>
-      <input class="in" id="fe-title" aria-label="Title" maxLength={Math.max(TITLE_MAX, f.title.length)} value={title} ref={(el) => { if (el && !el.dataset.f) { el.dataset.f = '1'; el.focus(); } }} onInput={(e) => setTitle((e.currentTarget as HTMLInputElement).value)} />
+      <input
+        class="in" id="fe-title" aria-label="Title" maxLength={Math.max(TITLE_MAX, f.title.length)}
+        value={title} ref={focusCard} onInput={(e) => setTitle(e.currentTarget.value)}
+      />
       <select class={`field ${ws ? '' : 'unset'}`} id="fe-ws" aria-label="Workstream" value={ws} onChange={(e) => setWs((e.currentTarget as HTMLSelectElement).value)}>{wsOptions.map((w) => <option key={w} value={w}>{w}</option>)}</select>
       {/* #636: each citation is a tag after the sentence it supports; the tooltip says so, the screen does not */}
       <div class="lbl" title={CITE_TIP}>Detail</div>

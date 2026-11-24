@@ -264,5 +264,84 @@ for (const scheme of ['light', 'dark']) { const ctx = await browser.newContext({
   await ctx.close();
 }
 
+async function findingEditLayout(page) {
+  return page.evaluate(() => {
+    const composer = document.querySelector('#pcomposer').getBoundingClientRect();
+    const action = (id) => {
+      const button = document.getElementById(id);
+      const bounds = button.getBoundingClientRect();
+      const x = bounds.left + bounds.width / 2;
+      const y = bounds.top + bounds.height / 2;
+      const hit = bounds.bottom <= composer.top && button.contains(document.elementFromPoint(x, y));
+      return { hit, x, y };
+    };
+    return { save: action('fe-save'), cancel: action('fe-cancel'), focus: document.activeElement.id };
+  });
+}
+
+{ // #597: a long finding should open for editing with its actions clear of the conversation composer.
+  const { ctx, page } = await fresh();
+  await page.setViewportSize({ width: 1024, height: 640 });
+  await page.click('#fr-new');
+  await page.fill('#nd-name', 'Asset transfer');
+  await page.click('#nd-create');
+  await page.waitForSelector('.dtabs');
+  const title = 'Consent required before assigning the supply agreement';
+  const body = [
+    'The supply agreement requires written consent before the operating assets can be assigned to another owner.',
+    'The consent request must identify the proposed assignee and explain how service will continue after closing.',
+    'The latest amendment does not remove that requirement. The notice period begins on receipt of the request.',
+    'The draft assignment does not yet identify which purchase orders will transfer with the agreement.',
+    'The parties have not settled which of them is responsible for obtaining consent before the effective date.',
+  ];
+  const [dealId, findingId] = await page.evaluate(async ({ title, body }) => {
+    const dealId = Object.keys(store.get().deals)[0];
+    await store.dispatch(store.commandNamed('CreateFinding'), { dealId, title, workstream: 'Legal', body });
+    return [dealId, Object.keys(store.get().findings)[0]];
+  }, { title, body });
+  await page.goto(URL + `#finding-${dealId}-${findingId}`);
+  const openEditor = async () => {
+    await page.press('#f-edit', 'Enter');
+    await page.waitForSelector('#fe-title');
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    return findingEditLayout(page);
+  };
+  const initial = await openEditor();
+  say('finding-edit-actions-visible-without-messages',
+    initial.save.hit && initial.cancel.hit && initial.focus === 'fe-title', JSON.stringify(initial));
+  const revised = 'Written consent required before assignment';
+  await page.fill('#fe-title', revised);
+  for (const id of ['fe-ws', 'fe-body', 'fe-save', 'fe-cancel']) {
+    await page.keyboard.press('Tab');
+    await page.waitForFunction((id) => document.activeElement.id === id, id);
+  }
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction((title) => document.querySelector('.opening h1, .opening .qtxt')?.textContent === title,
+    revised);
+  await page.fill('#pask', 'Which contracts need written consent before assignment?');
+  await page.press('#pask', 'Enter');
+  await page.waitForSelector('.msgs .ai:not(.pending):not(.failed)');
+  await page.locator('#f-edit').scrollIntoViewIfNeeded();
+  const threaded = await openEditor();
+  say('finding-edit-actions-visible-with-a-conversation',
+    threaded.save.hit && threaded.cancel.hit && threaded.focus === 'fe-title', JSON.stringify(threaded));
+  const draft = 'Confirm which purchase orders are included';
+  await page.fill('#fe-title', draft);
+  await page.evaluate(() => {
+    const chat = document.querySelector('.chat');
+    const start = chat.scrollTop;
+    chat.scrollTop = chat.scrollHeight;
+    chat.scrollTop = start;
+  });
+  const kept = await page.inputValue('#fe-title');
+  const { cancel } = await findingEditLayout(page);
+  if (cancel.hit) await page.mouse.click(cancel.x, cancel.y);
+  const titleAfterCancel = await page.evaluate((id) => store.get().findings[id].title, findingId);
+  say('finding-edit-draft-survives-scrolling-and-cancel-stays-reachable',
+    kept === draft && titleAfterCancel === revised && !(await page.$('#fe-title')) && !page.errors.length);
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter(([, ok]) => !ok).length; console.log(`\n${results.length - failed}/${results.length} passed`); process.exit(failed ? 1 : 0);
