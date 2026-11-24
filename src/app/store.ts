@@ -28,6 +28,7 @@ import { keepUnseen, movedHash } from './recovered';
 import { scopeOfKey } from './conversations';
 import { Item, ListRecord } from '../domain/checklist';
 import { Undo } from './commands/undo';
+import { guardLegacySettledClose } from './commands/closeSettled';
 import { lastImport } from './commands/importQuestions';
 import { merged, localConversations } from './threads';
 import { seenSince } from './draftsSeen';
@@ -39,6 +40,8 @@ type Listener = (s: State) => void;
 type DispatchOptions = {
   idempotencyKey?: string;
   quiet?: boolean;
+  /** The action's caller has its own wording for this refusal. */
+  quietRefusal?: (error: Failure) => boolean;
   /** The caller keeps the input and offers its own retry. */
   noRetry?: boolean;
   /** The field's value before this edit; later changes are refused. */
@@ -395,7 +398,7 @@ export class Store {
     const actor = this.state.user?.name ?? 'Unknown';
     const firm = FIRM;
     const planned = command.plan(this.state, input, { at, actor, firm, opId, ids: this.services.ids });
-    if (!planned.ok) { if (!opts.quiet) this.toast(planned.error.message); return planned; }
+    if (!planned.ok) return this.refusePlan(planned.error, opts);
     const plan = planned.value;
     // nothing longer than an export cell holds is saved: the one place the limit is checked (domain/importExport.ts)
     const long = plan.upserts.map((u) => overLimit(u.kind, u.record as Record<string, unknown>)).find(Boolean);
@@ -448,6 +451,11 @@ export class Store {
     if (plan.effect) this.startEffect(plan.effect, opId);
     void this.pruneJournal();
     return ok({ opId });
+  }
+
+  private refusePlan(error: Failure, opts: DispatchOptions) {
+    if (!opts.quiet && !opts.quietRefusal?.(error)) this.toast(error.message);
+    return fail(error);
   }
 
   /** Track every refused write that remains pending in the journal, including a refused failure marker (#565). */
@@ -1101,7 +1109,7 @@ export class Store {
         // refused it (no entry), there is nothing to keep it in, and the person is told to make the change again.
         if (this.movedSince(baseRevs)) { this.toast(`${CHANGED_SINCE}; make the change again`); return; }
         this.rerun.add(opId);
-        void this.retryAction(command, input, { idempotencyKey: opts.idempotencyKey })
+        void this.dispatch(command, input, { idempotencyKey: opts.idempotencyKey })
           .finally(() => this.rerun.delete(opId));
       };
     const text = err.kind === 'conflict' ? 'Changed elsewhere — not saved ·' : `Couldn’t save ·`;
@@ -1146,7 +1154,7 @@ export class Store {
           return fail({ kind: 'unreachable', message });
         }
       }
-      const result = await this.retryAction(command, operation.input, {
+      const result = await this.dispatchAction(command, operation.input as any, {
         opId, idempotencyKey: operation.idempotencyKey,
       });
       // A retry that leaves the journal pending must still have its Retry and Discard notices (#565).
@@ -1159,13 +1167,6 @@ export class Store {
     } finally {
       this.rerun.delete(opId);
     }
-  }
-
-  /** A retried settled close needs fresh checklist rows, including after a restart. */
-  private async retryAction<I, In>(command: Command<I, In>, input: In, opts: ExecuteOptions) {
-    const dealId = (input as { dealId?: string } | null)?.dealId;
-    if (command.name === 'CloseSettledQuestions' && typeof dealId === 'string') await this.refreshChecklist(dealId);
-    return this.dispatchAction(command, input, opts);
   }
 
   /** A retained no-op import still needs a durable success before its log step can fail. */
@@ -1264,7 +1265,9 @@ export class Store {
       }
       revision = loaded.value!.revision;
     }
-    const result = await this.execute(command, input, opId, targets, opts, revision);
+    const prepared = guardLegacySettledClose(command, opts.idempotencyKey);
+    if (prepared.prepare) await prepared.prepare(this, input);
+    const result = await this.execute(prepared, input, opId, targets, opts, revision);
     if (result.ok && result.value.unchanged && revision !== null && this.state.ops[opId]?.state !== 'succeeded') {
       await this.dropOp(opId);
     }

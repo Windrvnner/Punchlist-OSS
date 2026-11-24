@@ -193,7 +193,12 @@ A deal's checklist is made up of its own item records, linked to the findings an
   - If a person closed that finding, the item is **Resolved by a person**.
   - If that finding was deleted, the item is **Finding deleted**, and it still needs to be resolved.
   - Otherwise, the item shows the check's result: **Satisfied**, **Gap**, **Not settled**, or not checked.
-- **Close This Question** and **Add All Unresolved to Q&A…** are each one change with one **Undo** (`SetQuestionsStatus`, `AddUnresolved`). Both read the rows again before writing, and write nothing if a row has changed since the preview. **Add all unresolved to Q&A** has the fast model phrase a question for each gap or open finding that has no linked question. It works in parts sized by `inParts`, and asks again, one at a time, about any points that failed. Points still without a question are counted and offered with **Retry**.
+- **Close This Question** and the bulk close share `CloseSettledQuestions`. The app rereads the rows just before planning.
+  If any selected question is no longer settled, none are closed. Each close is one change with one **Undo**.
+- **Add All Unresolved to Q&A…** (`AddUnresolved`) reads the rows again before writing and applies one change with one
+  **Undo**. The fast model phrases a question for each gap or open finding that has no linked question. It works in
+  parts sized by `inParts` and asks again, one at a time, about any points that failed. Points still without a question
+  are counted and offered with **Retry**.
 
 ## Q&A log, imports, and the memo
 
