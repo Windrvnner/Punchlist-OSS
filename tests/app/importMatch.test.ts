@@ -295,6 +295,95 @@ describe('many questions in the same words', () => {
 
 // A chain of ties, where each row fits its own question and the one before it, stays quick at deal size.
 describe('a chain of tied rows', () => {
+  const originalHeader = 'No.,Question,Submitted by,Workstream,Received,Responded by,Response';
+  const incomingHeader = 'Question,Submitted by,Workstream,Received,Responded by,Response';
+  const priorResponse = 'The previous model used the preliminary assumptions.';
+  const responses = [
+    'The base case now uses the revised tariff assumptions.',
+    'The sensitivity case includes the higher reserve requirement.',
+    'The downside case reflects the updated cost estimates.',
+  ];
+
+  function originalRows(question: string, start: number) {
+    return [
+      [String(start), question, 'Lender A', 'Financial', '2026-01-01', 'Credit team', priorResponse],
+      [String(start + 1), question, 'Lender A', 'Legal', '2026-02-02', 'Credit team', priorResponse],
+      [String(start + 2), question, 'Lender A', 'Technical', '2026-03-03', 'Modeling team', priorResponse],
+    ];
+  }
+
+  function incomingRows(question: string) {
+    return [
+      [question, 'Lender A', 'Financial', '2026-02-02', '', responses[0]],
+      [question, 'Lender A', 'Legal', '2026-03-03', '', responses[2]],
+      [question, 'Lender A', '', '', 'Credit team', responses[1]],
+    ];
+  }
+
+  it('rechecks a newly unique row before taking the next tied row (#264)', async () => {
+    const { store } = make();
+    const dealId = await deal(store);
+    const question = 'Provide the financial model in native format.';
+    expect((await store.dispatch(ImportQuestions, {
+      dealId, mode: 'append', rows: sheet(originalHeader, originalRows(question, 1)),
+    })).ok).toBe(true);
+    const before = dealQuestions(store.get(), dealId);
+    const rows = sheet(incomingHeader, incomingRows(question));
+    const preview = previewImport(store, dealId, 'merge', rows);
+    const result = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows });
+    if (!result.ok) throw new Error(result.error.message);
+    const after = dealQuestions(store.get(), dealId);
+    expect(after.map((q) => [q.id, q.received, q.workstream, q.respondedBy, q.response])).toEqual([
+      [before[0].id, '2026-02-02', 'Financial', 'Credit team', responses[0]],
+      [before[1].id, '2026-02-02', 'Legal', 'Credit team', responses[1]],
+      [before[2].id, '2026-03-03', 'Legal', 'Modeling team', responses[2]],
+    ]);
+    expect(preview).toEqual({ ok: true, value: {
+      created: 0, restored: 0, updated: 3, changes: [
+        { n: 1, field: 'Received', from: '2026-01-01', to: '2026-02-02' },
+        { n: 1, field: 'Response', from: priorResponse, to: responses[0] },
+        { n: 2, field: 'Response', from: priorResponse, to: responses[1] },
+        { n: 3, field: 'Workstream', from: 'Technical', to: 'Legal' },
+        { n: 3, field: 'Response', from: priorResponse, to: responses[2] },
+      ],
+    } });
+    expect((await store.undo(result.value.opId)).ok).toBe(true);
+    expect(dealQuestions(store.get(), dealId).map(({ rev, updatedAt, ...q }) => q))
+      .toEqual(before.map(({ rev, updatedAt, ...q }) => q));
+  });
+
+  it('resolves the same chain across 2,100 realistic deal questions', async () => {
+    const { store } = make();
+    const dealId = await deal(store);
+    const wording = [...new Set(portfolioQuestions())].slice(0, 700);
+    expect(wording).toHaveLength(700);
+    expect((await store.dispatch(ImportQuestions, {
+      dealId, mode: 'append',
+      rows: sheet(originalHeader, wording.flatMap((text, index) => originalRows(text, index * 3 + 1))),
+    })).ok).toBe(true);
+    const before = dealQuestions(store.get(), dealId);
+    expect((await store.dispatch(ImportQuestions, {
+      dealId, mode: 'merge', rows: sheet(incomingHeader, wording.flatMap(incomingRows)),
+    })).ok).toBe(true);
+    const after = dealQuestions(store.get(), dealId);
+    expect(after.map((q) => q.id)).toEqual(before.map((q) => q.id));
+    const correctlyPlaced = after.filter((q, index) => q.response === responses[index % 3]);
+    expect(correctlyPlaced).toHaveLength(2_100);
+  });
+
+  it('keeps row order when the available questions fit equally well', async () => {
+    const { store } = make();
+    const dealId = await deal(store);
+    const question = 'Provide the latest cash flow forecast.';
+    expect((await store.dispatch(ImportQuestions, {
+      dealId, mode: 'append', rows: sheet('Question,Submitted by', [[question, 'Lender A'], [question, 'Lender A']]),
+    })).ok).toBe(true);
+    expect((await store.dispatch(ImportQuestions, {
+      dealId, mode: 'merge', rows: sheet('Question,Response', [[question, responses[0]], [question, responses[1]]]),
+    })).ok).toBe(true);
+    expect(dealQuestions(store.get(), dealId).map((q) => q.response)).toEqual(responses.slice(0, 2));
+  });
+
   it('2,000 rows, each fitting two questions, are matched in a few seconds', async () => {
     const { store } = make(); const dealId = await deal(store);
     const day = (j: number) => new Date(Date.UTC(2025, 0, 1 + j)).toISOString().slice(0, 10);
