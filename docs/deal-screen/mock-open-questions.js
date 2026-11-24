@@ -1,32 +1,33 @@
-// The deal screen mock-up: the points the first screens left open (#888, step 3). The deal's ⋯ menu, Deal Details
-// and Folders take the deal header's controls and Overview's Documents; the Findings tab holds the full list of
-// findings; Tasks shows what Needs Input holds; Home opens past conversations from its own header; and the sidebar
-// shows Archived at scale. Loads after mock-qa.js and before mock-screens.js, which calls these builders.
-
-// the Findings list opens as a tab after the fixed ones, with the finding's flag
-TAB_ICONS.findings = 'flag';
-const FINDINGS_TAB = { kind: 'findings', label: 'Findings' };
+// The deal screen mock-up: the points the first screens left open (#888, step 3). The breadcrumb shows the deal's
+// counterparty and opens Deal Info (details, folders, delete); Deal Memo sits at the header's right; the Diligence
+// tab switches between the Checklist and the Findings log, each with its own actions (Run Diligence, New Finding); Tasks shows what Needs Input holds; Home opens past conversations
+// from its own header; and the sidebar shows Archived at scale. Loads after mock-qa.js and before mock-screens.js, which calls these builders.
 
 // screens shown with the sidebar open and no pane
-const FULL_SIDEBAR_SCREENS = ['dealmenu', 'details', 'folders', 'homepast', 'archscale'];
+const FULL_SIDEBAR_SCREENS = ['dealheader', 'details', 'folders', 'homepast', 'archscale'];
 
 /** The page's stage, as mock-screens.js wraps every screen. */
 const openQuestionStage = (content) => `<section class="stage"><div class="x-stage">${content}</div></section>`;
 
-// ---- the deal's ⋯ menu, Deal Details and Folders ----
+// ---- the deal's header, Deal Info and Folders ----
 
-/** The deal's ⋯ menu: the deal header's controls A to Z, with Delete Deal… set apart, as the header's menu has it. */
-function dealDetailsMenu() {
-  const item = (label, meta = '', extraClass = '') => `<button type="button" role="menuitem" class="mi ${extraClass}">`
-    + `${label}${meta ? `<span class="x-mmeta">${meta}</span>` : ''}</button>`;
-  return '<div class="colmenu glass x-headmenu" role="menu" aria-label="Project Proseware">'
-    + item('Deal Details…')
-    + item('Deal Memo…')
-    + item('Folders…')
-    + item('Run Diligence', 'Last run Nov 20')
-    + '<div class="msep"></div>'
-    + item('Delete Deal…', '', 'ddel')
-    + '</div>';
+const COUNTERPARTY = 'Contoso Wind Partners';
+
+/** The deal's name and counterparty, as one button in the breadcrumb that opens Deal Info. */
+const dealNameButton = () => '<button type="button" class="x-dealname" title="Deal Info">'
+  + `<b>Project Proseware</b><span class="x-cp">${COUNTERPARTY}</span></button>`;
+
+/** Deal Memo… at the header's right, in place of the ⋯ the first screens drew. */
+const dealMemoButton = () => iconButton('memo', 16, 'Deal Memo…');
+
+/** The proposed header: the name button with its counterparty, and Deal Memo… beside the pane button. */
+function applyDealHeader() {
+  const name = document.querySelector('.x-head .x-trail > b');
+  const more = document.querySelector('.x-acts .btn[title="More"]');
+  // Home's header has neither: it names Home and has no deal controls
+  if (!name || !more) return;
+  name.outerHTML = dealNameButton();
+  more.outerHTML = dealMemoButton();
 }
 
 /** A labeled field of the New Deal form, filled in. */
@@ -34,18 +35,24 @@ function dealField(label, value) {
   return `<div><span class="lbl">${label}</span><input class="field" value="${value}" aria-label="${label}"></div>`;
 }
 
-/** Deal Details: the New Deal form's fields without its folders, plus Deal status. Each field saves as it changes. */
-function dealDetailsDialog() {
+/** Deal Info's folders line: how much of the data room is indexed, and Folders…, which opens the Folders dialog. */
+const DEAL_INFO_FOLDERS = '<div class="x-infofolders"><span class="lbl">Folders</span><div class="x-fl">'
+  + '<span>7 folders · 5,176 of 5,190 files indexed</span><button type="button" class="btn sm">Folders…</button>'
+  + '</div></div>';
+
+/** Deal Info: the New Deal form's fields plus Deal status, the folders line, and Delete Deal… set apart. */
+function dealInfoDialog() {
   const status = '<div><span class="lbl">Deal Status</span><button type="button" class="field x-fieldpick"'
     + ' aria-haspopup="menu">Live</button></div>';
-  return '<div class="scrim blur"><div class="dlg nddlg x-details" role="dialog" aria-label="Deal Details">'
-    + '<div class="shead"><h2>Deal Details</h2><button type="button" class="x" aria-label="Close"'
+  return '<div class="scrim blur"><div class="dlg nddlg x-details" role="dialog" aria-label="Deal Info">'
+    + '<div class="shead"><h2>Deal Info</h2><button type="button" class="x" aria-label="Close"'
     + ` title="Close (Esc)">${icon('close', 15)}</button></div>`
-    + `<div class="ndtop">${dealField('Name', 'Project Proseware')}`
-    + `${dealField('Counterparty', 'Contoso Wind Partners')}</div>`
+    + `<div class="ndtop">${dealField('Name', 'Project Proseware')}${dealField('Counterparty', COUNTERPARTY)}</div>`
     + `<div class="ndpicks">${dealField('Structure', 'Project finance')}${dealField('Sector', 'Renewables')}`
     + `${dealField('Technology', 'Offshore wind')}</div>`
-    + `<div class="ndpicks">${status}</div></div></div>`;
+    + `<div class="ndpicks">${status}</div>${DEAL_INFO_FOLDERS}`
+    + '<div class="acts x-infoacts"><button type="button" class="btn sm x-delete">Delete Deal…</button></div>'
+    + '</div></div>';
 }
 
 // the deal's folders: label, path and how many of their files are indexed; 04 Legal is still being indexed
@@ -120,7 +127,7 @@ const FINDING_GROUPS = [
 function findingListRow([title, when]) {
   const stale = when === 'May be out of date';
   const meta = stale ? `<span class="x-stale">${when}</span>` : when;
-  return `<div class="x-row x-frow"><span class="x-fmark" title="Open">${icon('flag', 14)}</span>`
+  return `<div class="x-row x-frow">${FLAG_MARK.replace('Flagged', 'Open')}`
     + `<span class="t" title="${title}">${title}`
     + `<small>${meta}</small></span><span class="s"></span></div>`;
 }
@@ -130,21 +137,34 @@ function findingGroup([workstream, count, findings]) {
     + findings.map(findingListRow).join('');
 }
 
-// the Findings page's own controls: the status filter, Filter (Workstream and Reviewed), New Finding, and ⋯
-// (Import…, Export… and Deleted…)
-const FINDINGS_TOOLBAR = '<div class="x-qtools x-ftools"><div class="seg"><button class="on">Open'
-  + '<span class="c"> 113</span></button><button>Closed<span class="c"> 21</span></button><button>All</button></div>'
-  + `${iconButton('filter', 15, 'Filter')}<span class="x-qact"><button class="btn sm">${icon('plus', 13)}`
-  + `New Finding</button>${iconButton('more', 16, 'More')}</span></div>`;
-
-const FINDINGS_LIST = `${FINDINGS_TOOLBAR}${FINDING_GROUPS.map(findingGroup).join('')}`;
-
-/** The Diligence tab, with Findings at the end of its filter row, which opens the Findings tab. */
-function diligenceWithFindingsButton() {
-  const button = `<button type="button" class="btn sm x-findbtn" title="Findings" aria-label="Findings">`
-    + `${icon('flag', 13)}<span class="l">Findings</span></button>`;
-  return diligenceReport(false).replace(`${REPORT_FILTERS}</div>`, `${REPORT_FILTERS}${button}</div>`);
+/** The Diligence tab's top row: the Checklist or Findings switch, then the chosen view's own actions. */
+function diligenceViewRow(findingsShown, actions) {
+  const choice = (label, on) => `<button class="${on ? 'on' : ''}">${label}</button>`;
+  return `<div class="x-qtools x-dview"><div class="seg">${choice('Checklist', !findingsShown)}`
+    + `${choice('Findings', findingsShown)}</div><span class="x-qact">${actions}</span></div>`;
 }
+
+// the Checklist view's action: Run Diligence, with when it last ran in its tooltip
+const RUN_DILIGENCE = '<button type="button" class="btn sm" title="Last run Nov 20">Run Diligence</button>';
+
+// the Findings page's own controls: New Finding and ⋯ (Import…, Export… and Deleted…) on the top row, then the
+// status filter and Filter (Workstream and Reviewed)
+const FINDINGS_ACTIONS = `<button class="btn sm">${icon('plus', 13)}New Finding</button>`
+  + iconButton('more', 16, 'More');
+const FINDINGS_FILTERS = '<div class="x-rhead"><div class="seg"><button class="on">Open<span class="c"> 113</span>'
+  + '</button><button>Closed<span class="c"> 21</span></button><button>All</button></div>'
+  + `${iconButton('filter', 15, 'Filter')}</div>`;
+
+// a flagged item's mark is the finding's flag, as in the Findings view, in place of the stripe the first screens drew
+const FLAG_MARK = `<span class="x-fmark" title="Flagged">${icon('flag', 14)}</span>`;
+
+/** The Diligence tab on its Checklist: the report under the view switch, its flagged items marked with the flag. */
+const diligenceChecklistView = () => diligenceViewRow(false, RUN_DILIGENCE)
+  + diligenceReport(false).replaceAll('<span class="mk k-finding"></span>', FLAG_MARK);
+
+/** The Diligence tab on its Findings: the whole log, open findings first by workstream. */
+const diligenceFindingsView = () => diligenceViewRow(true, FINDINGS_ACTIONS) + FINDINGS_FILTERS
+  + FINDING_GROUPS.map(findingGroup).join('');
 
 // ---- Tasks: what Needs Input holds ----
 
@@ -264,13 +284,14 @@ function fillSidebarAtScale() {
 // ---- the screens, and what is placed once they are on the page ----
 
 const OPEN_QUESTION_SCREENS = {
-  dealmenu: () => sidebar() + openQuestionStage(conversation([TURN_PERMITS], { title: CONVERSATION_TITLES.permits })),
-  details: () => OPEN_QUESTION_SCREENS.dealmenu(),
-  folders: () => OPEN_QUESTION_SCREENS.dealmenu(),
+  dealheader: () => sidebar() + openQuestionStage(conversation([TURN_PERMITS],
+    { title: CONVERSATION_TITLES.permits })),
+  details: () => OPEN_QUESTION_SCREENS.dealheader(),
+  folders: () => OPEN_QUESTION_SCREENS.dealheader(),
   reportfindings: () => slimRail() + openQuestionStage(inPermitsChat([TURN_PERMITS, TURN_DILIGENCE_DONE])
-    + pane(paneTabs([TASKS_TAB, DILIGENCE_TAB], 'diligence'), diligenceWithFindingsButton(), paneWidth())),
+    + pane(paneTabs([TASKS_TAB, DILIGENCE_TAB], 'diligence'), diligenceChecklistView(), paneWidth())),
   findings: () => slimRail() + openQuestionStage(inPermitsChat([TURN_PERMITS, TURN_DILIGENCE_DONE])
-    + pane(paneTabs([TASKS_TAB, DILIGENCE_TAB, FINDINGS_TAB], 'findings'), FINDINGS_LIST, paneWidth())),
+    + pane(paneTabs([TASKS_TAB, DILIGENCE_TAB], 'diligence'), diligenceFindingsView(), paneWidth())),
   needsinput: () => slimRail() + openQuestionStage(conversation([TURN_GUARANTEE_CAP, TURN_HEADROOM_NEEDS_INPUT],
     { title: 'Guarantee cap and covenants', open: true })
     + pane(paneTabs([TASKS_TAB], 'tasks'), NEEDS_INPUT_TASKS, paneWidth())),
@@ -278,14 +299,20 @@ const OPEN_QUESTION_SCREENS = {
   archscale: () => sidebar() + openQuestionStage(homeScreen()),
 };
 
-/** Opens the deal's ⋯ menu under its button, right-aligned to it, as the deal header's menu opens. */
-function openDealDetailsMenu() {
-  const button = document.querySelector('.x-acts .btn[title="More"]');
-  button.classList.add('on');
-  document.body.insertAdjacentHTML('beforeend', dealDetailsMenu());
-  const anchor = button.getBoundingClientRect();
-  const menu = document.querySelector('.x-headmenu');
-  Object.assign(menu.style, { left: `${anchor.right - menu.offsetWidth}px`, top: `${anchor.bottom + 6}px` });
+/** Shows the deal name's tooltip under it, as the app's tooltips show. */
+function showDealNameTooltip() {
+  const anchor = document.querySelector('.x-dealname').getBoundingClientRect();
+  const tooltip = document.createElement('div');
+  tooltip.className = 'tip';
+  tooltip.textContent = 'Deal Info';
+  document.body.appendChild(tooltip);
+  Object.assign(tooltip.style, { left: `${anchor.left}px`, top: `${anchor.bottom + 8}px` });
+  document.querySelector('.x-dealname').classList.add('hover');
+}
+
+/** In the task screen, the composer is set to Thorough, the answer mode whose questions run as tasks. */
+function setComposerToThorough() {
+  document.querySelector('.x-composer .scopebtn.mode span').textContent = 'Thorough';
 }
 
 /** Home's past conversations open under the history button, as wide as the composer. */
@@ -319,8 +346,10 @@ function showFoldersDialog() {
 /** Called by mock-screens.js once the screen is on the page. */
 function placeOpenQuestionScreens() {
   if (['homepast', 'archscale'].includes(screen)) selectHomeInSidebar();
-  if (screen === 'dealmenu') openDealDetailsMenu();
-  if (screen === 'details') document.body.insertAdjacentHTML('beforeend', dealDetailsDialog());
+  applyDealHeader();
+  if (screen === 'dealheader') showDealNameTooltip();
+  if (screen === 'needsinput') setComposerToThorough();
+  if (screen === 'details') document.body.insertAdjacentHTML('beforeend', dealInfoDialog());
   if (screen === 'folders') showFoldersDialog();
   if (screen === 'homepast') openHomePastList();
   if (screen === 'archscale') fillSidebarAtScale();
