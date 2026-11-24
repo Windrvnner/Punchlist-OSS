@@ -9,7 +9,7 @@
  */
 import { jsonrepair } from 'jsonrepair';
 
-const isObject = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
+export const isObject = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
 
 /** JSON as written, or as repaired; undefined when neither can be read */
 function parse(text: string): unknown {

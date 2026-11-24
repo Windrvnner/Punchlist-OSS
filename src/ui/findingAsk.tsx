@@ -48,8 +48,8 @@ function useAskDraft(findingId: string) {
     setTextState('');
     stopAsking();
   };
-  const { busy, log } = useLogQuestion(askDrafts, findingId, () => askDrafts.delete(findingId), settle);
-  return { asking, setAsking, text, setText, stopAsking, busy, log, kept: !!askDrafts.get(findingId) };
+  const out = useLogQuestion(askDrafts, findingId, (key) => askDrafts.delete(key), settle);
+  return { asking, setAsking, text, setText, stopAsking, ...out, kept: !!askDrafts.get(findingId) };
 }
 
 /**
@@ -60,12 +60,11 @@ export function KeptAsk({ dealId, findingId, title }: { dealId: string; findingI
   const s = useAppState();
   const draft = useAskDraft(findingId);
   if (!draft.kept) return null;
-  const cancel = () => draft.setText('');
   return (
     <div class="flinks">
       <AskCard ids="f-ask" cls="fask" counterparty={s.deals[dealId]?.counterparty ?? ''} linked={title}
         text={draft.text} onText={draft.setText} why="This finding was deleted" busy={draft.busy} onLog={() => {}}
-        onCancel={cancel} onEscape={() => {}} />
+        onCancel={draft.cancel} onEscape={() => {}} />
     </div>
   );
 }
@@ -79,7 +78,7 @@ export function FindingLinks({ dealId, f, pane }: { dealId: string; f: Finding; 
   // the check's rows name the item of a finding written before findings named it: read once, as the Q&A page does
   const unread = s.checklists[dealId] === undefined;
   useEffect(() => {
-    if (unread && store.services.ai.checklist) void store.refreshChecklist(dealId);
+    if (unread) void store.refreshChecklist(dealId);
   }, [dealId]);
   const item = findingItem(s, f);
   const asked = askedAbout(s, dealId, item?.id ?? null, f);
@@ -96,10 +95,6 @@ export function FindingLinks({ dealId, f, pane }: { dealId: string; f: Finding; 
   // Escape sets the question aside only where Ask the counterparty can bring it back, as on the Checklist
   const setAside = () => {
     if (offer && !ro) draft.stopAsking();
-  };
-  const cancel = () => {
-    draft.setText('');
-    draft.stopAsking();
   };
   const openItem = (e: MouseEvent, id: string) => {
     e.preventDefault();
@@ -120,7 +115,7 @@ export function FindingLinks({ dealId, f, pane }: { dealId: string; f: Finding; 
       </span>}
       {draft.asking && !pane && <AskCard ids="f-ask" cls="fask" counterparty={s.deals[dealId]?.counterparty ?? ''}
         linked={f.title} text={draft.text} onText={draft.setText} why={why} busy={draft.busy} onLog={() => void log()}
-        onCancel={cancel} onEscape={setAside} />}
+        onCancel={draft.cancel} onEscape={setAside} />}
     </div>
   );
 }

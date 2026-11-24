@@ -13,7 +13,7 @@ import { ConflictView } from './conflict';
 import { pastedLines, LIST_ACCEPT } from '../app/listRead';
 import type { FirmList, Layer } from '../domain/checklist';
 import { SERVICE } from '../control';
-import type { AiService } from '../ports';
+import type { Capabilities } from '../app/capabilities';
 import type { Leaving, ListReview, ListSource, Work } from './firmChecklistImport';
 import { NOT_DONE, pairKey, plural } from './firmChecklistReview';
 import type { ListTarget, Pair, Review, Rewording } from './firmChecklistReview';
@@ -32,7 +32,7 @@ export const Head = ({ title, onClose, disabled }: { title: string; onClose: () 
 /** Everything the steps show and do, gathered by ImportChecklistDialog on each render. */
 export interface ImportView {
   title: string;
-  ai: AiService;
+  can: Pick<Capabilities, 'reword' | 'sameMeaning'>;
   firm: FirmList;
   work: Work;
   source: ListSource;
@@ -131,7 +131,7 @@ function wordingRow(view: ImportView, review: Review) {
         {notDone && <b>Not asked</b>}
         {!notDone && !count && <b>No suggestions</b>}
         {notDone && <span>{notDone}</span>}
-        {notDone && view.ai.reword && <button type="button" class="linkb" id="cl-reword-retry"
+        {notDone && view.can.reword && <button type="button" class="linkb" id="cl-reword-retry"
           title="Ask for them again" disabled={!!view.work.busy}
           onClick={() => void view.listReview.retryWording()}>Retry</button>}
       </div>
@@ -196,7 +196,7 @@ function duplicatesRow(view: ImportView, review: Review) {
         {sameMissed && <span id="cl-missed">
           {NOT_DONE[sameMissed.kind]} for {plural(sameMissed.at.length, 'item')}
         </span>}
-        {(sameMissed || notDone) && view.ai.sameMeaning && <button type="button" class="linkb" id="cl-retry"
+        {(sameMissed || notDone) && view.can.sameMeaning && <button type="button" class="linkb" id="cl-retry"
           title="Ask about them again" disabled={!!view.work.busy}
           onClick={() => void view.listReview.retry()}>Retry</button>}
       </div>

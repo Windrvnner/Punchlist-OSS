@@ -97,9 +97,12 @@ function isProseI(offset: number, text: string): boolean {
   return /[?!]$/.test(before);
 }
 
-/** A misread or mistyped character can turn Is into ls. Roman identifiers keep their letters. */
+/**
+ * A misread or mistyped character can turn Is into ls. Roman identifiers keep their letters. The word I, however it was
+ * read, is i, so a class L that opens a sentence is not it (#127).
+ */
 function repairWord(word: string, offset: number, text: string): string {
-  if ((word === 'I' || word === 'i') && isProseI(offset, text)) return 'l';
+  if (/^[Iil|]$/.test(word) && isProseI(offset, text)) return 'i';
   if (word.length < 2 || ROMAN_NUMERAL.test(word)) return word;
   return word.replace(/[I|]/g, 'l');
 }
@@ -120,6 +123,7 @@ export function overlap(a: string, b: string): number {
 
 /** A number must not undo the wording key's protection of distinct identifiers or marks. */
 export function canMatchNumber(a: string, b: string): boolean {
+  if (!exactIdentifiers(identifierSig(a), identifierSig(b))) return false;   // Tranche II is not Tranche IV (#125)
   if (key(a) !== key(b) && misreadKey(a) !== misreadKey(b)
     && identifierCollisionKey(a) === identifierCollisionKey(b)) return false;
   return overlap(a, b) >= 0.6;
@@ -127,11 +131,124 @@ export function canMatchNumber(a: string, b: string): boolean {
 
 /** Roman identifiers are case-insensitive; ordinary words keep their existing number fallback. */
 function identifierCollisionKey(text: string): string {
-  const identifiers = text.normalize('NFKC').replace(QUESTION_WORD,
-    (word) => ROMAN_NUMERAL.test(word) ? word.replace(/i/gi, 'l') : word);
+  const identifiers = text.normalize('NFKC').replace(QUESTION_WORD, collisionWord);
   return misreadKey(identifiers.replace(/[I|]/g, 'l')).replace(/\p{M}/gu, '');
 }
 
+/** A word as the collision key reads it: a lone I, i, l or | is L, whichever word it is (#127); i in a numeral is l. */
+function collisionWord(word: string): string {
+  if (/^[Iil|]$/.test(word)) return 'L';
+  return ROMAN_NUMERAL.test(word) ? word.replace(/i/gi, 'l') : word;
+}
+
+/** a word or number of a question; a point or comma inside a number stays in it ("I.1", "1,500") */
+const QUESTION_TOKEN = /[\p{L}\p{M}\p{N}|]+(?:[.,][\p{L}\p{M}\p{N}|]+)*/gu;
+/** words a letter or numeral after them names: Class a, Tranche ii, part e */
+const NAMING_WORDS = new Set(('annex appendix article block class clause exhibit facility item limb lot paragraph '
+  + 'part phase rule schedule section series tier tranche unit').split(' '));
+
+/**
+ * The identifiers a question names, as they are compared (#125, #127, #128): anything with a digit, a Roman numeral in
+ * capitals, a single capital letter, a code of up to five capitals, and a letter or numeral in parentheses or after a
+ * naming word ("(a)", "class b", "tranche ii"). Sorted, so two lists compare in one walk.
+ */
+export function identifiers(text: string): string[] {
+  const normal = text.normalize('NFKC');
+  const found: string[] = [];
+  for (const match of normal.matchAll(QUESTION_TOKEN)) {
+    const form = identifierForm(match[0], match.index, normal);
+    if (form !== undefined) found.push(form);
+  }
+  return found.sort();
+}
+
+/**
+ * A word as an identifier, or undefined for an ordinary word. A lone I, i, l or | before a lowercase word is the word
+ * "I" however it was read ("I understand", "can I send"), unless a naming word comes before it ("Class I shares").
+ */
+function identifierForm(token: string, offset: number, text: string): string | undefined {
+  if (/\p{N}/u.test(token)) return numberForm(token);
+  if (namedLetter(token, offset, text)) return token.toLowerCase();
+  if (/^[Iil|]$/.test(token) && /^\s*\p{Ll}/u.test(text.slice(offset + 1))) return undefined;   // the word I
+  const capitals = /^\p{Lu}+$/u.test(token);
+  if (capitals && (token.length <= 5 || ROMAN_NUMERAL.test(token))) return token.toLowerCase();
+  return undefined;
+}
+
+/**
+ * A single letter or a Roman numeral in parentheses ("(a)", "( iv )"), or after a naming word ("class b", "part e"),
+ * alone or after a number ("clause 4 a"). Not before one: "a schedule" is an article.
+ */
+function namedLetter(token: string, offset: number, text: string): boolean {
+  if (!/^\p{L}$/u.test(token) && !ROMAN_NUMERAL.test(token)) return false;
+  const before = text.slice(Math.max(0, offset - 30), offset);
+  const after = text.slice(offset + token.length, offset + token.length + 30);
+  if (/\(\s*$/.test(before) && /^\s*\)/.test(after)) return true;
+  const named = (word: string | undefined) => !!word && NAMING_WORDS.has(word.toLowerCase());
+  return named(/(\p{L}+)[\s\-:]+(?:[\p{N}.]+[\s\-:.]*)?$/u.exec(before)?.[1]);
+}
+
+/**
+ * A number as an identifier: a letter read for a digit in it, or an l or | before it, is that digit (l00, 2O24, I00,
+ * O.5). An I, l, | or O before a single digit, or an I, l or | before a point and a digit, is a letter, read alike
+ * however it was scanned: Facility I1 is Facility l1, but not Facility 11, nor O1 01, nor I.1 1.1 (#128).
+ */
+function numberForm(token: string): string {
+  const lead = /^(?:[IOol|]\d|[Il|]\.\d)(?![\d.,])/.test(token) ? token[0] : '';
+  const letter = lead === '' ? '' : /[Oo]/.test(lead) ? 'o' : 'i';
+  const digits = token.slice(lead.length)
+    .replace(/[lI|](?=[\d.,])|(?<=[\d.,])[lI|]/g, '1')
+    .replace(/[oO](?=[\d.,])|(?<=[\d.,])[oO]/g, '0');
+  return letter + digits.toLowerCase();
+}
+
+/**
+ * What two wordings' identifiers are compared on: the identifiers, and the words with only case, spacing and
+ * punctuation taken out, which say the same whenever the identifiers do ("FY 2024" and "FY2024", "SPA" and "spa").
+ * A point or comma inside a number stays: Section 1.10 is not Section 11.0.
+ */
+export interface IdentifierSig { plain: string; ids: string[] }
+export function identifierSig(text: string): IdentifierSig {
+  const plain = text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}.,]|(?<!\p{N})[.,]|[.,](?!\p{N})/gu, '');
+  return { plain, ids: identifiers(text) };
+}
+
+/**
+ * Whether two wordings can be one question as far as their identifiers go: not when each names one the other does not
+ * (Class I and Class L, Facility I1 and Facility 11). One that only adds an identifier, or drops one, is a rewording.
+ */
+export function sameIdentifiers(a: IdentifierSig, b: IdentifierSig): boolean {
+  if (a.plain === b.plain) return true;
+  return !(namesOther(a.ids, b.ids) && namesOther(b.ids, a.ids));
+}
+/**
+ * Whether two wordings name exactly the same identifiers, for a match by number alone: there the words differ, and a
+ * row that adds or drops an identifier (Tranche II) may be another question, so it is a question of its own (#125).
+ */
+export function exactIdentifiers(a: IdentifierSig, b: IdentifierSig): boolean {
+  return a.plain === b.plain || (!namesOther(a.ids, b.ids) && !namesOther(b.ids, a.ids));
+}
+/** whether `ids` names an identifier, counted with its repeats, that `others` does not */
+function namesOther(ids: readonly string[], others: readonly string[]): boolean {
+  const left = new Map<string, number>();
+  for (const id of others) left.set(id, (left.get(id) ?? 0) + 1);
+  return ids.some((id) => {
+    const count = left.get(id) ?? 0;
+    left.set(id, count - 1);
+    return count <= 0;
+  });
+}
+
+/**
+ * The rows a wording pass of `matchRows` looks in, for a question of wording key `k`, number `n` and party `p`, last
+ * written to the log as party `was`: its own number, its party, the party last written, then a row naming no one.
+ */
+function wordingList(pass: 'own' | 'party' | 'was' | 'blank', k: string, n: number, p: string, was: string) {
+  if (pass === 'own') return `n\0${k}\0${n}`;
+  if (pass === 'party') return p ? `p\0${k}\0${p}` : undefined;
+  if (pass === 'was') return p && was && was !== p ? `p\0${k}\0${was}` : undefined;
+  return p ? `p\0${k}\0` : `k\0${k}`;
+}
 
 /**
  * Which row of the log stands for each question: the row with the same words, failing that the row with its number; each
@@ -171,10 +288,14 @@ export function matchRows(table: Pick<ReadTable, 'rows'>, mapping: Mapping, ques
   // then a row of its own party, then a row naming no one (any row, for a question naming no one)
   // (a row still naming the party the app last wrote for a question is tried only once every question has had its own
   // party's rows, so it never takes another question's row)
+  // a row of the question's words that names another identifier is not its row (#127, #128)
+  const rowSigs = table.rows.map((r) => identifierSig(cell(r, 'text')));
   for (const pass of ['own', 'party', 'was', 'blank'] as const) for (const q of questions) {
     if (rowOf.has(q.id)) continue;
-    const k = misreadKey(q.text), p = qParty(q), was = sentParty(q);
-    take(q, pass === 'own' ? firstFree(`n\0${k}\0${q.n}`, (i) => sameParty(i, q)) : pass === 'party' ? (p ? firstFree(`p\0${k}\0${p}`) : undefined) : pass === 'was' ? (p && was && was !== p ? firstFree(`p\0${k}\0${was}`) : undefined) : firstFree(p ? `p\0${k}\0` : `k\0${k}`));
+    const list = wordingList(pass, misreadKey(q.text), q.n, qParty(q), sentParty(q));
+    const sig = identifierSig(q.text);
+    const fits = (i: number) => (pass !== 'own' || sameParty(i, q)) && sameIdentifiers(rowSigs[i], sig);
+    take(q, list === undefined ? undefined : firstFree(list, fits));
   }
   // then by number, but only a row of the question's party whose meaningful words are mostly the question's (in doubt,
   // no match: the question gets a row of its own): the counterparty's own question 4 is not the app's question 4

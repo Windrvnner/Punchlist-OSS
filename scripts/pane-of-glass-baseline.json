@@ -1,0 +1,42 @@
+{
+  "src/ui/addUnresolved.tsx": {
+    "services": 2
+  },
+  "src/ui/app.tsx": {
+    "services": 1
+  },
+  "src/ui/deal.tsx": {
+    "repo": 1,
+    "services": 1
+  },
+  "src/ui/dialogs.tsx": {
+    "import": 1,
+    "services": 8
+  },
+  "src/ui/firmChecklistImport.ts": {
+    "services": 4
+  },
+  "src/ui/issuesList.tsx": {
+    "services": 2
+  },
+  "src/ui/keptDrafts.ts": {
+    "storage": 2
+  },
+  "src/ui/keptImports.ts": {
+    "storage": 2
+  },
+  "src/ui/pastList.tsx": {
+    "services": 1
+  },
+  "src/ui/qaImport.tsx": {
+    "repo": 1,
+    "services": 4
+  },
+  "src/ui/resolve.tsx": {
+    "repo": 1,
+    "services": 2
+  },
+  "src/ui/settings.tsx": {
+    "services": 2
+  }
+}

@@ -6,6 +6,8 @@ import { StoreKeeper, fromStoreName } from '../../src/backend/storeKeeper';
 import { memRepo, refuse, quota, type MemRepo } from '../adapters/memRepo';
 import type { Repository } from '../../src/ports';
 import { Finding, WORKSTREAMS } from '../../src/domain/model';
+import { memoContent } from '../../src/domain/memo';
+import { scaleMemoInput } from '../fixtures/memoScale';
 import type { DocRecord } from '../../src/backend/documents';
 import type { Folder } from '../../src/backend/logRepository';
 import { signedOut } from '../../src/backend/signInToken';
@@ -725,6 +727,191 @@ const storedFindings = async (repo: Repository) => val(await repo.list('finding'
 /** the same documents as indexing leaves them: no summary, only the words each uses most */
 const bare = (d: DocRecord, ...words: string[]): DocRecord => { const { summary: _s, keywords: _k, ...rest } = d; return { ...rest, words }; };
 const BARE = () => ({ d1: [bare(FA, 'lender', 'borrower', 'lock-up'), bare(TS, 'margin', 'tenor'), bare(IM, 'project', 'sponsor'), bare(MODEL, 'dscr', 'debt'), bare(SIDE, 'step-in', 'lender'), bare(MINUTES, 'hedging', 'board')] });
+
+const memoWrite = (call: Call) => call.prompt.includes('Write up this risk on the deal');
+const memoDeal = { ...scaleMemoInput.deal, name: 'Sample transaction', counterparty: '' };
+const lockUp = {
+  ...scaleMemoInput.findings.find(({ title }) => title.startsWith('Lock-up ratio'))!,
+  body: ['The draft uses a 1.25x ratio. [1]'], sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }],
+};
+const testPeriod = {
+  ...scaleMemoInput.findings.find(({ title }) => title.startsWith('Distribution test'))!,
+  body: ['The draft uses a six-month period. [1]'], sources: [{ doc: TS.name, loc: 'p. 3', docId: TS.docId }],
+};
+const memoEvidence = new Map([lockUp, testPeriod].map((record) => [record.id, record]));
+const memoFindings = scaleMemoInput.findings.map((record) => memoEvidence.get(record.id) ?? record);
+const openMemoFindings = memoFindings.filter(({ status }) => status === 'open');
+const closedFinding = memoFindings.find(({ status }) => status === 'closed')!;
+const unratedFinding = openMemoFindings.at(-1)!;
+const distributionRisk = {
+  title: 'Distribution terms differ from the term sheet', findings: [lockUp.id, testPeriod.id],
+};
+
+async function setupMemoReplies(groups: unknown[], write: (call: Call, attempt: number) => unknown = () => ({})) {
+  let writes = 0;
+  const byId = new Map(openMemoFindings.slice(0, -1).map(({ id }) => [id, 'Low']));
+  byId.set(lockUp.id, 'High');
+  byId.delete(testPeriod.id);
+  const standIn = setup((call) => {
+    if (call.prompt.startsWith('Rate each of these open findings')) {
+      const ids = [...call.prompt.matchAll(/^(f_\w+) \(/gm)].map((match) => match[1]);
+      const ratings = ids.filter((id) => byId.has(id)).map((id) => ({ id, rating: byId.get(id) }));
+      // The model omits this rating on the first pass and supplies it when asked again.
+      if (ids.includes(testPeriod.id)) byId.set(testPeriod.id, 'Medium');
+      return { ratings };
+    }
+    if (call.prompt.startsWith('These are the open findings on a deal, each with')) return { risks: groups };
+    if (memoWrite(call)) return write(call, ++writes);
+    return { paragraphs: ['The deal finances a solar project.'], sources: [] };
+  }, { d1: [FA, TS] });
+  await deal(standIn.repo, 'd1', memoDeal.name);
+  for (const { id, title, workstream, status, body, sources } of memoFindings) {
+    await finding(standIn.repo, id, title, { workstream, status, body, sources });
+  }
+  return standIn;
+}
+
+describe('deal memo model replies', () => {
+  it('keeps valid risk groups beside malformed entries and leaves every open finding in exactly one risk', async () => {
+    const offtake = openMemoFindings.find(({ title }) => title.startsWith('Offtake contract'))!;
+    const merchant = openMemoFindings.find(({ title }) => title.startsWith('Merchant prices'))!;
+    const offtakeRisk = { title: 'The base case overstates contracted output', findings: [offtake.id, merchant.id] };
+    const standIn = await setupMemoReplies([
+      { ...distributionRisk, findings: [...distributionRisk.findings, lockUp.id, closedFinding.id, 'f_unknown'] },
+      null, 4, 'a risk', ['an array'], false, {},
+      { ...offtakeRisk, findings: [lockUp.id, ...offtakeRisk.findings] },
+    ]);
+    const memo = val(await standIn.ai.memo!('d1'));
+    expect(memo.ratings[lockUp.id]).toBe('High');
+    expect(memo.ratings[testPeriod.id]).toBe('Medium');
+    expect(memo.ratings[offtake.id]).toBe('Low');
+    expect(memo.ratings[unratedFinding.id]).toBeUndefined();
+    expect(memo.risks!.slice(0, 2)).toEqual([distributionRisk, offtakeRisk]);
+    expect(memo.risks!.flatMap((risk) => risk.findings).sort()).toEqual(openMemoFindings.map(({ id }) => id).sort());
+    expect(memo.risks!.slice(2)).toHaveLength(openMemoFindings.length - 4);
+    expect(memo.risks!.slice(2).every(({ findings }) => findings.length === 1)).toBe(true);
+  });
+
+  it('uses one risk per open finding when none of the supplied groups is usable', async () => {
+    const standIn = await setupMemoReplies([null, 4, ['an array'], { findings: [closedFinding.id, 'f_unknown'] }]);
+    const memo = val(await standIn.ai.memo!('d1'));
+    expect(memo.risks).toEqual(openMemoFindings.map(({ id, title }) => ({ title, findings: [id] })));
+  });
+
+  const creditWords = 'The credit agreement sets the distribution lock-up ratio at 1.25x for six months.';
+  const termWords = 'The signed term sheet sets the distribution lock-up ratio at 1.30x for twelve months.';
+  const overlong = [
+    { name: 'three paragraphs', paragraphs: [`${creditWords} [1]`, `${termWords} [2]`, 'The ratios differ. [1]'] },
+    {
+      name: '201 words in two paragraphs',
+      paragraphs: [`${'covenant '.repeat(99)}threshold. [1]`, `${'distribution '.repeat(100)}test. [2]`],
+    },
+    { name: 'one 100,000-character token', paragraphs: ['', '  ', `${'x'.repeat(100_000)} [1]`] },
+    { name: '202 words separated by citation markers', paragraphs: ['Ratio.[1]Term '.repeat(101)] },
+    {
+      name: 'oversized text joined when invalid citations are removed',
+      paragraphs: [`${Array(15).fill('x'.repeat(200)).join(' [999]')} The draft sets the ratio. [1]`],
+    },
+    {
+      name: 'oversized text joined when export drops control characters',
+      paragraphs: [`${Array(15).fill('x'.repeat(199)).join('\u000b')} The draft sets the ratio. [1]`],
+    },
+    {
+      name: 'oversized text containing zero-width separators',
+      paragraphs: [`${Array(15).fill('x'.repeat(199)).join('\ufeff')} The draft sets the ratio. [1]`],
+    },
+    {
+      name: '201 words after removing a finding ID',
+      paragraphs: [`${'covenant '.repeat(199)}${lockUp.id}. [1]`],
+    },
+    {
+      name: 'three paragraphs in a single string',
+      paragraphs: [`${creditWords} [1]\r\n\r\n${termWords} [2]\n \nThe ratios differ. [1]`],
+    },
+    {
+      name: 'three paragraphs separated by NULs',
+      paragraphs: [`${creditWords} [1]\0${termWords} [2]\0The ratios differ.`],
+    },
+  ];
+  const citedRiskReply = (call: Call, paragraphs: string[]) => ({
+    paragraphs, sources: [{ doc: tag(call, FA), page: 14 }, { doc: tag(call, TS), page: 3 }],
+  });
+
+  it.each(overlong)('retries and escalates a deal memo key risk write-up with $name', async ({ paragraphs }) => {
+    const valid = [`${creditWords} [1]`, `${termWords} [2]`];
+    const standIn = await setupMemoReplies([distributionRisk], (call, attempt) => {
+      if (call.prompt.length > 100_000) throw Object.assign(new Error('Request too long'), { code: 'toolong' });
+      return citedRiskReply(call, attempt <= 2 ? paragraphs : ['', valid[0], '  ', valid[1]]);
+    });
+    const memo = val(await standIn.ai.memo!('d1'));
+    const writes = standIn.calls.filter(memoWrite);
+    expect(writes.map(({ model }) => model)).toEqual(['standard', 'standard', 'thorough']);
+    expect(writes[1].prompt).toContain('200 words');
+    expect(writes[1].prompt).toContain('That cannot be used:');
+    expect(memo.risks![0]).toEqual({
+      ...distributionRisk, body: valid, sources: [...lockUp.sources, ...testPeriod.sources],
+    });
+  });
+
+  it('accepts a deal memo key risk write-up of exactly 200 words with two cited paragraphs', async () => {
+    const body = [`${'covenant '.repeat(99)}threshold. [1]`, `${'distribution '.repeat(99)}test. [2]`];
+    const standIn = await setupMemoReplies([distributionRisk], (call) => citedRiskReply(call, body));
+    const memo = val(await standIn.ai.memo!('d1'));
+    expect(standIn.calls.filter(memoWrite).map(({ model }) => model)).toEqual(['standard']);
+    expect(memo.risks![0]).toEqual({
+      ...distributionRisk, body, sources: [...lockUp.sources, ...testPeriod.sources],
+    });
+  });
+
+  it('retries an overlong deal memo write-up when Standard and Thorough share a model', async () => {
+    const valid = [`${creditWords} [1]`, `${termWords} [2]`];
+    const standIn = await setupMemoReplies([distributionRisk], (call, attempt) =>
+      citedRiskReply(call, attempt < 3 ? overlong[0].paragraphs : valid));
+    standIn.svc.offered.thorough = standIn.svc.offered.standard;
+    const memo = val(await standIn.ai.memo!('d1'));
+    const writes = standIn.calls.filter(memoWrite);
+    expect(writes.map((call) => call.model)).toEqual(['standard', 'standard', 'standard']);
+    expect(writes[1].prompt).toContain('That cannot be used:');
+    expect(memo.risks![0]).toEqual({
+      ...distributionRisk, body: valid, sources: [...lockUp.sources, ...testPeriod.sources],
+    });
+  });
+
+  it('escalates the original deal memo request if the correction is too long for Standard', async () => {
+    const valid = [`${creditWords} [1]`, `${termWords} [2]`];
+    const standIn = await setupMemoReplies([distributionRisk], (call) => {
+      if (call.prompt.includes('That cannot be used:')) {
+        throw Object.assign(new Error('Request too long'), { code: 'toolong' });
+      }
+      return citedRiskReply(call, call.model === 'thorough' ? valid : overlong[0].paragraphs);
+    });
+    const memo = val(await standIn.ai.memo!('d1'));
+    const writes = standIn.calls.filter(memoWrite);
+    expect(writes.map((call) => call.model)).toEqual(['standard', 'standard', 'thorough']);
+    expect(writes[2].prompt).toBe(writes[0].prompt);
+    expect(writes[2].files).toEqual(writes[0].files);
+    expect(memo.risks![0]).toEqual({
+      ...distributionRisk, body: valid, sources: [...lockUp.sources, ...testPeriod.sources],
+    });
+  });
+
+  it('uses the findings’ own cited words after every key risk write-up exceeds the limits', async () => {
+    const standIn = await setupMemoReplies([distributionRisk], (call, attempt) =>
+      citedRiskReply(call, overlong[attempt - 1].paragraphs));
+    const memo = val(await standIn.ai.memo!('d1'));
+    expect(standIn.calls.filter(memoWrite).map(({ model }) => model)).toEqual(['standard', 'standard', 'thorough']);
+    expect(memo.risks![0]).toEqual(distributionRisk);
+    const content = memoContent({
+      ...scaleMemoInput, deal: memoDeal, findings: memoFindings,
+      groups: memo.risks, ratings: memo.ratings, summary: memo.summary,
+    });
+    expect(content.risks[0].paras).toEqual([
+      [{ text: 'The draft uses a 1.25x ratio.', refs: [1] }],
+      [{ text: 'The draft uses a six-month period.', refs: [2] }],
+    ]);
+    expect(content.refs.slice(0, 2)).toEqual(['Credit Agreement, p. 14', 'Term sheet (signed), p. 3']);
+  });
+});
 
 describe('what a document is', () => {
   it('nothing is described at indexing: the core documents are described once they are chosen, by the fast model from the document itself, and no other until it is read', async () => {

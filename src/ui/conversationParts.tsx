@@ -188,9 +188,8 @@ function SentFiles({ scope, files }: { scope: Scope; files: NonNullable<Message[
 function Pending({ reply, waiting }: { reply: Message | undefined; waiting: string | undefined }) {
   const store = useStore();
   const state = useAppState();
-  const ai = store.services.ai;
-  if (reply && ai.research) {
-    const stop = ai.stop ? { onStop: () => void stopAnswer(store, reply.id) } : {};
+  if (reply && state.can.research) {
+    const stop = state.can.stop ? { onStop: () => void stopAnswer(store, reply.id) } : {};
     return (
       <div class="ai pending rsching" role="status" aria-label={waiting ?? 'Researching'}>
         <ResearchView working since={reply.at} research={state.ui.researching[reply.id]} waiting={waiting} {...stop} />

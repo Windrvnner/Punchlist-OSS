@@ -30,6 +30,7 @@ import { Modal } from './dialogs';
 import { placeKept } from './placeKept';
 import { showTip, hideTip } from './tip';
 import { openResolve, inTwoVersions } from './resolve';
+import { focusSearchResult } from './nav';
 
 export { WORKSTREAMS };
 const PRIORITIES = ['High', 'Medium', 'Low'];
@@ -39,7 +40,7 @@ export function QaPage({ dealId }: { dealId: string }) {
   const ro = useContext(ReadOnlyContext);                 // why nothing on this deal can be changed just now, if it cannot: what cannot be used is shown as off, with the reason on hover
   const d = s.deals[dealId];
   // the checklist too, where the deal has one: a question whose item it has settled is offered to be closed
-  useEffect(() => { void store.loadDeal(dealId); if (store.services.ai.checklist) void store.refreshChecklist(dealId); }, [dealId]);
+  useEffect(() => { void store.loadDealWithChecklist(dealId); }, [dealId]);
   if (!d) return null;
   const load = s.dealLoad[dealId];
   const rows = dealQuestions(s, dealId);
@@ -157,11 +158,7 @@ export function QaPage({ dealId }: { dealId: string }) {
   useLayoutEffect(() => { const l = listRef.current; if (tuck && l && l.scrollTop < 24) setTuck(0); }, [list.length, tuck]);
 
   const select = (id: string) => store.ui({ selectedQuestion: id });
-  const focusRow = (id: string) => requestAnimationFrame(() => listRef.current?.querySelector<HTMLElement>(`.li[data-q="${id}"]`)?.focus());
-  // Enter on the row already open goes into it: to the Response, or while a draft is coming to its first button, else the
-  // Question, rather than a dozen Shift+Tabs back up the page. A click (detail > 0) only opens.
-  const intoPanel = () => (document.querySelector<HTMLElement>('.qpanel textarea.rtext') ?? document.querySelector<HTMLElement>('.qpanel .qright button:not(:disabled)') ?? document.querySelector<HTMLElement>('.qpanel textarea.qtext'))?.focus();
-  const close = () => { if (!sel) return; const id = sel.id; setCursor(id); store.ui({ selectedQuestion: null }); focusRow(id); };
+  const { focusRow, close } = useQaFocus(listRef, sel?.id ?? null, setCursor, s.ui.searchFocus);
   const escClose = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); close(); } };
   // the open question's place in the list, and a step to the one before or after it (the panel's arrows)
   const selAt = sel ? list.findIndex((r) => r.id === sel.id) : -1;
@@ -242,6 +239,47 @@ export function QaPage({ dealId }: { dealId: string }) {
       </section>
     </div>
   );
+}
+
+const ACTIVE_QA_FILTER = '.trk-tools [data-qaf][aria-pressed="true"]';
+
+function focusQaRow(list: RefObject<HTMLDivElement | null>, id: string, afterClose: boolean) {
+  requestAnimationFrame(() => {
+    const row = list.current?.querySelector<HTMLElement>(`.li[data-q="${id}"]`);
+    // #498: closing an out-of-filter Search result leaves a keyboard stop on the Q&A toolbar.
+    const filter = afterClose ? document.querySelector<HTMLElement>(ACTIVE_QA_FILTER) : null;
+    (row ?? filter)?.focus();
+  });
+}
+
+// Enter on the row already open goes into it: to the Response, or while a draft is coming to its first button, else the
+// Question, rather than a dozen Shift+Tabs back up the page. A click (detail > 0) only opens.
+function intoPanel() {
+  const target = document.querySelector<HTMLElement>('.qpanel textarea.rtext:not(:disabled)') ??
+    document.querySelector<HTMLElement>('.qpanel .qright button:not(:disabled)') ??
+    document.querySelector<HTMLElement>('.qpanel textarea.qtext:not(:disabled)') ??
+    document.querySelector<HTMLElement>('.qpanel');
+  target?.focus();
+}
+
+// #498: move focus once the Search result has rendered, and return it to the list or toolbar on close.
+function useQaFocus(
+  list: RefObject<HTMLDivElement | null>, selectedId: string | null, setCursor: (id: string) => void,
+  searchFocus: string | null,
+) {
+  const store = useStore();
+  useLayoutEffect(() => {
+    if (selectedId && searchFocus === selectedId) focusSearchResult(store, selectedId, intoPanel);
+  }, [selectedId, searchFocus]);
+
+  const focusRow = (id: string) => focusQaRow(list, id, false);
+  const close = () => {
+    if (!selectedId) return;
+    setCursor(selectedId);
+    store.ui({ selectedQuestion: null });
+    focusQaRow(list, selectedId, true);
+  };
+  return { focusRow, close };
 }
 
 /**
@@ -341,7 +379,7 @@ function MoreMenu({ dealId }: { dealId: string }) {
       {open && <div class="colmenu glass" id="colmenu" role="menu">
         <button type="button" class="mi" role="menuitem" id="qa-import" disabled={!!ro} title={ro ?? undefined}
           onClick={() => openDialog('importQa')}>Import Q&A Log…</button>
-        {store.services.qaLogs && <div class="mirow"><button type="button" class="mi" role="menuitem" id="qa-log"
+        {s.can.qaLogs && <div class="mirow"><button type="button" class="mi" role="menuitem" id="qa-log"
           onClick={() => { setOpen(false); void updateLog(store, dealId); }}>Update Q&A Log</button>
           {log && <button type="button" class="fb" role="menuitem" id="qa-logdir" aria-label="Log folder" aria-description={logPath(log)} onMouseEnter={(e) => showTip(e.currentTarget as HTMLElement, logPath(log))} onMouseLeave={(e) => hideTip(e.currentTarget as HTMLElement)} onClick={() => { setOpen(false); void chooseLogFolder(store, dealId).then((r) => { if (!r.ok) store.toast(r.error.message); }); }}><Icon name="folder" size={16} /></button>}</div>}
         <button type="button" class="mi" role="menuitem" id="qa-export" disabled={!dealQuestions(s, dealId).length}
@@ -449,7 +487,8 @@ function ConflictPanel({ q, busy, onClose, onKeyDown }: {
 }) {
   const s = useAppState();
   return (
-    <section class="det qpanel conflict glass" inert={busy} aria-label={`Q${q.n}`} onKeyDown={onKeyDown}>
+    <section class="det qpanel conflict glass" inert={busy}
+      aria-label={`Q${q.n}`} tabIndex={-1} onKeyDown={onKeyDown}>
       <ConflictView conflict={s.conflicts[q.id]} tail={<CloseDetail onClose={onClose} />} label={`Q${q.n}`} stepper />
     </section>
   );
