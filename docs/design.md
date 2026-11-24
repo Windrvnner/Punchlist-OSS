@@ -34,6 +34,8 @@ The look is defined in these files: `src/styles.css` (tokens, the shell, and con
   conversation's (06), with a 22px radius, 14px padding all around, 15px text on one line until more is typed, and 32px
   buttons and send.
 - **Side pane:** The open item on Checklist sits in a glass pane beside the list, with its top on the list's top line and its bottom on the sidebar's bottom line (08). The open question on Q&A takes a glass panel across the top (09).
+- **Reading mode:** A demo PDF without a preview shows “Page preview unavailable.” in
+  `--paper-ink` below the title. The paper still shows its page number, and the reading controls stay in place (#443).
 - **Windows:** Window sizes run from 1024×640 to 1536×864. Check every screen at 1280×736 and 1024×640, in dark and light.
 
 ## Type
@@ -193,7 +195,28 @@ See reference screenshots 02, 11, and 12.
   end of the name with a leading ellipsis. The document icon also shows the full filename on hover when space is
   tight (#441).
 - **Order:** A dropdown menu is A to Z, with "All …" or a prompt first and a "No …" or "None" option last, which in a long menu stays in view below the scrolling choices, under a 1px rule; the scrolling part shows whole rows only. Which dropdowns keep an order of their own is in [docs/decisions.md](decisions.md).
-- **Search** (14): Results drop from the sidebar field in a popup glass panel (radius 14px, `--shadow-pop`), grouped under labels split by rules: Deals, Findings, Checklist Items, Questions, and Documents. A group's label is set as labels are (Type: 13px, 600, `--ink-2`, title style), followed by how many match in all (13px `--ink-3`, tabular figures); each group shows its first five, and "Show N More" at the right end of the label's line (13px, 500, `--accent`) shows up to 50 more at a time and names that many, as a broad word can match thousands of checklist items. Until the arrows move, Enter opens the first result, never a "Show N More". The words typed show in bold (600) in each result's first line. A hit inside a deal has two lines: the matched text, and under it, short and in `--ink-3`, the deal it is in with the place at the right (a question number, pages or a sheet cell, in tabular figures). Where that deal shares its name with another, the line starts with what tells it apart: as in the sidebar, only what differs (the counterparty, or else the day); on hover, both. The second line stays one line, as in the approved mock-up: the deal's name gives way, cut at its end by whole words so an ellipsis never follows a space, so that what tells the deal apart and the place show whole; the name always keeps at least its first word. Only a sheet cell or other long place too wide to sit beside what tells the deal apart and that first word is left to the hover, and a question number or pages is never cut: what tells the deal apart gives way to it, by whole words and with no gap before the " · ". A deal's own hit gives on its second line what tells it apart, or otherwise its sector.
+- **Search** (14). Results drop from the sidebar field in a popup glass panel (radius 14px, `--shadow-pop`), grouped
+  under labels split by rules (Deals, Findings, Checklist Items, Questions, and Documents). The label is 13px in
+  600-weight `--ink-2` and title style. The total count uses 13px tabular figures in `--ink-3`. Each group starts with
+  five results. “Show N More” at the right of the label (13px, 500, `--accent`) names the number it adds, up to 50.
+  Until the selection moves, Enter skips “Show N More” and opens the first result. Matched words on the first line
+  use weight 600. A hit inside a deal names its deal on the second line in `--ink-3`. Its question number, pages,
+  or sheet cell appear at the right in tabular figures. For a shared deal name, the line starts with what distinguishes
+  the deal (the counterparty or creation date), with both on hover.
+  The location stays on one line and keeps the first meaningful word after “Project” along with the full question
+  number or page range (#495). A sheet cell too wide for the location is left to the hover.
+  In Search and the sidebar, a shortened counterparty keeps the words that distinguish same-name deals (#492).
+  An ellipsis marks a shortened suffix after those words (#791).
+  An oversized single-word counterparty ends in an ellipsis (#494) with normal spacing before the separator (#790).
+  The start of a right-to-left deal name stays visible in Search (#490). Full labels are available to screen readers
+  and on hover.
+  A deal's own hit gives on its second line what tells it apart, or otherwise its sector.
+- A Search question keeps the current deal's Q&A filters. From Home or a different deal it opens with All (#497).
+- Choosing an open Checklist item in Search reveals its row again (#496).
+- Keyboard selection in Search moves focus to the opened question or Checklist row (#498).
+  When a question closes and its row is hidden by the active filter, focus returns to the Q&A filters.
+- Search shows “No matches.” once it finishes reading My Deals and finds no results (#491).
+- Search keeps the highlighted result when more records arrive, while that result is still listed (#501).
 - **Lists and tables:** Rows are divided by 1px `--line` rules, no boxes. Column heads are set as in Type, in title style; on Q&A they stay in view above the list as it scrolls (with design C). The open row is the strongest; the row under the pointer is a step lighter.
 - **Links between records** (#2): A finding's page lists, under its text, its checklist item as a dotted link (as the Checklist pane links its finding), the questions asked (the Checklist pane's Asked list) and Ask the counterparty with its card (the same New question card). A question's panel says "Asked for “…”" on its Question label line, in `--ink-2` like the Response label's notes, with a dotted link. It stays beside the label and gives way to an ellipsis, whole in the tooltip, so the question keeps its lines.
 - **Folders dialog:** Each folder is a list row, as in Finder, with no box and no column heads: the `folder` icon at 16px in `--ink-3`, the name (12px 500 `--ink`) over the full path (12px `--ink-3`, cut at its start, whole on hover), the count (12px `--ink-3`, tabular; "2,148 of 5,190 indexed" in `--ink-2` while the folder is indexed, "Indexing" on hover) and the ×. Rows are at least 44px, divided by 1px `--line` rules, and a group's last row has none. The row under the pointer is Bare (`--card-hover`, `--r-ctl`); the name in it, an editable value, is bare at rest and the Control level under the pointer (`--card` in a 1px `--line` ring, 26px capsule), with "Edit name" in the app's tooltip. Folders waiting to be added are listed under a To Add heading below the deal's folders, with the same row ("1,486 files · 3.2 GB"). The footer has one filled action: Choose Folders… while nothing waits, then Add and Index, with Choose Folders… plain beside it. No rule under the title or over the footer, and 23px under the buttons, as in "Is this Project X?".
