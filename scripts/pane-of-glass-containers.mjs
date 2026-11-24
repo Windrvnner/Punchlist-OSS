@@ -1,34 +1,46 @@
-// A named literal may be changed through a write, method call, or alias that escapes the file.
+// Track uses that can change a named literal before a primitive path is copied out of it.
 import { Visitor } from 'vite';
-import { memberValue, missing, propertyKey } from './pane-of-glass-bindings.mjs';
+import { entryValue, missing, propertyKey } from './pane-of-glass-bindings.mjs';
 import { literalValue, unwrapped } from './pane-of-glass-syntax.mjs';
 
-function selectedKeys(pattern, member) {
-  if (member) return [propertyKey(member.property, member.computed)];
+function selectedKeys(pattern, member, resolve) {
+  if (member) return [propertyKey(member.property, member.computed, resolve)];
   if (pattern?.type === 'ArrayPattern') {
     if (pattern.elements.some((part) => part?.type === 'RestElement')) return [];
     return pattern.elements.flatMap((part, index) => part ? [String(index)] : []);
   }
   if (pattern?.type !== 'ObjectPattern') return [];
-  return pattern.properties.map((part) => part.type === 'Property' ? propertyKey(part.key, part.computed) : null);
+  return pattern.properties.map((part) => {
+    return part.type === 'Property' ? propertyKey(part.key, part.computed, resolve) : null;
+  });
 }
 
-export function containerReads(program) {
+function usesIn(program) {
   const patterns = new Map();
   const receivers = new Set();
   const members = new Map();
+  const spreads = new Set();
   const exported = new Set();
   const writeTargets = [];
+  const blocks = new Map();
+  function declarations(block) {
+    for (const statement of block.body) {
+      const variable = statement.declaration ?? statement;
+      if (variable.type !== 'VariableDeclaration') continue;
+      for (const item of variable.declarations) blocks.set(item, block);
+    }
+  }
   new Visitor({
+    Program: declarations,
+    BlockStatement: declarations,
     VariableDeclarator({ id, init }) {
       if (id.type.endsWith('Pattern')) patterns.set(unwrapped(init), id);
     },
     ExportNamedDeclaration({ declaration }) {
       for (const item of declaration?.declarations ?? []) exported.add(item);
     },
-    MemberExpression(node) {
-      members.set(unwrapped(node.object), node);
-    },
+    MemberExpression: (node) => members.set(unwrapped(node.object), node),
+    SpreadElement: (node) => spreads.add(unwrapped(node.argument)),
     CallExpression: (node) => receivers.add(unwrapped(node.callee)),
     TaggedTemplateExpression: (node) => receivers.add(unwrapped(node.tag)),
     AssignmentExpression: (node) => writeTargets.push(node.left),
@@ -39,26 +51,54 @@ export function containerReads(program) {
       if (node.operator === 'delete') writeTargets.push(node.argument);
     },
   }).visit(program);
+  return { patterns, members, spreads, receivers, exported, writeTargets, blocks };
+}
 
-  function readsMember(identifier, container, keys) {
-    const member = members.get(identifier);
-    if (!member || receivers.has(member)) return false;
-    if (writeTargets.some((target) => target.start <= member.start && member.end <= target.end)) return false;
-    const entry = memberValue(container, member);
-    if (literalValue(entry) !== undefined) return true;
-    // Reading a separate data property cannot replace the property being destructured.
-    if (!entry || entry === missing || !keys.length || keys.includes(null)) return false;
-    return !keys.includes(propertyKey(member.property, member.computed));
+function primitive(container, key, resolve) {
+  return literalValue(resolve(entryValue(container, key, resolve))) !== undefined;
+}
+
+function readsSelection(identifier, value, keys, uses, resolve) {
+  const member = uses.members.get(identifier);
+  if (member && uses.receivers.has(member)) return false;
+  const reads = selectedKeys(uses.patterns.get(identifier), member, resolve);
+  if (!reads.length || reads.includes(null)) return false;
+  const target = member && uses.writeTargets.find((part) => part.start <= member.start && member.end <= part.end);
+  return reads.every((key) => {
+    // A direct write to another data property leaves the tracked entry alone.
+    if (target && (target !== member || keys.includes(key))) return false;
+    if (!target && primitive(value, key, resolve)) return true;
+    const entry = entryValue(value, key, resolve);
+    return keys.length && !keys.includes(null) && !keys.includes(key) && entry && entry !== missing;
+  });
+}
+
+function captureDeclaration(variable, capture, blocks) {
+  const block = blocks.get(variable.defs.find((def) => blocks.has(def.node))?.node);
+  if (!block) return null;
+  for (const [declaration, owner] of blocks) {
+    const init = declaration.init;
+    if (owner === block && init && init.start <= capture.start && capture.end <= init.end) return declaration;
   }
+  return null;
+}
 
-  return (variable, use, value, capture) => {
-    if (variable.defs.some((def) => exported.has(def.node))) return false;
+export function containerReads(program, scopeOf) {
+  const uses = usesIn(program);
+  return (variable, use, value, capture, resolve) => {
+    if (variable.defs.some((def) => uses.exported.has(def.node))) return false;
+    const keys = selectedKeys(uses.patterns.get(capture), uses.members.get(capture), resolve);
     const parts = value.type === 'ArrayExpression' ? value.elements : value.properties.map((part) => part.value);
     const flat = parts.every((part) => literalValue(part) !== undefined);
-    const keys = selectedKeys(patterns.get(capture), members.get(capture));
+    const scope = scopeOf(capture);
+    const snapshots = keys.length && keys.every((key) => key !== null && primitive(value, key, resolve));
+    const captured = scope === variable.scope && snapshots && captureDeclaration(variable, capture, uses.blocks);
     return variable.references.every((ref) => {
       if (!ref.isRead() || !ref.isValueReference || ref.identifier === use) return true;
-      return (flat && patterns.has(ref.identifier)) || readsMember(ref.identifier, value, keys);
+      // A later statement cannot change a primitive already copied in this invocation.
+      if (captured && ref.from.variableScope === scope.variableScope && ref.identifier.start > captured.end) return true;
+      if (flat && uses.spreads.has(ref.identifier)) return true;
+      return readsSelection(ref.identifier, value, keys, uses, resolve);
     });
   };
 }

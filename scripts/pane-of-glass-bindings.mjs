@@ -80,7 +80,9 @@ function contains(pattern, name) {
 }
 
 function objectBinding(pattern, value, name, resolve) {
-  const entry = pattern.properties.find((part) => contains(part.type === 'Property' ? part.value : part.argument, name));
+  const entry = pattern.properties.find((part) => {
+    return contains(part.type === 'Property' ? part.value : part.argument, name);
+  });
   if (!entry) return null;
   if (entry.type === 'RestElement') {
     if (value?.type !== 'ObjectExpression') return null;

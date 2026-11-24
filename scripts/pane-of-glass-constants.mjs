@@ -35,11 +35,11 @@ export function localBindings(program) {
   const { scopes } = analyze(program, { sourceType: 'module', lib: [], jsxPragma: null });
   const bindings = new Map();
   for (const scope of scopes) {
-    for (const ref of scope.references) bindings.set(ref.identifier, ref.resolved);
+    for (const ref of scope.references) bindings.set(ref.identifier, ref);
   }
-  const stableContainer = containerReads(program);
+  const stableContainer = containerReads(program, (ref) => bindings.get(ref)?.from);
   function resolveVariable(reference, seen, capture) {
-    const variable = bindings.get(reference);
+    const variable = bindings.get(reference)?.resolved;
     if (reference.name === 'undefined' && !variable?.defs.length) return missing;
     const definition = fixedDeclaration(variable);
     if (!definition || seen.has(variable)) return null;
@@ -51,7 +51,7 @@ export function localBindings(program) {
     const alias = node.id === name && initial?.type === 'Identifier';
     const value = alias ? resolve(initial, visited, capture) : next(initial);
     if (value?.type === 'ObjectExpression' || value?.type === 'ArrayExpression') {
-      if (!stableContainer(variable, reference, value, capture)) return null;
+      if (!stableContainer(variable, reference, value, capture, next)) return null;
     }
     return value;
   }
