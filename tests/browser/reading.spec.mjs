@@ -321,5 +321,238 @@ for (const size of [[1280, 736], [1024, 640]]) {
   await ctx.close();
 }
 
+// Sample what Chromium actually paints. Reuse the same screenshot for every strip in a frame.
+async function readingPixels(page, boxes, options) {
+  const x = Math.min(...boxes.map(([left]) => left));
+  const y = Math.min(...boxes.map(([, top]) => top));
+  const clip = { x, y, width: Math.max(...boxes.map(([left, , width]) => left + width)) - x,
+    height: Math.max(...boxes.map(([, top, , height]) => top + height)) - y };
+  const regions = boxes.map(([left, top, width, height]) => [left - x, top - y, width, height]);
+  const png = await page.screenshot({ ...options, clip });
+  return page.evaluate(async ({ png, boxes }) => {
+    const image = new Image();
+    image.src = 'data:image/png;base64,' + png;
+    await image.decode();
+    const context = new OffscreenCanvas(image.width, image.height).getContext('2d');
+    context.drawImage(image, 0, 0);
+    return boxes.map(([x, y, width, height]) => Array.from(context.getImageData(x, y, width, height).data));
+  }, { png: png.toString('base64'), boxes: regions });
+}
+
+async function paneShadow(page, height) {
+  const { left, bottom, middle, fits } = await page.evaluate(() => {
+    const view = document.querySelector('.view.chatview').getBoundingClientRect();
+    const pane = (document.querySelector('.reading-pane') ?? document.querySelector('.chat')).getBoundingClientRect();
+    const rail = document.querySelector('.rail').getBoundingClientRect();
+    const paper = document.querySelector('.docbody .page').getBoundingClientRect();
+    const composer = document.getElementById('pcomposer').getBoundingClientRect();
+    const fits = document.documentElement.scrollWidth === innerWidth && document.body.scrollWidth === innerWidth &&
+      rail.right < pane.left && paper.left - pane.right >= 14.5 && composer.left >= pane.left &&
+      composer.right <= pane.right && composer.bottom <= pane.bottom;
+    return { left: Math.round(view.left), bottom: Math.round(view.bottom),
+      middle: Math.round(pane.left + pane.width / 2), fits };
+  });
+  const [outer, inner, upper, lower] = await readingPixels(page, [
+    [left - 1, height - 210, 1, 20], [left, height - 210, 1, 20],
+    [middle - 10, bottom - 1, 20, 1], [middle - 10, bottom, 20, 1],
+  ]);
+  const lightness = (strip) => strip.reduce((sum, value, i) => sum + (i % 4 === 3 ? 0 : value), 0) / 60;
+  return { side: +(lightness(outer) - lightness(inner)).toFixed(1),
+    bottom: +(lightness(lower) - lightness(upper)).toFixed(1), fits };
+}
+
+async function paneMaterials(page) {
+  return page.evaluate(() => {
+    const material = (element) => {
+      const style = getComputedStyle(element);
+      return [style.backgroundColor, style.backdropFilter, style.border, style.borderRadius, style.boxShadow,
+        getComputedStyle(element, '::after').backgroundImage];
+    };
+    const reference = JSON.stringify(material(document.querySelector('.rail')));
+    const pane = document.querySelector('.reading-pane') ?? document.querySelector('.chat');
+    const composer = document.querySelector('#pcomposer');
+    return { pane: JSON.stringify(material(pane)) === reference,
+      composer: JSON.stringify(material(composer)) === reference };
+  });
+}
+
+async function readingContrast(page, selector, pseudo = '') {
+  const { color, box } = await page.locator(selector).evaluate((element, pseudo) => {
+    const { left, top, width, height } = element.getBoundingClientRect();
+    const inset = pseudo ? 4 : 1;
+    return { color: getComputedStyle(element, pseudo).color.match(/\d+/g).map(Number),
+      box: [Math.ceil(left + inset), Math.ceil(top + 1), Math.floor(Math.min(width - inset * 2, 200)),
+        Math.floor(height - 2)] };
+  }, pseudo);
+  const style = await page.addStyleTag({ content: `${selector}${pseudo}{color:transparent!important}` });
+  const [background] = await readingPixels(page, [box]);
+  await style.evaluate((node) => node.remove());
+  const luminance = (red, green, blue) => {
+    const linear = (value) => value <= 10 ? value / 3294.6 : ((value / 255 + 0.055) / 1.055) ** 2.4;
+    return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue) + 0.05;
+  };
+  const ink = luminance(...color);
+  let lowest = Infinity;
+  for (let i = 0; i < background.length; i += 4) {
+    const pixel = luminance(background[i], background[i + 1], background[i + 2]);
+    lowest = Math.min(lowest, Math.max(ink, pixel) / Math.min(ink, pixel));
+  }
+  return lowest;
+}
+
+async function putAnswer(page, dealId, findingId, passages = 20) {
+  await page.evaluate(([dealId, findingId, passages]) => {
+    const terms = 'The agreement uses the distribution lock-up ratio from the signed term sheet. ' +
+      'The draft has a lower figure, so confirm the applicable threshold with the counterparty.';
+    const at = new Date().toISOString();
+    store.setThread(`f:${dealId}:${findingId}`, [
+      { id: 'lock-up-question', role: 'me', text: 'Which distribution threshold applies?', state: 'done', at },
+      { id: 'lock-up-answer', role: 'ai', text: Array(passages).fill(terms).join(' '), state: 'done', at },
+    ]);
+  }, [dealId, findingId, passages]);
+  await page.waitForSelector('.msgs .acts button');
+}
+
+function readingScroll(page, fraction) {
+  return page.evaluate((fraction) => {
+    const chat = document.querySelector('.chat');
+    if (fraction !== undefined) chat.scrollTop = fraction * (chat.scrollHeight - chat.clientHeight);
+    const composerTop = document.querySelector('#pcomposer').getBoundingClientRect().top;
+    return { top: chat.scrollTop, max: chat.scrollHeight - chat.clientHeight,
+      head: document.querySelector('.chathead').getBoundingClientRect().top,
+      clipGap: composerTop - chat.getBoundingClientRect().bottom,
+      endGap: composerTop - document.querySelector('.msgs').getBoundingClientRect().bottom };
+  }, fraction);
+}
+
+async function compareComposerPixels(page) {
+  const boxes = await page.evaluate(() => {
+    const composer = document.querySelector('#pcomposer').getBoundingClientRect();
+    const x = Math.ceil(composer.left + 18);
+    const width = Math.floor(composer.width - 36);
+    return [[x, Math.floor(composer.top - 90), width, 70],
+      [x, Math.ceil(composer.top + 24), width, Math.floor(composer.height - 40)],
+      [x, Math.ceil(composer.bottom), width, 12]];
+  });
+  // Keep the glass and isolate its backdrop from edits, focus transitions, and button state.
+  const options = { animations: 'disabled', style: '#pcomposer > * { opacity:0 }' };
+  const painted = await readingPixels(page, boxes, options);
+  const hidden = await page.addStyleTag({ content: '.chat .opening,.chat .msgs{visibility:hidden}' });
+  const background = await readingPixels(page, boxes, options);
+  await hidden.evaluate((style) => style.remove());
+  return painted.map((rgba, region) => rgba.filter((value, i) => Math.abs(value - background[region][i]) > 3).length);
+}
+
+async function fillComposer(page, text) {
+  await page.fill('#pask', text);
+  await page.waitForFunction((height) => document.getElementById('pask').offsetHeight === height, text ? 168 : 24);
+}
+
+const tallDraft = 'See the signed term sheet.\n'.repeat(7).trimEnd();
+
+async function answerActionFocus(page) {
+  const actions = page.locator('.msgs .acts button');
+  await readingScroll(page, 0.5);
+  await actions.nth(1).evaluate((button) => button.focus({ preventScroll: true }));
+  await page.keyboard.press('Tab');
+  return actions.last().evaluate((last) => {
+    const box = last.getBoundingClientRect();
+    const composer = document.querySelector('#pcomposer').getBoundingClientRect();
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    return last === document.activeElement && box.bottom <= composer.top && last.contains(hit);
+  });
+}
+
+async function composerOcclusion(page, note) {
+  const before = await readingScroll(page, 0);
+  const middle = await readingScroll(page, 0.5);
+  const shortPixels = await compareComposerPixels(page);
+  await fillComposer(page, tallDraft);
+  const grown = await readingScroll(page);
+  const tallPixels = await compareComposerPixels(page);
+  await fillComposer(page, '');
+  const restored = await readingScroll(page);
+  const focus = await answerActionFocus(page);
+  await page.locator('#pask').focus();
+  const top = await readingScroll(page, 0);
+  await fillComposer(page, tallDraft);
+  const start = await readingScroll(page);
+  const end = await readingScroll(page, 1);
+  await fillComposer(page, '');
+  const shrunk = await readingScroll(page);
+  const positions = [before, middle, grown, restored, top, start, end, shrunk];
+  const pixels = [shortPixels, tallPixels];
+  const clear = pixels.every(([above, through, below]) => above > 50 && through === 0 && below === 0) &&
+    positions.every(({ clipGap }) => clipGap >= 0 && clipGap <= 2);
+  const fromEnd = ({ max, top }) => max - top;
+  const keptMiddle = [grown, restored].every((position) =>
+    fromEnd(position) === fromEnd(middle) && Math.abs(position.endGap - middle.endGap) <= 1);
+  const anchored = keptMiddle && fromEnd(start) === fromEnd(top) && shrunk.top === shrunk.max &&
+    positions.every(({ head }) => head === before.head);
+  const gaps = [end, shrunk].map(({ endGap }) => +endGap.toFixed(1));
+  const endGap = gaps.every((gap) => Math.abs(gap - 34) <= 1.5);
+  const extent = Math.abs((grown.max - middle.max) - 144) <= 1;
+  say(`reading-text-stays-above-composer-and-remains-reachable-438-${note}`,
+    clear && anchored && endGap && extent && focus, JSON.stringify({ clear, pixels, anchored, gaps, extent, focus }));
+}
+
+async function shortAnswerStaysAtEnd(page, dealId, findingId) {
+  await putAnswer(page, dealId, findingId, 3);
+  const beforeResize = await readingScroll(page, 0);
+  const { width, height } = page.viewportSize();
+  // Start with the whole answer visible, with enough extra room for the original 34px gap.
+  await page.setViewportSize({ width, height: height + Math.round(55 - beforeResize.endGap) });
+  await page.waitForFunction(() => {
+    const thread = document.querySelector('.chat');
+    return thread.scrollHeight === thread.clientHeight;
+  });
+  const before = await readingScroll(page, 0);
+  await fillComposer(page, tallDraft);
+  const after = await readingScroll(page);
+  const pinned = before.max === 0 && after.max > 50 && after.top === after.max && after.endGap >= 34;
+  await fillComposer(page, '');
+  await page.setInputFiles('#pcomposer input[type=file]', {
+    name: 'side-letter.pdf', mimeType: 'application/pdf', buffer: Buffer.from('Mock attachment'),
+  });
+  await page.waitForSelector('#pcomposer .chip.att:not(.pending)');
+  const attached = await readingScroll(page);
+  const pinWithFile = attached.max > 0 && attached.top === attached.max && attached.endGap >= 34;
+  say('reading-keeps-a-short-answer-in-view-as-composer-grows-438', pinned && pinWithFile,
+    JSON.stringify({ before, after, attached }));
+}
+
+// #437 reuses the rail's pane glass. #442 checks both formerly clipped shadow edges, one pixel at a time.
+for (const colorScheme of ['dark', 'light']) {
+  const { ctx, page, id, fid } = await reading();
+  await page.emulateMedia({ colorScheme });
+  await page.waitForFunction((theme) => document.documentElement.dataset.theme === theme, colorScheme);
+  await putAnswer(page, id, fid);
+  for (const [width, height] of [[1280, 736], [1024, 640], [1440, 900]]) {
+    await page.setViewportSize({ width, height });
+    await page.mouse.move(width - 2, 1);
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.waitForTimeout(525);
+    if (width !== 1440) {
+      const glass = await paneMaterials(page);
+      const placeholder = await readingContrast(page, '#pask', '::placeholder');
+      await readingScroll(page, 0);
+      const location = '.opening .rsch-chip:last-child em';
+      await page.locator(location).hover();
+      await page.waitForTimeout(180);
+      const hovered = await readingContrast(page, location);
+      await page.mouse.move(width - 2, 1);
+      say(`reading-pane-and-composer-use-pane-glass-437-${colorScheme}-${width}`,
+        glass.pane && glass.composer && placeholder >= 4.5 && hovered >= 4.5,
+        JSON.stringify({ ...glass, placeholder: +placeholder.toFixed(2), hovered: +hovered.toFixed(2) }));
+    }
+    const shadow = await paneShadow(page, height);
+    say(`reading-pane-shadow-falls-off-beyond-view-442-${colorScheme}-${width}`,
+      Math.abs(shadow.side) <= 2 && Math.abs(shadow.bottom) <= 2 && shadow.fits, JSON.stringify(shadow));
+    if (width !== 1440) await composerOcclusion(page, `${colorScheme}-${width}`);
+    if (width === 1440 && colorScheme === 'dark') await shortAnswerStaysAtEnd(page, id, fid);
+  }
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter(([, ok]) => !ok).length; console.log(`\n${results.length - failed}/${results.length} passed`); process.exit(failed ? 1 : 0);

@@ -658,8 +658,13 @@ body.reading{--colw:clamp(320px,calc(100vw - 1000px),560px)}
 .pcomp .scopebtn,.pcomp .send,#homeask .scopebtn,#homeask .send,.askslot .askbox.open .scopebtn,.askslot .askbox.open .send{height:32px}.pcomp .send,#homeask .send,.askslot .askbox.open .send{width:32px}
 /* and the same above the words: a line of text carries its own room over the letters, so with no attachment above it the line starts higher */
 .pcomp .chips:empty+textarea,#homeask .chips:empty+textarea,.askslot .askbox.open .chips:empty+textarea{margin-top:-2px}
-/* reading mode: nothing readable shows through the composer */
-body.reading .tcomp.narrow{background:var(--menu-solid);backdrop-filter:none}
+/* Dark reading glass needs the stronger secondary text over the page glow and the layered composer (#437). */
+:root[data-theme="dark"] body.reading .reading-pane
+  :is(.rsch-chip em,.rsch-chip .dr,.rsch-pill .rsch-m){color:var(--ink-2)}
+:root[data-theme="dark"] body.reading .reading-pane :is(
+  .rsch-chip:hover :is(em,.dr,.rdg),.rsch-pill:is(.on,:hover) .rsch-m,.rsch-step em,.rsch-psg b
+){color:var(--ink)}
+:root[data-theme="dark"] body.reading .tcomp.narrow textarea::placeholder{color:var(--ink-2)}
 /* Retry and Resume in a line of text look like the app's other in-line actions */
 /* Retry uses the accent on UI surfaces, and paper ink on a document page. */
 .loadfail .tundo,.ai.failed .tundo{background:none;border:0;padding:0;margin-left:4px;font:inherit;font-weight:500;color:var(--accent);cursor:pointer}
@@ -674,7 +679,10 @@ body.reading .tcomp.narrow{background:var(--menu-solid);backdrop-filter:none}
 /* the queue, opened over a page, is not see-through */
 body.queued.qopen .rail{background:var(--menu-solid);backdrop-filter:none}
 /* reading, the open queue covers most of the conversation column: the column steps back rather than show a cut strip past the queue */
-body.reading.qopen .chatwrap.withdoc .chat,body.reading.qopen #pcomposer:not(:focus-within){mask-image:linear-gradient(transparent,transparent)}   /* a mask: its settle animation holds the opacity. A composer being typed in stays in view */
+/* A mask overrides the pane's settle animation. A composer being typed in stays in view. */
+body.reading.qopen .chatwrap.withdoc .reading-pane,body.reading.qopen #pcomposer:not(:focus-within){
+  mask-image:linear-gradient(transparent,transparent)
+}
 /* a conversation with nothing said yet takes no room under the record */
 .chat .msgs:empty{display:none}
 /* the trail: Home and the page keep their width; the facts give way first (a long counterparty), then the deal's name, with an ellipsis */
