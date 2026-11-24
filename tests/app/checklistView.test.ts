@@ -116,6 +116,10 @@ it('hides empty optional filters, falls back to All, and keeps the standard filt
 
 it('puts each list, section and subsection in first-item order and counts its visible rows', () => {
   const state = checklistDeal();
+  // An item left without a source comes before the named lists in the deal's records.
+  const unsourced = items[8];
+  state.items = { [unsourced.id]: state.items[unsourced.id], ...state.items };
+  state.items[unsourced.id].from = [];
   const product = { layer: 'product', value: 'Construction finance' } as const;
   const sector = { layer: 'sector', value: 'Energy' } as const;
   const technology = { layer: 'technology', value: 'Storage' } as const;
@@ -139,7 +143,8 @@ it('puts each list, section and subsection in first-item order and counts its vi
     [['Construction finance', 4], ['Execution', 3], ['Consents', 2]], [], [['Waivers', 1]], [['Conditions', 1]],
   ]);
   expect(names(shown[1].groups)).toEqual(names(shown[0].heads));
-  expect(shown.at(-1)?.row).toBe(legacy);
+  expect(shown.slice(-2).map(({ row }) => row.id)).toEqual([unsourced.id, legacy.id]);
+  expect(shown.at(-2)?.heads[0]).toMatchObject({ level: 'list', text: 'Other', count: 2 });
   const filtered = viewFor(state, 'off', deleted.id);
   expect(names(filtered.shown[0].heads)).toEqual([['Construction finance', 2], ['Execution', 2], ['Consents', 1]]);
 });
