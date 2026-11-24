@@ -3,9 +3,10 @@ import { Modal } from './dialogs';
 import { Icon } from './icons';
 import { RestoreFinding } from '../app/commands/findings';
 import { RestoreQuestion } from '../app/commands/questions';
-import { RemoveIssuesList, removable } from '../app/commands/issuesList';
+import { RemoveIssuesList } from '../app/commands/issuesList';
+import { removableIssuesLists, visibleDeletedNotes } from '../app/deletedView';
 import { bare } from './issuesList';
-import { type Finding, type Question, type Tombstone } from '../domain/model';
+import { type Finding, type Question } from '../domain/model';
 import { RestoreVersion, type ShownNote, type DeletedCopy } from '../app/commands/keptVersions';
 
 /**
@@ -14,11 +15,9 @@ import { RestoreVersion, type ShownNote, type DeletedCopy } from '../app/command
  * copy of a record that two PCs deleted with different words: those rows name the PC each came from, and show the
  * response (or detail) that tells them apart, whole.
  */
-// a record whose delete another PC's edit had not seen is not listed as deleted while a person chooses between the two, nor are its
-// entries; nor is a deletion note of a record that stands again because another PC imported the same question
 const plural = (n: number, w: string) => `${n.toLocaleString('en-US')} ${w}${n === 1 ? '' : 's'}`;
-export const deletedOf = (s: { tombstones: Record<string, Tombstone>; conflicts?: Record<string, unknown>; questions?: Record<string, unknown>; findings?: Record<string, unknown> }, dealId: string, kind?: 'finding' | 'question') =>
-  Object.values(s.tombstones).filter((t) => t.dealId === dealId && (t.kind === 'question' || t.kind === 'finding') && (!kind || t.kind === kind) && !s.conflicts?.[(t as ShownNote).of ?? t.id] && !(t.kind === 'question' ? s.questions?.[t.id] : s.findings?.[t.id])).sort((a, b) => b.at.localeCompare(a.at));
+export const deletedOf = (...args: Parameters<typeof visibleDeletedNotes>) =>
+  visibleDeletedNotes(...args).sort((a, b) => b.at.localeCompare(a.at));
 
 /** One row: a deletion note or entry, or one of a note's other copies. */
 interface Row { key: string; t: ShownNote; copy?: DeletedCopy; snapshot: unknown; at: string; actor: string; from?: string }
@@ -28,17 +27,8 @@ const rowsOf = (notes: ShownNote[]): Row[] => notes.flatMap((t) => [{ key: t.id,
  * The issues lists on a deal that can still be removed: a list with findings of its own nobody has changed since,
  * or marks on findings its points joined. The Deleted list is where an import is taken back once its notice has gone.
  */
-type ListsState = { findings: Record<string, Finding>; questions: Record<string, Question>; threads?: Record<string, unknown[]> };
-// worked out again only when the findings, questions or conversations change: the Findings header asks on every render
-let listsMemo: { s: ListsState; dealId: string; out: ReturnType<typeof listsFor> } | null = null;
-export const listsOf = (s: ListsState, dealId: string) => {
-  const m = listsMemo; if (m && m.dealId === dealId && m.s.findings === s.findings && m.s.questions === s.questions && m.s.threads === s.threads) return m.out;
-  const out = listsFor(s, dealId); listsMemo = { s, dealId, out }; return out;
-};
-// a list is its file: a revised list saved under the same name is a row of its own, and says when it came in
-const listsFor = (s: ListsState, dealId: string) => {
-  const names = new Map<string, string>(); for (const f of Object.values(s.findings)) if (f.dealId === dealId) for (const m of f.onLists ?? []) if (!names.has(m.doc)) names.set(m.doc, m.list);
-  const out = [...names].map(([doc, list]) => ({ doc, list, ...removable(s, dealId, doc) })).filter((l) => l.made.length || l.joined.length)
+export const listsOf = (...args: Parameters<typeof removableIssuesLists>) => {
+  const out = [...removableIssuesLists(...args)]
     .sort((a, b) => a.list.localeCompare(b.list) || a.at.localeCompare(b.at) || a.doc.localeCompare(b.doc));
   // to the second when two of them came in within the same minute
   return out.map((l) => { const twins = out.filter((o) => o !== l && bare(o.list) === bare(l.list)); return { ...l, twin: twins.length > 0, when: !l.at ? '' : twins.some((o) => o.at && fmtDateTime(o.at) === fmtDateTime(l.at)) ? fmtDateTimeSeconds(l.at) : fmtDateTime(l.at) }; });
