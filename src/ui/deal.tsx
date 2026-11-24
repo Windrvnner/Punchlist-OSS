@@ -3,13 +3,14 @@ import { useAppState, useStore, nameDir, fmtDate } from './hooks';
 import { recoveredParts } from '../app/recovered';
 import { Icon } from './icons';
 import { localYmd, type Deal } from '../domain/model';
-import { dealQuestions, versionsWord, DEAL_PAGES, pageHash, type Landing, askAbout, deleteWaits } from '../app/state';
+import { versionsWord, DEAL_PAGES, pageHash, type Landing, askAbout, deleteWaits } from '../app/state';
 import { FindingsSection } from './findings';
 import { Composer } from './conversation';
 import { dealNameRoom, EditDeal, GROUP_LABEL } from '../app/commands/deals';
 import { MoreMenu, MenuItem } from './moreMenu';
 import { Pick } from './qa';
-import { resumeIndexing, liveFolders } from '../app/indexing';
+import { resumeIndexing } from '../app/indexing';
+import { findingCounts, indexingTotals, questionCounts } from '../app/dealCounts';
 import { EditField, ReadOnlyContext, readDeal } from './editField';
 import { ConflictView } from './conflict';
 import { runMemo } from '../app/memo';
@@ -62,10 +63,20 @@ export function useDealLock(d: Deal): string | null {
   return clash ? `${d.name} has ${versionsWord(clash.versions.length).toLowerCase()}. Choose one first` : inherited;
 }
 
+function indexingLabel(stalled: boolean, indexed: number) {
+  if (!stalled) return 'Indexing';
+  return indexed ? 'Indexing stopped' : 'Indexing not started';
+}
+
 export function PageTop({ deal: d, route, placeholder, noAsk = false }: { deal: Deal; route: Landing; placeholder: string; noAsk?: boolean }) {
   const store = useStore(); const s = useAppState();
-  const open = dealQuestions(s, d.id).filter((q) => q.status === 'open').length;
-  const openF = Object.values(s.findings).filter((f) => f.dealId === d.id && f.status === 'open').length;
+  const tabCounts = {
+    findings: findingCounts(s, d.id).open,
+    qa: questionCounts(s, d.id).open,
+    checklist: 0,
+    overview: 0,
+  };
+  const { folders, indexed } = indexingTotals(s, d);
   const [renaming, setRenaming] = useState(false);
   // the rename box closes back onto ⋯, where Rename was chosen, unless the focus has already gone elsewhere (a click
   // on ⋯ itself, which saves the name as the box loses the focus, leaves it in the menu that opens)
@@ -74,7 +85,9 @@ export function PageTop({ deal: d, route, placeholder, noAsk = false }: { deal: 
     const active = document.activeElement;
     if (!active || active === document.body || active.id === 'deal-name') document.getElementById('deal-more')?.focus();
   };
-  const facts = [d.target, d.side, d.stage === 'indexing' ? (s.ui.indexStalled.includes(d.id) ? (liveFolders(s, d).some((f) => f.indexed > 0) ? 'Indexing stopped' : 'Indexing not started') : 'Indexing') : '', d.milestone, d.folders.length ? `${d.folders.length} folder${d.folders.length > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ');
+  const indexing = d.stage === 'indexing' ? indexingLabel(s.ui.indexStalled.includes(d.id), indexed) : '';
+  const folderLabel = folders ? `${folders} folder${folders > 1 ? 's' : ''}` : '';
+  const facts = [d.target, d.side, indexing, d.milestone, folderLabel].filter(Boolean).join(' · ');
   // the deal's own details are in a clash: they are read-only until a version is chosen. Its questions and findings are not affected.
   const clash = s.conflicts[d.id];
   const locked = useDealLock(d);
@@ -86,7 +99,7 @@ export function PageTop({ deal: d, route, placeholder, noAsk = false }: { deal: 
       <div class="headrow">
         <DealName deal={d} renaming={renaming} open={() => setRenaming(true)} done={renamed} />
         <div class="dtabs">{DEAL_PAGES.map(([page, label]) => {
-          const count = page === 'findings' ? openF : page === 'qa' ? open : 0;
+          const count = tabCounts[page];
           return <a key={page} href={`#${pageHash(page, d.id)}`} class={route === page ? 'on' : ''}
             aria-current={route === page ? 'page' : undefined}>{label}{count
               ? <span>{num(count)}<i> open</i></span> : null}</a>;
@@ -158,7 +171,7 @@ function CheckAgain({ deal: d, signedOut, done }: { deal: Deal; signedOut: strin
   const s = useAppState();
   const ro = useContext(ReadOnlyContext);
   const check = s.checks[d.id];
-  const found = Object.values(s.findings).some((f) => f.dealId === d.id);
+  const found = findingCounts(s, d.id).total > 0;
   const first = d.stage === 'indexing' && !found ? 'Indexing' : null;
   const run = () => act(done, () => void store.checkEverything(d.id, false, false));
   return <MenuItem id="deal-check" off={!!check?.busy} why={ro ?? signedOut ?? first} onClick={run}>
@@ -243,7 +256,7 @@ function DealName({ deal: d, renaming, open, done }: { deal: Deal; renaming: boo
 export function Stalled({ deal: d }: { deal: Deal }) {
   const store = useStore(); const s = useAppState();
   if (d.stage !== 'indexing' || !s.ui.indexStalled.includes(d.id)) return null;
-  const fs = liveFolders(s, d); const got = fs.reduce((a, f) => a + f.indexed, 0); const of = fs.reduce((a, f) => a + f.files, 0);
+  const { indexed: got, files: of } = indexingTotals(s, d);
   // not running and not finished: the app tries again by itself. Which line is shown depends on why it is waiting
   const wait = s.ui.indexWaiting[d.id];
   // the line says where it stopped and why; what happens next is on the button's hover (no explainer text on screen)
@@ -269,7 +282,7 @@ export function DealPage({ dealId }: { dealId: string }) {
   const d = s.deals[dealId];
   useEffect(() => { void store.loadDeal(dealId); }, [dealId]);
   if (!d) return null;
-  const none = !Object.values(s.findings).some((f) => f.dealId === d.id);
+  const none = !findingCounts(s, d.id).total;
   const indexing = d.stage === 'indexing'; const stopped = indexing && s.ui.indexStalled.includes(d.id);
   return (
     <div class="home top wide">

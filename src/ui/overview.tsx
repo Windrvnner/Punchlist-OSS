@@ -1,12 +1,12 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useAppState, useStore } from './hooks';
-import { firmOf, type Layer } from '../domain/checklist';
+import type { Layer } from '../domain/checklist';
 import { Icon } from './icons';
 import { AI_LABEL } from '../control';
 import type { Deal } from '../domain/model';
-import { dealQuestions, askAbout, dealHash, dealTwin, type UiState } from '../app/state';
-import { checklistStandingCounts } from '../app/dealCounts';
-import { liveFolders } from '../app/indexing';
+import { askAbout, dealHash, dealTwin, type UiState } from '../app/state';
+import { checklistListCounts, checklistStandingCounts, findingCounts, questionCounts } from '../app/dealCounts';
+import { folderProgress, overviewGaps } from '../app/indexing';
 import { openLocate } from '../app/relink';
 import { PageTop, Stalled, NoRoom, INDEXING_LINE, INDEXING_TIP, useDealLock } from './deal';
 import { EditField, ReadOnlyContext, readDeal } from './editField';
@@ -27,12 +27,10 @@ export function OverviewPage({ dealId }: { dealId: string }) {
   const d = s.deals[dealId];
   useEffect(() => { void store.loadDeal(dealId); void store.refreshChecklist(dealId); }, [dealId]);   // the checklist's rows say what each gap needs
   if (!d) return null;
-  const none = !Object.values(s.findings).some((f) => f.dealId === d.id);
+  const none = !findingCounts(s, d.id).total;
   const indexing = d.stage === 'indexing'; const stopped = indexing && s.ui.indexStalled.includes(d.id);
   const waiting = none && indexing;                       // nothing found yet and the first pass has not run: there is nothing to sum up
-  // the gaps come from the backend as titles; once the checklist's own rows are in hand they are used instead, each with what it needs, so nothing is matched by wording
-  const rows = s.checklists[d.id];
-  const gaps: { key: string; title: string; need?: string }[] = waiting ? [] : Array.isArray(rows) ? rows.filter((r) => r.result === 'gap').map((r) => ({ key: r.id, title: r.text, need: r.need })) : (s.gaps[d.id] ?? []).map((g) => ({ key: g.title, title: g.title }));
+  const gaps = waiting ? [] : overviewGaps(s, d.id);
   return (
     <div class="home top wide">
       <PageTop deal={d} route="overview" placeholder={askAbout(d.name)} />
@@ -61,10 +59,10 @@ export function OverviewPage({ dealId }: { dealId: string }) {
  */
 function Details({ deal: d }: { deal: Deal }) {
   const store = useStore(); const locked = useDealLock(d);
-  const s = useAppState(); const lists = firmOf(s.firmList).lists;
+  const s = useAppState();
   // A layer the firm has lists for is a pick list of them; one it has none for stays free text.
   const field = (label: string, k: 'product' | 'sector' | 'technology') => {
-    const names = lists.filter((l) => l.layer === k).map((l) => ({ name: l.name, n: l.items.length }));
+    const names = checklistListCounts(s, k);
     return (<div><div class="k" id={`ovf-${k}-l`}>{label}</div>{names.length ? <PickField deal={d} field={k} label={label} names={names} />
       : <EditField keep={`${d.id}:${k}`} read={readDeal(d.id, k)} label={label} placeholder="Not set" className="edit inl" cap={{}} value={d[k]} rev={d.rev} maxLength={80} commit={(v, over) => store.dispatch(EditDeal, { dealId: d.id, [k]: v }, { quiet: true, over })} />}</div>);
   };
@@ -97,8 +95,8 @@ function PickField({ deal: d, field, label, names }: { deal: Deal; field: Layer 
  */
 function Standing({ deal: d }: { deal: Deal }) {
   const store = useStore(); const s = useAppState();
-  const fs = Object.values(s.findings).filter((f) => f.dealId === d.id); const open = fs.filter((f) => f.status === 'open'); const again = open.filter((f) => f.updated).length; const closed = fs.length - open.length;
-  const qs = dealQuestions(s, d.id); const q = (st: string) => qs.filter((x) => x.status === st).length;
+  const findings = findingCounts(s, d.id);
+  const questions = questionCounts(s, d.id);
   const c = useMemo(() => checklistStandingCounts(s, d.id), [
     d.id, s.progress[d.id], s.checklists[d.id], s.items, s.findings, s.conflicts, s.tombstones, s.dealLoad[d.id],
   ]);
@@ -106,21 +104,30 @@ function Standing({ deal: d }: { deal: Deal }) {
   const cf = (checklistFilter: UiState['checklistFilter']) => () => store.ui({ checklistFilter });
   const qf = (status: 'open' | 'answered' | 'closed') => () => store.ui({ qaFilter: { ...store.get().ui.qaFilter, status } });
   const lines: Line[] = [
-    { id: 'ov-findings', title: 'Findings', href: `#deal-${d.id}`, go: ff('open'), segs: [
-      { k: 'open', n: open.length, word: 'open', go: ff('open'), sub: [['may be out of date', again, ff('reassess')]] },
-      { k: 'done', n: closed, word: 'closed', go: ff('closed') }] },
+    {
+      id: 'ov-findings', title: 'Findings', href: `#deal-${d.id}`, go: ff('open'), total: findings.total,
+      segs: [
+        { k: 'open', n: findings.open, word: 'open', go: ff('open'),
+          sub: [['may be out of date', findings.reassess, ff('reassess')]] },
+        { k: 'done', n: findings.closed, word: 'closed', go: ff('closed') },
+      ],
+    },
     ...(c ? [checklistLine(d.id, c, cf)] : []),
-    { id: 'ov-qa', title: 'Q&A', href: `#qa-${d.id}`, go: qf('open'), segs: [
-      { k: 'open', n: q('open'), word: 'open', go: qf('open') },
-      { k: 'prog', n: q('answered'), word: 'answered', go: qf('answered') },
-      { k: 'done', n: q('closed'), word: 'closed', go: qf('closed') }] },
+    {
+      id: 'ov-qa', title: 'Q&A', href: `#qa-${d.id}`, go: qf('open'), total: questions.total,
+      segs: [
+        { k: 'open', n: questions.open, word: 'open', go: qf('open') },
+        { k: 'prog', n: questions.answered, word: 'answered', go: qf('answered') },
+        { k: 'done', n: questions.closed, word: 'closed', go: qf('closed') },
+      ],
+    },
   ];
   return <section class="ovstat" id="ov-standing">{lines.map((l) => <Leaders key={l.id} line={l} />)}</section>;
 }
 
 type Seg = { k: 'open' | 'prog' | 'done'; n: number; word: string; go?: () => void; sub?: [string, number, () => void][] };
 type Line = {
-  id: string; title: string; href: string; go: () => void; segs: Seg[]; total?: number; off?: [string, () => void];
+  id: string; title: string; href: string; go: () => void; segs: Seg[]; total: number; off?: [string, () => void];
 };
 
 function checklistLine(
@@ -193,7 +200,6 @@ const overlaps = (pl: Placed[], W: number) => pl.some((A, a) => A.lx < -1 || A.l
 /** One column: its heading and total, its bar, and each part's words on a leader line from the part. Placed once the words can be measured, and again when the column's width changes. */
 function Leaders({ line: l }: { line: Line }) {
   const shown = l.segs.filter((g) => g.n > 0);
-  const total = l.total ?? l.segs.reduce((n, g) => n + g.n, 0);
   const col = useRef<HTMLDivElement>(null); const [laid, setPl] = useState<{ at: Placed[]; top: number; bot: number; key: string } | null>(null);
   const key = shown.map((g) => `${g.k}${g.n}${g.word}${(g.sub ?? []).map(([w, n]) => w + n).join()}`).join('|');
   const pl = laid?.key === key ? laid : null;            // a placing made for other parts is not used while the new one is worked out
@@ -206,7 +212,7 @@ function Leaders({ line: l }: { line: Line }) {
       setPl(parts.length ? { at: placeAll(parts, c.width), top: bar.top - c.top, bot: bar.bottom - c.top, key } : null); };
     lay(); const ro = new ResizeObserver(lay); ro.observe(el); return () => ro.disconnect();
   }, [key]);
-  const totalLabel = `${num(total)} in all`;
+  const totalLabel = `${num(l.total)} in all`;
   return (
     <div class="pcol" id={l.id} ref={col}>
       <div class="phead">
