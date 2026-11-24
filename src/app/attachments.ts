@@ -9,6 +9,7 @@
 import type { Store } from './store';
 import type { Attachment } from './state';
 import { AttachDocumentToFinding } from './commands/findings';
+import { hasTexts, keptDrafts } from './keptText';
 import { control } from '../control';
 
 /** how many files can go with one message: as many documents as one model call is given */
@@ -41,6 +42,54 @@ export async function attachFiles(store: Store, ctx: { dealId: string; findingId
 export const addToSources = (store: Store, dealId: string, findingId: string, file: { doc: string; docId: string }) =>
   store.dispatch(AttachDocumentToFinding, { dealId, findingId, doc: file.doc, docId: file.docId }, { idempotencyKey: `src-${findingId}-${file.docId}` });
 export const removeAttachment = (store: Store, id: string) => store.ui((ui) => ({ attachments: ui.attachments.filter((a) => a.id !== id) }));
+
+type KeptAttachment = Required<Pick<Attachment, 'id' | 'name' | 'dealId' | 'conv' | 'doc' | 'docId'>> & {
+  findingId?: string;
+};
+const hasFields = hasTexts('id', 'name', 'dealId', 'conv', 'doc', 'docId');
+const isKept = (value: unknown): value is KeptAttachment =>
+  hasFields(value) && ['string', 'undefined'].includes(typeof (value as { findingId?: unknown }).findingId);
+let keptAttachments: Map<string, KeptAttachment> | undefined;
+
+/** Only finished uploads are kept. The file itself is already saved with the deal or conversation (#60). */
+function keptOf({ id, name, dealId, findingId, conv, state, doc, docId }: Attachment): KeptAttachment | null {
+  if (state !== 'done' || !doc || !docId) return null;
+  return { id, name, dealId, conv, doc, docId, ...(findingId ? { findingId } : {}) };
+}
+
+function keepOnly(kept: Map<string, KeptAttachment>, attachments: Attachment[]) {
+  const done = new Map<string, KeptAttachment>();
+  for (const attachment of attachments) {
+    const record = keptOf(attachment);
+    if (record) done.set(record.id, record);
+  }
+  for (const id of [...kept.keys()]) {
+    if (!done.has(id)) kept.delete(id);
+  }
+  // A file moved to a deal's recovered copy keeps its current conversation and document reference (#117).
+  for (const [id, record] of done) {
+    if (JSON.stringify(kept.get(id)) !== JSON.stringify(record)) kept.set(id, record);
+  }
+}
+
+/** Restores unsent files and keeps the saved references in step with the composer. */
+export function keepAttachments(store: Pick<Store, 'get' | 'ui' | 'subscribe'>): () => void {
+  const kept = keptAttachments ??= keptDrafts('composer-files', isKept);
+  const have = new Set(store.get().ui.attachments.map((attachment) => attachment.id));
+  const back = [...kept.values()]
+    .filter((attachment) => !have.has(attachment.id))
+    .map((attachment): Attachment => ({ ...attachment, state: 'done' }));
+  if (back.length) store.ui((ui) => ({ attachments: [...ui.attachments, ...back] }));
+  let seen: Attachment[] = [];
+  const sync = () => {
+    const now = store.get().ui.attachments;
+    if (now === seen) return;
+    seen = now;
+    keepOnly(kept, now);
+  };
+  sync();
+  return store.subscribe(sync);
+}
 
 /** each copy's deleted deal by the copy's id, while the app runs: a file attached as a copy is made is carried later */
 const copiedFrom = new WeakMap<Store, Map<string, string>>();
