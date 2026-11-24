@@ -1,0 +1,260 @@
+/* The deal screen mock-up: the tab bar, the task rows, and the fixes made last, which override earlier rules. */
+/* tabs share the bar's width; words give way to an ellipsis */
+.x-strip .trk.x-even .x-stab,.x-strip .trk.x-even .x-stab.on {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+  justify-content: center;
+  padding: 0 10px;
+  position: relative;
+}
+.x-strip .trk.x-even .x-stab:has(.x) {
+  padding: 0 26px;
+}
+.x-strip .trk.x-even .x-stab .l {
+  flex: 0 1 auto;
+}
+.x-strip .trk.x-even .x-stab.on .x {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
+}
+.pastpop .prow,.pastpop .prow+.prow {
+  box-shadow: none;
+}
+.pastpop .pp,.pastpop .pt {
+  mask-image: none;
+  -webkit-mask-image: none;
+  text-overflow: ellipsis;
+}
+.x-scroll.x-dim {
+  opacity: .35;
+  filter: blur(2px);
+}
+
+/* a hairline between unchosen tabs, none beside the chosen one, which sits raised */
+.x-strip .trk.x-even .x-stab.on::before,.x-strip .trk.x-even .x-stab.on+.x-stab::before {
+  content: none;
+}
+.x-strip .trk.x-even .x-stab.on {
+  box-shadow: inset 0 1px 0 var(--spec),0 0 0 1px var(--glass-edge),0 1px 2px rgba(0,0,0,.14),0 2px 8px rgba(0,0,0,.10);
+}
+:root[data-theme="light"] .x-strip .trk.x-even .x-stab.on {
+  background: #fff;
+}
+:root[data-theme="dark"] {
+  --accent: #c3c8ce;
+  --accent-ink: #141516;
+  --light-a: rgba(195,199,204,0.16);
+}
+
+/* a cut unchosen tab drops its icon before its word */
+.x-strip .trk.x-even .x-stab.tight:not(.on) .ic {
+  display: none;
+}
+
+/* a waiting draft is marked with the app's small pill, not a second label */
+.x-badge {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  vertical-align: 1px;
+}
+
+/* a conversation starts below the top fade, so its first message is never faded */
+.x-scroll .msgs {
+  padding-top: 64px;
+}
+
+/* tasks are drawn like a desktop copy or download list */
+.x-tile svg {
+  display: block;
+}
+.x-pbar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+.x-circ {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb,var(--ink) 38%,transparent);
+  color: var(--surface);
+  cursor: pointer;
+}
+.x-circ svg {
+  display: block;
+}
+.x-prow .tx {
+  min-width: 0;
+}
+.x-prow .nm {
+  display: block;
+  color: var(--ink);
+  font-weight: 500;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.x-prow .tr {
+  display: flex;
+  align-items: center;
+}
+.x-pcard .k > span {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+
+/* compact task rows: name and count on one line, the bar under them at one width for every item */
+.x-tile {
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb,var(--ink) 9%,transparent);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink-2);
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+.x-prow {
+  position: relative;
+  display: grid;
+  align-items: center;
+  font-size: 13px;
+  grid-template-columns: 24px minmax(0,1fr) 18px;
+  column-gap: 10px;
+  padding: 8px 12px 8px 10px;
+}
+.x-prow:has(.btn) {
+  grid-template-columns: 24px minmax(0,1fr) auto;
+}
+.x-prow + .x-prow::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 1px;
+  background: var(--line);
+  left: 44px;
+}
+.x-prow .top,.x-pcard .top {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  line-height: 18px;
+}
+.x-prow .top .nm,.x-pcard .top .nm {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink);
+  font-weight: 500;
+}
+.x-prow .top .ct,.x-pcard .top .ct {
+  flex: none;
+  margin-left: auto;
+  color: var(--ink-3);
+  font-size: 12px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.x-pbar {
+  display: block;
+  border-radius: 2px;
+  background: color-mix(in srgb,var(--ink) 14%,transparent);
+  overflow: hidden;
+  height: 3px;
+  margin: 5px 0 2px;
+}
+.x-pcard {
+  align-items: center;
+  width: min(420px,100%);
+  padding: 8px 10px;
+  gap: 10px;
+}
+.x-pcard .k {
+  gap: 0;
+  display: block;
+}
+.x-strip .trk.x-even {
+  background: color-mix(in srgb,var(--ink) 8%,transparent);
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0,1fr);
+}
+.x-strip .trk.x-even .x-stab {
+  box-sizing: border-box;
+}
+.x-strip .trk.x-even .x-stab+.x-stab::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 1px;
+  transform: translateY(-50%);
+  height: 16px;
+  background: color-mix(in srgb,var(--ink) 30%,transparent);
+}
+.x-none {
+  color: var(--ink-3);
+}
+.x-lrow small .x-state {
+  display: block;
+  margin-top: 2px;
+}
+.x-q {
+  display: grid;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 13px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  grid-template-columns: 44px minmax(0,1fr) auto;
+}
+.x-docstage {
+  padding-bottom: 16px;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  padding: 18px 18px 0;
+  display: flex;
+  justify-content: center;
+  -webkit-mask-image: linear-gradient(to bottom,#000 calc(100% - 124px),transparent calc(100% - 78px));
+  mask-image: linear-gradient(to bottom,#000 calc(100% - 124px),transparent calc(100% - 78px));
+}
+.x-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 0 0 10px;
+  height: 52px;
+}
+.notices {
+  top: 66px;
+}
+.notices .toast {
+  background: var(--menu-solid);
+}
+.x-statepick {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.x-statepick .chev {
+  display: inline-grid;
+  opacity: .7;
+}
