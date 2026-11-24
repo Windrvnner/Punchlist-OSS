@@ -23,6 +23,25 @@ function pc(root: string, o: { folders?: () => string[]; settleMs?: number; id?:
 const folder = (p: string) => ({ path: p, label: path.basename(p), files: 0, size: '', indexed: 0, reviewed: 0 });
 const val = <T,>(r: { ok: boolean; value?: T }) => { expect(r.ok).toBe(true); return r.value as T; };
 const names = (docs: any) => (docs.records('d1') as { rel: string }[]).map((r) => r.rel).sort();
+
+/** Twenty facilities, five report types, and five years of quarterly reports. */
+function putQuarterlyReports(room: string) {
+  const reports = [
+    'Capital Expenditure', 'Liquidity Forecast', 'Maintenance Reserve', 'Insurance Claims', 'Debt Service',
+  ];
+  for (let year = 2022; year <= 2026; year++) {
+    for (let quarter = 1; quarter <= 4; quarter++) {
+      for (let facility = 1; facility <= 20; facility++) {
+        const period = `Q${quarter} ${year}`;
+        for (const report of reports) {
+          const rel = `Finance/Facility ${facility}/${report} - ${period}.csv`;
+          const row = `${report},Facility ${facility},${period},${facility * 12000}\n`;
+          put(room, rel, `Report,Facility,Period,Amount\n${row}`);
+        }
+      }
+    }
+  }
+}
 /** the folders `set` names may not be listed (EACCES), as for a person the data room's permissions keep out; returns the undo */
 function bar(set: () => string[]) {
   const realSync = fs.readdirSync, realAsync = fs.promises.readdir; const err = () => Object.assign(new Error('EACCES'), { code: 'EACCES' });
@@ -39,6 +58,68 @@ function opened(vdr: string) {
 }
 
 describe('looking at an indexed deal’s folders again', () => {
+  it('keeps both copies in use when only one changes after 31 days of unchanged looks (#33)', async () => {
+    const root = tmp();
+    const room = path.join(root, 'vdr');
+    const copy = path.join(root, 'copy');
+    const dayMs = 86_400_000;
+    const clockDifference = 20 * 60_000;
+    const rel = 'Finance/Facility 1/Liquidity Forecast - Q1 2022.csv';
+    putQuarterlyReports(room);
+    fs.cpSync(room, copy, { recursive: true });
+    const office = pc(root, { id: 'office' });
+    const laptop = pc(root, { id: 'laptop' });
+    const versions = (computer: ReturnType<typeof pc>) =>
+      computer.docs.records('d1').filter((record) => record.rel === rel).map((record) => record.docId);
+    const officeLines = () => (office.shared.read('docs-office-d1.jsonl') ?? '').trimEnd().split('\n').length;
+    try {
+      val(await office.docs.index('d1', [folder(room)]));
+      await office.docs.settled('d1');
+      expect(office.docs.records('d1')).toHaveLength(2000);
+      const [original] = versions(office);
+      skew = clockDifference;
+      val(await laptop.docs.mapFolder('d1', room, copy, true));
+      val(await laptop.docs.index('d1', [folder(room)]));
+      await laptop.docs.settled('d1');
+      const indexed = officeLines();
+      for (let day = 1; day <= 31; day++) {
+        skew = day * dayMs;
+        expect(await office.docs.freshen!('d1')).toEqual({ ok: true, value: 'same' });
+      }
+      expect(val(await office.docs.freshen!('d1'))).toBe('same');
+      const afterLooks = officeLines();
+
+      skew += clockDifference;
+      put(copy, rel, 'Report,Period,Amount\nRevised liquidity forecast,Q1 2022,125000\n');
+      expect(val(await laptop.docs.freshen!('d1'))).toBe('running');
+      await laptop.docs.settled('d1');
+      expect(versions(office)).toContain(original);
+      expect(versions(laptop)).toEqual(versions(office));
+      expect(versions(office)).toHaveLength(2);
+      expect(afterLooks).toBe(indexed + 31);
+      skew -= clockDifference;
+      expect(val(await office.docs.freshen!('d1'))).toBe('same');
+      expect(versions(office)).toContain(original);
+      expect(officeLines()).toBe(afterLooks);
+
+      // The office PC stops looking. A later replacement can clear its old sighting under the idle rule.
+      skew = 62 * dayMs + clockDifference;
+      put(copy, rel, 'Report,Period,Amount\nFinal liquidity forecast with reserve,Q1 2022,140000\n');
+      expect(val(await laptop.docs.freshen!('d1'))).toBe('running');
+      await laptop.docs.settled('d1');
+      expect(versions(laptop)).toHaveLength(1);
+      expect(versions(laptop)).not.toContain(original);
+
+      // Restarting the idle PC with the stale, unchanged copy does not put the retired version back in the deal.
+      skew -= clockDifference;
+      const reopened = pc(root, { id: 'office' });
+      expect(val(await reopened.docs.freshen!('d1'))).toBe('same');
+      expect(versions(reopened)).toEqual(versions(laptop));
+    } finally {
+      skew = 0;
+    }
+  }, 120000);
+
   it('at deal scale: an unchanged data room of 3,000 files opens nothing; one added, one changed and one removed are all picked up, and only those are read', async () => {
     const root = tmp(); const vdr = path.join(root, 'vdr');
     for (let i = 0; i < 3000; i++) put(vdr, `${String(i % 30).padStart(2, '0')} Section/Doc ${i}.csv`, csv(i));

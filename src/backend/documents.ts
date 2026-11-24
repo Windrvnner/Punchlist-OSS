@@ -732,11 +732,18 @@ export function nodeDocuments(o: DocumentsOptions) {
       const mine = closed.map((d) => path.relative(at, d).split(path.sep).join('/')); const had = both(dealId).shuts.get(p)?.get(o.installId);
       const opened = openedHere(dealId, p, at, mine); const vouched = had?.opened ?? [];
       if (f.finished && printed[dealId]?.[p] === listingPrint(files) && sameList([...mine].sort(), [...(had?.shut ?? [])].sort()) && sameList(opened, [...vouched].sort())) {
-        // Nothing to read. A PC that speaks for folders another may not open, or that may not open some itself, says it read
-        // the folder at most once a day, as a run does, so that its word does not lapse after timings.folderIdle while
-        // nothing changes. A PC no longer used does not look, so it says nothing, and its word lapses.
+        // The listing still matches this PC's last completed read. Confirm it once a day so the PC stays in use (#33).
+        // This line does not assert document sightings again, including sightings cleared while the PC was idle.
         const last = both(dealId).reads.get(p)?.get(o.installId) ?? '';
-        if ((opened.length || mine.length) && last < new Date(Date.parse(clock()) - DAY).toISOString()) say(dealId, { docId: '', read: p, ...(mine.length ? { shut: mine } : {}), opened });
+        const yesterday = new Date(Date.parse(clock()) - DAY).toISOString();
+        if (last < yesterday) {
+          say(dealId, {
+            docId: '',
+            read: p,
+            ...(mine.length ? { shut: mine } : {}),
+            ...(opened.length ? { opened } : {}),
+          });
+        }
         continue;
       }
       // something changed: it is read only once the folder has stopped changing, so a file still being copied in is left for the next look
