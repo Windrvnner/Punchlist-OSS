@@ -69,7 +69,9 @@ There is no optimistic state: the screen never shows a change that the repositor
 - **Undo** runs the stored inverse command as a normal operation, and is refused if the records have changed since.
 - Startup moves through stages (`session`, `deals`, `journal`, `ready`), and recovery re-enters at the stage that failed. Operations that a crash left pending are offered with **Retry** and **Discard**. **Retry** waits for other saves, loads its target records, and checks their original revisions. It then reuses the interrupted entry with its current journal revision until the result is durable.
 - A save that couldn't be written stays pending in the journal and is offered again, including after a restart. The app never re-runs a person's action by itself, with one exception: once the app is connected again, it saves a field's own typed text.
-- `EditField` (`src/ui/editField.tsx`) remembers the value that its text was typed over. If a change from elsewhere arrives in the meantime, the field shows "Changed elsewhere" with **Keep Mine** and **Take Theirs**, instead of writing over that change.
+- `FieldSave` (`src/app/fieldSave.ts`) remembers the value that a field's text was typed over, sends saves, and keeps
+  the draft through refusals and changes from elsewhere. `EditField` shows **Keep Mine** and **Take Theirs** when
+  the app needs the person to choose.
 
 ## The control file
 

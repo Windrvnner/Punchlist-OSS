@@ -6,7 +6,8 @@
 import type { ComponentChildren } from 'preact';
 import { useAppState, useStore } from './hooks';
 import { DropZone } from './fileDrop';
-import { EditField, ReadOnlyContext, readFolderLabel } from './editField';
+import { EditField, ReadOnlyContext } from './editField';
+import { readFolderLabel } from '../app/fieldDrafts';
 import { FolderCount, FolderRow, NameTip, RemoveX } from './folderRow';
 import { plural } from './counts';
 import { EditDeal, foldersWithRemoved, overlap, FOLDER_LABEL_MAX } from '../app/commands/deals';
