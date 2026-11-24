@@ -3,12 +3,18 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const script = path.resolve('scripts/check-pane-of-glass.mjs');
 const baselineFile = 'scripts/pane-of-glass-baseline.json';
 const directories: string[] = [];
 type Baseline = Record<string, Partial<Record<'import' | 'storage' | 'services' | 'repo', number>>>;
+
+function git(dir: string, ...args: string[]) {
+  const identity = ['-c', 'user.name=test', '-c', 'user.email=test@example.com'];
+  return execFileSync('git', [...identity, ...args], { cwd: dir, encoding: 'utf8' });
+}
 
 function check(cwd: string, ...args: string[]) {
   return spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8' });
@@ -132,16 +138,42 @@ describe('the remaining UI exceptions', () => {
   it.each([true, false])('rejects a manual increase when main has a baseline (%s)', (hasBaseline) => {
     const repo = fixture({ [file]: { services: 1 } });
     repo.write(file, 'store.services.ai');
-    const git = (...args: string[]) => execFileSync('git', args, { cwd: repo.dir });
-    git('init', '-q', '-b', 'main');
-    git('add', 'src');
-    if (hasBaseline) git('add', baselineFile);
-    git('-c', 'user.name=test', '-c', 'user.email=test@example.com', 'commit', '-qm', 'Record existing UI');
+    git(repo.dir, 'init', '-q', '-b', 'main');
+    git(repo.dir, 'add', 'src');
+    if (hasBaseline) git(repo.dir, 'add', baselineFile);
+    git(repo.dir, 'commit', '-qm', 'Record existing UI');
     repo.write(file, 'store.services.ai\nstore.services.ids');
     repo.setBaseline({ [file]: { services: 2 } });
     const result = repo.run();
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(`${file} services (lines 1, 2): the baseline cannot rise above main's count of 1`);
+    expect(result.stderr).toContain(`${file} services (lines 1, 2): the baseline cannot rise`);
+    expect(result.stderr).toContain('above the committed count of 1');
+  });
+
+  it('compares local edits in a shallow single-branch clone with its committed allowance', () => {
+    const repo = fixture({ [file]: { services: 1 } });
+    repo.write(file, 'store.services.ai');
+    git(repo.dir, 'init', '-q', '-b', 'topic');
+    git(repo.dir, 'add', 'src', baselineFile);
+    git(repo.dir, 'commit', '-qm', 'Record existing UI');
+    const clone = path.join(repo.dir, 'shallow');
+    git(repo.dir, 'clone', '-q', '--depth=1', '--single-branch', pathToFileURL(repo.dir).href, clone);
+    expect(git(clone, 'rev-parse', '--is-shallow-repository').trim()).toBe('true');
+    expect(check(clone).status).toBe(0);
+    writeFileSync(path.join(clone, file), 'store.services.ai\nstore.services.ids');
+    writeFileSync(path.join(clone, baselineFile), JSON.stringify({ [file]: { services: 2 } }));
+    const result = check(clone);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('the baseline cannot rise above the committed count of 1');
+  });
+
+  it('names the missing reference when a repository has no committed baseline or main', () => {
+    const repo = fixture();
+    repo.write(file, 'export const title = "Checklist"');
+    git(repo.dir, 'init', '-q', '-b', 'topic');
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Fetch origin/main');
   });
 
   it('passes the committed baseline on the repository sources', () => {

@@ -31,36 +31,47 @@ function countsFor(found) {
   return counts;
 }
 
+function committedCounts(ref) {
+  if (!git('ls-tree', '--name-only', ref, '--', baselinePath).trim()) return null;
+  return JSON.parse(git('show', `${ref}:${baselinePath}`));
+}
+
 // Comparing the proposed baseline with main catches an edit that raises both the count and its allowance.
-function mainBaseline() {
+function committedBaseline() {
   for (const ref of ['origin/main', 'main']) {
     const base = spawnSync('git', ['merge-base', 'HEAD', ref], { encoding: 'utf8' });
     if (base.status !== 0) continue;
     const at = base.stdout.trim();
-    const contents = (file) => git('show', `${at}:${file}`);
-    if (git('ls-tree', '--name-only', at, '--', baselinePath).trim()) return JSON.parse(contents(baselinePath));
+    const counts = committedCounts(at);
+    if (counts) return counts;
     // On the branch introducing the check, main's source is the record of its existing exceptions.
     const files = git('ls-tree', '-r', '-z', '--name-only', at, '--', 'src/ui').split('\0');
-    return countsFor(scan(files, contents));
+    return countsFor(scan(files, (file) => git('show', `${at}:${file}`)));
   }
-  return null;
+  // A shallow single-branch checkout may have only HEAD. Local edits still cannot raise its committed baseline.
+  if (spawnSync('git', ['rev-parse', '--show-toplevel']).status !== 0) return null;
+  if (spawnSync('git', ['rev-parse', '--verify', 'HEAD']).status === 0) {
+    const counts = committedCounts('HEAD');
+    if (counts) return counts;
+  }
+  throw new Error('Cannot establish the committed UI baseline. Fetch origin/main and its history before checking.');
 }
 
-function countProblem(count, entry, mainLimit) {
+function countProblem(count, entry, limit) {
   if (entry !== undefined && (!Number.isSafeInteger(entry) || entry <= 0)) return 'invalid baseline entry';
   const allowed = entry ?? 0;
-  if (mainLimit !== null && allowed > mainLimit) return `the baseline cannot rise above main's count of ${mainLimit}`;
+  if (limit !== null && allowed > limit) return `the baseline cannot rise above the committed count of ${limit}`;
   if (count > allowed) return `${count} exceeds the baseline of ${allowed}`;
   if (count < allowed && !lower) return `lower the baseline in this pull request with ${lowerCommand}`;
   return null;
 }
 
-function compareFile(file, lines, baseline, main) {
+function compareFile(file, lines, baseline, committed) {
   const problems = [];
   for (const kind of new Set([...Object.keys(lines), ...Object.keys(baseline)])) {
     const matches = lines[kind] ?? [];
-    const mainLimit = main ? (main[kind] ?? 0) : null;
-    const problem = countProblem(matches.length, baseline[kind], mainLimit);
+    const limit = committed ? (committed[kind] ?? 0) : null;
+    const problem = countProblem(matches.length, baseline[kind], limit);
     if (problem) {
       const where = matches.length ? `lines ${matches.join(', ')}` : 'no matching lines';
       problems.push(`${file} ${kind} (${where}): ${problem}`);
@@ -74,10 +85,11 @@ const files = readdirSync('src/ui', { recursive: true, withFileTypes: true })
   .map((entry) => `${entry.parentPath.replaceAll('\\', '/')}/${entry.name}`);
 const found = scan(files, read);
 const baseline = JSON.parse(read(baselinePath));
-const main = mainBaseline();
+const committed = committedBaseline();
 const problems = [];
 for (const file of new Set([...Object.keys(found), ...Object.keys(baseline)])) {
-  problems.push(...compareFile(file, found[file] ?? {}, baseline[file] ?? {}, main ? (main[file] ?? {}) : null));
+  const ceiling = committed ? (committed[file] ?? {}) : null;
+  problems.push(...compareFile(file, found[file] ?? {}, baseline[file] ?? {}, ceiling));
 }
 if (problems.length) {
   console.error(problems.join('\n'));
