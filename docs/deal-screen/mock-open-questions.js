@@ -119,17 +119,18 @@ const WATERFALL_TASK = 'Intercreditor waterfall';
 const TURN_WATERFALL_ASK = '<div class="me">Does the intercreditor waterfall pay the O&amp;M reserve before senior debt?</div>';
 
 const TURN_WATERFALL_NEEDS_INPUT = `${TURN_WATERFALL_ASK}
-<div class="ai"><p>I’m checking that as a task. It’s in Tasks, and I’ll answer here when it’s done.</p>
+<div class="ai"><p>This question runs as a task in Tasks. Its answer will appear here when it finishes.</p>
 ${taskCard('logedit', WATERFALL_TASK, 'Needs input')}</div>`;
 
-const REVIEW_BUTTON = (label) => `<button class="btn sm">${label}</button>`;
+// Needs Input's buttons share one width, so the status texts line up in one column
+const REVIEW_BUTTON = (label) => `<button class="btn sm x-act">${label}</button>`;
 
 // Needs Input: drafts to review, a task's question to the person, and items Diligence left out
 const NEEDS_INPUT_ROWS = [
   taskRow('sheet', 'Draft responses for open questions', '40 ready', { end: REVIEW_BUTTON('Review') }),
-  taskRow('logedit', WATERFALL_TASK, 'Pick a draft',
+  taskRow('logedit', WATERFALL_TASK, 'Draft choice',
     { end: REVIEW_BUTTON('Answer'), hoverText: 'Which draft is current: draft 5 (Nov 3) or draft 6 (Nov 17)?' }),
-  taskRow('cklist', 'Diligence', '12 items not checked', { end: REVIEW_BUTTON('Check Them') }),
+  taskRow('cklist', 'Diligence', '12 items not checked', { end: REVIEW_BUTTON('Run') }),
 ];
 
 const RUNNING_ROWS = [

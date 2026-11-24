@@ -75,7 +75,7 @@ ${taskCard('cklist', 'Diligence', '1,204 of 2,148', 0.56)}</div>`;
 const ASK_BOARD_RESOLUTIONS = '<div class="me">Are the board resolutions for the financing current?</div>';
 
 const TURN_BOARD_TASK_RUNNING = `${ASK_BOARD_RESOLUTIONS}
-<div class="ai"><p>I’m checking that as a task. It’s in Tasks, and I’ll answer here when it’s done.</p>
+<div class="ai"><p>This question runs as a task in Tasks. Its answer will appear here when it finishes.</p>
 ${taskCard('logedit', 'Board resolutions for the financing', 'Step 3 of 5', 0.5,
     'Reading Credit agreement (draft 6).pdf')}</div>`;
 

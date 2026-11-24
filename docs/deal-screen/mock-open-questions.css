@@ -109,3 +109,9 @@
     display: inline-flex;
   }
 }
+
+/* Needs Input's buttons share one width, so the status texts before them end on one line */
+.x-act {
+  width: 72px;
+  justify-content: center;
+}
