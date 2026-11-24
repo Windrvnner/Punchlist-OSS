@@ -1,7 +1,7 @@
 // Match syntax, so examples in comments, strings, regexes and JSX text never count as UI dependencies.
 import { posix } from 'node:path';
 import { parseSync, Visitor } from 'vite';
-import { constInitializers } from './pane-of-glass-constants.mjs';
+import { localConstLookup } from './pane-of-glass-constants.mjs';
 
 const storageNames = new Set(['localStorage', 'sessionStorage', 'indexedDB']);
 const layerPath = /^(?:backend|adapters|desktop|shell)(?:\/|$)/;
@@ -63,16 +63,16 @@ function unwrapped(node) {
 }
 
 // Only a direct identifier argument follows const aliases. Keep the diagnostic at the import site.
-function dynamicImportSource(program) {
-  let initializers;
+function dynamicImportSource(program, file, source) {
+  let lookup;
   return (argument) => {
     let node = unwrapped(argument);
     if (node.type !== 'Identifier') return argument;
-    initializers ??= constInitializers(program);
+    lookup ??= localConstLookup(program, file, source);
     const seen = new Set();
     while (node?.type === 'Identifier' && !seen.has(node)) {
       seen.add(node);
-      node = unwrapped(initializers.get(node));
+      node = unwrapped(lookup(node));
     }
     return literalText(node) === null ? argument : node;
   };
@@ -85,7 +85,7 @@ export function matchesIn(file, source) {
   function record(kind, node) {
     (offsets[kind] ??= new Set()).add(node.start);
   }
-  const importSource = dynamicImportSource(parsed.program);
+  const importSource = dynamicImportSource(parsed.program, file, source);
   function checkModule(node, source = node) {
     if (stringValues(source).some((name) => forbiddenModule(file, name))) record('import', node);
   }
