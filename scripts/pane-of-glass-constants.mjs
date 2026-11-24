@@ -18,11 +18,15 @@ function fixedDeclaration(variable) {
   return definitions[0].node.type === 'VariableDeclarator' ? definitions[0] : null;
 }
 
+function isUndefined(value) {
+  return value === missing || (value?.type === 'UnaryExpression' && value.operator === 'void');
+}
+
 // A fixed test selects only the branch JavaScript would use. A runtime test keeps both possible paths.
 function selectedBranch(node, resolve) {
   const test = resolve(node.test ?? node.left);
   const value = definitelyObject(test) ? true : literalValue(test);
-  const absent = test === missing || (test?.type === 'UnaryExpression' && test.operator === 'void');
+  const absent = isUndefined(test);
   if (value === undefined && !absent) return node;
   if (node.type === 'ConditionalExpression') return value ? node.consequent : node.alternate;
   if (node.operator === '??') return value == null ? node.right : node.left;
@@ -50,7 +54,7 @@ export function localBindings(program) {
   for (const scope of scopes) {
     for (const ref of scope.references) bindings.set(ref.identifier, ref);
   }
-  const stableContainer = containerReads(program, (ref) => bindings.get(ref)?.from, containerAliases(scopes));
+  const containerAtCapture = containerReads(program, (ref) => bindings.get(ref)?.from, containerAliases(scopes));
   function resolveVariable(reference, seen, capture) {
     const variable = bindings.get(reference)?.resolved;
     if (reference.name === 'undefined' && !variable?.defs.length) return missing;
@@ -63,16 +67,16 @@ export function localBindings(program) {
     // A direct alias keeps the key selected by its eventual destructuring or member read.
     const alias = node.id === name && initial?.type === 'Identifier';
     const value = alias ? resolve(initial, visited, capture) : next(initial);
-    if (!capture.truthOnly && (value?.type === 'ObjectExpression' || value?.type === 'ArrayExpression')) {
-      if (!stableContainer(variable, reference, value, capture, next)) return null;
-    }
-    return value;
+    if (capture.truthOnly) return value;
+    const literal = value?.type === 'ObjectExpression' || value?.type === 'ArrayExpression';
+    return literal ? containerAtCapture(variable, reference, value, capture, next) : value;
   }
 
   function resolve(expression, seen = new Set(), capture = { use: unwrapped(expression) }) {
     const reference = unwrapped(expression);
     if (reference?.type === 'ConditionalExpression' || reference?.type === 'LogicalExpression') {
-      const branch = selectedBranch(reference, (part) => resolve(part, seen, { use: unwrapped(part), truthOnly: true }));
+      const condition = (part) => resolve(part, seen, { use: unwrapped(part), truthOnly: true });
+      const branch = selectedBranch(reference, condition);
       return branch === reference ? reference : resolve(branch, seen);
     }
     if (reference?.type === 'MemberExpression') {

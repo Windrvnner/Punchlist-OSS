@@ -34,6 +34,10 @@ export function arraySlots(array, resolve, limit, seen = new Set()) {
   const visited = new Set(seen).add(array);
   if (array.original) return resizedSlots(array, resolve, limit, visited);
   if (array.slots) return slice(array.slots, 0, limit);
+  return literalSlots(array, resolve, limit, visited);
+}
+
+function literalSlots(array, resolve, limit, visited) {
   const entries = new Map();
   let length = 0;
   for (const part of array.elements) {
