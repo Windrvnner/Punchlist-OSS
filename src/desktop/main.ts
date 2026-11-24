@@ -26,6 +26,7 @@ import { serve, placesFor, machineIdentity, inTouchWith, findSoffice, inOneDrive
 import { envKey, modelService } from './model';
 import { aiSignIn } from './signin';
 import { providerSignIn } from './providerSignIn';
+import { writePickedFile } from './pickedFile';
 import { isCloudProvider, assertControl, control } from '../control';
 import type { WATCHED } from '../shell/bridge';
 
@@ -203,13 +204,9 @@ function files() {
       const id = randomUUID(); picked.set(id, k ? r.filePath : `${r.filePath}.${kinds[0].ext}`);
       return ok({ id, ext: (k ?? kinds[0]).ext });
     },
-    /** writes to a place the person picked, and only once: the window can't name a path of its own */
+    /** writes successfully only once to a place the person picked: the window can't name a path of its own */
     async writePicked(id: string, bytes: Uint8Array) {
-      const file = picked.get(id); picked.delete(id);
-      if (!file) return fail({ kind: 'failed', message: 'Couldn’t save the file' });
-      try { fs.writeFileSync(file, bytes); } catch (e) { return fail({ kind: 'failed', message: `Couldn’t save the file: ${(e as Error).message}` }); }
-      written.set(id, file); if (written.size > 20) written.delete(written.keys().next().value!);
-      return ok('saved' as const);
+      return writePickedFile(picked, written, id, bytes);
     },
     /** opens a file written with writePicked, in the PC's own app for its kind (Word, a PDF reader) */
     async openPicked(id: string) {
