@@ -414,8 +414,8 @@ page pages www http https com pdf doc docx xls xlsx`.split(/\s+/), "Filler words
       'Words after which a number names a part, not a period (Parcel 12, WTG 07, Phase 2): such documents are never folded into a series (lower case).', 1, 200),
   },
   colors: {
-    neutral: color('#606469', "The cool slate gray every background, text, glass, line, shadow and document page is worked out from, in both themes, the light theme's graphite accent, and the gray for done. Only its hue and strength are used: each theme sets how light each part is."),
-    accent: color('#d9c5a3', 'The accent: the main action, what is chosen, in progress, focus, links and AI marks, and the highlight on a document page, in the dark theme (sand); the light theme\'s accent is a graphite worked out from the neutral, and its document highlight from this color.'),
+    neutral: color('#606469', "The cool slate gray every background, text, glass, line, shadow and document page is worked out from, in both themes, the accent (light gray in the dark theme, graphite in the light one), and the gray for done. Only its hue and strength are used: each theme sets how light each part is."),
+    accent: color('#d9c5a3', 'The highlight and mark on a document page, in both themes. The accent itself (the main action, what is chosen, in progress, focus, links and AI marks) is a gray worked out from the neutral.'),
     red: color('#a8392a', 'Needs you: open findings, flagged items, failures and warnings, worked out for each theme from this one color.'),
   },
   desktop: {

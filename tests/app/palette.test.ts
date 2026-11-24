@@ -40,9 +40,9 @@ describe('the colors worked out from the base colors', () => {
     const teal = '#1d7f86', warm = '#7a7466';
     for (const theme of ['dark', 'light'] as const) {
       const t = themeColors(theme, bases({ accent: teal, neutral: warm }));
-      // the light theme's accent is a graphite of the neutral; its document highlight still takes the accent
-      for (const name of [...(theme === 'dark' ? ['accent'] as const : []), 'paper-hl', 'paper-mark'] as const) expect(near(hueOf(t[name]), oklch(teal)[2]), `${theme} ${name}`).toBe(true);
-      for (const name of ['surface', 'ink', 'ink-2', 'ink-3', 'menu-solid', 'paper', 'th-bg', 'row-alt', ...(theme === 'light' ? ['accent'] as const : [])] as const) expect(near(hueOf(t[name]), oklch(warm)[2], 15), `${theme} ${name}`).toBe(true);
+      // the accent is a gray of the neutral in both themes; the document highlight and mark still take colors.accent
+      for (const name of ['paper-hl', 'paper-mark'] as const) expect(near(hueOf(t[name]), oklch(teal)[2]), `${theme} ${name}`).toBe(true);
+      for (const name of ['surface', 'ink', 'ink-2', 'ink-3', 'menu-solid', 'paper', 'th-bg', 'row-alt', 'accent'] as const) expect(near(hueOf(t[name]), oklch(warm)[2], 15), `${theme} ${name}`).toBe(true);
     }
   });
 
