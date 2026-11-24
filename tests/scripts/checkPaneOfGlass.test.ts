@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { runtimeModuleCases, runtimeMutationSource } from './paneOfGlassRuntimeFixtures';
 
 const script = path.resolve('scripts/check-pane-of-glass.mjs');
 const baselineFile = 'scripts/pane-of-glass-baseline.json';
@@ -333,35 +334,7 @@ describe('UI dependency checks', () => {
     expect(repo.run().stderr).toContain(`${file} import (lines 3, 5): 2 exceeds`);
   });
 
-  it.each([
-    ['an absent optional caption', [
-      "const manifest: { target: string; caption?: string } = { target: 'CHOSEN' }",
-      "export const caption = manifest.caption ?? 'Checklist'",
-      'const { target } = manifest',
-    ]],
-    ['sibling reads through distinct local aliases', [
-      "const manifest = { target: 'CHOSEN', caption: 'Checklist' }",
-      'const heading = manifest',
-      'const pages = manifest',
-      'const reader = pages',
-      'export const title = heading.caption',
-      'const { target } = reader',
-    ]],
-    ['a capture beside a runtime caption', [
-      "const caption = () => 'Checklist'",
-      "const manifest = { target: 'CHOSEN', caption: caption() }",
-      'const { target, caption: title } = manifest',
-      "manifest.target = './checklist.mjs'",
-    ]],
-    ['a numeric object key on an array', [
-      "const modules = ['CHOSEN'] as const",
-      'const { 0: target } = modules',
-    ]],
-    ['an equality selecting a fixed branch', [
-      "const mode = 'checklist'",
-      "const target = mode === 'checklist' ? 'CHOSEN' : 'OTHER'",
-    ]],
-  ] as const)('agrees with the runtime module for %s', (_name, setup) => {
+  it.each(runtimeModuleCases)('agrees with the runtime module for %s', (_name, setup) => {
     const repo = fixture();
     const file = 'src/ui/checklistEntry.ts';
     repo.write('src/ui/checklist.mjs', "export const caption = 'Checklist'");
@@ -385,6 +358,23 @@ describe('UI dependency checks', () => {
       expect(result.status, result.stderr).toBe(forbidden ? 1 : 0);
       if (forbidden) expect(result.stderr).toContain(`${file} import (lines ${lines.length}): 1 exceeds`);
     }
+  });
+
+  it('leaves paths selected by a getter or runtime resize to the application', () => {
+    const repo = fixture();
+    repo.write('src/ui/checklist.mjs', "export const caption = 'Checklist'");
+    repo.write('src/ui/checklistEntry.ts', runtimeMutationSource);
+    repo.write('src/ui/fixture.mjs', runtimeMutationSource);
+    const loader = [
+      "import { open } from './src/ui/fixture.mjs'",
+      "console.log((await open()).map(page => page.caption).join(','))",
+    ].join('\n');
+    const args = ['--input-type=module', '-e', loader];
+    const runtime = spawnSync(process.execPath, args, { cwd: repo.dir, encoding: 'utf8' });
+    expect(runtime.status, runtime.stderr).toBe(0);
+    expect(runtime.stdout.trim()).toBe('Checklist,Checklist');
+    const result = repo.run();
+    expect(result.status, result.stderr).toBe(0);
   });
 
   it('resolves imports in TypeScript classes with decorators and auto-accessors', () => {
