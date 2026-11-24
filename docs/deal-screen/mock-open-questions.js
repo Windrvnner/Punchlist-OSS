@@ -113,18 +113,21 @@ const diligenceList = () => diligenceReport(false)
 
 // ---- Tasks: what Needs Input holds ----
 
+// the research task's short name, so it reads whole in the pane's row and in its card
+const HEADROOM_TASK = 'Covenant headroom';
+
 const TURN_HEADROOM_ASK = '<div class="me">How much covenant headroom is there in the downside case?</div>';
 
 const TURN_HEADROOM_NEEDS_INPUT = `${TURN_HEADROOM_ASK}
 <div class="ai"><p>I’m checking that as a task. It’s in Tasks, and I’ll answer here when it’s done.</p>
-${taskCard('logedit', 'Covenant headroom in the downside case', 'Needs input')}</div>`;
+${taskCard('logedit', HEADROOM_TASK, 'Needs input')}</div>`;
 
 const REVIEW_BUTTON = (label) => `<button class="btn sm">${label}</button>`;
 
 // Needs Input: drafts to review, a task's question to the person, and items Diligence left out
 const NEEDS_INPUT_ROWS = [
   taskRow('sheet', 'Draft responses for open questions', '40 ready', { end: REVIEW_BUTTON('Review') }),
-  taskRow('logedit', 'Covenant headroom in the downside case', 'Asks which model to use',
+  taskRow('logedit', HEADROOM_TASK, 'Pick a model',
     { end: REVIEW_BUTTON('Answer'), hoverText: 'Which model should I use: Nov 3 or Nov 17?' }),
   taskRow('cklist', 'Diligence', '12 items not checked', { end: REVIEW_BUTTON('Check Them') }),
 ];
