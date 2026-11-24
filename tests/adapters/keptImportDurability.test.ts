@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 type PendingTransaction = {
   mode: IDBTransactionMode;
+  writes: [unknown, IDBValidKey][];
   oncomplete?: () => void;
   onabort?: () => void;
   onerror?: () => void;
@@ -14,8 +15,10 @@ async function indexedImportStore() {
   const cursor: { result: null; onsuccess?: () => void } = { result: null };
   const database = {
     transaction: (_store: string, mode: IDBTransactionMode) => {
+      const writes: PendingTransaction['writes'] = [];
+      const put = (value: unknown, key: IDBValidKey) => { writes.push([value, key]); };
       const transaction = {
-        mode, objectStore: () => ({ put: () => ({}), delete: () => {}, openCursor: () => cursor }),
+        mode, writes, objectStore: () => ({ put, delete: () => {}, openCursor: () => cursor }),
         commit() {},
       };
       transactions.push(transaction);
@@ -62,5 +65,33 @@ describe('durable retained import submission', () => {
     await Promise.resolve();
     transactions.at(-1)!.oncomplete!();
     expect(await retrying).toBe(true);
+  });
+
+  it('resends the replacement file when choices change between a request error and its abort', async () => {
+    const { imports, transactions } = await indexedImportStore();
+    const key = imports.importKey.qa('renewables');
+    const original = new TextEncoder().encode('Question,Workstream\nConfirm permit status,Legal');
+    const revised = new TextEncoder().encode('Workstream,Question\nLegal,Confirm permit status');
+    const originalChoices = { questionColumn: 0, mode: 'merge' };
+    const revisionChoices = { questionColumn: 1, mode: 'merge' };
+    const latestChoices = { questionColumn: 1, mode: 'append' };
+    const saving = imports.saveImport(key, { file: original, choices: originalChoices });
+    await Promise.resolve();
+    transactions.at(-1)!.oncomplete!();
+    expect(await saving).toBe(true);
+
+    imports.keepImport(key, { file: revised, choices: revisionChoices });
+    await Promise.resolve();
+    const replacement = transactions.at(-1)!;
+    replacement.onerror?.();
+    imports.keepImport(key, { choices: latestChoices });
+    await Promise.resolve();
+    const retry = transactions.at(-1)!;
+    expect(retry).not.toBe(replacement);
+    replacement.onabort!();
+    retry.oncomplete!();
+
+    expect(retry.writes).toContainEqual([revised, [key, 'file']]);
+    expect(retry.writes).toContainEqual([latestChoices, [key, 'choices']]);
   });
 });

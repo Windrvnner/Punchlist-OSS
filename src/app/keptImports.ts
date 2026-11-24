@@ -61,7 +61,12 @@ class ImportKeeper {
   private async flush() {
     if (this.connection !== 'ready' || (!this.queue.length && !this.owed.size)) return true;
     const dropped = [...this.owed].filter((key) => !this.imports.has(key));
-    const changes: KeptImportChange[] = [...dropped.map((key) => ({ key, drop: true as const })), ...this.queue];
+    // A request error can mark a queued import for a whole retry just before this batch starts.
+    const queuedKeys = new Set(this.queue.map(({ key }) => key));
+    const retries = [...queuedKeys].flatMap((key) => this.whole.delete(key) ? this.partsOf(key) : []);
+    const changes: KeptImportChange[] = [
+      ...dropped.map((key) => ({ key, drop: true as const })), ...this.queue, ...retries,
+    ];
     this.queue = [];
     this.owed.clear();
     if (await this.port!.write(changes)) return true;

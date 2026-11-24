@@ -46,8 +46,11 @@ export class IndexedKeptImports implements KeptImports {
           return;
         }
         transaction = this.database.transaction(STORE, 'readwrite');
+        const failed = () => resolve(false);
         transaction.oncomplete = () => resolve(true);
-        transaction.onabort = () => resolve(false);
+        // A later edit can arrive between a request error and its transaction abort.
+        transaction.onerror = failed;
+        transaction.onabort = failed;
         const entries = transaction.objectStore(STORE);
         if (replace) entries.clear();
         for (const change of changes) {
