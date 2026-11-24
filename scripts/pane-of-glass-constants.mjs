@@ -38,18 +38,7 @@ export function localBindings(program) {
     for (const ref of scope.references) bindings.set(ref.identifier, ref.resolved);
   }
   const stableContainer = containerReads(program);
-  function resolve(expression, seen = new Set()) {
-    const reference = unwrapped(expression);
-    if (reference?.type === 'ConditionalExpression' || reference?.type === 'LogicalExpression') {
-      const branch = selectedBranch(reference, (part) => resolve(part, seen));
-      return branch === reference ? reference : resolve(branch, seen);
-    }
-    if (reference?.type === 'MemberExpression') {
-      if (seen.has(reference)) return null;
-      const visited = new Set(seen).add(reference);
-      return resolve(memberValue(resolve(reference.object, visited), reference), visited);
-    }
-    if (reference?.type !== 'Identifier') return reference;
+  function resolveVariable(reference, seen) {
     const variable = bindings.get(reference);
     if (reference.name === 'undefined' && !variable?.defs.length) return missing;
     const definition = fixedDeclaration(variable);
@@ -62,6 +51,20 @@ export function localBindings(program) {
       if (!stableContainer(variable, reference, value)) return null;
     }
     return value;
+  }
+
+  function resolve(expression, seen = new Set()) {
+    const reference = unwrapped(expression);
+    if (reference?.type === 'ConditionalExpression' || reference?.type === 'LogicalExpression') {
+      const branch = selectedBranch(reference, (part) => resolve(part, seen));
+      return branch === reference ? reference : resolve(branch, seen);
+    }
+    if (reference?.type === 'MemberExpression') {
+      if (seen.has(reference)) return null;
+      const visited = new Set(seen).add(reference);
+      return resolve(memberValue(resolve(reference.object, visited), reference), visited);
+    }
+    return reference?.type === 'Identifier' ? resolveVariable(reference, seen) : reference;
   }
   return resolve;
 }
