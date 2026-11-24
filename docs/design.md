@@ -34,6 +34,8 @@ The look is defined in these files: `src/styles.css` (tokens, the shell, and con
   conversation's (06), with a 22px radius, 14px padding all around, 15px text on one line until more is typed, and 32px
   buttons and send.
 - **Side pane:** The open item on Checklist sits in a glass pane beside the list, with its top on the list's top line and its bottom on the sidebar's bottom line (08). The open question on Q&A takes a glass panel across the top (09).
+- **Reading mode:** A demo PDF without a preview shows “Page preview unavailable.” in
+  `--paper-ink` below the title. The paper still shows its page number, and the reading controls stay in place (#443).
 - **Windows:** Window sizes run from 1024×640 to 1536×864. Check every screen at 1280×736 and 1024×640, in dark and light.
 
 ## Type
