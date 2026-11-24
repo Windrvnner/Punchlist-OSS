@@ -85,6 +85,47 @@ describe('UI dependency checks', () => {
     expect(result.stderr).toContain('"The frontend is a pane of glass" in CLAUDE.md');
   });
 
+  it('checks eager and lazy Vite glob imports against the included files', () => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    for (const layer of ['backend', 'adapters', 'desktop', 'shell', 'ui']) {
+      repo.write(`src/${layer}/lenient.ts`, 'export const available = true');
+    }
+    repo.write('src/backend/.hidden.ts', 'export const hidden = true');
+    repo.write(file, [
+      "export const eager = import.meta.glob('../backend/lenient.ts', { eager: true })",
+      "export const views = import.meta.glob('../{ui,adapters}/**/*.ts')",
+      "export const shell = import.meta.glob(['/src/*/lenient.ts', '!/src/backend/**'])",
+      "export const desktop = import.meta.glob('./lenient.ts', { base: '../desktop' })",
+      "export const local = import.meta.glob('./*.ts')",
+      "export const clean = import.meta.glob(['../{ui,backend}/*.ts', '!../backend/**'])",
+      "export const missing = import.meta.glob('../backend/missing*.ts')",
+      `export const quoted = "import.meta.glob('../backend/lenient.ts')"`,
+      "export const other = index.glob('../backend/lenient.ts')",
+      "export const caseFold = import.meta.glob('../backend/*.TS', { caseSensitive: false })",
+      "export const visible = import.meta.glob(['../backend/*.ts', '!../backend/lenient.ts'])",
+      "const hidden = import.meta.glob(['./*.ts', '!./lenient.ts'], { base: '/src/backend', exhaustive: true })",
+    ].join('\n'));
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 1, 2, 3, 4, 10, 12): 6 exceeds`);
+  });
+
+  it('defers the whole call when any option needs expression evaluation', () => {
+    const repo = fixture();
+    const file = 'src/ui/readers.ts';
+    repo.write('src/backend/part.ts', 'export const read = true');
+    repo.write(file, [
+      "const spread = import.meta.glob('./part.ts', { base: '../backend', ...other })",
+      "const joined = import.meta.glob('../backend/part.ts', { base: '../' + 'ui' })",
+      "const lookup = import.meta.glob('../backend/part.ts', { base: { checklist: '../ui' }.checklist })",
+      "const simple = import.meta.glob('../backend/part.ts', { query: { raw: true }, eager: true })",
+    ].join('\n'));
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 4): 1 exceeds`);
+  });
+
   it('checks computed member and destructuring keys and each read in a dotted JSX tag', () => {
     const repo = fixture();
     const file = 'src/ui/access.tsx';
