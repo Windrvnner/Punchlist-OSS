@@ -347,21 +347,24 @@ async function composerOcclusion(page, note) {
   await fillComposer(page, tallDraft);
   const grown = await readingScroll(page);
   const tallPixels = await compareComposerPixels(page);
+  await fillComposer(page, '');
+  const restored = await readingScroll(page);
+  const focus = await answerActionFocus(page);
+  await page.locator('#pask').focus();
   const top = await readingScroll(page, 0);
+  await fillComposer(page, tallDraft);
+  const start = await readingScroll(page);
   const end = await readingScroll(page, 1);
   await fillComposer(page, '');
   const shrunk = await readingScroll(page);
-  const focus = await answerActionFocus(page);
-  await page.locator('#pask').focus();
-  await readingScroll(page, 0);
-  await fillComposer(page, tallDraft);
-  const start = await readingScroll(page);
-  await fillComposer(page, '');
-  const positions = [before, middle, grown, top, end, shrunk, start];
+  const positions = [before, middle, grown, restored, top, start, end, shrunk];
   const pixels = [shortPixels, tallPixels];
   const clear = pixels.every(([above, through, below]) => above > 50 && through === 0 && below === 0) &&
     positions.every(({ clipGap }) => clipGap >= 0 && clipGap <= 2);
-  const anchored = grown.top === middle.top && start.top === 0 && shrunk.top === shrunk.max &&
+  const fromEnd = ({ max, top }) => max - top;
+  const keptMiddle = [grown, restored].every((position) =>
+    fromEnd(position) === fromEnd(middle) && Math.abs(position.endGap - middle.endGap) <= 1);
+  const anchored = keptMiddle && fromEnd(start) === fromEnd(top) && shrunk.top === shrunk.max &&
     positions.every(({ head }) => head === before.head);
   const gaps = [end, shrunk].map(({ endGap }) => +endGap.toFixed(1));
   const endGap = gaps.every((gap) => Math.abs(gap - 34) <= 1.5);
