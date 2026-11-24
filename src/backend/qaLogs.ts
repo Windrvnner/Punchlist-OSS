@@ -30,6 +30,18 @@ function copyLogFile(source: string, target: string, hash?: string): string {
   return target;
 }
 
+function copyArchivedBase(base: NonNullable<KeptEdit['base']>, target: string): string {
+  try {
+    return copyLogFile(base.file, target, base.hash);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      // A vanished base cannot be merged, but the kept edit can still be filed as it is (#278).
+      throw new Error('The Q&A log archive disappeared', { cause: error });
+    }
+    throw error;
+  }
+}
+
 export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogFiles {
   const conv: Converter = o.convert ?? Object.assign(() => Promise.reject(new Error('no converter')), { id: 'none' });   // a CSV log needs none
   /** every sheet of a file, as text */
@@ -75,7 +87,7 @@ export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogF
       for (const [i, k] of found.entries()) {
         if (!k.base) continue;
         try {
-          const bf = copy(k.base.file, `base${i}`, k.base.hash);
+          const bf = copyArchivedBase(k.base, path.join(work, `base${i}${ext}`));
           const kf = copy(path.join(folder, k.name), `kept${i}`, k.hash);
           const ks = await sheets(kf);
           const bs = await sheets(bf); const base = tableFrom(bs, opts), kept = tableFrom(ks, opts);
