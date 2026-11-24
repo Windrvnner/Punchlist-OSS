@@ -8,7 +8,9 @@ import { TEXT_MAX } from '../domain/importExport';
 import {
   type FieldDraft, type FieldValue, type ReadField, restoreFieldDraft, showFieldDraft,
 } from '../app/fieldDrafts';
-import { type FieldAtFocus, type FieldCommit, FieldSave, type FieldSaveView } from '../app/fieldSave';
+import {
+  type FieldAtFocus, type FieldCommit, type FieldComposition, FieldSave, type FieldSaveView,
+} from '../app/fieldSave';
 import { saveKeptDrafts } from '../app/keptText';
 import { CONNECTED } from '../app/connection';
 import { fmtDate, StoreContext } from './hooks';
@@ -75,7 +77,7 @@ export function EditField({
   const {
     draft, focused, half, held, ref, locked, status, external, onInput, onCompositionStart, onCompositionEnd,
     onBlur, onFocus, onKeyUp,
-    onKey, flush, draftRef, takeTheirs,
+    onKey, retry, takeTheirs,
   } = input;
 
   // autosize textareas
@@ -105,9 +107,7 @@ export function EditField({
       {cap ? <span class={`efcap ${cap.cls ?? ''}`} title={cap.title}
         onClick={(e) => focusCapsule(ref.current, e.target)}>
         {cap.icon}{shown}{field}</span> : <>{shown}{field}</>}
-      {fieldNotes(
-        input, value, () => void flush(draftRef.current), () => void flush(draftRef.current, true), takeTheirs,
-      )}
+      {fieldNotes(input, value, () => retry(false), () => retry(true), takeTheirs)}
     </span>
   );
 }
@@ -166,15 +166,21 @@ function useFieldInput(
   const [save, view] = useFieldSave({ value, rev }, keep, kept, input, lockedRef);
   const flush = (text: string, chosen = false) => save.save(text, commit, chosen);
   const events = inputEvents(input, save, { commit, flush, debounceMs, multiline, locked });
+  const retry = (chosen: boolean) => {
+    if (input.composition.current === 'held') input.composition.current = 'idle';
+    void flush(input.draftRef.current, chosen);
+  };
   const takeTheirs = () => {
+    cancelCompositionEnd(input);
+    input.composition.current = 'idle';
     input.putBack(value);
     save.takeTheirs(value, commit);
   };
 
   useFieldLifecycle({ save, keep, read, commit, flush, onText, input, locked });
   return {
-    ...view, ...events, locked, flush, takeTheirs, draft: input.draft, focused: input.focused, half: input.half,
-    held: input.held, ref: input.ref, draftRef: input.draftRef,
+    ...view, ...events, locked, retry, takeTheirs, draft: input.draft, focused: input.focused, half: input.half,
+    held: input.held, ref: input.ref,
   };
 }
 
@@ -198,7 +204,8 @@ function useLocalInput(start: string, value: string, type: 'text' | 'date') {
   const untouched = useRef(false);
   const ref = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
   const date = useDateInput(type, ref);
-  const composing = useRef(false);
+  const composition = useRef<FieldComposition>('idle');
+  const compositionEnd = useRef<number | null>(null);
   const timer = useRef<number | null>(null);
   const stopTimer = () => {
     if (timer.current === null) return false;
@@ -208,7 +215,7 @@ function useLocalInput(start: string, value: string, type: 'text' | 'date') {
   };
   return {
     ...date, draft, draftRef, setDraft, focused, focusedRef, setFocused, held, setHeld, atFocus, halfAtFocus,
-    notSavedAtFocus, untouched, ref, composing, timer, stopTimer,
+    notSavedAtFocus, untouched, ref, composition, compositionEnd, timer, stopTimer,
   };
 }
 type LocalInput = ReturnType<typeof useLocalInput>;
@@ -245,7 +252,7 @@ function useFieldSave(
   const saver = useRef<FieldSave | undefined>(undefined);
   const save = saver.current ??= new FieldSave(record, keep, kept, {
     text: () => input.draftRef.current,
-    composing: () => input.composing.current,
+    composition: () => input.composition.current,
     partial: () => input.halfRef.current,
     partialNow: input.halfTyped,
     locked: () => !!locked.current,
@@ -273,19 +280,50 @@ function markHalf(input: LocalInput, save: FieldSave) {
 
 type Flush = (text: string, chosen?: boolean) => Promise<unknown>;
 
-function compositionEvents(input: LocalInput, typed: (text: string) => void) {
+function cancelCompositionEnd(input: LocalInput) {
+  if (input.compositionEnd.current === null) return;
+  window.clearTimeout(input.compositionEnd.current);
+  input.compositionEnd.current = null;
+}
+
+function holdComposition(input: LocalInput, save: FieldSave) {
+  if (input.composition.current === 'idle') return false;
+  cancelCompositionEnd(input);
+  input.composition.current = 'held';
+  save.keepUnconfirmed();
+  return true;
+}
+
+function compositionEvents(input: LocalInput, save: FieldSave, typed: (text: string) => void) {
   // #239: let the browser finish the candidate before the field can save it.
   const onCompositionStart = () => {
-    input.composing.current = true;
+    cancelCompositionEnd(input);
+    input.composition.current = 'active';
     input.stopTimer();
   };
   const onCompositionEnd = (event: CompositionEvent) => {
-    input.composing.current = false;
+    if (input.composition.current === 'idle') return;
     typed((event.currentTarget as HTMLInputElement).value);
+    if (input.composition.current === 'held') {
+      save.keepUnconfirmed();
+      return;
+    }
+    // Chromium can fire compositionend before the blur that caused it, in one event turn.
+    cancelCompositionEnd(input);
+    input.compositionEnd.current = window.setTimeout(() => {
+      input.compositionEnd.current = null;
+      input.composition.current = 'idle';
+      typed(input.draftRef.current);
+    }, 0);
   };
   const onInput = (event: Event) => {
-    if ((event as InputEvent).isComposing) onCompositionStart();
+    const composing = (event as InputEvent).isComposing;
+    if (composing && input.composition.current === 'idle') onCompositionStart();
+    if (!composing && input.composition.current === 'held' && input.focusedRef.current) {
+      input.composition.current = 'idle';
+    }
     typed((event.currentTarget as HTMLInputElement).value);
+    if (input.composition.current === 'held') save.keepUnconfirmed();
   };
   return { onInput, onCompositionStart, onCompositionEnd };
 }
@@ -322,6 +360,7 @@ function inputEvents(
   const onBlur = () => {
     input.setHeld(false);
     input.setFocused(false);
+    if (holdComposition(input, save)) return;
     if (halfTyped()) {
       markHalf(input, save);
       return;
@@ -336,7 +375,7 @@ function inputEvents(
     if (halfTyped() !== halfRef.current && ref.current) typed(ref.current.value);
   };
   const onKey = (event: KeyboardEvent) => {
-    if (isCompositionKey(event, input.composing.current)) return;
+    if (isCompositionKey(event, input.composition.current === 'active')) return;
     if (event.key === 'Enter' && !multiline) {
       event.preventDefault();
       untouched.current = false;
@@ -354,7 +393,7 @@ function inputEvents(
     if (notSavedAtFocus.current) untouched.current = true;
     save.escape(text, notSavedAtFocus.current, commit);
   };
-  return { ...compositionEvents(input, typed), onBlur, onFocus, onKeyUp, onKey };
+  return { ...compositionEvents(input, save, typed), onBlur, onFocus, onKeyUp, onKey };
 }
 
 function useFieldLifecycle({
@@ -373,7 +412,10 @@ function useFieldLifecycle({
   const signedOut = useContext(SignedOutContext);
   const readRef = useRef(read);
   readRef.current = read;
-  useLayoutEffect(() => () => save.unmount(commit), []);
+  useLayoutEffect(() => () => {
+    cancelCompositionEnd(input);
+    save.unmount(commit);
+  }, []);
   useLayoutEffect(() => {
     if (keep === undefined) return;
     const leave = showFieldDraft(keep);
@@ -384,6 +426,7 @@ function useFieldLifecycle({
   }, []);
   const onLeave = useRef(() => {});
   onLeave.current = () => {
+    if (holdComposition(input, save)) return;
     save.keepCurrent();
     if (input.timer.current !== null) void flush(input.draftRef.current);
   };
