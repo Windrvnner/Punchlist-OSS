@@ -12,7 +12,7 @@ const DILIGENCE_TAB = { kind: 'diligence', label: 'Diligence' };
 const QA_TAB = { kind: 'qa', label: 'Q&amp;A' };
 const FINDING_TAB = { kind: 'finding', label: 'Guarantee cap is lower than the term sheet' };
 const DOCUMENT_TAB = { kind: 'document', label: 'Parent company guarantee (draft 2).pdf' };
-const TASK_TAB = { kind: 'task', label: 'Board resolutions for the financing' };
+const TASK_TAB = { kind: 'task', label: BOARD_TASK };
 
 /** The pane's tabs: the three core tabs (or the given versions of them), then the opened items. */
 function paneTabs(given, selectedKind) {
@@ -69,7 +69,7 @@ const TASKS_LIST = `<div class="x-lbl">Needs Input</div>
     { end: '<button class="btn sm">Review</button>' })}</div>
 <div class="x-lbl">Running</div>
 <div class="x-tgroup">${taskRow('cklist', 'Diligence', '1,284 of 2,148', { bar: 0.6, end: STOP_BUTTON })}
-${taskRow('logedit', 'Board resolutions for the financing', 'Step 3 of 5',
+${taskRow('logedit', BOARD_TASK, 'Step 3 of 5',
     { bar: 0.5, end: STOP_BUTTON, hoverText: 'Reading Credit agreement (draft 6).pdf' })}
 ${taskRow('folder', 'Indexing 04 Legal', '38 of 52 files', { bar: 0.73, end: STOP_BUTTON })}</div>
 <div class="x-lbl">Completed</div>
@@ -87,18 +87,18 @@ function taskStep(iconName, text, count, live = false) {
     + `<span class="tv">${icon('chev', 13)}</span></div>`;
 }
 
-const TASK_HEADING = '<h2>Board resolutions for the financing</h2>';
+const TASK_HEADING = `<h2>${BOARD_TASK}</h2>`;
 const TASK_ASK = '<div class="me">Check whether the board resolutions approving the financing are current.</div>';
-const TASK_STEPS_SO_FAR = `<p class="nar">I’ll find the resolutions first, then compare them with the latest credit`
+const TASK_STEPS_SO_FAR = `<p class="nar">Locating the board resolutions, then comparing them with the latest credit`
   + ` agreement.</p>
 ${taskStep('search', 'Searched 04 Legal for board resolutions', '7 files')}
-<p class="nar">Two resolutions approve the financing: January 18 and March 4. The March one replaces the January`
-  + ` one.</p>
+<p class="nar">Two resolutions approve the financing, dated January 18 and March 4. The March resolution`
+  + ` supersedes the January resolution.</p>
 ${taskStep('doc', 'Read Board resolution (Mar 4).pdf', 'p. 2')}`;
 
 const TASK_RUNNING = `<div class="x-tv"><div class="sc">${TASK_HEADING}
 ${TASK_ASK}${TASK_STEPS_SO_FAR}
-<p class="nar">The March resolution approves draft 4. Now checking what changed in draft 6:</p>
+<p class="nar">The March resolution approves draft 4. Comparing draft 6 with draft 4.</p>
 ${taskStep('doc', 'Reading Credit agreement (draft 6).pdf', '', true)}
 <div class="x-spin">2m 14s · step 3 of 5</div>
 </div>${taskReplyBox}</div>`;

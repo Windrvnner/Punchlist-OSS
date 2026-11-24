@@ -7,6 +7,9 @@ const screen = hashParams.get('s') || 'empty';
 document.documentElement.dataset.theme = hashParams.get('theme') || 'dark';
 const windowWidth = innerWidth;
 const narrowWindow = windowWidth <= 1180;
+
+// the board resolutions task's short name, so it reads whole on its tab, its card and its row
+const BOARD_TASK = 'Resolutions';
 const sidebarWidth = narrowWindow ? 208 : 236;
 
 /** An icon from icons.js as an SVG, at the given size and stroke width. */
