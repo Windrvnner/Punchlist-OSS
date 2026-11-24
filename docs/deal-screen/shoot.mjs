@@ -1,6 +1,6 @@
 // Renders each screen of the deal screen mock-up (mock.html) to a JPEG, as kept in shots/.
 // Run `npm run build` first: the mock-up uses the app's built stylesheet, which this script serves as app.css.
-// Usage: node docs/deal-screen/shoot.mjs [width]x[height] [dark]
+// Usage: node docs/deal-screen/shoot.mjs [width]x[height] [light|dark] (light is the default)
 // With no arguments it writes the light 1280x736 shots to shots/ beside this file, as kept in the repo. Any other size
 // or the dark theme goes to out/deal-screen/ instead.
 import fs from 'node:fs';
@@ -10,8 +10,8 @@ import { launchChrome } from '../../tests/browser/chrome.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
-const unknown = args.filter((arg) => !/^\d+x\d+$/.test(arg) && arg !== 'dark');
-if (unknown.length > 0) throw new Error(`Unknown arguments: ${unknown.join(' ')}. Use [width]x[height] and dark.`);
+const unknown = args.filter((arg) => !/^\d+x\d+$/.test(arg) && arg !== 'dark' && arg !== 'light');
+if (unknown.length > 0) throw new Error(`Unknown arguments: ${unknown.join(' ')}. Use [width]x[height] and light or dark.`);
 const sizeArg = args.find((arg) => /^\d+x\d+$/.test(arg)) || '1280x736';
 const [width, height] = sizeArg.split('x').map(Number);
 const theme = args.includes('dark') ? 'dark' : 'light';
