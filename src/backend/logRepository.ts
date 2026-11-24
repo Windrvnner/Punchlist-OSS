@@ -436,14 +436,9 @@ export class LogRepository implements Repository {
     // this folder: copied before install.json is written, and only if the new id has none yet, so a start that fails here has
     // changed nothing and the next one does it again. No app on this PC is writing the last id's journal by now.
     const carry = o.place ? this.lastIds[o.place] : undefined;
-    if (carry && carry !== id) {
-      const j = o.journal ?? o.local;
-      if (j.read(`ops-${id}.json`) == null) { const text = j.read(`ops-${carry}.json`); if (text != null) j.write(`ops-${id}.json`, text); }
-      this.previous = carry;
-      this.keepPlaceRecord(carry, true);
-    }
+    if (carry && carry !== id) this.carryUndo(id, carry);
+    else this.keepPlaceRecord(id);
     const now = this.install(id);
-    this.keepPlaceRecord(id, false, this.previous ?? undefined);
     this.keepInstall(JSON.stringify(now), texts);
     this.changes = new LocalChanges(o.local, id);
     this.ownLines = new Set(this.changes.ownLines(id));
@@ -671,7 +666,7 @@ export class LogRepository implements Repository {
     // with a named folder, only an id recorded for it (place-<id>.json): its files and lines cannot tell a copy of the folder from it
     const mine = (i: string) => { if (!o.place) return true; try { return JSON.parse(o.local.read(`place-${i}.json`) ?? 'null')?.place === o.place; } catch { return false; } };
     const localNames = o.local.list();
-    const journals = this.journalPlaceRecords(localNames);
+    const { journals, refused } = this.journalPlaceRecords(localNames);
     // The successor proves retirement even if marking the old record as left was refused (#750).
     for (const { previous } of journals.values()) {
       if (isText(previous)) not.add(previous);
@@ -708,23 +703,58 @@ export class LogRepository implements Repository {
       if (!ahead) found.push([i, here]);
     }
     const written = found.sort((a, b) => (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : 0))[0]?.[0];
-    return written ?? this.unwrittenJournalId(journals, localNames, sharedNames, not);
+    const id = written ?? this.unwrittenJournalId(journals, localNames, sharedNames, not);
+    // A held record cannot hide a verified id or be mistaken for an empty install when none is found.
+    if (!id && refused) throw refused;
+    if (id && o.place) this.rememberPredecessor(o.place, id, journals.get(id)?.previous);
+    return id;
   }
 
   /** Only folder records with local journals are recovery candidates. */
-  private journalPlaceRecords(localNames: string[]): Map<string, PlaceRecord> {
-    const { local, place } = this.o;
+  private journalPlaceRecords(localNames: string[]) {
+    const { place } = this.o;
     const machine = this.o.machine?.();
     const journals = new Map<string, PlaceRecord>();
-    if (!place || !machine) return journals;
+    let refused: unknown;
+    if (!place || !machine) return { journals, refused };
     const names = new Set(localNames);
-    for (const name of names) {
-      const id = idOfPlaceFile(name);
-      if (!id || !this.hasPlaceJournal(id, names)) continue;
-      const record = readPlaceRecord(local.read(name));
-      if (record.place === place && record.machine === machine) journals.set(id, record);
+    for (const id of new Set(localNames.map(idOfPlaceFile))) {
+      try {
+        if (!id || !this.hasPlaceJournal(id, names)) continue;
+        const record = this.journalPlaceOf(id, names);
+        if (record?.place === place && record.machine === machine) journals.set(id, record);
+      } catch (error) {
+        refused ??= error;
+      }
     }
-    return journals;
+    return { journals, refused };
+  }
+
+  private journalPlaceOf(id: string, names: ReadonlySet<string>): PlaceRecord | undefined {
+    const primary = this.readJournalPlace(`place-${id}.json`, names);
+    const spare = this.readJournalPlace(`undo-place-${id}.json`, names);
+    const { record } = primary;
+    const backup = spare.record;
+    if (record && backup && record.place === backup.place && record.machine === backup.machine) {
+      return {
+        ...record,
+        previous: record.previous ?? backup.previous,
+        left: record.left === true || backup.left === true,
+      };
+    }
+    const refused = primary.refused ?? spare.refused;
+    if (!record && !backup && refused) throw refused;
+    return record ?? backup;
+  }
+
+  private readJournalPlace(name: string, names: ReadonlySet<string>): { record?: PlaceRecord; refused?: unknown } {
+    if (!names.has(name)) return {};
+    try {
+      const record = readPlaceRecord(this.o.local.read(name));
+      return isText(record.place) && isText(record.machine) ? { record } : {};
+    } catch (refused) {
+      return { refused };
+    }
   }
 
   /** A replacement id can have a carried Undo journal before it writes any changes (#750). */
@@ -751,15 +781,35 @@ export class LogRepository implements Repository {
    * this PC, so it is taken only when its folder record names this machine and Windows user. A copy on another PC
    * takes a new id.
    */
-  private placedOnThisMachine(id: string): boolean {
+  private placedOnThisMachine(id: string, known?: PlaceRecord): boolean {
     const here = this.o.machine?.();
     if (!this.o.place || !here) return false;
     try {
-      const record = readPlaceRecord(this.o.local.read(`place-${id}.json`));
+      const record = known ?? readPlaceRecord(this.o.local.read(`place-${id}.json`));
       return record.place === this.o.place && record.machine === here && record.left !== true;
     } catch {
       return false;
     }
+  }
+
+  /** Receipt settlement needs the same predecessor as an ordinary start after carrying a journal. */
+  private rememberPredecessor(place: string, id: string, previous: unknown) {
+    if (!isText(previous) || previous === id) return;
+    this.previous = previous;
+    this.lastIds[place] = previous;
+  }
+
+  private carryUndo(id: string, previous: string) {
+    // The carried journal needs a durable folder binding before a start can present it as available.
+    this.keepPlaceRecord(id, false, previous);
+    const journal = this.o.journal ?? this.o.local;
+    const name = `ops-${id}.json`;
+    if (this.previous !== previous && journal.read(name) == null) {
+      const text = journal.read(`ops-${previous}.json`);
+      if (text != null) journal.write(name, text);
+    }
+    this.previous = previous;
+    this.keepPlaceRecord(previous, true);
   }
 
   /**
