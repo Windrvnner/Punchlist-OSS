@@ -21,12 +21,12 @@ class FitWorklist {
   private readonly byQuestion = new Map<string, Set<WaitingRows>>();
   private readonly bySource = new Map<FitSource, WaitingRows>();
   private readonly byRow = new Map<number, WaitingRows>();
-  private readonly sure: number[] = [];
-  private nextSure = 0;
+  private sure: number[] = [];
 
-  takeSure(): number | undefined {
-    if (this.nextSure < this.sure.length) return this.sure[this.nextSure++];
-    return undefined;
+  takeSure(): number[] {
+    const rows = this.sure;
+    this.sure = [];
+    return rows.sort((left, right) => left - right);
   }
 
   watch(row: number, choice: FitChoice | undefined): void {
@@ -75,7 +75,7 @@ class FitWorklist {
         affected.push(row);
       }
     }
-    return affected.sort((left, right) => left - right);
+    return affected;
   }
 
   private register(waiting: WaitingRows): void {
@@ -105,10 +105,12 @@ export function matchFitTier(
     for (const affected of worklist.affected(question)) worklist.watch(affected, find(affected));
   };
   const settle = () => {
-    // Rows already sure choose before rows that become sure as a result of their choices.
-    for (let row = worklist.takeSure(); row !== undefined; row = worklist.takeSure()) {
-      const choice = find(row);
-      if (choice) claim(row, choice.first);
+    // Finish each pass before giving rows made sure by those choices a turn in file order.
+    for (let rows = worklist.takeSure(); rows.length; rows = worklist.takeSure()) {
+      for (const row of rows) {
+        const choice = find(row);
+        if (choice) claim(row, choice.first);
+      }
     }
   };
 
