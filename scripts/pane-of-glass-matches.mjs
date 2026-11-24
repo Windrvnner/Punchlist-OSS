@@ -1,7 +1,8 @@
 // Match syntax, so examples in comments, strings, regexes and JSX text never count as UI dependencies.
 import { posix } from 'node:path';
 import { parseSync, Visitor } from 'vite';
-import { collectGlob } from './pane-of-glass-globs.mjs';
+import { literalGlob } from './pane-of-glass-globs.mjs';
+import { retainExpressions } from './pane-of-glass-expressions.mjs';
 import { forbiddenGlobs } from './pane-of-glass-vite.mjs';
 import { literalValue, unwrapped } from './pane-of-glass-syntax.mjs';
 
@@ -66,7 +67,7 @@ export async function matchesIn(file, source, files) {
   if (parsed.errors.length) throw new Error(`${file}: ${parsed.errors[0].message}`);
   const offsets = {};
   const globs = [];
-  const keysOnly = new Map();
+  const program = parsed.program;
   function record(kind, node) {
     (offsets[kind] ??= new Set()).add(node.start);
   }
@@ -107,7 +108,8 @@ export async function matchesIn(file, source, files) {
     TSImportType: moduleSource,
     TSExternalModuleReference: (node) => checkModule(node.expression),
     CallExpression(node) {
-      collectGlob(node, source, globs, keysOnly);
+      const glob = literalGlob(node, source);
+      if (glob) globs.push(glob);
       if (node.callee.type === 'Identifier' && node.callee.name === 'require') checkModule(node.arguments[0]);
     },
     MemberExpression: checkMember,
@@ -116,9 +118,10 @@ export async function matchesIn(file, source, files) {
     Identifier(node) {
       if (storageNames.has(node.name)) record('storage', node);
     },
-  }).visit(parsed.program);
+  }).visit(program);
+  retainExpressions(program, globs, source);
 
-  for (const index of await forbiddenGlobs(file, globs, keysOnly, files, forbiddenSource)) {
+  for (const index of await forbiddenGlobs(file, globs, files, forbiddenSource)) {
     record('import', globs[index].node);
   }
 

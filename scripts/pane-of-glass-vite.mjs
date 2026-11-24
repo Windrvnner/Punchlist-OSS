@@ -62,7 +62,7 @@ function forbiddenModuleIds(root, files, forbidden) {
   };
 }
 
-export async function forbiddenGlobs(file, globs, keysOnly, inventory, forbidden) {
+export async function forbiddenGlobs(file, globs, inventory, forbidden) {
   if (!globs.length) return [];
   const cwd = process.cwd();
   const scratch = mkdtempSync(path.join(cwd, '.pane-of-glass-'));
@@ -77,7 +77,7 @@ export async function forbiddenGlobs(file, globs, keysOnly, inventory, forbidden
     const forbiddenId = forbiddenModuleIds(root, inventory.files, forbidden);
     const matches = [];
     for (const [index, glob] of globs.entries()) {
-      const code = probeEntry(glob, project, file, keysOnly);
+      const code = probeEntry(glob, project, file);
       if (!code) continue;
       writeFileSync(path.join(root, file), code);
       if ((await selectedModules(config, file)).some(forbiddenId)) matches.push(index);

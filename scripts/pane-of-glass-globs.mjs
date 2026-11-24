@@ -3,16 +3,11 @@ import { posix } from 'node:path';
 import { literalValue, unwrapped } from './pane-of-glass-syntax.mjs';
 
 function globCall(node) {
-  const callee = node.callee;
-  if (callee.type !== 'MemberExpression' || callee.computed || callee.property.name !== 'glob') return false;
-  const object = callee.object;
-  return object.type === 'MetaProperty' && object.meta.name === 'import' && object.property.name === 'meta';
-}
-
-function globKeysArgument(node) {
   const callee = unwrapped(node.callee);
-  if (callee.type === 'MemberExpression' && !callee.computed && !callee.optional && !node.optional &&
-      callee.object.name === 'Object' && callee.property.name === 'keys') return unwrapped(node.arguments[0]);
+  if (callee.type !== 'MemberExpression') return false;
+  const name = callee.computed ? literalValue(callee.property) : callee.property.name;
+  const object = unwrapped(callee.object);
+  return name === 'glob' && object.type === 'MetaProperty' && object.meta.name === 'import';
 }
 
 const optionTypes = {
@@ -48,8 +43,8 @@ function literalOptions(node) {
   return settings;
 }
 
-function literalGlob(node, source) {
-  if (!globCall(node)) return;
+export function literalGlob(node, source) {
+  if (!globCall(node) || node.arguments.length > 2) return;
   const [argument, options] = node.arguments.map(unwrapped);
   const array = argument?.type === 'ArrayExpression';
   const values = (array ? argument.elements : [argument]).map(unwrapped);
@@ -57,14 +52,12 @@ function literalGlob(node, source) {
   const patterns = values.map((part) => ({ value: literalValue(part), syntax: source.slice(part.start, part.end) }));
   // A compound option can change the selected layer. Leave the entire call for #848.
   const settings = literalOptions(options);
-  if (settings) return { array, patterns, settings };
-}
-
-export function collectGlob(node, source, globs, keysOnly) {
-  const glob = literalGlob(node, source);
-  if (glob) globs.push({ ...glob, node });
-  const keys = globKeysArgument(node);
-  if (keys) keysOnly.set(keys.start, source.slice(node.callee.start, node.callee.end));
+  if (!settings) return;
+  const first = node.arguments[0];
+  const last = node.arguments.at(-1);
+  const prefix = source.slice(node.start, first.start);
+  const suffix = source.slice(last.end, node.end);
+  return { node, array, patterns, settings, prefix, suffix };
 }
 
 export function packageName(pattern) {
@@ -92,7 +85,7 @@ function patternSyntax({ value, syntax }, from, project) {
   if (local !== undefined) return JSON.stringify((negative ? '!' : '') + local);
 }
 
-export function probeEntry(glob, project, file, keysOnly) {
+export function probeEntry(glob, project, file) {
   const directory = posix.join(project, posix.dirname(file));
   const { base = '.', ...options } = glob.settings;
   const from = base.startsWith('/') ? posix.join(project, base) : posix.resolve(directory, base);
@@ -102,7 +95,6 @@ export function probeEntry(glob, project, file, keysOnly) {
   const argument = glob.array ? `[${safe.join(',')}]` : safe[0];
   // The snapshot has the source filenames and no application exports. A namespace import selects the same files.
   delete options.import;
-  const call = `import.meta.glob(${argument}, ${JSON.stringify(options)})`;
-  const wrapper = keysOnly.get(glob.node.start);
-  return `export const files = ${wrapper ? `${wrapper}(${call})` : call}`;
+  const args = glob.node.arguments.length > 1 ? argument + ', ' + JSON.stringify(options) : argument;
+  return 'export const files = ' + glob.render(glob.prefix + args + glob.suffix);
 }
