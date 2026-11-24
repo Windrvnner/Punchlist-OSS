@@ -299,6 +299,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 [CLAUDE.md](../CLAUDE.md) covers how to work on the app: commits, checks, mock-ups, readable code, and asking before design decisions. Beyond it, these rules apply:
 
 - Keep friction low, with as few controls and steps as possible.
+- Mock-ups kept in docs (such as `docs/deal-screen/`) are design references, not app code: they are checked by their screenshots, and the readable-code rules apply to app code and scripts (#881).
 - The attribution check allows a `Co-authored-by` trailer naming exactly the repository's own coding-agent identity (set in `scripts/aiAttribution.mjs`) and refuses every other AI co-author trailer (#877).
 - Never guess identities. Never cite finding codes.
 - Deleting a finding or a question asks first ("Delete Q38?", with **Keep It** or **Delete**), as do removing a folder and a list swap that turns items off; each keeps its Undo.
@@ -309,7 +310,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 
 ## Deal screen
 
-These decisions are for the rebuilt deal screen in [deal-screen-design.md](deal-screen-design.md) and are not built yet (#881). Once built, each replaces the lines above that it contradicts.
+These decisions are for the rebuilt deal screen in [deal-screen-design.md](deal-screen-design.md) and are not built yet (#881). Once built, they replace the sidebar's Deal status groups (Pages and navigation), **Past Conversations** in every composer (Conversations), and **Keep It** in confirms (Working rules). How the deal's Overview, Findings, and Checklist pages and the deal header fit the new screen is open.
 
 - A deal shows its conversation on the left and, when opened, one pane on the right. The pane's tabs are Tasks, Diligence, and Q&A, always in that order, followed by any opened finding, document, or task, each with ×.
 - The selected tab is 1.5 times as wide as each other tab, and the rest share the bar equally. A hairline separates unselected tabs, the selected tab sits raised, and tabs show no counts. An unselected tab too narrow for its name drops its icon before shortening the word. The Diligence tab uses the Checklist's icon.
@@ -321,7 +322,7 @@ These decisions are for the rebuilt deal screen in [deal-screen-design.md](deal-
 - Tasks belong to the deal, not to a conversation: they keep running and stay in Tasks when the person switches conversations, and a task's result card stays in the conversation that started it (#875).
 - Tasks are grouped as Needs Input, Running, and Completed. Each task is one row: an outline kind icon, its name, its count ("1,284 of 2,148" or "Step 3 of 5"), and, while it runs, a thin bar of the same width on every row. A round × stops it; a finished task opens from a round arrow. There are no time estimates, and an open-ended task's current file shows on hover.
 - A task's card in the chat has a fixed width and the same bar, and opens the task with **Open**. A finished task keeps its reply box.
-- Work in progress shows a small ring beside words naming the live step, never a spinner alone.
+- Work in progress shows a small ring beside words naming the live step, never a spinner alone; on a tab, the ring sits beside the tab's name.
 - An opened question sits in a card with its question, response, sources, links, and status, beside the conversation, never covering it. A draft response is marked with a **Draft** badge.
 - A source document opens in the pane in reading mode's viewer, with page navigation and zoom and no passage highlighting.
 - The dark theme is black and white: its accent is a light gray from the neutral (#873).
