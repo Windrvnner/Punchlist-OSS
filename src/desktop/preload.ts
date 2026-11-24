@@ -16,4 +16,5 @@ contextBridge.exposeInMainWorld('punchlist', {
     set.add(listener); return () => { set.delete(listener); };
   },
   pathFor: (file: File) => webUtils.getPathForFile(file),
+  flushKeptText: () => ipcRenderer.send('punchlist:flush-kept-text'),
 });

@@ -2,6 +2,7 @@
 // signed in on a test key, with no model service reachable. Run: node tests/desktop/smoke.spec.mjs (on Linux it needs a display: xvfb-run -a).
 import { _electron as electron } from 'playwright';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import { insideGate } from '../../scripts/gate-dir.mjs';
 
 const results = [];
@@ -60,7 +61,8 @@ let app = await launch(); let page = await app.firstWindow();
 {
   const s = await page.evaluate(() => ({ user: store.get().user?.name, node: typeof require + typeof process, keys: Object.keys(window.punchlist).sort().join() }));
   say('opens-on-backend', s.user === os.userInfo().username, JSON.stringify(s));
-  say('window-has-no-node', s.node === 'undefinedundefined' && s.keys === 'call,describe,on,pathFor', JSON.stringify(s));
+  const expectedKeys = 'call,describe,flushKeptText,on,pathFor';
+  say('window-has-no-node', s.node === 'undefinedundefined' && s.keys === expectedKeys, JSON.stringify(s));
   const min = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getMinimumSize());
   say('min-size-1024x640', min[0] === 1024 && min[1] === 640, JSON.stringify(min));
   const refused = await page.evaluate(() => window.punchlist.call('repo', 'close', []));
@@ -117,6 +119,22 @@ let dealId;
   const q = await page.evaluate(() => Object.values(store.get().questions).map((x) => x.text));
   const deal = await page.evaluate((id) => store.get().deals[id]?.name, dealId);
   say('kept-after-restart', deal === 'Project Desktop' && q.includes('Please confirm the lock-up ratio.\nAnd the test date.'), JSON.stringify({ deal, q }));
+}
+
+// A composer draft survives an abrupt exit of the main process (#825).
+{
+  await page.evaluate(() => { location.hash = ''; });
+  const draft = 'Does the agreement require notice before a change of control?';
+  await page.fill('#hask', draft);
+  // Past the 400 ms draft save, before Chromium ordinarily flushes its storage.
+  await page.waitForTimeout(750);
+  const child = app.process();
+  const exited = once(child, 'exit');
+  child.kill('SIGKILL');
+  await exited;
+
+  ({ app, page } = await started());
+  say('kept-draft-after-forced-exit', await page.inputValue('#hask') === draft);
 }
 
 // Settings shows the shared folder with Change
