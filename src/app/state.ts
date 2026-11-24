@@ -10,6 +10,7 @@ import type { ImportField } from '../domain/importExport';
 import { byName, NO_WORKSTREAM, workstreamChoices } from '../domain/order';
 import { addresser } from '../domain/suggest';
 import { capabilities, type Capabilities } from './capabilities';
+import { askBlock } from './asking';
 
 export type BootStage = 'session' | 'deals' | 'journal' | 'ready';
 
@@ -435,14 +436,16 @@ export function unresolvedPoints(s: Pick<State, 'questions' | 'findings' | 'tomb
   const askedItems = new Set(qs.map((q) => q.linkedItem?.id).filter(Boolean)); const askedFindings = new Set(qs.map((q) => q.linkedFinding).filter(Boolean));
   const points: Unresolved[] = [];
   for (const f of dealFindings(s as State, dealId)) {
-    // a finding raised on an item since turned off is not asked about, as its pane offers no Ask
-    if (f.status !== 'open' || s.conflicts[f.id] || askedFindings.has(f.id) || (f.itemId && (askedItems.has(f.itemId) || s.items[f.itemId]?.off))) continue;
+    const item = f.itemId ? s.items[f.itemId] : undefined;
+    const asked = askedFindings.has(f.id) || (f.itemId && askedItems.has(f.itemId));
+    if (askBlock(f.status, !!item?.off) || s.conflicts[f.id] || asked) continue;
     // a finding says no more than its title of what would settle it
     const need = '';
     points.push({ key: 'f:' + f.id, kind: 'finding', what: f.title, need, findingId: f.id, workstream: f.workstream });
   }
   if (Array.isArray(rows)) for (const r of rows) {
-    if (askedItems.has(r.id) || s.items[r.id]?.off || itemStanding(s, dealId, r).kind !== 'gap') continue;      // a turned-off item's last result stays in the rows
+    if (askedItems.has(r.id) || askBlock(undefined, !!s.items[r.id]?.off)) continue;
+    if (itemStanding(s, dealId, r).kind !== 'gap') continue;
     points.push({ key: 'i:' + r.id, kind: 'gap', what: r.text, need: r.need ?? '', itemId: r.id, workstream: '' });
   }
   const pool = qs.filter((q) => q.status === 'open' && !q.response.trim() && !q.linkedItem && !q.linkedFinding && !s.conflicts[q.id] && q.text.trim());

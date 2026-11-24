@@ -8,6 +8,7 @@ import type { State } from './state';
 import type { Result } from '../domain/result';
 import type { RecordKind, AuditKind } from '../domain/model';
 import type { Seen, Services } from '../ports';
+import type { Store } from './store';
 
 export interface PlanCtx { at: string; actor: string; firm: string; opId: string; ids: { next(prefix: 'd' | 'q' | 'f' | 'doc' | 'op'): string } }
 
@@ -59,6 +60,8 @@ export interface Command<I = unknown, In = I> {
   input: z.ZodType<I, In>;
   /** records this command will write; used to sequence operations per record */
   targets(state: State, input: I): string[];
+  /** Load inputs that must be current immediately before planning, once the target queue drains. */
+  prepare?(store: Pick<Store, 'get' | 'refreshChecklist'>, input: I, context: { retained: boolean }): Promise<void>;
   plan(state: State, input: I, ctx: PlanCtx): Result<Plan>;
 }
 

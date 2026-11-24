@@ -15,6 +15,7 @@ const LABELS: Record<string, string> = {
   CreateFinding: 'New finding',
   CreateQuestion: 'New question',
   SetQuestionsStatus: 'Close settled questions',
+  CloseSettledQuestions: 'Close settled questions',
   AddUnresolved: 'Add all unresolved to Q&A',
   DeleteDeal: 'Delete deal',
   DeleteFinding: 'Delete finding',

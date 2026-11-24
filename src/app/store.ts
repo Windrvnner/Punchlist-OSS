@@ -28,6 +28,7 @@ import { keepUnseen, movedHash } from './recovered';
 import { scopeOfKey } from './conversations';
 import { Item, ListRecord } from '../domain/checklist';
 import { Undo } from './commands/undo';
+import { guardLegacySettledClose } from './commands/closeSettled';
 import { lastImport } from './commands/importQuestions';
 import { merged, localConversations } from './threads';
 import { seenSince } from './draftsSeen';
@@ -39,6 +40,8 @@ type Listener = (s: State) => void;
 type DispatchOptions = {
   idempotencyKey?: string;
   quiet?: boolean;
+  /** The action's caller has its own wording for this refusal. */
+  quietRefusal?: (error: Failure) => boolean;
   /** The caller keeps the input and offers its own retry. */
   noRetry?: boolean;
   /** The field's value before this edit; later changes are refused. */
@@ -395,7 +398,7 @@ export class Store {
     const actor = this.state.user?.name ?? 'Unknown';
     const firm = FIRM;
     const planned = command.plan(this.state, input, { at, actor, firm, opId, ids: this.services.ids });
-    if (!planned.ok) { if (!opts.quiet) this.toast(planned.error.message); return planned; }
+    if (!planned.ok) return this.refusePlan(planned.error, opts);
     const plan = planned.value;
     // nothing longer than an export cell holds is saved: the one place the limit is checked (domain/importExport.ts)
     const long = plan.upserts.map((u) => overLimit(u.kind, u.record as Record<string, unknown>)).find(Boolean);
@@ -448,6 +451,11 @@ export class Store {
     if (plan.effect) this.startEffect(plan.effect, opId);
     void this.pruneJournal();
     return ok({ opId });
+  }
+
+  private refusePlan(error: Failure, opts: DispatchOptions) {
+    if (!opts.quiet && !opts.quietRefusal?.(error)) this.toast(error.message);
+    return fail(error);
   }
 
   /** Track every refused write that remains pending in the journal, including a refused failure marker (#565). */
@@ -1257,7 +1265,9 @@ export class Store {
       }
       revision = loaded.value!.revision;
     }
-    const result = await this.execute(command, input, opId, targets, opts, revision);
+    const prepared = guardLegacySettledClose(command, opts.idempotencyKey);
+    if (prepared.prepare) await prepared.prepare(this, input, { retained: revision !== null });
+    const result = await this.execute(prepared, input, opId, targets, opts, revision);
     if (result.ok && result.value.unchanged && revision !== null && this.state.ops[opId]?.state !== 'succeeded') {
       await this.dropOp(opId);
     }

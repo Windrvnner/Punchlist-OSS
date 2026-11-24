@@ -6,6 +6,7 @@ import { ok, fail, notFound, rejected } from '../../domain/result';
 import { nextQuestionNumber, sharedNumbers, type State } from '../state';
 import { sameWords } from '../../domain/importExport';
 import { keepAside, otherCopies, type ShownNote } from './keptVersions';
+import { AskOrigin, linksForAsk } from '../askSubmission';
 
 const Field = z.enum(['text', 'askedBy', 'received', 'workstream', 'priority', 'respondedBy', 'responded']);
 const YMDorBlank = z.string().refine((v) => v === '' || isRealDate(v), 'Enter a real date as YYYY-MM-DD');
@@ -24,19 +25,36 @@ const onChecklist = (state: State, dealId: string, id: string): boolean => {
 
 export const CreateQuestion = define({
   name: 'CreateQuestion',
-  input: z.object({ dealId: DealId, text: z.string().default(''), workstream: z.string().default(''), askedBy: z.string().default(''), received: YMDorBlank.default(''), linkedFinding: FindingId.optional(), linkedItem: z.string().min(1).optional() }),
+  input: z.object({
+    dealId: DealId, text: z.string().default(''), workstream: z.string().default(''), askedBy: z.string().default(''),
+    received: YMDorBlank.default(''), linkedFinding: FindingId.optional(), linkedItem: z.string().min(1).optional(),
+    askOrigin: AskOrigin.optional(),
+  }),
   targets: (_s, i) => [numbering(i.dealId)],
+  async prepare(store, { dealId, askOrigin }, { retained }) {
+    // Retry from Home loads the deal's records, but does not read its checklist.
+    if (askOrigin && (retained || !Array.isArray(store.get().checklists[dealId]))) {
+      await store.refreshChecklist(dealId);
+    }
+  },
   plan(state, input, ctx) {
     const d = state.deals[input.dealId];
     if (!d) return fail(notFound('Deal not found', input.dealId));
-    if (input.linkedFinding && state.findings[input.linkedFinding]?.dealId !== d.id) return fail(notFound('That finding is not on this deal', input.linkedFinding));
-    if (input.linkedItem && !onChecklist(state, d.id, input.linkedItem)) return fail(notFound('That item is not on this deal’s checklist', input.linkedItem));
+    const links = input.askOrigin ? linksForAsk(state, d.id, input.askOrigin) : ok(input);
+    if (!links.ok) return links;
+    const { linkedFinding, linkedItem, workstream } = links.value;
+    if (linkedFinding && state.findings[linkedFinding]?.dealId !== d.id) {
+      return fail(notFound('That finding is not on this deal', linkedFinding));
+    }
+    if (linkedItem && !onChecklist(state, d.id, linkedItem)) {
+      return fail(notFound('That item is not on this deal’s checklist', linkedItem));
+    }
     const id = ctx.ids.next('q');
     const q = Question.parse({
-      linkedFinding: input.linkedFinding,
-      ...(input.linkedItem ? { linkedItem: { id: input.linkedItem } } : {}),
+      linkedFinding,
+      ...(linkedItem ? { linkedItem: { id: linkedItem } } : {}),
       id, dealId: d.id, rev: 0, createdAt: ctx.at, updatedAt: ctx.at,
-      n: nextQuestionNumber(state, d.id), text: input.text, workstream: input.workstream,
+      n: nextQuestionNumber(state, d.id), text: input.text, workstream,
       askedBy: input.askedBy || ctx.firm,   // a question made here is submitted by the firm, not by the person at the keyboard; who typed it is in the history
       received: input.received,
       priority: 'High',   // a question with no priority is High; a person can lower it
@@ -118,9 +136,9 @@ export const SetQuestionStatus = define({
 });
 
 /**
- * Several questions' status set at once, as one change with one Undo: closing the questions the checklist has settled
- * (linking design, section 13). Each question is checked as SetQuestionStatus checks one; if any is gone or cannot move,
- * nothing is written and the refusal names it. The inverse puts every question back to the status it had.
+ * Several questions' statuses set as one change with one Undo. Each question is checked as SetQuestionStatus checks
+ * one. A refused move changes nothing. CloseSettledQuestions adds the checklist rule and uses this same status update
+ * and inverse, so Undo can reopen questions even if the checklist has changed.
  */
 export const SetQuestionsStatus = define({
   name: 'SetQuestionsStatus',

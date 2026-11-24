@@ -3,10 +3,11 @@
  * questions asked about it or its item, and Ask the counterparty, with the Checklist pane's card.
  */
 import { useContext, useEffect, useState } from 'preact/hooks';
-import { findingItem, type NamedItem } from '../app/state';
+import { askedAbout, findingAskTarget } from '../app/asking';
+import { findingItem } from '../app/state';
 import { CreateQuestion } from '../app/commands/questions';
 import type { Finding } from '../domain/model';
-import { AskCard, AskedList, askedAbout, useLogQuestion } from './askCounterparty';
+import { AskCard, AskedList, useLogQuestion } from './askCounterparty';
 import { ReadOnlyContext } from './editField';
 import { useAppState, useStore } from './hooks';
 import { keptDrafts, isText } from './keptDrafts';
@@ -16,13 +17,6 @@ import { openChecklistItem } from './nav';
 const askDrafts = keptDrafts('finding-ask', isText);
 /** whether a question is being typed on a finding's page */
 export const askKept = (findingId: string) => !!askDrafts.get(findingId);
-
-/** why a question cannot be logged about the finding now; a closed finding is not asked about, as on the Checklist */
-function logBlocked(ro: string | null | undefined, f: Finding, item: NamedItem | null): string | null {
-  if (ro) return ro;
-  if (f.status !== 'open') return 'This finding is closed';
-  return item?.off ? 'Its checklist item is turned off' : null;   // as Add all unresolved leaves it out (section 13)
-}
 
 /** The question being typed on a finding's page, kept as it is typed, and set aside or cleared. */
 function useAskDraft(findingId: string) {
@@ -82,15 +76,16 @@ export function FindingLinks({ dealId, f, pane }: { dealId: string; f: Finding; 
   }, [dealId]);
   const item = findingItem(s, f);
   const asked = askedAbout(s, dealId, item?.id ?? null, f);
-  const why = logBlocked(ro, f, item);
-  // a question being typed stays offered whatever happens to the finding meanwhile (lost work first): Log says why not
-  const offer = !pane && ((f.status === 'open' && !item?.off) || draft.kept);
+  const target = findingAskTarget(f, item);
+  const why = ro || target.why;
+  const offer = !pane && (!target.why || draft.kept);
   const log = async () => {
     if (draft.busy || !draft.text.trim() || why) return;
-    const linkedItem = item && !item.off ? { linkedItem: item.id } : {};
     const text = draft.text.trim();
-    const input = { dealId, text, workstream: f.workstream, linkedFinding: f.id, ...linkedItem };
-    await draft.log(text, () => store.dispatch(CreateQuestion, input, { idempotencyKey: 'f-q-' + f.id }));
+    await draft.log(text, () => store.dispatch(CreateQuestion, {
+      dealId, text, askOrigin: { kind: 'finding', findingId: f.id, itemId: target.links.linkedItem ?? null },
+    },
+      { idempotencyKey: 'f-q-' + f.id }));
   };
   // Escape sets the question aside only where Ask the counterparty can bring it back, as on the Checklist
   const setAside = () => {
