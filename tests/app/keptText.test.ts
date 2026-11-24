@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { MemoryLocal } from '../../src/adapters/local';
 import { fail } from '../../src/domain/result';
 import { KEPT_TEXT_KEY } from '../../src/ports';
+import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 
 let local: MemoryLocal;
 const fresh = () => {
@@ -114,6 +115,30 @@ describe('drafts kept across a restart', () => {
 
     expect(read).toHaveBeenCalledExactlyOnceWith(KEPT_TEXT_KEY);
     expect(write).not.toHaveBeenCalled();
+  });
+
+  it('recovers 2,376 portfolio drafts after a full write, a malformed entry, and two restarts', async () => {
+    const name = 'portfolio-questions';
+    const drafts = await load();
+    const map = drafts.keptDrafts(name, drafts.isText);
+    const expected: [string, string][] = portfolioQuestions().map((text, index) => [`q_${index}:text`, text]);
+    expect(expected).toHaveLength(2376);
+    for (const [id, text] of expected) map.set(id, text);
+
+    vi.spyOn(local, 'write').mockReturnValueOnce(fail({ kind: 'storageFull', message: 'Storage is full' }));
+    drafts.saveKeptDrafts();
+    expect(local.read(KEPT_TEXT_KEY)).toBeNull();
+    expect([...map]).toEqual(expected);
+
+    drafts.saveKeptDrafts();
+    expect(local.read(KEPT_TEXT_KEY)).toEqual({ [name]: expected });
+    const saved = [...expected.slice(0, 1200), ['malformed:text', 42], ...expected.slice(1200)];
+    local.write(KEPT_TEXT_KEY, { [name]: saved });
+
+    for (let restart = 0; restart < 2; restart++) {
+      const restored = await load();
+      expect([...restored.keptDrafts(name, restored.isText)]).toEqual(expected);
+    }
   });
 
   it('keeps text in memory when storage is full and writes it the next time the port is available', async () => {
