@@ -710,6 +710,20 @@ export function nodeDocuments(o: DocumentsOptions) {
   const busy = (dealId: string) => { const j = jobs.get(dealId); return (!!j && !j.done) || next.has(dealId); };
   /** looks at a deal's folders under way, so that a timer, a deal opened and a check asked for at once make one look */
   const looking = new Map<string, Promise<Result<'same' | 'running' | 'unknown'>>>();
+  /** Confirm an unchanged listing once a day without asserting cleared document sightings again (#33). */
+  function noteUnchangedRead(dealId: string, folder: string, shut: string[], opened: string[]) {
+    const last = both(dealId).reads.get(folder)?.get(o.installId) ?? '';
+    const yesterday = new Date(Date.parse(clock()) - DAY).toISOString();
+    if (last > yesterday) return;
+    try {
+      say(dealId, {
+        docId: '',
+        read: folder,
+        ...(shut.length ? { shut } : {}),
+        ...(opened.length ? { opened } : {}),
+      });
+    } catch { /* A refused note can wait for the next look; other folders may need indexing now. */ }
+  }
   /**
    * Has anything changed in the folders this PC has indexed for a deal since a run last read them? Each folder is
    * listed (names, sizes and dates; nothing is opened) and the listing compared with the last run's. A folder that changed,
@@ -732,18 +746,7 @@ export function nodeDocuments(o: DocumentsOptions) {
       const mine = closed.map((d) => path.relative(at, d).split(path.sep).join('/')); const had = both(dealId).shuts.get(p)?.get(o.installId);
       const opened = openedHere(dealId, p, at, mine); const vouched = had?.opened ?? [];
       if (f.finished && printed[dealId]?.[p] === listingPrint(files) && sameList([...mine].sort(), [...(had?.shut ?? [])].sort()) && sameList(opened, [...vouched].sort())) {
-        // The listing still matches this PC's last completed read. Confirm it once a day so the PC stays in use (#33).
-        // This line does not assert document sightings again, including sightings cleared while the PC was idle.
-        const last = both(dealId).reads.get(p)?.get(o.installId) ?? '';
-        const yesterday = new Date(Date.parse(clock()) - DAY).toISOString();
-        if (last < yesterday) {
-          say(dealId, {
-            docId: '',
-            read: p,
-            ...(mine.length ? { shut: mine } : {}),
-            ...(opened.length ? { opened } : {}),
-          });
-        }
+        noteUnchangedRead(dealId, p, mine, opened);
         continue;
       }
       // something changed: it is read only once the folder has stopped changing, so a file still being copied in is left for the next look
