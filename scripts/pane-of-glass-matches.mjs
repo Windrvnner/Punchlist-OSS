@@ -12,46 +12,43 @@ function concatenate(left, right) {
   return left.flatMap((prefix) => right.map((suffix) => prefix + suffix));
 }
 
-function templateValues(node, resolve) {
+function templateValues(node, visit) {
   let values = [node.quasis[0].value.cooked];
   for (const [index, expression] of node.expressions.entries()) {
     const tail = node.quasis[index + 1].value.cooked;
-    values = concatenate(values, stringValues(expression, resolve)).map((value) => value + tail);
+    values = concatenate(values, visit(expression)).map((value) => value + tail);
   }
   return values;
 }
 
 // Only inspect syntax. A placeholder preserves the known parts of a string around a runtime value.
-function stringValues(expression, resolve = () => ['*']) {
+function stringValues(expression, resolve, seen = new Set()) {
   if (!expression) return [];
   const node = unwrapped(expression);
   const text = literalValue(node);
   if (typeof text === 'string') return [text];
-  if (node.type === 'Identifier' || node.type === 'MemberExpression') return resolve(node);
-  if (node.type === 'TemplateLiteral') return templateValues(node, resolve);
+  const visit = (part) => stringValues(part, resolve, seen);
+  if (resolve && ['Identifier', 'MemberExpression', 'ConditionalExpression', 'LogicalExpression'].includes(node.type)) {
+    if (seen.has(node)) return ['*'];
+    const fixed = resolve(node);
+    if (!fixed) return ['*'];
+    if (fixed !== node) return stringValues(fixed, resolve, new Set(seen).add(node));
+  }
+  if (node.type === 'TemplateLiteral') return templateValues(node, visit);
   if (node.type === 'BinaryExpression' && node.operator === '+') {
-    return concatenate(stringValues(node.left, resolve), stringValues(node.right, resolve));
+    return concatenate(visit(node.left), visit(node.right));
   }
-  if (node.type === 'ConditionalExpression') {
-    return [...stringValues(node.consequent, resolve), ...stringValues(node.alternate, resolve)];
-  }
-  if (node.type === 'LogicalExpression') {
-    return [...stringValues(node.left, resolve), ...stringValues(node.right, resolve)];
-  }
+  if (node.type === 'ConditionalExpression') return [...visit(node.consequent), ...visit(node.alternate)];
+  if (node.type === 'LogicalExpression') return [...visit(node.left), ...visit(node.right)];
   return ['*'];
 }
 
 function importTargets(program) {
   let lookup;
-  function targets(node, seen = new Set()) {
-    return stringValues(node, (reference) => {
-      lookup ??= localBindings(program);
-      const initializer = lookup(reference);
-      if (!initializer || seen.has(initializer)) return ['*'];
-      return targets(initializer, new Set(seen).add(initializer));
-    });
-  }
-  return targets;
+  return (node) => stringValues(node, (part) => {
+    lookup ??= localBindings(program);
+    return lookup(part);
+  });
 }
 
 function forbiddenModule(file, name) {
