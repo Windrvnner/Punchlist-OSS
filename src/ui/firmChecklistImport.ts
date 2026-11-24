@@ -16,7 +16,7 @@ import {
   type Asked, type ListTarget, type Review,
 } from './firmChecklistReview';
 import { dropKept, type ChecklistChoices, type ChecklistKept, type Keeper } from './firmChecklistKept';
-import { keepImport } from './keptImports';
+import { keepImport } from '../app/keptImports';
 
 export type Busy = '' | 'reading' | 'asking' | 'reviewing' | 'importing';
 
