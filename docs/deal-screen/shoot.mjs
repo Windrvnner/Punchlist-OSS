@@ -48,6 +48,13 @@ const SCREENS = [
   ['24-qa-roomy', 'qafocus'],
   ['25-qa-roomy-item', 'qafocusitem'],
   ['26-qa-roomy-answered', 'qafocusitem&ans=1'],
+  ['27-deal-header', 'dealheader'],
+  ['28-deal-info', 'details'],
+  ['29-folders', 'folders'],
+  ['30-diligence', 'diligence'],
+  ['32-tasks-needs-input', 'needsinput'],
+  ['33-home-past-conversations', 'homepast'],
+  ['34-archived-at-scale', 'archscale'],
 ];
 
 /** The app's built stylesheet from dist/assets, which the mock-up loads as app.css. */

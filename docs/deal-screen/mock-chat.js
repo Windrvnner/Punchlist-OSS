@@ -2,7 +2,7 @@
 
 const CONVERSATION_TITLES = {
   permits: 'Permits and diligence',
-  boardResolutions: 'Board resolutions for the financing',
+  guarantee: 'Guarantee cap',
 };
 
 // marks where an answer's actions go; only the last answer in a conversation shows them
@@ -45,8 +45,8 @@ const TURN_DILIGENCE_RUNNING = `${ASK_DILIGENCE}
 ${taskCard('cklist', 'Diligence', '1,284 of 2,148 · 76 flagged', 0.6)}</div>`;
 
 const TURN_DILIGENCE_DONE = `${ASK_DILIGENCE}
-<div class="ai"><p>Diligence is done. Of 2,148 items, 1,912 are satisfied, 131 are to resolve and 105 are not settled`
-  + ` yet. Of those to resolve, 84 are flagged and 47 are gaps.</p>
+<div class="ai"><p>Diligence is complete. Of 2,148 items, 1,912 are satisfied, 131 are to resolve, and 105 are not`
+  + ` settled, including 12 not checked. Of those to resolve, 84 are flagged and 47 are gaps.</p>
 ${taskCard('cklist', 'Diligence', 'Done · 131 to resolve')}</div>`;
 
 const CAP_IN_DRAFT = cited('Draft 2 of the guarantee caps the guarantor’s liability at USD 25 million.');
@@ -65,24 +65,13 @@ const TURN_COUNTERPARTY = `<div class="me">Has the counterparty answered anythin
   + ` Nov&nbsp;12. Q87 on the guarantor’s credit rating was answered on Oct&nbsp;30.</p>${ACTIONS_MARK}</div>`;
 
 const TURN_DRAFT_RESPONSE = `<div class="me">Draft a response to Q433 from the documents.</div>
-<div class="ai"><p>Drafted from the grid operator’s letter and the connection agreement. It’s on Q433 for you to`
-  + ` check, and nothing is sent until you use it.</p>${ACTIONS_MARK}</div>`;
+<div class="ai"><p>Drafted from the grid operator’s letter and the connection agreement. The draft is on Q433`
+  + ` for review and is not sent until it is accepted.</p>${ACTIONS_MARK}</div>`;
 
 const TURN_RECHECK = `<div class="me">Two new files arrived in 04 Legal. Check them against the checklist.</div>
-<div class="ai"><p>Checking the checklist and findings against the 2 new files. The report updates as I go.</p>
+<div class="ai"><p>Checking the checklist and findings against the 2 new files.`
+  + ` The report updates as each item is checked.</p>
 ${taskCard('cklist', 'Diligence', '1,204 of 2,148', 0.56)}</div>`;
-
-const ASK_BOARD_RESOLUTIONS = '<div class="me">Are the board resolutions for the financing current?</div>';
-
-const TURN_BOARD_TASK_RUNNING = `${ASK_BOARD_RESOLUTIONS}
-<div class="ai"><p>I’m checking that as a task. It’s in Tasks, and I’ll answer here when it’s done.</p>
-${taskCard('logedit', 'Board resolutions for the financing', 'Step 3 of 5', 0.5,
-    'Reading Credit agreement (draft 6).pdf')}</div>`;
-
-const TURN_BOARD_TASK_DONE = `${ASK_BOARD_RESOLUTIONS}
-<div class="ai"><p>The resolutions are out of date. The board approved draft 4 of the credit agreement, and draft 6`
-  + ' changes the facility size and adds a hedging bank. I proposed it as a finding for you to review.</p>\n'
-  + `${taskCard('logedit', 'Board resolutions for the financing', 'Done · 4 documents')}${ACTIONS_MARK}</div>`;
 
 /** Puts the answer actions in place of the last mark only; earlier marks stay as empty comments. */
 function withLastAnswerActions(html) {
