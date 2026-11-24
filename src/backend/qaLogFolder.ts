@@ -97,8 +97,14 @@ const clean = (s: string) => {
  * version goes to the folder's archive first, dated, so nothing anyone wrote is lost. "later": the file is open somewhere, or
  * changed since it was read (someone saved a moment ago); nothing was written, and the next update starts from their version.
  */
-/** the name a save moves the log aside under, while it puts the new version in place: "~<stem> <8 hex>.old" */
-const asideName = (stem: string) => `~${stem.slice(0, 200)} ${crypto.randomBytes(4).toString('hex')}.old`;
+// Tie each working file to the full original filename, extension included, while keeping the name byte-bounded (#278).
+const workingPrefix = (file: string) => `~qa-log-${sha256(Buffer.from(file))}.`;
+const workingId = (file: string) => `${workingPrefix(file)}${crypto.randomBytes(4).toString('hex')}`;
+
+function workingKind(prefix: string, name: string): string | undefined {
+  if (!name.startsWith(prefix)) return undefined;
+  return /^[0-9a-f]{8}\.(old|tmp|kept|left)$/.exec(name.slice(prefix.length))?.[1];
+}
 
 /**
  * A save cut off between moving the log aside and putting the new version in place (the app closed, the share dropped)
@@ -113,38 +119,40 @@ export function restoreAside(folder: string, file: string): boolean {
  * The time by the folder's own clock: the change time of an empty file made there and taken away again, or null when none can
  * be made. A file's age is told against this, never against this PC's clock.
  */
-function folderNow(folder: string, stem: string): number | null {
-  const probe = path.join(folder, `${asideName(stem).slice(0, -4)}.tmp`);
+function folderNow(folder: string, file: string): number | null {
+  const probe = path.join(folder, `${workingId(file)}.tmp`);
   try { fs.writeFileSync(probe, new Uint8Array(0), { flag: 'wx' }); return fs.statSync(probe).ctimeMs; } catch { return null; } finally { tidy(probe); }
 }
 function putBack(folder: string, file: string): boolean {
   const at = path.join(folder, file); if (fs.existsSync(at)) return false;
-  const ext = path.extname(file); const stem = file.slice(0, file.length - ext.length).slice(0, 200);
+  const prefix = workingPrefix(file);
   let names: string[]; try { names = fs.readdirSync(folder); } catch { return false; }
-  const left = names.filter((n) => n.startsWith(`~${stem} `) && /^ [0-9a-f]{8}\.old$/.test(n.slice(stem.length + 1)))
+  const left = names.filter((name) => workingKind(prefix, name) === 'old')
     .map((n) => ({ n, t: fs.statSync(path.join(folder, n)).ctimeMs })).sort((a, b) => b.t - a.t);   // ctime: when it was moved aside
   const old = left[0]; if (!old) return false;
-  const now = folderNow(folder, stem); if (now === null || now - old.t < 60_000) return false;
+  const now = folderNow(folder, file); if (now === null || now - old.t < 60_000) return false;
   try { fs.renameSync(path.join(folder, old.n), at); return true; } catch { return false; }
 }
 
 /**
- * Takes away a save's own working files ("~<stem> <8 hex>.tmp" and ".old") that an earlier save could not remove because
+ * Takes away this log's own working files (".tmp" and ".old") that an earlier save could not remove because
  * another program held them for a moment (a sync client uploading the new version). Only those over a minute old by
  * the folder's clock (`now`: when this save's own working file was made; another PC may be saving this moment), only while
  * this log is in place, and only when the log or its archive holds the same bytes under this log's extension (or it is an
  * empty clock probe): so never this log moved aside, another log of the same name (".csv" beside
  * ".xlsx"), another PC's new version not yet in place, an edit saved in the moment before a move that never reached the
- * archive, or a team file that happens to be named alike. A name cut short to fit may be another log's, so its files stay.
+ * archive, or a team file that happens to be named alike. Legacy files with unknown ownership stay where they are.
  */
 function tidyLeftovers(folder: string, file: string, archive: string, now: number): void {
-  const ext = path.extname(file); const full = file.slice(0, file.length - ext.length); const stem = full.slice(0, 200);
-  if (full !== stem || !fs.existsSync(path.join(folder, file))) return;
+  const ext = path.extname(file);
+  const prefix = workingPrefix(file);
+  if (!fs.existsSync(path.join(folder, file))) return;
   let names: string[]; try { names = fs.readdirSync(folder); } catch { return; }
   // the leftovers first, by size and hash, so the archive is walked once and only files of a leftover's size are read
   const left: { f: string; size: number; hash: string }[] = [];
   for (const n of names) {
-    if (!n.startsWith(`~${stem} `) || !/^ [0-9a-f]{8}\.(tmp|old)$/.test(n.slice(stem.length + 1))) continue;
+    const kind = workingKind(prefix, n);
+    if (kind !== 'tmp' && kind !== 'old') continue;
     try {
       const f = path.join(folder, n); if (now - fs.statSync(f).ctimeMs < 60_000) continue;
       const b = new Uint8Array(fs.readFileSync(f)); left.push({ f, size: b.length, hash: sha256(b) });
@@ -166,11 +174,20 @@ const tidy = (f: string) => { try { fs.rmSync(f, { force: true }); } catch { /* 
  */
 export type KeptEdit = { name: string; hash: string; base: string | null };
 /**
- * "~<stem> <8 hex>.old", for this log's stem as save names it; or ".kept", one already brought into the log that the
+ * A working file for this log ending in ".old", or ".kept", one already brought into the log that the
  * archive refused (settleKept): it is never merged again, only filed in the archive when it takes it; ".left" is the same,
  * with some of its changes not in the log, so that the update that files it says so
  */
-const keptName = (stem: string, n: string) => n.startsWith(`~${stem} `) && /^ [0-9a-f]{8}\.(?:old|kept|left)$/.test(n.slice(stem.length + 1));
+function keptName(prefix: string, name: string): boolean {
+  const kind = workingKind(prefix, name);
+  return kind !== undefined && kind !== 'tmp';
+}
+
+/** A shortened archive name can be shared by another log, so it cannot identify the base of a kept edit. */
+function archiveBaseStem(stem: string, ext: string): string | undefined {
+  const suffix = ` 0000-00-00 0000${ext}`;
+  return Buffer.byteLength(stem + suffix) < MAX_NAME - 6 && stem === stem.trimEnd() ? stem : undefined;
+}
 
 /**
  * whether `bytes` are a file of the kind `ext` names: an OpenDocument package (.ods, which names itself in "mimetype"), an
@@ -185,8 +202,8 @@ const sameKind = (ext: string, b: Uint8Array) => {
 /**
  * The edits a save kept aside under its working name because the archive did not take a copy of them: a version of
  * the log moved aside, over a minute old by the folder's clock (another PC may be saving this moment), while the log is in
- * place, whose bytes the archive does not hold (one it holds is a leftover: tidyLeftovers takes it). A name cut short to fit
- * may be another log's, so it is never looked at. The version each was made from is the archive copy the same save made
+ * place, whose bytes the archive does not hold (one it holds is a leftover: tidyLeftovers takes it). The version each
+ * was made from is the archive copy the same save made
  * just before it moved the log aside: the newest of the log's kind in the archive made in the minute up to that move, by the
  * folder's clock, and only one named as an update names it (never a "saved meanwhile" copy, nor another log's). One made in the 2 seconds after the move (a file system that keeps
  * times coarsely) only when there is none before it, and only when every copy made then holds the same bytes: another PC's
@@ -196,16 +213,25 @@ const sameKind = (ext: string, b: Uint8Array) => {
  * alone. Oldest first, so a later edit is brought in after an earlier one.
  */
 export function keptEdits(folder: string, file: string): KeptEdit[] {
-  const ext = path.extname(file); const full = file.slice(0, file.length - ext.length); const stem = full.slice(0, 200);
-  if (full !== stem || !fs.existsSync(path.join(folder, file))) return [];
-  let names: string[]; try { names = fs.readdirSync(folder).filter((n) => keptName(stem, n)); } catch { return []; }
+  const ext = path.extname(file);
+  const prefix = workingPrefix(file);
+  if (!fs.existsSync(path.join(folder, file))) return [];
+  let names: string[];
+  try {
+    names = fs.readdirSync(folder).filter((name) => keptName(prefix, name));
+  } catch {
+    return [];
+  }
   if (!names.length) return [];
-  const now = folderNow(folder, stem); if (now === null) return [];
+  const now = folderNow(folder, file); if (now === null) return [];
   const dir = archiveIn(folder); const arc: { f: string; t: number; size: number; mine: boolean; hash?: string }[] = [];
   // this log's dated copies, as save names them, are the ones it may have been made from: another log may share the archive
-  const own = fit(stem, ` 0000-00-00 0000${ext}`); const dated = /^ \d{4}-\d{2}-\d{2} \d{4}(?: \(\d+\))?$/;
+  const own = archiveBaseStem(file.slice(0, file.length - ext.length), ext);
+  const dated = /^ \d{4}-\d{2}-\d{2} \d{4}(?: \(\d+\))?$/;
   if (dir) for (const n of fs.readdirSync(path.join(folder, dir))) {
-    const e = path.extname(n); if (e.toLowerCase() !== ext.toLowerCase()) continue; const mine = n.startsWith(own) && dated.test(n.slice(own.length, n.length - e.length));
+    const e = path.extname(n);
+    if (e.toLowerCase() !== ext.toLowerCase()) continue;
+    const mine = own !== undefined && n.startsWith(own) && dated.test(n.slice(own.length, n.length - e.length));
     try { const f = path.join(folder, dir, n); const st = fs.statSync(f); if (st.isFile()) arc.push({ f, t: st.ctimeMs, size: st.size, mine }); } catch { /* gone meanwhile */ }
   }
   const hashOf = (a: (typeof arc)[number]) => { try { a.hash ??= sha256(new Uint8Array(fs.readFileSync(a.f))); } catch { a.hash = ''; } return a.hash; };
@@ -241,8 +267,12 @@ export function keptEdits(folder: string, file: string): KeptEdit[] {
  * the names that went.
  */
 export function settleKept(folder: string, file: string, kept: { name: string; hash: string; left?: boolean }[]): string[] {
-  const ext = path.extname(file); const stem = file.slice(0, file.length - ext.length).slice(0, 200); const gone: string[] = [];
-  const mine = kept.filter((k) => path.basename(k.name) === k.name && keptName(stem, k.name)); if (!mine.length) return gone;
+  const ext = path.extname(file);
+  const stem = file.slice(0, file.length - ext.length);
+  const prefix = workingPrefix(file);
+  const gone: string[] = [];
+  const mine = kept.filter((k) => path.basename(k.name) === k.name && keptName(prefix, k.name));
+  if (!mine.length) return gone;
   const dir = archiveOf(folder);
   for (const k of mine) {
     try {
@@ -265,7 +295,9 @@ export function saveLog(o: { folder: string; file: string; bytes: Uint8Array; wa
   const by = whoHasOpen(o.folder, o.file); if (by !== null) return { status: 'later', ...(by ? { by } : {}) };
   // not there at all: another PC has it moved aside this moment, so this is "in use", not an error
   try { if (hash(at) !== o.was) return { status: 'later' }; } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'later' }; throw e; }
-  const id = asideName(stem).slice(0, -4); const tmp = path.join(o.folder, `${id}.tmp`); const aside = path.join(o.folder, `${id}.old`);
+  const id = workingId(o.file);
+  const tmp = path.join(o.folder, `${id}.tmp`);
+  const aside = path.join(o.folder, `${id}.old`);
   const dir = archiveOf(o.folder); let archive = '';
   // the archive file that holds the version moved aside byte for byte, once one is known to: only then may that version go
   let holds = '';
