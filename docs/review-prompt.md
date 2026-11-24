@@ -44,7 +44,8 @@ verdict, and no criteria in your own words.
 >    message in `git log main..HEAD`, the pull request, or issues it files or edits. Product terms and data fields
 >    (`owner`, "the end user") are not attribution. The usual Git author and committer fields are allowed, and so is
 >    a coding tool's plain "Generated with" footer (the tool's name, with at most a link to its product page): it
->    never blocks a merge and is not reported.
+>    never blocks a merge and is not reported. A `Co-authored-by` trailer for the contributor's own coding-agent
+>    identity (`Windrvnner-Codex`) is allowed and not reported either.
 > 6. New or changed code that is hard for a person to read, by the rules under "Readable code" in CLAUDE.md (the
 >    hints from `scripts/check-readability.mjs` help), or new or changed code in `src/ui` that breaks the "pane of
 >    glass" rule there: a model call, business rule, data transform, list or count rule, retry, or persistence in a

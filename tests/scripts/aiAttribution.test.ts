@@ -11,6 +11,7 @@ import { AI_ATTRIBUTION_PATTERNS, aiAttributionIn } from '../../scripts/aiAttrib
 
 const site = ['claude', '.ai'].join('');
 const tool = 'Claude';
+const agent = ['Cod', 'ex'].join('');
 const refused = [
   `https://${site}/code/session_1`,
   `see ${site}/chat/abc`,
@@ -35,6 +36,14 @@ const refused = [
   `> Co-Authored-By: ${tool} <a@example.com>`,
   `Co-Authored-By : ${tool} <a@example.com>`,
   `Co-Authored-By: Sonnet 5.5 <a@example.com>`,
+  `Co-authored-by: ${agent} <a@example.com>`,
+  `Co-authored-by: ${agent}`,
+  `Co-authored-by: Someone-${agent} <a@example.com>`,
+  `Co-authored-by: Windrvnner--${agent} <a@example.com>`,
+  `Co-authored-by: XWindrvnner-${agent} <a@example.com>`,
+  `Co-authored-by: rvnner-${agent} <a@example.com>`,
+  `Co-authored-by: ${agent} Windrvnner-${agent} <a@example.com>`,
+  `Co-authored-by: Windrvnner-${agent} and ${tool} <a@example.com>`,
   `${tool}-Session: x`,
   `_Requested by **Name** · thread_`,
   `<!-- ${['claude-projects', 'attribution'].join('-')}: {} -->`,
@@ -45,6 +54,9 @@ const allowed = [
   `https://${site}.example.com/page`,
   `Docs live on ${site} pages`,
   'Co-Authored-By: Jane <jane@example.org>',
+  `Co-authored-by: Windrvnner-${agent} <a@privaterelay.example.com>`,
+  `co-authored-by: windrvnner-${agent} <a@example.com>`,
+  `Co-authored-by: Jane <${agent.toLowerCase()}@example.com>`,
   'Sample generated with a script. Requested by the prompt.',
   'https://claude.com/product/claude-code',
   `Generated with [${tool} Code](https://claude.com/claude-code)`,
