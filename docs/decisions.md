@@ -130,6 +130,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 
 ## Checklist
 
+- Overview and Checklist count turned-off and not-yet-checked items the same way through one selector (#830).
 - An abandoned first pass over fewer documents than the deal now holds is finished like any left round,
   not started afresh.
 - The master checklist has four layers: general, structure, sector, and technology. There is always a general list.

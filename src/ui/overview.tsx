@@ -1,10 +1,11 @@
-import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useAppState, useStore } from './hooks';
 import { firmOf, type Layer } from '../domain/checklist';
 import { Icon } from './icons';
 import { AI_LABEL } from '../control';
 import type { Deal } from '../domain/model';
-import { dealQuestions, askAbout, itemStanding, dealHash, dealTwin, offFindingCount, type ItemKind, type UiState } from '../app/state';
+import { dealQuestions, askAbout, dealHash, dealTwin, type UiState } from '../app/state';
+import { checklistStandingCounts } from '../app/dealCounts';
 import { liveFolders } from '../app/indexing';
 import { openLocate } from '../app/relink';
 import { PageTop, Stalled, NoRoom, INDEXING_LINE, INDEXING_TIP, useDealLock } from './deal';
@@ -92,36 +93,23 @@ function PickField({ deal: d, field, label, names }: { deal: Deal; field: Layer 
  * How the deal stands, in three columns side by side: the findings, the checklist and the questions
  * (leader lines, side by side). Each is one bar in three parts, what is open, what is in progress and what is done,
  * with each part's words on a leader line from it. The heading opens its page; every figure opens its page showing what
- * it counts. Findings and questions are counted from the records on their pages, the checklist from what the backend
- * reports.
+ * it counts.
  */
 function Standing({ deal: d }: { deal: Deal }) {
   const store = useStore(); const s = useAppState();
   const fs = Object.values(s.findings).filter((f) => f.dealId === d.id); const open = fs.filter((f) => f.status === 'open'); const again = open.filter((f) => f.updated).length; const closed = fs.length - open.length;
   const qs = dealQuestions(s, d.id); const q = (st: string) => qs.filter((x) => x.status === st).length;
-  // the checklist from what the backend reports, each item where it stands now (itemStanding): an item whose finding a
-  // person closed is resolved by a person, one whose finding was deleted is "finding deleted". Until its rows are here, as counted.
-  const p = s.progress[d.id]?.checklist; const rows = s.checklists[d.id];
-  const by = (k: ItemKind) => (Array.isArray(rows) ? rows.filter((r) => itemStanding(s, d.id, r).kind === k).length : 0);
-  // an item whose finding was deleted is not settled, yet still counts as to resolve: deleting a finding never makes a
-  // deal look cleaner
-  const c = p && (Array.isArray(rows) ? { items: p.items, findings: by('finding'), gaps: by('gap'), unsettled: by('open'), person: by('person'), satisfied: by('satisfied'), gone: by('gone') } : { ...p, person: 0, gone: 0 });
+  const c = useMemo(() => checklistStandingCounts(s, d.id), [
+    d.id, s.progress[d.id], s.checklists[d.id], s.items, s.findings, s.conflicts, s.tombstones, s.dealLoad[d.id],
+  ]);
   const ff = (status: 'open' | 'reassess' | 'closed') => () => store.ui({ findingFilter: { ...store.get().ui.findingFilter, status } });
   const cf = (checklistFilter: UiState['checklistFilter']) => () => store.ui({ checklistFilter });
-  // items turned off for this deal leave every count; the heading says how many, and how many still have an open finding (linking design, section 12)
-  const offN = Object.values(s.items).filter((it) => it.dealId === d.id && it.off).length; const offOpen = offFindingCount(s, d.id);
-  const offLabel = `${num(offN)} turned off` + (offOpen ? `, ${num(offOpen)} with an open finding` : '');
   const qf = (status: 'open' | 'answered' | 'closed') => () => store.ui({ qaFilter: { ...store.get().ui.qaFilter, status } });
   const lines: Line[] = [
     { id: 'ov-findings', title: 'Findings', href: `#deal-${d.id}`, go: ff('open'), segs: [
       { k: 'open', n: open.length, word: 'open', go: ff('open'), sub: [['may be out of date', again, ff('reassess')]] },
       { k: 'done', n: closed, word: 'closed', go: ff('closed') }] },
-    ...(c && (c.items > 0 || offN > 0) ? [{ id: 'ov-checklist', title: 'Checklist', href: `#checklist-${d.id}`, go: cf('all'),
-      off: offN ? [offLabel, cf('off')] : undefined, segs: [
-      { k: 'open', n: c.findings + c.gaps + c.gone, word: 'to resolve', go: cf('all'), sub: [['flagged', c.findings, cf('finding')], [c.gaps === 1 ? 'gap' : 'gaps', c.gaps, cf('gap')], [c.gone === 1 ? 'finding deleted' : 'findings deleted', c.gone, cf('gone')]] },
-      { k: 'prog', n: c.unsettled, word: 'not settled', go: cf('open') },
-      // one done part: satisfied, or with items a person resolved, "settled", with each named after it
-      c.person ? { k: 'done', n: c.satisfied + c.person, word: 'settled', sub: [['satisfied', c.satisfied, cf('satisfied')], ['by a person', c.person, cf('person')]] } : { k: 'done', n: c.satisfied, word: 'satisfied', go: cf('satisfied') }] } as Line] : []),
+    ...(c ? [checklistLine(d.id, c, cf)] : []),
     { id: 'ov-qa', title: 'Q&A', href: `#qa-${d.id}`, go: qf('open'), segs: [
       { k: 'open', n: q('open'), word: 'open', go: qf('open') },
       { k: 'prog', n: q('answered'), word: 'answered', go: qf('answered') },
@@ -131,7 +119,32 @@ function Standing({ deal: d }: { deal: Deal }) {
 }
 
 type Seg = { k: 'open' | 'prog' | 'done'; n: number; word: string; go?: () => void; sub?: [string, number, () => void][] };
-type Line = { id: string; title: string; href: string; go: () => void; segs: Seg[]; off?: [string, () => void] };
+type Line = {
+  id: string; title: string; href: string; go: () => void; segs: Seg[]; total?: number; off?: [string, () => void];
+};
+
+function checklistLine(
+  dealId: string, counts: NonNullable<ReturnType<typeof checklistStandingCounts>>,
+  filter: (kind: UiState['checklistFilter']) => () => void,
+): Line {
+  const offLabel = `${num(counts.off)} turned off`
+    + (counts.offOpen ? `, ${num(counts.offOpen)} with an open finding` : '');
+  return {
+    id: 'ov-checklist', title: 'Checklist', href: `#checklist-${dealId}`, go: filter('all'), total: counts.all,
+    off: counts.off ? [offLabel, filter('off')] : undefined,
+    segs: [
+      { k: 'open', n: counts.toResolve, word: 'to resolve', go: filter('all'), sub: [
+        ['flagged', counts.finding, filter('finding')],
+        [counts.gap === 1 ? 'gap' : 'gaps', counts.gap, filter('gap')],
+        [counts.gone === 1 ? 'finding deleted' : 'findings deleted', counts.gone, filter('gone')],
+      ] },
+      { k: 'prog', n: counts.open, word: 'not settled', go: filter('open') },
+      counts.person ? { k: 'done', n: counts.settled, word: 'settled', sub: [
+        ['satisfied', counts.satisfied, filter('satisfied')], ['by a person', counts.person, filter('person')],
+      ] } : { k: 'done', n: counts.satisfied, word: 'satisfied', go: filter('satisfied') },
+    ],
+  };
+}
 type Placed = { lx: number; up: boolean; mode: 'r' | 'l' | 'c'; x: number; w: number; bare?: boolean };
 const LEAD: Record<Seg['k'], string> = { open: 'var(--high)', prog: 'var(--accent)', done: 'var(--bar-ix)' };
 // a done part's leader is drawn in --ink-3: a 2px line in the bar's own translucent gray is too faint to follow
@@ -179,7 +192,8 @@ const overlaps = (pl: Placed[], W: number) => pl.some((A, a) => A.lx < -1 || A.l
 
 /** One column: its heading and total, its bar, and each part's words on a leader line from the part. Placed once the words can be measured, and again when the column's width changes. */
 function Leaders({ line: l }: { line: Line }) {
-  const shown = l.segs.filter((g) => g.n > 0); const total = l.segs.reduce((n, g) => n + g.n, 0);
+  const shown = l.segs.filter((g) => g.n > 0);
+  const total = l.total ?? l.segs.reduce((n, g) => n + g.n, 0);
   const col = useRef<HTMLDivElement>(null); const [laid, setPl] = useState<{ at: Placed[]; top: number; bot: number; key: string } | null>(null);
   const key = shown.map((g) => `${g.k}${g.n}${g.word}${(g.sub ?? []).map(([w, n]) => w + n).join()}`).join('|');
   const pl = laid?.key === key ? laid : null;            // a placing made for other parts is not used while the new one is worked out
