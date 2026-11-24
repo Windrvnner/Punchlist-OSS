@@ -3,6 +3,7 @@
 // both; what is typed is never lost; and an open question on the Q&A page says what it was asked for. At deal scale:
 // a log of 2,000 questions beside the ones asked here.
 import { launchChrome } from './chrome.mjs';
+import { holdNext } from './cardPage.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = [];
 const say = (id, ok, note = '') => {
@@ -220,6 +221,62 @@ async function askedFor(page, questionId) {
   say('back on a finding whose question is still saving, Log is off and words typed meanwhile are kept',
     during && after === typed && back === typed && qs.length === 1 && !page.errors.length,
     JSON.stringify({ during, after, back, qs: qs.length, errors: page.errors }));
+  await ctx.close();
+}
+
+{ // #843: a new check raises another finding on the same item while the cancelled card's Log is still out.
+  const { ctx, page, id, f } = await findingPage();
+  const words = 'Please confirm the calculation in the executed agreement.';
+  const title = 'Distribution test requires two completed measurement periods';
+  const second = await page.evaluate(([first, title]) => __peer.add(first, { title }), [f.id, title]);
+  await page.waitForFunction((fid) => !!store.get().findings[fid], second);
+  await page.click('#f-item a');
+  const itemId = await page.locator('#ck-rows .ckrow.on').getAttribute('data-item');
+  const reopen = async () => {
+    await page.click('#ck-close');
+    await page.click(`#ck-rows [data-item="${itemId}"]`);
+  };
+  const draft = () => page.evaluate(() => document.querySelector('#ck-ask-text')?.value);
+  const targets = async () => (await linked(page)).filter((q) => q.text === words).map((q) => q.linkedFinding);
+  await page.click('#ck-ask');
+  await page.fill('#ck-ask-text', words);
+  await holdNext(page, 'CreateQuestion');
+  await page.click('#ck-ask-log');
+  await page.click('#ck-ask-cancel');
+  await page.evaluate(async ([dealId, itemId, findingId]) => {
+    const ai = store.services.ai;
+    const checklist = ai.checklist.bind(ai);
+    ai.checklist = async (id) => {
+      const result = await checklist(id);
+      if (result.ok) result.value = result.value.map((row) => row.id === itemId ? { ...row, findingId } : row);
+      return result;
+    };
+    await store.refreshChecklist(dealId);
+  }, [id, itemId, second]);
+  await page.click('#ck-ask');
+  await page.fill('#ck-ask-text', words);
+  const busy = await page.isDisabled('#ck-ask-log');
+  await page.evaluate(() => window.resume());
+  await page.waitForSelector('#ck-asked');
+  await page.waitForFunction(() => !document.querySelector('#ck-ask-log')?.disabled);
+  const after = await draft();
+  await reopen();
+  const kept = await draft();
+  const linkedTo = await textOf(page, '#ck-detail .clink');
+  const saved = await targets();
+  say('a cancelled Log saves the first question and keeps identical words for the second finding',
+    busy && after === words && kept === words && linkedTo === `Linked to “${title}”` && saved.join() === f.id,
+    JSON.stringify({ busy, after, kept, linkedTo, saved }));
+  await holdNext(page, 'CreateQuestion');
+  await page.click('#ck-ask-log');
+  await reopen();
+  const pending = await page.isDisabled('#ck-ask-log');
+  await page.evaluate(() => window.resume());
+  await page.waitForSelector('#ck-ask');
+  const both = await targets();
+  say('logging the kept question settles its reopened card and saves it against the second finding',
+    pending && both.join() === [f.id, second].join() && !page.errors.length,
+    JSON.stringify({ pending, both, errors: page.errors }));
   await ctx.close();
 }
 
