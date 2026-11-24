@@ -12,7 +12,7 @@ import { memoDocument } from '../domain/memoDoc';
 import { safeFileName } from '../domain/importExport';
 import { localYmd } from '../domain/model';
 import { AI_LABEL, SERVICE, control } from '../control';
-import { ok, fail, type Result } from '../domain/result';
+import { ok, fail, type Failure, type Result } from '../domain/result';
 
 const RANK: Record<string, number> = { broad: 0, product: 1, sector: 2, technology: 3, deal: 4 };
 /** The checklist as the memo counts it: each row under the list it comes from (the first of its lists, general first, as the Checklist page groups it), standing as the Overview counts it. */
@@ -26,7 +26,9 @@ export function memoItems(s: State, dealId: string): MemoItem[] | null {
   });
 }
 
-type MemoWrite = { id: string; bytes: Uint8Array };
+const WORD = { label: 'Word document', ext: 'docx' };
+const PDF = { label: 'PDF', ext: 'pdf' };
+type MemoWrite = { id: string; bytes: Uint8Array; name: string; kind: typeof WORD };
 
 async function writeMemo(store: Store, memo: MemoWrite): Promise<Result<'saved'>> {
   try {
@@ -49,7 +51,7 @@ export async function makeMemo(
   const name = safeFileName(`${at.name} deal memo`);
   // the dialog first: nothing is asked of the model until the person has said where it goes
   const two = sheets.document && fs.pickSave && fs.writePicked;
-  const pick = two ? await fs.pickSave!(name, [{ label: 'Word document', ext: 'docx' }, { label: 'PDF', ext: 'pdf' }]) : null;
+  const pick = two ? await fs.pickSave!(name, [WORD, PDF]) : null;
   if (pick && !pick.ok) return pick;
   if (pick && !pick.value) return ok('canceled');
   working();
@@ -69,7 +71,8 @@ export async function makeMemo(
   const made = await sheets.document(fodt); if (!made.ok) return made;
   if (pick?.value) {
     const { id, ext } = pick.value;
-    const memo = { id, bytes: ext === 'pdf' ? made.value.pdf : made.value.docx };
+    const kind = ext === 'pdf' ? PDF : WORD;
+    const memo = { id, bytes: kind === PDF ? made.value.pdf : made.value.docx, name, kind };
     writing(memo);
     return writeMemo(store, memo);
   }
@@ -87,14 +90,73 @@ function memoSaved(store: Store, file?: string) {
   store.toast('Deal memo saved', open);
 }
 
-/** A picked-file failure keeps the already converted memo and retries only that write (#656). */
-function memoNotSaved(store: Store, memo: MemoWrite, message: string) {
+type PendingMemo = { memo: MemoWrite; error: Failure };
+const pendingMemos = new WeakMap<Store, PendingMemo[]>();
+
+async function chooseMemoDestination(store: Store, memo: MemoWrite): Promise<Result<MemoWrite | null>> {
+  try {
+    const picked = await store.services.fs.pickSave!(memo.name, [memo.kind]);
+    if (!picked.ok) return picked;
+    return ok(picked.value ? { ...memo, id: picked.value.id } : null);
+  } catch {
+    return fail({ kind: 'failed', message: 'Couldn’t choose where to save the memo' });
+  }
+}
+
+/** A changed destination needs a new choice. The already converted memo survives even if that dialog is canceled. */
+async function retryMemoWrite(store: Store, pending: PendingMemo): Promise<PendingMemo | null> {
+  let { memo } = pending;
+  if (pending.error.kind === 'conflict') {
+    const chosen = await chooseMemoDestination(store, memo);
+    if (!chosen.ok) return { memo, error: { kind: 'conflict', message: chosen.error.message } };
+    if (!chosen.value) return pending;
+    memo = chosen.value;
+  }
+  const saved = await writeMemo(store, memo);
+  if (!saved.ok) return { memo, error: saved.error };
+  memoSaved(store, memo.id);
+  return null;
+}
+
+/** Show one notice at a time so identical notices cannot replace other pending memo saves (#656). */
+function showPendingMemo(store: Store, queue: PendingMemo[]) {
+  const next = queue[0];
+  if (!next) {
+    pendingMemos.delete(store);
+    return;
+  }
+  let retrying = false;
   const retry = async () => {
-    const result = await writeMemo(store, memo);
-    if (result.ok) memoSaved(store, memo.id);
-    else memoNotSaved(store, memo, result.error.message);
+    if (retrying) return;
+    retrying = true;
+    store.dismissToast(notice);
+    const pending = await retryMemoWrite(store, next);
+    if (pending) queue[0] = pending;
+    else queue.shift();
+    showPendingMemo(store, queue);
   };
-  store.toast(message, { label: 'Retry', run: () => void retry() }, { glyph: 'warn' });
+  const label = next.error.kind === 'conflict' ? 'Save As…' : 'Retry';
+  const action = { label, run: () => void retry() };
+  const notice = store.toast(next.error.message, action, { glyph: 'warn', sticky: 'stays' });
+  const stopWatching = store.subscribe(() => {
+    if (store.get().ui.toasts.some((toast) => toast.id === notice)) return;
+    stopWatching();
+    if (retrying) return;
+    queue.shift();
+    showPendingMemo(store, queue);
+  });
+}
+
+function memoNotSaved(store: Store, memo: MemoWrite, error: Failure) {
+  const queue = pendingMemos.get(store);
+  const pending = { memo, error };
+  if (queue) {
+    queue.push(pending);
+    return;
+  }
+  const first = [pending];
+  pendingMemos.set(store, first);
+  showPendingMemo(store, first);
 }
 
 const pressed = new Set<string>();   // deals whose memo is under way, from the press (the dialog included) to the notice
@@ -118,7 +180,7 @@ export async function runMemo(store: Store, dealId: string): Promise<void> {
     return;
   }
   if (attempt.memo) {
-    memoNotSaved(store, attempt.memo, result.error.message);
+    memoNotSaved(store, attempt.memo, result.error);
     return;
   }
   const retry = { label: 'Retry', run: () => void runMemo(store, dealId) };
