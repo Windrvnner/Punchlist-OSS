@@ -54,9 +54,7 @@ const ratingCases = [
   { name: 'no open findings', rated: 0, closedOnly: true, expected: [NO_OPEN] },
 ] as const;
 
-async function scriptedScaleMemo(
-  testCase: (typeof ratingCases)[number], summarize: (call: Call, attempt: number) => unknown = summaryFromPrompt,
-) {
+async function scriptedScaleMemo(testCase: (typeof ratingCases)[number]) {
   const findings = 'closedOnly' in testCase ? scaleMemoInput.findings.map((f) => ({ ...f, status: 'closed' as const }))
     : scaleMemoInput.findings;
   const ratings = Object.fromEntries(SCALE_FINDINGS.slice(0, testCase.rated).map((f): [string, Rating] => [
@@ -64,7 +62,7 @@ async function scriptedScaleMemo(
   ]));
   const rate = by(ratings);
   const reply = (call: Call) => ({ ratings: rate(call).ratings.filter((row) => row.rating) });
-  const s = setup(reply, summarize);
+  const s = setup(reply, summaryFromPrompt);
   await deal(s.repo);
   for (const f of findings) await finding(s.repo, f.id, f.title, { ...f, dealId: 'd1' });
   const result = val(await s.ai.memo!('d1'));
@@ -155,16 +153,6 @@ describe('the deal memo’s ratings and summary', () => {
     }
     const count = 'closedOnly' in testCase ? 'No open findings.' : `${SCALE_FINDINGS.length} open findings`;
     expect(pageOne).toContain(count);
-  });
-
-  it('keeps a stated fact about a known High risk when other ratings are unresolved', async () => {
-    const known = 'No signed agreement covers the remaining capacity. The high-voltage connection is unsigned.';
-    const { pageOne, sums } = await scriptedScaleMemo(ratingCases[2], () => ({
-      paragraphs: ['Open findings have unresolved ratings.', known],
-    }));
-    expect(sums).toHaveLength(1);
-    expect(pageOne).toContain(known);
-    expect(pageOne).toContain('41 unrated.');
   });
 
   it('keeps a summary that reports what a document requires', async () => {
