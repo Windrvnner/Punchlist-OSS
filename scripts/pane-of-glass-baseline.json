@@ -1,7 +1,4 @@
 {
-  "src/ui/addUnresolved.tsx": {
-    "services": 2
-  },
   "src/ui/app.tsx": {
     "services": 1
   },
