@@ -1,7 +1,9 @@
 // The Q&A log in its folder: saved over in place, the version it replaces first dated in the archive, nothing ever lost.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { archiveOf, saveLog, createLog, sha256, restoreAside, whoHasOpen } from '../../src/backend/qaLogFolder';
+import {
+  archiveOf, createLog, restoreAside, saveLog, settleKept, sha256, whoHasOpen,
+} from '../../src/backend/qaLogFolder';
 
 const folder = (...dirs: string[]) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-qalog-')); for (const x of dirs) fs.mkdirSync(path.join(d, x)); return d; };
 const bytes = (s: string) => new Uint8Array(Buffer.from(s));
@@ -224,7 +226,6 @@ describe('saving the log', () => {
     const archive = path.join(d, 'Archive', 'Lender A Q&A 2026-11-15 1612.xlsx');
     const earlierVersion = 'Please provide the current debt service reserve schedule.';
     const open = fs.openSync;
-    const link = fs.linkSync;
     const claimFails = () => {
       fs.writeFileSync(archive, earlierVersion);
       throw Object.assign(new Error('I/O error claiming the archive name'), { code: 'EIO' });
@@ -232,10 +233,6 @@ describe('saving the log', () => {
     vi.spyOn(fs, 'openSync').mockImplementation((file, flags, mode) => {
       if (file === archive && flags === 'wx') claimFails();
       return open(file, flags, mode);
-    });
-    vi.spyOn(fs, 'linkSync').mockImplementation((existing, file) => {
-      if (file === archive) claimFails();
-      return link(existing, file);
     });
 
     expect(() => save(d, 'ours')).toThrow('I/O error claiming the archive name');
@@ -257,21 +254,17 @@ describe('saving the log', () => {
     expect(list(path.join(d, 'Archive'))).toEqual([]);
     expect(read(d)).toBe('theirs');
   });
-  it.each([false, true])('cleans up a failed archive write on a share without links (replaced: %s)', (replaced) => {
+  const archiveWriteRaces = ['partial', 'replacement', 'in-place'];
+  it.each(archiveWriteRaces)('preserves a shared name after a failed archive write (%s)', (race) => {
     const d = withLog('theirs', 'Archive');
     const dir = path.join(d, 'Archive');
     const name = 'Lender A Q&A 2026-11-15 1612.xlsx';
     const archive = path.join(dir, name);
     const partial = path.join(d, 'incomplete-copy.tmp');
     const earlierVersion = 'Please clarify the notice period for voluntary prepayment.';
-    const link = fs.linkSync;
     const open = fs.openSync;
     const write = fs.writeFileSync;
     let archiveHandle: number | undefined;
-    vi.spyOn(fs, 'linkSync').mockImplementation((existing, file) => {
-      if (file === archive) throw Object.assign(new Error('Links are unsupported'), { code: 'ENOTSUP' });
-      return link(existing, file);
-    });
     vi.spyOn(fs, 'openSync').mockImplementation((file, flags, mode) => {
       const handle = open(file, flags, mode);
       if (file === archive && flags === 'wx') archiveHandle = handle;
@@ -280,33 +273,104 @@ describe('saving the log', () => {
     vi.spyOn(fs, 'writeFileSync').mockImplementation((file, data, options) => {
       if (file !== archive && file !== archiveHandle) return write(file, data, options);
       write(file, 'th', options);
-      if (replaced) {
-        fs.renameSync(archive, partial);
-        write(archive, earlierVersion);
-      }
+      if (race === 'replacement') fs.renameSync(archive, partial);
+      if (race !== 'partial') write(archive, earlierVersion);
       throw Object.assign(new Error('I/O error writing the archive copy'), { code: 'EIO' });
     });
 
     expect(() => save(d, 'ours')).toThrow('I/O error writing the archive copy');
     vi.restoreAllMocks();
     expect(read(d)).toBe('theirs');
-    expect(list(dir)).toEqual(replaced ? [name] : []);
-    if (replaced) expect(fs.readFileSync(archive, 'utf8')).toBe(earlierVersion);
+    expect(list(dir)).toEqual([name]);
+    expect(fs.readFileSync(archive, 'utf8')).toBe(race === 'partial' ? 'th' : earlierVersion);
   });
-  it('keeps the moved-aside log when a verified archive changes during the save (#21)', () => {
+  it('keeps the moved-aside log when the archive changes after its last hash read (#21)', () => {
     const original = 'Please confirm whether cancellation requires notice to the facility agent.';
     const d = withLog(original, 'Archive');
+    const archive = path.join(d, 'Archive', 'Lender A Q&A 2026-11-15 1612.xlsx');
+    const link = fs.linkSync;
+    const realRead = fs.readFileSync;
+    let published = false;
+    let edited = false;
+    vi.spyOn(fs, 'linkSync').mockImplementation((source, target) => {
+      link(source, target);
+      if (target === path.join(d, FILE)) published = true;
+    });
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((
+      file: fs.PathOrFileDescriptor, options?: Parameters<typeof fs.readFileSync>[1],
+    ) => {
+      const result = options === undefined ? realRead(file) : realRead(file, options);
+      if (file === archive && published && !edited) {
+        edited = true;
+        fs.writeFileSync(archive, 'Copy supplied during sync');
+      }
+      return result;
+    }) as typeof fs.readFileSync);
+
+    expect(save(d, 'ours').status).toBe('written');
+    vi.restoreAllMocks();
+    expect(edited).toBe(true);
+    expect(read(d)).toBe('ours');
+    expect(list(d).filter((file) => file.endsWith('.old')).map((file) => read(d, file))).toEqual([original]);
+  });
+  it('retains a kept edit when the filed archive changes after a hash read (#21)', () => {
+    const d = withLog('theirs', 'Archive');
+    const edit = 'The consent deadline was extended to the next business day.';
+    const name = '~Lender A Q&A 0123abcd.old';
+    const original = path.join(d, name);
+    fs.writeFileSync(original, edit);
+    const realRead = fs.readFileSync;
+    let edited = false;
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((
+      file: fs.PathOrFileDescriptor, options?: Parameters<typeof fs.readFileSync>[1],
+    ) => {
+      const result = options === undefined ? realRead(file) : realRead(file, options);
+      if (typeof file === 'string' && path.dirname(file) === path.join(d, 'Archive') && !edited) {
+        edited = true;
+        fs.writeFileSync(file, 'Copy supplied during sync');
+      }
+      return result;
+    }) as typeof fs.readFileSync);
+
+    expect(settleKept(d, FILE, [{ name, hash: sha256(bytes(edit)) }])).toEqual([]);
+    vi.restoreAllMocks();
+    expect(edited).toBe(true);
+    expect(read(d, name.replace('.old', '.kept'))).toBe(edit);
+  });
+  it('keeps the concurrent archive when a save backs out before publication (#21)', () => {
+    const d = withLog('theirs', 'Archive');
+    const active = path.join(d, FILE);
     const archive = path.join(d, 'Archive', 'Lender A Q&A 2026-11-15 1612.xlsx');
     const rename = fs.renameSync;
     vi.spyOn(fs, 'renameSync').mockImplementation((source, target) => {
       rename(source, target);
-      if (source === path.join(d, FILE)) fs.writeFileSync(archive, 'Copy supplied during sync');
+      if (source === active) {
+        fs.writeFileSync(target, 'The updated fee letter is in the data room.');
+        fs.writeFileSync(archive, 'Prior response on the guarantee conditions.');
+      }
     });
+
+    expect(save(d, 'ours')).toEqual({ status: 'later' });
+    vi.restoreAllMocks();
+    expect(fs.readFileSync(archive, 'utf8')).toBe('Prior response on the guarantee conditions.');
+    expect(read(d)).toBe('The updated fee letter is in the data room.');
+  });
+  it('updates a log when the archive allows files but denies new subdirectories (#21)', () => {
+    const d = withLog('theirs', 'Archive');
+    const dir = path.join(d, 'Archive');
+    const mkdtemp = fs.mkdtempSync;
+    vi.spyOn(fs, 'mkdtempSync').mockImplementation(((prefix) => {
+      if (typeof prefix === 'string' && path.dirname(prefix) === dir) {
+        throw Object.assign(new Error('Subdirectory creation denied'), { code: 'EACCES' });
+      }
+      return mkdtemp(prefix);
+    }) as typeof fs.mkdtempSync);
 
     expect(save(d, 'ours').status).toBe('written');
     vi.restoreAllMocks();
-    expect(read(d)).toBe('ours');
-    expect(list(d).filter((file) => file.endsWith('.old')).map((file) => read(d, file))).toEqual([original]);
+    const copies = list(dir);
+    expect(copies).toHaveLength(1);
+    expect(fs.readFileSync(path.join(dir, copies[0]), 'utf8')).toBe('theirs');
   });
   it('a file called "01. Archive" does not stop the save: the archive is "01. Archive (2)"', () => {
     const d = withLog(); fs.writeFileSync(path.join(d, '01. Archive'), 'x');
