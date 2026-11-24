@@ -42,7 +42,11 @@ for (const c of COMMANDS) registry.set(c.name, c);
 /** Theme, focus refresh, mount, and start: the same in both shells once the Store is made. */
 export async function run(store: Store) {
   startKeptText(store.services.local);
-  const { App } = await import('../ui/app');
+  const [{ App }, { startKeepingDrafts }] = await Promise.all([
+    import('../ui/app'),
+    import('../app/startKeepingDrafts'),
+  ]);
+  startKeepingDrafts(store);
   // Appearance: the person's choice, or Windows' when they chose to match it. The themes themselves are the tokens in styles.css.
   const sysLight = matchMedia('(prefers-color-scheme: light)');
   // written only when it changes: it runs on every change to the store, and writing even the same value restyles the
