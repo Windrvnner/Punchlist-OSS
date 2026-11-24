@@ -186,6 +186,8 @@ describe('UI dependency checks', () => {
   it('keeps a captured import path when the UI reads a sibling property', () => {
     const repo = fixture();
     const file = 'src/ui/checklistReader.ts';
+    repo.write('src/ui/checklist.ts', "export const title = 'Checklist'");
+    repo.write('src/ui/findings.ts', "export const title = 'Open findings'");
     const source = [
       "const paths = { entry: 'node:path', title: 'Checklist' } as const",
       'const { entry } = paths',
@@ -210,8 +212,9 @@ describe('UI dependency checks', () => {
     repo.write(file, [
       source.replaceAll('node:path', './checklist').replace('../backend/lenient', './findings'),
       "const editable = { entry: 'node:path', title: 'Checklist' }",
+      'const editableAlias = editable',
       "editable.entry = './checklist'",
-      'const { entry: changed } = editable',
+      'const { entry: changed } = editableAlias',
       'export const changedPage = () => import(changed)',
       "function supplied(page: 'node:path') { return import(page) }",
       "const annotated = runtimePage as 'node:path'",
