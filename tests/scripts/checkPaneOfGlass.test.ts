@@ -39,7 +39,8 @@ function loadCompiledFixture(repo: ReturnType<typeof fixture>, file: string, loa
   repo.write('build/checklist.mjs', "export const caption = 'Checklist'");
   const compiler = path.resolve('node_modules/typescript/bin/tsc');
   const args = [compiler, '--ignoreConfig', '--strict', '--isolatedModules', '--target', 'ES2022',
-    '--module', 'ESNext', '--moduleResolution', 'bundler', '--skipLibCheck', '--outDir', 'build', file];
+    '--module', 'ESNext', '--moduleResolution', 'bundler', '--jsx', 'react', '--jsxFactory', 'h',
+    '--skipLibCheck', '--outDir', 'build', file];
   const options = { cwd: repo.dir, encoding: 'utf8' } as const;
   const emit = spawnSync(process.execPath, args, options);
   expect(emit.status, emit.stdout + emit.stderr).toBe(0);
@@ -159,6 +160,47 @@ describe('UI dependency checks', () => {
     expect(result.stderr).toContain(`${file} import (lines 3, 19): 2 exceeds`);
     repo.write(file, source.replaceAll('node:path', './checklist.mjs'));
     expect(loadCompiledFixture(repo, file, loader)).toBe('Checklist,Checklist,Checklist');
+    expect(repo.run().status).toBe(0);
+  });
+
+  it('keeps a captured path when JSX and a destructuring assignment read other entries', () => {
+    const repo = fixture();
+    const file = 'src/ui/checklistHeading.tsx';
+    const source = [
+      "const paths = { entry: 'node:path', title: 'Checklist' }",
+      'let caption',
+      '({ title: caption } = paths)',
+      'const { entry: assigned } = paths',
+      'export const afterAssignment = () => import(assigned)',
+      'function h(component: () => string) { return component() }',
+      "const Title = () => 'Checklist'",
+      "const sections = { entry: 'node:path', Title }",
+      'export const heading = <sections.Title />',
+      'const { entry } = sections',
+      'export const afterHeading = () => import(entry)',
+      "const edited = { entry: 'node:path', local: './checklist.mjs' };",
+      '({ local: edited.entry } = edited)',
+      'const { entry: changed } = edited',
+      'export const afterWrite = () => import(changed)',
+      "const shared = { entry: 'node:path', title: 'Checklist' }",
+      'const alias = ({ title: caption } = shared)',
+      "alias.entry = './checklist.mjs'",
+      'const { entry: updated } = shared',
+      'export const afterAlias = () => import(updated)',
+    ].join('\n');
+    const loader = [
+      "import { afterAssignment, afterHeading, afterWrite, afterAlias, heading } from './build/checklistHeading.js'",
+      "const builtIn = await import('node:path')",
+      'const modules = await Promise.all([afterAssignment(), afterHeading(), afterWrite(), afterAlias()])',
+      "console.log([heading, ...modules.map(page => page === builtIn ? 'node:path' : page.caption)].join(','))",
+    ].join('\n');
+    repo.write(file, source);
+    expect(loadCompiledFixture(repo, file, loader)).toBe('Checklist,node:path,node:path,Checklist,Checklist');
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 5, 11): 2 exceeds`);
+    repo.write(file, source.replaceAll('node:path', './checklist.mjs'));
+    expect(loadCompiledFixture(repo, file, loader)).toBe('Checklist,Checklist,Checklist,Checklist,Checklist');
     expect(repo.run().status).toBe(0);
   });
 

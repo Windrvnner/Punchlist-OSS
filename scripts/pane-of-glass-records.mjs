@@ -2,7 +2,7 @@
 import { Visitor } from 'vite';
 
 function keyName(key, computed) {
-  if (!computed && key.type === 'Identifier') return key.name;
+  if (!computed && (key.type === 'Identifier' || key.type === 'JSXIdentifier')) return key.name;
   if (key.type === 'Literal' && ['string', 'number'].includes(typeof key.value)) return String(key.value);
   return null;
 }
@@ -53,6 +53,7 @@ function recordUses(program, unwrapped) {
       for (const item of declaration.declarations ?? []) blocks.set(item, block);
     }
   }
+  const member = (node) => members.set(unwrapped(node.object), node);
   new Visitor({
     Program: declarations,
     BlockStatement: declarations,
@@ -62,8 +63,16 @@ function recordUses(program, unwrapped) {
       while (name.type === 'TSQualifiedName') name = name.left;
       typeNames.add(name);
     },
-    MemberExpression: (node) => members.set(unwrapped(node.object), node),
+    MemberExpression: member,
+    JSXMemberExpression: member,
     VariableDeclarator: (node) => patterns.set(unwrapped(node.init), node.id),
+    // A destructuring assignment returns its input. A standalone statement discards that reference.
+    ExpressionStatement(node) {
+      const assignment = unwrapped(node.expression);
+      if (assignment.type === 'AssignmentExpression' && assignment.operator === '=') {
+        patterns.set(unwrapped(assignment.right), assignment.left);
+      }
+    },
     AssignmentExpression: (node) => write(node.left),
     UpdateExpression: (node) => write(node.argument),
     ForInStatement: (node) => write(node.left),
