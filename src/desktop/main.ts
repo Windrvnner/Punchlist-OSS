@@ -26,7 +26,7 @@ import { serve, placesFor, machineIdentity, inTouchWith, findSoffice, inOneDrive
 import { envKey, modelService } from './model';
 import { aiSignIn } from './signin';
 import { providerSignIn } from './providerSignIn';
-import { writePickedFile } from './pickedFile';
+import { pickedFile, writePickedFile } from './pickedFile';
 import { isCloudProvider, assertControl, control } from '../control';
 import type { WATCHED } from '../shell/bridge';
 
@@ -180,7 +180,7 @@ function compose(sharedPath: string, places: Places, person?: string | null): Ba
 }
 
 /** The file dialogs: folders for a deal, and where to save an export. */
-const picked = new Map<string, string>();   // places picked with pickSave and not yet written, by id
+const picked = new Map<string, ReturnType<typeof pickedFile>>();   // places picked with pickSave, by id
 const written = new Map<string, string>();  // files written there, by the same id, so the notice can open them
 function files() {
   return {
@@ -201,7 +201,8 @@ function files() {
       const r = await dialog.showSaveDialog(win, { defaultPath: path.join(app.getPath('documents'), `${name}.${kinds[0].ext}`), filters: kinds.map((k) => ({ name: k.label, extensions: [k.ext] })) });
       if (r.canceled || !r.filePath) return ok(null);
       const ext = path.extname(r.filePath).slice(1).toLowerCase(); const k = kinds.find((x) => x.ext === ext);
-      const id = randomUUID(); picked.set(id, k ? r.filePath : `${r.filePath}.${kinds[0].ext}`);
+      const id = randomUUID();
+      picked.set(id, pickedFile(k ? r.filePath : `${r.filePath}.${kinds[0].ext}`));
       return ok({ id, ext: (k ?? kinds[0]).ext });
     },
     /** writes successfully only once to a place the person picked: the window can't name a path of its own */
