@@ -38,6 +38,33 @@ const later = (a: Line, b: Line) => (a.at !== b.at ? a.at > b.at : a.pc !== b.pc
 const canon = (v: unknown): string => JSON.stringify(v, (_k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : x));
 const same = (a: KeptMessage, b: KeptMessage) => canon(a) === canon(b);
 
+type Readable = Pick<Folder, 'size' | 'read'>;
+
+/** Read confirmed local lines, reporting a refusal already encountered during this refresh (#784, #759). */
+function conversationCopy(local: Folder, refused: Map<string, unknown>): Readable {
+  return {
+    size: (name) => local.size(name),
+    read(name) {
+      if (refused.has(name)) throw refused.get(name);
+      return readOwn(local, name);
+    },
+  };
+}
+
+/** Restore this PC's shared files before polling. Carry local read failures into the same refresh's local reader. */
+function repairConversationFiles({ shared, local, installId }: ConversationLogOptions) {
+  let segment = 0;
+  const refused = new Map<string, unknown>();
+  for (const name of local.list()) {
+    const match = FILE.exec(name);
+    if (!match || match[1] !== installId) continue;
+    const failure = healOwn(shared, local, name);
+    if (failure) refused.set(name, failure.error);
+    segment = Math.max(segment, Number(match[2]));
+  }
+  return { segment, copy: conversationCopy(local, refused) };
+}
+
 export function conversationLog(o: ConversationLogOptions): ConversationStore & { close(): void } {
   const clock = o.clock ?? (() => new Date().toISOString());
   const limit = o.segmentBytes ?? 1_000_000;
@@ -74,9 +101,6 @@ export function conversationLog(o: ConversationLogOptions): ConversationStore & 
     }
     return out;
   };
-  type Readable = Pick<Folder, 'size' | 'read'>;
-  /** This PC's copy of its own files, without a failed save not yet cut off (`readOwn`). */
-  const ownCopy = { size: (name: string) => o.local.size(name), read: (name: string) => readOwn(o.local, name) };
   /** Pass each line of one file to `each`, unless the file is missing or its size is the one in `sizes` from the last read: an unchanged file is not opened. */
   const readChanged = (folder: Readable, sizes: Map<string, number>, name: string, each: (l: Line) => void) => {
     const size = folder.size(name); if (size < 0 || sizes.get(name) === size) return;
@@ -88,30 +112,16 @@ export function conversationLog(o: ConversationLogOptions): ConversationStore & 
     const me = o.user(); let mine = false;
     // another person signed in: everything is read again for them (it is rare, and only their lines are kept)
     if (me !== heldFor) { ids.clear(); byPerson.clear(); seen.clear(); seenLocal.clear(); heldFor = me; }
-    // this PC's own files first: lines the sync lost are put back from the local copy
-    const refused = new Map<string, unknown>();
-    for (const name of o.local.list()) {
-      const match = FILE.exec(name);
-      if (!match || match[1] !== o.installId) continue;
-      const failure = healOwn(o.shared, o.local, name);
-      if (failure) refused.set(name, failure.error);
-      file = Math.max(file, +match[2]);
-    }
+    const repaired = repairConversationFiles(o);
+    file = Math.max(file, repaired.segment);
     // a shared folder that cannot be read now costs only the other PCs' lines: this PC's are read from its own copy below
     let names: string[] = []; try { names = o.shared.list(); } catch { /* looked at again next time */ }
     for (const name of names) if (FILE.test(name)) { try { readChanged(o.shared, seen, name, (l) => { if (take(l) && l.by === me) mine = true; }); } catch { /* read again next time */ } }
     // and what only the local copy holds (the shared folder could not be read)
     // (without a failed save's lines that cannot be cut off yet: they would count as saved and not be saved again)
-    const readLocal = {
-      size: ownCopy.size,
-      read(name: string) {
-        if (refused.has(name)) throw refused.get(name);
-        return ownCopy.read(name);
-      },
-    };
     for (const name of o.local.list()) {
       const m = FILE.exec(name);
-      if (m && m[1] === o.installId) readChanged(readLocal, seenLocal, name, take);
+      if (m && m[1] === o.installId) readChanged(repaired.copy, seenLocal, name, take);
     }
     return mine;
   };

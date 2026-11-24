@@ -401,6 +401,24 @@ describe('conversations in the synced folder', () => {
     const there = await home.load();
     expect(there.ok && there.value['deal:d1:c1'].map((m) => m.id)).toEqual(['m1', 'm2', 'm3']);
   });
+
+  it('a fresh reader reports a refused local read and loads the conversation on retry (#784)', async () => {
+    const shared = new Mem();
+    const local = new Mem();
+    const open = () => conversationLog({ shared, local, installId: 'pc', user: () => 'person', clock });
+    const key = 'deal:d1:c1';
+    const message = msg('m1', 'me', 'Does the guarantee cover the revolving facility?', clock());
+    expect((await open().save(key, [message])).ok).toBe(true);
+    const reader = open();
+    const read = vi.spyOn(local, 'read').mockImplementationOnce(() => {
+      throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+    });
+
+    expect(await reader.load()).toMatchObject({ ok: false, error: { kind: 'unreachable' } });
+    expect(await reader.load()).toEqual({ ok: true, value: { [key]: [message] } });
+    read.mockRestore();
+  });
+
   it('a save that fails after writing its lines reuses no number: every PC shows the next message (#759)', async () => {
     const shared = new Mem();
     const log = conversationLog({ shared, local: new Mem(), installId: 'pc', user: () => 'adoe', clock });
