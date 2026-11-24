@@ -90,12 +90,12 @@ function listRow({ firm, target, setLayer, setName }: ImportView) {
 }
 
 /** What the review will ask for: clearer wording (when the model offers it) and duplicates. */
-function reviewChoices({ ai, target, listReview }: ImportView) {
+function reviewChoices({ can, target, listReview }: ImportView) {
   const where = target.layer === 'broad' ? '' : ', here and in the general list';
   const sameTip = `Items that ask for the same thing${where}; only what you check is removed`;
   return (
     <div class="srow top"><div class="k">Review</div><div class="cl-checks">
-      {ai.reword && <label class="xcheck"
+      {can.reword && <label class="xcheck"
         title={`${SERVICE} suggests wording for unclear or two-part items; you check the ones to use`}>
         <input type="checkbox" id="cl-askreword" checked={listReview.askReword}
           onChange={(e) => listReview.setAskReword((e.currentTarget as HTMLInputElement).checked)} />

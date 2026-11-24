@@ -15,6 +15,14 @@ import { splitCited } from './cite';
 export type Rating = 'High' | 'Medium' | 'Low';
 export const RATINGS: readonly Rating[] = ['High', 'Medium', 'Low'];
 
+/** Findings still missing a rating after looking up each open finding by id. */
+export function unratedFindings<T extends { id: string }>(
+  open: readonly T[],
+  ratings: Readonly<Record<string, Rating>>,
+): T[] {
+  return open.filter((finding) => !ratings[finding.id]);
+}
+
 /** One checklist item as the memo needs it: the list it comes from, how it stands (as the Overview counts it), and what a gap needs. */
 export interface MemoItem { text: string; list: string; kind: 'finding' | 'gap' | 'open' | 'person' | 'satisfied'; need?: string }
 
@@ -128,6 +136,15 @@ export function keyRisksOf(all: Grouped[], keyRisks: number): { key: Grouped[]; 
 /** the first sentence or two of a paragraph, up to about 240 characters: a smaller risk's line */
 const opening = (parts: MemoPart[]) => { const out: MemoPart[] = []; let len = 0; for (const x of parts) { if (len && (len + x.text.length > 240 || out.filter((y) => y.refs.length).length >= 2)) break; out.push(x); len += x.text.length; } return out.length && !out[out.length - 1].text.trim() ? out.slice(0, -1) : out; };
 
+function findingCounts(open: Finding[], risks: Grouped[], ratings: Record<string, Rating>): string {
+  if (!open.length) return 'No open findings.';
+  const counts = RATINGS.map((rating) => `${risks.filter((risk) => risk.rating === rating).length} ${rating}`);
+  // The severity counts describe grouped risks. Missing ratings count individual open findings (#661).
+  const unrated = unratedFindings(open, ratings).length;
+  if (unrated) counts.push(`${unrated.toLocaleString('en-US')} unrated`);
+  return `${n(open.length, 'open finding')} in ${n(risks.length, 'risk')}: ${counts.join(', ')}.`;
+}
+
 export function memoContent(i: MemoInput): Memo {
   const open = i.findings.filter((f) => f.status === 'open');
   const rated = (r: Rating) => open.filter((f) => i.ratings[f.id] === r);
@@ -137,7 +154,8 @@ export function memoContent(i: MemoInput): Memo {
   const workstreams = (g: Grouped) => [...new Set(g.findings.map((id) => byId.get(id)!.workstream.trim() || NO_WORKSTREAM))].sort(byName).join(', ');
   // a finding's own words: its first paragraph, as written
   const own = (f: Finding) => cited(f.body.find((p) => p.trim()) ?? '', f.sources);
-  const { key, rest } = keyRisksOf(riskGroups(open, i.ratings, i.groups), i.keyRisks);
+  const grouped = riskGroups(open, i.ratings, i.groups);
+  const { key, rest } = keyRisksOf(grouped, i.keyRisks);
   const risks: MemoRisk[] = key.map((g) => {
     const fs = g.findings.map((id) => byId.get(id)!); const sources = g.sources ?? [];
     // the model's write-up when there is one; else each finding's own first paragraph, as before
@@ -176,8 +194,7 @@ export function memoContent(i: MemoInput): Memo {
 
   const k = (kind: MemoItem['kind']) => items.filter((x) => x.kind === kind).length;
   const counts = [
-    // counted as risks, as the summary and the body speak of them (several findings can be one risk)
-    open.length ? `${n(open.length, 'open finding')} in ${n(key.length + rest.length, 'risk')}: ${RATINGS.map((r) => `${[...key, ...rest].filter((g) => g.rating === r).length} ${r}`).join(', ')}.` : 'No open findings.',
+    findingCounts(open, grouped, i.ratings),
     items.length ? `Of ${n(items.length, 'checklist item')}, ${(k('satisfied') + k('person')).toLocaleString('en-US')} ${k('satisfied') + k('person') === 1 ? 'is' : 'are'} settled, ${k('finding').toLocaleString('en-US')} flagged and ${n(k('gap'), 'gap')}${k('open') ? `; ${k('open').toLocaleString('en-US')} not settled` : ''}.` : '',
     `${n(openQs.length, 'question')} to the counterparty ${openQs.length === 1 ? 'is' : 'are'} open${oldestQ && age !== null && age >= 0 ? `; the oldest, Q${oldestQ.n}, was received ${n(age, 'day')} ago` : ''}.`,
   ].filter(Boolean).join(' ');

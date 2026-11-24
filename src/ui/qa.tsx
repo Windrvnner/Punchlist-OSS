@@ -40,7 +40,7 @@ export function QaPage({ dealId }: { dealId: string }) {
   const ro = useContext(ReadOnlyContext);                 // why nothing on this deal can be changed just now, if it cannot: what cannot be used is shown as off, with the reason on hover
   const d = s.deals[dealId];
   // the checklist too, where the deal has one: a question whose item it has settled is offered to be closed
-  useEffect(() => { void store.loadDeal(dealId); if (store.services.ai.checklist) void store.refreshChecklist(dealId); }, [dealId]);
+  useEffect(() => { void store.loadDealWithChecklist(dealId); }, [dealId]);
   if (!d) return null;
   const load = s.dealLoad[dealId];
   const rows = dealQuestions(s, dealId);
@@ -379,7 +379,7 @@ function MoreMenu({ dealId }: { dealId: string }) {
       {open && <div class="colmenu glass" id="colmenu" role="menu">
         <button type="button" class="mi" role="menuitem" id="qa-import" disabled={!!ro} title={ro ?? undefined}
           onClick={() => openDialog('importQa')}>Import Q&A Log…</button>
-        {store.services.qaLogs && <div class="mirow"><button type="button" class="mi" role="menuitem" id="qa-log"
+        {s.can.qaLogs && <div class="mirow"><button type="button" class="mi" role="menuitem" id="qa-log"
           onClick={() => { setOpen(false); void updateLog(store, dealId); }}>Update Q&A Log</button>
           {log && <button type="button" class="fb" role="menuitem" id="qa-logdir" aria-label="Log folder" aria-description={logPath(log)} onMouseEnter={(e) => showTip(e.currentTarget as HTMLElement, logPath(log))} onMouseLeave={(e) => hideTip(e.currentTarget as HTMLElement)} onClick={() => { setOpen(false); void chooseLogFolder(store, dealId).then((r) => { if (!r.ok) store.toast(r.error.message); }); }}><Icon name="folder" size={16} /></button>}</div>}
         <button type="button" class="mi" role="menuitem" id="qa-export" disabled={!dealQuestions(s, dealId).length}

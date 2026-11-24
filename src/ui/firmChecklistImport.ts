@@ -234,7 +234,7 @@ export type ListSource = ReturnType<typeof useListSource>;
 export function useListReview(
   store: Store, work: Work, prepared: { items: ListItem[] } | null, target: ListTarget, keeper: Keeper,
 ) {
-  const ai = store.services.ai;
+  const { can } = store.get();
   const left = keeper.left;
   const choices = useReviewChoices(store, left?.choices);
   const { askReword, askSame, useReword, remove } = choices;
@@ -252,8 +252,8 @@ export function useListReview(
   const sig = texts ? askedAbout(texts, askReword, askSame, generalTexts) : '';
   sigNow.current = sig;
   const cached = review && askedFor.current === sig ? review : null;
-  const canReword = !!ai.reword;
-  const canAskSame = !!ai.sameMeaning;
+  const canReword = can.reword;
+  const canAskSame = can.sameMeaning;
   const needsCall = cached
     ? canAskSame && hasMissedDuplicates(cached)
     : (askReword && canReword) || (askSame && canAskSame);
@@ -320,15 +320,15 @@ function useMadeReview(work: Work, left: ChecklistKept | null) {
 
 /** What the review asks for, and the rewordings and removals checked in it. */
 function useReviewChoices(store: Store, kept: ChecklistChoices | undefined) {
-  const ai = store.services.ai;
-  const [askReword, setAskReword] = useState(kept ? kept.askReword : !!ai.reword);
+  const { can } = store.get();
+  const [askReword, setAskReword] = useState(kept ? kept.askReword : can.reword);
   const [askSame, setAskSame] = useState(kept?.askSame ?? true);
   const [useReword, setUseReword] = useState<Set<number>>(kept?.useReword ?? new Set());
   const [remove, setRemove] = useState<Set<number>>(kept?.remove ?? new Set());
   const flipReword = (at: number) => setUseReword(toggled(useReword, at));
   const flipRemove = (at: number) => setRemove(toggled(remove, at));
   const reset = () => {
-    setAskReword(!!ai.reword);
+    setAskReword(can.reword);
     setAskSame(true);
     setUseReword(new Set());
     setRemove(new Set());
@@ -343,9 +343,10 @@ function useReviewChoices(store: Store, kept: ChecklistChoices | undefined) {
 function askModel(
   store: Store, texts: string[], ask: { askReword: boolean; askSame: boolean }, generalTexts: string[],
 ) {
+  const { can } = store.get();
   const ai = store.services.ai;
-  const rewording = ask.askReword && ai.reword ? ai.reword({ items: texts }) : null;
-  const duplicates = ask.askSame && ai.sameMeaning ? ai.sameMeaning({ items: texts, against: generalTexts }) : null;
+  const rewording = ask.askReword && can.reword ? ai.reword!({ items: texts }) : null;
+  const duplicates = ask.askSame && can.sameMeaning ? ai.sameMeaning!({ items: texts, against: generalTexts }) : null;
   return Promise.all([rewording, duplicates]);
 }
 
@@ -360,7 +361,7 @@ function withFailedPairs(was: Review, reason: Asked): Review {
 function useReviewRetries(
   store: Store, work: Work, review: Review | null, setReview: (review: Review) => void, generalTexts: string[],
 ) {
-  const ai = store.services.ai;
+  const { can } = store.get();
   // The ref guards same-frame presses. Only Next needs to know a model call is still pending after Back.
   const asking = useRef(false);
   const [pending, setPending] = useState(false);
@@ -381,9 +382,9 @@ function useReviewRetries(
   // The duplicate check missed some items last time (a part the service did not answer): Next asks about those alone
   // again, and adds what it finds.
   const askMissed = async (was: Review, texts: string[], missedAt: number[]) => {
-    const sameMeaning = ai.sameMeaning;
-    if (!sameMeaning) return false;
-    const sameReply = await ask(() => sameMeaning.call(ai, { items: texts, against: generalTexts, only: missedAt }));
+    if (!can.sameMeaning) return false;
+    const query = { items: texts, against: generalTexts, only: missedAt };
+    const sameReply = await ask(() => store.services.ai.sameMeaning!(query));
     if (!sameReply) return false;
     const updated = sameReply.ok ? withMissedPairs(was, sameReply.value) : withFailedPairs(was, failedAs(sameReply));
     setReview(updated);
@@ -395,16 +396,16 @@ function useReviewRetries(
   // when the check failed outright, and keeps the review on screen while it waits. Back drops its answer: Next
   // asks again
   const retry = async () => {
-    if (!review || work.busy) return;
+    if (!review || work.busy || !can.sameMeaning) return;
     const missedAt = review.sameMissed?.at ?? review.items.map((_, at) => at);
     await askMissed(review, review.items.map((item) => item.text), missedAt);
   };
   // The wording suggestions failed (decisions: Retries): Retry asks for them again, and adds them unchecked beside any
   // taken last time.
   const retryWording = async () => {
-    const reword = ai.reword;
-    if (!review || !reword) return;
-    const reply = await ask(() => reword.call(ai, { items: review.items.map((item) => item.text) }));
+    if (!review || !can.reword) return;
+    const items = review.items.map((item) => item.text);
+    const reply = await ask(() => store.services.ai.reword!({ items }));
     if (!reply) return;
     // failed again: the line gives this failure's reason, and the footer says it was asked again
     if (!reply.ok) {
