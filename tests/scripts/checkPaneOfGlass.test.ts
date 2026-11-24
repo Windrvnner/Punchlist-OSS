@@ -141,6 +141,48 @@ describe('UI dependency checks', () => {
     expect(repo.run().status).toBe(0);
   });
 
+  it('resolves runtime constants across erased TypeScript namespaces', () => {
+    const repo = fixture();
+    const file = 'src/ui/page.ts';
+    const compiler = path.resolve('node_modules/typescript/bin/tsc');
+    repo.write('package.json', '{"type":"module"}');
+    repo.write('build/checklist.mjs', "export const caption = 'Checklist'");
+    const loader = [
+      "import { load, Panel, Other } from './build/page.js'",
+      "const builtIn = await import('node:path')",
+      'const modules = await Promise.all([load(), Panel.load(), Other.load()])',
+      "console.log(modules.map(page => page === builtIn ? 'node:path' : page.caption).join(','))",
+    ].join('\n');
+    for (const name of ['node:path', './checklist.mjs']) {
+      const source = [
+        `const page = '${name}'`,
+        'namespace page { export type Caption = string }',
+        'export const load = () => import(page)',
+        'export namespace Panel {',
+        '  namespace page { export namespace Meta { export interface Caption { text: string } } }',
+        '  export const load = () => import(page)',
+        '}',
+        'export namespace Other {',
+        "  namespace page { export function toString() { return './checklist.mjs' } }",
+        '  export const load = () => import(page as unknown as string)',
+        '}',
+      ];
+      repo.write(file, source.join('\n'));
+      const args = [compiler, '--ignoreConfig', '--isolatedModules', '--target', 'ES2022', '--module', 'ESNext',
+        '--moduleResolution', 'bundler', '--skipLibCheck', '--outDir', 'build', file];
+      const cwd = repo.dir;
+      const emit = spawnSync(process.execPath, args, { cwd, encoding: 'utf8' });
+      expect(emit.status, emit.stdout + emit.stderr).toBe(0);
+      const run = spawnSync(process.execPath, ['--input-type=module', '-e', loader], { cwd, encoding: 'utf8' });
+      expect(run.status, run.stderr).toBe(0);
+      const local = name === './checklist.mjs';
+      expect(run.stdout.trim()).toBe(local ? 'Checklist,Checklist,Checklist' : 'node:path,node:path,Checklist');
+      const result = repo.run();
+      expect(result.status, result.stderr).toBe(local ? 0 : 1);
+      if (!local) expect(result.stderr).toContain(`${file} import (lines 3, 6): 2 exceeds`);
+    }
+  });
+
   it('checks computed member and destructuring keys and each read in a dotted JSX tag', () => {
     const repo = fixture();
     const file = 'src/ui/access.tsx';
