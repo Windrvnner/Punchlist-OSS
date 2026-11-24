@@ -252,81 +252,136 @@ function Leaders({ line: l }: { line: Line }) {
 
 const READ_TIP = `Read: given to the ${AI_LABEL} when a checklist item is checked. The rest are indexed,`
   + ' and searched when a question needs them.';
+const EMPTY_TIP = 'The folder opens but has no files. Its documents stay in the deal. '
+  + 'Locate it if it moved, or remove it under Folders.';
+const EMPTIES_TIP = 'These folders open but have no files. Their documents stay in the deal. '
+  + 'Locate them if they moved, or remove them under Folders.';
+const pct = (n: number, of: number) => (of > 0 ? Math.min(100, Math.max(n ? 1 : 0, 100 * n / of)) : 0);
+
+type FolderProgress = ReturnType<typeof folderProgress>;
+type FolderRow = FolderProgress['rows'][number];
+type FolderNotice = { kind: 'away' | 'empty'; label?: string; tip?: string };
+
+function emptyFolderNotice(emptyCount: number, folderCount: number): FolderNotice {
+  return {
+    kind: 'empty',
+    label: emptyCount === folderCount ? 'Files not found' : `Files not found in ${num(emptyCount)}`,
+    tip: emptyCount > 1 ? EMPTIES_TIP : EMPTY_TIP,
+  };
+}
+
+function folderNotice(row: FolderRow, progress: FolderProgress): FolderNotice | undefined {
+  const { awayCount, emptyCount, folderCount, total } = progress;
+  const summary = !row.key;
+  const showLabel = summary || !total;
+  if (awayCount) {
+    if (row.empty) return { kind: 'empty', label: 'Files not found', tip: EMPTY_TIP };
+    if (!summary && !row.away) return undefined;
+    if (!showLabel) return { kind: 'away' };
+    const label = awayCount === folderCount ? 'Not on this PC' : `${num(awayCount)} not on this PC`;
+    return { kind: 'away', label };
+  }
+  if (!emptyCount || (!summary && !row.empty)) return undefined;
+  return showLabel ? emptyFolderNotice(emptyCount, folderCount) : { kind: 'empty' };
+}
+
+function documentStatus(row: FolderRow, indexing: boolean, stopped: boolean) {
+  if (indexing) {
+    const status = `${num(row.indexed)} of ${num(row.files)} indexed`;
+    if (!stopped) return status;
+    return `${status} · ${row.indexed ? 'stopped' : 'not started'}`;
+  }
+  return row.read === undefined ? `${num(row.files)} indexed` : `${num(row.read)} of ${num(row.docs)} read`;
+}
+
+function FolderDocumentBar({ row, live }: { row: FolderRow; live: boolean }) {
+  return <span class="fbar">
+    <i class={`ix ${live ? 'live' : ''} ${row.indexed ? 'some' : ''}`}
+      style={{ width: `${pct(row.indexed, row.files)}%` }} />
+    <i class={`rv ${row.read ? 'some' : ''}`} style={{ width: `${pct(row.read ?? 0, row.docs)}%` }} />
+  </span>;
+}
+
+function FolderDocumentRow({ row, progress }: { row: FolderRow; progress: FolderProgress }) {
+  const className = `dcrow ${row.key && progress.total ? 'part' : ''}`;
+  const notice = folderNotice(row, progress);
+  const title = row.title || undefined;
+  if (notice) {
+    const marker = notice.kind === 'away' ? { 'data-away': '' } : { 'data-empty': '' };
+    return <div class={className} data-folder={row.key} {...marker}>
+      <span class="fn awayfn" title={title}>{row.name}</span>
+      <span class={`rd ${notice.label ? 'away' : ''}`} title={notice.tip}>{notice.label}</span>
+    </div>;
+  }
+  const indexing = row.indexed < row.files;
+  const live = indexing && !progress.stopped;
+  const status = documentStatus(row, indexing, progress.stopped);
+  const countingReads = !indexing && row.read !== undefined;
+  return <div class={className} data-folder={row.key}>
+    <span class="fn" title={title}>{row.name}{!indexing && row.copies > 0 &&
+      <span class="copies">{`${num(row.copies)} ${row.copies === 1 ? 'copy' : 'copies'} counted once`}</span>}</span>
+    <FolderDocumentBar row={row} live={live} />
+    <span class="rd" title={countingReads ? READ_TIP : undefined}>{status}</span>
+  </div>;
+}
+
+function CoreDocumentRow({ core }: { core: FolderProgress['core'] }) {
+  if (!core.files) return null;
+  if (core.unavailable) {
+    return <div class="dcrow" id="ov-core" data-away="">
+      <span class="fn awayfn">Core documents</span>
+      <span class="rd">{core.unavailable === core.files
+        ? '' : `${num(core.unavailable)} of ${num(core.files)} not on this PC`}</span>
+    </div>;
+  }
+  return <div class="dcrow" id="ov-core">
+    <span class="fn">Core documents</span>
+    <span class="fbar">
+      <i class={`rv ${core.read ? 'some' : ''}`} style={{ width: `${pct(core.read, core.files)}%` }} />
+    </span>
+    <span class="rd" title={READ_TIP}>{num(core.read)} of {num(core.files)} read</span>
+  </div>;
+}
+
 /**
- * The deal's folders: how far each has been indexed, and once indexed, how many of its documents have been read
- * against the checklist. The dark part of a line is what has been read; it is not meant to fill. The core documents
- * are chosen across the whole deal, so they have one line of their own.
+ * The deal's folders, how far each has been indexed, and how many of its documents have been read once indexed.
+ * The dark part of a line is what has been read. Core documents are chosen across the whole deal.
  */
 function Documents({ deal: d }: { deal: Deal }) {
-  const store = useStore(); const s = useAppState();
-  const folders = liveFolders(s, d);                     // while indexing is under way the counts come from the backend, not from the record
-  const stopped = d.stage === 'indexing' && s.ui.indexStalled.includes(d.id);
-  const p = s.progress[d.id];
-  // once a folder is indexed, it is read out of its documents: a copy of a document is counted once, at the document's first place
-  const rows = folders.map((f) => { const pf = f.indexed < f.files ? undefined : p?.folders.find((x) => x.folder === f.path);
-    return { key: f.path, name: f.label || f.path, title: f.path, files: f.files, indexed: f.indexed, read: pf?.read, docs: pf ? pf.files : f.files, copies: pf?.copies ?? 0 }; });
-  const sum = (k: 'files' | 'indexed' | 'docs') => rows.reduce((n, r) => n + r[k], 0);
-  const total = rows.length > 1 ? [{ key: '', name: `${rows.length} folders`, title: '', files: sum('files'), indexed: sum('indexed'), read: rows.every((r) => r.read !== undefined) ? rows.reduce((n, r) => n + r.read!, 0) : undefined, docs: sum('docs'), copies: 0 }] : [];
-  const core = p ? p.folders.reduce((n, f) => n + f.core, 0) : 0; const coreRead = p ? p.folders.reduce((n, f) => n + f.coreRead, 0) : 0;
-  const pct = (n: number, of: number) => (of > 0 ? Math.min(100, Math.max(n ? 1 : 0, 100 * n / of)) : 0);
-  // folders this PC cannot open, once the app has looked for them: said once, on the first line, with Locate in place of Folders
-  // a folder that opens with nothing in it is said on its own line, "Files not found", with Locate beside Folders, so it can be pointed at where it moved or removed
-  const ours = (fs: { dealId: string; folder: string }[]) => fs.filter((f) => f.dealId === d.id).map((f) => f.folder);
-  const empty = new Set(ours(s.ui.missingFolders?.empty ?? []));
-  const away = new Set(ours((s.ui.missingFolders?.tops ?? []).flatMap((t) => t.folders)).filter((f) => !empty.has(f)));
-  const awayHere = rows.filter((r) => away.has(r.key)).length; const emptyHere = rows.filter((r) => empty.has(r.key)).length;
-  // core documents in those folders cannot be opened here either: their line says no count read, as the folders' lines; "not on this PC" is said once, above, unless only some are away
-  const coreAway = p && (awayHere || emptyHere) ? p.folders.filter((f) => away.has(f.folder) || empty.has(f.folder)).reduce((x, f) => x + f.core, 0) : 0;
-  const awaySaid = awayHere === rows.length ? 'Not on this PC' : `${num(awayHere)} not on this PC`;
-  // with none missing, empty folders are said the same way: once, on the first line; beside missing ones, each says it on its own line
-  const emptySaid = emptyHere === rows.length ? 'Files not found' : `Files not found in ${num(emptyHere)}`;
-  const EMPTY_TIP = 'The folder opens but has no files. Its documents stay in the deal. Locate it if it moved, or remove it under Folders.';
-  const EMPTIES_TIP = 'These folders open but have no files. Their documents stay in the deal. Locate them if they moved, or remove them under Folders.';
-  const once = awayHere ? { has: (k: string) => away.has(k), said: awaySaid, tip: undefined, attr: { 'data-away': '' } } : { has: (k: string) => empty.has(k), said: emptySaid, tip: emptyHere > 1 ? EMPTIES_TIP : EMPTY_TIP, attr: { 'data-empty': '' } };
+  const store = useStore();
+  const s = useAppState();
+  const progress = folderProgress(s, d);
+  const { rows, total, folderCount, awayCount, emptyCount, core, alsoIn } = progress;
+  const display = total
+    ? [{ ...total, key: '', name: `${folderCount} folders`, title: '', away: false, empty: false }, ...rows]
+    : rows;
   return <>
-    <div class="lbl flagsl"><span role="heading" aria-level={2}>Documents</span><span class="lblacts">{(awayHere || emptyHere) > 0 && <button type="button" class="btn sm act" id="f-locate" aria-haspopup="dialog" onClick={() => openLocate(store)}><Icon name="folder" size={14} /><span>Locate…</span></button>}{!awayHere && <button type="button" class="btn sm act" id="f-folders" aria-haspopup="dialog" onClick={() => store.ui({ newDeal: { name: d.name, folders: [], error: '', busy: false, forDeal: d.id } })}><Icon name="folder" size={14} /><span>Folders</span></button>}</span></div>
+    <div class="lbl flagsl">
+      <span role="heading" aria-level={2}>Documents</span>
+      <span class="lblacts">
+        {(awayCount || emptyCount) > 0 && <button type="button" class="btn sm act" id="f-locate"
+          aria-haspopup="dialog" onClick={() => openLocate(store)}>
+          <Icon name="folder" size={14} /><span>Locate…</span>
+        </button>}
+        {!awayCount && <button type="button" class="btn sm act" id="f-folders" aria-haspopup="dialog"
+          onClick={() => store.ui({ newDeal: { name: d.name, folders: [], error: '', busy: false, forDeal: d.id } })}>
+          <Icon name="folder" size={14} /><span>Folders</span>
+        </button>}
+      </span>
+    </div>
     <div class="dcrows" id="ov-docs">
-      {[...total, ...rows].map((r) => { const ixing = r.indexed < r.files; const first = !r.key || !total.length;
-        if ((awayHere || emptyHere) && (once.has(r.key) || (!r.key && total.length))) return (
-          <div class={`dcrow ${r.key && total.length ? 'part' : ''}`} key={r.key} data-folder={r.key} {...once.attr}>
-            <span class="fn awayfn" title={r.title || undefined}>{r.name}</span>
-            <span class={`rd ${first ? 'away' : ''}`} title={first ? once.tip : undefined}>{first ? once.said : ''}</span>
-          </div>);
-        if (empty.has(r.key)) return (
-          <div class={`dcrow ${total.length ? 'part' : ''}`} key={r.key} data-folder={r.key} data-empty="">
-            <span class="fn awayfn" title={r.title || undefined}>{r.name}</span>
-            <span class="rd away" title={EMPTY_TIP}>Files not found</span>
-          </div>);
-        const status = ixing ? `${num(r.indexed)} of ${num(r.files)} indexed`
-          + (stopped ? (r.indexed ? ' · stopped' : ' · not started') : '')
-          : r.read !== undefined ? `${num(r.read)} of ${num(r.docs)} read` : `${num(r.files)} indexed`;
-        return (
-        <div class={`dcrow ${r.key && total.length ? 'part' : ''}`} key={r.key} data-folder={r.key}>
-          <span class="fn" title={r.title || undefined}>{r.name}{!ixing && r.copies > 0 &&
-            <span class="copies">{`${num(r.copies)} ${r.copies === 1 ? 'copy' : 'copies'} counted once`}</span>}</span>
-          <span class="fbar"><i class={`ix ${ixing && !stopped ? 'live' : ''} ${r.indexed ? 'some' : ''}`} style={{ width: `${pct(r.indexed, r.files)}%` }} /><i class={`rv ${r.read ? 'some' : ''}`} style={{ width: `${pct(r.read ?? 0, r.docs)}%` }} /></span>
-          {/* what "read" means is said on hover, not on the screen */}
-          <span class="rd" title={!ixing && r.read !== undefined ? READ_TIP : undefined}>{status}</span>
-        </div>); })}
-      {core > 0 && (coreAway ? <div class="dcrow" id="ov-core" data-away="">
-        <span class="fn awayfn">Core documents</span>
-        <span class="rd">{coreAway === core ? '' : `${num(coreAway)} of ${num(core)} not on this PC`}</span>
-      </div> : <div class="dcrow" id="ov-core">
-        <span class="fn">Core documents</span>
-        <span class="fbar">
-          <i class={`rv ${coreRead ? 'some' : ''}`} style={{ width: `${pct(coreRead, core)}%` }} />
-        </span>
-        <span class="rd" title={READ_TIP}>{num(coreRead)} of {num(core)} read</span>
-      </div>)}
-      {/* another deal whose data room holds most of this one's files, by content: it says so, and opens that deal; the two best at most */}
-      {(p?.alsoIn ?? []).slice(0, 2).map((a) => { const o = s.deals[a.dealId]; if (!o) return null; const twin = dealTwin(s, o); const who = twin || o.counterparty;   // a same-named deal is told apart by its counterparty and the day it was made
-        const tip = `The same files, by content, are in ${o.name}’s data room. `
+      {display.map((row) => <FolderDocumentRow key={row.key} row={row} progress={progress} />)}
+      <CoreDocumentRow core={core} />
+      {alsoIn.map(({ deal: match, docs, of }) => {
+        const twin = dealTwin(s, match);
+        const who = twin || match.counterparty;
+        const tip = `The same files, by content, are in ${match.name}’s data room. `
           + 'Files other deals also hold, such as precedents, are not counted';
-        return <div class="dcrow also" key={a.dealId} data-also={a.dealId}>
-          <a class="fn" href={`#${dealHash(s.prefs, o.id)}`} title={`${o.name}${who ? ` · ${who}` : ''}`}>
-            <span class="an">Also in {o.name}</span>{twin && <span class="copies">{twin}</span>}
+        return <div class="dcrow also" key={match.id} data-also={match.id}>
+          <a class="fn" href={`#${dealHash(s.prefs, match.id)}`} title={`${match.name}${who ? ` · ${who}` : ''}`}>
+            <span class="an">Also in {match.name}</span>{twin && <span class="copies">{twin}</span>}
           </a>
-          <span class="rd" title={tip}>{num(a.docs)} of {num(Math.max(a.of, a.docs))} files</span>
+          <span class="rd" title={tip}>{num(docs)} of {num(of)} files</span>
         </div>;
       })}
     </div>
