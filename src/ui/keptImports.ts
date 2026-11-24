@@ -5,7 +5,7 @@
  * the person starts over on purpose.
  *
  * An import holds the file it read (up to 20 MB) and model replies, more than local storage holds beside the kept drafts
- * (keptDrafts.ts), so it lives in the window's IndexedDB, which the desktop app keeps in its own folder on the PC. Each
+ * (keptText.ts), so it lives in the window's IndexedDB, which the desktop app keeps in its own folder on the PC. Each
  * import is kept as named parts, and a change writes only the parts that changed (the file once, a check as a check), all
  * in one transaction, so what is stored is always one whole state of the dialog. Writes go out as soon as the change is
  * made rather than after a pause, so a reload straight after a check mark keeps it.

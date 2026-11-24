@@ -10,7 +10,7 @@ import type { Finding } from '../domain/model';
 import { AskCard, AskedList, useLogQuestion } from './askCounterparty';
 import { ReadOnlyContext } from './editField';
 import { useAppState, useStore } from './hooks';
-import { keptDrafts, isText } from './keptDrafts';
+import { keptDrafts, isText } from '../app/keptText';
 import { openChecklistItem } from './nav';
 
 /** Questions half typed on a finding's page, kept across pages and a restart; Cancel or Log clear it. */

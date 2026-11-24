@@ -597,7 +597,7 @@ describe('EditField', () => {
   });
   it('a change from elsewhere found when the field\'s own trimmed save reports back: the text typed meanwhile is kept against a crash', async () => {
     localStorage.clear(); vi.resetModules();
-    const { EditField: First } = await import('../../src/ui/editField'); const { saveKeptDrafts } = await import('../../src/ui/keptDrafts');
+    const { EditField: First } = await import('../../src/ui/editField'); const { saveKeptDrafts } = await import('../../src/app/keptText');
     const root = document.createElement('div'); document.body.appendChild(root);
     const rec = { value: 'orig', rev: 1 }; const later: (() => void)[] = [];
     const draw = () => act(() => { render(<First keep="dL:counterparty" label="Counterparty" value={rec.value} rev={rec.rev} commit={commit} debounceMs={20} />, root); });
@@ -616,7 +616,7 @@ describe('EditField', () => {
 
   it('a waiting save refused after the person typed back to what it was typed over keeps nothing, so nothing is offered over the newer value later', async () => {
     localStorage.clear(); vi.resetModules();
-    const { EditField: First } = await import('../../src/ui/editField'); const { saveKeptDrafts } = await import('../../src/ui/keptDrafts');
+    const { EditField: First } = await import('../../src/ui/editField'); const { saveKeptDrafts } = await import('../../src/app/keptText');
     const root = document.createElement('div'); document.body.appendChild(root);
     const rec = { value: 'orig', rev: 1 }; const later: ((r: { ok: boolean; error?: { kind: string; message: string } }) => void)[] = []; let shown = true;
     const draw = () => act(() => { render(shown ? <First keep="dM:counterparty" label="Counterparty" value={rec.value} rev={rec.rev} commit={commit} debounceMs={20} /> : null, root); });

@@ -1,4 +1,4 @@
-import { checklistDrafts } from '../app/checklistDrafts';
+import { checklistDrafts } from './checklistDrafts';
 
 /**
  * Text typed into a form that is not a record yet (the composer and ask box, a new finding, a finding's edit, a closing

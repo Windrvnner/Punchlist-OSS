@@ -1,11 +1,11 @@
 /**
  * The New deal form half filled in, kept on this PC across a reload or restart until the deal is created (#55). It is
- * written as it changes, through the app's kept-draft store (keptDrafts.ts), so a dismiss, a reload or a crash loses
+ * written as it changes, through the app's kept-draft store (keptText.ts), so a dismiss, a reload or a crash loses
  * nothing. Folders still being read when the form went are kept as paths and read again when it opens (#113).
  */
 import type { DealKinds } from '../app/state';
 import { pathKey } from '../app/commands/deals';
-import { keptDrafts } from './keptDrafts';
+import { keptDrafts } from '../app/keptText';
 
 type KeptFolder = { path: string; label: string; files: number; size: string };
 

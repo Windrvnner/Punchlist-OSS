@@ -5,7 +5,7 @@ import { useAppState, useStore } from './hooks';
 import type { Store } from '../app/store';
 import { findingHref } from './findings';
 import { keepAsEdit } from './findingDrafts';
-import { hasTexts, keptDrafts } from './keptDrafts';
+import { hasTexts, keptDrafts } from '../app/keptText';
 import { focusCard, closeOnEscape } from './focus';
 import { workstreamChoices } from '../domain/order';
 import { TEXT_MAX } from '../domain/importExport';

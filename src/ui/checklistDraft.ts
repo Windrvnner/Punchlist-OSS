@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import { useLogQuestion } from './askCounterparty';
-import { keptChecklistQuestions } from './keptDrafts';
+import { keptChecklistQuestions } from '../app/keptText';
 
 /** Keep the card's original target between keystrokes, including before the first one or after clearing the box. */
 export function useChecklistDraft(key: string, currentFindingId?: string) {

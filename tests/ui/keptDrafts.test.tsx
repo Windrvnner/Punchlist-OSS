@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const KEY = 'dil/1/kept-drafts';
-const load = async () => { vi.resetModules(); return import('../../src/ui/keptDrafts'); };
+const load = async () => { vi.resetModules(); return import('../../src/app/keptText'); };
 beforeEach(() => { localStorage.clear(); vi.useRealTimers(); });
 
 describe('drafts kept across a restart', () => {

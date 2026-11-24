@@ -163,7 +163,7 @@ describe('kept text and a change put back while its field was off screen', () =>
   it('text being typed when "Changed elsewhere" shows is kept against a crash, and so is what is typed after', async () => {
     for (const route of ['other fields in one sync', 'the field itself'] as const) {
       const ui = await fresh(); const m = start(); const dealId = await deal(m.store);
-      const { saveKeptDrafts } = await import('../../src/ui/keptDrafts');
+      const { saveKeptDrafts } = await import('../../src/app/keptText');
       const stored = () => { saveKeptDrafts(); return JSON.stringify(JSON.parse(localStorage.getItem('dil/1/kept-drafts') ?? '{}')['edit-field'] ?? []); };
       const q = dealQuestions(m.store.get(), dealId).find((x) => String(x.n) === '1500')!;
       const f = screen(ui, m.store, { kind: 'response', dealId, questionId: q.id }); await f.shown(true);
