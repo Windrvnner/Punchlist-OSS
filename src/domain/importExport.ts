@@ -47,7 +47,7 @@ const TIME = /[ T]+([01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:\s*[AaPp]\.
 /**
  * A date as typed in a spreadsheet cell → YYYY-MM-DD, '' for blank, or null when it is not a real calendar date.
  * Never rolls an impossible date forward. On its own, a numeric date valid both ways gives its month-first reading; in an
- * import, prepareImport settles it from the dates around it (dateReadings). A year written with two digits is read as
+ * import, prepareImport reads it in the file's order (dateOrder). A year written with two digits is read as
  * Excel reads it. A month written as a word may come before or after the day, with an ordinal ("2nd") and with spaces,
  * hyphens or commas between. A date with a time is read as its date. A workbook's real date cell arrives as YYYY-MM-DD
  * (convert.ts), so it is never in doubt. A bare number (a serial date typed as text, or a cell with no date format) is not
@@ -57,7 +57,7 @@ export function parseDate(v: unknown): string | null { const c = dateReadings(v)
 
 /**
  * Every way a date cell can be read: [''] for blank, [] when it is not a real calendar date, one date, or for a numeric
- * date valid both ways ("02.11.2026") the month-first reading then the day-first one. prepareImport chooses between the two.
+ * date valid both ways ("02.11.2026") the month-first reading then the day-first one. prepareImport chooses by the file's order.
  */
 export function dateReadings(v: unknown): string[] {
   const one = (d: string | null) => (d === null ? [] : [d]);
@@ -74,6 +74,22 @@ export function dateReadings(v: unknown): string[] {
 }
 
 export interface ImportRow { /** the row's line in the file, header being line 1 */ line?: number; n: number | null; text: string; askedBy: string; received: string; workstream: string; priority: '' | 'High' | 'Medium' | 'Low'; response: string; respondedBy: string; responded: string; status: QuestionStatus | '' }
+/**
+ * The order a file writes its numeric dates in, read once from the date cells that show it: "13.10.2026" is day first and
+ * "10/13/2026" month first. A file with no such cell reads month first, as Excel does; one with both has no order,
+ * and its dates valid both ways are left blank and listed. Every date valid both ways then reads that way.
+ */
+export function dateOrder(raws: string[]): 'day' | 'month' | null {
+  let day = false; let month = false;
+  for (const raw of raws) {
+    const m = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](?:\d{4}|\d{2})/.exec(raw.trim());
+    if (!m) continue;
+    if (+m[1] > 12 && +m[2] <= 12) day = true;
+    if (+m[2] > 12 && +m[1] <= 12) month = true;
+  }
+  return day && month ? null : day ? 'day' : 'month';
+}
+
 export interface Prepared { rows: ImportRow[]; skipped: number; badDates: number; unknownValues: number; /** each date or value counted above, where it is: "Row 14 Received: 31/31/2026" */ unread: string[] }
 
 const PRIORITY: Record<string, ImportRow['priority']> = { high: 'High', medium: 'Medium', low: 'Low' };
@@ -92,8 +108,7 @@ const STATUS: Record<string, QuestionStatus> = { open: 'open', outstanding: 'ope
  * then no date after today. Unsettled, it is left blank and
  * counted as not read. A workbook's real date cells reach here as YYYY-MM-DD (see convert.ts), so only typed dates are in doubt.
  */
-export function prepareImport(table: string[][], mapping: Mapping, lines?: number[], o: { today?: string } = {}): Prepared {
-  const today = o.today ?? localYmd(new Date().toISOString());
+export function prepareImport(table: string[][], mapping: Mapping, lines?: number[]): Prepared {
   // control characters (NUL, BEL, ESC and the like) are never content; tabs and line breaks are
   const get = (r: string[], k: ImportField) => (mapping[k] == null ? '' : String(r[mapping[k]!] ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ''));
   const out: Prepared = { rows: [], skipped: 0, badDates: 0, unknownValues: 0, unread: [] };
@@ -110,29 +125,12 @@ export function prepareImport(table: string[][], mapping: Mapping, lines?: numbe
     if (st && !STATUS[st.toLowerCase()]) { out.unknownValues++; unread('status', st); }
     const row: ImportRow = { n, text, askedBy: get(r, 'askedBy').trim(), received: '', workstream: ws, priority: PRIORITY[pr.toLowerCase()] ?? '', response: get(r, 'response'), respondedBy: get(r, 'respondedBy').trim(), responded: '', status: STATUS[st.toLowerCase()] ?? '', line };
     out.rows.push(row);
-    const rec = date('received'), res = date('responded');
-    // the row's other date: keep the readings that leave received on or before responded
-    if (rec.readings.length > 1 || res.readings.length > 1) {
-      const fits = (x: string, y: string) => !x || !y || x <= y;
-      const a = rec.readings.filter((x) => res.readings.some((y) => fits(x, y))), b = res.readings.filter((y) => rec.readings.some((x) => fits(x, y)));
-      if (a.length) rec.readings = a; if (b.length) res.readings = b;
-    }
+    date('received'); date('responded');
   }
-  for (const col of [cells.received, cells.responded]) {
-    // the nearest dates above and below that are already settled, as they stood after the row's own check
-    const settled = col.map((c) => (c.readings.length === 1 && c.readings[0] ? c.readings[0] : ''));
-    for (const [i, c] of col.entries()) {
-      if (c.readings.length < 2) continue;
-      const above = settled.slice(0, i).reverse().find(Boolean), below = settled.slice(i + 1).find(Boolean);
-      const near = c.readings.filter((x) => (!above || above <= x) && (!below || x <= below));
-      // both fit (or neither): the one much nearer the dates around it, as a log in date order would have it
-      const days = (x: string) => Math.min(...[above, below].filter((y): y is string => !!y).map((y) => Math.abs(Date.parse(x) - Date.parse(y)) / 864e5));
-      const [a, b] = (near.length ? near : c.readings).map((x) => ({ x, d: days(x) })).sort((p, q) => p.d - q.d);
-      if (near.length === 1) c.readings = near;
-      else if (b && (above || below) && a.d * 2 < b.d) c.readings = [a.x];
-      else { const past = c.readings.filter((x) => x <= today); if (past.length === 1) c.readings = past; }
-    }
-    for (const c of col) { if (c.readings.length === 1) c.done(c.readings[0]); else c.bad(); }
+  const all = [...cells.received, ...cells.responded]; const order = dateOrder(all.map((c) => c.raw));
+  for (const c of all) {
+    if (c.readings.length === 2 && order) c.readings = [c.readings[order === 'day' ? 1 : 0]];
+    if (c.readings.length === 1) c.done(c.readings[0]); else c.bad();
   }
   out.unread.sort((x, y) => +x.split(' ')[1] - +y.split(' ')[1]);   // in row order, as the file reads; the sort keeps each row's own order
   return out;

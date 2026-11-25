@@ -67,20 +67,20 @@ describe('prepareImport', () => {
     expect(p.rows[0]).toMatchObject({ n: 2, priority: 'High', status: 'closed', received: '2026-11-01' });
     expect(p.rows[1]).toMatchObject({ n: null, priority: '', status: '', received: '', responded: '' });
   });
-  it('settles a date valid both ways by context, and leaves it blank when nothing settles it', () => {
+  it('reads every date valid both ways in the order the file shows, month first when it shows none', () => {
     const m = suggestMapping(['Question', 'Received', 'Date']);
-    const p = prepareImport([
-      ['Row other date', '13.10.2026', '02.11.2026'],   // received Oct 13, so responded is Nov 2, not Feb 11
-      ['Rows around', '20.10.2026', ''], ['Middle', '05.11.2026', ''], ['After', '20.11.2026', ''],   // between Oct 20 and Nov 20: Nov 5, not May 11
-    ], m, undefined, { today: '2026-11-15' });
-    expect(p.rows.map((r) => [r.received, r.responded])).toEqual([['2026-10-13', '2026-11-02'], ['2026-10-20', ''], ['2026-11-05', ''], ['2026-11-20', '']]);
-    // both readings come before the next row's date: the one much nearer it (Nov 2, a day before Nov 3, not Feb 11)
-    expect(prepareImport([['Near', '11/02/2026', ''], ['Next', '2026-11-03', '']], m, undefined, { today: '2026-11-15' }).rows[0].received).toBe('2026-11-02');
-    // no other date to go by: Dec 1 is after today, so Jan 12
-    expect(prepareImport([['Not in the future', '12.01.2026', '']], m, undefined, { today: '2026-11-15' }).rows[0].received).toBe('2026-01-12');
-    // nothing to go by and both readings in the past: left blank and listed
-    const q = prepareImport([['Alone', '02.03.2026', '']], m, undefined, { today: '2026-11-15' });
-    expect(q.rows[0].received).toBe(''); expect(q.badDates).toBe(1); expect(q.unread).toEqual(['Row 2 Received: 02.03.2026']);
+    // 13.10 can only be day first, so 02.11 and 05.11 read day first too, in either date column
+    const day = prepareImport([['A', '13.10.2026', '02.11.2026'], ['B', '05.11.2026', '']], m);
+    expect(day.rows.map((r) => [r.received, r.responded])).toEqual([['2026-10-13', '2026-11-02'], ['2026-11-05', '']]);
+    // 10/13 can only be month first
+    const month = prepareImport([['A', '10/13/2026', ''], ['B', '02/11/2026', '']], m);
+    expect(month.rows.map((r) => r.received)).toEqual(['2026-10-13', '2026-02-11']);
+    // nothing shows an order: month first, as Excel reads it
+    expect(prepareImport([['Alone', '02.03.2026', '']], m).rows[0].received).toBe('2026-02-03');
+    // both orders in one file: no order, so a date valid both ways is left blank and listed
+    const mixed = prepareImport([['A', '13.10.2026', ''], ['B', '10/13/2026', ''], ['C', '02.03.2026', '']], m);
+    expect(mixed.rows.map((r) => r.received)).toEqual(['2026-10-13', '2026-10-13', '']);
+    expect(mixed.badDates).toBe(1); expect(mixed.unread).toEqual(['Row 4 Received: 02.03.2026']);
   });
   it('reads back a number past Q999999, as the app numbers them', () => {
     const m = suggestMapping(['Number', 'Question']);

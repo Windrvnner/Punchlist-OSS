@@ -382,14 +382,13 @@ export function logWrite(table: Pick<ReadTable, 'rows' | 'lines' | 'cols' | 'las
 
 /**
  * A question's cells as the log writes them, in the app's terms, as the import reads them: a status of "Outstanding" as
- * open, a date of 11/20/2026 as 2026-11-20. A cell the import cannot read stays as written. `today` settles a date
- * written without its year, as the import does.
+ * open, a date of 11/20/2026 as 2026-11-20. A cell the import cannot read stays as written.
  */
-export function readLogCells(q: Question, cells: Record<string, string>, today?: string): Record<string, string> {
+export function readLogCells(q: Question, cells: Record<string, string>): Record<string, string> {
   const keys = Object.keys(cells) as ImportField[]; if (!keys.length) return {};
   const cols: ImportField[] = keys.includes('text') ? keys : [...keys, 'text'];   // a row is read only with its question
   const mapping = Object.fromEntries(IMPORT_FIELDS.map(([k]) => [k, cols.indexOf(k) < 0 ? null : cols.indexOf(k)])) as Mapping;
-  const read = prepareImport([cols.map((k) => cells[k] ?? q.text)], mapping, [2], today ? { today } : {}).rows[0] as unknown as Record<string, unknown> | undefined;
+  const read = prepareImport([cols.map((k) => cells[k] ?? q.text)], mapping, [2]).rows[0] as unknown as Record<string, unknown> | undefined;
   return Object.fromEntries(keys.map((k) => [k, read?.[k] == null || read[k] === '' && cells[k].trim() ? cells[k] : String(read[k])]));
 }
 /** whether a question's field already says `value` (in the app's terms, as readLogCells gives it); the words exactly as written */
