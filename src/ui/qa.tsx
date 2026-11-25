@@ -28,10 +28,10 @@ import { AI_LABEL } from '../control';
 import { workstreamChoices } from '../domain/order';
 import { MenuChoice, workstreamOptions } from './filterMenu';
 import { wholeRows } from './pickList';
-import { exportQaLog, chooseLogFolder, logOf } from '../app/qaLog';
+import { chooseLogFolder, logOf, markQaLogSeen } from '../app/qaLog';
 import { UndoLastImport, lastImport, undoLastImportPlan } from '../app/commands/importQuestions';
 import { Modal } from './dialogs';
-import { placeKept } from './placeKept';
+import { showQaLogUpdate } from './qaLogNotice';
 import { showTip, hideTip } from './tip';
 import { openResolve, inTwoVersions } from './resolve';
 import { focusSearchResult } from './nav';
@@ -92,13 +92,8 @@ export function QaPage({ dealId }: { dealId: string }) {
     const next = { ...all }; if (now) next[dealId] = now; else delete next[dealId];
     store.setPrefs({ qaOpen: next });
   }, [ready, sel?.id, dealId]);
-  // Opening a question is seeing what the Q&A log changed in it: its Changed mark goes, for this person.
-  // Only marks still current are kept, so the record stays as small as the deal's latest update.
   useEffect(() => {
-    if (!sel || !qaChanged(s, sel).length) return;
-    const st = store.get(); const at = (qid: string) => { const q = st.questions[qid]; return q ? st.deals[q.dealId]?.qaLogs[0]?.last?.at : undefined; };
-    const kept = Object.fromEntries(Object.entries(st.prefs.qaSeen).filter(([qid, when]) => at(qid) === when));
-    store.setPrefs({ qaSeen: { ...kept, [sel.id]: at(sel.id)! } });
+    if (sel) markQaLogSeen(store, sel.id);
   }, [sel?.id]);
   const twice = sharedNumbers(s, dealId);                 // numbers two questions hold: both rows are marked
   // What the row's look alone doesn't say goes in its tooltip (the Draft column is gone): a question in two versions,
@@ -384,7 +379,10 @@ function MoreMenu({ dealId }: { dealId: string }) {
         <button type="button" class="mi" role="menuitem" id="qa-import" disabled={!!ro} title={ro ?? undefined}
           onClick={() => openDialog('importQa')}>Import Q&A Log…</button>
         {s.can.qaLogs && <div class="mirow"><button type="button" class="mi" role="menuitem" id="qa-log"
-          onClick={() => { setOpen(false); void updateLog(store, dealId); }}>Update Q&A Log</button>
+          onClick={() => {
+            setOpen(false);
+            void showQaLogUpdate(store, dealId);
+          }}>Update Q&A Log</button>
           {log && <button type="button" class="fb" role="menuitem" id="qa-logdir" aria-label="Log folder" aria-description={logPath(log)} onMouseEnter={(e) => showTip(e.currentTarget as HTMLElement, logPath(log))} onMouseLeave={(e) => hideTip(e.currentTarget as HTMLElement)} onClick={() => { setOpen(false); void chooseLogFolder(store, dealId).then((r) => { if (!r.ok) store.toast(r.error.message); }); }}><Icon name="folder" size={16} /></button>}</div>}
         <button type="button" class="mi" role="menuitem" id="qa-export" disabled={!dealQuestions(s, dealId).length}
           onClick={() => openDialog('exportQa')}>Export Q&A Log…</button>
@@ -434,56 +432,6 @@ export function UndoImportDialog({ dealId }: { dealId: string }) {
 
 /** where the log is, as the folder writes its paths */
 const logPath = (l: { folder: string; file: string }) => `${l.folder}${l.folder.includes('\\') ? '\\' : '/'}${l.file}`;
-/**
- * Brings the deal's Q&A log up to date and says how it went in one notice: what changed, how many questions were
- * left in two versions, as someone wrote them in the file (Resolve steps through them), how many cells an edit kept aside
- * clashed on and were kept as in the file (Show opens the first), and how many edits kept aside were filed in the archive
- * with changes the log didn't take. While the file is in use (open in Excel, or saved by someone a
- * moment ago) it tries again on its own every half minute, naming who has it open only when the lock file does, with
- * Retry now (retry and notify); after 20 minutes it stops and says so.
- */
-const updating = new Set<string>();                                  // deals whose log is being saved: one update at a time
-const waiting = new Map<string, { timer: ReturnType<typeof setTimeout>; toast: number; tries: number }>();   // deals whose log was in use
-const RETRY_MS = 30_000, TRIES = 40;
-async function updateLog(store: ReturnType<typeof useStore>, dealId: string, auto = false) {
-  const w = waiting.get(dealId); if (w) { clearTimeout(w.timer); store.dismissToast(w.toast); waiting.delete(dealId); }
-  if (auto && !(store.get().deals[dealId] && logOf(store, dealId))) return;   // the deal or its log is gone: nothing to try again, and no new log is started unasked
-  if (updating.has(dealId)) { if (!auto) store.toast('Q&A log is being updated'); return; }
-  updating.add(dealId); const r = await exportQaLog(store, dealId, placeKept(store, dealId)).finally(() => updating.delete(dealId));
-  const n = (x: number) => x.toLocaleString('en-US');
-  // someone's edit filed in the archive with changes the log didn't take comes first, and the notice stays
-  const filing = (u = 0) => (u ? `${n(u)} ${u === 1 ? 'edit' : 'edits'} not fully merged, filed in the archive` : '');
-  if (!r.ok) {
-    const message = `Q&A log not updated: ${r.error.message}`;
-    store.toast(r.unmerged ? `${filing(r.unmerged)} · ${message}` : message, undefined, {
-      sticky: !!r.unmerged, glyph: 'warn',
-    });
-    return;
-  }
-  const v = r.value; if (v.status === 'canceled') return;
-  const again = { label: 'Retry Now', run: () => void updateLog(store, dealId) };
-  // short enough for one notice line: what matters most comes first, and the rest is on hover when it still doesn't fit
-  if (v.status === 'later') {
-    const tries = (w?.tries ?? 0) + 1;
-    if (tries > TRIES) { store.toast('Q&A log not updated · in use elsewhere for 20 minutes', { ...again, label: 'Retry' }, true); return; }
-    // "in use" covers a file open elsewhere and one saved or moved by someone a moment ago; who has it open is rarely known,
-    // so a name is shown only when a lock file gives one, as written there
-    const toast = store.toast(v.by ? `${v.by} has the Q&A log open · retrying` : 'The Q&A log is in use elsewhere · retrying', again, true);
-    waiting.set(dealId, { timer: setTimeout(() => void updateLog(store, dealId, true), RETRY_MS), toast, tries });
-    return;
-  }
-  const filed = filing(v.unmerged);
-  if (v.created) { if (filed) store.toast(`Q&A log made · ${filed}`, undefined, true); else store.toast('Q&A log made'); return; }
-  const did = [v.changed && `${n(v.changed)} changed in the log`, v.added && `${n(v.added)} added`, v.answered && `${n(v.answered)} answered`, v.updated && `${n(v.updated)} updated`].filter(Boolean).join(', ');
-  const first = dealQuestions(store.get(), dealId).find((q) => v.kept.includes(q.n));
-  const clash = dealQuestions(store.get(), dealId).find((q) => v.clashed.includes(q.n));
-  const versions = v.kept.length && first ? `${n(v.kept.length)} in two versions` : '', asFile = v.clashed.length && clash ? `${n(v.clashed.length)} kept as in the file` : '';
-  if (versions) store.toast([filed, versions, asFile, did].filter(Boolean).join(' · '), { label: 'Resolve', run: () => openResolve(store, dealId) }, true);
-  else if (asFile && clash) store.toast([filed, asFile, did].filter(Boolean).join(' · '), { label: 'Show', run: () => store.ui({ selectedQuestion: clash.id }) }, true);
-  else if (filed) store.toast([filed, did].filter(Boolean).join(' · '), undefined, true);
-  else store.toast(did ? `Q&A log updated · ${did}` : 'Q&A log is up to date');
-}
-
 /** a question in two versions, in the panel's place: its number over its title, as in the Resolve dialog, and the
  * stepper through the deal's other questions in two versions */
 function ConflictPanel({ q, busy, onClose, onKeyDown }: {
