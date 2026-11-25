@@ -81,6 +81,18 @@ describe('recovering interrupted saves (#278)', () => {
     }
   });
 
+  it('recovers a log under the other spelling of its name, as the app treats them as one log', () => {
+    const dir = folder();
+    try {
+      const aside = interruptAfterMove(dir, 'Lender log.csv', csv);
+      ageAsideFiles(aside, '');
+      expect(restoreAside(dir, 'Lender log.CSV')).toBe(true);
+      expect(fs.readFileSync(path.join(dir, 'Lender log.CSV'))).toEqual(csv);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('preserves an old working file whose original filename is unknown', () => {
     const dir = folder();
     try {

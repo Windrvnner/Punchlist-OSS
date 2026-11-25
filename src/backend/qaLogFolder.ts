@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { readZip, partText } from './zipParts';
+import { windowsPath } from '../domain/sheets';
 
 /**
  * a folder name that reads as an archive: "Archive", "02 - Old", "Superseded docs", "Prior versions", "Version history" (a bare "History" may hold anything). Only "Archive" and
@@ -97,8 +98,9 @@ const clean = (s: string) => {
  * version goes to the folder's archive first, dated, so nothing anyone wrote is lost. "later": the file is open somewhere, or
  * changed since it was read (someone saved a moment ago); nothing was written, and the next update starts from their version.
  */
-// Tie each working file to the full original filename, extension included, while keeping the name byte-bounded (#278).
-const workingPrefix = (file: string) => `~qa-log-${sha256(Buffer.from(file))}.`;
+// Tie each working file to the full original filename, extension included, the way the app tells two files apart
+// (case does not matter on Windows), while keeping the name byte-bounded (#278).
+const workingPrefix = (file: string) => `~qa-log-${sha256(Buffer.from(windowsPath(file)))}.`;
 const workingId = (file: string) => `${workingPrefix(file)}${crypto.randomBytes(4).toString('hex')}`;
 
 type KeptWorkingFile = { kind: 'old' | 'kept' | 'left'; archiveId: string; baseHash: string };
@@ -137,7 +139,8 @@ function putBack(folder: string, file: string): boolean {
   const left = names.filter((name) => workingFile(prefix, name)?.kind === 'old')
     .map((n) => ({ n, t: fs.statSync(path.join(folder, n)).ctimeMs })).sort((a, b) => b.t - a.t);   // ctime: when it was moved aside
   const old = left[0]; if (!old) return false;
-  const now = folderNow(folder, file); if (now === null || now - old.t < 60_000) return false;
+  const now = folderNow(folder, file);
+  if (now === null || now - old.t < 60_000) return false;
   try { fs.renameSync(path.join(folder, old.n), at); return true; } catch { return false; }
 }
 
@@ -146,8 +149,8 @@ function putBack(folder: string, file: string): boolean {
  * another program held them for a moment (a sync client uploading the new version). Only those over a minute old by
  * the folder's clock (`now`: when this save's own working file was made; another PC may be saving this moment), only while
  * this log is in place. A moved-aside file goes when this log or a verified archive for that attempt holds its bytes.
- * A temporary output goes when its bytes are already held or when it is an empty clock probe. Legacy files stay in
- * the folder.
+ * A temporary output goes when its bytes are already held or when it is an empty clock probe. A file whose original
+ * name cannot be verified stays in the folder.
  */
 function tidyLeftovers(folder: string, file: string, archive: string, now: number): void {
   const ext = path.extname(file);
@@ -192,9 +195,9 @@ export type KeptEdit = { name: string; hash: string; base: { file: string; hash:
  * archive refused (settleKept): it is never merged again, only filed in the archive when it takes it; ".left" is the same,
  * with some of its changes not in the log, so that the update that files it says so
  */
-function keptName(prefix: string, name: string): boolean {
-  const kind = workingFile(prefix, name)?.kind;
-  return kind !== undefined && kind !== 'tmp';
+function keptWork(prefix: string, name: string): KeptWorkingFile | undefined {
+  const work = workingFile(prefix, name);
+  return work && work.kind !== 'tmp' ? work : undefined;
 }
 
 type ArchiveCopy = { name: string; file: string; size: number; hash?: string };
@@ -272,21 +275,23 @@ export function keptEdits(folder: string, file: string): KeptEdit[] {
   const ext = path.extname(file);
   const prefix = workingPrefix(file);
   if (!fs.existsSync(path.join(folder, file))) return [];
-  let names: string[];
+  let names: { name: string; work: KeptWorkingFile }[];
   try {
-    names = fs.readdirSync(folder).filter((name) => keptName(prefix, name));
+    names = fs.readdirSync(folder).flatMap((name) => {
+      const work = keptWork(prefix, name);
+      return work ? [{ name, work }] : [];
+    });
   } catch {
     return [];
   }
   if (!names.length) return [];
-  const now = folderNow(folder, file); if (now === null) return [];
+  const now = folderNow(folder, file);
+  if (now === null) return [];
   const archive = archiveIn(folder);
   const copies = archiveCopies(archive && path.join(folder, archive), ext);
   const out: (KeptEdit & { t: number })[] = [];
-  for (const n of names) {
+  for (const { name: n, work } of names) {
     try {
-      const work = workingFile(prefix, n);
-      if (!work || work.kind === 'tmp') continue;
       const file = path.join(folder, n);
       const { ctimeMs } = fs.statSync(file);
       if (work.kind === 'old' && now - ctimeMs < 60_000) continue;
@@ -314,13 +319,14 @@ export function settleKept(folder: string, file: string, kept: { name: string; h
   const ext = path.extname(file);
   const prefix = workingPrefix(file);
   const gone: string[] = [];
-  const mine = kept.filter((k) => path.basename(k.name) === k.name && keptName(prefix, k.name));
+  const mine = kept.flatMap((k) => {
+    const work = path.basename(k.name) === k.name ? keptWork(prefix, k.name) : undefined;
+    return work ? [{ k, work }] : [];
+  });
   if (!mine.length) return gone;
   const dir = archiveOf(folder);
-  for (const k of mine) {
+  for (const { k, work } of mine) {
     try {
-      const work = workingFile(prefix, k.name);
-      if (!work || work.kind === 'tmp') continue;
       const f = path.join(folder, k.name);
       const b = fs.readFileSync(f);
       if (sha256(b) !== k.hash) continue;
@@ -337,6 +343,15 @@ export function settleKept(folder: string, file: string, kept: { name: string; h
   return gone;
 }
 
+/** Someone saved since the read: their version goes back to the log's name, or to the archive when that is taken. */
+function putBackOrFile(at: string, aside: string, dir: string, saved: Date): string {
+  if (!fs.existsSync(at)) {
+    fs.renameSync(aside, at);
+    return '';
+  }
+  return archiveKeptEdit(dir, path.basename(at), aside, fs.readFileSync(aside), saved);
+}
+
 export function saveLog(o: { folder: string; file: string; bytes: Uint8Array; was: string; at: Date }): LogSave {
   const at = path.join(o.folder, o.file); const ext = path.extname(o.file); const stem = o.file.slice(0, o.file.length - ext.length);
   const hash = (f: string) => sha256(new Uint8Array(fs.readFileSync(f)));
@@ -344,13 +359,10 @@ export function saveLog(o: { folder: string; file: string; bytes: Uint8Array; wa
   const by = whoHasOpen(o.folder, o.file); if (by !== null) return { status: 'later', ...(by ? { by } : {}) };
   // not there at all: another PC has it moved aside this moment, so this is "in use", not an error
   try { if (hash(at) !== o.was) return { status: 'later' }; } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'later' }; throw e; }
-  const id = workingId(o.file);
-  const tmp = path.join(o.folder, `${id}.tmp`);
-  let aside = '';
-  const dir = archiveOf(o.folder); let archive = '';
-  // the archive file that holds the version moved aside byte for byte, once one is known to: only then may that version go
-  let holds = '';
-  let published = false;
+  const id = workingId(o.file), tmp = path.join(o.folder, `${id}.tmp`);
+  // `holds`: the archive file with the version moved aside, byte for byte, once known: only then may that version go
+  let aside = '', archive = '', holds = '', published = false;
+  const dir = archiveOf(o.folder);
   const drop = () => {   // nothing was replaced: no copy may say it was
     if (archive) { fs.rmSync(path.join(dir, archive), { force: true }); if (holds === archive) holds = ''; }
     return { status: 'later' as const };
@@ -367,8 +379,7 @@ export function saveLog(o: { folder: string; file: string; bytes: Uint8Array; wa
     fs.renameSync(at, aside);
     const moved = hash(aside);
     if (moved !== o.was) {                                                             // someone saved a moment ago: theirs goes back
-      if (!fs.existsSync(at)) fs.renameSync(aside, at);
-      else holds = archiveKeptEdit(dir, o.file, aside, fs.readFileSync(aside), o.at);
+      holds = putBackOrFile(at, aside, dir, o.at);
       return drop();
     }
     if (baseHash === moved) holds = archive;
