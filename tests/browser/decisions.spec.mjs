@@ -1,4 +1,5 @@
 // Ten decisions on records, folders and imports. Each check is the thing a person would do.
+import { immapReady } from './importReady.mjs';
 import { launchChrome } from './chrome.mjs';
 import { openRename } from './dealMenu.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
@@ -343,7 +344,7 @@ const apart = (a, b) => !a || !b || a.r <= b.l || b.r <= a.l || a.b <= b.t || b.
     'odd.xlsx': [sheet('Log', [['B2', [['Queries', 'for', 'the sponsor']]], ['B5', [['Ref', 'Lender query', 'Sponsor reply'], ['A1', 'Is the debt sized on P90?', 'Yes']]]])],
   });
   const file = path.join(tmp, 'Proseware log.xlsx'); fs.writeFileSync(file, 'PK\u0003\u0004');               // the stand-in takes its sheets from __sheets
-  await page.goto(URL + '#qa-' + id); await page.waitForSelector('#qa-cols'); await page.click('#qa-cols'); await page.click('#qa-import'); await page.setInputFiles('#im-file', file); await page.waitForSelector('.immap');
+  await page.goto(URL + '#qa-' + id); await page.waitForSelector('#qa-cols'); await page.click('#qa-cols'); await page.click('#qa-import'); await page.setInputFiles('#im-file', file); await immapReady(page);
   const at = () => page.evaluate(() => ({ sheet: document.getElementById('im-sheet')?.value, sheets: [...(document.getElementById('im-sheet')?.options ?? [])].map((o) => o.value), row: document.getElementById('im-header').value, q: document.querySelector('[data-immap="text"]').selectedOptions[0].textContent, cols: [...document.querySelector('[data-immap="text"]').options].map((o) => o.textContent).slice(1), first: [...document.querySelectorAll('.imprev:not(.imchg) tbody tr:first-child td')].map((x) => x.textContent), line: document.getElementById('im-line').textContent, go: !document.getElementById('im-go').disabled }));
   const i0 = await at();
   say('import-finds-the-table-under-a-title-on-the-right-sheet', i0.sheet === 'Q&A' && i0.sheets.join() === 'Cover,Q&A' && i0.row === '6' && i0.q === 'Question' && i0.cols.join() === '#,Question,Submitted by,Response' && i0.first[0] === 'Is the EPC wrap fixed price?' && /Import 2 questions · 2 new/.test(i0.line) && i0.go, JSON.stringify(i0));
@@ -364,7 +365,7 @@ const apart = (a, b) => !a || !b || a.r <= b.l || b.r <= a.l || a.b <= b.t || b.
   // headings in words the app does not know: the model proposes the layout, it is shown as a proposal, and the person can still change it
   { const oddFile = path.join(tmp, 'odd.xlsx'); fs.writeFileSync(oddFile, 'PK\u0003\u0004');
     await page.evaluate(() => { window.__fail = { layout: true }; });
-    await page.click('#qa-cols'); await page.click('#qa-import'); await page.setInputFiles('#im-file', oddFile); await page.waitForSelector('.immap'); await page.waitForFunction(() => /Choose the question column/.test(document.getElementById('im-line').textContent));
+    await page.click('#qa-cols'); await page.click('#qa-import'); await page.setInputFiles('#im-file', oddFile); await immapReady(page); await page.waitForFunction(() => /Choose the question column/.test(document.getElementById('im-line').textContent));
     const byHand = await page.evaluate(() => ({ file: document.querySelector('.imfile').textContent, go: !document.getElementById('im-go').disabled, ask: !!document.getElementById('im-ask') }));
     await page.evaluate(() => { window.__fail = {}; }); await page.click('#im-ask'); await page.waitForFunction(() => /layout proposed by AI/.test(document.querySelector('.imfile').textContent), null, { timeout: 8000 });
     const prop = await at();

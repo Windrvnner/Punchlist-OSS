@@ -1,4 +1,5 @@
-// Going back in the browser while an import is open (#267). Only the browser build can do this: the desktop app has
+// Going back in the browser while an import { immapReady } from './importReady.mjs';
+import is open (#267). Only the browser build can do this: the desktop app has
 // no Back. The import closes as Escape closes it, and what was read and chosen is kept on this PC.
 import { launchChrome } from './chrome.mjs';
 
@@ -57,7 +58,7 @@ await page.evaluate(async ({ dealId, title }) => {
   await page.waitForSelector('#qa-add');
   await openImport();
   await page.setInputFiles('#im-file', file);
-  await page.waitForSelector('.immap');
+  await immapReady(page);
   await page.selectOption('[data-immap="workstream"]', '');
   await page.selectOption('[data-immap="askedBy"]', '');
   await page.click('[data-immode="append"]');
