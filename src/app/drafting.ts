@@ -123,3 +123,109 @@ export function stopDraftAll(store: Store, dealId: string) {
   stops.set(dealId, true);
   store.ui((ui) => ({ batch: ui.batch && ui.batch.dealId === dealId ? { ...ui.batch, stopping: true } : ui.batch }));
 }
+
+type MergeDraft = { text: string; ai: string };
+type MergeSide = 'app' | 'log';
+type MergeFields = Record<string, MergeSide>;
+type MergeModel = NonNullable<Services['ai']['merge']>;
+
+let keptMerges: Map<string, MergeDraft> | undefined;
+let keptSides: Map<string, MergeFields> | undefined;
+// Keep the existing keys and load them only after kept text is initialized.
+const mergeDrafts = () => keptMerges ??= keptDrafts('qa-merge', hasTexts('text', 'ai'));
+const mergeSides = () => keptSides ??= keptDrafts('qa-merge-sides', isMergeFields);
+const merging = new Set<string>();
+const mergeListeners = new Set<(questionId: string, error?: string) => void>();
+
+function isMergeFields(value: unknown): value is MergeFields {
+  return !!value && typeof value === 'object'
+    && Object.values(value).every((side) => side === 'app' || side === 'log');
+}
+
+export function responseMergeView(questionId: string) {
+  const draft = mergeDrafts().get(questionId);
+  return {
+    draft, hasDraft: !!draft?.text.trim(),
+    busy: merging.has(questionId), fields: mergeSides().get(questionId) ?? {},
+  };
+}
+
+export function editResponseMerge(questionId: string, text: string) {
+  const drafts = mergeDrafts();
+  drafts.set(questionId, { text, ai: drafts.get(questionId)?.ai ?? '' });
+}
+
+export function setResponseMergeSide(questionId: string, field: string, side: MergeSide) {
+  const sides = mergeSides();
+  sides.set(questionId, { ...sides.get(questionId), [field]: side });
+  return sides.get(questionId)!;
+}
+
+export function watchResponseMerges(listener: (questionId: string, error?: string) => void) {
+  mergeListeners.add(listener);
+  return () => { mergeListeners.delete(listener); };
+}
+
+/** Select a kept draft, wait for an in-flight one, or draft from the versions shown. */
+export function selectResponseMerge(
+  store: Store, question: Question, logText: string, again = false,
+): { text: string; busy: boolean } | undefined {
+  const { draft, hasDraft, busy } = responseMergeView(question.id);
+  const text = draft?.text ?? '';
+  if (!again && hasDraft && !busy) return { text, busy: false };
+  const ai = store.services.ai;
+  if (!ai.merge) return;
+  if (!busy) {
+    merging.add(question.id);
+    const input = { dealId: question.dealId, question: question.text, app: question.response, log: logText };
+    void finishResponseMerge(store, question.id, ai.merge.bind(ai), input, text);
+  }
+  return { text, busy: true };
+}
+
+async function finishResponseMerge(
+  store: Store, questionId: string, model: MergeModel, input: Parameters<MergeModel>[0], before: string,
+) {
+  const result = await model(input);
+  merging.delete(questionId);
+  const drafts = mergeDrafts();
+  const state = store.get();
+  // Keep a reply for its question after stepping away, unless it was resolved or its draft was edited meanwhile.
+  if (result.ok && hasLogVersion(state, state.questions[questionId])
+      && (drafts.get(questionId)?.text ?? '') === before) {
+    drafts.set(questionId, { text: result.value.text, ai: result.value.text });
+  }
+  for (const listener of mergeListeners) listener(questionId, result.ok ? undefined : result.error.message);
+}
+
+export function hasLogVersion(state: State, question: Question | undefined): boolean {
+  return !!question && Object.keys(qaKept(state, question)).length > 0;
+}
+
+function forgetResponseMerge(questionId: string) {
+  mergeDrafts().delete(questionId);
+  mergeSides().delete(questionId);
+}
+
+/** Clear the kept merge when there are no versions left to choose. */
+export function forgetResolvedResponseMerge(state: State, questionId: string) {
+  const question = state.questions[questionId];
+  if (question && !hasLogVersion(state, question)) forgetResponseMerge(questionId);
+}
+
+export async function keepResponseVersion(
+  store: Store, dealId: string, questionId: string, pick: VersionPick, merged: string, seen?: string,
+) {
+  const merge = pick === 'merged';
+  if (merge && (merging.has(questionId) || !merged.trim())) return fail(rejected('There is no merged draft to keep'));
+  const result = await chooseVersion(store, dealId, questionId, pick, {
+    merged, seen, drafted: mergeDrafts().get(questionId)?.ai, fields: merge ? mergeSides().get(questionId) : {},
+  });
+  if (result.ok) forgetResponseMerge(questionId);
+  return result;
+}
+
+export async function lastQuestionEditor(store: Store, questionId: string): Promise<string> {
+  const history = await store.services.repo.audit(questionId);
+  return history.ok ? history.value.at(-1)?.actor ?? '' : '';
+}
