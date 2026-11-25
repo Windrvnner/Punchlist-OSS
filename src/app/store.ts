@@ -34,6 +34,7 @@ import { merged, localConversations } from './threads';
 import { seenSince } from './draftsSeen';
 import { freshen, FOLDER_CHECK } from './folderWatch';
 import { reassess } from './findings';
+import { indexCommittedFolders } from './indexing';
 
 type Listener = (s: State) => void;
 
@@ -449,6 +450,7 @@ export class Store {
       this.toast(plan.message, plan.inverse ? { label: 'Undo', opId } : undefined, false, undefined, plan.messageCut);
     }
     if (plan.effect) this.startEffect(plan.effect, opId);
+    if (plan.dealId && plan.indexFolders?.length) indexCommittedFolders(this, plan.dealId, plan.indexFolders);
     void this.pruneJournal();
     return ok({ opId });
   }

@@ -9,6 +9,8 @@ import { addItems, missingItems, setOff, usableFirm } from './checklist';
 /** the longest a folder's label can be, on a new deal, on folders added later and when it is changed */
 export const FOLDER_LABEL_MAX = 60;
 const LabelText = z.string().trim().max(FOLDER_LABEL_MAX, `Keep the label under ${FOLDER_LABEL_MAX} characters`);
+// Older operations and callers can write deal records without asking this PC to index a folder.
+const IndexHere = z.literal(true).optional();
 const FolderInput = z.object({ path: z.string().min(1), label: LabelText, files: z.number().int().nonnegative(), size: z.string() });
 
 /**
@@ -51,7 +53,15 @@ export const dealNameRoom = (typed: string) => {
 
 export const CreateDeal = define({
   name: 'CreateDeal',
-  input: z.object({ name: z.string().trim().min(1, 'Give the deal a name'), folders: z.array(FolderInput).min(0), counterparty: z.string().trim().max(80, 'Keep it under 80 characters').optional(), product: z.string().trim().max(80, 'Keep it under 80 characters').optional(), sector: z.string().trim().max(80, 'Keep it under 80 characters').optional(), technology: z.string().trim().max(80, 'Keep it under 80 characters').optional() }),
+  input: z.object({
+    name: z.string().trim().min(1, 'Give the deal a name'),
+    folders: z.array(FolderInput).min(0),
+    indexHere: IndexHere,
+    counterparty: z.string().trim().max(80, 'Keep it under 80 characters').optional(),
+    product: z.string().trim().max(80, 'Keep it under 80 characters').optional(),
+    sector: z.string().trim().max(80, 'Keep it under 80 characters').optional(),
+    technology: z.string().trim().max(80, 'Keep it under 80 characters').optional(),
+  }),
   targets: () => [],
   plan(state, input, ctx) {
     const norm = (p: string) => p.replace(/[\\/]+$/, '').toLowerCase();
@@ -76,6 +86,7 @@ export const CreateDeal = define({
       upserts: [{ kind: 'deal', record: deal, expectedRev: null }, { kind: 'member', record: firstMember(id, ctx.actor, ctx.at), expectedRev: null }],
       index: { dealId: '_', add: [{ kind: 'deal', id }, { kind: 'member', id: memberId(id, ctx.actor) }] },
       audit: [{ kind: 'created', recordId: id, dealId: id, text: name }],
+      indexFolders: input.indexHere ? deal.folders.map((folder) => folder.path) : undefined,
       message: `${name} created`,   // indexing has not started yet, so nothing is said about it here: the page shows it once it runs
       // the firm's general list goes on the new deal straight after, in an operation of its own: a deal's items are filed
       // under the deal, and this change is filed with the list of deals
@@ -86,11 +97,15 @@ export const CreateDeal = define({
 
 /** A folder path as a key: the same folder written with / or \, in another case, or with a trailing separator, is one key. */
 export const pathKey = (p: string): string => p.toLowerCase().replace(/\//g, '\\').replace(/\\+$/, '');
+export const folderInside = (path: string, parent: string) => pathKey(path).startsWith(pathKey(parent) + '\\');
+
 /** Why `f` cannot go on beside `folders`: it is inside one of them, or holds one. Null when it overlaps none. */
 export function overlap(folders: Folder[], f: { path: string; label?: string }): string | null {
-  const me = pathKey(f.path), name = f.label || f.path;
-  const outer = folders.find((x) => me.startsWith(pathKey(x.path) + '\\')); if (outer) return `${name} is inside ${outer.label || outer.path}, already on this deal`;
-  const inner = folders.find((x) => pathKey(x.path).startsWith(me + '\\')); if (inner) return `${inner.label || inner.path}, already on this deal, is inside ${name}`;
+  const name = f.label || f.path;
+  const outer = folders.find(({ path }) => folderInside(f.path, path));
+  if (outer) return `${name} is inside ${outer.label || outer.path}, already on this deal`;
+  const inner = folders.find(({ path }) => folderInside(path, f.path));
+  if (inner) return `${inner.label || inner.path}, already on this deal, is inside ${name}`;
   return null;
 }
 
@@ -102,7 +117,7 @@ function liveAt(d: Pick<Deal, 'removed'>, at: number, path: string, n: number): 
 
 export const AddFolders = define({
   name: 'AddFolders',
-  input: z.object({ dealId: DealId, folders: z.array(FolderInput).min(1) }),
+  input: z.object({ dealId: DealId, folders: z.array(FolderInput).min(1), indexHere: IndexHere }),
   targets: (_s, i) => [i.dealId],
   plan(state, input, ctx) {
     const d = state.deals[input.dealId];
@@ -121,7 +136,14 @@ export const AddFolders = define({
       folders.splice(liveAt({ removed }, was.at, f.path, folders.length), 0, f);
     }
     const deal: Deal = { ...d, stage: 'indexing', folders, removed, updatedAt: ctx.at };
-    return ok({ dealId: d.id, upserts: [{ kind: 'deal', record: deal, expectedRev: d.rev }], audit: [{ kind: 'edited', recordId: d.id, dealId: d.id, field: 'folders', to: input.folders.map((f) => f.path) }], message: `${input.folders.length} folder${input.folders.length > 1 ? 's' : ''} added` });
+    const paths = input.folders.map((folder) => folder.path);
+    return ok({
+      dealId: d.id,
+      upserts: [{ kind: 'deal', record: deal, expectedRev: d.rev }],
+      audit: [{ kind: 'edited', recordId: d.id, dealId: d.id, field: 'folders', to: paths }],
+      indexFolders: input.indexHere ? paths : undefined,
+      message: `${paths.length} folder${paths.length > 1 ? 's' : ''} added`,
+    });
   },
 });
 
@@ -183,7 +205,7 @@ export function foldersWithRemoved(d: Pick<Deal, 'folders' | 'removed'>): { f: F
 /** Undo of RemoveFolder, and Restore in the Folders dialog: the folder goes back as it was, in its place. */
 export const RestoreFolder = define({
   name: 'RestoreFolder',
-  input: z.object({ dealId: DealId, folder: Folder, at: z.number().int().nonnegative() }),
+  input: z.object({ dealId: DealId, folder: Folder, at: z.number().int().nonnegative(), indexHere: IndexHere }),
   targets: (_s, i) => [i.dealId],
   plan(state, input, ctx) {
     const d = state.deals[input.dealId];
@@ -192,13 +214,14 @@ export const RestoreFolder = define({
     // a folder added since, inside this one or around it, would have its documents read twice: it says which
     const o = overlap(d.folders, input.folder); if (o) return fail(rejected(o));
     const folders = [...d.folders]; folders.splice(liveAt(d, input.at, input.folder.path, folders.length), 0, input.folder);
-    // one removed before its indexing finished is indexed the rest of the way: the Folders dialog starts it, and the deal
-    // shows Resume until then (only files not read yet are read)
-    const stage = input.folder.indexed < input.folder.files ? 'indexing' : d.stage;
+    // Only the unread files remain when an unfinished folder is put back.
+    const unfinished = input.folder.indexed < input.folder.files;
+    const stage = unfinished ? 'indexing' : d.stage;
     const deal: Deal = { ...d, folders, stage, removed: d.removed.filter((r) => pathKey(r.path) !== pathKey(input.folder.path)), updatedAt: ctx.at };
     return ok({
       dealId: d.id, upserts: [{ kind: 'deal', record: deal, expectedRev: d.rev }],
       audit: [{ kind: 'edited', recordId: d.id, dealId: d.id, field: 'folders', to: [input.folder.path] }],
+      indexFolders: input.indexHere && unfinished ? [input.folder.path] : undefined,
       message: `${input.folder.label || input.folder.path} restored`,
       inverse: { command: 'RemoveFolder', input: { dealId: d.id, path: input.folder.path } },
     });
@@ -299,6 +322,8 @@ export const EditDeal = define({
   },
 });
 
+export const matchesDealName = (typed: string, name: string) => cleanName(typed) === cleanName(name);
+
 export const DeleteDeal = define({
   name: 'DeleteDeal',
   // `seen`: what this PC had taken in when the person began deleting (Repository.seen): work from another PC that arrives
@@ -308,7 +333,7 @@ export const DeleteDeal = define({
   plan(state, input, ctx) {
     const d = state.deals[input.dealId];
     if (!d) return fail(notFound('Deal not found', input.dealId));
-    if (cleanName(input.typedName) !== cleanName(d.name)) return fail(rejected('Type the deal name exactly to delete it'));
+    if (!matchesDealName(input.typedName, d.name)) return fail(rejected('Type the deal name exactly to delete it'));
     const tomb = Tombstone.parse({ kind: 'deal', dealId: d.id, id: d.id, title: d.name, at: ctx.at, actor: ctx.actor, snapshot: d });
     return ok({
       dealId: d.id,

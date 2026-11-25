@@ -53,6 +53,8 @@ export interface Plan {
   alwaysSay?: boolean;
   /** runs after commit; its follow-up command is dispatched quietly */
   effect?: Effect;
+  /** Folder paths to index on the PC that requested this change, once the deal write has committed. */
+  indexFolders?: string[];
 }
 
 export interface Command<I = unknown, In = I> {
