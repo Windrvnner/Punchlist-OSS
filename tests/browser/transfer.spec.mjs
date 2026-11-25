@@ -253,37 +253,12 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
   say('no-page-errors-3', page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close(); }
 
-// A merge must show where long responses with the same opening differ (#269).
-{
-  const { ctx, page } = await fresh({ viewport: { width: 1024, height: 640 }, colorScheme: 'dark' });
-  const dealId = await newDeal(page, 'Import preview');
-  const question = 'Confirm the amount and timing of the debt service reserve.';
-  const prefix = 'The reserve uses the next twelve months of scheduled principal and interest in both projections. '
-    + 'The amount will be funded from the first disbursement.';
-  const now = `${prefix}\nThe approved illustration shows a twelve-month reserve.`;
-  const after = `${prefix}\nThe revised illustration shows a six-month reserve.\n`
-    + 'AmendmentAcknowledgmentAndReserveFundingDocumentationReference';
-  await page.goto(URL + '#qa-' + dealId);
-  await addQuestion(page, question);
-  await page.fill('.det textarea.rtext', now);
-  await page.press('.det textarea.rtext', 'Tab');
-  await page.waitForFunction((expected) => Object.values(store.get().questions)
-    .some((row) => row.response === expected), now);
-
-  await page.click('#qa-cols');
-  await page.click('#qa-import');
-  const mergeFile = file('reserve.csv', `Number,Question,Response\n1,"${question}","${after}"\n`);
-  await page.setInputFiles('#im-file', mergeFile);
-  await page.waitForSelector('#im-changes tbody td');
-  await page.focus('#im-answered');
-  await page.keyboard.press('Tab');
-  const focused = await focusId(page);
-  await page.keyboard.press('End');
-  await page.waitForTimeout(500);
-
-  const layout = await page.locator('#im-changes').evaluate((pane) => {
+async function overwriteComparisonLayout(page) {
+  return page.locator('#im-changes').evaluate((pane) => {
     const bounds = pane.getBoundingClientRect();
     const headerBottom = pane.querySelector('th').getBoundingClientRect().bottom;
+    const footerTop = pane.closest('.imdlg').querySelector('.xfoot').getBoundingClientRect().top;
+    const visibleBottom = Math.min(bounds.bottom, footerTop);
     const values = [...pane.querySelectorAll('tbody td:nth-child(n+3)')].map((cell) => {
       const text = cell.firstChild;
       const newline = text.textContent.indexOf('\n');
@@ -301,18 +276,62 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
       return {
         value: text.textContent,
         keptLineBreak,
-        readable: end.top >= headerBottom && end.bottom <= bounds.bottom && end.right <= cellBounds.right,
+        readable: end.top >= headerBottom && end.bottom <= visibleBottom && end.right <= cellBounds.right,
         widthFits: cell.scrollWidth === cell.clientWidth,
       };
     });
     return { values, scrolled: pane.scrollTop > 0, widthFits: pane.scrollWidth === pane.clientWidth };
   });
-  const exactText = layout.values.map(({ value }) => value).join('|') === [now, after].join('|');
-  const valuesFit = layout.values.every(({ keptLineBreak, readable, widthFits }) => keptLineBreak && readable && widthFits);
-  say('overwrite-values-show-both-endings-with-keyboard', focused === 'im-changes'
-    && layout.scrolled && layout.widthFits && exactText && valuesFit, JSON.stringify(layout));
-  say('overwrite-comparison-does-not-write', (await qs(page, dealId))[0].response === now);
-  await ctx.close();
+}
+
+// A merge must show where long responses with the same opening differ (#269).
+const question = 'Confirm the amount and timing of the debt service reserve.';
+const prefix = 'The reserve uses the next twelve months of scheduled principal and interest in both projections. '
+  + 'The amount will be funded from the first disbursement.';
+const now = `${prefix}\nThe approved illustration shows a twelve-month reserve.`;
+const after = `${prefix}\nThe revised illustration shows a six-month reserve.\n`
+  + 'AmendmentAcknowledgmentAndReserveFundingDocumentationReference';
+const mergeFile = file('reserve.csv', `Number,Question,Response\n1,"${question}","${after}"\n`);
+for (const [width, height] of [[1280, 736], [1024, 640]]) {
+  for (const colorScheme of ['light', 'dark']) {
+    const { ctx, page } = await fresh({ viewport: { width, height }, colorScheme });
+    const dealId = await newDeal(page, 'Import preview');
+    await page.goto(URL + '#qa-' + dealId);
+    await addQuestion(page, question);
+    await page.fill('.det textarea.rtext', now);
+    await page.press('.det textarea.rtext', 'Tab');
+    await page.waitForFunction((expected) => Object.values(store.get().questions)
+      .some((row) => row.response === expected), now);
+
+    await page.click('#qa-cols');
+    await page.click('#qa-import');
+    await page.setInputFiles('#im-file', mergeFile);
+    await page.waitForSelector('#im-changes tbody td');
+    await page.focus('#im-answered');
+    // Bring the comparison above the sticky footer before scrolling inside it.
+    await page.keyboard.press('End');
+    await page.waitForFunction(() => {
+      const dialog = document.querySelector('.imdlg');
+      return dialog.scrollTop + dialog.clientHeight >= dialog.scrollHeight - 1;
+    });
+    await page.keyboard.press('Tab');
+    const focused = await focusId(page);
+    await page.keyboard.press('End');
+    const reachedEnd = await page.waitForFunction(() => {
+      const pane = document.getElementById('im-changes');
+      return pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 1;
+    }, null, { timeout: 5000 }).then(() => true, () => false);
+
+    const layout = await overwriteComparisonLayout(page);
+    const exactText = layout.values.map(({ value }) => value).join('|') === [now, after].join('|');
+    const valuesFit = layout.values.every(({ keptLineBreak, readable, widthFits }) =>
+      keptLineBreak && readable && widthFits);
+    const view = `${colorScheme}-${width}x${height}`;
+    say(`overwrite-values-show-both-endings-with-keyboard-${view}`, focused === 'im-changes' && reachedEnd
+      && layout.scrolled && layout.widthFits && exactText && valuesFit, JSON.stringify({ focused, ...layout }));
+    say(`overwrite-comparison-does-not-write-${view}`, (await qs(page, dealId))[0].response === now);
+    await ctx.close();
+  }
 }
 
 await browser.close();
