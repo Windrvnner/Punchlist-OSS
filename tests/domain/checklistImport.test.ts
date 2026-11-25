@@ -43,4 +43,11 @@ describe('rewordings taken when a list was last brought in', () => {
     const twice = [{ text: 'Long-term service agreement in place.', was: 'LTSA in place', section: 'A' }, { text: 'Long-term service agreement in place.', was: 'LTSA in place', section: 'B' }];
     expect(earlierRewordings([{ text: 'LTSA in place' }, { text: 'LTSA in place' }], twice)).toEqual([{ at: 0, text: 'Long-term service agreement in place.' }, { at: 1, text: 'Long-term service agreement in place.' }]);
   });
+  it('keeps every item and section exactly as the file has it', () => {
+    const given = ['Board\u2019s \u201Cfee\u201D \u2013 caf\u00E9\u00A0terms', ' 2 years of accounts ', 'Line one\nline two', '\uFB01le?'];
+    const rows = given.map((text) => ['Se\u2019ction', text]);
+    expect(prepareChecklist(rows, { item: 1, section: 0 }).items.map((i) => [i.section, i.text])).toEqual(
+      given.map((text) => ['Se\u2019ction', text]),
+    );
+  });
 });
