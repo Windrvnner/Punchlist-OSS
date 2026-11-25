@@ -11,7 +11,7 @@ import { ResolveConflict } from '../../src/app/commands/conflicts';
 import { RestoreVersion } from '../../src/app/commands/keptVersions';
 import { dealQuestions, sharedNumbers } from '../../src/app/state';
 import '../ui/keptTextSession';
-import { deletedOf } from '../../src/ui/deleted';
+import { visibleDeletedNotes as deletedOf } from '../../src/app/deletedView';
 
 const ANSWERED = 'Please confirm whether the offtaker must consent to a change of control of the project company.';
 const OTHER = 'Please confirm whether the EPC contractor\'s performance bond stays in force until COD.';
