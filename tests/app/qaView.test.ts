@@ -2,9 +2,11 @@
 import { afterEach, expect, it } from 'vitest';
 import { MemoryLocal } from '../../src/adapters/local';
 import { initializeKeptText, saveKeptDrafts } from '../../src/app/keptText';
-import { qaEditorWorkstreams, qaPageView } from '../../src/app/qaView';
+import {
+  inTwoVersions, logVersionQueue, nextLogVersion, qaEditorWorkstreams, qaPageView, queueView, twoVersionsQueue,
+} from '../../src/app/qaView';
 import { initialState, type Conflict, type State } from '../../src/app/state';
-import { Deal, Question, wordingHash, type Draft, type Finding } from '../../src/domain/model';
+import { Deal, Finding, Question, wordingHash, type Draft } from '../../src/domain/model';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 
 initializeKeptText(new MemoryLocal());
@@ -139,4 +141,67 @@ it('keeps the selection in number order and applies status, workstream and text 
   state.conflicts = {};
   expect(view(state).statuses.at(-1)).toEqual({ status: 'versions', count: 0 });
   expect(view(state).list).toEqual([]);
+});
+
+it('searches the strip separately, wraps and keeps its place when search hides the current row', () => {
+  const state = fixture();
+  const scope = { kind: 'question' as const, dealId: DEAL, questionId: qid(2) };
+  filter(state, 'versions', 'Legal', 'no matching table rows');
+  const all = queueView(state, scope);
+  expect(all.shown.map(({ id }) => id)).toEqual([1, 2, 12, 15, 23, 40, 1200].map(qid));
+  expect(all.shown.map(({ done }) => done)).toEqual([false, false, false, false, false, false, true]);
+  expect(all).toMatchObject({ total: 7, position: 1, searchPosition: 1, previousId: qid(1), nextId: qid(12) });
+  state.ui.queueSearch = 'q12 PROVIDE THE DECOMMISSIONING';
+  const searched = queueView(state, scope);
+  expect(searched.shown.map(({ id }) => id)).toEqual([qid(12)]);
+  expect(searched).toMatchObject({ total: 7, position: 1, searchPosition: -1, previousId: qid(12), nextId: qid(12) });
+  state.ui.queueSearch = 'outside the log';
+  expect(queueView(state, scope)).toMatchObject({ shown: [], searchPosition: -1, previousId: qid(1), nextId: qid(12) });
+  state.ui.queueSearch = '';
+  expect(queueView(state, { ...scope, questionId: qid(1200) }).nextId).toBe(qid(1));
+});
+
+it('keeps PC conflicts separate from the log queue and skips records resolved after Resolve opened', () => {
+  const state = fixture();
+  expect(numbers(inTwoVersions(state, DEAL))).toEqual([1, 12, 15]);
+  const pc = state.conflicts[qid(40)];
+  expect(twoVersionsQueue(state, pc).map(({ id }) => id)).toEqual([23, 40, 1200].map(qid));
+  expect(twoVersionsQueue(state, { ...pc, kind: 'deal' })).toEqual([]);
+  expect(logVersionQueue(state, DEAL, qid(23))).toEqual([23, 1, 12, 15].map(qid));
+  const snapshot = logVersionQueue(state, DEAL, qid(1));
+  expect(snapshot).toEqual([1, 12, 15].map(qid));
+  state.questions[qid(12)].response = LOG_RESPONSE;
+  expect(nextLogVersion(state, snapshot, 0)).toBe(qid(15));
+  expect(nextLogVersion(state, snapshot, 2)).toBe(qid(1));
+  delete state.questions[qid(1)];
+  expect(nextLogVersion(state, snapshot, 2)).toBeUndefined();
+});
+
+it('uses Findings order and filters in the shared strip and keeps the selected finding available', () => {
+  const state = fixture();
+  const lease = Finding.parse({
+    ...RECORD, id: id('f', 1), dealId: DEAL, title: 'Leases require consent', workstream: 'Legal',
+    raisedAt: BEFORE, origin: 'human', updated: true,
+  });
+  const covenant = {
+    ...lease, id: id('f', 2), title: 'Covenant cure period missing', raisedAt: AT, updated: false,
+  };
+  const tax: Finding = {
+    ...lease, id: id('f', 3), title: 'Tax equity notice delivered', workstream: 'Tax', status: 'closed',
+  };
+  state.findings = Object.fromEntries([covenant, tax, lease].map((finding) => [finding.id, finding]));
+  const scope = { kind: 'finding' as const, dealId: DEAL, findingId: tax.id };
+  state.ui.findingFilter = { status: 'open', workstream: 'Legal', reviewed: '', text: '' };
+  const queue = queueView(state, scope);
+  expect(queue.shown.map(({ id, num, done }) => [id, num, done])).toEqual([
+    [lease.id, '', false], [covenant.id, '', false], [tax.id, '', true],
+  ]);
+  state.ui.findingFilter.text = 'cure';
+  expect(queueView(state, scope).shown.map(({ id }) => id)).toEqual([covenant.id, tax.id]);
+  state.ui.queueSearch = 'TAX EQUITY';
+  expect(queueView(state, scope).shown.map(({ id }) => id)).toEqual([tax.id]);
+  state.conflicts = Object.fromEntries([covenant, tax, lease].map((finding) => [
+    finding.id, conflict(finding, 'finding'),
+  ]));
+  expect(twoVersionsQueue(state, state.conflicts[tax.id]).map(({ id }) => id)).toEqual([lease.id, covenant.id, tax.id]);
 });
