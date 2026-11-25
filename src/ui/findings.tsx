@@ -9,7 +9,8 @@ import { useAppState, useStore, fmtDate, whenText , useDismiss, useMinuteTick } 
 import { afterDeletingFinding } from './nav';
 import { Icon } from './icons';
 import { ChoiceCheck } from './moreMenu';
-import { Ref, byDocument, fewDocuments } from './ref';
+import { Ref } from './ref';
+import { byDocument, fewDocuments } from '../app/citations';
 import { DocName } from './docName';
 import { FindingsHead } from './findingsHead';
 import { workstreamChoices } from '../domain/order';
@@ -429,7 +430,12 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
         {busy ? <div class="ai pending" aria-label="Updating"><span class="dots"><i /><i /><i /></span></div> : f.body.map((b, i) => <p class="dtxt" key={i}><Cited text={b} sources={f.sources} onOpen={onOpen} whole={!marked.size && !f.ownWords} onMore={listed ? showSources : undefined} /></p>)}
         {/* more documents than a pop shows: every one, with its places, in a list like Previous version */}
         {!busy && listed && <details class="prev fsrcs" id="f-sources" ref={srcList} open={srcOpen} onToggle={(e) => setSrcOpen((e.currentTarget as HTMLDetailsElement).open)}><summary>{docs.length} sources</summary>
-          <div class="sgl">{docs.map((g) => <div class="sgr" key={g.doc.docId}><span class="sgd"><DocName name={g.doc.doc} /></span><span class="sgp">{g.items.filter((x, j) => g.items.findIndex((y) => y.loc === x.loc) === j).map((x, j) => <button type="button" class="srcbtn" key={j} aria-label={`${g.doc.doc}, ${x.loc || 'open'}`} onClick={() => onOpen(x)}>{x.loc || 'Open'}</button>)}</span></div>)}</div></details>}
+          <div class="sgl">{docs.map((g) => <div class="sgr" key={g.doc.docId}>
+            <span class="sgd"><DocName name={g.doc.doc} /></span>
+            <span class="sgp">{g.pages.map((x, j) => <button type="button" class="srcbtn" key={j}
+              aria-label={`${g.doc.doc}, ${x.loc || 'open'}`} onClick={() => onOpen(x)}>
+              {x.loc || 'Open'}</button>)}</span>
+          </div>)}</div></details>}
         {f.note && <><div class="lbl" style="margin-top:12px">Note</div><p class="dtxt" style="white-space:pre-wrap">{f.note}</p></>}
         {prev && <details class="prev"><summary>Previous version · {fmtDate(localYmd(prev.at))}{wasReviewed ? ` · reviewed by ${wasReviewed.by}` : ''}</summary><p class="dtxt">{(prev.from as string[]).join(' ').replace(/\s*\[\d+\]/g, '')}</p></details>}
         </>}
