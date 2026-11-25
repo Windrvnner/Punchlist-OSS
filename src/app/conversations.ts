@@ -7,13 +7,14 @@
 import { isMine } from './commands/members';
 import type { Store } from './store';
 import { dealHash, pageHash, dealQuestions, type State, type Message } from './state';
-import { docKey, ownFilesId, type Source } from '../domain/model';
+import { docKey, ownFilesId, type Question, type Source } from '../domain/model';
 import { CreateQuestion, UseAsResponse } from './commands/questions';
-import { mayAddress } from '../domain/suggest';
+import { findQuestions, mayAddress } from '../domain/suggest';
 import { withoutMarkers } from '../domain/cite';
 import type { Research } from '../ports';
 import { bareDealName, cleanName } from './commands/deals';
-import { filesSendable } from './attachments';
+import { chipsSendable, dealCopied, filesSendable } from './attachments';
+import { isText, keptDrafts } from './keptText';
 
 /**
  * A conversation about a deal, or across deals, has its own id (`conv`): each question asked from a deal page's ask
@@ -137,37 +138,138 @@ function typedDealDestination(store: Store, text: string) {
   return deal ? { deal, page: suffix[2].toLowerCase() } : { deal: named(target), page: '' };
 }
 
-/** "Go to Proseware findings", "open Trey Q&A", "new deal". Resolved against loaded deals; no service call. */
-export function navIntent(store: Store, text: string): boolean {
-  const t = text.trim();
-  if (/^(new|create|add|start) (a )?(new )?deal\b/i.test(t)) { store.ui({ newDeal: { name: '', folders: [], error: '', busy: false } }); return true; }
-  const destination = typedDealDestination(store, t);
-  if (!destination?.deal) return false;
+function destinationHash(store: Store, text: string) {
+  const destination = typedDealDestination(store, text);
+  if (!destination?.deal) return;
   const { deal, page } = destination;
-  location.hash = page
+  return page
     ? pageHash(/q|question/.test(page) ? 'qa' : page as 'findings' | 'checklist' | 'overview', deal.id)
     : dealHash(store.get().prefs, deal.id);
+}
+
+/** "Go to Proseware findings", "open Trey Q&A", or "new deal", resolved against loaded deals. */
+export function navIntent(
+  store: Store, text: string, navigate = navigateWindow, handled?: () => void,
+): boolean {
+  const typed = text.trim();
+  if (/^(new|create|add|start) (a )?(new )?deal\b/i.test(typed)) {
+    handled?.();
+    store.ui({ newDeal: { name: '', folders: [], error: '', busy: false } });
+    return true;
+  }
+  const hash = destinationHash(store, typed);
+  if (!hash) return false;
+  handled?.();
+  navigate(hash);
   return true;
 }
 
-/** "Add all unresolved to Q&A", typed in a deal's ask box: opens the same preview as the Checklist's ⋯ menu (decisions, #2) */
-export function unresolvedIntent(store: Store, dealId: string, text: string): boolean {
-  if (!/^(?:please\s+)?add (?:all )?(?:the )?unresolved(?: (?:items|points|gaps(?: and(?: open)? findings)?))?(?: (?:to|into|in) (?:the )?(?:q ?& ?a|questions))?\s*[.!]?$/i.test(text.trim())) return false;
-  store.ui({ dialog: { kind: 'addUnresolved', dealId } }); return true;
+function navigateWindow(hash: string) {
+  if (typeof location !== 'undefined') location.hash = hash;
 }
 
-/**
- * "add a question: …" on a deal. 'none' when the text is not that command; otherwise whether the question was made.
- * A refusal (storage full, a copied install, …) has already been told to the person by the store, except for input it
- * rejects before planning, which is said here; the caller keeps the typed text so nothing is lost.
- */
-export async function questionIntent(store: Store, dealId: string, text: string): Promise<'none' | 'made' | 'refused'> {
-  const m = /^(?:add|log) (?:a )?question[:\s]+(.+)/is.exec(text.trim());
-  if (!m) return 'none';
-  const r = await store.dispatch(CreateQuestion, { dealId, text: m[1].trim() }, { idempotencyKey: 'ask-addq-' + dealId, noRetry: true });   // the text goes back in the box, which is the way to try again: a Retry as well could log it twice
-  if (r.ok) return 'made';
-  if (r.error.kind === 'invalid') store.toast(r.error.message);
-  return 'refused';
+/** "Add all unresolved to Q&A" opens the same preview as the Checklist menu (decisions, #2). */
+function unresolvedIntent(text: string) {
+  const command = '^(?:please\\s+)?add (?:all )?(?:the )?unresolved';
+  const points = '(?: (?:items|points|gaps(?: and(?: open)? findings)?))?';
+  const destination = '(?: (?:to|into|in) (?:the )?(?:q ?& ?a|questions))?\\s*[.!]?$';
+  return new RegExp(command + points + destination, 'i').test(text);
+}
+
+let drafts: { text: Map<string, string>; next: Map<string, string> } | undefined;
+const composerDrafts = () => drafts ??= {
+  text: keptDrafts('composer', isText),
+  next: keptDrafts('next-conversation', isText),
+};
+
+/** The ask box's next conversation is kept with its draft. Within a conversation, keep using that scope. */
+export function composerScope(given: Scope, launching: boolean): { scope: Scope; launchSlot?: string } {
+  if (!launching) return { scope: given };
+  const launchSlot = given.kind === 'all' ? 'all' : `deal:${given.dealId}`;
+  const { next } = composerDrafts();
+  const conv = next.get(launchSlot) ?? newConv();
+  if (!next.has(launchSlot)) next.set(launchSlot, conv);
+  const scope: Scope = given.kind === 'all' ? { kind: 'all', conv } : { kind: 'deal', dealId: given.dealId, conv };
+  return { scope, launchSlot };
+}
+
+// A typed Log Question clears the visible box when sent. Its text stays on disk until the result arrives.
+const hiddenQuestionDrafts = new Set<string>();
+export const composerText = (key: string) => hiddenQuestionDrafts.has(key) ? '' : composerDrafts().text.get(key) ?? '';
+export function setComposerText(key: string, text: string) {
+  hiddenQuestionDrafts.delete(key);
+  const kept = composerDrafts().text;
+  if (text) kept.set(key, text);
+  else kept.delete(key);
+}
+
+type SendView = {
+  launchSlot?: string;
+  navigate(hash: string): void;
+  sending?(): void;
+  textChanged?(): void;
+  refused?(): void;
+};
+
+const logging = new WeakMap<Store, Set<string>>();
+
+/** The kept text is the retry for a refused Log Question. Do not clear anything typed while that save was out. */
+async function logTypedQuestion(store: Store, dealId: string, text: string, key: string, view: SendView) {
+  const deals = logging.get(store) ?? new Set<string>();
+  logging.set(store, deals);
+  if (deals.has(dealId)) return;
+  deals.add(dealId);
+  hiddenQuestionDrafts.add(key);
+  try {
+    view.textChanged?.();
+    view.sending?.();
+    const result = await store.dispatch(CreateQuestion, { dealId, text }, {
+      idempotencyKey: 'ask-addq-' + dealId, noRetry: true,
+    });
+    if (!result.ok && result.error.kind === 'invalid') store.toast(result.error.message);
+    if (!hiddenQuestionDrafts.has(key) || dealCopied(store, dealId)) return;
+    if (result.ok) composerDrafts().text.delete(key);
+    else view.refused?.();
+  } finally {
+    deals.delete(dealId);
+    if (hiddenQuestionDrafts.delete(key)) view.textChanged?.();
+  }
+}
+
+/** Send the latest draft after file checks. Navigation and question commands take precedence over a model answer. */
+export async function sendTyped(store: Store, scope: Scope, view: SendView) {
+  const key = convKey(scope);
+  if (!composerText(key).trim() || store.readOnly() || scopeValid(store.get(), scope) !== true) return;
+  if (!(await chipsSendable(store, key))) return;
+  const state = store.get();
+  const filesDeal = filesDealOf(state, scope);
+  // A recovered copy now has the draft and files (#117). Do not clear or send them from the old scope.
+  if (store.readOnly() || scopeValid(state, scope) !== true || (filesDeal && dealCopied(store, filesDeal))) return;
+  const text = composerText(key).trim();
+  if (!text) return;
+  const take = () => {
+    setComposerText(key, '');
+    view.textChanged?.();
+    view.sending?.();
+  };
+  if (navIntent(store, text, view.navigate, take)) return;
+  const dealId = scope.kind === 'deal' ? scope.dealId : undefined;
+  if (dealId && unresolvedIntent(text)) {
+    take();
+    store.ui({ dialog: { kind: 'addUnresolved', dealId } });
+    return;
+  }
+  const question = dealId ? /^(?:add|log) (?:a )?question[:\s]+(.+)/is.exec(text) : null;
+  if (dealId && question) {
+    await logTypedQuestion(store, dealId, question[1].trim(), key, view);
+    return;
+  }
+  take();
+  if (view.launchSlot) {
+    composerDrafts().next.delete(view.launchSlot);
+    view.navigate(scopeHash(scope));
+  }
+  void ask(store, scope, text);
 }
 
 /** "Does this answer any of our open questions?", "would that address an open question": a person asking in words */
