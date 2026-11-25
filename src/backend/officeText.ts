@@ -49,11 +49,15 @@ export interface OfficeText { text: string; first: string; tracked: number }
 export function officeText(bytes: Uint8Array, name: string): OfficeText {
   if (/\.ppt[xm]$/i.test(name)) {
     const parts = unzip(bytes, (n) => /^ppt\/(?:slides\/slide|notesSlides\/notesSlide)\d+\.xml$/.test(n));
-    const read = (kind: string) => [...parts].filter(([n]) => n.includes(`/${kind}`)).sort((a, b) => +a[0].replace(/\D/g, '') - +b[0].replace(/\D/g, '')).map(([, x]) => textOf(x.toString('utf8'), 'a:t', 'a:p'));
+    const read = (kind: string) => [...parts]
+      .filter(([n]) => n.includes(`/${kind}`))
+      .sort((a, b) => +a[0].replace(/\D/g, '') - +b[0].replace(/\D/g, ''))
+      .map(([, x]) => textOf(x.toString('utf8'), 'a:t', 'a:p'));
     const slides = read('slide'); const notes = read('notesSlide');   // the speaker notes are text of the file too
     return { text: [...slides, ...notes].join('\n'), first: slides[0] ?? '', tracked: 0 };
   }
-  const parts = unzip(bytes, (n) => n === 'word/document.xml' || /^word\/(?:header\d*|footer\d*|footnotes|endnotes)\.xml$/.test(n));
+  const wanted = /^word\/(?:header\d*|footer\d*|footnotes|endnotes)\.xml$/;
+  const parts = unzip(bytes, (n) => n === 'word/document.xml' || wanted.test(n));
   const doc = parts.get('word/document.xml'); if (!doc) throw new Error('not a Word document');
   const xml = doc.toString('utf8');
   // text moved away keeps its words in w:t at the old place: as accepted, only the new place has them
