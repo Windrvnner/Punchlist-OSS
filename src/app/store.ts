@@ -1758,8 +1758,6 @@ export class Store {
     const key = `${answerId}|${questionId}`; const kept = this.readNotThese().filter((x) => x !== key);
     this.keepNotThese([...kept, key].slice(-NOT_THESE_KEEP));
   }
-  /** the suggestions put away under an answer come back (a person asked in words whether it addresses an open question) */
-  bringBack(answerId: string) { this.keepNotThese(this.readNotThese().filter((x) => !x.startsWith(answerId + '|'))); }
   private keepNotThese(notThese: string[]) {
     this.set({ ...this.state, ui: { ...this.state.ui, notThese } });
     this.services.local.write('notThese', notThese);

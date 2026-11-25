@@ -181,6 +181,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A deal page's ask box is the conversation composer in place: it is one line at rest and pushes the page down when used (option A).
 - **Past Conversations** in every composer opens a searchable list, set to This Deal or All Deals.
 - A typed "Log a question" that can't be saved goes back at the head of its box, ahead of anything typed while it was saving, with a blank line between; sending the box then logs that question alone and leaves the rest in the box. One the app keeps to retry stays with **Retry** instead (#955).
+- Typed text goes to the chat agent, except the typed commands: "open" or "go to" a deal by its exact name, "new deal", "add all unresolved to Q&A", and "log a question".
 - There is no Conversations tab.
 - Conversations are kept per person in the shared folder and follow the person between PCs. In the app, each person sees only their own; the files are readable by anyone with access to the folder, and no encryption is planned.
 - Answers cite sources sentence by sentence with a dotted underline, without numbered markers (#636). While a finding is being edited, each citation shows as a tag of at most 30 characters after its sentence (#636). An answer can become a finding, a question, or a response.
