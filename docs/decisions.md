@@ -290,6 +290,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - The model service sits behind one connector interface, chosen by `models.service`.
 - Intelligence sign-in is by API key or single sign-on, each turned on or off in the control file. Sign-in comes first; with nobody signed in, the app is read-only and keeps everything typed.
 - North, custom model gateways, Azure OpenAI, Amazon Bedrock and Google Vertex AI offer single sign-on.
+- A cloud service's saved sign-in holds while its service, address and sign-in fields stay the same; changing a model ID keeps everyone signed in.
 - Live tests run through the Claude connector on Haiku 5.5 by default (with model routing only to test the full document pipeline), and only when asked for (`npm run e2e:live`, or `npm run ai:check` for one service).
 
 ## Testing and packaging

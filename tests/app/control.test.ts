@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { control, checkControl, assertControl, notes, shownName, SERVICE, AI_LABEL, type Control } from '../../src/control';
+import { control, checkControl, assertControl, notes, shownName, signInBinding, SERVICE, AI_LABEL, type Control } from '../../src/control';
 import { COLOR_NAMES } from '../../src/palette';
 
 /** every color CSS knows by name, and the system colors, which only Windows High Contrast may use */
@@ -58,6 +58,18 @@ describe('the control file', () => {
     expect(problems).toEqual(['limits.chatTurns must be a whole number from 1 to 100.', 'limits.searchCalls is missing.', 'lists.searchFiller must list 0 to 2000 entries.']);
   });
 
+  it('binds a cloud sign-in to the address and sign-in fields, not to the model IDs', () => {
+    const azure = (change: (c: Record<string, Record<string, unknown>>) => void = () => {}) => edited((c) => {
+      c.models.service = 'azure';
+      Object.assign(c.azure, { address: 'https://a.example.test/openai/v1', tenant: 't', clientId: 'c', standard: 'm1' });
+      change(c);
+    });
+    const bound = signInBinding(azure());
+    expect(signInBinding(azure((c) => { c.azure.standard = 'm2'; c.azure.fast = 'm3'; }))).toBe(bound);
+    expect(signInBinding(azure((c) => { c.azure.address = 'https://b.example.test/openai/v1'; }))).not.toBe(bound);
+    expect(signInBinding(azure((c) => { c.azure.clientId = 'other'; }))).not.toBe(bound);
+    expect(signInBinding(edited((c) => { c.models.service = 'claude'; }))).toBeUndefined();
+  });
   it.each(['gateway', 'azure', 'bedrock', 'vertex'] as const)('validates the %s route at startup', (provider) => {
     const apiKeyOnly = edited((c) => {
       c.models.service = provider;
