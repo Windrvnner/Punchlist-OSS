@@ -1101,7 +1101,7 @@ export function nodeAi(o: AiOptions) {
     const clean = cleanId ? mine.find((x) => x.rec.docId === cleanId) : undefined; const rec = cleanId ? o.docs.records(s.dealId).find((r) => r.docId === cleanId) : undefined;
     // a standalone blackline: no clean draft is in the data room, so what it shows is never taken as the deal's terms
     const of = clean ? `its clean draft is ${clean.tag}. ${clean.tag} is what the deal's terms are` : rec ? `its clean draft is ${where(rec)}, which is not given here. The terms are what that clean draft says`
-      : cleanId === false ? 'no clean draft of it is in the data room. What it shows is not confirmed as the deal\'s terms: say so wherever you rely on it' : 'which clean draft it goes with is not clear. The terms are what a clean draft says';
+      : cleanId === false ? 'no clean draft of it was found by its cover or name. What it shows is not confirmed as the deal\'s terms: say so wherever you rely on it' : 'which clean draft it goes with is not clear. The terms are what a clean draft says';
     const sees = (o.blackline ?? control.blackline.pipeline) === 'A' ? ' Its strike-through and colors may not come through to you, so deleted words can read as if they were kept: be careful which wording is the new one.' : ' Struck-through words are deleted and colored words are inserted.';
     // what it was compared against (docs/other-project-documents-design.md): only this deal's own earlier draft makes its changes the deal's
     const vs = against === 'own' ? '' : against === 'other' && cleanId === false
