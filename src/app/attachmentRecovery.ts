@@ -1,3 +1,4 @@
+import { recoveredId } from '../domain/recovered';
 import type { Store } from './store';
 
 const CARRY_KEY = 'attachment-carries';
@@ -22,6 +23,19 @@ function savedCarries(store: Store): Map<string, Carry> {
     }
   }
   return carries;
+}
+
+/** Find the source of an older recovered copy using the same IDs as repository recovery (#744). */
+export async function recoveredAttachmentSource(store: Store, copy: string) {
+  const repo = store.services.repo;
+  const current = store.get().sync;
+  const read = current ? undefined : await repo.sync?.();
+  const sync = current ?? (read?.ok ? read.value : undefined);
+  if (!sync) return;
+  const deleted = await repo.list('tombstone', '_');
+  if (!deleted.ok) return;
+  const installs = [sync.self.id, ...sync.peers.map(({ id }) => id)];
+  return deleted.value.find(({ id }) => id.startsWith('d_') && installs.some((pc) => recoveredId(id, pc) === copy))?.id;
 }
 
 /** Carry document references that were published on the original deal to its recovered copy (#744). */
