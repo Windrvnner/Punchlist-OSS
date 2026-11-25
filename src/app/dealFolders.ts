@@ -10,18 +10,16 @@ import type { Store } from './store';
 export type DealForm = NonNullable<UiState['newDeal']>;
 type FolderName = Pick<Folder, 'path' | 'label'>;
 
-/** A folder starts with its own name. The label is editable. */
-export function guessLabel(path: string) {
+/** A folder's own name, the last part of its path, whole. */
+export function folderName(path: string) {
   const parts = path.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean);
-  return fitLabel(parts.at(-1) || path);
+  return (parts.at(-1) || path).trim();
 }
 
-export function fitLabel(name: string) {
-  const label = name.trim();
-  if (label.length <= FOLDER_LABEL_MAX) return label;
-  // A space just past the limit still ends a whole word.
-  const cut = label.slice(0, FOLDER_LABEL_MAX + 1).lastIndexOf(' ');
-  return (cut > 0 ? label.slice(0, cut) : label.slice(0, FOLDER_LABEL_MAX)).trim();
+/** A folder starts with its own name as its label, which is editable; a name too long for a label is never cut, so it starts with none. */
+export function guessLabel(path: string) {
+  const name = folderName(path);
+  return name.length <= FOLDER_LABEL_MAX ? name : '';
 }
 
 export function folderListed(folders: readonly Pick<Folder, 'path'>[], path: string) {
@@ -84,8 +82,8 @@ export async function readDealFolder(
   }
   const over = folders().find((folder) => foldersOverlap(path, folder.path));
   if (over) {
-    store.toast(folderInside(path, over.path) ? `That folder is inside ${over.label}, already on the list`
-      : `${over.label}, already on the list, is inside that folder`);
+    store.toast(folderInside(path, over.path) ? `That folder is inside ${over.label || over.path}, already on the list`
+      : `${over.label || over.path}, already on the list, is inside that folder`);
     return;
   }
   const removed = existing?.removed.find((folder) => pathKey(folder.path) === pathKey(path));

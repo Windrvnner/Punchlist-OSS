@@ -990,6 +990,21 @@ export class LogRepository implements Repository {
   async sync(): Promise<Result<SyncState>> { this.refresh(); return ok(this.syncNow()); }
   async seen(): Promise<Result<Seen>> { return ok(this.view.seenNow()); }
 
+  /**
+   * The id of a record that breaks the set precondition (#410): one that now exists under the deal and is not among the
+   * ids the plan read, or one the plan read that is gone.
+   */
+  private unexpectedMember(tx: Transaction, had: (kind: RecordKind, id: string) => boolean): string | undefined {
+    const set = tx.expectsMembers;
+    if (!set) return undefined;
+    const planned = new Set(set.ids);
+    const live = this.view.filedUnder(set.dealId)
+      .filter(({ kind, id }) => kind === set.kind && this.loaded(kind, id, had(kind, id)))
+      .map(({ id }) => id);
+    const liveIds = new Set(live);
+    return live.find((id) => !planned.has(id)) ?? set.ids.find((id) => !liveIds.has(id));
+  }
+
   /** `asHad`: as this PC had it, though its deal has been deleted (a change to it written before this PC's copy is made) */
   private loaded(kind: RecordKind, id: string, asHad = false): Loaded | null {
     const st = this.view.state(kind, id, asHad); if (!st.heads.length || (st.heads.length === 1 && st.heads[0].del)) return null;
@@ -1161,6 +1176,8 @@ export class LogRepository implements Repository {
         return fail({ kind: 'conflict', message: CHANGED, recordId: e.id, expected: e.rev, actual: rev });
       }
     }
+    const added = this.unexpectedMember(tx, had);
+    if (added) return fail({ kind: 'conflict', message: CHANGED, recordId: added });
     // 2. one line for the whole transaction
     const seq = this.seq + 1; const recs: RecChange[] = []; const retract: string[] = [];
     // A version's id names this install and line, plus a random part: a copied install that has not been found out yet writes

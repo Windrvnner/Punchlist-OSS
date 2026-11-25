@@ -63,3 +63,10 @@ describe('what a deal should hold', () => {
     expect(orderItems(items, firm).map((x) => x.text)).toEqual(['Insurance is in place', 'Completion tests are defined', 'Gone from the list', 'A person\'s own']);
   });
 });
+
+describe('a deal\'s items from a firm list keep the list\'s own wording', () => {
+  it('does not fold quotes, spaces or line breaks', () => {
+    const firm = list([layer('broad', '', ['  \u201CQuoted\u201D  item here\n'])]);
+    expect(itemsFor(firm, {}).map((i) => i.text)).toEqual(['  \u201CQuoted\u201D  item here\n']);
+  });
+});
