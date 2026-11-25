@@ -23,8 +23,7 @@ export const LAYER_NAMES: Record<Layer, { one: string; many: string }> = {
 export const LIST_NAME_MAX = 24;
 
 /**
- * A wording folded for comparing only, never for storing or showing (the app keeps and shows every wording exactly as it
- * was handed over): Unicode NFC; zero-width characters and soft hyphens removed; curly and low quotes, primes
+ * Wording as the app keeps it: Unicode NFC; zero-width characters and soft hyphens removed; curly and low quotes, primes
  * and modifier apostrophes made straight; the dashes U+2010–U+2015 and the minus sign made "-"; non-breaking spaces made
  * spaces; the common ligatures unfolded; white space trimmed, and each run of it made one space.
  */
@@ -154,7 +153,7 @@ export function itemsFor(firm: FirmList | null | undefined, d: { product?: strin
   for (const { layer, value } of dealLayers(d)) {
     const list = findList(firm, layer, value); if (!list) continue;
     for (const it of list.items) {
-      const text = it.text; const k = key(text); if (!k) continue;   // the wording stays as the list has it
+      const text = norm(it.text); const k = key(text); if (!k) continue;
       const had = out.get(k); const rev = (list as { rev?: unknown }).rev; const from = { layer, value: list.name, ...(typeof rev === 'number' ? { rev } : {}) };
       if (had) { if (!had.from.some((f) => f.layer === layer && f.value === list.name)) had.from.push(from); }
       else out.set(k, { text, ...(it.section ? { section: it.section } : {}), ...(it.subsection ? { subsection: it.subsection } : {}), from: [from] });

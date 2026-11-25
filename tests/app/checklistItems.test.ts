@@ -462,7 +462,7 @@ describe('each list of the firm’s is a record of its own', () => {
     await syncAll(A, B);
     const offered = () => offeredItems(A.store.get(), a).map((w) => w.text);
     const marked = () => [...unlistedItems(A.store.get(), A.store.get().deals[a])].map((id) => A.store.get().items[id].text);
-    expect(offered()).toEqual(['Lenders’ counsel opinion', 'Security is perfected']);
+    expect(offered()).toEqual(['Lenders\' counsel opinion', 'Security is perfected']);
     expect(marked()).toEqual(['Hedging is in place']);                      // case and a trailing period do not make an item new
     expect(offeredItems(B.store.get(), a)).toEqual([]);                      // not loaded on B: what it holds is not known there
     await A.store.dispatch(EditDeal, { dealId: a, group: 'closed' });
@@ -473,7 +473,7 @@ describe('each list of the firm’s is a record of its own', () => {
     expect(offered()).toEqual([]);
     // Undo turns them off: they stay on the deal, so they are not offered again
     expect((await A.store.dispatch(Undo, { opId: (r as any).value.opId })).ok).toBe(true);
-    expect(itemsOf(A, a).filter((i) => i.off).map((i) => i.text)).toEqual(['Lenders’ counsel opinion', 'Security is perfected']);
+    expect(itemsOf(A, a).filter((i) => i.off).map((i) => i.text)).toEqual(['Lenders\' counsel opinion', 'Security is perfected']);
     expect(offered()).toEqual([]);
     // the same list changed on both PCs at once: only the items both versions hold are offered, and neither version's items are marked
     await syncAll(A, B);
@@ -482,7 +482,7 @@ describe('each list of the firm’s is a record of its own', () => {
     await syncAll(A, B);
     expect(Object.keys(A.store.get().conflicts)).toEqual([listId('broad', '')]);
     expect(offered()).toEqual(['Tax opinion']);
-    expect(marked()).toEqual(['Lenders’ counsel opinion', 'Security is perfected']);
+    expect(marked()).toEqual(['Lenders\' counsel opinion', 'Security is perfected']);
   });
 
   it('a PC whose copy of a list is older than the one that added a deal’s items offers no Add them (linking design, section 5)', async () => {
