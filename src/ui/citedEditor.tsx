@@ -67,15 +67,23 @@ function selectedText(): string {
   return editorText(selection.getRangeAt(0).cloneContents());
 }
 
-/** what the box still has room for: whole characters only, so a letter or an emoji is never cut in half */
-function fitTo(text: string, room: number): string {
+/**
+ * what the box still has room for: whole characters only, so a letter or an emoji is never cut in half, and no
+ * citation divided: one cut short is left out, while any other bracket (a literal "[" or "[1") stays (#343)
+ */
+function fitTo(text: string, room: number, sourceCount: number): string {
   if (text.length <= room) return text;
-  let out = '';
+  let end = 0;
   for (const letter of graphemes(text)) {
-    if (out.length + letter.length > room) break;
-    out += letter;
+    if (end + letter.length > room) break;
+    end += letter.length;
   }
-  return out.replace(/\[\d*$/, '');   // nor a marker: one cut short is left out, not kept as words
+  let start = 0;
+  for (const piece of markerPieces(text, sourceCount)) {
+    if (start + piece.text.length > end) return text.slice(0, piece.ref ? start : end);
+    start += piece.text.length;
+  }
+  return text.slice(0, end);
 }
 
 /**
@@ -86,7 +94,7 @@ function fitTo(text: string, room: number): string {
  */
 function insertCited(text: string, box: HTMLElement, sources: Source[]) {
   const room = TEXT_MAX - editorText(box).length + selectedText().length;
-  const fitted = fitTo(text.replace(/\r\n?/g, '\n'), Math.max(0, room));
+  const fitted = fitTo(text.replace(/\r\n?/g, '\n'), Math.max(0, room), sources.length);
   const words = fitted.replace(/\n+$/, '');
   if (words) {
     const holder = document.createElement('div');
