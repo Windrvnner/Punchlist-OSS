@@ -10,6 +10,8 @@ import { ImportDialog } from '../../src/ui/qaImport';
 import { keepImport, importKey, keptImportsReady } from '../../src/app/keptImports';
 import { readImportBytes } from '../../src/app/transfer';
 import { dealQuestions } from '../../src/app/state';
+import { fail, ok } from '../../src/domain/result';
+import { tableFrom } from '../../src/domain/sheets';
 import { recoveryApp, recoveryDeal, type RecoveryApp } from '../app/recoveryKit';
 
 /** three heading lines, then 30 questions */
@@ -36,34 +38,57 @@ afterEach(() => {
   }
 });
 
-/** the import dialog on a kept import of the file, heading row 1; each reread for row 2 or 3 is held until let go */
-async function dialog(csv = CSV) {
+/** Hold a requested sheet or heading row until the test releases it, optionally failing the read. */
+function holdSheetReads(app: RecoveryApp, csv: string, otherSheet: boolean) {
+  const sheets = app.store.services.sheets;
+  const original = sheets.read;
+  const held = new Map<number | string, () => void>();
+  const failing = new Set<number>();
+  const grid = csv.split('\n').map((line) => line.split(','));
+  const alternate = [
+    ['Question', 'Notes', 'Response'],
+    ['Question', 'Notes', 'Response'],
+    ['Question', 'Final Notes', 'Response'],
+    ['Confirm the refinancing dates', 'Scheduled for the second quarter', 'Still under review'],
+  ];
+  sheets.read = async (bytes, name, opts) => {
+    const row = opts?.headerRow;
+    const delayed = row === 2 || row === 3 ? row : opts?.sheet === 'Updated review' && !row ? opts.sheet : null;
+    if (delayed) await new Promise<void>((go) => held.set(delayed, go));
+    if (row && failing.has(row)) return fail({ kind: 'failed', message: 'The file is locked' });
+    if (!otherSheet) return original.call(sheets, bytes, name, opts);
+    return ok(tableFrom([{ name: 'Initial review', grid }, { name: 'Updated review', grid: alternate }], opts)!);
+  };
+  const letGo = async (read: number | string) => {
+    await vi.waitFor(() => expect(held.has(read)).toBe(true));
+    const go = held.get(read)!;
+    held.delete(read);
+    await act(async () => go());
+  };
+  const restore = () => { sheets.read = original; };
+  return { letGo, failing, restore };
+}
+
+/** The import dialog on a kept import of the file at heading row 1. */
+async function dialog(csv = CSV, { legacy = false, otherSheet = false } = {}) {
   const app = recoveryApp();
   const dealId = await recoveryDeal(app);
   await keptImportsReady;
+  const { letGo, failing, restore } = holdSheetReads(app, csv, otherSheet);
   const read = await readImportBytes(app.store, 'Lender Q&A.csv', Uint8Array.from(new TextEncoder().encode(csv)));
   if (!read.ok) throw new Error(read.error.message);
   const choices = {
     mapping: read.value.mapping, path: null, mode: 'append', answered: false, makeLog: false, touched: true,
   };
-  keepImport(importKey.qa(dealId), { table: read.value, choices });
-  const sheets = app.store.services.sheets;
-  const original = sheets.read;
-  const held = new Map<number, () => void>();
-  const failing = new Set<number>();                                     // rows whose read fails once let go
-  sheets.read = async (bytes, name, opts) => {
-    const row = opts?.headerRow;
-    if (row === 2 || row === 3) await new Promise<void>((go) => held.set(row, go));
-    const locked = { ok: false as const, error: { kind: 'failed' as const, message: 'The file is locked' } };
-    if (row && failing.has(row)) return locked;
-    return original.call(sheets, bytes, name, opts);
-  };
+  const { cols: _cols, ...withoutPositions } = read.value;
+  keepImport(importKey.qa(dealId), { table: legacy ? withoutPositions : read.value, choices });
   const screen = document.createElement('div');
   document.body.append(screen);
   screens.push(screen);
-  await act(() => render(
+  const show = () => act(() => render(
     <StoreContext.Provider value={app.store}><ImportDialog dealId={dealId} /></StoreContext.Provider>, screen,
   ));
+  await show();
   await vi.waitFor(() => expect(screen.querySelector('#im-go')).not.toBeNull());
   const get = <T extends Element>(id: string) => screen.querySelector<T>(id)!;
   const heading = async (row: number) => {
@@ -73,22 +98,23 @@ async function dialog(csv = CSV) {
       field.dispatchEvent(new Event('input'));
     });
   };
-  const letGo = async (row: number) => {
-    await vi.waitFor(() => expect(held.has(row)).toBe(true));
-    await act(async () => held.get(row)!());
-  };
-  const pickResponse = async (column: string) => {
-    const response = get<HTMLSelectElement>('[data-immap="response"]');
+  const choose = async (selector: string, value: string) => {
+    const select = get<HTMLSelectElement>(selector);
     await act(() => {
-      response.value = column;
-      response.dispatchEvent(new Event('change'));
+      select.value = value;
+      select.dispatchEvent(new Event('change'));
     });
   };
+  const pickResponse = (column: string) => choose('[data-immap="response"]', column);
+  const reopen = async () => {
+    await act(() => render(null, screen));
+    await show();
+  };
   const done = async () => {
-    sheets.read = original;
+    restore();
     await app.repo.close();
   };
-  return { app, dealId, get, heading, letGo, pickResponse, done, failing };
+  return { app, dealId, get, heading, letGo, pickResponse, choose, reopen, done, failing };
 }
 
 describe('a heading row read again in the Q&A import (#63)', () => {
