@@ -107,5 +107,93 @@ for (const scheme of ['dark', 'light']) { const { ctx, page } = await fresh(sche
   const fit = await page.evaluate(() => { const row = document.querySelector('.headrow').getBoundingClientRect(); const bs = [...document.querySelectorAll('.hacts > *')].map((e) => e.getBoundingClientRect()); return { inRow: bs.every((r) => r.right <= row.right + 1), oneLine: new Set(bs.map((r) => Math.round(r.top + r.height / 2))).size === 1, overflow: document.documentElement.scrollWidth > innerWidth }; });
   say(`fits-1024-${scheme}`, fit.inRow && fit.oneLine && !fit.overflow, JSON.stringify(fit)); await ctx.close(); }
 
+async function refusePickedMemoWrite(page) {
+  await page.evaluate(() => {
+    const { fs, sheets, ai } = store.services;
+    const calls = window.memoSaveCalls = [];
+    const memo = ai.memo;
+    ai.memo = (dealId) => {
+      calls.push('model');
+      return memo(dealId);
+    };
+    sheets.document = async () => {
+      calls.push('convert');
+      return { ok: true, value: { docx: new Uint8Array([1]), pdf: new Uint8Array([2]) } };
+    };
+    fs.pickSave = async () => {
+      calls.push('pick');
+      return { ok: true, value: { id: 'picked', ext: 'pdf' } };
+    };
+    fs.writePicked = async (id, bytes) => {
+      const write = `${id}/${bytes.join()}`;
+      const retried = calls.includes(write);
+      calls.push(write);
+      return retried ? { ok: true, value: 'saved' } : {
+        ok: false, error: { kind: 'failed', message: 'Couldn’t save the file · Open elsewhere' },
+      };
+    };
+    fs.openPicked = async (id) => {
+      calls.push(`open ${id}`);
+      return { ok: true, value: 'opened' };
+    };
+  });
+}
+
+async function memoRefusalLayout(toast) {
+  return toast.evaluate(async (notice) => {
+    await document.fonts.ready;
+    const animations = notice.getAnimations({ subtree: true });
+    await Promise.allSettled(animations.map((item) => item.finished));
+    const title = notice.querySelector('.ttitle');
+    const detail = notice.querySelector('.tbody');
+    const retry = notice.querySelector('.tundo').getBoundingClientRect();
+    const icon = notice.querySelector('.tg svg').getBoundingClientRect();
+    const text = notice.querySelector('.ttext').getBoundingClientRect();
+    const center = (rect) => rect.top + rect.height / 2;
+    return {
+      title: title.textContent,
+      detail: detail?.textContent,
+      textFits: [title, detail].every((part) => part && part.scrollWidth <= part.clientWidth),
+      retrySize: [retry.width, retry.height],
+      iconSize: icon.width,
+      offsets: [center(icon) - center(retry), center(text) - center(retry)],
+    };
+  });
+}
+
+async function checkPickedMemoRetry(scheme, width, height) {
+  const { ctx, page } = await fresh(scheme, width, height);
+  try {
+    const id = await page.evaluate(async () => {
+      await store.dispatch(store.commandNamed('CreateDeal'), { name: 'Cedar', folders: [] }, { quiet: true });
+      return Object.keys(store.get().deals)[0];
+    });
+    await page.goto(`${URL}#overview-${id}`);
+    await page.evaluate((theme) => store.setPrefs({ theme }), scheme);
+    await refusePickedMemoWrite(page);
+    await openDealMenu(page);
+    await page.click('#deal-memo');
+    const toast = page.locator('#toast');
+    const retry = toast.getByRole('button', { name: 'Retry', exact: true });
+    await retry.waitFor();
+    const layout = await memoRefusalLayout(toast);
+    const fits = layout.title === 'Couldn’t save the file' && layout.detail === 'Open elsewhere'
+      && layout.textFits && layout.retrySize[0] >= 59.5 && Math.abs(layout.retrySize[1] - 24) <= 0.5
+      && Math.abs(layout.iconSize - 16) <= 0.5
+      && layout.offsets.every((offset) => Math.abs(offset) <= 0.5);
+    await retry.click();
+    await toast.getByRole('button', { name: 'Open', exact: true }).click();
+    const calls = await page.evaluate(() => window.memoSaveCalls.join('|'));
+    const retried = calls === 'pick|model|convert|picked/2|picked/2|open picked';
+    say(`locked-memo-${scheme}-${width}x${height}`, fits && retried, JSON.stringify({ layout, calls }));
+  } finally {
+    await ctx.close();
+  }
+}
+
+for (const [width, height] of [[1280, 736], [1024, 640]]) {
+  for (const scheme of ['dark', 'light']) await checkPickedMemoRetry(scheme, width, height);
+}
+
 await browser.close();
 const failed = results.filter(([, ok]) => !ok).length; console.log(`\n${results.length - failed}/${results.length} passed`); process.exit(failed ? 1 : 0);
