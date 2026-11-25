@@ -83,3 +83,15 @@ export function deletedIssuesLists(state: ListsState, dealId: string) {
     return { ...list, title, twin: twins.length > 0, when: list.at ? formatDateTime(list.at, seconds) : '' };
   });
 }
+
+/** The confirmation uses the same removal impact as the command (#410). */
+export function issuesListRemoval(list: ReturnType<typeof deletedIssuesLists>[number]) {
+  const name = list.twin && list.when ? `${list.list} (imported ${list.when})` : list.title;
+  const made = list.made.length;
+  const joined = list.joined.length;
+  const deleted = made === 0 ? 'No findings go to Deleted.'
+    : `${made.toLocaleString('en-US')} ${made === 1 ? 'finding goes' : 'findings go'} to Deleted.`;
+  const marks = joined
+    ? ` Marks are removed from ${joined.toLocaleString('en-US')} ${joined === 1 ? 'finding' : 'findings'}.` : '';
+  return { ask: `Remove ${name}?`, text: deleted + marks };
+}

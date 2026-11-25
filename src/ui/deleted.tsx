@@ -1,10 +1,13 @@
+import { useEffect, useState } from 'preact/hooks';
 import { useAppState, useStore, fmtDateTime } from './hooks';
-import { Modal } from './dialogs';
+import { AskFirst, Modal } from './dialogs';
 import { Icon } from './icons';
 import { RestoreFinding } from '../app/commands/findings';
 import { RestoreQuestion } from '../app/commands/questions';
 import { RemoveIssuesList } from '../app/commands/issuesList';
-import { deletedGroups, deletedIssuesLists, visibleDeletedNotes, type DeletedRow } from '../app/deletedView';
+import {
+  deletedGroups, deletedIssuesLists, issuesListRemoval, visibleDeletedNotes, type DeletedRow,
+} from '../app/deletedView';
 import { type Finding, type Question } from '../domain/model';
 import { RestoreVersion } from '../app/commands/keptVersions';
 
@@ -20,6 +23,32 @@ function GroupLabel({ label, count }: { label: string; count: number }) {
   return <div class="lbl">{label}<span class="n">{count.toLocaleString('en-US')}</span></div>;
 }
 
+const buttons = () => [...document.querySelectorAll<HTMLElement>('.deldlg [data-restore]')];
+
+/** Replace the Deleted modal with the ask, then return to the selected row (#410). */
+function useListRemoval(lists: ReturnType<typeof deletedIssuesLists>, remove: (doc: string, at: number) => void) {
+  const [request, setRequest] = useState<{ doc: string; key: string; at: number } | null>(null);
+  const selected = request && lists.find((list) => list.doc === request.doc);
+  const dismiss = () => {
+    setRequest(null);
+    requestAnimationFrame(() => buttons().find((button) => button.dataset.restore === request?.key)?.focus());
+  };
+  useEffect(() => {
+    if (request && !selected) setRequest(null);
+  }, [request, selected]);
+
+  const askRemove = (doc: string) => {
+    const key = `list:${doc}`;
+    setRequest({ doc, key, at: buttons().findIndex((button) => button.dataset.restore === key) });
+  };
+  const confirm = request && selected ? <AskFirst {...issuesListRemoval(selected)} go="Remove"
+    onKeep={dismiss} onGo={() => {
+      dismiss();
+      remove(request.doc, request.at);
+    }} /> : null;
+  return { askRemove, confirm };
+}
+
 export function DeletedDialog({ dealId }: { dealId: string }) {
   const store = useStore(); const s = useAppState();
   const close = () => store.ui({ dialog: null });
@@ -27,7 +56,6 @@ export function DeletedDialog({ dealId }: { dealId: string }) {
   const lists = deletedIssuesLists(s, dealId);
   // with the last one put back there is nothing left to show: the dialog closes, and because the button that opened it
   // has gone with the list, the focus goes to the page's list instead of to nowhere
-  const buttons = () => [...document.querySelectorAll<HTMLElement>('.deldlg [data-restore]')];
   const restore = (r: DeletedRow) => {
     const { t } = r;
     const copy = r.copy ? { copy: r.copy.ver } : {};
@@ -37,10 +65,8 @@ export function DeletedDialog({ dealId }: { dealId: string }) {
         ? store.dispatch(RestoreFinding, { dealId, findingId: t.id, ...copy }, { idempotencyKey: 'restore-' + r.key })
         : store.dispatch(RestoreQuestion, { dealId, questionId: t.id, ...copy }, { idempotencyKey: 'restore-' + r.key })));
   };
-  // a removed list's findings join the deleted ones below, so the dialog stays open on them
-  const remove = (doc: string) => act('list:' + doc, () => store.dispatch(RemoveIssuesList, { dealId, doc }));
-  const act = async (key: string, run: () => Promise<{ ok: boolean }>) => {
-    const at = buttons().findIndex((b) => b.dataset.restore === key);
+  const act = async (key: string, run: () => Promise<{ ok: boolean }>, fromAsk?: number) => {
+    const at = fromAsk ?? buttons().findIndex((b) => b.dataset.restore === key);
     if (!(await run()).ok) return;
     // its row has gone with the button that had the focus: the focus goes to the button that took its place, else the last one
     // (two frames: a removed list's findings are new rows, drawn a frame later)
@@ -48,7 +74,9 @@ export function DeletedDialog({ dealId }: { dealId: string }) {
     if (visibleDeletedNotes(current, dealId).length || deletedIssuesLists(current, dealId).length) {
       requestAnimationFrame(() => requestAnimationFrame(() => {
         const left = buttons();
-        if (at >= 0 && left.length && (!document.activeElement || document.activeElement === document.body)) {
+        const focus = document.activeElement;
+        const defaultFocus = fromAsk !== undefined && focus?.matches('.deldlg .delscroll');
+        if (at >= 0 && left.length && (!focus || focus === document.body || defaultFocus)) {
           left[Math.min(at, left.length - 1)].focus();
         }
       }));
@@ -57,6 +85,9 @@ export function DeletedDialog({ dealId }: { dealId: string }) {
     close();
     requestAnimationFrame(() => { if (!document.activeElement || document.activeElement === document.body) (document.querySelector<HTMLElement>('.flags .flagrow, .md .li[tabindex="0"]') ?? document.getElementById('view'))?.focus({ preventScroll: true }); });
   };
+  const removal = useListRemoval(lists, (doc, at) => {
+    void act('list:' + doc, () => store.dispatch(RemoveIssuesList, { dealId, doc }), at);
+  });
   const text = (row: DeletedRow) => row.t.kind === 'finding'
     ? (row.snapshot as Finding | undefined)?.title || row.t.title
     : (row.snapshot as Question | undefined)?.text || row.t.title || 'No text';
@@ -64,6 +95,7 @@ export function DeletedDialog({ dealId }: { dealId: string }) {
   const said = (row: DeletedRow) => row.t.kind === 'question'
     ? (row.snapshot as Question | undefined)?.response ?? ''
     : ((row.snapshot as Finding | undefined)?.body ?? []).join('\n\n');
+  if (removal.confirm) return removal.confirm;
   return (
     <Modal onClose={close} label="Deleted" blur className="sdlg deldlg">
       <div class="shead"><h2>Deleted</h2><button type="button" class="x" aria-label="Close" title="Close (Esc)" onClick={close}><Icon name="close" size={15} /></button></div>
@@ -95,7 +127,11 @@ export function DeletedDialog({ dealId }: { dealId: string }) {
                     {`${plural(l.made.length, 'finding')} · ${l.raised.toLocaleString('en-US')} already raised`}
                   </span>
                 </span>
-                <button type="button" class="btn sm" data-restore={'list:' + l.doc} title={`Send its ${plural(l.made.length, 'finding')} to Deleted and take its marks off the findings it joined${l.kept ? `. ${plural(l.kept, 'finding')} changed since ${l.kept === 1 ? 'stays' : 'stay'}` : ''}`} onClick={() => void remove(l.doc)}>Remove</button>
+                <button type="button" class="btn sm" data-restore={'list:' + l.doc}
+                  title={`Send its ${plural(l.made.length, 'finding')} to Deleted`
+                    + ' and take its marks off the findings it joined'
+                    + (l.kept ? `. ${plural(l.kept, 'finding')} changed since ${l.kept === 1 ? 'stays' : 'stay'}` : '')}
+                  onClick={() => removal.askRemove(l.doc)}>Remove</button>
               </div>))}
           </div>)}
       </div>
