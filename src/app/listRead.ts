@@ -103,19 +103,28 @@ export function checklistSourceLines(text: ChecklistText | null, table: ImportTa
 /** Later work (a file read, a model call, or leaving) takes the place of an earlier reply. */
 export function checklistRequests() {
   let generation = 0;
-  let tableRead: number | undefined;
+  // worksheet reads still running: counted apart from the tokens, so a later request does not hide one (#821)
+  let tableReads = 0;
+  // how many times a read has brought in another worksheet, so a review of the earlier one can be told apart
+  let sheetsChanged = 0;
   const newToken = () => ++generation;
   const isLatest = (token: number) => token === generation;
   const startTableRead = () => {
-    tableRead = newToken();
-    return tableRead;
+    tableReads++;
+    return newToken();
   };
+  // pending clears here only; whether the read is still the latest says whether its result is used
   const finishTableRead = (token: number) => {
-    if (tableRead === token) tableRead = undefined;
+    tableReads--;
     return isLatest(token);
   };
-  const tableReadPending = () => tableRead !== undefined && isLatest(tableRead);
-  return { newToken, isLatest, startTableRead, finishTableRead, tableReadPending };
+  const tableReadPending = () => tableReads > 0;
+  const sheetChanged = () => ++sheetsChanged;
+  const sheetsChangedSoFar = () => sheetsChanged;
+  return {
+    newToken, isLatest, startTableRead, finishTableRead, tableReadPending, sheetChanged,
+    sheetsChanged: sheetsChangedSoFar,
+  };
 }
 
 interface ChecklistTableReadEvents {
@@ -137,7 +146,10 @@ export async function rereadChecklistTable(
     const message = error instanceof Error ? error.message : 'The worksheet could not be opened';
     read = fail({ kind: 'failed', message });
   }
-  if (requests.finishTableRead(token)) events.finished(read);
+  if (!requests.finishTableRead(token)) return;
+  // another worksheet's items make an earlier review of this file out of date, even if the wording is the same
+  if (read.ok && read.value.table.sheet !== table.sheet) requests.sheetChanged();
+  events.finished(read);
 }
 
 interface ReadSource {

@@ -263,7 +263,7 @@ export function useListReview(
     if (change.kind !== 'retry' || change.open) setShown(true);
   };
   const next = () => {
-    if (plan && !work.busy && !work.tableReadPending()) return session.next(plan, show);
+    if (plan && !work.busy) return session.next(plan, show);
   };
   const retry = () => {
     if (review && !work.busy) return session.duplicates(review, target.generalTexts, show);

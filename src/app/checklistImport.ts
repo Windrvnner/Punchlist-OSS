@@ -389,10 +389,14 @@ export function checklistReviewSession(store: Store, requests: ChecklistRequests
   const flight = checklistReviewFlight(requests, events);
   let signature = '';
   let currentTexts: string[] = [];
+  // the worksheet the review was made for: a review of an earlier worksheet is never shown again (#821)
+  let reviewedSheets = requests.sheetsChanged();
+  const reviewIsOfThisSheet = () => reviewedSheets === requests.sheetsChanged();
   function plan(
     items: ListItem[] | null, target: ListTarget, options: ReviewOptions, review: Review | null, askedFor: string,
   ) {
-    const next = items && checklistReviewPlan(store.get().can, items, target, options, review, askedFor);
+    const kept = reviewIsOfThisSheet() ? review : null;
+    const next = items && checklistReviewPlan(store.get().can, items, target, options, kept, askedFor);
     signature = next?.signature ?? '';
     currentTexts = next?.texts ?? [];
     return next && { ...next, waiting: !!next.texts.length && next.needsCall && flight.pending };
@@ -404,13 +408,13 @@ export function checklistReviewSession(store: Store, requests: ChecklistRequests
     });
   }
   function duplicates(review: Review, generalTexts: string[], show: ShowReview, open = false, texts?: string[]) {
-    if (!store.get().can.sameMeaning) return;
+    if (!store.get().can.sameMeaning || requests.tableReadPending()) return;
     return askModel(() => retryChecklistDuplicates(store, review, generalTexts, texts), (next) => {
       show({ kind: 'retry', ...next, open });
     });
   }
   function wording(review: Review, show: ShowReview) {
-    if (!store.get().can.reword) return;
+    if (!store.get().can.reword || requests.tableReadPending()) return;
     const requested = currentTexts;
     return flight.ask(() => retryChecklistWording(store, review), (next) => {
       // Wording uses the imported items. General's items are only inputs to duplicate matching.
@@ -421,6 +425,8 @@ export function checklistReviewSession(store: Store, requests: ChecklistRequests
   }
   function next(plan: ReviewPlan, show: ShowReview) {
     const { can, items, target, options, texts, cached, needsCall } = plan;
+    // the items are those of the worksheet being read until that read ends (#821)
+    if (requests.tableReadPending()) return;
     if (!texts.length || !target.named || signature !== plan.signature) return;
     if (cached) {
       if (!needsCall) return show({ kind: 'open' });
@@ -428,6 +434,7 @@ export function checklistReviewSession(store: Store, requests: ChecklistRequests
     }
     const fresh = (replies?: readonly [RewordReply | null, SameMeaningReply | null]) => {
       const result = reviewChecklist(can, items, target, options, replies);
+      reviewedSheets = requests.sheetsChanged();
       show({ kind: 'fresh', ...result, signature: plan.signature });
     };
     if (!needsCall) return fresh();
