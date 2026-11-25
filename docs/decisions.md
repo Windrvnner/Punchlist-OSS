@@ -75,6 +75,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Responded By and its date appear beside the Response label when filled, and only on hover or focus when empty.
 - Changes from the Q&A log are marked in the row with Changed, Two Versions, and **Resolve**. While any such rows exist, Changed and Two Versions are also filters. A row in two versions has a 3px stripe, and its Response cell says only "Two versions". A changed cell shows the log's icon, with the old value in its tooltip, until the question is opened (option A).
 - **Resolve** shows the app's version and the log's version side by side, with **Keep Selected** and **Merge Both Versions** (which writes an AI draft; **Draft Again** redoes it). A choice belongs to its own question. The app's version, if not kept, goes to Deleted; the log's version stays in the archived file.
+- A merged response typed or edited in **Resolve** whose question is resolved elsewhere moves to the question's response box, unsaved and marked Changed elsewhere, until **Keep Mine** or **Take Theirs**; an untouched AI merge is dropped (#939).
 - The workstream filter is a filter button that opens the app's own menu: "All workstreams", the workstreams from A to Z, and "No workstream".
 - The table shows two lines of each response. **More** picks the columns shown (Responded By and Response Date start hidden), which never changes what Export or the log carries. Status is left out while every row shown has the same status. The page returns as it was left, per deal.
 - Scrolling down tucks the deal's header row away, and scrolling up brings it back. Column heads stay in place (#593).
@@ -86,7 +87,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A draft that can't be saved is retried five times with backoff, then shows as failed, with its text kept for **Retry** (#22).
 - **Draft from Documents** is offered on any open question without a draft; when it would replace typed text, it asks for confirmation on the button and offers **Undo**. **Draft All** drafts only questions with no response. An accepted draft records the firm as the responder.
 - A used draft, or a response taken from a conversation, keeps its label and sources only until a person changes its words.
-- Drafting quotes, word for word and with credit, a response already given to a similar question, then adds what the documents say.
+- Drafting quotes, word for word and with credit, a response already given to a similar question, then adds what the documents say. The model sees earlier responses only as R1, R2 and so on, never their question numbers, so a calendar quarter such as Q3 2027 stays in a draft, and a sentence naming an R number is dropped with the source only it cited (#286).
 - A typed response, or one taken from a conversation, doesn't change the status; a person marks the question Answered.
 - Emptying a response is announced in a notice with **Undo**.
 - A response on a question linked to a finding marks that finding; a response on an unlinked question is checked once against the open findings.
