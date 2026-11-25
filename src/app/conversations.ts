@@ -15,7 +15,9 @@ import type { Research } from '../ports';
 import { bareDealName, cleanName } from './commands/deals';
 import { chipsSendable, dealCopied, filesSendable } from './attachments';
 import { isText, keptDrafts } from './keptText';
-import { boxWithRefused, initializeRefusedCommands, keptForRetry, takeFromBox } from './refusedCommands';
+import {
+  boxWithRefused, initializeRefusedCommands, interruptedNow, keptForRetry, takeFromBox,
+} from './refusedCommands';
 
 /**
  * A conversation about a deal, or across deals, has its own id (`conv`): each question asked from a deal page's ask
@@ -224,12 +226,13 @@ type SendView = {
 async function logTypedQuestion(store: Store, dealId: string, question: string, typed: string, key: string,
   view: SendView) {
   // The text going back in the box is the way to try again: a Retry as well could log it twice.
+  const before = interruptedNow(store);
   const result = await store.dispatch(CreateQuestion, { dealId, text: question }, {
     idempotencyKey: 'ask-addq-' + dealId, noRetry: true,
   });
   if (result.ok) return;
   if (result.error.kind === 'invalid') store.toast(result.error.message);
-  if (keptForRetry(store, dealId, question)) return;
+  if (keptForRetry(store, before, dealId, question)) return;
   setComposerText(key, boxWithRefused(key, typed, composerText(key)));
   view.textChanged?.();
   view.refused?.();
