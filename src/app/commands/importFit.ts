@@ -1,4 +1,10 @@
-export type FitSource = () => readonly string[];
+/** The question a list would give now, and two available ones if it has that many (they prove a tie). */
+export interface FitView {
+  best?: string;
+  tie?: Candidates;
+}
+
+export type FitSource = () => FitView;
 
 type Candidates = readonly [string, string];
 
@@ -63,9 +69,9 @@ class FitWorklist {
     this.byQuestion.delete(question);
     for (const waiting of watchers) {
       this.unregister(waiting);
-      const candidates = waiting.source?.();
-      if (candidates?.length === 2) {
-        waiting.candidates = [candidates[0], candidates[1]];
+      const tie = waiting.source?.().tie;
+      if (tie) {
+        waiting.candidates = tie;
         this.register(waiting);
         continue;
       }

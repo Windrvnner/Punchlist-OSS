@@ -284,11 +284,11 @@ function chooseFrom(sources: FitSource[], order: ReadonlyMap<string, number>): F
   let witness: FitChoice['witness'];
   let first: string | undefined;
   for (const source of sources) {
-    const [best, other] = source();
+    const { best, tie } = source();
     if (!best) continue;
     if (!first || order.get(best)! < order.get(first)!) first = best;
     candidates.add(best);
-    if (other && !witness) witness = { candidates: [best, other], source };
+    if (tie && !witness) witness = { candidates: tie, source };
   }
   if (!first) return undefined;
   const other = [...candidates].find((candidate) => candidate !== first);

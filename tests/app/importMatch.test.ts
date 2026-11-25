@@ -509,6 +509,35 @@ describe('a chain of tied rows', () => {
     expect(preview).toMatchObject({ ok: true, value: { created: 0, updated: count } });
   }, 120_000);
 
+  it('quickly previews OCR variants after numbered rows claim the first questions', async () => {
+    const { store } = make();
+    const dealId = await deal(store);
+    const words = 'cash flow debt terms fees tax book cost data rates plans costs'.split(' ');
+    const prefix = 'Please provide the cash flow and debt terms, fees, tax book, cost data, rates, plans and costs. ';
+    const suffix = 'Include lease amortization, bond coverage and all collateral-level reconciliation schedules.';
+    const [base] = sheet('Question,Submitted by,Workstream', [[prefix + suffix, 'Lender A', 'Financial']]);
+    const capitalize = (text: string, mask: number) => text.replace(/[a-z]+/g, (word) => {
+      const index = words.indexOf(word);
+      return index >= 0 && (mask & (1 << index)) ? word.toUpperCase() : word;
+    });
+    const count = 4_000;
+    const numbered = 12;
+    const originals = Array.from({ length: count }, (_, index) => ({
+      ...base, n: index + 1, text: index < numbered ? capitalize(prefix, 1 << index) + suffix : prefix + suffix,
+    }));
+    const incoming = Array.from({ length: count }, (_, index) => {
+      if (index < numbered) return { ...originals[index], response: 'The numbered row answers its own question.' };
+      let bit = 0;
+      const scanned = suffix.replace(/l/g, (letter) => index & (1 << bit++) ? 'I' : letter);
+      return { ...base, text: capitalize(prefix, index) + scanned, response: 'The unnumbered row answers one.' };
+    });
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: originals })).ok).toBe(true);
+    const start = performance.now();
+    const preview = previewImport(store, dealId, 'merge', incoming);
+    expect(performance.now() - start).toBeLessThan(5_000);
+    expect(preview).toMatchObject({ ok: true, value: { created: 0, updated: count } });
+  }, 120_000);
+
   it('2,000 rows, each fitting two questions, are matched in a few seconds', async () => {
     const { store } = make(); const dealId = await deal(store);
     const day = (j: number) => new Date(Date.UTC(2025, 0, 1 + j)).toISOString().slice(0, 10);
