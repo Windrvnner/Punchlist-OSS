@@ -76,15 +76,15 @@ function create(dir: string, base: string, ext: string, bytes: Uint8Array): stri
     }
   }
 }
-/** whether `at` is still the file `claimed`: the same device, file number and creation time, all of which the share gave */
+/** whether `at` is still the file `claimed`: same device, file number and creation time, all of which the share gave */
 function sameFile(at: string, claimed: fs.BigIntStats): boolean {
   const now = fs.lstatSync(at, { bigint: true });
   const known = claimed.ino !== 0n && claimed.birthtimeNs !== 0n;
   return known && now.ino === claimed.ino && now.dev === claimed.dev && now.birthtimeNs === claimed.birthtimeNs;
 }
 /**
- * Empties the file claimed as `fd` (if its handle is still open), which only ever touches that file, then removes `at` if
- * it is still that file. A file another PC put there since (even one given a freed file number) stays. Where a share
+ * Empties the file claimed as `fd` (if its handle is still open), which only touches that file, then removes `at` if it
+ * is still that file. A file another PC put there since (even one given a freed file number) stays. Where a share
  * cannot tell files apart, an empty file stays: the next save moves on to the next name.
  */
 function takeAway(at: string, fd: number, claimed: fs.BigIntStats | undefined): void {
