@@ -29,6 +29,23 @@ export function useAppState(): State {
   return rendered;
 }
 
+/** Subscribe while a sign-in or folder form is on screen. */
+export function useConnectionForm<T>(form: {
+  get(): T;
+  subscribe(listener: () => void): () => void;
+  start(): () => void;
+}): T {
+  const [, force] = useState(0);
+  const rendered = form.get();
+  useLayoutEffect(() => {
+    const off = form.subscribe(() => force((n) => n + 1));
+    if (form.get() !== rendered) force((n) => n + 1);
+    return off;
+  }, [form]);
+  useEffect(form.start, [form]);
+  return rendered;
+}
+
 export const LOCALE = 'en-US';
 /**
  * Which way a deal's name runs. A name in Hebrew or Arabic runs right to left, so a name too long to show is cut at

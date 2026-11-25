@@ -151,13 +151,12 @@ function Shell() {
  * window; otherwise Settings, at its sign-in row.
  */
 function SignInBar() {
-  const store = useStore(); const s = useAppState(); const w = s.signin!;
+  const store = useStore();
   const [hidden, setHidden] = useState(false);   // until it shows again: the account row still says Read-only
   if (hidden) return null;
-  const go = () => { if (w.sso && !w.apiKey) void store.services.signin?.signIn(); else store.ui({ settings: true }); };
   return (
     <Notice class="robar" id="signin-bar" role="alert" glyph="warn" onClose={() => setHidden(true)}
-      actions={[{ label: 'Sign In', run: go, id: 'signin-bar-go' }]}>
+      actions={[{ label: 'Sign In', run: () => store.signInFromNotice(), id: 'signin-bar-go' }]}>
       <NoticeWords text={`Read-only · Not signed in to ${SERVICE}`} />
     </Notice>
   );
