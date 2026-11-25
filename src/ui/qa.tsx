@@ -18,8 +18,10 @@ import { AskedFor } from './askedFor';
 import { CreateQuestion, EditQuestionField, SetQuestionStatus, SetResponse, DeleteQuestion, RenumberQuestion } from '../app/commands/questions';
 import { createdRecord } from '../app/createdRecord';
 import { EditDeal } from '../app/commands/deals';
-import { RequestDraft, DiscardDraft, AcceptDraft } from '../app/commands/drafts';
-import { draftAll, stopDraftAll, typingIn } from '../app/drafting';
+import { DiscardDraft } from '../app/commands/drafts';
+import {
+  draftAll, draftReplacesResponse, requestQuestionDraft, stopDraftAll, typingIn, useQuestionDraft,
+} from '../app/drafting';
 import { isDraftStale } from '../domain/transitions';
 import { Ref } from './ref';
 import { deletedOf } from './deleted';
@@ -674,8 +676,7 @@ function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted 
             : (offer || settled) && <span class={`racts ${offer && settled ? 'two' : ''}`}>{offer && <span class="needs"
               title={ro ?? undefined}><button type="button" class="btn sm" id="q-draft" disabled={!!ro}
               title={ro ?? 'Draft from Documents'} aria-label="Draft from Documents"
-              onClick={() => { void store.dispatch(RequestDraft, { dealId: q.dealId, questionId: q.id },
-              { idempotencyKey: 'draft-' + q.id }); }}><span class="long">Draft from Documents</span><span
+              onClick={() => void requestQuestionDraft(store, q)}><span class="long">Draft from Documents</span><span
               class="short">Draft</span></button></span>}{settled && <CloseThisQuestion q={q} ro={ro}
               settled={settled} />}</span>}
         </div>
@@ -739,35 +740,28 @@ function DraftBox({ q }: { q: Question }) {
  * asks before it replaces it: the text is saved first, so Undo brings it back. `over`: the response
  * the text was typed over, so a change made elsewhere since is never written over unasked.
  */
-function DraftActions({ q, typed, over, elsewhere = false }: { q: Question; typed: string; over: string; elsewhere?: boolean }) {
-  const store = useStore(); const s = useAppState(); const ro = useContext(ReadOnlyContext);
+function DraftActions({ q, typed, over, elsewhere = false }: {
+  q: Question; typed: string; over: string; elsewhere?: boolean;
+}) {
+  const store = useStore();
+  const ro = useContext(ReadOnlyContext);
   // what the box held, and what it was typed over, when the person was asked: the confirm replaces that and nothing else, so a
   // coworker's change that syncs in while it waits is never written over. A change to the question takes the ask back.
   const [ask, setAsk] = useState<null | { typed: string; over: string; rev: number }>(null);
   useEffect(() => { if (ask && ask.rev !== q.rev) setAsk(null); }, [q.rev]);
   const d = q.draft!;
-  // a draft whose text came back but could not be saved keeps it: Retry writes that text rather than asking the model again
-  const redraft = () => { if (d.opId && store.hasKeptReply(d.opId)) store.retryKeptReply(d.opId); else void store.dispatch(RequestDraft, { dealId: q.dealId, questionId: q.id }, { idempotencyKey: 'draft-' + q.id }); };
+  const redraft = () => void requestQuestionDraft(store, q);
   const discard = () => void store.dispatch(DiscardDraft, { dealId: q.dealId, questionId: q.id }, { idempotencyKey: 'discard-' + q.id });
   const use = async (asked: null | { typed: string; over: string }) => {
     setAsk(null);
-    if (!asked) return store.dispatch(AcceptDraft, { dealId: q.dealId, questionId: q.id }, { idempotencyKey: 'take-' + q.id });
-    const elsewhereSaid = 'The response was changed elsewhere, so the draft wasn’t used. Nothing was changed.';
-    if (elsewhere) { store.toast(elsewhereSaid); return; }   // the box asks Keep mine or Take theirs first (a change put back is caught by its rev)
-    // text typed and not yet saved is saved first, so the draft's Undo puts it back; if it cannot be saved, the draft waits
-    const now = store.get().questions[q.id];
-    if (now && asked.typed !== now.response) {
-      const r = await store.dispatch(SetResponse, { dealId: q.dealId, questionId: q.id, response: asked.typed }, { quiet: true, over: asked.over });
-      if (!r.ok) {
-        store.toast(isChangedElsewhere(r.error) ? elsewhereSaid
-          : 'Your text couldn’t be saved, so the draft wasn’t used. Nothing was changed.');
-        return;
-      }
+    const result = await useQuestionDraft(store, q, asked ? { ...asked, elsewhere } : undefined);
+    if (result.kind === 'responseChanged') {
+      store.toast('The response was changed elsewhere, so the draft wasn’t used. Nothing was changed.');
+    } else if (result.kind === 'textNotSaved') {
+      store.toast('Your text couldn’t be saved, so the draft wasn’t used. Nothing was changed.');
+    } else if (result.kind === 'refused') {
+      store.toast(result.message);
     }
-    // what is replaced is what the person confirmed replacing: a coworker's change that synced in meanwhile is not
-    const r = await store.dispatch(AcceptDraft, { dealId: q.dealId, questionId: q.id, replace: true, over: asked.typed }, { idempotencyKey: 'take-' + q.id, quiet: true });
-    if (!r.ok) store.toast(isChangedElsewhere(r.error) ? elsewhereSaid : r.error.message);
-    return r;
   };
   const b = (label: string, run: () => void, pri = false) => <span class="needs" title={ro ?? undefined}><button type="button" class={`btn sm${pri ? ' pri' : ''}`} disabled={!!ro} title={ro ?? undefined} onClick={run}>{label}</button></span>;
   if (d.status === 'pending') return null;
@@ -776,7 +770,7 @@ function DraftActions({ q, typed, over, elsewhere = false }: { q: Question; type
   if (isDraftStale(q)) return <span class="racts">{b('Draft Again', redraft, true)}{b('Discard', discard)}</span>;
   // one action takes a ready draft (decisions: "a ready draft has one action"); to change it, use it and type.
   // Over text in the box it asks first, on the same button, as Draft all does: a second press replaces, leaving it does not
-  const replaces = !!typed.trim() || !!q.response.trim();
+  const replaces = draftReplacesResponse(q, typed);
   const take = !replaces ? b('Use as Response', () => void use(null), true)
     : ask ? <span class="needs"><button type="button" class="btn sm pri" id="q-use-confirm" disabled={!!ro}
       ref={(el) => { if (el && !el.dataset.f) { el.dataset.f = '1'; el.focus({ preventScroll: true }); } }}

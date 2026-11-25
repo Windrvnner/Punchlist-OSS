@@ -4,12 +4,72 @@
  * through RequestDraft/ApplyDraft, so a stop or a reload leaves nothing half-done.
  */
 import type { Store } from './store';
-import { RequestDraft } from './commands/drafts';
+import { AcceptDraft, RequestDraft } from './commands/drafts';
+import { SetResponse } from './commands/questions';
+import { isChangedElsewhere } from './changedElsewhere';
 import { isDraftStale } from '../domain/transitions';
-import { dealQuestions } from './state';
+import { dealQuestions, qaKept, type State } from './state';
+import { chooseVersion, type VersionPick } from './qaLog';
+import { hasTexts, keptDrafts } from './keptText';
 import type { Question } from '../domain/model';
+import { fail, rejected } from '../domain/result';
+import type { Services } from '../ports';
 
-export const eligibleForDraft = (q: Question) => q.status === 'open' && !q.response.trim() && !!q.text.trim() && (!q.draft || q.draft.status === 'failed' || isDraftStale(q));
+export const eligibleForDraft = (q: Question) => q.status === 'open' && !q.response.trim() && !!q.text.trim()
+  && (!q.draft || q.draft.status === 'failed' || isDraftStale(q));
+
+function retryKeptDraft(store: Store, opId: string | undefined): boolean {
+  if (!opId || !store.hasKeptReply(opId)) return false;
+  store.retryKeptReply(opId);
+  return true;
+}
+
+/** Retry a kept reply before making another request to the model. */
+export function requestQuestionDraft(store: Store, question: Pick<Question, 'dealId' | 'id' | 'draft'>) {
+  if (retryKeptDraft(store, question.draft?.opId)) return;
+  return store.dispatch(RequestDraft, { dealId: question.dealId, questionId: question.id }, {
+    idempotencyKey: 'draft-' + question.id,
+  });
+}
+
+export function draftReplacesResponse(question: Pick<Question, 'response'>, typed: string): boolean {
+  return !!typed.trim() || !!question.response.trim();
+}
+
+type DraftReplacement = { typed: string; over: string; elsewhere: boolean };
+type DraftAcceptance =
+  | { kind: 'accepted'; opId: string }
+  | { kind: 'reported' }
+  | { kind: 'responseChanged' }
+  | { kind: 'textNotSaved' }
+  | { kind: 'refused'; message: string };
+
+/** Save confirmed text before replacing it so Undo restores it. Each write checks the response it was based on. */
+export async function useQuestionDraft(
+  store: Store, question: Pick<Question, 'dealId' | 'id'>, replacement?: DraftReplacement,
+): Promise<DraftAcceptance> {
+  const target = { dealId: question.dealId, questionId: question.id };
+  const options = { idempotencyKey: 'take-' + question.id };
+  if (!replacement) {
+    const result = await store.dispatch(AcceptDraft, target, options);
+    return result.ok ? { kind: 'accepted', opId: result.value.opId } : { kind: 'reported' };
+  }
+  if (replacement.elsewhere) return { kind: 'responseChanged' };
+
+  const current = store.get().questions[question.id];
+  if (current && replacement.typed !== current.response) {
+    const saved = await store.dispatch(SetResponse, { ...target, response: replacement.typed }, {
+      quiet: true, over: replacement.over,
+    });
+    if (!saved.ok) return { kind: isChangedElsewhere(saved.error) ? 'responseChanged' : 'textNotSaved' };
+  }
+  const result = await store.dispatch(AcceptDraft, { ...target, replace: true, over: replacement.typed }, {
+    ...options, quiet: true,
+  });
+  if (result.ok) return { kind: 'accepted', opId: result.value.opId };
+  if (isChangedElsewhere(result.error)) return { kind: 'responseChanged' };
+  return { kind: 'refused', message: result.error.message };
+}
 
 const stops = new Map<string, boolean>();
 /** questions whose response a person is typing right now (the panel's response field has focus): Draft all leaves them alone */
@@ -35,7 +95,13 @@ export async function draftAll(store: Store, dealId: string, held: (q: Question)
       // after a wait (hours, it may be), the question is looked at again: another PC may have answered or drafted it meanwhile
       if ((await signedIn()) || stops.get(dealId)) { queue.unshift(q); continue; }
       // a draft whose text came back but could not be saved is written from that text, not asked of the model again
-      if (now.draft?.opId && store.hasKeptReply(now.draft.opId)) { store.retryKeptReply(now.draft.opId); asked.add(q.id); store.ui((ui) => ({ batch: ui.batch && ui.batch.dealId === dealId ? { ...ui.batch, done: ui.batch.done + 1 } : ui.batch })); continue; }
+      if (retryKeptDraft(store, now.draft?.opId)) {
+        asked.add(q.id);
+        store.ui((ui) => ({
+          batch: ui.batch?.dealId === dealId ? { ...ui.batch, done: ui.batch.done + 1 } : ui.batch,
+        }));
+        continue;
+      }
       const r = await store.dispatch(RequestDraft, { dealId, questionId: q.id, empty: true }, { quiet: true });
       if (!r.ok && store.readOnly()) { queue.unshift(q); continue; }   // signed out just now: its turn comes again after sign-in
       if (r.ok) { asked.add(q.id); await store.settled(r.value.opId); } else refused++;   // refused (a paused deal, say): counted as failed, not lost
