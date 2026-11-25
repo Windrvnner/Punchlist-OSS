@@ -8,9 +8,10 @@ import { describe, expect, it } from 'vitest';
 
 // Model vendors and providers, their model families, and the default service name. Built at run time, so this file
 // holds none of them as text.
-const NAMES = ['Cla' + 'ude', 'Anthropic', 'ChatGPT', 'OpenAI', 'Copilot', 'Gemini', 'Cohere', 'North', 'Haiku',
-  'Sonnet', 'Opus', 'Azure', 'Bedrock', 'Vertex', 'Intel' + 'ligence'];
-const VENDOR = new RegExp(`\\b(${NAMES.join('|')})\\b`);
+const NAMES = ['Cla' + 'ude', 'Anthropic', 'ChatGPT', 'GPT', 'OpenAI', 'Copilot', 'Gemini', 'Cohere', 'Mistral',
+  'Llama', 'North', 'Haiku', 'Sonnet', 'Opus', 'Azure', 'Bedrock', 'Vertex', 'Intel' + 'ligence'];
+// in any case, so a name written in capitals or lower case is caught too
+const VENDOR = new RegExp(`\\b(${NAMES.join('|')})\\b`, 'i');
 
 /** Each string literal, template part and JSX text in a source file that names a vendor, with its line. */
 function vendorNamesIn(file: string, source: string): string[] {
@@ -47,9 +48,10 @@ describe('vendor names on screen', () => {
       `export const title = 'Sign in to ${service}';`,
       `export const wait = \`Waiting for ${service}…\`;`,
       "export const plain = 'Northwest office';",
+      `export const tip = <button title="Ask ${vendor.toUpperCase()}" />;`,
     ].join('\n');
     expect(vendorNamesIn('src/ui/x.tsx', source).map((line) => line.split(' ')[0])).toEqual([
-      'src/ui/x.tsx:2', 'src/ui/x.tsx:3', 'src/ui/x.tsx:4',
+      'src/ui/x.tsx:2', 'src/ui/x.tsx:3', 'src/ui/x.tsx:4', 'src/ui/x.tsx:6',
     ]);
   });
 
