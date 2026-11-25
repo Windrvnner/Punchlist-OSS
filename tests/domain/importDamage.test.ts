@@ -17,6 +17,7 @@ describe('damagedImportText: single kinds of damage', () => {
     ['one mark for a run', 'at 2½–¾ months', 'at 2? months'],
     ['a lost narrow space', 'USD 2 million', 'USD 2?million'],
     ['a lost first byte of a misread letter', 'é', '?©'],
+    ['a lost run then a misread letter', '©©é   ', '??©   '],
     ['an emoji kept beside a vanished one', '😀?😀', '?😀'],
     ['a vanished emoji', 'Done ✅ today', 'Done today'],
     ['an edit a lossy file could also have made', 'Fee in €', 'Fee in ?'],

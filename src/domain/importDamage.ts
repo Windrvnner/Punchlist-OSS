@@ -108,6 +108,12 @@ class Ranges {
     this.merged = false;
   }
   addAll(other: Ranges) { for (const [low, high] of other.all()) this.add(low, high); }
+  /** The last few positions of each range, where a misread character may start inside a run of marks. */
+  tails(reach: number): number[] {
+    return this.all().flatMap(([low, high]) => {
+      return Array.from({ length: Math.min(reach, high - low) }, (_, offset) => high - 1 - offset);
+    });
+  }
   /** The end of each range: the first position after its marks, where an ordinary character may follow. */
   ends(): number[] { return this.all().map(([, high]) => high); }
   /** The positions of the incoming text inside the ranges that hold a literal "?", which may sit among the marks. */
@@ -166,6 +172,7 @@ function channelProduces(saved: string, incoming: string): boolean {
 function startsFor(char: string, nextQuestion: number[], ends: number[], plain: Set<number>, lost: Ranges): number[] {
   const starts = new Set([...plain, ...lost.ends()]);
   if (char === '?') for (const at of lost.questionMarks(nextQuestion)) starts.add(at);
+  if (!isAscii(char)) for (const at of lost.tails(MISREAD_REACH)) starts.add(at);
   const ordered = [...starts].sort((a, b) => a - b);
   if (isAscii(char)) return ordered;
   // a misread takes at most four marks, so only the last starts of a run can begin one that ends beyond it
