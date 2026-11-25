@@ -3,7 +3,7 @@ import type { RefObject } from 'preact';
 import { useAppState, useStore, fmtDate, useDismiss } from './hooks';
 import { EditField, ReadOnlyContext } from './editField';
 import { readQuestion, keepsUnsaved, unsavedText, unsavedBase, typedResponse } from '../app/fieldDrafts';
-import { isChangedElsewhere } from '../app/changedElsewhere';
+import { questionFieldCommit, type EditableQuestionField } from '../app/questionFields';
 import { Icon } from './icons';
 import { ChoiceCheck } from './moreMenu';
 import { PageTop } from './deal';
@@ -15,7 +15,9 @@ import { SettledLine, CloseThisQuestion } from './closeSettled';
 import { ConflictView } from './conflict';
 import { AskFirst } from './dialogs';
 import { AskedFor } from './askedFor';
-import { CreateQuestion, EditQuestionField, SetQuestionStatus, SetResponse, DeleteQuestion, RenumberQuestion } from '../app/commands/questions';
+import {
+  CreateQuestion, SetQuestionStatus, SetResponse, DeleteQuestion, RenumberQuestion,
+} from '../app/commands/questions';
 import { createdRecord } from '../app/createdRecord';
 import { EditDeal } from '../app/commands/deals';
 import { DiscardDraft } from '../app/commands/drafts';
@@ -692,19 +694,6 @@ function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted 
       {asking && <AskFirst ask={`Delete Q${q.n}?`} go="Delete" why="It can be restored from Deleted" onKeep={() => setAsking(false)} onGo={() => { setAsking(false); void del(); }} />}
     </section>
   );
-}
-
-type EditableQuestionField = 'text' | 'askedBy' | 'received' | 'workstream' | 'priority' | 'respondedBy' | 'responded';
-
-function questionFieldCommit(store: ReturnType<typeof useStore>, question: Question, field: EditableQuestionField) {
-  const { dealId, id: questionId } = question;
-  return async (value: string, over?: string) => {
-    const result = await store.dispatch(EditQuestionField, { dealId, questionId, field, value }, { quiet: true, over });
-    if (!result.ok && result.error.kind !== 'storageFull' && !isChangedElsewhere(result.error)) {
-      store.toast(result.error.message);
-    }
-    return result;
-  };
 }
 
 /**
