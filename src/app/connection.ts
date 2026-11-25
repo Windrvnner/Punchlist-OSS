@@ -91,14 +91,13 @@ export function canUseSignInKey({ key, busy }: Pick<SignInForm, 'key' | 'busy'>)
 
 /** Sign-in at first setup and in Settings. The read-only watcher in Store also looks for later sign-outs. */
 export class SignInConnection {
-  private form;
-  private looking?: Promise<void>;
+  private form = formState<SignInForm>({ status: null, mode: 'idle', key: '', busy: false, error: null });
+  private polling?: Promise<void>;
+  private statusRequest?: Promise<void>;
   private timer?: ReturnType<typeof setInterval>;
   private active = false;
 
-  constructor(private signin: AiSignIn, private onSignedIn?: () => void, status: SignInStatus | null = null) {
-    this.form = formState<SignInForm>({ status, mode: 'idle', key: '', busy: false, error: null });
-  }
+  constructor(private signin: AiSignIn, private onSignedIn?: () => void) {}
 
   get = () => this.form.get();
   subscribe = (listener: () => void) => this.form.subscribe(listener);
@@ -117,16 +116,24 @@ export class SignInConnection {
   };
 
   private look() {
-    this.looking ??= this.signin.status().then((result) => {
-      if (!this.active || !result.ok) return;
+    this.polling ??= (this.statusRequest ?? this.readStatus()).finally(() => { this.polling = undefined; });
+    return this.polling;
+  }
+
+  private readStatus() {
+    const request = this.signin.status().then((result) => {
+      if (!this.active || this.statusRequest !== request || !result.ok) return;
       const wasSignedIn = this.get().status?.signedIn;
       this.form.update({ status: result.value });
       if (result.value.signedIn) {
         clearInterval(this.timer);
         if (!wasSignedIn) this.onSignedIn?.();
       }
-    }, () => undefined).finally(() => { this.looking = undefined; });
-    return this.looking;
+    }, () => undefined).finally(() => {
+      if (this.statusRequest === request) this.statusRequest = undefined;
+    });
+    this.statusRequest = request;
+    return request;
   }
 
   setKey = (key: string) => this.form.update({ key, error: null });
@@ -155,9 +162,8 @@ export class SignInConnection {
       return;
     }
     this.form.update({ key: '', busy: false, ...(this.onSignedIn ? {} : { mode: 'idle' }) });
-    // A pending status request may have read before the key was accepted. Look again after it.
-    await this.looking;
-    if (this.active) await this.look();
+    // The old poll can still be waiting on a status read taken before the key was accepted.
+    if (this.active) await this.readStatus();
   };
 }
 
@@ -258,7 +264,7 @@ export async function startupConnection(
   const { signin, place } = services;
   const status = signin ? await signin.status().catch(() => null) : null;
   if (signin && status?.ok && status.value.firstSetup && !status.value.signedIn) {
-    return { stage: 'signin', form: new SignInConnection(signin, onSignedIn, status.value) };
+    return { stage: 'signin', form: new SignInConnection(signin, onSignedIn) };
   }
   if (place && !hasRepository) return { stage: 'connect', form: new SharedFolderConnection(place, true) };
   return { stage: 'ready' };

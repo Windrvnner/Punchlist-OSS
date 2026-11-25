@@ -1,5 +1,4 @@
 import { createContext } from 'preact';
-import { useSyncExternalStore } from 'preact/compat';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { Store } from '../app/store';
 import type { State } from '../app/state';
@@ -36,8 +35,15 @@ export function useConnectionForm<T>(form: {
   subscribe(listener: () => void): () => void;
   start(): () => void;
 }): T {
+  const [, force] = useState(0);
+  const rendered = form.get();
+  useLayoutEffect(() => {
+    const off = form.subscribe(() => force((n) => n + 1));
+    if (form.get() !== rendered) force((n) => n + 1);
+    return off;
+  }, [form]);
   useEffect(form.start, [form]);
-  return useSyncExternalStore(form.subscribe, form.get);
+  return rendered;
 }
 
 export const LOCALE = 'en-US';

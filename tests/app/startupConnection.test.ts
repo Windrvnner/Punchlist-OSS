@@ -105,6 +105,33 @@ describe('sign-in connection', () => {
     expect(signin.status).toHaveBeenCalledTimes(2);
     stop();
   });
+
+  it('advances immediately after an accepted key even when an old status poll has stalled', async () => {
+    const signin = signInPort();
+    let finish!: (value: Result<SignInStatus>) => void;
+    const staleStatus = new Promise<Result<SignInStatus>>((resolve) => { finish = resolve; });
+    signin.status.mockResolvedValueOnce(ok(signedOut)).mockReturnValueOnce(staleStatus);
+    const onSignedIn = vi.fn();
+    const form = new SignInConnection(signin, onSignedIn);
+    const stop = form.start();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(signin.status).toHaveBeenCalledTimes(2);
+
+    signin.status.mockResolvedValue(ok(signedIn));
+    form.setKey('alder-lane-stand-in');
+    const submitted = form.useKey();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(signin.status).toHaveBeenCalledTimes(3);
+    expect(onSignedIn).toHaveBeenCalledOnce();
+
+    finish(ok(signedOut));
+    await submitted;
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(form.get().status).toEqual(signedIn);
+    expect(signin.status).toHaveBeenCalledTimes(3);
+    expect(onSignedIn).toHaveBeenCalledOnce();
+    stop();
+  });
 });
 
 describe('shared-folder connection', () => {

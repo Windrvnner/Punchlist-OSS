@@ -5,7 +5,8 @@ import { describe, it, expect } from 'vitest';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { SignInRow, SignInPage } from '../../src/ui/signin';
-import { SignInConnection } from '../../src/app/connection';
+import { SignInConnection, startupConnection } from '../../src/app/connection';
+import { ok } from '../../src/domain/result';
 import type { AiSignIn } from '../../src/ports';
 
 const settle = (ms = 20) => act(() => new Promise<void>((r) => setTimeout(r, ms)));
@@ -94,6 +95,28 @@ async function page(signin: AiSignIn) {
 }
 
 describe('the first-setup sign-in page', () => {
+  it('keeps the original focus when the first-run page offers both ways', async () => {
+    const signin: AiSignIn = {
+      ...fake({ sso: true, apiKey: true }).s,
+      status: async () => ok({ signedIn: false, sso: true, apiKey: true, firstSetup: true }),
+    };
+    const startup = await startupConnection({ signin }, true, () => undefined);
+    if (startup.stage !== 'signin') throw new Error('Expected the sign-in stage before the shared folder');
+
+    const root = document.createElement('div');
+    document.body.append(root);
+    await act(() => { render(<SignInPage form={startup.form} />, root); });
+    await settle();
+    expect(root.querySelector('#si-sso')).toBeTruthy();
+    expect(document.activeElement).toBe(document.body);
+    await act(() => { root.querySelector<HTMLButtonElement>('#si-key-open')!.click(); });
+    expect(document.activeElement?.id).toBe('si-key');
+    await act(() => { root.querySelector<HTMLButtonElement>('#si-key-cancel')!.click(); });
+    expect(document.activeElement?.id).toBe('si-sso');
+    await act(() => { render(null, root); });
+    root.remove();
+  });
+
   it('offers both ways when both are on, and the key field straight away when only the key is', async () => {
     const both = await page(fake({ sso: true, apiKey: true }).s);
     expect(both.root.querySelector('h1')?.textContent).toBe('Sign In to Intelligence');

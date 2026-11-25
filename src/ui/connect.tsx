@@ -24,7 +24,8 @@ function connectTip(offer: FolderOffer, missing?: string) {
   if (missing) return gone;
   const synced = 'Deals, findings and Q&A are kept in a folder your OneDrive syncs, '
     + 'so every PC on the team sees the same records. ';
-  return synced + (offer ? CONNECT_NOTE : 'Sign in to OneDrive, then choose the team’s Punchlist folder.');
+  return synced + (offer ? 'Nothing is saved until one is connected.'
+    : 'Sign in to OneDrive, then choose the team’s Punchlist folder.');
 }
 
 function ConnectActions({ form, offer, teamLink, tip, busy }: {
