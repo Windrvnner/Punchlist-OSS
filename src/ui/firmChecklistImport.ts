@@ -41,6 +41,7 @@ export function useWork() {
   /** Drops the pending answer and clears the activity associated with it. */
   const drop = () => {
     newToken();
+    requests.dropTableReads();
     setBusy('');
   };
   return { busy, setBusy, error, setError, ...requests, begin, drop };
