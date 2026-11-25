@@ -51,130 +51,17 @@ export interface LogWrite {
 export function deMinimis(a: string, b: string): boolean {
   if (readKey(a) === readKey(b)) return true;
   const x = readKey(a, true), y = readKey(b, true);                                   // an emoji that became "?" is matched below
-  return lostCharacters(x, y) || lostCharacters(y, x);
+  // a "?" or "\uFFFD" stands for any one character outside plain ASCII (or a run of them, as an emoji can become "??")
+  const lost = (s: string, t: string) => /[?\uFFFD]/.test(s) && new RegExp(`^${s.split(/[?\uFFFD]+/).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('(?:[^\\x00-\\x7F]+|[?\uFFFD]+)')}$`, 'u').test(t);
+  return lost(x, y) || lost(y, x);
 }
-
-/** A file may replace a Unicode character or run of characters with question marks or replacement characters. */
-function lostCharacters(read: string, original: string): boolean {
-  if (!/[?\uFFFD]/.test(read)) return false;
-  const literal = read.split(/[?\uFFFD]+/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  const gaps = literal.join('(?:[^\\x00-\\x7F]+|[?\\uFFFD]+)');
-  return new RegExp('^' + gaps + '$', 'u').test(original);
-}
-
-/** An incoming Merge cell only loses characters or punctuation forms from the saved value (#256). */
-export function damagedImportText(saved: string, incoming: string): boolean {
-  const original = sheetSpacing(saved);
-  if (original === sheetSpacing(incoming)) return false;
-  const read = sheetSpacing(mojibake(incoming));
-  if (original === read) return true;
-  if (read === sheetSpacing(mojibake(saved))) return false;
-  if (!/[^\x00-\x7F]|\u0060/.test(saved)) return false;
-  return matchesDamagedRead(saved, read) || matchesUnreadBytes(saved, read);
-}
-
-/** Check the wrong encoding even when an unreadable byte made the incoming cell impossible to decode back. */
-function matchesUnreadBytes(saved: string, read: string): boolean {
-  if (!read.includes('\uFFFD')) return false;
-  const wrong = new TextDecoder('windows-1252').decode(new TextEncoder().encode(saved));
-  const withLoss = wrong.replace(/[\u0081\u008D\u008F\u0090\u009D]/g, '\uFFFD');
-  return withLoss !== wrong && matchesDamagedRead(withLoss, read);
-}
-
-/** Check every possible end of a replacement run before comparing the punctuation or words after it. */
-function matchesDamagedRead(original: string, read: string): boolean {
-  const parts = read.split(/([?\uFFFD]+| )/);
-  let offsets = whitespaceEnds(original, new Set([0])).add(0);
-  for (const [index, part] of parts.entries()) {
-    if (part === ' ') offsets = whitespaceEnds(original, offsets);
-    else if (index % 2 === 0) offsets = literalEnds(original, part, offsets);
-    else offsets = replacementEnds(original, part, offsets);
-    if (!offsets.size) return false;
-  }
-  const lastWord = original.trimEnd().length;
-  return Array.from(offsets).some((end) => end >= lastWord);
-}
-
-/** A regular space can match the sheet's spacing. A replacement mark may instead be a lost Unicode space. */
-function whitespaceEnds(original: string, starts: Set<number>): Set<number> {
-  const ends = new Set<number>();
-  for (const start of starts) {
-    let at = start;
-    while (/\s/.test(original[at] ?? '') && !ends.has(at + 1)) ends.add(++at);
-  }
-  return ends;
-}
-
-function literalEnds(original: string, read: string, starts: Set<number>): Set<number> {
-  const ends = new Set<number>();
-  const hasPlainPunctuation = /['"-]/.test(read);
-  for (const start of starts) {
-    const end = start + read.length;
-    if (end > original.length) continue;
-    if (original.startsWith(read, start) || (hasPlainPunctuation && matchesPunctuation(original, read, start))) {
-      ends.add(end);
-    }
-  }
-  return ends;
-}
-
-function matchesPunctuation(original: string, read: string, start: number): boolean {
-  for (let index = 0; index < read.length; index++) {
-    const saved = original[start + index];
-    if (saved !== read[index] && straightPunctuation(saved) !== read[index]) return false;
-  }
-  return true;
-}
-
-/**
- * A replacement run keeps its exact literal marks or stands for unread Unicode glyphs. A span cannot drop a literal
- * question mark. For each end, the latest possible start before a lost glyph leaves the fewest marks to preserve.
- */
-function replacementEnds(original: string, read: string, starts: Set<number>): Set<number> {
-  const ends = literalEnds(original, read, starts);
-  const first = Math.min(...starts);
-  const last = Math.max(...starts);
-  // Leave a replacement mark for the lost glyph after accounting for any literal question marks.
-  const marksToKeep = Math.min(read.length - 1, read.length - read.replace(/\?/g, '').length);
-  let marks = 0;
-  let marksAtStart: number | undefined;
-  let marksBeforeLoss: number | undefined;
-  for (let index = first; index < original.length; index++) {
-    if (starts.has(index)) marksAtStart = marks;
-    const glyph = original[index];
-    // Known ASCII text ends this run. A question mark can also appear literally among the lost characters.
-    if (/[\x00-\x3E\x40-\x7F]/.test(glyph)) {
-      if (index >= last) break;
-      marksAtStart = undefined;
-      marksBeforeLoss = undefined;
-      continue;
-    }
-    if (glyph === '?') {
-      marks++;
-    } else if (glyph !== '\uFFFD') {
-      marksBeforeLoss = marksAtStart;
-    }
-    if (marksBeforeLoss !== undefined && marks - marksBeforeLoss <= marksToKeep) ends.add(index + 1);
-  }
-  return ends;
-}
-
-/** The text as a spreadsheet may have read it, with optional emoji preservation for replacement characters. */
+/** a text with what a misreading changes taken out: its encoding repaired, Unicode's forms of one character made one, emoji and spacing gone */
 function readKey(s: string, emoji = false): string {
-  const text = straightPunctuation(mojibake(s).normalize('NFKC'));
-  return sheetSpacing(emoji ? text : text.replace(/\p{Extended_Pictographic}|\u200D|\uFE0E|\uFE0F/gu, ''));
+  const t = mojibake(s).normalize('NFKC')
+    .replace(/[\u2018\u2019\u201A\u201B\u2032\u00B4`]/g, "'").replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"').replace(/[\u2010-\u2015\u2212]/g, '-');
+  return (emoji ? t : t.replace(/\p{Extended_Pictographic}|\u200D|\uFE0E|\uFE0F/gu, ''))
+    .replace(/\s+/g, ' ').trim();
 }
-
-function straightPunctuation(text: string): string {
-  return text.replace(/[\u2018\u2019\u201A\u201B\u2032\u00B4\u0060]/g, "'")
-    .replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"')
-    .replace(/[\u2010-\u2015\u2212]/g, '-');
-}
-
-function sheetSpacing(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
-}
-
 /** UTF-8 text that was read as Windows-1252 ("â€™", "Ã©") made what it was; anything else as it is */
 const CP1252 = '\u20AC\u0081\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u008D\u017D\u008F\u0090\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u009D\u017E\u0178';
 function mojibake(s: string): string {

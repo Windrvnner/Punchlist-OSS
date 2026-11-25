@@ -13,7 +13,8 @@ import { Question, Finding, Tombstone, DealId, QuestionId, FindingId, QuestionSt
 import { setResponse, setQuestionStatus, checkQuestion } from '../../domain/transitions';
 import { numbering } from './questions';
 import { sameText, sameWords, type ImportRow } from '../../domain/importExport';
-import { misreadKey, canMatchNumber, identifierSig, sameIdentifiers, damagedImportText } from '../../domain/logWrite';
+import { misreadKey, canMatchNumber, identifierSig, sameIdentifiers } from '../../domain/logWrite';
+import { damagedImportText } from '../../domain/importDamage';
 import { ok, fail, notFound, rejected } from '../../domain/result';
 import { dealQuestions, nextQuestionNumber } from '../state';
 import { derivedId } from '../../domain/derivedId';
@@ -171,14 +172,13 @@ export const ImportQuestions = define({
         q = { ...existing };
         // a cell of only spaces is as good as empty here: it never overwrites what the log holds. A name or workstream is an
         // identity: one the log holds with spaces around it (typed so in the app) is the same one, and is left as it is.
-        const same = (k: string, a: string, b: string) => (IDENTITIES.has(k) ? a.trim() === b.trim() : sameText(a, b));
+        const same = (k: string, a: string, b: string) => {
+          if (IDENTITIES.has(k)) return a.trim() === b.trim();
+          return k === 'text' ? !importsText(b, a) : sameText(a, b);
+        };
         // A Submitted by that names no one (only a period, say) matched as naming no one, so it leaves the party as it is.
         const given = (k: string, v: string) => (k === 'askedBy' ? key(v) !== '' : v.trim() !== '');
-        if (importsText(q.text, row.text)) q.text = row.text;
-        for (const field of ['askedBy', 'received', 'workstream', 'priority', 'respondedBy', 'responded'] as const) {
-          const value = row[field];
-          if (given(field, value) && !same(field, value, q[field])) Object.assign(q, { [field]: value });
-        }
+        for (const k of ['text', 'askedBy', 'received', 'workstream', 'priority', 'respondedBy', 'responded'] as const) if (given(k, row[k]) && !same(k, row[k], (q as any)[k])) (q as any)[k] = row[k];
       } else {
         // the file's own number when no question holds it, live or deleted, or when an earlier row of this file took it (both are kept under it,
         // marked so a person renumbers one); otherwise the next free number
