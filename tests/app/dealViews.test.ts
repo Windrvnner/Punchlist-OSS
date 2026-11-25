@@ -4,7 +4,7 @@ import { createDealFromForm } from '../../src/app/dealSetup';
 import { folderDealLabels } from '../../src/app/dealLabel';
 import { dealRows, interruptedOperations, railDealGroups } from '../../src/app/dealView';
 import { compareChecklistVersion } from '../../src/app/conflictView';
-import { deletedGroups, deletedIssuesLists, visibleDeletedNotes } from '../../src/app/deletedView';
+import { deletedGroups, deletedIssuesLists, issuesListRemoval, visibleDeletedNotes } from '../../src/app/deletedView';
 import { locateFoldersView } from '../../src/app/relink';
 import { initialState, type Conflict } from '../../src/app/state';
 import { DeleteFinding } from '../../src/app/commands/findings';
@@ -151,6 +151,16 @@ describe('kept records and list revisions', () => {
       [second.doc, true, 'Credit diligence'], [first.doc, true, 'Credit diligence'],
     ]);
     expect(lists.every(({ when, at }) => when === formatDateTime(at, true))).toBe(true);
+    expect(lists.map(issuesListRemoval)).toEqual([
+      {
+        ask: `Remove Credit diligence.docx (imported ${lists[0].when})?`,
+        text: '110 findings go to Deleted.',
+      },
+      {
+        ask: `Remove Credit diligence.pdf (imported ${lists[1].when})?`,
+        text: '109 findings go to Deleted.',
+      },
+    ]);
     const note = stored.tombstones[removed.id];
     const withCopy = {
       ...note, copies: [{ ver: 'another', from: 'Other PC', actor: 'Reviewer', at: recent, snapshot: removed }],
@@ -165,5 +175,15 @@ describe('kept records and list revisions', () => {
     };
     expect(visibleDeletedNotes({ ...state, conflicts: { [removed.id]: conflict } }, dealId)).toEqual([]);
     expect(visibleDeletedNotes(stored, dealId)).toHaveLength(1);
+
+    const finding = lists[1].made[0];
+    const point = points.find(({ text }) => text === finding.body[0])!;
+    const join = { dealId, doc: 'doc_joined', list: 'Loan covenants.pdf', points: [{ ...point, join: finding.id }] };
+    expect((await store.dispatch(ImportIssuesList, join)).ok).toBe(true);
+    const joined = deletedIssuesLists(store.get(), dealId).find(({ doc }) => doc === join.doc)!;
+    expect(issuesListRemoval(joined)).toEqual({
+      ask: 'Remove Loan covenants?',
+      text: 'No findings go to Deleted. Marks are removed from 1 finding.',
+    });
   });
 });
