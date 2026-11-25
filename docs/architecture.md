@@ -58,7 +58,7 @@ Everything that changes a record is a command (`src/app/command.ts`, `src/app/co
 2. It waits behind any earlier operation on the same records.
 3. It plans against the current state, and refuses writes to records that are in two versions or that come from a newer build.
 4. It records the operation as pending in the journal: the undo journal kept on each PC, which holds operations for **Undo** and for recovering interrupted work.
-5. It commits the writes in one repository transaction.
+5. It commits the writes in one repository transaction. A plan can also list records it only read (`expects`); the transaction is refused if one has changed since.
 6. It settles the journal entry.
 7. Only then does it apply the result to the state.
 

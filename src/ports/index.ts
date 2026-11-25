@@ -52,6 +52,11 @@ export interface Version {
 export interface Transaction {
   writes: Write[];
   deletes?: Delete[];
+  /**
+   * Read-only preconditions: each record must still be at this rev (0 when it does not exist) at commit, or the whole
+   * transaction is refused with a conflict. Nothing is written to these records (#88).
+   */
+  expects?: { kind: RecordKind; id: string; rev: number }[];
   audit?: AuditEntry[];
   /** index membership changes: record ids filed under a deal. `remove` goes with a delete of the same record in the same transaction; on its own it takes nothing off, since a filed record is listed until it is deleted */
   index?: { dealId: string; add?: { kind: RecordKind; id: string }[]; remove?: { kind: RecordKind; id: string }[] };

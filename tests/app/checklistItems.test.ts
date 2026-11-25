@@ -12,6 +12,7 @@ import { ResolveConflict, ReopenConflict } from '../../src/app/commands/conflict
 import { CreateQuestion, DeleteQuestion, SetQuestionsStatus } from '../../src/app/commands/questions';
 import { settledQuestions, unresolvedPoints } from '../../src/app/state';
 import { AddUnresolved } from '../../src/app/commands/addUnresolved';
+import { linkApproval } from '../../src/app/unresolvedLinks';
 import { RevertImport } from '../../src/app/commands/importQuestions';
 import { CreateFinding } from '../../src/app/commands/findings';
 import { registry, Undo } from '../../src/app/commands/undo';
@@ -144,7 +145,16 @@ describe('the firm’s checklist and each deal’s items', () => {
     expect(unresolvedPoints({ ...off(st(), direct), findings: { ...st().findings, [f.id]: { ...f, itemId: direct } } }, a).points.map((p) => p.what)).toEqual([texts[1]]);
     // the person keeps two new questions and the link; the store must see the checklist to check the items
     (A.store as any).set(st());
-    const r = await A.store.dispatch(AddUnresolved, { dealId: a, add: [{ text: 'Which lock-up ratio was agreed?', workstream: 'Legal', linkedFinding: f.id }, { text: 'Please provide the executed direct agreement.', linkedItem: direct }], link: [{ questionId: got.links[0].q.id, linkedItem: insurance }] });
+    const { q, point: choice } = got.links[0];
+    const approval = linkApproval({ q, point: got.points.find((point) => point.key === choice)! });
+    const r = await A.store.dispatch(AddUnresolved, {
+      dealId: a,
+      add: [
+        { text: 'Which lock-up ratio was agreed?', workstream: 'Legal', linkedFinding: f.id },
+        { text: 'Please provide the executed direct agreement.', linkedItem: direct },
+      ],
+      link: [{ questionId: q.id, linkedItem: insurance, approval: approval.fingerprint }],
+    });
     expect(r.ok).toBe(true);
     const qs = () => Object.values(A.store.get().questions).filter((q) => q.dealId === a).sort((x, y) => x.n - y.n);
     expect(qs().map((q) => [q.n, q.linkedItem?.id ?? null, q.linkedFinding ?? null])).toEqual([[1, insurance, null], [2, model, null], [3, null, f.id], [4, direct, null]]);
