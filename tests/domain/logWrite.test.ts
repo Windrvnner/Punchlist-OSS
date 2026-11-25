@@ -166,9 +166,9 @@ describe('a log that writes its cells its own way', () => {
 describe('a date typed as text in a log', () => {
   const cols = ['No.', 'Question', 'Date received'];
   const typed = { columns: cols, cols: [0, 1, 2], rows: [['1', 'What is the minimum DSCR covenant?', '11/12/2026']], lines: [2], lastRow: 2 };
-  it('stays as the log has it: it is not a date, so the app does not write over it or take it for a change', () => {
+  it('stays as the log has it: not a date, so the app never writes over it, and it is listed as kept', () => {
     const w = logWrite(typed, suggestMapping(cols), [q(1, 'What is the minimum DSCR covenant?', { received: '2026-11-14' })]);
-    expect(w.steps).toEqual([]); expect(w.kept).toEqual([]);
+    expect(w.steps).toEqual([]); expect(w.kept).toEqual([1]);
   });
 });
 
@@ -194,9 +194,9 @@ describe('every column of the log', () => {
     expect(w.steps).toEqual([{ kind: 'cell', row: 1, col: 3, value: '2026-11-02', date: true }, { kind: 'cell', row: 1, col: 4, value: 'Answered' }, { kind: 'cell', row: 1, col: 6, value: '2026-11-14', date: true }]);
     expect(w).toMatchObject({ updated: 1, kept: [] });
   });
-  it('takes a cell that says what the app holds in other words ("Outstanding", 10/30/2026) for no change', () => {
+  it('takes "Outstanding" for open, but a typed date is not the app\'s date: it is kept as the log has it', () => {
     const w = logWrite(T([['1', 'Lender A', 'DSCR?', '10/30/2026', 'Outstanding', '', '']]), m, [q(1, 'DSCR?', { status: 'open', received: '2026-10-30' })]);
-    expect(w).toMatchObject({ steps: [], kept: [] });
+    expect(w).toMatchObject({ steps: [], kept: [1] });
   });
   // an edit made in the log is the latest; two versions only where the app changed the cell too
   it('takes a status only the log changed since the app wrote it', () => {

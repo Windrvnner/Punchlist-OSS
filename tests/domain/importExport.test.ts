@@ -13,11 +13,11 @@ describe('parseDate', () => {
     for (const typed of ['11/02/2026', '31/12/2026', 'Nov 1, 2026', '2-Nov-26', '2026/11/02', '11/14/2026 12:00:00', '44866']) expect([typed, parseDate(typed)]).toEqual([typed, null]);
     for (const bad of ['2026-99-99', '2026-02-31', 'soon']) expect(parseDate(bad)).toBeNull();
   });
-  it('lists a typed date in an import as not read and leaves the field blank', () => {
+  it('keeps a typed date in an import as written, and does not list it', () => {
     const m = suggestMapping(['Question', 'Received', 'Date']);
     const p = prepareImport([['Cell', '2026-10-13', '2026-11-02'], ['Typed', '13.10.2026', '02/11/2026']], m);
-    expect(p.rows.map((r) => [r.received, r.responded])).toEqual([['2026-10-13', '2026-11-02'], ['', '']]);
-    expect(p.badDates).toBe(2); expect(p.unread).toEqual(['Row 3 Received: 13.10.2026', 'Row 3 Date: 02/11/2026']);
+    expect(p.rows.map((r) => [r.received, r.responded])).toEqual([['2026-10-13', '2026-11-02'], ['13.10.2026', '02/11/2026']]);
+    expect(p.unread).toEqual([]);
   });
 });
 
@@ -55,11 +55,11 @@ describe('prepareImport', () => {
     const cols = ['Number', 'Question', 'Priority', 'Status', 'Received', 'Date'];
     const m = suggestMapping(cols);
     const p = prepareImport([['2', 'Datum', 'High', 'Closed', '2026-11-01', ''], ['', 'Coho', 'urgent', 'weird', 'Feb 31, 2026', 'April 31, 2026'], ['', '', '', '', '', '']], m);
-    expect(p.rows.length).toBe(2); expect(p.skipped).toBe(1); expect(p.badDates).toBe(2); expect(p.unknownValues).toBe(2);
+    expect(p.rows.length).toBe(2); expect(p.skipped).toBe(1); expect(p.unknownValues).toBe(2);
     // and says which, by row (the heading is row 1) and column
-    expect(p.unread).toEqual(['Row 3 Priority: urgent', 'Row 3 Status: weird', 'Row 3 Received: Feb 31, 2026', 'Row 3 Date: April 31, 2026']);
+    expect(p.unread).toEqual(['Row 3 Priority: urgent', 'Row 3 Status: weird']);
     expect(p.rows[0]).toMatchObject({ n: 2, priority: 'High', status: 'closed', received: '2026-11-01' });
-    expect(p.rows[1]).toMatchObject({ n: null, priority: '', status: '', received: '', responded: '' });
+    expect(p.rows[1]).toMatchObject({ n: null, priority: '', status: '', received: 'Feb 31, 2026', responded: 'April 31, 2026' });
   });
   it('reads back a number past Q999999, as the app numbers them', () => {
     const m = suggestMapping(['Number', 'Question']);
@@ -72,7 +72,6 @@ describe('prepareImport', () => {
     const t = readCsv(file.value.bytes); expect(t.ok).toBe(true);
     if (!t.ok) return;
     const p = prepareImport(t.value.rows, suggestMapping(t.value.columns));
-    expect(p.badDates).toBe(0);
     expect(p.rows[0]).toEqual({ n: 37, text: 'First\nSecond', askedBy: 'Lender', received: '2026-11-01', workstream: 'Legal', priority: 'High', response: 'Yes.', respondedBy: 'Sponsor', responded: '2026-11-02', status: 'answered', line: 2 });
   });
   it('an export, and a new Q&A log, never name the person in the app who accepted a draft; who responded is kept', () => {
@@ -117,7 +116,7 @@ describe('prepareImport', () => {
   it('keeps text as written: leading spaces, trailing line breaks and a question of only spaces', () => {
     const m = suggestMapping(['Number', 'Question', 'Response', 'Submitted by', 'Priority', 'Received']);
     const p = prepareImport([[' 3 ', '  Indented question', 'Yes.\n', ' Lender A ', ' High ', ' 2026-11-02 '], ['4', '   ', '', '', '', '']], m);
-    expect(p.skipped).toBe(0); expect(p.badDates).toBe(0); expect(p.unknownValues).toBe(0);
+    expect(p.skipped).toBe(0); expect(p.unknownValues).toBe(0);
     expect(p.rows[0]).toMatchObject({ n: 3, text: '  Indented question', response: 'Yes.\n', askedBy: 'Lender A', priority: 'High', received: '2026-11-02' });   // a name is an identity: the spaces around it go
     expect(p.rows[1]).toMatchObject({ n: 4, text: '   ' });
   });

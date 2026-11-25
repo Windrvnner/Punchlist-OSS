@@ -117,11 +117,11 @@ it('finds the proposed layout, shares the prepared rows with the preview, and im
     });
     const choices = choicesFor(layout.value, picked.value.path);
     const { prepared, previewRows } = prepareQaImport(layout.value, choices.mapping);
-    expect(prepared).toMatchObject({ skipped: 1, badDates: 1 });
+    expect(prepared).toMatchObject({ skipped: 1 });
     expect(prepared.rows.map((row) => row.text)).toEqual(questions);
     expect(previewRows.map((row) => row.cells)).toEqual(grid.slice(0, 5));
     expect(previewRows.map((row) => row.dates.received))
-      .toEqual(['2026-09-30', '2026-10-01', '2026-10-15', '', '2026-10-15']);
+      .toEqual(['2026-09-30', '2026-10-01', '2026-10-15', '31/31/2026', '2026-10-15']);
     const dry = previewImport(app.store, dealId, choices.mode, prepared.rows, choices.answered);
     const plan = summarizeQaImport(app.store.get(), dealId, importKey.qa(dealId), choices.mode, prepared, dry);
     expect(plan).toMatchObject({ total: 2_000, preview: { created: 2_000 } });

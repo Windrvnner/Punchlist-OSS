@@ -96,7 +96,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
   last accepted table until another sheet or heading row is read (#380).
 - **Undo Last Import…** in the Q&A page's ⋯ menu takes back this PC's last import after a confirmation, with no Undo after it, and leaves alone questions changed since the import.
 - A responder column is read as the response's author.
-- On import, a workbook's real date cell is read as a date and plain numbers are not. Text typed in a cell is never parsed as a date: it is left blank in the date field and listed as not read.
+- On import, a workbook's real date cell is read as a date and plain numbers are not. Text typed in a cell is never parsed as a date: it is kept as written in the date field and is not treated as a date.
 - Marking imported questions that have a response as Answered is optional and off by default.
 - Merge matches a row by wording first, then by number; a row that matches a deleted question brings it back. A row that names who submitted it never matches another party's question. "Will overwrite" is shown field by field first.
 - Merge never matches a row to a question that names a different identifier: anything with a digit, a Roman numeral or code in capitals, a single capital letter, or a letter or numeral in parentheses or after a word such as class, tranche, part or clause (Class A and B, Tranche II and IV, clause 4(a) and 4(b)). A row matched by number alone names exactly the question's identifiers, in the same capitals (the SPA and the spa are two questions there); any other row is a question of its own. Otherwise spacing, capitals and punctuation alone never make identifiers differ (#125, #127, #128).

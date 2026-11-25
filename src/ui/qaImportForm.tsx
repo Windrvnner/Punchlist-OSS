@@ -326,7 +326,6 @@ function leftOutNotes(prepared: Prepared | null): string[] {
   if (!prepared) return [];
   return [
     prepared.skipped ? `${plural(prepared.skipped, 'row')} without a question left out` : '',
-    prepared.badDates ? `${plural(prepared.badDates, 'date')} not read` : '',
     prepared.unknownValues ? `${plural(prepared.unknownValues, 'value')} not recognized` : '',
   ].filter(Boolean);
 }

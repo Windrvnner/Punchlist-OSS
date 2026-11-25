@@ -48,7 +48,7 @@ export function parseDate(v: unknown): string | null {
 }
 
 export interface ImportRow { /** the row's line in the file, header being line 1 */ line?: number; n: number | null; text: string; askedBy: string; received: string; workstream: string; priority: '' | 'High' | 'Medium' | 'Low'; response: string; respondedBy: string; responded: string; status: QuestionStatus | '' }
-export interface Prepared { rows: ImportRow[]; skipped: number; badDates: number; unknownValues: number; /** each date or value counted above, where it is: "Row 14 Received: 31/31/2026" */ unread: string[] }
+export interface Prepared { rows: ImportRow[]; skipped: number; unknownValues: number; /** each date or value counted above, where it is: "Row 14 Received: 31/31/2026" */ unread: string[] }
 
 const PRIORITY: Record<string, ImportRow['priority']> = { high: 'High', medium: 'Medium', low: 'Low' };
 const STATUS: Record<string, QuestionStatus> = { open: 'open', outstanding: 'open', answered: 'answered', closed: 'closed' };
@@ -61,17 +61,18 @@ const STATUS: Record<string, QuestionStatus> = { open: 'open', outstanding: 'ope
  * (number, dates, priority, status) ignore the spaces around them too. A question of only spaces is a question, as one
  * made in the app can be.
  * A date cell is read only when it is a real date (YYYY-MM-DD, as a workbook's date cell arrives; see convert.ts);
- * anything else in a date column is left blank and counted as not read, never parsed.
+ * anything else in a date column is kept as written, never parsed.
  */
 export function prepareImport(table: string[][], mapping: Mapping, lines?: number[]): Prepared {
   // control characters (NUL, BEL, ESC and the like) are never content; tabs and line breaks are
   const get = (r: string[], k: ImportField) => (mapping[k] == null ? '' : String(r[mapping[k]!] ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ''));
-  const out: Prepared = { rows: [], skipped: 0, badDates: 0, unknownValues: 0, unread: [] };
+  const out: Prepared = { rows: [], skipped: 0, unknownValues: 0, unread: [] };
   const nameOf = (k: ImportField) => IMPORT_FIELDS.find(([f]) => f === k)?.[1] ?? k;
   for (const [at, r] of table.entries()) {
     const text = get(r, 'text'); if (!text) { out.skipped++; continue; }
     const line = lines?.[at] ?? at + 2; const unread = (k: ImportField, v: string) => out.unread.push(`Row ${line} ${nameOf(k)}: ${v.trim()}`);
-    const date = (k: 'received' | 'responded') => { const raw = get(r, k); const d = parseDate(raw); if (d === null) { out.badDates++; unread(k, raw); } row[k] = d ?? ''; };
+    // a typed date is kept as written, and is not a date to sort or count by
+    const date = (k: 'received' | 'responded') => { const raw = get(r, k); row[k] = parseDate(raw) ?? raw; };
     const pr = get(r, 'priority').trim(); const st = get(r, 'status').trim(); const nRaw = get(r, 'n').trim().replace(/^q/i, ''); const n = /^\d{1,9}$/.test(nRaw) && +nRaw > 0 ? +nRaw : null;   // the app numbers past Q999999, so a 7-digit number it exported reads back
     const wsRaw = get(r, 'workstream').trim(); const ws = WORKSTREAMS.find((w) => w.toLowerCase() === wsRaw.toLowerCase()) ?? wsRaw;   // the app's spelling where it is one of ours; otherwise kept as written
     if (pr && !PRIORITY[pr.toLowerCase()]) { out.unknownValues++; unread('priority', pr); }

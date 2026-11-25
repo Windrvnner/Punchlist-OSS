@@ -103,7 +103,7 @@ export function EditField({
   const asText = dateAtRest(type, focused, half, draft);
   const shown = dateLabel(asText, className);
   const field = multiline ? <textarea rows={1} {...common} />
-    : type === 'date' ? dateControl(common, focused || half || !!draft) : <input type="text" {...common} />;
+    : type === 'date' ? dateControl(common, (focused || half || !!draft) && (!draft || /^\d{4}-\d{2}-\d{2}$/.test(draft))) : <input type="text" {...common} />;
   return (
     <span class={`efwrap ${asText ? 'dtext' : ''} ${cap ? 'capped' : ''}`}>
       {cap ? <span class={`efcap ${cap.cls ?? ''}`} title={cap.title}

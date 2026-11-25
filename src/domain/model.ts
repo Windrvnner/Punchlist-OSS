@@ -196,13 +196,13 @@ export const Question = Record.extend({
   n: z.number().int().positive(),
   text: z.string(),
   askedBy: z.string().default(''),
-  received: YMDorBlank.default(''),
+  received: z.string().default(''),   // a real date (YYYY-MM-DD), or the text an imported log had there, kept as written
   workstream: z.string().default(''),
   priority: Priority.default(''),
   status: QuestionStatus.default('open'),
   response: z.string().default(''),
   respondedBy: z.string().default(''),
-  responded: YMDorBlank.default(''),
+  responded: z.string().default(''),   // as received
   provenance: Provenance.optional(),
   linkedFinding: FindingId.optional(),
   /** the checklist item it was asked for (Ask the counterparty on a gap or a flagged item, Add all unresolved); linking design, section 6 */
