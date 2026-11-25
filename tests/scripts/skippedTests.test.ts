@@ -2,16 +2,22 @@
 // A test the diff skips counts as the regression it hides (docs/review-prompt.md), so lint refuses `.skip` in a test
 // file. A test skipped on a stated condition (`skipIf`) is allowed.
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 const biome = path.resolve('node_modules/@biomejs/biome/bin/biome');
+const directories: string[] = [];
+
+afterEach(() => {
+  for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 /** Lints the given test files with the repository's Biome settings, at the error level the checks use. */
 function lint(files: Record<string, string>) {
   const dir = mkdtempSync(path.join(tmpdir(), 'skipped-tests-'));
+  directories.push(dir);
   copyFileSync('biome.json', path.join(dir, 'biome.json'));
   spawnSync('git', ['init', '-q'], { cwd: dir });
   for (const [file, source] of Object.entries(files)) {
@@ -23,13 +29,11 @@ function lint(files: Record<string, string>) {
 }
 
 const header = "import { describe, it } from 'vitest';\n";
-const skip = ['it', 'skip'].join('.');
-const skipSuite = ['describe', 'skip'].join('.');
 
 describe('skipped tests', () => {
   it.each([
-    ['tests/app/a.test.ts', `${header}${skip}('keeps the draft', () => {});\n`],
-    ['tests/ui/b.test.tsx', `${header}${skipSuite}('the form', () => { it('keeps the draft', () => {}); });\n`],
+    ['tests/app/a.test.ts', `${header}it.skip('keeps the draft', () => {});\n`],
+    ['tests/ui/b.test.tsx', `${header}describe.skip('the form', () => { it('keeps the draft', () => {}); });\n`],
   ])('refuses a skipped test in %s', (file, source) => {
     const result = lint({ [file]: source });
     expect(result.status).toBe(1);
