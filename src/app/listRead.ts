@@ -54,10 +54,17 @@ export async function readListFile(store: Store, file: { name: string; size: num
   try { bytes = new Uint8Array(await file.arrayBuffer()); } catch { return fail({ kind: 'failed', message: 'The file could not be opened' }); }
   if (SHEET.test(file.name)) { const t = await readImportBytes(store, file.name, bytes, { headerRow: 1 }); return t.ok ? ok({ table: t.value }) : t; }
   let text: string;
-  if (PLAIN.test(file.name)) { try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { text = new TextDecoder('windows-1252').decode(bytes); } }
+  if (PLAIN.test(file.name)) text = decodePlainText(bytes);
   else { const sheets = store.services.sheets; if (!sheets.text) return fail({ kind: 'invalid', message: 'Only spreadsheets and text files can be read here' }); const r = await sheets.text(bytes, file.name); if (!r.ok) return r; text = r.value; }
   const lines = textLines(text.replace(/^\uFEFF/, ''));
   return lines.some((l) => l.trim()) ? ok({ lines }) : fail({ kind: 'invalid', message: 'The file has no text' });
+}
+
+/** A text file as Notepad opens it: a byte-order mark names UTF-16 (either order) or UTF-8; without one, UTF-8, else Windows-1252. */
+export function decodePlainText(bytes: Uint8Array): string {
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder('utf-16le').decode(bytes.subarray(2));
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder('utf-16be').decode(bytes.subarray(2));
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { return new TextDecoder('windows-1252').decode(bytes); }
 }
 
 type ChecklistFile = Parameters<typeof readListFile>[1];
