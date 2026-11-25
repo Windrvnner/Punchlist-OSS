@@ -8,7 +8,7 @@ import type { Source } from '../domain/model';
 import { list as listOf, strings, tagNumber } from './lenient';
 import {
   type ReportKit, type ReadLine, type ReadIssue, type Known, type Issue, type SentDoc,
-  ISSUE_PAGE, ISSUE_READS, isCut, partialOf, yes,
+  ISSUE_PAGE, isCut, partialOf, yes,
 } from './reportTypes';
 
 /** sentences of one paragraph, written out for the model */
@@ -290,11 +290,10 @@ export async function read(
   const s = await k.send(rec);
   if (!s) return 'lost';                       // cannot be sent from this PC: left for one that can, not a try
   const r = new ReportRead(k, rec, s, before);
-  for (let call = 0; call < ISSUE_READS; call++) {
+  for (let call = 0; ; call++) {               // page after page until the report ends: no length is too long
     const step = await readPage(r, call, last);
     if (step !== 'next') return step.end;
   }
-  return null;                                 // still going: something is wrong, and nothing is called read
 }
 
 /**

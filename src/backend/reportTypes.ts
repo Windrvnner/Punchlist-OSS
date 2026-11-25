@@ -127,8 +127,6 @@ export interface ReportKit {
 export const SORT_PART = 150;
 /** issues asked for in one call: each comes back as a finding in full, so a long report takes a few calls */
 export const ISSUE_PAGE = 25;
-/** calls that read one report at most: 20 pages of issues is 500, far past any report's */
-export const ISSUE_READS = 20;
 /** looks or reads of one document that could not finish before it is left alone, as describing a document is */
 export const TRIES = 3;
 
