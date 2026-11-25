@@ -231,11 +231,11 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
   }, 240_000);
 });
 
-it('an .xlsx log’s kept edit beside an .ods log of the same name is the .xlsx log’s alone', () => {
+it('an .xlsx log’s kept edit beside a .csv log of the same name is the .xlsx log’s alone', () => {
   const workbook = fs.readFileSync(path.resolve('tests/fixtures/excel-1900.xlsx'));
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-kind-'));
   const xlsx = 'Proseware Q&A log.xlsx';
-  const ods = 'Proseware Q&A log.ods';
+  const csv = 'Proseware Q&A log.csv';
   const kept = asideFixtureName(xlsx);
   const damaged = asideFixtureName(xlsx, { attempt: '0a1b2c3e' });
   const recent = asideFixtureName(xlsx, { attempt: '0a1b2c3f' });
@@ -247,11 +247,11 @@ it('an .xlsx log’s kept edit beside an .ods log of the same name is the .xlsx 
     return stats;
   }) as never);
   try {
-    for (const log of [xlsx, ods]) fs.writeFileSync(path.join(folder, log), 'a log');
+    for (const log of [xlsx, csv]) fs.writeFileSync(path.join(folder, log), 'a log');
     fs.writeFileSync(path.join(folder, kept), workbook);
     fs.writeFileSync(path.join(folder, damaged), workbook.subarray(0, workbook.length - 30));
     fs.writeFileSync(path.join(folder, recent), workbook);
-    expect(keptEdits(folder, ods)).toEqual([]);
+    expect(keptEdits(folder, csv)).toEqual([]);
     expect(keptEdits(folder, xlsx).map((edit) => edit.name).sort()).toEqual([kept, damaged]);
   } finally {
     spy.mockRestore();

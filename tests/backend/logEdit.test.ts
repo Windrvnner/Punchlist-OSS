@@ -383,3 +383,14 @@ describe.skipIf(!has)('updating a log where it is', () => {
     expect(await logs.save({ folder: path.join(folder, 'gone'), file: 'Lender A Q&A.xlsx', sheet: 'Lender Q&A', steps, stamp: 'x' })).toMatchObject({ ok: false, error: { kind: 'notFound' } });
   });
 });
+
+describe('a log that is not an Excel or CSV file', () => {
+  it('refuses an OpenDocument log without touching it', async () => {
+    const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-ods-'));
+    fs.writeFileSync(path.join(folder, 'Lender A Q&A.ods'), 'a log');
+    const saved = await nodeQaLogs({}).save({ folder, file: 'Lender A Q&A.ods', sheet: 'Q&A', stamp: '', steps: [] });
+    expect(!saved.ok && saved.error.message).toBe('Only .xlsx, .xlsm, .xls and .csv logs can be updated');
+    expect(fs.readFileSync(path.join(folder, 'Lender A Q&A.ods'), 'utf8')).toBe('a log');
+    fs.rmSync(folder, { recursive: true, force: true });
+  });
+});

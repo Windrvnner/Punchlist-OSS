@@ -301,14 +301,14 @@ function archiveKeptEdit(dir: string, file: string, workingName: string, bytes: 
 }
 
 /**
- * whether `bytes` are a file of the kind `ext` names: an OpenDocument package (.ods, which names itself in "mimetype"), an
- * Office one (.xlsx, .xlsm), an old Office file (.xls), or none of these (.csv)
+ * whether `bytes` are a file of the kind `ext` names: an Office package (.xlsx, .xlsm), an old Office file (.xls), or
+ * none of these (.csv)
  */
 const sameKind = (ext: string, b: Uint8Array) => {
   const zip = b[0] === 0x50 && b[1] === 0x4b, ole = b[0] === 0xd0 && b[1] === 0xcf && b[2] === 0x11 && b[3] === 0xe0; const e = ext.toLowerCase();
   if (e === '.xls') return ole; if (e === '.csv') return !zip && !ole; if (!zip) return false;
   // only a package that shows it is the other kind is another log's: a damaged one (cut short) is still this log's to file
-  try { const z = readZip(b); return e === '.ods' ? partText(z, '[Content_Types].xml') === null : partText(z, 'mimetype') === null; } catch { return true; }
+  try { return partText(readZip(b), 'mimetype') === null; } catch { return true; }
 };
 /**
  * The edits a save kept aside under its working name because the archive did not take a copy of them: a version of
