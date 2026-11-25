@@ -12,7 +12,10 @@ import { readImportBytes } from '../../src/app/transfer';
 import { CreateDeal } from '../../src/app/commands/deals';
 import { KeepQaLog } from '../../src/app/commands/qaLogs';
 import { dealQuestions } from '../../src/app/state';
-import { operationWrite, recoveryApp, recoveryDeal, type RecoveryApp } from '../app/recoveryKit';
+import {
+  failRecoveryWrite, operationWrite, recoveryApp, recoveryDeal, type RecoveryApp,
+} from '../app/recoveryKit';
+import type { Transaction } from '../../src/ports';
 
 const PATH = 'X:\\Deals\\Proseware\\Q&A\\Lender Q&A.csv';
 const SAID = 'Project Recovery fixture already uses “Lender Q&A.csv” in this folder as its Q&A log. '
@@ -77,6 +80,19 @@ async function openImport(app: RecoveryApp, dealId: string) {
   return screen;
 }
 
+/** The kept import opened in `dealId`, whose first Import fails before its operation reaches the journal (#926) */
+async function failFirstImport(app: RecoveryApp, dealId: string) {
+  await keepImportOf(app, dealId);
+  const screen = await openImport(app, dealId);
+  await vi.waitFor(() => expect(screen.querySelector<HTMLButtonElement>('#im-go')?.disabled).toBe(false));
+  const pending = (transaction: Transaction) => operationWrite(transaction, 'ImportQuestions', 'pending');
+  const restore = failRecoveryWrite(app, pending, 'Journal busy');
+  await act(() => screen.querySelector<HTMLButtonElement>('#im-go')!.click());
+  await vi.waitFor(() => expect(screen.textContent).toContain('Journal busy'));
+  restore();
+  return screen;
+}
+
 describe('another deal\'s Q&A log (#38)', () => {
   it('picking it is refused before it is read', async () => {
     const { app, first, second, had } = await twoDeals();
@@ -107,16 +123,7 @@ describe('another deal\'s Q&A log (#38)', () => {
   it.each([['the same choices', null], ['Merge chosen instead', 'merge']] as const)(
     'a retry with %s after a failed first Import imports nothing', async (_name, mode) => {
       const { app, first, second } = await twoDeals(false);
-      await keepImportOf(app, second);
-      const screen = await openImport(app, second);
-      await vi.waitFor(() => expect(screen.querySelector<HTMLButtonElement>('#im-go')?.disabled).toBe(false));
-      const original = app.repo.transaction.bind(app.repo);
-      app.repo.transaction = async (transaction) => (operationWrite(transaction, 'ImportQuestions', 'pending')
-        ? { ok: false, error: { kind: 'failed', message: 'Journal busy' } }
-        : original(transaction));
-      await act(() => screen.querySelector<HTMLButtonElement>('#im-go')!.click());
-      await vi.waitFor(() => expect(screen.textContent).toContain('Journal busy'));
-      app.repo.transaction = original;
+      const screen = await failFirstImport(app, second);
       await claimLog(app, first);
       const had = app.store.get().deals[first].qaLogs;
       if (mode) await act(() => screen.querySelector<HTMLButtonElement>(`[data-immode="${mode}"]`)!.click());
@@ -130,16 +137,7 @@ describe('another deal\'s Q&A log (#38)', () => {
 
   it('a retry after a failed first Import still imports when no other deal has the file', async () => {
     const { app, second } = await twoDeals(false);
-    await keepImportOf(app, second);
-    const screen = await openImport(app, second);
-    await vi.waitFor(() => expect(screen.querySelector<HTMLButtonElement>('#im-go')?.disabled).toBe(false));
-    const original = app.repo.transaction.bind(app.repo);
-    app.repo.transaction = async (transaction) => (operationWrite(transaction, 'ImportQuestions', 'pending')
-      ? { ok: false, error: { kind: 'failed', message: 'Journal busy' } }
-      : original(transaction));
-    await act(() => screen.querySelector<HTMLButtonElement>('#im-go')!.click());
-    await vi.waitFor(() => expect(screen.textContent).toContain('Journal busy'));
-    app.repo.transaction = original;
+    const screen = await failFirstImport(app, second);
     await act(() => screen.querySelector<HTMLButtonElement>('#im-go')!.click());
     await vi.waitFor(() => expect(dealQuestions(app.store.get(), second)).toHaveLength(2000));
     expect(app.store.get().deals[second].qaLogs[0]).toMatchObject({ file: 'Lender Q&A.csv' });
