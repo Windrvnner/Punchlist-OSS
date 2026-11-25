@@ -13,7 +13,7 @@ import { sameWording, earlierRewordings } from '../domain/checklistImport';
 import { alphabetical } from '../domain/order';
 import type { AiService } from '../ports';
 import type { Capabilities } from './capabilities';
-import { dropImport, keptImport, saveImport } from './keptImports';
+import { dropImport, keptImport } from './keptImports';
 import type { checklistRequests } from './listRead';
 import { ok, fail, type Result } from '../domain/result';
 import { Undo } from './commands/undo';
@@ -481,16 +481,18 @@ export async function submitChecklist(
   store: Store, importKey: string, target: ListTarget, items: ListItem[], file: string,
 ) {
   const kept = keptImport(importKey);
-  // Leaving the kept snapshot behind could offer the same import again after a reload.
-  dropImport(importKey);
   const name = target.layer === 'broad' ? '' : target.name;
-  let submitted = false;
-  try {
-    const result = await bringIn(store, { layer: target.layer, name, items, file, fileDate: '' });
-    submitted = result.ok;
-    return result;
-  } finally {
-    // A draft opened or written while this operation ran takes precedence over the older one.
-    if (!submitted && kept && !keptImport(importKey)) await saveImport(importKey, kept);
-  }
+  // The draft stays kept until the list is written, so a reload or a failure mid-write loses nothing (#931).
+  // Kept after a write, it is offered again; bringing in the same list again writes nothing.
+  const result = await bringIn(store, { layer: target.layer, name, items, file, fileDate: '' });
+  if (result.ok && kept && keptUnchanged(kept, keptImport(importKey))) dropImport(importKey);
+  return result;
+}
+
+/** Whether the kept draft is as it was: one written while the list was brought in is newer, and stays (#931). */
+function keptUnchanged(before: Readonly<Record<string, unknown>>, now: Readonly<Record<string, unknown>> | undefined) {
+  if (!now) return false;
+  const parts = Object.keys(before);
+  const same = (part: string) => part in now && Object.is(before[part], now[part]);
+  return parts.length === Object.keys(now).length && parts.every(same);
 }
