@@ -1,7 +1,10 @@
 import type { Deal, Folder } from '../domain/model';
-import { AddFolders, FOLDER_LABEL_MAX, folderInside, pathKey, RestoreFolder } from './commands/deals';
+import {
+  AddFolders, FOLDER_LABEL_MAX, folderInside, foldersWithRemoved, overlap, pathKey, RestoreFolder,
+} from './commands/deals';
+import { liveFolders } from './indexing';
 import type { NewDealDraftSession } from './newDealDraft';
-import type { UiState } from './state';
+import type { State, UiState } from './state';
 import type { Store } from './store';
 
 export type DealForm = NonNullable<UiState['newDeal']>;
@@ -35,7 +38,30 @@ function foldersOverlap(first: string, second: string) {
   return folderInside(first, second) || folderInside(second, first);
 }
 
-export async function restoreDealFolder(store: Store, dealId: string, removed: Deal['removed'][number]) {
+type Removed = Deal['removed'][number];
+
+/**
+ * The Folders dialog's rows: the deal's folders with their indexing count, then the removed ones, each with why
+ * Restore is off when it is (the deal's details are locked, or the folder overlaps one on the deal or waiting).
+ */
+export function dealFolderRows(
+  state: Pick<State, 'indexing'>, deal: Deal, waiting: FolderName[], locked?: string | false | null,
+) {
+  const live = liveFolders(state, deal);
+  const rows = foldersWithRemoved(deal);
+  const current = rows.flatMap(({ f, gone }) => gone ? [] : [{
+    folder: f, indexed: live.find((folder) => folder.path === f.path)?.indexed,
+  }]);
+  const removed = rows.flatMap(({ gone }) => gone
+    ? [{ gone, restoreOff: restoreOff(deal, waiting, gone, locked) }] : []);
+  return { current, removed };
+}
+
+function restoreOff(deal: Deal, waiting: FolderName[], gone: Removed, locked?: string | false | null) {
+  return locked || overlap(deal.folders, gone) || waitingFolderOverlap(waiting, gone) || undefined;
+}
+
+export async function restoreDealFolder(store: Store, dealId: string, removed: Removed) {
   const { at, ...folder } = removed;
   const result = await store.dispatch(RestoreFolder, { dealId, folder, at, indexHere: true });
   return result.ok;
@@ -80,7 +106,7 @@ export async function readDealFolder(
   return true;
 }
 
-function patchDealForm(store: Store, patch: Partial<DealForm>) {
+export function patchDealForm(store: Store, patch: Partial<DealForm>) {
   store.ui((ui) => ({ newDeal: ui.newDeal ? { ...ui.newDeal, ...patch } : null }));
 }
 
