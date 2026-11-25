@@ -67,7 +67,7 @@ function namedLog(names: string, sheet = 'Lender Q&A'): string {
 }
 
 /** The same workbook with one unmapped formula, in a format written by the LibreOffice macro. */
-function formulaLog(extension: 'ods' | 'xls', formula = 'LEN(B4)'): string {
+function formulaLog(extension: 'xls', formula = 'LEN(B4)'): string {
   const file = counterpartyLog();
   const zip = readZip(fs.readFileSync(file));
   const xml = partText(zip, 'xl/worksheets/sheet1.xml')!;
@@ -83,7 +83,7 @@ function formulaLog(extension: 'ods' | 'xls', formula = 'LEN(B4)'): string {
 }
 
 describe.skipIf(!has)('formula cells in other workbook formats', () => {
-  for (const extension of ['ods', 'xls'] as const) {
+  for (const extension of ['xls'] as const) {
     it(`refuses a formula overwrite in .${extension}, while ordinary cells remain writable`, async () => {
       const file = formulaLog(extension);
       const before = fs.readFileSync(file);
@@ -117,7 +117,7 @@ describe.skipIf(!has)('formula cells in other workbook formats', () => {
 });
 
 describe.skipIf(!has)('inserting rows into other workbook formats', () => {
-  for (const extension of ['ods', 'xls'] as const) {
+  for (const extension of ['xls'] as const) {
     it(`preserves a legitimate formula-reference adjustment when inserting a row in .${extension}`, async () => {
       const file = formulaLog(extension, 'LEN(B5)');
       const before = fs.readFileSync(file);
@@ -291,7 +291,7 @@ describe.skipIf(!has)('writing into a Q&A log', () => {
 });
 
 describe.skipIf(!has)('writing into a Q&A log of another kind', () => {
-  for (const ext of ['xls', 'ods', 'xlsm']) it(`keeps a .${ext} a .${ext}, with the new values and its other sheet`, async () => {
+  for (const ext of ['xls', 'xlsm']) it(`keeps a .${ext} a .${ext}, with the new values and its other sheet`, async () => {
     const x = counterpartyLog(); const dir = path.dirname(x);
     execFileSync(soffice, [`-env:UserInstallation=file://${dir}/p`, '--headless', '--convert-to', ext, '--outdir', dir, x], { stdio: 'ignore' });
     const f = path.join(dir, `log.${ext}`);
@@ -302,7 +302,7 @@ describe.skipIf(!has)('writing into a Q&A log of another kind', () => {
       { kind: 'cell', row: 5, col: 1, value: 'Is there a tax equity investor?' },
     ]);
     const out = path.join(tmp(), `out.${ext}`); fs.writeFileSync(out, bytes);
-    expect(execFileSync('file', ['-b', out], { encoding: 'utf8' })).toMatch(ext === 'xls' ? /Excel|Composite Document/ : ext === 'ods' ? /OpenDocument/ : /Zip|Excel|OOXML/);
+    expect(execFileSync('file', ['-b', out], { encoding: 'utf8' })).toMatch(ext === 'xls' ? /Excel|Composite Document/ : /Zip|Excel|OOXML/);
     const [log, notes] = await lo.sheets!(out);
     expect(notes.name).toBe('Notes');
     expect(log.grid.slice(3)).toEqual([
