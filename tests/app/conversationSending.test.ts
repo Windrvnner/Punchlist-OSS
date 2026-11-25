@@ -65,6 +65,26 @@ async function start(docs: Partial<DocumentService> = {}) {
   return { store, scope, dealId, navigate, asked };
 }
 
+/** Send `command` from the box, type `typedSince` while its save is out, and have the save refused (#955). */
+async function refusedWhileTyping(store: Store, scope: Scope, command: string, typedSince: string) {
+  const key = convKey(scope);
+  const original = store.dispatch.bind(store);
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => { release = resolve; });
+  const refusing = vi.spyOn(store, 'dispatch').mockImplementation(async (sent, input, options) => {
+    if (sent !== CreateQuestion) return original(sent, input, options);
+    await hold;
+    return fail({ kind: 'storageFull', message: 'The disk is full' });
+  });
+  setComposerText(key, command);
+  const sending = sendTyped(store, scope, { navigate: vi.fn() });
+  await vi.waitFor(() => expect(composerText(key)).toBe(''));
+  setComposerText(key, typedSince);
+  release();
+  await sending;
+  refusing.mockRestore();
+}
+
 it('runs navigation, unresolved, and logging before falling through to a model answer', async () => {
   const { store, scope, dealId, navigate, asked } = await start();
   const launch = composerScope(scope, true);
@@ -253,25 +273,11 @@ it('logs a refused command alone and asks the AI what was typed during its save'
   const key = convKey(scope);
   const command = `Log a question: ${instructions[50]}`;
   const followUp = `${instructions[51]}\n\n${instructions[52]}`;
-  const original = store.dispatch.bind(store);
-  let release!: () => void;
-  const hold = new Promise<void>((resolve) => { release = resolve; });
-  const refusing = vi.spyOn(store, 'dispatch').mockImplementation(async (sent, input, options) => {
-    if (sent !== CreateQuestion) return original(sent, input, options);
-    await hold;
-    return fail({ kind: 'storageFull', message: 'The disk is full' });
-  });
-  setComposerText(key, command);
-  const sending = sendTyped(store, scope, { navigate });
-  await vi.waitFor(() => expect(composerText(key)).toBe(''));
-  setComposerText(key, followUp);
-  release();
-  await sending;
-  refusing.mockRestore();
+  await refusedWhileTyping(store, scope, command, followUp);
   // A restart keeps which part of the box is the refused command.
   saveKeptDrafts();
-  const kept = local.read(KEPT_TEXT_KEY) as { 'refused-commands'?: [string, string[]][] } | null;
-  expect(new Map(kept?.['refused-commands']).get(key)).toEqual([command]);
+  const kept = local.read(KEPT_TEXT_KEY) as { 'refused-commands'?: [string, unknown][] } | null;
+  expect(new Map(kept?.['refused-commands']).get(key)).toEqual({ commands: [command], after: followUp });
   await sendTyped(store, scope, { navigate });
   expect(Object.values(store.get().questions).map((question) => question.text)).toEqual([instructions[50]]);
   expect(composerText(key)).toBe(followUp);
@@ -279,6 +285,20 @@ it('logs a refused command alone and asks the AI what was typed during its save'
   expect(asked).toHaveBeenCalledOnce();
   expect(store.get().threads[key][0].text).toBe(followUp);
   expect(Object.values(store.get().questions)).toHaveLength(1);
+});
+
+it('sends the box whole once the text after a refused command is no longer what was put back', async () => {
+  const { store, scope, navigate } = await start();
+  const key = convKey(scope);
+  const command = `Log a question: ${instructions[70]}`;
+  const detail = instructions[71];
+  await refusedWhileTyping(store, scope, command, instructions[72]);
+  // The person replaces what followed with a second paragraph of the same question.
+  setComposerText(key, `${command}\n\n${detail}`);
+  await sendTyped(store, scope, { navigate });
+  const logged = Object.values(store.get().questions).map((question) => question.text);
+  expect(logged).toEqual([`${instructions[70]}\n\n${detail}`]);
+  expect(composerText(key)).toBe('');
 });
 
 it('leaves a refused command to Retry, not the box, when the store keeps it as interrupted work', async () => {
@@ -316,20 +336,7 @@ it('does not repeat a refused command that was typed again during its save', asy
   const { store, scope, navigate } = await start();
   const key = convKey(scope);
   const command = `Log a question: ${instructions[40]}`;
-  const original = store.dispatch.bind(store);
-  let release!: () => void;
-  const hold = new Promise<void>((resolve) => { release = resolve; });
-  vi.spyOn(store, 'dispatch').mockImplementation(async (sent, input, options) => {
-    if (sent !== CreateQuestion) return original(sent, input, options);
-    await hold;
-    return fail({ kind: 'storageFull', message: 'The disk is full' });
-  });
-  setComposerText(key, command);
-  const sending = sendTyped(store, scope, { navigate });
-  await vi.waitFor(() => expect(composerText(key)).toBe(''));
-  setComposerText(key, `${command}  `);
-  release();
-  await sending;
+  await refusedWhileTyping(store, scope, command, `${command}  `);
   expect(composerText(key)).toBe(command);
 });
 
