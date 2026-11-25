@@ -1,5 +1,5 @@
 import { isChangedElsewhere } from './changedElsewhere';
-import { type FieldDraft, type FieldValue, unsavedFields } from './fieldDrafts';
+import { type FieldDraft, type FieldValue, joinHandedText, unsavedFields } from './fieldDrafts';
 
 type FieldCommitResult = {
   ok: boolean;
@@ -311,6 +311,15 @@ export class FieldSave {
     this.input.stopTimer();
     this.show({ external: true });
     this.keepText(text);
+  }
+
+  /** Text handed in from elsewhere (handFieldText) waits in the box for Keep Mine or Take Theirs (#939). */
+  takeHanded(text: string) {
+    if (this.input.partial()) return;
+    const current = this.input.text();
+    const next = joinHandedText(current === this.seen.value ? '' : current, text);
+    this.input.replaceText(next);
+    this.keepExternal();
   }
 
   takeTheirs(value: string, commit: FieldCommit) {
