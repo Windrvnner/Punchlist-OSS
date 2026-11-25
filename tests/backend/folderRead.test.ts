@@ -237,7 +237,7 @@ describe('reading a whole folder from the chat', () => {
       const t = setup(Array.from({ length: 12 }, (_v, i) => doc(`Permits/P${i + 1}.pdf`)), (_c, k) => (k === 1 ? { tool: 'folder', folder: 'permits', lookFor: 'expiry' } : { text: 'ok', sources: [] }), { width: 12, talks: true, toolCalls });
       const seen: { tools?: { name: string; description: string }[]; results?: unknown[]; prompt: string }[] = []; const was = t.svc.converse!.bind(t.svc); t.svc.converse = (i) => { seen.push(i); return was(i); };
       expect((await t.ai.answer(ask('Review the permits folder'))).ok, toolCalls).toBe(true);
-      expect(seen[0].tools!.map((x) => x.name), toolCalls).toEqual(['search', 'read', 'folder', 'answer']);
+      expect(seen[0].tools!.map((x) => x.name), toolCalls).toEqual(['search', 'read', 'folder', 'brief', 'answer']);
       expect(seen[0].tools!.find((x) => x.name === 'read')!.description).toContain('up to 12 documents');
       expect(t.batches.length, toolCalls).toBe(1);
       const result = toolCalls === 'native' ? String((seen[1].results as { text: string }[])[0].text) : seen[1].prompt; expect(result, toolCalls).toContain('You had all 12 documents in VDR/Permits read for “expiry”');

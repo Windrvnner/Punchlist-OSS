@@ -386,6 +386,103 @@ describe('the chat agent', () => {
     expect(s.calls.length).toBe(1);                                                                                                        // only the first search's documents were read by a model
   });
 
+  it('catches up on a deal with its brief: one model call, links as plain words, no finding id', async () => {
+    const briefOrSearch = (c: Call) => (c.prompt.includes('These are the open findings on a deal')
+      ? { paragraphs: ['The {lock-up mismatch|f_1} matters most.', 'Nothing else is open.'] }
+      : helper(c));
+    const answered = { text: 'The lock-up matters most.', sources: [] };
+    const catchUp = (_c: Call, n: number) => (n === 1 ? { tool: 'brief' } : answered);
+    const s = setup(briefOrSearch, { d1: [FA] }, { turn: catchUp });
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'Lock-up ratio differs from the term sheet');
+    const r = val(await s.ai.answer(ask('Catch me up on the deal')));
+    expect(r.text).toBe('The lock-up matters most.');
+    const told = s.turns[1].prompt;
+    const brief = 'The lock-up mismatch matters most.\nNothing else is open.';
+    expect(told).toContain(`The catch-up on the open findings:\n${brief}`);
+    expect(told).not.toContain('f_1');
+    expect(s.calls.filter((c) => c.prompt.includes('These are the open findings on a deal')).length).toBe(1);
+    const step = { text: 'Caught up on the open findings', result: '2 paragraphs', done: true };
+    expect(r.research!.steps[1]).toMatchObject(step);
+    // asked again with the findings unchanged: the brief is not written again
+    val(await s.ai.answer(ask('Catch me up on the deal')));
+    expect(s.calls.filter((c) => c.prompt.includes('These are the open findings on a deal')).length).toBe(1);
+    // a deal with no open findings is said to have none, with no model call for it
+    const none = setup(helper, { d1: [FA] }, { turn: catchUp });
+    await deal(none.repo);
+    val(await none.ai.answer(ask('Catch me up on the deal')));
+    expect(none.turns[1].prompt).toContain('The catch-up on the open findings:\nno open findings.');
+  });
+
+  it('a catch-up names each deal, says when it failed, and never takes unreadable findings for none', async () => {
+    const isBrief = (c: Call) => c.prompt.includes('These are the open findings on a deal');
+    const catchUp = (_c: Call, n: number) => (n === 1 ? { tool: 'brief' } : { text: 'Done.', sources: [] });
+    const lockUpFirst = (c: Call) => (isBrief(c) ? { paragraphs: ['Lock-up first.'] } : helper(c));
+    const two = setup(lockUpFirst, undefined, { turn: catchUp });
+    await deal(two.repo);
+    await deal(two.repo, 'd2', 'Project Wingtip');
+    await finding(two.repo, 'f_1', 'Lock-up ratio differs from the term sheet');
+    const acrossDeals = { message: 'Catch me up', history: [], model: 'thorough', dealIds: ['d1', 'd2'] };
+    const both = val(await two.ai.answer(acrossDeals));
+    expect(two.turns[1].prompt).toContain('Project Proseware: Lock-up first.\n\nProject Wingtip: no open findings.');
+    expect(both.research!.steps[1].result).toBe('Project Proseware: 1 paragraph · Project Wingtip: no open findings');
+    // stopped while the first deal is briefed: the next deal is not briefed
+    let stopper: ReturnType<typeof setup> | undefined;
+    const stopOnBrief = (c: Call) => {
+      if (!isBrief(c)) return helper(c);
+      void stopper!.ai.stop!('r1');
+      return { paragraphs: ['Lock-up first.'] };
+    };
+    stopper = setup(stopOnBrief, undefined, { repo: two.repo, turn: catchUp });
+    const stopped = val(await stopper.ai.answer({ ...acrossDeals, runId: 'r1' }));
+    expect(stopped.text).toBe('Done.');
+    expect(stopper.calls.filter(isBrief).length).toBe(1);
+    expect(stopper.turns[1].prompt).toContain('Project Wingtip: not briefed, since the person stopped the research.');
+    // a brief the model cannot write is said so, and the answer still comes
+    const unread = setup((c) => (isBrief(c) ? 'no' : helper(c)), { d1: [FA] }, { turn: catchUp });
+    await deal(unread.repo);
+    await finding(unread.repo, 'f_1', 'Lock-up ratio differs from the term sheet');
+    const failed = val(await unread.ai.answer(ask('Catch me up')));
+    expect(unread.turns[1].prompt).toContain('the catch-up could not be written: The AI’s reply could not be read.');
+    expect(failed.text).toBe('Done.');
+    expect(failed.research!.steps[1].result).toBe('could not be written');
+    // findings that cannot be read just now: named as such, no brief asked, and the answer goes on
+    const repo = memRepo(clock);
+    const list = repo.list.bind(repo);
+    repo.list = async (kind, dealId) => (kind === 'finding'
+      ? { ok: false as const, error: { kind: 'unreachable' as const, message: 'The Punchlist folder cannot be read' } }
+      : list(kind, dealId));
+    const away = setup(helper, { d1: [FA] }, { repo, turn: catchUp });
+    await deal(away.repo);
+    expect(val(await away.ai.answer(ask('Catch me up'))).text).toBe('Done.');
+    expect(away.turns[1].prompt).toContain('open findings:\nits findings could not be read just now.');
+    expect(away.calls.some(isBrief)).toBe(false);
+    // findings that drop out between the tool's read (the 2nd, after the first search) and the brief's own: said so,
+    // never taken for an outage
+    const flaky = memRepo(clock);
+    const flakyList = flaky.list.bind(flaky);
+    let findingReads = 0;
+    flaky.list = async (kind, dealId) => (kind === 'finding' && ++findingReads === 3
+      ? { ok: false as const, error: { kind: 'unreachable' as const, message: 'The Punchlist folder cannot be read' } }
+      : flakyList(kind, dealId));
+    const dropped = setup(helper, { d1: [FA] }, { repo: flaky, turn: catchUp });
+    await deal(dropped.repo);
+    await finding(dropped.repo, 'f_1', 'Lock-up ratio differs from the term sheet');
+    findingReads = 0;
+    expect(val(await dropped.ai.answer(ask('Catch me up'))).text).toBe('Done.');
+    const folderDown = 'the catch-up could not be written: The Punchlist folder cannot be read.';
+    expect(dropped.turns[1].prompt).toContain(folderDown);
+    // the service down while the brief is written: the answer says so, as for any tool
+    const down = setup((c) => {
+      if (!isBrief(c)) return helper(c);
+      throw Object.assign(new Error('ECONNREFUSED'), { code: 'unreachable' });
+    }, { d1: [FA] }, { turn: catchUp });
+    await deal(down.repo);
+    await finding(down.repo, 'f_1', 'Lock-up ratio differs from the term sheet');
+    const r = await down.ai.answer(ask('Catch me up'));
+    expect(!r.ok && r.error.kind).toBe('unreachable');
+  });
+
   it('a deal whose findings and questions cannot be read just now is named as such, never searched as empty', async () => {
     const repo = memRepo(clock); const list = repo.list.bind(repo); let down = true;
     repo.list = async (kind, dealId) => (down && dealId === 'd1' && (kind === 'finding' || kind === 'question') ? { ok: false as const, error: { kind: 'unreachable' as const, message: 'The Punchlist folder cannot be read' } } : list(kind, dealId));
@@ -473,14 +570,32 @@ describe('a kept conversation', () => {
   it('hybrid: search, read and answer go as tools, and a tool\'s result goes back in the next message', async () => {
     const s = setup(reader, undefined, { talks: true, turn: twoTurns, toolCalls: 'hybrid' }); const seen = spied(s);
     const r = val(await s.ai.answer(ask('What is the lock-up?')));
-    expect(seen.map((i) => i.tools?.map((t) => t.name))).toEqual([['search', 'read', 'folder', 'answer'], ['search', 'read', 'folder', 'answer']]); expect(seen.every((i) => !i.results)).toBe(true);
+    const tools = ['search', 'read', 'folder', 'brief', 'answer'];
+    expect(seen.map((i) => i.tools?.map((t) => t.name))).toEqual([tools, tools]);
+    expect(seen.every((i) => !i.results)).toBe(true);
     expect(seen[1].prompt).toMatch(/^You searched documents for “ratio”\./); expect(r.text).toBe('It is 1.25x.');
+  });
+
+  it.each(['native', 'hybrid'] as const)('%s: the brief tool is called and its result goes back', async (toolCalls) => {
+    const isBrief = (c: Call) => c.prompt.includes('These are the open findings on a deal');
+    const catchUp = (_c: Call, n: number) => (n === 1 ? { tool: 'brief' } : { text: 'Done.', sources: [] });
+    const s = setup((c) => (isBrief(c) ? { paragraphs: ['Lock-up first.'] } : reader(c)), undefined,
+      { talks: true, turn: catchUp, toolCalls });
+    const seen = spied(s);
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'Lock-up ratio differs from the term sheet');
+    expect(val(await s.ai.answer(ask('Catch me up'))).text).toBe('Done.');
+    // native: as the call's result; hybrid: in the next message
+    const told = toolCalls === 'native' ? seen[1].results![0].text : seen[1].prompt;
+    expect(told).toContain('The catch-up on the open findings:\nLock-up first.');
   });
 
   it('native: a result goes back as its call\'s result, and the next question answers the last call first; a model that refuses tool results steps down to hybrid in the same conversation', async () => {
     const s = setup(reader, undefined, { talks: true, turn: twoTurns, toolCalls: 'native' }); const seen = spied(s);
     const one = val(await s.ai.answer(ask('What is the lock-up?')));
-    expect(seen[0].tools!.map((t) => t.name)).toEqual(['search', 'read', 'folder', 'answer']); expect(seen[0].system).toMatch(/^You are researching .*call one tool: search, read, folder or answer\./s); expect(seen[0].results).toBeUndefined();
+    expect(seen[0].tools!.map((t) => t.name)).toEqual(['search', 'read', 'folder', 'brief', 'answer']);
+    expect(seen[0].system).toMatch(/^You are researching .*call one tool: search, read, folder, brief or answer\./s);
+    expect(seen[0].results).toBeUndefined();
     expect(seen[1].results).toHaveLength(1); expect(seen[1].results![0].text).toMatch(/^You searched documents for “ratio”\./); expect(seen[1].prompt).toMatch(/^This is turn 2 of at most/);
     expect(one.text).toBe('It is 1.25x.'); expect(one.thread!.call).toMatch(/^call_/);
     val(await s.ai.answer(ask('And the margin?', { history: said(['What is the lock-up?']), thread: one.thread })));

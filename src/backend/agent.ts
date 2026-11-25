@@ -1,6 +1,6 @@
 /**
  * The chat agent (decisions page, Conversations). A conversation's answer is worked out in turns by the
- * model the person chose (the main session), which has three tools:
+ * model the person chose (the main session), which has four tools:
  *   - search: what (documents, findings, Q&A or all) and a query. For documents, a search helper on the fast model runs
  *     the keyword search (folder paths and file names included), picks a few, reads them on the model service and
  *     returns passages with document and page. Findings and Q&A are records the app holds, searched by their words
@@ -12,6 +12,8 @@
  *     important first, each batch a step of its own. The whole folder is read, never part of it. A
  *     folder of more than `folderDocs` documents is not started until the person has said to: the main session is told
  *     to ask them, once, saying how many documents there are, and reads it with "all" once they agree (agentFolder.ts).
+ *   - brief: each deal's catch-up, the deal brief on its open findings (ai.ts dealBrief), for "catch me up on the deal"
+ *     (agentSearch.ts).
  * An attached document is not put into the prompt in full: the model service searches inside it for what the turn asks
  * (North reads attached files through its own search: My files and the chat API's file_ids). So attaching
  * a document again on each turn costs no tokens for its text, and a long document is no dearer than a short one.
@@ -63,7 +65,7 @@ import { SERVICE } from '../control';
 import { codeOf, type AgentKit, type AgentOptions, type AgentQuestion } from './agentKit';
 import type { Cited, Run, Sent } from './agentKit';
 import { AgentRun } from './agentRun';
-import { search, type What } from './agentSearch';
+import { catchUp, search, type What } from './agentSearch';
 import { FolderMemory, FolderReader } from './agentFolder';
 import { KeptConversation, type Turn } from './agentTalk';
 import { inlineTools } from './agentPrompts';
@@ -271,7 +273,8 @@ class Answering {
       if (!said) return 'You asked for a folder without naming it: give "folder".';
       return this.folders.read(said, lookFor, agreed);
     }
-    return `There is no tool "${tool}": use "search", "read" or "folder", or answer.`;
+    if (tool === 'brief') return catchUp(this.run);
+    return `There is no tool "${tool}": use "search", "read", "folder" or "brief", or answer.`;
   }
 
   /** the main session's answer, with the citations that can be stood behind; on the last turn, its notes if no text */
