@@ -10,13 +10,16 @@ import { Icon } from './icons';
 import { Modal } from './dialogs';
 import { FileDrop } from './fileDrop';
 import { ConflictView } from './conflict';
-import { pastedLines, LIST_ACCEPT } from '../app/listRead';
-import type { FirmList, Layer } from '../domain/checklist';
+import { LIST_ACCEPT } from '../app/listRead';
+import type { Layer } from '../domain/checklist';
 import { SERVICE } from '../control';
 import type { Capabilities } from '../app/capabilities';
 import type { Leaving, ListReview, ListSource, Work } from './firmChecklistImport';
-import { NOT_DONE, pairKey, plural } from './firmChecklistReview';
-import type { ListTarget, Pair, Review, Rewording } from './firmChecklistReview';
+import {
+  checklistReviewCounts, checklistWordingChoices, pairKey, type ListTarget, type Pair, type Review, type Rewording,
+} from '../app/checklistImport';
+import { NOT_DONE } from './firmChecklistReview';
+import { plural } from './counts';
 
 /** the tooltip on a checklist's "choose a file…": the kinds of file it reads */
 export const LIST_TIP = 'A spreadsheet, a Word file, a PDF or a text file';
@@ -33,7 +36,6 @@ export const Head = ({ title, onClose, disabled }: { title: string; onClose: () 
 export interface ImportView {
   title: string;
   can: Pick<Capabilities, 'reword' | 'sameMeaning'>;
-  firm: FirmList;
   work: Work;
   source: ListSource;
   listReview: ListReview;
@@ -77,8 +79,8 @@ function dropZone(source: ListSource) {
 }
 
 function pickFooter({ exit, source, work }: ImportView) {
-  const typed = source.paste.trim();
-  const typedLines = typed ? plural(pastedLines(source.paste).length, 'line') : '';
+  const typed = source.counts.pasted;
+  const typedLines = typed ? plural(typed, 'line') : '';
   const line = work.busy === 'reading' ? 'Reading the file' : typedLines;
   return (
     <div class="xfoot"><span id="cl-line">{line}</span><span class="grow" />
@@ -109,25 +111,25 @@ export function chooseStep(view: ImportView, split: NonNullable<ListTarget['spli
 export function reviewStep(view: ImportView, review: Review) {
   const { title, exit, work } = view;
   const shownSame = review.asked.same !== 'off';
-  const nothing = review.asked.reword === 'off' && !review.rewords.length && !shownSame;
+  const counts = checklistReviewCounts(review);
+  const shownWording = review.asked.reword !== 'off' || counts.suggestions > 0;
   return (
     <Modal onClose={exit.close} label={title} blur className="sdlg imdlg">
       <Head title={title} onClose={exit.close} disabled={work.busy === 'importing'} />
-      {(review.asked.reword !== 'off' || review.rewords.length > 0) && wordingRow(view, review)}
-      {shownSame && duplicatesRow(view, review)}
-      {nothing && <p class="fl-intro">Nothing to review</p>}
+      {shownWording && wordingRow(view, review, counts.suggestions)}
+      {shownSame && duplicatesRow(view, review, counts)}
+      {!shownWording && !shownSame && <p class="fl-intro">Nothing to review</p>}
       {reviewFooter(view)}
     </Modal>
   );
 }
 
-function wordingRow(view: ImportView, review: Review) {
+function wordingRow(view: ImportView, review: Review, count: number) {
   const notDone = NOT_DONE[review.asked.reword];
-  const count = review.rewords.length;
   return (
     <div class="srow top"><div class="k">Wording</div><div>
       <div class="rv-h" title={count ? 'Only checked items take the new wording' : undefined}>
-        {count > 0 && wordingSelection(view, review)}
+        {count > 0 && wordingSelection(view, review, count)}
         {notDone && <b>Not asked</b>}
         {!notDone && !count && <b>No suggestions</b>}
         {notDone && <span>{notDone}</span>}
@@ -146,11 +148,10 @@ function rewordingLocked({ listReview, work }: ImportView, at: number) {
   return listReview.remove.has(at) || work.busy === 'importing';
 }
 
-function wordingSelection(view: ImportView, { rewords }: Review) {
-  const { useReword, setUseReword } = view.listReview;
-  const count = plural(rewords.length, 'suggestion');
-  const eligible = rewords.map(({ at }) => at).filter((at) => !rewordingLocked(view, at));
-  const allChecked = eligible.length > 0 && eligible.every((at) => useReword.has(at));
+function wordingSelection(view: ImportView, review: Review, suggestions: number) {
+  const { useReword, setUseReword, remove } = view.listReview;
+  const count = plural(suggestions, 'suggestion');
+  const { eligible, allChecked } = checklistWordingChoices(review, remove, useReword, view.work.busy === 'importing');
   // #377: Retain checkmarks on locked rows so restoring a removed item also restores its wording choice.
   const setAll = (checked: boolean) => setUseReword((previous) => {
     const next = new Set(previous);
@@ -185,22 +186,24 @@ function rewordingRow(view: ImportView, review: Review, rewording: Rewording) {
   );
 }
 
-function duplicatesRow(view: ImportView, review: Review) {
+function duplicatesRow(
+  view: ImportView, review: Review, { duplicates, missed }: ReturnType<typeof checklistReviewCounts>,
+) {
   const { pairs, sameMissed } = review;
   const notDone = NOT_DONE[review.asked.same];
   return (
     <div class="srow top"><div class="k">Duplicates</div><div>
-      <div class="rv-h" title={pairs.length ? 'Only checked items are removed' : undefined}>
-        <b>{pairs.length ? `${pairs.length.toLocaleString('en-US')} found` : 'None found'}</b>
+      <div class="rv-h" title={duplicates ? 'Only checked items are removed' : undefined}>
+        <b>{duplicates ? `${duplicates.toLocaleString('en-US')} found` : 'None found'}</b>
         {notDone && <span>{notDone}; only same wording was checked</span>}
         {sameMissed && <span id="cl-missed">
-          {NOT_DONE[sameMissed.kind]} for {plural(sameMissed.at.length, 'item')}
+          {NOT_DONE[sameMissed.kind]} for {plural(missed, 'item')}
         </span>}
         {(sameMissed || notDone) && view.can.sameMeaning && <button type="button" class="linkb" id="cl-retry"
           title="Ask about them again" disabled={!!view.work.busy}
           onClick={() => void view.listReview.retry()}>Retry</button>}
       </div>
-      {pairs.length > 0 && <div class="rv-list" id="cl-pairs">{pairs.map((pair) => pairRow(view, review, pair))}</div>}
+      {duplicates > 0 && <div class="rv-list" id="cl-pairs">{pairs.map((pair) => pairRow(view, review, pair))}</div>}
     </div></div>
   );
 }
@@ -236,14 +239,11 @@ function reviewLine({ work, target, listReview }: ImportView): string {
   if (target.split && !work.busy) return target.splitSays;
   if (work.busy === 'importing') return 'Importing';
   if (work.busy === 'reviewing') return `Asking ${SERVICE}`;
-  const { items, useReword, remove, rewordAt } = listReview;
-  const taken = [...useReword].filter((at) => !remove.has(at));
-  const splitCount = taken.filter((at) => (rewordAt.get(at)?.length ?? 1) > 1).length;
-  const reworded = taken.length - splitCount;
-  const parts = [`Import ${plural(items.length, 'item')}`];
+  const { items, reworded, split, removed } = listReview.counts;
+  const parts = [`Import ${plural(items, 'item')}`];
   if (reworded) parts.push(`${reworded.toLocaleString('en-US')} reworded`);
-  if (splitCount) parts.push(`${splitCount.toLocaleString('en-US')} split`);
-  if (remove.size) parts.push(`${remove.size.toLocaleString('en-US')} removed`);
+  if (split) parts.push(`${split.toLocaleString('en-US')} split`);
+  if (removed) parts.push(`${removed.toLocaleString('en-US')} removed`);
   return parts.join(' · ');
 }
 
@@ -257,7 +257,7 @@ function reviewFooter(view: ImportView) {
       {split && chooseButton(view)}
       <span class="needs" title={split ? `${target.splitSays}. Choose one first` : undefined}>
         <button key={split ? 'held' : 'go'} class={`btn sm${split ? '' : ' pri'}`} type="button" id="cl-go"
-          disabled={!view.listReview.items.length || !!work.busy || !!split} onClick={view.bringItIn}>Import</button>
+          disabled={!view.listReview.counts.items || !!work.busy || !!split} onClick={view.bringItIn}>Import</button>
       </span>
     </div>
   );

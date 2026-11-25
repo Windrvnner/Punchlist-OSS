@@ -10,9 +10,6 @@
     "import": 1,
     "services": 8
   },
-  "src/ui/firmChecklistImport.ts": {
-    "services": 4
-  },
   "src/ui/pastList.tsx": {
     "services": 1
   },
