@@ -190,11 +190,12 @@ it('reports a failed merge quietly and leaves later typing intact when the retry
     await vi.waitFor(() => expect(responseMergeView(q.id).draft?.text).toBe(MERGED));
     expect(store.get().ui.toasts).toEqual(previousToasts);
 
-    const reply = Promise.withResolvers<Result<{ text: string }>>();
-    model.mockReturnValueOnce(reply.promise);
+    let resolveReply!: (result: Result<{ text: string }>) => void;
+    const reply = new Promise<Result<{ text: string }>>((resolve) => { resolveReply = resolve; });
+    model.mockReturnValueOnce(reply);
     expect(selectResponseMerge(store, q, LOG_RESPONSE, true)).toMatchObject({ busy: true });
     editResponseMerge(q.id, TYPED);
-    reply.resolve(ok({ text: MERGED }));
+    resolveReply(ok({ text: MERGED }));
     await vi.waitFor(() => expect(landed).toHaveBeenCalledTimes(3));
     expect(landed).toHaveBeenLastCalledWith(q.id, undefined);
     expect(responseMergeView(q.id)).toMatchObject({ busy: false, draft: { text: TYPED, ai: MERGED } });
