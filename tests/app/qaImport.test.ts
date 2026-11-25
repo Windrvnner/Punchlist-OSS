@@ -221,3 +221,53 @@ it('previews a control-only question from the file and submits only the sanitize
     await app.repo.close();
   }
 });
+
+/** A 2,000-question lender log whose Updated sheet has no "Reviewed reply" column, and a proposal that moves it. */
+function twoSheetLog(questions: string[]) {
+  const header = ['Number', 'Question', 'Reviewed reply', 'Response'];
+  const rows = questions.map((text, at) => [String(at + 1), text, `Reviewed ${at + 1}`, `Reply ${at + 1}`]);
+  return [
+    { name: 'Initial review', grid: [header, ...rows] },
+    { name: 'Updated review', grid: [
+      ['Number', 'Question', 'Response'], ...rows.map((row) => [row[0], row[1], row[3]]),
+    ] },
+  ];
+}
+
+it('keeps a column chosen during a layout proposal and refuses an unapplied one (#741)', async () => {
+  await useKeptPort();
+  const app = recoveryApp();
+  const sheets = app.store.services.sheets;
+  const questions = portfolioQuestions().slice(0, 2_000);
+  const book = twoSheetLog(questions);
+  sheets.read = async (_bytes, _filename, location) => ok(tableFrom(book, location)!);
+  try {
+    const dealId = await recoveryDeal(app);
+    const initial = await readImportBytes(app.store, NAME, new Uint8Array(), { sheet: 'Initial review' });
+    if (!initial.ok) throw new Error(initial.error.message);
+    const layout = new QaImportLayout(app.store, initial.value, initial.value.mapping, () => {});
+    layout.pick('response', 2);
+    const proposal = { ...initial.value, mapping: { ...initial.value.mapping, response: 3 } };
+    layout.propose(proposal);
+    expect(layout.view).toMatchObject({ mapping: { text: 1, response: 2 }, warning: '' });
+    await layout.reread({ sheet: 'Updated review' });
+    const { table, mapping } = layout.view;
+    expect(layout.view.warning).toBe('Column choice not applied for Response.');
+    if (!table || !mapping) throw new Error('no layout');
+    const { prepared } = prepareQaImport(table, mapping);
+    expect(prepared.rows).toHaveLength(2_000);
+    const choices = { ...choicesFor(table, null), mapping };
+    const refused = await submitQaImport(app.store, dealId, { table, choices }, prepared.rows);
+    expect(refused).toMatchObject({ ok: false, error: { kind: 'rejected' } });
+    expect(dealQuestions(app.store.get(), dealId)).toHaveLength(0);
+    layout.pick('response', null);
+    const next = layout.view;
+    const resolved = { ...choicesFor(next.table!, null), mapping: next.mapping! };
+    const sent = await submitQaImport(app.store, dealId, { table: next.table!, choices: resolved }, prepared.rows);
+    expect(sent).toEqual(ok(undefined));
+    expect(dealQuestions(app.store.get(), dealId)).toHaveLength(2_000);
+  } finally {
+    app.store.closing();
+    await app.repo.close();
+  }
+});

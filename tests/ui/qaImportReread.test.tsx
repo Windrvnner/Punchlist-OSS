@@ -221,6 +221,32 @@ describe('a heading row read again in the Q&A import (#63)', () => {
     }
   });
 
+  it('keeps a column chosen while the model proposes a layout, at 2,000 questions (#741)', async () => {
+    const lender = Array.from({ length: 2_000 }, (_, i) =>
+      `Provide lender report ${i + 1},Reviewed ${i + 1},Reply ${i + 1}`);
+    const csv = ['Question,Reviewed reply,Response', ...lender].join('\n');
+    const { app, get, choose, reopen, done } = await dialog(csv);
+    try {
+      let propose = () => {};
+      app.store.services.ai.layout = () => new Promise((resolve) => {
+        const fields = { text: 'Question', response: 'Response' };
+        propose = () => resolve(ok({ sheet: 'Sheet1', headerRow: 1, fields }));
+      });
+      await reopen();
+      await act(() => {
+        get('#im-ask').dispatchEvent(new Event('click'));
+      });
+      await vi.waitFor(() => expect(get<HTMLButtonElement>('#im-ask').textContent).toContain('Asking'));
+      await choose('[data-immap="response"]', '1');
+      await act(async () => propose());
+      await vi.waitFor(() => expect(get<HTMLButtonElement>('#im-ask').textContent).not.toContain('Asking'));
+      expect(get<HTMLSelectElement>('[data-immap="response"]').value).toBe('1');
+      expect(get('#im-line').textContent).toBe('Import 2,000 questions · 2,000 new');
+    } finally {
+      await done();
+    }
+  });
+
   it('Import waits for the reread and imports the rows of the heading shown', async () => {
     const { app, dealId, get, heading, letGo, done } = await dialog();
     try {
