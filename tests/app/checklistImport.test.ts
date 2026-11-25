@@ -426,3 +426,49 @@ it('holds the app review until both model requests settle when one throws', asyn
     await app.repo.close();
   }
 });
+
+it('keeps a wording retry through a General update and discards it for changed imported text', async () => {
+  const app = await readyApp();
+  try {
+    const { store } = app;
+    const items = portfolioQuestions().map((text) => ({ text }));
+    const suggestion = { at: 0, text: 'Obtain the signed EPC contract and changes', why: 'Use a direct request' };
+    type Wording = NonNullable<typeof store.services.ai.reword>;
+    let finish!: (reply: Awaited<ReturnType<Wording>>) => void;
+    const wording = vi.fn<Wording>()
+      .mockResolvedValueOnce(fail({ kind: 'failed', message: 'The wording reply failed' }))
+      .mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    store.services.ai.reword = wording;
+    const compare = vi.fn<NonNullable<typeof store.services.ai.sameMeaning>>();
+    store.services.ai.sameMeaning = compare;
+    const state = store.get();
+    const target = {
+      ...listTarget(state, firmOf(state.firmList), 'technology', 'Solar'),
+      generalTexts: ['Confirm insurance for project development.'],
+    };
+    const options = { askReword: true, askSame: false };
+    const session = checklistReviewSession(store, checklistRequests(), REVIEW_EVENTS);
+    const show = vi.fn<(change: ChecklistReviewChange) => void>();
+    const plan = session.plan(items, target, options, null, '')!;
+    await session.next(plan, show);
+    const { review } = shownReview(show.mock.lastCall?.[0], 'fresh');
+    const retry = session.wording(review, show);
+    const updated = { ...target, generalTexts: [...target.generalTexts, 'Obtain current operating permits.'] };
+    expect(session.plan(items, updated, options, review, plan.signature)?.signature).not.toBe(plan.signature);
+    finish(ok([suggestion]));
+    await retry;
+    const { review: retried } = shownReview(show.mock.lastCall?.[0], 'retry');
+    expect(retried).toMatchObject({ rewords: [suggestion], asked: { reword: 'done', same: 'off' } });
+
+    const stale = session.wording(review, show);
+    const revised = [{ text: 'Provide approvals for the new lender draws.' }, ...items.slice(1)];
+    session.plan(revised, updated, options, review, plan.signature);
+    finish(ok([suggestion]));
+    await stale;
+    expect(show).toHaveBeenCalledTimes(2);
+    expect(compare).not.toHaveBeenCalled();
+  } finally {
+    app.store.closing();
+    await app.repo.close();
+  }
+});

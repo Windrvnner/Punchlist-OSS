@@ -388,11 +388,13 @@ function checklistReviewFlight(requests: ChecklistRequests, events: ReviewReques
 export function checklistReviewSession(store: Store, requests: ChecklistRequests, events: ReviewRequestEvents) {
   const flight = checklistReviewFlight(requests, events);
   let signature = '';
+  let currentTexts: string[] = [];
   function plan(
     items: ListItem[] | null, target: ListTarget, options: ReviewOptions, review: Review | null, askedFor: string,
   ) {
     const next = items && checklistReviewPlan(store.get().can, items, target, options, review, askedFor);
     signature = next?.signature ?? '';
+    currentTexts = next?.texts ?? [];
     return next && { ...next, waiting: !!next.texts.length && next.needsCall && flight.pending };
   }
   async function askModel<T>(call: () => Promise<T>, show: (reply: T) => void) {
@@ -409,8 +411,12 @@ export function checklistReviewSession(store: Store, requests: ChecklistRequests
   }
   function wording(review: Review, show: ShowReview) {
     if (!store.get().can.reword) return;
-    return askModel(() => retryChecklistWording(store, review), (next) => {
-      show({ kind: 'retry', ...next, open: false });
+    const requested = currentTexts;
+    return flight.ask(() => retryChecklistWording(store, review), (next) => {
+      // Wording uses the imported items. General's items are only inputs to duplicate matching.
+      const changed = requested.length !== currentTexts.length
+        || requested.some((text, index) => text !== currentTexts[index]);
+      if (!changed) show({ kind: 'retry', ...next, open: false });
     });
   }
   function next(plan: ReviewPlan, show: ShowReview) {
