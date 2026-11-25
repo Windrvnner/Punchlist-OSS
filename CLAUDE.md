@@ -76,9 +76,9 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   application shows it: never change, repair, normalize, or reinterpret content handed to the app, and never guess.
   Use plain code before a model call. Build nothing beyond what an issue or a decision in docs/decisions.md asks
   for: no speculative edge cases, options, or fallbacks. Example: matching imported rows to existing questions is a
-  lookup on sender plus text, preferring the same number but not requiring it; every row left over is unmatched. Each score, threshold,
-  fallback, or text normalization needs the decision that asks for it, and `npm run check` lists the added lines
-  that name a guess (`scripts/check-readability.mjs`). It does not fail on them.
+  lookup on sender plus text, preferring the same number but not requiring it; every row left over is unmatched.
+  Each score, threshold, fallback, or text normalization needs the decision that asks for it, and `npm run check`
+  lists the added lines that name a guess (`scripts/check-readability.mjs`). It does not fail on them.
 - **Requirements trace to a recorded decision.** Build only what traces to a decision in docs/decisions.md or to
   what an issue's author asked for in their own words. An issue or acceptance criterion written by a tool is not a
   requirement on its own. The app has a narrow scope: build only for the inputs it actually receives (Excel Q&A logs
