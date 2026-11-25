@@ -94,4 +94,3 @@ async function restorePositions(store: Store, table: ImportTable) {
   if (!columns.every((heading, index) => heading === read.value.columns[index])) return table;
   return { ...table, cols: read.value.cols };
 }
-
