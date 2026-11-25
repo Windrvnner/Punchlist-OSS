@@ -340,7 +340,7 @@ const apart = (a, b) => !a || !b || a.r <= b.l || b.r <= a.l || a.b <= b.t || b.
   const sheet = (name, parts) => { const grid = []; for (const [origin, cells] of parts) { const m = /^([A-Z])(\d+)$/.exec(origin); const c0 = m[1].charCodeAt(0) - 65, r0 = +m[2] - 1; cells.forEach((row, i) => { row.forEach((v, j) => { while (grid.length <= r0 + i) grid.push([]); const r = grid[r0 + i]; while (r.length <= c0 + j) r.push(''); r[c0 + j] = String(v); }); }); } return { name, grid }; };
   await page.evaluate((s) => { window.__sheets = s; }, {
     'Proseware log.xlsx': [sheet('Cover', [['B3', [['Project Proseware'], ['Strictly confidential']]]]), sheet('Q&A', [['D2', [['Project Proseware: lender Q&A log'], [], ['Prepared November 9, 2026']]], ['D6', [['#', 'Question', 'Submitted by', 'Response'], [1, 'Is the EPC wrap fixed price?', 'Lender A', 'Yes, lump sum turnkey.'], [2, 'Who holds the interconnection agreement?', 'Lender A', '']]]])],
-    'odd.xlsx': [sheet('Log', [['B2', [['Queries', 'for', 'the sponsor']]], ['B5', [['Ref', 'Lender query', 'Sponsor reply'], ['A1', 'Is the debt sized on P90?', 'Yes']]]])],
+    'odd.xlsx': [sheet('Log', [['B2', [['Queries', 'for', 'the sponsor']]], ['B5', [['Ref', 'Lender RFI', 'Sponsor reply'], ['A1', 'Is the debt sized on P90?', 'Yes']]]])],
   });
   const file = path.join(tmp, 'Proseware log.xlsx'); fs.writeFileSync(file, 'PK\u0003\u0004');               // the stand-in takes its sheets from __sheets
   await page.goto(URL + '#qa-' + id); await page.waitForSelector('#qa-cols'); await page.click('#qa-cols'); await page.click('#qa-import'); await page.setInputFiles('#im-file', file); await page.waitForSelector('.immap');
@@ -370,7 +370,7 @@ const apart = (a, b) => !a || !b || a.r <= b.l || b.r <= a.l || a.b <= b.t || b.
     const prop = await at();
     await page.selectOption('[data-immap="n"]', ''); const changed = await page.evaluate(() => document.querySelector('[data-immap="n"]').value);
     await page.click('#im-restart'); await page.click('#im-restart-ask-go'); await page.waitForSelector('#im-drop'); await page.keyboard.press('Escape'); await page.waitForSelector('.imdlg', { state: 'detached' });
-    say('ai-proposes-the-layout-and-the-person-decides', !/proposed by AI/.test(byHand.file) && !byHand.go && byHand.ask && prop.row === '5' && prop.q === 'Lender query' && prop.first[0] === 'Is the debt sized on P90?' && prop.go && changed === '', JSON.stringify({ byHand, prop: [prop.row, prop.q, prop.line] })); }
+    say('ai-proposes-the-layout-and-the-person-decides', !/proposed by AI/.test(byHand.file) && !byHand.go && byHand.ask && prop.row === '5' && prop.q === 'Lender RFI' && prop.first[0] === 'Is the debt sized on P90?' && prop.go && changed === '', JSON.stringify({ byHand, prop: [prop.row, prop.q, prop.line] })); }
 
   // a waiting draft stands in the response's place; the status control stays. Use as response makes it the response,
   // which can then be typed over

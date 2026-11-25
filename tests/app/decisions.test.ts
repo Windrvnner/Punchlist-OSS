@@ -27,7 +27,7 @@ for (const c of COMMANDS) registry.set(c.name, c);
 let t = 0; const clock = { now: () => new Date(Date.UTC(2026, 10, 9, 16, 0, 0, t++)).toISOString() };
 let seq = 0; const ids = { next: (p: string) => `${p}_01HYYYYYYYYYYYYYYYV${String(seq++).padStart(7, '0')}` };
 /** a log that doesn't start at A1, on the second sheet, with headings the app's own rules don't know: as LibreOffice reads it */
-const ODD: Sheet[] = [{ name: 'Cover', grid: [['Project Proseware'], ['Confidential']] }, { name: 'Log', grid: [[], ['', 'Queries', 'for', 'the sponsor'], [], [], ['', 'Ref', 'Lender query', 'Sponsor reply'], ['', 'A1', 'Is the EPC wrap fixed price?', 'Yes']] }];
+const ODD: Sheet[] = [{ name: 'Cover', grid: [['Project Proseware'], ['Confidential']] }, { name: 'Log', grid: [[], ['', 'Queries', 'for', 'the sponsor'], [], [], ['', 'Ref', 'Lender RFI', 'Sponsor reply'], ['', 'A1', 'Is the EPC wrap fixed price?', 'Yes']] }];
 /** the stand-in's CSV reader, and "odd.xlsx" read as LibreOffice would read it */
 const codec: SpreadsheetCodec = { ...csvCodec, async read(bytes, name, opts) { if (name !== 'odd.xlsx') return csvCodec.read(bytes, name, opts); const t = tableFrom(ODD, opts); return t ? { ok: true, value: t } : { ok: false, error: { kind: 'invalid', message: 'The file has no rows' } }; } };
 function make(local = new MemoryLocal(), ai: Record<string, unknown> = {}) {
@@ -381,17 +381,17 @@ describe('more decisions', () => {
   it('the model can propose where the table is when the headings are in words the app does not know; the proposal is checked against the file', async () => {
     const m = make(); await m.store.boot();
     const first = await readImportBytes(m.store, 'odd.xlsx', odd()); if (!first.ok) throw new Error('read');
-    expect(first.value.mapping.text).toBeNull();                               // the app's own rules do not know "Lender query"
+    expect(first.value.mapping.text).toBeNull();                               // the app's own rules do not know "Lender RFI"
     const p = await proposeLayout(m.store, first.value);
     expect(p.ok).toBe(true); if (!p.ok) return;
-    expect([p.value.sheet, p.value.headerRow, p.value.columns, p.value.proposedByAi]).toEqual(['Log', 5, ['Ref', 'Lender query', 'Sponsor reply'], true]);
+    expect([p.value.sheet, p.value.headerRow, p.value.columns, p.value.proposedByAi]).toEqual(['Log', 5, ['Ref', 'Lender RFI', 'Sponsor reply'], true]);
     expect(p.value.mapping).toMatchObject({ n: 0, text: 1, response: 2 });
     expect(prepareImport(p.value.rows, p.value.mapping, p.value.lines).rows.map((r) => [r.text, r.response, r.line])).toEqual([['Is the EPC wrap fixed price?', 'Yes', 6]]);
   });
 
   it('a proposal that does not fit the file is refused rather than applied', async () => {
     const bytes = odd();
-    for (const bad of [{ sheet: 'No such sheet', headerRow: 5, fields: { text: 'Lender query' } }, { sheet: 'Log', headerRow: 5, fields: { text: 'A heading that is not there' } }, { sheet: 'Log', headerRow: 2.5, fields: { text: 'Lender query' } }, { sheet: 'Log', headerRow: 5, fields: {} }]) {
+    for (const bad of [{ sheet: 'No such sheet', headerRow: 5, fields: { text: 'Lender RFI' } }, { sheet: 'Log', headerRow: 5, fields: { text: 'A heading that is not there' } }, { sheet: 'Log', headerRow: 2.5, fields: { text: 'Lender RFI' } }, { sheet: 'Log', headerRow: 5, fields: {} }]) {
       const m = make(new MemoryLocal(), { layout: async () => ({ ok: true, value: bad }) }); await m.store.boot();
       const first = await readImportBytes(m.store, 'odd.xlsx', bytes); if (!first.ok) throw new Error('read');
       expect((await proposeLayout(m.store, first.value)).ok).toBe(false);

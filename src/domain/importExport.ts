@@ -24,7 +24,34 @@ export function findHeaderRow(table: string[][]): number {
   return 0;
 }
 
+const QUESTION_WORDS = ['question', 'questions', 'request', 'requests', 'query', 'queries', 'item', 'items'];
+/** words that make a heading about something else than the question itself ("Question No.", "Response to request") */
+const NOT_THE_QUESTION = ['no', 'number', 'num', 'ref', 'id', 'by', 'from', 'date', 'status', 'response', 'answer',
+  'reply', 'priority', 'category', 'workstream', 'owner', 'asked', 'raised', 'received'];
+/**
+ * The question column when no heading is exactly one of the usual names: the first heading with a question word among
+ * its words and none that makes it about something else ("Diligence Question", "Information Request"). Used only in a
+ * row where another column is a usual name too (a number, response or who asked), so that a title above the table is
+ * not taken for headings. It spares a model call for a layout that plain words settle (#1002).
+ */
+function looseQuestionColumn(columns: string[]): number | null {
+  const wordsOf = (heading: string) => String(heading ?? '').toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  const at = columns.findIndex((heading) => {
+    const words = wordsOf(heading);
+    return words.some((w) => QUESTION_WORDS.includes(w)) && !words.some((w) => NOT_THE_QUESTION.includes(w));
+  });
+  return at < 0 ? null : at;
+}
+
 export function suggestMapping(columns: string[]): Mapping {
+  const mapping = suggestedFields(columns);
+  const knowsAnotherColumn = Object.values(mapping).some((at) => at != null);
+  if (mapping.text == null && knowsAnotherColumn) mapping.text = looseQuestionColumn(columns);
+  return mapping;
+}
+
+/** each field's column by its usual heading, exactly */
+function suggestedFields(columns: string[]): Mapping {
   const norm = (c: string) => String(c ?? '').toLowerCase().replace(/[^a-z#]/g, '');
   const find = (...keys: string[]) => { const i = columns.findIndex((c) => keys.includes(norm(c))); return i < 0 ? null : i; };
   return {

@@ -49,13 +49,13 @@ describe('finding where the table starts', () => {
   });
 
   it('the person can name the heading row when the guess is wrong, or when the headings are in words we do not know', () => {
-    const odd = [['Ref', 'Lender query', 'Sponsor reply'], ['A1', 'Is the EPC wrap fixed price?', 'Yes']];
+    const odd = [['Ref', 'Lender RFI', 'Sponsor reply'], ['A1', 'Is the EPC wrap fixed price?', 'Yes']];
     const bytes = book({ Log: [{ cells: [['Queries', 'for', 'the sponsor']], origin: 'A1' }, { cells: odd, origin: 'A4' }] });
     const guess = read(bytes);
     // nothing recognizable: the first row with several cells
     expect(guess.headerRow).toBe(1);
     const said = read(bytes, { headerRow: 4 });
-    expect(said.columns).toEqual(['Ref', 'Lender query', 'Sponsor reply']); expect(said.rows).toEqual([['A1', 'Is the EPC wrap fixed price?', 'Yes']]); expect(said.lines).toEqual([5]);
+    expect(said.columns).toEqual(['Ref', 'Lender RFI', 'Sponsor reply']); expect(said.rows).toEqual([['A1', 'Is the EPC wrap fixed price?', 'Yes']]); expect(said.lines).toEqual([5]);
     expect(read(bytes, { headerRow: 999 }).headerRow).toBe(5);               // out of range lands on the last row, not an error
   });
 

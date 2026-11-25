@@ -321,7 +321,7 @@ export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => 
     if (hit) { loadIntoStore(opts, hit.sources.map((x: any) => x.docId).filter(Boolean)); return { status: 'found' as const, text: `The documents bear on this: ${String(hit.body[0] || hit.title).replace(/\s*\[\d+\]/g, '')}`, sources: hit.sources.slice(0, 2) }; }
     return { status: 'none' as const, text: '', sources: [] };
   }); },
-  // Stand-in for the model: reads headings the app's own rules do not know ("Lender query", "Sponsor reply", "Ref").
+  // Stand-in for the model: reads headings the app's own rules do not know ("Lender RFI", "Sponsor reply", "Ref").
   layout: async (i) => { const g = await gate(opts, 'layout', () => {
     const RULES: [string, RegExp][] = [['text', /question|query|request|rfi|issue raised/i], ['respondedBy', /(respon\w*|answer\w*|repl\w*) (by|from)|respondent|responder|responding (party|firm)/i], ['response', /response|answer|reply/i], ['n', /^(#|no\.?|ref\.?|number|id|q ?no\.?)$/i], ['status', /status|state/i], ['workstream', /workstream|category|area|topic/i], ['priority', /priority|urgency/i], ['responded', /(date (responded|answered)|response date)/i], ['received', /received|date raised|raised on/i], ['askedBy', /submitted by|raised by|asked by|from|party|lender/i]];
     for (const s of i.sheets) for (const [at, row] of s.rows.entries()) {
