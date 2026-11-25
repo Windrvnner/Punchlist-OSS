@@ -194,10 +194,8 @@ export function NewDealDialog() {
   const create = async (anyway = false) => {
     if (creating() || kept.busy()) return;     // a folder still being read is part of what is being created
     if (needName) return;
-    // only the path that was added is cleared: one typed during its read stays (#35)
-    const typed = path;
-    const typedTaken = () => setPath((now) => (now === typed ? '' : now));
-    const submit = { form: nd, typed, existing: existing ?? undefined, anyway, addPath, typedTaken };
+    const typedTaken = () => setPath('');
+    const submit = { form: nd, typed: path, existing: existing ?? undefined, anyway, addPath, typedTaken };
     const { done, deal } = await submitDealForm(store, submit);
     if (!done) return;
     close();
@@ -299,9 +297,9 @@ function PasteField({ path, setPath, add, busy }: {
  * so a deal is never created only to be set up afterwards.
  */
 function Kinds({ kinds, set }: { kinds: DealKinds; set: (k: DealKinds) => void }) {
-  const s = useAppState();
+  const state = useAppState();
   const field = (label: string, k: keyof DealKinds) => {
-    const names = checklistListCounts(s, k);
+    const names = checklistListCounts(state, k);
     return (<div><span class="lbl" id={`nd-${k}-l`}>{label}</span>{names.length
       ? <PickList id={`nd-${k}`} className="field" label={label} names={names} cur={kinds[k] ?? ''} empty="None" float end={k === 'technology'} onPick={(v) => set({ [k]: v })} />
       : <input class="field" id={`nd-${k}`} aria-labelledby={`nd-${k}-l`} placeholder="Not set" maxLength={80} value={kinds[k] ?? ''} onInput={(e) => set({ [k]: (e.currentTarget as HTMLInputElement).value })} />}</div>);

@@ -124,6 +124,30 @@ describe('submitting the deal form', () => {
     expect(typedTaken).toHaveBeenCalledOnce();
   });
 
+  it('takes a typed path already on the deal without reading it, and adds the folders waiting', async () => {
+    const store = await fixture();
+    const { deal } = await createDealFromForm(store, { ...form, folders: ROOM.slice(0, 40) });
+    const scan = vi.spyOn(store.services.docs, 'scanFolder');
+    store.ui({ newDeal: { ...form, folders: ROOM.slice(40), forDeal: deal!.id } });
+    const { submit, typedTaken } = submitting(store, ROOM[12].path.toUpperCase(), store.get().deals[deal!.id]);
+    expect(await submitDealForm(store, submit)).toEqual({ done: true });
+    expect(scan).not.toHaveBeenCalled();
+    expect(typedTaken).toHaveBeenCalledOnce();
+    expect(store.get().deals[deal!.id].folders.map(({ path }) => path)).toEqual(ROOM.map(({ path }) => path));
+  });
+
+  it('holds the form busy from the press while the typed path is read (#36)', async () => {
+    const store = await fixture();
+    let finish!: (value: Awaited<ReturnType<Store['services']['docs']['scanFolder']>>) => void;
+    vi.spyOn(store.services.docs, 'scanFolder').mockImplementation(() => new Promise((done) => { finish = done; }));
+    store.ui({ newDeal: { ...form, folders: ROOM.slice(0, 5), error: 'Couldn’t read D:/Earlier' } });
+    const submitted = submitDealForm(store, submitting(store, ROOM[5].path).submit);
+    expect(store.get().ui.newDeal).toMatchObject({ busy: true, error: '' });
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    finish(ok({ files: ROOM[5].files, size: ROOM[5].size }));
+    expect((await submitted).deal!.folders).toHaveLength(6);
+  });
+
   it('asks about a likely twin first, and creates the deal once asked to anyway', async () => {
     const store = await fixture();
     await createDealFromForm(store, form);
