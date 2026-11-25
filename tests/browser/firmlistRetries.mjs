@@ -50,7 +50,8 @@ async function sheetFile(page, rows, { name = 'Checklist workbook.xlsx', first, 
     const sheet = (name, item) => ({ name, grid: ['Item', item, ...rows].map((value) => [value]) });
     window.__sheets = { [name]: [sheet('Main', first), sheet('Appendix', second)] };
   }, { name, rows, first, second });
-  return { name, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.alloc(0) };
+  const mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  return { name, mimeType, buffer: Buffer.alloc(0) };
 }
 
 const failed = (kind) => ({ ok: false, error: { kind, message: kind } });
