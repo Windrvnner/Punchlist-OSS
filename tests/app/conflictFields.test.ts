@@ -27,10 +27,10 @@ const clash = (versions: ConflictVersion[]): Pick<Conflict, 'versions'> => ({ ve
 describe('the fields compared across two versions of a record', () => {
   it('shows only what differs, in reading order, across 104 questions changed on two PCs', () => {
     const texts = portfolioQuestions().slice(0, 104);
-    for (const [at, text] of texts.entries()) {
+    for (const [index, text] of texts.entries()) {
       const answered = { response: `Lender consent received for ${text}`, status: 'answered', respondedBy: 'Counsel' };
-      const here = version('here', question(at + 1, text, answered));
-      const there = version('there', question(at + 1, text, { priority: 'Medium' }));
+      const here = version('here', question(index + 1, text, answered));
+      const there = version('there', question(index + 1, text, { priority: 'Medium' }));
       expect(comparedFields(clash([here, there]), QUESTION_FIELDS)).toEqual({
         shown: ['response', 'status', 'priority', 'respondedBy'], statusOnLine: false,
       });
@@ -60,5 +60,39 @@ describe('the fields compared across two versions of a record', () => {
     const blank = version('here', question(1, ' ', { response: '' }));
     expect(comparedFields(clash([blank, version('there', null, true)]), QUESTION_FIELDS))
       .toEqual({ shown: [], statusOnLine: true });
+  });
+
+  it('with a delete, shows the words only the deleted copy holds', () => {
+    const text = portfolioQuestions()[30];
+    const cleared = version('here', question(31, text, { response: '' }));
+    const deletedCopy = version('there', question(31, text, { response: 'Covered by the title policy' }), true);
+    expect(comparedFields(clash([cleared, deletedCopy]), QUESTION_FIELDS).shown).toEqual(['text', 'response']);
+  });
+
+  it('leaves the status out of the rows with a delete, wherever it falls in the order', () => {
+    const fields = ['status', 'text', 'response'];
+    const kept = version('here', question(5, portfolioQuestions()[4], { response: 'Yes' }));
+    expect(comparedFields(clash([kept, version('there', null, true)]), fields).shown).toEqual(['text', 'response']);
+  });
+
+  it('compares findings, checklist items and deals in their own reading order', () => {
+    const findingFields = ['title', 'body', 'status', 'workstream', 'note', 'reviewed', 'sources', 'updated', 'origin'];
+    const finding = { title: 'Lender consent missing for the holdco loan', body: ['No consent in the data room'],
+      status: 'open', workstream: 'Financing' } as unknown as ConflictVersion['data'];
+    const deletedFinding = version('there', { ...finding!, status: 'closed' } as ConflictVersion['data'], true);
+    expect(comparedFields(clash([version('here', finding), deletedFinding]), findingFields))
+      .toEqual({ shown: ['title', 'body'], statusOnLine: true });
+
+    const item = (off: boolean) => ({ text: portfolioQuestions()[3], off }) as unknown as ConflictVersion['data'];
+    expect(comparedFields(clash([version('here', item(true)), version('there', item(false))]), ['off', 'text']).shown)
+      .toEqual(['off']);
+
+    const dealFields = ['name', 'group', 'counterparty', 'product', 'sector', 'technology', 'folders', 'milestone'];
+    const deal = (extra: Record<string, unknown>) => ({ name: 'Lucérne', group: 'live',
+      counterparty: 'Northwind Infrastructure', sector: 'Solar', ...extra }) as unknown as ConflictVersion['data'];
+    const here = deal({ milestone: 'Signing', group: 'monitor' });
+    const there = deal({ milestone: 'Closing', sector: 'Wind' });
+    expect(comparedFields(clash([version('here', here), version('there', there)]), dealFields))
+      .toEqual({ shown: ['group', 'sector', 'milestone'], statusOnLine: false });
   });
 });
