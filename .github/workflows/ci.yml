@@ -48,8 +48,11 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      # the tests that convert Word and spreadsheet files need LibreOffice at /usr/bin/soffice
-      - run: sh scripts/ci-apt-install.sh libreoffice-writer libreoffice-calc
+      # the tests that convert Word and spreadsheet files need LibreOffice at /usr/bin/soffice, and the two that need
+      # more get it here, so no test is skipped in CI: Impress for a presentation, Carlito for column widths
+      - run: >-
+          sh scripts/ci-apt-install.sh libreoffice-writer libreoffice-calc
+          libreoffice-impress fonts-crosextra-carlito
       - run: npm ci
       # as in check:all: LibreOffice must convert a workbook, and its tests then run on it rather than skip
       - run: node scripts/office-check.mjs
