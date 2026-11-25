@@ -8,12 +8,14 @@
  */
 import type { Store } from './store';
 import type { Attachment } from './state';
+import { AttachmentRecovery, recoveredAttachmentSource, type RecoveredSource } from './attachmentRecovery';
 import { AttachDocumentToFinding } from './commands/findings';
 import { hasTexts, keptDrafts } from './keptText';
 import { control } from '../control';
 
 /** how many files can go with one message: as many documents as one model call is given */
 export const MAX_ATTACHED = control.limits.docsPerCall;
+const WAITING_FOR_ATTACHMENTS = 'Still attaching — send when it finishes';
 
 type AttachmentTarget = Pick<Attachment, 'dealId' | 'findingId' | 'conv'>;
 const retryTargets = new WeakMap<() => void, AttachmentTarget>();
@@ -46,6 +48,7 @@ export async function attachFiles(store: Store, ctx: AttachmentTarget, files: Fi
         return;
       }
       store.ui((ui) => ({ attachments: ui.attachments.map((a) => (a.id === id ? { ...a, state: 'done' as const, doc: r.value.doc, docId: r.value.docId } : a)) }));
+      carryPublishedUpload(store, ctx.dealId, id);
       store.touchCached();
     })();
   }
@@ -105,8 +108,13 @@ export function keepAttachments(store: Pick<Store, 'get' | 'ui' | 'subscribe'>):
 
 /** each copy's deleted deal by the copy's id, while the app runs: a file attached as a copy is made is carried later */
 const copiedFrom = new WeakMap<Store, Map<string, string>>();
-/** the carrying under way, so a send made meanwhile waits for it rather than find its file missing */
-const carrying = new WeakMap<Store, Promise<unknown>>();
+const attachmentRecovery = new WeakMap<Store, AttachmentRecovery>();
+
+/** An upload that finished after the chip moved published under the original deal (#744). */
+function carryPublishedUpload(store: Store, original: string, id: string) {
+  const copy = store.get().ui.attachments.find((chip) => chip.id === id)?.dealId;
+  if (copy && copy !== original) void attachmentRecovery.get(store)?.queue(original, copy);
+}
 
 /** The attachment, moved to the copy's ids when its deal was kept as a copy; else as it was. */
 function movedAttachment<T extends AttachmentTarget>(attachment: T, ids: Record<string, string>): T {
@@ -131,7 +139,9 @@ function moveRetryTargets(store: Store, ids: Record<string, string>) {
  * conversation to the copy, as its typed text does (renameKept), and the files attached on the deal become the copy's.
  */
 export function followCopies(store: Store): () => void {
-  return store.onRenamed((ids) => {
+  const recovery = new AttachmentRecovery(store);
+  attachmentRecovery.set(store, recovery);
+  const stopRenames = store.onRenamed((ids) => {
     // the deal's own id among its records' (a deal's id starts d_), whether or not the copy has loaded yet
     const deals = Object.entries(ids).filter(([was, now]) => was !== now && was.startsWith('d_'));
     if (!deals.length) return;
@@ -139,13 +149,16 @@ export function followCopies(store: Store): () => void {
     store.ui((ui) => ({ attachments: ui.attachments.map((attachment) => movedAttachment(attachment, ids)) }));
     const from = copiedFrom.get(store) ?? new Map<string, string>();
     copiedFrom.set(store, from);
-    for (const [was, now] of deals) from.set(now, was);
-    const docs = store.services.docs;
-    if (!docs.carryAttached) return;
-    const carried = deals.map(([was, now]) => docs.carryAttached!(was, now));
-    // a carry that fails is tried again at the next send; it never stops a send by itself
-    carrying.set(store, Promise.all([carrying.get(store), ...carried]).catch(() => undefined));
+    for (const [was, now] of deals) {
+      from.set(now, was);
+      if (store.services.docs.carryAttached) void recovery.queue(was, now);
+    }
   });
+  return () => {
+    stopRenames();
+    recovery.stop();
+    if (attachmentRecovery.get(store) === recovery) attachmentRecovery.delete(store);
+  };
 }
 
 /** Whether a deal has been kept here as a copy (deleted on another PC) while the app runs. */
@@ -153,18 +166,32 @@ export const dealCopied = (store: Store, dealId: string) =>
   [...(copiedFrom.get(store)?.values() ?? [])].includes(dealId);
 
 /** Of these documents of a deal, those this PC can't send now. A file attached as a copy was made is carried first. */
-async function unsendableOf(store: Store, dealId: string, docIds: string[]): Promise<string[]> {
+async function unsendableOf(store: Store, dealId: string, docIds: string[]): Promise<string[] | 'recovering'> {
   const docs = store.services.docs;
   if (!docs.unsendable || !docIds.length) return [];
-  await carrying.get(store);
+  const recovery = attachmentRecovery.get(store);
+  const hadCarry = recovery?.waiting(dealId);
+  await recovery?.run(dealId);
   const first = await docs.unsendable(dealId, docIds);
-  // not checked (the shared folder can't be reached just now): the send goes ahead and says so itself if it fails
-  if (!first.ok || !first.value.length) return [];
-  const original = copiedFrom.get(store)?.get(dealId);
-  if (!original || !docs.carryAttached) return first.value;
-  await docs.carryAttached(original, dealId);
-  const again = await docs.unsendable(dealId, first.value);
-  return again.ok ? again.value : first.value;
+  if (first.ok && !first.value.length) return [];
+  if (recovery?.waiting(dealId)) return 'recovering';
+  // If the folder could not be checked, the send reports a failure itself.
+  if (!first.ok) return [];
+  if (hadCarry || !docs.carryAttached || !recovery) return first.value;
+  return carryFromRecoveredSource(store, recovery, dealId, first.value);
+}
+
+/** Carry the files of a copy made before this run from the deal it came from, then check again (#744). */
+async function carryFromRecoveredSource(store: Store, recovery: AttachmentRecovery, dealId: string, missing: string[]) {
+  const known = copiedFrom.get(store)?.get(dealId);
+  const found: RecoveredSource = known ? { state: 'found', id: known } : await recoveredAttachmentSource(store, dealId);
+  // A lookup that could not be made says nothing about the files: try again later rather than call them missing.
+  if (found.state === 'unknown') return 'recovering';
+  if (found.state === 'none') return missing;
+  await recovery.queue(found.id, dealId);
+  const again = await store.services.docs.unsendable!(dealId, missing);
+  if (recovery.waiting(dealId) && (!again.ok || again.value.length)) return 'recovering';
+  return again.ok ? again.value : missing;
 }
 
 /** Chips of these files show whether their file was found, so a person can see which to attach again (#671). */
@@ -185,6 +212,10 @@ function markMissing(store: Store, dealId: string, checked: string[], missing: s
 export async function filesSendable(store: Store, dealId: string, files: { doc: string; docId: string }[]) {
   const checked = files.map((file) => file.docId);
   const missing = await unsendableOf(store, dealId, checked);
+  if (missing === 'recovering') {
+    store.toast(WAITING_FOR_ATTACHMENTS);
+    return false;
+  }
   markMissing(store, dealId, checked, missing);
   if (!missing.length) return true;
   const names = [...new Set(files.filter((file) => missing.includes(file.docId)).map((file) => file.doc))];
@@ -227,7 +258,7 @@ export async function chipsSendable(store: Store, key: string) {
     for (;;) {
       const chips = composerChips(store.get(), key);
       if (chips.some((chip) => chip.state === 'pending')) {
-        store.toast('Still attaching — send when it finishes');
+        store.toast(WAITING_FOR_ATTACHMENTS);
         return false;
       }
       // A file which finished attaching during the previous check is checked too.

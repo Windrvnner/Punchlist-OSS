@@ -6,12 +6,13 @@
  */
 import { z } from 'zod';
 import { define, type Upsert, type AuditDraft } from '../command';
+import type { State } from '../state';
 import { Finding, DealId, FindingId, ListPoint, Tombstone } from '../../domain/model';
 import { checkFinding } from '../../domain/transitions';
 import { ok, fail, notFound, rejected } from '../../domain/result';
 import { TITLE_MAX } from './findings';
 import { derivedId } from '../../domain/derivedId';
-import { key as wording } from '../../domain/checklist';
+import { key as wording, sha256Hex } from '../../domain/checklist';
 import { issuesListDestinations } from '../issuesListJoins';
 
 /** what a finding's history says when an import marks it: its page leaves it out of the last change, as the mark itself says it */
@@ -115,12 +116,16 @@ export const RevertIssuesList = define({
  */
 export const RemoveIssuesList = define({
   name: 'RemoveIssuesList',
-  input: z.object({ dealId: DealId, doc: z.string().min(1) }),
+  // Older journal entries still parse, but a retry needs the original approval.
+  input: z.object({ dealId: DealId, doc: z.string().min(1), approvedImpact: z.string().optional() }),
   targets: (s, i) => Object.values(s.findings).filter((f) => f.dealId === i.dealId && (f.onLists ?? []).some((m) => m.doc === i.doc)).map((f) => f.id),
   plan(state, input, ctx) {
     const d = state.deals[input.dealId];
     if (!d) return fail(notFound('Deal not found', input.dealId));
     const parts = removable(state, d.id, input.doc);
+    if (staleApproval(state, ctx.opId, input, parts)) {
+      return fail(rejected('This issues list changed. Review it again before removing it.'));
+    }
     if (!parts.made.length && !parts.joined.length) return fail(rejected('Nothing of this list is left to remove'));
     const upserts: Upsert[] = []; const removes = []; const audit: AuditDraft[] = [];
     for (const f of parts.made) {
@@ -128,7 +133,7 @@ export const RemoveIssuesList = define({
       removes.push({ kind: 'finding' as const, id: f.id, rev: f.rev });
       audit.push({ kind: 'deleted', recordId: f.id, dealId: d.id, text: f.title });
     }
-    const marked = parts.joined.map((f) => ({ findingId: f.id, marks: (f.onLists ?? []).filter((m) => m.doc === input.doc) }));
+    const marked = parts.joined.map((f) => ({ findingId: f.id, marks: listMarks(f, input.doc) }));
     for (const f of parts.joined) {
       const left = (f.onLists ?? []).filter((m) => m.doc !== input.doc);
       upserts.push({ kind: 'finding', record: { ...f, onLists: left.length ? left : undefined, updatedAt: ctx.at }, expectedRev: f.rev });
@@ -136,13 +141,50 @@ export const RemoveIssuesList = define({
     }
     const made = parts.made.map((f) => f.id);
     return ok({
-      dealId: d.id, upserts, removes, audit,
+      dealId: d.id, upserts, removes, audit, ...approvedSet(state, d.id, upserts),
       index: made.length ? { dealId: d.id, remove: made.map((id) => ({ kind: 'finding' as const, id })), add: made.map((id) => ({ kind: 'tombstone' as const, id })) } : undefined,
       inverse: { command: 'RestoreIssuesList', input: { dealId: d.id, made, marked, doc: input.doc } }, undoesSafely: true,
       message: `Removed ${plural(made.length, 'finding')}${parts.kept ? ` · ${plural(parts.kept, 'finding')} kept, changed since` : ''}`,
     });
   },
 });
+
+/** Whether the approval no longer matches the list, or a retry has none to match (#410). */
+function staleApproval(state: State, opId: string, input: { dealId: string; doc: string; approvedImpact?: string },
+  parts: ReturnType<typeof removable>) {
+  if (input.approvedImpact === undefined) return state.ops[opId]?.command === 'RemoveIssuesList';
+  return input.approvedImpact !== removalImpact(input.dealId, input.doc, parts);
+}
+
+/**
+ * The approval covers every finding of the deal, not only those the removal writes: a peer's mark added to another
+ * finding, or a new finding that carries the list, changes what was approved. Findings not written are held at their
+ * rev, and the set of findings must be the same at commit, so the store plans again on the newer state (#410).
+ */
+function approvedSet(state: State, dealId: string, upserts: Upsert[]) {
+  const written = new Set(upserts.map(({ record }) => record.id));
+  const all = Object.values(state.findings).filter((finding) => finding.dealId === dealId);
+  return {
+    expects: all.filter(({ id }) => !written.has(id)).map(({ id, rev }) => ({ kind: 'finding' as const, id, rev })),
+    expectsMembers: { dealId, kind: 'finding' as const, ids: all.map(({ id }) => id) },
+  };
+}
+
+const listMarks = (finding: Finding, doc: string) => (finding.onLists ?? []).filter((mark) => mark.doc === doc);
+
+function impactRows(findings: Finding[], doc: string) {
+  return findings.map((finding) => {
+    const marks = listMarks(finding, doc).map((mark) => JSON.stringify([mark.list, mark.n, mark.text, mark.at]));
+    return [finding.id, marks.sort()] as const;
+  }).sort(([left], [right]) => left.localeCompare(right));
+}
+
+/** Binds confirmation to the file, deal, exact findings, and list marks, regardless of row order (#410). */
+export function removalImpact(
+  dealId: string, doc: string, parts: Pick<ReturnType<typeof removable>, 'made' | 'joined'>,
+) {
+  return sha256Hex(JSON.stringify([dealId, doc, impactRows(parts.made, doc), impactRows(parts.joined, doc)]));
+}
 
 /**
  * Undo of a removal: the findings come back from Deleted, and the marks go back on the findings they were taken off. It

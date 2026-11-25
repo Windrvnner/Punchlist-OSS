@@ -2,6 +2,7 @@
 // repeating a finding and 4 an earlier point. Only those 27 are listed; the rest become findings, and every finding a
 // point is on says "#N on issues list". A list the stand-in reads from a text file is checked end to end too.
 import { launchChrome } from './chrome.mjs';
+import { checkRemovalApproval } from './issueslistRemoval.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
 const browser = await launchChrome();
@@ -31,6 +32,17 @@ async function tipAfter(page, findingId, show) {
   }));
   console.log('no tooltip:', JSON.stringify({ arrived: !!here, ...seen }));
   return '';
+}
+
+async function listStatus(page) {
+  return page.evaluate(() => {
+    const { findings, tombstones } = store.get();
+    return [
+      Object.keys(findings).length,
+      Object.values(findings).filter((finding) => finding.onLists?.length).length,
+      Object.keys(tombstones).length,
+    ].join('/');
+  });
 }
 
 for (const [w, h, scheme] of [[1280, 736, 'dark'], [1024, 640, 'light']]) {
@@ -179,7 +191,27 @@ for (const [w, h, scheme] of [[1280, 736, 'dark'], [1024, 640, 'light']]) {
   say(`Deleted lists the issues list with Remove (${w})`, btn === 'Deleted…' && labels.join() === 'Issues Lists'
     && row.name === LIST.replace(/\.pdf$/, '') && row.meta === '138 findings · 26 already raised' && row.go === 'Remove'
     && row.tip.startsWith('Send its 138 findings to Deleted') && row.over <= 0, JSON.stringify({ btn, row }));
-  await page.click('.deldlg [data-del="list"] button'); await page.waitForSelector('.deldlg [data-del="finding"]');
+  const removeList = page.locator('.deldlg [data-del="list"] button');
+  const beforeRemove = await listStatus(page);
+  for (const keep of ['button', 'Escape']) {
+    await removeList.click();
+    await page.waitForSelector('#ask-go', { timeout: 4000 });
+    const prompt = await page.textContent('#ask-title');
+    const impact = await page.textContent('#ask-text');
+    const safeFocus = await page.evaluate(() => document.activeElement?.id === 'ask-keep');
+    say(`Remove asks what will change and writes nothing before approval (${w}, ${keep})`,
+      prompt === `Remove ${LIST}?`
+      && impact === '138 findings go to Deleted. Marks are removed from 22 findings.'
+      && safeFocus && (await listStatus(page)) === beforeRemove, JSON.stringify({ prompt, impact, safeFocus }));
+    if (keep === 'Escape') await page.keyboard.press('Escape');
+    else await page.click('#ask-keep');
+    await removeList.waitFor();
+    await page.waitForFunction(() => document.activeElement?.matches('.deldlg [data-del="list"] button'));
+    say(`Cancel keeps the list and restores focus (${w}, ${keep})`, (await listStatus(page)) === beforeRemove);
+  }
+  await removeList.click();
+  await page.click('#ask-go');
+  await page.waitForSelector('.deldlg [data-del="finding"]');
   await page.waitForFunction(() => document.activeElement?.matches('.deldlg [data-restore]'), null, { timeout: 2000 }).catch(() => {});
   const removed = await page.evaluate(() => ({ n: Object.keys(store.get().findings).length, marked: Object.values(store.get().findings).filter((f) => f.onLists?.length).length, rows: document.querySelectorAll('.deldlg [data-del="finding"]').length, list: !!document.querySelector('.deldlg [data-del="list"]'), toast: store.get().ui.toasts.at(-1), focus: !!document.activeElement?.matches('.deldlg [data-restore]') }));
   say(`Remove sends its findings to Deleted and takes its marks off, with Undo (${w})`, removed.n === 126 && removed.marked === 0 && removed.rows === 138 && !removed.list && removed.toast?.text === 'Removed 138 findings' && removed.toast?.action?.label === 'Undo' && removed.focus, JSON.stringify({ ...removed, toast: removed.toast?.text }));
@@ -205,10 +237,16 @@ for (const [w, h, scheme] of [[1280, 736, 'dark'], [1024, 640, 'light']]) {
   const twins = await page.evaluate(() => [...document.querySelectorAll('.deldlg [data-del="list"]')].map((r) => ({ name: r.querySelector('b').textContent, meta: r.querySelector('.dmeta').textContent })));
   say(`two lists under one name are two rows, each with when it came in (${w})`, twins.length === 2 && twins.every((t) => t.name === LIST.replace(/\.pdf$/, '') && /^Imported \w{3} \d+, \d+:\d\d(:\d\d)? [AP]M · /.test(t.meta)) && twins[0].meta.endsWith('164 findings · 0 already raised') && twins[1].meta.endsWith('120 findings · 0 already raised'), JSON.stringify(twins));
   await page.locator('.deldlg [data-del="list"]').nth(1).locator('button').click();
+  const revisedTime = twins[1].meta.split(' · ')[0].replace(/^Imported /, '');
+  const revisedAsk = await page.textContent('#ask-title');
+  say(`Confirmation distinguishes revisions with the same name (${w})`,
+    revisedAsk === `Remove ${LIST} (imported ${revisedTime})?`, revisedAsk);
+  await page.click('#ask-go');
   await page.waitForFunction(() => document.querySelectorAll('.deldlg [data-del="list"]').length === 1 && /^Removed/.test(store.get().ui.toasts.at(-1)?.text ?? ''), null, { timeout: 5000 }).catch(() => {});
   const one = await page.evaluate(() => { const fs = Object.values(store.get().findings); return { n: fs.length, first: fs.filter((f) => f.title.startsWith('first wrote')).length, revised: fs.filter((f) => f.title.startsWith('revised')).length, rows: [...document.querySelectorAll('.deldlg [data-del="list"]')].map((r) => r.querySelector('.dmeta').textContent), toast: store.get().ui.toasts.at(-1)?.text }; });
   say(`Remove takes only the revised list; the first stays whole (${w})`, one.n === 126 + 164 && one.first === 164 && one.revised === 0 && one.toast === 'Removed 120 findings' && one.rows.length === 1 && one.rows[0] === '164 findings · 0 already raised', JSON.stringify(one));
   await page.keyboard.press('Escape'); await page.waitForSelector('.deldlg', { state: 'detached' });
+  await checkRemovalApproval(page, dealId, say, w);
   say(`no page errors (${w})`, page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }

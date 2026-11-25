@@ -57,6 +57,11 @@ export interface Transaction {
    * transaction is refused with a conflict. Nothing is written to these records (#88).
    */
   expects?: { kind: RecordKind; id: string; rev: number }[];
+  /**
+   * Read-only set precondition: the records of this kind that exist under the deal at commit must be exactly these ids,
+   * so a record that arrived after the plan, which no rev can name, refuses the transaction (#410).
+   */
+  expectsMembers?: { dealId: string; kind: RecordKind; ids: string[] };
   audit?: AuditEntry[];
   /** index membership changes: record ids filed under a deal. `remove` goes with a delete of the same record in the same transaction; on its own it takes nothing off, since a filed record is listed until it is deleted */
   index?: { dealId: string; add?: { kind: RecordKind; id: string }[]; remove?: { kind: RecordKind; id: string }[] };
@@ -354,9 +359,10 @@ export interface DocumentService {
   attach(dealId: string, file: { name: string; bytes: Uint8Array }): Promise<Result<{ doc: string; docId: string }>>;
   /**
    * A deal deleted on another PC has been kept here as a copy: the files attached on the deal become the copy's too
-   * (#117). Left out, a copy has no attached files of its own.
+   * (#117). Left out, a copy has no attached files of its own. The result says how many lines were written and how
+   * many files still cannot be sent from the copy, so a carry that wrote nothing is not taken as finished (#744).
    */
-  carryAttached?(fromDealId: string, toDealId: string): Promise<Result<void>>;
+  carryAttached?(fromDealId: string, toDealId: string): Promise<Result<{ written: number; unresolved: number }>>;
   /** Of these documents, those whose file this PC can't send now (#671). Left out, every document is sendable. */
   unsendable?(dealId: string, docIds: string[]): Promise<Result<string[]>>;
   /** ids of the documents loaded in this user's store right now, across all deals. Read-only; changes as the store rotates. */

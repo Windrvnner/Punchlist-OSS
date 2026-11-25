@@ -2054,3 +2054,26 @@ describe('this PC’s own changes, and waits that outlast a restart', () => {
     touch = true; expect(val(await second.sync()).outOfTouchSince).toBeUndefined();
   });
 });
+
+describe('a precondition on the set of records under a deal (#410)', () => {
+  const q = (id: string) => ({
+    kind: 'question' as const, id, data: { id, dealId: 'd1', text: 'Confirm the ratio.' }, expectedRev: null,
+  });
+  const filed = (...ids: string[]) => ({ dealId: 'd1', add: ids.map((id) => ({ kind: 'question' as const, id })) });
+  const sameSet = (ids: string[], write = 'q9') => ({
+    writes: [q(write)], expectsMembers: { dealId: 'd1', kind: 'question' as const, ids },
+  });
+
+  it('refuses a write when a record arrived, or went, since the plan read the set', async () => {
+    const A = pc('PC A', 'adoe'), B = pc('PC B', 'sroe');
+    val(await A.repo.transaction({ writes: [q('q1'), q('q2')], index: filed('q1', 'q2') }));
+    carry(A.shared, B.shared); val(await B.repo.sync());
+    expect(await B.repo.transaction(sameSet(['q1', 'q2']))).toMatchObject({ ok: true });
+    val(await A.repo.transaction({ writes: [q('q3')], index: filed('q3') }));
+    carry(A.shared, B.shared); val(await B.repo.sync());
+    const arrived = await B.repo.transaction(sameSet(['q1', 'q2'], 'q8'));
+    expect(arrived).toMatchObject({ ok: false, error: { kind: 'conflict', recordId: 'q3' } });
+    const gone = await B.repo.transaction(sameSet(['q1', 'q2', 'q3', 'q7'], 'q8'));
+    expect(gone).toMatchObject({ ok: false, error: { kind: 'conflict', recordId: 'q7' } });
+  });
+});
