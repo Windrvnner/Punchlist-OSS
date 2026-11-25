@@ -131,7 +131,7 @@ type MergeModel = NonNullable<Services['ai']['merge']>;
 
 let keptMerges: Map<string, MergeDraft> | undefined;
 let keptSides: Map<string, MergeFields> | undefined;
-// Keep the existing keys and load them only after kept text is initialized.
+// Keep the existing keys and load them after kept text is initialized.
 const mergeDrafts = () => keptMerges ??= keptDrafts('qa-merge', hasTexts('text', 'ai'));
 const mergeSides = () => keptSides ??= keptDrafts('qa-merge-sides', isMergeFields);
 const merging = new Set<string>();
@@ -140,6 +140,12 @@ const mergeListeners = new Set<(questionId: string, error?: string) => void>();
 function isMergeFields(value: unknown): value is MergeFields {
   return !!value && typeof value === 'object'
     && Object.values(value).every((side) => side === 'app' || side === 'log');
+}
+
+/** Load both maps before recovery can move saved drafts to the copied questions' IDs. */
+export function initializeResponseMergeDrafts() {
+  mergeDrafts();
+  mergeSides();
 }
 
 export function responseMergeView(questionId: string) {
