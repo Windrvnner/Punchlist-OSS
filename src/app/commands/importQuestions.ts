@@ -1,7 +1,7 @@
 /**
  * Import a prepared table into a deal's Q&A log as one transaction: every row
- * lands or none does. Merge matches each row to a question like an XLOOKUP: the same number and exact text, else the
- * exact text alone, never by similar words; it brings back a deleted question a row matches, and takes only the
+ * lands or none does. Merge matches each row to a question like an XLOOKUP: the same number, exact text and sender,
+ * else the exact text and sender alone, never by similar words; it brings back a deleted question a row matches, and takes only the
  * non-empty incoming fields; a row that matches nothing is a new question. Append always adds.
  * Status comes only from a mapped Status column. Undo restores each touched question to exactly what it
  * was before the batch — once, however many rows named it — and removes the
@@ -167,13 +167,17 @@ export const ImportQuestions = define({
 
 /**
  * Which question each row is, by row index: first the question with the row's number and exact text, then the one with
- * the exact text alone. `pools` are searched in order (live, then deleted); a question is taken by one row only.
+ * the exact text alone, each with the same sender. `pools` are searched in order (live, then deleted); a question is taken by one row only.
  */
 function matchExactly(rows: ImportRow[], pools: Question[][]): Map<number, string> {
   const matched = new Map<number, string>(); const taken = new Set<string>();
+  // who sent the question is part of the match, exactly as written; a file that names no sender in any row (no such
+  // column) is matched without it
+  const hasSenders = rows.some((row) => row.askedBy !== '');
   const find = (row: ImportRow, sameNumber: boolean) => {
     for (const pool of pools) {
-      const hit = pool.find((q) => !taken.has(q.id) && q.text === row.text && (!sameNumber || q.n === row.n));
+      const hit = pool.find((q) => !taken.has(q.id) && q.text === row.text && (!hasSenders || q.askedBy === row.askedBy)
+        && (!sameNumber || q.n === row.n));
       if (hit) return hit;
     }
     return undefined;

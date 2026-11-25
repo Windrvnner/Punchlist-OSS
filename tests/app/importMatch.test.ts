@@ -57,6 +57,30 @@ describe('a merge matches each row to its question exactly', () => {
   });
 });
 
+describe('a merge matches the sender too', () => {
+  const csv = (who: string) => `No.,Question,Submitted by,Response\n1,Same words,${who},Reply\n`;
+  it('the same question from another sender is a question of its own', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: rowsFrom(csv('Lender A')) });
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: rowsFrom(csv('Lender B')) })).ok).toBe(true);
+    expect(dealQuestions(store.get(), dealId).map((q) => `${q.askedBy}|${q.response}`)).toEqual(['Lender A|Reply', 'Lender B|Reply']);
+  });
+  it('the same sender, exactly as written, is the same question; a different capital is not', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: rowsFrom('No.,Question,Submitted by\n1,Same words,Lender A\n') });
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: rowsFrom(csv('Lender A')) });
+    expect(dealQuestions(store.get(), dealId)).toHaveLength(1);
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: rowsFrom(csv('lender a')) });
+    expect(dealQuestions(store.get(), dealId)).toHaveLength(2);
+  });
+  it('a file with no sender in any row matches without one', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: rowsFrom('No.,Question,Submitted by\n1,Same words,Lender A\n') });
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: rowsFrom('No.,Question,Response\n1,Same words,Reply\n') });
+    expect(dealQuestions(store.get(), dealId).map((q) => q.response)).toEqual(['Reply']);
+  });
+});
+
 describe('a row that matches a deleted question', () => {
   it('brings it back with the file\'s values, says so in the preview, and Undo deletes it again', async () => {
     const { store } = make(); const dealId = await deal(store);

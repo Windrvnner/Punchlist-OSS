@@ -98,7 +98,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A responder column is read as the response's author.
 - On import, real date cells are read as dates and plain numbers are not. An ambiguous date is settled by the row's other date, its neighbors, and the rule that no date is in the future; otherwise it is left blank and listed.
 - Marking imported questions that have a response as Answered is optional and off by default.
-- Merge looks each row up like an XLOOKUP: the question with the same number and exact text, else the one with the exact text alone; a row that matches neither is a new question. Nothing is matched by similar words. A row that matches a deleted question brings it back. "Will overwrite" is shown field by field first.
+- Merge looks each row up like an XLOOKUP: the question with the same number, exact text and sender (Submitted by), else the one with the exact text and sender; a file with no sender in any row is matched without one; a row that matches neither is a new question. Nothing is matched by similar words. A row that matches a deleted question brings it back. "Will overwrite" is shown field by field first.
 - The same list imported on two PCs makes one set of questions, with ids derived from the deal, number, party, and wording.
 - Two questions with the same number are both kept and marked; a person renumbers one. Undo, Restore, and a kept
   version's Restore bring a deleted question back under its own number, even when another question holds it (#13, #116).
