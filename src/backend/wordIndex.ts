@@ -38,6 +38,27 @@ export function countWords(text: string, first = text): DocWords {
   return { counts, length, title };
 }
 
+/** the words of a text counted a piece at a time as `countWords` counts them, the first making the title */
+export class WordTally {
+  private readonly counts = new Map<string, number>();
+  private length = 0;
+  private readonly title: string[] = [];
+
+  add(text: string): void {
+    for (const t of tokens(text)) {
+      const w = keep(t);
+      if (!w) continue;
+      this.counts.set(w, (this.counts.get(w) ?? 0) + 1);
+      this.length++;
+      if (this.title.length < TITLE_WORDS && !this.title.includes(w)) this.title.push(w);
+    }
+  }
+
+  words(): DocWords {
+    return { counts: this.counts, length: this.length, title: this.title };
+  }
+}
+
 /**
  * A deal's index in memory. Documents are numbered as they are read in, and each keeps its words as the line wrote them
  * (" word:count word:count "). Which documents use a word is looked up the first time that word is searched for, and

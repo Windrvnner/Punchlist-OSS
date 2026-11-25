@@ -31,10 +31,12 @@ import type { Folder } from './logRepository';
 import { BUSY_WAITS } from './nodeFolder';
 import type { StoreKeeper, WantedDoc } from './storeKeeper';
 import { pdfLook, pdfPages, shortExt, type Converter, type ConvertInfo, type ChangeList } from './convert';
+import type { SheetFile } from './convert';
 import { parseCsv, sheetPart, type Sheet } from '../domain/sheets';
 import { decodeText } from '../adapters/spreadsheet';
-import { topWords } from './words';
-import { countWords, type WordIndex } from './wordIndex';
+import { countInto, mostUsed, topWords } from './words';
+import { countWords, WordTally, type WordIndex } from './wordIndex';
+import { eachCsvCell } from './csvFile';
 import { officeText, DIRECT } from './officeText';
 import { families, roomPath, ATTACHED } from './families';
 import { coverOf } from './blacklines';
@@ -471,14 +473,48 @@ export function nodeDocuments(o: DocumentsOptions) {
     if (!o.convert?.sheets) throw new Error('no converter');
     return o.convert.sheets(at, asShown);
   }
-  /** the words a spreadsheet uses most; undefined when it could not be read, which is not the same as having none (it is read again) */
+  /** one sheet of a spreadsheet: its name, and each of its cells handed over as it is read */
+  interface SheetSource { name: string; each(onCell: (cell: string) => void): Promise<void> }
+  const fileCells = (sheet: SheetFile): SheetSource => ({
+    name: sheet.name,
+    each: (onCell) => eachCsvCell(sheet.path, onCell),
+  });
+  const gridCells = (sheet: Sheet): SheetSource => ({
+    name: sheet.name,
+    each: async (onCell) => {
+      for (const row of sheet.grid) row.forEach(onCell);
+    },
+  });
+  /** the sheets of an Excel-family file: CSV files read a piece at a time, or (no such converter) whole grids */
+  async function readSheets<T>(at: string, use: (sheets: SheetSource[]) => Promise<T>): Promise<T> {
+    if (/\.csv$/i.test(at)) return use([fileCells({ name: 'Sheet1', path: at })]);
+    const exportFiles = o.convert?.sheetFiles;
+    if (!exportFiles) return use((await sheetsOf(at)).map(gridCells));
+    return exportFiles(at, (files) => use(files.map(fileCells)));
+  }
+  /**
+   * The words a spreadsheet uses most; undefined when it could not be read, which is not the same as having none (it is
+   * read again). Read a cell at a time, so a spreadsheet of any size is read with the memory of one piece of it.
+   */
   async function sheetWords(at: string, dealId?: string, docId?: string): Promise<string[] | undefined> {
     try {
-      const sheets = await sheetsOf(at);
-      const text = sheets.map((sh) => sh.name).filter((n) => !/^Sheet\d+$/.test(n));                         // a name nobody gave a sheet says nothing
-      for (const sh of sheets) for (const row of sh.grid) for (const c of row) if (/\p{L}/u.test(c)) text.push(c);   // a cell with no letters is a number or a date
-      if (dealId && docId) o.index?.add(dealId, docId, countWords(text.join('\n')));        // sheet names come first, so they make its title
-      return topWords(text.join('\n'));
+      const tally = new WordTally();
+      const used = new Map<string, number>();
+      const take = (text: string) => {
+        tally.add(text);
+        countInto(used, text);
+      };
+      const takeCell = (cell: string) => {
+        if (/\p{L}/u.test(cell)) take(cell);        // a cell with no letters is a number or a date
+      };
+      await readSheets(at, async (sheets) => {
+        // a name nobody gave a sheet says nothing
+        for (const sheet of sheets) if (!/^Sheet\d+$/.test(sheet.name)) take(sheet.name);
+        for (const sheet of sheets) await sheet.each(takeCell);
+      });
+      // sheet names come first, so they make its title
+      if (dealId && docId) o.index?.add(dealId, docId, tally.words());
+      return mostUsed(used);
     } catch { return undefined; }
   }
 
@@ -524,7 +560,11 @@ export function nodeDocuments(o: DocumentsOptions) {
     // they arrive, and its pages and words are read from the copy on this PC, which is then removed. A few are brought at a
     // time, because a share is slow at opening files more than at sending them. They are still worked on, and recorded, one
     // at a time and in order. A file already known by its size and date, with nothing missing from its record, is not read.
-    const list = found.flatMap(({ folder, files }) => files.map((f) => ({ folder, f })));
+    // Spreadsheets are read last, the smallest first (#427): a very large one cannot hold up everything else.
+    const bySize = (a: { f: { size: number } }, b: { f: { size: number } }) => a.f.size - b.f.size;
+    const everyFile = found.flatMap(({ folder, files }) => files.map((f) => ({ folder, f })));
+    const isPaged = (x: { f: { abs: string } }) => paged(path.basename(x.f.abs));
+    const list = [...everyFile.filter(isPaged), ...everyFile.filter((x) => !isPaged(x)).sort(bySize)];
     const started = Date.now(); let reading = 0, readFrom = 0, readMs = 0, workMs = 0, bytes = 0, brought = 0;
     const need = (name: string, had: DocRecord | undefined) => (paged(name) && !DIRECT.test(name) ? had?.pages === undefined || had?.words === undefined : had?.words === undefined);
     const dir = inbox ? path.join(inbox, dealId) : null; if (dir) fs.rmSync(dir, { recursive: true, force: true });
@@ -579,17 +619,32 @@ export function nodeDocuments(o: DocumentsOptions) {
             const unindexed = !!o.index && !o.index.has(dealId, docId);   // this PC keeps its own index, so it reads the words of every file in its copy once
             // Word and PowerPoint: the text is read from the file, and it is converted only when first sent or opened.
             // One that cannot be read so (damaged, or locked with a password) goes to the converter, as before, which says whether it can make pages.
-            const direct = DIRECT.test(name); const wordsWanted = words === undefined || unindexed; let readDirect = false;
-            if (direct && wordsWanted) try { const r = officeText(fs.readFileSync(src), name); words = topWords(r.text); if (r.tracked && pages === undefined) tracked = r.tracked; o.index?.add(dealId, docId, countWords(r.text, r.first)); readDirect = true; } catch { /* to the converter */ }
+            const direct = DIRECT.test(name);
+            const wordsWanted = words === undefined || unindexed;
+            let readDirect = false;
+            if (direct && wordsWanted) {
+              try {
+                const r = officeText(fs.readFileSync(src), name);
+                words = topWords(r.text);
+                if (r.tracked && pages === undefined) tracked = r.tracked;
+                o.index?.add(dealId, docId, countWords(r.text, r.first));
+                readDirect = true;
+              } catch { /* to the converter */ }
+            }
             if (paged(name) && (direct ? wordsWanted && !readDirect : pages === undefined || wordsWanted)) {
               let stuck = !!failed;                                         // known not to turn into pages: it was not brought across, and is counted and named as before
               if (!stuck) try { const info: ConvertInfo = {}; const pdf = await asPdf({ docId, name, ...(had?.via !== undefined ? { via: had.via } : {}) }, src, info); if (pdf !== src) { via = o.convert?.id; if (info.tracked) tracked = info.tracked; } try { const look = await pdfLook(fs.readFileSync(pdf), Infinity); pages = look.pages; words = topWords(look.text); o.index?.add(dealId, docId, countWords(look.text, look.first)); if (PDF.test(name)) cover = coverOf(look.first) ?? undefined; } finally { if (pdf !== src) discard(docId); } }
               catch { stuck = true; unpagedHere.set(f.abs, { size: f.size, mtimeMs: f.mtimeMs }); }
               if (stuck && pages === undefined) { asPages = false; unpaged++; skipped.unpaged.push(f.rel); }      // pages it already had stay; only its words are missing
-            } else if (!paged(name) && !failed && (words === undefined || unindexed)) {
-              // a spreadsheet that cannot be read is listed without words, not as having none: it is read again when it changes or on the next start
-              words = await sheetWords(src, dealId, docId) ?? words;
-              if (words === undefined) { unread++; skipped.unread.push(f.rel); unpagedHere.set(f.abs, { size: f.size, mtimeMs: f.mtimeMs }); }   // still listed, by its name
+            } else if (!paged(name) && (words === undefined || unindexed)) {
+              // a spreadsheet that cannot be read is listed without words, not as having none (#427): it is read
+              // again when it changes or on the next start
+              if (!failed) words = await sheetWords(src, dealId, docId) ?? words;
+              if (words === undefined) {
+                unread++;
+                skipped.unread.push(f.rel);
+                unpagedHere.set(f.abs, { size: f.size, mtimeMs: f.mtimeMs });
+              }
             }
             workMs += Date.now() - t0;
             if (asPages) {
