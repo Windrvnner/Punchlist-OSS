@@ -23,7 +23,7 @@ function watch(B: PC) {
   const carried: [string, string][] = [];
   const sent: { dealId?: string; attachments?: { docId: string }[] }[] = [];
   const docs = B.store.services.docs as DocumentService;
-  docs.carryAttached = async (from, to) => { carried.push([from, to]); return ok(undefined); };
+  docs.carryAttached = async (from, to) => { carried.push([from, to]); return ok({ written: 1, unresolved: 0 }); };
   const ai = B.store.services.ai as AiService;
   const answer = ai.answer.bind(ai);
   ai.answer = async (input) => {
@@ -65,7 +65,7 @@ function standInDocumentFolders(B: PC, dealId: string, delayUpload: boolean) {
       return fail({ kind: 'unreachable', message: 'Folder unavailable' });
     }
     for (const id of source) destination.add(id);
-    return ok(undefined);
+    return ok({ written: source.size, unresolved: 0 });
   };
   docs.unsendable = async (deal, ids) => ok(ids.filter((id) => !(deal === dealId ? source : destination).has(id)));
   return { doc, docId, finishUpload, source, destination, carries, reconnect: () => { available = true; } };
@@ -178,5 +178,47 @@ describe('files attached and not yet sent on a deal another PC deletes (#117)', 
     const home = B.store.get().ui.attachments.filter((a) => a.conv === 'all:c1');
     expect(home.map((a) => a.dealId)).toEqual(['me_0123456789abcdef', 'me_0123456789abcdef']);
     stop();
+  });
+});
+
+describe('a recovered copy whose source cannot be looked up (#744)', () => {
+  it('is waiting, not missing, while the deleted deals cannot be listed, then sends once they can', async () => {
+    const { A, B, dealId, qid } = await twoPcs();
+    const docs = standInDocumentFolders(B, dealId, false);
+    const stop = followCopies(B.store);
+    try {
+      await attachFiles(B.store, { dealId, conv: convKey({ kind: 'deal', dealId }) }, [new File(['x'], docs.doc)]);
+      await expect.poll(() => B.store.get().ui.attachments[0]?.state).toBe('done');
+      await deleteUnseen(A, B, dealId, qid);
+      await expect.poll(() => B.store.get().ui.attachments[0]?.dealId).not.toBe(dealId);
+      const [kept] = B.store.get().ui.attachments;
+      stop();
+      // a restart that no longer remembers which deal the copy came from: the source is looked up
+      const reopened = new Store({ ...B.store.services, local: new MemoryLocal() }, []);
+      reopened.ui({ attachments: [kept] });
+      const list = reopened.services.repo.list.bind(reopened.services.repo);
+      let reachable = false;
+      reopened.services.repo.list = ((kind: string, ...rest: unknown[]) =>
+        !reachable && kind === 'tombstone' ? Promise.resolve(fail({ kind: 'unreachable', message: 'offline' }))
+          : (list as (...args: unknown[]) => unknown)(kind, ...rest)) as typeof reopened.services.repo.list;
+      const stopReopened = followCopies(reopened);
+      try {
+        await reopened.boot();
+        await expect(filesSendable(reopened, kept.dealId, [docs])).resolves.toBe(false);
+        expect(reopened.get().ui.attachments[0].missing).toBeUndefined();
+        reachable = true;
+        docs.reconnect();
+        await expect(filesSendable(reopened, kept.dealId, [docs])).resolves.toBe(true);
+        expect(reopened.get().ui.attachments[0].missing).toBeUndefined();
+      } finally {
+        stopReopened();
+        reopened.closing();
+      }
+    } finally {
+      A.store.closing();
+      B.store.closing();
+      await A.repo.close();
+      await B.repo.close();
+    }
   });
 });
