@@ -233,7 +233,8 @@ export function CitedEditor({ id, label, text, sources, onText }: CitedEditorPro
   // text is not dragged out of the box (Cut and Paste move it), so a tag is never left behind its sentence
   const noDrag = (event: DragEvent) => event.preventDefault();
   return (
-    <div class={`in ta ced${limitClass(held)}`} title={limitTitle(held)} id={id} ref={box} role="textbox" aria-multiline="true" aria-label={label}
+    <div class={`in ta ced${limitClass(held)}`}
+      title={limitTitle(held)} id={id} ref={box} role="textbox" aria-multiline="true" aria-label={label}
       contentEditable spellcheck onInput={changed}
       onBeforeInput={(event) => guardInput(event as InputEvent, element())}
       onPaste={(event) => pasteCited(event, element(), sources)}

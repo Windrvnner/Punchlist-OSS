@@ -84,7 +84,8 @@ export function AskCard(p: AskCardProps) {
   return (
     <div class={`card addq ${p.cls}`} onKeyDown={closeOnEscape(p.onEscape)}>
       <div class="lbl">New Question for {p.counterparty || 'the Counterparty'}</div>
-      <textarea class={`in ta${limitClass(p.text)}`} title={limitTitle(p.text)} id={`${p.ids}-text`} maxLength={TEXT_MAX}
+      <textarea class={`in ta${limitClass(p.text)}`}
+        title={limitTitle(p.text)} id={`${p.ids}-text`} maxLength={TEXT_MAX}
         rows={3} aria-label="Question" ref={focusCard}
         value={p.text} onInput={type} />
       <span class="clink">Linked to “{p.linked}”</span>

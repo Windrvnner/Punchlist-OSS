@@ -28,5 +28,8 @@ describe('a text box at the Excel cell limit', () => {
     draw('x'.repeat(TEXT_MAX));
     expect(box().classList.contains('atlimit')).toBe(true);
     expect(box().title).toBe(TOO_LONG);
+    draw('x'.repeat(TEXT_MAX - 1));
+    expect(box().classList.contains('atlimit')).toBe(false);
+    expect(box().title).toBe('');
   });
 });

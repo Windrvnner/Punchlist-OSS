@@ -74,7 +74,8 @@ export function QuestionCard({ scope, answerId, initial, onDone }: {
   return (
     <div class="card addq" data-holds-work onKeyDown={closeOnEscape(onDone)}>
       <div class="lbl">New Question for {deal.counterparty || 'the Counterparty'}</div>
-      <textarea class={`in ta${limitClass(text)}`} title={limitTitle(text)} id="aq-text" maxLength={TEXT_MAX} rows={3}
+      <textarea class={`in ta${limitClass(text)}`}
+        title={limitTitle(text)} id="aq-text" maxLength={TEXT_MAX} rows={3}
         aria-label="Question" ref={focusCard}
         value={text} onInput={(e) => draft.change({ text: (e.currentTarget as HTMLTextAreaElement).value })} />
       <WorkstreamSelect id="aq-ws" value={workstream} onChange={(ws) => draft.change({ ws })} />

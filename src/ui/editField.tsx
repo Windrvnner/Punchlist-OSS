@@ -91,7 +91,8 @@ export function EditField({
     ref: ref as any, value: draft, placeholder, dir: 'auto' as const, 'aria-label': label,
     onInput, onBlur, onKeyUp, onFocus, maxLength, onKeyDown: onKey, readOnly: !!locked && !held,
     title: locked ?? limitTitle(draft),
-    class: `ef ${className ?? ''} ${locked ? 'idle' : status} ${external && !locked ? 'external' : ''}${limitClass(draft)}`,
+    class: `ef ${className ?? ''} ${locked ? 'idle' : status} ${external && !locked ? 'external' : ''}`
+      + limitClass(draft),
   };
   // a date at rest reads as the rest of the app writes one ("Oct 28"); the browser's own field sits over it, unseen,
   // so a click or Tab lands in it and it shows itself while focused
