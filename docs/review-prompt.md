@@ -16,7 +16,8 @@ verdict, and no criteria in your own words.
 > raise it as a blocker on the issue. Attack at least:
 >
 > - Deal scale: 2,000+ questions (the browser demo deal) and 100+ conflicts, with realistic wording, and documents,
->   lists and logs past every size, page and count limit in the code (one over the limit still gets read). A few sample
+>   lists and logs past every size, page and count limit in the code that no service refusal or recorded decision sets
+>   (one over the limit still gets read). A few sample
 >   rows or rows numbered 1..N don't count.
 > - Lost work: anything that can discard, overwrite, or hide what a person typed or chose, or that silently drops,
 >   skips, caps, truncates, alters or marks unreadable what the app reads, or saves a failed read as "no text".
