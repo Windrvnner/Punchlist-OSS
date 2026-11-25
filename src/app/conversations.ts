@@ -373,8 +373,9 @@ export const questionFromAnswer = (scope: Scope, answer: Message, asked: string)
 export function findingFromAnswer(answer: Message) {
   const text = withoutFindingLinks(answer.text);
   const preview = answerText(answer);
-  const sentence = /^[^.!?]*[.!?]/.exec(preview)?.[0] ?? preview;
-  return { text, preview, title: sentence.trim().replace(/[.!?]$/, '').slice(0, 140) };
+  // the first sentence ends at a . ! or ? followed by a space or the end, so "1.5x" and "U.S." do not end it; nothing is cut
+  const sentence = /^.*?[.!?](?=\s|$)/s.exec(preview)?.[0] ?? preview;
+  return { text, preview, title: sentence.trim().replace(/[.!?]$/, '') };
 }
 
 /** The current response to confirm before replacement, when one is present. */

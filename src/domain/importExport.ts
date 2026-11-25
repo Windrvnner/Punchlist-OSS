@@ -201,19 +201,33 @@ export function overLimit(kind: string, r: Record<string, unknown>): string | nu
   if (kind === 'finding' && Array.isArray(r.body) && r.body.join('\n\n').length > TEXT_MAX) return 'detail';   // the paragraphs share one cell
   return null;
 }
-/** a model's paragraphs cut to fit one cell together: whole paragraphs while they fit, the last one cut at a sentence */
+/** the note that ends text cut to fit one cell, so a cut is never silent */
+const CUT_NOTE = ' … [cut: longer than Excel allows in one cell]';
+/** the cut note as a paragraph of its own, dropping the last whole paragraphs if the note would not fit after them */
+function noteParagraph(kept: string[]): string[] {
+  while (kept.length && kept.join('\n\n').length + 2 + CUT_NOTE.length > TEXT_MAX) kept.pop();
+  return [CUT_NOTE.trim()];
+}
+/**
+ * A model's paragraphs cut to fit one cell together: whole paragraphs while they fit; the paragraph that does not fit is
+ * cut at a sentence and ends with the cut note; with no room for that, the note is a paragraph of its own.
+ */
 export function fitParas(paras: string[]): string[] {
   const out: string[] = []; let used = 0;
-  for (const p of paras) { const room = TEXT_MAX - used - (out.length ? 2 : 0); if (p.length <= room) { out.push(p); used += p.length + (out.length > 1 ? 2 : 0); continue; } if (room > 200) out.push(fitText(p, room)); break; }
+  for (const p of paras) {
+    const room = TEXT_MAX - used - (out.length ? 2 : 0);
+    if (p.length <= room) { out.push(p); used += p.length + (out.length > 1 ? 2 : 0); continue; }
+    if (room > 200) out.push(fitText(p, room)); else out.push(...noteParagraph(out));
+    break;
+  }
   return out;
 }
-/** a model's text cut to fit, at the last sentence end before the limit (or the limit itself if there is none) */
+/** a model's text cut to fit, at the last sentence end before the limit (or the limit itself), ending with the cut note */
 export function fitText(text: string, max = TEXT_MAX): string {
   if (text.length <= max) return text;
-  const head = text.slice(0, max); const end = Math.max(head.lastIndexOf('. '), head.lastIndexOf('.\n'));
-  return end > max / 2 ? head.slice(0, end + 1) : head;
+  const head = text.slice(0, max - CUT_NOTE.length); const end = Math.max(head.lastIndexOf('. '), head.lastIndexOf('.\n'));
+  return `${end > head.length / 2 ? head.slice(0, end + 1) : head}${CUT_NOTE}`;
 }
-const CUT_NOTE = ' … [cut: longer than Excel allows in one cell]';
 export function fitCells(table: (string | number)[][]): { table: (string | number)[][]; cut: number } {
   let cut = 0;
   const out = table.map((row) => row.map((c) => { if (typeof c !== 'string' || c.length <= EXCEL_CELL_MAX) return c; cut++; return c.slice(0, EXCEL_CELL_MAX - CUT_NOTE.length) + CUT_NOTE; }));

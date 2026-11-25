@@ -362,7 +362,7 @@ export function unid(text: string, ids: Set<string>): string {
 /** Ignore malformed entries individually so a usable group beside one still stands (#658). */
 function memoGroupRows(value: unknown, ids: Set<string>): RiskGroup[] {
   return listOf(value).filter(isObject).map((row) => ({
-    title: unid(strings(row.title)[0] ?? '', ids).slice(0, 160),
+    title: unid(strings(row.title)[0] ?? '', ids),
     findings: strings(row.findings),
   })).filter((group) => group.findings.length);
 }
@@ -1146,9 +1146,9 @@ export function nodeAi(o: AiOptions) {
       // (a finding may stand on one place). Answers keep each citation, since two passages may share a page.
       // A cell is the same place however it is written ("Sheet1!$B$2", "sheet1!b2"); a quote of only spaces is no quote.
       const key = `${s.dealId}|${s.rec.docId}|${loc.replace(/\$/g, '').toLowerCase()}`; const at = once ? placed.get(key) : undefined;
-      if (at) { const had = sources[at - 1]; const q = typeof c.quote === 'string' ? c.quote.trim() : ''; if (!had.quote?.trim() && q) had.quote = q.slice(0, 600); renumber.set(i + 1, at); return; }
+      if (at) { const had = sources[at - 1]; const q = typeof c.quote === 'string' ? c.quote.trim() : ''; if (!had.quote?.trim() && q) had.quote = q; renumber.set(i + 1, at); return; }
       placed.set(key, sources.length + 1); renumber.set(i + 1, sources.length + 1);
-      sources.push({ doc: s.rec.name, loc, docId: s.rec.docId, ...(typeof c.quote === 'string' && c.quote ? { quote: c.quote.slice(0, 600) } : {}), ...(withDeal ? { dealId: s.dealId } : {}), ...(blacklines(s.dealId).has(s.rec.docId) ? { reading: true } : precedents(s.dealId).has(s.rec.docId) ? { precedent: true } : {}) } as Source);   // a blackline's page is the model's reading of it; another project's document is tagged so
+      sources.push({ doc: s.rec.name, loc, docId: s.rec.docId, ...(typeof c.quote === 'string' && c.quote ? { quote: c.quote } : {}), ...(withDeal ? { dealId: s.dealId } : {}), ...(blacklines(s.dealId).has(s.rec.docId) ? { reading: true } : precedents(s.dealId).has(s.rec.docId) ? { precedent: true } : {}) } as Source);   // a blackline's page is the model's reading of it; another project's document is tagged so
     });
     const out = String(text ?? '').replace(/\s*\[(\d+)\]/g, (_m, n) => (renumber.has(+n) ? ` [${renumber.get(+n)}]` : '')).replace(/\{([^{}|]+)\|[^{}]*\}/g, '$1').replace(/ \[(\d+)\](?: ?\[\1\])+/g, once ? ' [$1]' : '$&').trim();
     return { text: out, sources };
