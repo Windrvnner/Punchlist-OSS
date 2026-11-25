@@ -14,8 +14,9 @@ export type Mapping = Record<ImportField, number | null>;
 
 /**
  * Which row of a sheet holds the column headings. A log often sits under a title and some padding, so this is the first
- * row (of the first 50) with a heading we recognize as the question column; failing that the first row with two or more
- * filled cells; failing that the first row. It is a starting point only: the dialog shows it and the person can change it.
+ * row (of the first 50) whose heading is the app's own name for the question column; failing that the first row with two
+ * or more filled cells; failing that the first row. It is a starting point only: the dialog shows it, the model's proposal
+ * may replace it, and the person can change it.
  */
 export function findHeaderRow(table: string[][]): number {
   const limit = Math.min(table.length, 50); const filled = (r: string[]) => r.filter((c) => c.trim()).length;
@@ -24,15 +25,18 @@ export function findHeaderRow(table: string[][]): number {
   return 0;
 }
 
+/**
+ * Which column is which field, by the app's own heading names only (its export's and import dialog's: "Number" or "#",
+ * "Question", "Submitted by" ...), ignoring case, spaces and punctuation. A log with any other wording is left to the
+ * model's proposal (`layout`) and to the person, never to a guess from similar words.
+ */
 export function suggestMapping(columns: string[]): Mapping {
   const norm = (c: string) => String(c ?? '').toLowerCase().replace(/[^a-z#]/g, '');
   const find = (...keys: string[]) => { const i = columns.findIndex((c) => keys.includes(norm(c))); return i < 0 ? null : i; };
   return {
-    n: find('#', 'no', 'number', 'num', 'q', 'qno', 'ref', 'id'), text: find('question', 'questions', 'questiontext', 'query', 'request', 'item'),
-    askedBy: find('submittedby', 'from', 'firm', 'askedby', 'raisedby', 'requester', 'source'), received: find('received', 'datereceived', 'dateraised', 'raised', 'asked'),
-    workstream: find('workstream', 'category', 'area', 'topic'), priority: find('priority', 'prio', 'urgency'),
-    response: find('response', 'answer', 'reply', 'sponsorresponse'), respondedBy: find('respondedby', 'answeredby', 'respondent', 'responder', 'repliedby', 'responseby', 'responsefrom', 'answerby', 'answerfrom', 'replyby', 'replyfrom', 'respondingparty', 'respondingfirm', 'respondentfirm', 'responderfirm'),
-    responded: find('date', 'dateresponded', 'responded', 'dateanswered', 'answered', 'responsedate'), status: find('status', 'state'),
+    n: find('#', 'no', 'number'), text: find('question'), askedBy: find('submittedby'), received: find('received'),
+    workstream: find('workstream'), priority: find('priority'), response: find('response'), respondedBy: find('respondedby'),
+    responded: find('date'), status: find('status'),
   };
 }
 

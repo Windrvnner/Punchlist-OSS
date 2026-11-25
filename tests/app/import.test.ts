@@ -29,7 +29,7 @@ const byN = (store: Store, dealId: string) => Object.fromEntries(dealQuestions(s
 describe('ImportQuestions', () => {
   it('an imported response is recorded as written by the responder the file names; a row that names nobody claims no author', async () => {
     const { store } = make(); const dealId = await deal(store);
-    const r = await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: rowsFrom('Number,Question,Response,Responder,Date\n1,What is the lock-up?,1.30x,Northwind Sponsor LP,2026-11-02\n2,Who holds the land?,The project company,,\n3,No response yet,,,\n') });
+    const r = await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: rowsFrom('Number,Question,Response,Responded by,Date\n1,What is the lock-up?,1.30x,Northwind Sponsor LP,2026-11-02\n2,Who holds the land?,The project company,,\n3,No response yet,,,\n') });
     expect(r.ok).toBe(true);
     const [q1, q2, q3] = dealQuestions(store.get(), dealId); const me = store.get().user!.name;
     expect(q1.respondedBy).toBe('Northwind Sponsor LP'); expect(q1.provenance).toMatchObject({ origin: 'human', actor: 'Northwind Sponsor LP' }); expect(q1.responded).toBe('2026-11-02');
@@ -64,8 +64,8 @@ describe('ImportQuestions', () => {
 
   it('merge updates only non-empty incoming fields; a second row with the same number is a second question; undo restores all', async () => {
     const { store } = make(); const dealId = await deal(store);
-    await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: rowsFrom('Number,Question,Response,Category\n900,Original question,Original response,Legal\n') });
-    const r = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: rowsFrom('Number,Question,Response,Category\n900,Original question,First response,\n900,Second update,Second response,\n') });
+    await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: rowsFrom('Number,Question,Response,Workstream\n900,Original question,Original response,Legal\n') });
+    const r = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: rowsFrom('Number,Question,Response,Workstream\n900,Original question,First response,\n900,Second update,Second response,\n') });
     expect(r.ok).toBe(true);
     const all = dealQuestions(store.get(), dealId);
     expect(all.map((q) => [q.n, q.text, q.response, q.workstream])).toEqual([[900, 'Original question', 'First response', 'Legal'], [900, 'Second update', 'Second response', '']]);
@@ -106,14 +106,15 @@ describe('ImportQuestions', () => {
     expect(!u.ok && u.error.message).toMatch(/Changed since/);
     expect(dealQuestions(store.get(), dealId)[0].text).toBe('One, edited');
   });
-  it('merge: a cell of only spaces is as good as empty and overwrites nothing; text with spaces around it is taken as written', async () => {
+  it('merge: a cell of only spaces is as good as empty and overwrites nothing; text with spaces around it is another question, as written', async () => {
     const { store } = make(); const dealId = await deal(store);
     await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: rowsFrom('Number,Question,Submitted by,Response\n1,One,Lender A,Yes\n') });
     await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: rowsFrom('Number,Question,Submitted by,Response\n1,"   "," ","  "\n2,"   ",,\n') });
     expect(byN(store, dealId)[1]).toMatchObject({ text: 'One', askedBy: 'Lender A', response: 'Yes' });
     expect(byN(store, dealId)[2]).toMatchObject({ text: '   ', response: '' });
     await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: rowsFrom('Number,Question\n1,"  One\n"\n') });
-    expect(byN(store, dealId)[1].text).toBe('  One\n');
+    expect(byN(store, dealId)[1].text).toBe('One');
+    expect(dealQuestions(store.get(), dealId).map((q) => q.text)).toContain('  One\n');
   });
   it('a file that changes nothing writes nothing and leaves nothing to undo', async () => {
     const { store } = make(); const dealId = await deal(store);

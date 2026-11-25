@@ -194,7 +194,8 @@ export function previewImport(store: Store, dealId: string, mode: 'merge' | 'app
 /**
  * Ask the model where the table is. Its answer is treated as a proposal and checked against the file: the sheet must exist,
  * the row must be in range, and a field is taken only when the heading it names is really in that row. Anything else is
- * dropped. Returns the table re-read at the proposed place with the proposed columns, or the reason there is no proposal.
+ * dropped. Returns the table re-read at the proposed place, the proposal filling only the fields the app's own heading names
+ * did not find, or the reason there is no proposal.
  */
 export async function proposeLayout(store: Store, table: ImportTable): Promise<Result<ImportTable>> {
   const layout = store.services.ai.layout;
@@ -206,9 +207,10 @@ export async function proposeLayout(store: Store, table: ImportTable): Promise<R
   if (!again.ok) return again;
   const norm = (x: string) => x.trim().toLowerCase(); const mapping = { ...again.value.mapping };
   for (const [k] of IMPORT_FIELDS) {
+    if (mapping[k] != null) continue;   // a column the app's own heading name found is the person's to change, not the model's
     const said = r.value.fields?.[k]; if (typeof said !== 'string' || !said.trim()) continue;
     const i = again.value.columns.findIndex((c) => norm(c) === norm(said));
-    if (i >= 0) { for (const [o] of IMPORT_FIELDS) if (o !== k && mapping[o] === i) mapping[o] = null; mapping[k] = i; }   // one column, one field
+    if (i >= 0 && !Object.values(mapping).includes(i)) mapping[k] = i;   // one column, one field
   }
   if (mapping.text == null) return fail({ kind: 'invalid', message: 'No question column was proposed' });
   return ok({ ...again.value, mapping, proposedByAi: true });

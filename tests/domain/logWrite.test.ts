@@ -7,7 +7,7 @@ import { writtenAsMeant } from '../../src/domain/sheets';
 
 const q = (n: number, text: string, more: Partial<Question> = {}) => ({ id: `q${n}`, n, text, askedBy: 'Lender A', received: '', workstream: '', priority: '', response: '', respondedBy: '', ...more }) as Question;
 // a log with a title in row 1, headings in row 3 and an empty column B; columns A, C, D, E of the sheet are read
-const columns = ['No.', 'Question', 'Sponsor response', 'Responded by'];
+const columns = ['No.', 'Question', 'Response', 'Responded by'];
 const table = { columns, cols: [0, 2, 3, 4], lines: [4, 5, 6], lastRow: 6, rows: [['Q1', 'What is the minimum DSCR covenant?', '1.20x', 'Sponsor'], ['Q2', 'Who is the EPC  contractor?', '', ''], ['Q3', 'What insurances are in place?', 'See the advisor report', 'Sponsor']] };
 const map = suggestMapping(columns);
 
@@ -141,7 +141,7 @@ describe('matching and keeping, in awkward logs', () => {
 // The log kept up to date as an IB Q&A log is: every column it has, nothing made up, someone's edits kept
 
 describe('a log that writes its cells its own way', () => {
-  const cols = ['No.', 'Question', 'Priority', 'Date received', 'Status', 'Response'];
+  const cols = ['No.', 'Question', 'Priority', 'Received', 'Status', 'Response'];
   const m = suggestMapping(cols);
   const log = { columns: cols, cols: cols.map((_, i) => i), rows: [['1', 'What is the minimum DSCR covenant?', '', '11/12/2026', 'Outstanding', '']], lines: [2], lastRow: 2 };
   it('leaves a blank Priority blank: the High a question with none came in with is the app\'s default, not a value anyone gave', () => {
