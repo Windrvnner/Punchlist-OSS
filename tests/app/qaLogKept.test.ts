@@ -4,6 +4,7 @@
 // folder; the other people's saves and the archive's refusal are stand-ins.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
+import { trackPaths } from '../backend/openedPaths';
 import { Store } from '../../src/app/store';
 import { memRepo, disk } from '../adapters/memRepo';
 import { MemoryLocal } from '../../src/adapters/local';
@@ -76,12 +77,13 @@ async function raced(folder: string, store: Store, dealId: string, sroe: (s: str
   const last = dealQuestions(store.get(), dealId).find((x) => x.text === text(N))!;
   await store.dispatch(SetResponse, { dealId, questionId: last.id, response: `App answer ${++answers}` });
   const log = path.join(folder, FILE); const real = fs.renameSync; const write = fs.writeFileSync; let n = 0;
+  const where = trackPaths();
   vi.spyOn(fs, 'renameSync').mockImplementation(((a: fs.PathLike, b: fs.PathLike) => {
     const was = String(a) === log && ++n === 1 ? fs.readFileSync(log, 'utf8') : null; real(a, b);
     if (was !== null) { write(b, sroe(was)); write(log, lroe(was)); }
   }) as typeof fs.renameSync);
   vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: fs.PathOrFileDescriptor, data: Uint8Array, o?: fs.WriteFileOptions) => {
-    if (String(p).includes('saved meanwhile')) throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); return write(p, data, o);
+    if (where(p).includes('saved meanwhile')) throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); return write(p, data, o);
   }) as typeof fs.writeFileSync);
   const r = await exportQaLog(store, dealId); vi.restoreAllMocks();
   expect(r.ok && r.value).toEqual({ status: 'later' });
@@ -194,8 +196,8 @@ describe('an edit kept aside in the log\'s folder', () => {
     const { folder, store, dealId, q } = await setup();
     await raced(folder, store, dealId, (s) => edited(s, { 3: ['3', text(3), 'sroe on 3', ''] }), (s) => s);
     later();
-    const write = fs.writeFileSync; const refuse = () => vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: fs.PathOrFileDescriptor, data: Uint8Array, o?: fs.WriteFileOptions) => {
-      if (String(p).includes('saved meanwhile')) throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); return write(p, data, o);
+    const write = fs.writeFileSync; const where = trackPaths(); const refuse = () => vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: fs.PathOrFileDescriptor, data: Uint8Array, o?: fs.WriteFileOptions) => {
+      if (where(p).includes('saved meanwhile')) throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); return write(p, data, o);
     }) as typeof fs.writeFileSync);
     refuse();
     const r = await exportQaLog(store, dealId); expect(r.ok && r.value).toMatchObject({ status: 'written', unmerged: 0 });
@@ -216,8 +218,8 @@ describe('an edit kept aside in the log\'s folder', () => {
     const lroe = (s: string) => s.split('\r\n').filter((_, i) => i !== 20).join('\r\n');   // ldoe took row 20 out
     await raced(folder, store, dealId, sroe, lroe);
     later();
-    const write = fs.writeFileSync; vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: fs.PathOrFileDescriptor, data: Uint8Array, o?: fs.WriteFileOptions) => {
-      if (String(p).includes('saved meanwhile')) throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); return write(p, data, o);
+    const write = fs.writeFileSync; const where = trackPaths(); vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: fs.PathOrFileDescriptor, data: Uint8Array, o?: fs.WriteFileOptions) => {
+      if (where(p).includes('saved meanwhile')) throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); return write(p, data, o);
     }) as typeof fs.writeFileSync);
     const r = await exportQaLog(store, dealId); expect(r.ok && r.value).toMatchObject({ status: 'written', unmerged: 0 });   // not filed yet: it is still in the folder
     const log = path.join(folder, FILE); expect(lines(log)[3]).toBe(`3,${text(3)},sroe on 3,`); expect(kept(folder)).toEqual([expect.stringMatching(/\.left$/)]);
