@@ -27,8 +27,9 @@ export function findHeaderRow(table: string[][]): number {
 
 const QUESTION_WORDS = ['question', 'questions', 'request', 'requests', 'query', 'queries'];
 /** the only other words a question heading may carry ("Diligence Question", "Lender Questions", "Q&A Request") */
-const QUESTION_HEADING_EXTRAS = ['diligence', 'information', 'lender', 'lenders', 'buyer', 'text', 'wording', 'the', 'a',
-  'q', 'and', 'for', 'of'];
+const QUESTION_HEADING_EXTRAS = [
+  'diligence', 'information', 'lender', 'lenders', 'buyer', 'text', 'wording', 'the', 'a', 'q', 'and', 'for', 'of',
+];
 /**
  * The question column when no heading is exactly one of the usual names: the first heading made only of a question
  * word and a few plain extras, with no digit or "#" (a number column). Any other word ("Question Type", "Request Due",
@@ -38,13 +39,14 @@ const QUESTION_HEADING_EXTRAS = ['diligence', 'information', 'lender', 'lenders'
  */
 function looseQuestionColumn(columns: string[]): number | null {
   const wordsOf = (heading: string) => String(heading ?? '').toLowerCase().split(/[^a-z]+/).filter(Boolean);
-  const at = columns.findIndex((heading) => {
-    if (/[#\d]/.test(String(heading ?? ''))) return false;
+  const matches = columns.flatMap((heading, at) => {
+    if (/[#\d]/.test(String(heading ?? ''))) return [];
     const words = wordsOf(heading);
-    return words.some((w) => QUESTION_WORDS.includes(w))
-      && words.every((w) => QUESTION_WORDS.includes(w) || QUESTION_HEADING_EXTRAS.includes(w));
+    const onlyQuestionWords = words.every((w) => QUESTION_WORDS.includes(w) || QUESTION_HEADING_EXTRAS.includes(w));
+    return words.some((w) => QUESTION_WORDS.includes(w)) && onlyQuestionWords ? [at] : [];
   });
-  return at < 0 ? null : at;
+  // two question-named columns ("Buyer Question", "Lender Question") are left to the model
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export function suggestMapping(columns: string[]): Mapping {

@@ -38,6 +38,11 @@ describe('the question column read from plain words, with no model (#1002)', () 
     expect(findHeaderRow([['No.', 'Lender Questions', 'Status'], ['1', 'Is it fixed price?', 'Open']])).toBe(0);
   });
 
+  it('leaves two question-named columns to the model', () => {
+    expect(suggestMapping(['Ref', 'Buyer Question', 'Lender Question', 'Response']).text).toBeNull();
+    expect(suggestMapping(['Ref', 'Buyer Request', 'Lender Request', 'Status']).text).toBeNull();
+  });
+
   it('keeps an exact heading ahead of a loose one', () => {
     expect(suggestMapping(['Diligence Question', 'Question']).text).toBe(1);
   });
