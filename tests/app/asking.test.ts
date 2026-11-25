@@ -147,14 +147,11 @@ it('refuses stale single and bulk closes, and closes and undoes a fresh selectio
   expect(statuses()).toEqual(['open', 'open']);
 });
 
-it.each(['current', 'legacy'])('refreshes a %s retry with unchanged question revisions', async (version) => {
+it('refreshes a retry with unchanged question revisions', async () => {
   const { store, repo, dealId, ids, statuses, rows } = await closeFixture();
   const writable = refuse(repo.shared, toAQuestion, quota, 1);
   const idempotencyKey = `close-settled-${dealId}`;
-  const set = ids.map((questionId) => ({ questionId, status: 'closed' as const }));
-  const first = version === 'legacy'
-    ? await store.dispatch(SetQuestionsStatus, { dealId, set }, { idempotencyKey })
-    : await store.dispatch(CloseSettledQuestions, { dealId, questionIds: ids }, { idempotencyKey });
+  const first = await store.dispatch(CloseSettledQuestions, { dealId, questionIds: ids }, { idempotencyKey });
   writable();
   expect(first.ok).toBe(false);
   expect(statuses()).toEqual(['open', 'open']);

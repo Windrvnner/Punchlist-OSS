@@ -14,7 +14,7 @@ import { ResolveConflict, ReopenConflict } from '../../src/app/commands/conflict
 import { registry, Undo } from '../../src/app/commands/undo';
 import { dealQuestions } from '../../src/app/state';
 import '../ui/keptTextSession';
-import { deletedOf } from '../../src/ui/deleted';
+import { visibleDeletedNotes as deletedOf } from '../../src/app/deletedView';
 
 class Mem implements Folder {
   files = new Map<string, string>();
