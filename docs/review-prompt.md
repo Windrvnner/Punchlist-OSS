@@ -63,6 +63,8 @@ verdict, and no criteria in your own words.
 >    acceptance criterion that asks for more than the issue did, or code that guesses (similarity scores,
 >    thresholds, inferred structure, text repair, fallbacks) where an exact rule or the person's choice would do. Each
 >    such rule must cite the decision that asks for it.
+>    A requirement, issue, or acceptance criterion that does not trace to a recorded decision or to what the issue's
+>    author asked for, or that handles an input the app does not receive, is a blocker.
 >
 > Anything else is minor. A minor finding that is small and in code the pull request already touches is fixed in
 > the same pull request, without a review round of its own. File every other minor finding (in other code, or too

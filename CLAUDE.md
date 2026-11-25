@@ -79,6 +79,10 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   lookup on number plus text, then on text alone; every row left over is unmatched. Each score, threshold,
   fallback, or text normalization needs the decision that asks for it, and `npm run check` lists the added lines
   that name a guess (`scripts/check-readability.mjs`). It does not fail on them.
+- **Requirements trace to a recorded decision.** Build only what traces to a decision in docs/decisions.md or to
+  what an issue's author asked for in their own words. An issue or acceptance criterion written by a tool is not a
+  requirement on its own. The app has a narrow scope: build only for the inputs it actually receives (Excel Q&A logs
+  and checklists as provided, and the documents in the deal folder), never for inputs it might receive.
 - **Send deal PDFs whole for AI analysis.** Send the original file so the model can read the pages directly.
   Word counts may be used to rank and pick documents. See docs/decisions.md for the planned handling of PDFs that
   the model service refuses as too large (#119) and the current checklist import behavior.
