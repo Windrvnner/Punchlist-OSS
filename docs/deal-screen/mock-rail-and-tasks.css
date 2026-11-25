@@ -1,0 +1,496 @@
+/* The deal screen mock-up: the slim rail, the sidebar, the roomy Q&A, the document stack, and Tasks. */
+/* slim rail, as reading mode's */
+#app.slim {
+  grid-template-columns: 48px minmax(0,1fr);
+}
+.x-slim .sp {
+  flex: 1;
+}
+.rail .brand .x-sidetog {
+  margin-left: auto;
+}
+
+/* the sidebar toggle shows the panel icon mirrored, so its divider sits on the left */
+.x-sidetog svg {
+  transform: scaleX(-1);
+}
+.rail .brand .x-sidetog + .plus {
+  margin-left: 6px;
+}
+.x-slim {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 8px;
+  padding-top: 8px;
+}
+.x-slim .railx {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink-2);
+  border-radius: 50%;
+}
+@media(max-width:1180px) {
+  #app:not(.slim) {
+    grid-template-columns: 208px minmax(0,1fr);
+  }
+}
+.x-tv {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.x-tv .sc {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 2px;
+}
+.x-tv h2 {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  margin: 6px 0 4px;
+  color: var(--ink);
+}
+.x-tv p {
+  font-size: 13.5px;
+  line-height: 1.45;
+  margin: 4px 0 8px;
+  color: var(--ink);
+}
+.x-tv .acts2 {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.x-tv .steer {
+  flex: none;
+  padding-top: 10px;
+}
+.x-tv .steer .askbox {
+  padding: 12px 12px 10px;
+  gap: 6px;
+}
+.x-tv .steer textarea {
+  flex: 1;
+}
+
+/* Q&A in the roomy pane: the list beside the opened question */
+.x-qlist {
+  margin-top: 4px;
+}
+.x-qlist .x-lrow {
+  grid-template-columns: 48px minmax(0,1fr) auto;
+  padding: 10px 10px;
+}
+.x-qlist .x-lrow .q {
+  -webkit-line-clamp: unset;
+  display: block;
+}
+.x-qlist .x-lrow .q small {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 3px;
+}
+.x-qitem .x-qcard {
+  margin: 0;
+  padding: 14px 16px 16px;
+}
+.x-qitem .x-qcard .cols {
+  grid-template-columns: minmax(0,1fr);
+  gap: 16px;
+  margin-top: 14px;
+}
+.x-qitem .x-qcard .qt {
+  font-size: 15px;
+  line-height: 1.5;
+}
+.x-qitem .x-qcard .draft,.x-qitem .x-qcard .resp {
+  font-size: 14px;
+  line-height: 1.5;
+}
+.x-lrow {
+  display: grid;
+  grid-template-columns: 44px minmax(0,1fr) 72px;
+  column-gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--ink-2);
+  align-items: start;
+}
+.x-lrow .n {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+.x-lrow .q {
+  color: var(--ink);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.x-lrow .st {
+  text-align: right;
+}
+.x-lrow .w {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  justify-content: flex-end;
+  color: var(--ink-2);
+}
+.x-lrow .w .x-ring {
+  color: var(--accent);
+}
+.x-qcard .hd .pos {
+  font-size: 12px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  margin-right: 2px;
+  white-space: nowrap;
+}
+.x .btn.sm.ico {
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+
+/* reading mode's page and zoom stack, in the pane */
+.x-pgstack {
+  position: absolute;
+  right: 16px;
+  bottom: 72px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px;
+}
+.x-pgstack>button {
+  display: grid;
+  place-items: center;
+}
+.x-pgstack>button svg {
+  display: block;
+}
+.x-docnav .cls {
+  margin-left: 2px;
+}
+.x-docstage.wide .x-page {
+  max-width: 680px;
+}
+.x-page.x-pdf {
+  padding: 0;
+  min-height: 0;
+  background: #fff;
+  height: max-content;
+}
+.x-page.x-pdf img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* work in progress: a small ring beside the live step's words, which shimmer */
+.x-shim {
+  background: linear-gradient(
+    90deg,
+    var(--ink-2) 0%,
+    var(--ink-2) 45%,
+    var(--ink-3) 62%,
+    var(--ink-2) 80%,
+    var(--ink-2) 100%
+  );
+  background-size: 250% 100%;
+  background-position: 20% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: xshim 2.4s linear infinite;
+}
+@keyframes xshim {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+@media (prefers-reduced-motion:reduce) {
+  .x-shim {
+    animation: none;
+    background: none;
+    color: var(--ink-2);
+  }
+}
+
+/* Tasks: one grouped list per state; each row has its state, what it is doing, its time, and its kind */
+.x-live {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+}
+.x-live .lv {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.x-live .mt {
+  flex: none;
+  white-space: nowrap;
+}
+.x-live .mt::before {
+  content: "\00a0·\00a0";
+}
+.x-pbody .x-lbl {
+  margin-top: 16px;
+}
+.x-tgroup {
+  border-radius: var(--r-card);
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+
+/* the live step below a running task's steps: ring, elapsed time, and steps done */
+.x-spin {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.x-tv .me {
+  margin: 6px 0 12px auto;
+  max-width: 85%;
+  padding: 9px 13px;
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 13.5px;
+  line-height: 1.45;
+  width: fit-content;
+}
+
+/* steps are plain one-line rows */
+.x-tool {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 26px;
+  padding: 0 2px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink);
+}
+.x-tool .ti {
+  display: grid;
+  place-items: center;
+  color: var(--ink-3);
+  width: 16px;
+}
+.x-tool .ti svg {
+  display: block;
+}
+.x-tool .ti .x-ring {
+  color: var(--accent);
+}
+.x-tool.live .tt {
+  color: var(--ink-2);
+}
+.x-tool .tt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.x-tool .tc {
+  margin-left: auto;
+  color: var(--ink-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.x-tool .tv {
+  display: grid;
+  color: var(--ink-3);
+}
+.x-tool .tt + .tv {
+  margin-left: auto;
+}
+
+/* the Checklist page's marks, as app.css draws them on .ckrow (checklist.tsx, Row) */
+.x-row .mk {
+  min-height: 18px;
+  display: grid;
+  place-items: center;
+  align-self: stretch;
+  width: 14px;
+}
+.x-row .mk.k-finding:before {
+  content: "";
+  background: var(--high);
+  border-radius: 2px;
+  width: 3px;
+  height: 100%;
+}
+.x-row .mk.k-gap:before {
+  content: "";
+  box-sizing: border-box;
+  border: 1.5px dashed var(--ink-3);
+  border-radius: 50%;
+  width: 10px;
+  height: 10px;
+}
+
+/* a narrow pane drops the filter counts, as the Checklist shortens its filters to stay on one row */
+@container (max-width:600px) {
+  .x-rhead .seg .c {
+    display: none;
+  }
+}
+.x {
+  --gap: 8px;
+}
+.x .msgs .ai p {
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
+.x-tv .nar {
+  color: var(--ink);
+  margin: 8px 0 4px;
+}
+.x-qitem .x-lbl {
+  margin-top: 18px;
+}
+.x-qitem .lnk {
+  font-size: 13.5px;
+  text-decoration: underline dotted var(--ink-3);
+  text-underline-offset: 4px;
+  text-decoration-thickness: 1px;
+}
+.x-stab:not(.on) {
+  justify-content: flex-start;
+}
+.x-qcard .x-lbl {
+  margin-top: 12px;
+}
+.x-qcard .lnk {
+  font-size: 13.5px;
+  text-decoration: underline dotted var(--ink-3);
+  text-underline-offset: 4px;
+  text-decoration-thickness: 1px;
+}
+.x-lrow small .w {
+  display: inline-flex;
+  vertical-align: -2px;
+  justify-content: flex-start;
+}
+.x-upd {
+  display: inline-block;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin: 0 8px 1px 0;
+  vertical-align: middle;
+}
+.rail .grp-h .x-upd {
+  margin: 0 8px 1px 0;
+}
+.rail a.dealrow.x-arch {
+  position: relative;
+}
+.rail a.dealrow.x-arch .x-upd {
+  position: absolute;
+  right: 12px;
+  top: 13px;
+  margin: 0;
+}
+.x-deals {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 6px 0 10px;
+}
+.x-archgrp {
+  margin-top: 4px;
+}
+.rail a.dealrow.x-arch .dn1 {
+  color: var(--ink-2);
+}
+.rail a.dealrow.x-arch:has(.dtw) {
+  height: auto;
+  min-height: 32px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+}
+.rail a.dealrow.x-arch .dtw {
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--ink-2);
+}
+.rail .dmore.open {
+  opacity: 1;
+}
+.x-trail {
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  align-items: center;
+}
+.x-head .x-hist .t {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.x-head .x-hist .chev {
+  display: inline-grid;
+  opacity: .7;
+}
+.x-head .x-hist.on {
+  color: var(--ink);
+}
+.x-head .x-hist {
+  height: 28px;
+  min-width: 0;
+  max-width: 100%;
+  gap: 6px;
+  padding: 0 10px;
+  color: var(--ink-2);
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 999px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  outline: 0;
+}
+.x-head .x-hist:hover {
+  background: var(--card-hover);
+  color: var(--ink);
+}

@@ -11,31 +11,17 @@ import { useRef } from 'preact/hooks';
 let seq = 0;
 /** the pop's distance below the line box of the line it hangs from */
 const GAP = 14;
-import type { Source } from '../domain/model';
-import { docKey } from '../domain/model';
+import { docKey, type Source } from '../domain/model';
+import { popDocuments } from '../app/citations';
 import { CachedMark } from './cached';
 import { DocName } from './docName';
 import { showTip, hideTip } from './tip';
-
-/** up to this many documents a pop lists them all; beyond it, with somewhere to send the rest, it lists POP_SHOWN and "N more" */
-export const POP_ALL = 4;
-/** sources from no more documents than a pop shows: shown in full as chips */
-export const fewDocuments = (sources: Source[]) => byDocument(sources).length <= POP_ALL;
-export const POP_SHOWN = 3;
-
-/** Sources by document, in the order each document is first cited, with its places joined ("p. 41, p. 44"). */
-export function byDocument(sources: Source[]): { doc: Source; places: string; items: Source[] }[] {
-  const out = new Map<string, { doc: Source; places: string; items: Source[] }>();
-  for (const x of sources) { const g = out.get(docKey(x)); if (g) g.items.push(x); else out.set(docKey(x), { doc: x, places: '', items: [x] }); }
-  for (const g of out.values()) g.places = [...new Set(g.items.map((x) => x.loc).filter(Boolean))].join(', ');
-  return [...out.values()];
-}
 
 /** places cut short to fit show in full in the app's tooltip, as a shortened name does */
 const fullPlaces = (e: MouseEvent) => { const el = e.currentTarget as HTMLElement; if (el.scrollWidth > el.clientWidth + 1) showTip(el, el.textContent?.replace(/^ · /, '') ?? ''); };
 
 export function Ref({ text, sources, className = '', above = false, onOpen, openText = 'Open document', onMore }: { text: string; sources: Source[]; className?: string; above?: boolean; onOpen?: () => void; openText?: string; onMore?: () => void }) {
-  const docs = byDocument(sources); const capped = !!onMore && docs.length > POP_ALL; const shown = capped ? docs.slice(0, POP_SHOWN) : docs;
+  const { capped, shown, more } = popDocuments(sources, !!onMore);
   const rb = useRef<HTMLSpanElement>(null); const pop = useRef<HTMLSpanElement>(null); const wrap = useRef<HTMLSpanElement>(null);
   const id = useRef(''); if (!id.current) id.current = `src-${++seq}`;
   const place = () => {
@@ -66,7 +52,9 @@ export function Ref({ text, sources, className = '', above = false, onOpen, open
       <span ref={rb} class={`rb ${className}`} role={onOpen ? 'button' : undefined} tabIndex={onOpen ? 0 : undefined} aria-describedby={id.current} onClick={onOpen ? (e) => { onOpen(); if ((e as MouseEvent).detail > 0) { (e.currentTarget as HTMLElement).blur(); reset(); } } : undefined} onKeyDown={(e) => { if (onOpen && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onOpen(); away(); } else if (e.key === 'Escape' && pop.current && getComputedStyle(pop.current).display !== 'none') { e.stopPropagation(); away(); } }}>{text}</span>
       <span ref={pop} class="pop" role="tooltip" id={id.current}>{shown.map((g) => <i key={docKey(g.doc)} class="psrc"><DocName name={g.doc.doc} />{g.places && <span class="loc" onMouseEnter={fullPlaces} onMouseLeave={(e) => hideTip(e.currentTarget as HTMLElement)}> · {g.places}</span>}<CachedMark doc={g.doc} /></i>)}
         {/* the pop's one action, also reachable by pointer: the rest of the sources, or what a click on the phrase opens */}
-        {capped ? <u class="pfoot" onClick={() => { away(); onMore!(); }}>{docs.length - POP_SHOWN} more →</u> : onOpen && <u class="pfoot" onClick={() => { away(); onOpen(); }}>{openText} →</u>}</span>
+        {capped
+          ? <u class="pfoot" onClick={() => { away(); onMore!(); }}>{more} more →</u>
+          : onOpen && <u class="pfoot" onClick={() => { away(); onOpen(); }}>{openText} →</u>}</span>
     </span>
   );
 }

@@ -1,6 +1,6 @@
 import type { Deal } from '../domain/model';
 import type { RoomMatch } from '../ports';
-import type { State } from './state';
+import type { DealKinds, State } from './state';
 import { cleanName, withProject } from './commands/deals';
 
 /**
@@ -28,4 +28,16 @@ export function likelyTwin(s: Pick<State, 'deals'>, want: { name: string; counte
     .sort((a, b) => b.score - a.score || (b.room?.matched ?? 0) - (a.room?.matched ?? 0) || b.deal.createdAt.localeCompare(a.deal.createdAt));
   if (!found.length) return null;
   const { score: _score, ...twin } = found[0]; return twin;
+}
+
+
+const KINDS = ['product', 'sector', 'technology'] as const;
+
+function kindMatches(first?: string, second?: string) {
+  const value = first?.trim().toLocaleLowerCase('en-US');
+  return !!value && value === second?.trim().toLocaleLowerCase('en-US');
+}
+
+export function matchingDealKinds(kinds: DealKinds, deal: DealKinds) {
+  return KINDS.filter((kind) => kindMatches(kinds[kind], deal[kind]));
 }

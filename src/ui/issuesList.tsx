@@ -12,15 +12,15 @@ import { Modal, LeaveFoot } from './dialogs';
 import { num, plural } from './counts';
 import { FileInput, PickFileRow } from './fileDrop';
 import { showTip, hideTip } from './tip';
-import { readIssuesList, reviewIssuesList, type ReadIssuesList } from '../app/issuesList';
+import { issuesListTitle, readIssuesList, reviewIssuesList, type ReadIssuesList } from '../app/issuesList';
 import { ImportIssuesList } from '../app/commands/issuesList';
 import { AI_LABEL } from '../control';
 import type { Finding, ListPoint } from '../domain/model';
-import { keptImport, keepImport, dropImport, importKey, useKeptImportsReady, useFreshOnCrash } from './keptImports';
+import { keptImport, keepImport, dropImport, importKey } from '../app/keptImports';
+import { useKeptImportsReady, useFreshOnCrash } from './keptImports';
 
 /** the files a list comes as: a PDF, a Word file or an email */
 const ACCEPT = '.pdf,.docx,.msg,.eml';
-export const bare = (name: string) => name.replace(/\.[A-Za-z0-9]{2,5}$/, '');
 
 /** "#3 on issues list", or "#3, #41 on issues list" for a finding more than one point is on */
 export const onListText = (marks: ListPoint[]) => `${marks.map((m) => `#${m.n}`).join(', ')} on issues list`;
@@ -31,10 +31,13 @@ const oneLine = (t: string, most = 78) => (t.length <= most ? t : `${t.slice(0, 
  * several have a line each, under their list's name, so every point shows some of its words.
  */
 export const onListTip = (marks: ListPoint[]) => {
-  if (marks.length === 1) return `${bare(marks[0].list)}\n#${marks[0].n} · ${marks[0].text}`;
+  if (marks.length === 1) return `${issuesListTitle(marks[0].list)}\n#${marks[0].n} · ${marks[0].text}`;
   // by list, as each list's file is its own list: two saved under one name show the name twice
   const lists = [...new Set(marks.map((m) => m.doc))];
-  return lists.map((l) => { const of = marks.filter((m) => m.doc === l); return [bare(of[0].list), ...of.map((m) => `#${m.n} · ${oneLine(m.text)}`)].join('\n'); }).join('\n');
+  return lists.map((list) => {
+    const points = marks.filter((mark) => mark.doc === list);
+    return [issuesListTitle(points[0].list), ...points.map((mark) => `#${mark.n} · ${oneLine(mark.text)}`)].join('\n');
+  }).join('\n');
 };
 
 /** The mark on a finding's page: its points, with the list and their words on hover or focus. Plain text, as the list row's. */
@@ -125,7 +128,7 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
     if (!r.ok) { keepNow.current(); setError(`Couldn’t import: ${r.error.message}`); return; }
     store.ui({ dialog: null });
   };
-  const name = bare(list.doc.doc);
+  const name = issuesListTitle(list.doc.doc);
   return (
     <Modal onClose={close} label="Import an issues list" blur className="sdlg imdlg ilf">
       <Head onClose={close} disabled={busy === 'importing'} />

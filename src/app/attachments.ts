@@ -15,8 +15,20 @@ import { control } from '../control';
 /** how many files can go with one message: as many documents as one model call is given */
 export const MAX_ATTACHED = control.limits.docsPerCall;
 
+type AttachmentTarget = Pick<Attachment, 'dealId' | 'findingId' | 'conv'>;
+const retryTargets = new WeakMap<() => void, AttachmentTarget>();
+
+/** A failed attachment no longer has a chip to move when its deal is recovered (#745). */
+function offerAttachmentRetry(store: Store, target: AttachmentTarget, file: File) {
+  const run = () => void attachFiles(store, retryTargets.get(run) ?? target, [file]);
+  retryTargets.set(run, target);
+  const dealName = store.get().deals[target.dealId]?.name;
+  const destination = dealName ? ` to ${dealName}` : '';
+  store.toast(`Couldn’t attach ${file.name}${destination} ·`, { label: 'Retry', run });
+}
+
 let seq = 0;
-export async function attachFiles(store: Store, ctx: { dealId: string; findingId?: string; conv: string }, files: File[]) {
+export async function attachFiles(store: Store, ctx: AttachmentTarget, files: File[]) {
   // past the most one message can take, a file is not attached, and the person is told, rather than it being dropped when sent
   const room = Math.max(0, MAX_ATTACHED - store.get().ui.attachments.filter((a) => a.conv === ctx.conv).length);
   if (files.length > room) store.toast(`${files.length - room} not attached: ${MAX_ATTACHED} files is the most for one message`);
@@ -26,11 +38,11 @@ export async function attachFiles(store: Store, ctx: { dealId: string; findingId
     void (async () => {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const r = await store.services.docs.attach(ctx.dealId, { name: file.name, bytes });
-      if (!store.get().ui.attachments.some((a) => a.id === id)) return; // removed while uploading
+      const chip = store.get().ui.attachments.find((attachment) => attachment.id === id);
+      if (!chip) return; // removed while uploading
       if (!r.ok) {
         store.ui((ui) => ({ attachments: ui.attachments.filter((a) => a.id !== id) }));
-        const dealName = store.get().deals[ctx.dealId]?.name;             // on Home the file goes in no deal
-        store.toast(`Couldn’t attach ${file.name}${dealName ? ` to ${dealName}` : ''} ·`, { label: 'Retry', run: () => void attachFiles(store, ctx, [file]) });
+        offerAttachmentRetry(store, chip, file);
         return;
       }
       store.ui((ui) => ({ attachments: ui.attachments.map((a) => (a.id === id ? { ...a, state: 'done' as const, doc: r.value.doc, docId: r.value.docId } : a)) }));
@@ -97,12 +109,21 @@ const copiedFrom = new WeakMap<Store, Map<string, string>>();
 const carrying = new WeakMap<Store, Promise<unknown>>();
 
 /** The attachment, moved to the copy's ids when its deal was kept as a copy; else as it was. */
-function movedAttachment(attachment: Attachment, ids: Record<string, string>): Attachment {
+function movedAttachment<T extends AttachmentTarget>(attachment: T, ids: Record<string, string>): T {
   const dealId = ids[attachment.dealId];
   if (!dealId) return attachment;
   const conv = attachment.conv.split(':').map((part) => ids[part] ?? part).join(':');
   const findingId = attachment.findingId ? ids[attachment.findingId] ?? attachment.findingId : undefined;
   return { ...attachment, dealId, conv, ...(findingId ? { findingId } : {}) };
+}
+
+function moveRetryTargets(store: Store, ids: Record<string, string>) {
+  for (const toast of store.get().ui.toasts) {
+    const run = toast.action?.run;
+    if (!run) continue;
+    const target = retryTargets.get(run);
+    if (target) retryTargets.set(run, movedAttachment(target, ids));
+  }
 }
 
 /**
@@ -114,6 +135,7 @@ export function followCopies(store: Store): () => void {
     // the deal's own id among its records' (a deal's id starts d_), whether or not the copy has loaded yet
     const deals = Object.entries(ids).filter(([was, now]) => was !== now && was.startsWith('d_'));
     if (!deals.length) return;
+    moveRetryTargets(store, ids);
     store.ui((ui) => ({ attachments: ui.attachments.map((attachment) => movedAttachment(attachment, ids)) }));
     const from = copiedFrom.get(store) ?? new Map<string, string>();
     copiedFrom.set(store, from);
@@ -174,4 +196,47 @@ export async function filesSendable(store: Store, dealId: string, files: { doc: 
     store.toast(`Couldn’t find ${names.length} files — attach them again`, undefined, false, names.join(', '));
   }
   return false;
+}
+
+export const composerChips = (state: { ui: { attachments: Attachment[] } }, key: string) =>
+  state.ui.attachments.filter((chip) => chip.conv === key);
+
+type ReadyChip = Attachment & { doc: string; docId: string };
+
+const readyChips = (chips: Attachment[]): ReadyChip[] =>
+  chips.filter((chip): chip is ReadyChip => chip.state === 'done' && !!chip.doc && !!chip.docId);
+
+/** A conversation may hold files from different deals. Name any missing file before sending. */
+async function filesOk(store: Store, chips: ReadyChip[]) {
+  for (const dealId of new Set(chips.map((chip) => chip.dealId))) {
+    if (!(await filesSendable(store, dealId, chips.filter((chip) => chip.dealId === dealId)))) return false;
+  }
+  return true;
+}
+
+const checking = new WeakMap<Store, Set<string>>();
+
+/** While this conversation's files are being checked, a second Enter sends nothing twice. */
+export async function chipsSendable(store: Store, key: string) {
+  const active = checking.get(store) ?? new Set<string>();
+  checking.set(store, active);
+  if (active.has(key)) return false;
+  active.add(key);
+  try {
+    const checked = new Set<string>();
+    for (;;) {
+      const chips = composerChips(store.get(), key);
+      if (chips.some((chip) => chip.state === 'pending')) {
+        store.toast('Still attaching — send when it finishes');
+        return false;
+      }
+      // A file which finished attaching during the previous check is checked too.
+      const fresh = readyChips(chips).filter((chip) => !checked.has(chip.id));
+      if (!fresh.length) return true;
+      if (!(await filesOk(store, fresh))) return false;
+      for (const chip of fresh) checked.add(chip.id);
+    }
+  } finally {
+    active.delete(key);
+  }
 }

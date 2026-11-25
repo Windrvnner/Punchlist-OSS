@@ -5,7 +5,7 @@ import { act } from 'preact/test-utils';
 import './keptTextSession';
 import { StoreContext } from '../../src/ui/hooks';
 import { ImportDialog } from '../../src/ui/qaImport';
-import { keptImport, keepImport, importKey, keptImportsReady } from '../../src/ui/keptImports';
+import { keptImport, keepImport, importKey, keptImportsReady } from '../../src/app/keptImports';
 import { readImportBytes } from '../../src/app/transfer';
 import { ImportQuestions, lastImport } from '../../src/app/commands/importQuestions';
 import { SetResponse } from '../../src/app/commands/questions';
