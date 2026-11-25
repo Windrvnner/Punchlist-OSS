@@ -412,6 +412,18 @@ describe('the chat agent', () => {
     const both = val(await two.ai.answer(acrossDeals));
     expect(two.turns[1].prompt).toContain('Project Proseware: Lock-up first.\n\nProject Wingtip: no open findings.');
     expect(both.research!.steps[1].result).toBe('Project Proseware: 1 paragraph · Project Wingtip: no open findings');
+    // stopped while the first deal is briefed: the next deal is not briefed
+    let stopper: ReturnType<typeof setup> | undefined;
+    const stopOnBrief = (c: Call) => {
+      if (!isBrief(c)) return helper(c);
+      void stopper!.ai.stop!('r1');
+      return { paragraphs: ['Lock-up first.'] };
+    };
+    stopper = setup(stopOnBrief, undefined, { repo: two.repo, turn: catchUp });
+    const stopped = val(await stopper.ai.answer({ ...acrossDeals, runId: 'r1' }));
+    expect(stopped.text).toBe('Done.');
+    expect(stopper.calls.filter(isBrief).length).toBe(1);
+    expect(stopper.turns[1].prompt).toContain('Project Wingtip: not briefed, since the person stopped the research.');
     // a brief the model cannot write is said so, and the answer still comes
     const unread = setup((c) => (isBrief(c) ? 'no' : helper(c)), { d1: [FA] }, { turn: catchUp });
     await deal(unread.repo);

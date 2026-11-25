@@ -2760,11 +2760,12 @@ export function nodeAi(o: AiOptions) {
      * written as the check left it (`kept`). An item's first line in a round is the one that counts (rounds.ts,
      * `counts`), which is why nothing is written for a held item until the agent has had its turn.
      *
-     * The limit: the agent's own ceilings hold (about `limits.chatTurns` turns a run, `limits.searchCalls` a search), and
-     * every call it makes, its turns, searches, reads and folder batches, counts against an allowance of its own for
-     * this check on this PC, as large as the check's own searches have (`limits.checkSearchCalls`, `filled`), so it never
-     * takes the check's searches from it. Once that is spent, or a run has failed, no more items are handed over. A gap
-     * already searched for on these documents and wording (`searched`) is not held, so not handed over again.
+     * The limit: the agent's own ceilings hold (about `limits.chatTurns` turns a run, `limits.searchCalls` a search),
+     * and every call it makes, its turns, searches, reads, folder batches and briefs, counts against an allowance of
+     * its own for this check on this PC, as large as the check's own searches have (`limits.checkSearchCalls`,
+     * `filled`), so it never takes the check's searches from it. Once that is spent, or a run has failed, no more items
+     * are handed over. A gap already searched for on these documents and wording (`searched`) is not held, so not
+     * handed over again.
      */
     const filled = { left: o.checkSearchCalls ?? L.checkSearchCalls };
     const filler = chatAgent({ ...agentKit, look: (deals, model, ask, lookFor, skip) => budget.run({ left: o.searchCalls ?? L.searchCalls, deal: filled }, () => read('search', deals, model, ask, lookFor, {}, '{"text": "what they say, with [n] markers", "sources": [...]}', undefined, skip)) }, agentOpts);

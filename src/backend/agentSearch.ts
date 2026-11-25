@@ -131,7 +131,10 @@ export async function catchUp(run: AgentRun): Promise<string> {
   const said: string[] = [];
   for (const dealId of question.deals) {
     const heading = multi ? `${await kit.dealName(dealId)}: ` : '';
-    const { text, result } = await briefOf(run, dealId);
+    // stopped by the person: no further deal is briefed (decisions: Stop answers from what was found)
+    const { text, result } = run.progress.stopped
+      ? { text: 'not briefed, since the person stopped the research.', result: 'stopped' }
+      : await briefOf(run, dealId);
     parts.push(heading + text);
     said.push(heading + result);
   }
