@@ -57,6 +57,11 @@ export interface Transaction {
    * transaction is refused with a conflict. Nothing is written to these records (#88).
    */
   expects?: { kind: RecordKind; id: string; rev: number }[];
+  /**
+   * Read-only set precondition: the records of this kind that exist under the deal at commit must be exactly these ids,
+   * so a record that arrived after the plan, which no rev can name, refuses the transaction (#410).
+   */
+  expectsMembers?: { dealId: string; kind: RecordKind; ids: string[] };
   audit?: AuditEntry[];
   /** index membership changes: record ids filed under a deal. `remove` goes with a delete of the same record in the same transaction; on its own it takes nothing off, since a filed record is listed until it is deleted */
   index?: { dealId: string; add?: { kind: RecordKind; id: string }[]; remove?: { kind: RecordKind; id: string }[] };

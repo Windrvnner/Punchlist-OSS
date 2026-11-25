@@ -38,6 +38,10 @@ export interface Plan {
   index?: { dealId: string; add?: { kind: RecordKind; id: string }[]; remove?: { kind: RecordKind; id: string }[] };
   /** records the plan read but does not write: refused at commit if one changed (see Transaction.expects) */
   expects?: { kind: RecordKind; id: string; rev: number }[];
+  /** the records of a kind under a deal that the plan read: refused at commit if the set changed
+   * (see Transaction.expectsMembers)
+   */
+  expectsMembers?: { dealId: string; kind: RecordKind; ids: string[] };
   audit: AuditDraft[];
   /** Undo of a choice between versions: they stand again, unchosen (see Transaction.reopen) */
   reopen?: { kind: RecordKind; id: string; versions: { id: string; by: string; from: string; at: string; data: unknown; here?: boolean }[] }[];
