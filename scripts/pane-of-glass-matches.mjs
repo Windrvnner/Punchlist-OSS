@@ -5,7 +5,12 @@ import { globSources } from './pane-of-glass-globs.mjs';
 import { literalText, unwrapped } from './pane-of-glass-syntax.mjs';
 import { localConstLookup } from './pane-of-glass-constants.mjs';
 
-const storageNames = new Set(['localStorage', 'sessionStorage', 'indexedDB']);
+// Persistence and network access belong in src/app and src/backend: browser storage, cookies, the Cache API, and
+// the browser's own ways to reach a server (a model service among them).
+const storageNames = new Set(['localStorage', 'sessionStorage', 'indexedDB', 'caches', 'cookie']);
+const networkNames = new Set(['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'sendBeacon']);
+// Read only as a property (document.cookie, navigator.sendBeacon), so a local variable of that name is fine.
+const propertyOnlyNames = new Set(['cookie', 'sendBeacon']);
 const layerPath = /^(?:backend|adapters|desktop|shell)(?:\/|$)/;
 const externalModule = /^(?:node:|(?:electron|fs|path)(?:\/|$))/;
 
@@ -80,6 +85,7 @@ export async function matchesIn(file, source, checkGlobs) {
     const names = propertyNames(key, computed);
     if (names.includes('services')) record('services', key);
     if (names.some((name) => storageNames.has(name))) record('storage', key);
+    if (names.some((name) => networkNames.has(name))) record('network', key);
   }
   function checkMember(node) {
     checkProperty(node.property, node.computed);
@@ -116,7 +122,9 @@ export async function matchesIn(file, source, checkGlobs) {
     JSXOpeningElement: checkTag,
     ObjectPattern: checkPattern,
     Identifier(node) {
+      if (propertyOnlyNames.has(node.name)) return;
       if (storageNames.has(node.name)) record('storage', node);
+      if (networkNames.has(node.name)) record('network', node);
     },
   }).visit(parsed.program);
 
