@@ -5,16 +5,15 @@ import { useAppState, useStore } from './hooks';
 import type { Store } from '../app/store';
 import { findingHref } from './findings';
 import {
-  answerCardDraft, answerFindingDrafts, answerQuestionDrafts, type CardDraft, saveAnswerFinding,
+  answerCardDraft, answerFindingDrafts, answerQuestionDrafts, type CardDraft, saveAnswerFinding, saveAnswerQuestion,
 } from '../app/answerDrafts';
 import { focusCard, closeOnEscape } from './focus';
 import { workstreamChoices } from '../domain/order';
 import { TEXT_MAX } from '../domain/importExport';
-import { dealIdOf, type Scope } from '../app/conversations';
-import { withoutMarkers } from '../domain/cite';
-import { CreateQuestion } from '../app/commands/questions';
+import { dealIdOf, findingFromAnswer, type Scope } from '../app/conversations';
+import type { Message } from '../app/state';
 import { TITLE_MAX } from '../app/commands/findings';
-import type { Finding, Source } from '../domain/model';
+import type { Finding } from '../domain/model';
 
 /** Keep the input as typed so leaving immediately after input keeps the latest text (#51). */
 function useCardDraft(drafts: Map<string, CardDraft>, answerId: string, start: CardDraft) {
@@ -62,12 +61,9 @@ export function QuestionCard({ scope, answerId, initial, onDone }: {
   const busy = out.busy;
   const log = () => {
     const sent = draft.typed;
-    const question = { dealId, text: text.trim(), workstream, linkedFinding: finding?.id };
-    void out.send(async (cancelled) => {
-      const result = await store.dispatch(CreateQuestion, question, { idempotencyKey: 'card-q-' + dealId });
-      // cancelled while it was out: a card opened since is left alone
-      return result.ok && !cancelled() && draft.landed(sent);
-    });
+    void out.send((cancelled) => saveAnswerQuestion(store, {
+      dealId, linkedFinding: finding?.id, draft, sent, cancelled,
+    }));
   };
   const cancel = () => {
     out.cancel();
@@ -91,23 +87,19 @@ export function QuestionCard({ scope, answerId, initial, onDone }: {
   );
 }
 
-/** The answer's first sentence, as a title: without the sentence's period, and 140 characters at most. */
-function firstSentence(text: string) {
-  const sentence = /^[^.!?]*[.!?]/.exec(text)?.[0] ?? text;
-  return sentence.trim().replace(/[.!?]$/, '').slice(0, 140);
-}
-
 /** "Add as finding": a new finding from the answer, with its sources. */
-export function FindingCard({ dealId, answerId, text, sources, onDone }: {
-  dealId: string; answerId: string; text: string; sources: Source[]; onDone: () => void;
+export function FindingCard({ dealId, answer, onDone }: {
+  dealId: string; answer: Message; onDone: () => void;
 }) {
   const store = useStore();
   const state = useAppState();
   const deal = state.deals[dealId];
+  const answerId = answer.id;
+  const sources = answer.sources ?? [];
+  const { text, preview, title: initial } = findingFromAnswer(answer);
   // the answer's first sentence starts as the title, as a real value to keep or change: shown only as a hint, it
   // looked filled in when it was not
-  const plainText = withoutMarkers(text, sources.length);
-  const draft = useCardDraft(answerFindingDrafts, answerId, { text: firstSentence(plainText), ws: '' });
+  const draft = useCardDraft(answerFindingDrafts, answerId, { text: initial, ws: '' });
   const { text: title, ws: workstream } = draft.typed;
   // why Create is off, said on hover
   const need = !title.trim() ? 'Give the finding a title' : !workstream ? 'Choose a workstream' : null;
@@ -141,7 +133,7 @@ export function FindingCard({ dealId, answerId, text, sources, onDone }: {
       <input class="in" id="af-title" placeholder="Title" aria-label="Title" maxLength={TITLE_MAX} ref={focusCard}
         value={title} onInput={(e) => draft.change({ text: (e.currentTarget as HTMLInputElement).value })} />
       <WorkstreamSelect id="af-ws" value={workstream} onChange={(ws) => draft.change({ ws })} />
-      <p class="cbody">{plainText}</p>
+      <p class="cbody">{preview}</p>
       {sources.length > 0 && <div class="csrc">{sources.map((source, i) => (
         <span class="ref" key={i}><span class="rb">{source.doc}{source.loc ? ` · ${source.loc}` : ''}</span></span>
       ))}</div>}
