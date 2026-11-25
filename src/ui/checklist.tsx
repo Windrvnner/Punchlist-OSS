@@ -44,7 +44,7 @@ const ONE: Record<Kind, string> = { finding: 'Flagged', gone: 'Finding deleted',
  */
 function GapRead({ r }: { r: ChecklistRow }) {
   const n = r.docs.length; const un = r.unread ?? []; const names = (xs: { name: string }[]) => xs.map((x) => x.name).join(', ');
-  // what the check's search looked for, each search once, with how many documents answered to it as its tooltip
+  // each search's tooltip says how many documents answered to it
   const said = (n: number) => (n ? `${n.toLocaleString('en-US')} ${n === 1 ? 'document answers' : 'documents answer'} to it` : 'No document answers to it');
   const searched = gapSearches(r);
   return <p class="ckp" id="ck-read">
