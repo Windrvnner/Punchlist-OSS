@@ -253,5 +253,67 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
   say('no-page-errors-3', page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close(); }
 
+// A merge must show where long responses with the same opening differ (#269).
+{
+  const { ctx, page } = await fresh({ viewport: { width: 1024, height: 640 }, colorScheme: 'dark' });
+  const dealId = await newDeal(page, 'Import preview');
+  const question = 'Confirm the amount and timing of the debt service reserve.';
+  const prefix = 'The reserve uses the next twelve months of scheduled principal and interest in both projections. '
+    + 'The amount will be funded from the first disbursement.';
+  const now = `${prefix}\nThe approved illustration shows a twelve-month reserve.`;
+  const after = `${prefix}\nThe revised illustration shows a six-month reserve.\n`
+    + 'AmendmentAcknowledgmentAndReserveFundingDocumentationReference';
+  await page.goto(URL + '#qa-' + dealId);
+  await addQuestion(page, question);
+  await page.fill('.det textarea.rtext', now);
+  await page.press('.det textarea.rtext', 'Tab');
+  await page.waitForFunction((expected) => Object.values(store.get().questions)
+    .some((row) => row.response === expected), now);
+
+  await page.click('#qa-cols');
+  await page.click('#qa-import');
+  const mergeFile = file('reserve.csv', `Number,Question,Response\n1,"${question}","${after}"\n`);
+  await page.setInputFiles('#im-file', mergeFile);
+  await page.waitForSelector('#im-changes tbody td');
+  await page.focus('#im-answered');
+  await page.keyboard.press('Tab');
+  const focused = await focusId(page);
+  await page.keyboard.press('End');
+  await page.waitForTimeout(500);
+
+  const layout = await page.locator('#im-changes').evaluate((pane) => {
+    const bounds = pane.getBoundingClientRect();
+    const headerBottom = pane.querySelector('th').getBoundingClientRect().bottom;
+    const values = [...pane.querySelectorAll('tbody td:nth-child(n+3)')].map((cell) => {
+      const text = cell.firstChild;
+      const newline = text.textContent.indexOf('\n');
+      const range = document.createRange();
+      const lineAt = (offset) => {
+        range.setStart(text, offset);
+        range.setEnd(text, offset + 1);
+        return range.getBoundingClientRect().top;
+      };
+      const keptLineBreak = lineAt(newline + 1) > lineAt(newline - 1);
+      range.setStart(text, text.length - 8);
+      range.setEnd(text, text.length);
+      const end = range.getBoundingClientRect();
+      const cellBounds = cell.getBoundingClientRect();
+      return {
+        value: text.textContent,
+        keptLineBreak,
+        readable: end.top >= headerBottom && end.bottom <= bounds.bottom && end.right <= cellBounds.right,
+        widthFits: cell.scrollWidth === cell.clientWidth,
+      };
+    });
+    return { values, scrolled: pane.scrollTop > 0, widthFits: pane.scrollWidth === pane.clientWidth };
+  });
+  const exactText = layout.values.map(({ value }) => value).join('|') === [now, after].join('|');
+  const valuesFit = layout.values.every(({ keptLineBreak, readable, widthFits }) => keptLineBreak && readable && widthFits);
+  say('overwrite-values-show-both-endings-with-keyboard', focused === 'im-changes'
+    && layout.scrolled && layout.widthFits && exactText && valuesFit, JSON.stringify(layout));
+  say('overwrite-comparison-does-not-write', (await qs(page, dealId))[0].response === now);
+  await ctx.close();
+}
+
 await browser.close();
 const failed = results.filter(([, ok]) => !ok).length; console.log(`\n${results.length - failed}/${results.length} passed`); process.exit(failed ? 1 : 0);
