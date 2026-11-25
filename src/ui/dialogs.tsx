@@ -9,14 +9,13 @@ import { FoldersBody, FoldersActs } from './foldersParts';
 import { versionsWord, dealHash, dealLabel, type DealKinds } from '../app/state';
 import { keepNewDeal } from '../app/newDealDraft';
 import { useNewDealDraft } from './useNewDealDraft';
-import { firmOf } from '../domain/checklist';
 import { PickList } from './pickList';
 import { FOLDER_LABEL_MAX, dealNameRoom, matchesDealName, RemoveFolder, DeleteDeal } from '../app/commands/deals';
 import {
-  addDealFolders, chosenDealFolder, droppedFolderPaths, folderListed, guessLabel,
-  pickDealFolders, readDealFolder, restoreDealFolder, waitingFolderOverlap,
+  chosenDealFolder, droppedFolderPaths, guessLabel, pickDealFolders, readDealFolder, restoreDealFolder,
 } from '../app/dealFolders';
-import { createDealFromForm, findDealTwin } from '../app/dealSetup';
+import { submitDealForm } from '../app/dealSetup';
+import { checklistListCounts } from '../app/dealCounts';
 import { TwinConfirm } from './twin';
 import type { Folder } from '../domain/model';
 
@@ -195,41 +194,12 @@ export function NewDealDialog() {
   const create = async (anyway = false) => {
     if (creating() || kept.busy()) return;     // a folder still being read is part of what is being created
     if (needName) return;
-    // held from the press, the typed path's read included, so Escape cannot close it before the deal is made (#36);
-    // kept in the store, so a second click before the next render is turned away
-    set({ busy: true, error: '' });
-    // a path typed but not yet added is part of the deal: add it first (unless it is already listed), and stop if it cannot be read
-    const typed = path.trim();
-    const listed = folderListed([...nd.folders, ...(existing?.folders ?? [])], typed);
-    if (typed && !listed && !(await addPath(typed))) {
-      set({ busy: false });
-      return;
-    }
-    if (typed) setPath('');
-    const folders = store.get().ui.newDeal?.folders ?? nd.folders;
-    if (existing) {
-      const result = await addDealFolders(store, existing.id, folders);
-      if (!result.ok) {
-        set({ busy: false, error: result.error.message });
-        return;
-      }
-      close();
-      return;
-    }
-    if (!anyway) {
-      const twin = await findDealTwin(store, { name: nd.name, counterparty: nd.counterparty, folders });
-      if (twin) {
-        set({ busy: false, twin });
-        return;
-      }
-    }
-    const { deal, message } = await createDealFromForm(store, { ...nd, folders });
-    if (!deal) {
-      set({ busy: false, error: message });
-      return;
-    }
+    const typedTaken = () => setPath('');
+    const submit = { form: nd, typed: path, existing: existing ?? undefined, anyway, addPath, typedTaken };
+    const { done, deal } = await submitDealForm(store, submit);
+    if (!done) return;
     close();
-    location.hash = dealHash(store.get().prefs, deal.id);
+    if (deal) location.hash = dealHash(store.get().prefs, deal.id);
   };
 
   const askRemove = (f: Folder) => setRemoving({ path: f.path, label: f.label.trim() || guessLabel(f.path) });
@@ -252,7 +222,6 @@ export function NewDealDialog() {
         <Kinds kinds={nd.kinds ?? {}} set={(k) => set({ kinds: { ...nd.kinds, ...k } })} /></>}
       {/* Folders: the deal's folders, those waiting under To Add, then the drop area */}
       {existing && <FoldersBody deal={existing} locked={locked}
-        waitingOver={(folder) => waitingFolderOverlap(nd.folders, folder)}
         restore={(gone) => void restoreDealFolder(store, existing.id, gone)} ask={askRemove} waiting={nd.folders}
         change={(folders) => set({ folders })} onDrop={(e) => void onDrop(e)} pastePath={pastePath}
         paste={pasting && pasteField} />}
@@ -328,9 +297,9 @@ function PasteField({ path, setPath, add, busy }: {
  * so a deal is never created only to be set up afterwards.
  */
 function Kinds({ kinds, set }: { kinds: DealKinds; set: (k: DealKinds) => void }) {
-  const lists = firmOf(useAppState().firmList).lists;
+  const state = useAppState();
   const field = (label: string, k: keyof DealKinds) => {
-    const names = lists.filter((l) => l.layer === k).map((l) => ({ name: l.name, n: l.items.length }));
+    const names = checklistListCounts(state, k);
     return (<div><span class="lbl" id={`nd-${k}-l`}>{label}</span>{names.length
       ? <PickList id={`nd-${k}`} className="field" label={label} names={names} cur={kinds[k] ?? ''} empty="None" float end={k === 'technology'} onPick={(v) => set({ [k]: v })} />
       : <input class="field" id={`nd-${k}`} aria-labelledby={`nd-${k}-l`} placeholder="Not set" maxLength={80} value={kinds[k] ?? ''} onInput={(e) => set({ [k]: (e.currentTarget as HTMLInputElement).value })} />}</div>);
