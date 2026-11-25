@@ -15,6 +15,7 @@ import { EditField, ReadOnlyContext } from './editField';
 import { readDeal } from '../app/fieldDrafts';
 import { ConflictView } from './conflict';
 import { runMemo } from '../app/memo';
+import { openDeleteDeal } from '../app/dealSetup';
 import { keptDrafts, hasTexts } from '../app/keptText';
 import { num } from './counts';
 
@@ -48,15 +49,6 @@ function RecoveredTitle({ name, head, tail }: { name: string; head: string; tail
     return () => ro?.disconnect();
   }, [name, head, tail]);
   return <h1 class="ttl left" ref={ref} title={name} aria-label={name} dir={nameDir(name)} />;
-}
-
-/**
- * The first delete pop-up opens at once; what this PC has taken in is asked as it opens and kept on it, so work from another
- * PC that arrives while the person confirms counts as unseen and is kept there. It is back long before a name is typed.
- */
-function openDelete(store: ReturnType<typeof useStore>, dealId: string) {
-  store.ui({ deleteDeal: { dealId, typed: '', error: '' } });
-  void store.services.repo.seen?.().then((r) => { const dd = store.get().ui.deleteDeal; if (r.ok && dd?.dealId === dealId && !dd.seen) store.ui({ deleteDeal: { ...dd, seen: r.value } }); });
 }
 
 export function useDealLock(d: Deal): string | null {
@@ -161,7 +153,7 @@ function DealMenu({ deal: d, lit, rename }: { deal: Deal; lit: boolean; rename: 
     <MenuItem id="deal-rename" why={locked} onClick={() => act(done, rename)}>Rename</MenuItem>
     <div class="msep" />
     <MenuItem id="deal-delete" className="ddel" why={ro ?? deleteWaits(s, d.id)}
-      onClick={() => act(done, () => openDelete(store, d.id))}>Delete Deal…</MenuItem>
+      onClick={() => act(done, () => void openDeleteDeal(store, d.id))}>Delete Deal…</MenuItem>
   </>} />;
 }
 

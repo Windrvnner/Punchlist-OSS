@@ -3,15 +3,15 @@
  * restart loses nothing, the model's reading and review included: opening the import again picks it up where it was
  * left. A paste alone is kept as typed. "change" keeps the list too until another is read in its place; only "start
  * over", which asks first, or bringing the list in lets it go. While it is brought in nothing is written: a failure
- * keeps it again. The storage itself is keptImports.ts.
+ * keeps it again. The storage itself is in app/keptImports.ts.
  */
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { ImportTable } from '../app/transfer';
 import type { LineRead } from '../domain/listRead';
 import type { ChecklistMapping } from '../domain/checklistImport';
 import { LAYERS, type Layer } from '../domain/checklist';
-import { keptImport, keepImport, dropImport, importKey } from './keptImports';
-import type { Asked, Review } from './firmChecklistReview';
+import { keptImport, keepImport, dropImport, importKey } from '../app/keptImports';
+import type { Asked, Review } from '../app/checklistImport';
 
 /** Every choice and check mark, kept beside the list */
 export interface ChecklistChoices {
@@ -73,7 +73,7 @@ function isChecklistKept(value: unknown): value is ChecklistKept {
  * place of the list "Replace…" names, nor the other way round. `fresh` opens it fresh past a kept import it could not
  * show. `setAside` is true while a kept import that was not shown (`fresh`, or one that fails its shape check) is still
  * left as it is: nothing new has been typed or read in its place yet (#381). `holding` stops writes while the list is
- * brought in; `keepNow` keeps the state as it is when called.
+ * brought in. The app restores the kept import if the submission fails.
  */
 export function useKeeper(layer: Layer | undefined, name: string | undefined, fresh: boolean) {
   const key = importKey.checklist(layer, name);
@@ -84,8 +84,7 @@ export function useKeeper(layer: Layer | undefined, name: string | undefined, fr
   });
   const setAside = useRef(fresh || unreadable);
   const holding = useRef(false);
-  const keepNow = useRef(() => {});
-  return { key, left, setAside, holding, keepNow };
+  return { key, left, setAside, holding };
 }
 export type Keeper = ReturnType<typeof useKeeper>;
 
@@ -115,7 +114,6 @@ export function useKeepImport(keeper: Keeper, now: KeptNow) {
     const askedFor = now.askedFor.current;
     keepImport(key, { paste, table, text, reads, review, choices: { ...choices, askedFor } });
   };
-  keeper.keepNow.current = keep;   // a failed bring-in keeps the state as it is then, not as it found it
   const { mapping, layer, name, askReword, askSame, shown } = choices;
   const { useReword, remove, readFailed, byColumns, bringIn } = choices;
   // written as soon as what is kept changes, before the next frame

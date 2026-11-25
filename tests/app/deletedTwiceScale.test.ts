@@ -14,7 +14,7 @@ import { ResolveConflict } from '../../src/app/commands/conflicts';
 import { RestoreVersion } from '../../src/app/commands/keptVersions';
 import { dealQuestions } from '../../src/app/state';
 import '../ui/keptTextSession';
-import { deletedOf } from '../../src/ui/deleted';
+import { visibleDeletedNotes as deletedOf } from '../../src/app/deletedView';
 
 const FOLDERS = ['1.1 Corporate', '2.3 Offtake', '3.2 Construction', '4.1 Financing', '5.4 Permits', '6.2 Insurance'];
 /** a response as a counterparty writes one, different for each question and each PC */
