@@ -127,7 +127,14 @@ export async function readImportFile(store: Store, file: { name: string; size: n
 
 // ---- import: what a merge would change, worked out before anything is written ----
 
-export interface ImportChange { n: number; field: string; from: string; to: string; /** the two differ only in spaces or line breaks, which look the same on screen */ spacing?: true }
+export interface ImportChange {
+  n: number;
+  field: string;
+  from: string;
+  to: string;
+  /** A change between values that match after whitespace is collapsed and trimmed. */
+  spacing?: true;
+}
 export interface ImportPreview { created: number; updated: number; /** deleted questions a row matches, brought back */ restored: number; changes: ImportChange[] }
 const PREVIEW_FIELDS: [keyof Question, string][] = [['text', 'Question'], ['askedBy', 'Submitted by'], ['received', 'Received'], ['workstream', 'Workstream'], ['priority', 'Priority'], ['status', 'Status'], ['response', 'Response'], ['respondedBy', 'Responded by'], ['responded', 'Date']];
 
