@@ -1,6 +1,6 @@
 // An edit saved over the Q&A log just before an update moved it aside, kept in the log's folder because a new file took the
 // log's name and the archive refused a copy of it, comes back at the next update: cell by cell, against the
-// archive copy it was made from. The app's Store on the real log files code, a CSV log of 2,000 questions in a temporary
+// archive copy it was made from. The app's Store on the real log files code, an .xlsx log of 2,000 questions in a temporary
 // folder; the other people's saves and the archive's refusal are stand-ins.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
@@ -22,6 +22,9 @@ import { prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { nodeQaLogs } from '../../src/backend/qaLogs';
 import { asideFixtureName } from '../backend/qaLogWorkingFiles';
 import { ok } from '../../src/domain/result';
+import { libreOfficeConverter } from '../../src/backend/convert';
+import { gridOf, xlsxOf } from '../backend/miniXlsx';
+import { hasOffice, soffice } from '../backend/officePrerequisites';
 
 const COMMANDS = [
   CreateDeal, ImportQuestions, SetResponse, KeepQaLog, SetQaLogFolder, RecordQaLogExport, RestoreQaLogs,
@@ -30,7 +33,8 @@ for (const c of COMMANDS) registry.set(c.name, c);
 let t = 0; const clock = { now: () => new Date(Date.UTC(2026, 10, 17, 10, 0, 0, t++)).toISOString() };
 let seq = 0; const ids = { next: (p: string) => `${p}_01HZZZZZZZZZZZZZZZZ${String(seq++).padStart(7, '0')}` };
 
-const N = 2000; const FILE = 'Proseware Q&A log.csv'; const columns = ['No.', 'Question', 'Response', 'Team notes'];
+const lo = libreOfficeConverter({ soffice, profile: fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-test-lo-')) });
+const N = 2000; const FILE = 'Proseware Q&A log.xlsx'; const columns = ['No.', 'Question', 'Response', 'Team notes'];
 const text = (i: number) => `Question ${i}: please confirm item ${i}.`;
 const ARC = '01. Archive';
 let answers = 0;
@@ -38,9 +42,9 @@ let answers = 0;
 async function setup() {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-qalog-kept-'));
   const rows = Array.from({ length: N }, (_, k) => [String(k + 1), text(k + 1), '', '']);
-  fs.writeFileSync(path.join(folder, FILE), [columns, ...rows].map((r) => r.join(',')).join('\r\n') + '\r\n');
+  fs.writeFileSync(path.join(folder, FILE), xlsxOf([columns, ...rows]));
   const opts = { latency: [0, 0] as [number, number] }; const repo = memRepo(clock.now, disk());
-  const store = new Store({ repo, ai: mockAi(opts, repo), docs: mockDocuments(opts), fs: { pickFolders: async () => ok([]), pathFor: null, save: async () => ok('saved' as const) }, sheets: csvCodec, session: mockSession(opts), local: new MemoryLocal(), qaLogs: nodeQaLogs({}), clock, ids }, COMMANDS);
+  const store = new Store({ repo, ai: mockAi(opts, repo), docs: mockDocuments(opts), fs: { pickFolders: async () => ok([]), pathFor: null, save: async () => ok('saved' as const) }, sheets: csvCodec, session: mockSession(opts), local: new MemoryLocal(), qaLogs: nodeQaLogs({ convert: lo }), clock, ids }, COMMANDS);
   await store.boot(); await store.dispatch(CreateDeal, { name: 'Proseware', folders: [] }); const dealId = Object.keys(store.get().deals)[0]; await store.loadDeal(dealId);
   // Only the complete log is setup; every save and race below still uses the real files.
   const imported = prepareImport(rows, suggestMapping(columns)).rows.map((row) => ({ ...row, askedBy: FIRM }));
@@ -50,16 +54,16 @@ async function setup() {
   const q = (i: number) => dealQuestions(store.get(), dealId).find((x) => x.text === text(i))!;
   return { folder, store, dealId, q };
 }
-/** the log's lines, as they are in the file (line 0 is the headings) */
-const lines = (f: string) => fs.readFileSync(f, 'utf8').split('\r\n');
-/** a version of the log with some lines set: by line number, the line's cells */
-const edited = (s: string, set: Record<number, string[]>, add: string[][] = []) => {
-  const l = s.split('\r\n'); for (const [i, cells] of Object.entries(set)) l[+i] = cells.join(',');
-  if (add.length) l.splice(l.length - 1, 0, ...add.map((r) => r.join(',')));
-  return l.join('\r\n');
+/** the log's lines, as they are in the file: each row's four cells joined by commas (line 0 is the headings) */
+const linesOf = (bytes: Uint8Array) => gridOf(bytes).map((r) => [...r, '', '', '', ''].slice(0, 4).join(','));
+const lines = (f: string) => linesOf(fs.readFileSync(f));
+/** a version of the log with some lines set: by line number, the line's cells, and rows added below the last */
+const edited = (bytes: Uint8Array, set: Record<number, string[]>, add: string[][] = []) => {
+  const grid = gridOf(bytes); for (const [i, cells] of Object.entries(set)) grid[+i] = cells;
+  return xlsxOf([...grid, ...add]);
 };
 const kept = (folder: string) => fs.readdirSync(folder).filter((n) => /^~qa-log-.*\.(old|kept|left)$/.test(n));
-const archive = (folder: string) => fs.readdirSync(path.join(folder, ARC)).sort().map((n) => ({ n, s: fs.readFileSync(path.join(folder, ARC, n), 'utf8') }));
+const archive = (folder: string) => fs.readdirSync(path.join(folder, ARC)).sort().map((n) => ({ n, s: fs.readFileSync(path.join(folder, ARC, n)) }));
 /** the folder's clock moves on two minutes: every file made from now on reads as made then, so the ones before are old */
 const later = () => {
   const wait = Date.now() + 30; while (Date.now() < wait) { /* so the files before are 20 ms older at least */ }
@@ -72,14 +76,14 @@ const later = () => {
  * log as it was) and someone makes a new file at the log's name (`lroe`, from the same version); the archive refuses sroe's
  * "saved meanwhile" copy (EACCES). Their edit is then only in the folder, under the save's working name.
  */
-async function raced(folder: string, store: Store, dealId: string, sroe: (s: string) => string, lroe: (s: string) => string) {
+async function raced(folder: string, store: Store, dealId: string, sroe: (s: Uint8Array) => Uint8Array, lroe: (s: Uint8Array) => Uint8Array) {
   // the app has something to write, so the update saves: an answer to the last question
   const last = dealQuestions(store.get(), dealId).find((x) => x.text === text(N))!;
   await store.dispatch(SetResponse, { dealId, questionId: last.id, response: `App answer ${++answers}` });
   const log = path.join(folder, FILE); const real = fs.renameSync; const write = fs.writeFileSync; let n = 0;
   const where = trackPaths();
   vi.spyOn(fs, 'renameSync').mockImplementation(((a: fs.PathLike, b: fs.PathLike) => {
-    const was = String(a) === log && ++n === 1 ? fs.readFileSync(log, 'utf8') : null; real(a, b);
+    const was = String(a) === log && ++n === 1 ? fs.readFileSync(log) : null; real(a, b);
     if (was !== null) { write(b, sroe(was)); write(log, lroe(was)); }
   }) as typeof fs.renameSync);
   vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: fs.PathOrFileDescriptor, data: Uint8Array, o?: fs.WriteFileOptions) => {
@@ -90,16 +94,16 @@ async function raced(folder: string, store: Store, dealId: string, sroe: (s: str
   expect(kept(folder)).toHaveLength(1);
 }
 
-describe('an edit kept aside in the log\'s folder', () => {
+describe.skipIf(!hasOffice)('an edit kept aside in the log\'s folder', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('comes back at the next update: their cells and rows go in, a cell both changed keeps the log\'s and is reported, and their version goes to the archive', async () => {
     const { folder, store, dealId, q } = await setup();
     await store.dispatch(SetResponse, { dealId, questionId: q(5).id, response: 'Answer from the app' });
-    const sroe = (s: string) => edited(s, { 7: ['7', text(7), 'sroe: answered by phone', ''], 9: ['9', text(9), 'sroe on 9', ''], 1500: ['1500', text(1500), '', 'sroe: chase'] }, [['2001', 'sroe\'s own question: any liens?', '', '']]);
-    const lroe = (s: string) => edited(s, { 9: ['9', text(9), 'ldoe on 9', ''], 11: ['11', text(11), 'ldoe on 11', ''] });
+    const sroe = (s: Uint8Array) => edited(s, { 7: ['7', text(7), 'sroe: answered by phone', ''], 9: ['9', text(9), 'sroe on 9', ''], 1500: ['1500', text(1500), '', 'sroe: chase'] }, [['2001', 'sroe\'s own question: any liens?', '', '']]);
+    const lroe = (s: Uint8Array) => edited(s, { 9: ['9', text(9), 'ldoe on 9', ''], 11: ['11', text(11), 'ldoe on 11', ''] });
     await raced(folder, store, dealId, sroe, lroe);
-    const samsBytes = fs.readFileSync(path.join(folder, kept(folder)[0]), 'utf8');
+    const samsBytes = fs.readFileSync(path.join(folder, kept(folder)[0]));
 
     later();
     const r = await exportQaLog(store, dealId);
@@ -116,7 +120,7 @@ describe('an edit kept aside in the log\'s folder', () => {
 
   it('a cell the log already has as they wrote it, or a row it already has, is not written twice', async () => {
     const { folder, store, dealId } = await setup();
-    const sroe = (s: string) => edited(s, { 3: ['3', text(3), 'sroe on 3', ''] }, [['2001', 'sroe\'s own question', '', '']]);
+    const sroe = (s: Uint8Array) => edited(s, { 3: ['3', text(3), 'sroe on 3', ''] }, [['2001', 'sroe\'s own question', '', '']]);
     await raced(folder, store, dealId, sroe, sroe);   // the new file is sroe's again (saved twice)
     later();
     const r = await exportQaLog(store, dealId);
@@ -128,7 +132,7 @@ describe('an edit kept aside in the log\'s folder', () => {
 
   it('is left alone while under a minute old by the folder\'s clock: another PC may be saving it this moment', async () => {
     const { folder, store, dealId, q } = await setup();
-    await raced(folder, store, dealId, (s) => edited(s, { 3: ['3', text(3), 'sroe on 3', ''] }), (s) => s + 'x,y,,\r\n');
+    await raced(folder, store, dealId, (s) => edited(s, { 3: ['3', text(3), 'sroe on 3', ''] }), (s) => edited(s, {}, [['x', 'y', '', '']]));
     await store.dispatch(SetResponse, { dealId, questionId: q(4).id, response: 'Answer 4' });
     const r = await exportQaLog(store, dealId);
     expect(r.ok && r.value).toMatchObject({ status: 'written', kept: [] });
@@ -140,7 +144,7 @@ describe('an edit kept aside in the log\'s folder', () => {
     const { folder, store, dealId } = await setup();
     await raced(folder, store, dealId, (s) => edited(s, { 3: ['3', text(3), 'sroe on 3', ''] }), (s) => s);
     for (const a of archive(folder)) fs.rmSync(path.join(folder, ARC, a.n));   // someone tidied the archive
-    const samsBytes = fs.readFileSync(path.join(folder, kept(folder)[0]), 'utf8');
+    const samsBytes = fs.readFileSync(path.join(folder, kept(folder)[0]));
     later();
     const r = await exportQaLog(store, dealId);
     expect(r.ok && r.value).toMatchObject({ status: 'written', kept: [], unmerged: 1 });   // the notice says so
@@ -151,14 +155,14 @@ describe('an edit kept aside in the log\'s folder', () => {
   it('an edit to one of two rows that read alike goes where the person says, ' +
     'and closing the ask leaves the update for later', async () => {
     const { folder, store, dealId } = await setup(); const log = path.join(folder, FILE); const CAP = 'Provide the cap table.';
-    fs.writeFileSync(log, edited(fs.readFileSync(log, 'utf8'), { 100: ['', CAP, '', ''], 900: ['', CAP, 'Draft from the data room', ''] }));   // asked twice, by nobody named
+    fs.writeFileSync(log, edited(fs.readFileSync(log), { 100: ['', CAP, '', ''], 900: ['', CAP, 'Draft from the data room', ''] }));   // asked twice, by nobody named
     await raced(folder, store, dealId, (s) => edited(s, { 900: ['', CAP, 'Final answer from sroe', ''] }), (s) => s);
-    const before = fs.readFileSync(log, 'utf8'); later();
+    const before = fs.readFileSync(log); later();
     let asked: KeptAsk[] = [];
     let r = await exportQaLog(store, dealId, async (ask) => { asked = ask; return null; });
     // nothing saved, nothing filed: asked again
     expect(r.ok && r.value).toEqual({ status: 'canceled' });
-    expect(fs.readFileSync(log, 'utf8')).toBe(before);
+    expect(fs.readFileSync(log).equals(before)).toBe(true);
     expect(kept(folder)).toHaveLength(1);
     expect(asked.map((a) => a.rows.map((x) => x.line))).toEqual([[101, 901]]);   // sheet lines, counted from 1
     r = await exportQaLog(store, dealId, async (ask) => ask.map((a) => a.rows.findIndex((x) => x.line === 901)));
@@ -169,7 +173,7 @@ describe('an edit kept aside in the log\'s folder', () => {
 
   it('an edit to one of two rows that read alike, left out by the person, is filed and said so', async () => {
     const { folder, store, dealId } = await setup(); const log = path.join(folder, FILE); const CAP = 'Provide the cap table.';
-    fs.writeFileSync(log, edited(fs.readFileSync(log, 'utf8'), { 100: ['', CAP, '', ''], 900: ['', CAP, 'Draft from the data room', ''] }));
+    fs.writeFileSync(log, edited(fs.readFileSync(log), { 100: ['', CAP, '', ''], 900: ['', CAP, 'Draft from the data room', ''] }));
     await raced(folder, store, dealId, (s) => edited(s, { 900: ['', CAP, 'Final answer from sroe', ''] }), (s) => s);
     later();
     const r = await exportQaLog(store, dealId, async (ask) => ask.map(() => -2));
@@ -202,20 +206,20 @@ describe('an edit kept aside in the log\'s folder', () => {
     refuse();
     const r = await exportQaLog(store, dealId); expect(r.ok && r.value).toMatchObject({ status: 'written', unmerged: 0 });
     const log = path.join(folder, FILE); expect(lines(log)[3]).toBe(`3,${text(3)},sroe on 3,`); expect(kept(folder)).toEqual([expect.stringMatching(/\.kept$/)]);
-    write(log, fs.readFileSync(log, 'utf8').replace(`3,${text(3)},sroe on 3,`, `3,${text(3)},,`));   // ldoe clears sroe's answer in Excel
+    write(log, edited(fs.readFileSync(log), { 3: ['3', text(3), '', ''] }));   // ldoe clears sroe's answer in Excel
     await store.dispatch(SetResponse, { dealId, questionId: q(4).id, response: 'Answer 4' });
     const again = await exportQaLog(store, dealId); expect(again.ok && again.value).toMatchObject({ status: 'written', kept: [] });
     expect(lines(log)[3]).toBe(`3,${text(3)},,`); expect(kept(folder)).toHaveLength(1);
     vi.mocked(fs.writeFileSync).mockRestore();                                         // the archive takes it now
     const third = await exportQaLog(store, dealId); expect(third.ok && third.value).toMatchObject({ status: 'written', unmerged: 0 });   // it was merged in full
     expect(lines(log)[3]).toBe(`3,${text(3)},,`); expect(kept(folder)).toEqual([]);
-    expect(archive(folder).filter((a) => a.n.includes('saved meanwhile')).map((a) => a.s.split('\r\n')[3])).toEqual([`3,${text(3)},sroe on 3,`]);
+    expect(archive(folder).filter((a) => a.n.includes('saved meanwhile')).map((a) => linesOf(a.s)[3])).toEqual([`3,${text(3)},sroe on 3,`]);
   }, 120_000);
 
   it('a change to a row the log took out is filed in the archive and the notice says so, at the update that files it', async () => {
     const { folder, store, dealId } = await setup();
-    const sroe = (s: string) => edited(s, { 3: ['3', text(3), 'sroe on 3', ''], 20: ['20', text(20), 'sroe on 20', ''] });
-    const lroe = (s: string) => s.split('\r\n').filter((_, i) => i !== 20).join('\r\n');   // ldoe took row 20 out
+    const sroe = (s: Uint8Array) => edited(s, { 3: ['3', text(3), 'sroe on 3', ''], 20: ['20', text(20), 'sroe on 20', ''] });
+    const lroe = (s: Uint8Array) => xlsxOf(gridOf(s).filter((_, i) => i !== 20));   // ldoe took row 20 out
     await raced(folder, store, dealId, sroe, lroe);
     later();
     const write = fs.writeFileSync; const where = trackPaths(); vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: fs.PathOrFileDescriptor, data: Uint8Array, o?: fs.WriteFileOptions) => {
@@ -225,25 +229,25 @@ describe('an edit kept aside in the log\'s folder', () => {
     const log = path.join(folder, FILE); expect(lines(log)[3]).toBe(`3,${text(3)},sroe on 3,`); expect(kept(folder)).toEqual([expect.stringMatching(/\.left$/)]);
     vi.mocked(fs.writeFileSync).mockRestore();                                         // the archive takes it now
     const again = await exportQaLog(store, dealId); expect(again.ok && again.value).toMatchObject({ status: 'written', unmerged: 1 });
-    expect(kept(folder)).toEqual([]); expect(archive(folder).filter((a) => a.n.includes('saved meanwhile')).map((a) => a.s.split('\r\n')[20])).toEqual([`20,${text(20)},sroe on 20,`]);
+    expect(kept(folder)).toEqual([]); expect(archive(folder).filter((a) => a.n.includes('saved meanwhile')).map((a) => linesOf(a.s)[20])).toEqual([`20,${text(20)},sroe on 20,`]);
     expect(lines(log).some((x) => x.includes('sroe on 20'))).toBe(false);
   }, 120_000);
 
   it('is merged against the archive copy made before the move, not one another PC made a moment after it', async () => {
-    const { folder, store, dealId } = await setup(); let lroe = '';
+    const { folder, store, dealId } = await setup(); let lroe: Uint8Array = new Uint8Array();
     await raced(folder, store, dealId, (s) => edited(s, { 3: ['3', text(3), 'sroe on 3', ''] }), (s) => (lroe = edited(s, { 11: ['11', text(11), 'ldoe on 11', ''] })));
     const wait = Date.now() + 30; while (Date.now() < wait) { /* a moment after: a copy made in the same tick of the file system's clock can't be told apart */ }
-    fs.writeFileSync(path.join(folder, ARC, 'Proseware Q&A log 2026-11-17 1001.csv'), lroe);   // another PC's update, archiving ldoe's file
+    fs.writeFileSync(path.join(folder, ARC, 'Proseware Q&A log 2026-11-17 1001.xlsx'), lroe);   // another PC's update, archiving ldoe's file
     later();
     const r = await exportQaLog(store, dealId); expect(r.ok && r.value).toMatchObject({ status: 'written', kept: [] });
     const l = lines(path.join(folder, FILE)); expect([l[3], l[11]]).toEqual([`3,${text(3)},sroe on 3,`, `11,${text(11)},ldoe on 11,`]);
   }, 120_000);
 
   it('uses the verified archive when copies of different bytes have the same timestamp', async () => {
-    const { folder, store, dealId } = await setup(); let lroe = '';
+    const { folder, store, dealId } = await setup(); let lroe: Uint8Array = new Uint8Array();
     await raced(folder, store, dealId, (s) => edited(s, { 3: ['3', text(3), 'sroe on 3', ''] }), (s) => (lroe = edited(s, { 11: ['11', text(11), 'ldoe on 11', ''] })));
-    fs.writeFileSync(path.join(folder, ARC, 'Proseware Q&A log 2026-11-17 1001.csv'), lroe);   // another PC's update, archiving ldoe's file
-    const t = fs.statSync(path.join(folder, ARC, 'Proseware Q&A log 2026-11-17 1001.csv')).ctimeMs; const st = fs.statSync;   // a coarse clock: every file made so far, made at once
+    fs.writeFileSync(path.join(folder, ARC, 'Proseware Q&A log 2026-11-17 1001.xlsx'), lroe);   // another PC's update, archiving ldoe's file
+    const t = fs.statSync(path.join(folder, ARC, 'Proseware Q&A log 2026-11-17 1001.xlsx')).ctimeMs; const st = fs.statSync;   // a coarse clock: every file made so far, made at once
     vi.spyOn(fs, 'statSync').mockImplementation(((f: fs.PathLike, o?: never) => { const s = st(f, o) as fs.Stats; return s && s.ctimeMs <= t ? Object.assign(Object.create(Object.getPrototypeOf(s)), s, { ctimeMs: t }) : s; }) as never);
     const real = vi.mocked(fs.statSync).getMockImplementation()!; const t0 = Date.now() + 20; while (Date.now() < t0) { /* the next files are later */ }
     vi.mocked(fs.statSync).mockImplementation(((f: fs.PathLike, o?: never) => { const s = real(f, o) as fs.Stats; return s && s.ctimeMs > t ? Object.assign(Object.create(Object.getPrototypeOf(s)), s, { ctimeMs: s.ctimeMs + 2 * 60_000 }) : s; }) as never);
@@ -255,10 +259,10 @@ describe('an edit kept aside in the log\'s folder', () => {
   }, 120_000);
 
   it('a copy of another log that shares the archive, made in the same tick, is never taken for the version they edited', async () => {
-    const { folder, store, dealId } = await setup(); let lroe = '';
+    const { folder, store, dealId } = await setup(); let lroe: Uint8Array = new Uint8Array();
     await raced(folder, store, dealId, (s) => edited(s, { 3: ['3', text(3), 'sroe on 3', ''] }), (s) => (lroe = edited(s, { 11: ['11', text(11), 'ldoe on 11', ''] })));
-    fs.writeFileSync(path.join(folder, ARC, 'Proseware Q&A log v2 2026-11-17 1001.csv'), lroe);   // another PC's update, archiving ldoe's file
-    const t = fs.statSync(path.join(folder, ARC, 'Proseware Q&A log v2 2026-11-17 1001.csv')).ctimeMs; const st = fs.statSync;   // a coarse clock: every file made so far, made at once
+    fs.writeFileSync(path.join(folder, ARC, 'Proseware Q&A log v2 2026-11-17 1001.xlsx'), lroe);   // another PC's update, archiving ldoe's file
+    const t = fs.statSync(path.join(folder, ARC, 'Proseware Q&A log v2 2026-11-17 1001.xlsx')).ctimeMs; const st = fs.statSync;   // a coarse clock: every file made so far, made at once
     vi.spyOn(fs, 'statSync').mockImplementation(((f: fs.PathLike, o?: never) => { const s = st(f, o) as fs.Stats; return s && s.ctimeMs <= t ? Object.assign(Object.create(Object.getPrototypeOf(s)), s, { ctimeMs: t }) : s; }) as never);
     const real = vi.mocked(fs.statSync).getMockImplementation()!; const t0 = Date.now() + 20; while (Date.now() < t0) { /* the next files are later */ }
     vi.mocked(fs.statSync).mockImplementation(((f: fs.PathLike, o?: never) => { const s = real(f, o) as fs.Stats; return s && s.ctimeMs > t ? Object.assign(Object.create(Object.getPrototypeOf(s)), s, { ctimeMs: s.ctimeMs + 2 * 60_000 }) : s; }) as never);
@@ -276,7 +280,7 @@ describe('an edit kept aside in the log\'s folder', () => {
     vi.spyOn(files, 'save').mockImplementation(async (req) => { saves++; return (req.steps.some((s) => s.kind === 'cell' && s.value === 'sroe on 3') ? { ok: false, error: { kind: 'rejected', message: 'the table ends in a totals row' } } : save(req)) as never; });
     const r = await exportQaLog(store, dealId); expect(r.ok && r.value).toMatchObject({ status: 'written', answered: 2, unmerged: 1 });
     const l = lines(path.join(folder, FILE)); expect([l[3], l[4]]).toEqual([`3,${text(3)},,`, `4,${text(4)},Answer 4,`]);
-    expect(kept(folder)).toEqual([]); expect(archive(folder).filter((a) => a.n.includes('saved meanwhile')).map((a) => a.s.split('\r\n')[3])).toEqual([`3,${text(3)},sroe on 3,`]);
+    expect(kept(folder)).toEqual([]); expect(archive(folder).filter((a) => a.n.includes('saved meanwhile')).map((a) => linesOf(a.s)[3])).toEqual([`3,${text(3)},sroe on 3,`]);
     await store.dispatch(SetResponse, { dealId, questionId: q(6).id, response: 'Answer 6' }); saves = 0;
     expect((await exportQaLog(store, dealId)).ok).toBe(true); expect(saves).toBe(1);   // not tried again at every update
   }, 120_000);
@@ -295,17 +299,17 @@ describe('an edit kept aside in the log\'s folder', () => {
 
   it('a row they added and saved again with a change is not added twice: the log\'s stays', async () => {
     const { folder, store, dealId } = await setup();
-    const sroe = (s: string) => edited(s, {}, [['2001', 'sroe new question: any liens?', '', 'Open']]);
+    const sroe = (s: Uint8Array) => edited(s, {}, [['2001', 'sroe new question: any liens?', '', 'Open']]);
     await raced(folder, store, dealId, sroe, (s) => edited(s, {}, [['2001', 'sroe new question: any liens?', '', 'Chased Nov 17']]));
     later();
     const r = await exportQaLog(store, dealId); expect(r.ok && r.value.status).toBe('written');
     expect(lines(path.join(folder, FILE)).filter((x) => x.includes('sroe new question'))).toEqual(['2001,sroe new question: any liens?,,Chased Nov 17']);
   }, 120_000);
 
-  it('an edit of another log of the same name (an .xlsx beside this .csv) is left alone', async () => {
+  it('an edit of another log of the same name (a .csv beside this .xlsx) is left alone', async () => {
     const { folder, store, dealId, q } = await setup();
-    const other = path.join(folder, asideFixtureName(FILE.replace(/\.csv$/, '.xlsx')));
-    fs.writeFileSync(other, Buffer.from([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]));
+    const other = path.join(folder, asideFixtureName(FILE.replace(/\.xlsx$/, '.csv')));
+    fs.writeFileSync(other, 'No.,Question\r\n1,Not this log\r\n');
     later();
     await store.dispatch(SetResponse, { dealId, questionId: q(4).id, response: 'Answer 4' });
     const r = await exportQaLog(store, dealId); expect(r.ok && r.value.status).toBe('written');

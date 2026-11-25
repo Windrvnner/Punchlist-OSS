@@ -519,8 +519,10 @@ export interface QaLogFiles {
   /**
    * Write `steps` into the log, which must still be the file read (`stamp`): the version it replaces goes to the folder's
    * archive first. "later": the file is open somewhere (Excel), or changed since it was read; nothing was written.
+   * The app never writes a CSV: a .csv log is left as it is and its updated copy is written as a new .xlsx in the same
+   * folder, whose name comes back as `file`: the log from then on.
    */
-  save(req: { folder: string; file: string; sheet: string; steps: SheetEdit[]; stamp: string }): Promise<Result<{ status: 'written'; archive: string } | { status: 'later'; by?: string }>>;   // by: who has it open, when their lock file names them
+  save(req: { folder: string; file: string; sheet: string; steps: SheetEdit[]; stamp: string }): Promise<Result<{ status: 'written'; archive: string; file?: string } | { status: 'later'; by?: string }>>;   // by: who has it open, when their lock file names them
   /** a new log in `folder`, under `file` or, if that name is taken, the first free "name (2).ext"; the name it got */
   create(req: { folder: string; file: string; bytes: Uint8Array }): Promise<Result<{ file: string }>>;
 }

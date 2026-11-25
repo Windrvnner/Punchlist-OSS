@@ -352,13 +352,11 @@ describe('writing into an .xlsx by editing the file itself', () => {
 });
 
 describe('which way a log is written', () => {
-  it('edits an .xlsx directly and a CSV as text, and never writes to the file given', async () => {
+  it('edits an .xlsx directly, and never writes to the file given', async () => {
     const x = counterpartyLog({ table: true }); const before = fs.readFileSync(x);
     const out = await editLog(lo, x, 'Lender Q&A', [{ kind: 'cell', row: 4, col: 2, value: 'Fabrikam' }]);
     expect(fs.readFileSync(x).equals(before)).toBe(true);
     expect(partText(readZip(out), 'xl/tables/table1.xml')).toBe(partText(readZip(before), 'xl/tables/table1.xml'));   // only LibreOffice would have rewritten the table part
-    const c = path.join(tmp(), 'log.csv'); fs.writeFileSync(c, new Uint8Array([0xef, 0xbb, 0xbf, ...Buffer.from('No.,Question,Response\r\n1,DSCR?,\r\n')]));
-    expect(Buffer.from(await editLog(lo, c, 'Sheet1', [{ kind: 'cell', row: 1, col: 2, value: '1.20x' }])).toString('utf8')).toBe('﻿No.,Question,Response\r\n1,DSCR?,1.20x\r\n');
   });
 });
 
@@ -376,6 +374,19 @@ describe.skipIf(!has)('updating a log where it is', () => {
     expect(log.grid[4]).toEqual(['2', 'Who is the EPC contractor?', 'Fabrikam', 'Open']);
     // a save from what was read before someone else's save writes nothing
     expect(await logs.save({ ...at, sheet: 'Lender Q&A', steps, stamp: t.value.stamp })).toEqual({ ok: true, value: { status: 'later' } });
+  }, 60_000);
+  it('never writes a CSV: leaves it as it is and writes the updated log as a new .xlsx beside it', async () => {
+    const { folder, logs } = setup(); const csv = Buffer.from('\ufeffNo.,Question,Response\r\n1,"DSCR?\r\nplease",?\r\n', 'utf8');
+    fs.writeFileSync(path.join(folder, 'Log.csv'), csv); const at = { folder, file: 'Log.csv' };
+    const t = await logs.read(at, { sheet: 'Sheet1', headerRow: 1 }); if (!t.ok) throw new Error(t.error.message);
+    const r = await logs.save({ ...at, sheet: 'Sheet1', steps: [{ kind: 'cell', row: 1, col: 2, value: '1.20x' }], stamp: t.value.stamp });
+    expect(r).toEqual({ ok: true, value: { status: 'written', archive: '', file: 'Log.xlsx' } });
+    expect(fs.readFileSync(path.join(folder, 'Log.csv')).equals(csv)).toBe(true);
+    const [sheet] = await lo.sheets!(path.join(folder, 'Log.xlsx'));
+    expect(sheet.grid).toEqual([['No.', 'Question', 'Response'], ['1', 'DSCR?\nplease', '1.20x']]);
+    // a second save of the same CSV does not replace the first workbook
+    const again = await logs.save({ ...at, sheet: 'Sheet1', steps: [{ kind: 'cell', row: 1, col: 2, value: '2x' }], stamp: t.value.stamp });
+    expect(again).toMatchObject({ ok: true, value: { file: 'Log (2).xlsx' } });
   }, 60_000);
   it('says so when the log is not where it was', async () => {
     const { folder, logs } = setup();

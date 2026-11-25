@@ -7,9 +7,8 @@ import { pdfLines, type Converter } from './convert';
 import type { SpreadsheetCodec } from '../ports';
 import { ok, fail } from '../domain/result';
 import { cellsAsShown, exportDocument, tableFrom } from '../domain/sheets';
-import { isWorkbook, readCsv, decodeText, encodeLike } from '../adapters/spreadsheet';
+import { isWorkbook, readCsv } from '../adapters/spreadsheet';
 import type { SheetEdit } from '../domain/sheets';
-import { editCsv } from '../domain/csvEdit';
 import { editXlsx } from './xlsxEdit';
 
 export function libreOfficeSheets(convert: Converter): SpreadsheetCodec {
@@ -50,12 +49,11 @@ export function libreOfficeSheets(convert: Converter): SpreadsheetCodec {
 
 /**
  * A Q&A log with `steps` made in it, as bytes of the same kind of file. An .xlsx or .xlsm is edited directly, so
- * every part but the cells written stays byte for byte; a CSV keeps its lines, quoting and encoding; anything else
- * (.xls, .ods) goes through LibreOffice, which saves the whole workbook again. The file given is never written to.
+ * every part but the cells written stays byte for byte; anything else (.xls, .ods) goes through LibreOffice, which saves
+ * the whole workbook again. The file given is never written to, and a CSV is never written at all (qaLogs).
  */
 export async function editLog(convert: Converter, file: string, sheet: string, steps: SheetEdit[]): Promise<Uint8Array> {
   const ext = path.extname(file).toLowerCase(); const bytes = new Uint8Array(fs.readFileSync(file));
-  if (ext === '.csv') return encodeLike(editCsv(decodeText(bytes), steps), bytes);
   if ((ext === '.xlsx' || ext === '.xlsm') && bytes[0] === 0x50 && bytes[1] === 0x4b) return editXlsx(bytes, sheet, steps);
   if (!convert.edit) throw new Error('This kind of spreadsheet can’t be written to here');
   return convert.edit(file, sheet, steps);

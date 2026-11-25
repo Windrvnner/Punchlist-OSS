@@ -21,6 +21,9 @@ import { prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { nodeQaLogs } from '../../src/backend/qaLogs';
 import { temporaryFixtureName } from '../backend/qaLogWorkingFiles';
 import { ok } from '../../src/domain/result';
+import { libreOfficeConverter } from '../../src/backend/convert';
+import { gridOf, xlsxOf } from '../backend/miniXlsx';
+import { hasOffice, soffice } from '../backend/officePrerequisites';
 
 const COMMANDS = [
   CreateDeal, ImportQuestions, SetResponse, KeepQaLog, SetQaLogFolder, RecordQaLogExport, RestoreQaLogs, TakeFromQaLog,
@@ -30,16 +33,17 @@ for (const c of COMMANDS) registry.set(c.name, c);
 let t = 0; const clock = { now: () => new Date(Date.UTC(2026, 10, 17, 10, 0, 0, t++)).toISOString() };
 let seq = 0; const ids = { next: (p: string) => `${p}_01HZZZZZZZZZZZZZZZZ${String(seq++).padStart(7, '0')}` };
 
-const N = 2000; const FILE = 'Proseware Q&A log.csv'; const columns = ['No.', 'Question', 'Response'];
+const lo = libreOfficeConverter({ soffice, profile: fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-tidy-test-lo-')) });
+const N = 2000; const FILE = 'Proseware Q&A log.xlsx'; const columns = ['No.', 'Question', 'Response'];
 const text = (i: number) => `Question ${i}: please confirm item ${i}.`;
 const busy = () => Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
 
 async function setup() {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-qalog-tidy-'));
   const rows = Array.from({ length: N }, (_, k) => [String(k + 1), text(k + 1), '']);
-  fs.writeFileSync(path.join(folder, FILE), [columns, ...rows].map((r) => r.join(',')).join('\r\n') + '\r\n');
+  fs.writeFileSync(path.join(folder, FILE), xlsxOf([columns, ...rows]));
   const opts = { latency: [0, 0] as [number, number] }; const repo = memRepo(clock.now, disk());
-  const store = new Store({ repo, ai: mockAi(opts, repo), docs: mockDocuments(opts), fs: { pickFolders: async () => ok([]), pathFor: null, save: async () => ok('saved' as const) }, sheets: csvCodec, session: mockSession(opts), local: new MemoryLocal(), qaLogs: nodeQaLogs({}), clock, ids }, COMMANDS);
+  const store = new Store({ repo, ai: mockAi(opts, repo), docs: mockDocuments(opts), fs: { pickFolders: async () => ok([]), pathFor: null, save: async () => ok('saved' as const) }, sheets: csvCodec, session: mockSession(opts), local: new MemoryLocal(), qaLogs: nodeQaLogs({ convert: lo }), clock, ids }, COMMANDS);
   await store.boot(); await store.dispatch(CreateDeal, { name: 'Proseware', folders: [] }); const dealId = Object.keys(store.get().deals)[0]; await store.loadDeal(dealId);
   // Only the complete log is setup; every save and race below still uses the real files.
   const imported = prepareImport(rows, suggestMapping(columns)).rows.map((row) => ({ ...row, askedBy: FIRM }));
@@ -50,7 +54,7 @@ async function setup() {
   return { folder, store, dealId, q5 };
 }
 /** the log's row for question `i`, as it is in the file */
-const row = (folder: string, i: number) => fs.readFileSync(path.join(folder, FILE), 'utf8').split('\r\n')[i];
+const row = (folder: string, i: number) => (gridOf(fs.readFileSync(path.join(folder, FILE)))[i] ?? []).join(',');
 /** the folder's clock moves on two minutes: every file made from now on reads as made then, so the ones before are old */
 const later = () => {
   const wait = Date.now() + 30; while (Date.now() < wait) { /* so the files before are 20 ms older at least */ }
@@ -60,7 +64,7 @@ const later = () => {
 const isWorkingFile = (name: string) => /^~qa-log-.*\.(tmp|old)$/.test(name);
 const leftovers = (folder: string) => fs.readdirSync(folder).filter(isWorkingFile);
 
-describe('a Q&A log update whose working files are busy as it tidies up', () => {
+describe.skipIf(!hasOffice)('a Q&A log update whose working files are busy as it tidies up', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('says it saved, records what it wrote, and the next update brings a corrected answer in; what was left goes then', async () => {
@@ -107,10 +111,10 @@ describe('a Q&A log update whose working files are busy as it tidies up', () => 
     const r = await exportQaLog(store, dealId); expect(r.ok && r.value.status).toBe('written');
     expect(fs.existsSync(fresh)).toBe(true);
     // however old: another PC's new version is in no version of the log; nor is another log's file or a team file named alike
-    const other = path.join(folder, temporaryFixtureName('Other log.csv', '0a1b2c3d'));
+    const other = path.join(folder, temporaryFixtureName('Other log.xlsx', '0a1b2c3d'));
     const theirs = path.join(folder, '~Proseware Q&A log notes.old');
     const dated = path.join(folder, '~Proseware Q&A log 20261117.tmp');
-    const workbook = path.join(folder, temporaryFixtureName(FILE.replace(/\.csv$/, '.xlsx'), '0a1b2c3e'));
+    const workbook = path.join(folder, temporaryFixtureName(FILE.replace(/\.xlsx$/, '.csv'), '0a1b2c3e'));
     for (const f of [other, theirs, dated, workbook]) fs.writeFileSync(f, 'not ours');
     await store.dispatch(SetResponse, { dealId, questionId: q5.id, response: 'Answer v2' });
     later();
@@ -131,9 +135,9 @@ describe('a Q&A log update while responses are typed in the app (#40)', () => {
     for (let i = 1; i <= 100; i++) await answer(i, `Answer ${i}`);
     expect((await exportQaLog(store, dealId)).ok).toBe(true);
     // the lender revises rows 1-100 in the file
-    const lines = fs.readFileSync(path.join(folder, FILE), 'utf8').split('\r\n');
-    for (let i = 1; i <= 100; i++) lines[i] = `${i},${text(i)},Answer ${i} revised by the lender`;
-    fs.writeFileSync(path.join(folder, FILE), lines.join('\r\n'));
+    const grid = gridOf(fs.readFileSync(path.join(folder, FILE)));
+    for (let i = 1; i <= 100; i++) grid[i] = [String(i), text(i), `Answer ${i} revised by the lender`];
+    fs.writeFileSync(path.join(folder, FILE), xlsxOf(grid));
     later();
     await answer(500, 'Answer 500');                                                     // so it saves
     const save = store.services.qaLogs!.save;
