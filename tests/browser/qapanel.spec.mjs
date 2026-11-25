@@ -27,6 +27,64 @@ async function newDeal(page, name, rows = ROWS) {
 // opens the question numbered n and waits for the panel to settle
 const openQ = async (page, n) => { await page.click(`.md .li:has(.n:text-is("${n}"))`); await page.waitForFunction((n) => document.querySelector('.qpanel .qph .n')?.textContent === 'Q' + n, n); await page.waitForTimeout(250); };
 
+async function pickWhileSaving(page, field, button, option, peerValue) {
+  await page.evaluate((field) => {
+    const question = store.get().questions[store.get().ui.selectedQuestion];
+    const repo = store.services.repo;
+    const transaction = repo.transaction.bind(repo);
+    const dispatch = store.dispatch.bind(store);
+    const run = { held: false };
+    const gate = new Promise((resolve) => { run.release = resolve; });
+    window.__queuedQuestionPick = run;
+    repo.transaction = async (tx) => {
+      const write = tx.writes[0];
+      const isSettlement = tx.writes.length === 1 && write.kind === 'op' && write.data.state === 'succeeded';
+      if (isSettlement && write.data.input?.questionId === question.id && write.data.input.field === 'askedBy') {
+        repo.transaction = transaction;
+        run.held = true;
+        await gate;
+      }
+      return transaction(tx);
+    };
+    store.dispatch = (command, input, options) => {
+      const promise = dispatch(command, input, options);
+      if (input?.questionId === question.id && input.field === field) {
+        store.dispatch = dispatch;
+        run.picked = promise;
+      }
+      return promise;
+    };
+    const value = field === 'workstream' ? 'The reviewer' : 'The lender';
+    run.first = store.dispatch(store.commandNamed('EditQuestionField'), {
+      dealId: question.dealId, questionId: question.id, field: 'askedBy', value,
+    }, { quiet: true });
+  }, field);
+  await page.waitForFunction(() => window.__queuedQuestionPick.held);
+  await page.click(button);
+  await page.click(option);
+  await page.evaluate(([field, value]) => __peer.change(store.get().ui.selectedQuestion, { [field]: value }),
+    [field, peerValue]);
+  await page.waitForFunction(([field, value]) => {
+    const { questions, ui } = store.get();
+    return questions[ui.selectedQuestion][field] === value;
+  }, [field, peerValue]);
+  const outcome = await page.evaluate(async (field) => {
+    const run = window.__queuedQuestionPick;
+    run.release();
+    const first = await run.first;
+    const picked = await run.picked;
+    const { questions, ui } = store.get();
+    return { first: first.ok, picked: picked?.ok, saved: questions[ui.selectedQuestion][field] };
+  }, field);
+  const notices = page.locator('.toast', { has: page.locator('.ttitle').filter({ hasText: /^Changed elsewhere$/ }) });
+  if (outcome.picked === false) await notices.first().waitFor({ timeout: 3000 });
+  const count = await notices.count();
+  await notices.evaluateAll((nodes) => {
+    for (const node of nodes) node.querySelector('.tclose').click();
+  });
+  return { ...outcome, notices: count };
+}
+
 for (const scheme of ['dark', 'light']) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 736 }, colorScheme: scheme }); const page = await ctx.newPage(); page.errors = [];
   page.on('pageerror', (e) => page.errors.push(e.message));
@@ -138,6 +196,14 @@ for (const scheme of ['dark', 'light']) {
   await page.click('.qpanel [aria-label="Priority"]'); await page.click('#q-prlist [role="option"]:has-text("Low")', { timeout: 3000 }).catch(() => {}); await page.waitForTimeout(300); const p5 = await prop('Priority', 'q-prlist');
   say(`${scheme}:priority-opens-its-list-without-saving-and-picks-with-keys-or-mouse`, p1.pr === 'High' && p1.list && p1.seen && p1.hi === 'High' && p1.opts === 'High|Medium|Low' && p1.focus
     && p2.pr === 'Medium' && !p2.list && p2.focus && p3.list && p3.hi === 'Medium' && p4.pr === 'Medium' && !p4.list && p5.pr === 'Low' && !p5.list && p5.focus, JSON.stringify({ p1, p2, p3, p4, p5 }));
+  for (const [field, button, option, other] of [
+    ['workstream', '#q-ws', '#q-ws-tax', 'Technical'],
+    ['priority', '#q-pr', '#q-pr-medium', 'High'],
+  ]) {
+    const pick = await pickWhileSaving(page, field, button, option, other);
+    say(`${scheme}:queued-${field}-pick-keeps-the-synced-choice-and-says-why`,
+      pick.first && pick.picked === false && pick.saved === other && pick.notices === 1, JSON.stringify(pick));
+  }
   await page.evaluate(async () => { for (const q of Object.values(store.get().questions).filter((x) => x.text.startsWith('Provide the executed') || x.text.startsWith('Has the interconnection'))) for (const [field, value] of [['workstream', 'Legal'], ['priority', 'High']]) await store.dispatch(store.commandNamed('EditQuestionField'), { dealId: q.dealId, questionId: q.id, field, value }, { quiet: true }); });
 
   // ---- Draft all open, with nothing left to draft, says why it is off: on hover and to a screen reader -------------
