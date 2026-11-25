@@ -2647,15 +2647,14 @@ export function nodeAi(o: AiOptions) {
       return { packs: packs.map((p) => ({ items: p.items, docs: withClean(dealId, p.docs) })), rest };
     };
     /**
-     * Filling gaps (docs/core-documents-design.md, part 4): items a full check would leave as gaps, or not settled for any
-     * reason but a folder out of reach, are held back (`note`, while `holding`) and handed a few at a time to the chat agent
-     * (agent.ts), unchanged, with its own search, read, folder and brief tools: it searches and reads as often as it
-     * needs. The
-     * documents its answer cites are then read against those items by `settle`, as on their last look, so the outcome is
-     * written as the check writes any other, except that the agent only ever adds to what the check found: an item those
-     * documents still leave open (they may have been cited for another item of the run) is written as the check left it
-     * (`kept`). An item's first line in a round is the one that counts (rounds.ts, `counts`), which is why nothing is
-     * written for a held item until the agent has had its turn.
+     * Filling gaps (docs/core-documents-design.md, part 4): items a full check would leave as gaps, or not settled for
+     * any reason but a folder out of reach, are held back (`note`, while `holding`) and handed a few at a time to the
+     * chat agent (agent.ts), unchanged, with its own search, read, folder and brief tools: it searches and reads as
+     * often as it needs. The documents its answer cites are then read against those items by `settle`, as on their last
+     * look, so the outcome is written as the check writes any other, except that the agent only ever adds to what the
+     * check found: an item those documents still leave open (they may have been cited for another item of the run) is
+     * written as the check left it (`kept`). An item's first line in a round is the one that counts (rounds.ts,
+     * `counts`), which is why nothing is written for a held item until the agent has had its turn.
      *
      * The limit: the agent's own ceilings hold (about `limits.chatTurns` turns a run, `limits.searchCalls` a search), and
      * every call it makes, its turns, searches, reads and folder batches, counts against an allowance of its own for

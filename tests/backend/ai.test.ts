@@ -535,16 +535,18 @@ describe('a kept conversation', () => {
     expect(seen[1].prompt).toMatch(/^You searched documents for “ratio”\./); expect(r.text).toBe('It is 1.25x.');
   });
 
-  it('native: the brief tool is called and its catch-up goes back as the call\'s result', async () => {
+  it.each(['native', 'hybrid'] as const)('%s: the brief tool is called and its result goes back', async (toolCalls) => {
     const isBrief = (c: Call) => c.prompt.includes('These are the open findings on a deal');
     const catchUp = (_c: Call, n: number) => (n === 1 ? { tool: 'brief' } : { text: 'Done.', sources: [] });
     const s = setup((c) => (isBrief(c) ? { paragraphs: ['Lock-up first.'] } : reader(c)), undefined,
-      { talks: true, turn: catchUp, toolCalls: 'native' });
+      { talks: true, turn: catchUp, toolCalls });
     const seen = spied(s);
     await deal(s.repo);
     await finding(s.repo, 'f_1', 'Lock-up ratio differs from the term sheet');
     expect(val(await s.ai.answer(ask('Catch me up'))).text).toBe('Done.');
-    expect(seen[1].results![0].text).toContain('The catch-up on the open findings:\nLock-up first.');
+    // native: as the call's result; hybrid: in the next message
+    const told = toolCalls === 'native' ? seen[1].results![0].text : seen[1].prompt;
+    expect(told).toContain('The catch-up on the open findings:\nLock-up first.');
   });
 
   it('native: a result goes back as its call\'s result, and the next question answers the last call first; a model that refuses tool results steps down to hybrid in the same conversation', async () => {
