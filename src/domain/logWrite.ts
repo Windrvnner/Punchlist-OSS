@@ -7,7 +7,7 @@
  */
 import type { Question } from './model';
 import type { ReadTable, SheetEdit } from './sheets';
-import { sameWords, prepareImport, IMPORT_FIELDS, type Mapping, type ImportField, type ImportRow } from './importExport';
+import { dateReadings, sameWords, prepareImport, IMPORT_FIELDS, type Mapping, type ImportField, type ImportRow } from './importExport';
 import { key } from './checklist';
 import { ROMAN_NUMERAL, NAMING_WORDS, normalizeReferences, setApartParts, isNamedChain } from './references';
 
@@ -340,7 +340,7 @@ export function logWrite(table: Pick<ReadTable, 'rows' | 'lines' | 'cols' | 'las
   // a value as the import reads it against the app's: a status or priority in the app's terms, whatever case it is written in
   const same = (k: ImportField, a: string, b: string) => (k === 'status' || k === 'priority' ? a.toLowerCase() === b.toLowerCase() : sameInLog(a, b));
   const sameAs = (k: ImportField, i: number, v: string) => { const r = read.get(i) as ImportRow | undefined; const was = r ? String((r as unknown as Record<string, unknown>)[k] ?? '') : cell(table.rows[i], k); if (k === 'n') return numberParts(cell(table.rows[i], 'n'))?.n === Number(v);
-    if ((k === 'received' || k === 'responded') && !was && cell(table.rows[i], k).trim()) return true;   // a date the import could not settle (11/02 either way) is left as the log writes it
+    if ((k === 'received' || k === 'responded') && !was && cell(table.rows[i], k).trim()) return true;   // a date valid both ways (11/02) shows no order of its own and is left as the log writes it
     return same(k, was, v) || sameInLog(cell(table.rows[i], k), v); };
   // a log cell's value as the import reads it ("11/12/2026" as 2026-11-12, "Outstanding" as open), else as written
   const readAs = (k: ImportField, i: number) => { const r = read.get(i) as ImportRow | undefined; return r ? String((r as unknown as Record<string, unknown>)[k] ?? '') : ''; };
@@ -382,14 +382,17 @@ export function logWrite(table: Pick<ReadTable, 'rows' | 'lines' | 'cols' | 'las
 
 /**
  * A question's cells as the log writes them, in the app's terms, as the import reads them: a status of "Outstanding" as
- * open, a date of 11/20/2026 as 2026-11-20. A cell the import cannot read stays as written.
+ * open, a date of 11/20/2026 as 2026-11-20. A cell the import cannot read stays as written, and so does a date valid
+ * both ways (11/02/2026): one cell shows no order, and only the file it is in does.
  */
 export function readLogCells(q: Question, cells: Record<string, string>): Record<string, string> {
   const keys = Object.keys(cells) as ImportField[]; if (!keys.length) return {};
   const cols: ImportField[] = keys.includes('text') ? keys : [...keys, 'text'];   // a row is read only with its question
   const mapping = Object.fromEntries(IMPORT_FIELDS.map(([k]) => [k, cols.indexOf(k) < 0 ? null : cols.indexOf(k)])) as Mapping;
   const read = prepareImport([cols.map((k) => cells[k] ?? q.text)], mapping, [2]).rows[0] as unknown as Record<string, unknown> | undefined;
-  return Object.fromEntries(keys.map((k) => [k, read?.[k] == null || read[k] === '' && cells[k].trim() ? cells[k] : String(read[k])]));
+  const unsettled = (k: string) => (k === 'received' || k === 'responded') && dateReadings(cells[k]).length > 1;
+  const asWritten = (k: string) => read?.[k] == null || (read[k] === '' && cells[k].trim()) || unsettled(k);
+  return Object.fromEntries(keys.map((k) => [k, asWritten(k) ? cells[k] : String(read?.[k])]));
 }
 /** whether a question's field already says `value` (in the app's terms, as readLogCells gives it); the words exactly as written */
 export function holds(q: Question, k: string, value: string): boolean {

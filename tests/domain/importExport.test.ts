@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseDate, prepareImport, suggestMapping, questionsSheet, findingsSheet, importCounts } from '../../src/domain/importExport';
+import { dateOrder, parseDate, prepareImport, suggestMapping, questionsSheet, findingsSheet, importCounts } from '../../src/domain/importExport';
 import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
 import { Question } from '../../src/domain/model';
 
@@ -148,5 +148,12 @@ describe('prepareImport', () => {
     const rows = prepareImport([['2', 'a'], ['3', 'b'], ['3', 'c']], { n: 0, text: 1, askedBy: null, received: null, workstream: null, priority: null, response: null, respondedBy: null, responded: null, status: null }).rows;
     expect(importCounts(rows, existing, 'merge')).toEqual({ add: 1, match: 2 });
     expect(importCounts(rows, existing, 'append')).toEqual({ add: 3, match: 0 });
+  });
+  it('reads the file\'s date order only from real dates, in any shape', () => {
+    expect(dateOrder(['13/10/26', '02/11/26'])).toBe('day');
+    expect(dateOrder(['10/13/2026 12:00'])).toBe('month');
+    expect(dateOrder(['2026-10-13', '02.11.2026'])).toBe('month');         // a real date cell shows no order
+    expect(dateOrder(['31/02/2026', '13/10/202'])).toBe('month');          // not real dates: they show nothing
+    expect(dateOrder(['13/10/2026', '10/13/2026'])).toBeNull();
   });
 });

@@ -57,7 +57,8 @@ export function parseDate(v: unknown): string | null { const c = dateReadings(v)
 
 /**
  * Every way a date cell can be read: [''] for blank, [] when it is not a real calendar date, one date, or for a numeric
- * date valid both ways ("02.11.2026") the month-first reading then the day-first one. prepareImport chooses by the file's order.
+ * date valid both ways ("02.11.2026") the month-first reading then the day-first one. prepareImport chooses between
+ * them by the file's order.
  */
 export function dateReadings(v: unknown): string[] {
   const one = (d: string | null) => (d === null ? [] : [d]);
@@ -75,15 +76,15 @@ export function dateReadings(v: unknown): string[] {
 
 export interface ImportRow { /** the row's line in the file, header being line 1 */ line?: number; n: number | null; text: string; askedBy: string; received: string; workstream: string; priority: '' | 'High' | 'Medium' | 'Low'; response: string; respondedBy: string; responded: string; status: QuestionStatus | '' }
 /**
- * The order a file writes its numeric dates in, read once from the date cells that show it: "13.10.2026" is day first and
- * "10/13/2026" month first. A file with no such cell reads month first, as Excel does; one with both has no order,
+ * The order a file writes its numeric dates in, read once from the date cells that show it: "13.10.2026" is day
+ * first and "10/13/2026" month first. A file with no such cell reads month first, as Excel does; one with both has no order,
  * and its dates valid both ways are left blank and listed. Every date valid both ways then reads that way.
  */
 export function dateOrder(raws: string[]): 'day' | 'month' | null {
   let day = false; let month = false;
   for (const raw of raws) {
     const m = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](?:\d{4}|\d{2})/.exec(raw.trim());
-    if (!m) continue;
+    if (!m || !dateReadings(raw).length) continue;   // a cell that is not a real date shows no order
     if (+m[1] > 12 && +m[2] <= 12) day = true;
     if (+m[2] > 12 && +m[1] <= 12) month = true;
   }
@@ -102,11 +103,9 @@ const STATUS: Record<string, QuestionStatus> = { open: 'open', outstanding: 'ope
  * "Lender A", so the spaces around them go (the text inside is untouched). The values that are read as something else
  * (number, dates, priority, status) ignore the spaces around them too. A question of only spaces is a question, as one
  * made in the app can be.
- * A numeric date valid both ways is settled by context, not by one format per file or column:
- * first the row's other date (a question is received before it is responded to), then the nearest settled dates above
- * and below it in its column (logs mostly run in date order: the reading between them, else the one much nearer them),
- * then no date after today. Unsettled, it is left blank and
- * counted as not read. A workbook's real date cells reach here as YYYY-MM-DD (see convert.ts), so only typed dates are in doubt.
+ * A numeric date valid both ways is read in the order the file's other numeric dates show (dateOrder), month first
+ * when none shows one; with both orders in the file it is left blank and counted as not read. A workbook's real date
+ * cells reach here as YYYY-MM-DD (see convert.ts), so only typed dates are in doubt.
  */
 export function prepareImport(table: string[][], mapping: Mapping, lines?: number[]): Prepared {
   // control characters (NUL, BEL, ESC and the like) are never content; tabs and line breaks are

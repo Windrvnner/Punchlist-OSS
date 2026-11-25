@@ -1,6 +1,6 @@
 // What the app writes back into a counterparty's own Q&A log: the questions it adds and the answers it adds, and nothing else.
 import { describe, it, expect } from 'vitest';
-import { logWrite } from '../../src/domain/logWrite';
+import { logWrite, readLogCells } from '../../src/domain/logWrite';
 import { suggestMapping } from '../../src/domain/importExport';
 import type { Question } from '../../src/domain/model';
 import { writtenAsMeant } from '../../src/domain/sheets';
@@ -160,6 +160,16 @@ describe('a log that writes its cells its own way', () => {
   it('knows a date it wrote, read back in the column\'s own date format, as its own', () => {
     const w = logWrite(log, m, [q(1, 'What is the minimum DSCR covenant?', { received: '2026-11-14', status: 'open' })], new Map([['q1', { received: '2026-11-12', status: 'Open' }]]));
     expect(w.steps).toEqual([{ kind: 'cell', row: 1, col: 3, value: '2026-11-14', date: true }]); expect(w.kept).toEqual([]);
+  });
+});
+
+describe('a log cell read in the app\'s terms', () => {
+  it('reads a date that shows its order, and leaves one valid both ways as the log writes it', () => {
+    const question = q(1, 'What is the minimum DSCR covenant?');
+    expect(readLogCells(question, { received: '11/20/2026', status: 'Outstanding' })).toEqual({ received: '2026-11-20', status: 'open' });
+    expect(readLogCells(question, { received: '20/11/2026' })).toEqual({ received: '2026-11-20' });
+    // one cell shows no order of its own, so a date like 02/11/2026 is not made month first here
+    expect(readLogCells(question, { received: '02/11/2026' })).toEqual({ received: '02/11/2026' });
   });
 });
 
