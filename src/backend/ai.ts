@@ -39,9 +39,10 @@
  */
 import { withoutDraftCredits } from './draftReply';
 import { MODEL_TEXT_MAX, fitText, fitParas } from '../domain/importExport';
+import { withoutMarkers } from '../domain/cite';
 import { ok, fail, type Result } from '../domain/result';
 import type { AiService, Repository, CheckSummary, CheckState, DealProgress, ChecklistRow } from '../ports';
-import { WORKSTREAMS, CHECK_REASON, type Source } from '../domain/model';
+import { WORKSTREAMS, CHECK_REASON, type Provenance, type Question, type Source } from '../domain/model';
 import type { ConverseInput, Conversed, ModelService } from './service';
 import type { ToolMode } from './agent';
 import { withSignInCap } from './signInToken';
@@ -1537,10 +1538,36 @@ export function nodeAi(o: AiOptions) {
 
   /** a response already given on the deal, to a question that reads like the one being drafted for */
   type Alike = { n: number; text: string; response: string; by: string; ai: boolean };
+  type AlikeQuestion = Pick<Question, 'id'> & Partial<Pick<Question,
+    'n' | 'text' | 'response' | 'askedBy' | 'status' | 'provenance'>>;
   const ALIKE = 5;                                                               // earlier responses one draft is shown at most
   const ALIKE_SHARE = 0.5;                                                       // of the question's weight in words, how much another question must share to be shown
   /** the words of a text as `words` gives them for the deal (its short names given their long form), and with each hyphenated word also written whole, so "lock-up" and "lockup" meet */
   const alikeWords = (t: string, dealId: string) => new Set([...words(t, dealId), ...words(t.replace(/(\p{L})[-\u2010\u2011\u2013](?=\p{L})/gu, '$1'), dealId)]);
+  /** A spacing-only edit can move the boundary without changing the quoted characters (#287). */
+  function draftCitationStart(response: string, prefixLength: number | undefined): number {
+    if (prefixLength === undefined) return 0;
+    let left = prefixLength;
+    for (const token of response.matchAll(/\S+/g)) {
+      if (left < token[0].length) return token.index + left;
+      left -= token[0].length;
+    }
+    return response.length;
+  }
+  /** Only an accepted draft keeps markers for that question's sources (#287). */
+  function priorResponse(response: string, provenance?: Provenance): string {
+    if (provenance?.origin !== 'ai') return fitText(response);
+    const sources = provenance.sources ?? [];
+    const start = draftCitationStart(response, sources[0]?.draftCitationPrefixLength);
+    const quoted = response.slice(0, start);
+    return fitText(quoted + withoutMarkers(response.slice(start), sources.length));
+  }
+  /** A draft's own markers can share numbers with literal brackets in the earlier responses (#287). */
+  function draftSources(sources: Source[], quotation: string): Source[] {
+    if (withoutMarkers(quotation, sources.length) === quotation) return sources;
+    const draftCitationPrefixLength = quotation.replace(/\s/g, '').length;
+    return sources.map((source) => ({ ...source, draftCitationPrefixLength }));
+  }
   /**
    * The responses on a deal to questions that read like this one, likeliest first: every other question a person marked
    * Answered or Closed (a typed response leaves a question open until a person marks it, so it may not have been given yet),
@@ -1550,15 +1577,21 @@ export function nodeAi(o: AiOptions) {
    */
   async function alike(dealId: string, questionId: string, text: string): Promise<Alike[]> {
     const mine = alikeWords(text, dealId); if (!mine.size) return [];
-    const log = (await live<{ id: string; n?: number; text?: string; response?: string; askedBy?: string; status?: string; provenance?: { origin?: string } }>('question', dealId) ?? []).filter((q) => q.id !== questionId && q.text?.trim());   // none to suggest while they cannot be read
+    const questions = await live<AlikeQuestion>('question', dealId) ?? [];
+    const log = questions.filter((q) => q.id !== questionId && q.text?.trim());
     const sets = log.map((q) => alikeWords(q.text!, dealId)); const df = new Map<string, number>();
     for (const set of sets) for (const w of set) if (mine.has(w)) df.set(w, (df.get(w) ?? 0) + 1);     // how rare a word is, counted over the whole log
     const weight = (w: string) => Math.log(1 + (log.length + 1) / ((df.get(w) ?? 0) + 1)); let whole = 0; for (const w of mine) whole += weight(w);
     const given = (q: (typeof log)[number]) => !!q.response?.trim() && (q.status === 'answered' || q.status === 'closed') && typeof q.n === 'number';
     return log.map((q, k) => { if (!given(q)) return { q, share: 0 }; let got = 0; for (const w of mine) if (sets[k].has(w)) got += weight(w); return { q, share: got / whole }; })
       .filter((x) => x.share >= ALIKE_SHARE).sort((a, b) => b.share - a.share || a.q.n! - b.q.n!).slice(0, ALIKE)
-      // a used draft keeps its [n] markers, which point at that question's own sources: taken out, so none is read against this draft's documents
-      .map(({ q }) => ({ n: q.n!, text: q.text!, response: fitText(q.response!.replace(/\s*\[\d+\]/g, '')), by: (q.askedBy ?? '').trim(), ai: q.provenance?.origin === 'ai' }));
+      .map(({ q }) => ({
+        n: q.n!,
+        text: q.text!,
+        response: priorResponse(q.response!, q.provenance),
+        by: (q.askedBy ?? '').trim(),
+        ai: q.provenance?.origin === 'ai',
+      }));
   }
   const one = (t: string) => t.replace(/\s+/g, ' ').trim();
   let briefs = new Map<string, { key: string; paragraphs: string[] }>();
@@ -1618,7 +1651,12 @@ export function nodeAi(o: AiOptions) {
       const kept = ownReply.text;
       const own = kept.charAt(0).toUpperCase() + kept.slice(1);
       if (!quoted.length && !own) return ok({ status: 'none', text: '', sources: [] });             // a draft rests on a document it cites or on an earlier response it names
-      return ok({ status: 'found', text: [...quoted, own].filter(Boolean).join('\n\n'), sources: own ? ownReply.sources : [] });
+      const quotation = quoted.join('\n\n');
+      return ok({
+        status: 'found',
+        text: [quotation, own].filter(Boolean).join('\n\n'),
+        sources: own ? draftSources(ownReply.sources, quotation) : [],
+      });
     },
     async reassess(i) {
       const f = await record<{ title: string; body: string[]; sources: Source[] }>('finding', i.findingId); if (!f) return fail({ kind: 'notFound', message: 'No such finding' });

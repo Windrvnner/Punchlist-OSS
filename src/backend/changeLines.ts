@@ -60,8 +60,9 @@ export interface Line {
    */
   op?: string;
   /**
-   * the record schema of the build that wrote the line (absent: 1). A build does not change a record last written by a
-   * newer schema.
+   * the lowest schema that carries every record in the line (absent: 1), not the schema of the build that wrote it, so
+   * that an older build is kept off only the records it would get wrong (#287). A build does not change a record last
+   * written by a newer schema.
    */
   schema?: number;
 }
@@ -101,4 +102,9 @@ export function isLine(x: any): x is Line {
   if (!x || x.v !== 1 || typeof x.pc !== 'string' || !Number.isInteger(x.seq)) return false;
   if (typeof x.at !== 'string' || typeof x.by !== 'string' || typeof x.from !== 'string') return false;
   return Array.isArray(x.recs) && x.recs.every(isRecChange);
+}
+
+/** The schema a line is marked with: the highest its records need, so a line of ordinary records stays at 1 (#287). */
+export function lineSchema(recs: { schema?: number }[]): number {
+  return Math.max(1, ...recs.map((rec) => rec.schema ?? 1));
 }
