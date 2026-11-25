@@ -13,7 +13,9 @@ describe('Word and PowerPoint text read straight from the file', () => {
     const tracked = officeText(fixture('Tracked.docx'), 'Tracked.docx');
     expect(tracked.tracked).toBe(13);                                                       // LibreOffice's count of the same file (documents.test.ts)
     expect(tracked.text).toContain('MOVEDSENTENCE new place.'); expect(tracked.text).not.toContain('MOVEDSENTENCE old place.');   // moved text is at its new place only
-    expect(tracked.text).toContain('INSERTEDROW'); expect(tracked.first).toBe(tracked.text);
+    expect(tracked.text).toContain('INSERTEDROW');
+    // a footer is text of the file too, after the body; the title is the body's start
+    expect(tracked.text).toContain('Draft FOOTERNEW'); expect(tracked.first).not.toContain('FOOTERNEW'); expect(tracked.text.startsWith(tracked.first)).toBe(true);
   });
   it("reads a deck's slides in their order, the first slide giving its title", () => {
     const deck = officeText(fixture('Deck.pptx'), 'Deck.pptx');

@@ -25,7 +25,7 @@ export const WEIGHT = { name: 10, title: 4 } as const;
 export const TITLE_WORDS = 40;
 
 /** a word as the index keeps it, or null for one it leaves out */
-const keep = (w: string) => (w.length < 2 || /^\d+$/.test(w) || FILLER.has(w) ? null : fold(w));
+const keep = (w: string) => (w.length < 2 || FILLER.has(w) ? null : fold(w));
 
 /** what the index keeps of one document's text */
 export interface DocWords { counts: Map<string, number>; length: number; title: string[] }
