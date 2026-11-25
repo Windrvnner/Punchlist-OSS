@@ -12,7 +12,9 @@ import { Modal, LeaveFoot } from './dialogs';
 import { num, plural } from './counts';
 import { FileInput, PickFileRow } from './fileDrop';
 import { showTip, hideTip } from './tip';
-import { issuesListTitle, readIssuesList, readPastedIssuesList, reviewIssuesList, type ReadIssuesList } from '../app/issuesList';
+import {
+  issuesListTitle, readIssuesList, readPastedIssuesList, reviewIssuesList, type ReadIssuesList,
+} from '../app/issuesList';
 import { ImportIssuesList } from '../app/commands/issuesList';
 import { AI_LABEL } from '../control';
 import type { Finding, ListPoint } from '../domain/model';

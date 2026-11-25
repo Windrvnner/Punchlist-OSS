@@ -14,10 +14,15 @@ export interface ReadIssuesList {
 
 type IssuesListFile = { name: string; arrayBuffer(): Promise<ArrayBuffer> };
 
+/** an email is not read as an issues list: it is a PDF, a Word file, or pasted text (also for a file dropped here) */
+const EMAIL_FILE = /\.(msg|eml)$/i;
+const EMAIL_REFUSED = 'An email cannot be read here: use a PDF, a Word file or paste the text';
+
 /** Attach the list and read its points against all the deal's findings, including closed ones. */
 export async function readIssuesList(
   store: Store, dealId: string, file: IssuesListFile, stillCurrent = () => true,
 ): Promise<Result<ReadIssuesList> | undefined> {
+  if (EMAIL_FILE.test(file.name)) return fail(rejected(EMAIL_REFUSED));
   const bytes = new Uint8Array(await file.arrayBuffer());
   const attached = await store.services.docs.attach(dealId, { name: file.name, bytes });
   if (!stillCurrent()) return;
@@ -35,7 +40,8 @@ export async function readIssuesList(
 /** A list pasted as text, read as a text file of its own (the way a file chosen is): the file's words are the paste. */
 export function readPastedIssuesList(store: Store, dealId: string, text: string, stillCurrent = () => true) {
   const bytes = new TextEncoder().encode(text);
-  return readIssuesList(store, dealId, { name: 'Pasted issues list.txt', arrayBuffer: async () => bytes.buffer as ArrayBuffer }, stillCurrent);
+  const file = { name: 'Pasted issues list.txt', arrayBuffer: async () => bytes.buffer as ArrayBuffer };
+  return readIssuesList(store, dealId, file, stillCurrent);
 }
 
 /** The preview uses ImportIssuesList's join rules, with the model's matches treated as proposals. */

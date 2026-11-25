@@ -1,5 +1,6 @@
-// An edit kept aside beside an .xlsx or .xls Q&A log, read and written through LibreOffice as the app does: their cells come
-// back into the workbook, a formula is never written over, and their version goes to the archive. 2,000 questions.
+// An edit kept aside beside an .xlsx or .xls Q&A log, read and written through LibreOffice as the app does: their
+// cells come back into the workbook, a formula is never written over, and their version goes to the archive.
+// 2,000 questions.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -192,7 +193,8 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     expect(fs.readdirSync(folder).filter((n) => n.endsWith('.old'))).toEqual([]);
   }, 240_000);
   // a formula the team keeps (here the length of each question) gives another value where they reworded one
-  for (const ext of ['.xls']) it(`never writes over a formula in a ${ext} log, nor takes a formula's new value for their change`, async () => {
+  const formulaTest = (ext: string) => `never writes over a formula in a ${ext} log, nor takes it for a change`;
+  for (const ext of ['.xls']) it(formulaTest(ext), async () => {
     const rows: (string | number)[][] = [['No.', 'Question', 'Response', 'Notes'], ...Array.from({ length: N }, (_, k) => [k + 1, q(k + 1), '', ''])];
     let x = await workbook(exportDocument(SHEET, rows)); for (const r of [7, 8, 9]) x = withFormula(x, r);
     const work = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-conv-')); fs.writeFileSync(path.join(work, 'log.xlsx'), x);

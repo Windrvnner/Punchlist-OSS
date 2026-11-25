@@ -48,7 +48,9 @@ export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogF
   const sheets = async (file: string): Promise<Sheet[]> => (/\.csv$/i.test(file) ? [{ name: 'Sheet1', grid: parseCsv(decodeText(new Uint8Array(fs.readFileSync(file)))) }] : o.convert?.sheets ? o.convert.sheets(file) : Promise.reject(new Error('no spreadsheet reader')));
   /** the log's place, or why it can't be used */
   const where = (folder: string, file: string) => {
-    if (!EXT.test(path.extname(file))) return fail({ kind: 'invalid' as const, message: 'Only .xlsx, .xlsm, .xls and .csv logs can be updated' });
+    if (!EXT.test(path.extname(file))) {
+      return fail({ kind: 'invalid' as const, message: 'Only .xlsx, .xlsm, .xls and .csv logs can be updated' });
+    }
     const at = path.join(folder, file); restoreAside(folder, file); return fs.existsSync(at) ? ok(at) : fail({ kind: 'notFound' as const, message: `The Q&A log isn’t at ${at} any more` });
   };
   /**

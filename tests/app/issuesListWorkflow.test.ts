@@ -126,6 +126,20 @@ it('stops before the model call when a file selection changes during attachment'
   expect(read).not.toHaveBeenCalled();
 });
 
+it('refuses an email file, picked or dropped, before attaching it or calling the model', async () => {
+  const { store } = make();
+  const attach = vi.fn(async () => ok(DOC));
+  const read = vi.fn(proposedIssues);
+  store.services.docs.attach = attach;
+  store.services.ai.issuesList = read;
+  for (const name of ['Counsel comments.eml', 'Counsel comments.MSG']) {
+    const result = await readIssuesList(store, 'deal', { name, arrayBuffer: async () => new ArrayBuffer(8) });
+    expect(result && !result.ok && result.error.message).toMatch(/email cannot be read/);
+  }
+  expect(attach).not.toHaveBeenCalled();
+  expect(read).not.toHaveBeenCalled();
+});
+
 it('preserves the explicit model join for an attached name with surrounding spaces', async () => {
   const { store, dealId, byTitle } = await seedDeal();
   const prior = byTitle.get(POINTS[8].title)!;
