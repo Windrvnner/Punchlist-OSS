@@ -120,10 +120,10 @@ export const inSources = (finding: Pick<Finding, 'sources'>, docId: string) =>
  * Whether a file attached or sent under a finding can be added to its sources: it has finished attaching and is not
  * among them already.
  */
-export function canAddToSources(
-  finding: Pick<Finding, 'sources'> | null | undefined,
+export function canAddToSources<F extends Pick<Finding, 'sources'>>(
+  finding: F | null | undefined,
   file: { doc?: string; docId?: string; state?: 'pending' | 'done' },
-): boolean {
+): finding is F {
   if (!finding || file.state === 'pending' || !file.doc || !file.docId) return false;
   return !inSources(finding, file.docId);
 }

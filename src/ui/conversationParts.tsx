@@ -178,14 +178,12 @@ function SentFiles({ scope, files }: { scope: Scope; files: NonNullable<Message[
   const state = useAppState();
   const finding = scope.kind === 'finding' ? state.findings[scope.findingId] : null;
   return (
-    <div class="matt">{files.map((file) => {
-      return (
-        <span class="chip att" key={docKey(file)}><Icon name="doc" size={12} /><DocName name={file.doc} />
-          {finding && canAddToSources(finding, file) && <button type="button" class="addsrc" data-addsrc
-            onClick={() => void addToSources(store, finding.dealId, finding.id, file)}>Add to Sources</button>}
-        </span>
-      );
-    })}</div>
+    <div class="matt">{files.map((file) => (
+      <span class="chip att" key={docKey(file)}><Icon name="doc" size={12} /><DocName name={file.doc} />
+        {canAddToSources(finding, file) && <button type="button" class="addsrc" data-addsrc
+          onClick={() => void addToSources(store, finding.dealId, finding.id, file)}>Add to Sources</button>}
+      </span>
+    ))}</div>
   );
 }
 
