@@ -9,8 +9,8 @@
  *   - OneDrive out for 15 minutes is also told once, in an ordinary notice.
  */
 import type { State } from './state';
-import { SERVICE } from '../control';
-import type { AiSignIn, SignInStatus } from '../ports';
+import { control, SERVICE } from '../control';
+import type { AiSignIn, SharedFolderChoice, SharedFolderStatus, SharedPlace, SignInStatus } from '../ports';
 
 /** the event a window hears when the app is connected again: a field whose save could not be written sends its text again */
 export const CONNECTED = 'punchlist-connected';
@@ -159,4 +159,107 @@ export class SignInConnection {
     await this.looking;
     if (this.active) await this.look();
   };
+}
+
+interface FolderForm {
+  status: SharedFolderStatus | null;
+  chosen: string | null;
+  picked: SharedFolderChoice | null;
+  busy: boolean;
+  error: string;
+}
+
+const onlyFolder = (status: SharedFolderStatus | null) =>
+  status && !status.path && status.found.length === 1 ? status.found[0] : null;
+
+function localFolderChoice(found: string[], chosen: string | null) {
+  return chosen && found.includes(chosen) ? chosen : found[0];
+}
+
+/** Prefer the folder just picked, then a local match, then the OneDrive suggestion when it can be used. */
+export function sharedFolderOffer({ status, chosen, picked, error }: FolderForm) {
+  const found = status && !status.path ? status.found : [];
+  const teamLink = status?.missing ? '' : control.desktop.teamFolderLink;
+  const local = localFolderChoice(found, chosen);
+  const suggested = status?.missing || teamLink ? null : status?.suggested;
+  const path = local ?? suggested;
+  const offer = picked ?? (path ? { path, inOneDrive: true } : null);
+  return {
+    offer, teamLink, choices: picked || found.length < 2 ? [] : found,
+    visible: !!status && (!onlyFolder(status) || !!error),
+  };
+}
+
+/** Pick and confirm a folder. First setup looks for synced folders until the backend restarts on one. */
+export class SharedFolderConnection {
+  private form = formState<FolderForm>({ status: null, chosen: null, picked: null, busy: false, error: '' });
+  private looking = false;
+  private active = false;
+
+  constructor(private place: SharedPlace, private firstSetup = false) {}
+
+  get = () => this.form.get();
+  subscribe = (listener: () => void) => this.form.subscribe(listener);
+
+  start = () => {
+    this.active = true;
+    void this.look();
+    const timer = this.firstSetup ? setInterval(() => void this.look(), 5000) : undefined;
+    return () => {
+      this.active = false;
+      clearInterval(timer);
+    };
+  };
+
+  private async look() {
+    if (this.looking) return;
+    this.looking = true;
+    try {
+      const result = await this.place.get();
+      if (!this.active || !result.ok) return;
+      const before = onlyFolder(this.get().status);
+      this.form.update({ status: result.value });
+      const only = onlyFolder(result.value);
+      if (this.firstSetup && only && only !== before) void this.useFolder(only);
+    } finally {
+      this.looking = false;
+    }
+  }
+
+  choose = (chosen: string) => this.form.update({ chosen });
+  cancel = () => this.form.update({ picked: null });
+
+  pick = async () => {
+    this.form.update({ error: '' });
+    const result = await this.place.pick();
+    if (!result.ok) this.form.update({ error: result.error.message });
+    else if (result.value) this.form.update({ picked: result.value });
+  };
+
+  async useFolder(path: string) {
+    this.form.update({ busy: true, error: '' });
+    const result = await this.place.use(path);
+    // On success the backend restarts the window on this folder.
+    if (!result.ok) this.form.update({ busy: false, error: result.error.message });
+  }
+}
+
+type StartupConnection =
+  | { stage: 'signin'; form: SignInConnection }
+  | { stage: 'connect'; form: SharedFolderConnection }
+  | { stage: 'ready' };
+
+/** A PC's first sign-in precedes folder setup. Once both are ready, the shell can construct the normal Store. */
+export async function startupConnection(
+  services: { signin?: AiSignIn; place?: SharedPlace },
+  hasRepository: boolean,
+  onSignedIn: () => void,
+): Promise<StartupConnection> {
+  const { signin, place } = services;
+  const status = signin ? await signin.status().catch(() => null) : null;
+  if (signin && status?.ok && status.value.firstSetup && !status.value.signedIn) {
+    return { stage: 'signin', form: new SignInConnection(signin, onSignedIn, status.value) };
+  }
+  if (place && !hasRepository) return { stage: 'connect', form: new SharedFolderConnection(place, true) };
+  return { stage: 'ready' };
 }
