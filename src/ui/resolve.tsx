@@ -11,7 +11,8 @@ import { Modal } from './dialogs';
 import { Icon } from './icons';
 import { ChoiceHead, Stepper } from './choiceCards';
 import { titleStyle } from './titleStyle';
-import { dealQuestions, qaKept, type State } from '../app/state';
+import { qaKept } from '../app/state';
+import { hasLogVersion, inTwoVersions, logVersionQueue, nextLogVersion } from '../app/qaView';
 import { chooseVersion, logOf, type VersionPick } from '../app/qaLog';
 import { cellValue } from '../domain/logWrite';
 import { IMPORT_FIELDS, type ImportField } from '../domain/importExport';
@@ -23,12 +24,10 @@ import type { Question } from '../domain/model';
 const LABEL = Object.fromEntries(IMPORT_FIELDS.map(([k, label]) => [k, titleStyle(label)]));
 LABEL.responded = 'Response Date';
 
-/** the questions on the deal in two versions with the log, in number order */
-export const inTwoVersions = (s: State, dealId: string) => dealQuestions(s, dealId).filter((q) => Object.keys(qaKept(s, q)).length).sort((a, b) => a.n - b.n);
-
 /** opens Resolve at a question, or at the first one */
 export const openResolve = (store: ReturnType<typeof useStore>, dealId: string, questionId?: string) => {
-  const first = questionId ?? inTwoVersions(store.get(), dealId)[0]?.id; if (!first) return;
+  const first = questionId ?? inTwoVersions(store.get(), dealId)[0]?.id;
+  if (!first) return;
   store.ui({ selectedQuestion: first, dialog: { kind: 'resolveQa', dealId, questionId: first } });
 };
 
@@ -94,7 +93,7 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
   const store = useStore(); const s = useAppState();
   const close = () => store.ui({ dialog: null });
   // the ones to step through, as they were when Resolve opened: one resolved keeps its place, so "3 of 112" holds still
-  const [queue] = useState(() => { const ids = inTwoVersions(store.get(), dealId).map((q) => q.id); return ids.includes(questionId) ? ids : [questionId, ...ids]; });
+  const [queue] = useState(() => logVersionQueue(store.get(), dealId, questionId));
   const at = Math.max(0, queue.indexOf(questionId));
   const q = s.questions[questionId] as Question | undefined; const kept = q ? qaKept(s, q) : {};
   const log = logOf(store, dealId);
@@ -120,8 +119,10 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
     landed.add(on); return () => { landed.delete(on); };
   }, []);
   const go = (id: string | undefined) => { if (id) store.ui({ selectedQuestion: id, dialog: { kind: 'resolveQa', dealId, questionId: id } }); };
-  const still = (id: string) => { const x = store.get().questions[id]; return !!x && Object.keys(qaKept(store.get(), x)).length > 0; };
-  const nextOpen = () => queue.slice(at + 1).find(still) ?? queue.slice(0, at).find(still);
+  const still = (id: string) => {
+    const state = store.get();
+    return hasLogVersion(state, state.questions[id]);
+  };
 
   const resp = 'response' in kept; const others = (Object.keys(kept) as ImportField[]).filter((k) => k !== 'response');
   const appText = q?.response ?? ''; const logText = kept.response ?? '';
@@ -155,7 +156,11 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
     const did = pick === 'log' ? 'the log’s version taken' : pick === 'merged' ? 'merged response used' : 'the app’s version kept';
     store.toast(`Q${q.n}: ${did}`, { label: 'Undo', opId: r.value.opId });
     // on to the next, with the focus on its first version, so 1, 2 and 3 go on working from the keyboard
-    const next = nextOpen(); if (next) { go(next); requestAnimationFrame(() => document.querySelector<HTMLElement>('.rsvdlg [data-pick="app"]')?.focus()); } else close();
+    const next = nextLogVersion(store.get(), queue, at);
+    if (next) {
+      go(next);
+      requestAnimationFrame(() => document.querySelector<HTMLElement>('.rsvdlg [data-pick="app"]')?.focus());
+    } else close();
   };
   // 1 and 2 pick a version and 3 merges them, outside the merged text
   useEffect(() => {
