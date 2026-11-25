@@ -365,9 +365,44 @@ async function answer(store: Store, scope: Scope, messageId: string, text: strin
 }
 
 /** An answer's text as it leaves the conversation, as a response or a question: finding links as words, no [n] markers. */
-export const answerText = (m: Message) => withoutMarkers(m.text.replace(/\{([^|}]+)\|f_[0-9A-Z]{26}\}/g, '$1'), m.sources?.length ?? 0);
-/** A person makes an answer the response to a question: with the answer's own sources, and once however often it is pressed. */
-export const useAnswer = (store: Store, dealId: string, questionId: string, m: Message) => store.dispatch(UseAsResponse, { dealId, questionId, text: answerText(m), sources: m.sources ?? [] }, { idempotencyKey: 'use-' + m.id });
+export const withoutFindingLinks = (text: string) => text.replace(/\{([^|}]+)\|f_[0-9A-Z]{26}\}/g, '$1');
+export const answerText = (m: Message) => withoutMarkers(withoutFindingLinks(m.text), m.sources?.length ?? 0);
+
+/** A new question from a finding starts with the answer. On a deal, it starts with what was asked. */
+export const questionFromAnswer = (scope: Scope, answer: Message, asked: string) =>
+  scope.kind === 'finding' ? answerText(answer) : asked;
+
+/** The answer's first sentence, without its last punctuation, starts the new finding's title. */
+export function findingFromAnswer(answer: Message) {
+  const text = withoutFindingLinks(answer.text);
+  const preview = answerText(answer);
+  const sentence = /^[^.!?]*[.!?]/.exec(preview)?.[0] ?? preview;
+  return { text, preview, title: sentence.trim().replace(/[.!?]$/, '').slice(0, 140) };
+}
+
+/** The current response to confirm before replacement, when one is present. */
+export const responseToReplace = (question?: Question) => question?.response.trim() ? question.response : null;
+
+/** Read the question itself so undoing the response brings the check back. */
+export function answerWasUsed(question: Question, answer: Message) {
+  const response = responseToReplace(question);
+  return response !== null && response.trim() === answerText(answer).trim();
+}
+
+/** A person makes an answer the response, with its sources and only once however often it is pressed. */
+export function useAnswer(store: Store, dealId: string, questionId: string, answer: Message, over: string | null = null) {
+  return store.dispatch(UseAsResponse, {
+    dealId, questionId, text: answerText(answer), sources: answer.sources ?? [], over: over ?? '',
+  }, { idempotencyKey: 'use-' + answer.id });
+}
+
+/** The question picker searches within Open or All and counts Open before searching. */
+export function answerQuestionChoices(state: State, dealId: string, typed: string, all: boolean) {
+  const questions = dealQuestions(state, dealId);
+  const open = questions.filter((question) => question.status === 'open');
+  const within = all ? questions : open;
+  return { rows: findQuestions(typed, within), hasQuestions: within.length > 0, openCount: open.length };
+}
 
 /**
  * A person asks the model whether an answer addresses the open question suggested under it. The verdict
