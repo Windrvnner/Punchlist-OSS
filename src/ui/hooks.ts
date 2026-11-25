@@ -1,4 +1,5 @@
 import { createContext } from 'preact';
+import { useSyncExternalStore } from 'preact/compat';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { Store } from '../app/store';
 import type { State } from '../app/state';
@@ -27,6 +28,16 @@ export function useAppState(): State {
     return off;
   }, [store]);
   return rendered;
+}
+
+/** Subscribe while a sign-in or folder form is on screen. */
+export function useConnectionForm<T>(form: {
+  get(): T;
+  subscribe(listener: () => void): () => void;
+  start(): () => void;
+}): T {
+  useEffect(form.start, [form]);
+  return useSyncExternalStore(form.subscribe, form.get);
 }
 
 export const LOCALE = 'en-US';
