@@ -2,6 +2,7 @@
 // repeating a finding and 4 an earlier point. Only those 27 are listed; the rest become findings, and every finding a
 // point is on says "#N on issues list". A list the stand-in reads from a text file is checked end to end too.
 import { launchChrome } from './chrome.mjs';
+import { checkRemovalApproval } from './issueslistRemoval.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
 const browser = await launchChrome();
@@ -199,7 +200,7 @@ for (const [w, h, scheme] of [[1280, 736, 'dark'], [1024, 640, 'light']]) {
     const impact = await page.textContent('#ask-text');
     const safeFocus = await page.evaluate(() => document.activeElement?.id === 'ask-keep');
     say(`Remove asks what will change and writes nothing before approval (${w}, ${keep})`,
-      prompt === `Remove ${row.name}?`
+      prompt === `Remove ${LIST}?`
       && impact === '138 findings go to Deleted. Marks are removed from 22 findings.'
       && safeFocus && (await listStatus(page)) === beforeRemove, JSON.stringify({ prompt, impact, safeFocus }));
     if (keep === 'Escape') await page.keyboard.press('Escape');
@@ -245,6 +246,7 @@ for (const [w, h, scheme] of [[1280, 736, 'dark'], [1024, 640, 'light']]) {
   const one = await page.evaluate(() => { const fs = Object.values(store.get().findings); return { n: fs.length, first: fs.filter((f) => f.title.startsWith('first wrote')).length, revised: fs.filter((f) => f.title.startsWith('revised')).length, rows: [...document.querySelectorAll('.deldlg [data-del="list"]')].map((r) => r.querySelector('.dmeta').textContent), toast: store.get().ui.toasts.at(-1)?.text }; });
   say(`Remove takes only the revised list; the first stays whole (${w})`, one.n === 126 + 164 && one.first === 164 && one.revised === 0 && one.toast === 'Removed 120 findings' && one.rows.length === 1 && one.rows[0] === '164 findings · 0 already raised', JSON.stringify(one));
   await page.keyboard.press('Escape'); await page.waitForSelector('.deldlg', { state: 'detached' });
+  await checkRemovalApproval(page, dealId, say, w);
   say(`no page errors (${w})`, page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }
