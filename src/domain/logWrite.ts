@@ -42,6 +42,12 @@ export interface LogWrite {
   taken: Record<string, Record<string, string>>;
 }
 
+/**
+ * A text as a log file holds it: the file keeps a line break as one "\n" and cannot hold control characters, so the writer
+ * stores them as a space. This is how the file stores text, not a repair; every other difference is a real edit.
+ */
+const asLogHolds = (text: string) => text.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, ' ');
+const sameInLog = (a: string, b: string) => a === b || asLogHolds(a) === asLogHolds(b);
 const QUESTION_WORD = /[\p{L}\p{M}|]+/gu;
 // Canonical numerals keep prose such as "civil" outside identifier matching.
 const ROMAN_NUMERAL = /^(?=.)m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})$/i;
@@ -314,10 +320,10 @@ export function logWrite(table: Pick<ReadTable, 'rows' | 'lines' | 'cols' | 'las
   // ("11/12/2026", "Outstanding", "H") that says what the app holds is not taken for a change
   const read = new Map(prepareImport(table.rows, mapping, table.rows.map((_, i) => i)).rows.map((r) => [r.line!, r] as const));
   // a value as the import reads it against the app's: a status or priority in the app's terms, whatever case it is written in
-  const same = (k: ImportField, a: string, b: string) => (k === 'status' || k === 'priority' ? a.toLowerCase() === b.toLowerCase() : a === b);
+  const same = (k: ImportField, a: string, b: string) => (k === 'status' || k === 'priority' ? a.toLowerCase() === b.toLowerCase() : sameInLog(a, b));
   const sameAs = (k: ImportField, i: number, v: string) => { const r = read.get(i) as ImportRow | undefined; const was = r ? String((r as unknown as Record<string, unknown>)[k] ?? '') : cell(table.rows[i], k); if (k === 'n') return numberParts(cell(table.rows[i], 'n'))?.n === Number(v);
     if ((k === 'received' || k === 'responded') && !was && cell(table.rows[i], k).trim()) return true;   // a date the import could not settle (11/02 either way) is left as the log writes it
-    return same(k, was, v) || cell(table.rows[i], k) === v; };
+    return same(k, was, v) || sameInLog(cell(table.rows[i], k), v); };
   // a log cell's value as the import reads it ("11/12/2026" as 2026-11-12, "Outstanding" as open), else as written
   const readAs = (k: ImportField, i: number) => { const r = read.get(i) as ImportRow | undefined; return r ? String((r as unknown as Record<string, unknown>)[k] ?? '') : ''; };
   for (const q of questions) {
@@ -330,9 +336,9 @@ export function logWrite(table: Pick<ReadTable, 'rows' | 'lines' | 'cols' | 'las
       if (!v.trim() && before[k] === undefined) continue;
       if (sameAs(k, i, v)) { now[k] = has; continue; }                                 // the log says it already, its own way: kept as the log writes it
       // the cell still holds what the app last put there, as written or as the import reads it
-      const ours = before[k] !== undefined && (has === before[k] || (!!readAs(k, i) && same(k, readAs(k, i), before[k])));
+      const ours = before[k] !== undefined && (sameInLog(has, before[k]) || (!!readAs(k, i) && same(k, readAs(k, i), before[k])));
       // someone changed it in the log; where the app still holds what it last sent, only the log changed: the app takes it
-      if (has.trim() && !ours && before[k] !== undefined && (v === before[k] || same(k, v, before[k]))) { (out.taken[q.id] ??= {})[k] = has; now[k] = has; continue; }
+      if (has.trim() && !ours && before[k] !== undefined && (sameInLog(v, before[k]) || same(k, v, before[k]))) { (out.taken[q.id] ??= {})[k] = has; now[k] = has; continue; }
       if (has.trim() && !ours) { theirs = true; (out.keptFields[q.id] ??= []).push(k); (out.keptText[q.id] ??= {})[k] = has; if (before[k] !== undefined) now[k] = before[k]; continue; }   // someone else's: never overwritten
       // a blank Priority stays blank: the app's High on a question that came in with none is its default, not a value anyone gave
       if (k === 'priority' && !has.trim() && v === 'High' && before[k] === undefined) continue;
@@ -371,5 +377,5 @@ export function readLogCells(q: Question, cells: Record<string, string>, today?:
 /** whether a question's field already says `value` (in the app's terms, as readLogCells gives it); the words exactly as written */
 export function holds(q: Question, k: string, value: string): boolean {
   const app = String((q as unknown as Record<string, unknown>)[k] ?? '');
-  return k === 'status' || k === 'priority' || k === 'received' || k === 'responded' ? app.toLowerCase() === value.trim().toLowerCase() : app === value;
+  return k === 'status' || k === 'priority' || k === 'received' || k === 'responded' ? app.toLowerCase() === value.trim().toLowerCase() : sameInLog(app, value);
 }

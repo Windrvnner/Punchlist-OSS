@@ -66,6 +66,21 @@ describe('a log edit is taken exactly as written', () => {
   });
 });
 
+describe('a log cell as the file holds it', () => {
+  it('is still what the app sent when the file stored its line breaks or control characters its own way', () => {
+    for (const [sent, held] of [['Line1\r\nLine2', 'Line1\nLine2'], ['a\u0001b', 'a b'], ['a\rb', 'a\nb']]) {
+      const w = logWrite(
+        { ...table, rows: [['Q1', 'What is the minimum DSCR covenant?', held, 'Sponsor']], lines: [4], lastRow: 4 },
+        map,
+        [q(1, 'What is the minimum DSCR covenant?', { response: `${sent} more` })],
+        new Map([['q1', { response: sent }]]),
+      );
+      expect(w.steps, sent).toEqual([{ kind: 'cell', row: 3, col: 3, value: `${sent} more` }]);
+      expect(w.kept, sent).toEqual([]);
+    }
+  });
+});
+
 describe('the read-back check of a written log', () => {
   const before = [{ name: 'Log', grid: [['No.', 'Question', 'Response'], ['1', 'DSCR?', '']] }, { name: 'Notes', grid: [['x']] }];
   const steps = [{ kind: 'cell' as const, row: 1, col: 2, value: '1.20x' }, { kind: 'rows' as const, after: 1, count: 1 }, { kind: 'cell' as const, row: 2, col: 0, value: 2 }];
