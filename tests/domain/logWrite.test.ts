@@ -1,6 +1,6 @@
 // What the app writes back into a counterparty's own Q&A log: the questions it adds and the answers it adds, and nothing else.
 import { describe, it, expect } from 'vitest';
-import { logWrite, readLogCells } from '../../src/domain/logWrite';
+import { logWrite } from '../../src/domain/logWrite';
 import { suggestMapping } from '../../src/domain/importExport';
 import type { Question } from '../../src/domain/model';
 import { writtenAsMeant } from '../../src/domain/sheets';
@@ -143,7 +143,7 @@ describe('matching and keeping, in awkward logs', () => {
 describe('a log that writes its cells its own way', () => {
   const cols = ['No.', 'Question', 'Priority', 'Date received', 'Status', 'Response'];
   const m = suggestMapping(cols);
-  const log = { columns: cols, cols: cols.map((_, i) => i), rows: [['1', 'What is the minimum DSCR covenant?', '', '11/12/2026', 'Outstanding', '']], lines: [2], lastRow: 2 };
+  const log = { columns: cols, cols: cols.map((_, i) => i), rows: [['1', 'What is the minimum DSCR covenant?', '', '2026-11-12', 'Outstanding', '']], lines: [2], lastRow: 2 };   // a workbook's real date cell reads as YYYY-MM-DD
   it('leaves a blank Priority blank: the High a question with none came in with is the app\'s default, not a value anyone gave', () => {
     const w = logWrite(log, m, [q(1, 'What is the minimum DSCR covenant?', { priority: 'High', received: '2026-11-12', status: 'open' })]);
     expect(w.steps).toEqual([]); expect(w).toMatchObject({ updated: 0, kept: [] }); expect(w.sent.q1.priority).toBeUndefined();
@@ -152,24 +152,23 @@ describe('a log that writes its cells its own way', () => {
   });
   it('keeps a date or status the log already says its own way as ours, so a later change in the app still reaches it', () => {
     const first = logWrite(log, m, [q(1, 'What is the minimum DSCR covenant?', { received: '2026-11-12', status: 'open' })]);
-    expect(first.steps).toEqual([]); expect(first.sent.q1).toMatchObject({ received: '11/12/2026', status: 'Outstanding' });
+    expect(first.steps).toEqual([]); expect(first.sent.q1).toMatchObject({ received: '2026-11-12', status: 'Outstanding' });
     const next = logWrite(log, m, [q(1, 'What is the minimum DSCR covenant?', { received: '2026-11-13', status: 'answered', response: 'Yes' })], new Map(Object.entries(first.sent)));
     expect(next.steps).toEqual([{ kind: 'cell', row: 1, col: 3, value: '2026-11-13', date: true }, { kind: 'cell', row: 1, col: 4, value: 'Answered' }, { kind: 'cell', row: 1, col: 5, value: 'Yes' }]);
     expect(next.kept).toEqual([]);
   });
-  it('knows a date it wrote, read back in the column\'s own date format, as its own', () => {
+  it('knows a date it wrote, read back from the log, as its own', () => {
     const w = logWrite(log, m, [q(1, 'What is the minimum DSCR covenant?', { received: '2026-11-14', status: 'open' })], new Map([['q1', { received: '2026-11-12', status: 'Open' }]]));
     expect(w.steps).toEqual([{ kind: 'cell', row: 1, col: 3, value: '2026-11-14', date: true }]); expect(w.kept).toEqual([]);
   });
 });
 
-describe('a log cell read in the app\'s terms', () => {
-  it('reads a date that shows its order, and leaves one valid both ways as the log writes it', () => {
-    const question = q(1, 'What is the minimum DSCR covenant?');
-    expect(readLogCells(question, { received: '11/20/2026', status: 'Outstanding' })).toEqual({ received: '2026-11-20', status: 'open' });
-    expect(readLogCells(question, { received: '20/11/2026' })).toEqual({ received: '2026-11-20' });
-    // one cell shows no order of its own, so a date like 02/11/2026 is not made month first here
-    expect(readLogCells(question, { received: '02/11/2026' })).toEqual({ received: '02/11/2026' });
+describe('a date typed as text in a log', () => {
+  const cols = ['No.', 'Question', 'Date received'];
+  const typed = { columns: cols, cols: [0, 1, 2], rows: [['1', 'What is the minimum DSCR covenant?', '11/12/2026']], lines: [2], lastRow: 2 };
+  it('stays as the log has it: it is not a date, so the app does not write over it or take it for a change', () => {
+    const w = logWrite(typed, suggestMapping(cols), [q(1, 'What is the minimum DSCR covenant?', { received: '2026-11-14' })]);
+    expect(w.steps).toEqual([]); expect(w.kept).toEqual([]);
   });
 });
 

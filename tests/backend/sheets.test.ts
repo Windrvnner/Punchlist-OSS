@@ -85,18 +85,12 @@ describe.skipIf(!has)('spreadsheets through LibreOffice', () => {
     expect(p.badDates).toBe(0); expect(p.rows[0]).toMatchObject({ text: 'Timed', received: '2026-11-14' });
   }, 60_000);
 
-  it('a date typed as text is read in the file\'s order, month first when it shows none; a real date cell is never in doubt', async () => {
-    // "02/11/2026" typed as text, beside a real date cell: a real cell shows no order, so it reads month first
+  it('a date typed as text is not read as a date and is listed; a real date cell is', async () => {
     const f = handMadeXlsx([text('A1', 'Question') + text('B1', 'Received'), text('A2', 'Typed') + text('B2', '02/11/2026'), text('A3', 'Cell') + '<c r="B3" s="2"><v>46328</v></c>']);
     const r = await libreOfficeSheets(lo).read(new Uint8Array(fs.readFileSync(f)), 'book.xlsx'); if (!r.ok) throw new Error(r.error.message);
     expect(r.value.rows.map((x) => x[1])).toEqual(['02/11/2026', '2026-11-02']);
     const p = prepareImport(r.value.rows, suggestMapping(r.value.columns));
-    expect(p.badDates).toBe(0); expect(p.rows.map((x) => x.received)).toEqual(['2026-02-11', '2026-11-02']);
-    // alone, the same date reads the same way
-    const g = handMadeXlsx([text('A1', 'Question') + text('B1', 'Received'), text('A2', 'Alone') + text('B2', '02/03/2026')]);
-    const q = await libreOfficeSheets(lo).read(new Uint8Array(fs.readFileSync(g)), 'book.xlsx'); if (!q.ok) throw new Error(q.error.message);
-    const pq = prepareImport(q.value.rows, suggestMapping(q.value.columns));
-    expect(pq.rows[0].received).toBe('2026-02-03'); expect(pq.unread).toEqual([]);
+    expect(p.badDates).toBe(1); expect(p.rows.map((x) => x.received)).toEqual(['', '2026-11-02']); expect(p.unread).toEqual(['Row 2 Received: 02/11/2026']);
   }, 60_000);
 
   it('a formula cell with no saved result reads as its value, so its row is not left out (LibreOffice works it out on load)', async () => {

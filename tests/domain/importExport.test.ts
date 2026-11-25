@@ -1,29 +1,23 @@
 import { describe, it, expect } from 'vitest';
-import { dateOrder, parseDate, prepareImport, suggestMapping, questionsSheet, findingsSheet, importCounts } from '../../src/domain/importExport';
+import { parseDate, prepareImport, suggestMapping, questionsSheet, findingsSheet, importCounts } from '../../src/domain/importExport';
 import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
 import { Question } from '../../src/domain/model';
 
 describe('parseDate', () => {
-  it('accepts unambiguous dates with a full year', () => {
+  it('reads a real date (as a workbook\'s date cell arrives) and blank, and nothing typed', () => {
     expect(parseDate('2026-11-01')).toBe('2026-11-01');
-    expect(parseDate('11/02/2026')).toBe('2026-11-02');      // month first
-    expect(parseDate('31/12/2026')).toBe('2026-12-31');      // only day-first is possible
-    expect(parseDate('Nov 1, 2026')).toBe('2026-11-01');
-    expect(parseDate('October 3, 2026')).toBe('2026-10-03');
-    expect(parseDate('Sept 5, 2026')).toBe('2026-09-05');
     expect(parseDate('')).toBe('');
+    expect(parseDate('  2026-11-01 ')).toBe('2026-11-01');
+    expect(parseDate('2026-11-14 12:00:00')).toBe('2026-11-14');   // a date-and-time cell is its date
+    // text typed in a cell is not a date and is never parsed into one, however it is written
+    for (const typed of ['11/02/2026', '31/12/2026', 'Nov 1, 2026', '2-Nov-26', '2026/11/02', '11/14/2026 12:00:00', '44866']) expect([typed, parseDate(typed)]).toEqual([typed, null]);
+    for (const bad of ['2026-99-99', '2026-02-31', 'soon']) expect(parseDate(bad)).toBeNull();
   });
-  it('reads the other common ways of writing a date', () => {
-    for (const [typed, iso] of [['2-Nov-2026', '2026-11-02'], ['02-Nov-26', '2026-11-02'], ['2026/11/02', '2026-11-02'], ['2026.11.2', '2026-11-02'], ['Nov 2nd 2026', '2026-11-02'], ['November 3rd, 2026', '2026-11-03'], ['21st Nov 2026', '2026-11-21'], ['Nov-02-2026', '2026-11-02']]) expect([typed, parseDate(typed)]).toEqual([typed, iso]);
-    // a two-digit year is read as Excel reads it, and the day and month in the order four-digit years are
-    expect(parseDate('11/02/26')).toBe('2026-11-02'); expect(parseDate('13/02/26')).toBe('2026-02-13'); expect(parseDate('02.11.26')).toBe(parseDate('02.11.2026')); expect(parseDate('1/2/99')).toBe('1999-01-02');
-  });
-  it('reads a date with a time as its date', () => {
-    for (const [typed, iso] of [['11/14/2026 12:00:00', '2026-11-14'], ['11/14/2026 3:30 PM', '2026-11-14'], ['Nov 14, 2026 09:15', '2026-11-14'], ['2026/11/14 23:59:59.5', '2026-11-14']]) expect([typed, parseDate(typed)]).toEqual([typed, iso]);
-    for (const bad of ['11/14/2026 25:00', '12:00:00', '11/31/2026 12:00:00']) expect([bad, parseDate(bad)]).toEqual([bad, null]);
-  });
-  it('rejects impossible or year-less dates instead of changing them', () => {
-    for (const bad of ['2026-99-99', '31/02/2026', 'Feb 31, 2026', 'April 31, 2026', 'Nov 1', '1 Nov', 'soon', '44866']) expect(parseDate(bad)).toBeNull();
+  it('lists a typed date in an import as not read and leaves the field blank', () => {
+    const m = suggestMapping(['Question', 'Received', 'Date']);
+    const p = prepareImport([['Cell', '2026-10-13', '2026-11-02'], ['Typed', '13.10.2026', '02/11/2026']], m);
+    expect(p.rows.map((r) => [r.received, r.responded])).toEqual([['2026-10-13', '2026-11-02'], ['', '']]);
+    expect(p.badDates).toBe(2); expect(p.unread).toEqual(['Row 3 Received: 13.10.2026', 'Row 3 Date: 02/11/2026']);
   });
 });
 
@@ -66,21 +60,6 @@ describe('prepareImport', () => {
     expect(p.unread).toEqual(['Row 3 Priority: urgent', 'Row 3 Status: weird', 'Row 3 Received: Feb 31, 2026', 'Row 3 Date: April 31, 2026']);
     expect(p.rows[0]).toMatchObject({ n: 2, priority: 'High', status: 'closed', received: '2026-11-01' });
     expect(p.rows[1]).toMatchObject({ n: null, priority: '', status: '', received: '', responded: '' });
-  });
-  it('reads every date valid both ways in the order the file shows, month first when it shows none', () => {
-    const m = suggestMapping(['Question', 'Received', 'Date']);
-    // 13.10 can only be day first, so 02.11 and 05.11 read day first too, in either date column
-    const day = prepareImport([['A', '13.10.2026', '02.11.2026'], ['B', '05.11.2026', '']], m);
-    expect(day.rows.map((r) => [r.received, r.responded])).toEqual([['2026-10-13', '2026-11-02'], ['2026-11-05', '']]);
-    // 10/13 can only be month first
-    const month = prepareImport([['A', '10/13/2026', ''], ['B', '02/11/2026', '']], m);
-    expect(month.rows.map((r) => r.received)).toEqual(['2026-10-13', '2026-02-11']);
-    // nothing shows an order: month first, as Excel reads it
-    expect(prepareImport([['Alone', '02.03.2026', '']], m).rows[0].received).toBe('2026-02-03');
-    // both orders in one file: no order, so a date valid both ways is left blank and listed
-    const mixed = prepareImport([['A', '13.10.2026', ''], ['B', '10/13/2026', ''], ['C', '02.03.2026', '']], m);
-    expect(mixed.rows.map((r) => r.received)).toEqual(['2026-10-13', '2026-10-13', '']);
-    expect(mixed.badDates).toBe(1); expect(mixed.unread).toEqual(['Row 4 Received: 02.03.2026']);
   });
   it('reads back a number past Q999999, as the app numbers them', () => {
     const m = suggestMapping(['Number', 'Question']);
@@ -148,12 +127,5 @@ describe('prepareImport', () => {
     const rows = prepareImport([['2', 'a'], ['3', 'b'], ['3', 'c']], { n: 0, text: 1, askedBy: null, received: null, workstream: null, priority: null, response: null, respondedBy: null, responded: null, status: null }).rows;
     expect(importCounts(rows, existing, 'merge')).toEqual({ add: 1, match: 2 });
     expect(importCounts(rows, existing, 'append')).toEqual({ add: 3, match: 0 });
-  });
-  it('reads the file\'s date order only from real dates, in any shape', () => {
-    expect(dateOrder(['13/10/26', '02/11/26'])).toBe('day');
-    expect(dateOrder(['10/13/2026 12:00'])).toBe('month');
-    expect(dateOrder(['2026-10-13', '02.11.2026'])).toBe('month');         // a real date cell shows no order
-    expect(dateOrder(['31/02/2026', '13/10/202'])).toBe('month');          // not real dates: they show nothing
-    expect(dateOrder(['13/10/2026', '10/13/2026'])).toBeNull();
   });
 });

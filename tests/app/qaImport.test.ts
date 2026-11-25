@@ -36,7 +36,7 @@ function choicesFor(table: ImportTable, path: string | null, makeLog = false): Q
 }
 
 function questionsGrid(questions: string[]) {
-  const dates = ['30/09/2026', '01/10/2026', '15/10/2026', '31/31/2026'];
+  const dates = ['2026-09-30', '2026-10-01', '2026-10-15', '31/31/2026'];
   return questions.map((text, at) => [
     String(at + 1), text, at % 2 ? 'Contoso' : 'Fabrikam', dates[at] ?? '2026-10-15',
     'The signed project documents have been added to the data room.',

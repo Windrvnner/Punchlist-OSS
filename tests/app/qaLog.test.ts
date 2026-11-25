@@ -207,7 +207,7 @@ describe('a deal\'s Q&A log', () => {
     ]);
     expect(logOf(store, dealId)!.last!.sent[q2.id].response).toBe('Fabrikam');
   });
-  // a log that writes a status or a date its own way ("Outstanding", 11/20/2026) is read in the app's terms
+  // a log that writes a status its own way ("Outstanding") is read in the app's terms; a real date cell reads as YYYY-MM-DD
   it('takes in a status or date only the log changed, written its own way, as Changed and not as two versions', async () => {
     const cols4 = ['No.', 'Question', 'Response', 'Status', 'Date'];
     const at = (st: string, dt: string) => ({
@@ -226,7 +226,7 @@ describe('a deal\'s Q&A log', () => {
     const q2 = dealQuestions(store.get(), dealId)[1];
     await store.dispatch(SetQuestionStatus, { dealId, questionId: q2.id, status: 'answered' }); await store.dispatch(EditQuestionField, { dealId, questionId: q2.id, field: 'responded', value: '2026-11-12' });
     await keepImportedLog(store, dealId, { path: PATH, sheet: 'Log', headerRow: 1, mapping: suggestMapping(cols4), make: true, rows: box.file.rows });
-    box.file = at('Outstanding', '11/20/2026');
+    box.file = at('Outstanding', '2026-11-20');
     expect(await exportQaLog(store, dealId)).toMatchObject({ value: { status: 'written', changed: 1, kept: [] } }); expect(saves).toEqual([]);
     const q = store.get().questions[q2.id];
     expect([q.status, q.responded, qaVersions(store.get(), q), qaChanged(store.get(), q).sort()]).toEqual(['open', '2026-11-20', '', ['responded', 'status']]);
