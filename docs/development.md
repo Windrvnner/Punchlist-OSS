@@ -199,5 +199,8 @@ Its **How the batch is worked** section sets that batch's own rules. These rules
 - Test the failing case and the nearby cases that already work on `main`, so that a fix keeps the behavior around it.
 - Check the files and dependencies a fix needs against the files the batch must not edit before starting it, and
   again whenever a revision changes a data contract.
+- Use code, not a model, for any step a rule can decide: parsing, matching, numbering, dates and periods, sorting,
+  counting, and formatting. Where a fix adds or keeps a model call, say in its pull request what language
+  understanding the call needs that code cannot supply.
 - Limit work in flight. When reviews keep finding the same kind of failure, open no new pull requests until the open
   ones are finished.

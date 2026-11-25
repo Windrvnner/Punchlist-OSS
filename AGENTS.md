@@ -63,6 +63,12 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   - Copy nothing (share the code instead), and leave no dead code (remove it). Comment anything that isn't self-explanatory.
   - Lines that a change touches follow these rules. Untouched code is left alone, and the formatter stays off. Older code is brought up to these rules in separate, behavior-neutral cleanup pull requests.
   - `npm run check` lists changed lines over 120 characters and new functions that are too complex, compared with the branch's merge base with `main` (`scripts/check-readability.mjs`). It does not fail on them.
+- **Code before a model.** Use a model only when the task needs language understanding: reading free text, judging
+  meaning, drafting. Parsing, matching, numbering, dates and periods (a question number "Q1" versus a quarter "Q1
+  2026"), sorting, counting, and formatting are done in code, with tests at deal scale. Never ask a model to decide
+  something a rule can decide, and never show a model identifiers (such as question numbers) that its prose could
+  then be confused with; give it neutral handles and map them back in code. A model's answer is a proposal that code
+  checks against the data.
 - **Reuse before building.** Rework an existing screen, dialog, component, or piece of code rather than building something new, and name what you reused.
 - **Keep it simple.** Use the plain approach and the tools already in the app. LibreOffice ships with the app, and spreadsheets go through it. Take dependencies only from npm or GitHub.
 - **Send deal PDFs whole for AI analysis.** Send the original file so the model can read the pages directly.
