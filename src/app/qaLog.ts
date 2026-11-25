@@ -380,30 +380,25 @@ type UpdateOptions = {
   announce?: (outcome: QaLogUpdateOutcome) => (() => void) | undefined;
 };
 type WaitingUpdate = { timer: ReturnType<typeof setTimeout>; tries: number; dismiss?: () => void };
-type LogUpdates = { running: Set<string>; waiting: Map<string, WaitingUpdate> };
+type LogUpdates = { running: Map<string, Promise<void>>; waiting: Map<string, WaitingUpdate> };
 const logUpdates = new WeakMap<Store, LogUpdates>();
 const RETRY_MS = 30_000;
 const LOG_RETRIES = 40;
 
-async function runLogUpdate<T>(store: Store, dealId: string, busy: T,
-  run: (updates: LogUpdates, tries: number) => Promise<T>) {
+async function runLogUpdate<T>(store: Store, dealId: string, busy: T, run: (updates: LogUpdates) => Promise<T>) {
   let updates = logUpdates.get(store);
   if (!updates) {
-    updates = { running: new Set(), waiting: new Map() };
+    updates = { running: new Map(), waiting: new Map() };
     logUpdates.set(store, updates);
   }
   if (updates.running.has(dealId)) return busy;
-  updates.running.add(dealId);
+  let finished!: () => void;
+  updates.running.set(dealId, new Promise((resolve) => { finished = resolve; }));
   try {
-    const queued = updates.waiting.get(dealId);
-    if (queued) {
-      clearTimeout(queued.timer);
-      updates.waiting.delete(dealId);
-      queued.dismiss?.();
-    }
-    return await run(updates, queued?.tries ?? 0);
+    return await run(updates);
   } finally {
     updates.running.delete(dealId);
+    finished();
   }
 }
 
@@ -425,16 +420,38 @@ export function updateQaLog(store: Store, dealId: string, options: UpdateOptions
 }
 
 function waitForLog(store: Store, dealId: string, options: UpdateOptions,
-  waiting: LogUpdates['waiting'], tries: number, by?: string): QaLogUpdateOutcome {
+  updates: LogUpdates, tries: number, by?: string): QaLogUpdateOutcome {
   const retry = () => updateQaLog(store, dealId, options);
   if (tries >= LOG_RETRIES) return { kind: 'retryLimit', retry };
-  const timer = setTimeout(() => void attemptQaLog(store, dealId, options, true), RETRY_MS);
-  waiting.set(dealId, { tries: tries + 1, timer });
+  const queued: WaitingUpdate = {
+    timer: setTimeout(() => void retryWhenIdle(store, dealId, options, updates, queued), RETRY_MS),
+    tries: tries + 1,
+  };
+  updates.waiting.set(dealId, queued);
   return { kind: 'retrying', by, retry };
 }
 
+/** A direct export can still be writing when a retry is due. Keep the retry and its notice until the write finishes. */
+async function retryWhenIdle(store: Store, dealId: string, options: UpdateOptions,
+  updates: LogUpdates, queued: WaitingUpdate) {
+  while (updates.waiting.get(dealId) === queued) {
+    const running = updates.running.get(dealId);
+    if (!running) {
+      await attemptQaLog(store, dealId, options, true);
+      return;
+    }
+    await running;
+  }
+}
+
 async function attemptQaLog(store: Store, dealId: string, options: UpdateOptions, automatic: boolean) {
-  const result = await runLogUpdate<QaLogUpdateOutcome>(store, dealId, { kind: 'busy' }, async ({ waiting }, tries) => {
+  const result = await runLogUpdate<QaLogUpdateOutcome>(store, dealId, { kind: 'busy' }, async (updates) => {
+    const queued = updates.waiting.get(dealId);
+    if (queued) {
+      clearTimeout(queued.timer);
+      updates.waiting.delete(dealId);
+      queued.dismiss?.();
+    }
     // A background retry never starts a replacement log if the deal or its log has since gone.
     if (automatic && !logOf(store, dealId)) return { kind: 'canceled' };
     const result = await writeQaLog(store, dealId, options.place);
@@ -442,9 +459,9 @@ async function attemptQaLog(store: Store, dealId: string, options: UpdateOptions
     if (!result.ok) outcome = { kind: 'failed', error: result.error, unmerged: result.unmerged ?? 0 };
     else if (result.value.status === 'written') outcome = writtenOutcome(store, dealId, result.value);
     else if (result.value.status === 'canceled') outcome = { kind: 'canceled' };
-    else outcome = waitForLog(store, dealId, options, waiting, tries, result.value.by);
+    else outcome = waitForLog(store, dealId, options, updates, queued?.tries ?? 0, result.value.by);
     const dismiss = options.announce?.(outcome);
-    const next = waiting.get(dealId);
+    const next = updates.waiting.get(dealId);
     if (next) next.dismiss = dismiss;
     return outcome;
   });

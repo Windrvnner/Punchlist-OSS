@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi, type Mock } from 'vitest';
 import { ImportQuestions } from '../../src/app/commands/importQuestions';
 import { RecordQaLogExport } from '../../src/app/commands/qaLogs';
 import { SetResponse } from '../../src/app/commands/questions';
@@ -56,6 +56,25 @@ afterEach(async () => {
   }
 });
 
+function trackNotices() {
+  const dismiss = vi.fn();
+  const announce = vi.fn((outcome: QaLogUpdateOutcome) => outcome.kind === 'retrying' ? dismiss : undefined);
+  return { announce, dismiss };
+}
+
+function holdSave(save: Mock<QaLogFiles['save']>, result: Awaited<ReturnType<QaLogFiles['save']>>) {
+  let enter!: () => void;
+  let finish!: () => void;
+  const entered = new Promise<void>((resolve) => { enter = resolve; });
+  const paused = new Promise<void>((resolve) => { finish = resolve; });
+  save.mockImplementationOnce(async () => {
+    enter();
+    await paused;
+    return result;
+  });
+  return { entered, finish };
+}
+
 it('writes the change and records what the log holds for a full portfolio', async () => {
   const { store, dealId, save, questions, response } = await fixture(QUESTIONS.length);
   const outcome = await updateQaLog(store, dealId);
@@ -66,8 +85,7 @@ it('writes the change and records what the log holds for a full portfolio', asyn
 
 it('retries at 30-second intervals and reports that the third attempt saved', async () => {
   const { store, dealId, save } = await fixture();
-  const dismiss = vi.fn();
-  const announce = vi.fn((outcome: QaLogUpdateOutcome) => outcome.kind === 'retrying' ? dismiss : undefined);
+  const { announce, dismiss } = trackNotices();
   save.mockResolvedValueOnce(BUSY).mockResolvedValueOnce(ok({ status: 'later' }));
   vi.useFakeTimers();
   expect(await updateQaLog(store, dealId, { announce })).toMatchObject({ kind: 'retrying', by: 'lender.team' });
@@ -116,25 +134,59 @@ it('replaces a waiting timer when Retry Now succeeds', async () => {
   expect(save).toHaveBeenCalledTimes(2);
 });
 
+it('keeps the scheduled retry and its notice when a direct export also finds the log in use', async () => {
+  const { store, dealId, save } = await fixture();
+  const { announce, dismiss } = trackNotices();
+  save.mockResolvedValueOnce(BUSY).mockResolvedValueOnce(BUSY);
+  vi.useFakeTimers();
+  expect(await updateQaLog(store, dealId, { announce })).toMatchObject({ kind: 'retrying' });
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(await exportQaLog(store, dealId)).toEqual(BUSY);
+  expect(announce).toHaveBeenCalledTimes(1);
+  expect(dismiss).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(19_999);
+  expect(save).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(save).toHaveBeenCalledTimes(3);
+  expect(announce).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'updated' }));
+  expect(dismiss).toHaveBeenCalledTimes(1);
+});
+
+it('waits for a pending direct export before making the due automatic retry', async () => {
+  const { store, dealId, read, save } = await fixture();
+  const { announce, dismiss } = trackNotices();
+  save.mockResolvedValueOnce(BUSY);
+  vi.useFakeTimers();
+  await updateQaLog(store, dealId, { announce });
+  const held = holdSave(save, BUSY);
+  const direct = exportQaLog(store, dealId);
+  await held.entered;
+  try {
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(dismiss).not.toHaveBeenCalled();
+  } finally {
+    held.finish();
+    await direct;
+  }
+  expect(await direct).toEqual(BUSY);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(save).toHaveBeenCalledTimes(3);
+  expect(announce).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'updated' }));
+  expect(dismiss).toHaveBeenCalledTimes(1);
+});
+
 it('refuses a second update for the same deal while the file save is pending', async () => {
   const { store, dealId, read, save } = await fixture();
-  let enter!: () => void;
-  let finish!: () => void;
-  const entered = new Promise<void>((resolve) => { enter = resolve; });
-  const paused = new Promise<void>((resolve) => { finish = resolve; });
-  save.mockImplementationOnce(async () => {
-    enter();
-    await paused;
-    return WRITTEN;
-  });
+  const held = holdSave(save, WRITTEN);
   const first = updateQaLog(store, dealId);
-  await entered;
+  await held.entered;
   try {
     expect(await updateQaLog(store, dealId)).toEqual({ kind: 'busy' });
     expect(await exportQaLog(store, dealId)).toMatchObject({ ok: false, error: { kind: 'rejected' } });
     expect(read).toHaveBeenCalledTimes(1);
   } finally {
-    finish();
+    held.finish();
   }
   expect(await first).toMatchObject({ kind: 'updated' });
   expect(save).toHaveBeenCalledTimes(1);
