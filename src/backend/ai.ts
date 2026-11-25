@@ -1709,7 +1709,9 @@ export function nodeAi(o: AiOptions) {
       return ok({ body: out.text.split(/\s*\u0000\s*/).filter(Boolean), sources: out.sources });
     },
     async dealBrief(dealId) {
-      const all = await o.repo.list('finding', dealId); if (!all.ok) return all;
+      const all = await o.repo.list('finding', dealId);
+      // findings that cannot be read are not an outage of the model service: the chat's catch-up goes on (#1017)
+      if (!all.ok) return fail({ kind: 'failed', message: all.error.message });
       const open = all.value.map((l) => ({ rev: l.rev, ...(l.envelope.data as { id: string; title: string; workstream: string; status: string; body: string[] }) })).filter((f) => f.status === 'open');
       if (!open.length) return ok({ paragraphs: [] });
       const key = open.map((f) => `${f.id}:${f.rev}`).join('|'); const had = briefs.get(dealId); if (had?.key === key) return ok({ paragraphs: had.paragraphs });       // nothing changed: not asked again

@@ -431,6 +431,21 @@ describe('the chat agent', () => {
     expect(val(await away.ai.answer(ask('Catch me up'))).text).toBe('Done.');
     expect(away.turns[1].prompt).toContain('open findings:\nits findings could not be read just now.');
     expect(away.calls.some(isBrief)).toBe(false);
+    // findings that drop out between the tool's read (the 2nd, after the first search) and the brief's own: said so,
+    // never taken for an outage
+    const flaky = memRepo(clock);
+    const flakyList = flaky.list.bind(flaky);
+    let findingReads = 0;
+    flaky.list = async (kind, dealId) => (kind === 'finding' && ++findingReads === 3
+      ? { ok: false as const, error: { kind: 'unreachable' as const, message: 'The Punchlist folder cannot be read' } }
+      : flakyList(kind, dealId));
+    const dropped = setup(helper, { d1: [FA] }, { repo: flaky, turn: catchUp });
+    await deal(dropped.repo);
+    await finding(dropped.repo, 'f_1', 'Lock-up ratio differs from the term sheet');
+    findingReads = 0;
+    expect(val(await dropped.ai.answer(ask('Catch me up'))).text).toBe('Done.');
+    const folderDown = 'the catch-up could not be written: The Punchlist folder cannot be read.';
+    expect(dropped.turns[1].prompt).toContain(folderDown);
     // the service down while the brief is written: the answer says so, as for any tool
     const down = setup((c) => {
       if (!isBrief(c)) return helper(c);
