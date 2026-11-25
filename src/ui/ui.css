@@ -237,7 +237,11 @@ details.fsrcs .sgp .srcbtn:hover{color:var(--ink);text-decoration-color:var(--ac
 
 /* ---- import: what a merge will overwrite ---- */
 .imchg{max-height:150px}
-.imchg td{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.imchg td:nth-child(n+3) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
 .imchg td:first-child,.imchg th:first-child{width:44px}
 
 /* ---- search: a field in the rail, results drop from it ---- */
