@@ -4,7 +4,7 @@
  * after the repository accepted it.
  */
 import type { z } from 'zod';
-import type { State } from './state';
+import type { State, Toast } from './state';
 import type { Result } from '../domain/result';
 import type { RecordKind, AuditKind } from '../domain/model';
 import type { Seen, Services } from '../ports';
@@ -49,8 +49,10 @@ export interface Plan {
   message?: string;
   /** the part of the message that gives way when the notice is short of room, such as a long deal name (#27) */
   messageCut?: string;
-  /** the message is shown even when the action was asked for quietly: for an action that takes away what a person had entered, so that it can always be undone */
+  /** Show success even if the caller handles refusals, or if the person must still be offered Undo. */
   alwaysSay?: boolean;
+  /** Override the notice glyph when its wording (such as a deal name) can look like a failure. */
+  messageGlyph?: Toast['glyph'];
   /** runs after commit; its follow-up command is dispatched quietly */
   effect?: Effect;
   /** Folder paths to index on the PC that requested this change, once the deal write has committed. */

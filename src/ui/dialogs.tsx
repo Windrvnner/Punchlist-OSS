@@ -214,7 +214,6 @@ export function NewDealDialog() {
         return;
       }
       close();
-      store.toast(`${folders.length} folder${folders.length > 1 ? 's' : ''} added`);
       return;
     }
     if (!anyway) {
@@ -230,7 +229,6 @@ export function NewDealDialog() {
       return;
     }
     close();
-    store.toast(`${deal.name} created`, undefined, { glyph: 'done' });
     location.hash = dealHash(store.get().prefs, deal.id);
   };
 

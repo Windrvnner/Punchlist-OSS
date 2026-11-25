@@ -87,7 +87,9 @@ export const CreateDeal = define({
       index: { dealId: '_', add: [{ kind: 'deal', id }, { kind: 'member', id: memberId(id, ctx.actor) }] },
       audit: [{ kind: 'created', recordId: id, dealId: id, text: name }],
       indexFolders: input.indexHere ? deal.folders.map((folder) => folder.path) : undefined,
-      message: `${name} created`,   // indexing has not started yet, so nothing is said about it here: the page shows it once it runs
+      message: `${name} created`,
+      alwaysSay: input.indexHere,
+      messageGlyph: input.indexHere ? 'done' : undefined,
       // the firm's general list goes on the new deal straight after, in an operation of its own: a deal's items are filed
       // under the deal, and this change is filed with the list of deals
       effect: async () => { const items = missingItems(state, deal); return items.length ? { command: 'AddDealItems', input: { dealId: id, items, fresh: true } } : null; },
@@ -143,6 +145,7 @@ export const AddFolders = define({
       audit: [{ kind: 'edited', recordId: d.id, dealId: d.id, field: 'folders', to: paths }],
       indexFolders: input.indexHere ? paths : undefined,
       message: `${paths.length} folder${paths.length > 1 ? 's' : ''} added`,
+      alwaysSay: input.indexHere,
     });
   },
 });
