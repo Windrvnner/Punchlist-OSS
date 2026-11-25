@@ -1236,6 +1236,11 @@ export function nodeAi(o: AiOptions) {
     findings: async (d) => (await live<{ title?: string; body?: string[]; status?: string }>('finding', d))?.map((f) => ({ title: String(f.title ?? ''), body: strings(f.body), status: String(f.status ?? 'open') })) ?? null,
     questions: (d) => live('question', d),
     dealName: async (d) => { const r = await o.repo.get('deal', d); return String((r.ok && (r.value?.envelope.data as { name?: string } | undefined)?.name) || 'another deal'); },
+    // the chat's catch-up tool reuses the deal brief, its finding links put back to their words
+    brief: async (d) => {
+      const r = await service.dealBrief(d);
+      return r.ok ? ok(r.value.paragraphs.map((p) => withoutMemoMarks(p))) : r;
+    },
   };
   // a kept conversation is compacted by 80% of what one call to its model may send at most, leaving room for the turn's own question and documents
   const agentOpts = { turns: o.turns ?? control.limits.chatTurns, width, compactAt: (model: string) => Math.min(o.compactAt ?? control.limits.compactAt, Math.floor((inLimit(model) * control.limits.compactShare) / 100)), folderDocs: o.folderDocs ?? control.limits.folderDocs };
@@ -1702,7 +1707,9 @@ export function nodeAi(o: AiOptions) {
       return ok({ body: out.text.split(/\s*\u0000\s*/).filter(Boolean), sources: out.sources });
     },
     async dealBrief(dealId) {
-      const all = await o.repo.list('finding', dealId); if (!all.ok) return all;
+      const all = await o.repo.list('finding', dealId);
+      // findings that cannot be read are not an outage of the model service: the chat's catch-up goes on (#1017)
+      if (!all.ok) return fail({ kind: 'failed', message: all.error.message });
       const open = all.value.map((l) => ({ rev: l.rev, ...(l.envelope.data as { id: string; title: string; workstream: string; status: string; body: string[] }) })).filter((f) => f.status === 'open');
       if (!open.length) return ok({ paragraphs: [] });
       const key = open.map((f) => `${f.id}:${f.rev}`).join('|'); const had = briefs.get(dealId); if (had?.key === key) return ok({ paragraphs: had.paragraphs });       // nothing changed: not asked again
@@ -2742,20 +2749,21 @@ export function nodeAi(o: AiOptions) {
       return { packs: packs.map((p) => ({ items: p.items, docs: withClean(dealId, p.docs) })), rest };
     };
     /**
-     * Filling gaps (docs/core-documents-design.md, part 4): items a full check would leave as gaps, or not settled for any
-     * reason but a folder out of reach, are held back (`note`, while `holding`) and handed a few at a time to the chat agent
-     * (agent.ts), unchanged, with its own search, read and folder tools: it searches and reads as often as it needs. The
-     * documents its answer cites are then read against those items by `settle`, as on their last look, so the outcome is
-     * written as the check writes any other, except that the agent only ever adds to what the check found: an item those
-     * documents still leave open (they may have been cited for another item of the run) is written as the check left it
-     * (`kept`). An item's first line in a round is the one that counts (rounds.ts, `counts`), which is why nothing is
-     * written for a held item until the agent has had its turn.
+     * Filling gaps (docs/core-documents-design.md, part 4): items a full check would leave as gaps, or not settled for
+     * any reason but a folder out of reach, are held back (`note`, while `holding`) and handed a few at a time to the
+     * chat agent (agent.ts), unchanged, with its own search, read, folder and brief tools: it searches and reads as
+     * often as it needs. The documents its answer cites are then read against those items by `settle`, as on their last
+     * look, so the outcome is written as the check writes any other, except that the agent only ever adds to what the
+     * check found: an item those documents still leave open (they may have been cited for another item of the run) is
+     * written as the check left it (`kept`). An item's first line in a round is the one that counts (rounds.ts,
+     * `counts`), which is why nothing is written for a held item until the agent has had its turn.
      *
-     * The limit: the agent's own ceilings hold (about `limits.chatTurns` turns a run, `limits.searchCalls` a search), and
-     * every call it makes, its turns, searches, reads and folder batches, counts against an allowance of its own for
-     * this check on this PC, as large as the check's own searches have (`limits.checkSearchCalls`, `filled`), so it never
-     * takes the check's searches from it. Once that is spent, or a run has failed, no more items are handed over. A gap
-     * already searched for on these documents and wording (`searched`) is not held, so not handed over again.
+     * The limit: the agent's own ceilings hold (about `limits.chatTurns` turns a run, `limits.searchCalls` a search),
+     * and every call it makes, its turns, searches, reads, folder batches and briefs, counts against an allowance of
+     * its own for this check on this PC, as large as the check's own searches have (`limits.checkSearchCalls`,
+     * `filled`), so it never takes the check's searches from it. Once that is spent, or a run has failed, no more items
+     * are handed over. A gap already searched for on these documents and wording (`searched`) is not held, so not
+     * handed over again.
      */
     const filled = { left: o.checkSearchCalls ?? L.checkSearchCalls };
     const filler = chatAgent({ ...agentKit, look: (deals, model, ask, lookFor, skip) => budget.run({ left: o.searchCalls ?? L.searchCalls, deal: filled }, () => read('search', deals, model, ask, lookFor, {}, '{"text": "what they say, with [n] markers", "sources": [...]}', undefined, skip)) }, agentOpts);

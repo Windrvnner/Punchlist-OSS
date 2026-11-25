@@ -71,6 +71,11 @@ export interface AgentKit {
   questions(dealId: string): Promise<QuestionRecord[] | null>;
   dealName(dealId: string): Promise<string>;
   /**
+   * the deal's catch-up: two short paragraphs on what matters most in its open findings (ai.ts dealBrief), in plain
+   * words with no finding links; none when it has no open findings
+   */
+  brief(dealId: string): Promise<Result<string[]>>;
+  /**
    * Optional: one turn of a conversation the model service keeps, read as askJson reads a reply and repaired once in
    * the same conversation; `conversation` left out starts a new one. Throws with `code: 'gone'` when the service no
    * longer has it.
