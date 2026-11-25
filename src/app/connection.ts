@@ -92,7 +92,6 @@ export function canUseSignInKey({ key, busy }: Pick<SignInForm, 'key' | 'busy'>)
 /** Sign-in at first setup and in Settings. The read-only watcher in Store also looks for later sign-outs. */
 export class SignInConnection {
   private form = formState<SignInForm>({ status: null, mode: 'idle', key: '', busy: false, error: null });
-  private polling?: Promise<void>;
   private statusRequest?: Promise<void>;
   private timer?: ReturnType<typeof setInterval>;
   private active = false;
@@ -104,9 +103,9 @@ export class SignInConnection {
 
   start = () => {
     this.active = true;
-    void this.look().then(() => {
+    void this.pollStatus().then(() => {
       if (this.active && this.get().status?.signedIn === false) {
-        this.timer = setInterval(() => void this.look(), 2000);
+        this.timer = setInterval(() => void this.pollStatus(), 2000);
       }
     });
     return () => {
@@ -115,9 +114,8 @@ export class SignInConnection {
     };
   };
 
-  private look() {
-    this.polling ??= (this.statusRequest ?? this.readStatus()).finally(() => { this.polling = undefined; });
-    return this.polling;
+  private pollStatus() {
+    return this.statusRequest ?? this.readStatus();
   }
 
   private readStatus() {

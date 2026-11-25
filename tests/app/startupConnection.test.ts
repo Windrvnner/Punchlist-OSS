@@ -21,6 +21,12 @@ function signInPort() {
   };
 }
 
+function pendingSignInStatus() {
+  let resolve!: (result: Result<SignInStatus>) => void;
+  const promise = new Promise<Result<SignInStatus>>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 function folderPort() {
   return {
     get: vi.fn<SharedPlace['get']>().mockResolvedValue(ok(searching)),
@@ -130,6 +136,45 @@ describe('sign-in connection', () => {
     expect(form.get().status).toEqual(signedIn);
     expect(signin.status).toHaveBeenCalledTimes(3);
     expect(onSignedIn).toHaveBeenCalledOnce();
+    stop();
+  });
+
+  it('resumes polling when the immediate key confirmation is unreachable', async () => {
+    const signin = signInPort();
+    const superseded = pendingSignInStatus();
+    const confirmation = pendingSignInStatus();
+    const replacement = pendingSignInStatus();
+    signin.status.mockResolvedValueOnce(ok(signedOut))
+      .mockReturnValueOnce(superseded.promise)
+      .mockReturnValueOnce(confirmation.promise)
+      .mockReturnValueOnce(replacement.promise);
+    const onSignedIn = vi.fn();
+    const form = new SignInConnection(signin, onSignedIn);
+    const stop = form.start();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(signin.status).toHaveBeenCalledTimes(2);
+
+    form.setKey('alder-lane-stand-in');
+    const submitted = form.useKey();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(signin.status).toHaveBeenCalledTimes(3);
+    confirmation.resolve(fail({ kind: 'unreachable', message: 'The bridge briefly disconnected.' }));
+    await submitted;
+    expect(onSignedIn).not.toHaveBeenCalled();
+    expect(form.get()).toMatchObject({ key: '', status: signedOut });
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(signin.status).toHaveBeenCalledTimes(4);
+    superseded.resolve(ok({ ...signedOut, problem: 'An older sign-in result.' }));
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(signin.status).toHaveBeenCalledTimes(4);
+    expect(form.get().status).toEqual(signedOut);
+
+    replacement.resolve(ok(signedIn));
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(form.get().status).toEqual(signedIn);
+    expect(onSignedIn).toHaveBeenCalledOnce();
+    expect(signin.status).toHaveBeenCalledTimes(4);
     stop();
   });
 });
