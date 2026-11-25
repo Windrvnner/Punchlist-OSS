@@ -12,7 +12,7 @@
 import { SERVICE } from '../control';
 import { commandLabel } from './commandLabels';
 import { capabilities } from './capabilities';
-import { CONNECTED } from './connection';
+import { CONNECTED, SharedFolderConnection, SignInConnection } from './connection';
 import { CHANGED_ELSEWHERE } from './changedElsewhere';
 import { overLimit, TOO_LONG } from '../domain/importExport';
 import type { Command, Plan } from './command';
@@ -34,6 +34,7 @@ import { merged, localConversations } from './threads';
 import { seenSince } from './draftsSeen';
 import { freshen, FOLDER_CHECK } from './folderWatch';
 import { reassess } from './findings';
+import { indexCommittedFolders } from './indexing';
 
 type Listener = (s: State) => void;
 
@@ -446,9 +447,11 @@ export class Store {
     const removed = new Set((plan.removes ?? []).map((r) => r.id));
     if (removed.size) this.ui((ui) => ({ toasts: ui.toasts.map((t) => { const o = t.action?.opId ? this.state.ops[t.action.opId] : undefined; return o && ([...o.targets, ...Object.keys(o.resultRevs ?? {})].some((id) => removed.has(id)) || removed.has((o.input as { dealId?: string } | undefined)?.dealId ?? '')) ? { ...t, action: undefined } : t; }) }));   // a deal deleted takes the Undos of everything done on it
     if (plan.message && (!opts.quiet || plan.alwaysSay)) {
-      this.toast(plan.message, plan.inverse ? { label: 'Undo', opId } : undefined, false, undefined, plan.messageCut);
+      const action = plan.inverse ? { label: 'Undo', opId } : undefined;
+      this.toast(plan.message, action, { glyph: plan.messageGlyph }, undefined, plan.messageCut);
     }
     if (plan.effect) this.startEffect(plan.effect, opId);
+    if (plan.dealId && plan.indexFolders?.length) indexCommittedFolders(this, plan.dealId, plan.indexFolders);
     void this.pruneJournal();
     return ok({ opId });
   }
@@ -1863,6 +1866,19 @@ export class Store {
       if (!!this.state.net.model !== down) this.set({ ...this.state, net: { ...this.state.net, model: down } });
     };
     return new Proxy(ai, { get: (t, k) => { const f = Reflect.get(t, k); return typeof f !== 'function' || !MODEL_CALLS.has(k) ? f : (...a: unknown[]) => { const r = f.apply(t, a); if (r instanceof Promise) void r.then(seen(++asked), () => undefined); return r; }; } });
+  }
+  settingsSignIn() {
+    const { signin } = this.services;
+    return signin ? new SignInConnection(signin) : null;
+  }
+  settingsSharedFolder() {
+    const { place } = this.services;
+    return place ? new SharedFolderConnection(place) : null;
+  }
+  signInFromNotice() {
+    const { signin } = this.state;
+    if (signin?.sso && !signin.apiKey) void this.services.signin?.signIn();
+    else this.ui({ settings: true });
   }
   /**
    * Intelligence sign-in, looked at every 2 seconds while the app is open (desktop): while nobody is signed in the app
