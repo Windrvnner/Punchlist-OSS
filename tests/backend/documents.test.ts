@@ -801,6 +801,26 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     expect(val(await office.docs.carryAttached!('d_never_synced', 'd2'))).toEqual({ written: 0, unresolved: 1 });
   });
 
+  it('a carry of 2,000 attached files finishes in one pass and a repeat has nothing left (#744)', async () => {
+    const { root } = room();
+    const office = pc(root, 'office');
+    const attached: string[] = [];
+    for (let i = 1; i <= 2000; i++) {
+      attached.push(val(await office.docs.attach('d1', { name: `Consent ${i}.pdf`, bytes: pdf(`c${i}`, 1) })).docId);
+    }
+    expect(val(await office.docs.carryAttached!('d1', 'd2'))).toEqual({ written: 2000, unresolved: 0 });
+    expect(val(await office.docs.carryAttached!('d1', 'd2'))).toEqual({ written: 0, unresolved: 0 });
+    expect(val(await office.docs.unsendable!('d2', attached))).toEqual([]);
+  }, 120_000);
+
+  it('a carry from a deal that has files but none attached is done, with nothing to write (#744)', async () => {
+    const { root, vdr } = room();
+    const office = pc(root, 'office');
+    await indexAll(office, vdr);
+    expect(office.docs.records('d1').length).toBeGreaterThan(0);
+    expect(val(await office.docs.carryAttached!('d1', 'd2'))).toEqual({ written: 0, unresolved: 0 });
+  });
+
   it('a carry reports attached files whose shared copy is gone, and writes none twice (#744)', async () => {
     const { root } = room();
     const office = pc(root, 'office');

@@ -778,8 +778,10 @@ export function nodeDocuments(o: DocumentsOptions) {
       say(toDealId, line);
       written++;
     }
-    const left = await unsendable(toDealId, attached.map((d) => d.docId));
-    return { written, unresolved: left.length };
+    // nothing written: the first check still stands, so the files are not checked again
+    const ids = attached.map((d) => d.docId);
+    const unresolved = written ? (await unsendable(toDealId, ids)).length : ids.length - sendable.size;
+    return { written, unresolved };
   }
   /** Of these documents of a deal, those whose file this PC can send now. */
   async function sendableAmong(dealId: string, docIds: string[]): Promise<string[]> {
