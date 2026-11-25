@@ -110,7 +110,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - An import can make a spreadsheet the deal's log ("Make this the deal's Q&A log", checked for a file with two or more parties). If there is no log, the first update creates one in the app's layout, in a folder a person picks. A later party's file only adds and updates questions and is never written to.
 - Updates add no columns and never write to a formula cell. To reply to one party, use Export filtered by Submitted By.
 - **Update Q&A Log** brings every column up to date and first saves the old version to the folder's archive; it never deletes anything else. A log open elsewhere is retried every 30 seconds for 20 minutes; the notice names who has it open only when the lock file does.
-- An edit made in the log wins over the app's value, unless it is a de minimis encoding or spacing change; where both changed, the question is in two versions.
+- An edit made in the log wins over the app's value, exactly as written: the app never repairs, normalizes or ignores any character, so a "?" stays a "?". Where both changed, the question is in two versions.
 - An edit saved to the log just before an update moved the log is merged in. Where its row is unclear, the person places it, and what can't be merged stays in the archive. "Not fully merged" comes first in the notice, which stays until dismissed.
 
 ## Findings
@@ -298,6 +298,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 
 ## Working rules
 
+- The file is the source of truth. The app never changes, repairs, normalizes or reinterprets content handed to it; what it shows matches what the file's native app shows.
 [CLAUDE.md](../CLAUDE.md) covers how to work on the app: commits, checks, mock-ups, readable code, and asking before design decisions. Beyond it, these rules apply:
 
 - Keep friction low, with as few controls and steps as possible.
