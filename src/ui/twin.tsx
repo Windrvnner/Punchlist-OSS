@@ -3,7 +3,7 @@ import { Modal } from './dialogs';
 import { Icon } from './icons';
 import { SetDealMember, isMine } from '../app/commands/members';
 import { dealHash } from '../app/state';
-import type { TwinFound } from '../app/dupes';
+import { matchingDealKinds, type TwinFound } from '../app/dupes';
 import type { DealKinds } from '../app/state';
 
 const day = (iso: string) => { const d = new Date(iso); return isNaN(+d) ? '' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); };
@@ -15,8 +15,7 @@ const day = (iso: string) => { const d = new Date(iso); return isNaN(+d) ? '' : 
  * the form as it was, Create Anyway makes the new deal, and the main action adds the deal that is there to the person's
  * deals, or opens it when it is already one of theirs. Escape and the × close it back to the form, so nothing typed is lost.
  */
-const KINDS: ['product' | 'sector' | 'technology', string][] = [['product', 'Structure'], ['sector', 'Sector'], ['technology', 'Technology']];
-const same = (a?: string, b?: string) => !!a?.trim() && a.trim().toLocaleLowerCase('en-US') === b?.trim().toLocaleLowerCase('en-US');
+const KIND_LABELS = { product: 'Structure', sector: 'Sector', technology: 'Technology' };
 
 export function TwinConfirm({ found, kinds = {}, back, anyway }: { found: TwinFound; kinds?: DealKinds; back: () => void; anyway: () => void }) {
   const store = useStore(); const s = useAppState(); const d = s.deals[found.dealId];
@@ -35,7 +34,10 @@ export function TwinConfirm({ found, kinds = {}, back, anyway }: { found: TwinFo
         {found.room && <RoomRow room={found.room} name={d.name} />}
         {d.counterparty && <div class="srow"><div class="k">Counterparty</div><div id="tw-cp">{d.counterparty}</div></div>}
         <div class="srow"><div class="k">Created</div><div id="tw-made">{day(d.createdAt)}</div></div>
-        {KINDS.filter(([k]) => same(kinds[k], d[k])).map(([k, label]) => <div class="srow" key={k}><div class="k">{label}</div><div id={`tw-${k}`}>{d[k]}</div></div>)}
+        {matchingDealKinds(kinds, d).map((kind) => (
+          <div class="srow" key={kind}>
+            <div class="k">{KIND_LABELS[kind]}</div><div id={`tw-${kind}`}>{d[kind]}</div>
+          </div>))}
       </div>
       {/* macOS order: the alternative alone at the left, Back and the main action at the right */}
       <div class="xfoot">
