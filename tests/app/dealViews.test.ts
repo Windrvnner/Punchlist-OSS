@@ -151,7 +151,7 @@ describe('kept records and list revisions', () => {
       [second.doc, true, 'Credit diligence'], [first.doc, true, 'Credit diligence'],
     ]);
     expect(lists.every(({ when, at }) => when === formatDateTime(at, true))).toBe(true);
-    expect(lists.map(issuesListRemoval)).toEqual([
+    expect(lists.map((list) => issuesListRemoval(list, dealId))).toMatchObject([
       {
         ask: `Remove Credit diligence.docx (imported ${lists[0].when})?`,
         text: '110 findings go to Deleted.',
@@ -181,8 +181,8 @@ describe('kept records and list revisions', () => {
     const join = { dealId, doc: 'doc_joined', list: 'Loan covenants.pdf', points: [{ ...point, join: finding.id }] };
     expect((await store.dispatch(ImportIssuesList, join)).ok).toBe(true);
     const joined = deletedIssuesLists(store.get(), dealId).find(({ doc }) => doc === join.doc)!;
-    expect(issuesListRemoval(joined)).toEqual({
-      ask: 'Remove Loan covenants?',
+    expect(issuesListRemoval(joined, dealId)).toMatchObject({
+      ask: 'Remove Loan covenants.pdf?',
       text: 'No findings go to Deleted. Marks are removed from 1 finding.',
     });
   });

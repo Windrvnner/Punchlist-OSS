@@ -1,6 +1,6 @@
 import { fmtDateTime, formatDateTime } from '../domain/dateTime';
 import { issuesListTitle } from './issuesList';
-import { removable } from './commands/issuesList';
+import { removable, removalImpact } from './commands/issuesList';
 import type { DeletedCopy, ShownNote } from './commands/keptVersions';
 import type { State } from './state';
 
@@ -72,7 +72,7 @@ export function deletedGroups(state: DeletedState, dealId: string) {
   })).filter(({ rows }) => rows.length);
 }
 
-/** Separate revisions of one issues list by import time, to the second when they share a minute. */
+/** Distinguish revisions by import time and number those with the same displayed name and time. */
 export function deletedIssuesLists(state: ListsState, dealId: string) {
   const lists = removableIssuesLists(state, dealId);
   return lists.map((list) => {
@@ -80,18 +80,24 @@ export function deletedIssuesLists(state: ListsState, dealId: string) {
     const twins = lists.filter((other) => other !== list && issuesListTitle(other.list) === title);
     const minute = fmtDateTime(list.at);
     const seconds = twins.some((other) => other.at && fmtDateTime(other.at) === minute);
-    return { ...list, title, twin: twins.length > 0, when: list.at ? formatDateTime(list.at, seconds) : '' };
+    const when = formatDateTime(list.at, seconds);
+    const tied = lists.filter((other) => other.list === list.list && formatDateTime(other.at, seconds) === when);
+    const revision = tied.length > 1 ? tied.indexOf(list) + 1 : undefined;
+    return { ...list, title, twin: twins.length > 0, when, revision };
   });
 }
 
 /** The confirmation uses the same removal impact as the command (#410). */
-export function issuesListRemoval(list: ReturnType<typeof deletedIssuesLists>[number]) {
-  const name = list.twin && list.when ? `${list.list} (imported ${list.when})` : list.title;
+export function issuesListRemoval(list: ReturnType<typeof deletedIssuesLists>[number], dealId: string) {
+  const details = [list.when && `imported ${list.when}`, list.revision && `revision ${list.revision}`]
+    .filter(Boolean).join(' · ');
+  const name = list.twin && details ? `${list.list} (${details})` : list.list;
   const made = list.made.length;
   const joined = list.joined.length;
   const deleted = made === 0 ? 'No findings go to Deleted.'
     : `${made.toLocaleString('en-US')} ${made === 1 ? 'finding goes' : 'findings go'} to Deleted.`;
   const marks = joined
     ? ` Marks are removed from ${joined.toLocaleString('en-US')} ${joined === 1 ? 'finding' : 'findings'}.` : '';
-  return { ask: `Remove ${name}?`, text: deleted + marks };
+  const input = { dealId, doc: list.doc, approvedImpact: removalImpact(dealId, list.doc, list) };
+  return { ask: `Remove ${name}?`, text: deleted + marks, input };
 }

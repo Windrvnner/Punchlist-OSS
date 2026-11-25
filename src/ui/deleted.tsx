@@ -24,38 +24,42 @@ function GroupLabel({ label, count }: { label: string; count: number }) {
 }
 
 const buttons = () => [...document.querySelectorAll<HTMLElement>('.deldlg [data-restore]')];
+type RemovalConfirmation = ReturnType<typeof issuesListRemoval>;
+type RemovalInput = RemovalConfirmation['input'];
 
 /** Replace the Deleted modal with the ask, then return to the selected row (#410). */
-function useListRemoval(lists: ReturnType<typeof deletedIssuesLists>, remove: (doc: string, at: number) => void) {
-  const [request, setRequest] = useState<{ doc: string; key: string; at: number } | null>(null);
-  const selected = request && lists.find((list) => list.doc === request.doc);
+function useListRemoval(
+  lists: ReturnType<typeof deletedIssuesLists>, dealId: string, remove: (input: RemovalInput, at: number) => void,
+) {
+  const [request, setRequest] = useState<{ confirmation: RemovalConfirmation; key: string; at: number } | null>(null);
+  const valid = request?.confirmation.input.dealId === dealId &&
+    lists.some((list) => list.doc === request.confirmation.input.doc);
   const dismiss = () => {
     setRequest(null);
     requestAnimationFrame(() => buttons().find((button) => button.dataset.restore === request?.key)?.focus());
   };
   useEffect(() => {
-    if (request && !selected) setRequest(null);
-  }, [request, selected]);
+    if (request && !valid) setRequest(null);
+  }, [request, valid]);
 
-  const askRemove = (doc: string) => {
-    const key = `list:${doc}`;
-    setRequest({ doc, key, at: buttons().findIndex((button) => button.dataset.restore === key) });
+  const askRemove = (list: (typeof lists)[number]) => {
+    const key = `list:${list.doc}`;
+    const at = buttons().findIndex((button) => button.dataset.restore === key);
+    setRequest({ confirmation: issuesListRemoval(list, dealId), key, at });
   };
-  const confirm = request && selected ? <AskFirst {...issuesListRemoval(selected)} go="Remove"
-    onKeep={dismiss} onGo={() => {
+  const confirm = request && valid ? (
+    <AskFirst ask={request.confirmation.ask} text={request.confirmation.text} go="Remove" onKeep={dismiss} onGo={() => {
       dismiss();
-      remove(request.doc, request.at);
-    }} /> : null;
+      remove(request.confirmation.input, request.at);
+    }} />
+  ) : null;
   return { askRemove, confirm };
 }
 
-export function DeletedDialog({ dealId }: { dealId: string }) {
-  const store = useStore(); const s = useAppState();
+/** Keep keyboard focus in Deleted as rows go away, or return it to the page when the last row is gone. */
+function useDeletedActions(dealId: string) {
+  const store = useStore();
   const close = () => store.ui({ dialog: null });
-  const groups = deletedGroups(s, dealId);
-  const lists = deletedIssuesLists(s, dealId);
-  // with the last one put back there is nothing left to show: the dialog closes, and because the button that opened it
-  // has gone with the list, the focus goes to the page's list instead of to nowhere
   const restore = (r: DeletedRow) => {
     const { t } = r;
     const copy = r.copy ? { copy: r.copy.ver } : {};
@@ -71,6 +75,7 @@ export function DeletedDialog({ dealId }: { dealId: string }) {
     // its row has gone with the button that had the focus: the focus goes to the button that took its place, else the last one
     // (two frames: a removed list's findings are new rows, drawn a frame later)
     const current = store.get();
+    if (current.ui.dialog?.kind !== 'deleted' || current.ui.dialog.dealId !== dealId) return;
     if (visibleDeletedNotes(current, dealId).length || deletedIssuesLists(current, dealId).length) {
       requestAnimationFrame(() => requestAnimationFrame(() => {
         const left = buttons();
@@ -83,11 +88,23 @@ export function DeletedDialog({ dealId }: { dealId: string }) {
       return;
     }
     close();
-    requestAnimationFrame(() => { if (!document.activeElement || document.activeElement === document.body) (document.querySelector<HTMLElement>('.flags .flagrow, .md .li[tabindex="0"]') ?? document.getElementById('view'))?.focus({ preventScroll: true }); });
+    requestAnimationFrame(() => {
+      if (document.activeElement && document.activeElement !== document.body) return;
+      const pageList = document.querySelector<HTMLElement>('.flags .flagrow, .md .li[tabindex="0"]');
+      (pageList ?? document.getElementById('view'))?.focus({ preventScroll: true });
+    });
   };
-  const removal = useListRemoval(lists, (doc, at) => {
-    void act('list:' + doc, () => store.dispatch(RemoveIssuesList, { dealId, doc }), at);
-  });
+  const remove = (input: RemovalInput, at: number) =>
+    void act('list:' + input.doc, () => store.dispatch(RemoveIssuesList, input), at);
+  return { close, restore, remove };
+}
+
+export function DeletedDialog({ dealId }: { dealId: string }) {
+  const s = useAppState();
+  const groups = deletedGroups(s, dealId);
+  const lists = deletedIssuesLists(s, dealId);
+  const { close, restore, remove } = useDeletedActions(dealId);
+  const removal = useListRemoval(lists, dealId, remove);
   const text = (row: DeletedRow) => row.t.kind === 'finding'
     ? (row.snapshot as Finding | undefined)?.title || row.t.title
     : (row.snapshot as Question | undefined)?.text || row.t.title || 'No text';
@@ -124,6 +141,7 @@ export function DeletedDialog({ dealId }: { dealId: string }) {
                 <span class="dtext"><b title={l.list}>{l.title}</b>
                   <span class="dmeta">
                     {l.twin && l.when ? `Imported ${l.when} · ` : ''}
+                    {l.revision ? `Revision ${l.revision} · ` : ''}
                     {`${plural(l.made.length, 'finding')} · ${l.raised.toLocaleString('en-US')} already raised`}
                   </span>
                 </span>
@@ -131,7 +149,7 @@ export function DeletedDialog({ dealId }: { dealId: string }) {
                   title={`Send its ${plural(l.made.length, 'finding')} to Deleted`
                     + ' and take its marks off the findings it joined'
                     + (l.kept ? `. ${plural(l.kept, 'finding')} changed since ${l.kept === 1 ? 'stays' : 'stay'}` : '')}
-                  onClick={() => removal.askRemove(l.doc)}>Remove</button>
+                  onClick={() => removal.askRemove(l)}>Remove</button>
               </div>))}
           </div>)}
       </div>
