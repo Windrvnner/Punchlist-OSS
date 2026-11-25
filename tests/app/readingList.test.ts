@@ -10,7 +10,7 @@ import { RequestDraft, ApplyDraft, RecoverDrafts } from '../../src/app/commands/
 import { registry } from '../../src/app/commands/undo';
 import { ask, conversationDocs, findDoc, convKey } from '../../src/app/conversations';
 import { dealFindings, dealQuestions } from '../../src/app/state';
-import { menuSections } from '../../src/ui/docMenu';
+import { menuSections } from '../../src/app/citations';
 
 const COMMANDS = [CreateDeal, CreateQuestion, SetResponse, RequestDraft, ApplyDraft, RecoverDrafts];
 for (const c of COMMANDS) registry.set(c.name, c);
