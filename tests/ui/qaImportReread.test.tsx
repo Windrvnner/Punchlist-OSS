@@ -15,6 +15,12 @@ import { recoveryApp, recoveryDeal, type RecoveryApp } from '../app/recoveryKit'
 /** three heading lines, then 30 questions */
 const rows = Array.from({ length: 30 }, (_, i) => `Confirm item ${i + 1} of the list,Yes ${i + 1}`);
 const CSV = ['Question,Response', 'Question,Response', 'Question,Response', ...rows].join('\n');
+const COLUMN_CHANGES = [
+  'Question,Previous Review,Notes,Response',
+  'Question,,Notes,Response',
+  'Question,,Final Notes,Response',
+  'Provide the permit transfer schedule,,Transfer timing is being reviewed,Transfer expected before closing',
+].join('\n');
 
 const screens: HTMLDivElement[] = [];
 beforeAll(() => {
@@ -31,11 +37,11 @@ afterEach(() => {
 });
 
 /** the import dialog on a kept import of the file, heading row 1; each reread for row 2 or 3 is held until let go */
-async function dialog() {
+async function dialog(csv = CSV) {
   const app = recoveryApp();
   const dealId = await recoveryDeal(app);
   await keptImportsReady;
-  const read = await readImportBytes(app.store, 'Lender Q&A.csv', Uint8Array.from(new TextEncoder().encode(CSV)));
+  const read = await readImportBytes(app.store, 'Lender Q&A.csv', Uint8Array.from(new TextEncoder().encode(csv)));
   if (!read.ok) throw new Error(read.error.message);
   const choices = {
     mapping: read.value.mapping, path: null, mode: 'append', answered: false, makeLog: false, touched: true,
@@ -71,14 +77,65 @@ async function dialog() {
     await vi.waitFor(() => expect(held.has(row)).toBe(true));
     await act(async () => held.get(row)!());
   };
+  const pickResponse = async (column: string) => {
+    const response = get<HTMLSelectElement>('[data-immap="response"]');
+    await act(() => {
+      response.value = column;
+      response.dispatchEvent(new Event('change'));
+    });
+  };
   const done = async () => {
     sheets.read = original;
     await app.repo.close();
   };
-  return { app, dealId, get, heading, letGo, done, failing };
+  return { app, dealId, get, heading, letGo, pickResponse, done, failing };
 }
 
 describe('a heading row read again in the Q&A import (#63)', () => {
+  it('keeps a response column explicitly left out during the read (#741)', async () => {
+    const { get, heading, letGo, pickResponse, done } = await dialog();
+    try {
+      await heading(3);
+      await pickResponse('');
+      expect(get<HTMLSelectElement>('[data-immap="response"]').value).toBe('');
+      await letGo(3);
+      await vi.waitFor(() => expect(get('#im-line').textContent).toBe('Import 30 questions · 30 new'));
+      expect(get<HTMLSelectElement>('[data-immap="response"]').value).toBe('');
+    } finally {
+      await done();
+    }
+  });
+
+  it('keeps the selected sheet column even when its preview position changes (#741)', async () => {
+    const { app, dealId, get, heading, letGo, pickResponse, done } = await dialog(COLUMN_CHANGES);
+    try {
+      await heading(3);
+      await pickResponse('2');
+      await letGo(3);
+      await vi.waitFor(() => expect(get('#im-line').textContent).toBe('Import 1 question · 1 new'));
+      expect(get<HTMLSelectElement>('[data-immap="response"]').selectedOptions[0].text).toBe('Final Notes');
+      await act(() => get<HTMLButtonElement>('#im-go').click());
+      await vi.waitFor(() => expect(dealQuestions(app.store.get(), dealId)[0]?.response)
+        .toBe('Transfer timing is being reviewed'));
+    } finally {
+      await done();
+    }
+  });
+
+  it('names a picked column that did not carry over to the reread (#741)', async () => {
+    const { get, heading, letGo, pickResponse, done } = await dialog(COLUMN_CHANGES);
+    try {
+      await heading(3);
+      await pickResponse('1');
+      await letGo(3);
+      await vi.waitFor(() => expect(get('#im-line').textContent).toBe('Column choice not applied for Response.'));
+      expect(get('#im-line').getAttribute('role')).toBe('alert');
+      expect(get<HTMLSelectElement>('[data-immap="response"]').value).toBe('');
+    } finally {
+      await done();
+    }
+  });
+
   it('Import waits for the reread and imports the rows of the heading shown', async () => {
     const { app, dealId, get, heading, letGo, done } = await dialog();
     try {

@@ -8,9 +8,12 @@ import {
 import {
   keptQaImport, loadQaImport, prepareQaImport, submitQaImport, summarizeQaImport, type QaChoices,
 } from '../../src/app/qaImport';
-import { previewImport, proposeLayout, type ImportTable } from '../../src/app/transfer';
+import {
+  previewImport, proposeLayout, readImportBytes, rereadImportTable, type ImportTable,
+} from '../../src/app/transfer';
 import { dealQuestions } from '../../src/app/state';
 import { ok } from '../../src/domain/result';
+import { tableFrom } from '../../src/domain/sheets';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { copyRecoveryDisk, holdRecoveryWrite, operationWrite, recoveryApp, recoveryDeal } from './recoveryKit';
 
@@ -40,6 +43,41 @@ function questionsGrid(questions: string[]) {
     'The signed project documents have been added to the data room.',
   ]);
 }
+
+it('carries a column to another sheet only when its heading identifies it (#741)', async () => {
+  const app = recoveryApp();
+  const sheets = app.store.services.sheets;
+  const read = sheets.read;
+  sheets.read = async (_bytes, _filename, location) => ok(tableFrom([
+    { name: 'Initial review', grid: [
+      ['Question', 'Reviewed reply', 'Response'],
+      ['Provide the debt repayment schedule', 'Monthly installments', 'Schedule pending'],
+    ] },
+    { name: 'Updated review', grid: [
+      ['Question', 'Response', 'Reviewed reply'],
+      ['Confirm the repayment dates', 'Awaiting confirmation', 'Due on each payment date'],
+    ] },
+    { name: 'Alternative review', grid: [
+      ['Question', 'Reviewed reply', 'Reviewed reply', 'Response'],
+      ['Confirm the amortization frequency', 'Monthly', 'Quarterly', 'Awaiting confirmation'],
+    ] },
+  ], location)!);
+  try {
+    const before = await readImportBytes(app.store, NAME, new Uint8Array(), { sheet: 'Initial review' });
+    if (!before.ok) throw new Error(before.error.message);
+    const chosen = new Map([['response' as const, 1]]);
+    const updated = await rereadImportTable(app.store, before.value, { sheet: 'Updated review' }, chosen);
+    expect(updated).toMatchObject({ ok: true, value: { mapping: { text: 0, response: 2 }, error: '' } });
+    const ambiguous = await rereadImportTable(app.store, before.value, { sheet: 'Alternative review' }, chosen);
+    expect(ambiguous).toMatchObject({
+      ok: true, value: { mapping: { text: 0, response: null }, error: 'Column choice not applied for Response.' },
+    });
+  } finally {
+    sheets.read = read;
+    app.store.closing();
+    await app.repo.close();
+  }
+});
 
 it('finds the proposed layout, shares the prepared rows with the preview, and imports 2,000 questions', async () => {
   await useKeptPort();
