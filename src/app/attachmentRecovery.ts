@@ -4,8 +4,14 @@ import type { Store } from './store';
 
 const CARRY_KEY = 'attachment-carries';
 const RETRY_MS = 30_000;
+/**
+ * How long a carry that finds nothing yet holds sends back as "still attaching" (#744). A source whose lines have not
+ * synced here is told apart from one that never had any only by waiting; after this the files are reported missing
+ * as usual, and the carry keeps retrying so that lines arriving later are still carried.
+ */
+const GRACE_MS = 10 * 60_000;
 
-type Carry = { original: string; copy: string };
+type Carry = { original: string; copy: string; since: number };
 const carryKey = ({ original, copy }: Carry) => `${original}:${copy}`;
 
 function savedCarries(store: Store): Map<string, Carry> {
@@ -21,7 +27,8 @@ function savedCarries(store: Store): Map<string, Carry> {
     const copy = DealId.safeParse(entry?.copy);
     const original = DealId.safeParse(entry?.original);
     if (copy.success && original.success && copy.data !== original.data) {
-      const carry = { copy: copy.data, original: original.data };
+      const since = typeof entry.since === 'number' && Number.isFinite(entry.since) ? entry.since : Date.now();
+      const carry = { copy: copy.data, original: original.data, since };
       carries.set(carryKey(carry), carry);
     }
   }
@@ -79,12 +86,14 @@ export class AttachmentRecovery {
   }
 
   waiting(copy: string) {
-    return [...this.pending.values()].some((carry) => carry.copy === copy);
+    const now = Date.now();
+    return [...this.pending.values()].some((carry) => carry.copy === copy && now - carry.since < GRACE_MS);
   }
 
   queue(original: string, copy: string) {
-    const carry = { original, copy };
-    const key = carryKey(carry);
+    const key = carryKey({ original, copy, since: 0 });
+    // a carry asked for again keeps the time it first waited from, so that asking does not restart the grace
+    const carry = { original, copy, since: this.pending.get(key)?.since ?? Date.now() };
     this.pending.set(key, carry);
     this.save(key, carry);
     return this.runCarry(key);

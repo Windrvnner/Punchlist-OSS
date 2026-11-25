@@ -222,3 +222,45 @@ describe('a recovered copy whose source cannot be looked up (#744)', () => {
     }
   });
 });
+
+describe('a carry that finds nothing synced yet (#744)', () => {
+  it('stays queued and holds sends only for a grace period, then reports missing and still completes', async () => {
+    const { A, B, dealId, qid } = await twoPcs();
+    const docs = standInDocumentFolders(B, dealId, false);
+    const stop = followCopies(B.store);
+    const queued = () => (B.store.services.local.read('attachment-carries') as unknown[] | undefined) ?? [];
+    vi.useFakeTimers({ shouldAdvanceTime: true });          // the first refused carry already holds the retry timer
+    try {
+      await attachFiles(B.store, { dealId, conv: convKey({ kind: 'deal', dealId }) }, [new File(['x'], docs.doc)]);
+      await expect.poll(() => B.store.get().ui.attachments[0]?.state).toBe('done');
+      await deleteUnseen(A, B, dealId, qid);
+      await expect.poll(() => B.store.get().ui.attachments[0]?.dealId).not.toBe(dealId);
+      const copyId = B.store.get().ui.attachments[0].dealId;
+      let tries = 0;
+      const port = B.store.services.docs;
+      port.carryAttached = async () => { tries++; return ok({ written: 0, unresolved: 1 }); };
+      await vi.advanceTimersByTimeAsync(30_000);
+      tries = 0;
+      await expect(filesSendable(B.store, copyId, [docs])).resolves.toBe(false);
+      expect(B.store.get().ui.attachments[0].missing).toBeUndefined();
+      expect(queued()).toHaveLength(1);                           // unresolved keeps the carry, in memory and saved
+      await vi.advanceTimersByTimeAsync(11 * 60_000);
+      expect(tries).toBeGreaterThan(20);                          // it keeps retrying past the grace period
+      expect(queued()).toHaveLength(1);
+      await expect(filesSendable(B.store, copyId, [docs])).resolves.toBe(false);
+      expect(B.store.get().ui.attachments[0].missing).toBe(true);
+      // the lines arrive after all: the carry completes and the file is sent from the copy
+      port.carryAttached = async () => { docs.destination.add(docs.docId); return ok({ written: 1, unresolved: 0 }); };
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(queued()).toHaveLength(0);
+      await expect(filesSendable(B.store, copyId, [docs])).resolves.toBe(true);
+    } finally {
+      stop();
+      vi.useRealTimers();
+      A.store.closing();
+      B.store.closing();
+      await A.repo.close();
+      await B.repo.close();
+    }
+  });
+});
