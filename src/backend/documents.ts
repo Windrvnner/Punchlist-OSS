@@ -753,20 +753,38 @@ export function nodeDocuments(o: DocumentsOptions) {
   /**
    * The files attached on a deal that has since been deleted on another PC become its recovered copy's too, so what was
    * attached there still opens and sends from the copy (#117). The file stays where it was saved in the shared folder;
-   * only its line is written again, under the copy. A document the copy already knows is left as it is.
+   * only its line is written again, under the copy. A document the copy already has is left as it is when its file
+   * can be sent from here. What was written and what still cannot be sent are told (#744): a deal whose lines have not
+   * synced here yet counts as one unresolved file, so the caller tries again.
    */
-  function carryAttached(fromDealId: string, toDealId: string) {
+  async function carryAttached(fromDealId: string, toDealId: string): Promise<{ written: number; unresolved: number }> {
+    const source = records(fromDealId);
+    if (!source.size) return { written: 0, unresolved: 1 };
+    const attached = [...source.values()].filter((d) => [d, ...(d.copies ?? [])].some((p) => p.folder === ATTACHED));
+    const sendable = new Set(await sendableAmong(toDealId, attached.map((d) => d.docId)));
     const have = all(toDealId);
-    for (const d of records(fromDealId).values()) {
-      const place = [d, ...(d.copies ?? [])].find((p) => p.folder === ATTACHED);
-      if (!place || have.get(d.docId)?.name) continue;
+    let written = 0;
+    for (const d of attached) {
+      // a known document is left alone unless its file is not sendable and the copy lacks the attached place
+      const known = have.get(d.docId);
+      const placed = [known, ...(known?.copies ?? [])].some((p) => p?.folder === ATTACHED);
+      if (sendable.has(d.docId) || (known?.name && placed)) continue;
+      const place = [d, ...(d.copies ?? [])].find((p) => p.folder === ATTACHED)!;
       const line = { docId: d.docId, hash: d.hash, name: place.name, folder: ATTACHED, rel: place.rel, size: d.size };
       // what is known of the file goes with it, so the copy need not read it again
       for (const key of ['pages', 'via', 'tracked', 'words'] as const) {
         if (d[key] !== undefined) Object.assign(line, { [key]: d[key] });
       }
       say(toDealId, line);
+      written++;
     }
+    const left = await unsendable(toDealId, attached.map((d) => d.docId));
+    return { written, unresolved: left.length };
+  }
+  /** Of these documents of a deal, those whose file this PC can send now. */
+  async function sendableAmong(dealId: string, docIds: string[]): Promise<string[]> {
+    const left = new Set(await unsendable(dealId, docIds));
+    return docIds.filter((id) => !left.has(id));
   }
   /** Of these documents of a deal, those whose file this PC cannot send now: gone, or not synced here yet (#671). */
   async function unsendable(dealId: string, docIds: string[]): Promise<string[]> {
@@ -856,7 +874,7 @@ export function nodeDocuments(o: DocumentsOptions) {
       } catch (e) { return fail({ kind: 'failed', message: (e as Error).message || unloaded }); }
       return ok({ doc: known(dealId, docId)?.name ?? file.name, docId });
     }),
-    carryAttached: safe(async (fromDealId, toDealId) => ok(carryAttached(fromDealId, toDealId))),
+    carryAttached: safe(async (fromDealId, toDealId) => ok(await carryAttached(fromDealId, toDealId))),
     unsendable: safe(async (dealId, docIds) => ok(await unsendable(dealId, docIds))),
     cached: safe(async () => ok(o.keeper.loaded())),
     drafts: safe(async (dealId, docId) => {

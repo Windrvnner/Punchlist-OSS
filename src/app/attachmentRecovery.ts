@@ -28,17 +28,23 @@ function savedCarries(store: Store): Map<string, Carry> {
   return carries;
 }
 
+/** What looking for the deal a recovered copy came from found: it, no such deal, or no answer (#744). */
+export type RecoveredSource = { state: 'found'; id: string } | { state: 'none' } | { state: 'unknown' };
+
 /** Find the source of an older recovered copy using the same IDs as repository recovery (#744). */
-export async function recoveredAttachmentSource(store: Store, copy: string) {
+export async function recoveredAttachmentSource(store: Store, copy: string): Promise<RecoveredSource> {
   const repo = store.services.repo;
   const current = store.get().sync;
   const read = current ? undefined : await repo.sync?.();
+  if (read && !read.ok) return { state: 'unknown' };
   const sync = current ?? (read?.ok ? read.value : undefined);
-  if (!sync) return;
+  if (!sync) return { state: 'none' };
   const deleted = await repo.list('tombstone', '_');
-  if (!deleted.ok) return;
+  if (!deleted.ok) return { state: 'unknown' };
   const installs = [sync.self.id, ...sync.peers.map(({ id }) => id)];
-  return deleted.value.find(({ id }) => id.startsWith('d_') && installs.some((pc) => recoveredId(id, pc) === copy))?.id;
+  const source = deleted.value.find(({ id }) => id.startsWith('d_') && installs.some((pc) => recoveredId(id, pc) === copy));
+  const id = source?.id;
+  return id ? { state: 'found', id } : { state: 'none' };
 }
 
 /** Carry document references that were published on the original deal to its recovered copy (#744). */
@@ -101,11 +107,12 @@ export class AttachmentRecovery {
   private async carry(key: string, carry: Carry) {
     const { original, copy } = carry;
     const docs = this.store.services.docs;
-    // Yield before calling the port so the claim is in place even when the port throws immediately.
+    // #744: yield before calling the port so the claim is in place even when the port throws immediately.
     await Promise.resolve();
     let succeeded = false;
     try {
-      succeeded = !!(await docs.carryAttached?.(original, copy))?.ok;
+      const result = await docs.carryAttached?.(original, copy);
+      succeeded = !!result?.ok && result.value.unresolved === 0;    // #744: files left unresolved keep the carry queued
     } catch { /* a refused or failed carry stays pending */ }
     this.running.delete(key);
     if (this.stopped) return;

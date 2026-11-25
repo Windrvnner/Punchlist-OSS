@@ -349,9 +349,10 @@ export interface DocumentService {
   attach(dealId: string, file: { name: string; bytes: Uint8Array }): Promise<Result<{ doc: string; docId: string }>>;
   /**
    * A deal deleted on another PC has been kept here as a copy: the files attached on the deal become the copy's too
-   * (#117). Left out, a copy has no attached files of its own.
+   * (#117). Left out, a copy has no attached files of its own. The result says how many lines were written and how
+   * many files still cannot be sent from the copy, so a carry that wrote nothing is not taken as finished (#744).
    */
-  carryAttached?(fromDealId: string, toDealId: string): Promise<Result<void>>;
+  carryAttached?(fromDealId: string, toDealId: string): Promise<Result<{ written: number; unresolved: number }>>;
   /** Of these documents, those whose file this PC can't send now (#671). Left out, every document is sendable. */
   unsendable?(dealId: string, docIds: string[]): Promise<Result<string[]>>;
   /** ids of the documents loaded in this user's store right now, across all deals. Read-only; changes as the store rotates. */

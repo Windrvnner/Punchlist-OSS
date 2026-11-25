@@ -8,7 +8,7 @@
  */
 import type { Store } from './store';
 import type { Attachment } from './state';
-import { AttachmentRecovery, recoveredAttachmentSource } from './attachmentRecovery';
+import { AttachmentRecovery, recoveredAttachmentSource, type RecoveredSource } from './attachmentRecovery';
 import { AttachDocumentToFinding } from './commands/findings';
 import { hasTexts, keptDrafts } from './keptText';
 import { control } from '../control';
@@ -178,12 +178,20 @@ async function unsendableOf(store: Store, dealId: string, docIds: string[]): Pro
   // If the folder could not be checked, the send reports a failure itself.
   if (!first.ok) return [];
   if (hadCarry || !docs.carryAttached || !recovery) return first.value;
-  const original = copiedFrom.get(store)?.get(dealId) ?? await recoveredAttachmentSource(store, dealId);
-  if (!original) return first.value;
-  await recovery.queue(original, dealId);
-  const again = await docs.unsendable(dealId, first.value);
+  return carryFromRecoveredSource(store, recovery, dealId, first.value);
+}
+
+/** Carry the files of a copy made before this run from the deal it came from, then check again (#744). */
+async function carryFromRecoveredSource(store: Store, recovery: AttachmentRecovery, dealId: string, missing: string[]) {
+  const known = copiedFrom.get(store)?.get(dealId);
+  const found: RecoveredSource = known ? { state: 'found', id: known } : await recoveredAttachmentSource(store, dealId);
+  // A lookup that could not be made says nothing about the files: try again later rather than call them missing.
+  if (found.state === 'unknown') return 'recovering';
+  if (found.state === 'none') return missing;
+  await recovery.queue(found.id, dealId);
+  const again = await store.services.docs.unsendable!(dealId, missing);
   if (recovery.waiting(dealId) && (!again.ok || again.value.length)) return 'recovering';
-  return again.ok ? again.value : first.value;
+  return again.ok ? again.value : missing;
 }
 
 /** Chips of these files show whether their file was found, so a person can see which to attach again (#671). */
