@@ -27,6 +27,9 @@ initializeKeptText(local);
 registry.set(RestoreQuestionSnapshot.name, RestoreQuestionSnapshot);
 const { answerCardDraft, saveAnswerFinding } = await import('../../src/app/answerDrafts');
 afterEach(saveKeptDrafts);
+/** The composer drafts as saved to disk, which is what a restart brings back. */
+const keptComposer = () =>
+  new Map((local.read(KEPT_TEXT_KEY) as { composer?: [string, string][] } | null)?.composer);
 
 const at = new Date(2026, 10, 25, 0, 10).toISOString();
 const clock = { now: () => at };
@@ -126,7 +129,7 @@ it('waits for pending attachments, checks new files, and sends the latest text o
   expect(asked).toHaveBeenCalledTimes(1);
 });
 
-it('keeps the exact typed question while its save is pending or refused', async () => {
+it('clears a typed question before its save and brings it back when refused', async () => {
   const { store, scope, dealId, navigate, asked } = await start();
   const key = convKey(scope);
   const submitted = `  Add a question: ${instructions[30]}  `;
@@ -138,7 +141,7 @@ it('keeps the exact typed question while its save is pending or refused', async 
   const refused = vi.fn();
   await sendTyped(store, scope, { navigate, refused });
   expect(refused).toHaveBeenCalledOnce();
-  expect(composerText(key)).toBe(submitted);
+  expect(composerText(key)).toBe(submitted.trim());
   refuse.mockRestore();
 
   let release!: () => void;
@@ -151,8 +154,9 @@ it('keeps the exact typed question while its save is pending or refused', async 
   await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(1));
   expect(composerText(key)).toBe('');
   await sendTyped(store, scope, { navigate });
+  // A restart while the save is out finds no command to send again.
   saveKeptDrafts();
-  expect(local.read(KEPT_TEXT_KEY)).toMatchObject({ composer: expect.arrayContaining([[key, submitted]]) });
+  expect(keptComposer().has(key)).toBe(false);
   setComposerText(key, instructions[34]);
   release();
   await sending;
@@ -187,18 +191,17 @@ it.each([
   if (newer === 'erased') setComposerText(key, '');
   expect(composerText(key)).toBe(newer === 'kept' ? next : '');
   saveKeptDrafts();
-  const pending = local.read(KEPT_TEXT_KEY);
+  const pending = keptComposer();
   release();
   await sending;
 
   const restores = outcome === 'refused' && newer === 'erased';
-  expect(composerText(key)).toBe(restores ? submitted : newer === 'kept' ? next : '');
+  expect(composerText(key)).toBe(restores ? submitted.trim() : newer === 'kept' ? next : '');
   expect(refused).toHaveBeenCalledTimes(restores ? 1 : 0);
   expect(Object.values(store.get().questions)).toHaveLength(outcome === 'saved' ? 1 : 0);
-  expect(pending).toMatchObject({ composer: expect.arrayContaining([[key, newer === 'kept' ? next : submitted]]) });
+  expect(pending.get(key)).toBe(newer === 'kept' ? next : undefined);
   saveKeptDrafts();
-  const settled = local.read(KEPT_TEXT_KEY) as { composer?: [string, string][] } | null;
-  expect(new Map(settled?.composer).get(key)).toBe(restores ? submitted : newer === 'kept' ? next : undefined);
+  expect(keptComposer().get(key)).toBe(restores ? submitted.trim() : newer === 'kept' ? next : undefined);
 });
 
 it('keeps text in finding and question scopes deleted since they were opened', async () => {

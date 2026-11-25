@@ -198,16 +198,10 @@ export function composerScope(given: Scope, launching: boolean): { scope: Scope;
   return { scope, launchSlot };
 }
 
-// A typed Log Question clears the visible box when sent. Its text remains the kept draft whenever the box is empty.
-const submittedQuestions = new Map<string, { text: string; hidden: boolean }>();
-export const composerText = (key: string) =>
-  submittedQuestions.get(key)?.hidden ? '' : composerDrafts().text.get(key) ?? '';
+export const composerText = (key: string) => composerDrafts().text.get(key) ?? '';
 export function setComposerText(key: string, text: string) {
-  const submitted = submittedQuestions.get(key);
-  if (submitted) submitted.hidden = !text;
   const kept = composerDrafts().text;
-  const value = text || submitted?.text;
-  if (value) kept.set(key, value);
+  if (text) kept.set(key, text);
   else kept.delete(key);
 }
 
@@ -219,33 +213,23 @@ type SendView = {
   refused?(): void;
 };
 
-const logging = new WeakMap<Store, Set<string>>();
-
-/** The kept text is the retry for a refused Log Question. Do not clear anything typed while that save was out. */
-async function logTypedQuestion(store: Store, dealId: string, text: string, key: string, view: SendView) {
-  const deals = logging.get(store) ?? new Set<string>();
-  logging.set(store, deals);
-  if (deals.has(dealId)) return;
-  deals.add(dealId);
-  const submitted = { text: composerText(key), hidden: true };
-  submittedQuestions.set(key, submitted);
-  let refocus = false;
-  try {
-    view.textChanged?.();
-    view.sending?.();
-    const result = await store.dispatch(CreateQuestion, { dealId, text }, {
-      idempotencyKey: 'ask-addq-' + dealId, noRetry: true,
-    });
-    if (!result.ok && result.error.kind === 'invalid') store.toast(result.error.message);
-    if (!submitted.hidden || dealCopied(store, dealId)) return;
-    if (result.ok) composerDrafts().text.delete(key);
-    else refocus = true;
-  } finally {
-    deals.delete(dealId);
-    submittedQuestions.delete(key);
-    if (submitted.hidden) view.textChanged?.();
-    if (refocus) view.refused?.();
-  }
+/**
+ * The box and its saved draft are already clear, so a restart after the save cannot bring the command back. A refusal
+ * (storage full, a copied install, ...) has been told by the store, except input rejected before planning, said here.
+ * The typed command then goes back in the box, unless something new has been typed since, so it can be sent again.
+ */
+async function logTypedQuestion(store: Store, dealId: string, question: string, typed: string, key: string,
+  view: SendView) {
+  // The text going back in the box is the way to try again: a Retry as well could log it twice.
+  const result = await store.dispatch(CreateQuestion, { dealId, text: question }, {
+    idempotencyKey: 'ask-addq-' + dealId, noRetry: true,
+  });
+  if (result.ok) return;
+  if (result.error.kind === 'invalid') store.toast(result.error.message);
+  if (composerText(key)) return;
+  setComposerText(key, typed);
+  view.textChanged?.();
+  view.refused?.();
 }
 
 /** Send the latest draft after file checks. Navigation and question commands take precedence over a model answer. */
@@ -273,7 +257,8 @@ export async function sendTyped(store: Store, scope: Scope, view: SendView) {
   }
   const question = dealId ? /^(?:add|log) (?:a )?question[:\s]+(.+)/is.exec(text) : null;
   if (dealId && question) {
-    await logTypedQuestion(store, dealId, question[1].trim(), key, view);
+    take();
+    await logTypedQuestion(store, dealId, question[1].trim(), text, key, view);
     return;
   }
   take();
