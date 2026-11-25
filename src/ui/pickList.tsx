@@ -3,7 +3,6 @@ import { createPortal } from 'preact/compat';
 import { useDismiss } from './hooks';
 import { Icon } from './icons';
 import { ChoiceCheck } from './moreMenu';
-import { key } from '../domain/checklist';
 import { byName } from '../domain/order';
 
 /** One of the firm's lists for a layer, and how many items it has. */
@@ -44,9 +43,14 @@ export function PickList({ id, label, names: given, cur, onPick, className, floa
   const menu = useRef<HTMLDivElement>(null); const search = useRef<HTMLInputElement>(null);
   const close = () => setOpen(false);
   const searching = names.length >= SEARCH_FROM;
-  const known = names.some((x) => key(x.name) === key(cur));
+  const known = names.some((x) => x.name === cur);
   const shown = q.trim() ? names.filter((x) => x.name.toLowerCase().includes(q.trim().toLowerCase())) : names;
-  const pick = (v: string) => { close(); (document.querySelector(`#${id} > button`) as HTMLElement | null)?.focus(); if (key(v) !== key(cur)) onPick(v); };
+  const pick = (v: string) => {
+    close();
+    (document.querySelector(`#${id} > button`) as HTMLElement | null)?.focus();
+    // only the very same name is a no-op: a name that differs in case or spacing is a different pick
+    if (v !== cur) onPick(v);
+  };
 
   // placed under its button and kept inside the window: a long list scrolls inside the menu, the search box and None stay
   useLayoutEffect(() => {
@@ -77,7 +81,7 @@ export function PickList({ id, label, names: given, cur, onPick, className, floa
         : <div class="mlbl">The Firm’s {label} Lists</div>}
       <div class="scroll">
         {shown.map((x, i) => {
-          const on = key(x.name) === key(cur);
+          const on = x.name === cur;
           return <button type="button" key={x.name} class={`mi ${on ? 'on' : ''} ${q.trim() && i === 0 ? 'first' : ''}`}
             data-pick={x.name} onClick={() => pick(x.name)}>
             <span>{mark(x.name)}</span><span class="c">{x.n}</span><ChoiceCheck on={on} />
