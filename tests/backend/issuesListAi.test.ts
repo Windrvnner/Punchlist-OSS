@@ -143,7 +143,7 @@ describe('reading an issues list', () => {
       for (const shift of [(f: number, c: number) => (c >= 1 ? 0 : f), (f: number, c: number) => (c >= 1 ? f + 10 : f)]) expect((await read(stand(L, { shift }))).n).toBe(UNREAD);
     }
   });
-  it('a page given again fails the page, even when the check passes it: the read ends, bringing in nothing', async () => {
+  it('a page given again fails the page, even when the check passes it, and the read brings in nothing', async () => {
     const passes = () => ({ missing: [], extra: [], wrong: [] });
     const again = await read(stand(LIST, { shift: (f, c) => (c >= 1 ? 0 : f), check: passes }));
     expect(again.n).toBe(UNREAD);
