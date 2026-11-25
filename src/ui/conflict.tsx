@@ -9,10 +9,9 @@ import { useAppState, useStore, fmtDate, fmtDateTime } from './hooks';
 import { type Conflict, type State, conflictLabel, versionsWord } from '../app/state';
 import { ResolveConflict } from '../app/commands/conflicts';
 import { GROUP_LABEL } from '../app/commands/deals';
-import { differingFields } from '../domain/versions';
 import { withoutMarkers } from '../domain/cite';
 import type { Deal, Finding, Question, Source } from '../domain/model';
-import { compareChecklistVersion } from '../app/conflictView';
+import { compareChecklistVersion, comparedFields } from '../app/conflictView';
 import type { ListRecord } from '../domain/checklist';
 import { AI_LABEL } from '../control';
 import { Icon } from './icons';
@@ -172,12 +171,9 @@ export function ConflictView({ conflict: c, tail, stepper, label }: {
   const store = useStore(); const s = useAppState();
   const [busy, setBusy] = useState(false);
   const fields = FIELDS[c.kind];
-  // With a delete, every version shows the first fields a person would look at (for a question: the question and its
-  // response), not only where they differ: a deleted version shows the words it held (the deleting PC's copy), so a person
-  // sees what each choice keeps. Its status rides on the line under the PC's name rather than taking a row of its own.
-  const deleted = c.versions.some((v) => v.deleted); const live = c.versions.filter((v) => !v.deleted || v.data);
-  const differ = new Set(differingFields(live.map((v) => v.data as Record<string, unknown> | null), fields.map(([k]) => k)));
-  const shown = deleted ? fields.filter(([k]) => k !== 'status').slice(0, 2).filter(([k]) => live.some((v) => v.data && String((v.data as any)[k] ?? '').trim())) : fields.filter(([k]) => differ.has(k));
+  // the app picks which fields are compared (for a question with a delete: its text and response)
+  const compared = comparedFields(c, fields.map(([k]) => k));
+  const shown = fields.filter(([k]) => compared.shown.includes(k));
   const [picked, setPicked] = useState<string | null>(null);   // design B: nothing is picked until a person picks
   const pv = c.versions.find((v) => v.id === picked);
   const others = c.versions.filter((v) => v.id !== picked).map((v) => `${v.here ? 'This PC' : v.from}’s version`).join(' and ');
@@ -190,7 +186,8 @@ export function ConflictView({ conflict: c, tail, stepper, label }: {
   };
   const toDeleted = c.kind === 'question' || c.kind === 'finding';
   const tip = !pv ? 'Pick a version' : toDeleted ? `${others} goes to Deleted` : undefined;
-  const st = deleted ? fields.find(([k]) => k === 'status') : undefined; const stOf = (v: (typeof c.versions)[number]) => (st && v.data ? st[2]((v.data as any)[st[0]], v.data, s) : '');
+  const st = compared.statusOnLine ? fields.find(([k]) => k === 'status') : undefined;
+  const stOf = (v: (typeof c.versions)[number]) => (st && v.data ? st[2]((v.data as any)[st[0]], v.data, s) : '');
   // every version's fields sit on the same rows, so a difference is read straight across
   const rows = 1 + Math.max(1, shown.length);
   return (
