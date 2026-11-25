@@ -246,7 +246,7 @@ function settleResolvedMerges(state: State) {
   }
 }
 
-/** A question loaded with its deal, not being chosen on this PC, with no versions left. Others wait for a later look. */
+/** A question loaded with its deal, not being chosen on this PC, with no versions left. Others wait. */
 function settledQuestion(state: State, questionId: string): boolean {
   const question = state.questions[questionId];
   return !!question && !!state.deals[question.dealId] && !choosing.has(questionId) && !hasLogVersion(state, question);

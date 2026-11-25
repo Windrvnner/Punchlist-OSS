@@ -292,7 +292,7 @@ it('keeps a hand-edited merge in the response box when another PC resolves its q
   }
 });
 
-it('keeps unsaved response text first and adds the merge after it when its question is resolved elsewhere', async () => {
+it('keeps unsaved response text first and adds the merge after it when resolved elsewhere', async () => {
   const { store, repo, q } = await mergeFixture();
   const stop = keepResolvedMerges(store, handFieldText);
   try {
@@ -327,7 +327,7 @@ it('clears an untouched AI merge and a merge matching the response when resolved
   }
 });
 
-it('drops a hand-edited merge when this PC keeps another version, and keeps it when that choice is refused', async () => {
+it('drops a typed merge when this PC keeps another version, and keeps it when that choice is refused', async () => {
   const { store, repo, dealId, q, question } = await mergeFixture([12]);
   const stop = keepResolvedMerges(store, handFieldText);
   try {

@@ -80,24 +80,25 @@ async function keepTypedMergeResolvedElsewhere(page, dealId, tag) {
   const tip = await page.getAttribute('#rsv-done', 'title');
   await page.keyboard.press('Escape');
   await page.waitForSelector('.rsvdlg', { state: 'detached' });
+  const showsTyped = () => page.waitForFunction(
+    (text) => document.querySelector('textarea.rtext')?.value === text, TYPED, { timeout: 8000 },
+  ).catch(() => {});
   const box = () => page.evaluate(() => ({
     text: document.querySelector('textarea.rtext')?.value,
     note: document.querySelector('.efstate.ext')?.textContent ?? '',
   }));
-  await page.waitForFunction((text) => document.querySelector('textarea.rtext')?.value === text, TYPED, { timeout: 8000 })
-    .catch(() => {});
+  await showsTyped();
   const shown = await box();
   say(tag + 'a-typed-merge-resolved-elsewhere-waits-in-the-response-box',
     shown.text === TYPED && /^Changed elsewhere/.test(shown.note) && !!tip, JSON.stringify({ shown, tip }));
 
   await page.reload(); await page.waitForSelector('.dtabs', { state: 'attached' });
   await page.evaluate((id) => store.ui({ selectedQuestion: id }), questionId);
-  await page.waitForFunction((text) => document.querySelector('textarea.rtext')?.value === text, TYPED, { timeout: 8000 })
-    .catch(() => {});
+  await showsTyped();
   const reloaded = await box();
   await page.click('.efstate.ext button:first-of-type');
-  await page.waitForFunction(([id, text]) => store.get().questions[id].response === text, [questionId, TYPED], { timeout: 8000 })
-    .catch(() => {});
+  const saved = ([id, text]) => store.get().questions[id].response === text;
+  await page.waitForFunction(saved, [questionId, TYPED], { timeout: 8000 }).catch(() => {});
   const used = await page.evaluate((id) => store.get().questions[id].response, questionId);
   say(tag + 'the-typed-merge-survives-a-reload-and-keep-mine-uses-it',
     reloaded.text === TYPED && /^Changed elsewhere/.test(reloaded.note) && used === TYPED,
