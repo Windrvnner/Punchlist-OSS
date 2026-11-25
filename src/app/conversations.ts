@@ -216,7 +216,7 @@ type SendView = {
 /**
  * The box and its saved draft are already clear, so a restart after the save cannot bring the command back. A refusal
  * (storage full, a copied install, ...) has been told by the store, except input rejected before planning, said here.
- * The typed command then goes back in the box, unless something new has been typed since, so it can be sent again.
+ * The typed command then goes back in the box, so it can be sent again, ahead of anything typed since (#955).
  */
 async function logTypedQuestion(store: Store, dealId: string, question: string, typed: string, key: string,
   view: SendView) {
@@ -226,10 +226,18 @@ async function logTypedQuestion(store: Store, dealId: string, question: string, 
   });
   if (result.ok) return;
   if (result.error.kind === 'invalid') store.toast(result.error.message);
-  if (composerText(key)) return;
-  setComposerText(key, typed);
+  setComposerText(key, withRefusedCommand(typed, composerText(key)));
   view.textChanged?.();
   view.refused?.();
+}
+
+/**
+ * A refused command and what was typed while it was saving are both kept in the box, the command first, as it was
+ * typed first, and a blank line between them (#955). Nothing typed is written over, and no second place hides either.
+ */
+function withRefusedCommand(typed: string, typedSince: string) {
+  if (!typedSince.trim() || typedSince.trim() === typed) return typed;
+  return `${typed}\n\n${typedSince}`;
 }
 
 /** Send the latest draft after file checks. Navigation and question commands take precedence over a model answer. */
