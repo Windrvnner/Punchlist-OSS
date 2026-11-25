@@ -188,7 +188,7 @@ export interface AiService {
   reword?(input: { items: string[] }): Promise<Result<{ at: number; text: string; why: string; also?: string[] }[]>>;
   /**
    * Optional. What each line of a list is, as a firm's list is brought in: a section or subsection heading, an item
-   * (its words as the line has them, numbering and bullets left off), the rest of the item above it, a table's heading row,
+   * (its words as the line has them, numbering and bullets included), the rest of the item above it, a table's heading row,
    * or not an item. Lines are numbered from 1; `only` asks about just those lines, the others given for context.
    * `thorough` asks the thorough model, for lines the standard model's readings left unplaced. Proposals only: the app
    * checks each reading against its line and accounts for every line (domain/listRead).
