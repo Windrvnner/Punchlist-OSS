@@ -8,6 +8,7 @@ import type { DraftRef } from '../ports';
 import { useAppState, useStore } from './hooks';
 import { Icon } from './icons';
 import { ChoiceCheck } from './moreMenu';
+import { shownDrafts } from '../app/citations';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 /** "Apr 15", or with the year "Apr 15, 2026"; a draft whose folder has no date is named by its folder */
@@ -20,12 +21,8 @@ export const draftDate = (d: DraftRef, year = false) => {
 export function useDrafts(dealId: string, docId: string): DraftRef[] {
   const store = useStore(); const s = useAppState();
   useEffect(() => { void store.loadDrafts(dealId, docId); }, [dealId, docId]);
-  const all = s.drafts[`${dealId}|${docId}`] ?? [];
-  return all.length > 1 ? all : [];
+  return shownDrafts(s.drafts[`${dealId}|${docId}`]);
 }
-
-/** the newest draft, when this document is an earlier one */
-export const newerThan = (drafts: DraftRef[], docId: string) => (drafts.length > 1 && drafts[0].docId !== docId && drafts.some((d) => d.docId === docId) ? drafts[0] : null);
 
 /** The bar's drafts control: the open draft's date, opening the list. */
 export function DraftsButton({ drafts, docId, open, setOpen }: { drafts: DraftRef[]; docId: string; open: boolean; setOpen: (v: boolean) => void }) {
