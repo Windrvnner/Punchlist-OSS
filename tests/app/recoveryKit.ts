@@ -9,6 +9,7 @@ import { CreateFinding, SetFindingStatus } from '../../src/app/commands/findings
 import { AddDealItems, SetItemsOff } from '../../src/app/commands/checklist';
 import { ImportQuestions } from '../../src/app/commands/importQuestions';
 import { KeepQaLog, RecordQaLogExport } from '../../src/app/commands/qaLogs';
+import type { Command } from '../../src/app/command';
 import { memRepo, disk, type Disk } from '../adapters/memRepo';
 import type { Transaction } from '../../src/ports';
 
@@ -19,7 +20,7 @@ const commands = [
 ];
 let sequence = 0;
 
-export function recoveryApp(saved = disk()) {
+export function recoveryApp(saved = disk(), moreCommands: Command<any>[] = []) {
   const clock = { now: () => new Date(Date.UTC(2026, 10, 19, 10, 0, 0, sequence++)).toISOString() };
   const repo = memRepo(clock.now, saved);
   const options = { latency: [0, 0] as [number, number] };
@@ -33,7 +34,7 @@ export function recoveryApp(saved = disk()) {
     fs: { pickFolders: null, pathFor: null, save: async () => ({ ok: true, value: 'saved' }) },
     session: mockSession(options), local: new MemoryLocal(), clock,
     ids: { next: (kind) => `${kind}_01HZZZZZZZZZZZZZZZZ${String(sequence++).padStart(7, '0')}` },
-  }, commands);
+  }, [...commands, ...moreCommands]);
   return { store, repo, saved };
 }
 export type RecoveryApp = ReturnType<typeof recoveryApp>;
