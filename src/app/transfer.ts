@@ -7,7 +7,10 @@
 import type { Store } from './store';
 import type { SheetPreview } from '../ports';
 import { IMPORT_FIELDS } from '../domain/importExport';
-import { type State, dealQuestions, dealFindings, FIRM, workstreamHead, qaWorkstream } from './state';
+import {
+  type State, dealQuestions, dealFindings, findingWorkstreams, FIRM,
+  workstreamHead, qaStatusOnly, qaWorkstream, qaWorkstreamChoices,
+} from './state';
 import type { Question, Finding } from '../domain/model';
 import { questionsSheet, findingsSheet, safeFileName, fitCells, suggestMapping, sameWords, type Mapping, type ImportRow } from '../domain/importExport';
 import { ImportQuestions } from './commands/importQuestions';
@@ -17,14 +20,54 @@ const MIME = { xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetm
 export const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
 
 export interface QaExportFilter { status: 'open' | 'answered' | 'closed' | 'all'; workstream: string; askedBy: string[] }
-export const questionRowsFor = (s: State, dealId: string, f: QaExportFilter): Question[] =>
-  dealQuestions(s, dealId).filter((q) => (f.status === 'all' || q.status === f.status)
-    && (!f.workstream || qaWorkstream(q) === f.workstream) && f.askedBy.includes(q.askedBy));
+
+function qaRowShown(row: Question, filter: QaExportFilter): boolean {
+  return (filter.status === 'all' || row.status === filter.status)
+    && (!filter.workstream || qaWorkstream(row) === filter.workstream);
+}
+
+export const questionRowsFor = (state: State, dealId: string, filter: QaExportFilter): Question[] =>
+  dealQuestions(state, dealId).filter((row) => qaRowShown(row, filter) && filter.askedBy.includes(row.askedBy));
+
+/** The export opens on the page's status and workstream with every submitting firm selected. */
+export function qaFilterFromPage(state: State, dealId: string): QaExportFilter {
+  const { status, workstream } = state.ui.qaFilter;
+  const askedBy = [...new Set(dealQuestions(state, dealId).map((row) => row.askedBy))];
+  return { status: qaStatusOnly(status), workstream, askedBy };
+}
+
+/** Firm counts describe the available rows, and the footer counts the selected firms only. */
+export function qaExportView(state: State, dealId: string, filter: QaExportFilter) {
+  const rows = dealQuestions(state, dealId);
+  const firmCounts = new Map<string, number>();
+  let firmsTotal = 0;
+  let total = 0;
+  for (const row of rows) {
+    const shown = Number(qaRowShown(row, filter));
+    firmCounts.set(row.askedBy, (firmCounts.get(row.askedBy) ?? 0) + shown);
+    firmsTotal += shown;
+    if (filter.askedBy.includes(row.askedBy)) total += shown;
+  }
+  const firms = [...firmCounts.keys()].sort();
+  return { firms, firmCounts, firmsTotal, total, workstreams: qaWorkstreamChoices(rows) };
+}
 
 /** The workstream is compared as the Findings list heads it (trimmed, "No workstream" for none), so an export opened from a filtered list holds what the list shows. */
 export interface FindingExportFilter { status: 'open' | 'closed' | 'all'; workstream: string; reviewedOnly: boolean }
 export const findingRowsFor = (s: State, dealId: string, f: FindingExportFilter): Finding[] =>
   dealFindings(s, dealId).filter((x) => (f.status === 'all' || x.status === f.status) && (!f.workstream || workstreamHead(x) === f.workstream) && (!f.reviewedOnly || !!x.reviewed));
+
+/** Reassess opens on Open, since the export does not have a Reassess filter. */
+export function findingFilterFromPage(state: State): FindingExportFilter {
+  const page = state.ui.findingFilter;
+  const status = page.status === 'reassess' ? 'open' : page.status;
+  return { status, workstream: page.workstream, reviewedOnly: page.reviewed === 'yes' };
+}
+
+export function findingExportView(state: State, dealId: string, filter: FindingExportFilter) {
+  const workstreams = findingWorkstreams(dealFindings(state, dealId));
+  return { workstreams, total: findingRowsFor(state, dealId, filter).length };
+}
 
 async function saveSheet(
   store: Store,

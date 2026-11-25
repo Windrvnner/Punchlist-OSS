@@ -175,3 +175,46 @@ export async function filesSendable(store: Store, dealId: string, files: { doc: 
   }
   return false;
 }
+
+export const composerChips = (state: { ui: { attachments: Attachment[] } }, key: string) =>
+  state.ui.attachments.filter((chip) => chip.conv === key);
+
+type ReadyChip = Attachment & { doc: string; docId: string };
+
+const readyChips = (chips: Attachment[]): ReadyChip[] =>
+  chips.filter((chip): chip is ReadyChip => chip.state === 'done' && !!chip.doc && !!chip.docId);
+
+/** A conversation may hold files from different deals. Name any missing file before sending. */
+async function filesOk(store: Store, chips: ReadyChip[]) {
+  for (const dealId of new Set(chips.map((chip) => chip.dealId))) {
+    if (!(await filesSendable(store, dealId, chips.filter((chip) => chip.dealId === dealId)))) return false;
+  }
+  return true;
+}
+
+const checking = new WeakMap<Store, Set<string>>();
+
+/** While this conversation's files are being checked, a second Enter sends nothing twice. */
+export async function chipsSendable(store: Store, key: string) {
+  const active = checking.get(store) ?? new Set<string>();
+  checking.set(store, active);
+  if (active.has(key)) return false;
+  active.add(key);
+  try {
+    const checked = new Set<string>();
+    for (;;) {
+      const chips = composerChips(store.get(), key);
+      if (chips.some((chip) => chip.state === 'pending')) {
+        store.toast('Still attaching — send when it finishes');
+        return false;
+      }
+      // A file which finished attaching during the previous check is checked too.
+      const fresh = readyChips(chips).filter((chip) => !checked.has(chip.id));
+      if (!fresh.length) return true;
+      if (!(await filesOk(store, fresh))) return false;
+      for (const chip of fresh) checked.add(chip.id);
+    }
+  } finally {
+    active.delete(key);
+  }
+}

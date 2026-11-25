@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { CreateDeal, AddFolders, EditDeal, FOLDER_LABEL_MAX } from '../../src/app/commands/deals';
 import '../ui/keptTextSession';
-import { guessLabel, fitLabel } from '../../src/ui/dialogs';
+import { guessLabel, fitLabel } from '../../src/app/dealFolders';
 
 const folder = (label: string) => ({ path: 'C:\\Deals\\vdr', label, files: 1, size: '0.1 GB' });
 const dealId = 'd_01HPRBFXXXXXXXXXXXXXXXXXXX';
