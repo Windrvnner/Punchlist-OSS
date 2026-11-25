@@ -10,7 +10,8 @@ import { useEffect, useState } from 'preact/hooks';
 import { Icon } from './icons';
 import { AI_LABEL } from '../control';
 import { DocName } from './docName';
-import { useDrafts, newerThan, draftDate } from './drafts';
+import { useDrafts, draftDate } from './drafts';
+import { newerThan, sourceChips } from '../app/citations';
 import { docKey, type Source } from '../domain/model';
 import type { Research } from '../ports';
 
@@ -68,7 +69,7 @@ export function ResearchView({ research, working, since, sources = [], onOpen, d
 export function SourceChips({ sources, onOpen, dealId }: {
   sources: Source[]; onOpen?: (s: Source) => void; dealId?: string;
 }) {
-  const chips = sources.filter((s, i) => sources.findIndex((x) => docKey(x) === docKey(s) && x.loc === s.loc) === i);
+  const chips = sourceChips(sources);
   if (!chips.length) return null;
   return (
     <div class="rsch-chips">

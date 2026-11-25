@@ -1,0 +1,110 @@
+/* The deal screen mock-up: an opened Q&A question and its card. */
+/* Q&A item, opened above the list as on today's Q&A page */
+.x-qcard {
+  border-radius: var(--r-card);
+  background: var(--glass-2);
+  box-shadow: inset 0 1px 0 var(--spec),0 0 0 1px var(--glass-edge);
+  padding: 12px 14px 14px;
+  margin: 0 0 12px;
+}
+.x-qcard .hd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.x-qcard .hd b {
+  font-size: 14px;
+  font-weight: 600;
+}
+.x-qcard .hd .end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.x-qcard .props {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 6px 0 2px;
+}
+.x-qcard .props span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ink-2);
+  height: 24px;
+}
+.x-qcard .props svg {
+  display: block;
+  color: var(--ink-3);
+}
+.x-qcard .cols {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) minmax(0,1.3fr);
+  gap: 18px;
+  margin-top: 8px;
+}
+@container (max-width:560px) {
+  .x-qcard .cols {
+    grid-template-columns: minmax(0,1fr);
+    gap: 10px;
+  }
+  .x-qcard .hd .pos {
+    display: none;
+  }
+}
+.x-qcard .lb {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+}
+.x-qcard .lb .sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-2);
+}
+.x-qcard .lb .sub svg {
+  display: block;
+  color: var(--ink-3);
+}
+.x-qcard .resp {
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: var(--r-ctl);
+  padding: 8px 11px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.x-qcard .qt {
+  font-size: 13.5px;
+  line-height: 1.55;
+  margin: 0;
+}
+.x-qcard .draft {
+  border: 1px dashed var(--ink-3);
+  border-radius: var(--r-ctl);
+  padding: 8px 11px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.x-qcard .rsch-chips {
+  margin: 8px 0 0;
+}
+.x-qcard .acts2 {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.x-tr.on {
+  background: var(--card);
+  border-radius: var(--r-ctl);
+}

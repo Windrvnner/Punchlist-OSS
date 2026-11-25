@@ -20,12 +20,13 @@ const gateDir = path.resolve('out/gate', new Date().toISOString().replace(/[:.]/
 fs.mkdirSync(gateDir, { recursive: true });
 env.PUNCHLIST_GATE_DIR = gateDir;
 const display = process.platform !== 'linux' || !!process.env.DISPLAY;
+const desktopSuites = process.platform === 'linux' ? ['smoke', 'signin', 'qaLogRecovery'] : ['smoke', 'signin'];
 const steps = [
   ['npm', ['run', 'check']],
   ['npm', ['exec', '--', 'vite', 'build']],
   ['npm', ['run', 'browser', '--', '--jobs', '2']],
   ['node', ['scripts/desktop-build.mjs']],
-  ...['smoke', 'signin'].map((suite) => {
+  ...desktopSuites.map((suite) => {
     const script = `tests/desktop/${suite}.spec.mjs`;
     return display ? ['node', [script]] : ['xvfb-run', ['-a', 'node', script]];
   }),

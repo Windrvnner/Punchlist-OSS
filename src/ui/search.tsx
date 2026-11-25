@@ -8,10 +8,11 @@ import { CachedMark } from './cached';
 import type { Store } from '../app/store';
 import { revealChecklistRow } from './checklist';
 import { navigate } from './nav';
-import { searchGroups, loadAllForSearch, GROUP_PAGE, type Hit, type HitGroup, type HitKind } from '../app/search';
+import {
+  searchGroups, loadAllForSearch, ownDealsLoading, GROUP_PAGE, type Hit, type HitGroup, type HitKind,
+} from '../app/search';
 import { TwinLabel } from './dealLabel';
 import { bareDealName } from '../app/commands/deals';
-import { isMine } from '../app/commands/members';
 import { Marked } from './searchMark';
 
 /**
@@ -134,12 +135,6 @@ function revealOpenChecklistHit(store: Store, hit: Hit): boolean {
   if (!id || location.hash !== '#' + hit.hash || store.get().ui.selectedChecklist !== id) return false;
   revealChecklistRow(document.getElementById('ck-rows'), id);
   return true;
-}
-
-// #491: deals outside My Deals are never read by Search.
-function ownDealsLoading(state: ReturnType<typeof useAppState>): boolean {
-  return Object.keys(state.deals).some((id) =>
-    isMine(state, id) && (state.dealLoad[id] === 'loading' || state.dealLoad[id] === undefined));
 }
 
 type Item = { hit: Hit } | { more: HitGroup };

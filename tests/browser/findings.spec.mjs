@@ -63,6 +63,61 @@ async function indexedDeal(page, name = 'Proseware') {
   say('a-deleted-finding-can-be-restored-from-its-own-page', back.there && back.here === undefined && back.trail.endsWith('Findings'), JSON.stringify(back));
   await ctx.close(); }
 
+// #763: the deleted page names an unsaved edit and Restore it opens that same edit.
+async function checkDeletedEdit(page, dealId, title, remove, reload = false) {
+  await page.goto(URL + '#deal-' + dealId);
+  await page.click('#f-new');
+  await page.fill('#af-title', title);
+  await page.selectOption('#af-ws', 'Legal');
+  await page.fill('#af-body', 'The signed agreement requires a third-party consent.');
+  await page.click('#af-create');
+  await page.locator('.flagrow', { hasText: title }).click();
+  const findingUrl = page.url();
+  const findingId = await page.evaluate((wording) =>
+    Object.values(store.get().findings).find((finding) => finding.title === wording).id, title);
+  const editedTitle = 'Assignment consent needs a notice period';
+  const editedDetail = 'The revised consent adds a 30-day notice period before assignment.';
+  await page.click('#f-edit');
+  await page.fill('#fe-title', editedTitle);
+  await page.fill('#fe-body', editedDetail);
+  await remove(findingId);
+  await page.waitForFunction((id) => !store.get().findings[id] && store.get().tombstones[id], findingId);
+  const stayed = page.url() === findingUrl;
+  if (!stayed) await page.goto(findingUrl);
+  await page.waitForSelector('#gone-restore');
+  const kept = page.getByRole('status').filter({ hasText: 'Unsaved finding edit kept.' });
+  const named = await kept.isVisible();
+  if (reload) {
+    await page.reload();
+    await page.waitForSelector('#gone-restore');
+  }
+  const stillNamed = await kept.isVisible();
+  await page.click('#gone-restore');
+  await page.waitForSelector('#fe-body');
+  const restored = await page.inputValue('#fe-title') === editedTitle
+    && await page.textContent('#fe-body') === editedDetail;
+  say(`deleted-edit-kept-${title}`, stayed && named && stillNamed && restored && !page.errors.length,
+    JSON.stringify({ stayed, named, stillNamed, restored, errors: page.errors }));
+}
+
+{
+  const { ctx, page } = await fresh();
+  const dealId = await indexedDeal(page);
+  await checkDeletedEdit(page, dealId, 'Assignment agreement needs consent', async () => {
+    await page.click('#f-delete');
+    await page.click('#ask-go');
+  });
+  await checkDeletedEdit(page, dealId, 'Sublease requires a notice', async () => {
+    await page.click('#toast .tundo');
+  });
+  await checkDeletedEdit(page, dealId, 'Amendment lacks a signature', async (findingId) => {
+    await page.evaluate((id) => __peer.remove(id), findingId);
+    await page.click('#conflict .cfl-v:has-text("Deleted")');
+    await page.click('#conflict .cfl-keep:has-text("Keep It Deleted")');
+  }, true);
+  await ctx.close();
+}
+
 // 2 person-raised finding (red while open, like any other), linked response → Reassess → previous assessment kept
 { const { ctx, page } = await fresh();
   const id = await indexedDeal(page, 'Trey');
