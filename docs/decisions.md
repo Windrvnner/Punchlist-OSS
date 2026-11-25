@@ -161,6 +161,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A rewording accepted when a list was brought in is offered again the next time.
 - In an open checklist import, a review that needs the model waits for a pending review request. The Duplicates line
   and footer show the latest retry failure, and a partial check keeps its pairs and checked removals (#378).
+- **Add All Unresolved to Q&A…** keeps a chosen link with its exact question and point, and writes it only if both are unchanged at commit (#88).
 - **Add All Unresolved to Q&A…** sizes its calls to the model's limits and retries quietly; whatever still fails is offered for Retry.
 - Names of structures, sectors, and technologies stay at about 24 characters or fewer.
 
