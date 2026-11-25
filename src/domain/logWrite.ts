@@ -9,6 +9,7 @@ import type { Question } from './model';
 import type { ReadTable, SheetEdit } from './sheets';
 import { sameWords, prepareImport, IMPORT_FIELDS, type Mapping, type ImportField, type ImportRow } from './importExport';
 import { key } from './checklist';
+import { ROMAN_NUMERAL, NAMING_WORDS, normalizeReferences, setApartParts, isNamedChain } from './references';
 
 /** every field the app keeps up to date in the log, where the log has a column for it */
 const FIELDS: ImportField[] = ['n', 'text', 'askedBy', 'received', 'workstream', 'priority', 'status', 'response', 'respondedBy', 'responded'];
@@ -71,8 +72,6 @@ function mojibake(s: string): string {
   try { return new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(bytes)); } catch { return s; }
 }
 const QUESTION_WORD = /[\p{L}\p{M}|]+/gu;
-// Canonical numerals keep prose such as "civil" outside identifier matching.
-const ROMAN_NUMERAL = /^(?=.)m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})$/i;
 /**
  * The words of a question with what a misreading could change taken out, for matching a log's rows and an import's to the
  * app's questions (not for deciding whose a cell is): spacing, case, quote and dash shapes, punctuation between words, a capital
@@ -80,7 +79,7 @@ const ROMAN_NUMERAL = /^(?=.)m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|
  * Identifiers and combining marks stay distinct.
  */
 export function misreadKey(s: string): string {
-  return s.normalize('NFKC')
+  return normalizeReferences(s.normalize('NFKC'))
     .replace(/[\u2010-\u2015\u2212]/g, '-')                                             // dash shapes are one dash
     .replace(/[^\s]*\d[^\s]*/g, (t) => t.replace(/[lI|](?=[\d.,]|$)|(?<=[\d.,])[lI|]/g, '1').replace(/[oO](?=[\d.,])|(?<=[\d.,])[oO]/g, '0'))   // l00, 2O24
     .replace(QUESTION_WORD, repairWord)
@@ -143,9 +142,6 @@ function collisionWord(word: string): string {
 
 /** a word or number of a question; a point or comma inside a number stays in it ("I.1", "1,500") */
 const QUESTION_TOKEN = /[\p{L}\p{M}\p{N}|]+(?:[.,][\p{L}\p{M}\p{N}|]+)*/gu;
-/** words a letter or numeral after them names: Class a, Tranche ii, part e */
-const NAMING_WORDS = new Set(('annex appendix article block class clause exhibit facility item limb lot paragraph '
-  + 'part phase rule schedule section series tier tranche unit').split(' '));
 
 /**
  * The identifiers a question names, as they are compared (#125, #127, #128): anything with a digit, a Roman numeral in
@@ -153,13 +149,22 @@ const NAMING_WORDS = new Set(('annex appendix article block class clause exhibit
  * naming word ("(a)", "class b", "tranche ii"). Sorted, so two lists compare in one walk.
  */
 export function identifiers(text: string): string[] {
-  const normal = text.normalize('NFKC');
-  const found: string[] = [];
-  for (const match of normal.matchAll(QUESTION_TOKEN)) {
-    const form = identifierForm(match[0], match.index, normal);
-    if (form !== undefined) found.push(form);
+  return identifiersIn(normalizeReferences(text.normalize('NFKC'))).ids;
+}
+
+/** The identifiers a normalized text names, and the open ones: a lone letter after a point that may be a word (#778) */
+function identifiersIn(text: string): { ids: string[]; open: string[] } {
+  const ids: string[] = [];
+  const open: string[] = [];
+  const setApart = setApartParts(text);
+  for (const match of text.matchAll(QUESTION_TOKEN)) {
+    const found = setApart.get(match.index);
+    const part = found?.length === match[0].length ? found : undefined;   // not a longer token such as a,500
+    const form = part ? part.id : identifierForm(match[0], match.index, text);
+    if (form === undefined) continue;
+    (part?.droppable ? open : ids).push(form);
   }
-  return found.sort();
+  return { ids: ids.sort(), open: open.sort() };
 }
 
 /**
@@ -167,6 +172,7 @@ export function identifiers(text: string): string[] {
  * "I" however it was read ("I understand", "can I send"), unless a naming word comes before it ("Class I shares").
  */
 function identifierForm(token: string, offset: number, text: string): string | undefined {
+  if (isNamedChain(token, offset, text)) return token.toLowerCase();   // clause 4.b, clause IV.II
   if (/\p{N}/u.test(token)) return numberForm(token);
   if (namedLetter(token, offset, text)) return token.toLowerCase();
   if (/^[Iil|]$/.test(token) && /^\s*\p{Ll}/u.test(text.slice(offset + 1))) return undefined;   // the word I
@@ -207,26 +213,36 @@ function numberForm(token: string): string {
  * punctuation taken out, which say the same whenever the identifiers do ("FY 2024" and "FY2024", "SPA" and "spa").
  * A point or comma inside a number stays: Section 1.10 is not Section 11.0.
  */
-export interface IdentifierSig { plain: string; ids: string[] }
+export interface IdentifierSig { plain: string; ids: string[]; open: string[] }
 export function identifierSig(text: string): IdentifierSig {
-  const plain = text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}.,]|(?<!\p{N})[.,]|[.,](?!\p{N})/gu, '');
-  return { plain, ids: identifiers(text) };
+  const normal = normalizeReferences(text.normalize('NFKC'));
+  const plain = normal.toLowerCase().replace(/[^\p{L}\p{M}\p{N}.,]|(?<!\p{N})[.,]|[.,](?!\p{N})/gu, '');
+  return { plain, ...identifiersIn(normal) };
 }
 
 /**
  * Whether two wordings can be one question as far as their identifiers go: not when each names one the other does not
  * (Class I and Class L, Facility I1 and Facility 11). One that only adds an identifier, or drops one, is a rewording.
+ * An open identifier counts as named, so the rewording rule never needs it to be a word.
  */
 export function sameIdentifiers(a: IdentifierSig, b: IdentifierSig): boolean {
   if (a.plain === b.plain) return true;
-  return !(namesOther(a.ids, b.ids) && namesOther(b.ids, a.ids));
+  const named = (sig: IdentifierSig) => [...sig.ids, ...sig.open];
+  return !(namesOther(named(a), named(b)) && namesOther(named(b), named(a)));
 }
 /**
  * Whether two wordings name exactly the same identifiers, for a match by number alone: there the words differ, and a
  * row that adds or drops an identifier (Tranche II) may be another question, so it is a question of its own (#125).
+ * An open identifier ("each item. I understand") is a word unless the other wording names it too; open ones of both
+ * wordings that the other lacks are two different references ("class. a" and "class. i"), not two words.
  */
 export function exactIdentifiers(a: IdentifierSig, b: IdentifierSig): boolean {
-  return a.plain === b.plain || (!namesOther(a.ids, b.ids) && !namesOther(b.ids, a.ids));
+  if (a.plain === b.plain) return true;
+  const reads = (sig: IdentifierSig) => [...sig.ids, ...sig.open];
+  const droppedA = namesOther(a.open, reads(b));
+  const droppedB = namesOther(b.open, reads(a));
+  if (droppedA && droppedB) return false;
+  return !namesOther(a.ids, reads(b)) && !namesOther(b.ids, reads(a));
 }
 /** whether `ids` names an identifier, counted with its repeats, that `others` does not */
 function namesOther(ids: readonly string[], others: readonly string[]): boolean {
