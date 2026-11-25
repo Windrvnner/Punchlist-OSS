@@ -518,7 +518,7 @@ export function nodeAi(o: AiOptions) {
   /** every call to the model is asked again quietly when it fails or comes back empty (src/backend/retry.ts) */
   const retried = retrier(o.retry);
   const complete = async ({ kind, split: _split, ...input }: Ask): Promise<string> => {
-    const b = kind === 'describe' || kind === 'core' ? undefined : budget.getStore();
+    const b = kind === 'describe' ? undefined : budget.getStore();
     // each try is counted in the usage log and against a search's calls, since each is paid for; a search out of calls is not asked again
     return retried(async () => {
       if (b && (b.left-- <= 0 || (b.deal && b.deal.left-- <= 0))) throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
@@ -922,12 +922,10 @@ export function nodeAi(o: AiOptions) {
   }
   /**
    * The documents in a folder a person named, in the order to read them for something, across the deals asked
-   * about. First a ranking with no model: by how many of the words a file answers to; then the deal's core documents,
-   * the more important first; then by path; each document's earlier drafts straight after it. Then the fast model puts the top of that ranking
-   * (`shortlist`) in order, and what it leaves out follows in the ranking's order; when it cannot be asked, or its reply
-   * cannot be read, the ranking stands. Only a service that cannot be reached throws. A blackline whose clean draft is
-   * unclear is left out, as everywhere else. `near` are the data room's folders a level or two down, when the name
-   * matches none, so that the model can name one that is there.
+   * about, ranked by code alone: by how many of the words a file answers to; then the deal's core documents, the more
+   * important first; then by path; each document's earlier drafts straight after it. No model is asked (#286). A
+   * blackline whose clean draft is unclear is left out, as everywhere else. `near` are the data room's folders a level
+   * or two down, when the name matches none, so that the model can name one that is there.
    */
   async function folderList(deals: string[], said: string, what: string): Promise<{ folders: string[]; docs: { dealId: string; rec: DocRecord }[]; near: string[] }> {
     const q = words(what);
@@ -940,11 +938,7 @@ export function nodeAi(o: AiOptions) {
       const core = await coreOf(dealId); const rank = new Map(core.map((id, i) => [id, i])); const s = scores(dealId, recs, q);
       const order = draftsInOrder(dealId, all, recs.map((r) => ({ r, n: s.get(r.docId) ?? 0, at: where(r) }))
         .sort((x, y) => y.n - x.n || (rank.get(x.r.docId) ?? Infinity) - (rank.get(y.r.docId) ?? Infinity) || (x.at < y.at ? -1 : x.at > y.at ? 1 : 0)).map((x) => x.r));
-      const list = order.slice(0, shortlist); const isCore = starred(core); let reply: { order?: unknown } | null = null;
-      try { reply = await askJson({ kind: 'priority', split: true, model: (await models()).fast, system: JSON_ONLY, prompt: `These are ${list.length < order.length ? `the ${list.length} likeliest of the ${order.length} files` : `the ${order.length} files`} in ${found.length > 1 ? 'the folders' : 'the folder'} ${found.join('; ')} of the data room of a project-finance deal, the likeliest first. Each is given by its full path from the root of the data room, with a short description where there is one, or else the words it uses most. The deal's core documents are marked *.\n${list.map((r, i) => `${i + 1}${isCore.has(r.docId) ? '*' : ''}: ${shown(r, 12, dealId)}`).join('\n')}\n\nThey are to be read a few at a time, one batch after another, for this:\n${what}\n\nIn what order should they be read? First the ones that matter most for this: the deal's core documents, signed and final documents, the latest drafts. Last the ones that bear on it least, such as earlier drafts. Judge from what is listed here alone.\nReply as JSON: {"order": [12, 3, 7]} with their numbers, the first to read first. You may leave out the ones that bear on it least.` }, ['order']); }
-      catch (e) { if (unreachable(e)) throw e; }                                  // the ranking stands
-      const first = reply && 'order' in reply ? listOf(reply.order).map(int).filter((n): n is number => n !== null && n >= 1 && n <= list.length).map((n) => list[n - 1]) : [];
-      per.push([...new Set([...first, ...order])].map((rec) => ({ dealId, rec })));
+      per.push(order.map((rec) => ({ dealId, rec })));                                         // the ranking is the order (#286)
     }
     // across deals, in turn: each deal's first, then each deal's second, and so on
     const docs: { dealId: string; rec: DocRecord }[] = []; for (let i = 0; per.some((p) => i < p.length); i++) for (const p of per) if (i < p.length) docs.push(p[i]);
