@@ -78,9 +78,10 @@ describe('the fields compared across two versions of a record', () => {
   it('compares findings, checklist items and deals in their own reading order', () => {
     const findingFields = ['title', 'body', 'status', 'workstream', 'note', 'reviewed', 'sources', 'updated', 'origin'];
     const finding = { title: 'Lender consent missing for the holdco loan', body: ['No consent in the data room'],
-      status: 'open', workstream: 'Financing' } as unknown as ConflictVersion['data'];
-    const deletedFinding = version('there', { ...finding!, status: 'closed' } as ConflictVersion['data'], true);
-    expect(comparedFields(clash([version('here', finding), deletedFinding]), findingFields))
+      status: 'open', workstream: 'Financing' };
+    const asData = (data: object) => data as unknown as ConflictVersion['data'];
+    const deletedFinding = version('there', asData({ ...finding, status: 'closed' }), true);
+    expect(comparedFields(clash([version('here', asData(finding)), deletedFinding]), findingFields))
       .toEqual({ shown: ['title', 'body'], statusOnLine: true });
 
     const item = (off: boolean) => ({ text: portfolioQuestions()[3], off }) as unknown as ConflictVersion['data'];
@@ -94,5 +95,19 @@ describe('the fields compared across two versions of a record', () => {
     const there = deal({ milestone: 'Closing', sector: 'Wind' });
     expect(comparedFields(clash([version('here', here), version('there', there)]), dealFields))
       .toEqual({ shown: ['group', 'sector', 'milestone'], statusOnLine: false });
+  });
+
+  it('compares two versions of a firm list by its items, and a deleted one by what it held', () => {
+    const items = portfolioQuestions().slice(0, 2000).map((text) => ({ text }));
+    const list = (extra: object) => ({ name: 'Solar', file: 'Solar checklist.xlsx', items, ...extra }) as
+      unknown as ConflictVersion['data'];
+    const reordered = list({ items: [...items].reverse() });
+    expect(comparedFields(clash([version('here', list({})), version('there', reordered)]), ['items', 'file']).shown)
+      .toEqual(['items']);
+    // an empty list holds no words, so only the deleted copy's items and file are shown
+    const emptied = version('here', list({ items: [], file: '' }));
+    expect(comparedFields(clash([emptied, version('there', list({}), true)]), ['items', 'file']).shown)
+      .toEqual(['items', 'file']);
+    expect(comparedFields(clash([emptied, version('there', null, true)]), ['items', 'file']).shown).toEqual([]);
   });
 });
