@@ -12,6 +12,7 @@ import { define, type Upsert, type AuditDraft } from '../command';
 import { Question, Finding, Tombstone, DealId, QuestionId, FindingId, QuestionStatus, isRealDate } from '../../domain/model';
 import { setResponse, setQuestionStatus, checkQuestion } from '../../domain/transitions';
 import { numbering } from './questions';
+import { matchExactly, withAccepted, AcceptedMatch } from './importMatching';
 import { sameText, sameWords, type ImportRow } from '../../domain/importExport';
 import { ok, fail, notFound, rejected } from '../../domain/result';
 import { dealQuestions, nextQuestionNumber } from '../state';
@@ -29,7 +30,7 @@ export const ImportRowSchema = z.object({ line: z.number().int().positive().opti
 
 export const ImportQuestions = define({
   name: 'ImportQuestions',
-  input: z.object({ dealId: DealId, mode: z.enum(['merge', 'append']), rows: z.array(ImportRowSchema).min(1, 'Nothing to import'), /** the person checked "Mark questions that have a response as Answered" */ answerResponded: z.boolean().default(false) }),
+  input: z.object({ dealId: DealId, mode: z.enum(['merge', 'append']), rows: z.array(ImportRowSchema).min(1, 'Nothing to import'), /** the person checked "Mark questions that have a response as Answered" */ answerResponded: z.boolean().default(false), /** suggestions the person accepted, for rows that matched nothing */ accepted: z.array(AcceptedMatch).default([]) }),
   targets: (s, i) => [...dealQuestions(s, i.dealId).map((q) => q.id), ...Object.values(s.tombstones).filter((t) => t.kind === 'question' && t.dealId === i.dealId).map((t) => t.id), numbering(i.dealId)],
   plan(state, input, ctx) {
     const d = state.deals[input.dealId];
@@ -54,7 +55,9 @@ export const ImportQuestions = define({
     // exact same text; failing that, the one with the exact same text alone. A row that matches neither is a new question.
     // No fuzzy matching: nothing is matched by similar words. A live question is taken before a deleted one.
     const pools = [[...originals.values()], [...gone.values()]];
-    const matchOf = input.mode === 'merge' ? matchExactly(input.rows, pools) : new Map<number, string>();
+    const known = new Set(pools.flat().map((q) => q.id));
+    const exact = input.mode === 'merge' ? matchExactly(input.rows, pools) : new Map<number, string>();
+    const matchOf = withAccepted(exact, input.rows, input.mode === 'merge' ? input.accepted : [], known);
     // A new question's id is made from the deal, the file's own number, the party and the wording, so the same list imported
     // on two PCs before they meet makes the same records, and the change files hold one of each. The id is fixed at
     // creation: an edit or renumbering later never changes it. The k-th row of the file with the same four makes its own
@@ -164,36 +167,6 @@ export const ImportQuestions = define({
     });
   },
 });
-
-/**
- * Which question each row is, by row index: first the question with the row's number and exact text, then the one with
- * the exact text alone, each with the same sender (or one naming none). `pools` are searched in order (live, then deleted); a question is taken by one row only.
- */
-function matchExactly(rows: ImportRow[], pools: Question[][]): Map<number, string> {
-  const matched = new Map<number, string>(); const taken = new Set<string>();
-  // who sent the question is part of the match, as written (spaces around a name are not part of it). A row or a
-  // question that names no sender does not conflict with one that does, but the same sender is always tried first.
-  const sender = (name: string) => name.trim();
-  const find = (row: ImportRow, sameNumber: boolean, sameSender: boolean) => {
-    for (const pool of pools) {
-      const hit = pool.find((q) => !taken.has(q.id) && q.text === row.text && (!sameNumber || q.n === row.n)
-        && (sameSender ? sender(q.askedBy) === sender(row.askedBy)
-          : !sender(q.askedBy) || !sender(row.askedBy)));
-      if (hit) return hit;
-    }
-    return undefined;
-  };
-  for (const sameNumber of [true, false]) {
-    for (const sameSender of [true, false]) {
-      for (const [idx, row] of rows.entries()) {
-        if (matched.has(idx) || (sameNumber && row.n == null)) continue;
-        const hit = find(row, sameNumber, sameSender);
-        if (hit) { matched.set(idx, hit.id); taken.add(hit.id); }
-      }
-    }
-  }
-  return matched;
-}
 
 export const RevertImport = define({
   name: 'RevertImport',

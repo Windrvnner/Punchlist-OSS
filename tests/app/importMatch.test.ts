@@ -89,7 +89,7 @@ describe('a row that matches a deleted question', () => {
     await store.dispatch(EditQuestionField, { dealId, questionId: gone.id, field: 'workstream', value: 'Technical' });
     await store.dispatch(DeleteQuestion, { dealId, questionId: gone.id });
     const rows = rowsFrom('No.,Question,Response\n7,Who is the EPC contractor?,Fabrikam\n');
-    expect(previewImport(store, dealId, 'merge', rows)).toEqual({ ok: true, value: { created: 0, updated: 0, restored: 1, changes: [] } });
+    expect(previewImport(store, dealId, 'merge', rows)).toEqual({ ok: true, value: { created: 0, updated: 0, restored: 1, changes: [], suggestions: [] } });
     const r = await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows }); if (!r.ok) throw new Error(r.error.message);
     expect(store.get().ui.toasts.at(-1)?.text).toBe('Imported · 0 new · 0 updated · 1 restored');
     expect(store.get().questions[gone.id]).toMatchObject({
@@ -122,3 +122,35 @@ describe('a row that matches a deleted question', () => {
 });
 
 // Deals run to 2,000 questions. Importing the log of a deal that size, half of it changed, is quick.
+
+describe('a row that matches nothing exactly', () => {
+  const setup = async () => {
+    const { store } = make(); const dealId = await deal(store);
+    await store.dispatch(CreateQuestion, { dealId, text: 'Who is the EPC contractor?' });
+    const rows = rowsFrom('No.,Question,Response\n9,who is the EPC  Contractor,Fabrikam\n');
+    return { store, dealId, rows, id: dealQuestions(store.get(), dealId)[0].id };
+  };
+  it('is suggested the question it could be, and is added as a new question unless the person accepts', async () => {
+    const { store, dealId, rows, id } = await setup();
+    const preview = previewImport(store, dealId, 'merge', rows);
+    expect(preview.ok && preview.value.suggestions).toEqual([{ line: 2, text: 'who is the EPC  Contractor', questionId: id, n: 1, questionText: 'Who is the EPC contractor?' }]);
+    expect(preview.ok && preview.value.created).toBe(1);
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows })).ok).toBe(true);
+    expect(dealQuestions(store.get(), dealId)).toHaveLength(2);
+  });
+  it('slots in as the suggested question once accepted, and the suggestion is gone', async () => {
+    const { store, dealId, rows, id } = await setup();
+    const accepted = [{ line: 2, questionId: id }];
+    const preview = previewImport(store, dealId, 'merge', rows, false, accepted);
+    expect(preview.ok && [preview.value.suggestions, preview.value.created, preview.value.updated]).toEqual([[], 0, 1]);
+    expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows, accepted })).ok).toBe(true);
+    expect(dealQuestions(store.get(), dealId).map((q) => `${q.text}|${q.response}`)).toEqual(['who is the EPC  Contractor|Fabrikam']);
+  });
+  it('is not suggested another sender\'s question, nor anything by number or other words', async () => {
+    const { store, dealId } = await setup();
+    await store.dispatch(EditQuestionField, { dealId, questionId: dealQuestions(store.get(), dealId)[0].id, field: 'askedBy', value: 'Lender A' });
+    const other = rowsFrom('No.,Question,Submitted by\n1,who is the epc contractor,Lender B\n1,Who is the contractor for the EPC?,Lender A\n');
+    const preview = previewImport(store, dealId, 'merge', other);
+    expect(preview.ok && preview.value.suggestions).toEqual([]);
+  });
+});
