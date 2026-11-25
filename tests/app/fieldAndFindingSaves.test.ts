@@ -293,3 +293,12 @@ it('keeps unsaved typing and handed text when the typing’s save is refused as 
   expect(save.view.external).toBe(true);
   expect(unsavedFields.get(key)?.text).toBe(`${firstEdit}\n\n${handed}`);
 });
+
+it('marks handed text changed elsewhere when the record itself has not changed (#939)', async () => {
+  const { save, type, key, unsavedFields, text } = await field();
+  type(firstEdit);
+  save.takeHanded(handed);
+  expect(text()).toBe(`${firstEdit}\n\n${handed}`);
+  expect(save.view.external).toBe(true);
+  expect(unsavedFields.get(key)).toEqual({ text: `${firstEdit}\n\n${handed}`, base: original, rev: -1 });
+});

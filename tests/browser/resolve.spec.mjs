@@ -92,7 +92,7 @@ async function keepTypedMergeResolvedElsewhere(page, dealId, tag) {
   await showsTyped();
   const shown = await box();
   say(tag + 'a-typed-merge-resolved-elsewhere-waits-in-the-response-box',
-    shown.text === TYPED && /^Changed elsewhere/.test(shown.note) && !!tip && !again, JSON.stringify({ shown, tip }));
+    shown.text === TYPED && /^Changed elsewhere/.test(shown.note) && !!tip && !again, JSON.stringify({ shown, tip, again: !!again }));
 
   await page.reload(); await page.waitForSelector('.dtabs', { state: 'attached' });
   await page.evaluate((id) => store.ui({ selectedQuestion: id }), questionId);
