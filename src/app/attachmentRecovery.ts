@@ -42,7 +42,8 @@ export async function recoveredAttachmentSource(store: Store, copy: string): Pro
   const deleted = await repo.list('tombstone', '_');
   if (!deleted.ok) return { state: 'unknown' };
   const installs = [sync.self.id, ...sync.peers.map(({ id }) => id)];
-  const source = deleted.value.find(({ id }) => id.startsWith('d_') && installs.some((pc) => recoveredId(id, pc) === copy));
+  const isSource = (id: string) => id.startsWith('d_') && installs.some((pc) => recoveredId(id, pc) === copy);
+  const source = deleted.value.find(({ id }) => isSource(id));
   const id = source?.id;
   return id ? { state: 'found', id } : { state: 'none' };
 }
