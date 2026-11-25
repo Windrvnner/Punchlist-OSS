@@ -2,8 +2,8 @@
  * The checklist import kept on this PC as it changes, so the × or Escape, Back to the lists, a reload or a
  * restart loses nothing, the model's reading and review included: opening the import again picks it up where it was
  * left. A paste alone is kept as typed. "change" keeps the list too until another is read in its place; only "start
- * over", which asks first, or bringing the list in lets it go. While it is brought in nothing is written: a failure
- * keeps it again. The storage itself is in app/keptImports.ts.
+ * over", which asks first, or bringing the list in lets it go. While it is brought in nothing is written, and it is
+ * let go only once the list is written (#931). The storage itself is in app/keptImports.ts.
  */
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { ImportTable } from '../app/transfer';
@@ -73,7 +73,7 @@ function isChecklistKept(value: unknown): value is ChecklistKept {
  * place of the list "Replace…" names, nor the other way round. `fresh` opens it fresh past a kept import it could not
  * show. `setAside` is true while a kept import that was not shown (`fresh`, or one that fails its shape check) is still
  * left as it is: nothing new has been typed or read in its place yet (#381). `holding` stops writes while the list is
- * brought in. The app restores the kept import if the submission fails.
+ * brought in. The app lets the kept import go once the list is written.
  */
 export function useKeeper(layer: Layer | undefined, name: string | undefined, fresh: boolean) {
   const key = importKey.checklist(layer, name);
