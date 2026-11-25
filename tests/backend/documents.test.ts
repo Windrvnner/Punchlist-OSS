@@ -251,7 +251,7 @@ describe('documents on real folders', () => {
     expect(a.docs.records('d1').map((r) => r.name)).not.toContain('Locked.docx'); expect(a.docs.records('d1').length).toBe(5); expect(a.work()).toEqual([]);
     // with no converter on this PC, a Word file is one of those; PDFs and spreadsheets are not
     const b = pc(tmp(), 'bare', new StandInService(), { convert: null, folders: [vdr] }); const q = await indexAll(b, vdr);
-    expect(q.log[1]).toBe('2 files could not be turned into pages and were not indexed: 01 Legal/Broken.pdf, 01 Legal/Locked.docx'); expect(b.docs.records('d1').map((r) => r.name).sort()).toEqual(['Credit Agreement.pdf', 'Energy Yield Report.pdf', 'Model v12.xlsx', 'Notes.docx', 'Shareholders Agreement.pdf']);   // a Word file is indexed from its text with no converter; only showing it needs one
+    expect(q.log).toContain('2 files could not be turned into pages and were not indexed: 01 Legal/Broken.pdf, 01 Legal/Locked.docx'); expect(q.log).toContain('1 file could not be read: 03 Financial/Model v12.xlsx');   // no converter, so the workbook's words cannot be read: it is listed by name and read again later; expect(b.docs.records('d1').map((r) => r.name).sort()).toEqual(['Credit Agreement.pdf', 'Energy Yield Report.pdf', 'Model v12.xlsx', 'Notes.docx', 'Shareholders Agreement.pdf']);   // a Word file is indexed from its text with no converter; only showing it needs one
   });
 
   it.skipIf(!hasOffice)(

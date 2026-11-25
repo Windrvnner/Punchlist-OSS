@@ -587,9 +587,9 @@ export function nodeDocuments(o: DocumentsOptions) {
               catch { stuck = true; unpagedHere.set(f.abs, { size: f.size, mtimeMs: f.mtimeMs }); }
               if (stuck && pages === undefined) { asPages = false; unpaged++; skipped.unpaged.push(f.rel); }      // pages it already had stay; only its words are missing
             } else if (!paged(name) && !failed && (words === undefined || unindexed)) {
-              // a spreadsheet that cannot be read is not recorded as having no text: it is read again when it changes or on the next start (#sheet-retry)
+              // a spreadsheet that cannot be read is listed without words, not as having none: it is read again when it changes or on the next start
               words = await sheetWords(src, dealId, docId) ?? words;
-              if (words === undefined) { asPages = false; unread++; skipped.unread.push(f.rel); unpagedHere.set(f.abs, { size: f.size, mtimeMs: f.mtimeMs }); }
+              if (words === undefined) { unread++; skipped.unread.push(f.rel); unpagedHere.set(f.abs, { size: f.size, mtimeMs: f.mtimeMs }); }   // still listed, by its name
             }
             workMs += Date.now() - t0;
             if (asPages) {
