@@ -7,12 +7,14 @@ import { RecordQaLogExport, RestoreQaVersion } from '../../src/app/commands/qaLo
 import { SetResponse } from '../../src/app/commands/questions';
 import { registry } from '../../src/app/commands/undo';
 import {
-  editResponseMerge, hasLogVersion, keepResponseVersion, lastQuestionEditor, requestQuestionDraft,
+  editResponseMerge, hasLogVersion, keepResolvedMerges, keepResponseVersion, lastQuestionEditor, requestQuestionDraft,
   responseMergeView, selectResponseMerge, setResponseMergeSide, useQuestionDraft, watchResponseMerges,
 } from '../../src/app/drafting';
 import { initializeKeptText, saveKeptDrafts } from '../../src/app/keptText';
 import { keepImportedLog } from '../../src/app/qaLog';
 import { dealQuestions } from '../../src/app/state';
+import type { Store } from '../../src/app/store';
+import type { Question } from '../../src/domain/model';
 import { nodeAi } from '../../src/backend/ai';
 import { StandInService } from '../../src/backend/service';
 import { StoreKeeper } from '../../src/backend/storeKeeper';
@@ -25,7 +27,7 @@ import { recoveryApp, recoveryDeal, type RecoveryApp } from './recoveryKit';
 
 const storage = new MemoryLocal();
 initializeKeptText(storage);
-const { unsavedFields } = await import('../../src/app/fieldDrafts');
+const { handFieldText, typedResponse, unsavedFields } = await import('../../src/app/fieldDrafts');
 const apps: RecoveryApp[] = [];
 const QUESTIONS = portfolioQuestions();
 const COLUMNS = ['Number', 'Question', 'Response', 'Submitted by'];
@@ -121,10 +123,12 @@ const APP_RESPONSE = 'The operating permits are indexed in the Compliance folder
 const LOG_RESPONSE = 'The transmission permit was renewed in November.';
 const MERGED = `${APP_RESPONSE} ${LOG_RESPONSE}`;
 
-async function mergeFixture() {
+/** `others`: more questions in two versions, by index, beside question 165 */
+async function mergeFixture(others: number[] = []) {
   const app = await fixture();
   const { store, repo, dealId, rows, question } = app;
   const q = question(165);
+  const more = others.map((index) => [question(index).id, { response: `${LOG_RESPONSE} (${index})` }]);
   expect(await store.dispatch(SetResponse, {
     dealId, questionId: q.id, response: APP_RESPONSE,
   }, { quiet: true })).toMatchObject({ ok: true });
@@ -135,13 +139,13 @@ async function mergeFixture() {
     dealId, name: LOG_NAME.replace(/\.csv$/, ''),
     last: {
       archive: 'Previous lender Q&A.csv', at: LOG_DATE, by: 'Deal team', sent: {},
-      kept: { [q.id]: { response: LOG_RESPONSE, priority: 'High' } },
+      kept: { ...Object.fromEntries(more), [q.id]: { response: LOG_RESPONSE, priority: 'High' } },
     },
   }, { quiet: true })).toMatchObject({ ok: true });
   expect(hasLogVersion(store.get(), question(165))).toBe(true);
   const model = vi.fn<NonNullable<AiService['merge']>>().mockResolvedValue(ok({ text: MERGED }));
   store.services.ai.merge = model;
-  return { store, repo, dealId, model, q: question(165) };
+  return { store, repo, dealId, model, question, q: question(165) };
 }
 
 it('drafts the displayed versions once, keeps edits and field choices, and preserves the choice’s Undo', async () => {
@@ -244,4 +248,113 @@ it('quietly retries a transient transport failure from one merge selection', asy
     continueRetry();
     stop();
   }
+});
+
+const CONFLICTS = Array.from({ length: 111 }, (_, index) => index * 2);   // with question 165, 112 in two versions
+const RESOLVED_AT = '2026-11-21T09:30:00.000Z';
+
+/** Another PC resolves a question by taking the log's version. */
+async function resolveElsewhere(repo: RecoveryApp['repo'], question: Question, response: string) {
+  const coworker = { ...ELSEWHERE, at: RESOLVED_AT };
+  const pick = { of: LOG_DATE, sent: { response, ...(response === LOG_RESPONSE ? { priority: 'High' } : {}) } };
+  const priority = response === LOG_RESPONSE ? 'High' : question.priority;
+  repo.peer.change('question', question.id, {
+    ...question, response, priority, logPick: pick, updatedAt: coworker.at,
+  }, coworker);
+  await repo.sync();
+}
+
+it('keeps a hand-edited merge in the response box when another PC resolves its question (#939)', async () => {
+  const { store, repo, q, question } = await mergeFixture(CONFLICTS);
+  const stop = keepResolvedMerges(store, handFieldText);
+  try {
+    selectResponseMerge(store, q, LOG_RESPONSE);
+    await vi.waitFor(() => expect(responseMergeView(q.id).draft?.text).toBe(MERGED));
+    editResponseMerge(q.id, TYPED);
+    for (const index of CONFLICTS.slice(0, 40)) editResponseMerge(question(index).id, `Typed for ${index}`);
+    await resolveElsewhere(repo, q, LOG_RESPONSE);
+    await vi.waitFor(() => expect(store.get().questions[q.id].response).toBe(LOG_RESPONSE));
+
+    const resolved = store.get().questions[q.id];
+    expect(hasLogVersion(store.get(), resolved)).toBe(false);
+    expect(unsavedFields.get(`${q.id}:response`)).toEqual({ text: TYPED, base: LOG_RESPONSE, rev: -1 });
+    expect(typedResponse(resolved)).toBe(true);
+    expect(responseMergeView(q.id)).toMatchObject({ hasDraft: false, fields: {} });
+    // the other 111 questions are still in two versions, so their merges stay where they are
+    expect(CONFLICTS.filter((index) => responseMergeView(question(index).id).hasDraft)).toHaveLength(40);
+    expect(CONFLICTS.some((index) => unsavedFields.has(`${question(index).id}:response`))).toBe(false);
+    saveKeptDrafts();
+    const saved = storage.read(KEPT_TEXT_KEY) as Record<string, [string, unknown][]>;
+    expect(saved['edit-field']).toEqual([[`${q.id}:response`, { text: TYPED, base: LOG_RESPONSE, rev: -1 }]]);
+    expect(saved['qa-merge'].some(([id]) => id === q.id)).toBe(false);
+  } finally {
+    stop();
+  }
+});
+
+it('keeps unsaved response text first and adds the merge after it when its question is resolved elsewhere', async () => {
+  const { store, repo, q } = await mergeFixture();
+  const stop = keepResolvedMerges(store, handFieldText);
+  try {
+    const unsaved = { text: 'Seller counsel confirmed the permit list.', base: APP_RESPONSE, rev: q.rev };
+    unsavedFields.set(`${q.id}:response`, unsaved);
+    editResponseMerge(q.id, TYPED);
+    await resolveElsewhere(repo, q, APP_RESPONSE);
+    await vi.waitFor(() => expect(hasLogVersion(store.get(), store.get().questions[q.id])).toBe(false));
+    expect(unsavedFields.get(`${q.id}:response`))
+      .toEqual({ text: `${unsaved.text}\n\n${TYPED}`, base: APP_RESPONSE, rev: -1 });
+    expect(responseMergeView(q.id).hasDraft).toBe(false);
+  } finally {
+    stop();
+  }
+});
+
+it('clears an untouched AI merge and a merge matching the response when resolved elsewhere', async () => {
+  const { store, repo, q, question } = await mergeFixture([12]);
+  const other = question(12);
+  const stop = keepResolvedMerges(store, handFieldText);
+  try {
+    selectResponseMerge(store, q, LOG_RESPONSE);
+    await vi.waitFor(() => expect(responseMergeView(q.id).draft?.text).toBe(MERGED));
+    editResponseMerge(other.id, LOG_RESPONSE);
+    await resolveElsewhere(repo, q, LOG_RESPONSE);
+    await resolveElsewhere(repo, other, LOG_RESPONSE);
+    await vi.waitFor(() => expect(responseMergeView(other.id).hasDraft).toBe(false));
+    expect(responseMergeView(q.id).hasDraft).toBe(false);
+    expect(unsavedFields.size).toBe(0);
+  } finally {
+    stop();
+  }
+});
+
+it('drops a hand-edited merge when this PC keeps another version, and keeps it when that choice is refused', async () => {
+  const { store, repo, dealId, q, question } = await mergeFixture([12]);
+  const stop = keepResolvedMerges(store, handFieldText);
+  try {
+    editResponseMerge(q.id, TYPED);
+    const kept = await keepResponseVersion(store, dealId, q.id, 'app', { merged: TYPED, fields: {}, seen: LOG_DATE });
+    expect(kept).toMatchObject({ ok: true });
+    expect(responseMergeView(q.id).hasDraft).toBe(false);
+    expect(unsavedFields.size).toBe(0);
+
+    const other = question(12);
+    editResponseMerge(other.id, TYPED);
+    await resolveElsewhere(repo, other, `${LOG_RESPONSE} (12)`);
+    await vi.waitFor(() => expect(unsavedFields.has(`${other.id}:response`)).toBe(true));
+    const refused = await keepResponseVersion(store, dealId, other.id, 'merged', {
+      merged: TYPED, fields: {}, seen: LOG_DATE,
+    });
+    expect(refused.ok).toBe(false);
+    expect(unsavedFields.get(`${other.id}:response`)?.text).toBe(TYPED);
+  } finally {
+    stop();
+  }
+});
+
+it('leaves a kept merge alone until its question and deal are loaded', () => {
+  const store = { get: () => ({ questions: {}, deals: {} }), subscribe: () => () => {} } as unknown as Store;
+  editResponseMerge('q_not_loaded', TYPED);
+  const stop = keepResolvedMerges(store, handFieldText);
+  stop();
+  expect(responseMergeView('q_not_loaded').draft).toEqual({ text: TYPED, ai: '' });
 });
