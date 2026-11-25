@@ -76,7 +76,7 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   application shows it: never change, repair, normalize, or reinterpret content handed to the app, and never guess.
   Use plain code before a model call. Build nothing beyond what an issue or a decision in docs/decisions.md asks
   for: no speculative edge cases, options, or fallbacks. Example: matching imported rows to existing questions is a
-  lookup on sender plus text, preferring the same number but not requiring it; every row left over is unmatched.
+  lookup on number plus text, then on text alone; every row left over is unmatched.
   Each score, threshold, fallback, or text normalization needs the decision that asks for it, and `npm run check`
   lists the added lines that name a guess (`scripts/check-readability.mjs`). It does not fail on them.
 - **Requirements trace to a recorded decision.** Build only what traces to a decision in docs/decisions.md or to
@@ -136,7 +136,9 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
 
 ## Product rules
 
-- Lost work comes first. Anything that can lose what a person typed or chose is fixed before anything else.
+- Lost work comes first. Anything that can lose what a person typed or chose is fixed before anything else. So is
+  anything the app silently drops, skips, caps, truncates, alters, or marks unreadable in what it reads, and any
+  failed read saved as "no text".
 - Only a person changes a record's state; the app and the model propose. Big actions, including deletes, ask first in the app's own confirmation dialog and keep their **Undo**. Deleting a deal asks twice and has no **Undo**.
 - Screens carry no explainer or helper text; explanations go in tooltips. Use en-US throughout.
 - The look follows Perplexity, Harvey, and Apple, in glass: no generic AI look and no thin full-height lines down a left edge. Match the existing screens and never regress them.
@@ -145,8 +147,8 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
 ## How decisions are made
 
 - Read the README and `docs/decisions.md` before changing anything. Check `docs/decisions.md`, `docs/architecture.md`, and the code before proposing anything, and say what already exists. Follow a settled decision and say where it was decided. Still ask first about a major design decision, even when it looks settled.
-- Nothing is reported, merged, or called done unless it is verified in the code and by running it. A finding that is
-  unverified or inferred is verified, or fixed, before it is reported.
+- Nothing is reported, merged, or called done unless it is verified in the code and, where it runs, by running it.
+  A finding that is unverified or inferred is verified, or fixed, before it is reported.
 - Check claims before making them. File a bug only once it is reproduced on the current build. Close a UI bug whose element no longer exists as not planned, with the label `no longer applies`.
 
 ## Documentation and decisions

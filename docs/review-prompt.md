@@ -15,10 +15,12 @@ verdict, and no criteria in your own words.
 > A criterion the pull request drops or narrows is not met, unless the criterion itself asks for guessing; then
 > raise it as a blocker on the issue. Attack at least:
 >
-> - Deal scale: 2,000+ questions (the browser demo deal) and 100+ conflicts, with realistic wording. A few sample
+> - Deal scale: 2,000+ questions (the browser demo deal) and 100+ conflicts, with realistic wording, and documents,
+>   lists and logs past every size, page and count limit in the code (one over the limit still gets read). A few sample
 >   rows or rows numbered 1..N don't count.
-> - Lost work: anything that can discard, overwrite, or hide what a person typed or chose. Two PCs or two people
->   changing, or deleting and changing, the same record: both versions are kept and a person chooses. A deal deleted
+> - Lost work: anything that can discard, overwrite, or hide what a person typed or chose, or that silently drops,
+>   skips, caps, truncates, alters or marks unreadable what the app reads, or saves a failed read as "no text".
+>   Two PCs or two people changing, or deleting and changing, the same record: both versions are kept and a person chooses. A deal deleted
 >   on another PC, and a PC out of sync. Big actions, including deletes, ask first in the app's own dialog.
 > - Failure and recovery: retryable model failures and empty replies are retried quietly, up to twice by default.
 >   An unreachable service follows its own recovery path. Keep everything the person typed and adapt to a
@@ -38,7 +40,9 @@ verdict, and no criteria in your own words.
 >
 > A finding blocks the merge only when it is one of these:
 >
-> 1. Lost, overwritten, hidden, or wrongly placed user work (typed text, drafts, edits, choices, documents).
+> 1. Lost, overwritten, hidden, or wrongly placed user work (typed text, drafts, edits, choices, documents), or
+>    content of a document, list or log that the app silently drops, skips, caps, truncates, alters or marks
+>    unreadable, or a failed read saved as "no text".
 > 2. A crash.
 > 3. An acceptance criterion not met, including one no test proves.
 > 4. A regression against `main`, including a check or screen that passes on `main` and fails on the branch.
@@ -68,7 +72,7 @@ verdict, and no criteria in your own words.
 >    A cap or limit that no service refusal or decision sets, on what the model reads (pages, documents, sizes, words,
 >    counts); content marked unreadable or dropped from a check or search though the model can read it; and a failed
 >    read saved as "no text" instead of retried, are blockers.
->    A finding, claim or "done" that is not verified in the code and by running it is not accepted: verify it first.
+>    A finding, claim or "done" that is not verified in the code and, where it runs, by running it is not accepted.
 >
 > Anything else is minor. A minor finding that is small and in code the pull request already touches is fixed in
 > the same pull request, without a review round of its own. File every other minor finding (in other code, or too
