@@ -1,7 +1,7 @@
 // Importing an issues list, at deal scale: a 164-point list into a deal with 126 findings. Each point becomes a
 // finding unless it joins one: 23 join a finding already raised and 4 join an earlier point's. Every finding a point is on
 // is marked with it. Undo takes the import back exactly: its findings go and only its marks come off.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Store } from '../../src/app/store';
 import { memRepo, disk } from '../adapters/memRepo';
 import { mockAi, mockDocuments, mockSession } from '../../src/adapters/mocks';
@@ -13,6 +13,8 @@ import { registry, Undo } from '../../src/app/commands/undo';
 import { csvCodec } from '../../src/adapters/spreadsheet';
 import { MemoryLocal } from '../../src/adapters/local';
 import { dealFindings } from '../../src/app/state';
+import { deletedIssuesLists, issuesListRemoval } from '../../src/app/deletedView';
+import { fail } from '../../src/domain/result';
 import { issuesListClock, planIssuesListSeed } from './issuesListKit';
 
 const COMMANDS = [CreateDeal, CreateFinding, DeleteFinding, RestoreFinding, EditFinding, SetFindingStatus, CreateQuestion, ImportIssuesList, RevertIssuesList, RemoveIssuesList, RestoreIssuesList];
@@ -22,6 +24,54 @@ let seq = 0; const ids = { next: (p: string) => `${p}_01HZZZZZZZZZZZZZZZZ${Strin
 const LIST = 'Credit Agreement Issues List – Sponsor counsel (Nov 14).pdf'; const DOC = 'doc_sponsorlist14';
 const findingInput = (dealId: string, index: number) => ({
   dealId, title: `Finding ${index}`, workstream: 'Legal', body: [`What finding ${index} says.`],
+});
+
+const addMark = (findingId: string, text: string, n: string) => ({
+  n, text, title: text, workstream: 'Legal', join: findingId,
+});
+
+function approvedRemoval(store: Store, dealId: string) {
+  const list = deletedIssuesLists(store.get(), dealId).find(({ doc }) => doc === DOC)!;
+  return issuesListRemoval(list, dealId).input;
+}
+
+describe('confirmed issues list removal', () => {
+  it('refuses a queued removal when another mark has joined the same finding', async () => {
+    const { store, dealId, had } = await dealWith(1);
+    const first = addMark(had[0], 'Distributions are permitted before the debt service test.', '1');
+    const second = addMark(had[0], 'The debt service test does not define adjusted cash flow.', '2');
+    const list = { dealId, doc: DOC, list: LIST };
+    expect((await store.dispatch(ImportIssuesList, { ...list, points: [first] })).ok).toBe(true);
+    const approval = approvedRemoval(store, dealId);
+    const adding = store.dispatch(ImportIssuesList, { ...list, points: [second] });
+    const removing = store.dispatch(RemoveIssuesList, approval);
+    expect((await adding).ok).toBe(true);
+    expect(await removing).toMatchObject({ ok: false, error: { kind: 'rejected' } });
+    expect(store.get().findings[had[0]].onLists?.map(({ text }) => text)).toEqual([first.text, second.text]);
+    expect((await store.dispatch(RemoveIssuesList, approvedRemoval(store, dealId))).ok).toBe(true);
+    expect(store.get().findings[had[0]].onLists).toBeUndefined();
+  });
+
+  it.each([true, false])('checks a failed removal from the journal again (has original approval: %s)', async (confirmed) => {
+    const { store, dealId, had } = await dealWith(2);
+    const first = addMark(had[0], 'The reserve replenishment period is not defined.', '1');
+    const second = addMark(had[1], 'The hedge covenant lacks a minimum term.', '2');
+    const list = { dealId, doc: DOC, list: LIST };
+    expect((await store.dispatch(ImportIssuesList, { ...list, points: [first] })).ok).toBe(true);
+    const approval = confirmed ? approvedRemoval(store, dealId) : { dealId, doc: DOC };
+    const repo = store.services.repo;
+    const transact = repo.transaction.bind(repo);
+    const hold = vi.spyOn(repo, 'transaction').mockImplementation((tx) => tx.writes.some((w) => w.kind === 'finding')
+      ? Promise.resolve(fail({ kind: 'failed', message: 'Write refused' })) : transact(tx));
+    expect(await store.dispatch(RemoveIssuesList, approval)).toMatchObject({ ok: false });
+    hold.mockRestore();
+    const failed = Object.values(store.get().ops)
+      .find((op) => op.command === 'RemoveIssuesList' && op.state === 'failed')!;
+    expect(failed.input).toEqual(approval);
+    expect((await store.dispatch(ImportIssuesList, { ...list, points: [second] })).ok).toBe(true);
+    expect(await store.retryOp(failed.id)).toMatchObject({ ok: false, error: { kind: 'rejected' } });
+    expect(had.map((id) => store.get().findings[id].onLists?.[0].text)).toEqual([first.text, second.text]);
+  });
 });
 const findingIds = (store: Store, dealId: string) =>
   dealFindings(store.get(), dealId).map((finding) => finding.id).sort();
