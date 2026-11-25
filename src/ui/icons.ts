@@ -24,4 +24,3 @@ export function Icon({ name, size = 16, sw = 1.75 }: { name: string; size?: numb
   const d = P[name] ?? '';
   return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': sw, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', dangerouslySetInnerHTML: { __html: d } });
 }
-export const iconNames = Object.keys(P);
