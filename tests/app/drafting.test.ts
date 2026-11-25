@@ -154,7 +154,7 @@ it('drafts the displayed versions once, keeps edits and field choices, and prese
     dealId, question: q.text, app: APP_RESPONSE, log: LOG_RESPONSE,
   });
   editResponseMerge(q.id, TYPED);
-  setResponseMergeSide(q.id, 'priority', 'log');
+  const fields = setResponseMergeSide(q.id, {}, 'priority', 'log');
   saveKeptDrafts();
   expect(storage.read(KEPT_TEXT_KEY)).toMatchObject({
     'qa-merge': [[q.id, { text: TYPED, ai: MERGED }]],
@@ -163,10 +163,12 @@ it('drafts the displayed versions once, keeps edits and field choices, and prese
   delete store.services.ai.merge;
   expect(selectResponseMerge(store, q, LOG_RESPONSE)).toEqual({ text: TYPED, busy: false });
   expect(selectResponseMerge(store, q, LOG_RESPONSE, true)).toBeUndefined();
-  const stale = await keepResponseVersion(store, dealId, q.id, 'merged', TYPED, '2026-11-20T10:00:00.000Z');
+  const stale = await keepResponseVersion(store, dealId, q.id, 'merged', {
+    merged: TYPED, fields, seen: '2026-11-20T10:00:00.000Z',
+  });
   expect(stale).toMatchObject({ ok: false, error: { kind: 'rejected' } });
   expect(responseMergeView(q.id)).toMatchObject({ draft: { text: TYPED }, fields: { priority: 'log' } });
-  const used = await keepResponseVersion(store, dealId, q.id, 'merged', TYPED, LOG_DATE);
+  const used = await keepResponseVersion(store, dealId, q.id, 'merged', { merged: TYPED, fields, seen: LOG_DATE });
   if (!used.ok) throw new Error(used.error.message);
   expect(store.get().questions[q.id])
     .toMatchObject({ response: TYPED, priority: 'High', provenance: { origin: 'human' } });

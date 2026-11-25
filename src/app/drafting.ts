@@ -161,10 +161,11 @@ export function editResponseMerge(questionId: string, text: string) {
   drafts.set(questionId, { text, ai: drafts.get(questionId)?.ai ?? '' });
 }
 
-export function setResponseMergeSide(questionId: string, field: string, side: MergeSide) {
-  const sides = mergeSides();
-  sides.set(questionId, { ...sides.get(questionId), [field]: side });
-  return sides.get(questionId)!;
+/** The open dialog's choices can outlive the kept copy after a peer resolves the question. */
+export function setResponseMergeSide(questionId: string, shown: MergeFields, field: string, side: MergeSide) {
+  const fields = { ...shown, [field]: side };
+  mergeSides().set(questionId, fields);
+  return fields;
 }
 
 export function watchResponseMerges(listener: (questionId: string, error?: string) => void) {
@@ -220,12 +221,14 @@ export function forgetResolvedResponseMerge(state: State, questionId: string) {
 }
 
 export async function keepResponseVersion(
-  store: Store, dealId: string, questionId: string, pick: VersionPick, merged: string, seen?: string,
+  store: Store, dealId: string, questionId: string, pick: VersionPick,
+  shown: { merged: string; fields: MergeFields; seen?: string },
 ) {
   const merge = pick === 'merged';
+  const { merged, fields, seen } = shown;
   if (merge && (merging.has(questionId) || !merged.trim())) return fail(rejected('There is no merged draft to keep'));
   const result = await chooseVersion(store, dealId, questionId, pick, {
-    merged, seen, drafted: mergeDrafts().get(questionId)?.ai, fields: merge ? mergeSides().get(questionId) : {},
+    merged, seen, drafted: mergeDrafts().get(questionId)?.ai, fields: merge ? fields : {},
   });
   if (result.ok) forgetResponseMerge(questionId);
   return result;

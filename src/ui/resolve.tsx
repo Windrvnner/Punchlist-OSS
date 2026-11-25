@@ -152,7 +152,9 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
   const keep = async () => {
     if (!q || !pick || busy || (pick === 'merged' && (merged.busy || !merged.text.trim()))) return;
     setBusy(true);
-    const r = await keepResponseVersion(store, dealId, q.id, pick, merged.text, seen.current);
+    const r = await keepResponseVersion(store, dealId, q.id, pick, {
+      merged: merged.text, fields, seen: seen.current,
+    });
     setBusy(false);
     if (!r.ok) { store.toast(r.error.message); return; }
     const did = pick === 'log' ? 'the log’s version taken' : pick === 'merged' ? 'merged response used' : 'the app’s version kept';
@@ -252,7 +254,7 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
             <span class="seg">{(['app', 'log'] as const).map((w) => <button type="button" key={w}
               class={side(k) === w ? 'on' : ''} aria-pressed={side(k) === w}
               title={w === 'app' ? 'As in the app' : 'As in the Q&A log'}
-              onClick={() => setFields(setResponseMergeSide(q.id, k, w))}>
+              onClick={() => setFields(setResponseMergeSide(q.id, fields, k, w))}>
               {(w === 'app' ? cellValue(q, k) : kept[k]) || '—'}</button>)}</span></div>)}</div>}
         </> : <p class="emptyline" id="rsv-done">Resolved</p>}
       </div>
