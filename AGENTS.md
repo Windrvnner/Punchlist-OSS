@@ -65,10 +65,11 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   - `npm run check` lists changed lines over 120 characters and new functions that are too complex, compared with the branch's merge base with `main` (`scripts/check-readability.mjs`). It does not fail on them.
 - **Reuse before building.** Rework an existing screen, dialog, component, or piece of code rather than building something new, and name what you reused.
 - **Keep it simple.** Use the plain approach and the tools already in the app. LibreOffice ships with the app, and spreadsheets go through it. Take dependencies only from npm or GitHub.
-- **Do the simplest thing that meets the ask.** Treat the file as the source of truth, as its own application shows it: never change, repair, normalize, or reinterpret content handed to the app, and never
-  guess. Use plain code before a model call. Build nothing beyond what an issue or a decision in docs/decisions.md
-  asks for: no speculative edge cases, options, or fallbacks. Example: matching imported rows to existing questions
-  is a lookup on number plus text, then on text alone; every row left over is unmatched.
+- **Do the simplest thing that meets the ask.** Treat the file as the source of truth, as its own
+  application shows it: never change, repair, normalize, or reinterpret content handed to the app, and never guess.
+  Use plain code before a model call. Build nothing beyond what an issue or a decision in docs/decisions.md asks
+  for: no speculative edge cases, options, or fallbacks. Example: matching imported rows to existing questions is a
+  lookup on number plus text, then on text alone; every row left over is unmatched.
 - **Send deal PDFs whole for AI analysis.** Send the original file so the model can read the pages directly.
   Word counts may be used to rank and pick documents. See docs/decisions.md for the planned handling of PDFs that
   the model service refuses as too large (#119) and the current checklist import behavior.
