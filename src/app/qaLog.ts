@@ -12,8 +12,9 @@ import { localYmd, type QaLog, type Question } from '../domain/model';
 import { dealQuestions, dealTwin, qaChanged, qaKept } from './state';
 import { logWrite, logHolds, matchRows, cellValue, readLogCells, holds } from '../domain/logWrite';
 import {
-  KeepQaLog, SetQaLogFolder, RecordQaLogExport, ChooseQaVersion, TakeFromQaLog, fileTaken, windowsPath as samePath,
+  KeepQaLog, SetQaLogFolder, RecordQaLogExport, ChooseQaVersion, TakeFromQaLog, fileTaken,
 } from './commands/qaLogs';
+import { windowsPath as samePath } from '../domain/sheets';
 import { questionsSheet, suggestMapping, type Mapping, type ImportField } from '../domain/importExport';
 import { ok, fail, invalid, rejected, type Failure, type Result } from '../domain/result';
 import { cell, type KeptAsk } from '../domain/keptMerge';
