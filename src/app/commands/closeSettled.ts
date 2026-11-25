@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { DealId, QuestionId } from '../../domain/model';
 import { fail, type Failure } from '../../domain/result';
-import { define, type Command } from '../command';
+import { define } from '../command';
 import { settledChecklistAvailable, settledQuestionIds } from '../settledView';
 import type { State } from '../state';
 import type { Store } from '../store';
@@ -46,24 +46,6 @@ export const CloseSettledQuestions = define({
     return SetQuestionsStatus.plan(state, { dealId, set }, ctx);
   },
 });
-
-const legacyClose = define({
-  ...SetQuestionsStatus,
-  prepare: (store, input) => refresh(store, input),
-  plan(state, input, ctx) {
-    const ids = input.set.filter(({ status }) => status === 'closed').map(({ questionId }) => questionId);
-    const blocked = ids.length ? closeBlocked(state, input.dealId, ids) : null;
-    return blocked ? refusal(blocked) : SetQuestionsStatus.plan(state, input, ctx);
-  },
-});
-
-/** Journal entries from before the dedicated close command retain their name and input shape. */
-export function guardLegacySettledClose<I, In>(command: Command<I, In>, key?: string): Command<I, In> {
-  if (command.name === SetQuestionsStatus.name && key?.startsWith('close-settled-')) {
-    return legacyClose as unknown as Command<I, In>;
-  }
-  return command;
-}
 
 /** Let each control show its own wording for a checklist refusal. */
 export async function closeSettledQuestions(

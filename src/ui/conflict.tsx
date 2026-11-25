@@ -12,12 +12,14 @@ import { GROUP_LABEL } from '../app/commands/deals';
 import { differingFields } from '../domain/versions';
 import { withoutMarkers } from '../domain/cite';
 import type { Deal, Finding, Question, Source } from '../domain/model';
-import { key, type ListRecord } from '../domain/checklist';
+import { compareChecklistVersion } from '../app/conflictView';
+import type { ListRecord } from '../domain/checklist';
 import { AI_LABEL } from '../control';
 import { Icon } from './icons';
 import { Stepper } from './choiceCards';
 import { titleStyle } from './titleStyle';
-import { openConflict, twoVersionsQueue } from './twoVersions';
+import { twoVersionsQueue } from '../app/qaView';
+import { openConflict } from './twoVersions';
 
 type Fmt = (value: any, record: any, s: State) => string;
 const text: Fmt = (v) => String(v ?? '');
@@ -58,22 +60,8 @@ const FIELDS: Record<Conflict['kind'], [string, string, Fmt][]> = {
     ['off', 'On this deal', (v) => (v ? 'Turned off' : 'On')],
     ['text', 'Item', text],
   ],
-  // one list of the firm's: how many items; those only this version holds, and those another holds that this one lacks
-  // (what keeping it would drop), the first few named; "the same items" only when every version holds the same ones
   firmList: [
-    ['items', 'Items', (v: ListRecord['items'], r: ListRecord, s) => {
-      const others = (s.conflicts[r.id]?.versions ?? []).map((x) => x.data as ListRecord | null).filter((x): x is ListRecord => !!x && x !== r && x.items !== v);
-      const n = (v ?? []).length; const head = n.toLocaleString('en-US');
-      if (!others.length) return head;
-      const mine = new Set((v ?? []).map((i) => key(i.text)));
-      const theirs = new Set(others.flatMap((o) => o.items.map((i) => key(i.text))));
-      const only = (v ?? []).filter((i) => !theirs.has(key(i.text)));
-      const seen = new Set<string>(); const lacks = others.flatMap((o) => o.items).filter((i) => !mine.has(key(i.text)) && !seen.has(key(i.text)) && !!seen.add(key(i.text)));
-      const sameEverywhere = !only.length && !lacks.length && others.every((o) => o.items.every((i) => theirs.has(key(i.text))) && new Set(o.items.map((i) => key(i.text))).size === theirs.size);
-      if (sameEverywhere) return `${head}\nThe same items, ordered or grouped differently`;
-      const named = (said: string, list: { text: string }[]) => (list.length ? [`${list.length.toLocaleString('en-US')} ${said}:`, ...list.slice(0, 5).map((i) => `· ${i.text}`), ...(list.length > 5 ? [`and ${(list.length - 5).toLocaleString('en-US')} more`] : [])] : []);
-      return [head, ...named('only in this version', only), ...named('not in this version', lacks)].join('\n');
-    }],
+    ['items', 'Items', checklistVersionWords],
     ['file', 'File', text],
   ],
   deal: [
@@ -92,6 +80,24 @@ const FIELDS: Record<Conflict['kind'], [string, string, Fmt][]> = {
     ['log', 'Activity', (v: string[]) => (v ?? []).join('\n')],
   ],
 };
+
+function checklistVersionWords(items: ListRecord['items'], record: ListRecord, state: State) {
+  const { count, compared, same, only, lacks } = compareChecklistVersion(state, record, items);
+  const head = count.toLocaleString('en-US');
+  if (!compared) return head;
+  if (same) return `${head}\nThe same items, ordered or grouped differently`;
+  return [head, ...versionItemWords('only in this version', only), ...versionItemWords('not in this version', lacks)]
+    .join('\n');
+}
+
+function versionItemWords(label: string, items: ReturnType<typeof compareChecklistVersion>['only']) {
+  if (!items.count) return [];
+  return [
+    `${items.count.toLocaleString('en-US')} ${label}:`,
+    ...items.names.map((text) => `· ${text}`),
+    ...(items.more ? [`and ${items.more.toLocaleString('en-US')} more`] : []),
+  ];
+}
 
 /** the record's own title, as its page shows it: a question's text, a finding's title, an item's words */
 function conflictTitle(s: State, c: Conflict): string {

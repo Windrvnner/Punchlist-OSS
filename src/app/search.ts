@@ -185,6 +185,12 @@ export function searchGroups(s: State, query: string, expanded: readonly HitKind
   }).filter((g) => g.hits.length);
 }
 
+/** #491: Search waits only for the unvisited or loading deals in My Deals. */
+export function ownDealsLoading(state: Pick<State, 'deals' | 'dealLoad' | 'members' | 'user'>): boolean {
+  return Object.keys(state.deals).some((id) =>
+    isMine(state, id) && (state.dealLoad[id] === 'loading' || state.dealLoad[id] === undefined));
+}
+
 /**
  * Load the records of every deal not yet visited, so search covers them. No AI calls. A deal with no checklist items of its
  * own has its check's items read too, once, so they can be found as well.
