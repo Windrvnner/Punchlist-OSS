@@ -13,15 +13,36 @@ function lineOf(lineStarts, offset) {
   return low + 1;
 }
 
-/** Each function, method and arrow function in `source`, as { first, last } lines. Empty when it cannot be parsed. */
+/** Whether a call is a test suite (`describe(...)`, `describe.each(...)(...)`), whose callback holds many tests. */
+function isSuite(call) {
+  let callee = call.callee;
+  while (callee.type === 'MemberExpression' || callee.type === 'CallExpression') {
+    callee = callee.type === 'MemberExpression' ? callee.object : callee.callee;
+  }
+  return callee.type === 'Identifier' && callee.name === 'describe';
+}
+
+/**
+ * Each function, method and arrow function in `source`, as { first, last, suite } lines; `suite` marks the callback
+ * of a test suite. Empty when it cannot be parsed.
+ */
 export function functionSpans(file, source) {
   const parsed = parseSync(file, source);
   if (parsed.errors.length) return [];
   const lineStarts = [0];
   for (let at = source.indexOf('\n'); at !== -1; at = source.indexOf('\n', at + 1)) lineStarts.push(at + 1);
   const spans = [];
-  const add = (node) => spans.push({ first: lineOf(lineStarts, node.start), last: lineOf(lineStarts, node.end - 1) });
-  const visitor = new Visitor({ FunctionDeclaration: add, FunctionExpression: add, ArrowFunctionExpression: add });
+  const suites = new Set();
+  const add = (node) => {
+    const first = lineOf(lineStarts, node.start);
+    spans.push({ first, last: lineOf(lineStarts, node.end - 1), suite: suites.has(node.start) });
+  };
+  const markSuite = (call) => {
+    if (isSuite(call)) for (const argument of call.arguments) suites.add(argument.start);
+  };
+  const visitor = new Visitor({
+    CallExpression: markSuite, FunctionDeclaration: add, FunctionExpression: add, ArrowFunctionExpression: add,
+  });
   visitor.visit(parsed.program);
   return spans;
 }

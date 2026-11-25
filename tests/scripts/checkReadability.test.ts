@@ -9,8 +9,8 @@ import { describe, expect, it } from 'vitest';
 
 const script = path.resolve('scripts/check-readability.mjs');
 
-/** A repository whose main holds `before`, checked out on a branch that writes `after` on top. */
-function branch(before: Record<string, string>, after: Record<string, string>) {
+/** A repository whose main holds `before`, checked out on a branch that deletes `removed` and writes `after`. */
+function branch(before: Record<string, string>, after: Record<string, string>, removed: string[] = []) {
   const dir = mkdtempSync(path.join(tmpdir(), 'readability-'));
   const identity = ['-c', 'user.name=t', '-c', 'user.email=t@example.com'];
   const git = (...args: string[]) => execFileSync('git', [...identity, ...args], { cwd: dir });
@@ -27,6 +27,7 @@ function branch(before: Record<string, string>, after: Record<string, string>) {
   git('add', '.');
   git('commit', '-qm', 'Before');
   git('checkout', '-qb', 'topic');
+  if (removed.length) git('rm', '-q', ...removed);
   write(after);
   git('add', '.');
   git('commit', '-qm', 'After');
@@ -60,14 +61,25 @@ describe('the readability hints', () => {
     expect(result.stdout).not.toContain('src/b.ts:74');
   });
 
-  it('list a file over 500 lines the branch made longer, and not one it made shorter', () => {
-    const lines = (n: number) => Array.from({ length: n }, (_, i) => `export const v${i} = ${i};`).join('\n');
+  it('list no test suite callback, however long', () => {
+    const suite = `describe('many', () => {\n${"  it('adds', () => {});\n".repeat(70)}});\n`;
+    const result = branch({}, { 'tests/c.test.ts': `import { describe, it } from 'vitest';\n${suite}` });
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain('tests/c.test.ts');
+  });
+
+  it('list a file over 500 lines the branch made longer, and not one it made shorter or renamed shorter', () => {
+    // each line ends with a newline, as an editor saves it
+    const lines = (n: number) => Array.from({ length: n }, (_, i) => `export const v${i} = ${i};\n`).join('');
     const result = branch(
-      { 'src/grown.ts': lines(520), 'src/cut.ts': lines(560) },
-      { 'src/grown.ts': lines(530), 'src/cut.ts': lines(540) },
+      { 'src/grown.ts': lines(520), 'src/cut.ts': lines(560), 'src/full.ts': lines(490), 'src/old.ts': lines(600) },
+      { 'src/grown.ts': lines(530), 'src/cut.ts': lines(540), 'src/full.ts': lines(500), 'src/new.ts': lines(590) },
+      ['src/old.ts'],
     );
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('src/grown.ts  530 lines');
     expect(result.stdout).not.toContain('src/cut.ts');
+    expect(result.stdout).not.toContain('src/full.ts');
+    expect(result.stdout).not.toContain('src/new.ts');
   });
 });

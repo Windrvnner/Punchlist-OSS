@@ -171,33 +171,52 @@ function complexFunctions(changed, spans) {
     .map((d) => `${d.file}:${d.line}  ${d.message}`);
 }
 
-/** New functions over the length limit: those whose first line the branch added or changed. */
+/** New functions over the length limit: those whose first line the branch added or changed, but no test suite. */
 function longFunctions(changed, spans) {
   const found = [];
   for (const [file, lines] of changed) {
-    for (const { first, last } of spans.get(file) ?? []) {
+    for (const { first, last, suite } of spans.get(file) ?? []) {
       const length = last - first + 1;
-      if (length > MAX_FUNCTION_LINES && lines.has(first)) found.push(`${file}:${first}  ${length} lines`);
+      if (suite || length <= MAX_FUNCTION_LINES || !lines.has(first)) continue;
+      found.push(`${file}:${first}  ${length} lines`);
     }
   }
   return found;
 }
 
+/** Lines as an editor counts them: a final newline ends the last line rather than starting another. */
+function lineCount(text) {
+  if (text === '') return 0;
+  return text.split(/\r?\n/).length - (text.endsWith('\n') ? 1 : 0);
+}
+
 /** The number of lines `file` had at `base`; 0 for a file that is new since. */
 function lineCountAt(base, file) {
   try {
-    return git('show', `${base}:${file}`).split(/\r?\n/).length;
+    return lineCount(git('show', `${base}:${file}`));
   } catch {
     return 0;
   }
 }
 
+/** For each file the branch renamed, its name at `base`, so a renamed file is compared with itself. */
+function renamedFrom(base) {
+  const renames = new Map();
+  for (const line of git('diff', '-M', '--diff-filter=R', '--name-status', base).split('\n')) {
+    const [, before, after] = line.split('\t');
+    if (after) renames.set(after, before);
+  }
+  return renames;
+}
+
 /** Changed files over the length limit that the branch made longer. */
 function longFiles(changed, base) {
+  const renames = renamedFrom(base);
   const found = [];
   for (const file of changed.keys()) {
-    const count = readLines(file).length;
-    if (count > MAX_FILE_LINES && count > lineCountAt(base, file)) found.push(`${file}  ${count} lines`);
+    const count = lineCount(readLines(file).join('\n'));
+    const before = lineCountAt(base, renames.get(file) ?? file);
+    if (count > MAX_FILE_LINES && count > before) found.push(`${file}  ${count} lines`);
   }
   return found;
 }
