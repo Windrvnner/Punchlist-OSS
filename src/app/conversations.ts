@@ -121,17 +121,31 @@ export function pastConversationList(store: Store, { dealId, allDeals, search }:
 let seq = 0;
 const mid = () => `m${Date.now().toString(36)}${(seq++).toString(36)}`;
 
+/** a deal name as typed navigation compares it: without "Project", in any case */
+const navigationName = (name: string) => bareDealName(name.trim(), 'navigation').toLowerCase();
+/** the same, without the punctuation around it: "Fund IV" for "Project (Fund IV)" */
+const unwrappedName = (name: string) => navigationName(name).replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+
+/**
+ * The deal a typed name names: the one of that exact name, else the only one whose name matches once the punctuation
+ * around it is left out. Two such deals name none, and the text goes to the chat agent.
+ */
+function dealByName<T extends { name: string }>(deals: T[], typed: string): T | undefined {
+  const exact = navigationName(typed);
+  if (!exact) return;
+  const named = deals.find((deal) => navigationName(deal.name) === exact);
+  if (named) return named;
+  const unwrapped = unwrappedName(typed);
+  const near = unwrapped ? deals.filter((deal) => unwrappedName(deal.name) === unwrapped) : [];
+  return near.length === 1 ? near[0] : undefined;
+}
+
 // #500: only the explicit verb and page suffix are syntax; a deal name can contain punctuation or Unicode.
 function typedDealDestination(store: Store, text: string) {
   const command = /^(?:take me to|go to|open|show me|show|switch to|jump to)\s+(.+)$/is.exec(text);
   if (!command) return;
   const target = cleanName(command[1]);
-  const lookup = (name: string) => {
-    const key = bareDealName(name.trim(), 'navigation').toLowerCase();
-    if (!key) return;
-    return Object.values(store.get().deals).find((candidate) =>
-      bareDealName(candidate.name, 'navigation').toLowerCase() === key);
-  };
+  const lookup = (name: string) => dealByName(Object.values(store.get().deals), name);
   const possessive = (name: string) => lookup(name.replace(/['’]s$/i, '')) ?? lookup(name);
   const named = (name: string) => {
     const withoutArticle = name.replace(/^the\s+/i, '');

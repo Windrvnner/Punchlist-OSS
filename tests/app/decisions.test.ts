@@ -121,6 +121,21 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
     expect(navIntent(m.store, 'What is in Harbor-Refinance Q&A?')).toBe(false);
   });
 
+  it('a typed deal name finds a deal whose name has punctuation around it, when only one does', async () => {
+    const m = make();
+    const fund = await deal(m, '(Fund IV)');
+    const plus = await deal(m, 'C++');
+    await deal(m, 'C#');
+    await deal(m, '(Kestrel)');
+    await deal(m, '[Kestrel]');
+    for (const [name, id] of [['Fund IV', fund], ['Project (Fund IV)', fund], ['C++', plus]]) {
+      expect(navIntent(m.store, `Open ${name} Q&A`)).toBe(true);
+      expect(location.hash).toBe(`#${pageHash('qa', id)}`);
+    }
+    expect(navIntent(m.store, 'Open C Q&A')).toBe(false);
+    expect(navIntent(m.store, 'Open Kestrel Q&A')).toBe(false);
+  });
+
   it('Undo brings back a capitalized "Project"; an accent or hidden character is not the word', async () => {
     const m = make();
     const a = await deal(m, 'project Wingtip Storage');
