@@ -143,6 +143,12 @@ describe('reading an issues list', () => {
       for (const shift of [(f: number, c: number) => (c >= 1 ? 0 : f), (f: number, c: number) => (c >= 1 ? f + 10 : f)]) expect((await read(stand(L, { shift }))).n).toBe(UNREAD);
     }
   });
+  it('a page given again fails the page, even when the check passes it: the read ends, bringing in nothing', async () => {
+    const passes = () => ({ missing: [], extra: [], wrong: [] });
+    const again = await read(stand(LIST, { shift: (f, c) => (c >= 1 ? 0 : f), check: passes }));
+    expect(again.n).toBe(UNREAD);
+    expect(again.reads.length).toBeLessThan(10);
+  });
   it('asks for the next page by the last point read: its number and its opening words', async () => {
     const { reads } = await read(stand(LIST));
     expect(reads[1].prompt).toContain('from the one after point 80 (counting the first as 1). That last point is numbered "80" and begins "Clause 80.2 should be changed to the agreed", at most 80.');

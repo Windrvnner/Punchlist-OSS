@@ -2135,7 +2135,9 @@ export function nodeAi(o: AiOptions) {
           catch (e) { if ((e as { code?: string })?.code !== 'cutoff') throw e; }
           return !!reply && nothing(reply.missing) && [reply.extra, reply.wrong].every((v) => v === undefined || nothing(v));
         };
-        for (;;) {   // page after page until the list ends: no length is too long (a page that fails is retried, ISSUES_TRIES)
+        // page after page until the list ends: no length is too long (a page that fails is retried, ISSUES_TRIES)
+        let lastPage = '';
+        for (;;) {
           const asking = page; let cutoff = false;
           let reply: { points?: unknown; more?: unknown } | null = null;
           try { reply = await tried(() => askJson({ kind: 'issuesList', split: true, model: fast, system: JSON_ONLY, files: [fileId], prompt: `${i.doc.doc} is an issues list: the points one party raises on a deal's documents. List its points in order${read.length ? `, from the one after point ${read.length} (counting the first as 1)${after()}` : ''}, at most ${page}.\nFor each: "n": its number or reference as the list writes it ("" when it has none); "text": the point in its own words exactly as written, joined into one paragraph when it runs over several lines. Leave out headings, introductions and notes that raise no point.\n"more": true when the list has points after the last one you give.\nReply as JSON: {"points": [{"n": "1", "text": "…"}], "more": false}` }, ['points'])); }
@@ -2143,11 +2145,14 @@ export function nodeAi(o: AiOptions) {
           if (cutoff) { if (asking > 10) { page = size = Math.ceil(asking / 2); continue; } return fail({ kind: 'failed', message: 'It could not be read as an issues list' }); }
           if (!reply || !Array.isArray(reply.points)) { if (++tries >= ISSUES_TRIES) return fail({ kind: 'failed', message: 'It could not be read as an issues list' }); continue; }
           const got = (reply.points as { n?: unknown; text?: unknown }[]).map((p) => ({ n: clean(p?.n).replace(/^#/, ''), text: clean(p?.text) })).filter((p) => p.text);
+          // a page given again moves the read nowhere: it fails, as an unreadable reply does
+          const thisPage = JSON.stringify(got);
+          if (got.length && thisPage === lastPage) { if (++tries >= ISSUES_TRIES) return unread(); continue; }
           // a full page that says nothing follows is read on from, as the model may have left "more" out; the next page then ends it
           const toEnd = !got.length || (got.length < asking && !(reply.more === true || /^(true|yes)$/i.test(String(reply.more ?? '').trim())));
           if (!(await checked(got, toEnd))) { if (++tries >= ISSUES_TRIES) return unread(); page = Math.max(10, Math.ceil(asking / 2)); continue; }
           // past the check: the next page is the full size again
-          tries = 0; page = size; read.push(...got);
+          tries = 0; page = size; read.push(...got); lastPage = thisPage;
           if (toEnd) break;
         }
       } catch (e) { return failure(e, 'The file could not be read'); }

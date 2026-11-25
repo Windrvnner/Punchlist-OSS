@@ -111,6 +111,8 @@ class ReportRead {
   titles = new Map<string, Set<string>>();
   /** issues given with no page that opens */
   unplaced = 0;
+  /** every row any page has given, as written: a page of only rows already given moves the read nowhere */
+  private given = new Set<string>();
   /** pages that could not be added to a finding now: a later sweep adds them */
   owe = new Map<string, Source[]>();
 
@@ -199,6 +201,13 @@ class ReportRead {
     return true;
   }
 
+  /** whether some row of this page is one no earlier page gave; all of them are kept as given */
+  adds(rows: Record<string, unknown>[]): boolean {
+    const fresh = rows.map((row) => JSON.stringify(row)).filter((key) => !this.given.has(key));
+    for (const key of fresh) this.given.add(key);
+    return fresh.length > 0;
+  }
+
   /** the next page starts after the last issue given */
   moveOn(rows: Record<string, unknown>[]) {
     const lastRow = rows[rows.length - 1];
@@ -275,8 +284,10 @@ async function readPage(r: ReportRead, call: number, last: boolean): Promise<Ste
   r.heard(reply);
   if (!(await r.takeAll(rows, known))) return { end: null };
   r.moveOn(rows);
+  const fresh = r.adds(rows);
   if (!page.cut && (!rows.length || !hasMore(reply, rows, r.size))) return { end: finish(r, last) };
-  return 'next';
+  // a model that gives a page again and says there is more would go on for ever: the read is a try that failed
+  return fresh ? 'next' : { end: null };
 }
 
 /**
