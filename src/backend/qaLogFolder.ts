@@ -51,20 +51,21 @@ function fit(name: string, rest: string): string {
  */
 function create(dir: string, base: string, ext: string, bytes: Uint8Array): string {
   for (let k = 1; ; k++) {
-    const name = `${base}${k > 1 ? ` (${k})` : ''}${ext}`; const at = path.join(dir, name);
+    const name = `${base}${k > 1 ? ` (${k})` : ''}${ext}`;
+    const at = path.join(dir, name);
     let fd: number;
     try { fd = fs.openSync(at, 'wx'); } catch (e) {
       if ((e as NodeJS.ErrnoException).code === 'EEXIST' && k <= 99) continue;
       throw e;   // nothing was claimed, so nothing is taken away
     }
     try {
-      fs.writeFileSync(at, bytes, { flag: 'r+' });
+      fs.writeFileSync(fd, bytes);   // through the claimed handle: never onto a file that took the name since
       return name;
     } catch (e) {
       takeAway(at, fd);
       throw e;
     } finally {
-      fs.closeSync(fd);
+      try { fs.closeSync(fd); } catch { /* the copy is written; a share that fails the close leaves it whole */ }
     }
   }
 }
@@ -75,7 +76,8 @@ function create(dir: string, base: string, ext: string, bytes: Uint8Array): stri
  */
 function takeAway(at: string, fd: number): void {
   try {
-    const mine = fs.fstatSync(fd, { bigint: true }); fs.ftruncateSync(fd, 0);
+    const mine = fs.fstatSync(fd, { bigint: true });
+    fs.ftruncateSync(fd, 0);
     const now = fs.lstatSync(at, { bigint: true });
     const provable = mine.ino !== 0n && mine.birthtimeNs !== 0n;
     const same = now.ino === mine.ino && now.dev === mine.dev && now.birthtimeNs === mine.birthtimeNs;
