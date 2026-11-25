@@ -9,21 +9,33 @@
  */
 import type { Store } from './store';
 import { localYmd, type QaLog, type Question } from '../domain/model';
-import { dealQuestions, dealTwin, qaKept } from './state';
+import { dealQuestions, dealTwin, qaChanged, qaKept } from './state';
 import { logWrite, logHolds, matchRows, cellValue, readLogCells, holds } from '../domain/logWrite';
 import {
   KeepQaLog, SetQaLogFolder, RecordQaLogExport, ChooseQaVersion, TakeFromQaLog, fileTaken, windowsPath as samePath,
 } from './commands/qaLogs';
 import { questionsSheet, suggestMapping, type Mapping, type ImportField } from '../domain/importExport';
-import { ok, fail, type Result } from '../domain/result';
+import { ok, fail, invalid, rejected, type Failure, type Result } from '../domain/result';
 import { cell, type KeptAsk } from '../domain/keptMerge';
 import type { SheetEdit } from '../domain/sheets';
+import type { QaLogFiles } from '../ports';
 
 /** a log's name: its file's name without the extension, and without " - vCurrent" */
 export const logName = (file: string) => file.replace(/\.[^.]+$/, '').replace(/\s+-\s+vCurrent$/i, '').trim() || 'Q&A log';
 
 /** the deal's log, if it has one */
 export const logOf = (store: Store, dealId: string): QaLog | undefined => store.get().deals[dealId]?.qaLogs[0];
+
+/** Opening a changed question marks its current log update seen and forgets marks from older updates. */
+export function markQaLogSeen(store: Store, questionId: string) {
+  const state = store.get();
+  const updateOf = (id: string) => state.deals[state.questions[id]?.dealId]?.qaLogs[0]?.last?.at;
+  const at = updateOf(questionId);
+  const question = state.questions[questionId];
+  if (at === undefined || !question || !qaChanged(state, question).length) return;
+  const current = Object.fromEntries(Object.entries(state.prefs.qaSeen).filter(([id, when]) => updateOf(id) === when));
+  store.setPrefs({ qaSeen: { ...current, [questionId]: at } });
+}
 
 /** a file's folder and name, from its full path ("X:\Deals\Proseware\Q&A log.xlsx") */
 const placeOf = (full: string) => { const i = Math.max(full.lastIndexOf('\\'), full.lastIndexOf('/')); return i > 0 ? { folder: full.slice(0, i), file: full.slice(i + 1) } : null; };
@@ -170,6 +182,52 @@ export type ExportOutcome =
  */
 export type PlaceKept = (ask: KeptAsk[]) => Promise<number[] | null>;
 
+export const NEW_KEPT_ROW = -1;
+export const LEAVE_KEPT_OUT = -2;
+
+/** Each existing row can take at most one of the edits being placed. */
+export function keptRowTaken(asks: KeptAsk[], choices: (number | undefined)[], edit: number, candidate: number) {
+  const row = asks[edit]?.rows[candidate]?.row;
+  return row !== undefined && choices.some((choice, index) =>
+    index !== edit && choice !== undefined && asks[index]?.rows[choice]?.row === row);
+}
+
+function validKeptPlacement(asks: KeptAsk[], choices: number[]) {
+  return choices.length === asks.length && asks.every((ask, edit) => {
+    const choice = choices[edit];
+    return choice === NEW_KEPT_ROW || choice === LEAVE_KEPT_OUT ||
+      (Number.isInteger(choice) && !!ask.rows[choice] && !keptRowTaken(asks, choices, edit, choice));
+  });
+}
+
+type LogTable = Extract<Awaited<ReturnType<QaLogFiles['read']>>, { ok: true }>['value'];
+type KeptLogEdits = NonNullable<LogTable['kept']>;
+
+/** Place each retained edit where chosen. Edits left out will be filed in the archive. */
+function placeLogEdits(kept: KeptLogEdits, choices: number[], below: number) {
+  const picked: SheetEdit[] = [];
+  const own: SheetEdit[] = [];
+  const clashes = [...kept.clashes];
+  const out = new Set<string>();
+  let nextNewRow = below + 1;
+  for (const [index, edit] of (kept.ask ?? []).entries()) {
+    if (choices[index] === LEAVE_KEPT_OUT) {
+      out.add(edit.file);
+      continue;
+    }
+    const target = edit.rows[choices[index]];
+    if (target) {
+      picked.push(...target.steps);
+      if (target.clash && !clashes.includes(target.row)) clashes.push(target.row);
+      continue;
+    }
+    const row = nextNewRow++;
+    own.push({ kind: 'rows', after: row - 1, count: 1 }, ...edit.add.map(({ col, value }) => cell(row, col, value)));
+  }
+  const files = kept.files.map((file) => out.has(file.name) ? { ...file, left: true as const } : file);
+  return { picked, own, kept: { ...kept, files, clashes: clashes.sort((left, right) => left - right) } };
+}
+
 /** what the update compared for each question it takes cells for, so a later edit is never replaced (#40) */
 function comparedValues(qs: Question[], taken: Record<string, Record<string, string>>) {
   const byId = new Map(qs.map((q) => [q.id, q] as const));
@@ -183,7 +241,14 @@ function comparedValues(qs: Question[], taken: Record<string, Record<string, str
  * Bring the deal's log up to date with everything the app holds (logWrite), in the file itself. A failure after the log was
  * saved still says how many kept edits it filed not fully merged.
  */
-export async function exportQaLog(store: Store, dealId: string, place?: PlaceKept): Promise<Result<ExportOutcome> & { unmerged?: number }> {
+type ExportResult = Result<ExportOutcome> & { unmerged?: number };
+
+export function exportQaLog(store: Store, dealId: string, place?: PlaceKept): Promise<ExportResult> {
+  return runLogUpdate(store, dealId, fail(rejected('Q&A log is being updated')),
+    () => writeQaLog(store, dealId, place));
+}
+
+async function writeQaLog(store: Store, dealId: string, place?: PlaceKept): Promise<ExportResult> {
   const files = store.services.qaLogs; if (!files) return fail({ kind: 'rejected', message: 'Q&A logs are updated from the desktop app' });
   let log = logOf(store, dealId); let created = false;
   if (!log) {
@@ -205,18 +270,17 @@ export async function exportQaLog(store: Store, dealId: string, place?: PlaceKep
   // A row of a kept edit the log can't say for sure goes where the person says: into a row (a cell both
   // changed keeps the log's, and is reported), as a row of its own below the update's own, or left out (then the notice
   // says the edit was not fully merged). Closing the ask leaves the whole update for later, so it is asked again.
-  const picked: SheetEdit[] = [], own: SheetEdit[] = [];
+  let picked: SheetEdit[] = [];
+  let own: SheetEdit[] = [];
   if (kept?.ask?.length) {
-    const chose = place ? await place(kept.ask) : null; if (!chose) return ok({ status: 'canceled' });
-    const below = table.value.lastRow - 1 + w.steps.reduce((n, s) => n + (s.kind === 'rows' ? s.count : 0), 0); const clashes = [...kept.clashes];
-    const out = new Set<string>();                                                  // files with a row left out
-    kept.ask.forEach((a, i) => {
-      if (chose[i] === -2) { out.add(a.file); return; }
-      const at = a.rows[chose[i]];
-      if (at) { picked.push(...at.steps); if (at.clash && !clashes.includes(at.row)) clashes.push(at.row); return; }
-      const row = below + 1 + own.filter((s) => s.kind === 'rows').length; own.push({ kind: 'rows', after: row - 1, count: 1 }, ...a.add.map((c) => cell(row, c.col, c.value)));
-    });
-    kept = { ...kept, clashes: clashes.sort((x, y) => x - y), files: kept.files.map((f) => (out.has(f.name) ? { ...f, left: true as const } : f)) };
+    const choices = place ? await place(kept.ask) : null;
+    if (!choices) return ok({ status: 'canceled' });
+    if (!validKeptPlacement(kept.ask, choices)) {
+      return fail(invalid('Each kept edit needs its own log row or placement'));
+    }
+    const below = table.value.lastRow - 1 + w.steps.reduce((count, step) =>
+      count + (step.kind === 'rows' ? step.count : 0), 0);
+    ({ kept, picked, own } = placeLogEdits(kept, choices, below));
   }
   const steps = [...(kept?.steps ?? []), ...picked, ...w.steps, ...own];
   // nothing to write (a log just made holds everything) leaves the file alone; what it holds of ours is still recorded
@@ -295,4 +359,112 @@ export async function exportQaLog(store: Store, dealId: string, place?: PlaceKep
   // a question where an edit kept aside clashed with the log is said as kept as in the file, unless it is in two versions
   const clashed = clash.filter((n) => !versions.includes(n));
   return ok({ status: 'written', archive, added: w.added, answered: w.answered, updated: w.updated, changed: Object.keys(changed).length, kept: versions, keptText, clashed, unmerged, ...(created ? { created: true as const } : {}) });
+}
+
+type WrittenLog = Extract<ExportOutcome, { status: 'written' }>;
+type UpdateCounts = Pick<WrittenLog, 'added' | 'answered' | 'updated' | 'changed' | 'unmerged'>;
+type RetryLog = () => Promise<QaLogUpdateOutcome>;
+
+export type QaLogUpdateOutcome =
+  | { kind: 'busy' | 'canceled' }
+  | { kind: 'failed'; error: Failure; unmerged: number }
+  | { kind: 'retrying'; by?: string; retry: RetryLog }
+  | { kind: 'retryLimit'; retry: RetryLog }
+  | { kind: 'created'; unmerged: number }
+  | { kind: 'updated'; counts: UpdateCounts; versions: number; clashed: number;
+      action?: { kind: 'resolve' } | { kind: 'show'; questionId: string } };
+
+type UpdateOptions = {
+  place?: PlaceKept;
+  /** Offers the outcome to the caller, also for background attempts. A waiting notice may supply its dismissal. */
+  announce?: (outcome: QaLogUpdateOutcome) => (() => void) | undefined;
+};
+type WaitingUpdate = { timer: ReturnType<typeof setTimeout>; tries: number; dismiss?: () => void };
+type LogUpdates = { running: Map<string, Promise<void>>; waiting: Map<string, WaitingUpdate> };
+const logUpdates = new WeakMap<Store, LogUpdates>();
+const RETRY_MS = 30_000;
+const LOG_RETRIES = 40;
+
+async function runLogUpdate<T>(store: Store, dealId: string, busy: T, run: (updates: LogUpdates) => Promise<T>) {
+  let updates = logUpdates.get(store);
+  if (!updates) {
+    updates = { running: new Map(), waiting: new Map() };
+    logUpdates.set(store, updates);
+  }
+  if (updates.running.has(dealId)) return busy;
+  let finished!: () => void;
+  updates.running.set(dealId, new Promise((resolve) => { finished = resolve; }));
+  try {
+    return await run(updates);
+  } finally {
+    updates.running.delete(dealId);
+    finished();
+  }
+}
+
+function writtenOutcome(store: Store, dealId: string, written: WrittenLog): QaLogUpdateOutcome {
+  const { created, unmerged, changed, added, answered, updated, kept, clashed } = written;
+  if (created) return { kind: 'created', unmerged };
+  const questions = dealQuestions(store.get(), dealId);
+  const clash = questions.find((question) => clashed.includes(question.n));
+  const versions = questions.some((question) => kept.includes(question.n)) ? kept.length : 0;
+  const action = versions ? { kind: 'resolve' as const }
+    : clash ? { kind: 'show' as const, questionId: clash.id } : undefined;
+  return { kind: 'updated', counts: { unmerged, changed, added, answered, updated }, versions,
+    clashed: clash ? clashed.length : 0, action };
+}
+
+/** Update now, then retry a busy file every half minute for up to 20 minutes. */
+export function updateQaLog(store: Store, dealId: string, options: UpdateOptions = {}): Promise<QaLogUpdateOutcome> {
+  return attemptQaLog(store, dealId, options, false);
+}
+
+function waitForLog(store: Store, dealId: string, options: UpdateOptions,
+  updates: LogUpdates, tries: number, by?: string): QaLogUpdateOutcome {
+  const retry = () => updateQaLog(store, dealId, options);
+  if (tries >= LOG_RETRIES) return { kind: 'retryLimit', retry };
+  const queued: WaitingUpdate = {
+    timer: setTimeout(() => void retryWhenIdle(store, dealId, options, updates, queued), RETRY_MS),
+    tries: tries + 1,
+  };
+  updates.waiting.set(dealId, queued);
+  return { kind: 'retrying', by, retry };
+}
+
+/** A direct export can still be writing when a retry is due. Keep the retry and its notice until the write finishes. */
+async function retryWhenIdle(store: Store, dealId: string, options: UpdateOptions,
+  updates: LogUpdates, queued: WaitingUpdate) {
+  while (updates.waiting.get(dealId) === queued) {
+    const running = updates.running.get(dealId);
+    if (!running) {
+      await attemptQaLog(store, dealId, options, true);
+      return;
+    }
+    await running;
+  }
+}
+
+async function attemptQaLog(store: Store, dealId: string, options: UpdateOptions, automatic: boolean) {
+  const result = await runLogUpdate<QaLogUpdateOutcome>(store, dealId, { kind: 'busy' }, async (updates) => {
+    const queued = updates.waiting.get(dealId);
+    if (queued) {
+      clearTimeout(queued.timer);
+      updates.waiting.delete(dealId);
+      queued.dismiss?.();
+    }
+    // A background retry never starts a replacement log if the deal or its log has since gone.
+    if (automatic && !logOf(store, dealId)) return { kind: 'canceled' };
+    const result = await writeQaLog(store, dealId, options.place);
+    let outcome: QaLogUpdateOutcome;
+    if (!result.ok) outcome = { kind: 'failed', error: result.error, unmerged: result.unmerged ?? 0 };
+    else if (result.value.status === 'written') outcome = writtenOutcome(store, dealId, result.value);
+    else if (result.value.status === 'canceled') outcome = { kind: 'canceled' };
+    else outcome = waitForLog(store, dealId, options, updates, queued?.tries ?? 0, result.value.by);
+    const dismiss = options.announce?.(outcome);
+    const next = updates.waiting.get(dealId);
+    if (next) next.dismiss = dismiss;
+    return outcome;
+  });
+  if (result.kind === 'busy' && !automatic) options.announce?.(result);
+  return result;
 }
