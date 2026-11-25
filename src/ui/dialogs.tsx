@@ -12,7 +12,7 @@ import { useNewDealDraft } from './useNewDealDraft';
 import { PickList } from './pickList';
 import { FOLDER_LABEL_MAX, dealNameRoom, matchesDealName, RemoveFolder, DeleteDeal } from '../app/commands/deals';
 import {
-  chosenDealFolder, droppedFolderPaths, guessLabel, pickDealFolders, readDealFolder, restoreDealFolder,
+  chosenDealFolder, droppedFolderPaths, folderName, guessLabel, pickDealFolders, readDealFolder, restoreDealFolder,
 } from '../app/dealFolders';
 import { submitDealForm } from '../app/dealSetup';
 import { checklistListCounts } from '../app/dealCounts';
@@ -202,7 +202,7 @@ export function NewDealDialog() {
     if (deal) location.hash = dealHash(store.get().prefs, deal.id);
   };
 
-  const askRemove = (f: Folder) => setRemoving({ path: f.path, label: f.label.trim() || guessLabel(f.path) });
+  const askRemove = (f: Folder) => setRemoving({ path: f.path, label: f.label.trim() || folderName(f.path) });
   const pasteField = <PasteField path={path} setPath={setPath} add={() => void addTyped()} busy={scanning} />;
   if (existing && removing) return <AskFirst ask={`Remove ${removing.label} from ${existing.name}?`} go="Remove" onKeep={() => { setRemoving(null); backTo(removing.path); }} onGo={() => { setRemoving(null); void store.dispatch(RemoveFolder, { dealId: existing.id, path: removing.path }); }} />;
   if (!existing && nd.twin && s.deals[nd.twin.dealId]) return <TwinConfirm found={nd.twin} kinds={nd.kinds} back={() => set({ twin: undefined })} anyway={() => { set({ twin: undefined }); void create(true); }} />;

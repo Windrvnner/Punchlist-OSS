@@ -1296,6 +1296,28 @@ describe('when something changes', () => {
     expect(s.verifyCalls.length).toBeGreaterThan(0); expect(s.verifyCalls[0].files.map((f) => fromStoreName(f.name)!.name)[0]).toBe('Lock-up waiver letter.pdf');
   });
 
+  it('marks two independent same-name document arrivals and leaves a repeated poll alone (#326)', async () => {
+    const recs = { d1: [FA, TS, IM, MODEL] };
+    const { ai, repo } = setup(twelve(), recs, {
+      checklist: () => TWELVE,
+      affects: () => ({ affected: ['F1'] }),
+      verify: () => ({ stands: false, why: 'The notice changes the covenant.' }),
+    });
+    await deal(repo);
+    const [id] = val(await ai.firstPass('d1')).written;
+    const name = 'Covenant notice.pdf';
+    recs.d1.push(doc(52, name, { summary: 'The lock-up ratio is suspended for the current period.' }));
+    expect(val(await ai.firstPass('d1')).marked).toEqual([id]);
+    const first = val(await repo.get('finding', id))!;
+    expect(val(await ai.firstPass('d1')).marked).toEqual([]);
+    expect(val(await repo.get('finding', id))!.rev).toBe(first.rev);
+    recs.d1.push(doc(53, name, { summary: 'The lock-up ratio is suspended for the following period.' }));
+    expect(val(await ai.firstPass('d1')).marked).toEqual([id]);
+    const second = val(await repo.get('finding', id))!;
+    expect(second.rev).toBeGreaterThan(first.rev);
+    expect(second.envelope.data).toMatchObject({ updated: true, updatedWhy: `${name} arrived` });
+  });
+
   it('a draft fails, rather than throwing, when the model service cannot say which models it has', async () => {
     const s = setup(() => ({ status: 'found', text: 'x', sources: [] })); s.svc.models = async () => { const e: any = new Error('ECONNREFUSED'); e.code = 'unreachable'; throw e; };
     const d = await s.ai.draft({ dealId: 'd1', questionId: 'q_1', questionText: 'Confirm the lock-up ratio.' }); expect(!d.ok && d.error.kind).toBe('unreachable');
@@ -1467,6 +1489,47 @@ describe('checking everything again', () => {
     expect(await findingData(s.repo, f1)).toMatchObject({ updated: true, updatedWhy: 'Check of everything', title: 'Lock-up ratio differs between the credit agreement and the term sheet', status: 'open' });
     const calm = await start({ verify: (c) => ({ stands: c.model !== 'fast', why: '' }) }); const q = val(await calm.s.ai.checkAll({ dealId: 'd1' }));
     expect(calm.s.verifyCalls.map((c) => c.model)).toEqual(['fast', 'standard']); expect(q.toReassess).toBe(0); expect((await findingData(calm.s.repo, calm.f1)).updated ?? false).toBe(false);
+  });
+
+  it('a later explicit check renews the finding warning while keeping the same reason (#326)', async () => {
+    const { s: { ai, repo }, f1: findingId } = await start({
+      verify: () => ({ stands: false, why: 'The covenant still needs review.' }),
+    });
+    const request = { dealId: 'd1' };
+    expect(val(await ai.checkAll(request)).toReassess).toBe(1);
+    const first = val(await repo.get('finding', findingId))!;
+    expect(val(await ai.checkAll(request)).toReassess).toBe(1);
+    const second = val(await repo.get('finding', findingId))!;
+    expect(second.rev).toBeGreaterThan(first.rev);
+    expect(second.envelope.data).toMatchObject({ updated: true, updatedWhy: 'Check of everything' });
+  });
+
+  it('pays both checks after a person resolves crossed finding versions (#326)', async () => {
+    const shared = new Mem();
+    const { s: { ai, repo }, f1: findingId } = await start({
+      shared,
+      verify: () => ({ stands: false, why: 'The covenant still needs review.' }),
+    });
+    const finding = await findingData(repo, findingId);
+    repo.peer.edit('finding', findingId, { ...finding, note: 'The covenant is still under review.' }, {
+      by: 'peer', from: 'Another PC', at: clock(),
+    });
+    await repo.sync();
+    const crossed = val(await repo.get('finding', findingId))!;
+    expect(crossed.conflict?.length).toBeGreaterThan(0);
+    for (let check = 0; check < 2; check++) val(await ai.checkAll({ dealId: 'd1' }));
+    const entries = () => (shared.read('checks-local-d1.jsonl') ?? '').trim().split('\n')
+      .map((line) => JSON.parse(line));
+    const pending = entries().flatMap((line) => line.owed?.finding === findingId ? [line.owed.round] : []);
+    expect(new Set(pending).size).toBe(2);
+    val(await repo.transaction({ writes: [{
+      kind: 'finding', id: findingId, data: finding, expectedRev: crossed.rev,
+      resolves: crossed.conflict!.map((version) => version.id),
+    }] }));
+    expect(val(await ai.firstPass('d1')).marked).toContain(findingId);
+    const paid = entries().flatMap((line) => line.paid?.finding === findingId ? [line.paid.round] : []);
+    expect(paid).toEqual(pending);
+    expect(await findingData(repo, findingId)).toMatchObject({ updated: true, markedRound: pending[1] });
   });
 
   it('when the sample overturns more than one in five, a check of everything by the standard model is offered; that check has no sample', async () => {

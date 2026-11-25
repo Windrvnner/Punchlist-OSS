@@ -55,6 +55,8 @@ verdict, and no criteria in your own words.
 >    internal or private links, references to non-public systems or services, text copied from third-party
 >    documentation, wording that is not provider-neutral, or a change not described in technical terms.
 > 8. Existing documentation that the changes in the pull request make inaccurate.
+> 9. Changing or reinterpreting content handed to the app, or machinery beyond what was asked, including an
+>    acceptance criterion that asks for more than the issue did.
 >
 > Anything else is minor. A minor finding that is small and in code the pull request already touches is fixed in
 > the same pull request, without a review round of its own. File every other minor finding (in other code, or too

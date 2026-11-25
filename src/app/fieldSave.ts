@@ -34,9 +34,12 @@ export type FieldAtFocus = Pick<FieldSaveView, 'byItself' | 'reason'> & {
   status: 'failed' | 'refused';
 };
 
+export type FieldComposition = 'idle' | 'active' | 'held';
+
 /** The input supplies its live text and browser state. Save policy only returns changes for it to show. */
 export type FieldInput = {
   text(): string;
+  composition?(): FieldComposition;
   partial(): boolean;
   partialNow(): boolean;
   locked(): boolean;
@@ -78,6 +81,10 @@ export class FieldSave {
 
   private show(change: Partial<FieldSaveView>) {
     const next = { ...this.view, ...change };
+    if (this.input.composition?.() === 'held' && !next.external && this.input.text() !== this.seen.value) {
+      next.status = 'failed';
+      next.byItself = false;
+    }
     const { status, external, byItself, reason } = this.view;
     if (status === next.status && external === next.external && byItself === next.byItself && reason === next.reason) {
       return;
@@ -109,6 +116,16 @@ export class FieldSave {
     if (this.input.text() !== this.seen.value) this.keepText(this.input.text());
   }
 
+  keepUnconfirmed() {
+    this.keepCurrent();
+    if (this.input.text() !== this.seen.value && !this.view.external) this.show({ status: 'failed', byItself: false });
+  }
+
+  private composing() {
+    const composition = this.input.composition?.();
+    return composition === 'active' || composition === 'held';
+  }
+
   refuseInput(reason: string) {
     if (!this.view.external) this.show({ status: 'refused', reason });
   }
@@ -120,7 +137,7 @@ export class FieldSave {
     this.retryDraft = undefined;
     if (this.keep !== undefined && (unsavedFields.has(this.keep) || this.view.external)) this.keepText(text);
     else if (this.input.locked() && text !== this.seen.value) this.keepText(text);
-    return !this.view.external;
+    return !this.view.external && !this.composing();
   }
 
   receive(record: FieldValue) {
@@ -146,7 +163,7 @@ export class FieldSave {
       return;
     }
     const text = this.input.text();
-    if (!this.input.partial() && (text === previous.value || text === record.value)) {
+    if (!this.input.partial() && !this.composing() && (text === previous.value || text === record.value)) {
       this.input.replaceText(record.value);
       this.show({ external: false });
       this.takeBase(record.value);
@@ -180,6 +197,7 @@ export class FieldSave {
   }
 
   async save(text: string, commit: FieldCommit, chosen = false): Promise<FieldSaveOutcome | undefined> {
+    if (this.composing()) return undefined;
     this.input.stopTimer();
     if (!this.shouldSend(text, chosen)) return undefined;
     if (text === this.retryDraft) this.retryDraft = undefined;
@@ -334,7 +352,7 @@ export class FieldSave {
   unmount(commit: FieldCommit) {
     this.keepCurrent();
     const text = this.input.text();
-    if (this.input.stopTimer() && text !== this.seen.value && !this.input.partial()
+    if (this.input.stopTimer() && text !== this.seen.value && !this.input.partial() && !this.composing()
       && !this.view.external && !this.input.locked() && this.base === this.seen.value) {
       void commit(text, this.base);
     }
@@ -345,7 +363,7 @@ export class FieldSave {
   }
 
   reconnect(commit: FieldCommit) {
-    if (this.view.status !== 'failed' || !this.view.byItself || this.view.external) return;
+    if (this.view.status !== 'failed' || !this.view.byItself || this.view.external || this.composing()) return;
     this.resending = true;
     void this.save(this.input.text(), commit);
   }
