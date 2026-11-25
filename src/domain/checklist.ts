@@ -23,7 +23,8 @@ export const LAYER_NAMES: Record<Layer, { one: string; many: string }> = {
 export const LIST_NAME_MAX = 24;
 
 /**
- * Wording as the app keeps it: Unicode NFC; zero-width characters and soft hyphens removed; curly and low quotes, primes
+ * A wording folded for comparing only, never for storing or showing (the app keeps and shows every wording exactly as it
+ * was handed over): Unicode NFC; zero-width characters and soft hyphens removed; curly and low quotes, primes
  * and modifier apostrophes made straight; the dashes U+2010–U+2015 and the minus sign made "-"; non-breaking spaces made
  * spaces; the common ligatures unfolded; white space trimmed, and each run of it made one space.
  */

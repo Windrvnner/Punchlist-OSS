@@ -6,7 +6,7 @@
  * again and, if still unplaced, left out. Nothing in the input is dropped: a line left out is listed, and a person can
  * bring it in where it sits.
  */
-import { key, norm, type ListItem } from './checklist';
+import { key, type ListItem } from './checklist';
 
 /** what the model says a line is; `text` is the part of the line it takes, as the line has it */
 export interface LineRead {
@@ -85,24 +85,24 @@ export function tieOut(lines: string[], reads: ReadonlyMap<number, LineRead>, br
   const count = { lines: lines.length, items: 0, more: 0, headings: 0, blank: 0, left: 0 };
   let section = ''; let subsection = ''; let last: ReadItem | null = null;
   const add = (text: string, n: number, s = section, sub = subsection) => {
-    last = { text: norm(text), lines: [n], ...(s ? { section: s } : {}), ...(sub ? { subsection: sub } : {}) }; items.push(last); count.items++;
+    last = { text, lines: [n], ...(s ? { section: s } : {}), ...(sub ? { subsection: sub } : {}) }; items.push(last); count.items++;
   };
   lines.forEach((line, i) => {
     const n = i + 1;
     if (!key(line)) { count.blank++; return; }
     const r = reads.get(n);
     if (!usable(line, r)) { leave(n); return; }
-    if (r!.k === 'section') { section = norm(r!.text!); subsection = ''; last = null; count.headings++; return; }
-    if (r!.k === 'subsection') { subsection = norm(r!.text!); last = null; count.headings++; return; }
+    if (r!.k === 'section') { section = r!.text!; subsection = ''; last = null; count.headings++; return; }
+    if (r!.k === 'subsection') { subsection = r!.text!; last = null; count.headings++; return; }
     if (r!.k === 'columns') { count.headings++; return; }
     if (r!.k === 'more') {
       if (!last) { leave(n); return; }
-      const it: ReadItem = last; it.text = norm(`${it.text} ${line}`); it.lines.push(n); count.more++; return;
+      const it: ReadItem = last; it.text = `${it.text} ${line.trim()}`; it.lines.push(n); count.more++; return;
     }
     if (r!.k === 'item') {
       // a table row's own section cell starts that section (and no subsection) for it and the rows under it, as a section
       // filled in only on the first row of each section is laid out; its subsection cell does the same within the section
-      const s = norm(r!.section ?? ''); const sub = norm(r!.subsection ?? '');
+      const s = r!.section ?? ''; const sub = r!.subsection ?? '';
       if (s && s !== section) { section = s; subsection = ''; }
       if (sub) subsection = sub;
       add(r!.text!, n);
@@ -113,8 +113,8 @@ export function tieOut(lines: string[], reads: ReadonlyMap<number, LineRead>, br
   return { items, left, count };
 
   function leave(n: number) {
-    // a line brought in keeps its words; only a leading bullet or number goes, as the model leaves those off an item
-    if (bringIn.has(n)) { add(lines[n - 1].trim().replace(/^([-•*]+|\d+(\.\d+)*[.)]?|[a-z]\))\s+/i, '') || lines[n - 1], n); last = null; return; }
+    // a line brought in keeps its words; only a leading bullet or list number goes (not a figure that is part of the wording), as the model leaves those off an item
+    if (bringIn.has(n)) { add(lines[n - 1].trim().replace(/^([-•*]+|\d+(\.\d+)+[.)]?|\d+[.)]|[a-z]\))\s+/i, '') || lines[n - 1], n); last = null; return; }
     left.push(n); count.left++;
   }
 }

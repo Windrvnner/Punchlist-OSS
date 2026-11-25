@@ -2,7 +2,7 @@
  * Bringing in a checklist from a spreadsheet, as pure functions over the table the SpreadsheetCodec read:
  * which column holds the items and which their section, the rows as items, and the items worded the same.
  */
-import { key, norm, type ListItem } from './checklist';
+import { key, type ListItem } from './checklist';
 
 export interface ChecklistMapping { item: number | null; section: number | null; subsection?: number | null }
 
@@ -27,7 +27,7 @@ export function suggestChecklistColumns(columns: string[], rows: string[][]): Ch
 }
 
 /**
- * The rows as items: the item column's wording, normalized, with the section column's heading when there is one. A row
+ * The rows as items: the item column's wording exactly as the file has it, with the section column's heading when there is one. A row
  * whose item cell is empty is left out and counted. A section column that is filled only on the first row of each
  * section (as such lists are often laid out) gives its heading to the rows under it. A subsection column does the same
  * within its section: a new section starts with no subsection.
@@ -35,9 +35,9 @@ export function suggestChecklistColumns(columns: string[], rows: string[][]): Ch
 export function prepareChecklist(rows: string[][], m: ChecklistMapping): { items: ListItem[]; skipped: number } {
   const items: ListItem[] = []; let skipped = 0; let section = ''; let subsection = '';
   for (const r of rows) {
-    if (m.section !== null) { const s = norm(String(r[m.section] ?? '')); if (s && s !== section) { section = s; subsection = ''; } }
-    if (m.subsection != null) { const s = norm(String(r[m.subsection] ?? '')); if (s) subsection = s; }
-    const text = m.item === null ? '' : norm(String(r[m.item] ?? ''));
+    if (m.section !== null) { const s = String(r[m.section] ?? ''); if (s && s !== section) { section = s; subsection = ''; } }
+    if (m.subsection != null) { const s = String(r[m.subsection] ?? ''); if (s) subsection = s; }
+    const text = m.item === null ? '' : String(r[m.item] ?? '');
     if (!key(text)) { skipped++; continue; }
     items.push({ text, ...(section ? { section } : {}), ...(subsection ? { subsection } : {}) });
   }

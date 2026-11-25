@@ -39,7 +39,8 @@ describe('a list read by the model, tied out line by line', () => {
     expect(t.left).toEqual([1]);
     expect(t.items.map((i) => [i.section, i.text])).toContainEqual(['Site', 'Page 2 of 6']);
     expect(t.items.findIndex((i) => i.text === 'Page 2 of 6')).toBe(2);
-    // a leading bullet or number is left off, as the model leaves it off an item
+    // a leading bullet or list number is left off, as the model leaves it; a figure in the wording stays
+    expect(tieOut(['2 years of audited accounts', '10. Board minutes'], new Map(), new Set([1, 2])).items.map((i) => i.text)).toEqual(['2 years of audited accounts', 'Board minutes']);
     expect(tieOut(['*  Independent engineer engaged', '1.4) Survey'], new Map(), new Set([1, 2])).items.map((i) => i.text)).toEqual(['Independent engineer engaged', 'Survey']);
   });
 

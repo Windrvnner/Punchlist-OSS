@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { define, type PlanCtx, type Upsert } from '../command';
 import { DealId } from '../../domain/model';
 import { ok, fail, notFound, rejected, type Result } from '../../domain/result';
-import { FirmLayerList, type FirmList, ListId, ListRecord, Item, ItemFrom, ItemId, LIST_NAME_MAX, LAYER_NAMES, firmOf, itemId, itemsFor, key, listId, norm, dealLayers, type Layer } from '../../domain/checklist';
+import { FirmLayerList, type FirmList, ListId, ListRecord, Item, ItemFrom, ItemId, LIST_NAME_MAX, LAYER_NAMES, firmOf, itemId, itemsFor, key, listId, dealLayers, type Layer } from '../../domain/checklist';
 import { type State, conflictLabel, versionsWord } from '../state';
 import { sameContent } from '../../domain/versions';
 
@@ -25,7 +25,7 @@ type Wanted = z.infer<typeof Wanted>;
 export function addItems(state: Pick<State, 'items'>, dealId: string, wanted: Wanted[], ctx: Pick<PlanCtx, 'at'>): { upserts: Upsert[]; ids: string[] } {
   const upserts: Upsert[] = []; const ids: string[] = []; const seen = new Set<string>();
   for (const w of wanted) {
-    const text = norm(w.text); if (!key(text)) continue;
+    const text = w.text; if (!key(text)) continue;
     const id = itemId(dealId, text); if (seen.has(id) || state.items[id]) continue; seen.add(id);
     const rec = Item.parse({ id, dealId, rev: 0, createdAt: ctx.at, updatedAt: ctx.at, text, normV: 1, from: w.from, ...(w.section ? { section: w.section } : {}), ...(w.subsection ? { subsection: w.subsection } : {}), off: false });
     upserts.push({ kind: 'item', record: rec, expectedRev: null }); ids.push(id);
@@ -156,10 +156,10 @@ export const BringInList = define({
   input: z.object({ list: FirmLayerList.omit({ by: true, at: true }) }),
   targets: (_s, i) => [listId(i.list.layer, i.list.name)],
   plan(state, input, ctx) {
-    const l = input.list; const name = l.layer === 'broad' ? '' : norm(l.name);
+    const l = input.list; const name = l.layer === 'broad' ? '' : l.name;
     if (l.layer !== 'broad' && !key(name)) return fail(rejected(`Give the ${LAYER_NAMES[l.layer].one.toLowerCase()} list a name`));
     if (name.length > LIST_NAME_MAX) return fail(rejected(`Keep the name to ${LIST_NAME_MAX} characters`));
-    const items = l.items.map((it) => ({ ...it, text: norm(it.text) })).filter((it) => key(it.text));
+    const items = l.items.map((it) => ({ ...it })).filter((it) => key(it.text));
     if (!items.length) return fail(rejected('This list has no items'));
     const id = listId(l.layer, name); const cur = state.firmList[id];
     // refused even when nothing would be written, so a list in two versions is never taken as brought in

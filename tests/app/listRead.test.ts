@@ -5,7 +5,6 @@ import { tieOut, textLines, type LineRead } from '../../src/domain/listRead';
 import { mockAi } from '../../src/adapters/mocks';
 import { ok, fail } from '../../src/domain/result';
 import type { AiService } from '../../src/ports';
-import { norm } from '../../src/domain/checklist';
 import { ITEMS, LEFT_OUT, pastedLines } from '../fixtures/pastedList';
 
 const LINES = ['1. Site', '1.1 Title report', '1.2 Leases cover the array', 'Page 2 of 6'];
@@ -41,8 +40,8 @@ describe('the stand-in reading the mock-up list', () => {
     const lines = textLines(pastedLines().join('\n'));
     const r = await readList(mockAi({ latency: [0, 0] }), lines); if (!r.ok) throw new Error(r.error.message);
     const t = tieOut(lines, r.value);
-    // the app keeps wording with straight quotes (norm)
-    expect(t.items.map((i) => i.text)).toEqual(ITEMS.map((i) => norm(i.t)));
+    // the app keeps every wording exactly as the file has it, curly quotes included
+    expect(t.items.map((i) => i.text)).toEqual(ITEMS.map((i) => i.t));
     expect(t.items.map((i) => i.section ?? '')).toEqual(ITEMS.map((i) => i.s));
     expect(t.left.map((n) => lines[n - 1].trim())).toEqual(LEFT_OUT);
     const c = t.count; expect(c.items + c.more + c.headings + c.blank + c.left).toBe(lines.length);
