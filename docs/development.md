@@ -194,16 +194,17 @@ Its **How the batch is worked** section sets that batch's own rules. These rules
 
 - Set the definition of done in the batch issue before the first pull request, with separate acceptance criteria for
   each goal, so the final status of every goal is clear.
-- Open each pull request as a draft as soon as its design holds, so the required checks run while its independent
-  review does. Have the review start with the before-and-after tests for failed writes, restarts, and edits from
-  another window.
-- Follow the process mechanically from the first pull request. Give every squash merge an explicit commit title and
-  body, since a generated body can fail the attribution check (#864). Run one local test run at a time. Leave a pull
-  request that reaches the review-round limit open as a draft, with its blocker noted on it and on the batch issue.
 - Open a pull request only once its design is proved to hold where the guarantee is enforced: for example, ownership
   is checked before a file is published, evidence before a finding is saved, and separate inputs stay separate before
   a draft is made. When a review exposes a wrong assumption, re-examine the design rather than patching the reported
-  case.
+  case. Open it as a draft at that point, so the required checks run while its independent review does.
+- When a fix touches saving, write its before-and-after tests for failed writes, restarts, and edits from another
+  window first.
+- Apply these rules from the first pull request. Give every squash merge an explicit commit title and body, since a
+  generated body can fail the attribution check (#864). Run one local test command at a time on a machine, since
+  timing-sensitive tests fail under load. A pull request that reaches the round limit in
+  [review-prompt.md](review-prompt.md) stays open as a draft until it is cut or split, with its blocker noted on it
+  and on the batch issue.
 - Test the failing case and the nearby cases that already work on `main`, so that a fix keeps the behavior around it.
 - Check the files and dependencies a fix needs against the files the batch must not edit before starting it, and
   again whenever a revision changes a data contract.
