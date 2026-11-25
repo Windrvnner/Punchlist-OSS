@@ -10,6 +10,7 @@ Dependencies point inward, following these rules:
 - `app` never imports `backend`, `adapters`, or `ui`.
 - `adapters` and `backend` implement the ports.
 - `ui` reads `domain` helpers but changes records only through `app`.
+- `ui` never imports `backend`, `adapters`, `desktop`, or `shell`, and reaches services and storage only through `app`.
 - `logRepository.ts` and `changeLog.ts` are bundled into the browser build, so they must stay free of Node imports.
 
 The source tree is organized as follows:
@@ -67,7 +68,9 @@ There is no optimistic state: the screen never shows a change that the repositor
 - **Undo** runs the stored inverse command as a normal operation, and is refused if the records have changed since.
 - Startup moves through stages (`session`, `deals`, `journal`, `ready`), and recovery re-enters at the stage that failed. Operations that a crash left pending are offered with **Retry** and **Discard**. **Retry** waits for other saves, loads its target records, and checks their original revisions. It then reuses the interrupted entry with its current journal revision until the result is durable.
 - A save that couldn't be written stays pending in the journal and is offered again, including after a restart. The app never re-runs a person's action by itself, with one exception: once the app is connected again, it saves a field's own typed text.
-- `EditField` (`src/ui/editField.tsx`) remembers the value that its text was typed over. If a change from elsewhere arrives in the meantime, the field shows "Changed elsewhere" with **Keep Mine** and **Take Theirs**, instead of writing over that change.
+- `FieldSave` (`src/app/fieldSave.ts`) remembers the value that a field's text was typed over, sends saves, and keeps
+  the draft through refusals and changes from elsewhere. `EditField` shows **Keep Mine** and **Take Theirs** when
+  the app needs the person to choose.
 
 ## The control file
 
@@ -167,7 +170,7 @@ The code is in `src/backend/ai.ts`, `agent.ts`, and `lenient.ts`.
 
 The first pass checks a deal's documents against the checklist once the deal's folders finish indexing. A person can ask for another check, either quick or deep. Each item comes out as satisfied, a finding (with a source that opens), a gap, or not settled, and a run never stops to ask anything (`firstPass` and `checkAll` in `src/backend/ai.ts`).
 
-Results go into per-PC `checks-<install>-<deal>.jsonl` files, ordered by a running number rather than by the clock, so every PC shows the same results. Each check runs as a round (`src/backend/rounds.ts`): one shared run of checks on one deal, which every PC with the deal can take part in. The PC that starts a round writes the list of pieces of work. Each PC works out its own share from the same lines, using rendezvous hashing over the members that are active. Work that costs a model call is claimed first, and a member that is quiet for 15 minutes has its work taken over. If every member leaves a round, any PC that has the deal open and holds its documents finishes it.
+Results go into per-PC `checks-<install>-<deal>.jsonl` files, ordered by a running number rather than by the clock, so every PC shows the same results. Each check runs as a round (`src/backend/rounds.ts`): one shared run of checks on one deal, which every PC with the deal can take part in. The PC that starts a round writes the list of pieces of work. Each PC works out its own share from the same lines, using rendezvous hashing over the members that are active. Work that costs a model call is claimed first, and a member that is quiet for 15 minutes has its work taken over. If every member leaves a round, any PC that has the deal open and holds its documents finishes it. Two PCs that open a round of the same kind while out of sync merge them into the round with the lower id; a batch still running in the merged round writes its results for the kept round, even once that has ended, unless a later round has begun.
 
 New documents or responses go to the fast model, which says what they could change, with the standard model confirming any doubts, before a finding is marked to reassess.
 
@@ -182,6 +185,8 @@ A deal's checklist is made up of its own item records, linked to the findings an
 - **A deal's items** (kind `item`) are only ever added, never removed. An item's ID is `i_` derived from the deal and its wording's `key()` (`norm()`, with case folded and any trailing period removed), so the same wording added on two PCs is one item. The wording, `from` (the list and its `rev`), and the section are bookkeeping fields. Turned off (`off`) is the only field a person sets, and a write of bookkeeping fields alone folds into a concurrent change of `off` (#19).
 - **Items are added** when a deal is created; when a deal gets a new structure, sector, or technology (in the same change); by a bring-in; and by "Add them" when the master checklist's lists hold items the deal lacks. "Add them" is offered only on a loaded deal that is not marked Closed and not in two versions, and only while this PC's copy of each list the items name is at least as new as the `rev` they name (`offeredItems`). Picking another list swaps lists: items that only the old list held are turned off and marked `offBySwap`, and they are turned back on when a list that holds them returns.
 - **Order:** Items are ordered by layer (general, structure, sector, technology), then in the order of the master checklist's lists for that layer (`orderItems`). An item whose wording is not in the current master checklist lists for the deal's layers shows an icon (`unlistedItems`).
+- **The Checklist page** reads its rows, groups, filter counts and each turned-off item's findings from
+  `src/app/checklistView.ts`.
 - **The checks** read a deal's items that are turned on, in this order. A deal with no items is checked against the checklist the backend was given.
 - **Links:** A question records the item it was asked for (`linkedItem`), which is set by **Ask the Counterparty** and **Add All Unresolved to Q&A…**. A finding raised by a check records its item (`itemId`). A check matches a problem to a finding by its item, never by its title, and a reworded item is a new item. A finding names its item by that ID or, failing that, by the check line that names it (`findingItem` in `src/app/state.ts`).
 - **An item's standing** (`state.ts`) is worked out as follows. Items that are turned off are left out of the counts.
@@ -189,14 +194,28 @@ A deal's checklist is made up of its own item records, linked to the findings an
   - If a person closed that finding, the item is **Resolved by a person**.
   - If that finding was deleted, the item is **Finding deleted**, and it still needs to be resolved.
   - Otherwise, the item shows the check's result: **Satisfied**, **Gap**, **Not settled**, or not checked.
-- **Close This Question** and **Add All Unresolved to Q&A…** are each one change with one **Undo** (`SetQuestionsStatus`, `AddUnresolved`). Both read the rows again before writing, and write nothing if a row has changed since the preview. **Add all unresolved to Q&A** has the fast model phrase a question for each gap or open finding that has no linked question. It works in parts sized by `inParts`, and asks again, one at a time, about any points that failed. Points still without a question are counted and offered with **Retry**.
+- **Close This Question** and the bulk close share `CloseSettledQuestions`. The app rereads the rows just before planning.
+  If any selected question is no longer settled, none are closed. Each close is one change with one **Undo**.
+- **Add All Unresolved to Q&A…** (`AddUnresolved`) reads the rows again before writing and applies one change with one
+  **Undo**. The fast model phrases a question for each gap or open finding that has no linked question. It works in
+  parts sized by `inParts` and asks again, one at a time, about any points that failed. Points still without a question
+  are counted and offered with **Retry**.
 
 ## Q&A log, imports, and the memo
 
 - **The Q&A log** (`src/app/qaLog.ts`, `src/backend/qaLogs.ts`) is the team's own spreadsheet; the deal records only where it is. An update reads the log as it is, works out the cells to change (`logWrite` in `src/domain/logWrite.ts`), and writes them into a copy (`editLog` in `src/backend/spreadsheets.ts`). It then checks that only those cells changed, archives the old version, and saves the copy over the log (`src/backend/qaLogFolder.ts`).
+- **Q&A import** reads and proposes a table layout through `src/app/transfer.ts`. Its preview uses prepared dates
+  where available. `src/app/qaImport.ts` submits the prepared rows through `ImportQuestions`. That workflow resumes retained
+  submissions by their journal correlation and finishes the saved log choice.
 - **The master checklist** is brought in pasted or from a file, read line by line by the model, and tied out so that every line is accounted for (`src/app/listRead.ts`, `src/domain/listRead.ts`). Its items go to every deal that uses the list and is not marked Closed, with one **Undo** for all of them.
-- **An issues list** is attached in the same way as a file in a chat. The model reads it page by page, with each page checked against the file, and the issues are then titled and matched against the deal's findings (`issuesList` in `src/backend/ai.ts`, `src/app/commands/issuesList.ts`).
-- **An import in progress** (the file, the model's reading, the choices, and the check marks) is kept on each PC in IndexedDB (`src/ui/keptImports.ts`), part by part. A Q&A submission reaches IndexedDB before its operation starts, and keeps a unique journal correlation until both the rows and its Q&A log choice are finished. Reopening resumes that submission without appending its rows again.
+- **An issues list** is attached and read through `src/app/issuesList.ts`. The model reads and checks each page against the
+  file and proposes titles and matches (`issuesList` in `src/backend/ai.ts`). The preview and import command resolve the
+  same matches through `src/app/issuesListJoins.ts`.
+- **An import in progress** (the file, the model's reading, the choices, and the check marks) is kept on each PC,
+  part by part, through the `KeptImports` port. Both shells use the IndexedDB adapter. `src/app/keptImports.ts` keeps
+  the parts and coordinates Q&A submission checkpoints. A submission reaches the store before its operation starts
+  and keeps a unique journal correlation until both the rows and its Q&A log choice are finished. Reopening resumes
+  that submission without appending its rows again.
 - **The deal memo** (`src/app/memo.ts`, `src/domain/memo.ts`, `src/domain/memoDoc.ts`) asks the model only for the summary and each open finding's rating. Everything else is worked out from the records, and LibreOffice turns the result into Word and PDF files.
 
 ## Conversations

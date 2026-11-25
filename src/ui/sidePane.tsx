@@ -10,7 +10,7 @@ import { Icon } from './icons';
 import { FindingOpening, findingHref } from './findings';
 import { STATUS_LABEL } from './qa';
 import { navigate } from './nav';
-import { answerText, useAnswer } from '../app/conversations';
+import { answerText, answerWasUsed, responseToReplace, useAnswer } from '../app/conversations';
 import type { Message } from '../app/state';
 import type { Question, Source } from '../domain/model';
 
@@ -53,14 +53,29 @@ export function SidePane({ onOpen, thread }: { onOpen: (s: Source) => void; thre
  * stays open and shows the question with its new response; undone, it is back to the check.
  */
 function QuestionCheck({ q, answer, close }: { q: Question; answer: Message; close: () => void }) {
-  const store = useStore(); const [replace, setReplace] = useState(false);
+  const store = useStore();
+  const [replace, setReplace] = useState<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
   // the button pressed goes once the answer is the response: the focus stays in the pane, on what it now says
-  const use = async () => { const r = await useAnswer(store, q.dealId, q.id, answer); setReplace(false); if (r.ok) requestAnimationFrame(() => { const a = document.activeElement; if (!a || a === document.body || box.current?.closest('#sidepane')?.contains(a)) box.current?.querySelector<HTMLElement>('#side-used')?.focus({ preventScroll: true }); }); };
+  const use = async (over: string | null = null) => {
+    const result = await useAnswer(store, q.dealId, q.id, answer, over);
+    setReplace(null);
+    if (!result.ok) return;
+    requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (!active || active === document.body || box.current?.closest('#sidepane')?.contains(active)) {
+        box.current?.querySelector<HTMLElement>('#side-used')?.focus({ preventScroll: true });
+      }
+    });
+  };
+  const askUse = () => {
+    const response = responseToReplace(store.get().questions[q.id]);
+    if (response === null) void use();
+    else setReplace(response);
+  };
   const notThis = () => { store.putAway(answer.id, q.id); close(); };
   // read from the question itself, so an Undo puts the check back
-  const used = !!q.response.trim() && q.response.trim() === answerText(answer).trim();
-  if (used) return (
+  if (answerWasUsed(q, answer)) return (
     <div class="qcheck" ref={box}>
       <div class="qmeta"><b>Q{q.n}</b><span class="st">{STATUS_LABEL[q.status]}</span>{[q.workstream, q.priority, q.askedBy].filter(Boolean).map((x) => <span key={x}>{x}</span>)}</div>
       {q.received && <p class="qrec">Received {fmtDate(q.received)}</p>}
@@ -76,18 +91,25 @@ function QuestionCheck({ q, answer, close }: { q: Question; answer: Message; clo
       {q.received && <p class="qrec">Received {fmtDate(q.received)}</p>}
       <p class="qfull" id="side-q">{q.text}</p>
       <div class="plbl">Current Response</div>
-      {q.response.trim() ? <p class="qresp" id="side-now">{q.response}</p> : <p class="qnone" id="side-now">None yet</p>}
+      {responseToReplace(q) !== null
+        ? <p class="qresp" id="side-now">{q.response}</p> : <p class="qnone" id="side-now">None yet</p>}
       <div class="plbl">Would Become the Response</div>
       <p class="qprop" id="side-new">{answerText(answer)}</p>
-      {replace ? <div class="card confirm" role="alertdialog" aria-label="Replace the response" onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setReplace(false); } }}>
+      {replace !== null ? <div class="card confirm" role="alertdialog" aria-label="Replace the response"
+        onKeyDown={(e) => {
+          if (e.key !== 'Escape') return;
+          e.preventDefault();
+          e.stopPropagation();
+          setReplace(null);
+        }}>
         <p>Q{q.n} already has a response. Replace it with this answer?</p>
         <div class="cacts"><button type="button" class="btn sm pri" id="side-replace"
           ref={(el) => { if (el && !el.dataset.f) { el.dataset.f = '1'; el.focus(); } }}
-          onClick={() => void use()}>Replace</button><button type="button" class="btn sm" id="side-keep"
-          onClick={() => setReplace(false)}>Keep the Current Response</button></div>
+          onClick={() => void use(replace)}>Replace</button><button type="button" class="btn sm" id="side-keep"
+          onClick={() => setReplace(null)}>Keep the Current Response</button></div>
       </div>
       : <div class="pacts"><button type="button" class="btn sm pri" id="side-use"
-        onClick={() => { if (q.response.trim()) setReplace(true); else void use(); }}>Use as Response</button><button
+        onClick={askUse}>Use as Response</button><button
         type="button" class="btn sm" id="side-not" onClick={notThis}>Not This One</button></div>}
     </div>
   );

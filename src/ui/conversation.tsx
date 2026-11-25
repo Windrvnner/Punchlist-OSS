@@ -11,29 +11,17 @@ import { Icon } from './icons';
 import { FindingOpening } from './findings';
 import { SidePane } from './sidePane';
 import {
-  ask, convKey, dealIdOf, suggestions, conversationDocs, findDoc, navIntent, questionIntent, unresolvedIntent,
-  scopeHash, newConv, filesDealOf, type Scope,
+  composerScope, composerText, convKey, dealIdOf, suggestions, conversationDocs, findDoc, filesDealOf, scopeValid,
+  sendTyped, setComposerText, type Scope,
 } from '../app/conversations';
 import { isOwnFiles, type Deal, type Question, type Source } from '../domain/model';
-import { attachFiles, dealCopied, filesSendable } from '../app/attachments';
-import { type Attachment, type Message, type State , isReading, askAbout, askAcross } from '../app/state';
-import { keptDrafts, isText } from './keptDrafts';
+import { attachFiles, composerChips } from '../app/attachments';
+import { type Message, type State, isReading, askAbout, askAcross } from '../app/state';
 import { DocPanel } from './docPanel';
 import { PastList } from './pastList';
 import { useRotatingExample } from './homeExamples';
 import { AttachButton, Chip, ModelPill, SendButton, type AttachTarget } from './composerParts';
 import { Exchange, NotHere, QuestionOpening, Trail } from './conversationParts';
-
-/** Whether what a conversation is about is still there: 'loading' while its deal is loaded to find out. */
-export function scopeValid(state: State, scope: Scope): boolean | 'loading' {
-  if (scope.kind === 'all') return true;
-  if (!state.deals[scope.dealId]) return false;
-  if (scope.kind === 'deal') return true;
-  const load = state.dealLoad[scope.dealId];
-  if (load !== 'loaded') return load === 'failed' ? false : 'loading';
-  if (scope.kind === 'finding') return state.findings[scope.findingId]?.dealId === scope.dealId;
-  return state.questions[scope.questionId]?.dealId === scope.dealId;
-}
 
 /**
  * the space between one exchange and the next in a conversation, and between the last one and the composer (.msgs
@@ -148,11 +136,13 @@ export function ConversationPage({ scope }: { scope: Scope }) {
   const empty = thread.length === 0;
   return (
     <div class={`chatwrap ${open ? 'withdoc' : ''} ${side ? 'withside' : ''}`}>
-      <div class="chat" ref={chatRef}>
-        <div class="chathead">{trail}</div>
-        <Opening scope={scope} deal={deal} question={question} checklistItem={empty ? fromList?.item : undefined}
-          onOpen={openDoc} />
-        <Messages scope={scope} thread={thread} onOpen={openDoc} />
+      <div class={open ? 'reading-pane glass' : 'reading-pane'}>
+        <div class="chat" ref={chatRef}>
+          <div class="chathead">{trail}</div>
+          <Opening scope={scope} deal={deal} question={question} checklistItem={empty ? fromList?.item : undefined}
+            onOpen={openDoc} />
+          <Messages scope={scope} thread={thread} onOpen={openDoc} />
+        </div>
       </div>
       {side && <SidePane onOpen={openDoc} thread={thread} />}
       {open && readDeal && !stale && <DocPanel dealId={readDeal} docs={docs}
@@ -211,29 +201,7 @@ function Messages({ scope, thread, onOpen }: {
   );
 }
 
-/**
- * The composer: under a conversation (`#pcomposer`), and the ask box at the top of a deal's pages and on Home
- * (option A, the same composer in place). Enter sends; Shift+Enter is a new line. Text in progress is kept per
- * conversation. Asked from a deal page or from Home, a question starts a new conversation; under one, it continues it.
- */
-const drafts = keptDrafts('composer', isText);                // kept across a restart too
-/** the conversation the next question asked from a deal's pages, or from Home, will start */
-const nextConv = keptDrafts('next-conversation', isText);   // so the ask box's kept text finds its conversation again
-
 type Launch = 'deal' | 'home' | undefined;
-
-/**
- * The conversation a composer asks in: its own, or for an ask box, the new one its next question will start.
- * `slot`: the ask box's place in the list of next conversations.
- */
-function composerScope(given: Scope, launch: Launch) {
-  const slot = given.kind === 'all' ? 'all' : `deal:${given.dealId}`;
-  if (launch && !nextConv.has(slot)) nextConv.set(slot, newConv());
-  if (!launch) return { slot, scope: given };
-  const conv = nextConv.get(slot)!;
-  const scope: Scope = given.kind === 'all' ? { kind: 'all', conv } : { kind: 'deal', dealId: given.dealId, conv };
-  return { slot, scope };
-}
 
 /**
  * Text in progress lives in the per-conversation map and is read straight from it, so changing conversation shows
@@ -241,13 +209,12 @@ function composerScope(given: Scope, launch: Launch) {
  */
 function useKeptText(key: string) {
   const [, bump] = useState(0);
-  const text = drafts.get(key) ?? '';
+  const textChanged = () => bump((n) => n + 1);
   const setText = (value: string) => {
-    if (value) drafts.set(key, value);
-    else drafts.delete(key);
-    bump((n) => n + 1);
+    setComposerText(key, value);
+    textChanged();
   };
-  return { text, setText };
+  return { text: composerText(key), setText, textChanged };
 }
 
 /** The box grows with its text up to COMPOSER_LINES; the one-line ask box keeps the style sheet's height. */
@@ -268,10 +235,11 @@ function fitHeight(box: HTMLTextAreaElement, oneLine: boolean) {
  */
 function placeComposer(composer: HTMLFormElement, chat: HTMLElement, reading: boolean, beside: boolean) {
   const frame = composer.offsetParent as HTMLElement | null;
-  if (reading && frame) {
-    const wrapLeft = chat.parentElement!.getBoundingClientRect().left;
+  const pane = reading && frame ? chat.parentElement : null;
+  if (pane && frame) {
+    const wrapLeft = pane.parentElement!.getBoundingClientRect().left;
     composer.style.setProperty('--cl', wrapLeft - frame.getBoundingClientRect().left + 14 + 'px');
-    composer.style.setProperty('--cw', chat.offsetWidth - 28 + 'px');
+    composer.style.setProperty('--cw', pane.offsetWidth - 28 + 'px');
     composer.style.removeProperty('--tw');
   } else if (beside && frame) {
     composer.style.setProperty('--cl', chat.getBoundingClientRect().left - frame.getBoundingClientRect().left + 'px');
@@ -279,11 +247,19 @@ function placeComposer(composer: HTMLFormElement, chat: HTMLElement, reading: bo
   } else {
     composer.style.setProperty('--tw', chat.offsetWidth + 'px');
   }
-  const gap = Math.round(chat.getBoundingClientRect().bottom - composer.getBoundingClientRect().top);
-  const want = gap + THREAD_GAP + 'px';
-  if (chat.style.paddingBottom === want) return;
-  const fromEnd = chat.scrollHeight - chat.scrollTop - chat.clientHeight;
-  chat.style.paddingBottom = want;
+  const bottom = (pane ?? chat).getBoundingClientRect().bottom;
+  fitThread(chat, Math.round(bottom - composer.getBoundingClientRect().top), !!pane);
+}
+
+/** In reading mode, take the covered height out of both the scrollport and its padding (#438). */
+function fitThread(chat: HTMLElement, gap: number, reading: boolean) {
+  const padding = gap + THREAD_GAP + 'px';
+  const cover = reading ? gap + 'px' : '';
+  if (chat.style.getPropertyValue('--thread-padding') === padding &&
+      chat.style.getPropertyValue('--composer-cover') === cover) return;
+  const fromEnd = chat.scrollHeight - chat.clientHeight - chat.scrollTop;
+  chat.style.setProperty('--thread-padding', padding);
+  chat.style.setProperty('--composer-cover', cover);
   chat.scrollTop = chat.scrollHeight - chat.clientHeight - fromEnd;
 }
 
@@ -338,84 +314,6 @@ const isSendKey = (e: KeyboardEvent) => e.key === 'Enter' && !e.shiftKey && !e.i
 /** Focus inside the composer opens a one-line ask box, unless it is on the past conversations' button or list. */
 const inPastList = (el: HTMLElement) => !!el.closest('.pastpop, .pastbtn');
 
-/** What sending needs: the conversation, where its text is kept, and where its files go. */
-type Sending = {
-  store: Store; scope: Scope; key: string; slot: string; launch: Launch; target: AttachTarget | null;
-  chips: Attachment[]; readOnly: string | null; box: RefObject<HTMLTextAreaElement | null>;
-  setText: (text: string) => void;
-};
-
-/**
- * Sends what is typed, read at the moment of sending, not from the last render. Typed text that asks to go somewhere,
- * or on a deal's pages to add a question or an unresolved item, is done as asked instead of being asked of the model.
- */
-async function sendTyped({ store, scope, key, slot, launch, target, chips, readOnly, box, setText }: Sending) {
-  if (!(drafts.get(key) ?? '').trim() || readOnly) return;
-  if (chips.some((chip) => chip.state === 'pending')) {
-    store.toast('Still attaching — send when it finishes');
-    return;
-  }
-  if (!(await chipsSendable(store, key))) return;
-  // the deal was kept as a copy during the check (#117): its text and files are on the copy now, to be sent from there
-  if (target && dealCopied(store, target.dealId)) return;
-  // read after the files are checked, so anything typed meanwhile goes too
-  const typed = (drafts.get(key) ?? '').trim();
-  if (!typed) return;
-  setText('');
-  if (launch) box.current?.blur();
-  if (navIntent(store, typed)) return;
-  const inDeal = target && scope.kind === 'deal' ? target.dealId : null;
-  if (inDeal && unresolvedIntent(store, inDeal, typed)) return;
-  const intent = inDeal ? await questionIntent(store, inDeal, typed) : 'none';
-  // refused: the typed text comes back, unless something new has been typed since, so it can be sent again
-  if (intent === 'refused' && !drafts.get(key)) {
-    setText(typed);
-    box.current?.focus();
-  }
-  if (intent !== 'none') return;
-  if (launch) {
-    nextConv.delete(slot);
-    location.hash = scopeHash(scope);   // the new conversation opens, with its question in it
-  }
-  void ask(store, scope, typed);
-}
-
-/** the conversations whose files are being checked before a send, so a second Enter meanwhile sends nothing twice */
-const checking = new Set<string>();
-
-/** the files in a conversation's composer that are ready to go */
-const readyChips = (store: Store, key: string) => store.get().ui.attachments
-  .filter((chip) => chip.conv === key && chip.state === 'done' && chip.doc && chip.docId);
-
-/** Whether these files can all be sent from this PC (#671), deal by deal; the person is told of any that can't. */
-async function filesOk(store: Store, chips: Attachment[]) {
-  const files = chips.map((chip) => ({ dealId: chip.dealId, doc: chip.doc!, docId: chip.docId! }));
-  for (const dealId of new Set(files.map((file) => file.dealId))) {
-    if (!(await filesSendable(store, dealId, files.filter((file) => file.dealId === dealId)))) return false;
-  }
-  return true;
-}
-
-/**
- * Whether the composer's files can all go now. A file that finishes attaching during the check is checked too.
- */
-async function chipsSendable(store: Store, key: string) {
-  if (checking.has(key)) return false;
-  checking.add(key);
-  try {
-    const checked = new Set<string>();
-    let fresh = readyChips(store, key);
-    while (fresh.length) {
-      if (!(await filesOk(store, fresh))) return false;
-      for (const chip of fresh) checked.add(chip.id);
-      fresh = readyChips(store, key).filter((chip) => !checked.has(chip.id));
-    }
-    return true;
-  } finally {
-    checking.delete(key);
-  }
-}
-
 export function Composer({ scope: given, launch, placeholder: placeholderGiven, examples }: {
   scope: Scope; launch?: 'deal' | 'home'; placeholder?: string; examples?: string[];
 }) {
@@ -423,9 +321,11 @@ export function Composer({ scope: given, launch, placeholder: placeholderGiven, 
   const state = useAppState();
   // read-only while nobody is signed in: nothing is sent and nothing attached; what was typed stays in the box
   const readOnly = useContext(ReadOnlyContext);
-  const { slot, scope } = composerScope(given, launch);
+  const { scope, launchSlot } = composerScope(given, !!launch);
   const key = convKey(scope);
-  const { text, setText } = useKeptText(key);
+  const currentKey = useRef(key);
+  currentKey.current = key;
+  const { text, setText, textChanged } = useKeptText(key);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const menu = menuFor === key;
   const setMenu = (open: boolean) => setMenuFor(open ? key : null);
@@ -443,8 +343,13 @@ export function Composer({ scope: given, launch, placeholder: placeholderGiven, 
   const beside = !launch && !reading && !!state.ui.side && given.kind !== 'all';
   useComposerPlace(form, launch, reading, beside);
   const target = attachTarget(state, scope, key);
-  const chips = target ? state.ui.attachments.filter((attachment) => attachment.conv === key) : [];
-  const send = () => sendTyped({ store, scope, key, slot, launch, target, chips, readOnly, box, setText });
+  const chips = target ? composerChips(state, key) : [];
+  const send = () => sendTyped(store, scope, {
+    launchSlot, textChanged,
+    navigate: (hash) => { location.hash = hash; },
+    sending: () => { if (launch && currentKey.current === key) box.current?.blur(); },
+    refused: () => { if (currentKey.current === key) box.current?.focus(); },
+  });
   const deal = target ? state.deals[target.dealId] : null;
   const example = useRotatingExample(examples, box, !!text);   // Home's example questions (homeExamples.ts)
   const placeholder = readOnly ? 'Read-only' : example ?? placeholderGiven ?? placeholderFor(state, scope, deal);

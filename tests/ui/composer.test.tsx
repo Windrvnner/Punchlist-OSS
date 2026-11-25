@@ -10,6 +10,7 @@ import { mockAi, mockDocuments, mockSession } from '../../src/adapters/mocks';
 import { CreateDeal } from '../../src/app/commands/deals';
 import { CreateQuestion, DeleteQuestion } from '../../src/app/commands/questions';
 import { registry } from '../../src/app/commands/undo';
+import './keptTextSession';
 import { StoreContext } from '../../src/ui/hooks';
 import { Composer } from '../../src/ui/conversation';
 import { attachFiles, followCopies, removeAttachment, MAX_ATTACHED } from '../../src/app/attachments';

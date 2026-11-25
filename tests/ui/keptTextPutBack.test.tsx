@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // Text kept as "Not saved" while its field is off screen is not written over a change another PC made and a third PC put
 // back meanwhile. Real Store, stand-in folders, other PCs with their clocks ahead and behind, 2,000 questions.
-import { describe, it, expect, vi } from 'vitest';
+import { restartKeptText } from './keptTextSession';
+import { describe, it, expect } from 'vitest';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { Store } from '../../src/app/store';
@@ -48,7 +49,8 @@ async function other(m: ReturnType<typeof start>, who: typeof PC2, kind: 'deal' 
 }
 
 // the field and the store's context come from one load of the modules, as in the app (a restart loads them again)
-type Ui = typeof import('../../src/ui/editField') & typeof import('../../src/ui/hooks');
+type Ui = typeof import('../../src/ui/editField') & typeof import('../../src/ui/hooks')
+  & typeof import('../../src/app/fieldDrafts');
 /** a field as the app shows one: under the store, drawn from its state; `shown(false)` takes it off screen */
 function screen(ui: Ui, store: Store, which: { kind: 'counterparty'; dealId: string } | { kind: 'response'; dealId: string; questionId: string }) {
   const host = document.createElement('div'); document.body.appendChild(host);
@@ -64,8 +66,16 @@ function screen(ui: Ui, store: Store, which: { kind: 'counterparty'; dealId: str
   const press = async (label: string) => { await act(async () => { [...host.querySelectorAll('button')].find((b) => b.textContent?.startsWith(label))!.click(); }); await tick(60); };
   return { host, shown, el, type, press, text: () => host.textContent ?? '' };
 }
-const load = async () => ({ ...(await import('../../src/ui/editField')), ...(await import('../../src/ui/hooks')) }) as Ui;
-async function fresh() { localStorage.clear(); vi.resetModules(); return load(); }
+const load = async (): Promise<Ui> => ({
+  ...(await import('../../src/ui/editField')),
+  ...(await import('../../src/ui/hooks')),
+  ...(await import('../../src/app/fieldDrafts')),
+});
+async function fresh() {
+  localStorage.clear();
+  await restartKeptText();
+  return load();
+}
 
 describe('kept text and a change put back while its field was off screen', () => {
   it('the issue\'s steps: a second PC changes the counterparty, a third puts it back; the field says "Changed elsewhere" and Retry is not offered', async () => {
@@ -163,7 +173,7 @@ describe('kept text and a change put back while its field was off screen', () =>
   it('text being typed when "Changed elsewhere" shows is kept against a crash, and so is what is typed after', async () => {
     for (const route of ['other fields in one sync', 'the field itself'] as const) {
       const ui = await fresh(); const m = start(); const dealId = await deal(m.store);
-      const { saveKeptDrafts } = await import('../../src/ui/keptDrafts');
+      const { saveKeptDrafts } = await import('../../src/app/keptText');
       const stored = () => { saveKeptDrafts(); return JSON.stringify(JSON.parse(localStorage.getItem('dil/1/kept-drafts') ?? '{}')['edit-field'] ?? []); };
       const q = dealQuestions(m.store.get(), dealId).find((x) => String(x.n) === '1500')!;
       const f = screen(ui, m.store, { kind: 'response', dealId, questionId: q.id }); await f.shown(true);
@@ -203,7 +213,8 @@ describe('kept text and a change put back while its field was off screen', () =>
       if (putBack) { await again.store.boot(); await other(again, PC2, 'deal', dealId, { counterparty: 'pc2 wording' }); await other(again, PC3, 'deal', dealId, { counterparty: 'orig' }); }
       const restarted = start(m.kv); await restarted.store.boot(); await restarted.store.loadDeal(dealId);
       expect(restarted.store.get().deals[dealId].counterparty).toBe('orig');
-      vi.resetModules(); const ui2 = await load();
+      await restartKeptText();
+      const ui2 = await load();
       const g = screen(ui2, restarted.store, { kind: 'counterparty', dealId }); await g.shown(true);
       expect(g.el().value).toBe('mine');
       if (putBack) { expect(g.text()).toMatch(/Changed elsewhere/); expect(g.text()).not.toMatch(/Retry/); }

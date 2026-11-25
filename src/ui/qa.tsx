@@ -1,58 +1,58 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { RefObject } from 'preact';
 import { useAppState, useStore, fmtDate, useDismiss } from './hooks';
-import { EditField, ReadOnlyContext, readQuestion, keepsUnsaved, unsavedText, unsavedBase } from './editField';
-import { CHANGED_ELSEWHERE } from '../app/changedElsewhere';
+import { EditField, ReadOnlyContext } from './editField';
+import { readQuestion, keepsUnsaved, unsavedText, unsavedBase, typedResponse } from '../app/fieldDrafts';
+import { isChangedElsewhere } from '../app/changedElsewhere';
 import { Icon } from './icons';
 import { ChoiceCheck } from './moreMenu';
 import { PageTop } from './deal';
-import { dealQuestions, sharedNumbers, nextQuestionNumber, settledQuestions, qaVersions, qaChanged, qaListed, qaKept, type State } from '../app/state';
-import { qaWorkstreamChoices, workstreamForNew } from '../app/state';
+import { sharedNumbers, nextQuestionNumber, qaVersions, qaChanged, workstreamForNew, type State }
+  from '../app/state';
+import { hasLogVersion, qaEditorWorkstreams, qaPageView } from '../app/qaView';
+import { settledQuestion } from '../app/settledView';
 import { SettledLine, CloseThisQuestion } from './closeSettled';
 import { ConflictView } from './conflict';
 import { AskFirst } from './dialogs';
 import { AskedFor } from './askedFor';
 import { CreateQuestion, EditQuestionField, SetQuestionStatus, SetResponse, DeleteQuestion, RenumberQuestion } from '../app/commands/questions';
+import { createdRecord } from '../app/createdRecord';
 import { EditDeal } from '../app/commands/deals';
-import { RequestDraft, DiscardDraft, AcceptDraft } from '../app/commands/drafts';
-import { draftAll, stopDraftAll, eligibleForDraft, typingIn } from '../app/drafting';
+import { DiscardDraft } from '../app/commands/drafts';
+import {
+  draftAll, draftReplacesResponse, requestQuestionDraft, stopDraftAll, typingIn, useQuestionDraft,
+} from '../app/drafting';
 import { isDraftStale } from '../domain/transitions';
 import { Ref } from './ref';
-import { deletedOf } from './deleted';
+import { visibleDeletedNotes } from '../app/deletedView';
 import { WORKSTREAMS, type Question, type QuestionStatus } from '../domain/model';
 import { AI_LABEL } from '../control';
-import { workstreamChoices } from '../domain/order';
 import { MenuChoice, workstreamOptions } from './filterMenu';
 import { wholeRows } from './pickList';
-import { exportQaLog, chooseLogFolder, logOf } from '../app/qaLog';
+import { chooseLogFolder, logOf, markQaLogSeen } from '../app/qaLog';
 import { UndoLastImport, lastImport, undoLastImportPlan } from '../app/commands/importQuestions';
 import { Modal } from './dialogs';
-import { placeKept } from './placeKept';
+import { showQaLogUpdate } from './qaLogNotice';
 import { showTip, hideTip } from './tip';
-import { openResolve, inTwoVersions } from './resolve';
+import { openResolve } from './resolve';
+import { focusSearchResult } from './nav';
 
 export { WORKSTREAMS };
 const PRIORITIES = ['High', 'Medium', 'Low'];
 export const STATUS_LABEL: Record<QuestionStatus, string> = { open: 'Open', answered: 'Answered', closed: 'Closed' };
+const QA_FILTER_LABEL = { ...STATUS_LABEL, all: 'All', changed: 'Changed', versions: 'Two Versions' };
 export function QaPage({ dealId }: { dealId: string }) {
   const store = useStore(); const s = useAppState();
   const ro = useContext(ReadOnlyContext);                 // why nothing on this deal can be changed just now, if it cannot: what cannot be used is shown as off, with the reason on hover
   const d = s.deals[dealId];
   // the checklist too, where the deal has one: a question whose item it has settled is offered to be closed
-  useEffect(() => { void store.loadDeal(dealId); if (store.services.ai.checklist) void store.refreshChecklist(dealId); }, [dealId]);
+  useEffect(() => { void store.loadDealWithChecklist(dealId); }, [dealId]);
   if (!d) return null;
   const load = s.dealLoad[dealId];
-  const rows = dealQuestions(s, dealId);
   const F = s.ui.qaFilter;
-  const counts = { open: rows.filter((r) => r.status === 'open').length, answered: rows.filter((r) => r.status === 'answered').length, closed: rows.filter((r) => r.status === 'closed').length,
-    changed: rows.filter((r) => qaChanged(s, r).length).length, versions: rows.filter((r) => qaVersions(s, r)).length };
-  const match = (r: Question) => qaListed(s, r, F);
-  // the open question stays in the list whatever the filter; a question in two versions is found by its own filter
-  // (option A)
-  const list = rows.filter((r) => match(r) || r.id === s.ui.selectedQuestion);
-  const hide = shownColumns(s.prefs.hideCols, list, (r) => !!qaVersions(s, r));
-  // The open question, if any. None open is the full table, for skimming; opening one puts its detail beside a narrower list.
-  const sel = (load === 'loaded' && rows.find((r) => r.id === s.ui.selectedQuestion)) || null;
+  const view = qaPageView(s, dealId, typedResponse);
+  const { list, outsideFilter, selected: sel } = view;
+  const hide = view.oneStatus ? { ...s.prefs.hideCols, status: true } : s.prefs.hideCols;
   // The table is always the full table: an open question goes across the top of the page instead (design G)
   const wide = true;
   // In the full table nothing is selected, so the keyboard has a place of its own: the row the arrows last reached.
@@ -87,18 +87,18 @@ export function QaPage({ dealId }: { dealId: string }) {
     const next = { ...all }; if (now) next[dealId] = now; else delete next[dealId];
     store.setPrefs({ qaOpen: next });
   }, [ready, sel?.id, dealId]);
-  // Opening a question is seeing what the Q&A log changed in it: its Changed mark goes, for this person.
-  // Only marks still current are kept, so the record stays as small as the deal's latest update.
   useEffect(() => {
-    if (!sel || !qaChanged(s, sel).length) return;
-    const st = store.get(); const at = (qid: string) => { const q = st.questions[qid]; return q ? st.deals[q.dealId]?.qaLogs[0]?.last?.at : undefined; };
-    const kept = Object.fromEntries(Object.entries(st.prefs.qaSeen).filter(([qid, when]) => at(qid) === when));
-    store.setPrefs({ qaSeen: { ...kept, [sel.id]: at(sel.id)! } });
+    if (sel) markQaLogSeen(store, sel.id);
   }, [sel?.id]);
   const twice = sharedNumbers(s, dealId);                 // numbers two questions hold: both rows are marked
   // What the row's look alone doesn't say goes in its tooltip (the Draft column is gone): a question in two versions,
   // one sharing its number with another, or (dimmed) one shown although outside the filter. How two versions show is being designed.
-  const mark = (r: Question) => (qaVersions(s, r) ? `${qaVersions(s, r)}: open it to choose one` : twice.has(r.n) ? 'Same number' : !match(r) ? 'Outside this filter' : '');
+  const mark = (r: Question) => {
+    const versions = qaVersions(s, r);
+    if (versions) return `${versions}: open it to choose one`;
+    if (twice.has(r.n)) return 'Same number';
+    return r.id === outsideFilter ? 'Outside this filter' : '';
+  };
   /** a ready draft waiting in place of the response: shown in the Response cell after the AI mark, as the panel shows it in the response's place */
   const waiting = (r: Question) => (r.draft?.status === 'found' && !r.response.trim() ? r.draft.text : '');
   /**
@@ -157,11 +157,7 @@ export function QaPage({ dealId }: { dealId: string }) {
   useLayoutEffect(() => { const l = listRef.current; if (tuck && l && l.scrollTop < 24) setTuck(0); }, [list.length, tuck]);
 
   const select = (id: string) => store.ui({ selectedQuestion: id });
-  const focusRow = (id: string) => requestAnimationFrame(() => listRef.current?.querySelector<HTMLElement>(`.li[data-q="${id}"]`)?.focus());
-  // Enter on the row already open goes into it: to the Response, or while a draft is coming to its first button, else the
-  // Question, rather than a dozen Shift+Tabs back up the page. A click (detail > 0) only opens.
-  const intoPanel = () => (document.querySelector<HTMLElement>('.qpanel textarea.rtext') ?? document.querySelector<HTMLElement>('.qpanel .qright button:not(:disabled)') ?? document.querySelector<HTMLElement>('.qpanel textarea.qtext'))?.focus();
-  const close = () => { if (!sel) return; const id = sel.id; setCursor(id); store.ui({ selectedQuestion: null }); focusRow(id); };
+  const { focusRow, close } = useQaFocus(listRef, sel?.id ?? null, setCursor, s.ui.searchFocus);
   const escClose = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); close(); } };
   // the open question's place in the list, and a step to the one before or after it (the panel's arrows)
   const selAt = sel ? list.findIndex((r) => r.id === sel.id) : -1;
@@ -206,7 +202,7 @@ export function QaPage({ dealId }: { dealId: string }) {
     const r = await store.dispatch(CreateQuestion, { dealId, text: '', workstream }, { idempotencyKey: 'qa-add' });
     setAdding(false);
     if (!r.ok) return;
-    const qid = store.get().ops[r.value.opId]?.targets.find((t) => store.get().questions[t]);
+    const qid = createdRecord(store.get(), r.value.opId, 'questions')?.id;
     // the filter is left as the person set it: the open question is listed whatever the filter, marked if outside it
     if (qid) { store.ui({ selectedQuestion: qid }); requestAnimationFrame(() => (document.querySelector('.det textarea.qtext') as HTMLElement | null)?.focus()); }
   };
@@ -219,7 +215,7 @@ export function QaPage({ dealId }: { dealId: string }) {
         : <Detail q={sel} busy={adding} onClose={close} onKeyDown={escClose} pos={selAt + 1} of={list.length} step={step} nextId={(list[selAt + 1] ?? list[selAt - 1])?.id ?? null} onDeleted={(id) => { back.current = { id, to: store.get().ui.selectedQuestion }; }} />)}
       <section class="tracker">
         <SettledLine dealId={dealId} />
-        <QaTools dealId={dealId} rows={rows} counts={counts} ro={ro} onAdd={() => void add()} />
+        <QaTools dealId={dealId} view={view} ro={ro} onAdd={() => void add()} />
         {wide && load === 'loaded' && list.length > 0 && <Heads listRef={listRef} />}
         <div class={`md ${wide ? 'wide' : ''} ${hide.priority ? 'nopr' : ''} ${hide.askedBy ? 'noby' : ''}`} onKeyDown={(e) => { if (e.key === 'Escape' && sel && !e.defaultPrevented) { e.preventDefault(); close(); } }}>
           <div class="list" role="listbox" aria-label="Questions" ref={listRef} onKeyDown={onKey} onScroll={onScroll} style={`grid-template-columns:${cols}`}>
@@ -231,12 +227,25 @@ export function QaPage({ dealId }: { dealId: string }) {
             {load === 'failed' ? <p class="loadfail" style="padding:16px 12px">Couldn’t load this deal’s questions. <button type="button" class="tundo" onClick={() => void store.retryDeal(dealId)}>Retry</button></p>
               : load !== 'loaded' ? Array.from({ length: 7 }, (_, i) => <div class="phrow" key={i}><i /><i /></div>)
               : list.length ? [...(shownFrom ? [<div key="vtop" aria-hidden="true" style={{ height: `${shownFrom * rowH.current}px` }} />] : []), ...list.slice(shownFrom, shownTo).map((r) => (
-                <button type="button" key={r.id} class={`li ${sel?.id === r.id ? 'on' : ''} ${match(r) ? '' : 'offfilter'} ${qaVersions(s, r) ? 'cfrow' : ''}`} role="option" data-q={r.id} title={tip(r) || undefined} aria-description={tip(r) || undefined} data-conflict={s.conflicts[r.id] ? '' : undefined} data-samenumber={!s.conflicts[r.id] && twice.has(r.n) ? '' : undefined} tabIndex={at === r.id ? 0 : -1} aria-selected={sel?.id === r.id} onClick={(e) => { if (!s.conflicts[r.id] && Object.keys(qaKept(s, r)).length) openResolve(store, dealId, r.id); else if (sel?.id === r.id && e.detail === 0) intoPanel(); else select(r.id); }}>
+                <button type="button" key={r.id} role="option" data-q={r.id}
+                  class={`li ${sel?.id === r.id ? 'on' : ''} ${r.id === outsideFilter ? 'offfilter' : ''} `
+                    + (qaVersions(s, r) ? 'cfrow' : '')}
+                  title={tip(r) || undefined} aria-description={tip(r) || undefined}
+                  data-conflict={s.conflicts[r.id] ? '' : undefined}
+                  data-samenumber={!s.conflicts[r.id] && twice.has(r.n) ? '' : undefined}
+                  tabIndex={at === r.id ? 0 : -1} aria-selected={sel?.id === r.id} onClick={(e) => {
+                    if (!s.conflicts[r.id] && hasLogVersion(s, r)) openResolve(store, dealId, r.id);
+                    else if (sel?.id === r.id && e.detail === 0) intoPanel();
+                    else select(r.id);
+                  }}>
                   <QaRow r={r} hide={hide} wide={wide} versions={qaVersions(s, r)} changed={qaChanged(s, r)}
                     was={d.qaLogs[0]?.last?.changed?.[r.id]} mark={mark(r)} waiting={waiting(r)} beside={beside(r)}
                     draftNote={waiting(r) ? rowDraftNote(r) : ''} />
                 </button>)), ...(big ? [<div key="vend" aria-hidden="true" style={{ height: `${(list.length - shownTo) * rowH.current}px` }} />, <Sizer key="vsize" list={list} wide={wide} hide={hide} />] : [])]
-              : <p class="emptyline" id="qa-empty" style="padding:28px 12px">{rows.length ? <>Nothing matches{F.text || F.workstream ? <>. <button type="button" class="linkb" id="qa-clear" onClick={() => store.ui({ qaFilter: { ...F, text: '', workstream: '' } })}>Clear the filter</button></> : '.'}</> : 'No questions yet.'}</p>}
+              : <p class="emptyline" id="qa-empty" style="padding:28px 12px">{view.hasQuestions ? <>Nothing matches
+                {F.text || F.workstream ? <>. <button type="button" class="linkb" id="qa-clear"
+                  onClick={() => store.ui({ qaFilter: { ...F, text: '', workstream: '' } })}>Clear the filter</button>
+                </> : '.'}</> : 'No questions yet.'}</p>}
           </div>
         </div>
       </section>
@@ -244,17 +253,47 @@ export function QaPage({ dealId }: { dealId: string }) {
   );
 }
 
-/**
- * The columns the list hides: those the person turned off in ⋯, and Status while every row shown says the same status,
- * as with one status chosen. A row in two versions keeps it, as its column can
- * name the versions. Response is never hidden this way: an empty one shows there is no response yet.
- */
-function shownColumns(chosen: State['prefs']['hideCols'], list: Question[], twoVersions: (r: Question) => boolean) {
-  const same = list.length > 0 && list.every((r) => r.status === list[0].status && !twoVersions(r));
-  return same ? { ...chosen, status: true } : chosen;
+const ACTIVE_QA_FILTER = '.trk-tools [data-qaf][aria-pressed="true"]';
+
+function focusQaRow(list: RefObject<HTMLDivElement | null>, id: string, afterClose: boolean) {
+  requestAnimationFrame(() => {
+    const row = list.current?.querySelector<HTMLElement>(`.li[data-q="${id}"]`);
+    // #498: closing an out-of-filter Search result leaves a keyboard stop on the Q&A toolbar.
+    const filter = afterClose ? document.querySelector<HTMLElement>(ACTIVE_QA_FILTER) : null;
+    (row ?? filter)?.focus();
+  });
 }
 
-/** The ⋯ menu: import and its undo, export, and which columns the list shows (a per-user preference). */
+// Enter on the row already open goes into it: to the Response, or while a draft is coming to its first button, else the
+// Question, rather than a dozen Shift+Tabs back up the page. A click (detail > 0) only opens.
+function intoPanel() {
+  const target = document.querySelector<HTMLElement>('.qpanel textarea.rtext:not(:disabled)') ??
+    document.querySelector<HTMLElement>('.qpanel .qright button:not(:disabled)') ??
+    document.querySelector<HTMLElement>('.qpanel textarea.qtext:not(:disabled)') ??
+    document.querySelector<HTMLElement>('.qpanel');
+  target?.focus();
+}
+
+// #498: move focus once the Search result has rendered, and return it to the list or toolbar on close.
+function useQaFocus(
+  list: RefObject<HTMLDivElement | null>, selectedId: string | null, setCursor: (id: string) => void,
+  searchFocus: string | null,
+) {
+  const store = useStore();
+  useLayoutEffect(() => {
+    if (selectedId && searchFocus === selectedId) focusSearchResult(store, selectedId, intoPanel);
+  }, [selectedId, searchFocus]);
+
+  const focusRow = (id: string) => focusQaRow(list, id, false);
+  const close = () => {
+    if (!selectedId) return;
+    setCursor(selectedId);
+    store.ui({ selectedQuestion: null });
+    focusQaRow(list, selectedId, true);
+  };
+  return { focusRow, close };
+}
+
 /**
  * The row of controls over the Q&A list. The filter shows Changed and Two versions while there are any (option
  * A). One row, never two (design.md): once the select and the Filter have shrunk as far as the design lets them and the
@@ -262,16 +301,15 @@ function shownColumns(chosen: State['prefs']['hideCols'], list: Question[], twoV
  * workstream select narrows, the buttons take their short words, the select narrows again, the filter labels drop their counts
  * (each count goes to its label's tooltip), and the Filter field folds to a search button that opens it in a small menu.
  */
-function QaTools({ dealId, rows, counts, ro, onAdd }: { dealId: string; rows: Question[]; counts: Record<'open' | 'answered' | 'closed' | 'changed' | 'versions', number>; ro: string | null | undefined; onAdd: () => void }) {
-  const store = useStore(); const s = useAppState(); const F = s.ui.qaFilter;
+function QaTools({ dealId, view, ro, onAdd }: {
+  dealId: string; view: ReturnType<typeof qaPageView>; ro: string | null | undefined; onAdd: () => void;
+}) {
+  const store = useStore();
+  const F = useAppState().ui.qaFilter;
   const n = (x: number) => x.toLocaleString('en-US');
-  type Choice = readonly [State['ui']['qaFilter']['status'], string, number | null];
-  const choices: Choice[] = [['open', 'Open', counts.open], ['answered', 'Answered', counts.answered], ['closed', 'Closed', counts.closed], ['all', 'All', null],
-    ...(counts.changed || F.status === 'changed' ? [['changed', 'Changed', counts.changed] as const] : []),
-      ...(counts.versions || F.status === 'versions' ? [['versions', 'Two Versions', counts.versions] as const] : [])];
   const tools = useRef<HTMLDivElement>(null); const [lvl, setLvl] = useState(0); const [width, setWidth] = useState(0);
   useEffect(() => { const el = tools.current; if (!el) return; const ro = new ResizeObserver(() => setWidth(Math.round(el.getBoundingClientRect().width))); ro.observe(el); return () => ro.disconnect(); }, []);
-  const shape = choices.map((c) => c[0]).join();
+  const shape = view.statuses.map(({ status }) => status).join();
   useLayoutEffect(() => { setLvl(0); }, [width, shape]);           // start again from the full row whenever the room or the choices change
   useLayoutEffect(() => {                                          // then give way a step at a time until it fits
     // the row never wraps (the select, then the Filter, shrink first), so what it no longer holds runs past its right
@@ -286,20 +324,27 @@ function QaTools({ dealId, rows, counts, ro, onAdd }: { dealId: string; rows: Qu
   return (
     <div class="trk-head"><div class={`trk-tools sq${lvl}`} ref={tools}>
       <div class="seg">
-        {choices.map(([k, l, c]) => <button type="button" key={k} class={F.status === k ? 'on' : ''} aria-pressed={F.status === k} data-qaf={k} title={c != null && lvl >= 4 ? `${n(c)} ${l.toLowerCase()}` : undefined} onClick={() => set({ status: k })}>{c != null && lvl < 4 ? `${l} ${n(c)}` : l}</button>)}
+        {view.statuses.map(({ status, count }) => {
+          const label = QA_FILTER_LABEL[status];
+          return <button type="button" key={status} class={F.status === status ? 'on' : ''}
+            aria-pressed={F.status === status} data-qaf={status} onClick={() => set({ status })}
+            title={count != null && lvl >= 4 ? `${n(count)} ${label.toLowerCase()}` : undefined}>
+            {count != null && lvl < 4 ? `${label} ${n(count)}` : label}
+          </button>;
+        })}
       </div>
-      <WorkstreamFilter rows={rows} />
+      <WorkstreamFilter names={view.workstreams} />
       {lvl < 5 ? field() : <span class="findwrap">
         <button type="button" class={`btn sm ico ${find || F.text ? 'on' : ''}`} id="qa-find" aria-label="Filter" title={F.text ? `Filter: ${F.text}` : 'Filter'} aria-haspopup="menu" aria-expanded={find} onClick={() => setFind(!find)}><Icon name="search" size={16} /></button>
         {find && <div class="colmenu glass findmenu" data-menu>{field('qa-findtext')}</div>}
       </span>}
-      <span class="qacts">{F.status === 'versions' && inTwoVersions(s, dealId).length ? <button type="button"
+      <span class="qacts">{view.showResolve ? <button type="button"
         class="btn sm" id="qa-resolve" title="Choose a version for each, one after another"
         onClick={() => openResolve(store, dealId)}>Resolve</button> : <DraftAllButton dealId={dealId}
-        eligible={rows.filter((r) => eligibleForDraft(r) && !typedResponse(r)).length} />}<span class="needs"
+        eligible={view.draftable} />}<span class="needs"
         title={ro ?? undefined}><button class="btn sm" type="button" id="qa-add" disabled={!!ro} title={ro ?? undefined}
         onClick={onAdd}><span class="long">Add Question</span><span class="short">Add</span></button></span><MoreMenu
-        dealId={dealId} /></span>
+        dealId={dealId} hasQuestions={view.hasQuestions} /></span>
     </div></div>
   );
 }
@@ -308,10 +353,9 @@ function QaTools({ dealId, rows, counts, ro, onAdd }: { dealId: string; rows: Qu
  * The workstream filter: the filter button Findings has, opening a menu of the workstreams, in
  * place of a dropdown. With one chosen, the button shows its name in the "on" look, cut short with its tooltip if long.
  */
-function WorkstreamFilter({ rows }: { rows: Question[] }) {
+function WorkstreamFilter({ names }: { names: string[] }) {
   const store = useStore(); const F = useAppState().ui.qaFilter;
   const [open, setOpen] = useState(false); useDismiss(open, () => setOpen(false), '.trk-tools .wsfilter');
-  const names = qaWorkstreamChoices(rows);
   const tip = F.workstream ? `Workstream: ${F.workstream}` : 'Workstream';
   const pick = (workstream: string) => { setOpen(false); store.ui({ qaFilter: { ...F, workstream } }); };
   return (
@@ -328,7 +372,8 @@ function WorkstreamFilter({ rows }: { rows: Question[] }) {
   );
 }
 
-function MoreMenu({ dealId }: { dealId: string }) {
+/** The ⋯ menu: import and its undo, export, and which columns the list shows. */
+function MoreMenu({ dealId, hasQuestions }: { dealId: string; hasQuestions: boolean }) {
   const store = useStore(); const s = useAppState(); const ro = useContext(ReadOnlyContext);   // read-only: what brings changes in is off
   const [open, setOpen] = useState(false); const wrap = useRef<HTMLSpanElement>(null);
   useDismiss(open, () => setOpen(false), '.colwrap');
@@ -341,14 +386,19 @@ function MoreMenu({ dealId }: { dealId: string }) {
       {open && <div class="colmenu glass" id="colmenu" role="menu">
         <button type="button" class="mi" role="menuitem" id="qa-import" disabled={!!ro} title={ro ?? undefined}
           onClick={() => openDialog('importQa')}>Import Q&A Log…</button>
-        {store.services.qaLogs && <div class="mirow"><button type="button" class="mi" role="menuitem" id="qa-log"
-          onClick={() => { setOpen(false); void updateLog(store, dealId); }}>Update Q&A Log</button>
+        {s.can.qaLogs && <div class="mirow"><button type="button" class="mi" role="menuitem" id="qa-log"
+          onClick={() => {
+            setOpen(false);
+            void showQaLogUpdate(store, dealId);
+          }}>Update Q&A Log</button>
           {log && <button type="button" class="fb" role="menuitem" id="qa-logdir" aria-label="Log folder" aria-description={logPath(log)} onMouseEnter={(e) => showTip(e.currentTarget as HTMLElement, logPath(log))} onMouseLeave={(e) => hideTip(e.currentTarget as HTMLElement)} onClick={() => { setOpen(false); void chooseLogFolder(store, dealId).then((r) => { if (!r.ok) store.toast(r.error.message); }); }}><Icon name="folder" size={16} /></button>}</div>}
-        <button type="button" class="mi" role="menuitem" id="qa-export" disabled={!dealQuestions(s, dealId).length}
+        <button type="button" class="mi" role="menuitem" id="qa-export" disabled={!hasQuestions}
           onClick={() => openDialog('exportQa')}>Export Q&A Log…</button>
         {/* the seldom used ways back, apart from Import so neither is pressed for the other */}
         <div class="msep" />
-        <button type="button" class="mi" role="menuitem" id="qa-deleted" disabled={!!ro || !deletedOf(s, dealId).length} title={ro ?? undefined} onClick={() => openDialog('deleted')}>Deleted…</button>
+        <button type="button" class="mi" role="menuitem" id="qa-deleted"
+          disabled={!!ro || !visibleDeletedNotes(s, dealId).length} title={ro ?? undefined}
+          onClick={() => openDialog('deleted')}>Deleted…</button>
         {/* this PC's last import into the deal, at any time after, once confirmed */}
         <button type="button" class="mi" role="menuitem" id="qa-unimport" disabled={!!ro || !lastImport(s, dealId)}
           title={ro ?? undefined} onClick={() => openDialog('undoImport')}>Undo Last Import…</button>
@@ -392,56 +442,6 @@ export function UndoImportDialog({ dealId }: { dealId: string }) {
 
 /** where the log is, as the folder writes its paths */
 const logPath = (l: { folder: string; file: string }) => `${l.folder}${l.folder.includes('\\') ? '\\' : '/'}${l.file}`;
-/**
- * Brings the deal's Q&A log up to date and says how it went in one notice: what changed, how many questions were
- * left in two versions, as someone wrote them in the file (Resolve steps through them), how many cells an edit kept aside
- * clashed on and were kept as in the file (Show opens the first), and how many edits kept aside were filed in the archive
- * with changes the log didn't take. While the file is in use (open in Excel, or saved by someone a
- * moment ago) it tries again on its own every half minute, naming who has it open only when the lock file does, with
- * Retry now (retry and notify); after 20 minutes it stops and says so.
- */
-const updating = new Set<string>();                                  // deals whose log is being saved: one update at a time
-const waiting = new Map<string, { timer: ReturnType<typeof setTimeout>; toast: number; tries: number }>();   // deals whose log was in use
-const RETRY_MS = 30_000, TRIES = 40;
-async function updateLog(store: ReturnType<typeof useStore>, dealId: string, auto = false) {
-  const w = waiting.get(dealId); if (w) { clearTimeout(w.timer); store.dismissToast(w.toast); waiting.delete(dealId); }
-  if (auto && !(store.get().deals[dealId] && logOf(store, dealId))) return;   // the deal or its log is gone: nothing to try again, and no new log is started unasked
-  if (updating.has(dealId)) { if (!auto) store.toast('Q&A log is being updated'); return; }
-  updating.add(dealId); const r = await exportQaLog(store, dealId, placeKept(store, dealId)).finally(() => updating.delete(dealId));
-  const n = (x: number) => x.toLocaleString('en-US');
-  // someone's edit filed in the archive with changes the log didn't take comes first, and the notice stays
-  const filing = (u = 0) => (u ? `${n(u)} ${u === 1 ? 'edit' : 'edits'} not fully merged, filed in the archive` : '');
-  if (!r.ok) {
-    const message = `Q&A log not updated: ${r.error.message}`;
-    store.toast(r.unmerged ? `${filing(r.unmerged)} · ${message}` : message, undefined, {
-      sticky: !!r.unmerged, glyph: 'warn',
-    });
-    return;
-  }
-  const v = r.value; if (v.status === 'canceled') return;
-  const again = { label: 'Retry Now', run: () => void updateLog(store, dealId) };
-  // short enough for one notice line: what matters most comes first, and the rest is on hover when it still doesn't fit
-  if (v.status === 'later') {
-    const tries = (w?.tries ?? 0) + 1;
-    if (tries > TRIES) { store.toast('Q&A log not updated · in use elsewhere for 20 minutes', { ...again, label: 'Retry' }, true); return; }
-    // "in use" covers a file open elsewhere and one saved or moved by someone a moment ago; who has it open is rarely known,
-    // so a name is shown only when a lock file gives one, as written there
-    const toast = store.toast(v.by ? `${v.by} has the Q&A log open · retrying` : 'The Q&A log is in use elsewhere · retrying', again, true);
-    waiting.set(dealId, { timer: setTimeout(() => void updateLog(store, dealId, true), RETRY_MS), toast, tries });
-    return;
-  }
-  const filed = filing(v.unmerged);
-  if (v.created) { if (filed) store.toast(`Q&A log made · ${filed}`, undefined, true); else store.toast('Q&A log made'); return; }
-  const did = [v.changed && `${n(v.changed)} changed in the log`, v.added && `${n(v.added)} added`, v.answered && `${n(v.answered)} answered`, v.updated && `${n(v.updated)} updated`].filter(Boolean).join(', ');
-  const first = dealQuestions(store.get(), dealId).find((q) => v.kept.includes(q.n));
-  const clash = dealQuestions(store.get(), dealId).find((q) => v.clashed.includes(q.n));
-  const versions = v.kept.length && first ? `${n(v.kept.length)} in two versions` : '', asFile = v.clashed.length && clash ? `${n(v.clashed.length)} kept as in the file` : '';
-  if (versions) store.toast([filed, versions, asFile, did].filter(Boolean).join(' · '), { label: 'Resolve', run: () => openResolve(store, dealId) }, true);
-  else if (asFile && clash) store.toast([filed, asFile, did].filter(Boolean).join(' · '), { label: 'Show', run: () => store.ui({ selectedQuestion: clash.id }) }, true);
-  else if (filed) store.toast([filed, did].filter(Boolean).join(' · '), undefined, true);
-  else store.toast(did ? `Q&A log updated · ${did}` : 'Q&A log is up to date');
-}
-
 /** a question in two versions, in the panel's place: its number over its title, as in the Resolve dialog, and the
  * stepper through the deal's other questions in two versions */
 function ConflictPanel({ q, busy, onClose, onKeyDown }: {
@@ -449,7 +449,8 @@ function ConflictPanel({ q, busy, onClose, onKeyDown }: {
 }) {
   const s = useAppState();
   return (
-    <section class="det qpanel conflict glass" inert={busy} aria-label={`Q${q.n}`} onKeyDown={onKeyDown}>
+    <section class="det qpanel conflict glass" inert={busy}
+      aria-label={`Q${q.n}`} tabIndex={-1} onKeyDown={onKeyDown}>
       <ConflictView conflict={s.conflicts[q.id]} tail={<CloseDetail onClose={onClose} />} label={`Q${q.n}`} stepper />
     </section>
   );
@@ -566,7 +567,7 @@ function headerInUse(head: HTMLElement): boolean {
  */
 function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted }: { q: Question; busy?: boolean; onClose: () => void; onKeyDown: (e: KeyboardEvent) => void; pos: number; of: number; step: (by: number) => void; nextId: string | null; onDeleted: (id: string) => void }) {
   const store = useStore(); const s = useAppState(); const ro = useContext(ReadOnlyContext); const nav = useNavRoom(q.id); const panel = usePanelFit<HTMLElement>(q.id);   // the header's lines are known before the panel is sized
-  const field = (f: 'text' | 'askedBy' | 'received' | 'workstream' | 'priority' | 'respondedBy' | 'responded') => (value: string, over?: string) => store.dispatch(EditQuestionField, { dealId: q.dealId, questionId: q.id, field: f, value }, { quiet: true, over }).then((r) => { if (!r.ok && r.error.kind !== 'storageFull' && r.error.message !== CHANGED_ELSEWHERE) store.toast(r.error.message); return r; });   // changed elsewhere: the field says so itself
+  const field = (name: EditableQuestionField) => questionFieldCommit(store, q, name);
   const setStatus = (status: QuestionStatus) => void store.dispatch(SetQuestionStatus, { dealId: q.dealId, questionId: q.id, status });
   // Delete asks first; an ask left open for another question is not carried over to this one
   const [asking, setAsking] = useState(false); useLayoutEffect(() => setAsking(false), [q.id]);
@@ -622,8 +623,7 @@ function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted 
     ((fromBox ? null : panel.current?.querySelector<HTMLElement>('.qright .racts button:not(:disabled)')) ?? panel.current)?.focus({ preventScroll: true });
   }, [q.id, area]);
 
-  // the response's corner also offers Close this question while the checklist has settled its item (Draft from documents: `offer`, above)
-  const settled = settledQuestions(s, q.dealId).close.some((x) => x.q.id === q.id);
+  const settled = settledQuestion(s, q);
   return (
     <section class="det qpanel glass" key={q.id} inert={busy} aria-busy={busy} aria-label={`Q${q.n}`} ref={panel} tabIndex={-1} onKeyDown={onKeyDown}>
       <div class="qph">
@@ -635,8 +635,11 @@ function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted 
           {/* the details: each still a choice, shown as plain values with an icon for what they are */}
           <div class="qprops">
             {/* the deal's own workstreams (an imported log keeps the other side's) after the app's, as the table's filter lists them */}
-            <Pick name="q-ws" label="Workstream" wrap="qpick" cls="qp" chev title="Workstream" value={q.workstream} ro={ro} onPick={(v) => void field('workstream')(v)}
-              options={[...workstreamChoices(dealQuestions(s, q.dealId).map((r) => r.workstream)).map((w) => ({ v: w, text: w })), { v: '', text: 'No workstream' }]}><Icon name="tag" size={14} /></Pick>
+            <Pick name="q-ws" label="Workstream" wrap="qpick" cls="qp" chev title="Workstream" value={q.workstream}
+              ro={ro} onPick={(value) => void field('workstream')(value)} options={[
+                ...qaEditorWorkstreams(s, q.dealId).map((name) => ({ v: name, text: name })),
+                { v: '', text: 'No workstream' },
+              ]}><Icon name="tag" size={14} /></Pick>
             <Pick name="q-pr" label="Priority" wrap="qpick" cls="qp" chev title="Priority" value={q.priority} ro={ro} onPick={(v) => void field('priority')(v)} options={PRIORITIES.map((w) => ({ v: w, text: w }))}><Icon name="flag" size={14} /></Pick>
             <EditField keep={`${q.id}:askedBy`} read={readQuestion(q.id, 'askedBy')} label="Submitted by" placeholder="Submitted by" className="edit inl" cap={{ cls: 'qp lift', title: 'Submitted by', icon: <Icon name="user" size={14} /> }} value={q.askedBy} rev={q.rev} commit={field('askedBy')} />
             <EditField keep={`${q.id}:received`} read={readQuestion(q.id, 'received')} label="Received" type="date" placeholder="Received" className="dedit" cap={{ cls: 'qp', title: 'Received', icon: <Icon name="cal" size={14} /> }} value={q.received} rev={q.rev} commit={field('received')} />
@@ -675,9 +678,9 @@ function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted 
             : (offer || settled) && <span class={`racts ${offer && settled ? 'two' : ''}`}>{offer && <span class="needs"
               title={ro ?? undefined}><button type="button" class="btn sm" id="q-draft" disabled={!!ro}
               title={ro ?? 'Draft from Documents'} aria-label="Draft from Documents"
-              onClick={() => { void store.dispatch(RequestDraft, { dealId: q.dealId, questionId: q.id },
-              { idempotencyKey: 'draft-' + q.id }); }}><span class="long">Draft from Documents</span><span
-              class="short">Draft</span></button></span>}{settled && <CloseThisQuestion q={q} ro={ro} />}</span>}
+              onClick={() => void requestQuestionDraft(store, q)}><span class="long">Draft from Documents</span><span
+              class="short">Draft</span></button></span>}{settled && <CloseThisQuestion q={q} ro={ro}
+              settled={settled} />}</span>}
         </div>
         {/* the box keeps one place in the tree whether a draft is under it or not, so it is never drawn afresh mid-typing */}
         {drafting ? <DraftBox q={q} />
@@ -691,8 +694,18 @@ function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted 
   );
 }
 
-/** Text typed into a question's response box that could not be saved, kept while the box is not on screen. */
-const typedResponse = (q: Question) => { const t = unsavedText(`${q.id}:response`); return t !== undefined && t !== q.response && !!t.trim(); };
+type EditableQuestionField = 'text' | 'askedBy' | 'received' | 'workstream' | 'priority' | 'respondedBy' | 'responded';
+
+function questionFieldCommit(store: ReturnType<typeof useStore>, question: Question, field: EditableQuestionField) {
+  const { dealId, id: questionId } = question;
+  return async (value: string, over?: string) => {
+    const result = await store.dispatch(EditQuestionField, { dealId, questionId, field, value }, { quiet: true, over });
+    if (!result.ok && result.error.kind !== 'storageFull' && !isChangedElsewhere(result.error)) {
+      store.toast(result.error.message);
+    }
+    return result;
+  };
+}
 
 /**
  * What the response label says about a draft that is waiting in place of a response. The panel's label for a ready
@@ -729,31 +742,28 @@ function DraftBox({ q }: { q: Question }) {
  * asks before it replaces it: the text is saved first, so Undo brings it back. `over`: the response
  * the text was typed over, so a change made elsewhere since is never written over unasked.
  */
-function DraftActions({ q, typed, over, elsewhere = false }: { q: Question; typed: string; over: string; elsewhere?: boolean }) {
-  const store = useStore(); const s = useAppState(); const ro = useContext(ReadOnlyContext);
+function DraftActions({ q, typed, over, elsewhere = false }: {
+  q: Question; typed: string; over: string; elsewhere?: boolean;
+}) {
+  const store = useStore();
+  const ro = useContext(ReadOnlyContext);
   // what the box held, and what it was typed over, when the person was asked: the confirm replaces that and nothing else, so a
   // coworker's change that syncs in while it waits is never written over. A change to the question takes the ask back.
   const [ask, setAsk] = useState<null | { typed: string; over: string; rev: number }>(null);
   useEffect(() => { if (ask && ask.rev !== q.rev) setAsk(null); }, [q.rev]);
   const d = q.draft!;
-  // a draft whose text came back but could not be saved keeps it: Retry writes that text rather than asking the model again
-  const redraft = () => { if (d.opId && store.hasKeptReply(d.opId)) store.retryKeptReply(d.opId); else void store.dispatch(RequestDraft, { dealId: q.dealId, questionId: q.id }, { idempotencyKey: 'draft-' + q.id }); };
+  const redraft = () => void requestQuestionDraft(store, q);
   const discard = () => void store.dispatch(DiscardDraft, { dealId: q.dealId, questionId: q.id }, { idempotencyKey: 'discard-' + q.id });
   const use = async (asked: null | { typed: string; over: string }) => {
     setAsk(null);
-    if (!asked) return store.dispatch(AcceptDraft, { dealId: q.dealId, questionId: q.id }, { idempotencyKey: 'take-' + q.id });
-    const elsewhereSaid = 'The response was changed elsewhere, so the draft wasn’t used. Nothing was changed.';
-    if (elsewhere) { store.toast(elsewhereSaid); return; }   // the box asks Keep mine or Take theirs first (a change put back is caught by its rev)
-    // text typed and not yet saved is saved first, so the draft's Undo puts it back; if it cannot be saved, the draft waits
-    const now = store.get().questions[q.id];
-    if (now && asked.typed !== now.response) {
-      const r = await store.dispatch(SetResponse, { dealId: q.dealId, questionId: q.id, response: asked.typed }, { quiet: true, over: asked.over });
-      if (!r.ok) { store.toast(r.error.message === CHANGED_ELSEWHERE ? elsewhereSaid : 'Your text couldn’t be saved, so the draft wasn’t used. Nothing was changed.'); return; }
+    const result = await useQuestionDraft(store, q, asked ? { ...asked, elsewhere } : undefined);
+    if (result.kind === 'responseChanged') {
+      store.toast('The response was changed elsewhere, so the draft wasn’t used. Nothing was changed.');
+    } else if (result.kind === 'textNotSaved') {
+      store.toast('Your text couldn’t be saved, so the draft wasn’t used. Nothing was changed.');
+    } else if (result.kind === 'refused') {
+      store.toast(result.message);
     }
-    // what is replaced is what the person confirmed replacing: a coworker's change that synced in meanwhile is not
-    const r = await store.dispatch(AcceptDraft, { dealId: q.dealId, questionId: q.id, replace: true, over: asked.typed }, { idempotencyKey: 'take-' + q.id, quiet: true });
-    if (!r.ok) store.toast(r.error.message === CHANGED_ELSEWHERE ? elsewhereSaid : r.error.message);
-    return r;
   };
   const b = (label: string, run: () => void, pri = false) => <span class="needs" title={ro ?? undefined}><button type="button" class={`btn sm${pri ? ' pri' : ''}`} disabled={!!ro} title={ro ?? undefined} onClick={run}>{label}</button></span>;
   if (d.status === 'pending') return null;
@@ -762,7 +772,7 @@ function DraftActions({ q, typed, over, elsewhere = false }: { q: Question; type
   if (isDraftStale(q)) return <span class="racts">{b('Draft Again', redraft, true)}{b('Discard', discard)}</span>;
   // one action takes a ready draft (decisions: "a ready draft has one action"); to change it, use it and type.
   // Over text in the box it asks first, on the same button, as Draft all does: a second press replaces, leaving it does not
-  const replaces = !!typed.trim() || !!q.response.trim();
+  const replaces = draftReplacesResponse(q, typed);
   const take = !replaces ? b('Use as Response', () => void use(null), true)
     : ask ? <span class="needs"><button type="button" class="btn sm pri" id="q-use-confirm" disabled={!!ro}
       ref={(el) => { if (el && !el.dataset.f) { el.dataset.f = '1'; el.focus({ preventScroll: true }); } }}

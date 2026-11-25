@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
-// A heading row or sheet chosen in the Q&A import is read again before Import can go: what is imported is always the
-// rows of the heading shown, never the last table read (#63).
+// Import waits for a pending sheet or heading choice to be read. A failed read marks the choice unused and keeps
+// the accepted table available (#63, #380).
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
+import './keptTextSession';
 import { StoreContext } from '../../src/ui/hooks';
 import { ImportDialog } from '../../src/ui/qaImport';
-import { keepImport, importKey, keptImportsReady } from '../../src/ui/keptImports';
+import { keepImport, importKey, keptImportsReady } from '../../src/app/keptImports';
 import { readImportBytes } from '../../src/app/transfer';
 import { dealQuestions } from '../../src/app/state';
 import { recoveryApp, recoveryDeal, type RecoveryApp } from '../app/recoveryKit';
@@ -131,7 +132,7 @@ describe('a heading row read again in the Q&A import (#63)', () => {
     }
   });
 
-  it('a reread that fails says so and lets the person go on with the row already read', async () => {
+  it('a reread that fails marks the typed row unused and lets the person go on with the row already read', async () => {
     const { app, dealId, get, heading, letGo, done, failing } = await dialog();
     try {
       failing.add(2);
@@ -140,7 +141,9 @@ describe('a heading row read again in the Q&A import (#63)', () => {
       const said = 'Could not read Lender Q&A.csv: The file is locked';
       await vi.waitFor(() => expect(get('#im-line').textContent).toBe(said));
       const field = get<HTMLInputElement>('#im-header');
-      expect([field.value, get<HTMLButtonElement>('#im-go').disabled]).toEqual(['1', false]);
+      expect([field.value, get<HTMLButtonElement>('#im-go').disabled]).toEqual(['2', false]);
+      expect(get('#im-header-unused').textContent).toBe('Not used');
+      expect(get('#im-header-unused').getAttribute('title')).toBe('The preview uses row 1');
       await heading(3);
       await letGo(3);
       await vi.waitFor(() => expect(get('#im-line').textContent).toBe('Import 30 questions · 30 new'));

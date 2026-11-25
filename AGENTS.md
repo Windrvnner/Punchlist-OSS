@@ -17,6 +17,7 @@ Start with these documents:
 - [docs/decisions.md](docs/decisions.md) lists the decisions in force.
 - [docs/design.md](docs/design.md) describes how the app looks. Read it before you work on any screen.
 - [docs/linking-design.md](docs/linking-design.md) describes the parts, not yet built, of the design that links checklist items to findings and Q&A questions.
+- [docs/deal-screen-design.md](docs/deal-screen-design.md) holds the mock-up and screens, not yet built, of the rebuilt deal screen.
 - [docs/review-prompt.md](docs/review-prompt.md) is the adversarial review prompt for every pull request.
 - The repository's **Issues** tab tracks every bug and every planned feature. The planned features make up the Build list.
 
@@ -29,7 +30,7 @@ npm ci                                       # install dependencies and the pre-
 npx tsc -p . --noEmit                        # type-check
 npx biome lint --diagnostic-level=error .    # lint (errors block commits)
 npx vitest run [path/to/file.test.ts]        # unit, backend, and end-to-end tests, or one file
-npm run check                                # type-check, lint, secrets check, readability hints, and unit tests
+npm run check                                # static checks and unit tests
 npm run build                                # build into dist/
 npm run browser -- --jobs 2 [suites]         # browser suites against dist/ on port 4178 (set PUNCHLIST_PORT to change it)
 npm run check:all                            # everything CI runs, including the desktop app, on this machine
@@ -45,6 +46,15 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
 
 ## Code
 
+- **The frontend is a pane of glass.** `src/ui` only shows state, sends commands, and calls `src/app` functions. It
+  makes no AI or model calls and holds no business rules, data transforms, retries, or persistence (no `localStorage`
+  or IndexedDB), and it doesn't decide which items a list shows, how they are grouped, or what is counted. Those live
+  in `src/app` (commands, selectors in `src/app/state.ts`, and workflow functions) or `src/backend`, reaching storage
+  and services only through `src/ports`, so that every workflow can run without a window. The UI never imports the
+  backend, adapters, desktop, or shell. Formatting a value for display, and screen-only state such as focus, an open
+  menu, or scroll position, stay in `src/ui`. New or changed UI code that breaks this is a review blocker.
+  `npm run check` fails on forbidden UI imports, service or repository access, and browser storage
+  (`scripts/check-pane-of-glass.mjs`).
 - **Readable code.** Every change must be easy for a person to review on GitHub. New or changed code that breaks the rules below is a review blocker, just like lost work or a crash. Code that a pull request did not touch never is.
   - Put one statement on each line, and keep lines to 120 characters at most, comments included.
   - Keep new functions to about 60 lines and files to about 500. Don't grow a function that is already past that limit; add a named helper instead.
@@ -83,8 +93,9 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
 - Use the contributor's own Git identity for commits. No AI-tool trailers, "Requested by" headers, or links to an
   AI chat, session, project, or thread appear in commits, pull requests, issues, or comments. A coding tool's plain
   "Generated with" footer (the tool's name, with at most a link to its product page) is allowed and never blocks a
-  merge. `scripts/check-attribution.mjs` (part of `npm run check`) enforces this for tracked files and the branch's
-  commit messages.
+  merge, and so is a `Co-authored-by` trailer for the repository's own coding-agent identity (as named in
+  `scripts/aiAttribution.mjs`). `scripts/check-attribution.mjs` (part of `npm run check`) enforces this for tracked
+  files and the branch's commit messages.
 
 ## Secrets and the model key
 

@@ -1,0 +1,243 @@
+/* The deal screen mock-up: the shell, the conversation, and the empty deal. Every color is an app token or a mix the
+   app already uses. Later files refine earlier ones, so the files load in order. */
+.x-stage {
+  display: flex;
+  gap: var(--gap);
+  height: 100%;
+  min-height: 0;
+  position: relative;
+}
+.x-conv {
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  container-type: inline-size;
+}
+.x-trail b {
+  font-weight: 600;
+  color: var(--ink);
+}
+.x-trail .sep {
+  color: var(--ink-3);
+}
+.x-trail .t {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.x-head .x-acts {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.btn.sm.ico {
+  width: 28px;
+  padding: 0;
+}
+.x-toggle {
+  position: relative;
+}
+.x-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+  padding: 6px 20px 150px;
+  -webkit-mask-image: linear-gradient(to bottom,transparent 0,transparent 30px,var(--mask) 64px);
+  mask-image: linear-gradient(to bottom,transparent 0,transparent 30px,var(--mask) 64px);
+}
+.x-col {
+  max-width: 740px;
+  margin: 0 auto;
+}
+.x .msgs {
+  gap: 16px;
+  padding-top: 4px;
+}
+.x .msgs .ai {
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: min(72ch,100%);
+  min-width: 0;
+}
+.x .rsch-pill,.x .rsch-chip {
+  max-width: 100%;
+}
+.x .rsch-chip .docnm {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  white-space: nowrap;
+}
+.x .msgs .ai p:last-of-type {
+  margin-bottom: 0;
+}
+.x .msgs .me {
+  font-size: 13.5px;
+  max-width: 70%;
+  padding: 8px 13px;
+}
+.x .rsch {
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.x .rsch-pill {
+  height: 28px;
+  font-size: 12.5px;
+}
+.x .rsch-chip {
+  height: 26px;
+  font-size: 12px;
+}
+.x .rsch-chip em {
+  font-style: normal;
+  color: var(--ink-3);
+}
+.x .rsch-chip svg {
+  color: var(--ink-3);
+}
+.x .ref .rb {
+  text-decoration: underline dotted var(--ink-3);
+  text-underline-offset: 4px;
+  text-decoration-thickness: 1px;
+}
+.x .acts {
+  display: flex;
+  gap: 14px;
+  margin-top: 8px;
+  color: var(--ink-2);
+}
+.x .acts svg {
+  display: block;
+}
+.x .acts .ib {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+}
+.x-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 10px 12px 10px 14px;
+  border-radius: var(--r-card);
+  background: var(--card);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  max-width: min(520px,100%);
+  box-sizing: border-box;
+  min-width: 0;
+}
+.x-card .k {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 1px;
+}
+.x-card .k > span:not(.x-live) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.x-card .k span {
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.x-card .btn {
+  margin-left: auto;
+  flex: none;
+}
+.x-ring {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+.x-ring svg {
+  display: block;
+}
+.x-composer {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 0;
+  z-index: 5;
+}
+.x-composer .askbox {
+  max-width: 740px;
+  margin: 0 auto;
+  padding: 12px 12px 10px;
+  gap: 6px;
+}
+.x .askbox textarea {
+  font-size: 14px;
+  line-height: 22px;
+  min-height: 22px;
+  height: 22px;
+  padding: 0 4px;
+}
+.x .askbox .scopebtn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.x .askbox .send {
+  width: 30px;
+  height: 30px;
+}
+.x .askbox .send svg {
+  width: 15px;
+  height: 15px;
+}
+@container (max-width:440px) {
+  .x-composer .scopebtn .t {
+    display: none;
+  }
+  .x-composer .scopebtn {
+    padding: 0;
+    width: 28px;
+    justify-content: center;
+  }
+  .x-composer .scopebtn.mode {
+    width: auto;
+    padding: 0 10px;
+  }
+}
+
+/* empty deal: Home's layout, scoped to the deal */
+.x-empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 20px 56px;
+}
+.x-empty .center {
+  width: 100%;
+  max-width: 740px;
+  margin: 0 auto;
+}
+.x-empty .ttl {
+  font: 600 24px/1.15 var(--display);
+  letter-spacing: -.4px;
+  text-align: center;
+  margin: 0 0 14px;
+}
+.x-empty .askbox textarea {
+  min-height: 44px;
+  height: 44px;
+}

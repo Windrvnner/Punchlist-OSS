@@ -9,22 +9,20 @@ import { showTip, hideTip } from './tip';
 import { Brief, Cited } from './findings';
 import { ResearchView } from './research';
 import { closeOnEscape, focusOnce, focusOnceInPlace } from './focus';
-import { askVerdict, dealIdOf, type Scope } from '../app/conversations';
-import { splitCited, withoutMarkers } from '../domain/cite';
-import { UseAsResponse } from '../app/commands/questions';
-import { dealQuestions, type Message, type State } from '../app/state';
+import {
+  answerQuestionChoices, answerText, askVerdict, dealIdOf, questionFromAnswer, responseToReplace, useAnswer,
+  withoutFindingLinks, type Scope,
+} from '../app/conversations';
+import { splitCited } from '../domain/cite';
+import type { Message, State } from '../app/state';
 import type { Deal, Question, Source } from '../domain/model';
-import { findQuestions } from '../domain/suggest';
 import { QuestionCard, FindingCard } from './answerCards';
 
 type Verdict = State['ui']['verdicts'][string];
 
-/** An answer's text with its links to findings, `{words|f_…}`, reduced to their words. */
-const withoutFindingLinks = (text: string) => text.replace(/\{([^|}]+)\|f_[0-9A-Z]{26}\}/g, '$1');
-
-/** What putting an answer in as a question's response needs to know; `clean` is its text without markers. */
+/** What putting an answer in as a question's response needs to know. */
 type UseOptions = {
-  store: Store; scope: Scope; answer: Message; clean: string;
+  store: Store; scope: Scope; answer: Message;
   /** what had the focus, which it goes back to when a card or the Replace prompt closes */
   from: { current: HTMLElement | null };
   /** closes the "Use as response to a question…" list, when that is what is open */
@@ -37,22 +35,21 @@ type UseOptions = {
  * Putting an answer in as a question's response: replacing a response that is already there is asked first (the
  * Replace prompt, for the question in `replace`); filling an empty one is not.
  */
-function useUseAsResponse({ store, scope, answer, clean, from, closeUseCard, closeList }: UseOptions) {
-  const [replace, setReplace] = useState<string | null>(null);
-  const useOn = async (questionId: string) => {
-    const use = { dealId: dealIdOf(scope) as string, questionId, text: clean, sources: answer.sources ?? [] };
-    await store.dispatch(UseAsResponse, use, { idempotencyKey: 'use-' + answer.id });
-  };
+function useUseAsResponse({ store, scope, answer, from, closeUseCard, closeList }: UseOptions) {
+  const [replace, setReplace] = useState<{ questionId: string; response: string } | null>(null);
+  const useOn = (questionId: string, over: string | null = null) =>
+    useAnswer(store, dealIdOf(scope) as string, questionId, answer, over);
   // Picked from the list, the list gives way to the Replace prompt, and the focus goes back to the button that opened
   // the list.
   const askUse = (questionId: string, picked = false) => {
-    if (!store.get().questions[questionId]?.response.trim()) {
+    const response = responseToReplace(store.get().questions[questionId]);
+    if (response === null) {
       void useOn(questionId).then(closeUseCard);
       return;
     }
     if (picked) closeList();
     else from.current = document.activeElement as HTMLElement | null;
-    setReplace(questionId);
+    setReplace({ questionId, response });
   };
   return { replace, setReplace, useOn, askUse };
 }
@@ -86,41 +83,41 @@ export function Answer({ scope, message: answer, asked, onOpen, suggest }: {
   // answer rests on all its sources. Text that leaves as a response or a question goes without the markers.
   const sourceCount = answer.sources?.length ?? 0;
   const marked = sourceCount > 0 && splitCited(plain, sourceCount).some((part) => part.refs.length > 0);
-  const clean = withoutMarkers(plain, sourceCount);
+  const clean = answerText(answer);
   const closeUseCard = () => {
     if (card === 'use') closeCard();
   };
-  const use = useUseAsResponse({ store, scope, answer, clean, from, closeUseCard, closeList: () => setCard(null) });
+  const use = useUseAsResponse({ store, scope, answer, from, closeUseCard, closeList: () => setCard(null) });
   const closeReplace = () => {
     use.setReplace(null);
     focusBack();
   };
   const replaceIt = () => {
-    const questionId = use.replace!;
+    if (!use.replace) return;
+    const { questionId, response } = use.replace;
     closeReplace();
-    void use.useOn(questionId).then(closeUseCard);
+    void use.useOn(questionId, response).then(closeUseCard);
   };
   const openCard = (opener: HTMLElement, which: 'q' | 'f' | 'use') => {
     from.current = opener;
     setCard(which);
   };
   const openFromAnswer = (src: Source) => onOpen(src, asked);
-  const replacing = use.replace ? state.questions[use.replace] : undefined;
+  const replacing = use.replace ? state.questions[use.replace.questionId] : undefined;
   return (
     <div class="ai">
       {answer.research && <ResearchView research={answer.research} sources={answer.sources} dealId={dealIdOf(scope)}
         onOpen={openFromAnswer} />}
       <AnswerText answer={answer} plain={plain} marked={marked} deal={deal} onOpen={openFromAnswer} />
       <AnswerActs scope={scope} hasDeal={!!deal} clean={clean} openCard={openCard} askUse={use.askUse} />
-      {card === 'use' && deal && <UsePicker id={answer.id} deal={deal.name} questions={dealQuestions(state, deal.id)}
+      {card === 'use' && deal && <UsePicker id={answer.id} deal={deal}
         onPick={(questionId) => use.askUse(questionId, true)} onClose={closeCard} />}
       {suggested && deal && <SuggestedQuestion question={suggested} dealId={deal.id} answer={answer}
         verdict={state.ui.verdicts[`${answer.id}|${suggested.id}`]} askUse={use.askUse} />}
       {replacing && <ReplacePrompt question={replacing} onReplace={replaceIt} onKeep={closeReplace} />}
       {card === 'q' && deal && <QuestionCard scope={scope} answerId={answer.id}
-        initial={scope.kind === 'finding' ? clean : asked} onDone={closeCard} />}
-      {card === 'f' && deal && <FindingCard dealId={deal.id} answerId={answer.id} text={plain}
-        sources={answer.sources ?? []} onDone={closeCard} />}
+        initial={questionFromAnswer(scope, answer, asked)} onDone={closeCard} />}
+      {card === 'f' && deal && <FindingCard dealId={deal.id} answer={answer} onDone={closeCard} />}
     </div>
   );
 }
@@ -214,7 +211,7 @@ function SuggestedQuestion({ question, dealId, answer, verdict, askUse }: {
       {verdict && <p class="verdict" role="status">{verdictText(verdict)}</p>}
       <div class="row">
         {/* while it checks, the button is off but keeps the focus (aria-disabled, not disabled) */}
-        {store.services.ai.addresses && <button type="button" class="btn sm ask"
+        {state.can.addresses && <button type="button" class="btn sm ask"
           title={`Check whether this answers Q${question.n}`}
           aria-disabled={verdict === 'asking' ? true : undefined} onClick={check}>
           {checkLabel(verdict)}
@@ -285,7 +282,7 @@ function keepActiveInView(list: HTMLElement) {
 /** What the list says beside a question: whether it has a response and, under All, a status other than Open */
 function tagOf(question: Question) {
   if (question.status === 'answered') return 'Answered';
-  const tags = [question.status === 'closed' && 'Closed', question.response.trim() && 'Has a response'];
+  const tags = [question.status === 'closed' && 'Closed', responseToReplace(question) !== null && 'Has a response'];
   return tags.filter(Boolean).join(' · ');
 }
 
@@ -296,20 +293,20 @@ function tagOf(question: Question) {
  * move through it and Enter picks, as a click does; Escape closes it. The focus stays in the field throughout
  * (aria-activedescendant). `id`: the answer's; `questions`: all the deal's.
  */
-function UsePicker({ id, deal, questions, onPick, onClose }: {
-  id: string; deal: string; questions: Question[]; onPick: (questionId: string) => void; onClose: () => void;
+function UsePicker({ id, deal, onPick, onClose }: {
+  id: string; deal: Deal; onPick: (questionId: string) => void; onClose: () => void;
 }) {
+  const state = useAppState();
   const [typed, setTyped] = useState('');
   const [active, setActive] = useState(0);
   const [all, setAll] = useState(false);
-  const open = questions.filter((question) => question.status === 'open');
   const list = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLDivElement>(null);
   // again when All makes the list longer
   useLayoutEffect(() => {
     if (box.current) scrollIntoChat(box.current);
   }, [all]);
-  const rows = findQuestions(typed, all ? questions : open);
+  const { rows, openCount, hasQuestions } = answerQuestionChoices(state, deal.id, typed, all);
   const current = Math.min(active, Math.max(0, rows.length - 1));
   // picked once: pressing Enter again while it is being used does nothing
   const busy = useRef(false);
@@ -346,7 +343,7 @@ function UsePicker({ id, deal, questions, onPick, onClose }: {
       {/* the filter sits on the label's line, as the Checklist's does; a click on it leaves the focus in the field
           below */}
       <div class="lbl flagsl"><label for={`use-find-${id}`}>Use as response to a question</label>
-        <span class="lblacts"><OpenOrAll all={all} openCount={open.length} show={show} /></span></div>
+        <span class="lblacts"><OpenOrAll all={all} openCount={openCount} show={show} /></span></div>
       <span class="ufind"><Icon name="search" size={14} />
         <input class="in" id={`use-find-${id}`} placeholder="Find by number or words" autoComplete="off"
           spellcheck={false} role="combobox" aria-expanded="true" aria-autocomplete="list"
@@ -355,11 +352,11 @@ function UsePicker({ id, deal, questions, onPick, onClose }: {
           onInput={(e) => type((e.currentTarget as HTMLInputElement).value)} /></span>
       {/* a click picks without taking the focus from the field */}
       <div class="ulist" id={`use-list-${id}`} role="listbox"
-        aria-label={`${all ? 'Questions' : 'Open questions'} on ${deal}`} ref={list}
+        aria-label={`${all ? 'Questions' : 'Open questions'} on ${deal.name}`} ref={list}
         onMouseDown={(e) => e.preventDefault()}>
         {rows.map((question, i) => <UseOption key={question.id} id={optionId(question)} question={question}
           active={i === current} onHover={() => setActive(i)} onPick={() => pick(question)} />)}
-        {!rows.length && <p class="unone">{noneText(all, (all ? questions : open).length > 0, typed, deal)}</p>}
+        {!rows.length && <p class="unone">{noneText(all, hasQuestions, typed, deal.name)}</p>}
       </div>
       <div class="cacts"><button type="button" class="btn sm" onClick={onClose}>Cancel</button></div>
     </div>

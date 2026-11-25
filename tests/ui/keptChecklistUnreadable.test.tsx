@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { useKeepImport, useKeeper, type KeptNow } from '../../src/ui/firmChecklistKept';
-import { dropImport, importKey, keepImport, keptImport, keptImportsReady } from '../../src/ui/keptImports';
+import { dropImport, importKey, keepImport, keptImport, keptImportsReady } from '../../src/app/keptImports';
 import type { ImportTable } from '../../src/app/transfer';
 
 const key = importKey.checklist();
@@ -77,6 +77,16 @@ describe('a kept checklist import that cannot be shown (#381)', () => {
     await act(() => render(<Keeping paste="" />, screen));
     expect(keptImport(key)?.paste).toBe('');
     expect(keptImport(key)?.choices).toBeUndefined();
+  });
+
+  it('clears an unused heading when a paste replaces the saved import (#380)', async () => {
+    await keptImportsReady;
+    const headingDraft = { sheet: 'Main', headerRow: 1, text: '0' };
+    keepImport(key, { ...unreadable, headingDraft });
+    await act(() => render(<Keeping paste="" />, screen));
+    expect(keptImport(key)?.headingDraft).toEqual(headingDraft);
+    await act(() => render(<Keeping paste="Tax returns" />, screen));
+    expect(keptImport(key)).toMatchObject({ paste: 'Tax returns', headingDraft: null });
   });
 
   it('is replaced whole by a list read in its place', async () => {

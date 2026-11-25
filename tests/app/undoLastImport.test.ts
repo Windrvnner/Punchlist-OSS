@@ -12,7 +12,8 @@ import { CreateFinding, EditFinding, AttachDocumentToFinding } from '../../src/a
 import { ImportQuestions, RevertImport, UndoLastImport, lastImport } from '../../src/app/commands/importQuestions';
 import { registry, Undo } from '../../src/app/commands/undo';
 import { dealQuestions, dealFindings } from '../../src/app/state';
-import { deletedOf } from '../../src/ui/deleted';
+import '../ui/keptTextSession';
+import { visibleDeletedNotes as deletedOf } from '../../src/app/deletedView';
 
 const COMMANDS = [
   CreateDeal, DeleteDeal, CreateQuestion, SetResponse, DeleteQuestion, RestoreQuestion, EditQuestionField,

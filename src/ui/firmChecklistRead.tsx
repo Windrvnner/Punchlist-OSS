@@ -4,12 +4,13 @@
  */
 import { Modal, LeaveFoot } from './dialogs';
 import type { ChecklistMapping } from '../domain/checklistImport';
-import { LAYERS, LAYER_NAMES, LIST_NAME_MAX, findList, key, type Layer } from '../domain/checklist';
-import { alphabetical } from '../domain/order';
+import { LAYERS, LAYER_NAMES, LIST_NAME_MAX, type Layer } from '../domain/checklist';
 import { SERVICE } from '../control';
 import type { ListSource } from './firmChecklistImport';
-import { NOT_DONE, plural } from './firmChecklistReview';
+import { NOT_DONE } from './firmChecklistReview';
+import { plural } from './counts';
 import { Head, chooseButton, statusLine, type ImportView } from './firmChecklistSteps';
+import { HeadingRowField } from './headingRowField';
 
 type Table = NonNullable<ListSource['table']>;
 
@@ -32,12 +33,14 @@ function nextFooter(view: ImportView, line: string, tip?: string) {
   const { split } = target;
   const why = whyNoNext(view);
   const noColumn = source.byColumns && source.mapping.item === null;
+  const waiting = listReview.waiting && !why && !noColumn;
+  const status = waiting && !work.error ? `Asking ${SERVICE}` : line;
   return (
-    <div class="xfoot">{statusLine(view, line, tip)}<span class="grow" />
+    <div class="xfoot">{statusLine(view, status, tip)}<span class="grow" />
       {split && chooseButton(view)}
       <span class="needs" title={why}>
         <button key={split ? 'held' : 'next'} class={`btn sm${split ? '' : ' pri'}`} type="button" id="cl-next"
-          title={why} disabled={!(source.prepared?.items.length) || !!why || !!work.busy || noColumn}
+          title={why} disabled={!source.prepared?.count || !!why || !!work.busy || noColumn || waiting}
           onClick={() => void listReview.next()}>Next</button>
       </span>
     </div>
@@ -54,7 +57,7 @@ function fileRow({ change, exit }: ImportView, label: string, said: string) {
   );
 }
 
-const rowsSaid = (table: Table) => `${table.name} · ${plural(table.rows.length, 'row')}`;
+const rowsSaid = (table: Table, rows: number) => `${table.name} · ${plural(rows, 'row')}`;
 
 const sheetOptions = (sheets: string[]) => sheets.map((sheet) => <option key={sheet} value={sheet}>{sheet}</option>);
 
@@ -65,12 +68,11 @@ function namePlaceholder(layer: Layer) {
 }
 
 /** Which list: the general one, or a named product, sector or technology list. */
-function listRow({ firm, target, setLayer, setName }: ImportView) {
-  const { layer, name, replaces } = target;
+function listRow({ target, setLayer, setName }: ImportView) {
+  const { layer, name, replaces, named, listNames, hasGeneral } = target;
   const one = LAYER_NAMES[layer].one.toLowerCase();
-  const nameNote = !key(name) ? undefined : replaces ? `Replaces the ${replaces.name} list` : `A new ${one} list`;
-  const names = alphabetical((firm?.lists ?? []).filter((list) => list.layer === layer).map((list) => list.name));
-  const generalTip = findList(firm, 'broad', '') ? 'Replaces the general list' : undefined;
+  const nameNote = !named ? undefined : replaces ? `Replaces the ${replaces.name} list` : `A new ${one} list`;
+  const generalTip = hasGeneral ? 'Replaces the general list' : undefined;
   return (
     <div class="srow top"><div class="k">List</div><div>
       <div class="seg" id="cl-layer" role="group" aria-label="Which list">{LAYERS.map((each) => (
@@ -81,19 +83,19 @@ function listRow({ firm, target, setLayer, setName }: ImportView) {
         <input class="field" id="cl-name" title={nameNote} list="cl-names" aria-label={`Name of the ${one}`}
           maxLength={LIST_NAME_MAX} placeholder={namePlaceholder(layer)} value={name}
           onInput={(e) => setName((e.currentTarget as HTMLInputElement).value)} />
-        <datalist id="cl-names">{names.map((listName) => <option key={listName} value={listName} />)}</datalist>
+        <datalist id="cl-names">{listNames.map((listName) => <option key={listName} value={listName} />)}</datalist>
       </div>}
     </div></div>
   );
 }
 
 /** What the review will ask for: clearer wording (when the model offers it) and duplicates. */
-function reviewChoices({ ai, target, listReview }: ImportView) {
+function reviewChoices({ can, target, listReview }: ImportView) {
   const where = target.layer === 'broad' ? '' : ', here and in the general list';
   const sameTip = `Items that ask for the same thing${where}; only what you check is removed`;
   return (
     <div class="srow top"><div class="k">Review</div><div class="cl-checks">
-      {ai.reword && <label class="xcheck"
+      {can.reword && <label class="xcheck"
         title={`${SERVICE} suggests wording for unclear or two-part items; you check the ones to use`}>
         <input type="checkbox" id="cl-askreword" checked={listReview.askReword}
           onChange={(e) => listReview.setAskReword((e.currentTarget as HTMLInputElement).checked)} />
@@ -146,8 +148,8 @@ export function readStep(view: ImportView, lines: string[]) {
   const count = tied?.count;
   // until the reading is in (it starts just after the lines are shown), the line says it is being asked
   const reading = work.busy === 'asking' || (!count && !readFailed && !work.error);
-  const lineCount = plural(lines.length, 'line');
-  const said = text ? `${text.name || 'Pasted'} · ${lineCount}` : rowsSaid(table!);
+  const lineCount = plural(source.counts.lines, 'line');
+  const said = text ? `${text.name || 'Pasted'} · ${lineCount}` : rowsSaid(table!, source.counts.rows);
   return (
     <Modal onClose={exit.close} label={title} blur className="sdlg imdlg">
       <Head title={title} onClose={exit.close} />
@@ -164,18 +166,19 @@ export function readStep(view: ImportView, lines: string[]) {
       </div></div>
       {leftOutRow(source, lines)}
       {reviewChoices(view)}
-      {nextFooter(view, readLine(view, lines, reading), count ? tieOutTip(count) : undefined)}
+      {nextFooter(view, readLine(view, reading), count ? tieOutTip(count) : undefined)}
     </Modal>
   );
 }
 
 /** What the footer says while the model reads the list, and once it has: what Next will take. */
-function readLine({ work, source, target }: ImportView, lines: string[], reading: boolean): string {
+function readLine({ work, source, target }: ImportView, reading: boolean): string {
   const count = source.tied?.count;
+  if (work.busy === 'reading') return 'Reading the file';
   if (reading || work.busy === 'reviewing') return `Asking ${SERVICE}`;
   if (work.error) return work.error;
   if (target.split) return target.splitSays;
-  if (!count) return plural(lines.length, 'line');
+  if (!count) return plural(source.counts.lines, 'line');
   if (!target.named) return `Name the ${LAYER_NAMES[target.layer].one.toLowerCase()}`;
   return `${plural(count.items, 'item')}${count.left ? ` · ${plural(count.left, 'line')} left out` : ''}`;
 }
@@ -223,7 +226,7 @@ export function columnsStep(view: ImportView, table: Table) {
   return (
     <Modal onClose={exit.close} label={title} blur className="sdlg imdlg">
       <Head title={title} onClose={exit.close} />
-      {fileRow(view, 'File', rowsSaid(table))}
+      {fileRow(view, 'File', rowsSaid(table, source.counts.rows))}
       {listRow(view)}
       {headingsRow(source, table)}
       <div class="srow top"><div class="k">Columns</div><div class="immap three">
@@ -240,22 +243,17 @@ export function columnsStep(view: ImportView, table: Table) {
 
 /** Where the headings are: the sheet, and the row they sit on. */
 function headingsRow(source: ListSource, table: Table) {
-  const typed = (value: number) => {
-    const fits = Number.isInteger(value) && value >= 1 && value <= table.lastRow;
-    if (fits && value !== table.headerRow) void source.reread({ sheet: table.sheet, headerRow: value });
-  };
+  const sheet = source.wantedSheet ?? table.sheet;
   return (
     <div class="srow"><div class="k">Headings</div><div class="imwhere">
       {table.sheets.length > 1 && <label><span>Sheet</span>
-        <select class="field" id="cl-sheet" aria-label="Sheet" value={table.sheet}
+        <select class="field" id="cl-sheet" aria-label="Sheet" value={sheet}
           onChange={(e) => void source.reread({ sheet: (e.currentTarget as HTMLSelectElement).value })}>
           {sheetOptions(table.sheets)}
         </select>
       </label>}
-      <label><span>Row</span>
-        <input class="field" id="cl-header" type="number" aria-label="Heading row" min={1} max={table.lastRow} step={1}
-          value={table.headerRow} onInput={(e) => typed(+(e.currentTarget as HTMLInputElement).value)} />
-      </label>
+      <HeadingRowField id="cl-header" importKey={source.importKey} table={table} sheet={sheet}
+        read={(headerRow, accept) => source.reread({ sheet, headerRow }, accept)} />
     </div></div>
   );
 }
@@ -285,7 +283,8 @@ function columnPicker(view: ImportView, table: Table, column: keyof ChecklistMap
 /** What the footer says when the columns are chosen by hand: what is missing, or what Next will take. */
 function columnsLine({ work, source, target }: ImportView): string {
   const { mapping, prepared } = source;
-  const count = prepared?.items.length ?? 0;
+  const count = prepared?.count ?? 0;
+  if (work.busy === 'reading') return 'Reading the file';
   if (work.busy === 'reviewing') return `Asking ${SERVICE}`;
   if (work.error) return work.error;
   if (target.split) return target.splitSays;

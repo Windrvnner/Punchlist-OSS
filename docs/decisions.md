@@ -14,11 +14,14 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A click on the backdrop closes a menu but never a dialog. Search results and hover popups don't dim the page; the
   connection bar and tooltips stay solid; notices use popup glass.
 - The app has dark and light themes. Every color is derived from three base colors in the control file (`colors.neutral`, `colors.accent`, and `colors.red`) and written nowhere else; icons use the text color. There is no amber, no green, and no separate AI blue, and the build stops when text would fall below WCAG AA contrast.
+- Both themes are black and white: the accent is a gray of the neutral, light in dark and graphite in light. `colors.accent` colors only the highlight and mark on a document page (#873).
 - Supported window sizes run from 1024×640 to 1536×864. Phone-sized windows and 400% zoom layouts are out of scope; ultrawide monitors are to be considered later, once everything else is settled (#5).
 - There is no all-capitals text. Labels, column heads, buttons, menu items, value capsules, and dialog titles that aren't questions use Apple's title style; sentences, tooltips, body text, and meta lines stay in sentence case (see design.md, under Type).
 - A heading has one row of controls under it, never two. A header that runs short of space drops words first, then turns buttons into icons.
 - Controls that are clicked repeatedly keep a fixed width and position. Icon buttons sit centered with no padding; small ones are 28×28.
 - Home's ask box, a deal page's ask box, and a conversation's composer are one composer, with the same sizes and controls, **Attach** included. It grows to seven full lines and then scrolls; the conversation ends 34px above it, and what was in view stays in view.
+- In reading mode, the pane and composer use 22px glass. The thread keeps its place from the end when the composer
+  resizes, and the pane shadow fades into the surrounding gaps (#437, #438, #442).
 - Dropdown menus are sorted A to Z as a person reads them, with "No…", "None", and "— not in file —" last, and "All …" or an unset prompt first. Menus with an order of their own (statuses, priority, Deal status, model tiers, and a file's sheets and columns) keep that order, as do lists that aren't dropdowns.
 - Everything works by keyboard alone. Escape closes; focus returns to whatever opened a dialog; Ctrl Z does what the visible notice's **Undo** does.
 - There is no explainer or helper text on screen; explanations go in tooltips.
@@ -29,6 +32,12 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Home is the ask composer alone ("Ask across your deals…"), with no deal list, count, or dashboard cards.
 - The sidebar lists deals only, grouped by Deal status (Live, Monitoring, Pitch, and Closed; the Pitch group is headed "Pitches"). Groups fold and stay folded, and a group appears once it has a deal.
 - Search is one field in the sidebar (Ctrl K). Its results are grouped as Deals, Findings, Checklist Items, Questions, and Documents, and an item opens on its deal's Checklist (#2).
+- A Search question keeps the current deal's Q&A filters. From Home or a different deal it opens with All (#497).
+- Choosing an open Checklist item in Search reveals its row again (#496).
+- Keyboard selection in Search moves focus to the opened question or Checklist row (#498).
+  When a question closes and its row is hidden by the active filter, focus returns to the Q&A filters.
+- Search shows “No matches.” once it finishes reading My Deals and finds no results (#491).
+- Search keeps the highlighted result when more records arrive, while that result is still listed (#501).
 - A deal's pages are Overview, Findings, Checklist, and Q&A; **Settings** → **Deals Open On** picks which page opens first (Overview by default). No new tabs are added.
 - The deal header holds Deal status and one ⋯ menu with **Check Again** (showing "Last checked [date]"), **Deal Memo…**, **Rename**, and, set apart, **Delete Deal…**.
 - The counterparty sits alone at the top right of every deal page. Structure, Sector, and Technology appear on Overview only.
@@ -37,7 +46,12 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Documents on Overview shows each folder's "N of M read", one Core documents row, and up to two deals, shown as "Also in Project X", that hold most of this deal's documents.
 - The Findings page has **New Finding** as its one button and a ⋯ menu with **Import…**, **Export…**, and **Deleted…**; its filter menu holds Workstream and Reviewed. The list doesn't mark who raised a finding. It is grouped by workstream (A to Z, with "No workstream" last), and open findings marked "May be out of date" come first in each group.
 - Finding and question pages use the slim rail (the sidebar folded to icons) and the queue strip.
-- "Project " is added in front of a deal name that lacks it. A name that starts with that word in any capitalization, followed by anything other than a letter, accent, or digit, has the word rewritten as "Project" and the rest kept as typed; misspellings are not corrected. Deals may share a name; they are told apart by counterparty, then by creation date, in the sidebar, Add Deal, and search.
+- "Project " is added in front of a deal name that lacks it. A name that starts with that word in any capitalization, followed by anything other than a letter, accent, or digit, has the word rewritten as "Project" and the rest kept as typed; misspellings are not corrected. Deals may share a name; they are told apart by counterparty, then by creation date, in the sidebar, Add Deal, search, and the confirmations and notices that name a deal, as "Project Kestrel (Wingtip)" (#27).
+- Search and the sidebar keep the distinguishing words in shortened counterparty labels (#492).
+  An ellipsis marks a shortened suffix after those words (#791).
+  Search keeps the meaningful name after “Project” and the full question number or page range (#495).
+- Search ellipsizes an oversized single counterparty word (#494) and keeps the start of right-to-left deal names (#490).
+- Search uses the usual separator spacing after an ellipsized single-word counterparty (#790).
 - The New Deal form has Name and Counterparty; Structure, Sector, and Technology pick lists; and Folders. × closes it, and there is no Cancel. **Create** stays unavailable until there is a name.
 - Before a new deal is made, a duplicate check asks "Is this Project X?" when the folders' files, or the name and counterparty, match a team deal; nothing is refused.
 - Each deal has a Deleted list for findings and questions, showing who deleted each and when, with **Restore**. A deleted record reached by a link says so and offers **Restore**; a question being typed on a deleted finding's page stays there, with **Log Question** off (#340). A deleted question's number is never reused. An imported issues list can be removed from the Deleted list.
@@ -77,6 +91,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Emptying a response is announced in a notice with **Undo**.
 - A response on a question linked to a finding marks that finding; a response on an unlinked question is checked once against the open findings.
 - Import finds the table and its columns by the app's own rules and asks the model only when no question column is found. Nothing is imported until the person clicks **Import**, and the whole import is one Undo.
+- Q&A and checklist imports keep an unused heading row as typed and mark it “Not used.” The preview stays on the
+  last accepted table until another sheet or heading row is read (#380).
 - **Undo Last Import…** in the Q&A page's ⋯ menu takes back this PC's last import after a confirmation, with no Undo after it, and leaves alone questions changed since the import.
 - A responder column is read as the response's author.
 - On import, real date cells are read as dates and plain numbers are not. An ambiguous date is settled by the row's other date, its neighbors, and the rule that no date is in the future; otherwise it is left blank and listed.
@@ -119,6 +135,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 
 ## Checklist
 
+- Overview and Checklist count turned-off and not-yet-checked items the same way through one selector (#830).
 - An abandoned first pass over fewer documents than the deal now holds is finished like any left round,
   not started afresh.
 - The master checklist has four layers: general, structure, sector, and technology. There is always a general list.
@@ -140,7 +157,10 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - An item that is no longer in the current master checklist lists gets an icon, for information only (#2).
 - Linking the Checklist, Findings, and Q&A follows docs/linking-design.md, which covers only what is not yet built (#2). The next step is letting a person mark a gap resolved, with its source and with Undo. The rest waits until it is requested.
 - Each list in the master checklist is its own shared record. Bringing a list in adds its items to every deal that uses it and is not marked Closed. A deal's items are append-only; swapping a list asks first when items would be turned off.
+- The Wording heading checkbox selects or clears every available suggestion, and each row keeps its own checkbox (#377).
 - A rewording accepted when a list was brought in is offered again the next time.
+- In an open checklist import, a review that needs the model waits for a pending review request. The Duplicates line
+  and footer show the latest retry failure, and a partial check keeps its pairs and checked removals (#378).
 - **Add All Unresolved to Q&A…** sizes its calls to the model's limits and retries quietly; whatever still fails is offered for Retry.
 - Names of structures, sectors, and technologies stay at about 24 characters or fewer.
 
@@ -155,6 +175,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - There is no Conversations tab.
 - Conversations are kept per person in the shared folder and follow the person between PCs. In the app, each person sees only their own; the files are readable by anyone with access to the folder, and no encryption is planned.
 - Answers cite sources sentence by sentence with a dotted underline, without numbered markers (#636). While a finding is being edited, each citation shows as a tag of at most 30 characters after its sentence (#636). An answer can become a finding, a question, or a response.
+- Cited phrases show the pointer cursor when they open a source. Hover-only citations keep the default cursor (#440).
+- Source chips keep the cited location and tags whole. The name shortens to fit and appears in full on hover (#441).
 - Chat is an agent with search, read, and folder tools. A folder read always covers the whole folder; reading more than `limits.folderDocs` documents asks first, and **Stop** answers from what was found.
 - While chat works, it shows "Researching" with the full trace; once it has answered, it shows "Researched · N steps · N of M documents searched · time", never "read" (option D).
 - Tool calls run inline by default; the hybrid and native modes are set by `models.toolCalls`.
@@ -162,6 +184,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A chat is one conversation on the model service; past its limit, it is compacted into an uploaded transcript.
 - Each PC keeps its own word index of the data room; nothing is added to the shared folder.
 - Documents open in reading mode beside the conversation, with page keys and zoom.
+- Switching PDFs opens the cited page at the top and keeps the zoom (#447).
+- In the browser demo, a PDF without a preview shows its title, page number, and a preview status (#443).
 - Decided but not built: plain-symbol math, a named finding opening in a side pane, answer actions as icons, and a suggested open question card.
 
 ## Deal memo
@@ -169,10 +193,16 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - The deal memo is a templated memo of Findings, Checklist, and Q&A: a one-page summary, the memo itself from page two, and an appendix.
 - Risk at a glance ranks workstreams by weighted risk (High 9, Medium 3, Low 1), in at most 12 rows.
 - Key risks lists every High risk, then the oldest Medium risks up to `memo.keyRisks`, A to Z within each severity.
+- The memo keeps usable risk groups when other entries in the model's reply are malformed.
+  Each open finding has one risk, on its own if the model left it out (#658).
+- The memo limits a key risk write-up to two paragraphs and 200 words. If retries yield no usable write-up,
+  it uses the findings' own cited words (#659).
 - The memo reports facts only: no recommendation, mitigants, next steps, or judging words.
 - **Deal Memo…** in the deal header's ⋯ menu asks where to save (Word or PDF), then makes the memo; there is no review step.
 - The memo has no text in capitals, headings included.
 - Risks are rated High, Medium, or Low, only in the memo, by the model against the control file's definitions. A finding keeps its rating until the finding changes, so two memos agree. The memo carries no AI mark, only one disclaimer at the end. High prints in red; Medium and Low print in the text color.
+- When ratings are unresolved, the memo asks the model to say so and describe risks from the evidence. The first-page
+  counts show the ratings and the number of unrated open findings (#661).
 - The memo currently uses a built-in plain template; custom Word templates are planned. The memo is for internal use only.
 
 ## Documents and indexing
@@ -187,6 +217,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A deleted or replaced document leaves the deal under the rules in architecture.md; nothing linked to it is deleted (#413).
 - A folder that this person may not open doesn't stop indexing, and a check that couldn't read it says "Not complete".
 - The app never deletes documents. Drafts of one agreement form a family: the newest is read first, and reading mode shows a draft's date and lists its family's drafts, any two of which can be compared. Versions in one folder count only with an explicit mark such as v3 or Rev A.
+- A document-page error and its **Retry** use the paper text color. **Retry** is always underlined (#439).
 - "Read" means given to the model in a check that came to a result.
 - Core documents are worked out on each PC without a model; see docs/core-documents-design.md.
 - When an agreement is core, its whole family is core too: schedules, exhibits, annexes, amendments, side letters, signature pages, and change orders, identified from names and paths only; see docs/core-families-design.md.
@@ -197,6 +228,9 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 
 ## Storage and sharing between PCs
 
+- For now, the app is designed around one person at a time on each deal, across any of their own PCs, syncing through
+  a shared folder such as OneDrive. This is a design focus, not a restriction: new multi-person features wait for a
+  coordination layer, such as a database backend, and nothing built now may block them (#834).
 - Records are stored as change files in the team's shared folder, and each PC writes only its own. OneDrive
   provides automatic discovery and sync. The folder picker also accepts folders outside OneDrive (#111).
 - A PC connects through the team folder's share link in the control file (`desktop.teamFolderLink`). On screen, the folder is called the "Punchlist folder", and its name defaults to Punchlist (`desktop.sharedFolder`).
@@ -213,6 +247,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A copied install is detected and stops writing. A build never changes a record written by a newer version.
 - A damaged undo journal (each PC's record of its actions, used for Undo and to recover interrupted work) is set aside, and its complete entries are still offered.
 - A deal's analysis is split between the PCs that have the deal open, in rounds (a round is one shared run of checks on the deal, split into pieces of work) that any PC can take over. A requested check that an abandoned round doesn't cover writes that round off.
+- Two rounds of one kind open at once become the one with the lower id. A batch still running in the other counts
+  for the kept round, unless a later check has begun (#795).
 - The check line names who is working.
 - A check waiting on the model service says so after 2 minutes and resumes by itself; a check waiting on a sign-in says that instead.
 - Attachments are kept in the shared folder under their document's id. A file attached on Home is kept with the person's conversations.
@@ -264,12 +300,64 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 [CLAUDE.md](../CLAUDE.md) covers how to work on the app: commits, checks, mock-ups, readable code, and asking before design decisions. Beyond it, these rules apply:
 
 - Keep friction low, with as few controls and steps as possible.
+- The attribution check allows a `Co-authored-by` trailer naming exactly the repository's own coding-agent identity (set in `scripts/aiAttribution.mjs`) and refuses every other AI co-author trailer (#877).
 - Never guess identities. Never cite finding codes.
 - Deleting a finding or a question asks first ("Delete Q38?", with **Keep It** or **Delete**), as do removing a folder and a list swap that turns items off; each keeps its Undo.
 - Close every gap as soon as it is found; fix confirmed Critical and Major issues rather than stopping to report them.
 - Say how an ambiguous instruction is being read. Ask about a product decision before it is built.
 - Each thing lives in one place: decisions here; bugs and Build list items (with their designs) as GitHub issues; review notes on pull requests; how the app works in the docs; the detailed contract in code comments and tests; and history in git. There are no Markdown review files or running logs.
 - The README covers what the app is and does, screenshots of the real app, and how to install and use it; developer setup is in docs/development.md.
+
+## Deal screen
+
+These decisions are for the rebuilt deal screen in [deal-screen-design.md](deal-screen-design.md) and are not built yet
+(#881). Once built, they replace Deal status wherever it appears (Look and feel, Pages and navigation), **Past
+Conversations** in every composer (Conversations), and **Keep It** in confirms (Working rules).
+They also replace the deal header, Overview, the Findings page, and **Deals Open On** (Pages and navigation); the
+Findings worklist beside the Checklist (Findings, Checklist); Overview's counts (Checklist); **Deal Memo…** in the ⋯
+menu (Deal memo); and Check again's place and **Check the N Left Out** (Findings, AI and models).
+
+- A deal shows its conversation on the left and, when opened, one pane on the right. The pane's tabs are Tasks, Diligence, and Q&A, always in that order, followed by any opened finding, document, or task, each with ×.
+- The selected tab is 1.5 times as wide as each other tab, and the rest share the bar equally. A hairline separates unselected tabs, the selected tab sits raised, and tabs show no counts. An unselected tab too narrow for its name drops its icon before shortening the word. The Diligence tab uses the Checklist's icon.
+- The sidebar folds to its slim rail while the pane is open and comes back when it closes. A sidebar pinned open stays, and the conversation narrows; the pane gives way only to keep the conversation at least 400px wide.
+- The checklist is the starting point for diligence, and each item's result is a finding, whether satisfied, flagged,
+  a gap, or not settled: the Diligence list and findings are one list, not two. A flagged result is closed on its
+  finding (#888).
+- A deal has no Deal status. The sidebar lists deals in one list, ordered by when the person last worked on each
+  deal, and **Archive Deal** hides one.
+- A deal's ⋯ menu offers **Archive Deal**, which asks first in the app's confirm dialog. Archived deals fold under **Archived**; a dot marks an archived deal whose data room changed, with its update line ("4 new files · 11:20 AM"). An archived deal's ⋯ menu offers **Unarchive Deal**.
+- The conversation title in the breadcrumb is a button that opens the deal's past conversations. **Past Conversations** leaves the composer.
+- The check of the data room against the checklist is called Diligence (**Run Diligence**, the Diligence tab), and the list of running and finished work is called Tasks. The Diligence tab shows the Checklist's own marks and groups.
+- Tasks belong to the deal, not to a conversation: they keep running and stay in Tasks when the person switches conversations, and a task's result card stays in the conversation that started it (#875).
+- Tasks are grouped as Needs Input, Running, and Completed. Each task is one row: an outline kind icon, its name, its count ("1,284 of 2,148" or "Step 3 of 5"), and, while it runs, a thin bar of the same width on every row. A round × stops it; a finished task opens from a round arrow. There are no time-remaining estimates (elapsed time may show), and an open-ended task's current file shows on hover.
+- A task's card in the chat has a fixed width and the same bar, and opens the task with **Open**. A finished task keeps its reply box.
+- Work in progress shows a small ring beside words naming the live step, never a spinner alone; on a tab, the ring sits beside the tab's name.
+- An opened question sits in a card with its question, response, sources, links, and status, beside the conversation, never covering it. A draft response is marked with a **Draft** badge.
+- A source document opens in the pane in reading mode's viewer, with page navigation and zoom and no passage highlighting.
+- Confirm dialogs say **Cancel**, not **Keep It** (#867).
+- The deal's name and counterparty in the breadcrumb are one button that opens **Deal Info**: name, counterparty,
+  Structure, Sector, Technology, the folders line with **Edit**, and **Delete Deal**. **Deal Memo** is an icon button
+  at the header's right (#888).
+- Overview is retired: its counts are the Diligence and Q&A filters, its Documents list is in **Folders**, and
+  indexing runs as a task (#888).
+- **Run Diligence** sits at the end of the Diligence tab's filter row. Findings that no checklist item raised join
+  the Diligence list under Flagged (#888).
+- A deal opens on a new conversation, with the pane as the person last left it (#888).
+- A question asked in a conversation is answered in that conversation, and anything it needs from the person is
+  asked there. It appears in Tasks only once the person leaves the conversation while it runs, and stays there under
+  Completed once it finishes. Diligence, imports, indexing, Deal Memo, and draft responses always run as tasks (#888).
+- Needs Input holds drafts ready to review, items Diligence did not check ("N items not checked", **Run**), and
+  questions left running that wait on the person ("Awaiting draft selection", **Answer**). Its buttons share one
+  width (#888).
+- Home's header holds **Past Conversations**, which lists every conversation with its deal's name (#888).
+- Working on a deal means sending a message in it, starting a task on it, or changing its records, details, or
+  folders. Archived lists deals whose data room changed first, newest change first, then the rest by when they were
+  last worked on; a deal's dot and update line clear once it is opened. Archiving is kept on the person's own record
+  of the deal (#888).
+- Deleting a conversation, once allowed, leaves its tasks running, and its confirm says how many are running (#888).
+- A conversation that receives a task's result moves to the top of Past Conversations, with a dot until it is
+  opened (#888).
+- Task steps, task notices, and status text are written in a neutral voice, with no first person (#888).
 
 ## Built, awaiting confirmation
 

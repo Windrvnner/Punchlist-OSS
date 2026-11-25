@@ -3,17 +3,20 @@ import { useAppState, useStore, nameDir, fmtDate } from './hooks';
 import { recoveredParts } from '../app/recovered';
 import { Icon } from './icons';
 import { localYmd, type Deal } from '../domain/model';
-import { dealQuestions, versionsWord, DEAL_PAGES, pageHash, type Landing, askAbout, deleteWaits } from '../app/state';
+import { versionsWord, DEAL_PAGES, pageHash, type Landing, askAbout, deleteWaits } from '../app/state';
 import { FindingsSection } from './findings';
 import { Composer } from './conversation';
 import { dealNameRoom, EditDeal, GROUP_LABEL } from '../app/commands/deals';
 import { MoreMenu, MenuItem } from './moreMenu';
 import { Pick } from './qa';
-import { resumeIndexing, liveFolders } from '../app/indexing';
-import { EditField, ReadOnlyContext, readDeal } from './editField';
+import { dealFirstPassStatus, indexingStopped, resumeIndexing } from '../app/indexing';
+import { conflictVersionCount, findingCounts, indexingTotals, questionCounts } from '../app/dealCounts';
+import { EditField, ReadOnlyContext } from './editField';
+import { readDeal } from '../app/fieldDrafts';
 import { ConflictView } from './conflict';
 import { runMemo } from '../app/memo';
-import { keptDrafts, hasTexts } from './keptDrafts';
+import { openDeleteDeal } from '../app/dealSetup';
+import { keptDrafts, hasTexts } from '../app/keptText';
 import { num } from './counts';
 
 /**
@@ -48,24 +51,27 @@ function RecoveredTitle({ name, head, tail }: { name: string; head: string; tail
   return <h1 class="ttl left" ref={ref} title={name} aria-label={name} dir={nameDir(name)} />;
 }
 
-/**
- * The first delete pop-up opens at once; what this PC has taken in is asked as it opens and kept on it, so work from another
- * PC that arrives while the person confirms counts as unseen and is kept there. It is back long before a name is typed.
- */
-function openDelete(store: ReturnType<typeof useStore>, dealId: string) {
-  store.ui({ deleteDeal: { dealId, typed: '', error: '' } });
-  void store.services.repo.seen?.().then((r) => { const dd = store.get().ui.deleteDeal; if (r.ok && dd?.dealId === dealId && !dd.seen) store.ui({ deleteDeal: { ...dd, seen: r.value } }); });
+export function useDealLock(d: Deal): string | null {
+  const s = useAppState();
+  const inherited = useContext(ReadOnlyContext);
+  const versions = conflictVersionCount(s, d.id);
+  return versions === undefined ? inherited : `${d.name} has ${versionsWord(versions).toLowerCase()}. Choose one first`;
 }
 
-export function useDealLock(d: Deal): string | null {
-  const s = useAppState(); const inherited = useContext(ReadOnlyContext); const clash = s.conflicts[d.id];
-  return clash ? `${d.name} has ${versionsWord(clash.versions.length).toLowerCase()}. Choose one first` : inherited;
+function indexingLabel(stalled: boolean, indexed: number) {
+  if (!stalled) return 'Indexing';
+  return indexed ? 'Indexing stopped' : 'Indexing not started';
 }
 
 export function PageTop({ deal: d, route, placeholder, noAsk = false }: { deal: Deal; route: Landing; placeholder: string; noAsk?: boolean }) {
   const store = useStore(); const s = useAppState();
-  const open = dealQuestions(s, d.id).filter((q) => q.status === 'open').length;
-  const openF = Object.values(s.findings).filter((f) => f.dealId === d.id && f.status === 'open').length;
+  const tabCounts = {
+    findings: findingCounts(s, d.id).open,
+    qa: questionCounts(s, d.id).open,
+    checklist: 0,
+    overview: 0,
+  };
+  const { folders, indexed } = indexingTotals(s, d);
   const [renaming, setRenaming] = useState(false);
   // the rename box closes back onto ⋯, where Rename was chosen, unless the focus has already gone elsewhere (a click
   // on ⋯ itself, which saves the name as the box loses the focus, leaves it in the menu that opens)
@@ -74,7 +80,9 @@ export function PageTop({ deal: d, route, placeholder, noAsk = false }: { deal: 
     const active = document.activeElement;
     if (!active || active === document.body || active.id === 'deal-name') document.getElementById('deal-more')?.focus();
   };
-  const facts = [d.target, d.side, d.stage === 'indexing' ? (s.ui.indexStalled.includes(d.id) ? (liveFolders(s, d).some((f) => f.indexed > 0) ? 'Indexing stopped' : 'Indexing not started') : 'Indexing') : '', d.milestone, d.folders.length ? `${d.folders.length} folder${d.folders.length > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · ');
+  const indexing = d.stage === 'indexing' ? indexingLabel(s.ui.indexStalled.includes(d.id), indexed) : '';
+  const folderLabel = folders ? `${folders} folder${folders > 1 ? 's' : ''}` : '';
+  const facts = [d.target, d.side, indexing, d.milestone, folderLabel].filter(Boolean).join(' · ');
   // the deal's own details are in a clash: they are read-only until a version is chosen. Its questions and findings are not affected.
   const clash = s.conflicts[d.id];
   const locked = useDealLock(d);
@@ -86,7 +94,7 @@ export function PageTop({ deal: d, route, placeholder, noAsk = false }: { deal: 
       <div class="headrow">
         <DealName deal={d} renaming={renaming} open={() => setRenaming(true)} done={renamed} />
         <div class="dtabs">{DEAL_PAGES.map(([page, label]) => {
-          const count = page === 'findings' ? openF : page === 'qa' ? open : 0;
+          const count = tabCounts[page];
           return <a key={page} href={`#${pageHash(page, d.id)}`} class={route === page ? 'on' : ''}
             aria-current={route === page ? 'page' : undefined}>{label}{count
               ? <span>{num(count)}<i> open</i></span> : null}</a>;
@@ -139,13 +147,13 @@ function DealMenu({ deal: d, lit, rename }: { deal: Deal; lit: boolean; rename: 
   const making = s.ui.memoBusy.includes(d.id);
   const busy = making ? 'Making the deal memo' : undefined;
   return <MoreMenu id="deal-more" menuId="deal-menu" lit={lit} busy={busy} items={(done) => <>
-    {store.services.ai.checkAll && <CheckAgain deal={d} signedOut={signedOut} done={done} />}
-    {store.services.ai.memo && <MenuItem id="deal-memo" off={making} why={making ? null : signedOut}
+    {s.can.checkAll && <CheckAgain deal={d} signedOut={signedOut} done={done} />}
+    {s.can.memo && <MenuItem id="deal-memo" off={making} why={making ? null : signedOut}
       onClick={() => act(done, () => void runMemo(store, d.id))}>{busy ? `${busy}…` : 'Deal Memo…'}</MenuItem>}
     <MenuItem id="deal-rename" why={locked} onClick={() => act(done, rename)}>Rename</MenuItem>
     <div class="msep" />
     <MenuItem id="deal-delete" className="ddel" why={ro ?? deleteWaits(s, d.id)}
-      onClick={() => act(done, () => openDelete(store, d.id))}>Delete Deal…</MenuItem>
+      onClick={() => act(done, () => void openDeleteDeal(store, d.id))}>Delete Deal…</MenuItem>
   </>} />;
 }
 
@@ -158,8 +166,7 @@ function CheckAgain({ deal: d, signedOut, done }: { deal: Deal; signedOut: strin
   const s = useAppState();
   const ro = useContext(ReadOnlyContext);
   const check = s.checks[d.id];
-  const found = Object.values(s.findings).some((f) => f.dealId === d.id);
-  const first = d.stage === 'indexing' && !found ? 'Indexing' : null;
+  const first = dealFirstPassStatus(s, d).waiting ? 'Indexing' : null;
   const run = () => act(done, () => void store.checkEverything(d.id, false, false));
   return <MenuItem id="deal-check" off={!!check?.busy} why={ro ?? signedOut ?? first} onClick={run}>
     {check?.busy ? 'Checking…' : 'Check Again'}
@@ -242,8 +249,8 @@ function DealName({ deal: d, renaming, open, done }: { deal: Deal; renaming: boo
  */
 export function Stalled({ deal: d }: { deal: Deal }) {
   const store = useStore(); const s = useAppState();
-  if (d.stage !== 'indexing' || !s.ui.indexStalled.includes(d.id)) return null;
-  const fs = liveFolders(s, d); const got = fs.reduce((a, f) => a + f.indexed, 0); const of = fs.reduce((a, f) => a + f.files, 0);
+  if (!indexingStopped(s, d)) return null;
+  const { indexed: got, files: of } = indexingTotals(s, d);
   // not running and not finished: the app tries again by itself. Which line is shown depends on why it is waiting
   const wait = s.ui.indexWaiting[d.id];
   // the line says where it stopped and why; what happens next is on the button's hover (no explainer text on screen)
@@ -269,16 +276,14 @@ export function DealPage({ dealId }: { dealId: string }) {
   const d = s.deals[dealId];
   useEffect(() => { void store.loadDeal(dealId); }, [dealId]);
   if (!d) return null;
-  const none = !Object.values(s.findings).some((f) => f.dealId === d.id);
-  const indexing = d.stage === 'indexing'; const stopped = indexing && s.ui.indexStalled.includes(d.id);
+  const { noRoom, waiting, showIndexing } = dealFirstPassStatus(s, d);
   return (
     <div class="home top wide">
       <PageTop deal={d} route="findings" placeholder={askAbout(d.name)} />
       <Stalled deal={d} />
-      {none && !d.folders.length ? <NoRoom deal={d} />
-        : none && stopped ? null
-        : none && indexing ? <p class="emptyline" title={INDEXING_TIP}>{INDEXING_LINE}</p>
-        : <FindingsSection deal={d} />}
+      {noRoom ? <NoRoom deal={d} />
+        : showIndexing ? <p class="emptyline" title={INDEXING_TIP}>{INDEXING_LINE}</p>
+        : !waiting && <FindingsSection deal={d} />}
     </div>
   );
 }

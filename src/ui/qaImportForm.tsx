@@ -9,17 +9,17 @@ import { checkedOf, chosenOf } from './fieldValue';
 import { showTip, hideTip } from './tip';
 import { num, plural } from './counts';
 import { titleStyle } from './titleStyle';
-import { IMPORT_FIELDS, parseDate, type Mapping, type ImportField, type Prepared } from '../domain/importExport';
+import { HeadingRowField } from './headingRowField';
+import { IMPORT_FIELDS, type Mapping, type ImportField, type Prepared } from '../domain/importExport';
+import type { ImportMode, QaPreviewRow } from '../app/qaImport';
 import { logChoice } from '../app/qaLog';
 import { SERVICE, AI_LABEL } from '../control';
 import type { ImportTable, ImportChange } from '../app/transfer';
 import type { Store } from '../app/store';
-import type { Busy, ImportMode, ImportPlan, QaImportActions, QaImportState, Rereading } from './qaImport';
+import type { Busy, ImportPlan, QaImportActions, QaImportState } from './qaImport';
 
 /** The changes the "Will overwrite" table lists; the rest are counted under it */
 const CHANGES_LISTED = 200;
-/** The rows the preview shows */
-const PREVIEW_ROWS = 5;
 /** The unread dates and values the footer's tooltip names; the rest are counted */
 const UNREAD_NAMED = 8;
 const MERGE_TIP = 'Matched by wording, then by number';
@@ -50,9 +50,9 @@ export function QaImportForm({ store, dealId, qa, plan, actions }: {
       {logChoice(store, dealId, qa.path) === 'new' && (
         <MakeLogRow makeLog={qa.makeLog} importing={importing} onPick={onMakeLog} />
       )}
-      <HeadingsRow table={table} busy={busy} wanted={qa.wanted} actions={actions} />
+      <HeadingsRow importKey={qa.key} table={table} busy={busy} wantedSheet={qa.wantedSheet} actions={actions} />
       <ColumnsRow table={table} mapping={mapping} importing={importing} onMap={onMap} />
-      <PreviewRow table={table} mapping={mapping} prepared={plan.prepared} />
+      <PreviewRow mapping={mapping} rows={plan.previewRows} />
       <ModeRow mode={mode} importing={importing} onPick={qa.setMode} />
       {mapping.response != null && <AnsweredRow answered={qa.answered} importing={importing} onPick={qa.setAnswered} />}
       {mode === 'merge' && !!plan.preview?.changes.length && <ChangesRow changes={plan.preview.changes} />}
@@ -96,30 +96,22 @@ function MakeLogRow({ makeLog, importing, onPick }: {
 }
 
 /** Where the table is: its sheet and heading row, which the person can change or ask the model to find */
-function HeadingsRow({ table, busy, wanted, actions }: {
-  table: ImportTable; busy: Busy; wanted: Rereading; actions: QaImportActions;
+function HeadingsRow({ importKey, table, busy, wantedSheet, actions }: {
+  importKey: string; table: ImportTable; busy: Busy; wantedSheet?: string; actions: QaImportActions;
 }) {
   const importing = busy === 'importing';
-  // while a reread is pending its fields show the choice being read, not the table read before it, and a choice is
-  // compared with that one, so going back to the row already read replaces the pending read (#63)
-  const shown = busy === 'reading' ? { ...table, ...wanted } : table;
-  const pickRow = (e: Event) => {
-    const row = +(e.currentTarget as HTMLInputElement).value;
-    const valid = Number.isInteger(row) && row >= 1 && row <= table.lastRow;
-    if (valid && row !== shown.headerRow) void actions.reread({ sheet: shown.sheet, headerRow: row });
-  };
+  const sheet = (busy === 'reading' && wantedSheet) || table.sheet;
   return (
     <div class="srow"><div class="k">Headings</div><div class="imwhere">
       {table.sheets.length > 1 && <label><span>Sheet</span>
-        <select class="field" id="im-sheet" aria-label="Sheet" value={shown.sheet} disabled={importing}
+        <select class="field" id="im-sheet" aria-label="Sheet" value={sheet} disabled={importing}
           onChange={(e) => void actions.reread({ sheet: chosenOf(e) })}>
           {table.sheets.map((sheet) => <option key={sheet} value={sheet}>{sheet}</option>)}
         </select>
       </label>}
-      <label><span>Row</span>
-        <input class="field" id="im-header" type="number" aria-label="Heading row" min={1} max={table.lastRow} step={1}
-          value={shown.headerRow} disabled={importing} onInput={pickRow} />
-      </label>
+      <HeadingRowField id="im-header" importKey={importKey} table={table} sheet={sheet} disabled={importing}
+        onEdit={actions.cancelProposal}
+        read={(headerRow, accept) => actions.reread({ sheet, headerRow }, accept)} />
       {actions.canAsk && (
         <button type="button" class="linkb" id="im-ask" disabled={!!busy} onClick={() => void actions.askAi(table)}>
           {busy === 'asking' ? `Asking ${SERVICE}` : `Ask ${SERVICE} to Find the Table`}
@@ -157,20 +149,18 @@ function ColumnsRow({ table, mapping, importing, onMap }: {
 }
 
 /** The first rows with a question, in the mapped columns */
-function PreviewRow({ table, mapping, prepared }: { table: ImportTable; mapping: Mapping; prepared: Prepared | null }) {
+function PreviewRow({ mapping, rows }: { mapping: Mapping; rows: QaPreviewRow[] }) {
   // the number is left out of the preview: the question and response need the width
   const shown = IMPORT_FIELDS.filter(([field]) => field !== 'n' && mapping[field] != null);
-  const questionColumn = mapping.text;
-  const rows = questionColumn == null
-    ? []
-    : table.rows.filter((row) => String(row[questionColumn] ?? '').trim()).slice(0, PREVIEW_ROWS);
-  const cell = previewCell(table, mapping, prepared);
   return (
     <div class="srow top"><div class="k">Preview</div><div class="imprev"><table>
       <thead><tr>{shown.map(([field, label]) => <th key={field} data-k={field}>{titleStyle(label)}</th>)}</tr></thead>
       <tbody>{rows.length
         ? rows.map((row, i) => <tr key={i}>
-          {shown.map(([field]) => <td key={field} title={cell(field, row)}>{cell(field, row)}</td>)}
+          {shown.map(([field]) => {
+            const value = previewCell(field, row, mapping);
+            return <td key={field} title={value}>{value}</td>;
+          })}
         </tr>)
         : <tr><td colSpan={shown.length || 1} class="emptyline" style="margin:0;padding:10px">
           No rows with a question
@@ -184,16 +174,12 @@ function PreviewRow({ table, mapping, prepared }: { table: ImportTable; mapping:
  * A preview cell's words. A date shows as the import will read it, so one valid both ways shows the reading its
  * context chose; one that can't be read shows a dash.
  */
-function previewCell(table: ImportTable, mapping: Mapping, prepared: Prepared | null) {
-  // each row's line in the file, which the prepared rows are known by
-  const lineOf = new Map(table.rows.map((row, at) => [row, table.lines?.[at] ?? at + 2]));
-  return (field: ImportField, row: string[]) => {
-    const value = String(row[mapping[field]!] ?? '');
-    if (field !== 'received' && field !== 'responded') return value;
-    const iso = prepared?.rows.find((x) => x.line === lineOf.get(row))?.[field] ?? parseDate(value);
-    if (iso) return fmtDate(iso);
-    return value.trim() ? '—' : '';
-  };
+function previewCell(field: ImportField, row: QaPreviewRow, mapping: Mapping) {
+  const value = String(row.cells[mapping[field]!] ?? '');
+  if (field !== 'received' && field !== 'responded') return value;
+  const iso = row.dates[field];
+  if (iso) return fmtDate(iso);
+  return value.trim() ? '—' : '';
 }
 
 /** What happens to questions the deal already has: merged, or added again as new */

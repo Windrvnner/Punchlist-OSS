@@ -13,7 +13,8 @@ import { EditQuestionField, RenumberQuestion, SetResponse, DeleteQuestion, Resto
 import { ResolveConflict, ReopenConflict } from '../../src/app/commands/conflicts';
 import { registry, Undo } from '../../src/app/commands/undo';
 import { dealQuestions } from '../../src/app/state';
-import { deletedOf } from '../../src/ui/deleted';
+import '../ui/keptTextSession';
+import { visibleDeletedNotes as deletedOf } from '../../src/app/deletedView';
 
 class Mem implements Folder {
   files = new Map<string, string>();

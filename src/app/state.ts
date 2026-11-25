@@ -1,3 +1,4 @@
+import { distinguishingWords, type TwinFocus } from './dealLabel';
 import type { Deal, Question, Finding, Tombstone, Member, Operation, DealId, QuestionId, FindingId, AuditEntry, Source, Folder, RecordKind, ClashKind } from '../domain/model';
 import type { Item, ListRecord } from '../domain/checklist';
 import type { CheckState, ModelThread, Research } from '../ports';
@@ -8,6 +9,8 @@ import type { ImportField } from '../domain/importExport';
 // the one A to Z order every list a person picks from uses
 import { byName, NO_WORKSTREAM, workstreamChoices } from '../domain/order';
 import { addresser } from '../domain/suggest';
+import { capabilities, type Capabilities } from './capabilities';
+import { askBlock } from './asking';
 
 export type BootStage = 'session' | 'deals' | 'journal' | 'ready';
 
@@ -102,6 +105,7 @@ export interface UiState {
   /** the import or export dialog that is open, if any (or the confirmation of Undo last import); its form state lives in the dialog */
   dialog: null | { kind: 'importQa' | 'exportQa' | 'exportFindings' | 'deleted' | 'importIssues' | 'placeKept' | 'closeSettled' | 'addUnresolved' | 'undoImport'; dealId: DealId } | { kind: 'resolveQa'; dealId: DealId; questionId: QuestionId };
   selectedQuestion: QuestionId | null;
+  searchFocus: string | null;
   /** the checklist item open beside the list on the Checklist page */
   selectedChecklist: string | null;
   /** `changed` and `versions`: only the questions changed in the Q&A log, or in two versions (shown while there are any) */
@@ -132,6 +136,7 @@ export interface UiState {
 }
 
 export interface State {
+  can: Capabilities;
   boot: { stage: BootStage; error?: string };
   /** `down`: the backend out of reach (the bar at the top). `model`: the model service's last answer was that it could not be reached (the connection card's Intelligence row). */
   net: { down: boolean; model?: boolean };
@@ -181,7 +186,8 @@ export interface State {
   ui: UiState;
 }
 
-export const initialState = (): State => ({
+export const initialState = (can = capabilities()): State => ({
+  can,
   boot: { stage: 'session' },
   net: { down: false },
   user: null,
@@ -227,6 +233,7 @@ export const initialState = (): State => ({
     palette: false,
     dialog: null,
     selectedQuestion: null,
+    searchFocus: null,
     selectedChecklist: null,
     qaFilter: { status: 'open', workstream: '', text: '' },
     toasts: [],
@@ -429,14 +436,16 @@ export function unresolvedPoints(s: Pick<State, 'questions' | 'findings' | 'tomb
   const askedItems = new Set(qs.map((q) => q.linkedItem?.id).filter(Boolean)); const askedFindings = new Set(qs.map((q) => q.linkedFinding).filter(Boolean));
   const points: Unresolved[] = [];
   for (const f of dealFindings(s as State, dealId)) {
-    // a finding raised on an item since turned off is not asked about, as its pane offers no Ask
-    if (f.status !== 'open' || s.conflicts[f.id] || askedFindings.has(f.id) || (f.itemId && (askedItems.has(f.itemId) || s.items[f.itemId]?.off))) continue;
+    const item = f.itemId ? s.items[f.itemId] : undefined;
+    const asked = askedFindings.has(f.id) || (f.itemId && askedItems.has(f.itemId));
+    if (askBlock(f.status, !!item?.off) || s.conflicts[f.id] || asked) continue;
     // a finding says no more than its title of what would settle it
     const need = '';
     points.push({ key: 'f:' + f.id, kind: 'finding', what: f.title, need, findingId: f.id, workstream: f.workstream });
   }
   if (Array.isArray(rows)) for (const r of rows) {
-    if (askedItems.has(r.id) || s.items[r.id]?.off || itemStanding(s, dealId, r).kind !== 'gap') continue;      // a turned-off item's last result stays in the rows
+    if (askedItems.has(r.id) || askBlock(undefined, !!s.items[r.id]?.off)) continue;
+    if (itemStanding(s, dealId, r).kind !== 'gap') continue;
     points.push({ key: 'i:' + r.id, kind: 'gap', what: r.text, need: r.need ?? '', itemId: r.id, workstream: '' });
   }
   const pool = qs.filter((q) => q.status === 'open' && !q.response.trim() && !q.linkedItem && !q.linkedFinding && !s.conflicts[q.id] && q.text.trim());
@@ -513,21 +522,36 @@ export function dealTwinLabels(deals: Iterable<Deal>) {
     named.set(key, matches);
   }
   const labels = new Map<string, ReturnType<typeof dealTwins>>();
-  return (deal: Deal, short = false) => {
+  function labelFor(deal: Deal, short: 'focus'): TwinFocus | undefined;
+  function labelFor(deal: Deal, short?: boolean): string;
+  function labelFor(deal: Deal, short: boolean | 'focus' = false): string | TwinFocus | undefined {
     const key = dealNameKey(deal.name);
     const matches = named.get(key);
-    if (!matches || matches.length < 2) return '';
+    if (!matches || matches.length < 2) return short === 'focus' ? undefined : '';
     let group = labels.get(key);
     if (!group) {
       group = dealTwins(matches);
       labels.set(key, group);
     }
     const label = group.get(deal.id);
-    return (short ? label?.short : label?.full) ?? '';
-  };
+    if (!label) return short === 'focus' ? undefined : '';
+    if (short === 'focus') return distinguishingWords(label.short, [...group.values()].map((twin) => twin.short));
+    return short ? label.short : label.full;
+  }
+  return labelFor;
 }
 
 export function dealTwin(s: Pick<State, 'deals'>, d: Deal, short = false): string {
   const k = dealNameKey(d.name); const group = [d, ...Object.values(s.deals).filter((x) => x.id !== d.id && dealNameKey(x.name) === k)];
   const t = dealTwins(group).get(d.id); return (short ? t?.short : t?.full) ?? '';
+}
+
+/**
+ * A deal's name as a confirmation or notice says it: with the sidebar's short line in brackets when another deal shares
+ * the name, as "Project Kestrel (Wingtip)"; the name alone otherwise (#27). A notice splits its text at " · " into
+ * title and body, so a line holding both counterparty and day joins them with a comma instead.
+ */
+export function dealLabel(s: Pick<State, 'deals'>, d: Deal): string {
+  const twin = dealTwin(s, d, true).replaceAll(' · ', ', ');
+  return twin ? `${d.name} (${twin})` : d.name;
 }

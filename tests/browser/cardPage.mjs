@@ -76,3 +76,12 @@ export const ask = async (page, words, nth) => {
   await page.keyboard.press('Enter');
   await page.waitForSelector(`.msgs .ai:not(.pending):not(.failed) >> nth=${nth}`, { timeout: 15000 });
 };
+
+// Show a completed check naming a different finding for the same item.
+export function recheckFinding(page, dealId, itemId, findingId) {
+  return page.evaluate(([dealId, itemId, findingId]) => {
+    const state = store.get();
+    const rows = state.checklists[dealId].map((row) => row.id === itemId ? { ...row, findingId } : row);
+    store.set({ ...state, checklists: { ...state.checklists, [dealId]: rows } });
+  }, [dealId, itemId, findingId]);
+}

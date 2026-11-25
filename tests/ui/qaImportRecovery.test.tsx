@@ -2,9 +2,10 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
+import './keptTextSession';
 import { StoreContext } from '../../src/ui/hooks';
 import { ImportDialog } from '../../src/ui/qaImport';
-import { keptImport, keepImport, importKey, keptImportsReady } from '../../src/ui/keptImports';
+import { keptImport, keepImport, importKey, keptImportsReady } from '../../src/app/keptImports';
 import { readImportBytes } from '../../src/app/transfer';
 import {
   copyRecoveryDisk, holdRecoveryWrite, operationWrite, recoveryApp, recoveryDeal, type RecoveryApp,

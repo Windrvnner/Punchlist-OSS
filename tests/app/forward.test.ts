@@ -12,7 +12,8 @@ import { RestoreQuestionSnapshot } from '../../src/app/commands/drafts';
 import { registry } from '../../src/app/commands/undo';
 import { dealQuestions, dealFindings } from '../../src/app/state';
 import { Question, Finding, Deal, Tombstone, CURRENT_SCHEMA } from '../../src/domain/model';
-import { deletedOf } from '../../src/ui/deleted';
+import '../ui/keptTextSession';
+import { visibleDeletedNotes as deletedOf } from '../../src/app/deletedView';
 
 const COMMANDS = [CreateDeal, CreateQuestion, EditQuestionField, SetQuestionStatus, SetResponse, DeleteQuestion, RestoreQuestion, CreateFinding, EditFinding, RestoreQuestionSnapshot];
 for (const c of COMMANDS) registry.set(c.name, c);

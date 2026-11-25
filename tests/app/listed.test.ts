@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { initialState, listedFindings, findingListed, workstreamHead, type State } from '../../src/app/state';
+import '../ui/keptTextSession';
 import { markText } from '../../src/ui/findings';
 import { findingRowsFor } from '../../src/app/transfer';
 import type { Finding } from '../../src/domain/model';

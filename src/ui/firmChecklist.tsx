@@ -2,17 +2,16 @@
  * The firm's checklist: its lists, and bringing one in from a spreadsheet. Mapped and previewed like
  * the Q&A import, then reviewed: suggested rewordings and duplicates, each used only if a person checks it.
  * The import's steps are in firmChecklistSteps.tsx and firmChecklistRead.tsx, what it
- * remembers and does in firmChecklistImport.ts, how it is kept on this PC in firmChecklistKept.ts, and its review's
- * sums in firmChecklistReview.ts.
+ * wires up in firmChecklistImport.ts, how it is kept in firmChecklistKept.ts, and its review in app/checklistImport.ts.
  */
 import { useEffect, useState } from 'preact/hooks';
-import type { State } from '../app/state';
 import { versionsWord } from '../app/state';
 import { useAppState, useStore, fmtDateTime } from './hooks';
 import { Modal } from './dialogs';
 import { ConflictView } from './conflict';
-import { LAYERS, LAYER_NAMES, firmOf, listId, type FirmLayerList, type Layer } from '../domain/checklist';
-import { listTarget, plural, type ListTarget } from './firmChecklistReview';
+import { LAYER_NAMES, firmOf, type Layer } from '../domain/checklist';
+import { checklistShelf, listTarget, type ListTarget } from '../app/checklistImport';
+import { plural } from './counts';
 import { useLeaving, useListReview, useListSource, useWork } from './firmChecklistImport';
 import type { ListReview, ListSource } from './firmChecklistImport';
 import { useKeepImport, useKeeper, dropKept, type KeptNow } from './firmChecklistKept';
@@ -34,28 +33,26 @@ export function FirmChecklistDialog() {
   if (at?.step === 'import') {
     return <KeptChecklistImport layer={at.layer} name={at.name} dropped={dropped} taken={() => setDropped(null)} />;
   }
-  const firm = firmOf(state.firmList);
+  const { sections, totals } = checklistShelf(state);
   const clash = choosing ? state.conflicts[choosing] : undefined;
   const close = () => store.ui({ firmChecklist: null });
   const open = (layer?: Layer, name?: string) => store.ui({ firmChecklist: { step: 'import', layer, name } });
-  const lists = firm?.lists ?? [];
-  const total = lists.reduce((sum, list) => sum + list.items.length, 0);
   const importFile = (file: File) => {
     setDropped(file);
     open();
   };
-  const shelf: Shelf = { state, lists, choose: setChoosing, replace: open };
+  const actions: ShelfActions = { choose: setChoosing, replace: open };
   return (
     <Modal onClose={close} label="Firm’s checklist" blur
-      className={`sdlg imdlg fldlg${lists.length ? '' : ' empty'}`}>
+      className={`sdlg imdlg fldlg${totals.lists ? '' : ' empty'}`}>
       <Head title="Firm’s Checklist" onClose={close} />
       {clash ? <ConflictView conflict={clash} />
-        : lists.length ? <>{LAYERS.map((layer) => layerSection(shelf, layer))}</> : noListsDrop(importFile)}
+        : totals.lists ? <>{sections.map((section) => layerSection(actions, section))}</> : noListsDrop(importFile)}
       {/* keyed, so Back is never the Import button reused, with its accent fill fading out */}
       {clash ? <div class="xfoot" key="back"><span class="grow" />
         <button class="btn sm" type="button" id="fl-back" onClick={() => setChoosing(null)}>Back</button>
       </div> : <div class="xfoot" key="lists">
-        {lists.length > 0 && <span id="fl-count">{plural(lists.length, 'list')} · {plural(total, 'item')}</span>}
+        {totals.lists > 0 && <span id="fl-count">{plural(totals.lists, 'list')} · {plural(totals.items, 'item')}</span>}
         <span class="grow" />
         <button class="btn sm pri" type="button" id="fl-import" title="Importing a list again replaces it"
           onClick={() => open()}>Import a List…</button>
@@ -74,42 +71,40 @@ function noListsDrop(importFile: (file: File) => void) {
 }
 
 /** The firm's lists as the dialog shows them, and what their buttons do */
-interface Shelf {
-  state: State;
-  lists: FirmLayerList[];
+interface ShelfActions {
   /** opens the choice between a list's two versions, by the list's record */
   choose: (id: string) => void;
   replace: (layer: Layer, name: string) => void;
 }
 
-function layerSection(shelf: Shelf, layer: Layer) {
-  const mine = shelf.lists.filter((list) => list.layer === layer);
+type ShelfSection = ReturnType<typeof checklistShelf>['sections'][number];
+
+function layerSection(actions: ShelfActions, { layer, rows, count }: ShelfSection) {
   const noneTip = layer === 'broad'
     ? 'Deals are checked against their own lists only'
     : `A deal with a ${LAYER_NAMES[layer].one.toLowerCase()} is checked without one`;
   return (
     <div class="fl-sec" key={layer} data-layer={layer}>
       <div class="fl-h"><b>{LAYER_NAMES[layer].many}</b>
-        {layer !== 'broad' && mine.length > 0 && <span class="c">{mine.length}</span>}
+        {layer !== 'broad' && count > 0 && <span class="c">{count}</span>}
       </div>
-      {mine.length ? mine.map((list) => firmListRow(shelf, list)) : <div class="fl-none" title={noneTip}>None yet</div>}
+      {count ? rows.map((row) => firmListRow(actions, row)) : <div class="fl-none" title={noneTip}>None yet</div>}
     </div>
   );
 }
 
 /** One list: its items, who brought it in and when, or that it is in two versions and waits for a choice */
-function firmListRow(shelf: Shelf, list: FirmLayerList & { layer: Layer }) {
-  const clash = shelf.state.conflicts[listId(list.layer, list.name)];
+function firmListRow(actions: ShelfActions, { list, items, clash, versions }: ShelfSection['rows'][number]) {
   return (
     <div class="fl-row" key={list.name} data-list={list.name}>
       <span class="nm">{list.layer === 'broad' ? 'General' : list.name}</span>
       {clash ? <>
-        <span class="meta"><span class="cf">{versionsWord(clash.versions.length)}</span></span>
+        <span class="meta"><span class="cf">{versionsWord(versions)}</span></span>
         <button type="button" class="linkb" data-choose={list.name}
-          onClick={() => shelf.choose(clash.id)}>Choose…</button>
+          onClick={() => actions.choose(clash.id)}>Choose…</button>
       </> : <>
-        <span class="meta">{plural(list.items.length, 'item')} · {list.by}, {fmtDateTime(list.at)}</span>
-        <button type="button" class="linkb" onClick={() => shelf.replace(list.layer, list.name)}>Replace…</button>
+        <span class="meta">{plural(items, 'item')} · {list.by}, {fmtDateTime(list.at)}</span>
+        <button type="button" class="linkb" onClick={() => actions.replace(list.layer, list.name)}>Replace…</button>
       </>}
     </div>
   );
@@ -138,7 +133,7 @@ function ImportChecklistDialog(props: ImportProps & { fresh: boolean }) {
   const keeper = useKeeper(props.layer, props.name, props.fresh);
   const kept = keeper.left?.choices;
   const work = useWork();
-  const source = useListSource(store, work, keeper.left);
+  const source = useListSource(store, work, keeper);
   useDroppedFile(source, props.dropped, props.taken);
   const [layer, setLayer] = useState<Layer>(kept?.layer ?? props.layer ?? 'broad');
   const [name, setName] = useState(kept?.name ?? props.name ?? '');
@@ -155,7 +150,7 @@ function ImportChecklistDialog(props: ImportProps & { fresh: boolean }) {
   const fileName = table?.name ?? text?.name ?? '';
   const view: ImportView = {
     title: review ? `Import a Checklist · ${layer === 'broad' ? 'General' : name}` : 'Import a Checklist',
-    ai: store.services.ai, firm, work, source, listReview, target, exit, setLayer, setName,
+    can: state.can, work, source, listReview, target, exit, setLayer, setName,
     change: () => {
       work.drop();
       source.forget();

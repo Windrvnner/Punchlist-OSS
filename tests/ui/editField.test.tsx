@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
+import { restartKeptText } from './keptTextSession';
 import { EditField, ReadOnlyContext } from '../../src/ui/editField';
 import { CONNECTED } from '../../src/app/connection';
 import { CHANGED_ELSEWHERE } from '../../src/app/changedElsewhere';
@@ -235,7 +236,8 @@ describe('EditField', () => {
     window.dispatchEvent(new Event('pagehide'));                         // reload, well inside the debounce
     expect(sent).toEqual(['Provide the executed EPC contract']);        // sent at once rather than waiting out the debounce
     // the next start: a fresh copy of the module, the record still holding what it had
-    vi.resetModules(); render(null, host);
+    render(null, host);
+    await restartKeptText();
     const { EditField: Fresh } = await import('../../src/ui/editField');
     await act(() => { render(<Fresh keep="q1:text" label="Question" multiline value="Provide the" rev={1} commit={commit} />, host); });
     expect(host.querySelector('textarea')!.value).toBe('Provide the executed EPC contract');
@@ -245,7 +247,8 @@ describe('EditField', () => {
   });
 
   it('text that could not be saved is back after a crash, with no page-hide, and after the start that follows too', async () => {
-    localStorage.clear(); vi.resetModules();
+    localStorage.clear();
+    await restartKeptText();
     const { EditField: First } = await import('../../src/ui/editField');
     const host = document.createElement('div'); document.body.appendChild(host);
     const refused = () => Promise.resolve({ ok: false, error: { kind: 'rejected', message: 'The folder could not be written to' } });
@@ -256,7 +259,7 @@ describe('EditField', () => {
     await act(() => { render(null, host); });                               // the person moves on: the text is kept as not saved
     await new Promise((r) => setTimeout(r, 700));                           // then the app dies: no page-hide
     for (let start = 0; start < 2; start++) {
-      vi.resetModules();
+      await restartKeptText();
       const { EditField: Fresh } = await import('../../src/ui/editField');
       await act(() => { render(<Fresh keep="q2:text" label="Question" multiline value="" rev={1} commit={refused} />, host); });
       expect(host.querySelector('textarea')!.value).toBe('Confirm the step-in period');
@@ -267,7 +270,8 @@ describe('EditField', () => {
   });
 
   it('text whose save was refused is kept at once, while the field still shows Not saved, and follows further typing', async () => {
-    localStorage.clear(); vi.resetModules();
+    localStorage.clear();
+    await restartKeptText();
     const { EditField: First } = await import('../../src/ui/editField');
     const host = document.createElement('div'); document.body.appendChild(host);
     const refused = () => Promise.resolve({ ok: false, error: { kind: 'rejected', message: 'The folder could not be written to' } });
@@ -280,7 +284,7 @@ describe('EditField', () => {
     await type('Confirm the step-in period');                               // typed on while the save is refused
     await new Promise((r) => setTimeout(r, 700));                           // then the app dies with the field on screen: no unmount, no page-hide
     const crashedHost = document.createElement('div'); document.body.appendChild(crashedHost);
-    vi.resetModules();
+    await restartKeptText();
     const { EditField: Fresh } = await import('../../src/ui/editField');
     await act(() => { render(<Fresh keep="q3:text" label="Question" multiline value="" rev={1} commit={refused} />, crashedHost); });
     expect(crashedHost.querySelector('textarea')!.value).toBe('Confirm the step-in period');
@@ -290,7 +294,8 @@ describe('EditField', () => {
   });
 
   it('signed out while typing: the field stays open until it is left, what is typed is kept at once (a crash keeps it), and it is sent after sign-in; a field not in use stays shut', async () => {
-    localStorage.clear(); vi.resetModules();
+    localStorage.clear();
+    await restartKeptText();
     const { EditField: First, ReadOnlyContext: RO, SignedOutContext: Out } = await import('../../src/ui/editField');
     const OUT = 'Sign in to Intelligence to make changes';
     const host = document.createElement('div'); document.body.appendChild(host); const sent: string[] = []; const rec = { value: 'As saved', rev: 1 };
@@ -309,7 +314,7 @@ describe('EditField', () => {
     expect(sent).toEqual([]);
     // the app dies with the field on screen: what was typed comes back on the next start
     await new Promise((r) => setTimeout(r, 700));
-    vi.resetModules();
+    await restartKeptText();
     const { EditField: Fresh } = await import('../../src/ui/editField');
     const crashed = document.createElement('div'); document.body.appendChild(crashed);
     await act(() => { render(<Fresh keep="q4:text" label="Response" multiline value="As saved" rev={1} commit={commit} />, crashed); });
@@ -324,7 +329,8 @@ describe('EditField', () => {
   });
 
   it('text typed just before the sign-in lapses, not yet sent, is kept on this PC at once: a crash keeps it', async () => {
-    localStorage.clear(); vi.resetModules();
+    localStorage.clear();
+    await restartKeptText();
     const { EditField: First, ReadOnlyContext: RO, SignedOutContext: Out } = await import('../../src/ui/editField');
     const host = document.createElement('div'); document.body.appendChild(host); const sent: string[] = [];
     const commit = async (v: string) => { sent.push(v); return { ok: true }; };
@@ -335,7 +341,7 @@ describe('EditField', () => {
     await new Promise((r) => setTimeout(r, 100)); await draw('Sign in to Intelligence to make changes');   // lapses inside the wait before a save
     await new Promise((r) => setTimeout(r, 1200));                                                         // then the app dies: no unmount, no page-hide
     expect(sent).toEqual([]);
-    vi.resetModules();
+    await restartKeptText();
     const { EditField: Fresh } = await import('../../src/ui/editField');
     const crashed = document.createElement('div'); document.body.appendChild(crashed);
     await act(() => { render(<Fresh keep="q6:text" label="Response" multiline value="As saved" rev={1} commit={commit} />, crashed); });
@@ -352,13 +358,46 @@ describe('EditField', () => {
       if (rec.value !== over && rec.value !== wrote) return res({ ok: false, error: { kind: 'conflict', message: CHANGED_ELSEWHERE } });
       if (rec.value !== v) { rec.value = v; rec.rev++; wrote = v; } res({ ok: true });
     } }));
-    const draw = () => act(() => { render(<EditField label="Counterparty" keep={keep} multiline={multiline} value={rec.value} rev={rec.rev} commit={commit} debounceMs={20} />, host); });
+    const draw = (locked: string | null = null) => act(() => {
+      render(<ReadOnlyContext.Provider value={locked}>
+        <EditField label="Counterparty" keep={keep} multiline={multiline} value={rec.value}
+          rev={rec.rev} commit={commit} debounceMs={20} />
+      </ReadOnlyContext.Provider>, host);
+    });
     const el = () => host.querySelector(multiline ? 'textarea' : 'input') as HTMLInputElement;
     const typeBlur = (v: string) => act(() => { el().dispatchEvent(new FocusEvent('focus')); el().value = v; el().dispatchEvent(new Event('input', { bubbles: true })); el().dispatchEvent(new FocusEvent('blur')); });
     const go = async (i: number, away?: boolean) => { await act(async () => { sent[i].go(away); }); await draw(); };
     const elsewhere = async (v: string) => { rec.value = v; rec.rev++; await draw(); };
     return { host, rec, sent, draw, el, unmount: () => act(() => { render(null, host); }), typeBlur, go, elsewhere, button: (t: string) => [...host.querySelectorAll('button')].find((b) => b.textContent === t)! };
   }
+
+  it.each([
+    ['The deal has two versions. Choose one first.', 'deal:unlock-after-conflict'],
+    ['Sign in to Intelligence to make changes', 'deal:unlock-after-sign-in'],
+  ])('waits for Retry on a reopened field after clearing "%s"', async (reason, keep) => {
+    const original = 'The borrower under the signed agreement';
+    const kept = 'The guarantor named in the accession deed';
+    const f = queued(original, keep);
+    await f.draw();
+    await f.typeBlur(kept);
+    await f.go(0, true);
+    await f.unmount();
+    await f.draw();
+    expect(f.button('Not saved · Retry')).toBeDefined();
+
+    await f.draw(reason);
+    expect(f.el().readOnly).toBe(true);
+    await f.draw();
+    expect(f.sent.map(({ v }) => v)).toEqual([kept]);
+    expect(f.rec.value).toBe(original);
+    expect(f.el().value).toBe(kept);
+
+    await act(async () => { f.button('Not saved · Retry').click(); });
+    expect(f.sent[1]).toMatchObject({ v: kept, over: original });
+    await f.go(1);
+    expect(f.rec.value).toBe(kept);
+    await f.unmount();
+  });
 
   it('several changes read at once while the field\'s save is out, value unchanged, then the save fails: "Changed elsewhere", not Retry', async () => {
     const f = queued('abc'); await f.draw();
@@ -500,7 +539,8 @@ describe('EditField', () => {
     const unreachable = () => Promise.resolve({ ok: false, error: { kind: 'unreachable', message: 'The Punchlist folder is out of reach' } });
     /** type into a field whose save fails, then move on: the text is kept as not saved */
     async function typedAndLeft(keep: string, typed: string, record = 'A: the original text', store?: { get(): any; subscribe(fn: () => void): () => void }) {
-      localStorage.clear(); vi.resetModules();
+      localStorage.clear();
+      await restartKeptText();
       const { EditField: First } = await import('../../src/ui/editField'); const { StoreContext } = await import('../../src/ui/hooks');
       const host = document.createElement('div'); document.body.appendChild(host);
       // with a store, the field reads itself from it as the app's fields do, so its kept text is watched once it goes
@@ -533,7 +573,8 @@ describe('EditField', () => {
     it('after a restart too: the record the text was typed over is kept with it', async () => {
       const { host } = await typedAndLeft('qF:text', 'F mine');
       await new Promise((r) => setTimeout(r, 500));                                             // written to local storage
-      vi.resetModules(); const { EditField: Fresh } = await import('../../src/ui/editField');
+      await restartKeptText();
+      const { EditField: Fresh } = await import('../../src/ui/editField');
       const sent: string[] = []; const commit = async (v: string) => { sent.push(v); return { ok: true }; };
       await act(() => { render(<Fresh keep="qF:text" label="Question" multiline value="F theirs" rev={5} commit={commit} />, host); });
       expect(host.querySelector('textarea')!.value).toBe('F mine'); expect(host.textContent).toMatch(/Changed elsewhere/);
@@ -560,7 +601,8 @@ describe('EditField', () => {
 
     it('a change elsewhere that lands while the field’s own save is out, then that save fails: "Changed elsewhere", and neither Retry nor the reconnect resends', async () => {
       for (const kind of ['unreachable', 'conflict']) {
-        localStorage.clear(); vi.resetModules();
+        localStorage.clear();
+        await restartKeptText();
         const { EditField: First } = await import('../../src/ui/editField');
         const host = document.createElement('div'); document.body.appendChild(host);
         const sent: string[] = []; let release: ((v: { ok: boolean; error?: { kind: string; message: string } }) => void) | null = null;
@@ -580,7 +622,8 @@ describe('EditField', () => {
     });
 
     it('a change elsewhere that arrived while the field was on screen and flagged is still flagged once the field comes back', async () => {
-      localStorage.clear(); vi.resetModules();
+      localStorage.clear();
+      await restartKeptText();
       const { EditField: First } = await import('../../src/ui/editField');
       const host = document.createElement('div'); document.body.appendChild(host);
       const draw = (value: string, rev: number) => act(() => { render(<First keep="qH:text" label="Question" multiline value={value} rev={rev} commit={unreachable} debounceMs={20} />, host); });
@@ -596,8 +639,10 @@ describe('EditField', () => {
     });
   });
   it('a change from elsewhere found when the field\'s own trimmed save reports back: the text typed meanwhile is kept against a crash', async () => {
-    localStorage.clear(); vi.resetModules();
-    const { EditField: First } = await import('../../src/ui/editField'); const { saveKeptDrafts } = await import('../../src/ui/keptDrafts');
+    localStorage.clear();
+    await restartKeptText();
+    const { EditField: First } = await import('../../src/ui/editField');
+    const { saveKeptDrafts } = await import('../../src/app/keptText');
     const root = document.createElement('div'); document.body.appendChild(root);
     const rec = { value: 'orig', rev: 1 }; const later: (() => void)[] = [];
     const draw = () => act(() => { render(<First keep="dL:counterparty" label="Counterparty" value={rec.value} rev={rec.rev} commit={commit} debounceMs={20} />, root); });
@@ -615,8 +660,10 @@ describe('EditField', () => {
   });
 
   it('a waiting save refused after the person typed back to what it was typed over keeps nothing, so nothing is offered over the newer value later', async () => {
-    localStorage.clear(); vi.resetModules();
-    const { EditField: First } = await import('../../src/ui/editField'); const { saveKeptDrafts } = await import('../../src/ui/keptDrafts');
+    localStorage.clear();
+    await restartKeptText();
+    const { EditField: First } = await import('../../src/ui/editField');
+    const { saveKeptDrafts } = await import('../../src/app/keptText');
     const root = document.createElement('div'); document.body.appendChild(root);
     const rec = { value: 'orig', rev: 1 }; const later: ((r: { ok: boolean; error?: { kind: string; message: string } }) => void)[] = []; let shown = true;
     const draw = () => act(() => { render(shown ? <First keep="dM:counterparty" label="Counterparty" value={rec.value} rev={rec.rev} commit={commit} debounceMs={20} /> : null, root); });
@@ -667,7 +714,8 @@ describe('EditField', () => {
     });
 
     it('the person’s own save, stored trimmed and heard back after they left, is not a change elsewhere when the field comes back', async () => {
-      localStorage.clear(); vi.resetModules();
+      localStorage.clear();
+      await restartKeptText();
       const { EditField: First } = await import('../../src/ui/editField');
       const root = document.createElement('div'); document.body.appendChild(root);
       const rec = { value: '', rev: 1 }; const sent: string[] = []; const later: (() => void)[] = []; let shown = true;
@@ -695,7 +743,8 @@ describe('EditField', () => {
 
     it('a change elsewhere that lands after the field’s own save is applied, before it hears back, is still asked about, kept text too', async () => {
       // the Store's order: a save that is written is applied (the field is drawn with it) before the caller hears back
-      localStorage.clear(); vi.resetModules();
+      localStorage.clear();
+      await restartKeptText();
       const { EditField: First } = await import('../../src/ui/editField');
       const root = document.createElement('div'); document.body.appendChild(root);
       const rec = { value: 'abc', rev: 1 }; const sent: string[] = []; const later: (() => void)[] = [];

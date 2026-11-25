@@ -7,13 +7,14 @@
 import { isMine } from './commands/members';
 import type { Store } from './store';
 import { dealHash, pageHash, dealQuestions, type State, type Message } from './state';
-import { docKey, ownFilesId, type Source } from '../domain/model';
+import { docKey, ownFilesId, type Question, type Source } from '../domain/model';
 import { CreateQuestion, UseAsResponse } from './commands/questions';
-import { mayAddress } from '../domain/suggest';
+import { findQuestions, mayAddress } from '../domain/suggest';
 import { withoutMarkers } from '../domain/cite';
 import type { Research } from '../ports';
-import { bareDealName } from './commands/deals';
-import { filesSendable } from './attachments';
+import { bareDealName, cleanName } from './commands/deals';
+import { chipsSendable, dealCopied, filesSendable } from './attachments';
+import { isText, keptDrafts } from './keptText';
 
 /**
  * A conversation about a deal, or across deals, has its own id (`conv`): each question asked from a deal page's ask
@@ -28,6 +29,17 @@ export type Scope =
 
 /** The deal a conversation is about; none for one across every deal. */
 export const dealIdOf = (scope: Scope) => (scope.kind === 'all' ? undefined : scope.dealId);
+
+/** Whether what a conversation is about is still there, or its deal has yet to load. */
+export function scopeValid(state: State, scope: Scope): boolean | 'loading' {
+  if (scope.kind === 'all') return true;
+  if (!state.deals[scope.dealId]) return false;
+  if (scope.kind === 'deal') return true;
+  const load = state.dealLoad[scope.dealId];
+  if (load !== 'loaded') return load === 'failed' ? false : 'loading';
+  if (scope.kind === 'finding') return state.findings[scope.findingId]?.dealId === scope.dealId;
+  return state.questions[scope.questionId]?.dealId === scope.dealId;
+}
 
 export const convKey = (s: Scope) => s.kind === 'all' ? (s.conv ? `all:${s.conv}` : 'all') : s.kind === 'deal' ? `deal:${s.dealId}${s.conv ? ':' + s.conv : ''}` : s.kind === 'finding' ? `f:${s.dealId}:${s.findingId}` : `q:${s.dealId}:${s.questionId}`;
 export const scopeHash = (s: Scope) => s.kind === 'all' ? (s.conv ? `chat-${s.conv}` : 'chat') : s.kind === 'deal' ? `chat-${s.dealId}${s.conv ? '-' + s.conv : ''}` : s.kind === 'finding' ? `finding-${s.dealId}-${s.findingId}` : `q-${s.dealId}-${s.questionId}`;
@@ -65,52 +77,196 @@ export function pastConversations(s: State): PastConversation[] {
     const dealId = scope.kind === 'all' ? undefined : scope.dealId;
     if (dealId && !s.deals[dealId]) continue;
     const last = list[list.length - 1]; const ai = [...list].reverse().find((m) => m.role === 'ai');
-    const preview = !ai ? '' : ai.state === 'pending' ? 'Answering…' : ai.state === 'failed' ? 'Couldn’t get an answer' : oneLine(withoutMarkers(ai.text.replace(/\{([^|}]+)\|f_[0-9A-Z]{26}\}/g, '$1'), ai.sources?.length ?? 0));
+    const preview = !ai ? '' : ai.state === 'pending' ? 'Answering…'
+      : ai.state === 'failed' ? 'Couldn’t get an answer' : oneLine(answerText(ai));
     const about = scope.kind === 'finding' ? s.findings[scope.findingId]?.title ?? 'Finding' : scope.kind === 'question' ? (s.questions[scope.questionId] ? `Q${s.questions[scope.questionId].n}` : 'Question') : undefined;
     out.push({ key, scope, dealId, about, title: oneLine(first.text), preview, at: last.at, words: list.map((m) => m.text).join(' ').toLowerCase() });
   }
   return out.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
 }
 
+function dayGroup(at: string, now: Date): 'today' | 'week' | 'older' {
+  const then = new Date(at);
+  const today = +new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = Math.floor((today - +new Date(then.getFullYear(), then.getMonth(), then.getDate())) / 864e5);
+  return days <= 0 ? 'today' : days < 7 ? 'week' : 'older';
+}
+
+/** Past conversations in the chosen deal and matching every word, with headings at local day boundaries. */
+export function pastConversationList(store: Store, { dealId, allDeals, search }: {
+  dealId?: string; allDeals: boolean; search: string;
+}) {
+  const every = pastConversations(store.get());
+  const words = search.trim().toLowerCase();
+  const terms = words ? words.split(/\s+/) : [];
+  const now = new Date(store.services.clock.now());
+  let previous: ReturnType<typeof dayGroup> | undefined;
+  const rows = every.filter((conversation) => {
+    if (!allDeals && conversation.dealId !== dealId) return false;
+    const title = conversation.title.toLowerCase();
+    return terms.every((term) => title.includes(term) || conversation.words.includes(term));
+  }).map((conversation) => {
+    const group = dayGroup(conversation.at, now);
+    const startsGroup = group !== previous;
+    previous = group;
+    return { conversation, group, startsGroup };
+  });
+  return { rows, words, now, hasConversations: every.length > 0 };
+}
+
 let seq = 0;
 const mid = () => `m${Date.now().toString(36)}${(seq++).toString(36)}`;
 
-/** "Go to Proseware findings", "open Trey Q&A", "new deal". Resolved against loaded deals; no service call. */
-export function navIntent(store: Store, text: string): boolean {
-  const t = text.trim();
-  if (/^(new|create|add|start) (a )?(new )?deal\b/i.test(t)) { store.ui({ newDeal: { name: '', folders: [], error: '', busy: false } }); return true; }
-  // a page named after the deal opens that page; a typed or a curly apostrophe both count
-  const m = /^(?:take me to|go to|open|show me|show|switch to|jump to)\s+(?:the\s+)?(?:project\s+)?([a-z0-9 ]+?)(?:['’]s)?(?:\s+(q ?& ?a|questions|findings|checklist|overview))?\s*$/i.exec(t);
-  if (!m) return false;
-  const name = m[1].toLowerCase().trim();
-  const deal = Object.values(store.get().deals).find((candidate) =>
-    bareDealName(candidate.name, 'navigation').toLowerCase() === name);
-  if (!deal) return false;
-  const page = (m[2] ?? '').toLowerCase();
-  location.hash = page
+// #500: only the explicit verb and page suffix are syntax; a deal name can contain punctuation or Unicode.
+function typedDealDestination(store: Store, text: string) {
+  const command = /^(?:take me to|go to|open|show me|show|switch to|jump to)\s+(.+)$/is.exec(text);
+  if (!command) return;
+  const target = cleanName(command[1]);
+  const lookup = (name: string) => {
+    const key = bareDealName(name.trim(), 'navigation').toLowerCase();
+    if (!key) return;
+    return Object.values(store.get().deals).find((candidate) =>
+      bareDealName(candidate.name, 'navigation').toLowerCase() === key);
+  };
+  const possessive = (name: string) => lookup(name.replace(/['’]s$/i, '')) ?? lookup(name);
+  const named = (name: string) => {
+    const withoutArticle = name.replace(/^the\s+/i, '');
+    return possessive(withoutArticle) ?? (withoutArticle !== name ? possessive(name) : undefined);
+  };
+  const suffix = /^(.+?)\s+(q ?& ?a|questions|findings|checklist|overview)$/i.exec(target);
+  const deal = suffix && named(suffix[1]);
+  return deal ? { deal, page: suffix[2].toLowerCase() } : { deal: named(target), page: '' };
+}
+
+function destinationHash(store: Store, text: string) {
+  const destination = typedDealDestination(store, text);
+  if (!destination?.deal) return;
+  const { deal, page } = destination;
+  return page
     ? pageHash(/q|question/.test(page) ? 'qa' : page as 'findings' | 'checklist' | 'overview', deal.id)
     : dealHash(store.get().prefs, deal.id);
+}
+
+/** "Go to Proseware findings", "open Trey Q&A", or "new deal", resolved against loaded deals. */
+export function navIntent(
+  store: Store, text: string, navigate = navigateWindow, handled?: () => void,
+): boolean {
+  const typed = text.trim();
+  if (/^(new|create|add|start) (a )?(new )?deal\b/i.test(typed)) {
+    handled?.();
+    store.ui({ newDeal: { name: '', folders: [], error: '', busy: false } });
+    return true;
+  }
+  const hash = destinationHash(store, typed);
+  if (!hash) return false;
+  handled?.();
+  navigate(hash);
   return true;
 }
 
-/** "Add all unresolved to Q&A", typed in a deal's ask box: opens the same preview as the Checklist's ⋯ menu (decisions, #2) */
-export function unresolvedIntent(store: Store, dealId: string, text: string): boolean {
-  if (!/^(?:please\s+)?add (?:all )?(?:the )?unresolved(?: (?:items|points|gaps(?: and(?: open)? findings)?))?(?: (?:to|into|in) (?:the )?(?:q ?& ?a|questions))?\s*[.!]?$/i.test(text.trim())) return false;
-  store.ui({ dialog: { kind: 'addUnresolved', dealId } }); return true;
+function navigateWindow(hash: string) {
+  if (typeof location !== 'undefined') location.hash = hash;
 }
 
+/** "Add all unresolved to Q&A" opens the same preview as the Checklist menu (decisions, #2). */
+function unresolvedIntent(text: string) {
+  const command = '^(?:please\\s+)?add (?:all )?(?:the )?unresolved';
+  const points = '(?: (?:items|points|gaps(?: and(?: open)? findings)?))?';
+  const destination = '(?: (?:to|into|in) (?:the )?(?:q ?& ?a|questions))?\\s*[.!]?$';
+  return new RegExp(command + points + destination, 'i').test(text);
+}
+
+let drafts: { text: Map<string, string>; next: Map<string, string> } | undefined;
+const composerDrafts = () => drafts ??= {
+  text: keptDrafts('composer', isText),
+  next: keptDrafts('next-conversation', isText),
+};
+
+/** Load both maps before recovery can move saved drafts and their conversation slots to a copy. */
+export function initializeComposerDrafts() {
+  composerDrafts();
+}
+
+/** The ask box's next conversation is kept with its draft. Within a conversation, keep using that scope. */
+export function composerScope(given: Scope, launching: boolean): { scope: Scope; launchSlot?: string } {
+  if (!launching) return { scope: given };
+  const launchSlot = given.kind === 'all' ? 'all' : `deal:${given.dealId}`;
+  const { next } = composerDrafts();
+  const conv = next.get(launchSlot) ?? newConv();
+  if (!next.has(launchSlot)) next.set(launchSlot, conv);
+  const scope: Scope = given.kind === 'all' ? { kind: 'all', conv } : { kind: 'deal', dealId: given.dealId, conv };
+  return { scope, launchSlot };
+}
+
+export const composerText = (key: string) => composerDrafts().text.get(key) ?? '';
+export function setComposerText(key: string, text: string) {
+  const kept = composerDrafts().text;
+  if (text) kept.set(key, text);
+  else kept.delete(key);
+}
+
+type SendView = {
+  launchSlot?: string;
+  navigate(hash: string): void;
+  sending?(): void;
+  textChanged?(): void;
+  refused?(): void;
+};
+
 /**
- * "add a question: …" on a deal. 'none' when the text is not that command; otherwise whether the question was made.
- * A refusal (storage full, a copied install, …) has already been told to the person by the store, except for input it
- * rejects before planning, which is said here; the caller keeps the typed text so nothing is lost.
+ * The box and its saved draft are already clear, so a restart after the save cannot bring the command back. A refusal
+ * (storage full, a copied install, ...) has been told by the store, except input rejected before planning, said here.
+ * The typed command then goes back in the box, unless something new has been typed since, so it can be sent again.
  */
-export async function questionIntent(store: Store, dealId: string, text: string): Promise<'none' | 'made' | 'refused'> {
-  const m = /^(?:add|log) (?:a )?question[:\s]+(.+)/is.exec(text.trim());
-  if (!m) return 'none';
-  const r = await store.dispatch(CreateQuestion, { dealId, text: m[1].trim() }, { idempotencyKey: 'ask-addq-' + dealId, noRetry: true });   // the text goes back in the box, which is the way to try again: a Retry as well could log it twice
-  if (r.ok) return 'made';
-  if (r.error.kind === 'invalid') store.toast(r.error.message);
-  return 'refused';
+async function logTypedQuestion(store: Store, dealId: string, question: string, typed: string, key: string,
+  view: SendView) {
+  // The text going back in the box is the way to try again: a Retry as well could log it twice.
+  const result = await store.dispatch(CreateQuestion, { dealId, text: question }, {
+    idempotencyKey: 'ask-addq-' + dealId, noRetry: true,
+  });
+  if (result.ok) return;
+  if (result.error.kind === 'invalid') store.toast(result.error.message);
+  if (composerText(key)) return;
+  setComposerText(key, typed);
+  view.textChanged?.();
+  view.refused?.();
+}
+
+/** Send the latest draft after file checks. Navigation and question commands take precedence over a model answer. */
+export async function sendTyped(store: Store, scope: Scope, view: SendView) {
+  const key = convKey(scope);
+  if (!composerText(key).trim() || store.readOnly() || scopeValid(store.get(), scope) !== true) return;
+  if (!(await chipsSendable(store, key))) return;
+  const state = store.get();
+  const filesDeal = filesDealOf(state, scope);
+  // A recovered copy now has the draft and files (#117). Do not clear or send them from the old scope.
+  if (store.readOnly() || scopeValid(state, scope) !== true || (filesDeal && dealCopied(store, filesDeal))) return;
+  const text = composerText(key).trim();
+  if (!text) return;
+  const take = () => {
+    setComposerText(key, '');
+    view.textChanged?.();
+    view.sending?.();
+  };
+  if (navIntent(store, text, view.navigate, take)) return;
+  const dealId = scope.kind === 'deal' ? scope.dealId : undefined;
+  if (dealId && unresolvedIntent(text)) {
+    take();
+    store.ui({ dialog: { kind: 'addUnresolved', dealId } });
+    return;
+  }
+  const question = dealId ? /^(?:add|log) (?:a )?question[:\s]+(.+)/is.exec(text) : null;
+  if (dealId && question) {
+    take();
+    await logTypedQuestion(store, dealId, question[1].trim(), text, key, view);
+    return;
+  }
+  take();
+  if (view.launchSlot) {
+    composerDrafts().next.delete(view.launchSlot);
+    view.navigate(scopeHash(scope));
+  }
+  void ask(store, scope, text);
 }
 
 /** "Does this answer any of our open questions?", "would that address an open question": a person asking in words */
@@ -206,9 +362,46 @@ async function answer(store: Store, scope: Scope, messageId: string, text: strin
 }
 
 /** An answer's text as it leaves the conversation, as a response or a question: finding links as words, no [n] markers. */
-export const answerText = (m: Message) => withoutMarkers(m.text.replace(/\{([^|}]+)\|f_[0-9A-Z]{26}\}/g, '$1'), m.sources?.length ?? 0);
-/** A person makes an answer the response to a question: with the answer's own sources, and once however often it is pressed. */
-export const useAnswer = (store: Store, dealId: string, questionId: string, m: Message) => store.dispatch(UseAsResponse, { dealId, questionId, text: answerText(m), sources: m.sources ?? [] }, { idempotencyKey: 'use-' + m.id });
+export const withoutFindingLinks = (text: string) => text.replace(/\{([^|}]+)\|f_[0-9A-Z]{26}\}/g, '$1');
+export const answerText = (m: Message) => withoutMarkers(withoutFindingLinks(m.text), m.sources?.length ?? 0);
+
+/** A new question from a finding starts with the answer. On a deal, it starts with what was asked. */
+export const questionFromAnswer = (scope: Scope, answer: Message, asked: string) =>
+  scope.kind === 'finding' ? answerText(answer) : asked;
+
+/** The answer's first sentence, without its last punctuation, starts the new finding's title. */
+export function findingFromAnswer(answer: Message) {
+  const text = withoutFindingLinks(answer.text);
+  const preview = answerText(answer);
+  const sentence = /^[^.!?]*[.!?]/.exec(preview)?.[0] ?? preview;
+  return { text, preview, title: sentence.trim().replace(/[.!?]$/, '').slice(0, 140) };
+}
+
+/** The current response to confirm before replacement, when one is present. */
+export const responseToReplace = (question?: Question) => question?.response.trim() ? question.response : null;
+
+/** Read the question itself so undoing the response brings the check back. */
+export function answerWasUsed(question: Question, answer: Message) {
+  const response = responseToReplace(question);
+  return response !== null && response.trim() === answerText(answer).trim();
+}
+
+/** A person makes an answer the response, with its sources and only once however often it is pressed. */
+export function useAnswer(
+  store: Store, dealId: string, questionId: string, answer: Message, over: string | null = null,
+) {
+  return store.dispatch(UseAsResponse, {
+    dealId, questionId, text: answerText(answer), sources: answer.sources ?? [], over: over ?? '',
+  }, { idempotencyKey: 'use-' + answer.id });
+}
+
+/** The question picker searches within Open or All and counts Open before searching. */
+export function answerQuestionChoices(state: State, dealId: string, typed: string, all: boolean) {
+  const questions = dealQuestions(state, dealId);
+  const open = questions.filter((question) => question.status === 'open');
+  const within = all ? questions : open;
+  return { rows: findQuestions(typed, within), hasQuestions: within.length > 0, openCount: open.length };
+}
 
 /**
  * A person asks the model whether an answer addresses the open question suggested under it. The verdict

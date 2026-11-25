@@ -11,7 +11,8 @@
  */
 import { SERVICE } from '../control';
 import { commandLabel } from './commandLabels';
-import { CONNECTED } from './connection';
+import { capabilities } from './capabilities';
+import { CONNECTED, SharedFolderConnection, SignInConnection } from './connection';
 import { CHANGED_ELSEWHERE } from './changedElsewhere';
 import { overLimit, TOO_LONG } from '../domain/importExport';
 import type { Command, Plan } from './command';
@@ -32,12 +33,15 @@ import { merged, localConversations } from './threads';
 import { seenSince } from './draftsSeen';
 import { freshen, FOLDER_CHECK } from './folderWatch';
 import { reassess } from './findings';
+import { indexCommittedFolders } from './indexing';
 
 type Listener = (s: State) => void;
 
 type DispatchOptions = {
   idempotencyKey?: string;
   quiet?: boolean;
+  /** The action's caller has its own wording for this refusal. */
+  quietRefusal?: (error: Failure) => boolean;
   /** The caller keeps the input and offers its own retry. */
   noRetry?: boolean;
   /** The field's value before this edit; later changes are refused. */
@@ -201,7 +205,7 @@ type ToastLinger = boolean | 'stays' | 'kept';
 type ToastStyle = { sticky?: ToastLinger; glyph?: State['ui']['toasts'][number]['glyph'] };
 
 export class Store {
-  private state: State = initialState();
+  private state: State;
   private listeners = new Map<Listener, boolean>();
   private peerRenderFrame: number | null = null;
   private commands = new Map<string, Command<any>>();
@@ -222,6 +226,7 @@ export class Store {
   private readonly windowId = globalThis.crypto.randomUUID();
 
   constructor(public readonly services: Services, commands: Command<any>[]) {
+    this.state = initialState(capabilities(services));
     this.conversations = services.conversations ?? localConversations(services.local);
     for (const c of [...commands, Undo]) this.commands.set(c.name, c);
     services.ai = this.watchModel(services.ai);
@@ -393,7 +398,7 @@ export class Store {
     const actor = this.state.user?.name ?? 'Unknown';
     const firm = FIRM;
     const planned = command.plan(this.state, input, { at, actor, firm, opId, ids: this.services.ids });
-    if (!planned.ok) { if (!opts.quiet) this.toast(planned.error.message); return planned; }
+    if (!planned.ok) return this.refusePlan(planned.error, opts);
     const plan = planned.value;
     // nothing longer than an export cell holds is saved: the one place the limit is checked (domain/importExport.ts)
     const long = plan.upserts.map((u) => overLimit(u.kind, u.record as Record<string, unknown>)).find(Boolean);
@@ -440,10 +445,19 @@ export class Store {
     // longer apply: it is withdrawn, and its notice stays.
     const removed = new Set((plan.removes ?? []).map((r) => r.id));
     if (removed.size) this.ui((ui) => ({ toasts: ui.toasts.map((t) => { const o = t.action?.opId ? this.state.ops[t.action.opId] : undefined; return o && ([...o.targets, ...Object.keys(o.resultRevs ?? {})].some((id) => removed.has(id)) || removed.has((o.input as { dealId?: string } | undefined)?.dealId ?? '')) ? { ...t, action: undefined } : t; }) }));   // a deal deleted takes the Undos of everything done on it
-    if (plan.message && (!opts.quiet || plan.alwaysSay)) this.toast(plan.message, plan.inverse ? { label: 'Undo', opId } : undefined);
+    if (plan.message && (!opts.quiet || plan.alwaysSay)) {
+      const action = plan.inverse ? { label: 'Undo', opId } : undefined;
+      this.toast(plan.message, action, { glyph: plan.messageGlyph }, undefined, plan.messageCut);
+    }
     if (plan.effect) this.startEffect(plan.effect, opId);
+    if (plan.dealId && plan.indexFolders?.length) indexCommittedFolders(this, plan.dealId, plan.indexFolders);
     void this.pruneJournal();
     return ok({ opId });
+  }
+
+  private refusePlan(error: Failure, opts: DispatchOptions) {
+    if (!opts.quiet && !opts.quietRefusal?.(error)) this.toast(error.message);
+    return fail(error);
   }
 
   /** Track every refused write that remains pending in the journal, including a refused failure marker (#565). */
@@ -1253,6 +1267,7 @@ export class Store {
       }
       revision = loaded.value!.revision;
     }
+    if (command.prepare) await command.prepare(this, input, { retained: revision !== null });
     const result = await this.execute(command, input, opId, targets, opts, revision);
     if (result.ok && result.value.unchanged && revision !== null && this.state.ops[opId]?.state !== 'succeeded') {
       await this.dropOp(opId);
@@ -1478,6 +1493,11 @@ export class Store {
 
   private dealLoads = new Map<string, Promise<void>>();
   private gapsAsked = new Set<string>();             // deals whose gaps and unread responses this session has asked for, so callers that come together ask once
+  /** Load the deal and, where available, the checklist rows that can settle its questions. */
+  async loadDealWithChecklist(dealId: string): Promise<void> {
+    await Promise.all([this.loadDeal(dealId), this.refreshChecklist(dealId)]);
+  }
+
   /**
    * Load a deal's records once. Concurrent callers share the same load. The gaps are fetched once a session, and only
    * for callers that show them (the deal pages), not for search across deals; asked once even when callers come together.
@@ -1844,6 +1864,19 @@ export class Store {
       if (!!this.state.net.model !== down) this.set({ ...this.state, net: { ...this.state.net, model: down } });
     };
     return new Proxy(ai, { get: (t, k) => { const f = Reflect.get(t, k); return typeof f !== 'function' || !MODEL_CALLS.has(k) ? f : (...a: unknown[]) => { const r = f.apply(t, a); if (r instanceof Promise) void r.then(seen(++asked), () => undefined); return r; }; } });
+  }
+  settingsSignIn() {
+    const { signin } = this.services;
+    return signin ? new SignInConnection(signin) : null;
+  }
+  settingsSharedFolder() {
+    const { place } = this.services;
+    return place ? new SharedFolderConnection(place) : null;
+  }
+  signInFromNotice() {
+    const { signin } = this.state;
+    if (signin?.sso && !signin.apiKey) void this.services.signin?.signIn();
+    else this.ui({ settings: true });
   }
   /**
    * Intelligence sign-in, looked at every 2 seconds while the app is open (desktop): while nobody is signed in the app

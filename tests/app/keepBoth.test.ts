@@ -3,7 +3,8 @@
 // Deleted as an entry of its own, with the PC it came from, and restores. Two PCs that deleted different words keep both.
 import { describe, it, expect } from 'vitest';
 import { pc, carry, settle, syncAll, twoPcs, okd, type PC } from './pcs';
-import { deletedOf } from '../../src/ui/deleted';
+import '../ui/keptTextSession';
+import { visibleDeletedNotes as deletedOf } from '../../src/app/deletedView';
 import { DeleteDeal } from '../../src/app/commands/deals';
 import { EditQuestionField, SetResponse, DeleteQuestion, RestoreQuestion } from '../../src/app/commands/questions';
 import { EditFinding, DeleteFinding, RestoreFinding } from '../../src/app/commands/findings';

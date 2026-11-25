@@ -400,12 +400,35 @@ export interface DraftRef { doc: string; docId: string; date: string | null; fol
 /** `pages` is the document's page count when it is known, for stepping through its pages in reading mode */
 export type PageView = { kind: 'pdf'; url: string | null; page: number; pages?: number } | { kind: 'sheet'; name: string; cols: string[]; rows: { r: number; cells: string[] }[]; cell?: string };
 
+/** LocalStore key for typed draft maps. A null value clears the saved drafts. */
+export const KEPT_TEXT_KEY = 'kept-drafts';
+
 /** Per-user, per-machine data that is not a record: preferences, and a cache of conversation threads (their home is the person's files in the shared folder; see ConversationStore). Never part of a transaction. */
 export interface LocalStore {
   read(key: string): unknown | null;
   write(key: string, value: unknown): Result<void>;
   /** called when another window of the same person changed a key; returns a function that stops listening */
   watch?(onChange: (key: string) => void): () => void;
+}
+
+/** One named part of an import, such as its file, model reading, choices or check marks. */
+export interface KeptImportPart { key: string; part: string; value: unknown }
+export type KeptImportChange = KeptImportPart | { key: string; drop: true };
+export type KeptImportRead = KeptImportPart[] | 'memory' | 'unavailable';
+
+/** Per-machine storage for import drafts. A write commits all its parts together in call order. */
+export interface KeptImports {
+  /** Memory fallback permits submission only when there is no store. An unavailable store cannot checkpoint. */
+  read(onLateOpen: () => void): Promise<KeptImportRead>;
+  /** Replace is used when a blocked connection opens after the app has continued with its own snapshot. */
+  write(changes: readonly KeptImportChange[], replace?: boolean): Promise<boolean>;
+}
+
+/** Existing kept maps for Checklist questions. Record IDs follow a deal when it is recovered as a copy. */
+export interface ChecklistDraftMaps {
+  texts: Map<string, string>;
+  targets: Map<string, string>;
+  movedId: (id: string) => string;
 }
 
 /** One message of a conversation, as it is kept. An answer still waiting (`pending`) is never kept in the synced folder; the window's local store keeps it, so another window shows it waiting. */
@@ -499,6 +522,15 @@ export interface Session {
   }>>;
 }
 
+export interface SharedFolderStatus {
+  path: string | null;
+  found: string[];
+  suggested: string | null;
+  missing?: string;
+}
+
+export interface SharedFolderChoice { path: string; inOneDrive: boolean }
+
 /**
  * Desktop only: the team's shared folder on this PC. Until a person connects one, the app shows only the screen that asks
  * for it (ui/connect.tsx); nothing is saved before that. Settings shows it with Change.
@@ -509,11 +541,19 @@ export interface SharedPlace {
    * records (looked for afresh on each call), the Punchlist folder in OneDrive to suggest when there are none (null
    * without OneDrive), and why the folder in use cannot be opened, if it cannot.
    */
-  get(): Promise<Result<{ path: string | null; found: string[]; suggested: string | null; missing?: string }>>;
+  get(): Promise<Result<SharedFolderStatus>>;
   /** the folder picker; null when the person cancels. `inOneDrive` is false for a folder OneDrive does not sync. */
-  pick(): Promise<Result<{ path: string; inOneDrive: boolean } | null>>;
+  pick(): Promise<Result<SharedFolderChoice | null>>;
   /** use this folder from now on, on this PC: the app starts again on it */
   use(path: string): Promise<Result<void>>;
+}
+
+export interface SignInStatus {
+  signedIn: boolean;
+  sso: boolean;
+  apiKey: boolean;
+  firstSetup?: boolean;
+  problem?: string;
 }
 
 /**
@@ -524,7 +564,7 @@ export interface AiSignIn {
   /** whether a token or key is held on this PC that has not expired, which ways of signing in are offered, and why
    * single sign-on stopped opening by itself when the provider kept refusing its token. `firstSetup`: this PC has never
    * signed in, so the window shows only the sign-in page until it does (decisions: "Intelligence sign-in"). */
-  status(): Promise<Result<{ signedIn: boolean; sso: boolean; apiKey: boolean; firstSetup?: boolean; problem?: string }>>;
+  status(): Promise<Result<SignInStatus>>;
   /** single sign-on: the provider's sign-in page in the app's own window; the token is taken from the SSO site's cookie */
   signIn(): Promise<Result<void>>;
   /** use an API key the person pasted, once the service has accepted it; it is kept like a token from single sign-on.

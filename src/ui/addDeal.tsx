@@ -3,24 +3,20 @@ import { createPortal } from 'preact/compat';
 import { useAppState, useStore } from './hooks';
 import { Modal } from './dialogs';
 import { Icon } from './icons';
-import { SetDealMember, isMine } from '../app/commands/members';
-import { dealTwin } from '../app/state';
+import { SetDealMember } from '../app/commands/members';
+import { dealTwin, dealLabel } from '../app/state';
+import { dealRows } from '../app/dealView';
 
 /**
  * Add deal: every deal in the shared folder, to add to your own list, and New deal beside
- * the search. It is the only way to join a deal. Deals to add come first, by name; the ones already yours come last.
+ * the search. It is the only way to join a deal. Deals to add come first; the ones already yours come last.
  */
 export function AddDealDialog() {
   const store = useStore(); const s = useAppState();
   const [q, setQ] = useState('');
   const close = () => store.ui({ addDeal: false });
   const want = q.trim().toLowerCase();
-  const rows = Object.values(s.deals)
-    .filter((d) => !want || d.name.toLowerCase().includes(want) || d.counterparty.toLowerCase().includes(want))
-    .map((d) => ({ d, mine: isMine(s, d.id) }))
-    // the newest first in each part
-    .sort((a, b) =>
-      Number(a.mine) - Number(b.mine) || b.d.createdAt.localeCompare(a.d.createdAt) || b.d.id.localeCompare(a.d.id));
+  const rows = dealRows(s, 'add', q);
   const addToMine = (dealId: string) =>
     store.dispatch(SetDealMember, { dealId, on: true }, { idempotencyKey: `add-${dealId}` });
   const newDeal = () => store.ui({ addDeal: false, newDeal: { name: '', folders: [], error: '', busy: false } });
@@ -33,7 +29,7 @@ export function AddDealDialog() {
         <button type="button" class="btn pri" id="add-new" onClick={newDeal}>New Deal</button>
       </div>
       <div class="addlist" role="list" aria-label="Deals">
-        {rows.map(({ d, mine }) => (
+        {rows.map(({ deal: d, mine }) => (
           <div key={d.id} class={`addrow ${mine ? 'mine' : ''}`} role="listitem" data-deal={d.id}>
             <span class="dwho"><span class="an"><span title={d.name}>{d.name}</span>{d.group === 'closed' && <span class="tag">Closed</span>}</span>{(dealTwin(s, d) || d.counterparty) && <span class="cp">{dealTwin(s, d) || d.counterparty}</span>}</span>
             {mine ? <span class="yours"><Icon name="check" size={13} sw={2} />In your deals</span>
@@ -84,9 +80,11 @@ export function RemoveDealDialog({ dealId }: { dealId: string }) {
     if (r.ok && 'dealId' in store.get().ui.route && (store.get().ui.route as { dealId?: string }).dealId === dealId) location.hash = 'deals';   // off its own pages, which no longer have a place in the sidebar
   };
   if (!d) return null;
+  const label = dealLabel(s, d);      // says which of two same-named deals it is (#27)
   return (
-    <Modal onClose={close} label={`Remove ${d.name} from your deals?`} blur className="sdlg dddlg uldlg">
-      <div class="shead"><h2>Remove {d.name} from your deals?</h2><button type="button" class="x" aria-label="Close" title="Close (Esc)" onClick={close}><Icon name="close" size={15} /></button></div>
+    <Modal onClose={close} label={`Remove ${label} from your deals?`} blur className="sdlg dddlg uldlg">
+      <div class="shead"><h2>Remove {label} from your deals?</h2><button type="button" class="x" aria-label="Close"
+        title="Close (Esc)" onClick={close}><Icon name="close" size={15} /></button></div>
       <div class="xfoot"><span class="grow" /><button type="button" class="btn sm" id="ul-keep" data-autofocus
         onClick={close}>Keep It</button><button type="button" class="btn sm pri" id="ul-go"
         title="It stays in Add deal; nothing is deleted" onClick={() => void go()}>Remove</button></div>

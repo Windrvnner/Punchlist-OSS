@@ -4,8 +4,10 @@
  * record is written once, through a command, when indexing finishes. Stops when the deal disappears.
  */
 import type { Store } from './store';
-import { RecordIndexingProgress } from './commands/deals';
-import type { Folder } from '../domain/model';
+import { pathKey, RecordIndexingProgress } from './commands/deals';
+import type { Deal, Folder } from '../domain/model';
+import type { DealProgress, FolderSearch } from '../ports';
+import type { State } from './state';
 import { control } from '../control';
 
 const active = new Set<string>();
@@ -21,6 +23,152 @@ export function withProgress(own: Folder[], polled: Folder[]): Folder[] {
 /** A deal's folders as they stand now: with live progress while indexing is under way. */
 export const liveFolders = (s: { indexing: Record<string, { folders: Folder[] }> }, d: { id: string; folders: Folder[] }): Folder[] =>
   s.indexing[d.id] ? withProgress(d.folders, s.indexing[d.id].folders) : d.folders;
+
+/** Once loaded, checklist rows give the gaps' needs directly, without matching titles. */
+function overviewGaps(
+  state: Pick<State, 'checklists' | 'gaps'>, dealId: string,
+): { key: string; title: string; need?: string }[] {
+  const rows = state.checklists[dealId];
+  if (!Array.isArray(rows)) {
+    return (state.gaps[dealId] ?? []).map(({ title }) => ({ key: title, title }));
+  }
+  return rows.filter((row) => row.result === 'gap')
+    .map((row) => ({ key: row.id, title: row.text, need: row.need }));
+}
+
+export function indexingStopped(state: Pick<State, 'ui'>, deal: Pick<Deal, 'id' | 'stage'>) {
+  return deal.stage === 'indexing' && state.ui.indexStalled.includes(deal.id);
+}
+
+/** Overview and Findings share the first-pass state, including when the stalled notice replaces Indexing. */
+export function dealFirstPassStatus(
+  state: Pick<State, 'findings' | 'ui'>, deal: Pick<Deal, 'id' | 'stage' | 'folders'>,
+) {
+  const noFindings = !Object.values(state.findings).some((finding) => finding.dealId === deal.id);
+  const waiting = deal.stage === 'indexing' && noFindings;
+  const noRoom = noFindings && deal.folders.length === 0;
+  const stopped = indexingStopped(state, deal);
+  return { waiting, noRoom, stopped, showIndexing: waiting && !noRoom && !stopped };
+}
+
+/** A first pass that has yet to produce findings has no gaps or standing to show. */
+export function overviewStatus(
+  state: Pick<State, 'checklists' | 'gaps' | 'findings' | 'ui'>, deal: Pick<Deal, 'id' | 'stage' | 'folders'>,
+) {
+  const status = dealFirstPassStatus(state, deal);
+  return { ...status, gaps: status.waiting ? [] : overviewGaps(state, deal.id) };
+}
+
+function unavailableFolders(missing: FolderSearch | null, dealId: string) {
+  const ours = (folders: { dealId: string; folder: string }[]) =>
+    folders.filter((folder) => folder.dealId === dealId).map((folder) => folder.folder);
+  const empty = new Set(ours(missing?.empty ?? []));
+  const away = new Set(ours((missing?.tops ?? []).flatMap((top) => top.folders)).filter((path) => !empty.has(path)));
+  return { away, empty };
+}
+
+function stillIndexing(folder: Pick<Folder, 'files' | 'indexed'>) {
+  return folder.indexed < folder.files;
+}
+
+function readingRow(folder: Folder, progress: DealProgress['folders']) {
+  // Once indexing is complete, read counts come from checklist progress, where identical copies count once.
+  const indexing = stillIndexing(folder);
+  const reading = indexing ? undefined : progress.find((row) => row.folder === folder.path);
+  return {
+    files: folder.files,
+    indexed: folder.indexed,
+    indexing,
+    read: reading?.read,
+    docs: reading?.files ?? folder.files,
+    copies: reading?.copies ?? 0,
+  };
+}
+
+export function folderIndexCounts(folders: Pick<Folder, 'files' | 'indexed'>[]) {
+  return {
+    files: folders.reduce((sum, folder) => sum + folder.files, 0),
+    indexed: folders.reduce((sum, folder) => sum + folder.indexed, 0),
+  };
+}
+
+function readingTotals(rows: ReturnType<typeof readingRow>[]) {
+  const totals = folderIndexCounts(rows);
+  return {
+    ...totals,
+    indexing: stillIndexing(totals),
+    read: rows.every((row) => row.read !== undefined) ? rows.reduce((sum, row) => sum + (row.read ?? 0), 0) : undefined,
+    docs: rows.reduce((sum, row) => sum + row.docs, 0),
+    copies: 0,
+  };
+}
+
+function coreDocuments(
+  progress: DealProgress['folders'], away: Set<string>, empty: Set<string>, anyUnavailable: boolean,
+) {
+  const core = { files: 0, read: 0, unavailable: 0 };
+  for (const folder of progress) {
+    core.files += folder.core;
+    core.read += folder.coreRead;
+    if (anyUnavailable && (away.has(folder.folder) || empty.has(folder.folder))) core.unavailable += folder.core;
+  }
+  return core;
+}
+
+export type FolderProgressNotice = { kind: 'away' | 'empty'; label?: { count: number; all: boolean } };
+
+function summaryNotice(away: number, empty: number, folders: number): FolderProgressNotice | undefined {
+  if (away) return { kind: 'away', label: { count: away, all: away === folders } };
+  if (empty) return { kind: 'empty', label: { count: empty, all: empty === folders } };
+  return undefined;
+}
+
+function folderNotice(
+  away: boolean, empty: boolean, summary: FolderProgressNotice | undefined, grouped: boolean,
+): FolderProgressNotice | undefined {
+  // When the summary names inaccessible folders, an empty folder still gets its own label.
+  if (away) return grouped ? { kind: 'away' } : summary;
+  if (!empty) return undefined;
+  if (summary?.kind === 'away') return { kind: 'empty', label: { count: 1, all: true } };
+  return grouped ? { kind: 'empty' } : summary;
+}
+
+/** Overview's reading progress follows the deal's folder order and shows the state of folders on this PC. */
+export function folderProgress(
+  state: Pick<State, 'deals' | 'indexing' | 'progress' | 'ui'>, deal: Pick<Deal, 'id' | 'folders' | 'stage'>,
+) {
+  const progress = state.progress[deal.id];
+  const reading = progress?.folders ?? [];
+  const { away, empty } = unavailableFolders(state.ui.missingFolders, deal.id);
+  const folders = liveFolders(state, deal).map((folder) => ({
+    key: folder.path,
+    name: folder.label || folder.path,
+    title: folder.path,
+    ...readingRow(folder, reading),
+    away: away.has(folder.path),
+    empty: empty.has(folder.path),
+  }));
+  const awayCount = folders.filter((folder) => folder.away).length;
+  const emptyCount = folders.filter((folder) => folder.empty).length;
+  const grouped = folders.length > 1;
+  const summary = summaryNotice(awayCount, emptyCount, folders.length);
+  const rows = folders.map(({ away, empty, ...row }) => ({
+    ...row, notice: folderNotice(away, empty, summary, grouped),
+  }));
+  const total = grouped ? { ...readingTotals(rows), notice: summary } : null;
+  const core = coreDocuments(reading, away, empty, Boolean(summary));
+  // Only the first two reported matches are considered, even if one of those deals is no longer present.
+  const alsoIn = (progress?.alsoIn ?? []).slice(0, 2).flatMap(({ dealId, docs, of }) => {
+    const match = state.deals[dealId];
+    return match ? [{ deal: match, docs, of: Math.max(of, docs) }] : [];
+  });
+  return {
+    rows, total, folderCount: folders.length, core, alsoIn,
+    showLocate: Boolean(summary),
+    showFolders: awayCount === 0,
+    stopped: indexingStopped(state, deal),
+  };
+}
 
 type Why = 'away' | 'retry';
 const waiting = (store: Store, dealId: string, why: Why | null) => {
@@ -42,6 +190,18 @@ const away = (kind: string) => kind === 'notFound';
 /** the "Couldn't start indexing" notice showing for each deal, so a second failure replaces it rather than adding another */
 const noticesOf = new WeakMap<Store, Map<string, number>>();
 const stalled = (store: Store, dealId: string, on: boolean) => store.ui((ui) => ({ indexStalled: on ? [...new Set([...ui.indexStalled, dealId])] : ui.indexStalled.filter((x) => x !== dealId) }));
+
+/** A re-added folder can return to its old row, so select the committed paths by identity. */
+export function indexCommittedFolders(store: Store, dealId: string, paths: string[]) {
+  const deal = store.get().deals[dealId];
+  if (!deal) return;
+  const folders = new Map(deal.folders.map((folder) => [pathKey(folder.path), folder]));
+  const requested = paths.flatMap((path) => {
+    const folder = folders.get(pathKey(path));
+    return folder ? [folder] : [];
+  });
+  if (requested.length) void startIndexing(store, dealId, requested);
+}
 
 export async function startIndexing(store: Store, dealId: string, folders: Folder[]) {
   if (!store.get().deals[dealId]) return;                  // the deal has gone (a Retry pressed on a notice that outlived it): nothing is started for it

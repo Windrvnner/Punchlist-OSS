@@ -1,37 +1,38 @@
 import { Fragment } from 'preact';
 import { onListText, OnListMark } from './issuesList';
-import { LISTED } from '../app/commands/issuesList';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { TEXT_MAX } from '../domain/importExport';
-import { checkingSays } from '../app/checking';
+import { checkingSays, watchCheck } from '../app/checking';
 import { showTip, hideTip } from './tip';
 import { ReadOnlyContext } from './editField';
 import { useAppState, useStore, fmtDate, whenText , useDismiss, useMinuteTick } from './hooks';
 import { afterDeletingFinding } from './nav';
 import { Icon } from './icons';
 import { ChoiceCheck } from './moreMenu';
-import { Ref, byDocument, fewDocuments } from './ref';
+import { Ref } from './ref';
+import { byDocument, fewDocuments } from '../app/citations';
 import { DocName } from './docName';
-import { deletedOf, listsOf } from './deleted';
+import { FindingsHead } from './findingsHead';
 import { workstreamChoices } from '../domain/order';
-import { dealFindings, versionsWord, listedFindings, findingListed, workstreamHead, findingWorkstreams } from '../app/state';
-import { NO_WORKSTREAM } from '../app/state';
+import { versionsWord, type State } from '../app/state';
+import { checkLeftCount, uncheckedChecklistCount } from '../app/dealCounts';
+import { findingsView } from '../app/findingsView';
 import { ConflictView } from './conflict';
 import { AskFirst } from './dialogs';
 import { FindingLinks, askKept } from './findingAsk';
-import { CreateFinding, EditFinding, SetFindingStatus, ReviewFinding, DeleteFinding, TITLE_MAX } from '../app/commands/findings';
-import { reassess, previousVersion } from '../app/findings';
+import { SetFindingStatus, ReviewFinding, DeleteFinding, TITLE_MAX } from '../app/commands/findings';
+import { findingHistory, reassess, type FindingHistoryEvent } from '../app/findings';
 import type { Deal, Finding, Source } from '../domain/model';
 import { localYmd, CHECK_REASON } from '../domain/model';
-import { splitCited, toParagraphs } from '../domain/cite';
+import { splitCited } from '../domain/cite';
 import { SERVICE, AI_LABEL } from '../control';
-import { keptDrafts, hasTexts } from './keptDrafts';
+import { keptDrafts, hasTexts } from '../app/keptText';
 import { useSaveOut } from './saveOut';
-import { editDrafts, editsOut, landCreated, landEdit, newFindingDrafts } from './findingDrafts';
-import type { EditDraft } from './findingDrafts';
+import {
+  editBeingSaved, editDrafts, type EditDraft, newFindingDrafts, saveFindingEdit, saveNewFinding,
+} from '../app/findingDrafts';
 import { SourceChips } from './research';
 import { CitedEditor } from './citedEditor';
-import { MenuChoice, workstreamOptions, type MenuOption } from './filterMenu';
 
 /** The mark on an open finding that something has happened since it was written: what it says, and why. */
 export const OUT_OF_DATE = 'May be out of date';
@@ -80,89 +81,15 @@ export function Brief({ paragraphs, deal, onFinding, marked }: { paragraphs: str
 /** when a closed finding was closed, as its row says it: "Closed yesterday", "Closed 3 days ago", "Closed Nov 14" */
 const closedText = (at: string) => { const w = whenText(at); return `Closed ${/^[A-Z][a-z]{2} \d/.test(w) ? w : w[0].toLowerCase() + w.slice(1)}`; };
 
-/** The status the list is showing. A choice with nothing left in it falls back to Open, so a short list is never left empty by a filter that no longer has anything to offer. */
-const statusShown = (FF: { status: 'open' | 'reassess' | 'closed' | 'all' }, all: Finding[]) =>
-  (FF.status === 'reassess' && !all.some((f) => f.status === 'open' && f.updated)) || (FF.status === 'closed' && all.length <= 8 && !all.some((f) => f.status === 'closed')) ? 'open' : FF.status;
-
-/**
- * The Findings heading and everything that acts on the list, in one row. As the row narrows it gives up only what it
- * must, in this order: everything in words; the buttons as icons; the status filter folded into the filter symbol with
- * the buttons back in words; both as icons. Which of these fits is measured, not guessed from the window's width.
- */
-function FindingsHead({ deal: d, all, adding, onNew }: { deal: Deal; all: Finding[]; adding: boolean; onNew: () => void }) {
-  const store = useStore(); const s = useAppState(); const kept = s.ui.findingFilter; const FF = { ...kept, status: statusShown(kept, all) };
-  const set = (patch: Partial<typeof FF>) => store.ui({ findingFilter: { ...FF, ...patch } });
-  const many = all.length > 8; const deleted = deletedOf(s, d.id, 'finding').length; const lists = listsOf(s, d.id).length;   // an issues list is taken back from Deleted too
-  const counts = { open: all.filter((f) => f.status === 'open').length, reassess: all.filter((f) => f.status === 'open' && f.updated).length, closed: all.filter((f) => f.status === 'closed').length };
-  // a status to choose between exists when something is closed or marked, or the list is long; a filter that is on is always shown, so it can be turned off
-  const choice = many || counts.closed > 0 || counts.reassess > 0 || FF.status !== 'open';
-  const statuses = ([['open', `Open ${counts.open}`], ['reassess', `To update ${counts.reassess}`], ['closed', `Closed ${counts.closed}`], ['all', 'All']] as const)
-    .filter(([k]) => k === 'open' || k === 'all' || FF.status === k || (k === 'reassess' ? counts.reassess > 0 : counts.closed > 0 || many));
-  const more = many || !!FF.workstream || !!FF.text || !!FF.reviewed;                 // the long list's own filters: workstream, reviewed, words
-  // the list's headings, in their order: A to Z, then "No workstream" when any finding has none
-  const wsl = findingWorkstreams(all);
-  // 0 words and status in the row · 1 buttons as icons · 2 status in the filter menu, buttons in words · 3 both
-  const row = useRef<HTMLDivElement>(null); const [mode, setMode] = useState(0); const [, again] = useState(0); const seen = useRef({ w: -1, sig: '' });
-  const sig = `${choice}|${statuses.map((x) => x[1]).join()}|${more}`;
-  useLayoutEffect(() => {
-    const el = row.current; if (!el) return;
-    if (seen.current.sig !== sig || seen.current.w !== el.clientWidth) { seen.current = { w: el.clientWidth, sig }; if (mode !== 0) { setMode(0); return; } }   // something changed: start from words and give up only what does not fit
-    if (el.scrollWidth > el.clientWidth + 1 && mode < 3) setMode(mode + 1);
-  });
-  useEffect(() => { const el = row.current; if (!el || typeof ResizeObserver === 'undefined') return; const ro = new ResizeObserver(() => { if (el.clientWidth !== seen.current.w) again((n) => n + 1); }); ro.observe(el); return () => ro.disconnect(); }, []);
-  const icons = mode === 1 || mode === 3; const folded = mode >= 2 && choice;
-  const [menu, setMenu] = useState(false); useDismiss(menu, () => setMenu(false), '.fhead .fwrap');
-  const hidden = (folded && FF.status !== 'open') || !!FF.workstream || !!FF.text || !!FF.reviewed;   // a filter is on that the row itself does not show
-  const act = (id: string, icon: string, label: string, props: Record<string, unknown>) => (
-    <button type="button" class={`btn sm act ${icons ? 'ico' : ''}`} id={id}
-      {...(icons ? { title: label, 'aria-label': label } : {})} {...props}>
-      <Icon name={icon} size={14} />{icons ? null : <span>{label}</span>}
-    </button>);
-  return (
-    <div class="lbl flagsl fhead" ref={row} data-fhead={mode}>
-      <span class="h" role="heading" aria-level={2}>Findings</span>
-      {choice && !folded && <div class="seg">{statuses.map(([k, l]) => <button type="button" key={k} class={FF.status === k ? 'on' : ''} aria-pressed={FF.status === k} data-fstatusf={k} onClick={() => set({ status: k })}>{l}</button>)}</div>}
-      {(folded || more) && <span class="fwrap">
-        <button type="button" class={`btn sm ico ${hidden ? 'on' : ''}`} id="f-filter" aria-haspopup="menu" aria-expanded={menu} title={hidden ? 'Filter (on)' : 'Filter'} aria-label={hidden ? 'Filter (on)' : 'Filter'} onClick={() => setMenu(!menu)}><Icon name="filter" size={14} /></button>
-        {/* statuses alone are a menu of choices; with the sections and the text filter it is a group of controls */}
-        {menu && <div class="colmenu fmenu" {...(more ? { role: 'group', 'aria-label': 'Filter', 'data-menu': true } : { role: 'menu' })}>
-          {folded && statuses.map(([k, l]) => <StatusChoice key={k} status={k} label={l} on={FF.status === k}
-            inMenu={!more} pick={() => {
-              set({ status: k });
-              if (!more) setMenu(false);
-            }} />)}
-          {folded && more && <div class="msep" />}
-          {more && <>
-            {/* the words first, in the menu search field Past conversations has, above a long list of workstreams */}
-            <span class="psearch"><Icon name="search" size={14} />
-              <input placeholder="Filter" aria-label="Filter findings" value={FF.text}
-                onInput={(e) => set({ text: (e.currentTarget as HTMLInputElement).value })} /></span>
-            <div class="msep" />
-            <MenuChoice title="Workstream" name="f-ws" options={workstreamOptions(wsl)} value={FF.workstream}
-              onPick={(workstream) => set({ workstream })} long pinLast={wsl.at(-1) === NO_WORKSTREAM} />
-            <div class="msep" />
-            <MenuChoice title="Reviewed" name="f-rev" options={REVIEWED} value={FF.reviewed}
-              onPick={(reviewed) => set({ reviewed })} />
-          </>}
-        </div>}
-      </span>}
-      <span class="sp" />
-      {act('f-new', 'plus', 'New Finding', { 'aria-expanded': adding, onClick: onNew })}
-      <FindingsMore dealId={d.id} empty={!all.length} restorable={deleted > 0 || lists > 0} />
-    </div>
-  );
-}
-
-/** The Reviewed section of the Findings filter menu, in the dropdown's old order. */
-const REVIEWED: MenuOption<'' | 'yes' | 'no'>[] =
-  [['', 'Reviewed or Not'], ['yes', 'Reviewed'], ['no', 'Not Reviewed']];
-
 /**
  * The Findings ⋯ menu, matching Q&A's: Import…, Export…, then the seldom used Deleted… apart from them
  * (decisions.md, Findings). New finding stays the one visible button.
  */
 function FindingsMore({ dealId, empty, restorable }: { dealId: string; empty: boolean; restorable: boolean }) {
-  const store = useStore(); const [open, setOpen] = useState(false); const wrap = useRef<HTMLSpanElement>(null);
+  const store = useStore();
+  const { can } = useAppState();
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLSpanElement>(null);
   useDismiss(open, () => setOpen(false), '.fhead .fmore');
   // focus the ⋯ button first, so closing the dialog returns there
   const openDialog = (kind: 'importIssues' | 'exportFindings' | 'deleted') => {
@@ -173,7 +100,7 @@ function FindingsMore({ dealId, empty, restorable }: { dealId: string; empty: bo
       <button type="button" class={`btn sm ico ${open ? 'on' : ''}`} id="f-more" aria-label="More" title="More"
         aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="more" size={16} /></button>
       {open && <div class="colmenu glass" role="menu">
-        {store.services.ai.issuesList && <button type="button" class="mi" role="menuitem" id="f-import"
+        {can.issuesList && <button type="button" class="mi" role="menuitem" id="f-import"
           onClick={() => openDialog('importIssues')}>Import…</button>}
         <button type="button" class="mi" role="menuitem" id="f-export" disabled={empty}
           onClick={() => openDialog('exportFindings')}>Export…</button>
@@ -183,19 +110,6 @@ function FindingsMore({ dealId, empty, restorable }: { dealId: string; empty: bo
       </div>}
     </span>
   );
-}
-
-/**
- * One status in the Findings filter: a choice in its menu, or, beside the filter's other controls, a pressed button.
- * The one on is checked (design.md, Menus).
- */
-function StatusChoice({ status, label, on, inMenu, pick }: {
-  status: string; label: string; on: boolean; inMenu: boolean; pick: () => void;
-}) {
-  const role = inMenu ? { role: 'menuitemradio' as const, 'aria-checked': on } : { 'aria-pressed': on };
-  return <button type="button" {...role} class={`mi ${on ? 'on' : ''}`} data-fstatusf={status} onClick={pick}>
-    {label}<ChoiceCheck on={on} />
-  </button>;
 }
 
 /** A finding's status menu, Open or Closed, the current one checked (design.md, Menus). */
@@ -216,17 +130,15 @@ function StatusMenu({ status, choose }: { status: string; choose: (x: 'open' | '
  */
 export function CheckLine({ deal: d }: { deal: Deal }) {
   const store = useStore(); const s = useAppState(); const c = s.checks[d.id]; const ro = useContext(ReadOnlyContext);
-  if (!store.services.ai.checkAll) return null;
+  useEffect(() => s.can.checkAll ? watchCheck(store, d.id) : undefined, [store, d.id, s.can.checkAll]);
   const on = (iso: string) => fmtDate(localYmd(iso)); const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
   const out = c?.left ? [c.left.items ? n(c.left.items, 'checklist item', 'checklist items') : '', c.left.findings ? n(c.left.findings, 'finding', 'findings') : ''].filter(Boolean).join(' and ') : '';
   const deep = !!c?.offerDeep && !c.left && !c.failedAt;
   // what the latest check left out can be checked on its own while the documents are the ones it checked
-  const rest = !deep && !c?.failedAt && c?.left && !c.left.changed ? c.left.items + c.left.findings : 0;
-  // while a check runs, the line is refreshed every few seconds: who else is in it, and how it is going
-  useEffect(() => { if (!c?.busy && !c?.checking) return; const t = setInterval(() => void store.refreshChecked(d.id), 3000); return () => clearInterval(t); }, [d.id, !!c?.busy, !!c?.checking]);
+  const rest = checkLeftCount(c, deep);
   const shared = checkingSays(c?.checking, c?.busy === 'deep');
   // checklist items no check has reached yet, such as items brought in since the last one; not while the first pass is still reading
-  const rows = s.checklists[d.id]; const unchecked = d.stage === 'indexing' || !Array.isArray(rows) ? 0 : rows.filter((r) => r.result === 'unchecked').length;
+  const unchecked = uncheckedChecklistCount(s, d);
   // the names shown on hover go when the line no longer has them
   // the names go in the same frame as the line that named them, not a frame after it (#695)
   const lineRef = useRef<HTMLSpanElement>(null);
@@ -242,7 +154,7 @@ export function CheckLine({ deal: d }: { deal: Deal }) {
   // the line goes once nothing is due; if the focus was in it, it moves to the deal's ⋯, where Check again stays, not to the page
   const had = useRef(false);
   useEffect(() => { if (!said && had.current) { had.current = false; if (!document.activeElement || document.activeElement === document.body) document.getElementById('deal-more')?.focus(); } }, [!!said]);
-  if (!said) return null;                                // nothing due: no line
+  if (!s.can.checkAll || !said) return null;
   return <div class="ovcheck" id="ov-check" onFocusIn={() => { had.current = true; }} onFocusOut={(e) => { if (e.relatedTarget && !(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) had.current = false; }}>
     {said && <span ref={lineRef} class={`when ${warn ? 'warn' : ''}`} id="f-checked" role="status" {...(shared?.who ? { tabIndex: 0, 'aria-description': shared.who, onMouseEnter: (e: MouseEvent) => showTip(e.currentTarget as HTMLElement, shared.who!), onMouseLeave: (e: MouseEvent) => hideTip(e.currentTarget as HTMLElement), onFocus: (e: FocusEvent) => showTip(e.currentTarget as HTMLElement, shared.who!, 0), onBlur: (e: FocusEvent) => hideTip(e.currentTarget as HTMLElement) } : {})}>{warn && <i class="dot" aria-hidden="true" />}{said}</span>}
     {/* while a check runs the button is off but keeps the focus (aria-disabled, not disabled, which would drop the focus to the page) */}
@@ -257,24 +169,56 @@ export function CheckLine({ deal: d }: { deal: Deal }) {
 /** A workstream's heading in the Findings list, styled as the Checklist's group headings; read out as "Legal, 12", not "Legal12". */
 const GroupHead = ({ name, n }: { name: string; n: number }) => <div class="ckgroup fgroup" role="heading" aria-level={3} aria-label={`${name}, ${n}`}>{name}<span class="n">{n}</span></div>;
 
+function findingActivity(finding: Finding, questions: State['questions'], status?: string) {
+  const opening = dot(finding);
+  if (finding.status === 'closed' && finding.closedAt) return opening + closedText(finding.closedAt);
+  const when = finding.status === 'open' && finding.updated
+    ? markText(finding, questions) : whenText(finding.raisedAt);
+  return opening + (status ? `${status} · ` : '') + when;
+}
+
+function FindingListRow({ finding: f, questions, conflictVersions, showStatus }: {
+  finding: Finding; questions: State['questions']; conflictVersions?: number; showStatus: boolean;
+}) {
+  const open = f.status === 'open';
+  const status = open ? 'Open' : 'Closed';
+  const activity = findingActivity(f, questions, showStatus ? status : undefined);
+  return <a href={findingHref(f)} class="flagrow">
+    <span class={`stripe ${open ? 'High' : ''}`} title={status} />
+    <span class="ft">
+      {f.updated && (open ? <i class="upd" aria-hidden="true" /> : <i class="upd" title="May need reopening" />)}
+      {f.aiTitle && <AiTitle />}{f.title}
+      {f.reviewed && <i class="rvd" title={`Reviewed by ${f.reviewed.by}`}><Icon name="checkfill" size={13} /></i>}
+    </span>
+    <span class="fm" title={!open && f.note ? f.note : undefined}>
+      {conflictVersions !== undefined &&
+        <><span class="cf" data-conflict>{versionsWord(conflictVersions)}</span> · </>}
+      {f.workstream}{activity}{f.onLists?.length ? ` · ${onListText(f.onLists)}` : ''}
+    </span>
+  </a>;
+}
+
 export function FindingsSection({ deal: d }: { deal: Deal }) {
-  const store = useStore(); const s = useAppState(); useMinuteTick();
+  const s = useAppState();
+  useMinuteTick();
   const [adding, setAdding] = useState(() => newFindingDrafts.has(d.id));   // a half-written new finding comes back open
-  // by workstream, and in each one marked findings first: they are the ones waiting on a person. Otherwise the order they are kept in.
-  const all = listedFindings(s, d.id);
-  const many = all.length > 8; const FF = { ...s.ui.findingFilter, status: statusShown(s.ui.findingFilter, all) };
-  const list = all.filter((f) => findingListed(s, f, FF));   // a finding with two versions needs a decision, so no filter hides it
+  const view = findingsView(s, d.id);
+  const { many, rows, counts } = view;
   return (
     <>
       <section class={`twocol one ${many ? 'many' : ''}`}><div>
-        <FindingsHead deal={d} all={all} adding={adding} onNew={() => setAdding(true)} />
+        <FindingsHead view={view} adding={adding} onNew={() => setAdding(true)}>
+          <FindingsMore dealId={d.id} empty={!counts.total} restorable={view.restorable} />
+        </FindingsHead>
         {adding && <NewFindingCard deal={d} onDone={() => { setAdding(false); requestAnimationFrame(() => { if (!document.activeElement || document.activeElement === document.body) document.getElementById('f-new')?.focus(); }); }} />}
         <div class={`flags ${many ? 'scroll' : ''}`}>
-          {list.length ? list.map((f, i) => <Fragment key={f.id}>
-            {/* under a heading for each workstream, with how many of its findings are shown, as the Checklist groups its items; the row still names its workstream, so a row scrolled away from its heading says where it belongs */}
-            {(i === 0 || workstreamHead(list[i - 1]) !== workstreamHead(f)) && <GroupHead name={workstreamHead(f)} n={list.filter((x) => workstreamHead(x) === workstreamHead(f)).length} />}
-            <a href={findingHref(f)} class="flagrow" key={f.id}><span class={`stripe ${f.status === 'open' ? 'High' : ''}`} title={f.status === 'open' ? 'Open' : 'Closed'} /><span class="ft">{f.updated && (f.status === 'open' ? <i class="upd" aria-hidden="true" /> : <i class="upd" title="May need reopening" />)}{f.aiTitle && <AiTitle />}{f.title}{f.reviewed && <i class="rvd" title={`Reviewed by ${f.reviewed.by}`}><Icon name="checkfill" size={13} /></i>}</span><span class="fm" title={f.status === 'closed' && f.note ? f.note : undefined}>{s.conflicts[f.id] ? <><span class="cf" data-conflict>{versionsWord(s.conflicts[f.id].versions.length)}</span> · </> : null}{f.workstream}{f.status === 'closed' && f.closedAt ? `${dot(f)}${closedText(f.closedAt)}` : <>{FF.status === 'all' ? `${dot(f)}${f.status === 'open' ? 'Open' : 'Closed'} · ` : dot(f)}{f.updated && f.status === 'open' ? markText(f, s.questions) : whenText(f.raisedAt)}</>}{f.onLists?.length ? ` · ${onListText(f.onLists)}` : ''}</span></a></Fragment>)
-            : <p class="emptyline" style="margin-top:14px">{all.length ? 'Nothing matches.' : 'Nothing has been flagged.'}</p>}
+          {rows.length ? rows.map(({ finding, heading, conflictVersions }) => <Fragment key={finding.id}>
+            {heading && <GroupHead name={heading.name} n={heading.count} />}
+            <FindingListRow finding={finding} questions={s.questions} conflictVersions={conflictVersions}
+              showStatus={view.filter.status === 'all'} />
+          </Fragment>) : <p class="emptyline" style="margin-top:14px">
+            {counts.total ? 'Nothing matches.' : 'Nothing has been flagged.'}
+          </p>}
         </div>
       </div></section>
     </>
@@ -300,7 +244,7 @@ const CITE_TIP = 'A tag after a sentence names the source it cites. It moves wit
 function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
   const store = useStore();
   // what was typed and kept, or, after Cancel while a save is out, what that save sent (#771)
-  const kept = editDrafts.get(f.id) ?? editsOut.get(f.id);
+  const kept = editDrafts.get(f.id) ?? editBeingSaved(f.id);
   // the finding as this edit began (kept with the draft, so a change made elsewhere meanwhile is still caught on Save)
   const start: EditDraft = kept ?? {
     title: f.title, ws: f.workstream, body: f.body.join('\n\n'),
@@ -341,15 +285,7 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
     if (busy) return;
     remember({});   // the kept draft holds what is sent, so the save can tell what is typed after it (#771)
     const sent = draft.current;
-    const edit = {
-      dealId: f.dealId, findingId: f.id, title, workstream: ws, body: toParagraphs(body), base: sent.base,
-    };
-    void out.send(async (cancelled) => {
-      editsOut.set(f.id, sent);
-      const r = await store.dispatch(EditFinding, edit, { idempotencyKey: 'f-edit-' + f.id })
-        .finally(() => editsOut.delete(f.id));
-      return landEdit(f.id, sent, r, cancelled());
-    });
+    void out.send((cancelled) => saveFindingEdit(store, f, sent, cancelled));
   };
   return (
     <div class="card addf fedit" data-holds-work onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onDone(); } }}>
@@ -391,13 +327,7 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
   };
   const create = () => {
     const sent = { title, ws, body };
-    const input = { dealId: d.id, title, workstream: ws, body: toParagraphs(body), origin: 'human' as const };
-    void out.send(async (cancelled) => {
-      const r = await store.dispatch(CreateFinding, input, { idempotencyKey: 'f-create-' + d.id });
-      // cancelled while it was out: a form opened since is left alone
-      if (!r.ok || cancelled()) return undefined;
-      return landCreated(d.id, sent, createdFinding(store, r.value.opId));
-    });
+    void out.send((cancelled) => saveNewFinding(store, d.id, sent, cancelled));
   };
   return (
     <div class="card addf" data-holds-work onKeyDown={(e) =>
@@ -413,14 +343,18 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
   );
 }
 
-/** the finding a CreateFinding made, by what its write wrote */
-export function createdFinding(store: ReturnType<typeof useStore>, opId: string): Finding | undefined {
-  const state = store.get();
-  const written = Object.keys(state.ops[opId]?.resultRevs ?? {});
-  return written.map((id) => state.findings[id]).find(Boolean);
-}
+const HIST_TEXT: Record<FindingHistoryEvent['kind'], string> = {
+  edited: 'Edited', status: 'Status changed', response: 'Response received', responseWithdrawn: 'Response removed',
+  document: 'Document attached', reassessed: 'Updated', note: 'Note added',
+};
 
-const HIST_TEXT: Record<string, string> = { edited: 'Edited', status: 'Status changed', response: 'Response received', responseWithdrawn: 'Response removed', document: 'Document attached', reassessed: 'Updated', note: 'Note added' };
+function historyText(event: FindingHistoryEvent): string {
+  if (event.kind === 'status' && (event.to === 'closed' || event.to === 'open')) {
+    return `${event.to === 'closed' ? 'closed' : 'reopened'} by ${event.actor}`;
+  }
+  if (event.kind === 'note') return HIST_TEXT.note;
+  return event.text ?? HIST_TEXT[event.kind];
+}
 
 /** The finding as its page shows it. In the side pane beside a conversation (`pane`) it has no Edit or Delete: those are on its page. */
 export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: string; findingId: string; onOpen: (s: Source) => void; pane?: boolean }) {
@@ -450,16 +384,8 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
     const typing = askKept(f.id) && <FindingLinks key={f.id} dealId={dealId} f={f} pane={pane} />;
     return <div class="opening"><div class="lbl fmeta"><span>{f.workstream}</span></div>{clash}{typing}</div>;
   }
-  const audit = s.audit[f.id] ?? [];
-  const undone = new Set(audit.map((a) => a.undoes).filter(Boolean));
-  const standing = audit.filter((a) => !undone.has(a.opId));
-  // the latest thing that happened, said as what it was: a note written while closing is part of the closing, not the event
-  const newest = [...standing].reverse().find((a) => HIST_TEXT[a.kind] && (a as { text?: string }).text !== LISTED);
-  const last = newest?.kind === 'note' ? standing.find((a) => a.kind === 'status' && a.opId === newest.opId) ?? newest : newest;
-  const lastText = !last ? '' : last.kind === 'status' && (last.to === 'closed' || last.to === 'open') ? `${last.to === 'closed' ? 'closed' : 'reopened'} by ${last.actor}` : last.kind === 'note' ? HIST_TEXT.note : (last as { text?: string }).text ?? HIST_TEXT[last.kind];
-  const prev = previousVersion(standing);
-  // the review that the last update cleared, if it cleared one: kept in sight on the version it was given to
-  const wasReviewed = prev ? (standing.find((a) => a.kind === 'unreviewed' && a.opId === prev.opId)?.from as Finding['reviewed'] | undefined) ?? null : null;
+  const { last, previous: prev, previousReview: wasReviewed } = findingHistory(s, f.id);
+  const lastText = last ? historyText(last) : '';
   const busy = s.ui.reassessing.includes(f.id);
   // which sources the detail's markers point at
   const marked = new Set(f.body.flatMap((b) => splitCited(b, f.sources.length).flatMap((p) => p.refs)));
@@ -467,7 +393,11 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
   const listed = !fewDocuments(f.sources);
   const raised = f.origin !== 'ai' && f.raisedBy ? `Raised by ${f.raisedBy} · ${fmtDate(localYmd(f.raisedAt))}` : `identified ${whenText(f.raisedAt).toLowerCase()}`;
   const commit = async (status: 'open' | 'closed', text: string) => { const r = await store.dispatch(SetFindingStatus, { dealId, findingId, status, note: text.trim() || undefined }, { idempotencyKey: 'fst-' + f.id }); if (r.ok) setNote(null); };
-  const del = async () => { const r = await store.dispatch(DeleteFinding, { dealId, findingId }, { idempotencyKey: 'fdel-' + f.id }); if (r.ok) location.hash = afterDeletingFinding(dealId); };
+  const del = async () => {
+    const result = await store.dispatch(DeleteFinding, { dealId, findingId }, { idempotencyKey: 'fdel-' + f.id });
+    // #763: the deleted page names the draft and can restore the finding with its edit.
+    if (result.ok && !editDrafts.has(f.id)) location.hash = afterDeletingFinding(dealId);
+  };
   return (
       <div class="opening">
         <div class="lbl fmeta"><span>{f.workstream}{dot(f)}{raised}{f.reviewed ? ` · reviewed by ${f.reviewed.by}, ${fmtDate(localYmd(f.reviewed.at))}` : ''}{last ? ` · ${lastText} · ${whenText(last.at).toLowerCase()}` : ''}<OnListMark f={f} /></span>
@@ -500,7 +430,12 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
         {busy ? <div class="ai pending" aria-label="Updating"><span class="dots"><i /><i /><i /></span></div> : f.body.map((b, i) => <p class="dtxt" key={i}><Cited text={b} sources={f.sources} onOpen={onOpen} whole={!marked.size && !f.ownWords} onMore={listed ? showSources : undefined} /></p>)}
         {/* more documents than a pop shows: every one, with its places, in a list like Previous version */}
         {!busy && listed && <details class="prev fsrcs" id="f-sources" ref={srcList} open={srcOpen} onToggle={(e) => setSrcOpen((e.currentTarget as HTMLDetailsElement).open)}><summary>{docs.length} sources</summary>
-          <div class="sgl">{docs.map((g) => <div class="sgr" key={g.doc.docId}><span class="sgd"><DocName name={g.doc.doc} /></span><span class="sgp">{g.items.filter((x, j) => g.items.findIndex((y) => y.loc === x.loc) === j).map((x, j) => <button type="button" class="srcbtn" key={j} aria-label={`${g.doc.doc}, ${x.loc || 'open'}`} onClick={() => onOpen(x)}>{x.loc || 'Open'}</button>)}</span></div>)}</div></details>}
+          <div class="sgl">{docs.map((g) => <div class="sgr" key={g.doc.docId}>
+            <span class="sgd"><DocName name={g.doc.doc} /></span>
+            <span class="sgp">{g.pages.map((x, j) => <button type="button" class="srcbtn" key={j}
+              aria-label={`${g.doc.doc}, ${x.loc || 'open'}`} onClick={() => onOpen(x)}>
+              {x.loc || 'Open'}</button>)}</span>
+          </div>)}</div></details>}
         {f.note && <><div class="lbl" style="margin-top:12px">Note</div><p class="dtxt" style="white-space:pre-wrap">{f.note}</p></>}
         {prev && <details class="prev"><summary>Previous version · {fmtDate(localYmd(prev.at))}{wasReviewed ? ` · reviewed by ${wasReviewed.by}` : ''}</summary><p class="dtxt">{(prev.from as string[]).join(' ').replace(/\s*\[\d+\]/g, '')}</p></details>}
         </>}

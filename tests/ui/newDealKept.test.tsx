@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 // The New deal form kept across a restart (#55), with folders still being read (#113).
+import { restartKeptText } from './keptTextSession';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const KEY = 'dil/1/kept-drafts';
 const load = async () => {
-  vi.resetModules();
-  return import('../../src/ui/newDealKept');
+  await restartKeptText();
+  return import('../../src/app/newDealDraft');
 };
 const folder = (n: number) => ({ path: `D:\\Deals\\Room ${n}`, label: `Room ${n}`, files: 100 + n, size: '0.3 GB' });
 const DRAFT = {
@@ -21,6 +22,22 @@ describe('the kept New deal form', () => {
     window.dispatchEvent(new Event('pagehide'));
     k = await load();
     expect(k.keptNewDeal()).toEqual(DRAFT);
+  });
+
+  it('reads the prior raw key and flushes the same shape when the window is hidden', async () => {
+    localStorage.setItem(KEY, JSON.stringify({ 'new-deal': [['new', DRAFT]] }));
+    const k = await load();
+    expect(k.keptNewDeal()).toEqual(DRAFT);
+
+    const updated = { ...DRAFT, name: 'Lender diligence' };
+    k.keepNewDeal(updated);
+    const hidden = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    try {
+      document.dispatchEvent(new Event('visibilitychange'));
+      expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ 'new-deal': [['new', updated]] });
+    } finally {
+      hidden.mockRestore();
+    }
   });
 
   it('is forgotten once the deal is made', async () => {

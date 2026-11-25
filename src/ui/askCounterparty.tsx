@@ -2,28 +2,18 @@
  * Ask the counterparty (linking design, sections 6 and 13): the card a linked question is typed in, and the list of the
  * questions already asked. Shared by the Checklist's open item and a finding's page.
  */
-import { dealQuestions } from '../app/state';
+import { logQuestionDraft, questionDraftAt, questionLogKey } from '../app/logQuestionDraft';
 import { TEXT_MAX } from '../domain/importExport';
-import type { Finding, Question } from '../domain/model';
+import type { Question } from '../domain/model';
 import { closeOnEscape, focusCard } from './focus';
 import { useStore } from './hooks';
+import { moveKey } from '../app/keptText';
 import { navigate } from './nav';
+import { pendingSaveKeys } from '../app/saveOut';
 import { useSaveOut } from './saveOut';
 
 /** a question's status, as a list of asked questions says it */
 export const STATUS: Record<Question['status'], string> = { open: 'open', answered: 'answered', closed: 'closed' };
-
-/** the questions put to the counterparty about an item, or about a finding (the one it raised), oldest first */
-export function askedAbout(
-  s: Parameters<typeof dealQuestions>[0],
-  dealId: string,
-  itemId: string | null,
-  f: Finding | undefined,
-): Question[] {
-  const aboutItem = (q: Question) => itemId !== null && q.linkedItem?.id === itemId;
-  const aboutFinding = (q: Question) => !!f && q.linkedFinding === f.id;
-  return dealQuestions(s, dealId).filter((q) => aboutItem(q) || aboutFinding(q)).sort((a, b) => a.n - b.n);
-}
 
 /** The questions asked, each as its number (opening it on the Q&A page), its status and its words. */
 export function AskedList({ dealId, qs, id }: { dealId: string; qs: Question[]; id: string }) {
@@ -47,15 +37,25 @@ export function AskedList({ dealId, qs, id }: { dealId: string; qs: Question[]; 
  * Log question for a card whose text is kept in `drafts` under `key`. Log stays off while the save runs, also on a card
  * drawn again for the same key meanwhile (the person went to another finding and back). Once the save lands, the kept
  * text is let go (`forget`) only if it is still the text logged, so words typed since are kept; then the card on screen
- * is told (`settle`), and closes if nothing is kept.
+ * is told (`settle`), and closes if nothing is kept. Cancel leaves any card opened since for the same key alone (#843).
  */
-export function useLogQuestion(drafts: Map<string, string>, key: string, forget: () => void, settle: () => void) {
-  const { busy, send } = useSaveOut<void>('ask:' + key, settle);
-  const log = (text: string, dispatch: () => Promise<{ ok: boolean }>) => send(async () => {
-    const res = await dispatch();
-    if (res.ok && drafts.get(key)?.trim() === text) forget();
+export function useLogQuestion(
+  drafts: Map<string, string>, key: string, forget: (currentKey: string) => void, settle: () => void,
+  captureTarget?: () => () => boolean,
+) {
+  const saveKey = questionLogKey(key, pendingSaveKeys(), moveKey);
+  const out = useSaveOut(saveKey, (current: boolean) => {
+    if (current) settle();
   });
-  return { busy, log };
+  const draft = questionDraftAt(key, moveKey, drafts, forget);
+  const log = (text: string, dispatch: () => Promise<{ ok: boolean }>) =>
+    out.send((cancelled) => logQuestionDraft(text, draft, dispatch, cancelled, captureTarget?.()));
+  const cancel = () => {
+    out.cancel();
+    draft.forget();
+    settle();
+  };
+  return { busy: out.busy, log, cancel };
 }
 
 /** What the card shows and does; `ids` prefixes its fields' ids (`ck-ask` gives ck-ask-text, ck-ask-log and so on). */

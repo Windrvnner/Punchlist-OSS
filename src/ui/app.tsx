@@ -1,5 +1,5 @@
-import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { GROUP_HEADING } from '../app/commands/deals';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { dealRows, interruptedOperations, isInterrupted, railDealGroups } from '../app/dealView';
 import { commandLabel } from '../app/commandLabels';
 import { StoreContext, useAppState, useStore, lastInput, nameDir } from './hooks';
 import { Icon } from './icons';
@@ -10,12 +10,11 @@ import { QaPage, UndoImportDialog } from './qa';
 import { DealPage } from './deal';
 import { OverviewPage } from './overview';
 import { ChecklistPage } from './checklist';
-import { ConversationPage, Composer, scopeValid } from './conversation';
+import { ConversationPage, Composer } from './conversation';
 import { QueueStrip } from './queueStrip';
-import { scopeOfRoute, ask, navIntent } from '../app/conversations';
+import { scopeOfRoute, scopeValid } from '../app/conversations';
 import { NewDealDialog, DeleteDealDialog } from './dialogs';
 import { AddDealDialog, DealMore, RemoveDealDialog } from './addDeal';
-import { isMine } from '../app/commands/members';
 import { ExportQaDialog, ExportFindingsDialog } from './transfer';
 import { ImportDialog } from './qaImport';
 import { IssuesListDialog } from './issuesList';
@@ -28,19 +27,14 @@ import { FirmChecklistDialog } from './firmChecklist';
 import { LocateDialog } from './relink';
 import { PlaceKeptDialog } from './placeKept';
 import { SearchBox } from './search';
+import { TwinLabel } from './dealLabel';
 import { homeExamples } from './homeExamples';
 import { AccountRow } from './connection';
 import { ReadOnlyContext, SignedOutContext } from './editField';
 import { SERVICE } from '../control';
 import { takeNavPatch, closeDocument, takeFocusAfter } from './nav';
-import { renameKept } from './keptDrafts';
-import { keepAttachments } from './keptAttachments';
-import { followCopies } from '../app/attachments';
-import { staleKept } from './editField';
-import { isReading, dealHash, dealTwin } from '../app/state';
+import { isReading, dealHash, dealTwinLabels } from '../app/state';
 import { num } from './counts';
-
-const GROUPS: [State['deals'][string]['group'], string][] = (['live', 'monitor', 'pitch', 'closed'] as const).map((g) => [g, GROUP_HEADING[g]]);
 
 function routeFromHash(): State['ui']['route'] {
   const h = (location.hash || '#deals').slice(1);
@@ -61,16 +55,14 @@ export function App({ store }: { store: Store }) {
 
 function Shell() {
   const store = useStore(); const s = useAppState();
-  useLayoutEffect(() => keepAttachments(store), []);   // unsent attachments survive a restart (#60)
-  useEffect(() => followCopies(store), []);   // unsent attachments on a deleted deal follow it to its copy (#117)
-  useEffect(() => store.onRenamed((ids) => renameKept(ids, staleKept)), []);   // text kept on a deleted deal follows it to its copy
   useEffect(() => {
     const apply = () => {
       const route = routeFromHash(); const was = store.get().ui.route;
       const deal = (r: State['ui']['route']) => ('dealId' in r && r.dealId ? r.dealId : null);
       // list filters and the selected question belong to one deal: moving to another deal starts clean
       const fresh = deal(route) !== deal(was) ? { findingFilter: { status: 'open' as const, workstream: '', text: '', reviewed: '' as const }, qaFilter: { status: 'open' as const, workstream: '', text: '' }, checklistFilter: 'all' as const, selectedQuestion: null, selectedChecklist: null } : {};
-      store.ui({ route, doc: null, docAside: null, side: null, queueSearch: '', dialog: null, ...fresh, ...takeNavPatch() });
+      store.ui({ route, doc: null, docAside: null, side: null, queueSearch: '', dialog: null,
+        searchFocus: null, ...fresh, ...takeNavPatch() });
       // the link or button that was pressed is gone with the old page: focus goes to what opened the document being closed, else to the new page, not to nowhere
       const backTo = takeFocusAfter();
       requestAnimationFrame(() => { const back = backTo.map((sel) => document.querySelector<HTMLElement>(sel)).find(Boolean); if (back) back.focus(); else if (!document.activeElement || document.activeElement === document.body) document.getElementById('view')?.focus({ preventScroll: true }); });
@@ -159,13 +151,12 @@ function Shell() {
  * window; otherwise Settings, at its sign-in row.
  */
 function SignInBar() {
-  const store = useStore(); const s = useAppState(); const w = s.signin!;
+  const store = useStore();
   const [hidden, setHidden] = useState(false);   // until it shows again: the account row still says Read-only
   if (hidden) return null;
-  const go = () => { if (w.sso && !w.apiKey) void store.services.signin?.signIn(); else store.ui({ settings: true }); };
   return (
     <Notice class="robar" id="signin-bar" role="alert" glyph="warn" onClose={() => setHidden(true)}
-      actions={[{ label: 'Sign In', run: go, id: 'signin-bar-go' }]}>
+      actions={[{ label: 'Sign In', run: () => store.signInFromNotice(), id: 'signin-bar-go' }]}>
       <NoticeWords text={`Read-only · Not signed in to ${SERVICE}`} />
     </Notice>
   );
@@ -223,8 +214,7 @@ function Rail() {
   // which groups are unfolded is one of the person's view choices: it is kept with the others, so a reload does not unfold them
   const open = s.prefs.railOpen; const setOpen = (next: Record<string, boolean>) => store.setPrefs({ railOpen: next });
   const r = s.ui.route; const cur = 'dealId' in r && r.dealId ? r.dealId : null;
-  // a deal shows for the people who created it or added it; each group lists the newest deal first
-  const deals = Object.values(s.deals).filter((d) => isMine(s, d.id)).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+  const groups = railDealGroups(s);
   // the group holding the deal on screen opens when you arrive there or it moves group; after that it folds like any other
   const curGroup = cur ? s.deals[cur]?.group : undefined;
   // The exception is the deal the app was opened on: if its group was folded by hand, a reload leaves it folded.
@@ -256,9 +246,9 @@ function Rail() {
           </a> : <>
         <a href="#deals" class={r.name === 'home' ? 'on' : ''} aria-current={r.name === 'home' ? 'page' : undefined}>Home</a>
         {/* a group shows once it has a deal */}
-        {GROUPS.map(([g, label]) => (
-          <RailGroup key={g} label={label} deals={deals.filter((d) => d.group === g)}
-            open={!!open[g]} toggle={() => setOpen({ ...open, [g]: !open[g] })} cur={cur} />))}
+        {groups.map(({ group, label, deals }) => (
+          <RailGroup key={group} label={label} deals={deals}
+            open={!!open[group]} toggle={() => setOpen({ ...open, [group]: !open[group] })} cur={cur} />))}
         </>}
       </nav>
       <AccountRow />
@@ -274,15 +264,17 @@ function RailGroup({ label, deals, open, toggle, cur }: {
   label: string; deals: State['deals'][string][]; open: boolean; toggle: () => void; cur: string | null;
 }) {
   const s = useAppState();
+  const twinOf = useMemo(() => dealTwinLabels(Object.values(s.deals)), [s.deals]);
   if (!deals.length) return null;
   const row = (d: State['deals'][string]) => {
-    const twin = dealTwin(s, d);
+    const twin = twinOf(d);
+    const label = twin ? `${d.name} · ${twin}` : d.name;
     return (
       <div class="drow" key={d.id}>
         <a href={`#${dealHash(s.prefs, d.id)}`} class={`dealrow ${cur === d.id ? 'on' : ''}`}
-          aria-current={cur === d.id ? 'true' : undefined} title={twin ? `${d.name} · ${twin}` : d.name}>
+          aria-current={cur === d.id ? 'true' : undefined} title={label} aria-label={twin ? label : undefined}>
           <span class="dn1" dir={nameDir(d.name)}>{d.name}</span>
-          {twin && <span class="dtw">{dealTwin(s, d, true)}</span>}
+          {twin && <span class="dtw"><TwinLabel text={twinOf(d, true)} focus={twinOf(d, 'focus')} /></span>}
         </a>
         <DealMore dealId={d.id} />
       </div>
@@ -301,7 +293,7 @@ function RailGroup({ label, deals, open, toggle, cur }: {
 
 function Home() {
   const store = useStore(); const s = useAppState(); const ro = useContext(ReadOnlyContext);
-  const deals = Object.values(s.deals).filter((d) => isMine(s, d.id));
+  const deals = dealRows(s, 'home');
   if (!deals.length) return (
     <div class="home firstrun"><div class="center">
       <h1 class="ttl">Start with a deal</h1>
@@ -321,7 +313,7 @@ function Home() {
     <div class="home"><div class="center">
       <h1 class="ttl">What would you like to know?</h1>
       {/* the heading and the box at the window's center, with example questions in the box */}
-      <Composer scope={{ kind: 'all' }} launch="home" examples={homeExamples(deals.map((x) => x.name))} />
+      <Composer scope={{ kind: 'all' }} launch="home" examples={homeExamples(deals.map(({ deal }) => deal.name))} />
       {/* Home is the composer alone: the deals are in the sidebar, records in two versions on their own deal */}
     </div></div>
   );
@@ -422,7 +414,7 @@ function InterruptedBar() {
   const [first, setFirst] = useState<string>();
   const [dismissed, setDismissed] = useState<string[]>([]);
   const bar = useRef<HTMLDivElement>(null);
-  const ops = Object.values(s.ops).filter((op) => op.state === 'interrupted');
+  const ops = interruptedOperations(s);
   const start = Math.max(0, ops.findIndex((op) => op.id === first));
   const ordered = [...ops.slice(start), ...ops.slice(0, start)];
   const showing = ordered.filter((op) => !dismissed.includes(op.id)).slice(0, INTERRUPTED_ROWS);
@@ -433,7 +425,7 @@ function InterruptedBar() {
     requestAnimationFrame(() => bar.current?.querySelector<HTMLElement>('.intop .tundo')?.focus());
   };
   const hide = (id: string) => {
-    setDismissed([...dismissed.filter((key) => s.ops[key]?.state === 'interrupted'), id]);
+    setDismissed([...dismissed.filter((key) => isInterrupted(s.ops[key])), id]);
   };
   if (!ops.length) return null;
   return (

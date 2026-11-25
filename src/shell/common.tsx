@@ -8,6 +8,7 @@ import type { Store } from '../app/store';
 import { registry } from '../app/commands/undo';
 import { CreateDeal, AddFolders, RemoveFolder, RestoreFolder, DeleteDeal, EditDeal, RecordIndexingProgress } from '../app/commands/deals';
 import { AddUnresolved } from '../app/commands/addUnresolved';
+import { CloseSettledQuestions } from '../app/commands/closeSettled';
 import { CreateQuestion, EditQuestionField, SetQuestionStatus, SetQuestionsStatus, SetResponse, DeleteQuestion, RestoreQuestion, UseAsResponse, RenumberQuestion } from '../app/commands/questions';
 import { CreateFinding, EditFinding, SetFindingStatus, ReviewFinding, DeleteFinding, RestoreFinding, RestoreFindingSnapshot, Reassess, ApplyReassessment, AttachDocumentToFinding } from '../app/commands/findings';
 import { ImportQuestions, RevertImport, UndoLastImport } from '../app/commands/importQuestions';
@@ -21,15 +22,34 @@ import { SetDealMember } from '../app/commands/members';
 import { pickUpIndexing } from '../app/indexing';
 import { lookForFolders } from '../app/relink';
 import { watchFolders } from '../app/folderWatch';
-import { App } from '../ui/app';
+import { startKeptText } from './keptText';
+import { initializeKeptImports } from '../app/keptImports';
+import { IndexedKeptImports } from '../adapters/keptImports';
 import '../styles.css';
 import '../ui/ui.css';
 
-export const COMMANDS = [CreateDeal, AddFolders, RemoveFolder, RestoreFolder, DeleteDeal, EditDeal, EditFinding, RecordIndexingProgress, CreateQuestion, EditQuestionField, SetQuestionStatus, SetQuestionsStatus, AddUnresolved, SetResponse, DeleteQuestion, RestoreQuestion, RequestDraft, ApplyDraft, RecoverDrafts, DiscardDraft, AcceptDraft, RestoreQuestionSnapshot, CreateFinding, SetFindingStatus, ReviewFinding, DeleteFinding, RestoreFinding, RestoreFindingSnapshot, Reassess, ApplyReassessment, AttachDocumentToFinding, UseAsResponse, ImportQuestions, RevertImport, UndoLastImport, ImportIssuesList, RevertIssuesList, RemoveIssuesList, RestoreIssuesList, ResolveConflict, ReopenConflict, RestoreVersion, RenumberQuestion, AddDealItems, SetItemsOff, RegroupDealItems, BringInList, RestoreList, SetDealMember, KeepQaLog, SetQaLogFolder, RecordQaLogExport, RestoreQaLogs, ChooseQaVersion, RestoreQaVersion, TakeFromQaLog, RestoreQuestionSnapshots];
+export const COMMANDS = [
+  CreateDeal, AddFolders, RemoveFolder, RestoreFolder, DeleteDeal, EditDeal, EditFinding, RecordIndexingProgress,
+  CreateQuestion, EditQuestionField, SetQuestionStatus, SetQuestionsStatus, CloseSettledQuestions, AddUnresolved,
+  SetResponse, DeleteQuestion, RestoreQuestion, RequestDraft, ApplyDraft, RecoverDrafts, DiscardDraft, AcceptDraft,
+  RestoreQuestionSnapshot, CreateFinding, SetFindingStatus, ReviewFinding, DeleteFinding, RestoreFinding,
+  RestoreFindingSnapshot, Reassess, ApplyReassessment, AttachDocumentToFinding, UseAsResponse, ImportQuestions,
+  RevertImport, UndoLastImport, ImportIssuesList, RevertIssuesList, RemoveIssuesList, RestoreIssuesList,
+  ResolveConflict, ReopenConflict, RestoreVersion, RenumberQuestion, AddDealItems, SetItemsOff, RegroupDealItems,
+  BringInList, RestoreList, SetDealMember, KeepQaLog, SetQaLogFolder, RecordQaLogExport, RestoreQaLogs,
+  ChooseQaVersion, RestoreQaVersion, TakeFromQaLog, RestoreQuestionSnapshots,
+];
 for (const c of COMMANDS) registry.set(c.name, c);
 
 /** Theme, focus refresh, mount, and start: the same in both shells once the Store is made. */
-export function run(store: Store) {
+export async function run(store: Store) {
+  startKeptText(store.services.local);
+  initializeKeptImports(new IndexedKeptImports());
+  const [{ App }, { startKeepingDrafts }] = await Promise.all([
+    import('../ui/app'),
+    import('../app/startKeepingDrafts'),
+  ]);
+  startKeepingDrafts(store);
   // Appearance: the person's choice, or Windows' when they chose to match it. The themes themselves are the tokens in styles.css.
   const sysLight = matchMedia('(prefers-color-scheme: light)');
   // written only when it changes: it runs on every change to the store, and writing even the same value restyles the

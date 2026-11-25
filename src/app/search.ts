@@ -3,6 +3,7 @@
  * questions. Pure over state; the palette loads unvisited deals' records first.
  */
 import type { Store } from './store';
+import type { TwinFocus } from './dealLabel';
 import { type State, type UiState, dealQuestions, dealFindings, dealHash, dealTwinLabels } from './state';
 import { conversationDocs, docIndex } from './conversations';
 import { docKey } from '../domain/model';
@@ -10,9 +11,26 @@ import type { Item } from '../domain/checklist';
 import { isMine } from './commands/members';
 
 export type HitKind = 'deal' | 'finding' | 'item' | 'question' | 'document';
-/** Where a hit inside a deal is: the deal's name, what tells it from a deal of the same name, and the place in it ("Q7", "p. 4"). */
-export interface Place { deal: string; twin: string; at: string }
-export interface Hit { /** the hover, where it says more than `where` */ tip?: string; key: string; kind: HitKind; title: string; where: string; hash: string; /** set on hits inside a deal */ place?: Place; ui?: Partial<UiState>; /** set on document hits */ doc?: { doc: string; docId: string } }
+// The deal, its disambiguator and the place within the deal (for example, Q7 or p. 4).
+export interface Place {
+  deal: string;
+  twin: string;
+  focus?: TwinFocus;
+  at: string;
+}
+
+export interface Hit {
+  key: string;
+  kind: HitKind;
+  title: string;
+  where: string;
+  hash: string;
+  tip?: string;
+  place?: Place;
+  twinFocus?: TwinFocus;
+  ui?: Partial<UiState>;
+  doc?: { doc: string; docId: string };
+}
 export const MAX_HITS = 12;
 /** How many of each type show before "+N more". */
 export const GROUP_SHOWN = 5;
@@ -75,6 +93,13 @@ const wordsOf = (folded: string) => folded.split(/[^\p{L}\p{N}]+/u);
 /** how well a folded title answers the query: it starts with it (0), a word does (1), or it holds it elsewhere (2) */
 const rankOf = (t: string, l: string) => t.startsWith(l) ? 0 : wordsOf(t).some((w) => w.startsWith(l)) ? 1 : 2;
 
+// #497: opening a question from the current deal keeps that deal's Q&A filters.
+function questionSearchPatch(route: UiState['route'], dealId: string, questionId: string): Partial<UiState> {
+  const selectedQuestion = questionId;
+  if ('dealId' in route && route.dealId === dealId) return { selectedQuestion };
+  return { selectedQuestion, qaFilter: { status: 'all', workstream: '', text: '' } };
+}
+
 /** Every match, best first within its type (titles that start with the query, then a word that does, then the rest), checklist items after the other types. */
 export const allHits = (s: State, query: string): Hit[] => gather(s, query, Infinity).hits;
 
@@ -93,14 +118,25 @@ function gather(s: State, query: string, itemsShown: number): { hits: Hit[]; ite
   const itemsOf = itemsByDeal(s.items);
   for (const d of Object.values(s.deals).filter((x) => isMine(s, x.id))) {   // the person's own deals: others are joined through Add deal
     // a deal that shares its name says on its second line only what differs, as the sidebar does; the hover gives both
-    if (!l || has(d.name, d.target, d.counterparty, d.product, d.sector, d.technology)) out.push({ key: d.id, kind: 'deal', title: d.name, where: twinOf(d, true) || d.sector, tip: twinOf(d) || d.sector, hash: dealHash(s.prefs, d.id) });
+    if (!l || has(d.name, d.target, d.counterparty, d.product, d.sector, d.technology)) {
+      const focus = twinOf(d, 'focus');
+      out.push({
+        key: d.id, kind: 'deal', title: d.name, where: twinOf(d, true) || d.sector,
+        tip: twinOf(d) || d.sector, ...(focus && { twinFocus: focus }), hash: dealHash(s.prefs, d.id),
+      });
+    }
     if (!l) continue;
     // a hit inside a deal names it, and where another deal has the same name, its counterparty and the day it was made
     // whole in `where` (the hover); the row, short of room, shows only what differs, as the sidebar does
-    let twins: [string, string] | undefined;   // worked out on the deal's first hit only: most deals have none on a keystroke
+    // Work out the labels only for deals with a match.
+    let twins: [string, string, TwinFocus?] | undefined;
     const inDeal = (place = ''): Pick<Hit, 'where' | 'place'> => {
-      const [twin, short] = twins ??= [twinOf(d), twinOf(d, true)]; const at = place.replace(/\s+/g, ' ').trim();
-      return { where: [d.name, twin, at].filter(Boolean).join(' · '), place: { deal: d.name, twin: short, at } };
+      const [twin, short, focus] = twins ??= [twinOf(d), twinOf(d, true), twinOf(d, 'focus')];
+      const at = place.replace(/\s+/g, ' ').trim();
+      return {
+        where: [d.name, twin, at].filter(Boolean).join(' · '),
+        place: { deal: d.name, twin: short, ...(focus && { focus }), at },
+      };
     };
     for (const f of dealFindings(s, d.id)) {
       const hash = `finding-${d.id}-${f.id}`;
@@ -119,7 +155,13 @@ function gather(s: State, query: string, itemsShown: number): { hits: Hit[]; ite
     const make = (it: { id: string; text: string }): Hit => ({ key: `item|${d.id}|${it.id}`, kind: 'item', title: it.text, ...(here ??= inDeal()), hash: `checklist-${d.id}`, ui: { selectedChecklist: it.id, checklistFilter: 'all' } });
     const list = own.length || !Array.isArray(rows) ? own : rows;
     if (list.length) { const x = indexOf(list, `${list === own ? 'items' : 'rows'}|${d.id}`); for (const i of matching(x, l, lq)) { found[itemRank(x, i, l)].push({ it: x.items[i], make }); items++; } }
-    for (const q of dealQuestions(s, d.id)) if (has(q.text, 'q' + q.n, q.response)) out.push({ key: q.id, kind: 'question', title: q.text || `Q${q.n}`, ...inDeal(`Q${q.n}`), hash: `qa-${d.id}`, ui: { selectedQuestion: q.id, qaFilter: { status: 'all', workstream: '', text: '' } } });
+    for (const q of dealQuestions(s, d.id)) {
+      if (!has(q.text, 'q' + q.n, q.response)) continue;
+      out.push({
+        key: q.id, kind: 'question', title: q.text || `Q${q.n}`, ...inDeal(`Q${q.n}`), hash: `qa-${d.id}`,
+        ui: questionSearchPatch(s.ui.route, d.id, q.id),
+      });
+    }
   }
   if (!l) return { hits: out, items: 0 };
   const rank = (h: Hit) => rankOf(fold(h.title), l);
@@ -141,6 +183,12 @@ export function searchGroups(s: State, query: string, expanded: readonly HitKind
     const of = all.hits.filter((h) => h.kind === kind); const hits = of.slice(0, shown(kind));
     return { kind, label: GROUP_LABEL[kind], hits, more: (kind === 'item' ? all.items : of.length) - hits.length };
   }).filter((g) => g.hits.length);
+}
+
+/** #491: Search waits only for the unvisited or loading deals in My Deals. */
+export function ownDealsLoading(state: Pick<State, 'deals' | 'dealLoad' | 'members' | 'user'>): boolean {
+  return Object.keys(state.deals).some((id) =>
+    isMine(state, id) && (state.dealLoad[id] === 'loading' || state.dealLoad[id] === undefined));
 }
 
 /**

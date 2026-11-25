@@ -4,10 +4,11 @@
  * after the repository accepted it.
  */
 import type { z } from 'zod';
-import type { State } from './state';
+import type { State, Toast } from './state';
 import type { Result } from '../domain/result';
 import type { RecordKind, AuditKind } from '../domain/model';
 import type { Seen, Services } from '../ports';
+import type { Store } from './store';
 
 export interface PlanCtx { at: string; actor: string; firm: string; opId: string; ids: { next(prefix: 'd' | 'q' | 'f' | 'doc' | 'op'): string } }
 
@@ -46,10 +47,16 @@ export interface Plan {
   undoesSafely?: true;
   /** short confirmation for the toast; undo is offered when `inverse` exists */
   message?: string;
-  /** the message is shown even when the action was asked for quietly: for an action that takes away what a person had entered, so that it can always be undone */
+  /** the part of the message that gives way when the notice is short of room, such as a long deal name (#27) */
+  messageCut?: string;
+  /** Show success even if the caller handles refusals, or if the person must still be offered Undo. */
   alwaysSay?: boolean;
+  /** Override the notice glyph when its wording (such as a deal name) can look like a failure. */
+  messageGlyph?: Toast['glyph'];
   /** runs after commit; its follow-up command is dispatched quietly */
   effect?: Effect;
+  /** Folder paths to index on the PC that requested this change, once the deal write has committed. */
+  indexFolders?: string[];
 }
 
 export interface Command<I = unknown, In = I> {
@@ -57,6 +64,8 @@ export interface Command<I = unknown, In = I> {
   input: z.ZodType<I, In>;
   /** records this command will write; used to sequence operations per record */
   targets(state: State, input: I): string[];
+  /** Load inputs that must be current immediately before planning, once the target queue drains. */
+  prepare?(store: Pick<Store, 'get' | 'refreshChecklist'>, input: I, context: { retained: boolean }): Promise<void>;
   plan(state: State, input: I, ctx: PlanCtx): Result<Plan>;
 }
 
