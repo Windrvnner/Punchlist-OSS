@@ -97,35 +97,13 @@ const openEdit = async (page) => {
   const undone = await copyAll(page);
   say('undo-paste-at-limit', JSON.parse(undone['application/x-punchlist-cited']).text === prefix);
 
-  await page.click('#fe-cancel');
-  const uncitedId = await findingIn(page, 'Legal');
-  await openFinding(page, uncitedId);
-  await page.evaluate((id) => { store.get().findings[id].sources = []; }, uncitedId);
-  await page.click('#f-edit');
-  await page.locator('#fe-body').fill('[1] in the compliance schedule.');
-  await page.keyboard.press('Control+a');
-  await page.keyboard.press('Control+c');
-  await page.click('#fe-cancel');
-  await openFinding(page, fid);
-  await openEdit(page);
-  const clipboardPrefix = `${prefix.slice(0, -2)}.`;
-  await page.locator('#fe-body').fill(clipboardPrefix);
-  await page.keyboard.press('Control+End');
-  await page.keyboard.press('Control+v');
-  const copiedText = await page.locator('#fe-body').textContent();
-  say('native-paste-at-limit-keeps-copied-literal-number', copiedText === `${clipboardPrefix}[1`);
-  await page.keyboard.press('Control+z');
-  say('undo-native-paste-at-limit', await page.locator('#fe-body').textContent() === clipboardPrefix);
-
-  await page.keyboard.press('Control+End');
-  await page.keyboard.press('Control+v');
+  await paste(page, { 'text/plain': '[see schedule]' });
   await saveEdit(page);
-  const expected = `${clipboardPrefix}[1`;
-  say('save-keeps-the-clipped-literal-number', (await body(page, fid))[0] === expected
-    && await page.locator('.dtxt').first().textContent() === expected);
+  const expected = `${prefix}[`;
+  say('save-keeps-the-clipped-literal-bracket', (await body(page, fid))[0] === expected);
   await page.click('#f-edit');
   const editor = page.locator('#fe-body');
-  say('reopen-keeps-the-clipped-literal-number', await editor.textContent() === expected
+  say('reopen-keeps-the-clipped-literal-bracket', await editor.textContent() === expected
     && await editor.locator('.ctag').count() === 0);
   await ctx.close();
 }

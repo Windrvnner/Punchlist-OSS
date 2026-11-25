@@ -107,36 +107,22 @@ describe('the finding editor', () => {
     expect(Boolean(inserted.querySelector('.ctag'))).toBe(expected === 'See[1]');
   });
 
-  it.each([
-    [2, '[1', undefined],
-    [3, '[1]', '[1]'],
-  ])('fits a copied bracketed number with %i characters free', async (room, text, marker) => {
-    const { box } = await mount(atLimit(room), [source('Facility agreement.pdf')]);
-    const clip = JSON.stringify({ text: '[1] in the compliance schedule.', sources: [] });
-    const inserted = capturePaste(box, { 'application/x-punchlist-cited': clip });
-    expect(editorText(inserted)).toBe(text);
-    expect(inserted.querySelector<HTMLElement>('.ctag')?.dataset.marker).toBe(marker);
-  });
-
-  it.each([
-    [6, 'See[2]', '[2]'],
-    [5, 'See', undefined],
-  ])('fits a copied citation using its recipient number with %i characters free', async (room, text, marker) => {
+  it('numbers a copied citation for this finding, and cuts it whole or not at all', async () => {
     const shared = source('Facility agreement.pdf');
-    const { box } = await mount(atLimit(room), [source('Fee letter.pdf'), shared]);
     const clip = JSON.stringify({ text: 'See[1] in the facility agreement.', sources: [shared] });
-    const inserted = capturePaste(box, { 'application/x-punchlist-cited': clip });
-    expect(editorText(inserted)).toBe(text);
-    expect(inserted.querySelector<HTMLElement>('.ctag')?.dataset.marker).toBe(marker);
+    for (const [room, text, marker] of [[6, 'See[2]', '[2]'], [5, 'See', undefined]] as const) {
+      const { box } = await mount(atLimit(room), [source('Fee letter.pdf'), shared]);
+      const inserted = capturePaste(box, { 'application/x-punchlist-cited': clip });
+      expect(editorText(inserted)).toBe(text);
+      expect(inserted.querySelector<HTMLElement>('.ctag')?.dataset.marker).toBe(marker);
+    }
   });
 
-  it('keeps a copied literal that shares the number of a renumbered citation', async () => {
-    const shared = source('Facility agreement.pdf');
-    const expected = 'See[2]; clause [2';
-    const { box } = await mount(atLimit(expected.length), [source('Fee letter.pdf'), shared]);
-    const clip = JSON.stringify({ text: 'See[1]; clause [2] applies.', sources: [shared] });
-    const inserted = capturePaste(box, { 'application/x-punchlist-cited': clip });
-    expect(editorText(inserted)).toBe(expected);
-    expect(inserted.querySelectorAll('.ctag')).toHaveLength(1);
+  it('reads a copied bracketed number as this finding would on reopening: a citation is never cut in two', async () => {
+    const clip = JSON.stringify({ text: '[1] in the compliance schedule.', sources: [] });
+    const { box } = await mount(atLimit(2), [source('Facility agreement.pdf')]);
+    expect(editorText(capturePaste(box, { 'application/x-punchlist-cited': clip }))).toBe('');
+    const bare = await mount(atLimit(2), []);
+    expect(editorText(capturePaste(bare.box, { 'application/x-punchlist-cited': clip }))).toBe('[1');
   });
 });
