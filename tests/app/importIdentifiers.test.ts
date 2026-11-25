@@ -145,6 +145,9 @@ describe('a row naming another identifier is a question of its own', () => {
   it('keeps a dotted clause apart from its parent clause (#778)', () => apart(
     'Please confirm whether clause 4.a consents are required from the lender.',
     'Please confirm whether clause 4 consents are required from the lender.', 1));
+  it('keeps a set-apart letter with the number glued to it apart (#778)', () => apart(
+    'Please confirm the consents required under clause 4. a,500 of the agreement.',
+    'Please confirm the consents required under clause 4. a,900 of the agreement.', 1));
   it('keeps two lone words that could each be a class letter separate (#778)', () => apart(
     'Please confirm the distribution rights for class. a shares.',
     'Please confirm the distribution rights for class. i shares.', 1));

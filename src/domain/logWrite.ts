@@ -158,7 +158,8 @@ function identifiersIn(text: string): { ids: string[]; open: string[] } {
   const open: string[] = [];
   const setApart = setApartParts(text);
   for (const match of text.matchAll(QUESTION_TOKEN)) {
-    const part = setApart.get(match.index);
+    const found = setApart.get(match.index);
+    const part = found?.length === match[0].length ? found : undefined;   // not a longer token such as a,500
     const form = part ? part.id : identifierForm(match[0], match.index, text);
     if (form === undefined) continue;
     (part?.droppable ? open : ids).push(form);

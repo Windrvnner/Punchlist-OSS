@@ -95,15 +95,19 @@ export function normalizeReferences(text: string): string {
   return result + text.slice(done);
 }
 
+export interface SetApartPart { id: string; droppable: boolean; length: number }
+
 /**
  * Each lone letter set apart after a point ("class. I", "clause 4. a"), by its offset in normalized text, with the
  * identifier it completes. Alone after the naming word it may be a word ("each item. I understand"): `droppable`.
  * After other parts it names a clause, so it is an ordinary identifier.
  */
-export function setApartParts(text: string): Map<number, { id: string; droppable: boolean }> {
-  const found = new Map<number, { id: string; droppable: boolean }>();
+export function setApartParts(text: string): Map<number, SetApartPart> {
+  const found = new Map<number, SetApartPart>();
   for (const { ref } of references(text)) {
-    if (ref.spaced) found.set(ref.lastAt, { id: ref.parts.join('.').toLowerCase(), droppable: ref.parts.length === 1 });
+    if (!ref.spaced) continue;
+    const id = ref.parts.join('.').toLowerCase();
+    found.set(ref.lastAt, { id, droppable: ref.parts.length === 1, length: ref.end - ref.lastAt });
   }
   return found;
 }
