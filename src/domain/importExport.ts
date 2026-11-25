@@ -24,7 +24,7 @@ export function findHeaderRow(table: string[][]): number {
   return 0;
 }
 
-const QUESTION_WORDS = ['question', 'questions', 'request', 'requests', 'query', 'queries', 'item', 'items'];
+const QUESTION_WORDS = ['question', 'questions', 'request', 'requests', 'query', 'queries'];
 /** words that make a heading about something else than the question itself ("Question No.", "Response to request") */
 const NOT_THE_QUESTION = ['no', 'number', 'num', 'ref', 'id', 'by', 'from', 'date', 'status', 'response', 'answer',
   'reply', 'priority', 'category', 'workstream', 'owner', 'asked', 'raised', 'received'];
@@ -38,6 +38,7 @@ function looseQuestionColumn(columns: string[]): number | null {
   const wordsOf = (heading: string) => String(heading ?? '').toLowerCase().split(/[^a-z]+/).filter(Boolean);
   const at = columns.findIndex((heading) => {
     const words = wordsOf(heading);
+    if (/[#\d]/.test(String(heading ?? ''))) return false;   // "Request #", "Q1": a number column, not the question
     return words.some((w) => QUESTION_WORDS.includes(w)) && !words.some((w) => NOT_THE_QUESTION.includes(w));
   });
   return at < 0 ? null : at;

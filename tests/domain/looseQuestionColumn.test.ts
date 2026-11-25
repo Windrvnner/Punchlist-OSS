@@ -18,6 +18,12 @@ describe('the question column read from plain words, with no model (#1002)', () 
     expect(mapping.text).toBeNull();
   });
 
+  it('does not take a number column or a bare item heading for the question', () => {
+    expect(suggestMapping(['Item #', 'Description', 'Status']).text).toBeNull();
+    expect(suggestMapping(['Request #', 'Details', 'Response']).text).toBeNull();
+    expect(suggestMapping(['Req. Item', 'Description', 'Status']).text).toBeNull();
+  });
+
   it('keeps an exact heading ahead of a loose one', () => {
     expect(suggestMapping(['Diligence Question', 'Question']).text).toBe(1);
   });
