@@ -182,6 +182,11 @@ const composerDrafts = () => drafts ??= {
   next: keptDrafts('next-conversation', isText),
 };
 
+/** Load both maps before recovery can move saved drafts and their conversation slots to a copy. */
+export function initializeComposerDrafts() {
+  composerDrafts();
+}
+
 /** The ask box's next conversation is kept with its draft. Within a conversation, keep using that scope. */
 export function composerScope(given: Scope, launching: boolean): { scope: Scope; launchSlot?: string } {
   if (!launching) return { scope: given };
