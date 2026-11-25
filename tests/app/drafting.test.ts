@@ -42,9 +42,8 @@ async function fixture(size = 312) {
   store.services.ai.draft = draft;
   const rows = QUESTIONS.slice(0, size).map((text, index) => [String(index + 1), text, '', 'Lender A']);
   const { rows: imported } = prepareImport(rows, MAPPING);
-  expect(await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: imported }, { quiet: true })).toMatchObject({
-    ok: true,
-  });
+  const result = await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: imported }, { quiet: true });
+  expect(result).toMatchObject({ ok: true });
   const questions = dealQuestions(store.get(), dealId);
   expect(questions).toHaveLength(size);
   const question = (index = 0) => store.get().questions[questions[index].id];
@@ -94,7 +93,7 @@ it('retries a kept reply after its write attempts fail without asking the model 
   await expect(useQuestionDraft(store, q)).resolves.toMatchObject({ kind: 'accepted' });
 });
 
-it('refuses replacement after a colleague changes the response and leaves the typed text and draft intact', async () => {
+it('preserves typed text and the draft when a colleague’s response prevents replacement', async () => {
   const { store, repo, question } = await fixture();
   const q = question(81);
   const requested = await requestQuestionDraft(store, q);

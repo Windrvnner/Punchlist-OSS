@@ -81,6 +81,35 @@ function ResolveFoot({ at, total, onStep, left, again, againOff, canKeep, picked
   );
 }
 
+/** The log shows when it was read, and the app side shows who last edited the question. */
+function useLastQuestionEditor(store: ReturnType<typeof useStore>, questionId: string, rev: number | undefined) {
+  const [editor, setEditor] = useState('');
+  useEffect(() => {
+    let live = true;
+    setEditor('');
+    void lastQuestionEditor(store, questionId).then((actor) => {
+      if (live) setEditor(actor);
+    });
+    return () => { live = false; };
+  }, [questionId, rev]);
+  return editor;
+}
+
+/** Show replies for the question on screen, including those requested before this dialog opened. */
+function useDisplayedMerge(questionId: string) {
+  const [merged, setMerged] = useState({ text: '', busy: false, error: '' });
+  const current = useRef(questionId);
+  current.current = questionId;
+  useEffect(() => watchResponseMerges((id, error) => {
+    if (id !== current.current) return;
+    setMerged((m) => ({
+      text: responseMergeView(id).draft?.text ?? m.text, busy: false,
+      error: error === undefined ? '' : `No merged draft: ${error}`,
+    }));
+  }), []);
+  return [merged, setMerged] as const;
+}
+
 export function ResolveDialog({ dealId, questionId }: { dealId: string; questionId: string }) {
   const store = useStore(); const s = useAppState();
   const close = () => store.ui({ dialog: null });
@@ -90,23 +119,13 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
   const q = s.questions[questionId] as Question | undefined; const kept = q ? qaKept(s, q) : {};
   const log = logOf(store, dealId);
   const [pick, setPick] = useState<VersionPick | null>(null);
-  const [merged, setMerged] = useState<{ text: string; busy: boolean; error: string }>({ text: '', busy: false, error: '' });
+  const [merged, setMerged] = useDisplayedMerge(questionId);
   const [fields, setFields] = useState<Record<string, 'app' | 'log'>>({});
   const [busy, setBusy] = useState(false);
-  // who last changed the question in the app, from its history (the log does not say who changed a cell, so its side gives only when it was read)
-  const [editor, setEditor] = useState('');
-  useEffect(() => {
-    let live = true;
-    setEditor('');
-    void lastQuestionEditor(store, questionId).then((actor) => {
-      if (live) setEditor(actor);
-    });
-    return () => { live = false; };
-  }, [questionId, q?.rev]);
+  const editor = useLastQuestionEditor(store, questionId, q?.rev);
   // a merged response drafted or typed for a question stays with it, so stepping on, Escape or closing never loses it:
   // the question opens with nothing picked (a choice is always the person's, made here and now), its merged response on
   // its card and the sides they set for it as they left them, until it is used
-  const current = useRef(questionId); current.current = questionId;
   // the update whose versions are shown: a choice is made against it, and another update meanwhile clears the pick, so the person looks again
   const seen = useRef(log?.last?.at);
   useEffect(() => { if (seen.current !== log?.last?.at) { seen.current = log?.last?.at; setPick(null); } }, [log?.last?.at]);
@@ -118,14 +137,6 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
     setFields(fields);
   }, [questionId]);
   useEffect(() => forgetResolvedResponseMerge(store.get(), questionId), [q?.id, Object.keys(kept).length]);
-  // a reply that comes in while this question is shown (even one asked for before Resolve was last closed) is shown at once
-  useEffect(() => watchResponseMerges((id, error) => {
-    if (id !== current.current) return;
-    setMerged((m) => ({
-      text: responseMergeView(id).draft?.text ?? m.text, busy: false,
-      error: error === undefined ? '' : `No merged draft: ${error}`,
-    }));
-  }), []);
   const go = (id: string | undefined) => { if (id) store.ui({ selectedQuestion: id, dialog: { kind: 'resolveQa', dealId, questionId: id } }); };
   const resp = 'response' in kept; const others = (Object.keys(kept) as ImportField[]).filter((k) => k !== 'response');
   const appText = q?.response ?? ''; const logText = kept.response ?? '';
