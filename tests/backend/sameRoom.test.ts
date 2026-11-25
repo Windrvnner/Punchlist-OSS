@@ -80,6 +80,16 @@ describe('sameRoom on real folders', () => {
     const first = bytesHash(path.join(vdr, '00 Section/Document 0.csv'));
     expect(bytesHash(path.join(again, 'Folder 0/Document 0.csv'))).toBe(first);
   });
+  it('finds every one of four deals that already hold the same data room', async () => {
+    const { vdr, docs } = setup();
+    const dealIds = ['d_1', 'd_2', 'd_3', 'd_4'];
+    for (const dealId of dealIds) {
+      await docs.index(dealId, [{ path: vdr, label: 'VDR', files: 40, size: '', indexed: 0, reviewed: 0 }]);
+      await docs.settled(dealId);
+    }
+    const r = await docs.sameRoom!([vdr], dealIds);
+    expect(r.ok && r.value).toEqual(dealIds.map((dealId) => ({ dealId, files: 40, matched: 40 })));
+  });
   it('finds the deal when its data room is added again with a small folder of the team’s own', async () => {
     const { root, vdr, docs } = setup(); await index(docs, vdr);
     const work = path.join(root, 'Our working files'); for (let i = 0; i < 10; i++) put(work, `Draft ${i}.csv`, `draft ${i}`);
