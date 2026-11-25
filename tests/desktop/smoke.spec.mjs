@@ -2,6 +2,8 @@
 // signed in on a test key, with no model service reachable. Run: node tests/desktop/smoke.spec.mjs (on Linux it needs a display: xvfb-run -a).
 import { _electron as electron } from 'playwright';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { once } from 'node:events';
 import { insideGate } from '../../scripts/gate-dir.mjs';
 
 const results = [];
@@ -37,6 +39,35 @@ async function started(at) {
   return { app, page };
 }
 
+async function forceDesktopExit(app) {
+  const child = app.process();
+  const exited = once(child, 'exit');
+  if (process.platform === 'win32') {
+    // Chromium child processes can keep the profile open after the main process is killed.
+    execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
+  } else {
+    // Playwright launches Electron in its own process group.
+    process.kill(-child.pid, 'SIGKILL');
+  }
+  await exited;
+}
+
+const responseBox = '.qpanel [aria-label="Response"]';
+async function openQuestionResponse(page, dealId) {
+  await page.evaluate((id) => { location.hash = '#qa-' + id; }, dealId);
+  await page.waitForFunction(
+    (id) => store.get().dealLoad[id] === 'loaded' && document.querySelector('.qapage'),
+    dealId,
+  );
+  const questionId = await page.evaluate((id) => {
+    const question = Object.values(store.get().questions).find((record) => record.dealId === id);
+    store.ui({ selectedQuestion: question.id });
+    return question.id;
+  }, dealId);
+  await page.waitForSelector(responseBox);
+  return questionId;
+}
+
 // 0 the first start asks for the shared folder and saves nothing before; the OneDrive one is offered
 let app = await launch(); let page = await app.firstWindow();
 {
@@ -60,7 +91,8 @@ let app = await launch(); let page = await app.firstWindow();
 {
   const s = await page.evaluate(() => ({ user: store.get().user?.name, node: typeof require + typeof process, keys: Object.keys(window.punchlist).sort().join() }));
   say('opens-on-backend', s.user === os.userInfo().username, JSON.stringify(s));
-  say('window-has-no-node', s.node === 'undefinedundefined' && s.keys === 'call,describe,on,pathFor', JSON.stringify(s));
+  const expectedKeys = 'call,describe,flushKeptText,on,pathFor';
+  say('window-has-no-node', s.node === 'undefinedundefined' && s.keys === expectedKeys, JSON.stringify(s));
   const min = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getMinimumSize());
   say('min-size-1024x640', min[0] === 1024 && min[1] === 640, JSON.stringify(min));
   const refused = await page.evaluate(() => window.punchlist.call('repo', 'close', []));
@@ -117,6 +149,43 @@ let dealId;
   const q = await page.evaluate(() => Object.values(store.get().questions).map((x) => x.text));
   const deal = await page.evaluate((id) => store.get().deals[id]?.name, dealId);
   say('kept-after-restart', deal === 'Project Desktop' && q.includes('Please confirm the lock-up ratio.\nAnd the test date.'), JSON.stringify({ deal, q }));
+}
+
+// A composer draft survives an abrupt exit of the main process (#825).
+{
+  await page.evaluate(() => { location.hash = ''; });
+  const draft = 'Does the agreement require notice before a change of control?';
+  await page.fill('#hask', draft);
+  // Past the 400 ms draft save, before Chromium ordinarily flushes its storage.
+  await page.waitForTimeout(750);
+  await forceDesktopExit(app);
+
+  ({ app, page } = await started());
+  say('kept-draft-after-forced-exit', await page.inputValue('#hask') === draft);
+}
+
+// A response that could not be saved to its record survives the same forced exit (#825).
+{
+  const questionId = await openQuestionResponse(page, dealId);
+  await page.evaluate((id) => {
+    const repo = store.services.repo;
+    const transaction = repo.transaction.bind(repo);
+    repo.transaction = async (request) => request.writes?.some((write) => write.id === id)
+      ? { ok: false, error: { kind: 'unreachable', message: 'The shared folder is unavailable' } }
+      : transaction(request);
+  }, questionId);
+
+  const draft = 'The amended credit agreement requires lender consent before a change of control.';
+  await page.fill(responseBox, draft);
+  await page.waitForSelector('.qpanel .efstate.fail');
+  // Give the failed response's kept snapshot time to be written.
+  await page.waitForTimeout(500);
+  await forceDesktopExit(app);
+
+  ({ app, page } = await started());
+  await openQuestionResponse(page, dealId);
+  const saved = await page.evaluate((id) => store.get().questions[id].response, questionId);
+  say('kept-failed-response-after-forced-exit', saved === '' && await page.inputValue(responseBox) === draft);
 }
 
 // Settings shows the shared folder with Change
