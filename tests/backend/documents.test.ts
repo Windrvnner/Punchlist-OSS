@@ -7,9 +7,10 @@ import { spawnSync } from 'node:child_process';
 import { sheetPart, type Sheet } from '../../src/domain/sheets';
 import { nodeDocuments, docIdFor, hashBytes } from '../../src/backend/documents';
 import { roomPath } from '../../src/backend/families';
-import { holdFolder, libreOfficeConverter, shortExt, pdfPages, pdfLook, pdfText, readChangeList, type Converter } from '../../src/backend/convert';
+import { holdFolder, libreOfficeConverter, shortExt, pdfPages, pdfLook, readChangeList, type Converter } from '../../src/backend/convert';
 import type { Folder } from '../../src/backend/logRepository';
 import { nodeFolder } from '../../src/backend/nodeFolder';
+import { pdfText } from '../fixtures/pdfText';
 import { wordIndex } from '../../src/backend/wordIndex';
 import { tokens, fold } from '../../src/backend/words';
 import { StoreKeeper, fromStoreName } from '../../src/backend/storeKeeper';
@@ -232,8 +233,7 @@ describe('documents on real folders', () => {
     expect(p.log).toEqual(['Indexed 3 files', '1 file has no readable text and can be found by name only: Scan.pdf']); expect(by('Scan.pdf')).toMatchObject({ pages: 2, words: [] });   // and the person is told which expect(by('Rates.csv').words).toEqual(['loan', 'senior', 'term', 'junior', 'margin', 'tenor']);
     // a spreadsheet too large to open quickly is indexed and found by its path, with no words
     put(vdr, 'Huge export.csv', 'ledger,entry\n'.repeat(2_100_000)); await indexAll(a, vdr); expect(by('Huge export.csv')).toMatchObject({ size: 27_300_000, words: [] });
-    const long = await pdfLook(pdf('long report', 100), 10); expect(long.pages).toBe(100); expect(long.text.split('\n').map((l) => +l.split('page ')[1])).toEqual([1, 11, 21, 31, 41, 51, 61, 71, 81, 91]);
-    expect((await pdfLook(pdf('short report', 4), 10)).text.split('\n').length).toBe(4);
+    const long = await pdfLook(pdf('long report', 100)); expect(long.pages).toBe(100); expect(long.text.split('\n').length).toBe(100);   // every page is read
     // a document another copy of the app recorded before words were kept: indexing here adds them, once
     const OLD = pdf('interconnection agreement', 2); put(vdr, 'Grid.pdf', OLD); const file = path.join(root, 'shared', 'docs-older-d1.jsonl');
     fs.appendFileSync(file, JSON.stringify({ v: 1, pc: 'older', at: '2026-11-01T00:00:00.000Z', docId: idOf(OLD), hash: hashBytes(OLD), name: 'Grid.pdf', folder: vdr, rel: 'Grid.pdf', size: OLD.length, pages: 2 }) + '\n');

@@ -584,7 +584,7 @@ export function nodeDocuments(o: DocumentsOptions) {
             if (direct && unread) try { const r = officeText(fs.readFileSync(src), name); words = topWords(r.text); if (r.tracked && pages === undefined) tracked = r.tracked; o.index?.add(dealId, docId, countWords(r.text, r.first)); readDirect = true; } catch { /* to the converter */ }
             if (paged(name) && (direct ? unread && !readDirect : pages === undefined || unread)) {
               let stuck = !!failed;                                         // known not to turn into pages: it was not brought across, and is counted and named as before
-              if (!stuck) try { const info: ConvertInfo = {}; const pdf = await asPdf({ docId, name, ...(had?.via !== undefined ? { via: had.via } : {}) }, src, info); if (pdf !== src) { via = o.convert?.id; if (info.tracked) tracked = info.tracked; } try { const look = await pdfLook(fs.readFileSync(pdf), Infinity); pages = look.pages; words = topWords(look.text); o.index?.add(dealId, docId, countWords(look.text, look.first)); if (PDF.test(name)) cover = coverOf(look.first) ?? undefined; } finally { if (pdf !== src) discard(docId); } }
+              if (!stuck) try { const info: ConvertInfo = {}; const pdf = await asPdf({ docId, name, ...(had?.via !== undefined ? { via: had.via } : {}) }, src, info); if (pdf !== src) { via = o.convert?.id; if (info.tracked) tracked = info.tracked; } try { const look = await pdfLook(fs.readFileSync(pdf)); pages = look.pages; words = topWords(look.text); o.index?.add(dealId, docId, countWords(look.text, look.first)); if (PDF.test(name)) cover = coverOf(look.first) ?? undefined; } finally { if (pdf !== src) discard(docId); } }
               catch { stuck = true; unpagedHere.set(f.abs, { size: f.size, mtimeMs: f.mtimeMs }); }
               if (stuck && pages === undefined) { asPages = false; unpaged++; skipped.unpaged.push(f.rel); }      // pages it already had stay; only its words are missing
             } else if (!paged(name) && (words === undefined || unindexed)) words = await sheetWords(src, bytesRead, dealId, docId);
@@ -872,7 +872,7 @@ export function nodeDocuments(o: DocumentsOptions) {
         fs.mkdirSync(path.dirname(at), { recursive: true }); fs.writeFileSync(at, file.bytes);
         let pages: number | undefined; let via: string | undefined; let tracked: number | undefined; let words: string[] | undefined;
         if (paged(file.name)) {
-          try { const info: ConvertInfo = {}; const pdf = await asPdf({ docId, name: file.name }, at, info); if (pdf !== at) { via = o.convert?.id; if (info.tracked) tracked = info.tracked; } try { const look = await pdfLook(fs.readFileSync(pdf), Infinity); pages = look.pages; words = topWords(look.text); o.index?.add(dealId, docId, countWords(look.text, look.first)); } finally { if (pdf !== at) discard(docId); } }
+          try { const info: ConvertInfo = {}; const pdf = await asPdf({ docId, name: file.name }, at, info); if (pdf !== at) { via = o.convert?.id; if (info.tracked) tracked = info.tracked; } try { const look = await pdfLook(fs.readFileSync(pdf)); pages = look.pages; words = topWords(look.text); o.index?.add(dealId, docId, countWords(look.text, look.first)); } finally { if (pdf !== at) discard(docId); } }
           catch { fs.rmSync(at, { force: true }); return fail({ kind: 'rejected', message: `${file.name} could not be ${PDF.test(file.name) ? 'opened' : 'converted to PDF'}, so it was not attached` }); }
         }
         else words = await sheetWords(at, file.bytes.length, dealId, docId);

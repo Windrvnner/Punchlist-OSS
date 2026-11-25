@@ -544,25 +544,24 @@ export async function pdfLines(bytes: Uint8Array): Promise<string> {
   } finally { await doc.destroy(); }
 }
 
-/** The words on each page of a PDF, in reading order as the file gives them. For checks; the app does not read inside documents. */
-export async function pdfText(bytes: Uint8Array): Promise<string[]> {
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), useSystemFonts: false, isEvalSupported: false, verbosity: 0 }).promise;
-  try { const pages: string[] = []; for (let i = 1; i <= doc.numPages; i++) pages.push((await (await doc.getPage(i)).getTextContent()).items.map((x) => ('str' in x ? x.str : '')).join('')); return pages; } finally { await doc.destroy(); }
-}
-
 /**
- * How many pages a PDF has, and the text of a spread of them: every page of a short document, and `sample` pages spaced
- * evenly through a long one, which is enough to count its words by and keeps indexing quick. A page with no text layer
- * (a scan) gives no text. `first` is the first page's text, for a document's title. Throws when the PDF cannot be opened (corrupt, or locked with a password).
+ * How many pages a PDF has and the text of every page, to count its words by. A page with no text layer (a scan) gives
+ * no text. `first` is the first page's text, for a document's title. Throws when the PDF cannot be opened (corrupt, or
+ * locked with a password).
  */
-export async function pdfLook(bytes: Uint8Array, sample = 40): Promise<{ pages: number; text: string; first: string }> {
+export async function pdfLook(bytes: Uint8Array): Promise<{ pages: number; text: string; first: string }> {
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), useSystemFonts: false, isEvalSupported: false, verbosity: 0 }).promise;
   try {
-    const n = doc.numPages; const which = n <= sample ? Array.from({ length: n }, (_, i) => i + 1) : Array.from({ length: sample }, (_, i) => 1 + Math.floor((i * n) / sample)); const text: string[] = [];
-    for (const i of which) { try { text.push((await (await doc.getPage(i)).getTextContent()).items.map((x) => ('str' in x ? x.str : '')).join(' ')); } catch { /* a page that cannot be read gives no words */ } }
-    return { pages: n, text: text.join('\n'), first: which[0] === 1 ? (text[0] ?? '') : '' };
+    const text: string[] = []; let first = '';
+    for (let page = 1; page <= doc.numPages; page++) {
+      try {
+        const words = (await (await doc.getPage(page)).getTextContent()).items.map((x) => ('str' in x ? x.str : '')).join(' ');
+        text.push(words);
+        if (page === 1) first = words;
+      } catch { /* a page that cannot be read gives no words */ }
+    }
+    return { pages: doc.numPages, text: text.join('\n'), first };
   } finally { await doc.destroy(); }
 }
 
