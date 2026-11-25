@@ -2,34 +2,45 @@
 // timed with stand-in failures and fake timers.
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { Store } from '../../src/app/store';
-import { memRepo, disk } from '../adapters/memRepo';
+import { memRepo, disk, refuse, toAQuestion } from '../adapters/memRepo';
 import { mockAi, mockDocuments, mockSession } from '../../src/adapters/mocks';
 import { csvCodec } from '../../src/adapters/spreadsheet';
 import { MemoryLocal } from '../../src/adapters/local';
 import { fail, ok, rejected, type Failure } from '../../src/domain/result';
 import { keepUntilSignedIn, undoFromNotice } from '../../src/app/undoNotice';
+import { CreateDeal } from '../../src/app/commands/deals';
+import { CreateQuestion, DeleteQuestion } from '../../src/app/commands/questions';
+import { registry } from '../../src/app/commands/undo';
+
+const COMMANDS = [CreateDeal, CreateQuestion, DeleteQuestion];
+for (const command of COMMANDS) registry.set(command.name, command);
 
 const clock = { now: () => new Date(Date.UTC(2026, 10, 17, 10)).toISOString() };
 let seq = 0;
-const ids = { next: (prefix: string) => `${prefix}_${String(seq++).padStart(7, '0')}` };
+const ids = { next: (prefix: string) => `${prefix}_01HZZZZZZZZZZZZZZZZ${String(seq++).padStart(7, '0')}` };
 const SIGNED_OUT = 'Sign in to Intelligence to make changes';
 const TEXT = 'Question deleted ·';
 
-/** A store whose Undo gives back `outcome` and whose sign-in reads `signedOut`, with one Undo notice showing. */
-function noticeShowing(outcome: Failure | null, signedOut = false) {
+function makeStore(kv = disk()) {
   const opts = { latency: [0, 0] as [number, number] };
-  const store = new Store({
-    repo: memRepo(clock.now, disk()), ai: mockAi(opts), docs: mockDocuments(opts),
+  return new Store({
+    repo: memRepo(clock.now, kv), ai: mockAi(opts), docs: mockDocuments(opts),
     fs: { pickFolders: null, pathFor: null, save: async () => ({ ok: true as const, value: 'saved' as const }) },
     sheets: csvCodec, session: mockSession(opts), local: new MemoryLocal(), clock, ids,
-  }, []);
+  }, COMMANDS);
+}
+
+/** A store whose Undo gives back `outcome` and whose sign-in reads `signedOut`, with one Undo notice showing. */
+function noticeShowing(outcome: Failure | null, signedOut = false) {
+  const store = makeStore();
   vi.spyOn(store, 'readOnly').mockReturnValue(signedOut ? SIGNED_OUT : null);
   const undo = vi.spyOn(store, 'undo').mockResolvedValue(outcome ? fail(outcome) : ok({ opId: 'op_undo' }));
   const action = { label: 'Undo', opId: 'op_1' };
   const id = store.toast(TEXT, action);
   return { store, undo, notice: { id, text: TEXT, action } };
 }
-const shown = (store: Store) => store.get().ui.toasts.map((t) => ({ text: t.text, sticky: t.sticky, action: t.action }));
+const shown = (store: Store) => store.get().ui.toasts
+  .map((t) => ({ text: t.text, sticky: t.sticky, action: t.action }));
 
 describe('a notice\'s Undo', () => {
   afterEach(() => { vi.useRealTimers(); });
@@ -77,5 +88,27 @@ describe('a notice\'s Undo', () => {
     const { store } = noticeShowing(null);
     expect(keepUntilSignedIn(store, 'Couldn’t save ·', { label: 'Retry', run: () => {} })).toBe(false);
     expect(shown(store)).toHaveLength(1);
+  });
+
+  it('a failed save\'s Retry pressed while signed out keeps its notice the same way', async () => {
+    const kv = disk();
+    const store = makeStore(kv);
+    await store.boot();
+    await store.dispatch(CreateDeal, { name: 'Datum', folders: [] });
+    const dealId = Object.keys(store.get().deals)[0];
+    await store.dispatch(CreateQuestion, { dealId, text: 'Is the lease assignable?' });
+    const questionId = Object.keys(store.get().questions)[0];
+    refuse(kv.shared, toAQuestion, () => new Error('The network path was not found'));
+    await store.dispatch(DeleteQuestion, { dealId, questionId });
+    const failed = store.get().ui.toasts.find((t) => t.text === 'Couldn’t save ·');
+    vi.spyOn(store, 'readOnly').mockReturnValue(SIGNED_OUT);
+    store.dismissToast(failed!.id);
+    vi.useFakeTimers();
+    failed!.action!.run!();
+    expect(shown(store).filter((t) => t.text !== 'Couldn’t save ·').map((t) => t.text)).toContain(SIGNED_OUT);
+    vi.advanceTimersByTime(Store.TOAST_MS + 1);
+    const kept = shown(store).filter((t) => t.text === 'Couldn’t save ·');
+    const retry = { label: 'Retry', run: failed!.action!.run };
+    expect(kept).toEqual([{ text: 'Couldn’t save ·', sticky: true, action: retry }]);
   });
 });
