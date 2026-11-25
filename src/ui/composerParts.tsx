@@ -5,7 +5,7 @@ import { Icon } from './icons';
 import { ChoiceCheck } from './moreMenu';
 import { DocName } from './docName';
 import { attachFiles, removeAttachment, addToSources, MAX_ATTACHED } from '../app/attachments';
-import { docKey } from '../domain/model';
+import { canAddToSources } from '../app/citations';
 import type { Scope } from '../app/conversations';
 import type { Attachment } from '../app/state';
 
@@ -31,8 +31,7 @@ export function Chip({ chip, scope }: { chip: Attachment; scope: Scope }) {
   const store = useStore();
   const state = useAppState();
   const finding = scope.kind === 'finding' ? state.findings[scope.findingId] : null;
-  const inSources = !!finding && !!chip.docId && finding.sources.some((source) => docKey(source) === chip.docId);
-  const canAdd = finding && chip.state === 'done' && chip.doc && !inSources;
+  const canAdd = canAddToSources(finding, chip);
   const add = () => void addToSources(store, finding!.dealId, finding!.id, { doc: chip.doc!, docId: chip.docId! });
   return (
     <span class={`chip att ${chip.state === 'pending' ? 'pending' : ''} ${chip.missing ? 'missing' : ''}`}
