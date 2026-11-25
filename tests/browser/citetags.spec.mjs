@@ -97,6 +97,7 @@ const openEdit = async (page) => {
   const undone = await copyAll(page);
   say('undo-paste-at-limit', JSON.parse(undone['application/x-punchlist-cited']).text === prefix);
 
+  await page.keyboard.press('Control+End');
   await paste(page, { 'text/plain': '[see schedule]' });
   await saveEdit(page);
   const expected = `${prefix}[`;
