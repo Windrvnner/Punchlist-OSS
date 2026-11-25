@@ -119,6 +119,45 @@ async function searchQuestions(run: AgentRun, queryWords: Set<string>, report: R
 }
 
 /**
+ * The catch-up tool: each deal's brief on its open findings, named by deal when there are several, one deal at a time.
+ * The brief is one model call, which is not made again while the deal's findings are unchanged (ai.ts dealBrief). A
+ * deal whose findings cannot be read just now is named as such, as a search of findings does, never taken for empty.
+ */
+export async function catchUp(run: AgentRun): Promise<string> {
+  const { kit, question } = run;
+  const step = run.step({ kind: 'search', text: 'Caught up on the open findings' });
+  const multi = question.deals.length > 1;
+  const parts: string[] = [];
+  const said: string[] = [];
+  for (const dealId of question.deals) {
+    const heading = multi ? `${await kit.dealName(dealId)}: ` : '';
+    // stopped by the person: no further deal is briefed (decisions: Stop answers from what was found)
+    const { text, result } = run.progress.stopped
+      ? { text: 'not briefed, since the person stopped the research.', result: 'stopped' }
+      : await briefOf(run, dealId);
+    parts.push(heading + text);
+    said.push(heading + result);
+  }
+  Object.assign(step, { result: said.join(' · '), done: true });
+  return `The catch-up on the open findings:\n${parts.join('\n\n')}`;
+}
+
+/** one deal's brief, for the main session (`text`) and for the step (`result`); throws when the service is down */
+async function briefOf(run: AgentRun, dealId: string): Promise<{ text: string; result: string }> {
+  if (!await run.kit.findings(dealId)) {
+    return { text: 'its findings could not be read just now.', result: 'findings could not be read' };
+  }
+  const brief = await run.kit.brief(dealId);
+  if (brief.ok) {
+    const count = brief.value.length;
+    const result = count ? `${count} ${noun(count, 'paragraph')}` : 'no open findings';
+    return { text: brief.value.join('\n') || 'no open findings.', result };
+  }
+  if (brief.error.kind === 'unreachable') throw Object.assign(new Error(brief.error.message), { code: 'unreachable' });
+  return { text: `the catch-up could not be written: ${brief.error.message}.`, result: 'could not be written' };
+}
+
+/**
  * Every deal's records, each with its deal's name when the question is about several deals. A deal whose records
  * cannot be read just now is `missed`, in the order the reads failed.
  */

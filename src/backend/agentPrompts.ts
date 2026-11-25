@@ -28,6 +28,8 @@ const readHelp = (width: number) => `Have up to ${width} documents attached to y
 const FOLDER_WHEN = 'Have every document in a folder read, the most important first, when you are asked to read or '
   + 'review a folder, or when the answer needs all of a folder rather than a few documents from it.';
 const FOLDER_NAMED = 'Name the folder as it is named in the data room, or as the question names it.';
+const BRIEF_HELP = 'Have the deal\'s open findings summed up in two short paragraphs: what matters most and why. '
+  + 'Use it when you are asked to catch up on a deal or for an overview of where it stands.';
 const FOLDER_RESULT = 'You get what each batch of its documents says, with document and page. A large folder is read '
   + 'only once the person has agreed: you are told when to ask them, and then';
 
@@ -41,6 +43,8 @@ export const inlineTools = (width: number) => [
   `  ${readHelp(width)}`,
   '{"tool": "folder", "folder": "Permits", "lookFor": "what to look for in it", "notes": "…"}',
   `  ${FOLDER_WHEN} ${FOLDER_NAMED} ${FOLDER_RESULT} add "all": true once they have.`,
+  '{"tool": "brief", "notes": "…"}',
+  `  ${BRIEF_HELP}`,
   '{"text": "the answer, with [n] markers", "sources": [{"doc": "D3", "page": 12, "quote": "a few words from that '
     + 'page"}]}',
   `  Your answer, once you have what you need. ${CITE_RULE}`,
@@ -50,7 +54,7 @@ export const inlineTools = (width: number) => [
 
 /** the same tools, called natively (`native` and `hybrid`): the model calls one each turn */
 export const NATIVE_TOOLS = [
-  `${ROLE} Each turn, call one tool: search, read, folder or answer.`,
+  `${ROLE} Each turn, call one tool: search, read, folder, brief or answer.`,
   CITE_RULE,
   '"notes" carry what you have learned from one turn to the next.',
 ].join('\n');
@@ -108,6 +112,11 @@ export const toolSpecs = (width: number): ToolSpec[] => [
       },
       required: ['folder'],
     },
+  },
+  {
+    name: 'brief',
+    description: BRIEF_HELP,
+    parameters: { type: 'object', properties: { notes } },
   },
   {
     name: 'answer',
