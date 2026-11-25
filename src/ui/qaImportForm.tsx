@@ -238,7 +238,7 @@ function AnsweredRow({ answered, importing, onPick }: {
 function SuggestionsRow({ qa, suggestions }: { qa: ReadQa; suggestions: Suggestion[] }) {
   const accept = (s: Suggestion) => qa.setAccepted([...qa.accepted, { line: s.line, questionId: s.questionId }]);
   return (
-    <div class="srow top"><div class="k">Could Match</div><div class="imprev imchg" id="im-suggest"><table>
+    <div class="srow top"><div class="k">Could Match</div><div class="imprev imsug" id="im-suggest"><table>
       <thead><tr><th>Row</th><th>In the file</th><th>Could be</th><th /></tr></thead>
       <tbody>
         {suggestions.map((s) => <tr key={s.line}>

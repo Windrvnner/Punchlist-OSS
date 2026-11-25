@@ -242,6 +242,7 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
       await review.waitForSelector('#im-suggest');
       const found = await review.evaluate(() => ({ rows: document.querySelectorAll('#im-suggest tbody tr').length, line: document.getElementById('im-line').textContent, buttons: document.querySelectorAll('#im-suggest [data-accept]').length }));
       say(`could-match-lists-each-row-${label}`, found.rows === SHOWN && found.buttons === SHOWN && new RegExp(`${SHOWN} new`).test(found.line), JSON.stringify(found));
+      await review.locator('#im-suggest').scrollIntoViewIfNeeded();
       await review.screenshot({ path: path.join(shots, `${label}.png`) });
       const geometry = await review.evaluate(() => { const pane = document.getElementById('im-suggest'); const frame = pane.getBoundingClientRect(); const dlg = document.querySelector('.imdlg').getBoundingClientRect(); return { inside: frame.left >= dlg.left && frame.right <= dlg.right, overflowX: pane.scrollWidth > pane.clientWidth + 1, goInView: document.getElementById('im-go').getBoundingClientRect().bottom <= window.innerHeight }; });
       say(`could-match-fits-${label}`, geometry.inside && geometry.goInView, JSON.stringify(geometry));
