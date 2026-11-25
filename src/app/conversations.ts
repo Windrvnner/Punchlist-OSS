@@ -13,6 +13,7 @@ import { findQuestions, mayAddress } from '../domain/suggest';
 import { withoutMarkers } from '../domain/cite';
 import type { Research } from '../ports';
 import { bareDealName, cleanName } from './commands/deals';
+import { TITLE_MAX } from './commands/findings';
 import { chipsSendable, dealCopied, filesSendable } from './attachments';
 import { isText, keptDrafts } from './keptText';
 
@@ -375,7 +376,9 @@ export function findingFromAnswer(answer: Message) {
   const preview = answerText(answer);
   // the first sentence ends at a . ! or ? followed by a space or the end, so "1.5x" and "U.S." do not end it; nothing is cut
   const sentence = /^.*?[.!?](?=\s|$)/s.exec(preview)?.[0] ?? preview;
-  return { text, preview, title: sentence.trim().replace(/[.!?]$/, '') };
+  // a sentence longer than a title may be is left for the person to word: nothing is cut, and the body keeps it all
+  const title = sentence.trim().replace(/[.!?]$/, '');
+  return { text, preview, title: title.length > TITLE_MAX ? '' : title };
 }
 
 /** The current response to confirm before replacement, when one is present. */

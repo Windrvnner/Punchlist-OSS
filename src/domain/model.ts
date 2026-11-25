@@ -48,7 +48,7 @@ const Record = z.object({
  * range across deals, so the page can be fetched from the right one. `reading` marks a page of a blackline: what it
  * shows of a change is the model's reading, to be checked on the page.
  */
-export const Source = z.object({ doc: z.string().min(1), loc: z.string(), docId: z.string().min(1), version: z.string().optional(), quote: z.string().max(600).optional(), dealId: z.string().optional(), reading: z.literal(true).optional(), precedent: z.literal(true).optional() });   // what the backend sends is cut to these fields: a source's other keys are dropped, also on a record from a newer build
+export const Source = z.object({ doc: z.string().min(1), loc: z.string(), docId: z.string().min(1), version: z.string().optional(), quote: z.string().max(32_767).optional(), dealId: z.string().optional(), reading: z.literal(true).optional(), precedent: z.literal(true).optional() });   // what the backend sends is cut to these fields: a source's other keys are dropped, also on a record from a newer build
 export type Source = z.infer<typeof Source>;
 /** What identifies a cited document: its id. */
 export const docKey = (s: { docId: string }): string => s.docId;

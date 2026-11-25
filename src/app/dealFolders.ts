@@ -82,8 +82,8 @@ export async function readDealFolder(
   }
   const over = folders().find((folder) => foldersOverlap(path, folder.path));
   if (over) {
-    store.toast(folderInside(path, over.path) ? `That folder is inside ${over.label}, already on the list`
-      : `${over.label}, already on the list, is inside that folder`);
+    store.toast(folderInside(path, over.path) ? `That folder is inside ${over.label || over.path}, already on the list`
+      : `${over.label || over.path}, already on the list, is inside that folder`);
     return;
   }
   const removed = existing?.removed.find((folder) => pathKey(folder.path) === pathKey(path));
