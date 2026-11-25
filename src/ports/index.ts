@@ -395,7 +395,6 @@ export interface DocumentService {
 export interface FolderPlace { dealId: string; folder: string; local: string }
 /** `tops` holds every folder to locate: those missing and those that read as empty (`empty`), which are there with nothing in them */
 export interface FolderSearch { placed: number; missing: number; tops: { top: string; folders: { dealId: string; folder: string }[] }[]; empty?: { dealId: string; folder: string }[] }
-/** Of the new folders' `files` (less those other deals also hold), `matched` by name and size to one of the deal's documents; of `printed` fingerprinted, `same` were identical. */
 /** a deal holding the same data room: `matched` of the new folders' `files` (precedents folders not counted) */
 export interface RoomMatch { dealId: string; files: number; matched: number }
 export interface DocumentRef { doc: string; docId: string }

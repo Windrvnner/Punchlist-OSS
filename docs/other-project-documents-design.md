@@ -31,7 +31,7 @@ A blackline is called this deal's own only when that is confirmed; otherwise the
 
 ## Reused
 
-- `blacklines.ts`: `isBlackline`, `cleanDrafts` (clean, unclear or standalone), `coverOf` and the kept cover, and the name forms "A Redline to B" and "A vs B" (`wants`, `VS`), all unchanged in what they decide.
+- `blacklines.ts`: `isBlackline`, `cleanDrafts` (clean, unclear or standalone), `coverOf` and the kept cover, and the name forms "A Redline to B" and "A vs B" (`wants`, `VS`). A blackline whose cover and name find no clean draft stands alone; a file that only shares a word of its name no longer makes it unclear.
 - `families.ts`: drafts in sibling dated folders; with part 1, versions in one folder; `roomPath`.
 - Part 1's precedent-folder rule: a folder named Precedent, Precedents or Precedent Documents once a leading number and punctuation are taken off ("12. Precedents", never "Conditions Precedent").
 - The "reading" tag, its chip and tooltip ([`ResearchView`](../src/ui/research.tsx)), and the rule in [`check`](../src/backend/ai.ts).
@@ -83,7 +83,7 @@ Every secondary source takes at most two places in any pick (the parent design's
 
 ### E. Unclear blacklines
 
-A blackline whose clean draft cannot be told, even from its folder path, name and cover, stays out of every choice, as before ([`ranked`](../src/backend/ai.ts)). A blackline misread is a far greater risk than one missed.
+A blackline whose cover or name finds more than one possible clean draft, even with its folder path, stays out of every choice, as before ([`ranked`](../src/backend/ai.ts)). A blackline misread is a far greater risk than one missed.
 
 ### F. Speed
 

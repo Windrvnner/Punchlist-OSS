@@ -322,12 +322,10 @@ interface FullCheck { mode: 'first' | 'quick' | 'deep'; items: number; findings:
 /** more than this share of a spot check overturned, and a check of everything by the standard model is offered */
 const OVERTURNED = 0.2;
 /**
- * a deal shows another deal as holding its documents from this many of them (and `SHARE` of them); worked out again
- * after this long
+ * a deal shows another deal as holding its documents from `ALSO_LEAST` of them and `SHARE` of them, the `ALSO_MAX`
+ * best, worked out again after `ALSO_MS`; a document `SHARED_BY` other deals hold is shared, not counted
  */
-const ALSO_LEAST = 10, ALSO_MS = 10 * 60_000, ALSO_MAX = 2;
-/** the part of this deal's documents another deal must hold; a document held by `SHARED_BY` other deals is shared */
-const SHARE = 0.6, SHARED_BY = 3;
+const ALSO_LEAST = 10, SHARE = 0.6, SHARED_BY = 3, ALSO_MS = 10 * 60_000, ALSO_MAX = 2;
 /** a folder holding less than this part of this deal's documents is not judged on its own */
 const FOLDER_PART = 0.25;
 const ARRIVALS = 100;                                              // new documents put to the fast model in one question
