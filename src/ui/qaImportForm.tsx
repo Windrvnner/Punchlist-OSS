@@ -18,8 +18,6 @@ import type { ImportTable, ImportChange } from '../app/transfer';
 import type { Store } from '../app/store';
 import type { Busy, ImportPlan, QaImportActions, QaImportState } from './qaImport';
 
-/** The changes the "Will overwrite" table lists; the rest are counted under it */
-const CHANGES_LISTED = 200;
 /** The unread dates and values the footer's tooltip names; the rest are counted */
 const UNREAD_NAMED = 8;
 const MERGE_TIP = 'Matched by wording, then by number';
@@ -216,20 +214,18 @@ function AnsweredRow({ answered, importing, onPick }: {
   );
 }
 
-/** Every field a merge will overwrite, the first ones listed and the rest counted */
+/** Every field a merge will overwrite, in the existing scrollable preview. */
 function ChangesRow({ changes }: { changes: ImportChange[] }) {
-  const more = changes.length - CHANGES_LISTED;
   return (
     <div class="srow top"><div class="k">Will Overwrite</div><div class="imprev imchg" id="im-changes"><table>
       <thead><tr><th>Q</th><th>Field</th><th>Now</th><th>After Import</th></tr></thead>
       <tbody>
-        {changes.slice(0, CHANGES_LISTED).map((change, i) => <tr key={i}>
+        {changes.map((change, i) => <tr key={i}>
           <td>{change.n}</td>
           <td>{change.field}{change.spacing ? ' (only spaces or line breaks)' : ''}</td>
           <td title={change.from}>{changeText(change, change.from)}</td>
           <td title={change.to}>{changeText(change, change.to)}</td>
         </tr>)}
-        {more > 0 && <tr><td colSpan={4}>and {more} more</td></tr>}
       </tbody>
     </table></div></div>
   );

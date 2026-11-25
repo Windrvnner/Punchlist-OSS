@@ -1,6 +1,7 @@
 import { launchChrome } from './chrome.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { openOnFindings } from './landing.mjs';
+import { portfolioQuestions } from '../fixtures/portfolioQuestions.ts';
 
 /** the stand-in exports CSV (the app itself writes .xlsx through LibreOffice): read it back the way Excel would */
 const readCsvFile = (file) => { const t = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''); const rows = []; let row = [], f = '', q = false;
@@ -146,6 +147,77 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
   say('no-page-errors-1', page.errors.length === 0 && true, JSON.stringify(page.errors));
   await ctx.close(); }
 
+// A complete, scrollable overwrite preview for a deal-scale merge (#272).
+{
+  const { ctx, page } = await fresh();
+  const dealId = await newDeal(page, 'Import review');
+  await page.goto(`${URL}#qa-${dealId}`);
+  const count = 2_000;
+  const questions = portfolioQuestions().slice(0, count);
+  const before = 'Approval is pending.';
+  const after = 'Approval is complete.';
+  async function openCsv(page, response) {
+    const rows = questions.map((question, index) => `${index + 1},"${question.replaceAll('"', '""')}",${response}`);
+    const csv = file('merge-review.csv', ['Number,Question,Response', ...rows].join('\n'));
+    await page.click('#qa-cols');
+    await page.click('#qa-import');
+    await page.setInputFiles('#im-file', csv);
+    await page.waitForSelector('.immap');
+  }
+  await openCsv(page, before);
+  await page.click('#im-go');
+  await page.waitForSelector('.imdlg', { state: 'detached' });
+  const storageState = await ctx.storageState();
+  await ctx.close();
+
+  async function checkPreview(colorScheme, width, height) {
+    const label = `${colorScheme}-${width}x${height}`;
+    const context = await browser.newContext({ colorScheme, viewport: { width, height }, storageState });
+    try {
+      const review = await context.newPage();
+      await review.goto(`${URL}#qa-${dealId}`);
+      await openCsv(review, after);
+      const table = review.locator('#im-changes');
+      await table.waitFor();
+      await table.locator('tbody tr').last().scrollIntoViewIfNeeded();
+
+      const preview = await table.evaluate((pane, { before, after }) => {
+        const rows = [...pane.querySelectorAll('tbody tr')];
+        const allPairsMatch = rows.every((row, index) => {
+          const cells = [...row.cells].map((cell) => cell.textContent);
+          return cells.join('|') === [String(index + 1), 'Response', before, after].join('|');
+        });
+        const last = rows.at(-1);
+        const frame = pane.getBoundingClientRect();
+        const row = last.getBoundingClientRect();
+        const cellsExposed = [...last.cells].every((cell) => {
+          const rect = cell.getBoundingClientRect();
+          return cell.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+        });
+        const lastVisible = pane.scrollTop > 0 && row.top >= frame.top && row.bottom <= frame.bottom && cellsExposed;
+        return { rows: rows.length, allPairsMatch, lastVisible, theme: document.documentElement.dataset.theme };
+      }, { before, after });
+      say(`merge-previews-every-overwrite-${label}`,
+        preview.rows === count && preview.allPairsMatch && preview.lastVisible && preview.theme === colorScheme,
+        JSON.stringify(preview));
+
+      const importReachable = await review.locator('#im-go').click({ trial: true, timeout: 3_000 })
+        .then(() => true, () => false);
+      say(`merge-import-stays-reachable-${label}`, importReachable);
+      const saved = await qs(review, dealId);
+      say(`merge-preview-leaves-responses-unchanged-${label}`,
+        saved.length === count && saved.every((question) => question.response === before));
+    } finally {
+      await context.close();
+    }
+  }
+
+  for (const theme of ['dark', 'light']) {
+    await checkPreview(theme, 1280, 736);
+    await checkPreview(theme, 1024, 640);
+  }
+}
+
 // ---- 2 Excel's two date systems: read through LibreOffice, tested in tests/backend/sheets.test.ts (the stand-in reads CSV only)
 
 // ---- 3 findings export, settings, search ----------------------------------------------
@@ -252,6 +324,87 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
   say('ctrl-k-toggles', await page.evaluate(() => !store.get().ui.palette && document.activeElement?.id !== 'pal-in' && !document.getElementById('pal-drop')));
   say('no-page-errors-3', page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close(); }
+
+async function overwriteComparisonLayout(page) {
+  return page.locator('#im-changes').evaluate((pane) => {
+    const bounds = pane.getBoundingClientRect();
+    const headerBottom = pane.querySelector('th').getBoundingClientRect().bottom;
+    const footerTop = pane.closest('.imdlg').querySelector('.xfoot').getBoundingClientRect().top;
+    const visibleBottom = Math.min(bounds.bottom, footerTop);
+    const values = [...pane.querySelectorAll('tbody td:nth-child(n+3)')].map((cell) => {
+      const text = cell.firstChild;
+      const newline = text.textContent.indexOf('\n');
+      const range = document.createRange();
+      const lineAt = (offset) => {
+        range.setStart(text, offset);
+        range.setEnd(text, offset + 1);
+        return range.getBoundingClientRect().top;
+      };
+      const keptLineBreak = lineAt(newline + 1) > lineAt(newline - 1);
+      range.setStart(text, text.length - 8);
+      range.setEnd(text, text.length);
+      const end = range.getBoundingClientRect();
+      const cellBounds = cell.getBoundingClientRect();
+      return {
+        value: text.textContent,
+        keptLineBreak,
+        readable: end.top >= headerBottom && end.bottom <= visibleBottom && end.right <= cellBounds.right,
+        widthFits: cell.scrollWidth === cell.clientWidth,
+      };
+    });
+    return { values, scrolled: pane.scrollTop > 0, widthFits: pane.scrollWidth === pane.clientWidth };
+  });
+}
+
+// A merge must show where long responses with the same opening differ (#269).
+const question = 'Confirm the amount and timing of the debt service reserve.';
+const prefix = 'The reserve uses the next twelve months of scheduled principal and interest in both projections. '
+  + 'The amount will be funded from the first disbursement.';
+const now = `${prefix}\nThe approved illustration shows a twelve-month reserve.`;
+const after = `${prefix}\nThe revised illustration shows a six-month reserve.\n`
+  + 'AmendmentAcknowledgmentAndReserveFundingDocumentationReference';
+const mergeFile = file('reserve.csv', `Number,Question,Response\n1,"${question}","${after}"\n`);
+for (const [width, height] of [[1280, 736], [1024, 640]]) {
+  for (const colorScheme of ['light', 'dark']) {
+    const { ctx, page } = await fresh({ viewport: { width, height }, colorScheme });
+    const dealId = await newDeal(page, 'Import preview');
+    await page.goto(URL + '#qa-' + dealId);
+    await addQuestion(page, question);
+    await page.fill('.det textarea.rtext', now);
+    await page.press('.det textarea.rtext', 'Tab');
+    await page.waitForFunction((expected) => Object.values(store.get().questions)
+      .some((row) => row.response === expected), now);
+
+    await page.click('#qa-cols');
+    await page.click('#qa-import');
+    await page.setInputFiles('#im-file', mergeFile);
+    await page.waitForSelector('#im-changes tbody td');
+    await page.focus('#im-answered');
+    // Bring the comparison above the sticky footer before scrolling inside it.
+    await page.keyboard.press('End');
+    await page.waitForFunction(() => {
+      const dialog = document.querySelector('.imdlg');
+      return dialog.scrollTop + dialog.clientHeight >= dialog.scrollHeight - 1;
+    });
+    await page.keyboard.press('Tab');
+    const focused = await focusId(page);
+    await page.keyboard.press('End');
+    const reachedEnd = await page.waitForFunction(() => {
+      const pane = document.getElementById('im-changes');
+      return pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 1;
+    }, null, { timeout: 5000 }).then(() => true, () => false);
+
+    const layout = await overwriteComparisonLayout(page);
+    const exactText = layout.values.map(({ value }) => value).join('|') === [now, after].join('|');
+    const valuesFit = layout.values.every(({ keptLineBreak, readable, widthFits }) =>
+      keptLineBreak && readable && widthFits);
+    const view = `${colorScheme}-${width}x${height}`;
+    say(`overwrite-values-show-both-endings-with-keyboard-${view}`, focused === 'im-changes' && reachedEnd
+      && layout.scrolled && layout.widthFits && exactText && valuesFit, JSON.stringify({ focused, ...layout }));
+    say(`overwrite-comparison-does-not-write-${view}`, (await qs(page, dealId))[0].response === now);
+    await ctx.close();
+  }
+}
 
 await browser.close();
 const failed = results.filter(([, ok]) => !ok).length; console.log(`\n${results.length - failed}/${results.length} passed`); process.exit(failed ? 1 : 0);
