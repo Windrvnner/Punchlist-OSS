@@ -17,7 +17,7 @@ import { initializeKeptText, saveKeptDrafts } from '../../src/app/keptText';
 import { initialState, type Attachment, type Message } from '../../src/app/state';
 import { Store } from '../../src/app/store';
 import { Deal, Question } from '../../src/domain/model';
-import { ok } from '../../src/domain/result';
+import { fail, ok } from '../../src/domain/result';
 import { KEPT_TEXT_KEY, type DocumentService } from '../../src/ports';
 import { disk, memRepo } from '../adapters/memRepo';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
@@ -159,6 +159,46 @@ it('keeps the exact typed question while its save is pending or refused', async 
   expect(composerText(key)).toBe(instructions[34]);
   expect(Object.values(store.get().questions)).toMatchObject([{ dealId, text: instructions[30] }]);
   expect(asked).not.toHaveBeenCalled();
+});
+
+it.each([
+  { outcome: 'refused', newer: 'erased' },
+  { outcome: 'refused', newer: 'kept' },
+  { outcome: 'saved', newer: 'erased' },
+])('settles a $outcome question save after newer input is $newer', async ({ outcome, newer }) => {
+  const { store, scope, navigate } = await start();
+  const key = convKey(scope);
+  const submitted = '  Log a question: Did the lender consent to the revised assignment provisions?  ';
+  const next = 'Do the assignment provisions affect the timetable for financial close?';
+  const original = store.dispatch.bind(store);
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => { release = resolve; });
+  const dispatch = vi.spyOn(store, 'dispatch').mockImplementation(async (command, input, options) => {
+    await hold;
+    return outcome === 'saved' ? original(command, input, options)
+      : fail({ kind: 'storageFull', message: 'The disk is full' });
+  });
+  const refused = vi.fn();
+  setComposerText(key, submitted);
+  const sending = sendTyped(store, scope, { navigate, refused });
+  await vi.waitFor(() => expect(dispatch).toHaveBeenCalledOnce());
+  expect(composerText(key)).toBe('');
+  setComposerText(key, next);
+  if (newer === 'erased') setComposerText(key, '');
+  expect(composerText(key)).toBe(newer === 'kept' ? next : '');
+  saveKeptDrafts();
+  const pending = local.read(KEPT_TEXT_KEY);
+  release();
+  await sending;
+
+  const restores = outcome === 'refused' && newer === 'erased';
+  expect(composerText(key)).toBe(restores ? submitted : newer === 'kept' ? next : '');
+  expect(refused).toHaveBeenCalledTimes(restores ? 1 : 0);
+  expect(Object.values(store.get().questions)).toHaveLength(outcome === 'saved' ? 1 : 0);
+  expect(pending).toMatchObject({ composer: expect.arrayContaining([[key, newer === 'kept' ? next : submitted]]) });
+  saveKeptDrafts();
+  const settled = local.read(KEPT_TEXT_KEY) as { composer?: [string, string][] } | null;
+  expect(new Map(settled?.composer).get(key)).toBe(restores ? submitted : newer === 'kept' ? next : undefined);
 });
 
 it('keeps text in finding and question scopes deleted since they were opened', async () => {

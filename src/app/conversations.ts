@@ -193,13 +193,16 @@ export function composerScope(given: Scope, launching: boolean): { scope: Scope;
   return { scope, launchSlot };
 }
 
-// A typed Log Question clears the visible box when sent. Its text stays on disk until the result arrives.
-const hiddenQuestionDrafts = new Set<string>();
-export const composerText = (key: string) => hiddenQuestionDrafts.has(key) ? '' : composerDrafts().text.get(key) ?? '';
+// A typed Log Question clears the visible box when sent. Its text remains the kept draft whenever the box is empty.
+const submittedQuestions = new Map<string, { text: string; hidden: boolean }>();
+export const composerText = (key: string) =>
+  submittedQuestions.get(key)?.hidden ? '' : composerDrafts().text.get(key) ?? '';
 export function setComposerText(key: string, text: string) {
-  hiddenQuestionDrafts.delete(key);
+  const submitted = submittedQuestions.get(key);
+  if (submitted) submitted.hidden = !text;
   const kept = composerDrafts().text;
-  if (text) kept.set(key, text);
+  const value = text || submitted?.text;
+  if (value) kept.set(key, value);
   else kept.delete(key);
 }
 
@@ -219,7 +222,9 @@ async function logTypedQuestion(store: Store, dealId: string, text: string, key:
   logging.set(store, deals);
   if (deals.has(dealId)) return;
   deals.add(dealId);
-  hiddenQuestionDrafts.add(key);
+  const submitted = { text: composerText(key), hidden: true };
+  submittedQuestions.set(key, submitted);
+  let refocus = false;
   try {
     view.textChanged?.();
     view.sending?.();
@@ -227,12 +232,14 @@ async function logTypedQuestion(store: Store, dealId: string, text: string, key:
       idempotencyKey: 'ask-addq-' + dealId, noRetry: true,
     });
     if (!result.ok && result.error.kind === 'invalid') store.toast(result.error.message);
-    if (!hiddenQuestionDrafts.has(key) || dealCopied(store, dealId)) return;
+    if (!submitted.hidden || dealCopied(store, dealId)) return;
     if (result.ok) composerDrafts().text.delete(key);
-    else view.refused?.();
+    else refocus = true;
   } finally {
     deals.delete(dealId);
-    if (hiddenQuestionDrafts.delete(key)) view.textChanged?.();
+    submittedQuestions.delete(key);
+    if (submitted.hidden) view.textChanged?.();
+    if (refocus) view.refused?.();
   }
 }
 
