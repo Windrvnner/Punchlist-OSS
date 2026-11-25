@@ -13,6 +13,9 @@ import {
 import { initializeKeptText, saveKeptDrafts } from '../../src/app/keptText';
 import { keepImportedLog } from '../../src/app/qaLog';
 import { dealQuestions } from '../../src/app/state';
+import { nodeAi } from '../../src/backend/ai';
+import { StandInService } from '../../src/backend/service';
+import { StoreKeeper } from '../../src/backend/storeKeeper';
 import { prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { fail, ok, type Result } from '../../src/domain/result';
 import { KEPT_TEXT_KEY, type AiService } from '../../src/ports';
@@ -120,7 +123,7 @@ const MERGED = `${APP_RESPONSE} ${LOG_RESPONSE}`;
 
 async function mergeFixture() {
   const app = await fixture();
-  const { store, dealId, rows, question } = app;
+  const { store, repo, dealId, rows, question } = app;
   const q = question(165);
   expect(await store.dispatch(SetResponse, {
     dealId, questionId: q.id, response: APP_RESPONSE,
@@ -138,7 +141,7 @@ async function mergeFixture() {
   expect(hasLogVersion(store.get(), question(165))).toBe(true);
   const model = vi.fn<NonNullable<AiService['merge']>>().mockResolvedValue(ok({ text: MERGED }));
   store.services.ai.merge = model;
-  return { store, dealId, model, q: question(165) };
+  return { store, repo, dealId, model, q: question(165) };
 }
 
 it('drafts the displayed versions once, keeps edits and field choices, and preserves the choice’s Undo', async () => {
@@ -200,6 +203,43 @@ it('reports a failed merge quietly and leaves later typing intact when the retry
     expect(responseMergeView(q.id)).toMatchObject({ busy: false, draft: { text: TYPED, ai: MERGED } });
     expect(model).toHaveBeenCalledTimes(3);
   } finally {
+    stop();
+  }
+});
+
+it('quietly retries a transient transport failure from one merge selection', async () => {
+  const { store, repo, q } = await mergeFixture();
+  const reply = vi.fn(() => JSON.stringify({ text: MERGED })).mockImplementationOnce(() => {
+    throw Object.assign(new Error('Model service temporarily unavailable'), { status: 503 });
+  });
+  const service = new StandInService(reply);
+  let continueRetry!: () => void;
+  const waiting = new Promise<void>((resolve) => { continueRetry = resolve; });
+  const sleep = vi.fn(() => waiting);
+  const backend = nodeAi({
+    service, repo, docs: { records: () => [], wanted: async () => [] },
+    keeper: new StoreKeeper(service, repo.local), retry: { sleep },
+  });
+  store.services.ai.merge = backend.merge;
+  const landed = vi.fn();
+  const stop = watchResponseMerges(landed);
+  const previousToasts = store.get().ui.toasts;
+  try {
+    expect(selectResponseMerge(store, q, LOG_RESPONSE)).toMatchObject({ busy: true });
+    await vi.waitFor(() => expect(sleep).toHaveBeenCalledTimes(1));
+    expect(service.calls).toHaveLength(1);
+    expect(responseMergeView(q.id)).toMatchObject({ busy: true, hasDraft: false });
+    expect(landed).not.toHaveBeenCalled();
+    expect(store.get().ui.toasts).toEqual(previousToasts);
+
+    continueRetry();
+    await vi.waitFor(() => expect(landed).toHaveBeenCalledExactlyOnceWith(q.id, undefined));
+    expect(service.calls).toHaveLength(2);
+    expect(service.calls[1]).toEqual(service.calls[0]);
+    expect(responseMergeView(q.id)).toMatchObject({ busy: false, draft: { text: MERGED, ai: MERGED } });
+    expect(store.get().ui.toasts).toEqual(previousToasts);
+  } finally {
+    continueRetry();
     stop();
   }
 });
