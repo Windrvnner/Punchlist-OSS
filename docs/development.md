@@ -61,12 +61,12 @@ npx vitest run tests/app/coreWorkflows.test.ts --environment node --no-file-para
 
 The static checks scan tracked files for secrets and attribution, and commit messages for attribution.
 After readability hints, `scripts/check-pane-of-glass.mjs` checks UI imports, service and repository access,
-and browser storage against the counts in `scripts/pane-of-glass-baseline.json`. For Vite globs with literal patterns and
-direct literal options or no options, it reports the original call if either development or production imports a
-forbidden module. If a change removes an access,
-run `node scripts/check-pane-of-glass.mjs --lower` and commit the lower baseline in the same pull request.
-The guard compares that baseline with the branch point on `main`. If the checkout lacks that history,
-the diagnostic gives the Git command to fetch it.
+and browser storage. The committed `scripts/pane-of-glass-baseline.json` is `{}`, so any match fails. For Vite globs
+with literal patterns and direct literal options or no options, the guard reports the original call if either
+development or production imports a forbidden module.
+The guard compares the baseline with the branch point on `main` and refuses increases. On a branch with existing
+entries, use `node scripts/check-pane-of-glass.mjs --lower` and commit the lower baseline when removing an access.
+If the checkout lacks the history needed for comparison, the diagnostic gives the Git command to fetch it.
 
 The GitHub Actions workflow also builds the Windows installer when it is started by hand.
 
