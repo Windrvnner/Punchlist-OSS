@@ -36,7 +36,8 @@ describe('blacklines', () => {
       doc('a', 'Deal/Project Bellows SPA Redline to Project Bellows SPA v1.pdf'), doc('pa', 'Deal/Project Bellows SPA.docx'),
       doc('b', 'Legal/SPA v3 Redline to SPA v2.pdf'), doc('s3', 'Legal/SPA v3.docx'), doc('s2', 'Legal/SPA v2.docx'),
       doc('c', 'Leases/Agreement to Lease redline.pdf'), doc('al', 'Leases/Agreement to Lease.docx'),
-      doc('ex', 'Legal/Exhibit A to SPA redline.pdf'), doc('xa', 'Legal/Exhibit A.pdf'),            // "to" in a title splits nothing: no clean draft, so it stands alone
+      // "to" in a title splits nothing: no clean draft, so it stands alone
+      doc('ex', 'Legal/Exhibit A to SPA redline.pdf'), doc('xa', 'Legal/Exhibit A.pdf'),
     ]);
     expect(Object.fromEntries(m)).toEqual({ a: 'pa', b: 's3', c: 'al', ex: false });
   });
@@ -65,12 +66,13 @@ describe('blacklines', () => {
     const m = cleanDrafts([
       doc('a1', 'Legal/Side letter blackline.pdf'), doc('x', 'Legal/Lease.pdf'),
       doc('a2', 'Legal/SPA v3 v v2.pdf', { cover: 'Comparison of SPA v2.docx and SPA v3.docx. Insertions 4 Deletions 2' }),
-      doc('b2', 'Legal/Side letter blackline.pdf'), doc('sl', 'Other/Side letter.pdf'),                   // its name, in another folder only
+      // its name, in another folder only
+      doc('b2', 'Legal/Side letter blackline.pdf'), doc('sl', 'Other/Side letter.pdf'),
       doc('w', 'Finance/Valuation comparison.pdf'),                                                     // a weak word alone is no blackline, so it never stands alone
     ]);
     expect(Object.fromEntries(m)).toEqual({ a1: false, a2: false, b2: false });
   });
-  it('stands alone beside a file sharing a word of its name, and is unclear when only the original the cover names is there', () => {
+  it('stands alone beside a file sharing a word of its name; unclear when only the cover’s original is there', () => {
     const m = cleanDrafts([
       doc('r1', 'Legal/Credit Agreement - Redline v3 to v2.pdf'), doc('ca', 'Legal/Credit Agreement v3.docx'),
       doc('r2', 'Deal/Blackline - SPA v3 against SPA v2.pdf'), doc('r3', 'Deal/SPA_redline_2026-03-01.pdf'), doc('r4', 'Deal/SPA blackline.pdf'), doc('sx', 'Deal/SPA (execution version).docx'),

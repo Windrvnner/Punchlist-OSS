@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { control, checkControl, assertControl, notes, shownName, signInBinding, SERVICE, AI_LABEL, type Control } from '../../src/control';
+import {
+  control, checkControl, assertControl, notes, shownName, signInBinding, SERVICE, AI_LABEL, type Control,
+} from '../../src/control';
 import { COLOR_NAMES } from '../../src/palette';
 
 /** every color CSS knows by name, and the system colors, which only Windows High Contrast may use */
@@ -61,7 +63,8 @@ describe('the control file', () => {
   it('binds a cloud sign-in to the address and sign-in fields, not to the model IDs', () => {
     const azure = (change: (c: Record<string, Record<string, unknown>>) => void = () => {}) => edited((c) => {
       c.models.service = 'azure';
-      Object.assign(c.azure, { address: 'https://a.example.test/openai/v1', tenant: 't', clientId: 'c', standard: 'm1' });
+      Object.assign(c.azure, { address: 'https://a.example.test/openai/v1', tenant: 't', clientId: 'c' });
+      c.azure.standard = 'm1';
       change(c);
     });
     const bound = signInBinding(azure());

@@ -9,7 +9,9 @@ import { RequestDraft, ApplyDraft, RecoverDrafts, DiscardDraft, AcceptDraft, Res
 import { CreateFinding, SetFindingStatus, ReviewFinding, DeleteFinding, RestoreFinding, RestoreFindingSnapshot, Reassess, ApplyReassessment, AttachDocumentToFinding } from '../../src/app/commands/findings';
 import { registry } from '../../src/app/commands/undo';
 import { csvCodec } from '../../src/adapters/spreadsheet';
-import { ask, retry, convKey, conversationDocs, docIndex, suggestions, useAnswer, answerText, askVerdict, type Scope } from '../../src/app/conversations';
+import {
+  ask, retry, convKey, conversationDocs, docIndex, suggestions, useAnswer, answerText, askVerdict, type Scope,
+} from '../../src/app/conversations';
 import { MAX_ATTACHED, attachFiles, addToSources } from '../../src/app/attachments';
 import { dealFindings } from '../../src/app/state';
 import type { AiService, DocumentService, LocalStore } from '../../src/ports';
@@ -210,7 +212,11 @@ describe('conversations', () => {
   });
   it('a typed question about the open questions goes to the model like any other', async () => {
     let calls = 0;
-    const { store, repo } = make({ ai: { answer: async (i) => { calls++; return mockAi({ latency: [0, 0] }, repo).answer(i); } } });
+    const answer: AiService['answer'] = async (i) => {
+      calls++;
+      return mockAi({ latency: [0, 0] }, repo).answer(i);
+    };
+    const { store, repo } = make({ ai: { answer: (i) => answer(i) } });
     const dealId = await deal(store);
     await mockFirstPass(repo, dealId, 'Project Datum'); await sleep(20); await store.loadDeal(dealId);
     const scope: Scope = { kind: 'deal', dealId };

@@ -65,7 +65,8 @@ export const isBlackline = (d: { name: string; cover?: string }) => PDF.test(d.n
 
 /**
  * Each blackline among these documents, by id, with its clean draft's id; null when which one is not clear; false when
- * neither its cover nor its name finds one (a standalone blackline, read on its own). Documents that are not blacklines are left out:
+ * neither its cover nor its name finds one (a standalone blackline, read on its own). Documents that are not blacklines
+ * are left out:
  * what is in the map is a blackline.
  */
 export function cleanDrafts(docs: BlacklineDoc[]): Map<string, string | null | false> {
@@ -96,7 +97,7 @@ export function cleanDrafts(docs: BlacklineDoc[]): Map<string, string | null | f
       if (here !== null) { out.set(b.docId, here ?? null); found = true; break; }
       const fam = fams.filter((f) => base(f.name) === want); if (fam.length) { out.set(b.docId, fam.length === 1 ? fam[0].drafts[0].docId : null); found = true; break; }
     }
-    // 4 no clean draft by cover or name: it stands alone and is read on its own, whatever else shares a word of its name
+    // 4 no clean draft by cover or name: it stands alone, read on its own, whatever else shares a word of its name
     if (!found) out.set(b.docId, false);
   }
   // a weaker word: a blackline only when the file of its name without that word is in its folder; otherwise an ordinary document

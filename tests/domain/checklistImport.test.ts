@@ -3,12 +3,14 @@ import { suggestChecklistColumns, prepareChecklist, sameWording, earlierRewordin
 
 describe('reading a checklist from a table', () => {
   it('finds the item and section columns by their headings', () => {
-    expect(suggestChecklistColumns(['#', 'Area', 'Requirement', 'Owner'])).toEqual({ item: 2, section: 1, subsection: null });
+    const area = suggestChecklistColumns(['#', 'Area', 'Requirement', 'Owner']);
+    expect(area).toEqual({ item: 2, section: 1, subsection: null });
     expect(suggestChecklistColumns(['Section', 'Sub-section', 'Item'])).toEqual({ item: 2, section: 0, subsection: 1 });
     expect(suggestChecklistColumns(['Ref', 'Checklist item'])).toEqual({ item: 1, section: null, subsection: null });
   });
   it('without a known heading, picks no item column, whatever the cells hold', () => {
-    expect(suggestChecklistColumns(['No', 'Document', 'Notes'])).toEqual({ item: null, section: null, subsection: null });
+    const none = suggestChecklistColumns(['No', 'Document', 'Notes']);
+    expect(none).toEqual({ item: null, section: null, subsection: null });
   });
   it('turns rows into items, carries a section down to the rows under it, and counts empty rows', () => {
     const rows = [['Insurance', 'Insurance is in place'], ['', 'Insurer is rated A- or better'], ['', '  '], ['Model', 'The model is audited']];

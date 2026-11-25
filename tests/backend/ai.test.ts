@@ -133,10 +133,13 @@ describe('answers', () => {
   });
   it('leaves out a blackline whose clean draft is not clear', async () => {
     const PAIRED = doc(72, 'Side letter blackline.pdf', { summary: 'Side letter step-in changes.' });
-    const UNCLEAR = doc(73, 'Lease redline.pdf', { summary: 'Lease step-in changes.', cover: 'Comparison of Lease v1.docx and Lease.pdf. Insertions 2' });
+    const cover = 'Comparison of Lease v1.docx and Lease.pdf. Insertions 2';
+    const UNCLEAR = doc(73, 'Lease redline.pdf', { summary: 'Lease step-in changes.', cover });
     const L1 = doc(76, 'Lease.pdf', { folder: 'vdr', rel: 'One/Lease.pdf' }), L2 = doc(77, 'Lease.pdf', { folder: 'vdr', rel: 'Two/Lease.pdf' });
     const s = setup(() => ({ text: 'ok', sources: [] }), { d1: [SIDE, PAIRED, UNCLEAR, L1, L2] }, { library: [] });
-    val(await s.ai.answer(ask('What step-in changes do the blacklines make?'))); expect(sentNames(s.calls[0])).toEqual(['Side letter blackline.pdf', 'Side letter.pdf']);   // the side letter's is read with it; the lease's cover names two files of one name
+    val(await s.ai.answer(ask('What step-in changes do the blacklines make?')));
+    // the side letter's is read with it; the lease's cover names two files of one name
+    expect(sentNames(s.calls[0])).toEqual(['Side letter blackline.pdf', 'Side letter.pdf']);
     const PEER = doc(75, 'Peer comparison.pdf', { summary: 'Step-in terms of peer projects.' }); const r = setup(() => ({ text: 'ok', sources: [] }), { d1: [PEER] }, { library: [] });
     val(await r.ai.answer(ask('What step-in terms do peers have?'))); expect(sentNames(r.calls[0])).toEqual(['Peer comparison.pdf']);      // a report named "comparison" is no blackline: it is read
   });
@@ -144,7 +147,9 @@ describe('answers', () => {
     const LONE = doc(78, 'Lease redline.pdf', { summary: 'Lease step-in changes.' });
     const s = setup((c) => ({ text: 'Step-in now needs 30 days. [1]', sources: [{ doc: tag(c, LONE), page: 2 }] }), { d1: [LONE] }, { library: [] });
     const r = val(await s.ai.answer(ask('What step-in changes does the lease redline make?'))); expect(sentNames(s.calls[0])).toEqual(['Lease redline.pdf']);
-    expect(s.calls[0].prompt).toContain(`${tag(s.calls[0], LONE)} is a blackline: a comparison of two documents with the changes marked, made by a comparison tool; no clean draft of it was found by its cover or name.`);
+    const lone = tag(s.calls[0], LONE);
+    expect(s.calls[0].prompt).toContain(`${lone} is a blackline: a comparison of two documents with the `
+      + 'changes marked, made by a comparison tool; no clean draft of it was found by its cover or name.');
     expect(r.sources.map((x) => x.reading)).toEqual([true]);
   });
   it("checks a Word file's cited page against the pages counted when it was first sent", async () => {
