@@ -10,6 +10,7 @@
  * use; `routing` sends fast, standard and thorough to Haiku, Sonnet and Opus.
  */
 import fs from 'node:fs';
+import { decodeText } from '../domain/textEncoding';
 import os from 'node:os';
 import path from 'node:path';
 import Anthropic, { toFile, type Middleware } from '@anthropic-ai/sdk';
@@ -132,6 +133,13 @@ async function sheetText(convert: Converter, file: { name: string; bytes: Uint8A
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
+/** a text file as UTF-8: its own bytes when they are UTF-8, else read as a spreadsheet program reads a .csv or .txt (UTF-16, Windows-1252) */
+function plainTextBytes(file: { name: string; bytes: Uint8Array }): Uint8Array {
+  try { new TextDecoder('utf-8', { fatal: true }).decode(file.bytes); return file.bytes; } catch { /* another encoding, or not text */ }
+  if (/\.(csv|txt|text|md)$/i.test(file.name)) return new TextEncoder().encode(decodeText(file.bytes));
+  throw new Error(`${SERVICE} cannot read ${file.name}: only PDFs, text and spreadsheets`);
+}
+
 /** what goes into the store for a file: a PDF as it is, a spreadsheet as text, any other text as it is */
 export async function storable(file: { name: string; bytes: Uint8Array }, convert?: Converter): Promise<{ bytes: Uint8Array; type: string }> {
   if (file.bytes[0] === 0x25 && file.bytes[1] === 0x50 && file.bytes[2] === 0x44 && file.bytes[3] === 0x46) return { bytes: file.bytes, type: 'application/pdf' };   // %PDF
@@ -139,8 +147,7 @@ export async function storable(file: { name: string; bytes: Uint8Array }, conver
     if (!convert) throw new Error(`${file.name} is a spreadsheet, and there is no converter to read it with`);
     return { bytes: new TextEncoder().encode(await sheetText(convert, file)), type: 'text/plain' };
   }
-  try { new TextDecoder('utf-8', { fatal: true }).decode(file.bytes); } catch { throw new Error(`${SERVICE} cannot read ${file.name}: only PDFs, text and spreadsheets`); }
-  return { bytes: file.bytes, type: 'text/plain' };
+  return { bytes: plainTextBytes(file), type: 'text/plain' };
 }
 
 export function claudeService(o: ClaudeOptions): ModelService & { use: ClaudeUse } {
