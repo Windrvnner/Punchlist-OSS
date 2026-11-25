@@ -25,6 +25,12 @@ export function unappliedImportColumns(table: QaImportTable | null): ImportField
   return (table?.columnPicks ?? []).filter((pick) => pick.unapplied).map(({ field }) => field);
 }
 
+/** The one message that names the unapplied columns in field order, or '' when none are unapplied (#741). */
+export function unappliedColumnsWarning(unapplied: ImportField[]) {
+  const labels = IMPORT_FIELDS.filter(([field]) => unapplied.includes(field)).map(([, label]) => label);
+  return labels.length ? `Column choice not applied for ${labels.join(', ')}.` : '';
+}
+
 /** Older kept layouts include the mapping but lack the explicit pick history and source positions. */
 export function restoreImportColumnPicks(table: QaImportTable | null, mapping: Mapping | null) {
   if (!table || !mapping || Array.isArray(table.columnPicks)) return table;

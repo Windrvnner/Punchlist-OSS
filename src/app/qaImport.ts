@@ -1,11 +1,11 @@
 import { Operation } from '../domain/model';
 import { fail, ok, type Result } from '../domain/result';
 import {
-  IMPORT_FIELDS, importCounts, parseDate, prepareImport, type ImportRow, type Mapping, type Prepared,
+  importCounts, parseDate, prepareImport, type ImportRow, type Mapping, type Prepared,
 } from '../domain/importExport';
 import { ImportQuestions } from './commands/importQuestions';
 import { dropImport, finishKeptSubmission, importKey, keepImport, keptImport } from './keptImports';
-import { unappliedImportColumns, type QaImportTable } from './qaImportColumns';
+import { unappliedColumnsWarning, unappliedImportColumns } from './qaImportColumns';
 import { keepImportedLog, logTakenBy } from './qaLog';
 import { dealQuestions, type State } from './state';
 import type { Store } from './store';
@@ -182,9 +182,7 @@ export async function submitQaImport(
 
 /** A manual column choice that no longer matches the file is settled by a person before any row is sent (#741). */
 function unappliedColumnsMessage(table: ImportTable) {
-  const fields = unappliedImportColumns(table as QaImportTable);
-  const labels = IMPORT_FIELDS.filter(([field]) => fields.includes(field)).map(([, label]) => label);
-  return labels.length ? `Column choice not applied for ${labels.join(', ')}.` : '';
+  return unappliedColumnsWarning(unappliedImportColumns(table));
 }
 
 /** Only a complete submission made by this build can own the retained rows. */

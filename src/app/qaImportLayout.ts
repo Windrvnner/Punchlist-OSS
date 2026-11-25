@@ -1,7 +1,7 @@
-import { IMPORT_FIELDS, type ImportField, type Mapping } from '../domain/importExport';
+import { type ImportField, type Mapping } from '../domain/importExport';
 import type { Store } from './store';
 import {
-  applyImportColumnPicks, pickImportColumn, restoreImportColumnPicks, unappliedImportColumns,
+  applyImportColumnPicks, pickImportColumn, restoreImportColumnPicks, unappliedColumnsWarning, unappliedImportColumns,
   type QaImportTable,
 } from './qaImportColumns';
 import { readImportBytes, type ImportLocation, type ImportTable } from './transfer';
@@ -91,8 +91,7 @@ export class QaImportLayout {
 
 function layoutView(table: QaImportTable | null, mapping: Mapping | null): QaImportLayoutView {
   const unapplied = unappliedImportColumns(table);
-  const labels = IMPORT_FIELDS.filter(([field]) => unapplied.includes(field)).map(([, label]) => label);
-  const warning = labels.length ? `Column choice not applied for ${labels.join(', ')}.` : '';
+  const warning = unappliedColumnsWarning(unapplied);
   return { table, mapping, reading: false, error: '', unapplied, warning };
 }
 
