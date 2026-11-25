@@ -36,7 +36,7 @@ export const openResolve = (store: ReturnType<typeof useStore>, dealId: string, 
 };
 
 /** resolved elsewhere: the merged response the person typed waits, not saved, in the response box (#939) */
-const HANDED_TIP = 'Your merged response is in the response box, not saved';
+const HANDED_TIP = 'Unsaved text is kept in the response box';
 /** the merged response's heading, once picked: it is then the choice (its card is the box to edit) */
 const MERGED_RADIO = { role: 'radio', 'aria-checked': true, tabIndex: 0, 'aria-label': 'Merged response' } as const;
 
