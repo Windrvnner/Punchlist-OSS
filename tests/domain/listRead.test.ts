@@ -13,7 +13,7 @@ describe('a list read by the model, tied out line by line', () => {
   it('accounts for every line, joins a wrapped item, and keeps each item under its heading', () => {
     const t = tieOut(LINES, reads(READ));
     expect(t.items.map((i) => [i.section, i.text, i.lines])).toEqual([
-      ['Site', 'Title report for the whole site', [4]], ['Site', 'Leases cover the array and the gen-tie route', [5, 6]], ['Permits', 'Conditional use permit issued', [9]]]);
+      ['1. Site', '1.1  Title report for the whole site', [4]], ['1. Site', '1.2  Leases cover the array and the gen-tie route', [5, 6]], ['2. Permits', '2.1  Conditional use permit issued', [9]]]);
     expect(t.left).toEqual([1, 7]);
     const c = t.count; expect(c.items + c.more + c.headings + c.blank + c.left).toBe(c.lines);
     expect(c).toEqual({ lines: 9, items: 3, more: 1, headings: 2, blank: 1, left: 2 });
@@ -25,7 +25,7 @@ describe('a list read by the model, tied out line by line', () => {
     const t = tieOut(LINES, r);
     expect(t.left).toEqual([1, 4, 7, 9]);
     // the wrapped line of the next item still joins its own item, not one before it
-    expect(t.items.map((i) => i.text)).toEqual(['Leases cover the array and the gen-tie route']);
+    expect(t.items.map((i) => i.text)).toEqual(['1.2  Leases cover the array and the gen-tie route']);
     const c = t.count; expect(c.items + c.more + c.headings + c.blank + c.left).toBe(c.lines);
   });
 
@@ -37,7 +37,7 @@ describe('a list read by the model, tied out line by line', () => {
   it('brings a checked line in where it sits, with its own words, under the heading above it', () => {
     const t = tieOut(LINES, reads(READ), new Set([7]));
     expect(t.left).toEqual([1]);
-    expect(t.items.map((i) => [i.section, i.text])).toContainEqual(['Site', 'Page 2 of 6']);
+    expect(t.items.map((i) => [i.section, i.text])).toContainEqual(['1. Site', 'Page 2 of 6']);
     expect(t.items.findIndex((i) => i.text === 'Page 2 of 6')).toBe(2);
     // a line brought in comes in exactly as written: bullets, list numbers and figures stay
     const given = ['*  Independent engineer engaged', '1.4) Survey', '2 years of audited accounts', '10. Board minutes'];
@@ -46,9 +46,9 @@ describe('a list read by the model, tied out line by line', () => {
 
   it('reads a table row with its own section and subsection, and the heading row as a heading', () => {
     const lines = tableLines(['Area', 'Requirement'], [['Interconnection', 'Network upgrade costs  capped'], ['Land', 'Site control covers the array']]);
-    expect(lines[1]).toBe('Interconnection | Network upgrade costs capped');
+    expect(lines[1]).toBe('Interconnection | Network upgrade costs  capped');   // the cell's own spacing stays
     const t = tieOut(lines, reads([{ n: 1, k: 'columns' }, { n: 2, k: 'item', text: 'Network upgrade costs capped', section: 'Interconnection' }, { n: 3, k: 'item', text: 'Site control covers the array', section: 'Land' }]));
-    expect(t.items.map((i) => [i.section, i.text])).toEqual([['Interconnection', 'Network upgrade costs capped'], ['Land', 'Site control covers the array']]);
+    expect(t.items.map((i) => [i.section, i.text])).toEqual([['Interconnection', 'Network upgrade costs  capped'], ['Land', 'Site control covers the array']]);
     expect(t.count.headings).toBe(1);
   });
 

@@ -154,7 +154,7 @@ export function itemsFor(firm: FirmList | null | undefined, d: { product?: strin
   for (const { layer, value } of dealLayers(d)) {
     const list = findList(firm, layer, value); if (!list) continue;
     for (const it of list.items) {
-      const text = norm(it.text); const k = key(text); if (!k) continue;
+      const text = it.text; const k = key(text); if (!k) continue;   // the wording stays as the list has it
       const had = out.get(k); const rev = (list as { rev?: unknown }).rev; const from = { layer, value: list.name, ...(typeof rev === 'number' ? { rev } : {}) };
       if (had) { if (!had.from.some((f) => f.layer === layer && f.value === list.name)) had.from.push(from); }
       else out.set(k, { text, ...(it.section ? { section: it.section } : {}), ...(it.subsection ? { subsection: it.subsection } : {}), from: [from] });

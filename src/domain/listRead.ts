@@ -34,7 +34,8 @@ export interface TiedOut {
 
 /** A table as lines for the model: the heading row, then each row, its cells joined by " | ". */
 export function tableLines(columns: string[], rows: string[][]): string[] {
-  const line = (r: string[]) => r.map((c) => String(c ?? '').replace(/\s+/g, ' ').trim()).join(' | ');
+  // a line break inside a cell would split the row, so it becomes a space; the cell's other characters are kept
+  const line = (r: string[]) => r.map((c) => String(c ?? '').replace(/\r\n?|\n/g, ' ')).join(' | ');
   return [line(columns), ...rows.map(line)];
 }
 
@@ -55,6 +56,15 @@ function holds(line: string, part: string): boolean {
   if (cells.length > 1) return cells.some((c) => key(c) === p);
   const l = key(line); if (!l.endsWith(p)) return false;
   return l.slice(0, l.length - p.length).split(/\s+/).filter(Boolean).every((w) => LABEL.test(w));
+}
+
+/**
+ * The words a reading stands for, exactly as the line has them: for a table row ("a | b") the whole cell the reading names,
+ * otherwise the whole line without its edge spaces, numbering and bullets included. The model's own wording is only checked against the line.
+ */
+function asWritten(line: string, part: string): string {
+  const cells = line.split(' | ');
+  return cells.length > 1 ? cells.find((c) => key(c) === key(part)) ?? part : line.trim();   // edge spaces are layout
 }
 
 /**
@@ -92,8 +102,8 @@ export function tieOut(lines: string[], reads: ReadonlyMap<number, LineRead>, br
     if (!key(line)) { count.blank++; return; }
     const r = reads.get(n);
     if (!usable(line, r)) { leave(n); return; }
-    if (r!.k === 'section') { section = r!.text!; subsection = ''; last = null; count.headings++; return; }
-    if (r!.k === 'subsection') { subsection = r!.text!; last = null; count.headings++; return; }
+    if (r!.k === 'section') { section = asWritten(line, r!.text!); subsection = ''; last = null; count.headings++; return; }
+    if (r!.k === 'subsection') { subsection = asWritten(line, r!.text!); last = null; count.headings++; return; }
     if (r!.k === 'columns') { count.headings++; return; }
     if (r!.k === 'more') {
       if (!last) { leave(n); return; }
@@ -102,10 +112,10 @@ export function tieOut(lines: string[], reads: ReadonlyMap<number, LineRead>, br
     if (r!.k === 'item') {
       // a table row's own section cell starts that section (and no subsection) for it and the rows under it, as a section
       // filled in only on the first row of each section is laid out; its subsection cell does the same within the section
-      const s = r!.section ?? ''; const sub = r!.subsection ?? '';
-      if (s && s !== section) { section = s; subsection = ''; }
-      if (sub) subsection = sub;
-      add(r!.text!, n);
+      const s = r!.section ? asWritten(line, r!.section) : ''; const sub = r!.subsection ? asWritten(line, r!.subsection) : '';
+      if (key(s) && key(s) !== key(section)) { section = s; subsection = ''; }
+      if (key(sub)) subsection = sub;
+      add(asWritten(line, r!.text!), n);
       return;
     }
     leave(n);

@@ -26,7 +26,7 @@ describe('reading a list in, every line accounted for', () => {
     const r = await readList(ai, LINES); if (!r.ok) throw new Error(r.error.message);
     expect(calls).toEqual([{ only: undefined, thorough: undefined }, { only: [2, 3], thorough: false }, { only: [2], thorough: true }]);
     const t = tieOut(LINES, r.value);
-    expect(t.items.map((i) => i.text)).toEqual(['Leases cover the array']); expect(t.left).toEqual([2, 4]);
+    expect(t.items.map((i) => i.text)).toEqual(['1.2 Leases cover the array']); expect(t.left).toEqual([2, 4]);
   });
   it('fails when the first reading fails, and keeps the first reading when a later pass fails', async () => {
     expect((await readList(fake([() => null]).ai, LINES)).ok).toBe(false);
@@ -40,9 +40,11 @@ describe('the stand-in reading the mock-up list', () => {
     const lines = textLines(pastedLines().join('\n'));
     const r = await readList(mockAi({ latency: [0, 0] }), lines); if (!r.ok) throw new Error(r.error.message);
     const t = tieOut(lines, r.value);
-    // the app keeps every wording exactly as the file has it, curly quotes included
-    expect(t.items.map((i) => i.text)).toEqual(ITEMS.map((i) => i.t));
-    expect(t.items.map((i) => i.section ?? '')).toEqual(ITEMS.map((i) => i.s));
+    // the app keeps every line exactly as the file has it, numbering and curly quotes included
+    const unnumbered = (text: string) => text.replace(/^(\d+(\.\d+)*[.)]?|[a-z]\))\s+/i, '');
+    expect(t.items.map((i) => unnumbered(i.text))).toEqual(ITEMS.map((i) => i.t));
+    expect(t.items.every((i) => lines.some((line) => line.trim() && i.text.startsWith(line.trim())))).toBe(true);
+    expect(t.items.map((i) => unnumbered(i.section ?? ''))).toEqual(ITEMS.map((i) => i.s));
     expect(t.left.map((n) => lines[n - 1].trim())).toEqual(LEFT_OUT);
     const c = t.count; expect(c.items + c.more + c.headings + c.blank + c.left).toBe(lines.length);
   });

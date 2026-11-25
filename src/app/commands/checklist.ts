@@ -159,7 +159,7 @@ export const BringInList = define({
     const l = input.list; const name = l.layer === 'broad' ? '' : l.name;
     if (l.layer !== 'broad' && !key(name)) return fail(rejected(`Give the ${LAYER_NAMES[l.layer].one.toLowerCase()} list a name`));
     if (name.length > LIST_NAME_MAX) return fail(rejected(`Keep the name to ${LIST_NAME_MAX} characters`));
-    const items = l.items.map((it) => ({ ...it })).filter((it) => key(it.text));
+    const items = l.items.filter((it) => key(it.text));
     if (!items.length) return fail(rejected('This list has no items'));
     const id = listId(l.layer, name); const cur = state.firmList[id];
     // refused even when nothing would be written, so a list in two versions is never taken as brought in
