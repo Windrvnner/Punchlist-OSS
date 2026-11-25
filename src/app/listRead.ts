@@ -103,7 +103,41 @@ export function checklistSourceLines(text: ChecklistText | null, table: ImportTa
 /** Later work (a file read, a model call, or leaving) takes the place of an earlier reply. */
 export function checklistRequests() {
   let generation = 0;
-  return { newToken: () => ++generation, isLatest: (token: number) => token === generation };
+  let tableRead: number | undefined;
+  const newToken = () => ++generation;
+  const isLatest = (token: number) => token === generation;
+  const startTableRead = () => {
+    tableRead = newToken();
+    return tableRead;
+  };
+  const finishTableRead = (token: number) => {
+    if (tableRead === token) tableRead = undefined;
+    return isLatest(token);
+  };
+  const tableReadPending = () => tableRead !== undefined && isLatest(tableRead);
+  return { newToken, isLatest, startTableRead, finishTableRead, tableReadPending };
+}
+
+interface ChecklistTableReadEvents {
+  started(): void;
+  finished(read: Result<MappedChecklistTable>): void;
+}
+
+/** An older model reply cannot release the selected worksheet's read (#821). */
+export async function rereadChecklistTable(
+  store: Store, requests: ReturnType<typeof checklistRequests>, table: ImportTable,
+  options: { sheet?: string; headerRow?: number }, byColumns: boolean, events: ChecklistTableReadEvents,
+) {
+  const token = requests.startTableRead();
+  events.started();
+  let read: Result<MappedChecklistTable>;
+  try {
+    read = await readChecklistColumns(store, table, options, byColumns);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'The worksheet could not be opened';
+    read = fail({ kind: 'failed', message });
+  }
+  if (requests.finishTableRead(token)) events.finished(read);
 }
 
 interface ReadSource {
@@ -130,7 +164,7 @@ export function checklistReading(store: Store, requests: ReturnType<typeof check
 
   async function read(events: ReadingEvents) {
     const current = source;
-    if (!current?.lines || current.byColumns) return;
+    if (!current?.lines || current.byColumns || requests.tableReadPending()) return;
     const ticket = requests.newToken();
     events.started();
     const reply = await readList(store.services.ai, current.lines);

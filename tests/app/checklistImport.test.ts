@@ -9,7 +9,7 @@ import {
 import { importKey, initializeKeptImports, keptImport, keptImportsReady, saveImport } from '../../src/app/keptImports';
 import {
   checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistReading, checklistRequests, checklistSourceLines,
-  loadChecklistSource, readChecklistColumns, tieChecklistLines,
+  loadChecklistSource, readChecklistColumns, rereadChecklistTable, tieChecklistLines,
 } from '../../src/app/listRead';
 import { firmOf, listId, norm } from '../../src/domain/checklist';
 import type { LineRead } from '../../src/domain/listRead';
@@ -226,6 +226,48 @@ it('resumes unfinished reading and skips the initial read for a kept result or f
     expect(model.mock.calls.map(([input]) => input.lines)).toEqual([primary, revised, primary]);
     expect(events.started).toHaveBeenCalledTimes(3);
     expect(events.finished).toHaveBeenCalledTimes(3);
+  } finally {
+    app.store.closing();
+    await app.repo.close();
+  }
+});
+
+it('keeps review input reserved for the latest worksheet read, including a read failure (#821)', async () => {
+  const app = await readyApp();
+  try {
+    const { store } = app;
+    const questions = portfolioQuestions();
+    const source = value(await loadChecklistSource(store, await portfolioFile(questions)));
+    if (!('table' in source)) throw new Error('Expected a checklist table');
+    const requests = checklistRequests();
+    const events = { started: vi.fn(), finished: vi.fn() };
+    const read = vi.fn<typeof store.services.sheets.read>();
+    const releases: (() => void)[] = [];
+    read.mockImplementation(async (_bytes, _name, options) => {
+      await new Promise<void>((resolve) => { releases.push(resolve); });
+      if (options?.sheet === 'Unreadable') throw new Error('The worksheet could not be opened');
+      return ok({ columns: ['Item'], sheet: options?.sheet, rows: questions.map((text) => [text]) });
+    });
+    store.services.sheets.read = read;
+    const model = vi.fn<NonNullable<typeof store.services.ai.readList>>();
+    store.services.ai.readList = model;
+    const reading = checklistReading(store, requests);
+
+    const earlier = rereadChecklistTable(store, requests, source.table, { sheet: 'Supplement' }, false, events);
+    const latest = rereadChecklistTable(store, requests, source.table, { sheet: 'Unreadable' }, false, events);
+    releases[0]();
+    await earlier;
+    expect(requests.tableReadPending()).toBe(true);
+    expect(events.finished).not.toHaveBeenCalled();
+    expect(await reading.retry(questions, false, READ_EVENTS)).toBeUndefined();
+    expect(model).not.toHaveBeenCalled();
+
+    releases[1]();
+    await latest;
+    expect(requests.tableReadPending()).toBe(false);
+    expect(events.finished).toHaveBeenCalledExactlyOnceWith(fail({
+      kind: 'failed', message: 'The worksheet could not be opened',
+    }));
   } finally {
     app.store.closing();
     await app.repo.close();
