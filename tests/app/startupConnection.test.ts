@@ -89,26 +89,75 @@ describe('sign-in connection', () => {
     stop();
   });
 
-  it('starts single sign-on, skips overlapping status checks and stops polling when the PC is signed in', async () => {
+  it('observes single sign-on through a stalled poll and ignores outstanding replies after handoff', async () => {
     const signin = signInPort();
-    let finish!: (value: Result<SignInStatus>) => void;
-    const slowStatus = new Promise<Result<SignInStatus>>((resolve) => { finish = resolve; });
-    signin.status.mockResolvedValueOnce(ok(signedOut)).mockReturnValueOnce(slowStatus);
+    const stalled = pendingSignInStatus();
+    const next = pendingSignInStatus();
+    const last = pendingSignInStatus();
+    signin.status.mockResolvedValueOnce(ok(signedOut))
+      .mockReturnValueOnce(stalled.promise)
+      .mockReturnValueOnce(next.promise)
+      .mockReturnValueOnce(last.promise);
+    const onSignedIn = vi.fn();
+    const form = new SignInConnection(signin, onSignedIn);
+    const stop = form.start();
+    await vi.advanceTimersByTimeAsync(2000);
+    await form.signIn();
+    expect(signin.signIn).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(signin.status).toHaveBeenCalledTimes(4);
+    expect(onSignedIn).not.toHaveBeenCalled();
+    next.resolve(ok(signedIn));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onSignedIn).toHaveBeenCalledOnce();
+    stalled.resolve(ok(signedOut));
+    last.resolve(ok(signedOut));
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(form.get().status).toEqual(signedIn);
+    expect(onSignedIn).toHaveBeenCalledOnce();
+    expect(signin.status).toHaveBeenCalledTimes(4);
+    stop();
+  });
+
+  it('accepts a valid status when every scheduled SSO status reply is slower than the polling interval', async () => {
+    const signin = signInPort();
     const onSignedIn = vi.fn();
     const form = new SignInConnection(signin, onSignedIn);
     const stop = form.start();
     await vi.advanceTimersByTimeAsync(0);
     await form.signIn();
-    expect(signin.signIn).toHaveBeenCalledOnce();
+    signin.status.mockImplementation(() => new Promise((resolve) => {
+      setTimeout(() => resolve(ok(signedIn)), 14000);
+    }));
 
-    await vi.advanceTimersByTimeAsync(6000);
-    expect(signin.status).toHaveBeenCalledTimes(2);
-    expect(onSignedIn).not.toHaveBeenCalled();
-    finish(ok(signedIn));
-    await vi.advanceTimersByTimeAsync(6000);
+    await vi.advanceTimersByTimeAsync(16000);
     expect(form.get().status).toEqual(signedIn);
     expect(onSignedIn).toHaveBeenCalledOnce();
-    expect(signin.status).toHaveBeenCalledTimes(2);
+    const requestsAtHandoff = signin.status.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(16000);
+    expect(signin.status).toHaveBeenCalledTimes(requestsAtHandoff);
+    expect(onSignedIn).toHaveBeenCalledOnce();
+    stop();
+  });
+
+  it('keeps a newer status when an earlier poll replies out of order', async () => {
+    const signin = signInPort();
+    const older = pendingSignInStatus();
+    const current = { ...signedOut, problem: 'Single sign-on did not work. Use an API key.' };
+    signin.status.mockResolvedValueOnce(ok(signedOut))
+      .mockReturnValueOnce(older.promise)
+      .mockResolvedValueOnce(ok(current));
+    const onSignedIn = vi.fn();
+    const form = new SignInConnection(signin, onSignedIn);
+    const stop = form.start();
+
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(form.get().status).toEqual(current);
+    older.resolve(ok(signedIn));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(form.get().status).toEqual(current);
+    expect(onSignedIn).not.toHaveBeenCalled();
     stop();
   });
 
@@ -155,18 +204,17 @@ describe('sign-in connection', () => {
     expect(signin.status).toHaveBeenCalledTimes(2);
 
     form.setKey('alder-lane-stand-in');
-    const submitted = form.useKey();
-    await vi.advanceTimersByTimeAsync(2000);
+    await form.useKey();
     expect(signin.status).toHaveBeenCalledTimes(3);
     confirmation.resolve(fail({ kind: 'unreachable', message: 'The bridge briefly disconnected.' }));
-    await submitted;
+    await vi.advanceTimersByTimeAsync(0);
     expect(onSignedIn).not.toHaveBeenCalled();
     expect(form.get()).toMatchObject({ key: '', status: signedOut });
 
     await vi.advanceTimersByTimeAsync(2000);
     expect(signin.status).toHaveBeenCalledTimes(4);
     superseded.resolve(ok({ ...signedOut, problem: 'An older sign-in result.' }));
-    await vi.advanceTimersByTimeAsync(4000);
+    await vi.advanceTimersByTimeAsync(0);
     expect(signin.status).toHaveBeenCalledTimes(4);
     expect(form.get().status).toEqual(signedOut);
 
@@ -175,6 +223,30 @@ describe('sign-in connection', () => {
     expect(form.get().status).toEqual(signedIn);
     expect(onSignedIn).toHaveBeenCalledOnce();
     expect(signin.status).toHaveBeenCalledTimes(4);
+    stop();
+  });
+
+  it('observes an accepted key on a scheduled poll when its immediate status read stalls', async () => {
+    const signin = signInPort();
+    const stalled = pendingSignInStatus();
+    const onSignedIn = vi.fn();
+    const form = new SignInConnection(signin, onSignedIn);
+    const stop = form.start();
+    await vi.advanceTimersByTimeAsync(0);
+    signin.status.mockReturnValueOnce(stalled.promise).mockResolvedValue(ok(signedIn));
+    form.setKey('alder-lane-stand-in');
+    await form.useKey();
+    expect(signin.status).toHaveBeenCalledTimes(2);
+    expect(form.get()).toMatchObject({ key: '', busy: false, status: signedOut });
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(form.get().status).toEqual(signedIn);
+    expect(onSignedIn).toHaveBeenCalledOnce();
+    stalled.resolve(ok(signedOut));
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(signin.status).toHaveBeenCalledTimes(3);
+    expect(form.get().status).toEqual(signedIn);
+    expect(onSignedIn).toHaveBeenCalledOnce();
     stop();
   });
 });
