@@ -261,6 +261,104 @@ for (const size of SIZES) { // #2: Add all unresolved to Q&A: from ⋯, a previe
   await ctx.close();
 }
 
+const certificate = 'Certificate renewal lender compliance';
+const alphaTitle = `${certificate} Alpha`;
+const betaTitle = `${certificate} Beta`;
+const openUnresolved = async (page) => {
+  await page.click('#ck-pmore');
+  await page.click('#ck-add-unresolved');
+  await page.waitForSelector('#au-list .lrow input', { timeout: 10000 });
+};
+
+async function certificateSetup(page, dealId, partial) {
+  return page.evaluate(async ({ dealId, partial, alphaTitle, betaTitle, certificate }) => {
+    const run = (name, input) => store.dispatch(store.commandNamed(name), { dealId, ...input }, { quiet: true });
+    const ai = store.services.ai;
+    const rows = store.get().checklists[dealId];
+    ai.checklist = async () => ({ ok: true, value: rows.map((row) => ({ ...row, result: 'satisfied' })) });
+    for (const finding of Object.values(store.get().findings)) {
+      await run('SetFindingStatus', { findingId: finding.id, status: 'closed' });
+    }
+    await store.refreshChecklist(dealId);
+    ai.phrase = async ({ items }) => ({
+      ok: true,
+      value: items.map(({ what }) => partial && what === betaTitle ? null : `Please document ${what}.`),
+    });
+    for (const title of [betaTitle, alphaTitle]) await run('CreateFinding', { title, workstream: 'Legal' });
+    await run('CreateQuestion', { text: certificate });
+    const alpha = Object.values(store.get().findings).find((finding) => finding.title === alphaTitle).id;
+    const beta = Object.values(store.get().findings).find((finding) => finding.title === betaTitle).id;
+    return { alpha, beta };
+  }, { dealId, partial, alphaTitle, betaTitle, certificate });
+}
+
+async function unresolvedSnapshot(page) {
+  return page.evaluate(() => {
+    const dialog = document.querySelector('.lnkdlg').getBoundingClientRect();
+    const go = document.getElementById('au-go');
+    const box = go.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(go);
+    const text = range.getBoundingClientRect();
+    return {
+      rows: [...document.querySelectorAll('#au-list .lrow')].map((row) => ({
+        question: row.querySelector('b')?.textContent,
+        target: row.querySelector('.lfor').textContent,
+        checked: row.querySelector('input').checked,
+      })),
+      button: go.textContent,
+      inside: dialog.top >= 0 && dialog.bottom <= innerHeight + 1 && box.bottom <= dialog.bottom,
+      centered: Math.abs((box.top + box.bottom - text.top - text.bottom) / 2) <= 1,
+    };
+  });
+}
+
+async function retainedLinkCase(scheme, size, partial) {
+  const { ctx, page, id } = await checklist(scheme, size);
+  const targets = await certificateSetup(page, id, partial);
+  await openUnresolved(page);
+  await page.click(`#au-list .lrow:has-text("Link to Finding · ${alphaTitle}") input`);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.lnkdlg', { state: 'detached' });
+  await page.evaluate(([dealId, text]) => store.dispatch(
+    store.commandNamed('CreateQuestion'), { dealId, text }, { quiet: true },
+  ), [id, alphaTitle]);
+  await openUnresolved(page);
+  await page.waitForTimeout(500);
+  const preview = await unresolvedSnapshot(page);
+  if (process.env.SHOTS) {
+    const path = `${process.env.SHOTS}/kept-link-${scheme}-${size.join('x')}.png`;
+    await page.screenshot({ path });
+  }
+  await page.click('#au-go');
+  const closed = await page.waitForSelector('.lnkdlg', { state: 'detached', timeout: 5000 })
+    .then(() => true, () => false);
+  const written = await page.evaluate(({ alpha, beta }) => {
+    const questions = Object.values(store.get().questions);
+    return {
+      first: questions.find((q) => q.n === 1)?.linkedFinding,
+      alpha: questions.filter((q) => q.linkedFinding === alpha).length,
+      beta: questions.filter((q) => q.linkedFinding === beta).length,
+    };
+  }, targets);
+  const checkedLinks = preview.rows.filter((row) => row.question && row.checked);
+  const betaDraft = preview.rows.find((row) => !row.question && row.target.endsWith(betaTitle));
+  say(`#88 keeps the exact approved link ${scheme} ${size[0]} (partial=${partial})`,
+    checkedLinks.length === 1 && checkedLinks[0].question === 'Q1' && checkedLinks[0].target.endsWith(alphaTitle)
+    && preview.rows.find((row) => !row.question && row.target.endsWith(alphaTitle))?.checked === false
+    && (partial ? !betaDraft : betaDraft?.checked)
+    && preview.button === (partial ? 'Link 1 question' : 'Add 1 question')
+    && preview.inside && preview.centered && closed && written.first === targets.alpha && written.alpha === 1
+    && written.beta === (partial ? 0 : 1) && !page.errors.length,
+    JSON.stringify({ preview, closed, written, errors: page.errors }));
+  await ctx.close();
+}
+
+for (const [index, size] of SIZES.entries()) {
+  await retainedLinkCase('light', size, index === 1);
+  await retainedLinkCase('dark', size, index === 0);
+}
+
 { // a checklist that cannot be read is said so, never taken for an empty one; and one phrasing per deal however often the dialog is opened
   const { ctx, page, id } = await checklist('light', SIZES[1]);
   await page.evaluate(() => { const ai = store.services.ai; const was = ai.phrase.bind(ai); window.__phrased = 0; ai.phrase = (i) => { window.__phrased++; return new Promise((r) => setTimeout(() => r(was(i)), 1500)); }; const read = ai.checklist.bind(ai); ai.checklist = (d) => (window.__ckFail ? Promise.resolve({ ok: false, error: { kind: 'failed', message: 'checklist failed' } }) : read(d)); });
