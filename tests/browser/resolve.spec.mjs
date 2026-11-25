@@ -58,6 +58,52 @@ async function keepDisplayedStatusAfterRefresh(page, dealId, tag) {
   await page.waitForSelector('.rsvdlg', { state: 'detached' });
 }
 
+/** #939: a merge typed by hand outlives another PC resolving its question, in the response box, until used */
+async function keepTypedMergeResolvedElsewhere(page, dealId, tag) {
+  const TYPED = 'No notices served since COD. Seller’s counsel confirmed on November 14; the register is in 4.2.';
+  const questionId = await page.evaluate((dealId) => {
+    const question = Object.values(store.get().questions).find((q) => q.n === 81 && q.dealId === dealId);
+    store.ui({ selectedQuestion: question.id, dialog: { kind: 'resolveQa', dealId, questionId: question.id } });
+    return question.id;
+  }, dealId);
+  await page.click('#rsv-merge');
+  await page.waitForFunction(() => document.querySelector('#rsv-merged')?.value);
+  await page.fill('#rsv-merged', TYPED);
+  const keptMerge = ([id, text]) => (JSON.parse(localStorage.getItem('dil/1/kept-drafts') ?? '{}')['qa-merge'] ?? [])
+    .some(([key, draft]) => key === id && draft.text === text);
+  await page.waitForFunction(keptMerge, [questionId, TYPED]);
+  await page.evaluate(async ([dealId, id, LOG]) => {
+    const { last } = store.get().deals[dealId].qaLogs[0];
+    await window.__peer.change(id, { response: LOG, logPick: { of: last.at, sent: last.kept[id] } });
+  }, [dealId, questionId, LOG]);
+  await page.waitForSelector('#rsv-done');
+  const tip = await page.getAttribute('#rsv-done', 'title');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.rsvdlg', { state: 'detached' });
+  const box = () => page.evaluate(() => ({
+    text: document.querySelector('textarea.rtext')?.value,
+    note: document.querySelector('.efstate.ext')?.textContent ?? '',
+  }));
+  await page.waitForFunction((text) => document.querySelector('textarea.rtext')?.value === text, TYPED, { timeout: 8000 })
+    .catch(() => {});
+  const shown = await box();
+  say(tag + 'a-typed-merge-resolved-elsewhere-waits-in-the-response-box',
+    shown.text === TYPED && /^Changed elsewhere/.test(shown.note) && !!tip, JSON.stringify({ shown, tip }));
+
+  await page.reload(); await page.waitForSelector('.dtabs', { state: 'attached' });
+  await page.evaluate((id) => store.ui({ selectedQuestion: id }), questionId);
+  await page.waitForFunction((text) => document.querySelector('textarea.rtext')?.value === text, TYPED, { timeout: 8000 })
+    .catch(() => {});
+  const reloaded = await box();
+  await page.click('.efstate.ext button:first-of-type');
+  await page.waitForFunction(([id, text]) => store.get().questions[id].response === text, [questionId, TYPED], { timeout: 8000 })
+    .catch(() => {});
+  const used = await page.evaluate((id) => store.get().questions[id].response, questionId);
+  say(tag + 'the-typed-merge-survives-a-reload-and-keep-mine-uses-it',
+    reloaded.text === TYPED && /^Changed elsewhere/.test(reloaded.note) && used === TYPED,
+    JSON.stringify({ reloaded, used }));
+}
+
 for (const [w, h] of [[1280, 736], [1024, 640]]) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h } }); const page = await ctx.newPage(); page.errors = [];
   page.on('pageerror', (e) => page.errors.push(e.message));
@@ -260,6 +306,7 @@ for (const [w, h] of [[1280, 736], [1024, 640]]) {
   say(tag + 'another-pc-resolving-another-question-puts-nothing-in-two-versions', two.conflicts === 0 && two.n.includes(String(TWO - 4)) && /^Q43: the app’s version kept/.test(two.toast), JSON.stringify(two));
   await page.keyboard.press('Escape'); await page.waitForSelector('.rsvdlg', { state: 'detached' });
   if (w === 1280) await keepDisplayedStatusAfterRefresh(page, id, tag);
+  if (w === 1280) await keepTypedMergeResolvedElsewhere(page, id, tag);
   say(tag + 'no-page-errors', page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }
