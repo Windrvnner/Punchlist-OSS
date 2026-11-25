@@ -26,6 +26,7 @@ import { serve, placesFor, machineIdentity, inTouchWith, findSoffice, inOneDrive
 import { envKey, modelService } from './model';
 import { aiSignIn } from './signin';
 import { providerSignIn } from './providerSignIn';
+import { pickedFile, writePickedFile } from './pickedFile';
 import { isCloudProvider, assertControl, control } from '../control';
 import type { WATCHED } from '../shell/bridge';
 
@@ -62,6 +63,9 @@ let trim: ReturnType<typeof setInterval> | undefined;
 
 async function start() {
   try { assertControl(); } catch (e) { stop(e); return; }     // a value out of range in the control file stops the app, naming it
+  ipcMain.on('punchlist:flush-kept-text', ({ sender }) => {
+    if (sender === win?.webContents) sender.session.flushStorageData();
+  });
   ipcMain.handle('punchlist:describe', () => bridge.describe());
   // while the folder is being changed the backend's services are away for a moment: the window hears "can't be reached" and
   // shows it is offline, with Retry, rather than being told the service is not there
@@ -179,7 +183,7 @@ function compose(sharedPath: string, places: Places, person?: string | null): Ba
 }
 
 /** The file dialogs: folders for a deal, and where to save an export. */
-const picked = new Map<string, string>();   // places picked with pickSave and not yet written, by id
+const picked = new Map<string, ReturnType<typeof pickedFile>>();   // places picked with pickSave, by id
 const written = new Map<string, string>();  // files written there, by the same id, so the notice can open them
 function files() {
   return {
@@ -200,16 +204,13 @@ function files() {
       const r = await dialog.showSaveDialog(win, { defaultPath: path.join(app.getPath('documents'), `${name}.${kinds[0].ext}`), filters: kinds.map((k) => ({ name: k.label, extensions: [k.ext] })) });
       if (r.canceled || !r.filePath) return ok(null);
       const ext = path.extname(r.filePath).slice(1).toLowerCase(); const k = kinds.find((x) => x.ext === ext);
-      const id = randomUUID(); picked.set(id, k ? r.filePath : `${r.filePath}.${kinds[0].ext}`);
+      const id = randomUUID();
+      picked.set(id, pickedFile(k ? r.filePath : `${r.filePath}.${kinds[0].ext}`));
       return ok({ id, ext: (k ?? kinds[0]).ext });
     },
-    /** writes to a place the person picked, and only once: the window can't name a path of its own */
+    /** writes successfully only once to a place the person picked: the window can't name a path of its own */
     async writePicked(id: string, bytes: Uint8Array) {
-      const file = picked.get(id); picked.delete(id);
-      if (!file) return fail({ kind: 'failed', message: 'Couldn’t save the file' });
-      try { fs.writeFileSync(file, bytes); } catch (e) { return fail({ kind: 'failed', message: `Couldn’t save the file: ${(e as Error).message}` }); }
-      written.set(id, file); if (written.size > 20) written.delete(written.keys().next().value!);
-      return ok('saved' as const);
+      return writePickedFile(picked, written, id, bytes);
     },
     /** opens a file written with writePicked, in the PC's own app for its kind (Word, a PDF reader) */
     async openPicked(id: string) {
