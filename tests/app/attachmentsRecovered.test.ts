@@ -61,7 +61,9 @@ function standInDocumentFolders(B: PC, dealId: string, delayUpload: boolean) {
   };
   docs.carryAttached = async (_from, to) => {
     carries.push(to);
-    if (!available && (!delayUpload || source.size)) return fail({ kind: 'unreachable', message: 'Folder unavailable' });
+    if (!available && (!delayUpload || source.size)) {
+      return fail({ kind: 'unreachable', message: 'Folder unavailable' });
+    }
     for (const id of source) destination.add(id);
     return ok(undefined);
   };

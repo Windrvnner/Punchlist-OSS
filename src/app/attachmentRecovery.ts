@@ -1,3 +1,4 @@
+import { DealId } from '../domain/model';
 import { recoveredId } from '../domain/recovered';
 import type { Store } from './store';
 
@@ -17,8 +18,10 @@ function savedCarries(store: Store): Map<string, Carry> {
   }
   if (!Array.isArray(saved)) return carries;
   for (const entry of saved as Partial<Carry>[]) {
-    if (typeof entry?.copy === 'string' && typeof entry.original === 'string' && entry.copy !== entry.original) {
-      const carry = { copy: entry.copy, original: entry.original };
+    const copy = DealId.safeParse(entry?.copy);
+    const original = DealId.safeParse(entry?.original);
+    if (copy.success && original.success && copy.data !== original.data) {
+      const carry = { copy: copy.data, original: original.data };
       carries.set(carryKey(carry), carry);
     }
   }
