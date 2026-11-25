@@ -23,6 +23,25 @@ const EXT = /^\.(xlsx|xlsm|xls|ods|csv)$/i;
 /** a failure that may pass: a file held a moment (an error code), or LibreOffice taking too long, stopping, or saying nothing */
 const brief = (e: unknown) => !!(e as NodeJS.ErrnoException).code || /timed? ?out|took too long|^exit -?\d+|nothing was reported/i.test((e as Error)?.message ?? '');
 
+/** A shared archive or working file can change before its local copy is made (#278). */
+function copyLogFile(source: string, target: string, hash?: string): string {
+  fs.copyFileSync(source, target);
+  if (hash && sha256(fs.readFileSync(target)) !== hash) throw new Error('The copied Q&A log bytes changed');
+  return target;
+}
+
+function copyArchivedBase(base: NonNullable<KeptEdit['base']>, target: string): string {
+  try {
+    return copyLogFile(base.file, target, base.hash);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      // A vanished base cannot be merged, but the kept edit can still be filed as it is (#278).
+      throw new Error('The Q&A log archive disappeared', { cause: error });
+    }
+    throw error;
+  }
+}
+
 export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogFiles {
   const conv: Converter = o.convert ?? Object.assign(() => Promise.reject(new Error('no converter')), { id: 'none' });   // a CSV log needs none
   /** every sheet of a file, as text */
@@ -51,7 +70,8 @@ export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogF
     const work = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-qalog-kept-'));
     try {
       /** a copy under the log's extension, for the readers (a kept edit's own name ends in .old) */
-      const copy = (from: string, name: string) => { const f = path.join(work, `${name}${ext}`); fs.copyFileSync(from, f); return f; };
+      const copy = (from: string, name: string, hash?: string) =>
+        copyLogFile(from, path.join(work, `${name}${ext}`), hash);
       // A workbook's formulas too (a CSV has none): a cell of the log that holds one is never written, and one of theirs is
       // never taken for their change (a "days outstanding" gives another value on the day they saved)
       const grid = (all: Sheet[]) => all.find((s) => s.name === opts.sheet)?.grid ?? [];
@@ -67,7 +87,9 @@ export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogF
       for (const [i, k] of found.entries()) {
         if (!k.base) continue;
         try {
-          const bf = copy(k.base, `base${i}`), kf = copy(path.join(folder, k.name), `kept${i}`); const ks = await sheets(kf);
+          const bf = copyArchivedBase(k.base, path.join(work, `base${i}${ext}`));
+          const kf = copy(path.join(folder, k.name), `kept${i}`, k.hash);
+          const ks = await sheets(kf);
           const bs = await sheets(bf); const base = tableFrom(bs, opts), kept = tableFrom(ks, opts);
           files.push(k);
           if (!base || !kept || base.sheet !== opts.sheet || kept.sheet !== opts.sheet) continue;

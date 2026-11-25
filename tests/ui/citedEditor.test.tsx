@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { markerPieces, splitCited } from '../../src/domain/cite';
 import { CitedEditor, editorText, tagLabel, TAG_MAX } from '../../src/ui/citedEditor';
+import { TEXT_MAX } from '../../src/domain/importExport';
 import type { Source } from '../../src/domain/model';
 
 const source = (doc: string): Source => ({ doc, loc: 'p. 1', docId: `doc_${doc.length}` });
@@ -49,6 +50,29 @@ describe('the finding editor', () => {
     });
     return { box: host.querySelector('#fe-body') as HTMLElement };
   };
+  const capturePaste = (box: HTMLElement, types: Record<string, string>) => {
+    const inserted = document.createElement('div');
+    const exec = vi.fn((_operation: string, _ui: boolean, value: string) => {
+      inserted.innerHTML = value;
+      return true;
+    });
+    const previous = Object.getOwnPropertyDescriptor(document, 'execCommand');
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: exec });
+    try {
+      const paste = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(paste, 'clipboardData', { value: { getData: (type: string) => types[type] ?? '' } });
+      box.dispatchEvent(paste);
+      return inserted;
+    } finally {
+      if (previous) Object.defineProperty(document, 'execCommand', previous);
+      else Reflect.deleteProperty(document, 'execCommand');
+    }
+  };
+
+  const atLimit = (room: number) => {
+    const detail = 'The annual budget accompanies the compliance certificate. ';
+    return detail.repeat(Math.ceil(TEXT_MAX / detail.length)).slice(0, TEXT_MAX - room);
+  };
   it('shows each marker as a tag and gives back the stored text unchanged, at a long finding\'s scale', async () => {
     const sources = Array.from({ length: 40 }, (_, i) => source(`Data room document ${i + 1}.pdf`));
     const sentence = (p: number, s: number) => `Sentence ${s} of paragraph ${p} cites. [${((p * 4 + s) % 40) + 1}]`;
@@ -65,5 +89,40 @@ describe('the finding editor', () => {
     const box = document.createElement('div');
     box.innerHTML = 'One.<span data-marker="[1]">Doc</span><div>Two.<br></div><div><br></div><p>Three.</p>';
     expect(editorText(box)).toBe('One.[1]\nTwo.\n\n\n\nThree.');
+  });
+
+  it.each([
+    ['a literal opening bracket', '[see schedule]', 1, 1, '['],
+    ['an unfinished number', '[1 left open', 2, 1, '[1'],
+    ['an out-of-range number', '[999] in the schedule', 3, 1, '[99'],
+    ['a number with no sources', '[1] in the schedule', 2, 0, '[1'],
+    ['a partial citation', 'See[1] for the source', 5, 1, 'See'],
+    ['a whole citation', 'See[1] for the source', 6, 1, 'See[1]'],
+    ['a whole grapheme', '[👍🏽 later', 3, 1, '['],
+  ])('fits a paste at the limit with %s', async (_name, pasted, room, sourceCount, expected) => {
+    const sources = sourceCount ? [source('Facility agreement.pdf')] : [];
+    const { box } = await mount(atLimit(room), sources);
+    const inserted = capturePaste(box, { 'text/plain': pasted });
+    expect(editorText(inserted)).toBe(expected);
+    expect(Boolean(inserted.querySelector('.ctag'))).toBe(expected === 'See[1]');
+  });
+
+  it('numbers a copied citation for this finding, and cuts it whole or not at all', async () => {
+    const shared = source('Facility agreement.pdf');
+    const clip = JSON.stringify({ text: 'See[1] in the facility agreement.', sources: [shared] });
+    for (const [room, text, marker] of [[6, 'See[2]', '[2]'], [5, 'See', undefined]] as const) {
+      const { box } = await mount(atLimit(room), [source('Fee letter.pdf'), shared]);
+      const inserted = capturePaste(box, { 'application/x-punchlist-cited': clip });
+      expect(editorText(inserted)).toBe(text);
+      expect(inserted.querySelector<HTMLElement>('.ctag')?.dataset.marker).toBe(marker);
+    }
+  });
+
+  it('reads a copied bracketed number as this finding would on reopening: a citation is never cut in two', async () => {
+    const clip = JSON.stringify({ text: '[1] in the compliance schedule.', sources: [] });
+    const { box } = await mount(atLimit(2), [source('Facility agreement.pdf')]);
+    expect(editorText(capturePaste(box, { 'application/x-punchlist-cited': clip }))).toBe('');
+    const bare = await mount(atLimit(2), []);
+    expect(editorText(capturePaste(bare.box, { 'application/x-punchlist-cited': clip }))).toBe('[1');
   });
 });
