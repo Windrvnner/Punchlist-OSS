@@ -86,6 +86,10 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
 - **Send deal PDFs whole for AI analysis.** Send the original file so the model can read the pages directly.
   Word counts may be used to rank and pick documents. See docs/decisions.md for the planned handling of PDFs that
   the model service refuses as too large (#119) and the current checklist import behavior.
+- **Never assume a limit that isn't real.** The model reads whole files, so no arbitrary cap (pages, documents, sizes,
+  words, counts) limits what it reads: its input limit and the existing batching decide, and a cap needs a service
+  refusal or a decision behind it. Nothing is marked unreadable or dropped from a check or search that the model can
+  read, and a failed read is retried, never saved as "no text".
 
 ## Commits and pull requests
 
@@ -141,6 +145,8 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
 ## How decisions are made
 
 - Read the README and `docs/decisions.md` before changing anything. Check `docs/decisions.md`, `docs/architecture.md`, and the code before proposing anything, and say what already exists. Follow a settled decision and say where it was decided. Still ask first about a major design decision, even when it looks settled.
+- Nothing is reported, merged, or called done unless it is verified in the code and by running it. A finding that is
+  unverified or inferred is verified, or fixed, before it is reported.
 - Check claims before making them. File a bug only once it is reproduced on the current build. Close a UI bug whose element no longer exists as not planned, with the label `no longer applies`.
 
 ## Documentation and decisions

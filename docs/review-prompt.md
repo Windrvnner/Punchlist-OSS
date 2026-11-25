@@ -65,6 +65,10 @@ verdict, and no criteria in your own words.
 >    such rule must cite the decision that asks for it.
 >    A requirement, issue, or acceptance criterion that does not trace to a recorded decision or to what the issue's
 >    author asked for, or that handles an input the app does not receive, is a blocker.
+>    A cap or limit that no service refusal or decision sets, on what the model reads (pages, documents, sizes, words,
+>    counts); content marked unreadable or dropped from a check or search though the model can read it; and a failed
+>    read saved as "no text" instead of retried, are blockers.
+>    A finding, claim or "done" that is not verified in the code and by running it is not accepted: verify it first.
 >
 > Anything else is minor. A minor finding that is small and in code the pull request already touches is fixed in
 > the same pull request, without a review round of its own. File every other minor finding (in other code, or too
