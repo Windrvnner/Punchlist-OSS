@@ -9,7 +9,7 @@ import { join } from 'node:path';
 const MAX_LINE = 120;
 const MAX_LISTED = 40; // a long list helps nobody; the first ones show where to look
 const COMPLEXITY_RULE = 'complexity/noExcessiveCognitiveComplexity';
-// Words that mark a guess: a score, a threshold, a fallback, a similarity, a normalization or a repair of text.
+// Words that mark a guess: a threshold, a fallback, a similarity, a normalization or a repair of text.
 const GUESS_WORDS = /overlap|similar|fuzzy|normali[sz]|guess|heuristic|threshold|fallback|repair/i;
 const CODE_FILE = /\.(ts|tsx|mjs|js)$/;
 // Code Biome lints: src, tests and scripts, and files at the top of the repo, but not the test fixtures.

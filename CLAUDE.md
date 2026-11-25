@@ -88,8 +88,8 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   the model service refuses as too large (#119) and the current checklist import behavior.
 - **Never assume a limit that isn't real.** The model reads whole files, so no arbitrary cap (pages, documents, sizes,
   words, counts) limits what it reads: its input limit and the existing batching decide, and a cap needs a service
-  refusal or a decision behind it. Nothing is marked unreadable or dropped from a check or search that the model can
-  read, and a failed read is retried, never saved as "no text".
+  refusal or a decision behind it. Unless a decision says so, nothing is marked unreadable or dropped from a check or
+  search that the model can read, and a failed read is retried, never saved as "no text".
 
 ## Commits and pull requests
 
