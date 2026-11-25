@@ -104,14 +104,11 @@ export class SignInConnection {
 
   start = () => {
     this.active = true;
-    let stopped = false;
-    void this.readStatus().then(() => {
-      if (!stopped && this.get().status?.signedIn === false) {
-        this.timer = setInterval(() => void this.readStatus(), 2000);
-      }
-    });
+    // Polls from the start, so a first read that fails or stalls is read again rather than leaving the form blank
+    // (#948). The first signed-in reply stops the polling.
+    this.timer = setInterval(() => void this.readStatus(), 2000);
+    void this.readStatus();
     return () => {
-      stopped = true;
       this.active = false;
       this.ignoreStatusThrough = this.lastStatusRequest;
       clearInterval(this.timer);
