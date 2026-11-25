@@ -103,28 +103,24 @@ export function checklistSourceLines(text: ChecklistText | null, table: ImportTa
 /** Later work (a file read, a model call, or leaving) takes the place of an earlier reply. */
 export function checklistRequests() {
   let generation = 0;
-  // worksheet reads still running: counted apart from the tokens, so a later request does not hide one (#821)
-  let tableReads = 0;
-  // how many times a read has brought in another worksheet, so a review of the earlier one can be told apart
-  let sheetsChanged = 0;
+  // worksheet reads still running: kept apart from the tokens, so a later request does not hide one (#821)
+  const tableReads = new Set<number>();
   const newToken = () => ++generation;
   const isLatest = (token: number) => token === generation;
   const startTableRead = () => {
-    tableReads++;
-    return newToken();
+    const token = newToken();
+    tableReads.add(token);
+    return token;
   };
   // pending clears here only; whether the read is still the latest says whether its result is used
   const finishTableRead = (token: number) => {
-    tableReads--;
+    tableReads.delete(token);
     return isLatest(token);
   };
-  const tableReadPending = () => tableReads > 0;
-  const sheetChanged = () => ++sheetsChanged;
-  const sheetsChangedSoFar = () => sheetsChanged;
-  return {
-    newToken, isLatest, startTableRead, finishTableRead, tableReadPending, sheetChanged,
-    sheetsChanged: sheetsChangedSoFar,
-  };
+  const tableReadPending = () => tableReads.size > 0;
+  // a read that never settles must not hold the review once the person has dropped it (Change, Back)
+  const dropTableReads = () => tableReads.clear();
+  return { newToken, isLatest, startTableRead, finishTableRead, tableReadPending, dropTableReads };
 }
 
 interface ChecklistTableReadEvents {
@@ -146,10 +142,7 @@ export async function rereadChecklistTable(
     const message = error instanceof Error ? error.message : 'The worksheet could not be opened';
     read = fail({ kind: 'failed', message });
   }
-  if (!requests.finishTableRead(token)) return;
-  // another worksheet's items make an earlier review of this file out of date, even if the wording is the same
-  if (read.ok && read.value.table.sheet !== table.sheet) requests.sheetChanged();
-  events.finished(read);
+  if (requests.finishTableRead(token)) events.finished(read);
 }
 
 interface ReadSource {

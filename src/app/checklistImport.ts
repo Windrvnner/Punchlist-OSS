@@ -166,9 +166,12 @@ export function listTarget(state: State, firm: FirmList, layer: Layer, name: str
   return { layer, name, named, replaces, split, splitSays, generalTexts, listNames, hasGeneral: !!general };
 }
 
-/** What the review was asked about: a review asked for other choices is not shown again. */
-const askedAbout = (texts: string[], askReword: boolean, askSame: boolean, generalTexts: string[]) =>
-  JSON.stringify([texts, askReword, askSame, generalTexts]);
+/**
+ * What the review was asked about: a review asked for other choices, or made for the same wording in other sections
+ * (another worksheet or header row), is not shown again (#821).
+ */
+const askedAbout = (items: ListItem[], askReword: boolean, askSame: boolean, generalTexts: string[]) =>
+  JSON.stringify([items, askReword, askSame, generalTexts]);
 
 /** What a new review is made from: the items, the person's choices, and the model's replies (null when not asked). */
 interface ReviewInput {
@@ -285,7 +288,7 @@ function checklistReviewPlan(
   review: Review | null, askedFor: string,
 ) {
   const texts = items.map((item) => item.text);
-  const signature = askedAbout(texts, options.askReword, options.askSame, target.generalTexts);
+  const signature = askedAbout(items, options.askReword, options.askSame, target.generalTexts);
   const cached = review && askedFor === signature ? review : null;
   const needsCall = cached
     ? can.sameMeaning && hasMissedDuplicates(cached)
@@ -389,14 +392,10 @@ export function checklistReviewSession(store: Store, requests: ChecklistRequests
   const flight = checklistReviewFlight(requests, events);
   let signature = '';
   let currentTexts: string[] = [];
-  // the worksheet the review was made for: a review of an earlier worksheet is never shown again (#821)
-  let reviewedSheets = requests.sheetsChanged();
-  const reviewIsOfThisSheet = () => reviewedSheets === requests.sheetsChanged();
   function plan(
     items: ListItem[] | null, target: ListTarget, options: ReviewOptions, review: Review | null, askedFor: string,
   ) {
-    const kept = reviewIsOfThisSheet() ? review : null;
-    const next = items && checklistReviewPlan(store.get().can, items, target, options, kept, askedFor);
+    const next = items && checklistReviewPlan(store.get().can, items, target, options, review, askedFor);
     signature = next?.signature ?? '';
     currentTexts = next?.texts ?? [];
     return next && { ...next, waiting: !!next.texts.length && next.needsCall && flight.pending };
@@ -434,7 +433,6 @@ export function checklistReviewSession(store: Store, requests: ChecklistRequests
     }
     const fresh = (replies?: readonly [RewordReply | null, SameMeaningReply | null]) => {
       const result = reviewChecklist(can, items, target, options, replies);
-      reviewedSheets = requests.sheetsChanged();
       show({ kind: 'fresh', ...result, signature: plan.signature });
     };
     if (!needsCall) return fresh();
