@@ -6,8 +6,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import { useAppState, useStore } from './hooks';
 import { Modal, DialogHead } from './dialogs';
 import { FileInput, PickFileRow } from './fileDrop';
-import { readImportBytes, proposeLayout, previewImport, type ImportTable } from '../app/transfer';
-import type { Mapping } from '../domain/importExport';
+import {
+  rereadImportTable, proposeLayout, previewImport, type ImportLocation, type ImportTable,
+} from '../app/transfer';
+import type { ImportField, Mapping } from '../domain/importExport';
 import {
   clearQaImport, keepQaImport, keptQaImport, loadQaImport, prepareQaImport, qaImportPartyCount,
   replaceQaImport, submitQaImport, summarizeQaImport, type ImportMode, type QaChoices,
@@ -20,8 +22,6 @@ import type { Store } from '../app/store';
 
 /** What the dialog is doing while the person waits */
 export type Busy = '' | 'reading' | 'importing' | 'asking';
-/** a sheet or heading row chosen in the import and being read */
-type Rereading = { sheet?: string; headerRow?: number };
 /** The files the Q&A import reads */
 const SPREADSHEETS = '.xlsx,.xlsm,.xls,.xlsb,.ods,.csv';
 
@@ -84,6 +84,7 @@ function useQaImportState(dealId: string, fresh: boolean) {
   const [busy, setBusy] = useState<Busy>('');
   // the sheet a reread is reading: shown in its picker until the read settles (#63)
   const [wantedSheet, setWantedSheet] = useState<string>();
+  const rereadChoices = useRef<Map<ImportField, number | null> | null>(null);
   const [error, setError] = useState('');
   const [restart, setRestart] = useState(false);   // "start over" asks first, in the footer
   const fileRef = useRef<HTMLInputElement>(null);
@@ -93,7 +94,7 @@ function useQaImportState(dealId: string, fresh: boolean) {
   return {
     key, table, setTable, mapping, setMapping, path, setPath, mode, setMode, answered, setAnswered,
     makeLog, setMakeLog, touched, busy, setBusy, wantedSheet, setWantedSheet,
-    error, setError, restart, setRestart, fileRef, token,
+    error, setError, restart, setRestart, fileRef, token, rereadChoices,
   };
 }
 export type QaImportState = ReturnType<typeof useQaImportState>;
@@ -145,6 +146,7 @@ function useQaImportActions(store: Store, dealId: string, qa: QaImportState, pla
 
   const startOver = () => {
     token.current++;
+    qa.rereadChoices.current = null;
     clearQaImport(store, qa.key);
     qa.setRestart(false);
     setBusy('');
@@ -161,6 +163,7 @@ function useQaImportActions(store: Store, dealId: string, qa: QaImportState, pla
   /** "change": back to the file pick. What was kept stays until another file is read in its place */
   const changeFile = () => {
     token.current++;
+    qa.rereadChoices.current = null;
     setBusy('');
     setTable(null);
     setMapping(null);
@@ -169,7 +172,12 @@ function useQaImportActions(store: Store, dealId: string, qa: QaImportState, pla
   };
 
   const run = () => runImport(store, dealId, qa, plan);
-  return { close, startOver, changeFile, run, ...fileReading(store, dealId, qa) };
+  const pickColumn = (field: ImportField, column: number | null) => {
+    qa.rereadChoices.current?.set(field, column);
+    setMapping((mapping) => mapping && { ...mapping, [field]: column });
+    setError('');
+  };
+  return { close, startOver, changeFile, run, pickColumn, ...fileReading(store, dealId, qa) };
 }
 export type QaImportActions = ReturnType<typeof useQaImportActions>;
 
@@ -217,27 +225,33 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
     }
   };
 
-  // the person says where the table really starts: another sheet, or another heading row
-  // A later choice replaces a pending read. Import waits for it and uses the accepted table (#63, #380).
-  const reread = async (where: Rereading, accept?: (read: ImportTable) => void) => {
-    if (!table || busy === 'importing') return;
-    const mine = ++token.current;   // a later choice wins over a slower earlier read
-    setBusy('reading');
-    qa.setWantedSheet(where.sheet);
-    const again = await readImportBytes(store, table.name, table.bytes, where);
-    if (token.current !== mine) return;
-    setBusy('');
-    if (!again.ok) {
-      setError(`Could not read ${table.name}: ${again.error.message}`);
-      return;
-    }
-    setError('');
-    setTable(again.value);
-    setMapping(again.value.mapping);
-    accept?.(again.value);
-  };
-
+  const reread = (where: ImportLocation, accept?: (read: ImportTable) => void) =>
+    rereadTable(store, qa, where, accept);
   return { load, canAsk, askAi, reread, cancelProposal: () => cancelProposal(qa) };
+}
+
+/** A later sheet or heading choice takes over while Import waits for the accepted table (#63, #380). */
+async function rereadTable(
+  store: Store, qa: QaImportState, where: ImportLocation, accept?: (read: ImportTable) => void,
+) {
+  const { table, busy, token, setBusy, setError, setTable, setMapping, rereadChoices } = qa;
+  if (!table || busy === 'importing') return;
+  const mine = ++token.current;
+  const choices = rereadChoices.current ??= new Map();
+  setBusy('reading');
+  qa.setWantedSheet(where.sheet);
+  const again = await rereadImportTable(store, table, where, choices);
+  if (token.current !== mine) return;
+  rereadChoices.current = null;
+  setBusy('');
+  if (!again.ok) {
+    setError(again.error.message);
+    return;
+  }
+  setError(again.value.error);
+  setTable(again.value.table);
+  setMapping(again.value.mapping);
+  accept?.(again.value.table);
 }
 
 /** A manual heading edit takes over from an outstanding layout proposal (#380). */

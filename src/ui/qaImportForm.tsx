@@ -35,10 +35,6 @@ export function QaImportForm({ store, dealId, qa, plan, actions }: {
 }) {
   const { table, mapping, busy, mode } = qa;
   const importing = busy === 'importing';
-  const onMap = (field: ImportField, column: number | null) => {
-    qa.setMapping({ ...mapping, [field]: column });
-    qa.setError('');
-  };
   const onMakeLog = (on: boolean) => {
     qa.touched.current = true;
     qa.setMakeLog(on);
@@ -51,7 +47,7 @@ export function QaImportForm({ store, dealId, qa, plan, actions }: {
         <MakeLogRow makeLog={qa.makeLog} importing={importing} onPick={onMakeLog} />
       )}
       <HeadingsRow importKey={qa.key} table={table} busy={busy} wantedSheet={qa.wantedSheet} actions={actions} />
-      <ColumnsRow table={table} mapping={mapping} importing={importing} onMap={onMap} />
+      <ColumnsRow table={table} mapping={mapping} importing={importing} onMap={actions.pickColumn} />
       <PreviewRow mapping={mapping} rows={plan.previewRows} />
       <ModeRow mode={mode} importing={importing} onPick={qa.setMode} />
       {mapping.response != null && <AnsweredRow answered={qa.answered} importing={importing} onPick={qa.setAnswered} />}
