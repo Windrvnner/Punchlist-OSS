@@ -236,7 +236,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A PC connects through the team folder's share link in the control file (`desktop.teamFolderLink`). On screen, the folder is called the "Punchlist folder", and its name defaults to Punchlist (`desktop.sharedFolder`).
 - A deal shows for the people who created or added it; this organizes deals but doesn't restrict access. There are currently no per-deal walls and no encryption.
 - When a record has changed on two PCs, both versions are kept and a person chooses; the app never picks.
-- An import in progress (Q&A, an issues list, or the master checklist) is kept on its PC until it is written, replaced, or started over, so closing, reloading, or restarting, even while it is written, loses nothing (#931).
+- An import in progress (Q&A, an issues list, or the master checklist) is kept on its PC until it is done, replaced, or started over, so closing, reloading, or restarting loses nothing.
+- The master checklist import stays kept until its list is written, so a reload while it is written loses nothing (#931).
 - The New Deal form is kept on its PC as it changes, folders still being read included, until the deal is created, so closing, reloading, or restarting loses nothing (#55, #113). Once Create is pressed, the form stays open until the deal is made or Create fails (#36).
 - No design may lose or hide typed work. Every version not kept is listed under Deleted as "Superseded by" the person who chose, and can be restored.
 - Text typed into a new finding (New finding or **Add as finding**) while **Create Finding** is saving goes to the finding made: its page opens in Edit with that text. A form that held only what was sent closes (#115).

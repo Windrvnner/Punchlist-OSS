@@ -493,5 +493,6 @@ export async function submitChecklist(
 function keptUnchanged(before: Readonly<Record<string, unknown>>, now: Readonly<Record<string, unknown>> | undefined) {
   if (!now) return false;
   const parts = Object.keys(before);
-  return parts.length === Object.keys(now).length && parts.every((part) => part in now && Object.is(before[part], now[part]));
+  const same = (part: string) => part in now && Object.is(before[part], now[part]);
+  return parts.length === Object.keys(now).length && parts.every(same);
 }

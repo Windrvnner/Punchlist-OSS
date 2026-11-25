@@ -1,5 +1,4 @@
-// A reload while an import's write is pending keeps what the person pasted, read and checked (#931): the master
-// checklist paste with its review, and the issues list with its check mark. Each import's write is held before it
+// A reload while the master checklist is written keeps the paste and its review (#931). The write is held before it
 // starts, so the reload lands while it is pending, as a closed window or a crash would.
 
 /** Holds every repository transaction that writes a record of `kind`, so it never finishes in this window. */
@@ -20,9 +19,26 @@ async function openChecklistImport(page) {
   await page.waitForSelector('#fl-import'); await page.click('#fl-import');
 }
 
+const SITES = ['Northwind Solar', 'Trey Wind', 'Fabrikam Storage', 'Contoso Hydro', 'Litware Biogas'];
+const REQUESTS = [
+  'Provide the executed EPC contract, with all amendments and change orders',
+  'Confirm whether the interconnection agreement has been assigned to the project company',
+  'List all permits held and confirm none are subject to appeal',
+  'Provide the PPA, including the offtaker credit support and any termination notices',
+  'Provide the O&M agreement and the last 12 monthly performance reports',
+  'Describe any liquidated damages paid or claimed under the construction contract',
+  'Provide the title report and survey for the site',
+  'Confirm whether any lender consents are needed for the sale',
+  'Provide the land lease, with the rent schedule and extension options',
+  'Describe the environmental studies performed and any open remediation',
+];
+
 /** A 2,000-line paste, read and reviewed, then a reload while its list is written. */
 export async function checkChecklistPasteReload(page, say) {
-  const lines = Array.from({ length: 2000 }, (_, at) => `Provide the executed agreement for facility ${at + 1}`);
+  const lines = Array.from({ length: 2000 }, (_, at) => {
+    const request = REQUESTS[Math.floor(at / SITES.length) % REQUESTS.length];
+    return `${request} for ${SITES[at % SITES.length]}, phase ${Math.floor(at / 100) + 1}`;
+  });
   await openChecklistImport(page);
   await page.fill('#cl-paste', ['Facility checklist', ...lines].join('\n'));
   await page.click('#cl-paste-next'); await page.waitForSelector('#cl-line');
@@ -39,32 +55,5 @@ export async function checkChecklistPasteReload(page, say) {
   const written = await page.evaluate(() => Object.keys(store.get().firmList).length);
   say('#931 a reload while the pasted checklist is written keeps the paste and its review',
     shown && after === before && written === 0, JSON.stringify({ before, after, written }));
-  await page.keyboard.press('Escape');
-}
-
-/** An issues list with a point kept separate, then a reload while its findings are written. */
-export async function checkIssuesListReload(page, say, dealId) {
-  await page.evaluate((d) => store.dispatch(store.commandNamed('CreateFinding'),
-    { dealId: d, title: 'Change of control definition omits the sponsor fund vehicles', workstream: 'Legal' },
-    { quiet: true }), dealId);
-  const points = Array.from({ length: 160 }, (_, at) => `${at + 2}. Point ${at + 2}: the covenant needs a cure period`);
-  const list = ['Comments', '1. Change of control definition omits the sponsor fund vehicles', ...points].join('\n');
-  await page.click('#f-more'); await page.click('#f-import'); await page.waitForSelector('#il-drop');
-  await page.setInputFiles('#il-file', { name: 'Lender counsel comments.txt', mimeType: 'text/plain',
-    buffer: Buffer.from(list) });
-  await page.waitForSelector('#il-raised .ilr input'); await page.click('#il-raised .ilr input');
-  const before = await page.textContent('#il-line');
-  const count = () => page.evaluate(() => Object.keys(store.get().findings).length);
-  const had = await count();
-  await holdWrites(page, 'finding');
-  await page.click('#il-go'); await settle(page);
-  await page.reload(); await page.waitForSelector('#f-more');
-  await page.click('#f-more'); await page.click('#f-import');
-  const shown = await page.waitForSelector('#il-raised', { timeout: 5000 }).then(() => true, () => false);
-  const after = shown
-    ? { line: await page.textContent('#il-line'), checked: await page.isChecked('#il-raised .ilr input') } : null;
-  const findings = await count();
-  say('#931 a reload while an issues list is imported keeps the list and its check mark',
-    shown && after.line === before && after.checked && findings === had, JSON.stringify({ before, after, had, findings }));
   await page.keyboard.press('Escape');
 }

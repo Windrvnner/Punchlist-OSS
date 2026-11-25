@@ -3,7 +3,9 @@
 import { afterEach, expect, it } from 'vitest';
 import { MemoryKeptImports } from '../../src/adapters/keptImports';
 import { listTarget, submitChecklist } from '../../src/app/checklistImport';
-import { importKey, initializeKeptImports, keepImport, keptImport, keptImportsReady, saveImport } from '../../src/app/keptImports';
+import {
+  importKey, initializeKeptImports, keepImport, keptImport, keptImportsReady, saveImport,
+} from '../../src/app/keptImports';
 import { checklistPaste } from '../../src/app/listRead';
 import { firmOf, listId } from '../../src/domain/checklist';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
