@@ -3,6 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { Store } from '../../src/app/store';
 import { CHANGED_ELSEWHERE } from '../../src/app/changedElsewhere';
+import { questionFieldCommit } from '../../src/app/questionFields';
 import { memRepo, disk, type MemRepo } from '../adapters/memRepo';
 import { MemoryLocal } from '../../src/adapters/local';
 import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
@@ -69,6 +70,37 @@ async function oneSync(m: ReturnType<typeof start>, kind: 'deal' | 'question', i
 }
 
 describe('a field save queued behind another save of the record', () => {
+  it.each([
+    { field: 'workstream', selected: 'Tax', peerValue: 'Technical' },
+    { field: 'priority', selected: 'Medium', peerValue: 'Low' },
+  ] as const)('refuses and reports a queued question $field pick after a peer pick (#202)', async (test) => {
+    const { field, selected, peerValue } = test;
+    const m = start();
+    await m.store.boot();
+    await m.store.dispatch(CreateDeal, { name: 'Sample', folders: [] });
+    const dealId = Object.keys(m.store.get().deals)[0];
+    await m.store.dispatch(CreateQuestion, {
+      dealId, text: 'Which reserve balance must be funded at financial close?', workstream: 'Legal',
+    }, { quiet: true });
+    const [question] = dealQuestions(m.store.get(), dealId);
+    const release = m.hold();
+    const revisedText = 'Which reserve balance must be funded before the first drawdown?';
+    const first = questionFieldCommit(m.store, question, 'text')(revisedText, question.text);
+    await tick();
+    expect(m.store.get().questions[question.id].text).toBe(revisedText);
+    const pick = questionFieldCommit(m.store, m.store.get().questions[question.id], field)(selected);
+    await theirs(m, 'question', question.id, { [field]: peerValue });
+    release();
+    expect((await first).ok).toBe(true);
+    expect(await pick).toEqual({ ok: false, error: { kind: 'conflict', message: CHANGED_ELSEWHERE } });
+    const synced = m.store.get().questions[question.id];
+    expect(synced[field]).toBe(peerValue);
+    expect(synced.text).toBe(revisedText);
+    expect(m.store.get().ui.toasts.filter((toast) => toast.text === CHANGED_ELSEWHERE)).toHaveLength(1);
+    expect((await questionFieldCommit(m.store, synced, field)(selected)).ok).toBe(true);
+    expect(m.store.get().questions[question.id][field]).toBe(selected);
+  });
+
   it('the issue\'s steps: "Theirs" synced in before the second save\'s turn is kept, and the second save is refused as changed elsewhere', async () => {
     const m = start(); const dealId = await deal(m);
     const go = m.hold();
