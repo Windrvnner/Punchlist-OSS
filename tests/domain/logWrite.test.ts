@@ -13,7 +13,7 @@ const map = suggestMapping(columns);
 
 describe('writing back into a Q&A log', () => {
   it('adds an answer the log does not have, in its own row and columns, and leaves filled answers alone', () => {
-    const w = logWrite(table, map, [q(1, 'What is the minimum DSCR covenant?', { response: '1.25x' }), q(2, 'Who is the EPC  contractor?', { response: 'Fabrikam', respondedBy: 'Sponsor' }), q(3, 'What insurances are in place?', { response: 'See the advisor report' })]);
+    const w = logWrite(table, map, [q(1, 'What is the minimum DSCR covenant?', { response: '1.25x' }), q(2, 'Who is the EPC contractor?', { response: 'Fabrikam', respondedBy: 'Sponsor' }), q(3, 'What insurances are in place?', { response: 'See the advisor report' })]);
     expect(w.steps).toEqual([
       { kind: 'cell', row: 4, col: 3, value: 'Fabrikam' },
       { kind: 'cell', row: 4, col: 4, value: 'Sponsor' },
