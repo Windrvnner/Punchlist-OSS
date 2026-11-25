@@ -390,7 +390,9 @@ export function answerWasUsed(question: Question, answer: Message) {
 }
 
 /** A person makes an answer the response, with its sources and only once however often it is pressed. */
-export function useAnswer(store: Store, dealId: string, questionId: string, answer: Message, over: string | null = null) {
+export function useAnswer(
+  store: Store, dealId: string, questionId: string, answer: Message, over: string | null = null,
+) {
   return store.dispatch(UseAsResponse, {
     dealId, questionId, text: answerText(answer), sources: answer.sources ?? [], over: over ?? '',
   }, { idempotencyKey: 'use-' + answer.id });
