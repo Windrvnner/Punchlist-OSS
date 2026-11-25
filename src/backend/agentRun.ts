@@ -149,11 +149,10 @@ export class AgentRun {
     return `${attached}${capped}${notFound}`;
   }
 
-  /** a document named by its path or file name: the whole path or name first, then the end of a path */
+  /** a document named by its whole path or its whole file name, in any case; anything else is not found */
   private byPath(said: string, recs: DealDoc[]): Sent | undefined {
     const low = said.toLowerCase();
-    const found = recs.find((x) => this.kit.where(x.rec).toLowerCase() === low || x.rec.name.toLowerCase() === low)
-      ?? recs.find((x) => this.kit.where(x.rec).toLowerCase().endsWith(low));
+    const found = recs.find((x) => this.kit.where(x.rec).toLowerCase() === low || x.rec.name.toLowerCase() === low);
     return found ? this.tagOf(found.dealId, found.rec) : undefined;
   }
 

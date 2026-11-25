@@ -220,6 +220,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A folder can be removed from a deal after a confirmation, with Undo, and restored later; new checks stop reading it, and existing citations still open.
 - Punchlist reads linked data-room files in place. An empty folder is never taken as a deal folder. Each PC finds a deal's folders by itself where it can; otherwise it asks once, with **Locate…**.
 - A document's id is the SHA-256 hash of its bytes, so identical copies are one document.
+- The chat agent opens a document only by its tag, its whole path, or its whole file name (in any case); anything else is "Not found".
 - Indexing (building each PC's word index of the data room) asks no model and uploads nothing, and it resumes by itself once the data room is available again.
 - A deal's folders are checked for changes every 5 minutes.
 - LibreOffice, bundled with the app, is the only document converter; converted documents have every tracked change accepted.

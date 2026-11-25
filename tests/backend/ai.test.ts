@@ -335,6 +335,14 @@ describe('the chat agent', () => {
   /** the search helper's reading: what the script says the documents it was given say, citing each of them on page 1 */
   const helper = (c: Call) => ({ text: c.files.map((_f, i) => `Found in D${i + 1}. [${i + 1}]`).join(' '), sources: c.files.map((_f, i) => ({ doc: `D${i + 1}`, page: 1, quote: `words ${i + 1}` })) });
 
+  it('reads a document only by its whole path or name, never by the end of another name', async () => {
+    const s = setup(helper, undefined, { pick: () => ({ read: [] }), turn: (_c, n) => n === 1
+      ? { tool: 'read', docs: ['Agreement.pdf', 'credit agreement.PDF'] }
+      : { text: 'Done.', sources: [] } });
+    val(await s.ai.answer(ask('What does the agreement say?')));
+    expect(sentNames(s.turns[1])).toEqual(['Credit Agreement.pdf']);
+    expect(s.turns[1].prompt).toContain('Not found: Agreement.pdf.');
+  });
   it('searches, reads whole what it asks for, and answers citing only documents a model was given', async () => {
     const s = setup(helper, undefined, { pick: (c) => ({ read: numbersOf(c, FA) }), turn: (c, n) => n === 1 ? { tool: 'search', what: 'documents', query: 'board minutes hedging', notes: 'FA p. 1 has the ratio' }
       : n === 2 ? { tool: 'read', docs: [tag(c, FA), 'vdr/Board minutes March.pdf', 'nowhere.pdf'] }
