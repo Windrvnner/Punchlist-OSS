@@ -15,9 +15,10 @@ import { qaKept } from '../app/state';
 import { inTwoVersions, logVersionQueue, nextLogVersion } from '../app/qaView';
 import { logOf, type VersionPick } from '../app/qaLog';
 import {
-  editResponseMerge, forgetResolvedResponseMerge, keepResponseVersion, lastQuestionEditor,
+  editResponseMerge, keepResponseVersion, lastQuestionEditor,
   responseMergeView, selectResponseMerge, setResponseMergeSide, watchResponseMerges,
 } from '../app/drafting';
+import { typedResponse } from '../app/fieldDrafts';
 import { cellValue } from '../domain/logWrite';
 import { IMPORT_FIELDS, type ImportField } from '../domain/importExport';
 import { AI_LABEL } from '../control';
@@ -34,6 +35,8 @@ export const openResolve = (store: ReturnType<typeof useStore>, dealId: string, 
   store.ui({ selectedQuestion: first, dialog: { kind: 'resolveQa', dealId, questionId: first } });
 };
 
+/** resolved elsewhere: the merged response the person typed waits, not saved, in the response box (#939) */
+const HANDED_TIP = 'Your merged response is in the response box, not saved';
 /** the merged response's heading, once picked: it is then the choice (its card is the box to edit) */
 const MERGED_RADIO = { role: 'radio', 'aria-checked': true, tabIndex: 0, 'aria-label': 'Merged response' } as const;
 
@@ -136,7 +139,6 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
     setMerged({ text: hasDraft ? draft!.text : '', busy, error: '' });
     setFields(fields);
   }, [questionId]);
-  useEffect(() => forgetResolvedResponseMerge(store.get(), questionId), [q?.id, Object.keys(kept).length]);
   const go = (id: string | undefined) => { if (id) store.ui({ selectedQuestion: id, dialog: { kind: 'resolveQa', dealId, questionId: id } }); };
   const resp = 'response' in kept; const others = (Object.keys(kept) as ImportField[]).filter((k) => k !== 'response');
   const appText = q?.response ?? ''; const logText = kept.response ?? '';
@@ -256,7 +258,7 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
               title={w === 'app' ? 'As in the app' : 'As in the Q&A log'}
               onClick={() => setFields(setResponseMergeSide(q.id, fields, k, w))}>
               {(w === 'app' ? cellValue(q, k) : kept[k]) || '—'}</button>)}</span></div>)}</div>}
-        </> : <p class="emptyline" id="rsv-done">Resolved</p>}
+        </> : <p class="emptyline" id="rsv-done" title={typedResponse(q) ? HANDED_TIP : undefined}>Resolved</p>}
       </div>
       <ResolveFoot at={at} total={queue.length} left={inTwoVersions(s, dealId).length}
         onStep={(by) => go(queue[at + by])} again={pick === 'merged' && s.can.merge ? () => mergeIt(true) : null}

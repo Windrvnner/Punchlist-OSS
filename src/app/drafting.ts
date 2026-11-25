@@ -11,6 +11,7 @@ import { isDraftStale } from '../domain/transitions';
 import { dealQuestions, qaKept, type State } from './state';
 import { chooseVersion, type VersionPick } from './qaLog';
 import { hasTexts, keptDrafts } from './keptText';
+import type { handFieldText } from './fieldDrafts';
 import type { Question } from '../domain/model';
 import { fail, rejected } from '../domain/result';
 import type { Services } from '../ports';
@@ -214,10 +215,52 @@ function forgetResponseMerge(questionId: string) {
   mergeSides().delete(questionId);
 }
 
-/** Clear the kept merge when there are no versions left to choose. */
-export function forgetResolvedResponseMerge(state: State, questionId: string) {
+/** questions whose choice this PC is saving: their merge goes with the choice, not to the response box */
+const choosing = new Set<string>();
+
+/** The person's own words in a merged response: typed, or an AI draft they edited. */
+function typedMerge(draft: MergeDraft, question: Question): boolean {
+  return !!draft.text.trim() && draft.text !== draft.ai && draft.text !== question.response;
+}
+
+/** set while the app watches for resolved merges: fieldDrafts loads only after kept text is read, so it is passed in */
+let handText: typeof handFieldText | undefined;
+
+/**
+ * A kept merge whose question has no versions left (resolved on another PC, or settled by a log update) is cleared.
+ * Words the person typed in it go to the question's response box as unsaved text, with "Changed elsewhere", so they
+ * stay until the person uses or discards them (#939). Field sides are choices between versions that no longer exist.
+ */
+function settleResolvedMerges(state: State) {
+  if (!handText) return;
+  for (const [questionId, draft] of [...mergeDrafts()]) {
+    if (!settledQuestion(state, questionId)) continue;
+    const question = state.questions[questionId];
+    if (typedMerge(draft, question)) {
+      handText(`${questionId}:response`, draft.text, { value: question.response, rev: question.rev });
+    }
+    forgetResponseMerge(questionId);
+  }
+  for (const questionId of [...mergeSides().keys()]) {
+    if (settledQuestion(state, questionId)) mergeSides().delete(questionId);
+  }
+}
+
+/** A question loaded with its deal, not being chosen on this PC, with no versions left. Others wait for a later look. */
+function settledQuestion(state: State, questionId: string): boolean {
   const question = state.questions[questionId];
-  if (question && !hasLogVersion(state, question)) forgetResponseMerge(questionId);
+  return !!question && !!state.deals[question.dealId] && !choosing.has(questionId) && !hasLogVersion(state, question);
+}
+
+/** Settle kept merges now and whenever the app's state changes, handing typed words to the response box. */
+export function keepResolvedMerges(store: Store, hand: typeof handFieldText): () => void {
+  handText = hand;
+  settleResolvedMerges(store.get());
+  const stop = store.subscribe(() => settleResolvedMerges(store.get()));
+  return () => {
+    stop();
+    handText = undefined;
+  };
 }
 
 export async function keepResponseVersion(
@@ -227,11 +270,18 @@ export async function keepResponseVersion(
   const merge = pick === 'merged';
   const { merged, fields, seen } = shown;
   if (merge && (merging.has(questionId) || !merged.trim())) return fail(rejected('There is no merged draft to keep'));
-  const result = await chooseVersion(store, dealId, questionId, pick, {
-    merged, seen, drafted: mergeDrafts().get(questionId)?.ai, fields: merge ? fields : {},
-  });
-  if (result.ok) forgetResponseMerge(questionId);
-  return result;
+  choosing.add(questionId);
+  try {
+    const result = await chooseVersion(store, dealId, questionId, pick, {
+      merged, seen, drafted: mergeDrafts().get(questionId)?.ai, fields: merge ? fields : {},
+    });
+    if (result.ok) forgetResponseMerge(questionId);
+    return result;
+  } finally {
+    choosing.delete(questionId);
+    // A choice refused because the question was resolved meanwhile leaves the merge to settle like any other.
+    settleResolvedMerges(store.get());
+  }
 }
 
 export async function lastQuestionEditor(store: Store, questionId: string): Promise<string> {
