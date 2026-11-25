@@ -5,6 +5,7 @@ import { Finding, FindingId, DealId, Source, Tombstone, docKey, wordingHash } fr
 import { setFindingStatus, reviewFinding, checkFinding } from '../../domain/transitions';
 import { ok, fail, notFound, rejected, invalid } from '../../domain/result';
 import { keepAside, otherCopies, type ShownNote } from './keptVersions';
+import { inSources } from '../citations';
 
 const Target = z.object({ dealId: DealId, findingId: FindingId });
 const live = (state: any, i: { dealId: string; findingId: string }): Finding | null => { const f = state.findings[i.findingId]; return f && f.dealId === i.dealId ? f : null; };
@@ -315,7 +316,7 @@ export const AttachDocumentToFinding = define({
   plan(state, input, ctx) {
     const f = live(state, input);
     if (!f) return fail(notFound('Finding not found', input.findingId));
-    if (f.sources.some((x) => docKey(x) === docKey(input))) return ok({ upserts: [], audit: [] });   // the same document, not merely the same name
+    if (inSources(f, docKey(input))) return ok({ upserts: [], audit: [] });
     const sources = [...f.sources, { doc: input.doc, loc: '', docId: input.docId }];
     const next: Finding = { ...f, sources, ...attachMark(f, input.doc), updatedAt: ctx.at };
     return ok({
