@@ -43,11 +43,13 @@ export interface LogWrite {
 }
 
 /**
- * A text as a log file holds it: the file keeps a line break as one "\n" and cannot hold control characters, so the writer
- * stores them as a space. This is how the file stores text, not a repair; every other difference is a real edit.
+ * A text as a log file holds it: the file keeps a line break as one "\n" and cannot hold control characters, so a writer
+ * stores each as a space or leaves it out (xlsx leaves it out). This is how the file stores text, not a repair; every
+ * other difference is a real edit.
  */
-const asLogHolds = (text: string) => text.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, ' ');
-const sameInLog = (a: string, b: string) => a === b || asLogHolds(a) === asLogHolds(b);
+const asLogHolds = (text: string, controls: string) =>
+  text.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, controls);
+const sameInLog = (a: string, b: string) => a === b || asLogHolds(a, ' ') === asLogHolds(b, ' ') || asLogHolds(a, '') === asLogHolds(b, '');
 const QUESTION_WORD = /[\p{L}\p{M}|]+/gu;
 // Canonical numerals keep prose such as "civil" outside identifier matching.
 const ROMAN_NUMERAL = /^(?=.)m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})$/i;

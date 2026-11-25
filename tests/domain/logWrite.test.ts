@@ -68,7 +68,7 @@ describe('a log edit is taken exactly as written', () => {
 
 describe('a log cell as the file holds it', () => {
   it('is still what the app sent when the file stored its line breaks or control characters its own way', () => {
-    for (const [sent, held] of [['Line1\r\nLine2', 'Line1\nLine2'], ['a\u0001b', 'a b'], ['a\rb', 'a\nb']]) {
+    for (const [sent, held] of [['Line1\r\nLine2', 'Line1\nLine2'], ['a\u0001b', 'a b'], ['a\u0001b', 'ab'], ['a\rb', 'a\nb']]) {
       const w = logWrite(
         { ...table, rows: [['Q1', 'What is the minimum DSCR covenant?', held, 'Sponsor']], lines: [4], lastRow: 4 },
         map,
