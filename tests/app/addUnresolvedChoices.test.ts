@@ -77,3 +77,42 @@ it('refuses the approved link at the write boundary when another PC rewrites the
   expect(result.ok).toBe(false);
   expect(store.get().questions[link.q.id].linkedFinding).toBeUndefined();
 });
+
+const COVENANTS = ['Debt service coverage', 'Leverage', 'Reserve funding', 'Insurance', 'Permits', 'Title', 'Offtake'];
+
+/** A deal at working size: 126 more findings across workstreams and 40 more open questions around the approved pair. */
+async function crowd(store: ReturnType<typeof make>['store'], dealId: string) {
+  for (let n = 0; n < 126; n++) {
+    const title = `${COVENANTS[n % COVENANTS.length]} requirement ${n} lacks supporting schedule`;
+    val(await store.dispatch(CreateFinding, { dealId, title, workstream: n % 2 ? 'Legal' : 'Financial' }));
+  }
+  for (let n = 0; n < 40; n++) {
+    const text = `Please confirm the ${COVENANTS[n % 7]} terms, item ${n}`;
+    val(await store.dispatch(CreateQuestion, { dealId, text }));
+  }
+}
+
+it('refuses the approved link when another PC rewrites the finding between plan and commit', async () => {
+  const { store, repo, dealId, link } = await fixture(false);
+  await crowd(store, dealId);
+  const findingId = link.point.findingId!;
+  const title = 'Escrow account beneficiary and payment directions';
+  const commit = repo.transaction.bind(repo);
+  let edited = false;
+  vi.spyOn(repo, 'transaction').mockImplementation(async (tx) => {
+    // the plan has read the finding and the question; the peer's edit arrives just before the write
+    if (!edited && tx.writes.some((write) => write.kind === 'question')) {
+      edited = true;
+      repo.peer.change('finding', findingId, { ...store.get().findings[findingId], title }, ELSEWHERE);
+      val(await repo.sync());
+    }
+    return commit(tx);
+  });
+  const result = await store.dispatch(AddUnresolved, {
+    dealId, add: [],
+    link: [{ questionId: link.q.id, linkedFinding: findingId, approval: linkApproval(link).fingerprint }],
+  });
+  expect(edited).toBe(true);
+  expect(result.ok).toBe(false);
+  expect(store.get().questions[link.q.id].linkedFinding).toBeUndefined();
+});

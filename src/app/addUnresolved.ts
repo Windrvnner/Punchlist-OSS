@@ -12,6 +12,7 @@ import {
 type DraftedPoint = Unresolved & { text: string };
 type SelectedUnresolved = { points: DraftedPoint[]; links: UnresolvedLink[] };
 export type UnresolvedPreview = SelectedUnresolved & { out: Unresolved[] };
+type Changed = { kind: 'changed'; count: number; keys: ReadonlySet<string>; invalidLinks: ReadonlySet<string> };
 export const UNREAD_CHECKLIST = 'Couldn’t load the checklist';
 
 type Phrase = NonNullable<AiService['phrase']>;
@@ -109,14 +110,12 @@ export function selectUnresolved(
   preview: UnresolvedPreview | null,
   off: ReadonlySet<string>,
   linked: ApprovedLinks,
-) {
+): SelectedUnresolved & { linkedPoints: Set<string>; draftPoints: Set<string> } {
   const links = preview?.links.filter((link) => isApprovedLink(link, linked.get(link.point.key))) ?? [];
   const linkedPoints = new Set(links.map((link) => link.point.key));
   const points = preview?.points.filter((point) => !off.has(point.key) && !linkedPoints.has(point.key)) ?? [];
   return { points, links, linkedPoints, draftPoints: new Set(points.map((point) => point.key)) };
 }
-
-type Changed = { kind: 'changed'; count: number; keys: ReadonlySet<string>; invalidLinks: ReadonlySet<string> };
 
 export function narrowUnresolved(
   preview: UnresolvedPreview | null,

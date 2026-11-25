@@ -6,7 +6,7 @@
  * stops the whole change, and the refusal names it.
  */
 import { z } from 'zod';
-import { define, type Upsert, type AuditDraft } from '../command';
+import { define, type Upsert, type AuditDraft, type Plan } from '../command';
 import { Question, DealId, QuestionId, FindingId } from '../../domain/model';
 import { numbering } from './questions';
 import { ok, fail, notFound, rejected } from '../../domain/result';
@@ -17,14 +17,14 @@ import type { ChecklistRow } from '../../ports';
 const Link = z.object({ linkedItem: z.string().min(1).optional(), linkedFinding: FindingId.optional() }).refine((x) => !!x.linkedItem || !!x.linkedFinding, 'A question here is for an item or a finding');
 const onChecklist = (state: State, dealId: string, id: string) => (state.items[id] ? state.items[id].dealId === dealId : (Array.isArray(state.checklists[dealId]) && (state.checklists[dealId] as { id: string }[]).some((r) => r.id === id)));
 
-type ChosenLink = { questionId: string; linkedItem?: string; linkedFinding?: string; approval?: string };
+type ChosenLink = { questionId: string; linkedItem?: string; linkedFinding?: string; approval: string };
 export const UNRESOLVED_LINK_CHANGED = 'A chosen link changed since, so nothing was added. Review the link again.';
 
 function approvedLinksStillMatch(state: State, dealId: string, questions: Question[], links: ChosenLink[]) {
   if (!links.length) return true;
   const points = new Map(unresolvedTargets(state, dealId, questions).map((point) => [point.key, point]));
   return links.every((link) => {
-    if (!link.approval || (!!link.linkedItem === !!link.linkedFinding)) return false;
+    if (!!link.linkedItem === !!link.linkedFinding) return false;
     const point = points.get(link.linkedFinding ? 'f:' + link.linkedFinding : 'i:' + link.linkedItem);
     const q = state.questions[link.questionId];
     return !!point && q?.dealId === dealId && canLinkUnresolved(q, !!state.conflicts[q.id])
@@ -32,12 +32,23 @@ function approvedLinksStillMatch(state: State, dealId: string, questions: Questi
   });
 }
 
+/**
+ * The finding or item record behind each approved link, at the rev the check above just read (#88). The write refuses
+ * if one changed since, such as a peer's edit syncing between this plan and the commit. An item that is only a check
+ * row has no record yet (rev 0), so a peer's first edit of it is caught too.
+ */
+function pointRevisions(state: State, links: ChosenLink[]): NonNullable<Plan['expects']> {
+  return links.map((link) => (link.linkedFinding
+    ? { kind: 'finding' as const, id: link.linkedFinding, rev: state.findings[link.linkedFinding]?.rev ?? 0 }
+    : { kind: 'item' as const, id: link.linkedItem!, rev: state.items[link.linkedItem!]?.rev ?? 0 }));
+}
+
 export const AddUnresolved = define({
   name: 'AddUnresolved',
   input: z.object({
     dealId: DealId,
     add: z.array(z.object({ text: z.string().min(1), workstream: z.string().default('') }).and(Link)),
-    link: z.array(z.object({ questionId: QuestionId, approval: z.string().optional() }).and(Link)),
+    link: z.array(z.object({ questionId: QuestionId, approval: z.string().min(1) }).and(Link)),
   }).refine((x) => x.add.length + x.link.length > 0, 'Nothing to add'),
   targets: (_state, input) => [numbering(input.dealId), ...input.link.flatMap((link) => [
     link.questionId, ...(link.linkedFinding ? [link.linkedFinding] : []), ...(link.linkedItem ? [link.linkedItem] : []),
@@ -90,7 +101,7 @@ export const AddUnresolved = define({
     }
     const said = [input.add.length && `${input.add.length.toLocaleString('en-US')} question${input.add.length === 1 ? '' : 's'} added`, input.link.length && `${input.link.length.toLocaleString('en-US')} linked`].filter(Boolean).join(' · ');
     return ok({
-      dealId: d.id, upserts, audit,
+      dealId: d.id, upserts, audit, expects: pointRevisions(state, input.link),
       index: created.length ? { dealId: d.id, add: created.map((id) => ({ kind: 'question' as const, id })) } : undefined,
       inverse: { command: 'RevertImport', input: { dealId: d.id, created, restore: before, findings: [], said: 'Questions taken back' } },
       message: said,
