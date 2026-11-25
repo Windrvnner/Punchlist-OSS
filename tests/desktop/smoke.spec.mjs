@@ -39,6 +39,66 @@ async function started(at) {
   return { app, page };
 }
 
+async function counterpartyEdits(page, dealId) {
+  return page.evaluate(async (id) => {
+    const audit = await store.services.repo.audit(id);
+    if (!audit.ok) throw new Error('Could not read the deal audit');
+    const prefix = 'Counterparty set to ';
+    return {
+      value: store.get().deals[id]?.counterparty,
+      edits: audit.value.filter((entry) => entry.text?.startsWith(prefix))
+        .map((entry) => entry.text.slice(prefix.length)),
+    };
+  }, dealId);
+}
+
+async function checkCounterpartyComposition(page, dealId) {
+  const field = page.getByRole('textbox', { name: 'Counterparty', exact: true });
+  const session = await page.context().newCDPSession(page);
+  const waitForValue = (value) => page.waitForFunction(([id, expected]) =>
+    store.get().deals[id]?.counterparty === expected, [dealId, value]);
+  const expected = ['Borrowing entity'];
+  await field.fill(expected[0]);
+  await field.blur();
+  await waitForValue(expected[0]);
+  await field.evaluate((element) => {
+    element.addEventListener('input', (event) => {
+      if (event.isComposing) element.dataset.testComposing = 'true';
+    });
+    element.addEventListener('compositionend', () => { delete element.dataset.testComposing; });
+  });
+  for (const [reading, confirmed, pause] of [['けいやく', '契約', true], ['しょうにん', '承認', true], ['ほしょう', '保証']]) {
+    await field.selectText();
+    await session.send('Input.imeSetComposition', {
+      text: reading, selectionStart: reading.length, selectionEnd: reading.length,
+    });
+    if (pause) {
+      await page.waitForTimeout(1000); // The composing input remains active beyond the field's 500 ms debounce.
+      const { value, edits } = await counterpartyEdits(page, dealId);
+      const composing = await field.getAttribute('data-test-composing') === 'true';
+      say(`ime-keeps-last-confirmed-${confirmed}`, composing && value === expected.at(-1) &&
+        JSON.stringify(edits) === JSON.stringify(expected), JSON.stringify({ composing, value, edits }));
+    }
+    await session.send('Input.insertText', { text: confirmed });
+    await waitForValue(confirmed);
+    expected.push(confirmed);
+  }
+  await field.selectText();
+  const unconfirmed = 'しはらい';
+  await session.send('Input.imeSetComposition', {
+    text: unconfirmed, selectionStart: unconfirmed.length, selectionEnd: unconfirmed.length,
+  });
+  await field.blur();
+  await page.waitForTimeout(750); // Chromium ends composition synchronously as part of the blur.
+  const { value, edits } = await counterpartyEdits(page, dealId);
+  const retry = page.getByRole('button', { name: 'Not saved · Retry', exact: true });
+  const held = await field.inputValue() === unconfirmed && await retry.isVisible();
+  say('ime-blur-keeps-unconfirmed-draft', held && value === expected.at(-1) &&
+    JSON.stringify(edits) === JSON.stringify(expected), JSON.stringify({ value, edits, held }));
+  await session.detach();
+  return expected;
+}
+
 async function forceDesktopExit(app) {
   const child = app.process();
   const exited = once(child, 'exit');
@@ -142,6 +202,7 @@ let dealId;
     await page.screenshot({ path: path.join(shots, `desktop-overview-${theme}-${w}x${h}.png`) });
   }
   say('no-window-errors', page.errors.length === 0, page.errors.join(' | '));
+  const expectedEdits = await checkCounterpartyComposition(page, dealId);
   await app.close();
   ({ app, page } = await started());
   await page.evaluate((id) => { location.hash = '#qa-' + id; }, dealId);
@@ -149,6 +210,9 @@ let dealId;
   const q = await page.evaluate(() => Object.values(store.get().questions).map((x) => x.text));
   const deal = await page.evaluate((id) => store.get().deals[id]?.name, dealId);
   say('kept-after-restart', deal === 'Project Desktop' && q.includes('Please confirm the lock-up ratio.\nAnd the test date.'), JSON.stringify({ deal, q }));
+  const { value, edits } = await counterpartyEdits(page, dealId);
+  say('ime-persists-only-confirmed-values', value === expectedEdits.at(-1) &&
+    JSON.stringify(edits) === JSON.stringify(expectedEdits), JSON.stringify({ value, edits }));
 }
 
 // A composer draft survives an abrupt exit of the main process (#825).
