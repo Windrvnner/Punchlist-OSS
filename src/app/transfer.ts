@@ -6,7 +6,7 @@
  */
 import type { Store } from './store';
 import type { SheetPreview } from '../ports';
-import { IMPORT_FIELDS, type ImportField } from '../domain/importExport';
+import { IMPORT_FIELDS } from '../domain/importExport';
 import {
   type State, dealQuestions, dealFindings, findingWorkstreams, FIRM,
   workstreamHead, qaStatusOnly, qaWorkstream, qaWorkstreamChoices,
@@ -141,46 +141,6 @@ export async function readImportBytes(
   });
 }
 
-/** Keep choices made during the reread (#741). A missing choice stays unmapped and is named in the footer. */
-export async function rereadImportTable(
-  store: Store, before: ImportTable, location: ImportLocation, choices: ReadonlyMap<ImportField, number | null>,
-) {
-  const read = await readImportBytes(store, before.name, before.bytes, location);
-  if (!read.ok) return fail({ ...read.error, message: `Could not read ${before.name}: ${read.error.message}` });
-  return ok({ table: read.value, ...applyImportColumnChoices(before, read.value, choices) });
-}
-
-function applyImportColumnChoices(
-  before: ImportTable, after: ImportTable, choices: ReadonlyMap<ImportField, number | null>,
-) {
-  const mapping = { ...after.mapping };
-  const missed: string[] = [];
-  for (const [field, label] of IMPORT_FIELDS) {
-    const picked = choices.get(field);
-    if (picked === undefined) continue;
-    mapping[field] = picked === null ? null : rereadColumn(before, after, picked);
-    if (picked !== null && mapping[field] === null) missed.push(label);
-  }
-  const error = missed.length ? `Column choice not applied for ${missed.join(', ')}.` : '';
-  return { mapping, error };
-}
-
-function rereadColumn(before: ImportTable, after: ImportTable, picked: number) {
-  const sourceColumn = before.cols?.[picked];
-  if (before.sheet === after.sheet && sourceColumn !== undefined && after.cols) {
-    const position = after.cols.indexOf(sourceColumn);
-    return position < 0 ? null : position;
-  }
-  // Without a shared sheet position, only an unambiguous heading can identify the chosen column.
-  const heading = before.columns[picked]?.trim().toLowerCase();
-  if (!heading || uniqueImportHeading(before.columns, heading) === null) return null;
-  return uniqueImportHeading(after.columns, heading);
-}
-
-function uniqueImportHeading(columns: string[], heading: string) {
-  const matches = columns.flatMap((name, index) => name.trim().toLowerCase() === heading ? [index] : []);
-  return matches.length === 1 ? matches[0] : null;
-}
 /** Read a chosen file into a table of strings with a suggested column mapping. Nothing is changed. */
 export async function readImportFile(store: Store, file: { name: string; size: number; arrayBuffer(): Promise<ArrayBuffer> }): Promise<Result<ImportTable>> {
   if (!/\.(xlsx|xlsm|xls|xlsb|ods|csv)$/i.test(file.name)) return fail({ kind: 'invalid', message: 'Choose a spreadsheet: .xlsx, .xls, .ods or .csv' });

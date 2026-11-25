@@ -8,9 +8,8 @@ import {
 import {
   keptQaImport, loadQaImport, prepareQaImport, submitQaImport, summarizeQaImport, type QaChoices,
 } from '../../src/app/qaImport';
-import {
-  previewImport, proposeLayout, readImportBytes, rereadImportTable, type ImportTable,
-} from '../../src/app/transfer';
+import { previewImport, proposeLayout, readImportBytes, type ImportTable } from '../../src/app/transfer';
+import { QaImportLayout } from '../../src/app/qaImportLayout';
 import { dealQuestions } from '../../src/app/state';
 import { ok } from '../../src/domain/result';
 import { tableFrom } from '../../src/domain/sheets';
@@ -65,13 +64,23 @@ it('carries a column to another sheet only when its heading identifies it (#741)
   try {
     const before = await readImportBytes(app.store, NAME, new Uint8Array(), { sheet: 'Initial review' });
     if (!before.ok) throw new Error(before.error.message);
-    const chosen = new Map([['response' as const, 1]]);
-    const updated = await rereadImportTable(app.store, before.value, { sheet: 'Updated review' }, chosen);
-    expect(updated).toMatchObject({ ok: true, value: { mapping: { text: 0, response: 2 }, error: '' } });
-    const ambiguous = await rereadImportTable(app.store, before.value, { sheet: 'Alternative review' }, chosen);
-    expect(ambiguous).toMatchObject({
-      ok: true, value: { mapping: { text: 0, response: null }, error: 'Column choice not applied for Response.' },
+    const layout = new QaImportLayout(app.store, before.value, before.value.mapping, () => {});
+    const updated = layout.reread({ sheet: 'Updated review' });
+    expect(layout.view.reading).toBe(true);
+    layout.pick('response', 1);
+    await updated;
+    expect(layout.view).toMatchObject({ mapping: { text: 0, response: 2 }, reading: false, warning: '' });
+    await layout.reread({ sheet: 'Alternative review' });
+    expect(layout.view).toMatchObject({
+      mapping: { text: 0, response: null }, warning: 'Column choice not applied for Response.',
     });
+    layout.pick('priority', null);
+    expect(layout.view.unapplied).toEqual(['response']);
+    const { table, mapping } = layout.view;
+    const reopened = new QaImportLayout(app.store, table, mapping, () => {});
+    expect(reopened.view.warning).toBe('Column choice not applied for Response.');
+    reopened.pick('response', null);
+    expect(reopened.view).toMatchObject({ mapping: { response: null, priority: null }, warning: '' });
   } finally {
     sheets.read = read;
     app.store.closing();
