@@ -20,6 +20,11 @@ export interface QaImportTable extends ImportTable {
   columnPicks?: ColumnPick[];
 }
 
+/** The fields whose manual choice could not be found in the accepted read; Import must wait for a new choice (#741). */
+export function unappliedImportColumns(table: QaImportTable | null): ImportField[] {
+  return (table?.columnPicks ?? []).filter((pick) => pick.unapplied).map(({ field }) => field);
+}
+
 /** Older kept layouts include the mapping but lack the explicit pick history and source positions. */
 export function restoreImportColumnPicks(table: QaImportTable | null, mapping: Mapping | null) {
   if (!table || !mapping || Array.isArray(table.columnPicks)) return table;

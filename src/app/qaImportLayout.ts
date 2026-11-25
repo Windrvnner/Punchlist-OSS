@@ -1,7 +1,8 @@
 import { IMPORT_FIELDS, type ImportField, type Mapping } from '../domain/importExport';
 import type { Store } from './store';
 import {
-  applyImportColumnPicks, pickImportColumn, restoreImportColumnPicks, type QaImportTable,
+  applyImportColumnPicks, pickImportColumn, restoreImportColumnPicks, unappliedImportColumns,
+  type QaImportTable,
 } from './qaImportColumns';
 import { readImportBytes, type ImportLocation, type ImportTable } from './transfer';
 
@@ -36,6 +37,16 @@ export class QaImportLayout {
   replace(table: ImportTable | null, mapping = table?.mapping ?? null) {
     this.cancel();
     this.show(layoutView(restoreImportColumnPicks(table, mapping), mapping));
+  }
+
+  /** A proposed layout keeps the choices made while it was awaited; they win over the proposal's columns (#741). */
+  propose(proposal: ImportTable) {
+    const before = this.current.table;
+    const picks = before?.columnPicks ?? [];
+    if (!before || !picks.length) return this.replace(proposal);
+    this.cancel();
+    const { table, mapping } = applyImportColumnPicks(before, proposal, picks);
+    this.show(layoutView(table, mapping));
   }
 
   pick(field: ImportField, column: number | null) {
@@ -79,7 +90,7 @@ export class QaImportLayout {
 }
 
 function layoutView(table: QaImportTable | null, mapping: Mapping | null): QaImportLayoutView {
-  const unapplied = (table?.columnPicks ?? []).filter((pick) => pick.unapplied).map(({ field }) => field);
+  const unapplied = unappliedImportColumns(table);
   const labels = IMPORT_FIELDS.filter(([field]) => unapplied.includes(field)).map(([, label]) => label);
   const warning = labels.length ? `Column choice not applied for ${labels.join(', ')}.` : '';
   return { table, mapping, reading: false, error: '', unapplied, warning };

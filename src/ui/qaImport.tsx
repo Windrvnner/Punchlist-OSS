@@ -211,7 +211,7 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
     setBusy('');
     if (proposal.ok) {
       setError('');
-      reader.replace(proposal.value);
+      reader.propose(proposal.value);
     } else if (asked.mapping.text != null) {
       setError(`${SERVICE} had no better proposal`);
     }
