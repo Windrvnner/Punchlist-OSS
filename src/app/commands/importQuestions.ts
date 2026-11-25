@@ -167,26 +167,29 @@ export const ImportQuestions = define({
 
 /**
  * Which question each row is, by row index: first the question with the row's number and exact text, then the one with
- * the exact text alone, each with the same sender. `pools` are searched in order (live, then deleted); a question is taken by one row only.
+ * the exact text alone, each with the same sender (or one naming none). `pools` are searched in order (live, then deleted); a question is taken by one row only.
  */
 function matchExactly(rows: ImportRow[], pools: Question[][]): Map<number, string> {
   const matched = new Map<number, string>(); const taken = new Set<string>();
-  // who sent the question is part of the match, exactly as written; a file that names no sender in any row (no such
-  // column) is matched without it
-  const hasSenders = rows.some((row) => row.askedBy !== '');
-  const find = (row: ImportRow, sameNumber: boolean) => {
+  // who sent the question is part of the match, as written (spaces around a name are not part of it). A row or a
+  // question that names no sender does not conflict with one that does, but the same sender is always tried first.
+  const sender = (name: string) => name.trim();
+  const find = (row: ImportRow, sameNumber: boolean, sameSender: boolean) => {
     for (const pool of pools) {
-      const hit = pool.find((q) => !taken.has(q.id) && q.text === row.text && (!hasSenders || q.askedBy === row.askedBy)
-        && (!sameNumber || q.n === row.n));
+      const hit = pool.find((q) => !taken.has(q.id) && q.text === row.text && (!sameNumber || q.n === row.n)
+        && (sameSender ? sender(q.askedBy) === sender(row.askedBy)
+          : !sender(q.askedBy) || !sender(row.askedBy)));
       if (hit) return hit;
     }
     return undefined;
   };
   for (const sameNumber of [true, false]) {
-    for (const [idx, row] of rows.entries()) {
-      if (matched.has(idx) || (sameNumber && row.n == null)) continue;
-      const hit = find(row, sameNumber);
-      if (hit) { matched.set(idx, hit.id); taken.add(hit.id); }
+    for (const sameSender of [true, false]) {
+      for (const [idx, row] of rows.entries()) {
+        if (matched.has(idx) || (sameNumber && row.n == null)) continue;
+        const hit = find(row, sameNumber, sameSender);
+        if (hit) { matched.set(idx, hit.id); taken.add(hit.id); }
+      }
     }
   }
   return matched;

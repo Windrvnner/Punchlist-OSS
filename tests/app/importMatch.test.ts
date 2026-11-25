@@ -73,7 +73,7 @@ describe('a merge matches the sender too', () => {
     await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: rowsFrom(csv('lender a')) });
     expect(dealQuestions(store.get(), dealId)).toHaveLength(2);
   });
-  it('a file with no sender in any row matches without one', async () => {
+  it('a row naming no sender matches any sender; the same sender is taken first', async () => {
     const { store } = make(); const dealId = await deal(store);
     await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: rowsFrom('No.,Question,Submitted by\n1,Same words,Lender A\n') });
     await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: rowsFrom('No.,Question,Response\n1,Same words,Reply\n') });
