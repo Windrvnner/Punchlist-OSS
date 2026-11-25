@@ -119,26 +119,39 @@ async function searchQuestions(run: AgentRun, queryWords: Set<string>, report: R
 }
 
 /**
- * The catch-up tool: each deal's brief on its open findings, named by deal when there are several. The brief is one
- * model call, which is not made again while the deal's findings are unchanged (ai.ts dealBrief).
+ * The catch-up tool: each deal's brief on its open findings, named by deal when there are several, one deal at a time.
+ * The brief is one model call, which is not made again while the deal's findings are unchanged (ai.ts dealBrief). A
+ * deal whose findings cannot be read just now is named as such, as a search of findings does, never taken for empty.
  */
 export async function catchUp(run: AgentRun): Promise<string> {
   const { kit, question } = run;
   const step = run.step({ kind: 'search', text: 'Caught up on the open findings' });
   const multi = question.deals.length > 1;
-  let paragraphs = 0;
-  const parts = await Promise.all(question.deals.map(async (dealId) => {
+  const parts: string[] = [];
+  const said: string[] = [];
+  for (const dealId of question.deals) {
     const heading = multi ? `${await kit.dealName(dealId)}: ` : '';
-    const brief = await kit.brief(dealId);
-    if (brief.ok) paragraphs += brief.value.length;
-    if (brief.ok) return `${heading}${brief.value.join('\n') || 'no open findings.'}`;
-    if (brief.error.kind === 'unreachable') {
-      throw Object.assign(new Error(brief.error.message), { code: 'unreachable' });
-    }
-    return `${heading}the catch-up could not be written: ${brief.error.message}.`;
-  }));
-  Object.assign(step, { result: `${paragraphs} ${noun(paragraphs, 'paragraph')}`, done: true });
+    const { text, result } = await briefOf(run, dealId);
+    parts.push(heading + text);
+    said.push(heading + result);
+  }
+  Object.assign(step, { result: said.join(' · '), done: true });
   return `The catch-up on the open findings:\n${parts.join('\n\n')}`;
+}
+
+/** one deal's brief, for the main session (`text`) and for the step (`result`); throws when the service is down */
+async function briefOf(run: AgentRun, dealId: string): Promise<{ text: string; result: string }> {
+  if (!await run.kit.findings(dealId)) {
+    return { text: 'its findings could not be read just now.', result: 'findings could not be read' };
+  }
+  const brief = await run.kit.brief(dealId);
+  if (brief.ok) {
+    const count = brief.value.length;
+    const result = count ? `${count} ${noun(count, 'paragraph')}` : 'no open findings';
+    return { text: brief.value.join('\n') || 'no open findings.', result };
+  }
+  if (brief.error.kind === 'unreachable') throw Object.assign(new Error(brief.error.message), { code: 'unreachable' });
+  return { text: `the catch-up could not be written: ${brief.error.message}.`, result: 'could not be written' };
 }
 
 /**

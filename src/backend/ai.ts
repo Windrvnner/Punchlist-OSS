@@ -2649,7 +2649,8 @@ export function nodeAi(o: AiOptions) {
     /**
      * Filling gaps (docs/core-documents-design.md, part 4): items a full check would leave as gaps, or not settled for any
      * reason but a folder out of reach, are held back (`note`, while `holding`) and handed a few at a time to the chat agent
-     * (agent.ts), unchanged, with its own search, read and folder tools: it searches and reads as often as it needs. The
+     * (agent.ts), unchanged, with its own search, read, folder and brief tools: it searches and reads as often as it
+     * needs. The
      * documents its answer cites are then read against those items by `settle`, as on their last look, so the outcome is
      * written as the check writes any other, except that the agent only ever adds to what the check found: an item those
      * documents still leave open (they may have been cited for another item of the run) is written as the check left it
