@@ -47,7 +47,8 @@ export function QaImportForm({ store, dealId, qa, plan, actions }: {
         <MakeLogRow makeLog={qa.makeLog} importing={importing} onPick={onMakeLog} />
       )}
       <HeadingsRow importKey={qa.key} table={table} busy={busy} wantedSheet={qa.wantedSheet} actions={actions} />
-      <ColumnsRow table={table} mapping={mapping} importing={importing} onMap={actions.pickColumn} />
+      <ColumnsRow table={table} mapping={mapping} unapplied={qa.unapplied}
+        importing={importing} onMap={actions.pickColumn} />
       <PreviewRow mapping={mapping} rows={plan.previewRows} />
       <ModeRow mode={mode} importing={importing} onPick={qa.setMode} />
       {mapping.response != null && <AnsweredRow answered={qa.answered} importing={importing} onPick={qa.setAnswered} />}
@@ -118,29 +119,47 @@ function HeadingsRow({ importKey, table, busy, wantedSheet, actions }: {
 }
 
 /** Which of the file's columns holds each field. The question must have one; any other can be "not in file" */
-function ColumnsRow({ table, mapping, importing, onMap }: {
+function ColumnsRow({ table, mapping, unapplied, importing, onMap }: {
   table: ImportTable;
   mapping: Mapping;
+  unapplied: ImportField[];
   importing: boolean;
   onMap: (field: ImportField, column: number | null) => void;
 }) {
-  const pick = (field: ImportField) => (e: Event) => {
-    const value = chosenOf(e);
-    onMap(field, value === '' ? null : +value);
-  };
   return (
     <div class="srow top"><div class="k">Columns</div><div class="immap">
       {IMPORT_FIELDS.map(([field, label]) => (
-        <label key={field}><span>{label}</span>
-          <select class="field" aria-label={label} data-immap={field} disabled={importing}
-            value={mapping[field] == null ? '' : String(mapping[field])} onChange={pick(field)}>
-            {field === 'text' && <option value="">Choose a Column</option>}
-            {/* the file's columns in its own order, left to right, as the preview shows them; "not in file" last */}
-            {table.columns.map((name, i) => <option key={i} value={String(i)}>{name || `(column ${i + 1})`}</option>)}
-            {field !== 'text' && <option value="">— not in file —</option>}
-          </select>
-        </label>))}
+        <ColumnPick key={field} field={field} label={label} columns={table.columns} value={mapping[field]}
+          unapplied={unapplied.includes(field)} importing={importing} onMap={onMap} />))}
     </div></div>
+  );
+}
+
+function ColumnPick({ field, label, columns, value, unapplied, importing, onMap }: {
+  field: ImportField;
+  label: string;
+  columns: string[];
+  value: number | null;
+  unapplied: boolean;
+  importing: boolean;
+  onMap: (field: ImportField, column: number | null) => void;
+}) {
+  const chosen = unapplied ? 'unapplied' : value == null ? '' : String(value);
+  return (
+    <label><span>{label}</span>
+      <select class="field" aria-label={label} data-immap={field} disabled={importing}
+        value={chosen} aria-invalid={unapplied || undefined} aria-describedby={unapplied ? 'im-line' : undefined}
+        onChange={(event) => {
+          const option = chosenOf(event);
+          if (option !== 'unapplied') onMap(field, option === '' ? null : +option);
+        }}>
+        {unapplied && <option value="unapplied" disabled>Choose a Column</option>}
+        {field === 'text' && !unapplied && <option value="">Choose a Column</option>}
+        {/* Columns stay in file order, with “not in file” last. */}
+        {columns.map((name, i) => <option key={i} value={String(i)}>{name || `(column ${i + 1})`}</option>)}
+        {field !== 'text' && <option value="">— not in file —</option>}
+      </select>
+    </label>
   );
 }
 
@@ -241,11 +260,11 @@ function changeText(change: { field: string }, value: string) {
 
 /** The footer: what Import will do (or why it can't), and the Import button */
 function ImportFoot({ qa, plan, onImport }: { qa: ReadQa; plan: ImportPlan; onImport: () => void }) {
-  const { error, busy, mapping } = qa;
+  const { error, warning, busy, mapping } = qa;
   const { total, dryError } = plan;
-  const failed = !!(error || dryError);
-  const unread = !error && !dryError && !busy ? unreadText(plan.prepared) : '';
-  const blocked = !total || mapping.text == null || !!busy || !!dryError;
+  const failed = !!(error || warning || dryError);
+  const unread = !failed && !busy ? unreadText(plan.prepared) : '';
+  const blocked = !total || mapping.text == null || !!busy || !!dryError || !!warning;
   return (
     <div class="xfoot">
       <span id="im-line" class={failed ? 'err' : ''} role={failed ? 'alert' : undefined} {...unreadTipProps(unread)}>
@@ -284,6 +303,7 @@ function footLine(qa: ReadQa, plan: ImportPlan) {
   if (qa.busy === 'asking') return `Asking ${SERVICE} where the table is`;
   if (qa.busy === 'reading') return 'Reading the file';
   if (qa.error) return qa.error;
+  if (qa.warning) return qa.warning;
   if (qa.busy === 'importing') return 'Importing';
   if (qa.mapping.text == null) return 'Choose the question column';
   if (plan.dryError) return `Can’t import this file: ${plan.dryError}`;
