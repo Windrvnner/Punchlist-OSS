@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { saveLog, sha256 } from '../../src/backend/qaLogFolder';
+import { trackPaths } from './openedPaths';
 import { nodeQaLogs } from '../../src/backend/qaLogs';
 
 const at = new Date(2026, 10, 15, 16, 12);
@@ -56,8 +57,9 @@ function saveWithArchiveCollision(folder: string, foreignHoldsEdit: boolean) {
     aside = String(to);
     write(original, current);
   });
+  const where = trackPaths();
   vi.spyOn(fs, 'writeFileSync').mockImplementation((target, bytes, options) => {
-    if (String(target).includes(' saved meanwhile')) throw new Error('Archive copy is unavailable');
+    if (where(target).includes(' saved meanwhile')) throw new Error('Archive copy is unavailable');
     write(target, bytes, options);
   });
   expect(() => saveLog({ folder, file, bytes: base, was: sha256(base), at })).toThrow('Archive copy is unavailable');
