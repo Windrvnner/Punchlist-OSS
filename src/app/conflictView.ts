@@ -1,5 +1,6 @@
 import { key, type ListItem, type ListRecord } from '../domain/checklist';
-import type { State } from './state';
+import { differingFields } from '../domain/versions';
+import type { Conflict, State } from './state';
 
 /** Count what this version holds and what a person would set aside by choosing it. */
 export function compareChecklistVersion(
@@ -29,4 +30,20 @@ export function compareChecklistVersion(
 function preview(items: ListItem[]) {
   const names = items.slice(0, 5).map(({ text }) => text);
   return { count: items.length, names, more: items.length - names.length };
+}
+
+/**
+ * The fields shown for each version, from the record's fields in reading order. Changed on two PCs: the fields that
+ * differ. With a delete: the first two fields any readable version holds, so a person sees what each choice keeps,
+ * and the status rides on the line under the PC's name rather than taking a row of its own.
+ */
+export function comparedFields(conflict: Pick<Conflict, 'versions'>, fields: readonly string[]) {
+  const withDelete = conflict.versions.some((version) => version.deleted);
+  // a deleted version shows the words it held (the deleting PC's copy) when it has them
+  const readable = conflict.versions.filter((version) => !version.deleted || version.data);
+  const values = readable.map((version) => version.data as Record<string, unknown> | null);
+  if (!withDelete) return { shown: differingFields(values, fields), statusOnLine: false };
+  const held = (field: string) => values.some((data) => data && String(data[field] ?? '').trim());
+  const shown = fields.filter((field) => field !== 'status').slice(0, 2).filter(held);
+  return { shown, statusOnLine: true };
 }
