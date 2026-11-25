@@ -1,5 +1,5 @@
 // The checklist review at deal size, with model replies held until the test releases them (#378).
-async function openReview(page) {
+async function openReview(page, workbook) {
   const agreements = ['equipment supply agreement', 'construction contract', 'interconnection agreement', 'site lease',
     'maintenance agreement', 'power purchase agreement', 'credit agreement', 'insurance policy'];
   const evidence = ['signature pages', 'schedule of payments', 'notice provisions', 'renewal terms', 'amendments',
@@ -11,7 +11,7 @@ async function openReview(page) {
   await page.click('#u-menu');
   await page.click('#s-checklist-open');
   await page.click('#fl-import');
-  await page.setInputFiles('#cl-file', {
+  await page.setInputFiles('#cl-file', workbook ? await sheetFile(page, rows, workbook) : {
     name: 'Duplicate retries.csv', mimeType: 'text/csv', buffer: Buffer.from(['Item', ...rows].join('\n')),
   });
   const next = page.locator('#cl-next');
@@ -43,6 +43,14 @@ async function openReview(page) {
     missed: document.querySelector('#cl-missed')?.textContent,
   }), pair.b);
   return { page, finish, next, retry, calls, review, pair, rows, itemCount: rows.length };
+}
+
+async function sheetFile(page, rows, { name = 'Checklist workbook.xlsx', first, second }) {
+  await page.evaluate(({ name, rows, first, second }) => {
+    const sheet = (name, item) => ({ name, grid: ['Item', item, ...rows].map((value) => [value]) });
+    window.__sheets = { [name]: [sheet('Main', first), sheet('Appendix', second)] };
+  }, { name, rows, first, second });
+  return { name, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.alloc(0) };
 }
 
 const failed = (kind) => ({ ok: false, error: { kind, message: kind } });
@@ -160,13 +168,7 @@ async function replaceDuringRetry({ page, next, retry, finish, calls, rows }, sa
   const first = 'Provide the equipment acceptance certificate for each commissioned substation.';
   const appendix = 'Provide the operating permits for the collection network.';
   const name = 'Replacement checklist.xlsx';
-  await page.evaluate(({ name, first, appendix, rows }) => {
-    const sheet = (name, first) => ({ name, grid: ['Item', first, ...rows].map((value) => [value]) });
-    window.__sheets = { [name]: [sheet('Main', first), sheet('Appendix', appendix)] };
-  }, { name, first, appendix, rows });
-  await page.setInputFiles('#cl-file', {
-    name, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: Buffer.alloc(0),
-  });
+  await page.setInputFiles('#cl-file', await sheetFile(page, rows, { name, first, second: appendix }));
   await page.locator('.imprev').getByText(first, { exact: true }).waitFor();
   const sheetError = await sheetErrorWhileWaiting(page, next, name);
   const sourceControls = await retrySourceRead(page, appendix);
@@ -248,4 +250,55 @@ export async function checkDuplicateRetries(start, say) {
   await noCallAfterBack(review, say);
   say('no errors during duplicate retries', page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
+}
+
+export async function checkSheetReadDuringRetry(start, say) {
+  const first = 'Provide signed easements for the access road.';
+  const second = 'Provide the warranty for each installed turbine.';
+  const { ctx, page } = await start();
+  const { next, retry, finish, calls, itemCount } = await openReview(page, { first, second });
+  await next.click();
+  await finish(failed('failed'));
+  await retry.click();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await holdAppendix(page);
+  const sheet = page.locator('#cl-sheet');
+  await sheet.selectOption('Appendix');
+  await page.waitForFunction(() => !!window.__releaseAppendix);
+  await finish({ ok: true, value: { pairs: [] } });
+
+  const waiting = await next.isDisabled() && await sheet.inputValue() === 'Appendix';
+  const before = (await calls()).length;
+  await next.evaluate((button) => button.click());
+  const noEarlyRequest = (await calls()).length === before;
+  if (!noEarlyRequest) await finish({ ok: true, value: { pairs: [] } });
+  const premature = await page.locator('#cl-go').isVisible();
+  await page.evaluate(() => { window.__releaseAppendix(); });
+  if (!premature) {
+    await page.locator('.imprev').getByText(second, { exact: true }).waitFor();
+    await next.click();
+    await finish({ ok: true, value: { pairs: [] } });
+  }
+  await page.click('#cl-go');
+  await page.waitForSelector('#fl-count');
+  const imported = await page.evaluate(() => Object.values(store.get().firmList).flatMap((list) => list.items)
+    .map((item) => item.text));
+  say('Next waits for the selected checklist sheet after an older duplicate retry settles (#821)',
+    waiting && noEarlyRequest && !premature && imported.length === itemCount + 1
+      && imported.includes(second) && !imported.includes(first) && !page.errors.length,
+    JSON.stringify({ waiting, noEarlyRequest, premature, count: imported.length, first: imported[0] }));
+  await ctx.close();
+}
+
+async function holdAppendix(page) {
+  await page.evaluate(() => {
+    const codec = store.services.sheets;
+    const read = codec.read;
+    codec.read = async (bytes, name, options) => {
+      if (options?.sheet === 'Appendix') {
+        await new Promise((resolve) => { window.__releaseAppendix = resolve; });
+      }
+      return read(bytes, name, options);
+    };
+  });
 }
