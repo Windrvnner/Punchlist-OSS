@@ -34,6 +34,7 @@ function channel(services: Parameters<typeof serve>[0], o: { down?: () => boolea
     call: async (s, m, args) => { if (o.down?.()) throw new Error('gone'); return structuredClone(await end.call(s, m, structuredClone(args))); },
     on: (s: Watched, l) => { listeners[s].add(l); return () => listeners[s].delete(l); },
     pathFor: () => '',
+    flushKeptText: () => undefined,
   };
   return { api, emit: (s: Watched, c: unknown) => { for (const l of listeners[s]) l(structuredClone(c)); } };
 }
