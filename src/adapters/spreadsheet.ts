@@ -6,27 +6,35 @@ import { parseCsv, tableFrom } from '../domain/sheets';
 import type { SpreadsheetCodec } from '../ports';
 import { ok, fail } from '../domain/result';
 
-type Encoding = 'utf-8-bom' | 'utf-16le-bom' | 'utf-16be-bom' | 'utf-16le' | 'utf-16be' | 'utf-8' | 'windows-1252' | 'windows-1252-bom';
 /**
- * CSV files carry no reliable label for their encoding. Read, in order: a byte-order mark (UTF-8, UTF-16 either way);
- * UTF-16 without a mark, recognized by its zero bytes; valid UTF-8; and otherwise Windows-1252, which is what Excel on
- * Windows writes for "CSV" and in which every byte is a character. Text is never silently decoded as the wrong thing.
+ * A CSV's text as Excel reads it when the file is opened by double-click: a UTF-8 byte-order mark means UTF-8, a UTF-16
+ * mark means UTF-16 (either order), and a file with no mark is in the PC's Windows code page (Windows-1252). The app never
+ * guesses past that: UTF-8 text with no mark shows as Excel shows it, so a person sees the same characters in both.
  */
-function encodingOf(bytes: Uint8Array): Encoding {
-  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {   // a UTF-8 mark in front of Windows-1252 text, as some tools write it
-    try { new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(3)); return 'utf-8-bom'; } catch { return 'windows-1252-bom'; }
-  }
-  if (bytes[0] === 0xff && bytes[1] === 0xfe) return 'utf-16le-bom';
-  if (bytes[0] === 0xfe && bytes[1] === 0xff) return 'utf-16be-bom';
-  const n = Math.min(bytes.length, 4096); let evenZero = 0, oddZero = 0;
-  for (let i = 0; i < n; i++) if (bytes[i] === 0) { if (i % 2) oddZero++; else evenZero++; }
-  if (n >= 4 && oddZero > n / 8 && evenZero < n / 64) return 'utf-16le';
-  if (n >= 4 && evenZero > n / 8 && oddZero < n / 64) return 'utf-16be';
-  try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); return 'utf-8'; } catch { return 'windows-1252'; }
-}
 export function decodeText(bytes: Uint8Array): string {
-  const e = encodingOf(bytes); const bom = e.endsWith('-bom') ? (e.startsWith('utf-16') ? 2 : 3) : 0;
-  return new TextDecoder(e.replace('-bom', '')).decode(bytes.subarray(bom));
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return new TextDecoder('utf-8').decode(bytes.subarray(3));
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder('utf-16le').decode(bytes.subarray(2));
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder('utf-16be').decode(bytes.subarray(2));
+  return new TextDecoder('windows-1252').decode(bytes);
+}
+
+/**
+ * The character Excel splits a CSV's fields at when it opens the file by double-click: the system's list separator,
+ * which Windows sets to a semicolon where a region writes decimals with a comma, and to a comma elsewhere.
+ */
+export function regionListSeparator(): string {
+  const decimal = new Intl.NumberFormat().formatToParts(1.1).find((part) => part.type === 'decimal')?.value;
+  return decimal === ',' ? ';' : ',';
+}
+
+/**
+ * A CSV file's cells as Excel shows them: its text as `decodeText` reads it, split at the delimiter. A first line
+ * "sep=;" names the delimiter, as Excel takes it, and is not a row; without one the delimiter is the region's.
+ */
+export function csvGrid(bytes: Uint8Array, listSeparator: string = regionListSeparator()): string[][] {
+  const text = decodeText(bytes);
+  const named = /^sep=(.)\r?\n/.exec(text);
+  return named ? parseCsv(text.slice(named[0].length), undefined, named[1]) : parseCsv(text, undefined, listSeparator);
 }
 
 /** a workbook is a ZIP (.xlsx, .xlsm, .xlsb, .ods) or an OLE container (.xls), whatever it is called */
@@ -35,7 +43,7 @@ export const isWorkbook = (b: Uint8Array) => (b[0] === 0x50 && b[1] === 0x4b) ||
 /** A .csv read as text: raw strings, no number or date guessing. One sheet. */
 export function readCsv(bytes: Uint8Array, opts?: { sheet?: string; headerRow?: number }) {
   if (isWorkbook(bytes)) return fail({ kind: 'invalid' as const, message: 'That file is a workbook saved with a .csv name. Rename it to .xlsx and try again' });
-  const t = tableFrom([{ name: 'Sheet1', grid: parseCsv(decodeText(bytes)) }], opts);
+  const t = tableFrom([{ name: 'Sheet1', grid: csvGrid(bytes) }], opts);
   return t ? ok(t) : fail({ kind: 'invalid' as const, message: 'The file has no rows' });
 }
 

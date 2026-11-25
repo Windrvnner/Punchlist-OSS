@@ -10,8 +10,8 @@ import path from 'node:path';
 import type { Converter } from './convert';
 import type { QaLogFiles } from '../ports';
 import { ok, fail } from '../domain/result';
-import { parseCsv, writtenAsMeant, withSteps, tableFrom, exportDocument, type Sheet, type SheetEdit } from '../domain/sheets';
-import { decodeText } from '../adapters/spreadsheet';
+import { writtenAsMeant, withSteps, tableFrom, exportDocument, type Sheet, type SheetEdit } from '../domain/sheets';
+import { csvGrid } from '../adapters/spreadsheet';
 import { editLog, libreOfficeSheets } from './spreadsheets';
 import { saveLog, createLog, sha256, restoreAside, keptEdits, settleKept, type KeptEdit } from './qaLogFolder';
 import { fixedCells } from './xlsxEdit';
@@ -44,7 +44,7 @@ function copyArchivedBase(base: NonNullable<KeptEdit['base']>, target: string): 
 export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogFiles {
   const conv: Converter = o.convert ?? Object.assign(() => Promise.reject(new Error('no converter')), { id: 'none' });   // a CSV log needs none
   /** every sheet of a file, as text */
-  const sheets = async (file: string): Promise<Sheet[]> => (/\.csv$/i.test(file) ? [{ name: 'Sheet1', grid: parseCsv(decodeText(new Uint8Array(fs.readFileSync(file)))) }] : o.convert?.sheets ? o.convert.sheets(file) : Promise.reject(new Error('no spreadsheet reader')));
+  const sheets = async (file: string): Promise<Sheet[]> => (/\.csv$/i.test(file) ? [{ name: 'Sheet1', grid: csvGrid(new Uint8Array(fs.readFileSync(file))) }] : o.convert?.sheets ? o.convert.sheets(file) : Promise.reject(new Error('no spreadsheet reader')));
   /** the log's place, or why it can't be used */
   const where = (folder: string, file: string) => {
     if (!EXT.test(path.extname(file))) return fail({ kind: 'invalid' as const, message: 'Only .xlsx, .xlsm, .xls, .ods and .csv logs can be updated' });

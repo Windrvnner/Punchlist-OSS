@@ -26,8 +26,8 @@ export function cellsAsShown(plain: Sheet[], shown: Sheet[]): Sheet[] {
   }));
 }
 
-/** CSV as written by Excel and LibreOffice: commas, fields in double quotes when they hold a comma, quote or line break, "" for a quote. */
-export function parseCsv(text: string, bare?: (field: string) => string): string[][] {
+/** CSV as written by Excel and LibreOffice: commas (or the `delimiter` given), fields in double quotes when they hold a comma, quote or line break, "" for a quote. */
+export function parseCsv(text: string, bare?: (field: string) => string, delimiter = ','): string[][] {
   // `bare` rewrites a field written without quotes; LibreOffice quotes every text cell, so a bare field is a number or a date
   const rows: string[][] = []; let row: string[] = []; let field = ''; let quoted = false; let wasQuoted = false;
   const end = () => { row.push(bare && !wasQuoted ? bare(field) : field); field = ''; wasQuoted = false; };
@@ -38,7 +38,7 @@ export function parseCsv(text: string, bare?: (field: string) => string): string
       else if (c === '"') quoted = false;
       else field += c;
     } else if (c === '"') { quoted = true; wasQuoted = true; }
-    else if (c === ',') end();
+    else if (c === delimiter) end();
     else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; end(); rows.push(row); row = []; }
     else field += c;
   }
