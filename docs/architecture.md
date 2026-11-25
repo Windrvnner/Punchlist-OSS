@@ -41,7 +41,7 @@ The design uses no event sourcing, no CQRS, and no message bus. A command is a f
   A derived ID is fixed when the record is created: edits and renumbering never change it. A question's number is display data only.
 - Every record has a revision number, `rev`, that only increases. A write must name the `rev` it read, or it is refused as a conflict.
 - Text keeps its line breaks. Dates are `YYYY-MM-DD` or empty, and timestamps are full ISO 8601.
-- Records keep any fields that the current build does not recognize. A record from a newer schema than `CURRENT_SCHEMA` is read-only.
+- Records keep any fields that the current build does not recognize. A record from a newer schema than `CURRENT_SCHEMA` is read-only. A record and the journal line that carries it are marked with the lowest schema that holds their content (`schemaOf`, `lineSchema`), so only records with a newer field, such as a draft's citation boundary, are read-only to an older build.
 - Status and response changes go only through `src/domain/transitions.ts`, which commands call and the UI never does. Only a command that a person triggered changes a record's state. The backend adds findings and may mark a finding "to reassess", and nothing more.
 
 ## The Store and commands
@@ -165,7 +165,7 @@ The code is in `src/backend/ai.ts`, `agent.ts`, and `lenient.ts`.
 - **Nothing unverifiable is passed on.** Replies are read leniently, but a citation is kept only if it names a document that was sent and a page that document has.
 - **Model tiers.** The fast model sorts and the standard model answers. For automated checks, Thorough is a fallback
   after Standard fails twice. Chat can use Thorough if it is enabled in the picker.
-- **The chat agent** (`src/backend/agent.ts`) works in turns on the model the person chose, calling its `search`, `read`, and `folder` tools until it answers, within `limits.chatTurns` turns. Its steps are shown live and kept with the answer. The checks hand what they would otherwise leave as a gap to the same agent.
+- **The chat agent** (`src/backend/agent.ts`) works in turns on the model the person chose, calling its `search`, `read`, and `folder` tools until it answers, within `limits.chatTurns` turns. Before its first turn, code attaches the files given with the question (a finding's own documents among them) and searches everything once with the question's own words; after that the model chooses each tool and what to search. Searches of findings and Q&A match words in code, and a document search is run by a helper on the fast model. Its steps are shown live and kept with the answer. The checks hand what they would otherwise leave as a gap to the same agent.
 - **No model call starts on a timer.** Background retries only continue work that a person or an event started.
 
 ## Checks, and how PCs share them
@@ -187,8 +187,8 @@ A deal's checklist is made up of its own item records, linked to the findings an
 - **A deal's items** (kind `item`) are only ever added, never removed. An item's ID is `i_` derived from the deal and its wording's `key()` (`norm()`, with case folded and any trailing period removed), so the same wording added on two PCs is one item. The wording, `from` (the list and its `rev`), and the section are bookkeeping fields. Turned off (`off`) is the only field a person sets, and a write of bookkeeping fields alone folds into a concurrent change of `off` (#19).
 - **Items are added** when a deal is created; when a deal gets a new structure, sector, or technology (in the same change); by a bring-in; and by "Add them" when the master checklist's lists hold items the deal lacks. "Add them" is offered only on a loaded deal that is not marked Closed and not in two versions, and only while this PC's copy of each list the items name is at least as new as the `rev` they name (`offeredItems`). Picking another list swaps lists: items that only the old list held are turned off and marked `offBySwap`, and they are turned back on when a list that holds them returns.
 - **Order:** Items are ordered by layer (general, structure, sector, technology), then in the order of the master checklist's lists for that layer (`orderItems`). An item whose wording is not in the current master checklist lists for the deal's layers shows an icon (`unlistedItems`).
-- **The Checklist page** reads its rows, groups, filter counts and each turned-off item's findings from
-  `src/app/checklistView.ts`.
+- **The Checklist page** reads its rows, groups, filter counts, each gap's searches and each turned-off item's findings
+  from `src/app/checklistView.ts`.
 - **The checks** read a deal's items that are turned on, in this order. A deal with no items is checked against the checklist the backend was given.
 - **Links:** A question records the item it was asked for (`linkedItem`), which is set by **Ask the Counterparty** and **Add All Unresolved to Q&A…**. A finding raised by a check records its item (`itemId`). A check matches a problem to a finding by its item, never by its title, and a reworded item is a new item. A finding names its item by that ID or, failing that, by the check line that names it (`findingItem` in `src/app/state.ts`).
 - **An item's standing** (`state.ts`) is worked out as follows. Items that are turned off are left out of the counts.

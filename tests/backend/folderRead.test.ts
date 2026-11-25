@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * Asking the chat to read a whole folder: which folder a name means, the priority list of its documents, and
+ * Asking the chat to read a whole folder: which folder a name means, the ranked list of its documents, and
  * reading them a batch at a time, at realistic scale (a data room of 700 documents, 400 of them in the folder).
  */
 import { describe, it, expect } from 'vitest';
@@ -32,12 +32,12 @@ const isBatch = (c: Call) => c.prompt.includes('which is being read a batch at a
 /** the tags a batch's listing gives its documents, in order */
 const listed = (c: Call) => [...c.prompt.matchAll(/^(D\d+): (.*?)(?: \(\d+ pages\))?$/gm)].map((m) => ({ tag: m[1], path: m[2] }));
 
-function setup(recs: DocRecord[], turn: (c: Call, n: number) => unknown, more: Partial<AiOptions> & { priority?: (c: Call) => unknown; reads?: (c: Call, n: number) => unknown; talks?: boolean } = {}) {
+function setup(recs: DocRecord[], turn: (c: Call, n: number) => unknown, more: Partial<AiOptions> & { reads?: (c: Call, n: number) => unknown; talks?: boolean } = {}) {
   const turns: Call[] = []; const priorities: Call[] = []; const batches: Call[] = []; const others: Call[] = [];
-  const { priority = () => ({ order: [] }), reads = () => ({ text: '', sources: [] }), talks = false, ...options } = more;
+  const { reads = () => ({ text: '', sources: [] }), talks = false, ...options } = more;
   const svc = new StandInService(async (c) => {
     const call = c as Call;
-    const r = isTurn(call) ? (turns.push(call), turn(call, turns.length)) : isPriority(call) ? (priorities.push(call), priority(call)) : isBatch(call) ? (batches.push(call), reads(call, batches.length)) : (others.push(call), call.prompt.includes('It cannot be read as written') ? 'still not JSON' : { text: '', sources: [] });
+    const r = isTurn(call) ? (turns.push(call), turn(call, turns.length)) : isPriority(call) ? (priorities.push(call), { order: [] }) : isBatch(call) ? (batches.push(call), reads(call, batches.length)) : (others.push(call), call.prompt.includes('It cannot be read as written') ? 'still not JSON' : { text: '', sources: [] });
     const got = await r; return typeof got === 'string' ? got : JSON.stringify(got);
   });
   if (!talks) (svc as { converse?: unknown }).converse = undefined;      // a service that keeps no conversations, unless `talks`
@@ -74,19 +74,15 @@ describe('reading a whole folder from the chat', () => {
     // first question: the folder is over the size set, so the person is asked; second: they agreed, and it is read whole
     const s = setup(all, (_c, k) => (k === 1 ? { tool: 'folder', folder: 'the permits folder', lookFor: 'expiry dates' } : k === 2 ? { text: 'The permits folder has 400 documents. Shall I read all of them?', sources: [] } : k === 3 ? { tool: 'folder', folder: '07. Permits', lookFor: 'expiry dates', all: true } : k === 4 ? { tool: 'folder', folder: 'permits', lookFor: 'Expiry  dates' } : { text: 'The grid permit expires in 2031. [1]', sources: [{ doc: seen.tag, page: 1 }] }), {
       folderDocs: 160,
-      // the fast model puts the interconnection permit first
-      priority: (c) => ({ order: [+/^(\d+)\*?: .*Interconnection permit/m.exec(c.prompt)![1]] }),
       reads: gridReads(seen),
     });
     const asked = await s.ai.answer({ ...ask('Review the permits folder: when do they expire?'), conversation: 'c1' }); expect(asked.ok).toBe(true);
     expect(s.turns[1].prompt).toContain('VDR/07. Permits has 400 documents, more than the 160 that are read without asking. Nothing more has been read. Answer now, with no tool, by asking the person whether to read all 400 of them');
     expect(s.batches.length).toBe(0);
-    // one priority list, on the fast model, from the top of the keyword ranking (shortlist 100) of the folder's 400 documents only
-    expect(s.priorities.length).toBe(1); expect(s.priorities[0].model).toBe('fast');
-    expect(s.priorities[0].prompt).toContain('These are the 100 likeliest of the 400 files in the folder VDR/07. Permits');
-    expect(s.priorities[0].prompt).not.toContain('03. Finance');
+    // the folder's order is the code's ranking: no model is asked for it
+    expect(s.priorities.length).toBe(0);
     const r = await s.ai.answer({ ...ask('Yes, read all of it'), conversation: 'c1', history: [{ role: 'me' as const, text: 'Review the permits folder: when do they expire?' }, { role: 'ai' as const, text: 'The permits folder has 400 documents. Shall I read all of them?' }] }); expect(r.ok).toBe(true); const v = r.ok ? r.value : null;
-    // all 400, 8 a batch: 50 batches; nothing outside the folder; never more than 8 at once; the fast model's first pick first
+    // all 400, 8 a batch: 50 batches; nothing outside the folder; never more than 8 at once; the ranking's first document first
     expect(s.batches.length).toBe(50); expect(s.batches.every((b) => b.model === 'fast' && b.files.length <= 8 && b.files.length > 0)).toBe(true);
     const order = s.batches.flatMap((b) => listed(b).map((x) => x.path));
     expect(new Set(order).size).toBe(400); expect(order.every((p) => p.startsWith('VDR/07. Permits/'))).toBe(true);
@@ -110,7 +106,7 @@ describe('reading a whole folder from the chat', () => {
     const recs = Array.from({ length: 30 }, (_v, i) => doc(`07. Permits/P${i + 1}.pdf`));
     const s = setup(recs, (_c, k) => (k === 1 ? { tool: 'folder', folder: 'permits', lookFor: 'expiry' } : k === 2 ? { tool: 'folder', folder: 'permits', lookFor: 'environmental conditions' } : { text: 'ok', sources: [] }));
     expect((await s.ai.answer(ask('Permits?'))).ok).toBe(true);
-    expect(s.turns[2].prompt).toContain('You had all 30 documents in VDR/07. Permits read for “environmental conditions”'); expect(s.batches.length).toBe(8); expect(s.priorities.length).toBe(2);
+    expect(s.turns[2].prompt).toContain('You had all 30 documents in VDR/07. Permits read for “environmental conditions”'); expect(s.batches.length).toBe(8); expect(s.priorities.length).toBe(0);
   });
 
   it('a folder of 2,000 documents that all say something keeps the main session\'s prompt bounded', async () => {
@@ -136,9 +132,9 @@ describe('reading a whole folder from the chat', () => {
     expect(s.turns[4].prompt).toContain('You asked for a folder without naming it');
   });
 
-  it('without the fast model\'s order the ranking stands: what the words ask for first, then by path', async () => {
+  it('the ranking is the order: what the words ask for first, then by path', async () => {
     const recs = [doc('Permits/Aaa note.pdf'), doc('Permits/Zzz expiry schedule.pdf'), doc('Permits/Bbb environmental report.pdf')];
-    const s = setup(recs, (_c, k) => (k === 1 ? { tool: 'folder', folder: 'Permits', lookFor: 'expiry' } : { text: 'ok', sources: [] }), { width: 1, priority: () => 'I cannot say', library: [] });   // no library group names these, so none of them is core
+    const s = setup(recs, (_c, k) => (k === 1 ? { tool: 'folder', folder: 'Permits', lookFor: 'expiry' } : { text: 'ok', sources: [] }), { width: 1, library: [] });   // no library group names these, so none of them is core
     expect((await s.ai.answer(ask('When do they expire?'))).ok).toBe(true);
     expect(s.batches.map((b) => listed(b)[0].path)).toEqual(['VDR/Permits/Zzz expiry schedule.pdf', 'VDR/Permits/Aaa note.pdf', 'VDR/Permits/Bbb environmental report.pdf']);
   });

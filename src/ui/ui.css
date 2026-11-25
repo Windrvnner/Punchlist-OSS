@@ -2,6 +2,9 @@
 .efwrap{display:inline;position:relative}
 .rtyping{display:contents}   /* only marks the response field as being typed in, for Draft all; adds no box */
 .ef{font:inherit;color:inherit;background:transparent;border:0;outline:0;padding:0;margin:0;resize:none;width:100%;display:block;line-height:inherit}
+.ef.atlimit{border-radius:6px;box-shadow:0 0 0 1px var(--high),
+  0 0 0 4px color-mix(in srgb,var(--high) 22%,transparent)}   /* at the Excel cell limit */
+@media (forced-colors:active){.in.atlimit,.ef.atlimit{outline:2px solid CanvasText}}
 .ef.inl{display:inline;width:auto;min-width:4ch;border-bottom:1px dotted var(--ink-3);padding:0 2px}
 .ef.inl:focus{border-bottom-color:var(--accent)}
 .ef.qtext,.ef.rtext{font-size:13.5px;line-height:1.6;color:var(--ink);max-width:70ch;white-space:pre-wrap;border-radius:6px;padding:2px 4px;margin:-2px -4px;min-height:22px;overflow:hidden}
@@ -1444,6 +1447,7 @@ select.field.unset{color:var(--ink-3)}select.field.unset option{color:var(--opti
 .rsv-f{margin:0;display:grid;grid-template-columns:max-content minmax(0,1fr);column-gap:12px;row-gap:2px;font-size:12.5px}
 .rsv-t+.rsv-f{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
 .rsv-f>div{display:contents}.rsv-f dt{color:var(--ink-2)}.rsv-f dd{margin:0;color:var(--ink)}
+textarea.rsv-r.draftbox.atlimit{outline:2px solid var(--high)}   /* at the Excel cell limit */
 textarea.rsv-r.draftbox{field-sizing:content;min-height:calc(5 * 1.6em + 20px);resize:none;cursor:text;outline:2px dashed var(--accent);outline-offset:-2px;border:0;font:inherit;font-size:13px;line-height:1.6}
 .rsv-keep{display:flex;flex-wrap:wrap;gap:8px 16px;margin-top:10px;font-size:12.5px;color:var(--ink-2)}
 .rsv-kf{display:flex;align-items:center;gap:8px}

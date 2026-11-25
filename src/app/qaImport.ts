@@ -5,6 +5,7 @@ import {
 } from '../domain/importExport';
 import { ImportQuestions } from './commands/importQuestions';
 import { dropImport, finishKeptSubmission, importKey, keepImport, keptImport } from './keptImports';
+import { unappliedColumnsWarning, unappliedImportColumns } from './qaImportColumns';
 import { keepImportedLog, logTakenBy } from './qaLog';
 import { dealQuestions, type State } from './state';
 import type { Store } from './store';
@@ -160,6 +161,8 @@ export async function submitQaImport(
     // A kept import not sent yet imports nothing if another deal has made the file its log since (#38).
     const taken = saved ? null : logTakenBy(store, dealId, current.choices.path);
     if (taken) return fail({ kind: 'rejected', message: taken });
+    const unresolved = saved ? '' : unappliedColumnsMessage(current.table);
+    if (unresolved) return fail({ kind: 'rejected', message: unresolved });
     const chosen = await chooseSubmission(store, saved, current, rows);
     if (!chosen.ok) return chosen;
     if ('restore' in chosen.value) {
@@ -175,6 +178,11 @@ export async function submitQaImport(
   } finally {
     submitting.delete(key);
   }
+}
+
+/** A manual column choice that no longer matches the file is settled by a person before any row is sent (#741). */
+function unappliedColumnsMessage(table: ImportTable) {
+  return unappliedColumnsWarning(unappliedImportColumns(table));
 }
 
 /** Only a complete submission made by this build can own the retained rows. */

@@ -2,13 +2,14 @@
  * What the app writes back into the deal's Q&A log. The log stays the person's own file, in its own
  * format, columns and look, and is kept up to date as an IB Q&A log is: every column it has is filled in
  * from the app. An empty cell takes the app's value, if it has one; nothing is made up. A filled cell the app changed since
- * it last wrote it is updated, but not one someone else changed in the log since: theirs stands (`deMinimis` decides what
- * counts as a change). Questions the log lacks get rows of their own at the end. The app adds no columns.
+ * it last wrote it is updated, but not one someone else changed in the log since: theirs stands, and any difference
+ * in the text counts as a change. Questions the log lacks get rows of their own at the end. The app adds no columns.
  */
 import type { Question } from './model';
 import type { ReadTable, SheetEdit } from './sheets';
 import { sameWords, prepareImport, IMPORT_FIELDS, type Mapping, type ImportField, type ImportRow } from './importExport';
 import { key } from './checklist';
+import { ROMAN_NUMERAL, NAMING_WORDS, normalizeReferences, setApartParts, isNamedChain } from './references';
 
 /** every field the app keeps up to date in the log, where the log has a column for it */
 const FIELDS: ImportField[] = ['n', 'text', 'askedBy', 'received', 'workstream', 'priority', 'status', 'response', 'respondedBy', 'responded'];
@@ -43,36 +44,14 @@ export interface LogWrite {
 }
 
 /**
- * Two texts that differ only where a character was read wrong: text decoded in the wrong encoding ("donâ€™t"
- * for "don't"), a "?" or "\uFFFD" in place of a character a file could not hold, an emoji lost, and the forms Unicode gives one
- * character (a curly or straight quote, a dash shape, a non-breaking space). Spacing and line breaks, which a spreadsheet
- * stores its own way, do not count either. Everything a person types counts: every letter, its case, digits and punctuation.
+ * A text as a log file holds it: the file keeps a line break as one "\n" and cannot hold control characters, so a writer
+ * stores each as a space or leaves it out (xlsx leaves it out). This is how the file stores text, not a repair; every
+ * other difference is a real edit.
  */
-export function deMinimis(a: string, b: string): boolean {
-  if (readKey(a) === readKey(b)) return true;
-  const x = readKey(a, true), y = readKey(b, true);                                   // an emoji that became "?" is matched below
-  // a "?" or "\uFFFD" stands for any one character outside plain ASCII (or a run of them, as an emoji can become "??")
-  const lost = (s: string, t: string) => /[?\uFFFD]/.test(s) && new RegExp(`^${s.split(/[?\uFFFD]+/).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('(?:[^\\x00-\\x7F]+|[?\uFFFD]+)')}$`, 'u').test(t);
-  return lost(x, y) || lost(y, x);
-}
-/** a text with what a misreading changes taken out: its encoding repaired, Unicode's forms of one character made one, emoji and spacing gone */
-function readKey(s: string, emoji = false): string {
-  const t = mojibake(s).normalize('NFKC')
-    .replace(/[\u2018\u2019\u201A\u201B\u2032\u00B4`]/g, "'").replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"').replace(/[\u2010-\u2015\u2212]/g, '-');
-  return (emoji ? t : t.replace(/\p{Extended_Pictographic}|\u200D|\uFE0E|\uFE0F/gu, ''))
-    .replace(/\s+/g, ' ').trim();
-}
-/** UTF-8 text that was read as Windows-1252 ("â€™", "Ã©") made what it was; anything else as it is */
-const CP1252 = '\u20AC\u0081\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u008D\u017D\u008F\u0090\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u009D\u017E\u0178';
-function mojibake(s: string): string {
-  if (!/[\u00C2-\u00F4][\u0080-\u00BF\u0152-\u2122]/.test(s)) return s;
-  const bytes: number[] = [];
-  for (const ch of s) { const c = ch.codePointAt(0)!; const k = CP1252.indexOf(ch); if (c < 0x80 || (c >= 0xA0 && c <= 0xFF)) bytes.push(c); else if (k >= 0) bytes.push(0x80 + k); else return s; }
-  try { return new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(bytes)); } catch { return s; }
-}
+const asLogHolds = (text: string, controls: string) =>
+  text.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, controls);
+const sameInLog = (a: string, b: string) => a === b || asLogHolds(a, ' ') === asLogHolds(b, ' ') || asLogHolds(a, '') === asLogHolds(b, '');
 const QUESTION_WORD = /[\p{L}\p{M}|]+/gu;
-// Canonical numerals keep prose such as "civil" outside identifier matching.
-const ROMAN_NUMERAL = /^(?=.)m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})$/i;
 /**
  * The words of a question with what a misreading could change taken out, for matching a log's rows and an import's to the
  * app's questions (not for deciding whose a cell is): spacing, case, quote and dash shapes, punctuation between words, a capital
@@ -80,7 +59,7 @@ const ROMAN_NUMERAL = /^(?=.)m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|
  * Identifiers and combining marks stay distinct.
  */
 export function misreadKey(s: string): string {
-  return s.normalize('NFKC')
+  return normalizeReferences(s.normalize('NFKC'))
     .replace(/[\u2010-\u2015\u2212]/g, '-')                                             // dash shapes are one dash
     .replace(/[^\s]*\d[^\s]*/g, (t) => t.replace(/[lI|](?=[\d.,]|$)|(?<=[\d.,])[lI|]/g, '1').replace(/[oO](?=[\d.,])|(?<=[\d.,])[oO]/g, '0'))   // l00, 2O24
     .replace(QUESTION_WORD, repairWord)
@@ -143,9 +122,6 @@ function collisionWord(word: string): string {
 
 /** a word or number of a question; a point or comma inside a number stays in it ("I.1", "1,500") */
 const QUESTION_TOKEN = /[\p{L}\p{M}\p{N}|]+(?:[.,][\p{L}\p{M}\p{N}|]+)*/gu;
-/** words a letter or numeral after them names: Class a, Tranche ii, part e */
-const NAMING_WORDS = new Set(('annex appendix article block class clause exhibit facility item limb lot paragraph '
-  + 'part phase rule schedule section series tier tranche unit').split(' '));
 
 /**
  * The identifiers a question names, as they are compared (#125, #127, #128): anything with a digit, a Roman numeral in
@@ -153,13 +129,22 @@ const NAMING_WORDS = new Set(('annex appendix article block class clause exhibit
  * naming word ("(a)", "class b", "tranche ii"). Sorted, so two lists compare in one walk.
  */
 export function identifiers(text: string): string[] {
-  const normal = text.normalize('NFKC');
-  const found: string[] = [];
-  for (const match of normal.matchAll(QUESTION_TOKEN)) {
-    const form = identifierForm(match[0], match.index, normal);
-    if (form !== undefined) found.push(form);
+  return identifiersIn(normalizeReferences(text.normalize('NFKC'))).ids;
+}
+
+/** The identifiers a normalized text names, and the open ones: a lone letter after a point that may be a word (#778) */
+function identifiersIn(text: string): { ids: string[]; open: string[] } {
+  const ids: string[] = [];
+  const open: string[] = [];
+  const setApart = setApartParts(text);
+  for (const match of text.matchAll(QUESTION_TOKEN)) {
+    const found = setApart.get(match.index);
+    const part = found?.length === match[0].length ? found : undefined;   // not a longer token such as a,500
+    const form = part ? part.id : identifierForm(match[0], match.index, text);
+    if (form === undefined) continue;
+    (part?.droppable ? open : ids).push(form);
   }
-  return found.sort();
+  return { ids: ids.sort(), open: open.sort() };
 }
 
 /**
@@ -167,6 +152,7 @@ export function identifiers(text: string): string[] {
  * "I" however it was read ("I understand", "can I send"), unless a naming word comes before it ("Class I shares").
  */
 function identifierForm(token: string, offset: number, text: string): string | undefined {
+  if (isNamedChain(token, offset, text)) return token.toLowerCase();   // clause 4.b, clause IV.II
   if (/\p{N}/u.test(token)) return numberForm(token);
   if (namedLetter(token, offset, text)) return token.toLowerCase();
   if (/^[Iil|]$/.test(token) && /^\s*\p{Ll}/u.test(text.slice(offset + 1))) return undefined;   // the word I
@@ -207,26 +193,36 @@ function numberForm(token: string): string {
  * punctuation taken out, which say the same whenever the identifiers do ("FY 2024" and "FY2024", "SPA" and "spa").
  * A point or comma inside a number stays: Section 1.10 is not Section 11.0.
  */
-export interface IdentifierSig { plain: string; ids: string[] }
+export interface IdentifierSig { plain: string; ids: string[]; open: string[] }
 export function identifierSig(text: string): IdentifierSig {
-  const plain = text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}.,]|(?<!\p{N})[.,]|[.,](?!\p{N})/gu, '');
-  return { plain, ids: identifiers(text) };
+  const normal = normalizeReferences(text.normalize('NFKC'));
+  const plain = normal.toLowerCase().replace(/[^\p{L}\p{M}\p{N}.,]|(?<!\p{N})[.,]|[.,](?!\p{N})/gu, '');
+  return { plain, ...identifiersIn(normal) };
 }
 
 /**
  * Whether two wordings can be one question as far as their identifiers go: not when each names one the other does not
  * (Class I and Class L, Facility I1 and Facility 11). One that only adds an identifier, or drops one, is a rewording.
+ * An open identifier counts as named, so the rewording rule never needs it to be a word.
  */
 export function sameIdentifiers(a: IdentifierSig, b: IdentifierSig): boolean {
   if (a.plain === b.plain) return true;
-  return !(namesOther(a.ids, b.ids) && namesOther(b.ids, a.ids));
+  const named = (sig: IdentifierSig) => [...sig.ids, ...sig.open];
+  return !(namesOther(named(a), named(b)) && namesOther(named(b), named(a)));
 }
 /**
  * Whether two wordings name exactly the same identifiers, for a match by number alone: there the words differ, and a
  * row that adds or drops an identifier (Tranche II) may be another question, so it is a question of its own (#125).
+ * An open identifier ("each item. I understand") is a word unless the other wording names it too; open ones of both
+ * wordings that the other lacks are two different references ("class. a" and "class. i"), not two words.
  */
 export function exactIdentifiers(a: IdentifierSig, b: IdentifierSig): boolean {
-  return a.plain === b.plain || (!namesOther(a.ids, b.ids) && !namesOther(b.ids, a.ids));
+  if (a.plain === b.plain) return true;
+  const reads = (sig: IdentifierSig) => [...sig.ids, ...sig.open];
+  const droppedA = namesOther(a.open, reads(b));
+  const droppedB = namesOther(b.open, reads(a));
+  if (droppedA && droppedB) return false;
+  return !namesOther(a.ids, reads(b)) && !namesOther(b.ids, reads(a));
 }
 /** whether `ids` names an identifier, counted with its repeats, that `others` does not */
 function namesOther(ids: readonly string[], others: readonly string[]): boolean {
@@ -342,10 +338,10 @@ export function logWrite(table: Pick<ReadTable, 'rows' | 'lines' | 'cols' | 'las
   // ("11/12/2026", "Outstanding", "H") that says what the app holds is not taken for a change
   const read = new Map(prepareImport(table.rows, mapping, table.rows.map((_, i) => i)).rows.map((r) => [r.line!, r] as const));
   // a value as the import reads it against the app's: a status or priority in the app's terms, whatever case it is written in
-  const same = (k: ImportField, a: string, b: string) => (k === 'status' || k === 'priority' ? a.toLowerCase() === b.toLowerCase() : deMinimis(a, b));
+  const same = (k: ImportField, a: string, b: string) => (k === 'status' || k === 'priority' ? a.toLowerCase() === b.toLowerCase() : sameInLog(a, b));
   const sameAs = (k: ImportField, i: number, v: string) => { const r = read.get(i) as ImportRow | undefined; const was = r ? String((r as unknown as Record<string, unknown>)[k] ?? '') : cell(table.rows[i], k); if (k === 'n') return numberParts(cell(table.rows[i], 'n'))?.n === Number(v);
     if ((k === 'received' || k === 'responded') && !was && cell(table.rows[i], k).trim()) return true;   // a date the import could not settle (11/02 either way) is left as the log writes it
-    return same(k, was, v) || deMinimis(cell(table.rows[i], k), v); };
+    return same(k, was, v) || sameInLog(cell(table.rows[i], k), v); };
   // a log cell's value as the import reads it ("11/12/2026" as 2026-11-12, "Outstanding" as open), else as written
   const readAs = (k: ImportField, i: number) => { const r = read.get(i) as ImportRow | undefined; return r ? String((r as unknown as Record<string, unknown>)[k] ?? '') : ''; };
   for (const q of questions) {
@@ -358,9 +354,9 @@ export function logWrite(table: Pick<ReadTable, 'rows' | 'lines' | 'cols' | 'las
       if (!v.trim() && before[k] === undefined) continue;
       if (sameAs(k, i, v)) { now[k] = has; continue; }                                 // the log says it already, its own way: kept as the log writes it
       // the cell still holds what the app last put there, as written or as the import reads it
-      const ours = before[k] !== undefined && (deMinimis(has, before[k]) || (!!readAs(k, i) && same(k, readAs(k, i), before[k])));
+      const ours = before[k] !== undefined && (sameInLog(has, before[k]) || (!!readAs(k, i) && same(k, readAs(k, i), before[k])));
       // someone changed it in the log; where the app still holds what it last sent, only the log changed: the app takes it
-      if (has.trim() && !ours && before[k] !== undefined && (deMinimis(v, before[k]) || same(k, v, before[k]))) { (out.taken[q.id] ??= {})[k] = has; now[k] = has; continue; }
+      if (has.trim() && !ours && before[k] !== undefined && (sameInLog(v, before[k]) || same(k, v, before[k]))) { (out.taken[q.id] ??= {})[k] = has; now[k] = has; continue; }
       if (has.trim() && !ours) { theirs = true; (out.keptFields[q.id] ??= []).push(k); (out.keptText[q.id] ??= {})[k] = has; if (before[k] !== undefined) now[k] = before[k]; continue; }   // someone else's: never overwritten
       // a blank Priority stays blank: the app's High on a question that came in with none is its default, not a value anyone gave
       if (k === 'priority' && !has.trim() && v === 'High' && before[k] === undefined) continue;
@@ -396,8 +392,8 @@ export function readLogCells(q: Question, cells: Record<string, string>, today?:
   const read = prepareImport([cols.map((k) => cells[k] ?? q.text)], mapping, [2], today ? { today } : {}).rows[0] as unknown as Record<string, unknown> | undefined;
   return Object.fromEntries(keys.map((k) => [k, read?.[k] == null || read[k] === '' && cells[k].trim() ? cells[k] : String(read[k])]));
 }
-/** whether a question's field already says `value` (in the app's terms, as readLogCells gives it); words as deMinimis compares them */
+/** whether a question's field already says `value` (in the app's terms, as readLogCells gives it); the words exactly as written */
 export function holds(q: Question, k: string, value: string): boolean {
   const app = String((q as unknown as Record<string, unknown>)[k] ?? '');
-  return k === 'status' || k === 'priority' || k === 'received' || k === 'responded' ? app.toLowerCase() === value.trim().toLowerCase() : deMinimis(app, value);
+  return k === 'status' || k === 'priority' || k === 'received' || k === 'responded' ? app.toLowerCase() === value.trim().toLowerCase() : sameInLog(app, value);
 }

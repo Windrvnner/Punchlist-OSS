@@ -1,6 +1,6 @@
 // What the app writes back into a counterparty's own Q&A log: the questions it adds and the answers it adds, and nothing else.
 import { describe, it, expect } from 'vitest';
-import { logWrite, deMinimis } from '../../src/domain/logWrite';
+import { logWrite } from '../../src/domain/logWrite';
 import { suggestMapping } from '../../src/domain/importExport';
 import type { Question } from '../../src/domain/model';
 import { writtenAsMeant } from '../../src/domain/sheets';
@@ -13,7 +13,7 @@ const map = suggestMapping(columns);
 
 describe('writing back into a Q&A log', () => {
   it('adds an answer the log does not have, in its own row and columns, and leaves filled answers alone', () => {
-    const w = logWrite(table, map, [q(1, 'What is the minimum DSCR covenant?', { response: '1.25x' }), q(2, 'Who is the EPC contractor?', { response: 'Fabrikam', respondedBy: 'Sponsor' }), q(3, 'What insurances are in place?', { response: 'See the advisor report' })]);
+    const w = logWrite(table, map, [q(1, 'What is the minimum DSCR covenant?', { response: '1.25x' }), q(2, 'Who is the EPC  contractor?', { response: 'Fabrikam', respondedBy: 'Sponsor' }), q(3, 'What insurances are in place?', { response: 'See the advisor report' })]);
     expect(w.steps).toEqual([
       { kind: 'cell', row: 4, col: 3, value: 'Fabrikam' },
       { kind: 'cell', row: 4, col: 4, value: 'Sponsor' },
@@ -39,10 +39,10 @@ describe('writing back into a Q&A log', () => {
   it('writes nothing when the app has nothing the log lacks', () => {
     expect(logWrite(table, map, [q(1, 'What is the minimum DSCR covenant?', { response: '1.20x' })])).toMatchObject({ steps: [], added: 0, answered: 0, updated: 0, kept: [], keptFields: {} });
   });
-  it('replaces an answer that still reads as the app last sent it, once the app\'s answer has changed by more than a misreading', () => {
-    const qs = [q(1, 'What is the minimum DSCR covenant?', { response: '1.25x, stepping up to 1.30x' }), q(3, 'What insurances are in place?', { response: 'See the advisor\u00A0 report' })];
-    const w = logWrite(table, map, qs, new Map([['q1', { response: '1.20x ' }], ['q3', { response: 'See the advisor report' }]]));
-    expect(w.steps).toEqual([{ kind: 'cell', row: 3, col: 3, value: '1.25x, stepping up to 1.30x' }]);   // Q3 differs only in its spacing
+  it('replaces an answer that still reads as the app last sent it, once the app\'s answer has changed', () => {
+    const qs = [q(1, 'What is the minimum DSCR covenant?', { response: '1.25x, stepping up to 1.30x' }), q(3, 'What insurances are in place?', { response: 'See the advisor report' })];
+    const w = logWrite(table, map, qs, new Map([['q1', { response: '1.20x' }], ['q3', { response: 'See the advisor report' }]]));
+    expect(w.steps).toEqual([{ kind: 'cell', row: 3, col: 3, value: '1.25x, stepping up to 1.30x' }]);
     expect(w).toMatchObject({ updated: 1, answered: 0, kept: [] });
   });
   it('leaves an answer the counterparty changed after the app sent it', () => {
@@ -51,24 +51,33 @@ describe('writing back into a Q&A log', () => {
   });
 });
 
-describe('a change a misreading could make', () => {
-  it('is a character read wrong: the wrong encoding, a "?" for a character, a lost emoji, a quote or dash shape, or spacing', () => {
-    for (const [a, b] of [
-      ['don\u2019t', 'donâ€™t'],
-      ['Café', 'CafÃ©'],
-      ['Café', 'Caf?'],
-      ['Café', 'Caf\uFFFD'],
-      ['Done 👍', 'Done'],
-      ['Done 👍', 'Done ??'],
-      ['“Final” report – Nov 12', '"Final" report - Nov 12'],
-      ['The EPC  contractor\r\nis Fabrikam', 'The EPC contractor is Fabrikam'],
-      ['1\u00A0000', '1 000'],
-    ]) {
-      expect(deMinimis(a, b), `${a} / ${b}`).toBe(true);
+describe('a log edit is taken exactly as written', () => {
+  it('keeps a "?" or damaged characters as the log shows them, and never counts them as the app\'s text', () => {
+    for (const edited of ['Caf?', 'Caf\uFFFD', 'CafÃ©', 'Café ', 'Done 👍']) {
+      const response = edited.startsWith('Done') ? 'Done' : 'Café';
+      const w = logWrite(
+        { ...table, rows: [['Q1', 'What is the minimum DSCR covenant?', edited, 'Sponsor']], lines: [4], lastRow: 4 },
+        map,
+        [q(1, 'What is the minimum DSCR covenant?', { response })],
+        new Map([['q1', { response }]]),
+      );
+      expect(w, edited).toMatchObject({ steps: [], taken: { q1: { response: edited } } });
     }
   });
-  it('is never a change a person could have typed: a figure, a sign, a letter, its case or punctuation', () => {
-    for (const [a, b] of [['1.20x', '1.25x'], ['1.20x', '1.20X'], ['Approved.', 'Approved'], ['100', 'l00'], ['What?', 'What.'], ['Caf?', 'Cafe'], ['1.20', '120'], ['Approved', 'Not approved'], ['+5%', '-5%'], ['$1,500', '$1.500'], ['burn', 'bum']]) expect(deMinimis(a, b), `${a} / ${b}`).toBe(false);
+});
+
+describe('a log cell as the file holds it', () => {
+  it('is still what the app sent when the file stored its line breaks or control characters its own way', () => {
+    for (const [sent, held] of [['Line1\r\nLine2', 'Line1\nLine2'], ['a\u0001b', 'a b'], ['a\u0001b', 'ab'], ['a\rb', 'a\nb']]) {
+      const w = logWrite(
+        { ...table, rows: [['Q1', 'What is the minimum DSCR covenant?', held, 'Sponsor']], lines: [4], lastRow: 4 },
+        map,
+        [q(1, 'What is the minimum DSCR covenant?', { response: `${sent} more` })],
+        new Map([['q1', { response: sent }]]),
+      );
+      expect(w.steps, sent).toEqual([{ kind: 'cell', row: 3, col: 3, value: `${sent} more` }]);
+      expect(w.kept, sent).toEqual([]);
+    }
   });
 });
 

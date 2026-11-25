@@ -4,7 +4,7 @@ Status: all four parts are built, except the store of item keywords by wording (
 
 ## What core documents do, and what they do not
 
-Core documents are a deal's most important documents. They are marked `*` whenever the fast model picks documents for a check, a question, or a folder read. They also break ties in the keyword ranking ([`ranked`](../src/backend/ai.ts)), and the fast model reads them once up front for a summary and search terms ([`describeSoon`](../src/backend/ai.ts)). They do not limit what a check can read: every checklist item's search and pick ranks every document in the data room (`ranked` over `o.docs.records`; [`headed`](../src/backend/ai.ts) takes the top `limits.shortlist` of that ranking), so the cap of 100 never kept a document from a check. Coverage comes from the per-item search. The core set is the deal's map of what matters, and it sets the order in which things are read.
+Core documents are a deal's most important documents. They are marked `*` whenever the fast model picks documents for a check or a question. They also break ties in the keyword ranking ([`ranked`](../src/backend/ai.ts)), and the fast model reads them once up front for a summary and search terms ([`describeSoon`](../src/backend/ai.ts)). They do not limit what a check can read: every checklist item's search and pick ranks every document in the data room (`ranked` over `o.docs.records`; [`headed`](../src/backend/ai.ts) takes the top `limits.shortlist` of that ranking), so the cap of 100 never kept a document from a check. Coverage comes from the per-item search. The core set is the deal's map of what matters, and it sets the order in which things are read.
 
 The design has these goals:
 - Cut token use while giving complete coverage, with no artificial cap.

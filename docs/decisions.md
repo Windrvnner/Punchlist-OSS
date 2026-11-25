@@ -101,16 +101,21 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Merge matches a row by wording first, then by number; a row that matches a deleted question brings it back. A row that names who submitted it never matches another party's question. "Will overwrite" is shown field by field first.
 - Merge never matches a row to a question that names a different identifier: anything with a digit, a Roman numeral or code in capitals, a single capital letter, or a letter or numeral in parentheses or after a word such as class, tranche, part or clause (Class A and B, Tranche II and IV, clause 4(a) and 4(b)). A row matched by number alone names exactly the question's identifiers, in the same capitals (the SPA and the spa are two questions there); any other row is a question of its own. Otherwise spacing, capitals and punctuation alone never make identifiers differ (#125, #127, #128).
 - In a number, an I, l or O before a single digit, or an I or l before a point and a digit, is a letter (Facility I1 is l1 but not 11, Class I.1 is not 1.1); an I, l or O elsewhere in a number reads as 1 or 0 (I00, 2O24, O.5). The word I is not an identifier (#127, #128).
+- Spacing around the points of a reference after a word such as class or clause never changes its identifier
+  (clause 4.b, clause 4. b; class. b, class b). A lone a, i or l right after the word and a point may start a sentence
+  ("each item. I understand"), so it names an identifier only where the other wording names it too; two different
+  ones are two references (#778).
 - The same list imported on two PCs makes one set of questions, with ids derived from the deal, number, party, and wording.
 - Two questions with the same number are both kept and marked; a person renumbers one. Undo, Restore, and a kept
   version's Restore bring a deleted question back under its own number, even when another question holds it (#13, #116).
 - Export has no finding or link columns and always carries every column of the log.
+- Excel's cell limit (32,767 characters) is the most any one text can hold. At the limit a text box's outline turns red, typing stops, and its tooltip says why; text a model returns that runs longer is cut at a sentence and ends with a visible note.
 - No person in the app is named in a prompt, export, spreadsheet, or the memo. An accepted AI draft exports as "AI draft, accepted on" a date, and findings export the date reviewed but not the reviewer. Who responded from outside the firm is kept.
 - Each deal has one consolidated Q&A log, in the team's own folder and format; the app keeps no copy and never gates it. One file is one deal's Q&A log: a file another deal already uses as its log can't be imported into a second deal (#38).
 - An import can make a spreadsheet the deal's log ("Make this the deal's Q&A log", checked for a file with two or more parties). If there is no log, the first update creates one in the app's layout, in a folder a person picks. A later party's file only adds and updates questions and is never written to.
 - Updates add no columns and never write to a formula cell. To reply to one party, use Export filtered by Submitted By.
 - **Update Q&A Log** brings every column up to date and first saves the old version to the folder's archive; it never deletes anything else. A log open elsewhere is retried every 30 seconds for 20 minutes; the notice names who has it open only when the lock file does.
-- An edit made in the log wins over the app's value, unless it is a de minimis encoding or spacing change; where both changed, the question is in two versions.
+- An edit made in the log wins over the app's value, exactly as written: a cell is compared character for character, so a "?" stays a "?". Only the file's own storage (line breaks kept as one "\n", control characters stored as a space) is allowed for. Matching a row to a question only picks the row and never changes text. Where both changed, the question is in two versions.
 - An edit saved to the log just before an update moved the log is merged in. Where its row is unclear, the person places it, and what can't be merged stays in the archive. "Not fully merged" comes first in the notice, which stays until dismissed.
 
 ## Findings
@@ -260,6 +265,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 
 ## AI and models
 
+- A model is used only for work that needs language understanding. Parsing, matching, numbering, dates and periods, sorting, counting, and formatting are done in code, including the selecting, matching, formatting, and checking around an AI feature's model call; a model sees neutral handles, never identifiers its prose could be confused with (#286).
 - There are three tiers, Fast, Standard, and Thorough, named only by tier. The control file sets each tier's model and which ones people can pick. For automated checks, Thorough is a fallback
   after Standard fails twice.
 - To manage cost, use the fast model for initial sorting and Standard for confirmation. Batch work to fit the
@@ -302,6 +308,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 
 [CLAUDE.md](../CLAUDE.md) covers how to work on the app: commits, checks, mock-ups, readable code, and asking before design decisions. Beyond it, these rules apply:
 
+- The file is the source of truth. The app never changes, repairs, normalizes or reinterprets content handed to it; what it shows matches what the file's native app shows.
 - Keep friction low, with as few controls and steps as possible.
 - The attribution check allows a `Co-authored-by` trailer naming exactly the repository's own coding-agent identity (set in `scripts/aiAttribution.mjs`) and refuses every other AI co-author trailer (#877).
 - Never guess identities. Never cite finding codes.

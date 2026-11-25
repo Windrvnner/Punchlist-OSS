@@ -4,7 +4,9 @@
 // alongside the documents. Tested at the scale of a real log: 2,500 questions from many parties.
 import { describe, it, expect } from 'vitest';
 import { setup, doc, val, deal, type Call } from './reviewKit';
+import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import type { Repository } from '../../src/ports';
+import type { Provenance } from '../../src/domain/model';
 
 const FA = doc(1, 'Credit Agreement.pdf', { summary: 'Senior credit agreement.', keywords: ['lock-up', 'distribution'] });
 const parties = ['Lender A', 'Lender B', 'Lender C', 'Bidder A', 'Bidder B', 'Bidder C', 'Rating agency', 'Lenders’ counsel'];
@@ -15,7 +17,15 @@ function log(n = 2500) {
   return Array.from({ length: n }, (_, k) => { const t = topics[k % topics.length], a = asks[Math.floor(k / topics.length) % asks.length];
     return { n: k + 100, text: `${a} ${t} (${k}).`, response: k % 3 ? `Per the data room, ${t} is as set out in the relevant agreement, item ${k}.` : '', askedBy: parties[k % parties.length] }; });
 }
-async function questions(repo: Repository, rows: { n: number; text: string; response: string; askedBy: string }[]) {
+type QuestionRow = {
+  n: number;
+  text: string;
+  response: string;
+  askedBy: string;
+  respondedBy?: string;
+  provenance?: Provenance;
+};
+async function questions(repo: Repository, rows: QuestionRow[]) {
   const writes = rows.map((r) => ({ kind: 'question' as const, id: `q_${r.n}`, data: { id: `q_${r.n}`, dealId: 'd1', status: r.response ? 'answered' : 'open', ...r }, expectedRev: null }));
   val(await repo.transaction({ writes, index: { dealId: 'd1', add: writes.map((w) => ({ kind: 'question' as const, id: w.id })) } }));
 }
@@ -24,6 +34,59 @@ const NEW = 'Please confirm which lock-up ratio applies from financial close, an
 const isDraft = (c: Call) => c.prompt.includes('Draft a response to this question');
 /** the earlier responses a draft was shown: R tag and party. Question numbers are never shown to the model (#286). */
 const shown = (c: Call) => [...c.prompt.matchAll(/^R(\d+)(?:, submitted by ([^:]+))?:/gm)].map((m) => ({ r: +m[1], by: m[2] ?? '' }));
+
+const previousDraft: Provenance = {
+  origin: 'ai',
+  sources: [14, 16].map((page) => ({ doc: FA.name, docId: FA.docId, loc: `p. ${page}` })),
+  actor: 'pc',
+  at: '2026-11-15T09:00:00.000Z',
+};
+const legalReferences = 'See clause 21.3 [2] of the facility agreement and Schedule [14].';
+
+describe('earlier responses keep literal brackets when quoted (#287)', () => {
+  it.each([
+    { label: 'a typed response', row: { response: legalReferences }, expected: legalReferences, large: true },
+    {
+      label: 'a response received from the counterparty',
+      row: { response: legalReferences, respondedBy: 'Counterparty' },
+      expected: legalReferences,
+    },
+    {
+      label: 'a conversation response with source metadata',
+      row: { response: legalReferences, provenance: { ...previousDraft, origin: 'chat' as const } },
+      expected: legalReferences,
+    },
+    {
+      label: 'an accepted draft with no sources',
+      row: { response: legalReferences, provenance: { ...previousDraft, sources: [] } },
+      expected: legalReferences,
+    },
+    {
+      label: 'an accepted draft with markers and an out-of-range bracket',
+      row: { response: 'The lock-up ratio is 1.20x. [1] See Schedule [14]. [2]', provenance: previousDraft },
+      expected: 'The lock-up ratio is 1.20x. See Schedule [14].',
+    },
+  ])('prepares $label for the model and quotes it word for word', async ({ row, expected, large }) => {
+    const s = setup(() => ({ status: 'found', text: '', sources: [], reused: ['R1'] }), { d1: [] });
+    const portfolio = large ? portfolioQuestions().map((text, index) => ({
+      n: index + 100,
+      text,
+      response: '',
+      askedBy: 'Lender A',
+    })) : [];
+    await deal(s.repo);
+    await questions(s.repo, [{ ...Q12, ...row, n: 5 }, ...portfolio]);
+    const draft = val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW }));
+    expect(draft).toEqual({
+      status: 'found',
+      text: `As answered to Lender B (Q5): ${expected}`,
+      sources: [],
+    });
+    const call = s.calls.find(isDraft)!;
+    const responseLine = call.prompt.split('\n').find((line) => line.startsWith('Response to R1'));
+    expect(responseLine).toContain(`“${expected}”`);
+  });
+});
 
 describe('a draft reuses an answer already given to another party', () => {
   it('among 2,500 questions, the one asked before in other words is found and the draft uses it, named as asked', async () => {
@@ -76,12 +139,21 @@ describe('a draft reuses an answer already given to another party', () => {
 
   it('a response typed but not yet marked Answered is not shown, and a shown response loses its own [n] markers', async () => {
     const s = setup((c) => (isDraft(c) ? { status: 'none' } : {}), { d1: [FA] });
-    await deal(s.repo); await questions(s.repo, [{ ...Q12, response: 'The lock-up ratio is 1.20x from financial close. [1] The credit agreement prevails. [2]' }]);
+    await deal(s.repo);
+    await questions(s.repo, [{
+      ...Q12,
+      response: 'The lock-up ratio is 1.20x from financial close. [1] The credit agreement prevails. [2]',
+      provenance: previousDraft,
+    }]);
     val(await s.repo.transaction({ writes: [{ kind: 'question', id: 'q_20', data: { id: 'q_20', dealId: 'd1', n: 20, text: Q12.text, response: 'Half-typed: 1.2', askedBy: 'Lender C', status: 'open' }, expectedRev: null }], index: { dealId: 'd1', add: [{ kind: 'question', id: 'q_20' }] } }));
     val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW }));
     const c = s.calls.find(isDraft)!;
     expect(shown(c)).toEqual([{ r: 1, by: 'Lender B' }]);
-    expect(c.prompt).toContain('Response to R1: “The lock-up ratio is 1.20x from financial close. The credit agreement prevails.”');
+    const responseLine = c.prompt.split('\n').find((line) => line.startsWith('Response to R1'));
+    expect(responseLine).toBe(
+      'Response to R1 (drafted by AI from the data room, not received from anyone): '
+      + '“The lock-up ratio is 1.20x from financial close. The credit agreement prevails.”',
+    );
   });
 
   it('a draft with no document behind it is the response it names, word for word: nothing made up, added or turned round is put in another party’s answer', async () => {

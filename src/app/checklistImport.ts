@@ -13,7 +13,7 @@ import { sameWording, earlierRewordings } from '../domain/checklistImport';
 import { alphabetical } from '../domain/order';
 import type { AiService } from '../ports';
 import type { Capabilities } from './capabilities';
-import { dropImport, keptImport, saveImport } from './keptImports';
+import { dropImport, keptImport } from './keptImports';
 import type { checklistRequests } from './listRead';
 import { ok, fail, type Result } from '../domain/result';
 import { Undo } from './commands/undo';
@@ -166,9 +166,12 @@ export function listTarget(state: State, firm: FirmList, layer: Layer, name: str
   return { layer, name, named, replaces, split, splitSays, generalTexts, listNames, hasGeneral: !!general };
 }
 
-/** What the review was asked about: a review asked for other choices is not shown again. */
-const askedAbout = (texts: string[], askReword: boolean, askSame: boolean, generalTexts: string[]) =>
-  JSON.stringify([texts, askReword, askSame, generalTexts]);
+/**
+ * What the review was asked about: a review asked for other choices, or made for the same wording in other sections
+ * (another worksheet or header row), is not shown again (#821).
+ */
+const askedAbout = (items: ListItem[], askReword: boolean, askSame: boolean, generalTexts: string[]) =>
+  JSON.stringify([items, askReword, askSame, generalTexts]);
 
 /** What a new review is made from: the items, the person's choices, and the model's replies (null when not asked). */
 interface ReviewInput {
@@ -285,7 +288,7 @@ function checklistReviewPlan(
   review: Review | null, askedFor: string,
 ) {
   const texts = items.map((item) => item.text);
-  const signature = askedAbout(texts, options.askReword, options.askSame, target.generalTexts);
+  const signature = askedAbout(items, options.askReword, options.askSame, target.generalTexts);
   const cached = review && askedFor === signature ? review : null;
   const needsCall = cached
     ? can.sameMeaning && hasMissedDuplicates(cached)
@@ -404,13 +407,13 @@ export function checklistReviewSession(store: Store, requests: ChecklistRequests
     });
   }
   function duplicates(review: Review, generalTexts: string[], show: ShowReview, open = false, texts?: string[]) {
-    if (!store.get().can.sameMeaning) return;
+    if (!store.get().can.sameMeaning || requests.tableReadPending()) return;
     return askModel(() => retryChecklistDuplicates(store, review, generalTexts, texts), (next) => {
       show({ kind: 'retry', ...next, open });
     });
   }
   function wording(review: Review, show: ShowReview) {
-    if (!store.get().can.reword) return;
+    if (!store.get().can.reword || requests.tableReadPending()) return;
     const requested = currentTexts;
     return flight.ask(() => retryChecklistWording(store, review), (next) => {
       // Wording uses the imported items. General's items are only inputs to duplicate matching.
@@ -421,6 +424,8 @@ export function checklistReviewSession(store: Store, requests: ChecklistRequests
   }
   function next(plan: ReviewPlan, show: ShowReview) {
     const { can, items, target, options, texts, cached, needsCall } = plan;
+    // the items are those of the worksheet being read until that read ends (#821)
+    if (requests.tableReadPending()) return;
     if (!texts.length || !target.named || signature !== plan.signature) return;
     if (cached) {
       if (!needsCall) return show({ kind: 'open' });
@@ -481,16 +486,18 @@ export async function submitChecklist(
   store: Store, importKey: string, target: ListTarget, items: ListItem[], file: string,
 ) {
   const kept = keptImport(importKey);
-  // Leaving the kept snapshot behind could offer the same import again after a reload.
-  dropImport(importKey);
   const name = target.layer === 'broad' ? '' : target.name;
-  let submitted = false;
-  try {
-    const result = await bringIn(store, { layer: target.layer, name, items, file, fileDate: '' });
-    submitted = result.ok;
-    return result;
-  } finally {
-    // A draft opened or written while this operation ran takes precedence over the older one.
-    if (!submitted && kept && !keptImport(importKey)) await saveImport(importKey, kept);
-  }
+  // The draft stays kept until the list is written, so a reload or a failure mid-write loses nothing (#931).
+  // Kept after a write, it is offered again; bringing in the same list again writes nothing.
+  const result = await bringIn(store, { layer: target.layer, name, items, file, fileDate: '' });
+  if (result.ok && kept && keptUnchanged(kept, keptImport(importKey))) dropImport(importKey);
+  return result;
+}
+
+/** Whether the kept draft is as it was: one written while the list was brought in is newer, and stays (#931). */
+function keptUnchanged(before: Readonly<Record<string, unknown>>, now: Readonly<Record<string, unknown>> | undefined) {
+  if (!now) return false;
+  const parts = Object.keys(before);
+  const same = (part: string) => part in now && Object.is(before[part], now[part]);
+  return parts.length === Object.keys(now).length && parts.every(same);
 }

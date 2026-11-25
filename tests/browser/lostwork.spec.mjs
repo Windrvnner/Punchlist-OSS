@@ -3,6 +3,7 @@
 import { launchChrome } from './chrome.mjs';
 import { openRename } from './dealMenu.mjs';
 import { openOnFindings } from './landing.mjs';
+import { checkChecklistPasteReload } from './pendingImports.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
 const browser = await launchChrome();
@@ -592,6 +593,17 @@ async function dealOnFindings(page, name = 'Proseware') {
   const h = await at('.qpanel .qph [aria-label="Received"]'); const h2 = (await qOf(13)).received;
   say('the Received date typed in part stays too', h.inPart && h.notes.join() === NOTE && h2 === '2026-10-28', JSON.stringify({ h, h2 }));
   say('no page errors', !page.errors.length, JSON.stringify(page.errors));
+  await ctx.close();
+}
+
+{ // #931: a reload while the master checklist is written keeps the paste and its review
+  const { ctx, page } = await open();
+  await page.click('#fr-new');
+  await page.fill('#nd-name', 'Proseware');
+  await page.click('#nd-create');
+  await page.waitForSelector('#u-menu');
+  await checkChecklistPasteReload(page, say);
+  say('#931 no page errors', !page.errors.length, JSON.stringify(page.errors));
   await ctx.close();
 }
 
