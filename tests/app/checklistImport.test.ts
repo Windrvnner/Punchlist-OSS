@@ -330,39 +330,45 @@ it('holds Next, duplicates and wording while a worksheet read runs, whatever els
   }
 });
 
-it('makes a new review when another worksheet with the same items is read (#821)', async () => {
+it('makes a new review for the same wording in other sections, and not for the same items (#821)', async () => {
   const app = await readyApp();
-  // the services are shared with later tests' apps, so the real read goes back after
-  const originalRead = app.store.services.sheets.read;
   try {
     const { store } = app;
     const questions = portfolioQuestions();
-    const { table, releases } = await heldSheetRead(app, questions);
+    expect(questions.length).toBeGreaterThanOrEqual(2000);
     const { reword } = modelReview(app);
     const state = store.get();
     const target = listTarget(state, firmOf(state.firmList), 'broad', '');
-    const requests = checklistRequests();
-    const session = checklistReviewSession(store, requests, REVIEW_EVENTS);
+    const session = checklistReviewSession(store, checklistRequests(), REVIEW_EVENTS);
     const show = vi.fn<(change: ChecklistReviewChange) => void>();
-    const items = questions.map((text) => ({ text }));
-    await session.next(session.plan(items, target, OPTIONS, null, '')!, show);
+    const inSection = (section: string) => questions.map((text) => ({ text, section }));
+    await session.next(session.plan(inSection('Old'), target, OPTIONS, null, '')!, show);
     const { review, signature } = shownReview(show.mock.lastCall?.[0], 'fresh');
-    expect(session.plan(items, target, OPTIONS, review, signature)?.cached).toBe(review);
+    expect(session.plan(inSection('Old'), target, OPTIONS, review, signature)?.cached).toBe(review);
 
-    const read = rereadChecklistTable(
-      store, requests, table, { sheet: 'Supplement' }, false, { started: vi.fn(), finished: vi.fn() },
-    );
-    await vi.waitFor(() => expect(releases).toHaveLength(1));
-    releases[0]();
-    await read;
-    const again = session.plan(items, target, OPTIONS, review, signature)!;
+    const again = session.plan(inSection('New'), target, OPTIONS, review, signature)!;
     expect(again.cached).toBeNull();
     await session.next(again, show);
     expect(reword).toHaveBeenCalledTimes(2);
-    expect(shownReview(show.mock.lastCall?.[0], 'fresh').review).not.toBe(review);
-    // the new review belongs to this worksheet, so it is shown again on Next
     const made = shownReview(show.mock.lastCall?.[0], 'fresh');
-    expect(session.plan(items, target, OPTIONS, made.review, made.signature)?.cached).toBe(made.review);
+    expect(made.review.items.every((item) => item.section === 'New')).toBe(true);
+    expect(session.plan(inSection('New'), target, OPTIONS, made.review, made.signature)?.cached).toBe(made.review);
+  } finally {
+    app.store.closing();
+    await app.repo.close();
+  }
+});
+
+it('drops a worksheet read that never settles when the person changes the file (#821)', async () => {
+  const app = await readyApp();
+  const originalRead = app.store.services.sheets.read;
+  try {
+    const { table } = await heldSheetRead(app, portfolioQuestions());
+    const requests = checklistRequests();
+    void rereadChecklistTable(app.store, requests, table, { sheet: 'Supplement' }, false, READ_EVENTS);
+    expect(requests.tableReadPending()).toBe(true);
+    requests.dropTableReads();
+    expect(requests.tableReadPending()).toBe(false);
   } finally {
     app.store.services.sheets.read = originalRead;
     app.store.closing();
