@@ -1,4 +1,4 @@
-import { findingsRaisedOnItem, checklistView, type ChecklistHeading } from '../app/checklistView';
+import { findingsRaisedOnItem, checklistView, gapSearches, type ChecklistHeading } from '../app/checklistView';
 import { titleStyle } from './titleStyle';
 import { Fragment, type ComponentChildren, type RefObject } from 'preact';
 import { createPortal } from 'preact/compat';
@@ -46,7 +46,7 @@ function GapRead({ r }: { r: ChecklistRow }) {
   const n = r.docs.length; const un = r.unread ?? []; const names = (xs: { name: string }[]) => xs.map((x) => x.name).join(', ');
   // what the check's search looked for, each search once, with how many documents answered to it as its tooltip
   const said = (n: number) => (n ? `${n.toLocaleString('en-US')} ${n === 1 ? 'document answers' : 'documents answer'} to it` : 'No document answers to it');
-  const searched = [...new Map((r.searched ?? []).map((x) => [x.q.toLowerCase(), x])).values()];
+  const searched = gapSearches(r);
   return <p class="ckp" id="ck-read">
     <span title={names(r.docs) || undefined}>{n ? `Not found in the ${n === 1 ? 'one document' : `${n.toLocaleString('en-US')} documents`} read.` : 'No document could be read for it.'}</span>
     {un.length > 0 && ` ${names(un)} ${un.length === 1 ? 'has' : 'have'} no readable text and ${un.length === 1 ? 'was' : 'were'} not read.`}

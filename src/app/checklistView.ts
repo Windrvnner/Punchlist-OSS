@@ -10,6 +10,13 @@ export function findingsRaisedOnItem(state: State, dealId: string, itemId: strin
       || a.createdAt.localeCompare(b.createdAt));
 }
 
+/** A gap's recorded searches, each once: the case variants of a search are one, shown with the text and count of
+ * its last record, in the order each was first searched (#956). */
+export function gapSearches(row: Pick<ChecklistRow, 'searched'>) {
+  const byKey = new Map((row.searched ?? []).map((search) => [search.q.toLowerCase(), search]));
+  return [...byKey.values()];
+}
+
 const layerOrder: ItemFrom['layer'][] = [...LAYERS, 'deal'];
 const levels = ['list', 'section', 'subsection'] as const;
 type ListLevel = typeof levels[number];
