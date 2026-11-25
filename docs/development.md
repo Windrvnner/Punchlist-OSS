@@ -11,9 +11,10 @@ You need the following:
   executable path when Chrome is installed elsewhere.
 - LibreOffice at `/usr/bin/soffice`. `npm test` skips the tests that need it when it is missing; `npm run check:all`
   first converts a small workbook with it (`node scripts/office-check.mjs` runs that check alone) and stops if it
-  cannot, then runs those tests on it rather than skip them. Two tests still skip without their extra part:
-  - The presentation file-name field test also needs LibreOffice Impress.
-  - The spreadsheet column-width test also needs Calibri or Carlito.
+  cannot, then runs those tests on it rather than skip them. Two tests also need an extra part. `npm test` skips each
+  one without it; `npm run check:all` and CI run them and fail without it:
+  - The presentation file-name field test needs LibreOffice Impress.
+  - The spreadsheet column-width test needs Calibri or Carlito; without either, it fails on a column width.
 
 ## Setup
 
