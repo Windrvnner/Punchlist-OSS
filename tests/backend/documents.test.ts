@@ -230,8 +230,10 @@ describe('documents on real folders', () => {
     put(vdr, 'Scan.pdf', blank); put(vdr, 'Credit Agreement.pdf', FA); put(vdr, 'Rates.csv', 'Tenor,Margin\nSenior term loan,2.25\nSenior term loan,2.50\nJunior loan,6\n');
     const a = pc(root, 'office'); const p = await indexAll(a, vdr); const by = (n: string) => a.docs.records('d1').find((r) => r.name === n)!;
     expect(p.log).toEqual(['Indexed 3 files', '1 file has no readable text and can be found by name only: Scan.pdf']); expect(by('Scan.pdf')).toMatchObject({ pages: 2, words: [] });   // and the person is told which expect(by('Rates.csv').words).toEqual(['loan', 'senior', 'term', 'junior', 'margin', 'tenor']);
-    // a spreadsheet too large to open quickly is indexed and found by its path, with no words
-    put(vdr, 'Huge export.csv', 'ledger,entry\n'.repeat(2_100_000)); await indexAll(a, vdr); expect(by('Huge export.csv')).toMatchObject({ size: 27_300_000, words: [] });
+    // a large spreadsheet is read like any other: its words are counted, however big it is
+    put(vdr, 'Huge export.csv', 'ledger,entry\n'.repeat(2_100_000)); await indexAll(a, vdr); expect(by('Huge export.csv')).toMatchObject({ size: 27_300_000, words: ['entry', 'ledger'] });
+    // a workbook that cannot be read now is not recorded as having no text: it is left unread, to be read again
+    put(vdr, 'Broken.xlsx', 'not a workbook'); const q = await indexAll(a, vdr); expect(by('Broken.xlsx')?.words).toBeUndefined(); expect(q.log.join(' ')).toContain('could not be read');
     const long = await pdfLook(pdf('long report', 100), 10); expect(long.pages).toBe(100); expect(long.text.split('\n').map((l) => +l.split('page ')[1])).toEqual([1, 11, 21, 31, 41, 51, 61, 71, 81, 91]);
     expect((await pdfLook(pdf('short report', 4), 10)).text.split('\n').length).toBe(4);
     // a document another copy of the app recorded before words were kept: indexing here adds them, once
