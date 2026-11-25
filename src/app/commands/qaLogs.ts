@@ -9,6 +9,7 @@ import { setResponse, editQuestionField, checkQuestion } from '../../domain/tran
 import { ok, fail, notFound, rejected, type Result } from '../../domain/result';
 import { keepAside } from './keptVersions';
 import { cellValue } from '../../domain/logWrite';
+import { windowsPath } from '../../domain/sheets';
 import type { ImportField } from '../../domain/importExport';
 
 /** the fields a version may set besides Response and Status (as EditQuestionField takes them) */
@@ -31,9 +32,6 @@ export const KeepQaLog = define({
     return ok({ dealId: d.id, upserts: [{ kind: 'deal', record: withLogs(d, [...d.qaLogs.filter((l) => l.name !== log.name), log], ctx.at), expectedRev: d.rev }], audit: [], inverse: { command: 'RestoreQaLogs', input: { dealId: d.id, logs: d.qaLogs } } });
   },
 });
-
-/** a path as Windows compares it: case and slash direction don't matter, nor a separator at the end */
-export const windowsPath = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLocaleLowerCase('en-US');
 
 /**
  * Two deals may share a name, and so may their logs' files: one file is one deal's log, or each would write the other's
