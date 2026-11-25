@@ -78,7 +78,7 @@ function misreadEnds(char: string, incoming: string, starts: Iterable<number>): 
   return positions;
 }
 
-/** For each incoming position, the end of the run of lost marks that starts there: the first position that is not one. */
+/** For each incoming position, the end of the run of lost marks starting there: the first position that is not one. */
 function runEnds(incoming: string): number[] {
   const ends: number[] = new Array(incoming.length + 1);
   ends[incoming.length] = incoming.length;
@@ -134,21 +134,32 @@ function channelProduces(saved: string, incoming: string): boolean {
   plain[0].add(0);
   let steps = 0;
   for (const [index, char] of chars.entries()) {
-    // Inside a run of marks every mark is lost, so only its end (or a literal "?") can start an ordinary character.
-    const starts = new Set([...plain[index], ...lost[index].ends()]);
-    if (char === '?') for (const at of lost[index].questionMarks(incoming)) starts.add(at);
-    let skipRunTo = -1;
-    for (const at of [...starts].sort((a, b) => a - b)) {
+    for (const at of startsFor(char, incoming, ends, plain[index], lost[index])) {
       if (++steps > MAX_STEPS) return false;
-      // a character outside ASCII starting inside a run already read by an earlier mark of it adds nothing new
-      if (!isAscii(char) && at < skipRunTo) continue;
-      if (!isAscii(char) && ends[at] > at) skipRunTo = ends[at];
       readCharacter(char, incoming, at, ends, plain[index + 1], lost[index + 1]);
     }
     if (!isAscii(char)) lost[index + 1].addAll(lost[index]);
   }
   const last = chars.length;
   return plain[last].has(incoming.length) || lost[last].contains(incoming.length);
+}
+
+/**
+ * The incoming positions where `char` may be read, in order. Inside a run of marks every mark is lost, so only its end
+ * (or a literal "?") can start an ordinary character. A character outside ASCII starting inside a run already read by an
+ * earlier mark of it adds nothing new, so only the first mark of each run is kept.
+ */
+function startsFor(char: string, incoming: string, ends: number[], plain: Set<number>, lost: Ranges): number[] {
+  const starts = new Set([...plain, ...lost.ends()]);
+  if (char === '?') for (const at of lost.questionMarks(incoming)) starts.add(at);
+  const ordered = [...starts].sort((a, b) => a - b);
+  if (isAscii(char)) return ordered;
+  let runEnd = -1;
+  return ordered.filter((at) => {
+    if (at < runEnd) return false;
+    if (ends[at] > at) runEnd = ends[at];
+    return true;
+  });
 }
 
 /** Every way `char` may be read at incoming position `at`: into the next plain positions or the next run of marks. */
