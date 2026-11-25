@@ -2,7 +2,7 @@
 import { expect, it } from 'vitest';
 import { checklistDrafts } from '../../src/app/checklistDrafts';
 import { checklistQuestionTarget } from '../../src/app/checklistQuestion';
-import { findingsRaisedOnItem, checklistView } from '../../src/app/checklistView';
+import { findingsRaisedOnItem, checklistView, gapSearches } from '../../src/app/checklistView';
 import { initialState, type State } from '../../src/app/state';
 import { itemId, type Item } from '../../src/domain/checklist';
 import type { ChecklistRow } from '../../src/ports';
@@ -191,4 +191,23 @@ it('lists a turned-off item’s findings in standing order while a question stay
   expect(raised()).toEqual([finished]);
   expect(card()).toMatchObject({ why: 'Its finding is no longer here', links: { linkedFinding: newer.id } });
   expect(findingsRaisedOnItem(state, deal.id, offUnseen.id)).toEqual([]);
+});
+
+it('lists a gap’s searches once each, in first-search order, with the text and count of the last record', () => {
+  const searched = [
+    { q: 'insurance advisor report final', n: 0 },
+    { q: 'Lenders insurance advisor', n: 1 },
+    { q: 'insurance due diligence report', n: 2 },
+    { q: 'INSURANCE ADVISOR REPORT FINAL', n: 3 },
+    { q: 'lenders insurance advisor', n: 0 },
+    { q: 'certificate of insurance', n: 1_204 },
+  ];
+  expect(gapSearches({ ...checkedRow(gap), searched })).toEqual([
+    { q: 'INSURANCE ADVISOR REPORT FINAL', n: 3 },
+    { q: 'lenders insurance advisor', n: 0 },
+    { q: 'insurance due diligence report', n: 2 },
+    { q: 'certificate of insurance', n: 1_204 },
+  ]);
+  expect(gapSearches(legacy)).toEqual([]);
+  expect(gapSearches({ ...legacy, searched: [] })).toEqual([]);
 });
