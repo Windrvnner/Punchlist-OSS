@@ -17,6 +17,7 @@ describe('damagedImportText: single kinds of damage', () => {
     ['one mark for a run', 'at 2½–¾ months', 'at 2? months'],
     ['a lost narrow space', 'USD 2 million', 'USD 2?million'],
     ['a vanished emoji', 'Done ✅ today', 'Done today'],
+    ['an edit a lossy file could also have made', 'Fee in €', 'Fee in ?'],
   ])('keeps the saved text for %s', (_name, saved, incoming) => {
     expect(damagedImportText(saved, incoming)).toBe(true);
   });
@@ -90,5 +91,23 @@ describe('damagedImportText: every output of the channel is recognised, no edit 
     const started = Date.now();
     expect(damagedImportText(long, '?'.repeat(6000))).toBe(true);
     expect(Date.now() - started).toBeLessThan(2000);
+  });
+});
+
+describe('damagedImportText: cells of lost characters among literal question marks', () => {
+  it.each([500, 1000])('decides a %s-pair cell quickly and correctly', (pairs) => {
+    const saved = 'é?'.repeat(pairs);
+    const started = Date.now();
+    expect(damagedImportText(saved, '?'.repeat(pairs * 3))).toBe(true);
+    expect(damagedImportText(saved, '?'.repeat(pairs * 3) + 'x')).toBe(false);
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it('decides a cell of the largest size with damage throughout in a few seconds', () => {
+    const saved = portfolioQuestions().join(' — ').slice(0, 30_000);
+    const started = Date.now();
+    expect(damagedImportText(saved, saved.replace(/—/g, '??'))).toBe(true);
+    expect(damagedImportText(saved, saved.replace(/—/g, '??') + '!')).toBe(false);
+    expect(Date.now() - started).toBeLessThan(5000);
   });
 });
