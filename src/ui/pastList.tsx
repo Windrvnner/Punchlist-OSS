@@ -4,35 +4,16 @@ import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { useAppState, useStore, useDismiss, LOCALE } from './hooks';
 import { Icon } from './icons';
 import { focusOnceInPlace } from './focus';
-import { pastConversations, scopeHash, type PastConversation } from '../app/conversations';
+import { pastConversationList, scopeHash, type PastConversation } from '../app/conversations';
 import type { State } from '../app/state';
 
-/** Every word searched for is in the conversation's title or in something said in it. */
-function matches(conversation: PastConversation, words: string) {
-  if (!words) return true;
-  const title = conversation.title.toLowerCase();
-  return words.split(/\s+/).every((word) => title.includes(word) || conversation.words.includes(word));
-}
-
-/** Whole days from the day `iso` falls on to today: 0 for today. */
-function daysAgo(iso: string, now: Date) {
-  const then = new Date(iso);
-  const today = +new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return Math.floor((today - +new Date(then.getFullYear(), then.getMonth(), then.getDate())) / 864e5);
-}
-
-/** The heading a conversation is listed under. */
-function dayGroup(iso: string, now: Date) {
-  const days = daysAgo(iso, now);
-  return days <= 0 ? 'Today' : days < 7 ? 'Earlier this week' : 'Older';
-}
+const DAY_HEADING = { today: 'Today', week: 'Earlier this week', older: 'Older' } as const;
 
 /** When a conversation was last used: the time today, the weekday this week, else the date (and year if not this). */
-function when(iso: string, now: Date) {
+function when(iso: string, now: Date, group: keyof typeof DAY_HEADING) {
   const then = new Date(iso);
-  const days = daysAgo(iso, now);
-  if (days <= 0) return then.toLocaleTimeString(LOCALE, { hour: 'numeric', minute: '2-digit' });
-  if (days < 7) return then.toLocaleDateString(LOCALE, { weekday: 'short' });
+  if (group === 'today') return then.toLocaleTimeString(LOCALE, { hour: 'numeric', minute: '2-digit' });
+  if (group === 'week') return then.toLocaleDateString(LOCALE, { weekday: 'short' });
   const year = then.getFullYear() === now.getFullYear() ? undefined : 'numeric';
   return then.toLocaleDateString(LOCALE, { month: 'short', day: 'numeric', year });
 }
@@ -92,15 +73,13 @@ function aboutTag(state: State, conversation: PastConversation, allDeals: boolea
 export function PastList({ close, within, opener, dealId, current, below }: {
   close: () => void; within: string; opener: string; dealId?: string; current?: string; below: boolean;
 }) {
-  const state = useAppState();
+  const store = useStore();
+  useAppState();
   useDismiss(true, close, within, opener);
   const [search, setSearch] = useState('');
   const [allDeals, setAllDeals] = useState(!dealId);
   const [chosen, setChosen] = useState(0);
-  const every = pastConversations(state);
-  const words = search.trim().toLowerCase();
-  const inView = (conversation: PastConversation) => allDeals || conversation.dealId === dealId;
-  const rows = every.filter((conversation) => inView(conversation) && matches(conversation, words));
+  const { rows, words, now, hasConversations } = pastConversationList(store, { dealId, allDeals, search });
   const popup = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -110,7 +89,7 @@ export function PastList({ close, within, opener, dealId, current, below }: {
     if (list.current) keepChosenInView(list.current);
   }, [chosen]);
   const go = (index: number) => {
-    const conversation = rows[index];
+    const conversation = rows[index]?.conversation;
     if (!conversation) return;
     close();
     if (conversation.key !== current) location.hash = scopeHash(conversation.scope);
@@ -146,35 +125,30 @@ export function PastList({ close, within, opener, dealId, current, below }: {
         {dealId && <DealToggle allDeals={allDeals} showDeals={showDeals} />}
       </div>
       <div class="plist" ref={list} role="listbox" aria-label="Conversations">
-        {!rows.length && <p class="pnone">{emptyMessage(every.length > 0, search.trim())}</p>}
-        <PastRows rows={rows} allDeals={allDeals} chosen={chosen} current={current} choose={setChosen} go={go} />
+        {!rows.length && <p class="pnone">{emptyMessage(hasConversations, search.trim())}</p>}
+        <PastRows rows={rows} now={now} allDeals={allDeals} chosen={chosen} current={current}
+          choose={setChosen} go={go} />
       </div>
     </div>
   );
 }
 
 /** The conversations, under a heading for each day group: today, earlier this week, older. */
-function PastRows({ rows, allDeals, chosen, current, choose, go }: {
-  rows: PastConversation[]; allDeals: boolean; chosen: number; current?: string; choose: (index: number) => void;
-  go: (index: number) => void;
+function PastRows({ rows, now, allDeals, chosen, current, choose, go }: {
+  rows: ReturnType<typeof pastConversationList>['rows']; now: Date; allDeals: boolean; chosen: number;
+  current?: string; choose: (index: number) => void; go: (index: number) => void;
 }) {
-  const store = useStore();
   const state = useAppState();
-  const now = new Date(store.services.clock.now());
   return (
     <>
-      {rows.map((conversation, i) => {
-        const group = dayGroup(conversation.at, now);
-        const startsGroup = i === 0 || dayGroup(rows[i - 1].at, now) !== group;
-        return (
-          <Fragment key={conversation.key}>
-            {startsGroup && <div class="pg">{group}</div>}
-            <PastRow conversation={conversation} about={aboutTag(state, conversation, allDeals)}
-              when={when(conversation.at, now)} chosen={i === chosen} current={conversation.key === current}
-              onHover={() => choose(i)} onGo={() => go(i)} />
-          </Fragment>
-        );
-      })}
+      {rows.map(({ conversation, group, startsGroup }, i) => (
+        <Fragment key={conversation.key}>
+          {startsGroup && <div class="pg">{DAY_HEADING[group]}</div>}
+          <PastRow conversation={conversation} about={aboutTag(state, conversation, allDeals)}
+            when={when(conversation.at, now, group)} chosen={i === chosen} current={conversation.key === current}
+            onHover={() => choose(i)} onGo={() => go(i)} />
+        </Fragment>
+      ))}
     </>
   );
 }

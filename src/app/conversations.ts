@@ -29,6 +29,17 @@ export type Scope =
 /** The deal a conversation is about; none for one across every deal. */
 export const dealIdOf = (scope: Scope) => (scope.kind === 'all' ? undefined : scope.dealId);
 
+/** Whether what a conversation is about is still there, or its deal has yet to load. */
+export function scopeValid(state: State, scope: Scope): boolean | 'loading' {
+  if (scope.kind === 'all') return true;
+  if (!state.deals[scope.dealId]) return false;
+  if (scope.kind === 'deal') return true;
+  const load = state.dealLoad[scope.dealId];
+  if (load !== 'loaded') return load === 'failed' ? false : 'loading';
+  if (scope.kind === 'finding') return state.findings[scope.findingId]?.dealId === scope.dealId;
+  return state.questions[scope.questionId]?.dealId === scope.dealId;
+}
+
 export const convKey = (s: Scope) => s.kind === 'all' ? (s.conv ? `all:${s.conv}` : 'all') : s.kind === 'deal' ? `deal:${s.dealId}${s.conv ? ':' + s.conv : ''}` : s.kind === 'finding' ? `f:${s.dealId}:${s.findingId}` : `q:${s.dealId}:${s.questionId}`;
 export const scopeHash = (s: Scope) => s.kind === 'all' ? (s.conv ? `chat-${s.conv}` : 'chat') : s.kind === 'deal' ? `chat-${s.dealId}${s.conv ? '-' + s.conv : ''}` : s.kind === 'finding' ? `finding-${s.dealId}-${s.findingId}` : `q-${s.dealId}-${s.questionId}`;
 /** The scope a stored conversation is about, from its key; null for a key this version does not know. */
@@ -65,11 +76,41 @@ export function pastConversations(s: State): PastConversation[] {
     const dealId = scope.kind === 'all' ? undefined : scope.dealId;
     if (dealId && !s.deals[dealId]) continue;
     const last = list[list.length - 1]; const ai = [...list].reverse().find((m) => m.role === 'ai');
-    const preview = !ai ? '' : ai.state === 'pending' ? 'Answering…' : ai.state === 'failed' ? 'Couldn’t get an answer' : oneLine(withoutMarkers(ai.text.replace(/\{([^|}]+)\|f_[0-9A-Z]{26}\}/g, '$1'), ai.sources?.length ?? 0));
+    const preview = !ai ? '' : ai.state === 'pending' ? 'Answering…'
+      : ai.state === 'failed' ? 'Couldn’t get an answer' : oneLine(answerText(ai));
     const about = scope.kind === 'finding' ? s.findings[scope.findingId]?.title ?? 'Finding' : scope.kind === 'question' ? (s.questions[scope.questionId] ? `Q${s.questions[scope.questionId].n}` : 'Question') : undefined;
     out.push({ key, scope, dealId, about, title: oneLine(first.text), preview, at: last.at, words: list.map((m) => m.text).join(' ').toLowerCase() });
   }
   return out.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+}
+
+function dayGroup(at: string, now: Date): 'today' | 'week' | 'older' {
+  const then = new Date(at);
+  const today = +new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = Math.floor((today - +new Date(then.getFullYear(), then.getMonth(), then.getDate())) / 864e5);
+  return days <= 0 ? 'today' : days < 7 ? 'week' : 'older';
+}
+
+/** Past conversations in the chosen deal and matching every word, with headings at local day boundaries. */
+export function pastConversationList(store: Store, { dealId, allDeals, search }: {
+  dealId?: string; allDeals: boolean; search: string;
+}) {
+  const every = pastConversations(store.get());
+  const words = search.trim().toLowerCase();
+  const terms = words ? words.split(/\s+/) : [];
+  const now = new Date(store.services.clock.now());
+  let previous: ReturnType<typeof dayGroup> | undefined;
+  const rows = every.filter((conversation) => {
+    if (!allDeals && conversation.dealId !== dealId) return false;
+    const title = conversation.title.toLowerCase();
+    return terms.every((term) => title.includes(term) || conversation.words.includes(term));
+  }).map((conversation) => {
+    const group = dayGroup(conversation.at, now);
+    const startsGroup = group !== previous;
+    previous = group;
+    return { conversation, group, startsGroup };
+  });
+  return { rows, words, now, hasConversations: every.length > 0 };
 }
 
 let seq = 0;
