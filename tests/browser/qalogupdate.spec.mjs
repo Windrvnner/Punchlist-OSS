@@ -2,6 +2,7 @@
 // said to be in use elsewhere (who has it open named only when the lock file names someone, as written there), tried
 // again on its own with Retry now (retry and notify). The browser build has no log files, so a stand-in for them is set
 // on the page.
+import { immapReady } from './importReady.mjs';
 import { launchChrome } from './chrome.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -107,7 +108,7 @@ const checked = await page.evaluate(async () => {
   store.services.fs.pathFor = (f) => `X:\\Deals\\Fresh\\${f.name}`; return Object.values(store.get().deals).find((d) => d.name.endsWith('Fresh')).id;
 });
 await page.goto(URL + '#qa-' + checked); await page.waitForSelector('#qa-cols');
-const offered = async (f) => { await page.click('#qa-cols'); await page.click('#qa-import'); await page.waitForSelector('.imdlg'); await page.setInputFiles('#im-file', f); await page.waitForSelector('#im-makelog'); await page.waitForTimeout(200); const v = await page.isChecked('#im-makelog'); await page.click('#im-restart'); await page.click('#im-restart-ask-go'); await page.waitForSelector('#im-drop'); await page.keyboard.press('Escape'); await page.waitForFunction(() => !document.querySelector('.imdlg')); return v; };
+const offered = async (f) => { await page.click('#qa-cols'); await page.click('#qa-import'); await page.waitForSelector('.imdlg'); await page.setInputFiles('#im-file', f); await page.waitForSelector('#im-makelog'); await immapReady(page); await page.waitForTimeout(200); const v = await page.isChecked('#im-makelog'); await page.click('#im-restart'); await page.click('#im-restart-ask-go'); await page.waitForSelector('#im-drop'); await page.keyboard.press('Escape'); await page.waitForFunction(() => !document.querySelector('.imdlg')); return v; };
 const [forOne, forMany] = [await offered(one), await offered(many)];
 say('the-log-box-starts-checked-only-for-a-file-with-two-or-more-parties', forOne === false && forMany === true, JSON.stringify({ forOne, forMany }));
 say('no-page-errors', page.errors.length === 0, JSON.stringify(page.errors));

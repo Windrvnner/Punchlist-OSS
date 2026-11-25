@@ -252,6 +252,7 @@ details.fsrcs .sgp .srcbtn:hover{color:var(--ink);text-decoration-color:var(--ac
 .imsug td:first-child,.imsug th:first-child{width:44px}
 .imsug td:last-child,.imsug th:last-child{width:84px}
 .imsug td{vertical-align:middle}
+.imsug td:last-child{text-align:right}
 
 /* ---- search: a field in the rail, results drop from it ---- */
 .rsearch{margin:6px 12px 8px;height:34px;border:1px solid var(--line);background:var(--card);border-radius:var(--r-ctl);display:flex;align-items:center;gap:8px;padding:0 10px;color:var(--ink-2);font-size:13px;position:relative;z-index:1;cursor:text}

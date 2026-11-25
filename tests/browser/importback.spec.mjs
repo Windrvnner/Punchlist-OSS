@@ -1,6 +1,7 @@
-// Going back in the browser while an import { immapReady } from './importReady.mjs';
-import is open (#267). Only the browser build can do this: the desktop app has
+// Going back in the browser while an import
+// is open (#267). Only the browser build can do this: the desktop app has
 // no Back. The import closes as Escape closes it, and what was read and chosen is kept on this PC.
+import { immapReady } from './importReady.mjs';
 import { launchChrome } from './chrome.mjs';
 
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
