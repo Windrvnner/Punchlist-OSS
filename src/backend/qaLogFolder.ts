@@ -9,10 +9,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { readZip, partText } from './zipParts';
-import {
-  copyThroughNewHandle, createCopy, fileArchive, removeBackedFile, sha256, stageCopy, tidy, tidyStage,
-  verifyCopy, type StagedArchive,
-} from './qaLogArchive';
 
 /**
  * a folder name that reads as an archive: "Archive", "02 - Old", "Superseded docs", "Prior versions", "Version history" (a bare "History" may hold anything). Only "Archive" and
@@ -22,7 +18,7 @@ const ARCHIVE = /^(?:\d+[\s._-]*)?(?:(?:archived?|superseded)(?:\s.*)?|old(?: ve
 /** the longest file name most file systems and shares take, in bytes */
 const MAX_NAME = 255;
 
-export { sha256 } from './qaLogArchive';
+export const sha256 = (b: Uint8Array) => crypto.createHash('sha256').update(b).digest('hex');
 
 /** the folder's own archive, or undefined when it has none */
 function archiveIn(folder: string): string | undefined {
@@ -47,59 +43,44 @@ function fit(name: string, rest: string): string {
   let n = name; while (n && Buffer.byteLength(n + rest) > MAX_NAME - 6) n = n.slice(0, -1);   // 6: room for " (99)"
   return n.trimEnd();
 }
-/** A retained edit needs its base for the next merge. Refresh its change time after filing that base (#21). */
-function refreshAsideTime(file: string): void {
-  const handle = fs.openSync(file, 'r+');
-  try {
-    const stat = fs.fstatSync(handle);
-    fs.futimesSync(handle, stat.atime, stat.mtime);
-  } finally { fs.closeSync(handle); }
-}
-
-function retainedBasePrefix(aside: string): string {
-  const name = path.parse(aside).name;
-  return `~qalog-${sha256(Buffer.from(name)).slice(0, 32)}-`;
-}
-
-/** The dated archive can go away after a move. Keep the verified merge base next to the aside in that case (#21). */
-function retainRacedBase(aside: string, staged: StagedArchive): void {
-  const hash = sha256(staged.bytes);
-  const file = path.join(path.dirname(aside), `${retainedBasePrefix(aside)}${hash}.base`);
-  try {
-    copyThroughNewHandle(file, staged.bytes);
-    verifyCopy(file, hash);
-  } catch { staged.retained = true; }
-}
-
-function retainedBaseOf(aside: string): { file: string; hash: string } | undefined {
-  const folder = path.dirname(aside);
-  const prefix = retainedBasePrefix(aside);
-  for (const name of fs.readdirSync(folder)) {
-    if (!name.startsWith(prefix) || !name.endsWith('.base')) continue;
-    const hash = name.slice(prefix.length, -5);
-    if (!/^[0-9a-f]{64}$/.test(hash)) continue;
-    const file = path.join(folder, name);
+/**
+ * writes a new file under the first free name: "<base><ext>", then "<base> (2)<ext>" and so on; never replaces one. The
+ * name is claimed first, with an exclusive open: from then on the file there is this call's own (no copy is ever
+ * replaced or renamed over), and a failure to claim takes nothing away (#21). A write that fails part-way (a share that
+ * drops) takes away only that file, so no version is ever a partial one.
+ */
+function create(dir: string, base: string, ext: string, bytes: Uint8Array): string {
+  for (let k = 1; ; k++) {
+    const name = `${base}${k > 1 ? ` (${k})` : ''}${ext}`; const at = path.join(dir, name);
+    let fd: number;
+    try { fd = fs.openSync(at, 'wx'); } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'EEXIST' && k <= 99) continue;
+      throw e;   // nothing was claimed, so nothing is taken away
+    }
     try {
-      verifyCopy(file, hash);
-      return { file, hash };
-    } catch { /* an incomplete base must never drive a merge */ }
+      fs.writeFileSync(at, bytes, { flag: 'r+' });
+      return name;
+    } catch (e) {
+      takeAway(at, fd);
+      throw e;
+    } finally {
+      fs.closeSync(fd);
+    }
   }
-  return undefined;
 }
-
-function archiveRacedEdit(o: {
-  dir: string; base: string; meanwhile: string; ext: string; aside: string; staged: StagedArchive;
-}): string {
+/**
+ * Empties the file claimed as `fd`, which only ever touches that file, then removes `at` if it is still that file: the
+ * same device, file number and creation time. A file another PC put there since (even one given a freed file number)
+ * stays. Where a share cannot tell files apart, an empty file stays: the next save moves on to the next name.
+ */
+function takeAway(at: string, fd: number): void {
   try {
-    return fileArchive(o.dir, o.meanwhile, o.ext, fs.readFileSync(o.aside));
-  } catch (error) {
-    // Leave the edit in the folder when the archive refuses it. Preserve the base where a later merge can find it.
-    try {
-      createCopy(o.dir, o.base, o.ext, o.staged.bytes);
-      refreshAsideTime(o.aside);
-    } catch { retainRacedBase(o.aside, o.staged); }
-    throw error;
-  }
+    const mine = fs.fstatSync(fd, { bigint: true }); fs.ftruncateSync(fd, 0);
+    const now = fs.lstatSync(at, { bigint: true });
+    const provable = mine.ino !== 0n && mine.birthtimeNs !== 0n;
+    const same = now.ino === mine.ino && now.dev === mine.dev && now.birthtimeNs === mine.birthtimeNs;
+    if (provable && same) fs.rmSync(at);
+  } catch { /* the share is gone: the next save finds the name taken and moves on */ }
 }
 export type LogSave = { status: 'written'; archive: string } | { status: 'later'; by?: string };
 
@@ -201,20 +182,8 @@ function tidyLeftovers(folder: string, file: string, archive: string, now: numbe
   try { for (const n of fs.readdirSync(archive)) if (path.extname(n).toLowerCase() === ext.toLowerCase()) look(path.join(archive, n)); } catch { /* no archive to vouch for them */ }
   for (const l of left) if (held.has(l.hash) || (l.size === 0 && l.f.endsWith('.tmp'))) tidy(l.f);   // an empty one: a clock probe (folderNow) left held
 }
-/** Check again before removing the aside, in case the archive changed while the save was in progress (#21). */
-function tidyArchivedAside(aside: string, archived: string): void {
-  try {
-    removeBackedFile(aside, archived, sha256(fs.readFileSync(aside)));
-  } catch { /* the aside may be the only complete copy */ }
-}
-
-/** An archive failure must never restore over a new file that has taken the active name (#21). */
-function restoreAfterArchiveFailure(aside: string, active: string): void {
-  try {
-    fs.linkSync(aside, active);
-    tidy(aside);
-  } catch { /* the aside remains recoverable */ }
-}
+/** removes a working file, leaving it for the next save's tidyLeftovers when another program holds it: the save itself is done */
+const tidy = (f: string) => { try { fs.rmSync(f, { force: true }); } catch { /* left for the next save */ } };
 
 /**
  * an edit kept aside: the file in the log's folder, its bytes' hash, and the archive file (full path) it was made
@@ -282,7 +251,7 @@ export function keptEdits(folder: string, file: string): KeptEdit[] {
       const before = near.find((a) => a.t <= st.ctimeMs); const after = near.filter((a) => a.t > st.ctimeMs && a.t <= st.ctimeMs + 2_000);
       const base = before ? (near.some((a) => a !== before && a.t === before.t && hashOf(a) !== hashOf(before)) ? undefined : before)
         : after.length && after.every((a) => hashOf(a) === hashOf(after[0])) ? after.at(-1) : undefined;
-      out.push({ name: n, hash, base: retainedBaseOf(f)?.file ?? base?.f ?? null, t: st.ctimeMs });
+      out.push({ name: n, hash, base: base?.f ?? null, t: st.ctimeMs });
     } catch { /* held, or gone meanwhile: the next update looks again */ }
   }
   return out.sort((x, y) => x.t - y.t).map(({ t: _, ...k }) => k);
@@ -304,48 +273,14 @@ export function settleKept(folder: string, file: string, kept: { name: string; h
     try {
       const f = path.join(folder, k.name); const b = new Uint8Array(fs.readFileSync(f)); if (sha256(b) !== k.hash) continue;
       const saved = fs.statSync(f).mtime;                                              // dated when they saved it, not when it is filed
-      const held = fs.readdirSync(dir).find((name) => archiveMatches(dir, name, ext, b.length, k.hash));
+      const held = fs.readdirSync(dir).some((n) => { if (path.extname(n).toLowerCase() !== ext.toLowerCase()) return false; try { const x = path.join(dir, n); return fs.statSync(x).size === b.length && sha256(new Uint8Array(fs.readFileSync(x))) === k.hash; } catch { return false; } });
       try {
-        const base = `${fit(stem, ` ${stamp(saved)} saved meanwhile${ext}`)} ${stamp(saved)} saved meanwhile`;
-        const filed = held ?? fileArchive(dir, base, ext, b);
-        if (!settleRetainedBase(dir, stem, ext, f, saved)) continue;
-        if (!removeBackedFile(f, path.join(dir, filed), k.hash)) continue;
-        gone.push(k.name);
+        if (!held) { const n = create(dir, `${fit(stem, ` ${stamp(saved)} saved meanwhile${ext}`)} ${stamp(saved)} saved meanwhile`, ext, b); if (sha256(new Uint8Array(fs.readFileSync(path.join(dir, n)))) !== k.hash) throw new Error('the copy differs'); }
+        fs.rmSync(f); gone.push(k.name);
       } catch { if (k.name.endsWith('.old')) fs.renameSync(f, path.join(folder, `${k.name.slice(0, -4)}.${k.left ? 'left' : 'kept'}`)); }   // not merged again; filed later
     } catch { /* not even renamed: it stays as it is, and the next update merges it again */ }
   }
   return gone;
-}
-
-function archiveMatches(dir: string, name: string, ext: string, size: number, hash: string): boolean {
-  if (path.extname(name).toLowerCase() !== ext.toLowerCase()) return false;
-  const file = path.join(dir, name);
-  try {
-    if (fs.statSync(file).size !== size) return false;
-    verifyCopy(file, hash);
-    return true;
-  } catch { return false; }
-}
-
-function settleRetainedBase(dir: string, stem: string, ext: string, aside: string, at: Date): boolean {
-  const pending = retainedBaseOf(aside);
-  if (!pending) return true;
-  const bytes = verifyCopy(pending.file, pending.hash);
-  const tag = ` ${stamp(at)} merge base`;
-  const archived = fileArchive(dir, `${fit(stem, `${tag}${ext}`)}${tag}`, ext, bytes);
-  return removeBackedFile(pending.file, path.join(dir, archived), pending.hash);
-}
-
-/** Publish the updated log unless another PC has already taken the name. */
-function publishUpdatedLog(source: string, active: string): boolean {
-  try {
-    fs.linkSync(source, active);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST' || fs.existsSync(active)) return false;
-    // Preserve the existing fallback for shares without hard links. Its separate recovery change is tracked in #20.
-    fs.renameSync(source, active);
-  }
-  return true;
 }
 
 export function saveLog(o: { folder: string; file: string; bytes: Uint8Array; was: string; at: Date }): LogSave {
@@ -356,66 +291,59 @@ export function saveLog(o: { folder: string; file: string; bytes: Uint8Array; wa
   // not there at all: another PC has it moved aside this moment, so this is "in use", not an error
   try { if (hash(at) !== o.was) return { status: 'later' }; } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'later' }; throw e; }
   const id = asideName(stem).slice(0, -4); const tmp = path.join(o.folder, `${id}.tmp`); const aside = path.join(o.folder, `${id}.old`);
-  const dir = archiveOf(o.folder);
-  let staged: StagedArchive | undefined;
-  let filingArchive = false;
+  const dir = archiveOf(o.folder); let archive = '';
   // the archive file that holds the version moved aside byte for byte, once one is known to: only then may that version go
   let holds = '';
   let published = false;
+  const drop = () => {   // nothing was replaced: no copy may say it was
+    if (archive) { fs.rmSync(path.join(dir, archive), { force: true }); if (holds === archive) holds = ''; }
+    return { status: 'later' as const };
+  };
   try {
     fs.writeFileSync(tmp, o.bytes, { flag: 'wx' });
     try { tidyLeftovers(o.folder, o.file, dir, fs.statSync(tmp).ctimeMs); } catch { /* tidying never fails a save */ }
-    const old = fs.readFileSync(at);
-    if (sha256(old) !== o.was) return { status: 'later' };
-    const archiveBase = `${fit(stem, ` ${stamp(o.at)}${ext}`)} ${stamp(o.at)}`;
-    staged = stageCopy(`${archiveBase}${ext}`, old, o.was);
+    const old = new Uint8Array(fs.readFileSync(at));                                   // the version being replaced, as it is
+    archive = create(dir, `${fit(stem, ` ${stamp(o.at)}${ext}`)} ${stamp(o.at)}`, ext, old);
     // The log is moved aside in one step, so no save can land on it unseen: one made before the move is in the file moved,
     // and is checked for now; one made after it makes a new file, which the app never replaces (below).
     fs.renameSync(at, aside);
     const moved = hash(aside);
     if (moved !== o.was) {                                                             // someone saved a moment ago: theirs goes back
       if (!fs.existsSync(at)) fs.renameSync(aside, at);
-      else {
-        const meanwhile = `${fit(stem, ` ${stamp(o.at)} saved meanwhile${ext}`)} ${stamp(o.at)} saved meanwhile`;
-        filingArchive = true;
-        holds = archiveRacedEdit({ dir, base: archiveBase, meanwhile, ext, aside, staged });
-        filingArchive = false;
-      }
-      return { status: 'later' };
+      else holds = create(dir, `${fit(stem, ` ${stamp(o.at)} saved meanwhile${ext}`)} ${stamp(o.at)} saved meanwhile`, ext, new Uint8Array(fs.readFileSync(aside)));
+      return drop();
     }
-    // Publish the dated archive only after confirming what this update actually moved (#21).
-    filingArchive = true;
-    const archive = createCopy(dir, archiveBase, ext, staged.bytes);
-    filingArchive = false;
-    holds = archive;
-    published = publishUpdatedLog(tmp, at);
-    if (!published) return { status: 'later' };
+    if (sha256(old) === moved) holds = archive;
+    // The new version takes the log's name only if nobody made a file there meanwhile: a link fails on a name in use,
+    // where a rename would replace it. A share that has no links (some NAS) gets a rename after one more look.
+    // When someone did, theirs stands and the version the app read stays in the archive, dated: it was replaced, by them.
+    try { fs.linkSync(tmp, at); } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'EEXIST' || fs.existsSync(at)) return { status: 'later' };
+      fs.renameSync(tmp, at);
+    }
+    published = true;
     return { status: 'written', archive };
   } catch (e) {
     if (['EBUSY', 'EPERM', 'EACCES'].includes((e as NodeJS.ErrnoException).code ?? '')) {   // open in Excel
       // a new file took the log's name meanwhile: it stands, and the dated archive copy stays, as when the link finds the name taken
       if (fs.existsSync(aside) && fs.existsSync(at)) return { status: 'later' };
-      if (!filingArchive && fs.existsSync(aside)) fs.renameSync(aside, at);
-      return { status: 'later' };
+      if (fs.existsSync(aside)) fs.renameSync(aside, at);
+      return drop();
     }
     throw e;
   } finally {
     // Tidying up never changes the outcome: once the new version is in place the save is made, and what it wrote is
     // recorded. A working file another program holds stays until the next save.
     tidy(tmp);
-    if (staged && !staged.retained) tidyStage(staged.file);
     // After publication, another PC may already have moved the new log aside for its own save (#280).
     if (fs.existsSync(aside)) {
-      if (!published && !fs.existsSync(at)) {
-        if (filingArchive) restoreAfterArchiveFailure(aside, at);
-        else fs.renameSync(aside, at);
-      } else if (holds) tidyArchivedAside(aside, path.join(dir, holds));
+      if (!published && !fs.existsSync(at)) fs.renameSync(aside, at);
+      else if (holds) tidy(aside);
     }
   }
 }
 
 /** a new log in `folder`: `file`, or the first free "name (2).ext" when that is taken; never replaces a file */
 export function createLog(folder: string, file: string, bytes: Uint8Array): string {
-  const ext = path.extname(file);
-  return createCopy(folder, file.slice(0, file.length - ext.length), ext, bytes);
+  const ext = path.extname(file); return create(folder, file.slice(0, file.length - ext.length), ext, bytes);
 }
