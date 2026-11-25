@@ -522,6 +522,15 @@ export interface Session {
   }>>;
 }
 
+export interface SharedFolderStatus {
+  path: string | null;
+  found: string[];
+  suggested: string | null;
+  missing?: string;
+}
+
+export interface SharedFolderChoice { path: string; inOneDrive: boolean }
+
 /**
  * Desktop only: the team's shared folder on this PC. Until a person connects one, the app shows only the screen that asks
  * for it (ui/connect.tsx); nothing is saved before that. Settings shows it with Change.
@@ -532,11 +541,19 @@ export interface SharedPlace {
    * records (looked for afresh on each call), the Punchlist folder in OneDrive to suggest when there are none (null
    * without OneDrive), and why the folder in use cannot be opened, if it cannot.
    */
-  get(): Promise<Result<{ path: string | null; found: string[]; suggested: string | null; missing?: string }>>;
+  get(): Promise<Result<SharedFolderStatus>>;
   /** the folder picker; null when the person cancels. `inOneDrive` is false for a folder OneDrive does not sync. */
-  pick(): Promise<Result<{ path: string; inOneDrive: boolean } | null>>;
+  pick(): Promise<Result<SharedFolderChoice | null>>;
   /** use this folder from now on, on this PC: the app starts again on it */
   use(path: string): Promise<Result<void>>;
+}
+
+export interface SignInStatus {
+  signedIn: boolean;
+  sso: boolean;
+  apiKey: boolean;
+  firstSetup?: boolean;
+  problem?: string;
 }
 
 /**
@@ -547,7 +564,7 @@ export interface AiSignIn {
   /** whether a token or key is held on this PC that has not expired, which ways of signing in are offered, and why
    * single sign-on stopped opening by itself when the provider kept refusing its token. `firstSetup`: this PC has never
    * signed in, so the window shows only the sign-in page until it does (decisions: "Intelligence sign-in"). */
-  status(): Promise<Result<{ signedIn: boolean; sso: boolean; apiKey: boolean; firstSetup?: boolean; problem?: string }>>;
+  status(): Promise<Result<SignInStatus>>;
   /** single sign-on: the provider's sign-in page in the app's own window; the token is taken from the SSO site's cookie */
   signIn(): Promise<Result<void>>;
   /** use an API key the person pasted, once the service has accepted it; it is kept like a token from single sign-on.

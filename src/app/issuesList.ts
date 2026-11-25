@@ -5,6 +5,8 @@ import { issuesListReviewPlan } from './issuesListJoins';
 import { dealFindings, type State } from './state';
 import type { Store } from './store';
 
+export const issuesListTitle = (name: string) => name.replace(/\.[A-Za-z0-9]{2,5}$/, '');
+
 export interface ReadIssuesList {
   doc: DocumentRef;
   points: IssuePoint[];

@@ -11,7 +11,7 @@ import { CreateDeal } from '../../src/app/commands/deals';
 import { CreateFinding, EditFinding, SetFindingStatus, DeleteFinding, RestoreFinding } from '../../src/app/commands/findings';
 import { ImportIssuesList, RevertIssuesList, RemoveIssuesList, RestoreIssuesList } from '../../src/app/commands/issuesList';
 import '../ui/keptTextSession';
-import { listsOf } from '../../src/ui/deleted';
+import { deletedIssuesLists as listsOf } from '../../src/app/deletedView';
 import type { Finding } from '../../src/domain/model';
 import { ResolveConflict } from '../../src/app/commands/conflicts';
 import { registry, Undo } from '../../src/app/commands/undo';
