@@ -16,6 +16,8 @@ describe('damagedImportText: single kinds of damage', () => {
     ['a run for one character', 'Paid in Kč', 'Paid in K??'],
     ['one mark for a run', 'at 2½–¾ months', 'at 2? months'],
     ['a lost narrow space', 'USD 2 million', 'USD 2?million'],
+    ['a lost first byte of a misread letter', 'é', '?©'],
+    ['an emoji kept beside a vanished one', '😀?😀', '?😀'],
     ['a vanished emoji', 'Done ✅ today', 'Done today'],
     ['an edit a lossy file could also have made', 'Fee in €', 'Fee in ?'],
   ])('keeps the saved text for %s', (_name, saved, incoming) => {
@@ -31,6 +33,7 @@ describe('damagedImportText: single kinds of damage', () => {
     ['a clean file over a damaged value', 'What?s the ratio', 'What’s the ratio'],
     ['a curly quote over a straight one', 'It\'s tested', 'It’s tested'],
     ['spacing only', 'It’s  tested', 'It’s tested'],
+    ['a dropped copyright sign', '© 2024 Acme', '2024 Acme'],
     ['an ASCII-only change', 'Provide the plan', 'Provide the plans'],
   ])('imports %s', (_name, saved, incoming) => {
     expect(damagedImportText(saved, incoming)).toBe(false);
@@ -100,6 +103,12 @@ describe('damagedImportText: cells of lost characters among literal question mar
     const started = Date.now();
     expect(damagedImportText(saved, '?'.repeat(pairs * 3))).toBe(true);
     expect(damagedImportText(saved, '?'.repeat(pairs * 3) + 'x')).toBe(false);
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it('decides interleaved marks in a 16,000-character cell within the time bound', () => {
+    const started = Date.now();
+    damagedImportText('é?'.repeat(8000), '?'.repeat(16000));
     expect(Date.now() - started).toBeLessThan(5000);
   });
 

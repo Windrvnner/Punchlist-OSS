@@ -13,11 +13,13 @@
  * invents characters, so a clean file offered over an already damaged value does not match and still corrects it.
  */
 
+/** The most bytes one character has in UTF-8. */
+const MISREAD_REACH = 4;
 const LOST = /[?�]/;
 const CP1252 = new TextDecoder('windows-1252');
 /** Safety valve for pathological cells: past this many alignment steps the cell is treated as an edit, which is
  *  listed in the preview and can be undone, rather than silently kept. */
-const MAX_STEPS = 20_000_000;
+const MAX_STEPS = 3_000_000;
 
 /** Quote and dash shapes a file may flatten (the same shapes the log update treats as one character). */
 function flattened(text: string): string {
@@ -37,7 +39,9 @@ function anySpacing(text: string): string {
 }
 
 const isAscii = (char: string) => char.charCodeAt(0) < 0x80;
-const isInvisible = (char: string) => /^(?:\p{Extended_Pictographic}|‍|︎|️)$/u.test(char);
+// ©, ® and ™ are letters of Windows-1252, so a file keeps them; other pictographs and joiners may vanish
+const PICTOGRAPH = /^(?:(?![\u00A9\u00AE\u2122])\p{Extended_Pictographic}|\u200D|\uFE0E|\uFE0F)$/u;
+const isInvisible = (char: string) => PICTOGRAPH.test(char);
 
 /** What one saved character may come back as, apart from lost runs and byte misreadings. */
 const plainCache = new Map<string, string[]>();
@@ -78,6 +82,13 @@ function misreadEnds(char: string, incoming: string, starts: Iterable<number>): 
   return positions;
 }
 
+/** For each incoming position, the nearest "?" at or after it (the text's length when there is none). */
+function nextQuestionMarks(incoming: string): number[] {
+  const next: number[] = new Array(incoming.length + 2).fill(incoming.length + 1);
+  for (let at = incoming.length - 1; at >= 0; at--) next[at] = incoming[at] === '?' ? at : next[at + 1];
+  return next;
+}
+
 /** For each incoming position, the end of the run of lost marks starting there: the first position that is not one. */
 function runEnds(incoming: string): number[] {
   const ends: number[] = new Array(incoming.length + 1);
@@ -100,9 +111,11 @@ class Ranges {
   /** The end of each range: the first position after its marks, where an ordinary character may follow. */
   ends(): number[] { return this.all().map(([, high]) => high); }
   /** The positions of the incoming text inside the ranges that hold a literal "?", which may sit among the marks. */
-  questionMarks(incoming: string): number[] {
+  questionMarks(nextQuestion: number[]): number[] {
     const found: number[] = [];
-    for (const [low, high] of this.all()) for (let at = low; at <= high; at++) if (incoming[at] === '?') found.push(at);
+    for (const [low, high] of this.all()) {
+      for (let at = nextQuestion[low]; at <= high; at = nextQuestion[at + 1]) found.push(at);
+    }
     return found;
   }
   contains(position: number): boolean { return this.all().some(([low, high]) => low <= position && position <= high); }
@@ -129,12 +142,13 @@ class Ranges {
 function channelProduces(saved: string, incoming: string): boolean {
   const chars = Array.from(saved);
   const ends = runEnds(incoming);
+  const nextQuestion = nextQuestionMarks(incoming);
   const plain = Array.from({ length: chars.length + 1 }, () => new Set<number>());
   const lost = Array.from({ length: chars.length + 1 }, () => new Ranges());
   plain[0].add(0);
   let steps = 0;
   for (const [index, char] of chars.entries()) {
-    for (const at of startsFor(char, incoming, ends, plain[index], lost[index])) {
+    for (const at of startsFor(char, nextQuestion, ends, plain[index], lost[index])) {
       if (++steps > MAX_STEPS) return false;
       readCharacter(char, incoming, at, ends, plain[index + 1], lost[index + 1]);
     }
@@ -149,26 +163,25 @@ function channelProduces(saved: string, incoming: string): boolean {
  * (or a literal "?") can start an ordinary character. A character outside ASCII starting inside a run already
  * read by an earlier mark of it adds nothing new, so only the first mark of each run is kept.
  */
-function startsFor(char: string, incoming: string, ends: number[], plain: Set<number>, lost: Ranges): number[] {
+function startsFor(char: string, nextQuestion: number[], ends: number[], plain: Set<number>, lost: Ranges): number[] {
   const starts = new Set([...plain, ...lost.ends()]);
-  if (char === '?') for (const at of lost.questionMarks(incoming)) starts.add(at);
+  if (char === '?') for (const at of lost.questionMarks(nextQuestion)) starts.add(at);
   const ordered = [...starts].sort((a, b) => a - b);
   if (isAscii(char)) return ordered;
+  // a misread takes at most four marks, so only the last starts of a run can begin one that ends beyond it
   let runEnd = -1;
   return ordered.filter((at) => {
-    if (at < runEnd) return false;
-    if (ends[at] > at) runEnd = ends[at];
-    return true;
+    if (at >= runEnd || ends[at] - at <= MISREAD_REACH) {
+      if (ends[at] > at) runEnd = Math.max(runEnd, ends[at]);
+      return true;
+    }
+    return false;
   });
 }
 
 /** Every way `char` may be read at incoming position `at`: into the next plain positions or the next run of marks. */
 function readCharacter(char: string, incoming: string, at: number, ends: number[], plain: Set<number>, lost: Ranges) {
-  if (!isAscii(char) && LOST.test(incoming[at] ?? '')) {
-    // a mark here is the start of a run; reading the character any other way would be a run too
-    lost.add(at + 1, ends[at]);
-    return;
-  }
+  if (!isAscii(char) && LOST.test(incoming[at] ?? '')) lost.add(at + 1, ends[at]);
   for (const read of plainReads(char)) if (incoming.startsWith(read, at)) plain.add(at + read.length);
   if (isAscii(char)) return;
   for (const end of misreadEnds(char, incoming, [at])) plain.add(end);
