@@ -55,7 +55,6 @@ export function QaPage({ dealId }: { dealId: string }) {
   const view = qaPageView(s, dealId, typedResponse);
   const { list, outsideFilter, selected: sel } = view;
   const hide = view.oneStatus ? { ...s.prefs.hideCols, status: true } : s.prefs.hideCols;
-  // The table is always the full table: an open question goes across the top of the page instead (design G)
   // In the full table nothing is selected, so the keyboard has a place of its own: the row the arrows last reached.
   const [cursor, setCursor] = useState<string | null>(null);
   const at = sel?.id ?? (cursor && list.some((r) => r.id === cursor) ? cursor : list[0]?.id ?? null);
