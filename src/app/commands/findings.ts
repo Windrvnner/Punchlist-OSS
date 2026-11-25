@@ -139,7 +139,7 @@ export const ReviewFinding = define({
       dealId: f.dealId,
       upserts: [{ kind: 'finding', record: r.value.record, expectedRev: f.rev }],
       audit: r.value.audit.map((a) => ({ ...a, kind: a.kind as any, recordId: f.id, dealId: f.dealId })),
-      inverse: { command: 'ReviewFinding', input: { ...input, reviewed: !input.reviewed } },
+      inverse: { command: 'RestoreFindingSnapshot', input: { dealId: f.dealId, findingId: f.id, snapshot: f } },
       message: input.reviewed ? 'Finding marked reviewed' : 'Review cleared',
     });
   },
