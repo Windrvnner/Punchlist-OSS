@@ -28,7 +28,6 @@ import { keepUnseen, movedHash } from './recovered';
 import { scopeOfKey } from './conversations';
 import { Item, ListRecord } from '../domain/checklist';
 import { Undo } from './commands/undo';
-import { guardLegacySettledClose } from './commands/closeSettled';
 import { lastImport } from './commands/importQuestions';
 import { merged, localConversations } from './threads';
 import { seenSince } from './draftsSeen';
@@ -1268,9 +1267,8 @@ export class Store {
       }
       revision = loaded.value!.revision;
     }
-    const prepared = guardLegacySettledClose(command, opts.idempotencyKey);
-    if (prepared.prepare) await prepared.prepare(this, input, { retained: revision !== null });
-    const result = await this.execute(prepared, input, opId, targets, opts, revision);
+    if (command.prepare) await command.prepare(this, input, { retained: revision !== null });
+    const result = await this.execute(command, input, opId, targets, opts, revision);
     if (result.ok && result.value.unchanged && revision !== null && this.state.ops[opId]?.state !== 'succeeded') {
       await this.dropOp(opId);
     }
