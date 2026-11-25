@@ -16,7 +16,8 @@ const refused = {
   trailer: ['Co-Authored-By: Claude', ' <noreply@example.com>'].join(''),
   session: ['Claude-Sess', 'ion: x'].join(''),
   credit: ['Decision: newest first, as the ', 'owner asked (Jane Doe, Nov 18).'].join(''),
-  email: ['Write to jane.doe', '@', 'firm.test about it.'].join(''),
+  wrappedCredit: ['Decision: newest first, as the\n', 'owner asked.'].join(''),
+  email: ['Write to jane.doe', '@', 'lawfirm.com about it.'].join(''),
 };
 
 const footer = ['Generated with [Claude', ' Code](https://claude.com/', 'claude-code)'].join('');
@@ -43,7 +44,8 @@ describe('the attribution check', () => {
     r.track('a.md', 'See https://platform.claude.com/docs/en/api/overview. Sample generated with a script.\n');
     r.track('b.md', `${productFooter}\nNext line\n`);
     r.track('c.md', `Rules quote "the ${'owner'} wants". Mail a@example.com or 1+a@users.noreply.github.com.\n`);
-    r.track('package-lock.json', `{ "deprecated": "contact i${'@'}firm.test" }\n`);
+    r.track('d.md', 'Test accounts use qa@punchlist.test and a@host.invalid.\n');
+    r.track('package-lock.json', `{ "deprecated": "contact i${'@'}lawfirm.com" }\n`);
     r.commit(`Add a note\n\n${footer}\n${productFooter}\n`);
     expect(r.check().status).toBe(0);
   });

@@ -4,15 +4,19 @@
 // is its one user.
 
 const VERBS = 'wants?|wanted|asks?|asked|says|said|decides?|decided|prefers?|preferred|requested';
-const ROLE_VERB = new RegExp(`(?<!")\\bthe (owner|maintainer|user)('s)? (${VERBS})\\b`, 'i');
+// Any run of spaces or a line break may separate the words, since docs are wrapped at 120 characters.
+const ROLE_VERB = new RegExp(`(?<!")\\bthe\\s+(owner|maintainer|user)('s)?\\s+(${VERBS})\\b`, 'i');
 const EMAIL = /[A-Za-z0-9._%+-]+@((?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,})/g;
-// example.com, .org, .net and their subdomains, and GitHub's and Apple's no-reply addresses.
-const ALLOWED_DOMAIN = /(^|\.)(example\.(com|org|net)|users\.noreply\.github\.com|privaterelay\.appleid\.com)$/i;
+// example.com, .org, .net and their subdomains, and GitHub's no-reply addresses.
+const ALLOWED_DOMAIN = /(^|\.)(example\.(com|org|net)|users\.noreply\.github\.com)$/i;
+// The top-level names reserved for tests and examples (RFC 2606).
+const RESERVED_TOP_LEVEL = /\.(test|example|invalid|localhost)$/i;
 // Files written by a tool, not a person: the lockfile repeats third-party package notices.
 const GENERATED_FILES = new Set(['package-lock.json']);
 
 function hasPersonalEmail(text) {
-  return [...text.matchAll(EMAIL)].some((match) => !ALLOWED_DOMAIN.test(match[1]));
+  const personal = (domain) => !ALLOWED_DOMAIN.test(domain) && !RESERVED_TOP_LEVEL.test(domain);
+  return [...text.matchAll(EMAIL)].some((match) => personal(match[1]));
 }
 
 /** The kinds of person attribution a text holds, by name; empty when it holds none. `file`: where it came from. */
