@@ -12,12 +12,15 @@ import { Icon } from './icons';
 import { ChoiceHead, Stepper } from './choiceCards';
 import { titleStyle } from './titleStyle';
 import { qaKept } from '../app/state';
-import { hasLogVersion, inTwoVersions, logVersionQueue, nextLogVersion } from '../app/qaView';
-import { chooseVersion, logOf, type VersionPick } from '../app/qaLog';
+import { inTwoVersions, logVersionQueue, nextLogVersion } from '../app/qaView';
+import { logOf, type VersionPick } from '../app/qaLog';
+import {
+  editResponseMerge, forgetResolvedResponseMerge, keepResponseVersion, lastQuestionEditor,
+  responseMergeView, selectResponseMerge, setResponseMergeSide, watchResponseMerges,
+} from '../app/drafting';
 import { cellValue } from '../domain/logWrite';
 import { IMPORT_FIELDS, type ImportField } from '../domain/importExport';
 import { AI_LABEL } from '../control';
-import { keptDrafts, hasTexts } from '../app/keptText';
 import type { Question } from '../domain/model';
 
 /** the cells' labels, in title style (labels are Title Case) */
@@ -30,17 +33,6 @@ export const openResolve = (store: ReturnType<typeof useStore>, dealId: string, 
   if (!first) return;
   store.ui({ selectedQuestion: first, dialog: { kind: 'resolveQa', dealId, questionId: first } });
 };
-
-/** merged responses not yet used, by question id: the text as it stands, and as the AI drafted it ('' once none was). Kept across a restart. */
-const merges = keptDrafts('qa-merge', hasTexts('text', 'ai'));
-/** the merged response kept for a question, when it has any text (one emptied is as good as none) */
-const mergeOf = (id: string) => { const m = merges.get(id); return m?.text.trim() ? m : undefined; };
-/** the questions a merged draft is being written for: one at a time each, so a second reply never lands on what a person typed into the first */
-const drafting = new Set<string>();
-/** told when a draft's reply comes in (the question, and the error if it failed), so whichever Resolve is open then shows it */
-const landed = new Set<(id: string, error: string) => void>();
-/** a merged response's Status and Priority as the person set them (the side each keeps), by question id, kept with the draft */
-const sides = keptDrafts('qa-merge-sides', (v): v is Record<string, 'app' | 'log'> => !!v && typeof v === 'object' && Object.values(v).every((x) => x === 'app' || x === 'log'));
 
 /** the merged response's heading, once picked: it is then the choice (its card is the box to edit) */
 const MERGED_RADIO = { role: 'radio', 'aria-checked': true, tabIndex: 0, 'aria-label': 'Merged response' } as const;
@@ -89,6 +81,35 @@ function ResolveFoot({ at, total, onStep, left, again, againOff, canKeep, picked
   );
 }
 
+/** The log shows when it was read, and the app side shows who last edited the question. */
+function useLastQuestionEditor(store: ReturnType<typeof useStore>, questionId: string, rev: number | undefined) {
+  const [editor, setEditor] = useState('');
+  useEffect(() => {
+    let live = true;
+    setEditor('');
+    void lastQuestionEditor(store, questionId).then((actor) => {
+      if (live) setEditor(actor);
+    });
+    return () => { live = false; };
+  }, [questionId, rev]);
+  return editor;
+}
+
+/** Show replies for the question on screen, including those requested before this dialog opened. */
+function useDisplayedMerge(questionId: string) {
+  const [merged, setMerged] = useState({ text: '', busy: false, error: '' });
+  const current = useRef(questionId);
+  current.current = questionId;
+  useEffect(() => watchResponseMerges((id, error) => {
+    if (id !== current.current) return;
+    setMerged((m) => ({
+      text: responseMergeView(id).draft?.text ?? m.text, busy: false,
+      error: error === undefined ? '' : `No merged draft: ${error}`,
+    }));
+  }), []);
+  return [merged, setMerged] as const;
+}
+
 export function ResolveDialog({ dealId, questionId }: { dealId: string; questionId: string }) {
   const store = useStore(); const s = useAppState();
   const close = () => store.ui({ dialog: null });
@@ -98,61 +119,44 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
   const q = s.questions[questionId] as Question | undefined; const kept = q ? qaKept(s, q) : {};
   const log = logOf(store, dealId);
   const [pick, setPick] = useState<VersionPick | null>(null);
-  const [merged, setMerged] = useState<{ text: string; busy: boolean; error: string }>({ text: '', busy: false, error: '' });
+  const [merged, setMerged] = useDisplayedMerge(questionId);
   const [fields, setFields] = useState<Record<string, 'app' | 'log'>>({});
   const [busy, setBusy] = useState(false);
-  // who last changed the question in the app, from its history (the log does not say who changed a cell, so its side gives only when it was read)
-  const [editor, setEditor] = useState('');
-  useEffect(() => { let live = true; setEditor(''); void store.services.repo.audit(questionId).then((r) => { if (live && r.ok) setEditor(r.value.at(-1)?.actor ?? ''); }); return () => { live = false; }; }, [questionId, q?.rev]);
-  // a merged response drafted or typed for a question stays with it (merges), so stepping on, Escape or closing never loses it:
+  const editor = useLastQuestionEditor(store, questionId, q?.rev);
+  // a merged response drafted or typed for a question stays with it, so stepping on, Escape or closing never loses it:
   // the question opens with nothing picked (a choice is always the person's, made here and now), its merged response on
   // its card and the sides they set for it as they left them, until it is used
-  const current = useRef(questionId); current.current = questionId;
   // the update whose versions are shown: a choice is made against it, and another update meanwhile clears the pick, so the person looks again
   const seen = useRef(log?.last?.at);
   useEffect(() => { if (seen.current !== log?.last?.at) { seen.current = log?.last?.at; setPick(null); } }, [log?.last?.at]);
-  useEffect(() => { seen.current = logOf(store, dealId)?.last?.at; const m = mergeOf(questionId); setPick(null); setMerged({ text: m?.text ?? '', busy: drafting.has(questionId), error: '' }); setFields(sides.get(questionId) ?? {}); }, [questionId]);
-  useEffect(() => { if (q && !Object.keys(kept).length) { merges.delete(q.id); sides.delete(q.id); } }, [q?.id, Object.keys(kept).length]);   // resolved elsewhere: nothing to keep it for
-  // a reply that comes in while this question is shown (even one asked for before Resolve was last closed) is shown at once
   useEffect(() => {
-    const on = (id: string, error: string) => { if (id === current.current) setMerged((m) => ({ text: merges.get(id)?.text ?? m.text, busy: false, error })); };
-    landed.add(on); return () => { landed.delete(on); };
-  }, []);
+    seen.current = logOf(store, dealId)?.last?.at;
+    const { draft, hasDraft, busy, fields } = responseMergeView(questionId);
+    setPick(null);
+    setMerged({ text: hasDraft ? draft!.text : '', busy, error: '' });
+    setFields(fields);
+  }, [questionId]);
+  useEffect(() => forgetResolvedResponseMerge(store.get(), questionId), [q?.id, Object.keys(kept).length]);
   const go = (id: string | undefined) => { if (id) store.ui({ selectedQuestion: id, dialog: { kind: 'resolveQa', dealId, questionId: id } }); };
-  const still = (id: string) => {
-    const state = store.get();
-    return hasLogVersion(state, state.questions[id]);
-  };
-
   const resp = 'response' in kept; const others = (Object.keys(kept) as ImportField[]).filter((k) => k !== 'response');
   const appText = q?.response ?? ''; const logText = kept.response ?? '';
 
-  const draft = async () => {
-    if (!s.can.merge || !q) return;
-    const id = q.id;
-    setPick('merged'); setMerged((m) => ({ text: m.text, busy: true, error: '' }));
-    if (drafting.has(id)) return;   // already being written: its reply is the one to wait for
-    drafting.add(id); const before = merges.get(id)?.text ?? '';
-    const r = await store.services.ai.merge!({ dealId, question: q.text, app: appText, log: logText });
-    drafting.delete(id);
-    // a reply is dropped when the question was resolved meanwhile, or its merged text was changed (nothing typed is ever replaced)
-    const use = r.ok && still(id) && (merges.get(id)?.text ?? '') === before;
-    // a reply that comes after the person has stepped on is kept for its own question, and shown when they come back to it
-    if (use) merges.set(id, { text: r.value.text, ai: r.value.text });
-    for (const tell of landed) tell(id, r.ok ? '' : `No merged draft: ${r.error.message}`);
-  };
-  /** Merge Both Versions: the merge drafted for this question if any, else a new draft (or the one on its way) */
-  const mergeIt = () => {
-    if (busy || !q) return Promise.resolve();
-    const m = mergeOf(q.id); if (!m || drafting.has(q.id)) return draft();
-    setPick('merged'); setMerged({ text: m.text, busy: false, error: '' }); return Promise.resolve();
+  const mergeIt = (again = false) => {
+    if (busy || !q) return;
+    const choice = selectResponseMerge(store, q, logText, again);
+    if (!choice) return;
+    setPick('merged');
+    setMerged((m) => ({ text: choice.busy ? m.text : choice.text, busy: choice.busy, error: '' }));
   };
   const mergeRef = useRef(mergeIt); mergeRef.current = mergeIt;
   const keep = async () => {
     if (!q || !pick || busy || (pick === 'merged' && (merged.busy || !merged.text.trim()))) return;
-    setBusy(true); const r = await chooseVersion(store, dealId, q.id, pick, { merged: merged.text, drafted: merges.get(q.id)?.ai, fields: pick === 'merged' ? fields : {}, seen: seen.current }); setBusy(false);
+    setBusy(true);
+    const r = await keepResponseVersion(store, dealId, q.id, pick, {
+      merged: merged.text, fields, seen: seen.current,
+    });
+    setBusy(false);
     if (!r.ok) { store.toast(r.error.message); return; }
-    merges.delete(q.id); sides.delete(q.id);
     const did = pick === 'log' ? 'the log’s version taken' : pick === 'merged' ? 'merged response used' : 'the app’s version kept';
     store.toast(`Q${q.n}: ${did}`, { label: 'Undo', opId: r.value.opId });
     // on to the next, with the focus on its first version, so 1, 2 and 3 go on working from the keyboard
@@ -186,11 +190,17 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
     if (!step || !from || e.ctrlKey || e.metaKey || e.altKey) return;
     const all = [...(e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role="radio"]')]; const to = all[(all.indexOf(from as HTMLElement) + step + all.length) % all.length]; if (!to) return;
     e.preventDefault(); to.focus();
-    const p = to.dataset.pick; if (p === 'app' || p === 'log') setPick(p); else if (p === 'merged' && mergeOf(q.id)) { lost.current = true; void mergeIt(); }
+    const p = to.dataset.pick;
+    if (p === 'app' || p === 'log') setPick(p);
+    else if (p === 'merged' && keptMerge.hasDraft) {
+      lost.current = true;
+      mergeIt();
+    }
   };
-  const has = !!mergeOf(q.id);   // a merged response is already drafted for this question
-  const mine = merges.get(q.id)?.ai ?? '';   // as the AI drafted it: the label says when a person has changed it since
-  const by = merged.busy ? 'Drafting' : !has ? '' : mine && (merges.get(q.id)?.text ?? '') !== mine ? `Drafted by ${AI_LABEL}, edited` : `Drafted by ${AI_LABEL}`;
+  const keptMerge = responseMergeView(q.id);
+  const { draft, hasDraft: has } = keptMerge;
+  const edited = !!draft?.ai && draft.text !== draft.ai;
+  const by = merged.busy ? 'Drafting' : !has ? '' : `Drafted by ${AI_LABEL}${edited ? ', edited' : ''}`;
   const side = (k: string) => fields[k] ?? (pick === 'log' ? 'log' : 'app');
   const mergedReady = pick !== 'merged' || (!merged.busy && !!merged.text.trim());
   const canKeep = !!pick && !busy && mergedReady && Object.keys(kept).length > 0;
@@ -227,19 +237,29 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
             {/* picked, the heading is the choice (its card is then the box to edit) */}
             <ChoiceHead id="rsv-mhead" picked={pick === 'merged'} name="Merged" meta={by}
               {...(pick === 'merged' ? MERGED_RADIO : {})} />
-            {pick !== 'merged' && <MergeCard drafted={has ? merges.get(q.id)!.text : ''} busy={busy}
+            {pick !== 'merged' && <MergeCard drafted={has ? draft!.text : ''} busy={busy}
               onMerge={(byKey) => { lost.current = byKey; void mergeIt(); }} />}
             {pick === 'merged' && merged.error && <p class="emptyline" role="alert">{merged.error}</p>}
             {/* text already there stays in view under an error, so what Keep Selected would use is never unseen */}
-            {pick === 'merged' && (!merged.error || merged.text) && <textarea class="rsv-r draftbox" id="rsv-merged" aria-label="Merged response" dir="auto" disabled={merged.busy} value={merged.text} onInput={(e) => { const text = (e.currentTarget as HTMLTextAreaElement).value; setMerged({ ...merged, text }); merges.set(q.id, { text, ai: mine }); }} />}
+            {pick === 'merged' && (!merged.error || merged.text) && <textarea class="rsv-r draftbox" id="rsv-merged"
+              aria-label="Merged response" dir="auto" disabled={merged.busy} value={merged.text}
+              onInput={(e) => {
+                const text = e.currentTarget.value;
+                setMerged({ ...merged, text });
+                editResponseMerge(q.id, text);
+              }} />}
           </div>}
           </div>
           {pick === 'merged' && others.length > 0 && <div class="rsv-keep">{others.map((k) => <div key={k} class="rsv-kf"><span>{LABEL[k]}</span>
-            <span class="seg">{(['app', 'log'] as const).map((w) => <button type="button" key={w} class={side(k) === w ? 'on' : ''} aria-pressed={side(k) === w} title={w === 'app' ? 'As in the app' : 'As in the Q&A log'} onClick={() => { const f = { ...fields, [k]: w }; setFields(f); sides.set(q.id, f); }}>{(w === 'app' ? cellValue(q, k) : kept[k]) || '—'}</button>)}</span></div>)}</div>}
+            <span class="seg">{(['app', 'log'] as const).map((w) => <button type="button" key={w}
+              class={side(k) === w ? 'on' : ''} aria-pressed={side(k) === w}
+              title={w === 'app' ? 'As in the app' : 'As in the Q&A log'}
+              onClick={() => setFields(setResponseMergeSide(q.id, fields, k, w))}>
+              {(w === 'app' ? cellValue(q, k) : kept[k]) || '—'}</button>)}</span></div>)}</div>}
         </> : <p class="emptyline" id="rsv-done">Resolved</p>}
       </div>
       <ResolveFoot at={at} total={queue.length} left={inTwoVersions(s, dealId).length}
-        onStep={(by) => go(queue[at + by])} again={pick === 'merged' && s.can.merge ? () => void draft() : null}
+        onStep={(by) => go(queue[at + by])} again={pick === 'merged' && s.can.merge ? () => mergeIt(true) : null}
         againOff={merged.busy || busy} canKeep={canKeep} picked={!!pick} onKeep={() => void keep()} />
     </Modal>
   );

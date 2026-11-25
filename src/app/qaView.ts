@@ -1,11 +1,12 @@
 import type { Question, QuestionStatus } from '../domain/model';
 import { workstreamChoices } from '../domain/order';
 import type { Scope } from './conversations';
-import { eligibleForDraft } from './drafting';
+import { eligibleForDraft, hasLogVersion } from './drafting';
 import {
-  dealQuestions, findingListed, listedFindings, qaChanged, qaKept, qaListed, qaVersions, qaWorkstreamChoices,
+  dealQuestions, findingListed, listedFindings, qaChanged, qaListed, qaVersions, qaWorkstreamChoices,
   type Conflict, type State,
 } from './state';
+export { hasLogVersion } from './drafting';
 
 type QaFilter = State['ui']['qaFilter'];
 type StatusChoice = { status: QaFilter['status']; count: number | null };
@@ -51,10 +52,6 @@ export function qaPageView(state: State, dealId: string, hasHeldResponse: (quest
 /** Editing a question can keep a workstream named in the imported log. */
 export function qaEditorWorkstreams(state: State, dealId: string): string[] {
   return workstreamChoices(dealQuestions(state, dealId).map((question) => question.workstream));
-}
-
-export function hasLogVersion(state: State, question: Question | undefined): boolean {
-  return !!question && Object.keys(qaKept(state, question)).length > 0;
 }
 
 /** Only unresolved differences with the log belong to Resolve, in question number order. */
