@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { render } from 'preact';
 import { act } from 'preact/test-utils';
 import { SignInRow, SignInPage } from '../../src/ui/signin';
+import { SignInConnection } from '../../src/app/connection';
 import type { AiSignIn } from '../../src/ports';
 
 const settle = (ms = 20) => act(() => new Promise<void>((r) => setTimeout(r, ms)));
@@ -17,7 +18,14 @@ function fake(o: { sso: boolean; apiKey: boolean; good?: string; problem?: strin
   };
   return { s, asked };
 }
-async function mount(s: AiSignIn) { const root = document.createElement('div'); document.body.append(root); await act(() => { render(<SignInRow signin={s} />, root); }); await settle(); return root; }
+async function mount(signin: AiSignIn) {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const form = new SignInConnection(signin);
+  await act(() => { render(<SignInRow form={form} />, root); });
+  await settle();
+  return root;
+}
 const type = async (root: HTMLElement, v: string) => { const f = root.querySelector<HTMLInputElement>('#s-key')!; f.value = v; await act(() => { f.dispatchEvent(new Event('input', { bubbles: true })); }); };
 
 describe('Intelligence sign-in', () => {
@@ -75,7 +83,15 @@ describe('Intelligence sign-in', () => {
   });
 });
 
-async function page(s: AiSignIn) { const root = document.createElement('div'); document.body.append(root); let done = 0; await act(() => { render(<SignInPage signin={s} onDone={() => { done++; }} />, root); }); await settle(); return { root, done: () => done }; }
+async function page(signin: AiSignIn) {
+  const root = document.createElement('div');
+  document.body.append(root);
+  let done = 0;
+  const form = new SignInConnection(signin, () => { done++; });
+  await act(() => { render(<SignInPage form={form} />, root); });
+  await settle();
+  return { root, done: () => done };
+}
 
 describe('the first-setup sign-in page', () => {
   it('offers both ways when both are on, and the key field straight away when only the key is', async () => {

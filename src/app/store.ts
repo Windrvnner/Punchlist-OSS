@@ -12,7 +12,7 @@
 import { SERVICE } from '../control';
 import { commandLabel } from './commandLabels';
 import { capabilities } from './capabilities';
-import { CONNECTED } from './connection';
+import { CONNECTED, SharedFolderConnection, SignInConnection } from './connection';
 import { CHANGED_ELSEWHERE } from './changedElsewhere';
 import { overLimit, TOO_LONG } from '../domain/importExport';
 import type { Command, Plan } from './command';
@@ -1866,6 +1866,19 @@ export class Store {
       if (!!this.state.net.model !== down) this.set({ ...this.state, net: { ...this.state.net, model: down } });
     };
     return new Proxy(ai, { get: (t, k) => { const f = Reflect.get(t, k); return typeof f !== 'function' || !MODEL_CALLS.has(k) ? f : (...a: unknown[]) => { const r = f.apply(t, a); if (r instanceof Promise) void r.then(seen(++asked), () => undefined); return r; }; } });
+  }
+  settingsSignIn() {
+    const { signin } = this.services;
+    return signin ? new SignInConnection(signin) : null;
+  }
+  settingsSharedFolder() {
+    const { place } = this.services;
+    return place ? new SharedFolderConnection(place) : null;
+  }
+  signInFromNotice() {
+    const { signin } = this.state;
+    if (signin?.sso && !signin.apiKey) void this.services.signin?.signIn();
+    else this.ui({ settings: true });
   }
   /**
    * Intelligence sign-in, looked at every 2 seconds while the app is open (desktop): while nobody is signed in the app
