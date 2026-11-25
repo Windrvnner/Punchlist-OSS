@@ -63,6 +63,9 @@ let trim: ReturnType<typeof setInterval> | undefined;
 
 async function start() {
   try { assertControl(); } catch (e) { stop(e); return; }     // a value out of range in the control file stops the app, naming it
+  ipcMain.on('punchlist:flush-kept-text', ({ sender }) => {
+    if (sender === win?.webContents) sender.session.flushStorageData();
+  });
   ipcMain.handle('punchlist:describe', () => bridge.describe());
   // while the folder is being changed the backend's services are away for a moment: the window hears "can't be reached" and
   // shows it is offline, with Retry, rather than being told the service is not there

@@ -4,7 +4,8 @@ import type { ComponentChildren } from 'preact';
 import { useAppState, useStore, fmtDate } from './hooks';
 import type { Store } from '../app/store';
 import { Icon } from './icons';
-import { Ref, fewDocuments } from './ref';
+import { Ref } from './ref';
+import { canAddToSources, fewDocuments } from '../app/citations';
 import { ConflictView } from './conflict';
 import { DocName } from './docName';
 import { ResearchView, SourceChips } from './research';
@@ -17,6 +18,7 @@ import { RestoreQuestion } from '../app/commands/questions';
 import { RestoreFinding } from '../app/commands/findings';
 import { dealHash, type Message } from '../app/state';
 import { KeptAsk } from './findingAsk';
+import { editDrafts } from '../app/findingDrafts';
 
 const Sep = () => <span class="sep">›</span>;
 
@@ -95,14 +97,18 @@ function GoneLine({ scope, deal, restore }: {
   const deleted = gone && gone.kind !== 'deal' ? gone : null;
   const back = deleted && deal ? `back to ${deal.name}` : deal ? `Back to ${deal.name}` : 'Back to Home';
   return (
-    <p class="emptyline" id="gone" style="margin-top:20px">
-      {deleted ? <>
-        {deleted.kind === 'finding' ? 'That finding was deleted.' : 'That question was deleted.'}{' '}
-        <button type="button" class="linkb" id="gone-restore" onClick={() => restore(deleted)}>Restore it</button>
-        {' or go '}
-      </> : <>{noLongerHere(scope)}{' '}</>}
-      <a class="linkb" href={deal ? `#${dealHash(state.prefs, deal.id)}` : '#deals'}>{back}</a>
-    </p>
+    <>
+      <p class="emptyline" id="gone" style="margin-top:20px">
+        {deleted ? <>
+          {deleted.kind === 'finding' ? 'That finding was deleted.' : 'That question was deleted.'}{' '}
+          <button type="button" class="linkb" id="gone-restore" onClick={() => restore(deleted)}>Restore it</button>
+          {' or go '}
+        </> : <>{noLongerHere(scope)}{' '}</>}
+        <a class="linkb" href={deal ? `#${dealHash(state.prefs, deal.id)}` : '#deals'}>{back}</a>
+      </p>
+      {deleted?.kind === 'finding' && editDrafts.has(deleted.id) &&
+        <p class="emptyline" id="gone-finding-edit" role="status">Unsaved finding edit kept.</p>}
+    </>
   );
 }
 
@@ -172,15 +178,12 @@ function SentFiles({ scope, files }: { scope: Scope; files: NonNullable<Message[
   const state = useAppState();
   const finding = scope.kind === 'finding' ? state.findings[scope.findingId] : null;
   return (
-    <div class="matt">{files.map((file) => {
-      const inSources = !!finding && finding.sources.some((source) => docKey(source) === docKey(file));
-      return (
-        <span class="chip att" key={docKey(file)}><Icon name="doc" size={12} /><DocName name={file.doc} />
-          {finding && !inSources && <button type="button" class="addsrc" data-addsrc
-            onClick={() => void addToSources(store, finding.dealId, finding.id, file)}>Add to Sources</button>}
-        </span>
-      );
-    })}</div>
+    <div class="matt">{files.map((file) => (
+      <span class="chip att" key={docKey(file)}><Icon name="doc" size={12} /><DocName name={file.doc} />
+        {canAddToSources(finding, file) && <button type="button" class="addsrc" data-addsrc
+          onClick={() => void addToSources(store, finding.dealId, finding.id, file)}>Add to Sources</button>}
+      </span>
+    ))}</div>
   );
 }
 

@@ -9,7 +9,8 @@ import { useAppState, useStore, fmtDate, whenText , useDismiss, useMinuteTick } 
 import { afterDeletingFinding } from './nav';
 import { Icon } from './icons';
 import { ChoiceCheck } from './moreMenu';
-import { Ref, byDocument, fewDocuments } from './ref';
+import { Ref } from './ref';
+import { byDocument, fewDocuments } from '../app/citations';
 import { DocName } from './docName';
 import { FindingsHead } from './findingsHead';
 import { workstreamChoices } from '../domain/order';
@@ -392,7 +393,11 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
   const listed = !fewDocuments(f.sources);
   const raised = f.origin !== 'ai' && f.raisedBy ? `Raised by ${f.raisedBy} · ${fmtDate(localYmd(f.raisedAt))}` : `identified ${whenText(f.raisedAt).toLowerCase()}`;
   const commit = async (status: 'open' | 'closed', text: string) => { const r = await store.dispatch(SetFindingStatus, { dealId, findingId, status, note: text.trim() || undefined }, { idempotencyKey: 'fst-' + f.id }); if (r.ok) setNote(null); };
-  const del = async () => { const r = await store.dispatch(DeleteFinding, { dealId, findingId }, { idempotencyKey: 'fdel-' + f.id }); if (r.ok) location.hash = afterDeletingFinding(dealId); };
+  const del = async () => {
+    const result = await store.dispatch(DeleteFinding, { dealId, findingId }, { idempotencyKey: 'fdel-' + f.id });
+    // #763: the deleted page names the draft and can restore the finding with its edit.
+    if (result.ok && !editDrafts.has(f.id)) location.hash = afterDeletingFinding(dealId);
+  };
   return (
       <div class="opening">
         <div class="lbl fmeta"><span>{f.workstream}{dot(f)}{raised}{f.reviewed ? ` · reviewed by ${f.reviewed.by}, ${fmtDate(localYmd(f.reviewed.at))}` : ''}{last ? ` · ${lastText} · ${whenText(last.at).toLowerCase()}` : ''}<OnListMark f={f} /></span>
@@ -425,7 +430,12 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
         {busy ? <div class="ai pending" aria-label="Updating"><span class="dots"><i /><i /><i /></span></div> : f.body.map((b, i) => <p class="dtxt" key={i}><Cited text={b} sources={f.sources} onOpen={onOpen} whole={!marked.size && !f.ownWords} onMore={listed ? showSources : undefined} /></p>)}
         {/* more documents than a pop shows: every one, with its places, in a list like Previous version */}
         {!busy && listed && <details class="prev fsrcs" id="f-sources" ref={srcList} open={srcOpen} onToggle={(e) => setSrcOpen((e.currentTarget as HTMLDetailsElement).open)}><summary>{docs.length} sources</summary>
-          <div class="sgl">{docs.map((g) => <div class="sgr" key={g.doc.docId}><span class="sgd"><DocName name={g.doc.doc} /></span><span class="sgp">{g.items.filter((x, j) => g.items.findIndex((y) => y.loc === x.loc) === j).map((x, j) => <button type="button" class="srcbtn" key={j} aria-label={`${g.doc.doc}, ${x.loc || 'open'}`} onClick={() => onOpen(x)}>{x.loc || 'Open'}</button>)}</span></div>)}</div></details>}
+          <div class="sgl">{docs.map((g) => <div class="sgr" key={g.doc.docId}>
+            <span class="sgd"><DocName name={g.doc.doc} /></span>
+            <span class="sgp">{g.pages.map((x, j) => <button type="button" class="srcbtn" key={j}
+              aria-label={`${g.doc.doc}, ${x.loc || 'open'}`} onClick={() => onOpen(x)}>
+              {x.loc || 'Open'}</button>)}</span>
+          </div>)}</div></details>}
         {f.note && <><div class="lbl" style="margin-top:12px">Note</div><p class="dtxt" style="white-space:pre-wrap">{f.note}</p></>}
         {prev && <details class="prev"><summary>Previous version · {fmtDate(localYmd(prev.at))}{wasReviewed ? ` · reviewed by ${wasReviewed.by}` : ''}</summary><p class="dtxt">{(prev.from as string[]).join(' ').replace(/\s*\[\d+\]/g, '')}</p></details>}
         </>}
