@@ -277,7 +277,7 @@ it('logs a refused command alone and asks the AI what was typed during its save'
   // A restart keeps which part of the box is the refused command.
   saveKeptDrafts();
   const kept = local.read(KEPT_TEXT_KEY) as { 'refused-commands'?: [string, unknown][] } | null;
-  expect(new Map(kept?.['refused-commands']).get(key)).toEqual({ commands: [command], after: followUp });
+  expect(new Map(kept?.['refused-commands']).get(key)).toEqual([command]);
   await sendTyped(store, scope, { navigate });
   expect(Object.values(store.get().questions).map((question) => question.text)).toEqual([instructions[50]]);
   expect(composerText(key)).toBe(followUp);
@@ -287,18 +287,15 @@ it('logs a refused command alone and asks the AI what was typed during its save'
   expect(Object.values(store.get().questions)).toHaveLength(1);
 });
 
-it('sends the box whole once the text after a refused command is no longer what was put back', async () => {
+it('logs a refused command alone after the text typed during its save was edited', async () => {
   const { store, scope, navigate } = await start();
   const key = convKey(scope);
   const command = `Log a question: ${instructions[70]}`;
-  const detail = instructions[71];
-  await refusedWhileTyping(store, scope, command, instructions[72]);
-  // The person replaces what followed with a second paragraph of the same question.
-  setComposerText(key, `${command}\n\n${detail}`);
+  await refusedWhileTyping(store, scope, command, 'Waht is the revenue?');
+  setComposerText(key, `${command}\n\nWhat is the revenue?`);
   await sendTyped(store, scope, { navigate });
-  const logged = Object.values(store.get().questions).map((question) => question.text);
-  expect(logged).toEqual([`${instructions[70]}\n\n${detail}`]);
-  expect(composerText(key)).toBe('');
+  expect(Object.values(store.get().questions).map((question) => question.text)).toEqual([instructions[70]]);
+  expect(composerText(key)).toBe('What is the revenue?');
 });
 
 it('leaves a refused command to Retry, not the box, when the store keeps it as interrupted work', async () => {

@@ -8,15 +8,10 @@ import { CreateQuestion } from './commands/questions';
 import { keptDrafts } from './keptText';
 import type { Store } from './store';
 
-/** The refused commands at the head of a box, newest first, and the text that followed them when they were put back. */
-type Held = { commands: string[]; after: string };
-const isHeld = (value: unknown): value is Held => {
-  const held = value as Partial<Held> | null;
-  return typeof held?.after === 'string' && Array.isArray(held.commands)
-    && held.commands.every((command) => typeof command === 'string');
-};
-let kept: Map<string, Held> | undefined;
-const heldCommands = () => kept ??= keptDrafts('refused-commands', isHeld);
+const isTexts = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((text) => typeof text === 'string');
+let held: Map<string, string[]> | undefined;
+const heldCommands = () => held ??= keptDrafts('refused-commands', isTexts);
 
 /** Load the map before recovery can move saved drafts to a copy. */
 export function initializeRefusedCommands() {
@@ -33,31 +28,33 @@ export function boxWithRefused(key: string, command: string, typedSince: string)
     heldCommands().delete(key);
     return command;
   }
-  const earlier = standing(key, since);
-  heldCommands().set(key, earlier
-    ? { commands: [command, ...earlier.commands], after: earlier.after }
-    : { commands: [command], after: since });
+  heldCommands().set(key, [command, ...commandsAtHead(since, heldCommands().get(key) ?? [])]);
   return `${command}\n\n${since}`;
 }
 
 /**
- * What a send takes from the box: the refused command at its head, while the box still starts with what was put back,
- * with the rest left in the box; otherwise the whole box, as usual.
+ * What a send takes from the box: the refused command at its head, while it still stands there unchanged with more
+ * after it, and the rest, as it is now, left in the box; otherwise the whole box, as usual. Text after the command is
+ * never joined to it, even when it was edited since, so a follow-up is not logged as part of the question.
  */
 export function takeFromBox(key: string, text: string): { send: string; rest: string } {
-  const held = standing(key, text);
+  const [head, ...others] = commandsAtHead(text, heldCommands().get(key) ?? []);
   heldCommands().delete(key);
-  if (!held) return { send: text, rest: '' };
-  const [head, ...others] = held.commands;
-  if (others.length) heldCommands().set(key, { commands: others, after: held.after });
+  if (!head) return { send: text, rest: '' };
+  if (others.length) heldCommands().set(key, others);
   return { send: head, rest: text.slice(head.length).trim() };
 }
 
-/** The box's remembered commands, if the box still starts with them and the text that followed them, unchanged. */
-function standing(key: string, text: string): Held | undefined {
-  const held = heldCommands().get(key);
-  if (!held?.commands.length) return undefined;
-  return text.startsWith([...held.commands, held.after].join('\n\n')) ? held : undefined;
+/** The remembered commands that still stand, unchanged and in order, at the head of the box, each followed by more. */
+function commandsAtHead(text: string, commands: string[]): string[] {
+  const standing: string[] = [];
+  let rest = text;
+  for (const command of commands) {
+    if (!rest.startsWith(`${command}\n\n`)) break;
+    standing.push(command);
+    rest = rest.slice(command.length + 2);
+  }
+  return standing;
 }
 
 /** The interrupted saves offered with Retry now, so a refusal can tell which one it left. */
