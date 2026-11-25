@@ -1,6 +1,7 @@
 // @vitest-environment node
-// The AI-attribution check: tracked files and the branch's commit messages must hold no AI-tool attribution, footer,
-// or link to an AI chat session. The refused texts are built at run time, so this file itself holds none of them.
+// The attribution check: tracked files and the branch's commit messages must hold no AI-tool attribution, footer,
+// or link to an AI chat session, no decision credited to a person, and no email address other than an example or
+// no-reply one. The refused texts are built at run time, so this file itself holds none of them.
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,6 +15,8 @@ const refused = {
   hidden: ['<!-- claude-projects', '-attribution: {} -->'].join(''),
   trailer: ['Co-Authored-By: Claude', ' <noreply@example.com>'].join(''),
   session: ['Claude-Sess', 'ion: x'].join(''),
+  credit: ['Decision: newest first, as the ', 'owner asked (Jane Doe, Nov 18).'].join(''),
+  email: ['Write to jane.doe', '@', 'firm.test about it.'].join(''),
 };
 
 const footer = ['Generated with [Claude', ' Code](https://claude.com/', 'claude-code)'].join('');
@@ -39,6 +42,8 @@ describe('the attribution check', () => {
     const r = repo();
     r.track('a.md', 'See https://platform.claude.com/docs/en/api/overview. Sample generated with a script.\n');
     r.track('b.md', `${productFooter}\nNext line\n`);
+    r.track('c.md', `Rules quote "the ${'owner'} wants". Mail a@example.com or 1+a@users.noreply.github.com.\n`);
+    r.track('package-lock.json', `{ "deprecated": "contact i${'@'}firm.test" }\n`);
     r.commit(`Add a note\n\n${footer}\n${productFooter}\n`);
     expect(r.check().status).toBe(0);
   });
@@ -60,6 +65,16 @@ describe('the attribution check', () => {
     r.commit('Clean change');
     expect(r.check().status).toBe(0);
     r.commit(`Bad change\n\n${refused.session}`);
+    const out = r.check();
+    expect(out.status).toBe(1);
+    expect(out.stderr).toContain('commit');
+  });
+
+  it.each(['credit', 'email'] as const)('refuses a commit message of the branch that holds the %s', (name) => {
+    const r = repo();
+    r.commit('Old');
+    r.git('checkout', '-q', '-b', 'topic');
+    r.commit(`Change\n\n${refused[name]}`);
     const out = r.check();
     expect(out.status).toBe(1);
     expect(out.stderr).toContain('commit');

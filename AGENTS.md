@@ -97,6 +97,8 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   decided, or said something (names, "the owner wants", "the maintainer asked", quotes of the user, or notes that
   carry a person and a date) and carry no AI attribution trailers. Product terms and data fields such as `owner` are
   fine. State decisions plainly ("Decision: X"). Attribution blocks a merge, like lost work.
+  `scripts/check-attribution.mjs` refuses a role credited with a decision ("the owner wants") and any email address
+  other than an example or no-reply one, in tracked files and the branch's commit messages.
 - Clean contributions: everything written to GitHub (issues, comments, pull requests, reviews, commit messages,
   docs, and code comments) follows ordinary open-source hygiene. It carries no personal information, no internal or
   private links, no references to non-public systems or services, and no text copied from third-party documentation.
