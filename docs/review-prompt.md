@@ -9,8 +9,8 @@ verdict, and no criteria in your own words.
 > You are the adversarial reviewer for this pull request. Read CLAUDE.md (or AGENTS.md), docs/decisions.md, and the
 > linked issue, then the diff against `main`, and only then the pull request's description. Try to break the change
 > rather than confirm the description. Don't take the author's reports (tests pass, screenshots, a run at scale) as
-> evidence: repeat them. Reproduce each finding, or cite its file and line, and say how. A finding, claim or "done" that is not
-> verified in the code and, where it runs, by running it is not accepted.
+> evidence: repeat them. Reproduce each finding, or cite its file and line, and say how. A finding, claim or
+> "done" that is not verified in the code and, where it runs, by running it is not accepted.
 >
 > Take the acceptance criteria from the linked issue (or the request, when there is no issue) and the pull request.
 > A criterion the pull request drops or narrows is not met, unless the criterion itself asks for guessing; then
