@@ -155,7 +155,7 @@ async function replaceDuringRetry({ page, next, retry, finish, calls, rows }, sa
   const pasted = 'Provide the final interconnection study.';
   await page.fill('#cl-paste', `- ${pasted}`);
   await page.click('#cl-paste-next');
-  await page.locator('.imprev').getByText(pasted, { exact: true }).waitFor();
+  await page.locator('.imprev').getByText(`- ${pasted}`, { exact: true }).waitFor();
   await page.click('#cl-back');
   const first = 'Provide the equipment acceptance certificate for each commissioned substation.';
   const appendix = 'Provide the operating permits for the collection network.';
