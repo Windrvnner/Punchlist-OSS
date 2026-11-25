@@ -10,6 +10,7 @@
  */
 import type { State } from './state';
 import { SERVICE } from '../control';
+import type { AiSignIn, SignInStatus } from '../ports';
 
 /** the event a window hears when the app is connected again: a field whose save could not be written sends its text again */
 export const CONNECTED = 'punchlist-connected';
@@ -57,4 +58,105 @@ export function connection(s: Pick<State, 'sync' | 'net' | 'signin'>, online: bo
   // OneDrive out for 15 minutes is also said once in a notice, as any other notice
   const notice = online && !!out && now - Date.parse(out) >= NOTICE_ONEDRIVE_MS ? `OneDrive hasn’t synced since ${clockTime(out, now)}` : null;
   return { rows, wrong: rows.some((r) => r.tone !== 'good'), dot, notice };
+}
+
+/** Each open form owns its state, including any API key being typed. */
+function formState<T>(initial: T) {
+  let state = initial;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => state,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+    update(change: Partial<T>) {
+      state = { ...state, ...change };
+      for (const listener of listeners) listener();
+    },
+  };
+}
+
+interface SignInForm {
+  status: SignInStatus | null;
+  mode: 'idle' | 'ways' | 'key';
+  key: string;
+  busy: boolean;
+  error: { message: string; away: boolean } | null;
+}
+
+export function canUseSignInKey({ key, busy }: Pick<SignInForm, 'key' | 'busy'>) {
+  return !busy && !!key.trim();
+}
+
+/** Sign-in at first setup and in Settings. The read-only watcher in Store also looks for later sign-outs. */
+export class SignInConnection {
+  private form;
+  private looking?: Promise<void>;
+  private timer?: ReturnType<typeof setInterval>;
+  private active = false;
+
+  constructor(private signin: AiSignIn, private onSignedIn?: () => void, status: SignInStatus | null = null) {
+    this.form = formState<SignInForm>({ status, mode: 'idle', key: '', busy: false, error: null });
+  }
+
+  get = () => this.form.get();
+  subscribe = (listener: () => void) => this.form.subscribe(listener);
+
+  start = () => {
+    this.active = true;
+    void this.look().then(() => {
+      if (this.active && this.get().status?.signedIn === false) {
+        this.timer = setInterval(() => void this.look(), 2000);
+      }
+    });
+    return () => {
+      this.active = false;
+      clearInterval(this.timer);
+    };
+  };
+
+  private look() {
+    this.looking ??= this.signin.status().then((result) => {
+      if (!this.active || !result.ok) return;
+      const wasSignedIn = this.get().status?.signedIn;
+      this.form.update({ status: result.value });
+      if (result.value.signedIn) {
+        clearInterval(this.timer);
+        if (!wasSignedIn) this.onSignedIn?.();
+      }
+    }, () => undefined).finally(() => { this.looking = undefined; });
+    return this.looking;
+  }
+
+  setKey = (key: string) => this.form.update({ key, error: null });
+  openKey = () => this.form.update({ mode: 'key', error: null });
+  openWays = () => this.form.update({ mode: 'ways' });
+  cancel = () => this.form.update({ mode: 'idle', error: null });
+
+  signIn = async () => {
+    this.form.update({ error: null });
+    const result = await this.signin.signIn();
+    if (!result.ok) {
+      this.form.update({ error: { message: result.error.message, away: false } });
+    } else if (!this.onSignedIn) {
+      this.form.update({ mode: 'idle' });
+    }
+  };
+
+  useKey = async () => {
+    const state = this.get();
+    if (!canUseSignInKey(state)) return;
+    this.form.update({ busy: true, error: null });
+    const result = await this.signin.paste(state.key);
+    if (!result.ok) {
+      const { message, kind } = result.error;
+      this.form.update({ busy: false, error: { message, away: kind === 'unreachable' } });
+      return;
+    }
+    this.form.update({ key: '', busy: false, ...(this.onSignedIn ? {} : { mode: 'idle' }) });
+    // A pending status request may have read before the key was accepted. Look again after it.
+    await this.looking;
+    if (this.active) await this.look();
+  };
 }
