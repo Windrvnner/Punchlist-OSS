@@ -10,8 +10,8 @@ import { EditField, ReadOnlyContext } from './editField';
 import { readFolderLabel } from '../app/fieldDrafts';
 import { FolderCount, FolderRow, NameTip, RemoveX } from './folderRow';
 import { plural } from './counts';
-import { EditDeal, foldersWithRemoved, overlap, FOLDER_LABEL_MAX } from '../app/commands/deals';
-import { liveFolders } from '../app/indexing';
+import { EditDeal, FOLDER_LABEL_MAX } from '../app/commands/deals';
+import { dealFolderRows } from '../app/dealFolders';
 import type { Deal, Folder } from '../domain/model';
 
 type Removed = Deal['removed'][number];
@@ -21,14 +21,13 @@ type DealFoldersProps = {
   deal: Deal;
   /** why the names are read-only (the deal is in two versions), if they are */
   locked?: string | false | null;
-  /** a waiting folder that overlaps a removed one: Restore says so and is off */
-  waitingOver: (f: Folder) => string | null;
   restore: (gone: Removed) => void;
   /** the × asks first, in the app's confirm */
   ask: (f: Folder) => void;
 };
 
 type FoldersBodyProps = DealFoldersProps & {
+  /** the folders waiting under To Add; one that overlaps a removed folder turns its Restore off */
   waiting: Waiting[];
   change: (folders: Waiting[]) => void;
   onDrop: (e: DragEvent) => void;
@@ -44,7 +43,7 @@ type FoldersBodyProps = DealFoldersProps & {
 export function FoldersBody({ waiting, change, onDrop, pastePath, paste, ...folders }: FoldersBodyProps) {
   return (
     <div class="fdbody">
-      <DealFolders {...folders} />
+      <DealFolders {...folders} waiting={waiting} />
       {waiting.length > 0 && <WaitingFolders folders={waiting} change={change} />}
       <DropZone id="nd-drop" compact onDrop={onDrop}>
         Drop folders here, or{' '}
@@ -56,24 +55,19 @@ export function FoldersBody({ waiting, change, onDrop, pastePath, paste, ...fold
 }
 
 /** The deal's folders, then the removed ones under their own heading, each with Restore */
-function DealFolders({ deal, locked, waitingOver, restore, ask }: DealFoldersProps) {
-  const live = liveFolders(useAppState(), deal);
-  const rows = foldersWithRemoved(deal);
-  if (!rows.length) return null;
-  const on = rows.filter((r) => !r.gone);
-  const off = rows.flatMap((r) => r.gone ? [r.gone] : []);
-  const indexedOf = (path: string) => live.find((f) => f.path === path)?.indexed;
-  const restoreLock = (f: Removed) => locked || overlap(deal.folders, f) || waitingOver(f) || undefined;
+function DealFolders({ deal, locked, waiting, restore, ask }: DealFoldersProps & { waiting: Waiting[] }) {
+  const { current, removed } = dealFolderRows(useAppState(), deal, waiting, locked);
+  if (!current.length && !removed.length) return null;
   return (
     <ReadOnlyContext.Provider value={locked || null}>
       <div class="fdlist" id="folders">
-        {on.length > 0 && <div class="fdgroup">{on.map(({ f }) => (
-          <DealFolderRow key={f.path} deal={deal} folder={f} indexed={indexedOf(f.path)} locked={!!locked} ask={ask} />
+        {current.length > 0 && <div class="fdgroup">{current.map(({ folder, indexed }) => (
+          <DealFolderRow key={folder.path} deal={deal} folder={folder} indexed={indexed} locked={!!locked} ask={ask} />
         ))}</div>}
-        {off.length > 0 && <div class="fdsec" id="folders-removed" role="heading" aria-level={3}>Removed</div>}
-        {off.length > 0 && <div class="fdgroup">{off.map((gone) => (
+        {removed.length > 0 && <div class="fdsec" id="folders-removed" role="heading" aria-level={3}>Removed</div>}
+        {removed.length > 0 && <div class="fdgroup">{removed.map(({ gone, restoreOff }) => (
           <FolderRow key={gone.path} path={gone.path} gone name={<span class="fdname">{gone.label}</span>}
-            action={<Restore locked={restoreLock(gone)} path={gone.path} run={() => restore(gone)} />} />
+            action={<Restore locked={restoreOff} path={gone.path} run={() => restore(gone)} />} />
         ))}</div>}
       </div>
     </ReadOnlyContext.Provider>
