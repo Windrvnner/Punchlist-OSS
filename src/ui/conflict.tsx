@@ -17,7 +17,8 @@ import { AI_LABEL } from '../control';
 import { Icon } from './icons';
 import { Stepper } from './choiceCards';
 import { titleStyle } from './titleStyle';
-import { openConflict, twoVersionsQueue } from './twoVersions';
+import { twoVersionsQueue } from '../app/qaView';
+import { openConflict } from './twoVersions';
 
 type Fmt = (value: any, record: any, s: State) => string;
 const text: Fmt = (v) => String(v ?? '');
