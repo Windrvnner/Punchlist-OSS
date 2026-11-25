@@ -4,7 +4,8 @@ import type { ComponentChildren } from 'preact';
 import { useAppState, useStore, fmtDate } from './hooks';
 import type { Store } from '../app/store';
 import { Icon } from './icons';
-import { Ref, fewDocuments } from './ref';
+import { Ref } from './ref';
+import { canAddToSources, fewDocuments } from '../app/citations';
 import { ConflictView } from './conflict';
 import { DocName } from './docName';
 import { ResearchView, SourceChips } from './research';
@@ -178,10 +179,9 @@ function SentFiles({ scope, files }: { scope: Scope; files: NonNullable<Message[
   const finding = scope.kind === 'finding' ? state.findings[scope.findingId] : null;
   return (
     <div class="matt">{files.map((file) => {
-      const inSources = !!finding && finding.sources.some((source) => docKey(source) === docKey(file));
       return (
         <span class="chip att" key={docKey(file)}><Icon name="doc" size={12} /><DocName name={file.doc} />
-          {finding && !inSources && <button type="button" class="addsrc" data-addsrc
+          {finding && canAddToSources(finding, file) && <button type="button" class="addsrc" data-addsrc
             onClick={() => void addToSources(store, finding.dealId, finding.id, file)}>Add to Sources</button>}
         </span>
       );
