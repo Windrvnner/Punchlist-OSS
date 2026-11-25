@@ -12,7 +12,7 @@ import { readImportBytes } from '../../src/app/transfer';
 import { CreateDeal } from '../../src/app/commands/deals';
 import { KeepQaLog } from '../../src/app/commands/qaLogs';
 import { dealQuestions } from '../../src/app/state';
-import { recoveryApp, recoveryDeal, type RecoveryApp } from '../app/recoveryKit';
+import { operationWrite, recoveryApp, recoveryDeal, type RecoveryApp } from '../app/recoveryKit';
 
 const PATH = 'X:\\Deals\\Proseware\\Q&A\\Lender Q&A.csv';
 const SAID = 'Project Recovery fixture already uses “Lender Q&A.csv” in this folder as its Q&A log. '
@@ -35,20 +35,36 @@ afterEach(() => {
   }
 });
 
-/** deal A with its log at PATH, and deal B with no log; every file picked is at PATH */
-async function twoDeals() {
-  const app = recoveryApp();
-  const first = await recoveryDeal(app);
+/** deal A makes the file at PATH its Q&A log */
+async function claimLog(app: RecoveryApp, dealId: string) {
   const log = {
     name: 'Lender Q&A', file: 'Lender Q&A.csv', folder: 'X:\\Deals\\Proseware\\Q&A', sheet: 'Sheet1', headerRow: 1,
     mapping: { text: 0, response: 1 },
   };
-  expect((await app.store.dispatch(KeepQaLog, { dealId: first, log })).ok).toBe(true);
+  expect((await app.store.dispatch(KeepQaLog, { dealId, log })).ok).toBe(true);
+}
+
+/** deal A with its log at PATH (unless `claimed` is false), and deal B with no log; every file picked is at PATH */
+async function twoDeals(claimed = true) {
+  const app = recoveryApp();
+  const first = await recoveryDeal(app);
+  if (claimed) await claimLog(app, first);
   await app.store.dispatch(CreateDeal, { name: 'Contoso', folders: [] });
   const second = Object.keys(app.store.get().deals).find((id) => id !== first)!;
   await app.store.loadDeal(second, { gaps: false });
   app.store.services.fs.pathFor = () => PATH;
   return { app, first, second, had: app.store.get().deals[first].qaLogs };
+}
+
+/** the whole 2,000-question file at PATH, kept as picked in `dealId`'s import, set to Append */
+async function keepImportOf(app: RecoveryApp, dealId: string) {
+  await keptImportsReady;
+  const read = await readImportBytes(app.store, 'Lender Q&A.csv', Uint8Array.from(new TextEncoder().encode(CSV)));
+  if (!read.ok) throw new Error(read.error.message);
+  const choices = {
+    mapping: { text: 0, response: 1 }, path: PATH, mode: 'append', answered: true, makeLog: true, touched: true,
+  };
+  keepImport(importKey.qa(dealId), { table: read.value, choices });
 }
 
 async function openImport(app: RecoveryApp, dealId: string) {
@@ -78,18 +94,55 @@ describe('another deal\'s Q&A log (#38)', () => {
 
   it('a kept import of it, not sent yet, imports nothing', async () => {
     const { app, first, second, had } = await twoDeals();
-    await keptImportsReady;
-    const read = await readImportBytes(app.store, 'Lender Q&A.csv', Uint8Array.from(new TextEncoder().encode(CSV)));
-    if (!read.ok) throw new Error(read.error.message);
-    const choices = {
-      mapping: { text: 0, response: 1 }, path: PATH, mode: 'append', answered: true, makeLog: true, touched: true,
-    };
-    keepImport(importKey.qa(second), { table: read.value, choices });
+    await keepImportOf(app, second);
     const screen = await openImport(app, second);
     await vi.waitFor(() => expect(screen.querySelector<HTMLButtonElement>('#im-go')?.disabled).toBe(false));
     await act(() => screen.querySelector<HTMLButtonElement>('#im-go')!.click());
     await vi.waitFor(() => expect(screen.textContent).toContain(SAID));
     expect([dealQuestions(app.store.get(), second).length, app.store.get().deals[first].qaLogs]).toEqual([0, had]);
+    await app.repo.close();
+  });
+
+  // The first Import fails before its operation reaches the journal; deal A then makes the file its log (#926).
+  it.each([['the same choices', null], ['Merge chosen instead', 'merge']] as const)(
+    'a retry with %s after a failed first Import imports nothing', async (_name, mode) => {
+      const { app, first, second } = await twoDeals(false);
+      await keepImportOf(app, second);
+      const screen = await openImport(app, second);
+      await vi.waitFor(() => expect(screen.querySelector<HTMLButtonElement>('#im-go')?.disabled).toBe(false));
+      const original = app.repo.transaction.bind(app.repo);
+      app.repo.transaction = async (transaction) => (operationWrite(transaction, 'ImportQuestions', 'pending')
+        ? { ok: false, error: { kind: 'failed', message: 'Journal busy' } }
+        : original(transaction));
+      await act(() => screen.querySelector<HTMLButtonElement>('#im-go')!.click());
+      await vi.waitFor(() => expect(screen.textContent).toContain('Journal busy'));
+      app.repo.transaction = original;
+      await claimLog(app, first);
+      const had = app.store.get().deals[first].qaLogs;
+      if (mode) await act(() => screen.querySelector<HTMLButtonElement>(`[data-immode="${mode}"]`)!.click());
+      await act(() => screen.querySelector<HTMLButtonElement>('#im-go')!.click());
+      await vi.waitFor(() => expect(screen.textContent).toContain(SAID));
+      expect([dealQuestions(app.store.get(), second).length, app.store.get().deals[first].qaLogs]).toEqual([0, had]);
+      expect(app.store.get().deals[second].qaLogs).toEqual([]);
+      await app.repo.close();
+    },
+  );
+
+  it('a retry after a failed first Import still imports when no other deal has the file', async () => {
+    const { app, second } = await twoDeals(false);
+    await keepImportOf(app, second);
+    const screen = await openImport(app, second);
+    await vi.waitFor(() => expect(screen.querySelector<HTMLButtonElement>('#im-go')?.disabled).toBe(false));
+    const original = app.repo.transaction.bind(app.repo);
+    app.repo.transaction = async (transaction) => (operationWrite(transaction, 'ImportQuestions', 'pending')
+      ? { ok: false, error: { kind: 'failed', message: 'Journal busy' } }
+      : original(transaction));
+    await act(() => screen.querySelector<HTMLButtonElement>('#im-go')!.click());
+    await vi.waitFor(() => expect(screen.textContent).toContain('Journal busy'));
+    app.repo.transaction = original;
+    await act(() => screen.querySelector<HTMLButtonElement>('#im-go')!.click());
+    await vi.waitFor(() => expect(dealQuestions(app.store.get(), second)).toHaveLength(2000));
+    expect(app.store.get().deals[second].qaLogs[0]).toMatchObject({ file: 'Lender Q&A.csv' });
     await app.repo.close();
   });
 });

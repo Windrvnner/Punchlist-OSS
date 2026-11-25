@@ -226,6 +226,9 @@ async function resumeSubmission(store: Store, dealId: string, submission: Submis
     return result ?? stillRunning();
   }
   const { choices, rows } = submission;
+  // Rows not yet in the journal are refused if another deal has made the file its log since they were kept (#926).
+  const taken = logTakenBy(store, dealId, choices.path);
+  if (taken) return fail({ kind: 'rejected', message: taken });
   return store.dispatch(ImportQuestions, {
     dealId, mode: choices.mode, rows, answerResponded: choices.answered,
   }, { idempotencyKey: submission.key });
