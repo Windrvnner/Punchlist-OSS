@@ -48,6 +48,8 @@ export interface BridgeApi {
   on(service: Watched, listener: (change: unknown) => void): () => void;
   /** the path of a file dropped or picked in the window */
   pathFor(file: File): string;
+  /** Ask Chromium to write the saved drafts to disk (#825). */
+  flushKeptText(): void;
 }
 
 export interface BridgedServices {
