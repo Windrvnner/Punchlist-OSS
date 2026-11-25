@@ -12,31 +12,68 @@ import { Icon } from './icons';
 import { Modal } from './dialogs';
 import type { Unresolved } from '../app/state';
 import {
+  chooseUnresolvedDraft, chooseUnresolvedLink, clearUnresolvedChoices, keepUnresolvedChoices,
+  pruneUnresolvedChoices, unresolvedChoices,
+} from '../app/addUnresolvedChoices';
+import {
   narrowUnresolved, prepareUnresolved, retryUnresolved, selectUnresolved, submitUnresolved,
   UNREAD_CHECKLIST as unread, type UnresolvedPreview,
 } from '../app/addUnresolved';
 
 const plural = (n: number) => `${n.toLocaleString('en-US')} question${n === 1 ? '' : 's'}`;
-const choices = new Map<string, { off: Set<string>; linked: Set<string> }>();
+
+type UnresolvedRowsProps = {
+  preview: UnresolvedPreview;
+  draftPoints: ReadonlySet<string>;
+  linkedPoints: ReadonlySet<string>;
+  checkPoint: (key: string, on: boolean) => void;
+  checkLink: (link: UnresolvedPreview['links'][number], on: boolean) => void;
+};
+const label = (point: Unresolved) => `${point.kind === 'finding' ? 'Finding' : 'Gap'} · ${point.what}`;
+
+function UnresolvedRows({ preview, draftPoints, linkedPoints, checkPoint, checkLink }: UnresolvedRowsProps) {
+  return <>
+    {preview.points.length > 0 && <div
+      class="lgrp">New Questions <span>{preview.points.length.toLocaleString('en-US')}</span></div>}
+    {preview.points.map((point) => <label class="lrow" key={point.key}>
+      <input type="checkbox" checked={draftPoints.has(point.key)}
+        onChange={(event) => checkPoint(point.key, event.currentTarget.checked)} />
+      <span class="lq">{point.text}<span class="lfor" title={label(point)}>{label(point)}</span></span>
+    </label>)}
+    {preview.links.length > 0 && <><div
+      class="lgrp">Already Asked? <span>{preview.links.length.toLocaleString('en-US')}</span></div>
+      {preview.links.map((link) => <label class="lrow" key={link.q.id}>
+        <input type="checkbox" checked={linkedPoints.has(link.point.key)}
+          onChange={(event) => checkLink(link, event.currentTarget.checked)} />
+        <span class="lq"><b>Q{link.q.n}</b>{link.q.text}
+          <span class="lfor" title={`Link to ${label(link.point)}`}>Link to {label(link.point)}</span>
+        </span>
+      </label>)}
+    </>}
+  </>;
+}
 
 export function AddUnresolvedDialog({ dealId }: { dealId: string }) {
   const store = useStore();
   const [ready, setReady] = useState<UnresolvedPreview | null>(null);
   const [count, setCount] = useState<number | null>(null);
   const [error, setError] = useState(''); const [busy, setBusy] = useState(false); const [tries, setTries] = useState(0); const [redo, setRedo] = useState(false);
-  // what the person unchecked or chose to link is kept per deal, so a stray click outside loses none of it (lost work first)
-  const kept0 = choices.get(dealId);
-  const [off, setOffNow] = useState<Set<string>>(kept0?.off ?? new Set()); const [linked, setLinkedNow] = useState<Set<string>>(kept0?.linked ?? new Set());
-  const setOff = (o: Set<string>) => { setOffNow(o); choices.set(dealId, { off: o, linked: choices.get(dealId)?.linked ?? linked }); };
-  const setLinked = (n: Set<string>) => { setLinkedNow(n); choices.set(dealId, { off: choices.get(dealId)?.off ?? off, linked: n }); };
+  const [choices, setChoices] = useState(() => unresolvedChoices(store, dealId));
+  const syncChoices = (preview: UnresolvedPreview) => {
+    const current = unresolvedChoices(store, dealId);
+    setChoices(keepUnresolvedChoices(store, dealId, pruneUnresolvedChoices(preview, current)));
+  };
   useEffect(() => {
     const wait = new AbortController();
     setError('');
     setReady(null);
-    void prepareUnresolved(store, dealId, { count: setCount, signal: wait.signal }).then((result) => {
+    const { linked } = unresolvedChoices(store, dealId);
+    void prepareUnresolved(store, dealId, { count: setCount, signal: wait.signal }, linked).then((result) => {
       if (!result || wait.signal.aborted) return;
-      if (result.ok) setReady(result.value);
-      else setError(result.error.message);
+      if (result.ok) {
+        setReady(result.value);
+        syncChoices(result.value);
+      } else setError(result.error.message);
     });
     return () => wait.abort();
   }, [dealId, tries]);
@@ -48,21 +85,14 @@ export function AddUnresolvedDialog({ dealId }: { dealId: string }) {
     setRedo(false);
     if (update) setReady(update);
   };
-  const selected = selectUnresolved(ready, off, linked);
-  const { points: kept, links } = selected;
-  // checking a link sets aside the new question for the same point, so it is not asked twice; it can be checked again
+  const selected = selectUnresolved(ready, choices.off, choices.linked);
+  const { points: kept, links, draftPoints, linkedPoints } = selected;
   const checkLink = (link: UnresolvedPreview['links'][number], on: boolean) => {
-    const nextLinked = new Set(linked);
-    const nextOff = new Set(off);
-    if (on) {
-      nextLinked.add(link.q.id);
-      nextOff.add(link.point.key);
-    } else nextLinked.delete(link.q.id);
-    setLinked(nextLinked);
-    setOff(nextOff);
+    setChoices(keepUnresolvedChoices(store, dealId, chooseUnresolvedLink(choices, link, on)));
   };
-  // and checking the new question again unchecks its link: a point is either asked anew or linked, never both
-  const checkPoint = (key: string, on: boolean) => { const o = new Set(off); const n = new Set(linked); if (on) { o.delete(key); for (const l of ready?.links ?? []) if (l.point.key === key) n.delete(l.q.id); } else o.add(key); setOff(o); setLinked(n); };
+  const checkPoint = (key: string, on: boolean) => {
+    setChoices(keepUnresolvedChoices(store, dealId, chooseUnresolvedDraft(choices, key, on)));
+  };
   const run = async () => {
     if (busy || !ready || (!kept.length && !links.length)) return;
     setBusy(true);
@@ -70,14 +100,15 @@ export function AddUnresolvedDialog({ dealId }: { dealId: string }) {
     const result = await submitUnresolved(store, dealId, selected);
     setBusy(false);
     if (result.kind === 'added') {
-      choices.delete(dealId);
+      clearUnresolvedChoices(store, dealId);
       store.ui({ dialog: null });
     } else if (result.kind === 'changed') {
-      setReady((current) => narrowUnresolved(current, result.keys));
+      setReady((current) => narrowUnresolved(current, result));
+      const remaining = narrowUnresolved(ready, result);
+      if (remaining) syncChoices(remaining);
       setError(`${plural(result.count)} changed since, so nothing was added`);
     } else setError(result.message);
   };
-  const label = (p: Unresolved) => `${p.kind === 'finding' ? 'Finding' : 'Gap'} · ${p.what}`;
   const go = kept.length ? `Add ${plural(kept.length)}` : links.length ? `Link ${plural(links.length)}` : 'Add questions';
   return (
     <Modal onClose={shut} label="Add all unresolved to Q&A" blur className={`sdlg xdlg lnkdlg ${(!ready && !error) || (ready && ready.points.length + ready.links.length > 8) ? 'tall' : ''}`}>
@@ -90,14 +121,8 @@ export function AddUnresolvedDialog({ dealId }: { dealId: string }) {
             && Array.from({ length: 9 }, (_, i) => <div class="phrow" key={i}><span
               class="bx" /><span><i /><i /></span></div>)}</>
           : !ready.points.length && !ready.out.length && !ready.links.length ? <p class="emptyline" id="au-none">Every gap and open finding has a question.</p>
-          : <>
-            {ready.points.length > 0 && <div
-              class="lgrp">New Questions <span>{ready.points.length.toLocaleString('en-US')}</span></div>}
-            {ready.points.map((p) => <label class="lrow" key={p.key}><input type="checkbox" checked={!off.has(p.key)} onChange={(e) => checkPoint(p.key, (e.currentTarget as HTMLInputElement).checked)} /><span class="lq">{p.text}<span class="lfor" title={label(p)}>{label(p)}</span></span></label>)}
-            {ready.links.length > 0 && <><div
-              class="lgrp">Already Asked? <span>{ready.links.length.toLocaleString('en-US')}</span></div>
-              {ready.links.map((l) => <label class="lrow" key={l.q.id}><input type="checkbox" checked={linked.has(l.q.id)} onChange={(e) => checkLink(l, (e.currentTarget as HTMLInputElement).checked)} /><span class="lq"><b>Q{l.q.n}</b>{l.q.text}<span class="lfor" title={`Link to ${label(l.point)}`}>Link to {label(l.point)}</span></span></label>)}</>}
-          </>}
+          : <UnresolvedRows preview={ready} draftPoints={draftPoints} linkedPoints={linkedPoints}
+              checkPoint={checkPoint} checkLink={checkLink} />}
       </div>
       {/* an unreadable checklist leaves only Retry, in the line above: no footer with a button that can do nothing */}
       {!(!ready && error === unread) && <div class="xfoot"><span id="au-count" class={error ? 'err' : ''} role={error ? 'alert' : undefined}>{(!ready && error === unread ? '' : error) || (!ready ? (count ? `Phrasing ${plural(count)}` : '') : [kept.length && plural(kept.length), links.length && `${links.length.toLocaleString('en-US')} linked`].filter(Boolean).join(' · '))}</span>

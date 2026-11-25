@@ -4,6 +4,7 @@ import {
   narrowUnresolved, prepareUnresolved, retryUnresolved, selectUnresolved, submitUnresolved,
 } from '../../src/app/addUnresolved';
 import { CreateQuestion } from '../../src/app/commands/questions';
+import { linkApproval } from '../../src/app/unresolvedLinks';
 import { itemId } from '../../src/domain/checklist';
 import { ok } from '../../src/domain/result';
 import type { ChecklistRow } from '../../src/ports';
@@ -73,8 +74,9 @@ it('retries only the missing question and keeps the selected link, unchecked poi
   expect(preview.out.map((p) => p.itemId)).toEqual([rows[4].id]);
   expect(requested.filter((texts) => texts.includes(missing)).length).toBeGreaterThan(1);
   expect(preview.links.map(({ point, q }) => [point.itemId, q.id])).toEqual([[rows[1].id, existing.id]]);
-  const off = new Set([preview.points[1].key, preview.points[2].key]);
-  const linked = new Set([existing.id]);
+  const off = new Set([preview.points[2].key]);
+  const selection = preview.links[0];
+  const linked = new Map([[selection.point.key, linkApproval(selection)]]);
   const old = selectUnresolved(preview, off, linked);
   expect(await retryUnresolved(store, dealId, preview.out)).toBeUndefined();
   expect(selectUnresolved(preview, off, linked)).toEqual(old);
@@ -106,5 +108,5 @@ it('writes nothing if a selected gap settles after the preview and narrows the s
   expect(result).toMatchObject({ kind: 'changed', count: 1 });
   if (result.kind !== 'changed') throw new Error('Expected the stale preview to be refused');
   expect(Object.values(store.get().questions)).toEqual([]);
-  expect(narrowUnresolved(preview, result.keys)?.points).toEqual(preview.points.slice(1));
+  expect(narrowUnresolved(preview, result)?.points).toEqual(preview.points.slice(1));
 });
