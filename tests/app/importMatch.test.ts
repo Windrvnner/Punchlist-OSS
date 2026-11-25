@@ -509,6 +509,23 @@ describe('a chain of tied rows', () => {
     expect(preview).toMatchObject({ ok: true, value: { created: 0, updated: count } });
   }, 120_000);
 
+  it('gives a row that reads exactly as a question its match, whatever the order of rows', async () => {
+    const existing = 'Provide spa ABC xylem';
+    const exact = 'Provide SPA abc xylem';
+    const misread = 'Provide SPA abc xyIem';
+    for (const order of [[exact, misread], [misread, exact]]) {
+      const { store } = make();
+      const dealId = await deal(store);
+      const original = sheet('Question,Submitted by', [[existing, 'L']]);
+      await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: original });
+      const rows = sheet('Question,Submitted by,Response', order.map((text) => [text, 'L', `answer ${text}`]));
+      expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows })).ok).toBe(true);
+      const after = dealQuestions(store.get(), dealId);
+      expect(after).toHaveLength(2);
+      expect(after[0].response).toBe(`answer ${exact}`);
+    }
+  });
+
   it('quickly previews OCR variants after numbered rows claim the first questions', async () => {
     const { store } = make();
     const dealId = await deal(store);

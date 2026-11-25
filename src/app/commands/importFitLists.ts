@@ -19,13 +19,22 @@ export interface FitCandidate {
 export class FitLists {
   private readonly sources = new Map<string, FitSource>();
 
-  constructor(private readonly questions: FitCandidate[], private readonly taken: ReadonlySet<string>) {}
+  private readonly plains: ReadonlySet<string>;
 
+  constructor(private readonly questions: FitCandidate[], private readonly taken: ReadonlySet<string>) {
+    this.plains = new Set(questions.map(({ signature }) => signature.plain));
+  }
+
+  /**
+   * Rows share a source when they fit the same questions: the same identifiers, and the same spelling when a
+   * question here reads exactly as the row does (an identical spelling fits whatever its identifiers).
+   */
   forRow(row: FitSignature): FitSource {
-    let source = this.sources.get(row.group);
+    const key = this.plains.has(row.plain) ? `${row.group}\0${row.plain}` : row.group;
+    let source = this.sources.get(key);
     if (!source) {
       source = this.makeSource(row);
-      this.sources.set(row.group, source);
+      this.sources.set(key, source);
     }
     return source;
   }
