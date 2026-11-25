@@ -24,6 +24,20 @@ describe('the question column read from plain words, with no model (#1002)', () 
     expect(suggestMapping(['Req. Item', 'Description', 'Status']).text).toBeNull();
   });
 
+  it('leaves a heading with any other word to the model', () => {
+    for (const heading of ['Question Type', 'Question Comments', 'Request Due', 'Request Sent', 'Query Resolution',
+      'Question Follow-up', 'Question Source', 'Request Reason', 'Question Contact', 'Question Log']) {
+      expect(suggestMapping(['No.', heading, 'Description', 'Status']).text).toBeNull();
+    }
+  });
+
+  it('keeps a real header row ahead of a title row that has a question word and a usual name', () => {
+    const header = ['No.', 'Question', 'Response'];
+    expect(findHeaderRow([['Q&A Request List', 'Status'], header])).toBe(1);
+    expect(findHeaderRow([['Question Log', 'Date'], header])).toBe(1);
+    expect(findHeaderRow([['No.', 'Lender Questions', 'Status'], ['1', 'Is it fixed price?', 'Open']])).toBe(0);
+  });
+
   it('keeps an exact heading ahead of a loose one', () => {
     expect(suggestMapping(['Diligence Question', 'Question']).text).toBe(1);
   });

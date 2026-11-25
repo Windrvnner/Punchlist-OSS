@@ -19,27 +19,30 @@ export type Mapping = Record<ImportField, number | null>;
  */
 export function findHeaderRow(table: string[][]): number {
   const limit = Math.min(table.length, 50); const filled = (r: string[]) => r.filter((c) => c.trim()).length;
-  for (let i = 0; i < limit; i++) if (suggestMapping(table[i]).text != null) return i;
+  for (let i = 0; i < limit; i++) if (suggestedFields(table[i]).text != null) return i;
+  for (let i = 0; i < limit; i++) if (suggestMapping(table[i]).text != null) return i;   // by words (#1002)
   for (let i = 0; i < limit; i++) if (filled(table[i]) >= 2) return i;
   return 0;
 }
 
 const QUESTION_WORDS = ['question', 'questions', 'request', 'requests', 'query', 'queries'];
-/** words that make a heading about something else than the question itself ("Question No.", "Response to request") */
-const NOT_THE_QUESTION = ['no', 'number', 'num', 'ref', 'id', 'by', 'from', 'date', 'status', 'response', 'answer',
-  'reply', 'priority', 'category', 'workstream', 'owner', 'asked', 'raised', 'received'];
+/** the only other words a question heading may carry ("Diligence Question", "Lender Questions", "Q&A Request") */
+const QUESTION_HEADING_EXTRAS = ['diligence', 'information', 'lender', 'lenders', 'buyer', 'text', 'wording', 'the', 'a',
+  'q', 'and', 'for', 'of'];
 /**
- * The question column when no heading is exactly one of the usual names: the first heading with a question word among
- * its words and none that makes it about something else ("Diligence Question", "Information Request"). Used only in a
- * row where another column is a usual name too (a number, response or who asked), so that a title above the table is
- * not taken for headings. It spares a model call for a layout that plain words settle (#1002).
+ * The question column when no heading is exactly one of the usual names: the first heading made only of a question
+ * word and a few plain extras, with no digit or "#" (a number column). Any other word ("Question Type", "Request Due",
+ * "Question Log") may name something else, so it is left to the model. Used only in a row where another column is a
+ * usual name too (a number, response or who asked), so that a title above the table is not taken for headings. It
+ * spares a model call for a layout that plain words settle (#1002).
  */
 function looseQuestionColumn(columns: string[]): number | null {
   const wordsOf = (heading: string) => String(heading ?? '').toLowerCase().split(/[^a-z]+/).filter(Boolean);
   const at = columns.findIndex((heading) => {
+    if (/[#\d]/.test(String(heading ?? ''))) return false;
     const words = wordsOf(heading);
-    if (/[#\d]/.test(String(heading ?? ''))) return false;   // "Request #", "Q1": a number column, not the question
-    return words.some((w) => QUESTION_WORDS.includes(w)) && !words.some((w) => NOT_THE_QUESTION.includes(w));
+    return words.some((w) => QUESTION_WORDS.includes(w))
+      && words.every((w) => QUESTION_WORDS.includes(w) || QUESTION_HEADING_EXTRAS.includes(w));
   });
   return at < 0 ? null : at;
 }
