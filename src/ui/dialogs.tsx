@@ -7,19 +7,17 @@ import { DocName } from './docName';
 import { ReadOnlyContext } from './editField';
 import { FoldersBody, FoldersActs } from './foldersParts';
 import { versionsWord, dealHash, dealLabel, type DealKinds } from '../app/state';
-import { keepNewDeal } from './newDealKept';
+import { keepNewDeal } from '../app/newDealDraft';
 import { useNewDealDraft } from './useNewDealDraft';
-import { firmOf } from '../domain/checklist';
 import { PickList } from './pickList';
-import { CreateDeal, AddFolders, RemoveFolder, RestoreFolder, DeleteDeal } from '../app/commands/deals';
-import { pathKey, cleanName } from '../app/commands/deals';
-import { FOLDER_LABEL_MAX, dealNameRoom } from '../app/commands/deals';
-import { startIndexing } from '../app/indexing';
-import { createdRecord } from '../app/createdRecord';
-import { ulidIds } from '../adapters/mocks';
-import { likelyTwin } from '../app/dupes';
+import { FOLDER_LABEL_MAX, dealNameRoom, matchesDealName, RemoveFolder, DeleteDeal } from '../app/commands/deals';
+import {
+  chosenDealFolder, droppedFolderPaths, guessLabel, pickDealFolders, readDealFolder, restoreDealFolder,
+} from '../app/dealFolders';
+import { submitDealForm } from '../app/dealSetup';
+import { checklistListCounts } from '../app/dealCounts';
 import { TwinConfirm } from './twin';
-import type { Deal, Folder } from '../domain/model';
+import type { Folder } from '../domain/model';
 
 /**
  * The one modal primitive. Only one is open at a time: while it is, the app behind is inert,
@@ -110,17 +108,6 @@ export function LeaveFoot({ id, ask, keep, leave, go = 'Close' }: { id: string; 
     id={`${id}-go`} onClick={leave}>{go}</button></div>;
 }
 
-/** A folder's label starts as the folder's own name: nothing is read into the path. The person can change it in the row. */
-export function guessLabel(p: string, _taken: string[] = []) {
-  return fitLabel(p.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop() || p);
-}
-/** a label taken from a folder's name, cut to the most a label holds, at a space where there is one */
-export function fitLabel(name: string) {
-  const s = name.trim(); if (s.length <= FOLDER_LABEL_MAX) return s;
-  const cut = s.slice(0, FOLDER_LABEL_MAX + 1).lastIndexOf(' ');                       // a space just past the limit still ends a whole word
-  return (cut > 0 ? s.slice(0, cut) : s.slice(0, FOLDER_LABEL_MAX)).trim();
-}
-
 /** Keep it puts the focus back on the × that asked, once the Folders dialog is back */
 const backTo = (path: string) => requestAnimationFrame(() => {
   const xs = [...document.querySelectorAll<HTMLElement>('#folders .fdrow .x')];
@@ -164,50 +151,11 @@ export function NewDealDialog() {
     if (!existing) kept.keepNow();
     store.ui({ newDeal: null });
   };
-  const norm = pathKey;
-  const taken = () => [...nd.folders.map((f) => f.label), ...(existing?.folders ?? []).map((f) => f.label)];
   // the deal's own details are in a clash: its folder labels are read-only until that clears
   const inherited = useContext(ReadOnlyContext);
   const locked = existing && s.conflicts[existing.id] ? `${existing.name} has ${versionsWord(s.conflicts[existing.id].versions.length).toLowerCase()}. Choose one first` : inherited;
 
-  // one removed before its indexing finished goes on being indexed: files already read are not read again
-  const restore = async (f: Deal['removed'][number]) => {
-    if (!existing) return false; const { at, ...folder } = f;
-    const r = await store.dispatch(RestoreFolder, { dealId: existing.id, folder, at });
-    if (r.ok && folder.indexed < folder.files) void startIndexing(store, existing.id, [folder]);
-    return r.ok;
-  };
-  // a folder waiting under Add folders inside a removed one, or around it, would be refused on Add once that one is back:
-  // Restore says so first, as it does for a folder on the deal
-  const waitingOver = (f: { path: string; label: string }): string | null => {
-    const me = pathKey(f.path); const w = nd.folders.find((x) => pathKey(x.path).startsWith(me + '\\') || me.startsWith(pathKey(x.path) + '\\'));
-    return w ? `${w.label || w.path}, waiting to be added, overlaps ${f.label || f.path}` : null;
-  };
-  const addPath = async (p: string, label?: string) => {
-    p = p.trim(); if (!p) return;
-    // read afresh, not from this render: a second Enter or drop while the first was being read saw the list without it
-    const listed = () => (store.get().ui.newDeal?.folders ?? nd.folders).some((f) => norm(f.path) === norm(p)) || !!existing?.folders.some((f) => norm(f.path) === norm(p));
-    if (listed() || kept.isReading(p)) {
-      store.toast('That folder is already on the list');
-      return;
-    }
-    // a folder inside one already on the list, or holding one, would be read twice: it is refused, with the folder it overlaps
-    const inside = (a: string, b: string) => { const x = norm(a).replace(/\\/g, '/'), y = norm(b).replace(/\\/g, '/'); return x.startsWith(y + '/'); };
-    const over = [...(store.get().ui.newDeal?.folders ?? nd.folders), ...(existing?.folders ?? [])].find((f) => inside(p, f.path) || inside(f.path, p));
-    if (over) { store.toast(inside(p, over.path) ? `That folder is inside ${over.label}, already on the list` : `${over.label}, already on the list, is inside that folder`); return; }
-    // a removed folder's path brings it back as it was, from what was already indexed, rather than reading it again
-    const gone = existing?.removed.find((f) => norm(f.path) === norm(p));
-    if (gone) return await restore(gone);                 // refused (the deal is in two versions): what was typed stays, and the notice says why
-    kept.started(p);
-    const r = await store.services.docs.scanFolder(p);
-    const folder = r.ok ? { path: p, label: label ? fitLabel(label) : guessLabel(p, taken()), ...r.value } : null;
-    if (!kept.finished(p, folder)) return false;       // this dialog has closed meanwhile
-    if (!r.ok) { set({ error: `Couldn’t read ${p}` }); return false; }
-    set({ error: '' });
-    if (listed()) return true;
-    store.ui((ui) => ui.newDeal ? { newDeal: { ...ui.newDeal, folders: [...ui.newDeal.folders, folder!] } } : {});
-    return true;
-  };
+  const addPath = (path: string) => readDealFolder(store, kept.draft, nd, path, existing ?? undefined);
   // what was typed stays in the field unless it was added: a path that could not be read can be corrected, not retyped.
   // A path typed while the scan was running stays too: only the path that was added is cleared (#35).
   const addTyped = async () => {
@@ -220,64 +168,38 @@ export function NewDealDialog() {
     requestAnimationFrame(() => document.getElementById('nd-path')?.focus());
   };
   const browse = async () => {
-    if (store.services.fs.pickFolders) {
-      const r = await store.services.fs.pickFolders();
-      if (r.ok) await kept.readEach(r.value);     // all of them kept from the moment they are chosen (#113)
-      return;
-    }
-    fileRef.current?.click();
+    const folders = pickDealFolders(store);
+    if (folders === null) fileRef.current?.click();
+    else await kept.readEach(await folders);
   };
-  const onFiles = (e: Event) => {
-    const input = e.currentTarget as HTMLInputElement; const fs = [...(input.files ?? [])]; input.value = '';
-    if (!fs.length) return;
-    const real = store.services.fs.pathFor?.(fs[0]);
-    const root = real ? real.replace(/[\\/][^\\/]*$/, '') : ((fs[0] as any).webkitRelativePath || fs[0].name).split('/')[0];
-    if (nd.folders.some((f) => norm(f.path) === norm(root))) { store.toast('That folder is already on the list'); return; }
-    set({ error: '', folders: [...nd.folders, { path: root, label: guessLabel(root, taken()), files: fs.length, size: (fs.reduce((a, f) => a + f.size, 0) / 1e9).toFixed(1) + ' GB' }] });
+  const onFiles = (event: Event) => {
+    const input = event.currentTarget as HTMLInputElement;
+    const files = [...(input.files ?? [])];
+    input.value = '';
+    const folder = chosenDealFolder(store, files, nd.folders);
+    if (folder) set({ error: '', folders: [...nd.folders, folder] });
   };
-  const onDrop = async (e: DragEvent) => {
-    e.preventDefault(); e.stopPropagation();
-    const files = [...(e.dataTransfer?.files ?? [])];
-    const items = [...(e.dataTransfer?.items ?? [])].map((i) => (i as any).webkitGetAsEntry?.()).filter(Boolean);
-    const names = store.services.fs.pathFor ? files.map((f) => store.services.fs.pathFor!(f)) : items.length ? items.map((en: any) => en.name) : files.map((f) => f.name);
-    await kept.readEach(names);                   // all of them kept from the moment they are dropped (#113)
+  const onDrop = async (event: DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const files = [...(event.dataTransfer?.files ?? [])];
+    const entries = [...(event.dataTransfer?.items ?? [])].flatMap((item) => {
+      const entry = item.webkitGetAsEntry?.();
+      return entry ? [entry] : [];
+    });
+    await kept.readEach(droppedFolderPaths(store, files, entries));
   };
   // a new deal needs a name before it can be created: until then the button is off, and pointing at it says why
   const needName = !existing && !nd.name.trim();
   const create = async (anyway = false) => {
     if (creating() || kept.busy()) return;     // a folder still being read is part of what is being created
     if (needName) return;
-    // held from the press, the typed path's read included, so Escape cannot close it before the deal is made (#36);
-    // kept in the store, so a second click before the next render is turned away
-    set({ busy: true, error: '' });
-    // a path typed but not yet added is part of the deal: add it first (unless it is already listed), and stop if it cannot be read
-    const typed = path.trim(); const listed = (p: string) => nd.folders.some((f) => norm(f.path) === norm(p)) || !!existing?.folders.some((f) => norm(f.path) === norm(p));
-    if (typed && !listed(typed) && !(await addPath(typed))) {
-      set({ busy: false });
-      return;
-    }
-    if (typed) setPath('');
-    const folders = store.get().ui.newDeal?.folders ?? nd.folders;   // read afresh: the typed path may have just been added
-    if (existing) {
-      const r = await store.dispatch(AddFolders, { dealId: existing.id, folders }, { idempotencyKey: 'nd-create', quiet: true });   // a refusal is said in the dialog, once
-      if (!r.ok) { set({ busy: false, error: r.error.message }); return; }
-      close(); store.toast(`${folders.length} folder${folders.length > 1 ? 's' : ''} added`); void startIndexing(store, existing.id, store.get().deals[existing.id].folders.slice(-folders.length));
-      return;
-    }
-    if (!anyway) {
-      // Is it a deal the team already has? It only asks: a check that cannot be made says nothing, and the deal is made
-      const room = folders.length && store.services.docs.sameRoom ? await store.services.docs.sameRoom(folders.map((f) => f.path), Object.keys(store.get().deals)) : null;
-      const t = likelyTwin(store.get(), { name: nd.name, counterparty: nd.counterparty }, room?.ok ? room.value : []);
-      if (t) { set({ busy: false, twin: { dealId: t.deal.id, ...(t.room ? { room: t.room } : {}), named: t.named } }); return; }
-    }
-    const r = await store.dispatch(CreateDeal, { name: nd.name, folders, ...nd.kinds, ...(nd.counterparty?.trim() ? { counterparty: nd.counterparty } : {}) }, { idempotencyKey: 'nd-create', quiet: true });
-    if (!r.ok) { set({ busy: false, error: r.error.kind === 'invalid' ? Object.values(r.error.fields ?? {})[0] ?? r.error.message : r.error.message }); return; }
-    const deal = createdRecord(store.get(), r.value.opId, 'deals');
-    if (!deal) { set({ busy: false, error: 'The deal was created but could not be opened. Find it in the list on the left.' }); return; }
+    const typedTaken = () => setPath('');
+    const submit = { form: nd, typed: path, existing: existing ?? undefined, anyway, addPath, typedTaken };
+    const { done, deal } = await submitDealForm(store, submit);
+    if (!done) return;
     close();
-    store.toast(`${deal.name} created`, undefined, { glyph: 'done' });
-    location.hash = dealHash(store.get().prefs, deal.id);
-    if (deal.folders.length) void startIndexing(store, deal.id, deal.folders);
+    if (deal) location.hash = dealHash(store.get().prefs, deal.id);
   };
 
   const askRemove = (f: Folder) => setRemoving({ path: f.path, label: f.label.trim() || guessLabel(f.path) });
@@ -299,8 +221,8 @@ export function NewDealDialog() {
           onKeyDown={enterToBrowse} /></div></div>
         <Kinds kinds={nd.kinds ?? {}} set={(k) => set({ kinds: { ...nd.kinds, ...k } })} /></>}
       {/* Folders: the deal's folders, those waiting under To Add, then the drop area */}
-      {existing && <FoldersBody deal={existing} locked={locked} waitingOver={waitingOver}
-        restore={(gone) => void restore(gone)} ask={askRemove} waiting={nd.folders}
+      {existing && <FoldersBody deal={existing} locked={locked}
+        restore={(gone) => void restoreDealFolder(store, existing.id, gone)} ask={askRemove} waiting={nd.folders}
         change={(folders) => set({ folders })} onDrop={(e) => void onDrop(e)} pastePath={pastePath}
         paste={pasting && pasteField} />}
       {!existing && <><div class="lbl" id="nd-flbl">Folders</div>
@@ -375,9 +297,9 @@ function PasteField({ path, setPath, add, busy }: {
  * so a deal is never created only to be set up afterwards.
  */
 function Kinds({ kinds, set }: { kinds: DealKinds; set: (k: DealKinds) => void }) {
-  const lists = firmOf(useAppState().firmList).lists;
+  const state = useAppState();
   const field = (label: string, k: keyof DealKinds) => {
-    const names = lists.filter((l) => l.layer === k).map((l) => ({ name: l.name, n: l.items.length }));
+    const names = checklistListCounts(state, k);
     return (<div><span class="lbl" id={`nd-${k}-l`}>{label}</span>{names.length
       ? <PickList id={`nd-${k}`} className="field" label={label} names={names} cur={kinds[k] ?? ''} empty="None" float end={k === 'technology'} onPick={(v) => set({ [k]: v })} />
       : <input class="field" id={`nd-${k}`} aria-labelledby={`nd-${k}-l`} placeholder="Not set" maxLength={80} value={kinds[k] ?? ''} onInput={(e) => set({ [k]: (e.currentTarget as HTMLInputElement).value })} />}</div>);
@@ -395,7 +317,7 @@ export function DeleteDealDialog() {
   const close = () => store.ui({ deleteDeal: null });
   if (!dd || !d) return null;
   const label = dealLabel(s, d);      // what the dialogs and the notice call it; the name alone is what is typed (#27)
-  const named = cleanName(dd.typed) === cleanName(d.name);   // spaces and accents as the name was kept, not as they were typed
+  const named = matchesDealName(dd.typed, d.name);
   const next = () => { if (named) store.ui({ deleteDeal: { ...dd, sure: true, error: '' } }); };
   const go = async () => {
     const r = await store.dispatch(DeleteDeal, { dealId: d.id, typedName: dd.typed, ...(dd.seen ? { seen: dd.seen } : {}) }, { idempotencyKey: 'dd-go', quiet: true });
@@ -427,5 +349,3 @@ export function DeleteDealDialog() {
     </Modal>
   );
 }
-
-export { ulidIds };

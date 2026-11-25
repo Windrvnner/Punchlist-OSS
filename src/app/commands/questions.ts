@@ -7,6 +7,7 @@ import { nextQuestionNumber, sharedNumbers, type State } from '../state';
 import { sameWords } from '../../domain/importExport';
 import { keepAside, otherCopies, type ShownNote } from './keptVersions';
 import { AskOrigin, linksForAsk } from '../askSubmission';
+import { CHANGED_ELSEWHERE } from '../changedElsewhere';
 
 const Field = z.enum(['text', 'askedBy', 'received', 'workstream', 'priority', 'respondedBy', 'responded']);
 const YMDorBlank = z.string().refine((v) => v === '' || isRealDate(v), 'Enter a real date as YYYY-MM-DD');
@@ -250,11 +251,17 @@ export const RestoreQuestion = define({
 /** An answer from a conversation becomes the question's response. Status stays as it is: a person sets that. */
 export const UseAsResponse = define({
   name: 'UseAsResponse',
-  input: z.object({ dealId: DealId, questionId: QuestionId, text: z.string().trim().min(1), sources: z.array(Source).default([]) }),
+  input: z.object({
+    dealId: DealId, questionId: QuestionId, text: z.string().trim().min(1), sources: z.array(Source).default([]),
+    over: z.string().optional(),
+  }),
   targets: (s, i) => { const q = s.questions[i.questionId]; return q?.linkedFinding ? [i.questionId, q.linkedFinding] : [i.questionId]; },
   plan(state, input, ctx) {
     const q = state.questions[input.questionId];
     if (!q || q.dealId !== input.dealId) return fail(notFound('Question not found', input.questionId));
+    // A response changed after the confirmation is a different response, including on Retry.
+    const current = q.response.trim() ? q.response : '';
+    if (input.over !== undefined && input.over !== current) return fail(rejected(CHANGED_ELSEWHERE));
     const linked = q.linkedFinding ? state.findings[q.linkedFinding] : undefined;
     const r = setResponse(q, input.text, { origin: 'chat', sources: input.sources, actor: ctx.actor, at: ctx.at }, linked, { at: ctx.at, actor: ctx.actor });
     if (!r.ok) return r;

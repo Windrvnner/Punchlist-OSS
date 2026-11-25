@@ -2,17 +2,15 @@
  * The Excel exports of the Q&A log and the findings. Each opens on the filter of the page it was opened from; the
  * footer counts what the export will hold.
  */
-import { useMemo, useState } from 'preact/hooks';
+import { useState } from 'preact/hooks';
 import { useAppState, useStore } from './hooks';
 import { Modal, DialogHead } from './dialogs';
 import { plural } from './counts';
 import { checkedOf, chosenOf } from './fieldValue';
 import {
-  dealQuestions, dealFindings, findingWorkstreams, qaStatusOnly, qaWorkstream, qaWorkstreamChoices,
-} from '../app/state';
-import { exportQuestions, exportFindings, questionRowsFor, findingRowsFor } from '../app/transfer';
-import type { QaExportFilter, FindingExportFilter } from '../app/transfer';
-import type { State } from '../app/state';
+  exportQuestions, exportFindings, qaExportView, qaFilterFromPage, findingExportView, findingFilterFromPage,
+  type QaExportFilter, type FindingExportFilter,
+} from '../app/transfer';
 import type { Store } from '../app/store';
 import type { Result } from '../domain/result';
 
@@ -34,23 +32,14 @@ const FINDING_STATUSES: readonly (readonly [FindingStatus, string])[] = [
 export function ExportQaDialog({ dealId }: { dealId: string }) {
   const store = useStore();
   const state = useAppState();
-  const rows = dealQuestions(state, dealId);
-  const firmsKey = rows.map((r) => r.askedBy).join('\u0001');
-  const firms = useMemo(() => [...new Set(rows.map((r) => r.askedBy))].sort(), [firmsKey]);
-  const [filter, setFilter] = useState<QaExportFilter>(() => qaFilterFromPage(store, dealId));
+  const [filter, setFilter] = useState<QaExportFilter>(() => qaFilterFromPage(state, dealId));
   const change = (part: Partial<QaExportFilter>) => setFilter({ ...filter, ...part });
   const exporting = useExport(store, () => exportQuestions(store, dealId, filter), 'question');
-  const count = (firm: string) => rows.filter((r) => r.askedBy === firm && qaRowShown(r, filter)).length;
-  const total = questionRowsFor(state, dealId, filter).length;
-  // the firm's workstreams and any others the deal's questions use (an import can bring its own), A to Z,
-  // as the Q&A page lists them, then "No workstream", as the page's filter offers it
-  //
-  const workstreams = qaWorkstreamChoices(rows);
+  const { firms, firmCounts, firmsTotal, total, workstreams } = qaExportView(state, dealId, filter);
   const allFirms = firms.every((firm) => filter.askedBy.includes(firm));
   const pickFirm = (firm: string, on: boolean) => {
     change({ askedBy: on ? [...filter.askedBy, firm] : filter.askedBy.filter((x) => x !== firm) });
   };
-  const firmsTotal = firms.reduce((sum, firm) => sum + count(firm), 0);
   return (
     <Modal onClose={exporting.close} label="Export Q&A log" blur className="sdlg xdlg">
       <DialogHead title="Export Q&A Log" onClose={exporting.close} disabled={exporting.busy} />
@@ -65,7 +54,7 @@ export function ExportQaDialog({ dealId }: { dealId: string }) {
         {firms.map((firm) => <label key={firm}>
           <input type="checkbox" checked={filter.askedBy.includes(firm)}
             onChange={(e) => pickFirm(firm, checkedOf(e))} />
-          <span>{firm.trim() || 'Not recorded'}</span><span class="c">{count(firm)}</span>
+          <span>{firm.trim() || 'Not recorded'}</span><span class="c">{firmCounts.get(firm)}</span>
         </label>)}
       </div></div>
       <div class="srow"><div class="k">Workstream</div>
@@ -81,12 +70,10 @@ export function ExportQaDialog({ dealId }: { dealId: string }) {
 export function ExportFindingsDialog({ dealId }: { dealId: string }) {
   const store = useStore();
   const state = useAppState();
-  // the same workstream choices as the Findings filter it opens from
-  const workstreams = findingWorkstreams(dealFindings(state, dealId));
   const [filter, setFilter] = useState<FindingExportFilter>(() => findingFilterFromPage(state));
   const change = (part: Partial<FindingExportFilter>) => setFilter({ ...filter, ...part });
   const exporting = useExport(store, () => exportFindings(store, dealId, filter), 'finding');
-  const total = findingRowsFor(state, dealId, filter).length;
+  const { total, workstreams } = findingExportView(state, dealId, filter);
   return (
     <Modal onClose={exporting.close} label="Export findings" blur className="sdlg xdlg">
       <DialogHead title="Export Findings" onClose={exporting.close} disabled={exporting.busy} />
@@ -106,26 +93,6 @@ export function ExportFindingsDialog({ dealId }: { dealId: string }) {
       <ExportFoot countId="fx-count" goId="fx-go" word="finding" total={total} exporting={exporting} />
     </Modal>
   );
-}
-
-/** The Q&A export opens on the Q&A page's status and workstream, with every party that submitted questions checked */
-function qaFilterFromPage(store: Store, dealId: string): QaExportFilter {
-  const page = store.get().ui.qaFilter;
-  const askedBy = [...new Set(dealQuestions(store.get(), dealId).map((r) => r.askedBy))];
-  return { status: qaStatusOnly(page.status), workstream: page.workstream, askedBy };
-}
-
-/** The findings export opens on the Findings page's filter; "to reassess" is no export choice, so it opens on Open */
-function findingFilterFromPage(state: State): FindingExportFilter {
-  const page = state.ui.findingFilter;
-  const status = page.status === 'reassess' ? 'open' : page.status;
-  return { status, workstream: page.workstream, reviewedOnly: page.reviewed === 'yes' };
-}
-
-/** Whether a question passes the export's status and workstream, for the count beside each party */
-function qaRowShown(row: { status: string; workstream: string }, filter: QaExportFilter) {
-  const statusShown = filter.status === 'all' || row.status === filter.status;
-  return statusShown && (!filter.workstream || qaWorkstream(row) === filter.workstream);
 }
 
 /**

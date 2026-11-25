@@ -147,3 +147,6 @@ export function writtenAsMeant(before: Sheet[], after: Sheet[], sheet: string, s
   }
   return null;
 }
+
+/** a path or file name as Windows compares it: case and slash direction don't matter, nor a separator at the end */
+export const windowsPath = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLocaleLowerCase('en-US');
