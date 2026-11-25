@@ -9,6 +9,104 @@ const browser = await launchChrome();
 const N = 2140, TWO = 112, CHANGED = 207;
 const APP = 'No notices served since COD.', LOG = 'No notices served since COD. Confirmed by seller’s counsel on November 14.';
 
+async function keepDisplayedStatusAfterRefresh(page, dealId, tag) {
+  const questionId = await page.evaluate((dealId) => {
+    const question = Object.values(store.get().questions).find((q) => q.n === 119 && q.dealId === dealId);
+    store.ui({ dialog: { kind: 'resolveQa', dealId, questionId: question.id } });
+    return question.id;
+  }, dealId);
+  const status = (side) => page.locator(`.rsv-keep .seg button:nth-child(${side})`);
+  await page.click('#rsv-merge');
+  await page.waitForFunction(() => document.querySelector('#rsv-merged')?.value);
+  await status(2).click();
+  const savedSide = ([id, present]) => {
+    const kept = JSON.parse(localStorage.getItem('dil/1/kept-drafts') ?? '{}')['qa-merge-sides'] ?? [];
+    return kept.some(([key]) => key === id) === present;
+  };
+  await page.waitForFunction(savedSide, [questionId, true]);
+  await page.evaluate(async ([dealId, id]) => {
+    const { last } = store.get().deals[dealId].qaLogs[0];
+    await window.__peer.change(id, { logPick: { of: last.at, sent: last.kept[id] } });
+  }, [dealId, questionId]);
+  await page.waitForSelector('#rsv-done');
+  await page.waitForFunction(savedSide, [questionId, false]);
+
+  await page.evaluate(async ([dealId, id]) => {
+    const { last, name } = store.get().deals[dealId].qaLogs[0];
+    const next = Object.values(store.get().questions).find((q) => q.n === 138 && q.dealId === dealId);
+    const kept = { ...last.kept, [id]: { response: 'Final notice register received.', status: 'Closed' },
+      [next.id]: { ...last.kept[next.id], status: 'Open' } };
+    const input = { dealId, name, last: { ...last, kept, at: '2026-11-16T16:02:00.000Z' } };
+    const result = await store.dispatch(store.commandNamed('RecordQaLogExport'), input, { quiet: true });
+    if (!result.ok) throw new Error(result.error.message);
+  }, [dealId, questionId]);
+  await page.click('#rsv-merge');
+  await page.waitForFunction(() => document.querySelector('#rsv-merged')?.value);
+  const pressed = await status(2).getAttribute('aria-pressed');
+  const shown = await status(2).textContent();
+  await page.click('#rsv-keep');
+  await page.waitForFunction(() => document.querySelector('.rsv-k')?.textContent === 'Q138');
+  const saved = await page.evaluate((id) => store.get().questions[id].status, questionId);
+  say(tag + 'keeping-a-merge-after-a-log-refresh-applies-the-displayed-side',
+    pressed === 'true' && shown === 'Closed' && saved === 'closed', JSON.stringify({ pressed, shown, saved }));
+
+  const reset = await page.locator('#rsv-keep').isDisabled();
+  await page.click('#rsv-merge');
+  const nextSide = await status(1).getAttribute('aria-pressed');
+  say(tag + 'stepping-to-the-next-question-resets-the-pick-and-uses-its-own-side', reset && nextSide === 'true');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.rsvdlg', { state: 'detached' });
+}
+
+/** #939: a merge typed by hand outlives another PC resolving its question, in the response box, until used */
+async function keepTypedMergeResolvedElsewhere(page, dealId, tag) {
+  const TYPED = 'No notices served since COD. Seller’s counsel confirmed on November 14; the register is in 4.2.';
+  const questionId = await page.evaluate((dealId) => {
+    const question = Object.values(store.get().questions).find((q) => q.n === 81 && q.dealId === dealId);
+    store.ui({ selectedQuestion: question.id, dialog: { kind: 'resolveQa', dealId, questionId: question.id } });
+    return question.id;
+  }, dealId);
+  await page.click('#rsv-merge');
+  await page.waitForFunction(() => document.querySelector('#rsv-merged')?.value);
+  await page.fill('#rsv-merged', TYPED);
+  const keptMerge = ([id, text]) => (JSON.parse(localStorage.getItem('dil/1/kept-drafts') ?? '{}')['qa-merge'] ?? [])
+    .some(([key, draft]) => key === id && draft.text === text);
+  await page.waitForFunction(keptMerge, [questionId, TYPED]);
+  await page.evaluate(async ([dealId, id, LOG]) => {
+    const { last } = store.get().deals[dealId].qaLogs[0];
+    await window.__peer.change(id, { response: LOG, logPick: { of: last.at, sent: last.kept[id] } });
+  }, [dealId, questionId, LOG]);
+  await page.waitForSelector('#rsv-done');
+  const tip = await page.getAttribute('#rsv-done', 'title');
+  // nothing is left to merge, so Draft Again goes too
+  const again = await page.$('#rsv-again');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.rsvdlg', { state: 'detached' });
+  const showsTyped = () => page.waitForFunction(
+    (text) => document.querySelector('textarea.rtext')?.value === text, TYPED, { timeout: 8000 },
+  ).catch(() => {});
+  const box = () => page.evaluate(() => ({
+    text: document.querySelector('textarea.rtext')?.value,
+    note: document.querySelector('.efstate.ext')?.textContent ?? '',
+  }));
+  await showsTyped();
+  const shown = await box();
+  say(tag + 'a-typed-merge-resolved-elsewhere-waits-in-the-response-box',
+    shown.text === TYPED && /^Changed elsewhere/.test(shown.note) && !!tip && !again, JSON.stringify({ shown, tip, again: !!again }));
+
+  await page.reload(); await page.waitForSelector('.dtabs', { state: 'attached' });
+  await page.evaluate((id) => store.ui({ selectedQuestion: id }), questionId);
+  await showsTyped();
+  const reloaded = await box();
+  await page.click('.efstate.ext button:first-of-type');
+  const saved = ([id, text]) => store.get().questions[id].response === text;
+  await page.waitForFunction(saved, [questionId, TYPED], { timeout: 8000 }).catch(() => {});
+  const used = await page.evaluate((id) => store.get().questions[id].response, questionId);
+  say(tag + 'the-typed-merge-survives-a-reload-and-keep-mine-uses-it',
+    reloaded.text === TYPED && /^Changed elsewhere/.test(reloaded.note) && used === TYPED,
+    JSON.stringify({ reloaded, used }));
+}
+
 for (const [w, h] of [[1280, 736], [1024, 640]]) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h } }); const page = await ctx.newPage(); page.errors = [];
   page.on('pageerror', (e) => page.errors.push(e.message));
@@ -210,6 +308,8 @@ for (const [w, h] of [[1280, 736], [1024, 640]]) {
   const two = await page.evaluate(() => ({ conflicts: Object.keys(store.get().conflicts).length, n: ((e) => e.title || e.textContent)(document.querySelector('[data-qaf="versions"]')), toast: document.querySelector('#toast .ttext')?.textContent }));
   say(tag + 'another-pc-resolving-another-question-puts-nothing-in-two-versions', two.conflicts === 0 && two.n.includes(String(TWO - 4)) && /^Q43: the app’s version kept/.test(two.toast), JSON.stringify(two));
   await page.keyboard.press('Escape'); await page.waitForSelector('.rsvdlg', { state: 'detached' });
+  if (w === 1280) await keepDisplayedStatusAfterRefresh(page, id, tag);
+  if (w === 1280) await keepTypedMergeResolvedElsewhere(page, id, tag);
   say(tag + 'no-page-errors', page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }

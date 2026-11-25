@@ -1,4 +1,5 @@
 import { hasTexts, keptDrafts } from './keptText';
+import type { Question } from '../domain/model';
 import type { State } from './state';
 
 export type FieldValue = { value: string; rev: number };
@@ -16,6 +17,12 @@ export const keepsUnsaved = (keep: string) => unsavedFields.has(keep);
 export const unsavedText = (keep: string) => unsavedFields.get(keep)?.text;
 export const unsavedBase = (keep: string) => unsavedFields.get(keep)?.base;
 
+/** Text typed into a question's response box that still differs from the saved response. */
+export function typedResponse(question: Question): boolean {
+  const text = unsavedText(`${question.id}:response`);
+  return text !== undefined && text !== question.response && !!text.trim();
+}
+
 /** A save may have landed after the field went away. Restore just the text the record still does not hold. */
 export function restoreFieldDraft(keep: string | undefined, value: string): FieldDraft | undefined {
   if (keep === undefined) return undefined;
@@ -23,6 +30,38 @@ export function restoreFieldDraft(keep: string | undefined, value: string): Fiel
   if (draft?.text !== value) return draft;
   unsavedFields.delete(keep);
   return undefined;
+}
+
+/** Text handed to a field from elsewhere goes after unsaved text already there, so both stay in sight. */
+export function joinHandedText(unsaved: string | undefined, handed: string): string {
+  return unsaved?.trim() && unsaved !== handed ? `${unsaved}\n\n${handed}` : handed;
+}
+
+/** fields on screen that take handed text into the box itself, by keep name */
+const takers = new Map<string, (text: string) => void>();
+
+/** A field on screen takes text handed to it in its box, marked "Changed elsewhere" (#939). */
+export function takeHandedText(keep: string, take: (text: string) => void) {
+  takers.set(keep, take);
+  return () => {
+    if (takers.get(keep) === take) takers.delete(keep);
+  };
+}
+
+/**
+ * Put text the person typed elsewhere in a field as unsaved text, with "Changed elsewhere" and its Keep Mine and
+ * Take Theirs, so the text stays until the person uses or discards it (#939). Text already unsaved there stays first.
+ */
+export function handFieldText(keep: string, text: string, record: FieldValue) {
+  if (text === record.value) return;
+  const take = takers.get(keep);
+  if (take) {
+    take(text);
+    return;
+  }
+  const kept = unsavedFields.get(keep);
+  const unsaved = kept && kept.text !== record.value ? kept : undefined;
+  unsavedFields.set(keep, { text: joinHandedText(unsaved?.text, text), base: unsaved?.base ?? record.value, rev: -1 });
 }
 
 const watching = new Map<string, () => void>();

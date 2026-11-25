@@ -52,14 +52,21 @@ npm run installer       # build the Windows installer into out/installer (on Win
 | `npm run screens` | Takes screenshots of every main screen into `out/` (add `-- 1440x900 --pdfs <folder>` for options). Needs `npm run serve`. |
 | `npm run package` | Optional local release ZIP containing the app, source, and `docs/`, written to `out/punchlist-<version>.zip`. |
 
+The app workflow test runs deal-scale imports, question drafting, folder matching, and Q&A log updates through a
+Store with stand-in ports. Run the test in Node without a window.
+
+```sh
+npx vitest run tests/app/coreWorkflows.test.ts --environment node --no-file-parallelism
+```
+
 The static checks scan tracked files for secrets and attribution, and commit messages for attribution.
 After readability hints, `scripts/check-pane-of-glass.mjs` checks UI imports, service and repository access,
-and browser storage against the counts in `scripts/pane-of-glass-baseline.json`. For Vite globs with literal patterns and
-direct literal options or no options, it reports the original call if either development or production imports a
-forbidden module. If a change removes an access,
-run `node scripts/check-pane-of-glass.mjs --lower` and commit the lower baseline in the same pull request.
-The guard compares that baseline with the branch point on `main`. If the checkout lacks that history,
-the diagnostic gives the Git command to fetch it.
+and browser storage. The committed `scripts/pane-of-glass-baseline.json` is `{}`, so any match fails. For Vite globs
+with literal patterns and direct literal options or no options, the guard reports the original call if either
+development or production imports a forbidden module.
+The guard compares the baseline with the branch point on `main` and refuses increases. On a branch with existing
+entries, use `node scripts/check-pane-of-glass.mjs --lower` and commit the lower baseline when removing an access.
+If the checkout lacks the history needed for comparison, the diagnostic gives the Git command to fetch it.
 
 The GitHub Actions workflow also builds the Windows installer when it is started by hand.
 
@@ -166,6 +173,7 @@ The rest of the project is documented in these places:
 - [decisions.md](decisions.md) lists the decisions in force.
 - [requirements.md](requirements.md) covers Windows setup, including the model provider, organization name, OneDrive folder, and checks after installation.
 - [linking-design.md](linking-design.md) describes the parts, not yet built, of the design that links checklist items to findings and Q&A questions (#2).
+- [deal-screen-design.md](deal-screen-design.md) holds the mock-up and screens, not yet built, of the rebuilt deal screen.
 - [design.md](design.md) describes how the app looks, with reference screenshots.
 - [review-prompt.md](review-prompt.md) is the adversarial review prompt for every pull request.
 - The detailed contracts are the TSDoc comments in `src/ports/index.ts` and `src/backend/*.ts`, and the tests.
@@ -178,3 +186,27 @@ The rest of the project is documented in these places:
 - Commits say `(#N)`. A pull request that fixes a bug or finishes an item says `Fixes #N`, so that merging it closes the issue. Review findings go on the pull request as review comments.
 - Before a release, check its assets for unreviewed files and identifying metadata such as author fields, local paths, and build machine names.
 - Before pushing commits, check that each commit's author and committer are the intended identities, using their GitHub noreply addresses.
+
+### Batches
+
+A batch is a Build list issue with the `batch` label that lists several fixes, each worked as its own pull request.
+Its **How the batch is worked** section sets that batch's own rules. These rules hold for every batch, in addition:
+
+- Set the definition of done in the batch issue before the first pull request, with separate acceptance criteria for
+  each goal, so the final status of every goal is clear.
+- Open a pull request only once its design is proved to hold where the guarantee is enforced: for example, ownership
+  is checked before a file is published, evidence before a finding is saved, and separate inputs stay separate before
+  a draft is made. When a review exposes a wrong assumption, re-examine the design rather than patching the reported
+  case. Open it as a draft at that point, so the required checks run while its independent review does.
+- When a fix touches saving, write its before-and-after tests for failed writes, restarts, and edits from another
+  window first.
+- Apply these rules from the first pull request. Give every squash merge an explicit commit title and body, since a
+  generated body can fail the attribution check (#864). Run one local test command at a time on a machine, since
+  timing-sensitive tests fail under load. A pull request that reaches the round limit in
+  [review-prompt.md](review-prompt.md) stays open as a draft until it is cut or split, with its blocker noted on it
+  and on the batch issue.
+- Test the failing case and the nearby cases that already work on `main`, so that a fix keeps the behavior around it.
+- Check the files and dependencies a fix needs against the files the batch must not edit before starting it, and
+  again whenever a revision changes a data contract.
+- Limit work in flight. When reviews keep finding the same kind of failure, open no new pull requests until the open
+  ones are finished.

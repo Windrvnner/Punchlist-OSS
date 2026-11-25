@@ -1,6 +1,7 @@
 import { toParagraphs } from '../domain/cite';
 import type { Finding, Source } from '../domain/model';
 import { CreateFinding } from './commands/findings';
+import { CreateQuestion } from './commands/questions';
 import { createdRecord } from './createdRecord';
 import { keepAsEdit } from './findingDrafts';
 import { hasTexts, keptDrafts } from './keptText';
@@ -26,6 +27,21 @@ export function answerCardDraft(drafts: Map<string, CardDraft>, answerId: string
     return true;
   };
   return { latest, forget, remember, landed };
+}
+
+/** Log the version sent, while leaving any newer typing on the card. */
+export async function saveAnswerQuestion(store: Store, input: {
+  dealId: string;
+  linkedFinding?: string;
+  draft: ReturnType<typeof answerCardDraft>;
+  sent: CardDraft;
+  cancelled(): boolean;
+}) {
+  const { dealId, linkedFinding, draft, sent, cancelled } = input;
+  const result = await store.dispatch(CreateQuestion, {
+    dealId, linkedFinding, text: sent.text.trim(), workstream: sent.ws,
+  }, { idempotencyKey: 'card-q-' + dealId });
+  return result.ok && !cancelled() && draft.landed(sent);
 }
 
 type AnswerFindingSave = {

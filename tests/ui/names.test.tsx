@@ -8,13 +8,15 @@ vi.mock('../../src/control', async (real) => ({ ...(await real<typeof import('..
 const { SignInRow } = await import('../../src/ui/signin');
 const { findingsSheet } = await import('../../src/domain/importExport');
 const { signedOut } = await import('../../src/backend/signInToken');
-const { connection } = await import('../../src/app/connection');
+const { connection, SignInConnection } = await import('../../src/app/connection');
 
 describe('names from the control file', () => {
   it('the sign-in row, a sign-in wait and an export use them', async () => {
     const root = document.createElement('div'); document.body.append(root);
     const signin = { status: async () => ({ ok: true as const, value: { signedIn: false, sso: true, apiKey: true } }), signIn: async () => ({ ok: true as const, value: undefined }), paste: async () => ({ ok: true as const, value: undefined }) };
-    await act(() => { render(<SignInRow signin={signin} />, root); }); await act(() => new Promise<void>((r) => setTimeout(r, 20)));
+    const form = new SignInConnection(signin);
+    await act(() => { render(<SignInRow form={form} />, root); });
+    await act(() => new Promise<void>((r) => setTimeout(r, 20)));
     expect(root.textContent).toContain('Lamna Brain Sign-In'); expect(root.textContent).not.toContain('Intelligence');
     expect(signedOut().message).toBe('Waiting for someone to sign in to Lamna Brain.');
     const sheet = findingsSheet([{ title: 't', body: ['b'], workstream: '', status: 'open', raisedAt: '', origin: 'ai', sources: [] } as never]);

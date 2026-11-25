@@ -4,12 +4,73 @@
  * through RequestDraft/ApplyDraft, so a stop or a reload leaves nothing half-done.
  */
 import type { Store } from './store';
-import { RequestDraft } from './commands/drafts';
+import { AcceptDraft, RequestDraft } from './commands/drafts';
+import { SetResponse } from './commands/questions';
+import { isChangedElsewhere } from './changedElsewhere';
 import { isDraftStale } from '../domain/transitions';
-import { dealQuestions } from './state';
+import { dealQuestions, qaKept, type State } from './state';
+import { chooseVersion, type VersionPick } from './qaLog';
+import { hasTexts, keptDrafts } from './keptText';
+import type { handFieldText } from './fieldDrafts';
 import type { Question } from '../domain/model';
+import { fail, rejected } from '../domain/result';
+import type { Services } from '../ports';
 
-export const eligibleForDraft = (q: Question) => q.status === 'open' && !q.response.trim() && !!q.text.trim() && (!q.draft || q.draft.status === 'failed' || isDraftStale(q));
+export const eligibleForDraft = (q: Question) => q.status === 'open' && !q.response.trim() && !!q.text.trim()
+  && (!q.draft || q.draft.status === 'failed' || isDraftStale(q));
+
+function retryKeptDraft(store: Store, opId: string | undefined): boolean {
+  if (!opId || !store.hasKeptReply(opId)) return false;
+  store.retryKeptReply(opId);
+  return true;
+}
+
+/** Retry a kept reply before making another request to the model. */
+export function requestQuestionDraft(store: Store, question: Pick<Question, 'dealId' | 'id' | 'draft'>) {
+  if (retryKeptDraft(store, question.draft?.opId)) return;
+  return store.dispatch(RequestDraft, { dealId: question.dealId, questionId: question.id }, {
+    idempotencyKey: 'draft-' + question.id,
+  });
+}
+
+export function draftReplacesResponse(question: Pick<Question, 'response'>, typed: string): boolean {
+  return !!typed.trim() || !!question.response.trim();
+}
+
+type DraftReplacement = { typed: string; over: string; elsewhere: boolean };
+type DraftAcceptance =
+  | { kind: 'accepted'; opId: string }
+  | { kind: 'reported' }
+  | { kind: 'responseChanged' }
+  | { kind: 'textNotSaved' }
+  | { kind: 'refused'; message: string };
+
+/** Save confirmed text before replacing it so Undo restores it. Each write checks the response it was based on. */
+export async function useQuestionDraft(
+  store: Store, question: Pick<Question, 'dealId' | 'id'>, replacement?: DraftReplacement,
+): Promise<DraftAcceptance> {
+  const target = { dealId: question.dealId, questionId: question.id };
+  const options = { idempotencyKey: 'take-' + question.id };
+  if (!replacement) {
+    const result = await store.dispatch(AcceptDraft, target, options);
+    return result.ok ? { kind: 'accepted', opId: result.value.opId } : { kind: 'reported' };
+  }
+  if (replacement.elsewhere) return { kind: 'responseChanged' };
+
+  const current = store.get().questions[question.id];
+  if (current && replacement.typed !== current.response) {
+    const saved = await store.dispatch(SetResponse, { ...target, response: replacement.typed }, {
+      quiet: true, over: replacement.over,
+    });
+    if (!saved.ok) return { kind: isChangedElsewhere(saved.error) ? 'responseChanged' : 'textNotSaved' };
+  }
+  const result = await store.dispatch(AcceptDraft, { ...target, replace: true, over: replacement.typed }, {
+    ...options, quiet: true,
+  });
+  if (result.ok) return { kind: 'accepted', opId: result.value.opId };
+  if (isChangedElsewhere(result.error)) return { kind: 'responseChanged' };
+  return { kind: 'refused', message: result.error.message };
+}
 
 const stops = new Map<string, boolean>();
 /** questions whose response a person is typing right now (the panel's response field has focus): Draft all leaves them alone */
@@ -35,7 +96,13 @@ export async function draftAll(store: Store, dealId: string, held: (q: Question)
       // after a wait (hours, it may be), the question is looked at again: another PC may have answered or drafted it meanwhile
       if ((await signedIn()) || stops.get(dealId)) { queue.unshift(q); continue; }
       // a draft whose text came back but could not be saved is written from that text, not asked of the model again
-      if (now.draft?.opId && store.hasKeptReply(now.draft.opId)) { store.retryKeptReply(now.draft.opId); asked.add(q.id); store.ui((ui) => ({ batch: ui.batch && ui.batch.dealId === dealId ? { ...ui.batch, done: ui.batch.done + 1 } : ui.batch })); continue; }
+      if (retryKeptDraft(store, now.draft?.opId)) {
+        asked.add(q.id);
+        store.ui((ui) => ({
+          batch: ui.batch?.dealId === dealId ? { ...ui.batch, done: ui.batch.done + 1 } : ui.batch,
+        }));
+        continue;
+      }
       const r = await store.dispatch(RequestDraft, { dealId, questionId: q.id, empty: true }, { quiet: true });
       if (!r.ok && store.readOnly()) { queue.unshift(q); continue; }   // signed out just now: its turn comes again after sign-in
       if (r.ok) { asked.add(q.id); await store.settled(r.value.opId); } else refused++;   // refused (a paused deal, say): counted as failed, not lost
@@ -56,4 +123,176 @@ export async function draftAll(store: Store, dealId: string, held: (q: Question)
 export function stopDraftAll(store: Store, dealId: string) {
   stops.set(dealId, true);
   store.ui((ui) => ({ batch: ui.batch && ui.batch.dealId === dealId ? { ...ui.batch, stopping: true } : ui.batch }));
+}
+
+type MergeDraft = { text: string; ai: string };
+type MergeSide = 'app' | 'log';
+type MergeFields = Record<string, MergeSide>;
+type MergeModel = NonNullable<Services['ai']['merge']>;
+
+let keptMerges: Map<string, MergeDraft> | undefined;
+let keptSides: Map<string, MergeFields> | undefined;
+// Keep the existing keys and load them after kept text is initialized.
+const mergeDrafts = () => keptMerges ??= keptDrafts('qa-merge', hasTexts('text', 'ai'));
+const mergeSides = () => keptSides ??= keptDrafts('qa-merge-sides', isMergeFields);
+const merging = new Set<string>();
+const mergeListeners = new Set<(questionId: string, error?: string) => void>();
+
+function isMergeFields(value: unknown): value is MergeFields {
+  return !!value && typeof value === 'object'
+    && Object.values(value).every((side) => side === 'app' || side === 'log');
+}
+
+/** Load both maps before recovery can move saved drafts to the copied questions' IDs. */
+export function initializeResponseMergeDrafts() {
+  mergeDrafts();
+  mergeSides();
+}
+
+export function responseMergeView(questionId: string) {
+  const draft = mergeDrafts().get(questionId);
+  return {
+    draft, hasDraft: !!draft?.text.trim(),
+    busy: merging.has(questionId), fields: mergeSides().get(questionId) ?? {},
+  };
+}
+
+export function editResponseMerge(questionId: string, text: string) {
+  const drafts = mergeDrafts();
+  drafts.set(questionId, { text, ai: drafts.get(questionId)?.ai ?? '' });
+}
+
+/** The open dialog's choices can outlive the kept copy after a peer resolves the question. */
+export function setResponseMergeSide(questionId: string, shown: MergeFields, field: string, side: MergeSide) {
+  const fields = { ...shown, [field]: side };
+  mergeSides().set(questionId, fields);
+  return fields;
+}
+
+export function watchResponseMerges(listener: (questionId: string, error?: string) => void) {
+  mergeListeners.add(listener);
+  return () => { mergeListeners.delete(listener); };
+}
+
+/** Select a kept draft, wait for an in-flight one, or draft from the versions shown. */
+export function selectResponseMerge(
+  store: Store, question: Question, logText: string, again = false,
+): { text: string; busy: boolean } | undefined {
+  const { draft, hasDraft, busy } = responseMergeView(question.id);
+  const text = draft?.text ?? '';
+  if (!again && hasDraft && !busy) return { text, busy: false };
+  const ai = store.services.ai;
+  if (!ai.merge) return;
+  if (!busy) {
+    merging.add(question.id);
+    const input = { dealId: question.dealId, question: question.text, app: question.response, log: logText };
+    void finishResponseMerge(store, question.id, ai.merge.bind(ai), input, text);
+  }
+  return { text, busy: true };
+}
+
+async function finishResponseMerge(
+  store: Store, questionId: string, model: MergeModel, input: Parameters<MergeModel>[0], before: string,
+) {
+  const result = await model(input);
+  merging.delete(questionId);
+  const drafts = mergeDrafts();
+  const state = store.get();
+  // Keep a reply for its question after stepping away, unless it was resolved or its draft was edited meanwhile.
+  if (result.ok && hasLogVersion(state, state.questions[questionId])
+      && (drafts.get(questionId)?.text ?? '') === before) {
+    drafts.set(questionId, { text: result.value.text, ai: result.value.text });
+  }
+  for (const listener of mergeListeners) listener(questionId, result.ok ? undefined : result.error.message);
+}
+
+export function hasLogVersion(state: State, question: Question | undefined): boolean {
+  return !!question && Object.keys(qaKept(state, question)).length > 0;
+}
+
+function forgetResponseMerge(questionId: string) {
+  mergeDrafts().delete(questionId);
+  mergeSides().delete(questionId);
+}
+
+/** questions whose choice this PC is saving: their merge goes with the choice, not to the response box */
+const choosing = new Set<string>();
+
+/** The person's own words in a merged response: typed, or an AI draft they edited. */
+function typedMerge(draft: MergeDraft, question: Question): boolean {
+  return !!draft.text.trim() && draft.text !== draft.ai && draft.text !== question.response;
+}
+
+/** set while the app watches for resolved merges: fieldDrafts loads only after kept text is read, so it is passed in */
+let handText: typeof handFieldText | undefined;
+/** the state the kept merges were last settled against */
+let settledFrom: State | undefined;
+
+/**
+ * A kept merge whose question has no versions left (resolved on another PC, or settled by a log update) is cleared.
+ * Words the person typed in it go to the question's response box as unsaved text, with "Changed elsewhere", so they
+ * stay until the person uses or discards them (#939). Field sides are choices between versions that no longer exist.
+ */
+function settleResolvedMerges(state: State) {
+  if (!handText) return;
+  settledFrom = state;
+  for (const [questionId, draft] of [...mergeDrafts()]) {
+    if (!settledQuestion(state, questionId)) continue;
+    const question = state.questions[questionId];
+    if (typedMerge(draft, question)) {
+      handText(`${questionId}:response`, draft.text, { value: question.response, rev: question.rev });
+    }
+    forgetResponseMerge(questionId);
+  }
+  for (const questionId of [...mergeSides().keys()]) {
+    if (settledQuestion(state, questionId)) mergeSides().delete(questionId);
+  }
+}
+
+/** A question loaded with its deal, not being chosen on this PC, with no versions left. Others wait. */
+function settledQuestion(state: State, questionId: string): boolean {
+  const question = state.questions[questionId];
+  return !!question && !!state.deals[question.dealId] && !choosing.has(questionId) && !hasLogVersion(state, question);
+}
+
+/** Settle kept merges now and whenever the app's state changes, handing typed words to the response box. */
+export function keepResolvedMerges(store: Store, hand: typeof handFieldText): () => void {
+  handText = hand;
+  settleResolvedMerges(store.get());
+  const stop = store.subscribe(() => {
+    const state = store.get();
+    // Most changes are the screen's own (a selection, a scroll): questions and deals are then the same objects.
+    if (state.questions !== settledFrom?.questions || state.deals !== settledFrom?.deals) settleResolvedMerges(state);
+  });
+  return () => {
+    stop();
+    handText = undefined;
+    settledFrom = undefined;
+  };
+}
+
+export async function keepResponseVersion(
+  store: Store, dealId: string, questionId: string, pick: VersionPick,
+  shown: { merged: string; fields: MergeFields; seen?: string },
+) {
+  const merge = pick === 'merged';
+  const { merged, fields, seen } = shown;
+  if (merge && (merging.has(questionId) || !merged.trim())) return fail(rejected('There is no merged draft to keep'));
+  choosing.add(questionId);
+  try {
+    const result = await chooseVersion(store, dealId, questionId, pick, {
+      merged, seen, drafted: mergeDrafts().get(questionId)?.ai, fields: merge ? fields : {},
+    });
+    if (result.ok) forgetResponseMerge(questionId);
+    return result;
+  } finally {
+    choosing.delete(questionId);
+    // A choice refused because the question was resolved meanwhile leaves the merge to settle like any other.
+    settleResolvedMerges(store.get());
+  }
+}
+
+export async function lastQuestionEditor(store: Store, questionId: string): Promise<string> {
+  const history = await store.services.repo.audit(questionId);
+  return history.ok ? history.value.at(-1)?.actor ?? '' : '';
 }

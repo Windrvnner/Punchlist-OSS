@@ -10,8 +10,7 @@ Dependencies point inward, following these rules:
 - `app` never imports `backend`, `adapters`, or `ui`.
 - `adapters` and `backend` implement the ports.
 - `ui` reads `domain` helpers but changes records only through `app`.
-- `ui` never imports `backend`, `adapters`, `desktop`, or `shell`, and reaches services and storage only through `app`;
-  the exceptions still being moved are listed in `scripts/pane-of-glass-baseline.json` (#833).
+- `ui` never imports `backend`, `adapters`, `desktop`, or `shell`, and reaches services and storage only through `app`.
 - `logRepository.ts` and `changeLog.ts` are bundled into the browser build, so they must stay free of Node imports.
 
 The source tree is organized as follows:
@@ -100,7 +99,9 @@ reports a lost connection, timeout, rate limit, or server error as `unreachable`
 **Desktop shell.** The desktop app is an Electron app. The main process (`src/desktop/main.ts`) assembles the backend and serves it to a single window across a bridge. The window runs the same Store and UI as the browser demo.
 
 - `src/shell/bridge.ts` lists every method the window may call, and the main process refuses anything else. The window has no access to Node or to file paths (context isolation and the sandbox are on). PDF pages are served by token, never by path.
-- Every bridged call resolves to a `Result`. If the main process can't be reached, the call resolves to `unreachable`; if a method throws, it resolves to `failed`.
+- Bridged service calls resolve to a `Result`. An unreachable main process produces `unreachable`. A thrown method
+  produces `failed`.
+- After saving a snapshot of kept drafts, the window asks the main process to flush local storage to disk (#825).
 - Everything the PC keeps is stored in `%LOCALAPPDATA%\Punchlist`. The shared folder is the one connected on this PC, recorded in `settings.json`. A PC that has never signed in shows the sign-in page first. Then, until a folder is connected, it shows only the connect page (`src/ui/connect.tsx`), which finds the team's Punchlist folders in OneDrive by itself (`teamFolders` in `src/desktop/host.ts`).
 - Each install has an ID for each shared folder (`install.json`, written twice so that one copy is always complete) and its own undo journal (`ops-<id>.json`).
 - Sign-in (`src/desktop/signin.ts`) accepts an API key or single sign-on, as the control file allows. The token is stored encrypted with Electron's `safeStorage`. While nobody is signed in, the app is read-only (`Store.readOnly`), and calls already under way wait for a sign-in.
@@ -205,11 +206,18 @@ A deal's checklist is made up of its own item records, linked to the findings an
 ## Q&A log, imports, and the memo
 
 - **The Q&A log** (`src/app/qaLog.ts`, `src/backend/qaLogs.ts`) is the team's own spreadsheet; the deal records only where it is. An update reads the log as it is, works out the cells to change (`logWrite` in `src/domain/logWrite.ts`), and writes them into a copy (`editLog` in `src/backend/spreadsheets.ts`). It then checks that only those cells changed, archives the old version, and saves the copy over the log (`src/backend/qaLogFolder.ts`).
+- **Q&A import** reads and proposes a table layout through `src/app/transfer.ts`. Its preview uses prepared dates
+  where available. `src/app/qaImport.ts` submits the prepared rows through `ImportQuestions`. That workflow resumes retained
+  submissions by their journal correlation and finishes the saved log choice.
 - **The master checklist** is brought in pasted or from a file, read line by line by the model, and tied out so that every line is accounted for (`src/app/listRead.ts`, `src/domain/listRead.ts`). Its items go to every deal that uses the list and is not marked Closed, with one **Undo** for all of them.
 - **An issues list** is attached and read through `src/app/issuesList.ts`. The model reads and checks each page against the
   file and proposes titles and matches (`issuesList` in `src/backend/ai.ts`). The preview and import command resolve the
   same matches through `src/app/issuesListJoins.ts`.
-- **An import in progress** (the file, the model's reading, the choices, and the check marks) is kept on each PC in IndexedDB (`src/ui/keptImports.ts`), part by part. A Q&A submission reaches IndexedDB before its operation starts, and keeps a unique journal correlation until both the rows and its Q&A log choice are finished. Reopening resumes that submission without appending its rows again.
+- **An import in progress** (the file, the model's reading, the choices, and the check marks) is kept on each PC,
+  part by part, through the `KeptImports` port. Both shells use the IndexedDB adapter. `src/app/keptImports.ts` keeps
+  the parts and coordinates Q&A submission checkpoints. A submission reaches the store before its operation starts
+  and keeps a unique journal correlation until both the rows and its Q&A log choice are finished. Reopening resumes
+  that submission without appending its rows again.
 - **The deal memo** (`src/app/memo.ts`, `src/domain/memo.ts`, `src/domain/memoDoc.ts`) asks the model only for the summary and each open finding's rating. Everything else is worked out from the records, and LibreOffice turns the result into Word and PDF files.
 
 ## Conversations

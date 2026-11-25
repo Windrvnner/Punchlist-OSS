@@ -75,6 +75,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Responded By and its date appear beside the Response label when filled, and only on hover or focus when empty.
 - Changes from the Q&A log are marked in the row with Changed, Two Versions, and **Resolve**. While any such rows exist, Changed and Two Versions are also filters. A row in two versions has a 3px stripe, and its Response cell says only "Two versions". A changed cell shows the log's icon, with the old value in its tooltip, until the question is opened (option A).
 - **Resolve** shows the app's version and the log's version side by side, with **Keep Selected** and **Merge Both Versions** (which writes an AI draft; **Draft Again** redoes it). A choice belongs to its own question. The app's version, if not kept, goes to Deleted; the log's version stays in the archived file.
+- A merged response typed or edited in **Resolve** whose question is resolved elsewhere moves to the question's response box, unsaved and marked Changed elsewhere, until **Keep Mine** or **Take Theirs**. Unsaved text already in the box stays first, with the merge after it; there is no dialog to choose between them. An untouched AI merge is dropped (#939).
 - The workstream filter is a filter button that opens the app's own menu: "All workstreams", the workstreams from A to Z, and "No workstream".
 - The table shows two lines of each response. **More** picks the columns shown (Responded By and Response Date start hidden), which never changes what Export or the log carries. Status is left out while every row shown has the same status. The page returns as it was left, per deal.
 - Scrolling down tucks the deal's header row away, and scrolling up brings it back. Column heads stay in place (#593).
@@ -86,7 +87,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A draft that can't be saved is retried five times with backoff, then shows as failed, with its text kept for **Retry** (#22).
 - **Draft from Documents** is offered on any open question without a draft; when it would replace typed text, it asks for confirmation on the button and offers **Undo**. **Draft All** drafts only questions with no response. An accepted draft records the firm as the responder.
 - A used draft, or a response taken from a conversation, keeps its label and sources only until a person changes its words.
-- Drafting quotes, word for word and with credit, a response already given to a similar question, then adds what the documents say.
+- Drafting quotes, word for word and with credit, a response already given to a similar question, then adds what the documents say. The model sees earlier responses only as R1, R2 and so on, never their question numbers, so a calendar quarter such as Q3 2027 stays in a draft, and a sentence naming an R number is dropped with the source only it cited (#286).
 - A typed response, or one taken from a conversation, doesn't change the status; a person marks the question Answered.
 - Emptying a response is announced in a notice with **Undo**.
 - A response on a question linked to a finding marks that finding; a response on an unlinked question is checked once against the open findings.
@@ -307,6 +308,57 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Say how an ambiguous instruction is being read. Ask about a product decision before it is built.
 - Each thing lives in one place: decisions here; bugs and Build list items (with their designs) as GitHub issues; review notes on pull requests; how the app works in the docs; the detailed contract in code comments and tests; and history in git. There are no Markdown review files or running logs.
 - The README covers what the app is and does, screenshots of the real app, and how to install and use it; developer setup is in docs/development.md.
+
+## Deal screen
+
+These decisions are for the rebuilt deal screen in [deal-screen-design.md](deal-screen-design.md) and are not built yet
+(#881). Once built, they replace Deal status wherever it appears (Look and feel, Pages and navigation), **Past
+Conversations** in every composer (Conversations), and **Keep It** in confirms (Working rules).
+They also replace the deal header, Overview, the Findings page, and **Deals Open On** (Pages and navigation); the
+Findings worklist beside the Checklist (Findings, Checklist); Overview's counts (Checklist); **Deal Memo…** in the ⋯
+menu (Deal memo); and Check again's place and **Check the N Left Out** (Findings, AI and models).
+
+- A deal shows its conversation on the left and, when opened, one pane on the right. The pane's tabs are Tasks, Diligence, and Q&A, always in that order, followed by any opened finding, document, or task, each with ×.
+- The selected tab is 1.5 times as wide as each other tab, and the rest share the bar equally. A hairline separates unselected tabs, the selected tab sits raised, and tabs show no counts. An unselected tab too narrow for its name drops its icon before shortening the word. The Diligence tab uses the Checklist's icon.
+- The sidebar folds to its slim rail while the pane is open and comes back when it closes. A sidebar pinned open stays, and the conversation narrows; the pane gives way only to keep the conversation at least 400px wide.
+- The checklist is the starting point for diligence, and each item's result is a finding, whether satisfied, flagged,
+  a gap, or not settled: the Diligence list and findings are one list, not two. A flagged result is closed on its
+  finding (#888).
+- A deal has no Deal status. The sidebar lists deals in one list, ordered by when the person last worked on each
+  deal, and **Archive Deal** hides one.
+- A deal's ⋯ menu offers **Archive Deal**, which asks first in the app's confirm dialog. Archived deals fold under **Archived**; a dot marks an archived deal whose data room changed, with its update line ("4 new files · 11:20 AM"). An archived deal's ⋯ menu offers **Unarchive Deal**.
+- The conversation title in the breadcrumb is a button that opens the deal's past conversations. **Past Conversations** leaves the composer.
+- The check of the data room against the checklist is called Diligence (**Run Diligence**, the Diligence tab), and the list of running and finished work is called Tasks. The Diligence tab shows the Checklist's own marks and groups.
+- Tasks belong to the deal, not to a conversation: they keep running and stay in Tasks when the person switches conversations, and a task's result card stays in the conversation that started it (#875).
+- Tasks are grouped as Needs Input, Running, and Completed. Each task is one row: an outline kind icon, its name, its count ("1,284 of 2,148" or "Step 3 of 5"), and, while it runs, a thin bar of the same width on every row. A round × stops it; a finished task opens from a round arrow. There are no time-remaining estimates (elapsed time may show), and an open-ended task's current file shows on hover.
+- A task's card in the chat has a fixed width and the same bar, and opens the task with **Open**. A finished task keeps its reply box.
+- Work in progress shows a small ring beside words naming the live step, never a spinner alone; on a tab, the ring sits beside the tab's name.
+- An opened question sits in a card with its question, response, sources, links, and status, beside the conversation, never covering it. A draft response is marked with a **Draft** badge.
+- A source document opens in the pane in reading mode's viewer, with page navigation and zoom and no passage highlighting.
+- Confirm dialogs say **Cancel**, not **Keep It** (#867).
+- The deal's name and counterparty in the breadcrumb are one button that opens **Deal Info**: name, counterparty,
+  Structure, Sector, Technology, the folders line with **Edit**, and **Delete Deal**. **Deal Memo** is an icon button
+  at the header's right (#888).
+- Overview is retired: its counts are the Diligence and Q&A filters, its Documents list is in **Folders**, and
+  indexing runs as a task (#888).
+- **Run Diligence** sits at the end of the Diligence tab's filter row. Findings that no checklist item raised join
+  the Diligence list under Flagged (#888).
+- A deal opens on a new conversation, with the pane as the person last left it (#888).
+- A question asked in a conversation is answered in that conversation, and anything it needs from the person is
+  asked there. It appears in Tasks only once the person leaves the conversation while it runs, and stays there under
+  Completed once it finishes. Diligence, imports, indexing, Deal Memo, and draft responses always run as tasks (#888).
+- Needs Input holds drafts ready to review, items Diligence did not check ("N items not checked", **Run**), and
+  questions left running that wait on the person ("Awaiting draft selection", **Answer**). Its buttons share one
+  width (#888).
+- Home's header holds **Past Conversations**, which lists every conversation with its deal's name (#888).
+- Working on a deal means sending a message in it, starting a task on it, or changing its records, details, or
+  folders. Archived lists deals whose data room changed first, newest change first, then the rest by when they were
+  last worked on; a deal's dot and update line clear once it is opened. Archiving is kept on the person's own record
+  of the deal (#888).
+- Deleting a conversation, once allowed, leaves its tasks running, and its confirm says how many are running (#888).
+- A conversation that receives a task's result moves to the top of Past Conversations, with a dot until it is
+  opened (#888).
+- Task steps, task notices, and status text are written in a neutral voice, with no first person (#888).
 
 ## Built, awaiting confirmation
 
