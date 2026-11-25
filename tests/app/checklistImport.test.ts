@@ -234,6 +234,7 @@ it('resumes unfinished reading and skips the initial read for a kept result or f
 
 it('keeps review input reserved for the latest worksheet read, including a read failure (#821)', async () => {
   const app = await readyApp();
+  const originalRead = app.store.services.sheets.read;
   try {
     const { store } = app;
     const questions = portfolioQuestions();
@@ -269,6 +270,101 @@ it('keeps review input reserved for the latest worksheet read, including a read 
       kind: 'failed', message: 'The worksheet could not be opened',
     }));
   } finally {
+    app.store.services.sheets.read = originalRead;
+    app.store.closing();
+    await app.repo.close();
+  }
+});
+
+/** A held worksheet read of `questions`, answered under the sheet's own name (#821). */
+async function heldSheetRead(app: Awaited<ReturnType<typeof readyApp>>, questions: string[]) {
+  const source = value(await loadChecklistSource(app.store, await portfolioFile(questions)));
+  if (!('table' in source)) throw new Error('Expected a checklist table');
+  const releases: (() => void)[] = [];
+  const { sheets } = app.store.services;
+  sheets.read = async (_bytes, _name, options) => {
+    await new Promise<void>((resolve) => { releases.push(resolve); });
+    return ok({ columns: ['Item'], sheet: options?.sheet, rows: questions.map((text) => [text]) });
+  };
+  return { table: source.table, releases };
+}
+
+it('holds Next, duplicates and wording while a worksheet read runs, whatever else takes a token (#821)', async () => {
+  const app = await readyApp();
+  // the services are shared with later tests' apps, so the real read goes back after
+  const originalRead = app.store.services.sheets.read;
+  try {
+    const { store } = app;
+    const questions = portfolioQuestions();
+    const { table, releases } = await heldSheetRead(app, questions);
+    const { reword, sameMeaning } = modelReview(app);
+    const state = store.get();
+    const target = listTarget(state, firmOf(state.firmList), 'broad', '');
+    const requests = checklistRequests();
+    const session = checklistReviewSession(store, requests, REVIEW_EVENTS);
+    const show = vi.fn<(change: ChecklistReviewChange) => void>();
+    const items = questions.map((text) => ({ text }));
+    const plan = session.plan(items, target, OPTIONS, null, '')!;
+    const events = { started: vi.fn(), finished: vi.fn() };
+
+    const read = rereadChecklistTable(store, requests, table, { sheet: 'Supplement' }, false, events);
+    requests.newToken();
+    expect(requests.tableReadPending()).toBe(true);
+    await session.next(plan, show);
+    await session.duplicates({ items, rewords: [], pairs: [], asked: { reword: 'off', same: 'failed' } }, [], show);
+    await session.wording({ items, rewords: [], pairs: [], asked: { reword: 'failed', same: 'off' } }, show);
+    expect(show).not.toHaveBeenCalled();
+    expect(reword).not.toHaveBeenCalled();
+    expect(sameMeaning).not.toHaveBeenCalled();
+
+    await vi.waitFor(() => expect(releases).toHaveLength(1));
+    releases[0]();
+    await read;
+    expect(requests.tableReadPending()).toBe(false);
+    await session.next(plan, show);
+    expect(shownReview(show.mock.lastCall?.[0], 'fresh').review.items).toHaveLength(questions.length);
+  } finally {
+    app.store.services.sheets.read = originalRead;
+    app.store.closing();
+    await app.repo.close();
+  }
+});
+
+it('makes a new review when another worksheet with the same items is read (#821)', async () => {
+  const app = await readyApp();
+  // the services are shared with later tests' apps, so the real read goes back after
+  const originalRead = app.store.services.sheets.read;
+  try {
+    const { store } = app;
+    const questions = portfolioQuestions();
+    const { table, releases } = await heldSheetRead(app, questions);
+    const { reword } = modelReview(app);
+    const state = store.get();
+    const target = listTarget(state, firmOf(state.firmList), 'broad', '');
+    const requests = checklistRequests();
+    const session = checklistReviewSession(store, requests, REVIEW_EVENTS);
+    const show = vi.fn<(change: ChecklistReviewChange) => void>();
+    const items = questions.map((text) => ({ text }));
+    await session.next(session.plan(items, target, OPTIONS, null, '')!, show);
+    const { review, signature } = shownReview(show.mock.lastCall?.[0], 'fresh');
+    expect(session.plan(items, target, OPTIONS, review, signature)?.cached).toBe(review);
+
+    const read = rereadChecklistTable(
+      store, requests, table, { sheet: 'Supplement' }, false, { started: vi.fn(), finished: vi.fn() },
+    );
+    await vi.waitFor(() => expect(releases).toHaveLength(1));
+    releases[0]();
+    await read;
+    const again = session.plan(items, target, OPTIONS, review, signature)!;
+    expect(again.cached).toBeNull();
+    await session.next(again, show);
+    expect(reword).toHaveBeenCalledTimes(2);
+    expect(shownReview(show.mock.lastCall?.[0], 'fresh').review).not.toBe(review);
+    // the new review belongs to this worksheet, so it is shown again on Next
+    const made = shownReview(show.mock.lastCall?.[0], 'fresh');
+    expect(session.plan(items, target, OPTIONS, made.review, made.signature)?.cached).toBe(made.review);
+  } finally {
+    app.store.services.sheets.read = originalRead;
     app.store.closing();
     await app.repo.close();
   }
