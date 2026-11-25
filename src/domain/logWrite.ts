@@ -9,6 +9,7 @@ import type { Question } from './model';
 import type { ReadTable, SheetEdit } from './sheets';
 import { sameWords, prepareImport, IMPORT_FIELDS, type Mapping, type ImportField, type ImportRow } from './importExport';
 import { key } from './checklist';
+import { ROMAN_NUMERAL, NAMING_WORDS, normalizeReferences, openParts, isNamedChain } from './references';
 
 /** every field the app keeps up to date in the log, where the log has a column for it */
 const FIELDS: ImportField[] = ['n', 'text', 'askedBy', 'received', 'workstream', 'priority', 'status', 'response', 'respondedBy', 'responded'];
@@ -71,8 +72,6 @@ function mojibake(s: string): string {
   try { return new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(bytes)); } catch { return s; }
 }
 const QUESTION_WORD = /[\p{L}\p{M}|]+/gu;
-// Canonical numerals keep prose such as "civil" outside identifier matching.
-const ROMAN_NUMERAL = /^(?=.)m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})$/i;
 /**
  * The words of a question with what a misreading could change taken out, for matching a log's rows and an import's to the
  * app's questions (not for deciding whose a cell is): spacing, case, quote and dash shapes, punctuation between words, a capital
@@ -80,20 +79,13 @@ const ROMAN_NUMERAL = /^(?=.)m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|
  * Identifiers and combining marks stay distinct.
  */
 export function misreadKey(s: string): string {
-  return identifierText(s)
+  return normalizeReferences(s.normalize('NFKC'))
     .replace(/[\u2010-\u2015\u2212]/g, '-')                                             // dash shapes are one dash
-    .replace(/[^\s]*\d[^\s]*/g, repairNumberWord)
+    .replace(/[^\s]*\d[^\s]*/g, (t) => t.replace(/[lI|](?=[\d.,]|$)|(?<=[\d.,])[lI|]/g, '1').replace(/[oO](?=[\d.,])|(?<=[\d.,])[oO]/g, '0'))   // l00, 2O24
     .replace(QUESTION_WORD, repairWord)
     .toLowerCase()
     .replace(/(\d)\.(?=\d)/g, '$1\u0000').replace(/(\d),(?=\d)/g, '$1\u0001')            // a point or comma inside a number is kept, each as itself: 1,500 is not 1.500
     .replace(/[^\p{L}\p{M}\p{N}\u0000\u0001\-+()$€£¥<>/%:=|]/gu, '');
-}
-
-/** In a named clause, a dotted letter stays a letter through OCR repair (#778). */
-function repairNumberWord(word: string, offset: number, text: string): string {
-  if (isNamedDottedLetter(word, offset, text)) return word;
-  return word.replace(/[lI|](?=[\d.,]|$)|(?<=[\d.,])[lI|]/g, '1')
-    .replace(/[oO](?=[\d.,])|(?<=[\d.,])[oO]/g, '0');
 }
 
 /** Repair initial I or i before a lowercase word. A period could belong to an abbreviation. */
@@ -150,82 +142,30 @@ function collisionWord(word: string): string {
 
 /** a word or number of a question; a point or comma inside a number stays in it ("I.1", "1,500") */
 const QUESTION_TOKEN = /[\p{L}\p{M}\p{N}|]+(?:[.,][\p{L}\p{M}\p{N}|]+)*/gu;
-/** words a letter or numeral after them names: Class a, Tranche ii, part e */
-const NAMING_WORDS = new Set(('annex appendix article block class clause exhibit facility item limb lot paragraph '
-  + 'part phase rule schedule section series tier tranche unit').split(' '));
-const DOTTED_SUFFIX = /(?<!\s)\s*\.\s*([\p{L}\p{N}]+)(?![\p{L}\p{M}\p{N}|])/gu;
-const DOTTED_LEAD = /\p{N}+\p{L}?|[ivxlcdm]+/iu.source;
-const DOTTED_NAME_BEFORE = new RegExp(
-  String.raw`(?<![\p{L}\p{M}\p{N}|])(\p{L}+)(?:[\s:-]+(${DOTTED_LEAD})(?:\s*[.,]\s*`
-    + String.raw`(?:${DOTTED_LEAD}|(?![ivxlcdm])\p{L}))*)?$`, 'iu',
-);
-const DOTTED_NUMBER_LETTER = new RegExp(
-  String.raw`^(${DOTTED_LEAD})(?:[.,]\p{N}+)*\.(\p{L}+|\p{N}+\p{L})(?![\p{L}\p{M}\p{N}|])`, 'iu',
-);
-const NUMERIC_PART = /^\p{N}+\p{L}?$/u;
-const LETTERED_NUMBER = /^\p{N}+\p{L}$/u;
-const CLOSED_NAMING_PHRASE = /(?:^|[^\p{L}])(?:a|an|any|another|by|each|every|per|that|the|this)\s*$/iu;
-const I_CONTRACTION = /^['’](?:m|d|ve|ll)\b/iu;
 
-/** Read dotted labels alike for both wording and identifier comparison (#778). */
-function identifierText(text: string): string {
-  return text.normalize('NFKC').replace(DOTTED_SUFFIX, (match, suffix, offset, normalized) => {
-    const numeric = NUMERIC_PART.test(suffix);
-    if (!numeric && !identifierLetter(suffix)) return match;
-    const name = dottedNameBefore(normalized, offset);
-    if (!name || (numeric && !name[2])) return match;
-    const after = normalized.slice(offset + match.length);
-    if (dottedProseI(suffix, name, normalized, after)) return `. ${suffix}`;
-    return name[2] ? `.${suffix}` : ` ${suffix}`;
-  });
-}
-
-function dottedNameBefore(text: string, offset: number): RegExpExecArray | null {
-  const name = DOTTED_NAME_BEFORE.exec(text.slice(0, offset).trimEnd());
-  return name && NAMING_WORDS.has(name[1].toLowerCase()) && (!name[2] || dottedLead(name[2])) ? name : null;
-}
-
-function isNamedDottedLetter(token: string, offset: number, text: string): boolean {
-  const parts = DOTTED_NUMBER_LETTER.exec(token);
-  if (!parts || !dottedLead(parts[1]) || !(identifierLetter(parts[2]) || LETTERED_NUMBER.test(parts[2]))) return false;
-  const name = dottedNameBefore(text, offset);
-  return !!name && !name[2];
-}
-
-const dottedLead = (token: string) => NUMERIC_PART.test(token) || ROMAN_NUMERAL.test(token);
-const identifierLetter = (token: string) => /^\p{L}$/u.test(token) || ROMAN_NUMERAL.test(token);
-const couldBePronounI = (token: string, after: string) => /^[Iil|]$/.test(token) && /^\s*\p{Ll}/u.test(after);
-
-/** "Each item. I …" has a complete noun phrase before the period. A numbered reference can have another component. */
-function dottedProseI(token: string, name: RegExpExecArray, text: string, after: string): boolean {
-  if (!/^[Iil|]$/.test(token)) return false;
-  if (I_CONTRACTION.test(after)) return true;
-  return !name[2] && CLOSED_NAMING_PHRASE.test(text.slice(0, name.index)) && /^\s*,?\s*\p{Ll}/u.test(after);
-}
-
-function isDottedProseI(token: string, offset: number, text: string): boolean {
-  if (!/^[Iil|]$/.test(token)) return false;
-  const before = text.slice(0, offset).trimEnd();
-  if (!before.endsWith('.')) return false;
-  const name = dottedNameBefore(before, before.length - 1);
-  return !!name && dottedProseI(token, name, text, text.slice(offset + token.length));
-}
 /**
  * The identifiers a question names, as they are compared (#125, #127, #128): anything with a digit, a Roman numeral in
  * capitals, a single capital letter, a code of up to five capitals, and a letter or numeral in parentheses or after a
  * naming word ("(a)", "class b", "tranche ii"). Sorted, so two lists compare in one walk.
  */
 export function identifiers(text: string): string[] {
-  return identifiersIn(identifierText(text));
+  return identifiersIn(normalizeReferences(text.normalize('NFKC'))).ids;
 }
 
-function identifiersIn(text: string): string[] {
-  const found: string[] = [];
+/** The identifiers a normalized text names, and the open ones: a lone part after a point that may be a word (#778). */
+function identifiersIn(text: string): { ids: string[]; open: string[] } {
+  const ids: string[] = [];
+  const open: string[] = [];
+  const openAt = openParts(text);
   for (const match of text.matchAll(QUESTION_TOKEN)) {
-    const form = identifierForm(match[0], match.index, text);
-    if (form !== undefined) found.push(form);
+    const openId = openAt.get(match.index);
+    if (openId !== undefined) open.push(openId);
+    else {
+      const form = identifierForm(match[0], match.index, text);
+      if (form !== undefined) ids.push(form);
+    }
   }
-  return found.sort();
+  return { ids: ids.sort(), open: open.sort() };
 }
 
 /**
@@ -233,12 +173,10 @@ function identifiersIn(text: string): string[] {
  * "I" however it was read ("I understand", "can I send"), unless a naming word comes before it ("Class I shares").
  */
 function identifierForm(token: string, offset: number, text: string): string | undefined {
-  if (/\p{N}/u.test(token)) {
-    return isNamedDottedLetter(token, offset, text) ? token.toLowerCase() : numberForm(token);
-  }
-  if (isDottedProseI(token, offset, text)) return undefined;
+  if (isNamedChain(token, offset, text)) return token.toLowerCase();   // clause 4.b, clause IV.II
+  if (/\p{N}/u.test(token)) return numberForm(token);
   if (namedLetter(token, offset, text)) return token.toLowerCase();
-  if (couldBePronounI(token, text.slice(offset + 1))) return undefined;
+  if (/^[Iil|]$/.test(token) && /^\s*\p{Ll}/u.test(text.slice(offset + 1))) return undefined;   // the word I
   const capitals = /^\p{Lu}+$/u.test(token);
   if (capitals && (token.length <= 5 || ROMAN_NUMERAL.test(token))) return token.toLowerCase();
   return undefined;
@@ -249,7 +187,7 @@ function identifierForm(token: string, offset: number, text: string): string | u
  * alone or after a number ("clause 4 a"). Not before one: "a schedule" is an article.
  */
 function namedLetter(token: string, offset: number, text: string): boolean {
-  if (!identifierLetter(token)) return false;
+  if (!/^\p{L}$/u.test(token) && !ROMAN_NUMERAL.test(token)) return false;
   const before = text.slice(Math.max(0, offset - 30), offset);
   const after = text.slice(offset + token.length, offset + token.length + 30);
   if (/\(\s*$/.test(before) && /^\s*\)/.test(after)) return true;
@@ -276,27 +214,36 @@ function numberForm(token: string): string {
  * punctuation taken out, which say the same whenever the identifiers do ("FY 2024" and "FY2024", "SPA" and "spa").
  * A point or comma inside a number stays: Section 1.10 is not Section 11.0.
  */
-export interface IdentifierSig { plain: string; ids: string[] }
+export interface IdentifierSig { plain: string; ids: string[]; open: string[] }
 export function identifierSig(text: string): IdentifierSig {
-  const normalized = identifierText(text);
-  const plain = normalized.toLowerCase().replace(/[^\p{L}\p{M}\p{N}.,]|(?<!\p{N})[.,]|[.,](?!\p{N})/gu, '');
-  return { plain, ids: identifiersIn(normalized) };
+  const normal = normalizeReferences(text.normalize('NFKC'));
+  const plain = normal.toLowerCase().replace(/[^\p{L}\p{M}\p{N}.,]|(?<!\p{N})[.,]|[.,](?!\p{N})/gu, '');
+  return { plain, ...identifiersIn(normal) };
 }
 
 /**
  * Whether two wordings can be one question as far as their identifiers go: not when each names one the other does not
  * (Class I and Class L, Facility I1 and Facility 11). One that only adds an identifier, or drops one, is a rewording.
+ * An open identifier counts as named, so the rewording rule never needs it to be a word.
  */
 export function sameIdentifiers(a: IdentifierSig, b: IdentifierSig): boolean {
   if (a.plain === b.plain) return true;
-  return !(namesOther(a.ids, b.ids) && namesOther(b.ids, a.ids));
+  const named = (sig: IdentifierSig) => [...sig.ids, ...sig.open];
+  return !(namesOther(named(a), named(b)) && namesOther(named(b), named(a)));
 }
 /**
  * Whether two wordings name exactly the same identifiers, for a match by number alone: there the words differ, and a
  * row that adds or drops an identifier (Tranche II) may be another question, so it is a question of its own (#125).
+ * An open identifier ("each item. I understand") is a word unless the other wording names it too; open ones of both
+ * wordings that the other lacks are two different references ("class. a" and "class. i"), not two words.
  */
 export function exactIdentifiers(a: IdentifierSig, b: IdentifierSig): boolean {
-  return a.plain === b.plain || (!namesOther(a.ids, b.ids) && !namesOther(b.ids, a.ids));
+  if (a.plain === b.plain) return true;
+  const reads = (sig: IdentifierSig) => [...sig.ids, ...sig.open];
+  const droppedA = namesOther(a.open, reads(b));
+  const droppedB = namesOther(b.open, reads(a));
+  if (droppedA && droppedB) return false;
+  return !namesOther(a.ids, reads(b)) && !namesOther(b.ids, reads(a));
 }
 /** whether `ids` names an identifier, counted with its repeats, that `others` does not */
 function namesOther(ids: readonly string[], others: readonly string[]): boolean {

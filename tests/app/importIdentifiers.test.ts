@@ -136,6 +136,15 @@ describe('a row naming another identifier is a question of its own', () => {
   it('keeps a Roman clause suffix separate from a decimal digit (#778)', () => apart(
     'Please confirm the notice required under clause 4. I(a) of the agreement.',
     'Please confirm the notice required under clause 4.1(a) of the agreement.', 1));
+  it('keeps Roman clause parts separate (#778)', () => apart(
+    'Please confirm the notice required under clause IV. II of the facility agreement.',
+    'Please confirm the notice required under clause IV. III of the facility agreement.', 1));
+  it('keeps lettered Roman clause parts separate (#778)', () => apart(
+    'Please confirm the notice required under clause IV. A of the facility agreement.',
+    'Please confirm the notice required under clause IV. B of the facility agreement.', 1));
+  it('keeps two lone words that could each be a class letter separate (#778)', () => apart(
+    'Please confirm the distribution rights for class. a shares.',
+    'Please confirm the distribution rights for class. i shares.', 1));
   it('keeps a spaced decimal clause separate from its joined digits (#778)', () => apart(
     'Please confirm the notice required under clause 4. 12(b) of the agreement.',
     'Please confirm the notice required under clause 412(b) of the agreement.', 1));
@@ -166,6 +175,15 @@ describe('a misread or reworded row naming the same identifiers is still the que
       `Please confirm the consents required under clause ${compact} of the facility agreement.`,
       `Please confirm all consents required under clause ${spaced} of the facility agreement.`, 1));
   }
+  it('matches a clause with an alphabetic prefix however it is spaced (#778)', () => matches(
+    'Please confirm the notice required under clause A.1 of the facility agreement.',
+    'Please confirm all notice required under clause A. 1 of the facility agreement.', 1));
+  it('matches a sentence-start I after a longer noun phrase (#778)', () => matches(
+    'Please send the signed agreements in the final schedule. I understand the drafts are in the data room.',
+    'Please send the signed agreements in the final schedule. We understand the drafts are in the data room.', 1));
+  it('matches Class I with or without a point before it (#778)', () => matches(
+    'Please confirm the distribution rights for the class I shares under the agreement.',
+    'Please confirm all distribution rights for the class. I shares under the agreement.', 1));
   it('keeps a sentence-start I as prose even when the space is missing (#778)', () => matches(
     'Please send the list for each item.I understand it is in the data room.',
     'Please send the list for each item. We understand it is in the data room folder.', 1));
@@ -202,12 +220,53 @@ describe('a misread or reworded row naming the same identifiers is still the que
   });
 });
 
+describe('spacing around the points of a reference never changes its identifiers (#778)', () => {
+  const REFERENCES = ['clause 4.b', 'clause 4.2a', 'clause 4.12(b)', 'clause IV.2', 'clause IV.II', 'clause A.1',
+    'clause 4.b.12', 'class.b', 'class.I', 'clause 4.I', 'clause 4.a', 'part IV.A'];
+  const spacings = (reference: string) => [reference, reference.replace(/\./g, '. '), reference.replace(/\./g, ' .'),
+    reference.replace(/\./g, ' . ')];
+  for (const reference of REFERENCES) {
+    it(`${reference}`, () => {
+      const [compact, ...others] = spacings(`Is ${reference} of the agreement met?`).map(identifierSig);
+      for (const other of others) expect(other).toEqual(compact);
+    });
+  }
+});
+
+describe('two references are one match only when they name the same parts (#778)', () => {
+  const parts = ['4', '12', '2a', 'b', 'a', 'I', 'II', 'III', 'IV'];
+  const all = [...parts.map((p) => [p]), ...parts.flatMap((p) => parts.map((q) => [p, q]))];
+  // clause I. I and clause II read alike once spacing and points are dropped, as they already did
+  const lists = all.filter((list) => all.every((other) => other === list || other.join('') !== list.join('')));
+  const gaps = ['.', '. ', ' . ', ' .'];
+  const spelled = (list: string[], at: number) =>
+    list.map((part, i) => i === 0 ? part : gaps[(i + at) % 4] + part).join('');
+  const sig = (name: string, list: string[], at: number) =>
+    identifierSig(`Please confirm the notice under ${name} ${spelled(list, at)} of the agreement.`);
+  const same = (a: string[], b: string[]) => a.join('.') === b.join('.');
+  /** the same parts, or one more part that may be a word at the end (clause 4. I understand ...) */
+  const mayMatch = (a: string[], b: string[]) => same(a, b)
+    || (b.length === a.length + 1 && ['a', 'I'].includes(b[a.length]) && a.every((part, i) => part === b[i]));
+  /** whether the match by number alone is right: joined only for the same parts or a part that may be a word */
+  const rightMatch = (a: string[], b: string[], name: string) => {
+    const exact = exactIdentifiers(sig(name, a, 0), sig(name, b, 1));
+    return same(a, b) ? exact : !exact || mayMatch(a, b) || mayMatch(b, a);
+  };
+  it('never joins different parts, whatever the spacing', () => {
+    const wrong = lists.flatMap((a) => lists.flatMap((b) => ['clause', 'class'].map((name) => ({ a, b, name }))))
+      .filter(({ a, b, name }) => !rightMatch(a, b, name));
+    expect(wrong).toEqual([]);
+  });
+});
+
 describe('the identifiers a question names', () => {
   it('reads a class letter after a full stop and leaves a sentence-start I as prose (#778)', () => {
-    expect(identifiers('Please confirm the rights for class. a shares.')).toEqual(['a']);
     expect(identifiers('Please confirm the rights for class.b shares.')).toEqual(['b']);
-    expect(identifiers('Please confirm the rights for class. l shares.')).toEqual(['l']);
     expect(identifiers('Please send the list for each item. I understand it is in the data room.')).toEqual([]);
+    // a lone a, i or l after a point may be a word: it is an identifier only where the other wording names it
+    expect(identifierSig('Please confirm the rights for class. a shares.').open).toEqual(['a']);
+    expect(identifierSig('Please confirm the rights for class.a shares.').open).toEqual(['a']);
+    expect(identifierSig('Please confirm clause 4.I requires consent.')).toMatchObject({ ids: ['4'], open: ['4.i'] });
   });
   it('reads whitespace inside a dotted clause number without changing its letter (#778)', () => {
     for (const number of ['4.b', '4. b', '4 .b', '4 . b']) {

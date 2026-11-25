@@ -100,8 +100,10 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Merge matches a row by wording first, then by number; a row that matches a deleted question brings it back. A row that names who submitted it never matches another party's question. "Will overwrite" is shown field by field first.
 - Merge never matches a row to a question that names a different identifier: anything with a digit, a Roman numeral or code in capitals, a single capital letter, or a letter or numeral in parentheses or after a word such as class, tranche, part or clause (Class A and B, Tranche II and IV, clause 4(a) and 4(b)). A row matched by number alone names exactly the question's identifiers, in the same capitals (the SPA and the spa are two questions there); any other row is a question of its own. Otherwise spacing, capitals and punctuation alone never make identifiers differ (#125, #127, #128).
 - In a number, an I, l or O before a single digit, or an I or l before a point and a digit, is a letter (Facility I1 is l1 but not 11, Class I.1 is not 1.1); an I, l or O elsewhere in a number reads as 1 or 0 (I00, 2O24, O.5). The word I is not an identifier (#127, #128).
-- Spaces around a point inside a named clause reference leave its identifier unchanged. A letter suffix stays a letter,
-  so clause 4. I and clause 4.1 identify different clauses (#778).
+- Spacing around the points of a reference after a word such as class or clause never changes its identifier (clause 4.b,
+  clause 4. b; class. b, class b). A lone a, i or l after a point may be a word that starts a sentence ("each item. I
+  understand"), so it names an identifier only where the other wording names it too; two different ones are two
+  references (#778).
 - The same list imported on two PCs makes one set of questions, with ids derived from the deal, number, party, and wording.
 - Two questions with the same number are both kept and marked; a person renumbers one. Undo, Restore, and a kept
   version's Restore bring a deleted question back under its own number, even when another question holds it (#13, #116).
