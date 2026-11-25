@@ -76,7 +76,6 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
   // list read in its place, "start over" (which asks first) or the import itself lets it go.
   const holding = useRef(false);
   const keep = () => { if (list && !holding.current) keepImport(KEY, { list, kept }); };
-  const keepNow = useRef(keep); keepNow.current = keep;   // a failed import keeps the state as it is then, not as Import found it
   // biome-ignore lint/correctness/useExhaustiveDependencies: written as soon as what is kept changes, before the next frame
   useLayoutEffect(keep, [list, kept]);
   const close = () => { if (busy === 'importing') return; setSwapping(false); token.current++; store.ui({ dialog: null }); };
@@ -121,11 +120,17 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
   const run = async () => {
     if (busy) return;
     setBusy('importing'); setError(''); setRestart(false); setSwapping(false);
-    // let go of the kept list first, so a reload while it runs never offers it again; a failure keeps it again
-    holding.current = true; dropImport(KEY);
-    const r = await store.dispatch(ImportIssuesList, { dealId, doc: list.doc.docId, list: list.doc.doc, points: input }, { idempotencyKey: `issues-${dealId}-${list.doc.docId}` });
-    setBusy(''); holding.current = false;
-    if (!r.ok) { keepNow.current(); setError(`Couldn’t import: ${r.error.message}`); return; }
+    // The kept list stays until the import is written, so a reload or a failure while it runs loses nothing (#931).
+    holding.current = true;
+    const command = { dealId, doc: list.doc.docId, list: list.doc.doc, points: input };
+    const r = await store.dispatch(ImportIssuesList, command, { idempotencyKey: `issues-${dealId}-${list.doc.docId}` });
+    setBusy('');
+    holding.current = false;
+    if (!r.ok) {
+      setError(`Couldn’t import: ${r.error.message}`);
+      return;
+    }
+    dropImport(KEY);
     store.ui({ dialog: null });
   };
   const name = issuesListTitle(list.doc.doc);
