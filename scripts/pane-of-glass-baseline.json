@@ -2,14 +2,6 @@
   "src/ui/app.tsx": {
     "services": 1
   },
-  "src/ui/deal.tsx": {
-    "repo": 1,
-    "services": 1
-  },
-  "src/ui/dialogs.tsx": {
-    "import": 1,
-    "services": 8
-  },
   "src/ui/pastList.tsx": {
     "services": 1
   },

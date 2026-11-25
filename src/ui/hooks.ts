@@ -65,16 +65,7 @@ export const fmtDate = (ymd: string) => {
   const d = new Date(ymd + 'T12:00:00');
   return isNaN(+d) ? '' : formatLocalDate(d, d.getFullYear() !== new Date().getFullYear());
 };
-/** A moment as the person at this machine sees it: "Nov 10, 5:42 PM". */
-export const fmtDateTime = (iso: string) => {
-  const d = new Date(iso);
-  return isNaN(+d) ? '' : d.toLocaleString(LOCALE, { month: 'short', day: 'numeric', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric', hour: 'numeric', minute: '2-digit' });
-};
-/** The same to the second, to tell apart two moments in one minute: "Nov 10, 5:42:07 PM". */
-export const fmtDateTimeSeconds = (iso: string) => {
-  const d = new Date(iso);
-  return isNaN(+d) ? '' : d.toLocaleString(LOCALE, { month: 'short', day: 'numeric', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric', hour: 'numeric', minute: '2-digit', second: '2-digit' });
-};
+export { fmtDateTime } from '../domain/dateTime';
 export const whenText = (iso: string) => {
   const d = new Date(iso); const h = (Date.now() - +d) / 36e5;
   // "Just now" for the first minute only, then minutes: an hour of "Just now" read as never aging

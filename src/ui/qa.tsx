@@ -24,7 +24,7 @@ import {
 } from '../app/drafting';
 import { isDraftStale } from '../domain/transitions';
 import { Ref } from './ref';
-import { deletedOf } from './deleted';
+import { visibleDeletedNotes } from '../app/deletedView';
 import { WORKSTREAMS, type Question, type QuestionStatus } from '../domain/model';
 import { AI_LABEL } from '../control';
 import { MenuChoice, workstreamOptions } from './filterMenu';
@@ -396,7 +396,9 @@ function MoreMenu({ dealId, hasQuestions }: { dealId: string; hasQuestions: bool
           onClick={() => openDialog('exportQa')}>Export Q&A Log…</button>
         {/* the seldom used ways back, apart from Import so neither is pressed for the other */}
         <div class="msep" />
-        <button type="button" class="mi" role="menuitem" id="qa-deleted" disabled={!!ro || !deletedOf(s, dealId).length} title={ro ?? undefined} onClick={() => openDialog('deleted')}>Deleted…</button>
+        <button type="button" class="mi" role="menuitem" id="qa-deleted"
+          disabled={!!ro || !visibleDeletedNotes(s, dealId).length} title={ro ?? undefined}
+          onClick={() => openDialog('deleted')}>Deleted…</button>
         {/* this PC's last import into the deal, at any time after, once confirmed */}
         <button type="button" class="mi" role="menuitem" id="qa-unimport" disabled={!!ro || !lastImport(s, dealId)}
           title={ro ?? undefined} onClick={() => openDialog('undoImport')}>Undo Last Import…</button>

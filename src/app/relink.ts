@@ -9,6 +9,8 @@
  * others too. Nothing is used until the person confirms with "Use these folders".
  */
 import type { Store } from './store';
+import type { State } from './state';
+import { folderDealIds, folderDealLabels, type FolderDealPlace } from './dealLabel';
 import type { FolderSearch } from '../ports';
 import { control } from '../control';
 import { topsOf } from '../domain/relink';
@@ -79,10 +81,33 @@ export function closeLocate(store: Store) {
 }
 
 /** the top folders still to point at: what is missing, less what the folders pointed at so far have found */
-export function stillMissing(store: Store) {
-  const s = store.get(); const found = new Set((s.ui.locate?.located ?? []).flatMap((l) => l.places.map((p) => `${p.dealId}\u0000${p.folder}`)));
-  const left = (s.ui.missingFolders?.tops ?? []).flatMap((t) => t.folders).filter((f) => !found.has(`${f.dealId}\u0000${f.folder}`));
+function stillMissing(state: Pick<State, 'ui'>, located: FolderDealPlace[]) {
+  const found = new Set(located.map((place) => `${place.dealId}\u0000${place.folder}`));
+  const left = (state.ui.missingFolders?.tops ?? []).flatMap((top) => top.folders)
+    .filter((folder) => !found.has(`${folder.dealId}\u0000${folder.folder}`));
   return topsOf(left);
+}
+
+/** why a top folder is still to be located: every folder under it opens empty, or it is not on this PC */
+function whyMissing(folders: FolderDealPlace[], empty: FolderDealPlace[]) {
+  const isEmpty = (f: FolderDealPlace) => empty.some((e) => e.dealId === f.dealId && e.folder === f.folder);
+  return folders.every(isEmpty) ? 'Files not found' : 'Not found on this PC';
+}
+
+export function locateFoldersView(state: Pick<State, 'deals' | 'ui'>) {
+  const located = state.ui.locate?.located ?? [];
+  const places = located.flatMap((row) => row.places);
+  const missing = stillMissing(state, places);
+  const labels = folderDealLabels(state, [...missing.flatMap((top) => top.folders), ...places]);
+  const dealsIn = (folders: FolderDealPlace[]) => folderDealIds(folders).map((id) => labels.get(id) ?? id);
+  const empty = state.ui.missingFolders?.empty ?? [];
+  return {
+    found: places.length,
+    missing: missing.map((row) => ({
+      ...row, count: row.folders.length, deals: dealsIn(row.folders), why: whyMissing(row.folders, empty),
+    })),
+    located: located.map((row) => ({ ...row, count: row.places.length, deals: dealsIn(row.places) })),
+  };
 }
 
 /** A person points `top` at a folder they pick on this PC; what it finds is listed, not yet used. */

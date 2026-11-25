@@ -1,5 +1,5 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { GROUP_HEADING } from '../app/commands/deals';
+import { dealRows, interruptedOperations, isInterrupted, railDealGroups } from '../app/dealView';
 import { commandLabel } from '../app/commandLabels';
 import { StoreContext, useAppState, useStore, lastInput, nameDir } from './hooks';
 import { Icon } from './icons';
@@ -15,7 +15,6 @@ import { QueueStrip } from './queueStrip';
 import { scopeOfRoute } from '../app/conversations';
 import { NewDealDialog, DeleteDealDialog } from './dialogs';
 import { AddDealDialog, DealMore, RemoveDealDialog } from './addDeal';
-import { isMine } from '../app/commands/members';
 import { ExportQaDialog, ExportFindingsDialog } from './transfer';
 import { ImportDialog } from './qaImport';
 import { IssuesListDialog } from './issuesList';
@@ -36,8 +35,6 @@ import { SERVICE } from '../control';
 import { takeNavPatch, closeDocument, takeFocusAfter } from './nav';
 import { isReading, dealHash, dealTwinLabels } from '../app/state';
 import { num } from './counts';
-
-const GROUPS: [State['deals'][string]['group'], string][] = (['live', 'monitor', 'pitch', 'closed'] as const).map((g) => [g, GROUP_HEADING[g]]);
 
 function routeFromHash(): State['ui']['route'] {
   const h = (location.hash || '#deals').slice(1);
@@ -218,8 +215,7 @@ function Rail() {
   // which groups are unfolded is one of the person's view choices: it is kept with the others, so a reload does not unfold them
   const open = s.prefs.railOpen; const setOpen = (next: Record<string, boolean>) => store.setPrefs({ railOpen: next });
   const r = s.ui.route; const cur = 'dealId' in r && r.dealId ? r.dealId : null;
-  // a deal shows for the people who created it or added it; each group lists the newest deal first
-  const deals = Object.values(s.deals).filter((d) => isMine(s, d.id)).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+  const groups = railDealGroups(s);
   // the group holding the deal on screen opens when you arrive there or it moves group; after that it folds like any other
   const curGroup = cur ? s.deals[cur]?.group : undefined;
   // The exception is the deal the app was opened on: if its group was folded by hand, a reload leaves it folded.
@@ -251,9 +247,9 @@ function Rail() {
           </a> : <>
         <a href="#deals" class={r.name === 'home' ? 'on' : ''} aria-current={r.name === 'home' ? 'page' : undefined}>Home</a>
         {/* a group shows once it has a deal */}
-        {GROUPS.map(([g, label]) => (
-          <RailGroup key={g} label={label} deals={deals.filter((d) => d.group === g)}
-            open={!!open[g]} toggle={() => setOpen({ ...open, [g]: !open[g] })} cur={cur} />))}
+        {groups.map(({ group, label, deals }) => (
+          <RailGroup key={group} label={label} deals={deals}
+            open={!!open[group]} toggle={() => setOpen({ ...open, [group]: !open[group] })} cur={cur} />))}
         </>}
       </nav>
       <AccountRow />
@@ -298,7 +294,7 @@ function RailGroup({ label, deals, open, toggle, cur }: {
 
 function Home() {
   const store = useStore(); const s = useAppState(); const ro = useContext(ReadOnlyContext);
-  const deals = Object.values(s.deals).filter((d) => isMine(s, d.id));
+  const deals = dealRows(s, 'home');
   if (!deals.length) return (
     <div class="home firstrun"><div class="center">
       <h1 class="ttl">Start with a deal</h1>
@@ -318,7 +314,7 @@ function Home() {
     <div class="home"><div class="center">
       <h1 class="ttl">What would you like to know?</h1>
       {/* the heading and the box at the window's center, with example questions in the box */}
-      <Composer scope={{ kind: 'all' }} launch="home" examples={homeExamples(deals.map((x) => x.name))} />
+      <Composer scope={{ kind: 'all' }} launch="home" examples={homeExamples(deals.map(({ deal }) => deal.name))} />
       {/* Home is the composer alone: the deals are in the sidebar, records in two versions on their own deal */}
     </div></div>
   );
@@ -419,7 +415,7 @@ function InterruptedBar() {
   const [first, setFirst] = useState<string>();
   const [dismissed, setDismissed] = useState<string[]>([]);
   const bar = useRef<HTMLDivElement>(null);
-  const ops = Object.values(s.ops).filter((op) => op.state === 'interrupted');
+  const ops = interruptedOperations(s);
   const start = Math.max(0, ops.findIndex((op) => op.id === first));
   const ordered = [...ops.slice(start), ...ops.slice(0, start)];
   const showing = ordered.filter((op) => !dismissed.includes(op.id)).slice(0, INTERRUPTED_ROWS);
@@ -430,7 +426,7 @@ function InterruptedBar() {
     requestAnimationFrame(() => bar.current?.querySelector<HTMLElement>('.intop .tundo')?.focus());
   };
   const hide = (id: string) => {
-    setDismissed([...dismissed.filter((key) => s.ops[key]?.state === 'interrupted'), id]);
+    setDismissed([...dismissed.filter((key) => isInterrupted(s.ops[key])), id]);
   };
   if (!ops.length) return null;
   return (
