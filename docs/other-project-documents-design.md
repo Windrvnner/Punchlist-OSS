@@ -44,7 +44,7 @@ A blackline is called this deal's own only when that is confirmed; otherwise the
 
 A document is of another project when every place it is in (`roomPath` of its main place and of each copy, so the deal folder's own name counts: a deal folder "X:\Precedents" is one) has a precedents folder on it. A precedent copied into a working folder, or this deal's executed agreement also filed in Precedents, is this deal's own. "Form", "Forms" and "Templates" are not used (this deal's own forms and filings). The test uses names and paths only, so the result is the same on every PC.
 
-A document of another project is never in a family and never a clean draft. A blackline that is itself of another project gets no clean draft from this deal: `cleanDrafts` maps it to `false` (read on its own, as a standalone blackline already is), and it is told as a blackline made on another project (D). Precedent-folder files are also left out of `cleanDrafts` step 4, so one sharing a this-deal blackline's first word does not make it unclear.
+A document of another project is never in a family and never a clean draft. A blackline that is itself of another project gets no clean draft from this deal: `cleanDrafts` maps it to `false` (read on its own, as a standalone blackline already is), and it is told as a blackline made on another project (D).
 
 ### B. What a blackline was compared against
 

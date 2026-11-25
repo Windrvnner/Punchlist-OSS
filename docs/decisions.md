@@ -225,6 +225,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A deal's folders are checked for changes every 5 minutes.
 - LibreOffice, bundled with the app, is the only document converter; converted documents have every tracked change accepted.
 - For tracked changes and blacklines, a Word file's own tracked changes are fact, and the clean draft is the source of truth for the deal's terms. A blackline is the model's reading: it never settles an item or closes a finding by itself. A control-file switch selects pipeline A (the default) or pipeline B. What a blackline was compared against is determined from its cover and name, never guessed (docs/other-project-documents-design.md).
+- A blackline whose clean draft neither its cover nor its name finds stands alone and is read on its own; a file that only shares a word of its name never makes it unclear.
 - A deleted or replaced document leaves the deal under the rules in architecture.md; nothing linked to it is deleted (#413).
 - A folder that this person may not open doesn't stop indexing, and a check that couldn't read it says "Not complete".
 - The app never deletes documents. Drafts of one agreement form a family: the newest is read first, and reading mode shows a draft's date and lists its family's drafts, any two of which can be compared. Versions in one folder count only with an explicit mark such as v3 or Rev A.

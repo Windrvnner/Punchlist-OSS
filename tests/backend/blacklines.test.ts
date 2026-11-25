@@ -36,9 +36,9 @@ describe('blacklines', () => {
       doc('a', 'Deal/Project Bellows SPA Redline to Project Bellows SPA v1.pdf'), doc('pa', 'Deal/Project Bellows SPA.docx'),
       doc('b', 'Legal/SPA v3 Redline to SPA v2.pdf'), doc('s3', 'Legal/SPA v3.docx'), doc('s2', 'Legal/SPA v2.docx'),
       doc('c', 'Leases/Agreement to Lease redline.pdf'), doc('al', 'Leases/Agreement to Lease.docx'),
-      doc('ex', 'Legal/Exhibit A to SPA redline.pdf'), doc('xa', 'Legal/Exhibit A.pdf'),            // "to" in a title splits nothing: unclear   // "to" in the name itself
+      doc('ex', 'Legal/Exhibit A to SPA redline.pdf'), doc('xa', 'Legal/Exhibit A.pdf'),            // "to" in a title splits nothing: no clean draft, so it stands alone
     ]);
-    expect(Object.fromEntries(m)).toEqual({ a: 'pa', b: 's3', c: 'al', ex: null });
+    expect(Object.fromEntries(m)).toEqual({ a: 'pa', b: 's3', c: 'al', ex: false });
   });
   it('reads a comparison tool’s cover page, and nothing else as one', () => {
     expect(coverOf('Comparison Details\nOriginal filename: SPA v2.docx\nModified filename: SPA v3.docx\nChanges: Add 12 Delete 7')).toMatch(/^Comparison Details/);
@@ -54,28 +54,28 @@ describe('blacklines', () => {
     ]);
     expect(Object.fromEntries(m)).toEqual({ cov: 'v3', nm: 'fa', ts: 't', fam: 'e2' });
   });
-  it('has none when it is unclear: two files of the cover’s name in other folders, two families, or a file of its name in another folder', () => {
+  it('has none when it is unclear: two files of the cover’s name in other folders, or two families', () => {
     const m = cleanDrafts([
       doc('b1', 'Legal/SPA v3 v v2.pdf', { cover: 'Comparison of SPA v2.docx and SPA v3.docx. Insertions 4 Deletions 2' }), doc('a', 'Legal/A/SPA v3.docx'), doc('b', 'Legal/B/SPA v3.docx'),
-      doc('b2', 'Legal/Side letter blackline.pdf'), doc('sl', 'Other/Side letter.pdf'),
       doc('b3', 'Legal/Lease (redline).pdf'), doc('l1', 'One/Drafts/2026-01-01/Lease.pdf'), doc('l2', 'One/Drafts/2026-02-01/Lease.pdf'), doc('l3', 'Two/Drafts/2026-01-01/Lease.pdf'), doc('l4', 'Two/Drafts/2026-02-01/Lease.pdf'),
     ]);
-    expect(Object.fromEntries(m)).toEqual({ b1: null, b2: null, b3: null });
+    expect(Object.fromEntries(m)).toEqual({ b1: null, b3: null });
   });
-  it('stands alone (false) when nothing in the data room could be its clean draft, by cover or by name', () => {
+  it('stands alone (false) when neither its cover nor its name finds its clean draft', () => {
     const m = cleanDrafts([
       doc('a1', 'Legal/Side letter blackline.pdf'), doc('x', 'Legal/Lease.pdf'),
       doc('a2', 'Legal/SPA v3 v v2.pdf', { cover: 'Comparison of SPA v2.docx and SPA v3.docx. Insertions 4 Deletions 2' }),
+      doc('b2', 'Legal/Side letter blackline.pdf'), doc('sl', 'Other/Side letter.pdf'),                   // its name, in another folder only
       doc('w', 'Finance/Valuation comparison.pdf'),                                                     // a weak word alone is no blackline, so it never stands alone
     ]);
-    expect(Object.fromEntries(m)).toEqual({ a1: false, a2: false });
+    expect(Object.fromEntries(m)).toEqual({ a1: false, a2: false, b2: false });
   });
-  it('is unclear, not alone, when a file that could be its clean draft is there by another name, or only the original the cover names', () => {
+  it('stands alone beside a file sharing a word of its name, and is unclear when only the original the cover names is there', () => {
     const m = cleanDrafts([
       doc('r1', 'Legal/Credit Agreement - Redline v3 to v2.pdf'), doc('ca', 'Legal/Credit Agreement v3.docx'),
       doc('r2', 'Deal/Blackline - SPA v3 against SPA v2.pdf'), doc('r3', 'Deal/SPA_redline_2026-03-01.pdf'), doc('r4', 'Deal/SPA blackline.pdf'), doc('sx', 'Deal/SPA (execution version).docx'),
       doc('r5', 'Old/EPC v3 v v2.pdf', { cover: 'Comparison of EPC v2.docx and EPC v3.docx. Insertions 4 Deletions 2' }), doc('e2', 'Old/EPC v2.docx'),   // only the original is here
     ]);
-    expect(Object.fromEntries(m)).toEqual({ r1: null, r2: null, r3: null, r4: null, r5: null });
+    expect(Object.fromEntries(m)).toEqual({ r1: false, r2: false, r3: false, r4: false, r5: null });
   });
 });
