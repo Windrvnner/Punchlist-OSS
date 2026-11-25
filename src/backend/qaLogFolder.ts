@@ -66,7 +66,7 @@ function create(dir: string, base: string, ext: string, bytes: Uint8Array): stri
       const open = fd;
       fd = -1;   // a closed handle's number may be given to another file: it is never used again
       fs.closeSync(open);
-      if (!sameFile(at, mine)) throw new Error('Another file took the name of the copy being written');
+      if (identityOf(at, mine) === 'other') throw new Error('Another file took the name of the copy being written');
       return name;
     } catch (e) {
       takeAway(at, fd, mine);
@@ -76,11 +76,15 @@ function create(dir: string, base: string, ext: string, bytes: Uint8Array): stri
     }
   }
 }
-/** whether `at` is still the file `claimed`: same device, file number and creation time, all of which the share gave */
-function sameFile(at: string, claimed: fs.BigIntStats): boolean {
+/**
+ * Whether `at` is still the file `claimed`: 'same' or 'other' by device, file number and creation time, or 'unknown'
+ * when the share gives no file number or creation time to tell files apart by.
+ */
+function identityOf(at: string, claimed: fs.BigIntStats): 'same' | 'other' | 'unknown' {
   const now = fs.lstatSync(at, { bigint: true });
-  const known = claimed.ino !== 0n && claimed.birthtimeNs !== 0n;
-  return known && now.ino === claimed.ino && now.dev === claimed.dev && now.birthtimeNs === claimed.birthtimeNs;
+  if (claimed.ino === 0n || claimed.birthtimeNs === 0n) return 'unknown';
+  const same = now.ino === claimed.ino && now.dev === claimed.dev && now.birthtimeNs === claimed.birthtimeNs;
+  return same ? 'same' : 'other';
 }
 /**
  * Empties the file claimed as `fd` (if its handle is still open), which only touches that file, then removes `at` if it
@@ -90,7 +94,7 @@ function sameFile(at: string, claimed: fs.BigIntStats): boolean {
 function takeAway(at: string, fd: number, claimed: fs.BigIntStats | undefined): void {
   if (fd >= 0) try { fs.ftruncateSync(fd, 0); } catch { /* the removal below is tried all the same */ }
   try {
-    if (claimed && sameFile(at, claimed)) fs.rmSync(at);
+    if (claimed && identityOf(at, claimed) === 'same') fs.rmSync(at);
   } catch { /* the share is gone: the next save finds the name taken and moves on */ }
 }
 export type LogSave = { status: 'written'; archive: string } | { status: 'later'; by?: string };

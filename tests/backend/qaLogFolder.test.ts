@@ -261,7 +261,8 @@ describe('saving the log', () => {
       expect(() => save(d, 'ours')).toThrow(); vi.restoreAllMocks();
       expect(archived(d)).toEqual([theirs]); expect(read(d)).toBe('theirs');
     });
-    const swapped = (fails: boolean) => `when another PC put its copy over the claimed name before the write ${fails ? 'failed' : 'ran'}`;
+    const swapped = (fails: boolean) =>
+      `when another PC put its copy over the claimed name before the write ${fails ? 'failed' : 'ran'}`;
     for (const fails of [true, false]) it(swapped(fails), () => {
       const d = withLog(); const real = fs.writeFileSync; const where = trackPaths();
       vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: fs.PathOrFileDescriptor, data: Uint8Array, o?: fs.WriteFileOptions) => {
@@ -290,6 +291,16 @@ describe('saving the log', () => {
       }) as typeof fs.closeSync);
       expect(() => save(d, 'ours')).toThrow(); vi.restoreAllMocks();
       expect(archived(d)).toEqual([]); expect(read(d)).toBe('theirs');
+    });
+    it('on a share that gives no file numbers, a copy is still written and reported', () => {
+      const d = withLog(); const real = fs.fstatSync;
+      vi.spyOn(fs, 'fstatSync').mockImplementation(((fd: number, o?: never) => {
+        const st = real(fd, o) as unknown as fs.BigIntStats;
+        const noFileNumber = Object.create(Object.getPrototypeOf(st));
+        return typeof st.ino === 'bigint' ? Object.assign(noFileNumber, st, { ino: 0n }) : st;
+      }) as typeof fs.fstatSync);
+      expect(save(d, 'ours')).toMatchObject({ status: 'written' }); vi.restoreAllMocks();
+      expect(archived(d)).toEqual(['theirs']); expect(read(d)).toBe('ours');
     });
     it('a copy whose write fails after its name was claimed leaves no empty file', () => {
       const d = withLog();
