@@ -1155,6 +1155,12 @@ export class LogRepository implements Repository {
       else if (cur?.conflict && !cur.conflict.every((v) => d.seen?.includes(v.id))) return fail({ kind: 'conflict', message: CHANGED, recordId: d.id });
       if (d.expectedRev !== null && (cur?.rev ?? 0) !== d.expectedRev) return fail({ kind: 'conflict', message: CHANGED, recordId: d.id, expected: d.expectedRev, actual: cur?.rev ?? 0 });
     }
+    for (const e of tx.expects ?? []) {   // read-only preconditions (#88): a record read by the plan must be unchanged
+      const rev = this.loaded(e.kind, e.id, had(e.kind, e.id))?.rev ?? 0;
+      if (rev !== e.rev) {
+        return fail({ kind: 'conflict', message: CHANGED, recordId: e.id, expected: e.rev, actual: rev });
+      }
+    }
     // 2. one line for the whole transaction
     const seq = this.seq + 1; const recs: RecChange[] = []; const retract: string[] = [];
     // A version's id names this install and line, plus a random part: a copied install that has not been found out yet writes
