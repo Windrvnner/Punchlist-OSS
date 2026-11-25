@@ -367,7 +367,7 @@ export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => 
       if (!line) { inItem = false; return; }
       if (table) {
         // the columns are told apart by the heading row, as the columns step suggests them
-        cols ??= suggestChecklistColumns(i.lines[0].split(' | ').map((c) => c.trim()), i.lines.slice(1).map((l) => l.split(' | ').map((c) => c.trim())));
+        cols ??= suggestChecklistColumns(i.lines[0].split(' | ').map((c) => c.trim()));
         const cells = raw.split(' | ').map((c) => c.trim()); const cell = (c: number | null | undefined) => (c == null ? '' : cells[c] ?? '');
         const text = cell(cols.item); const section = cell(cols.section); const subsection = cell(cols.subsection);
         r = n === 1 ? { n, k: 'columns' } : text ? { n, k: 'item', text, ...(section ? { section } : {}), ...(subsection ? { subsection } : {}) } : { n, k: 'left' };
