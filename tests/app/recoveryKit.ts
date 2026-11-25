@@ -75,6 +75,15 @@ export function holdRecoveryWrite(
   return { entered, release: () => { app.repo.transaction = original; release(); } };
 }
 
+/** Refuses every matching repository transaction with `message` until the returned restore is called. */
+export function failRecoveryWrite(app: RecoveryApp, matches: (transaction: Transaction) => boolean, message: string) {
+  const original = app.repo.transaction.bind(app.repo);
+  app.repo.transaction = async (transaction) => (matches(transaction)
+    ? { ok: false, error: { kind: 'failed', message } }
+    : original(transaction));
+  return () => { app.repo.transaction = original; };
+}
+
 export function operationWrite(transaction: Transaction, command: string, state: string) {
   return transaction.writes.some((write) => write.kind === 'op'
     && (write.data as { command?: string }).command === command
