@@ -9,7 +9,7 @@ import type { Question } from './model';
 import type { ReadTable, SheetEdit } from './sheets';
 import { sameWords, prepareImport, IMPORT_FIELDS, type Mapping, type ImportField, type ImportRow } from './importExport';
 import { key } from './checklist';
-import { ROMAN_NUMERAL, NAMING_WORDS, normalizeReferences, openParts, isNamedChain } from './references';
+import { ROMAN_NUMERAL, NAMING_WORDS, normalizeReferences, setApartParts, isNamedChain } from './references';
 
 /** every field the app keeps up to date in the log, where the log has a column for it */
 const FIELDS: ImportField[] = ['n', 'text', 'askedBy', 'received', 'workstream', 'priority', 'status', 'response', 'respondedBy', 'responded'];
@@ -152,18 +152,16 @@ export function identifiers(text: string): string[] {
   return identifiersIn(normalizeReferences(text.normalize('NFKC'))).ids;
 }
 
-/** The identifiers a normalized text names, and the open ones: a lone part after a point that may be a word (#778). */
+/** The identifiers a normalized text names, and the open ones: a lone letter after a point that may be a word (#778) */
 function identifiersIn(text: string): { ids: string[]; open: string[] } {
   const ids: string[] = [];
   const open: string[] = [];
-  const openAt = openParts(text);
+  const setApart = setApartParts(text);
   for (const match of text.matchAll(QUESTION_TOKEN)) {
-    const openId = openAt.get(match.index);
-    if (openId !== undefined) open.push(openId);
-    else {
-      const form = identifierForm(match[0], match.index, text);
-      if (form !== undefined) ids.push(form);
-    }
+    const part = setApart.get(match.index);
+    const form = part ? part.id : identifierForm(match[0], match.index, text);
+    if (form === undefined) continue;
+    (part?.droppable ? open : ids).push(form);
   }
   return { ids: ids.sort(), open: open.sort() };
 }

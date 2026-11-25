@@ -33,8 +33,8 @@ interface Reference {
   parts: string[];
   /** the separator before the first part held a point ("class. b") */
   pointFirst: boolean;
-  /** the last part follows a point and could be a word */
-  open: boolean;
+  /** the last part is a lone letter after a point: it is spelled set apart, whatever was typed */
+  spaced: boolean;
   /** where the last part starts */
   lastAt: number;
 }
@@ -48,7 +48,7 @@ function readReference(text: string, nameEnd: number): Reference | null {
   let position = start;
   let end = start;
   let afterPoint = separator[0].includes('.');
-  let open = false;
+  let spaced = false;
   let lastAt = start;
   for (;;) {
     PART.lastIndex = position;
@@ -57,20 +57,20 @@ function readReference(text: string, nameEnd: number): Reference | null {
     parts.push(part[1]);
     lastAt = position;
     end = PART.lastIndex;
-    open = afterPoint && OPEN_LETTER.test(part[1]);
+    spaced = afterPoint && OPEN_LETTER.test(part[1]);
     POINT.lastIndex = end;
     if (!POINT.exec(text)) break;
     position = POINT.lastIndex;
     afterPoint = true;
   }
-  return parts.length ? { start, end, parts, pointFirst: separator[0].includes('.'), open, lastAt } : null;
+  return parts.length ? { start, end, parts, pointFirst: separator[0].includes('.'), spaced, lastAt } : null;
 }
 
 /** the reference as one spelling: parts joined by a point, an open last part set apart, "class. b" as "class b" */
 function spelled(ref: Reference): string {
-  const last = ref.open ? ref.parts.length - 1 : ref.parts.length;
+  const last = ref.spaced ? ref.parts.length - 1 : ref.parts.length;
   const joined = ref.parts.slice(0, last).join('.');
-  if (!ref.open) return joined;
+  if (!ref.spaced) return joined;
   return joined ? `${joined}. ${ref.parts[last]}` : `. ${ref.parts[last]}`;
 }
 
@@ -88,19 +88,22 @@ export function normalizeReferences(text: string): string {
   let done = 0;
   for (const { nameEnd, ref } of references(text)) {
     const separator = text.slice(nameEnd, ref.start);
-    const kept = ref.pointFirst ? (ref.open && ref.parts.length === 1 ? '' : ' ') : separator;
+    const kept = ref.pointFirst ? (ref.spaced && ref.parts.length === 1 ? '' : ' ') : separator;
     result += text.slice(done, nameEnd) + kept + spelled(ref);
     done = ref.end;
   }
   return result + text.slice(done);
 }
 
-/** each lone part that may be a word, with the reference it would complete: its offset in normalized text and name */
-export function openParts(text: string): Map<number, string> {
-  const found = new Map<number, string>();
+/**
+ * Each lone letter set apart after a point ("class. I", "clause 4. a"), by its offset in normalized text, with the
+ * identifier it completes. Alone after the naming word it may be a word ("each item. I understand"): `droppable`.
+ * After other parts it names a clause, so it is an ordinary identifier.
+ */
+export function setApartParts(text: string): Map<number, { id: string; droppable: boolean }> {
+  const found = new Map<number, { id: string; droppable: boolean }>();
   for (const { ref } of references(text)) {
-    if (!ref.open) continue;
-    found.set(ref.lastAt, ref.parts.join('.').toLowerCase());
+    if (ref.spaced) found.set(ref.lastAt, { id: ref.parts.join('.').toLowerCase(), droppable: ref.parts.length === 1 });
   }
   return found;
 }

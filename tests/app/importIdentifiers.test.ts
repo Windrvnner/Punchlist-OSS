@@ -142,6 +142,9 @@ describe('a row naming another identifier is a question of its own', () => {
   it('keeps lettered Roman clause parts separate (#778)', () => apart(
     'Please confirm the notice required under clause IV. A of the facility agreement.',
     'Please confirm the notice required under clause IV. B of the facility agreement.', 1));
+  it('keeps a dotted clause apart from its parent clause (#778)', () => apart(
+    'Please confirm whether clause 4.a consents are required from the lender.',
+    'Please confirm whether clause 4 consents are required from the lender.', 1));
   it('keeps two lone words that could each be a class letter separate (#778)', () => apart(
     'Please confirm the distribution rights for class. a shares.',
     'Please confirm the distribution rights for class. i shares.', 1));
@@ -244,14 +247,9 @@ describe('two references are one match only when they name the same parts (#778)
   const sig = (name: string, list: string[], at: number) =>
     identifierSig(`Please confirm the notice under ${name} ${spelled(list, at)} of the agreement.`);
   const same = (a: string[], b: string[]) => a.join('.') === b.join('.');
-  /** the same parts, or one more part that may be a word at the end (clause 4. I understand ...) */
-  const mayMatch = (a: string[], b: string[]) => same(a, b)
-    || (b.length === a.length + 1 && ['a', 'I'].includes(b[a.length]) && a.every((part, i) => part === b[i]));
-  /** whether the match by number alone is right: joined only for the same parts or a part that may be a word */
-  const rightMatch = (a: string[], b: string[], name: string) => {
-    const exact = exactIdentifiers(sig(name, a, 0), sig(name, b, 1));
-    return same(a, b) ? exact : !exact || mayMatch(a, b) || mayMatch(b, a);
-  };
+  /** whether the match by number alone is right: joined only for the same parts */
+  const rightMatch = (a: string[], b: string[], name: string) =>
+    exactIdentifiers(sig(name, a, 0), sig(name, b, 1)) === same(a, b);
   it('never joins different parts, whatever the spacing', () => {
     const wrong = lists.flatMap((a) => lists.flatMap((b) => ['clause', 'class'].map((name) => ({ a, b, name }))))
       .filter(({ a, b, name }) => !rightMatch(a, b, name));
@@ -266,7 +264,7 @@ describe('the identifiers a question names', () => {
     // a lone a, i or l after a point may be a word: it is an identifier only where the other wording names it
     expect(identifierSig('Please confirm the rights for class. a shares.').open).toEqual(['a']);
     expect(identifierSig('Please confirm the rights for class.a shares.').open).toEqual(['a']);
-    expect(identifierSig('Please confirm clause 4.I requires consent.')).toMatchObject({ ids: ['4'], open: ['4.i'] });
+    expect(identifierSig('Please confirm clause 4.I requires consent.')).toMatchObject({ ids: ['4', '4.i'], open: [] });
   });
   it('reads whitespace inside a dotted clause number without changing its letter (#778)', () => {
     for (const number of ['4.b', '4. b', '4 .b', '4 . b']) {
