@@ -271,7 +271,25 @@ describe('saving the log', () => {
         return real(p, data, o);
       }) as typeof fs.writeFileSync);
       try { save(d, 'ours'); } catch { /* the failing write */ } vi.restoreAllMocks();
-      expect(archived(d)).toEqual([theirs]); expect(read(d)).toBe(fails ? 'theirs' : 'ours');
+      expect(archived(d)).toEqual([theirs]); expect(read(d)).toBe('theirs');   // the save failed: the log is as it was
+    });
+    it('a copy whose handle cannot be emptied or closed after a part-way write is still taken away', () => {
+      const d = withLog(); const real = fs.writeFileSync;
+      vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: fs.PathOrFileDescriptor, data: Uint8Array) => {
+        if (typeof p === 'number') { fs.writeSync(p, data.slice(0, 2)); throw eio(); }
+        return real(p, data);
+      }) as typeof fs.writeFileSync);
+      vi.spyOn(fs, 'ftruncateSync').mockImplementation(() => { throw eio(); });
+      expect(() => save(d, 'ours')).toThrow(); vi.restoreAllMocks();
+      expect(archived(d)).toEqual([]);
+    });
+    it('a copy whose handle fails to close is not reported written, and is taken away', () => {
+      const d = withLog(); const real = fs.closeSync; const where = trackPaths();
+      vi.spyOn(fs, 'closeSync').mockImplementation(((fd: number) => {
+        const archive = where(fd).includes('Archive'); real(fd); if (archive) throw eio();
+      }) as typeof fs.closeSync);
+      expect(() => save(d, 'ours')).toThrow(); vi.restoreAllMocks();
+      expect(archived(d)).toEqual([]); expect(read(d)).toBe('theirs');
     });
     it('a copy whose write fails after its name was claimed leaves no empty file', () => {
       const d = withLog();
