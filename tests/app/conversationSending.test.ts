@@ -238,7 +238,79 @@ it('keeps every refused command and all typing on a deal with thousands of quest
   saveKeptDrafts();
   expect(keptComposer().get(key)).toBe(`${first}\n\n${second}\n\n${third}`);
   expect(Object.values(store.get().questions)).toHaveLength(logged.length);
+
+  // Sent again, the refused command is logged alone, and what follows it stays in the box as it was.
+  repo.transaction = write;
+  await sendTyped(store, scope, { navigate });
+  const texts = Object.values(store.get().questions).map((question) => question.text);
+  expect(texts).toHaveLength(logged.length + 1);
+  expect(texts.at(-1)).toBe(instructions[2001]);
+  expect(composerText(key)).toBe(`${second}\n\n${third}`);
 }, 30_000);
+
+it('logs a refused command alone and asks the AI what was typed during its save', async () => {
+  const { store, scope, navigate, asked } = await start();
+  const key = convKey(scope);
+  const command = `Log a question: ${instructions[50]}`;
+  const followUp = `${instructions[51]}\n\n${instructions[52]}`;
+  const original = store.dispatch.bind(store);
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => { release = resolve; });
+  const refusing = vi.spyOn(store, 'dispatch').mockImplementation(async (sent, input, options) => {
+    if (sent !== CreateQuestion) return original(sent, input, options);
+    await hold;
+    return fail({ kind: 'storageFull', message: 'The disk is full' });
+  });
+  setComposerText(key, command);
+  const sending = sendTyped(store, scope, { navigate });
+  await vi.waitFor(() => expect(composerText(key)).toBe(''));
+  setComposerText(key, followUp);
+  release();
+  await sending;
+  refusing.mockRestore();
+  // A restart keeps which part of the box is the refused command.
+  saveKeptDrafts();
+  const kept = local.read(KEPT_TEXT_KEY) as { 'refused-commands'?: [string, string[]][] } | null;
+  expect(new Map(kept?.['refused-commands']).get(key)).toEqual([command]);
+  await sendTyped(store, scope, { navigate });
+  expect(Object.values(store.get().questions).map((question) => question.text)).toEqual([instructions[50]]);
+  expect(composerText(key)).toBe(followUp);
+  await sendTyped(store, scope, { navigate });
+  expect(asked).toHaveBeenCalledOnce();
+  expect(store.get().threads[key][0].text).toBe(followUp);
+  expect(Object.values(store.get().questions)).toHaveLength(1);
+});
+
+it('leaves a refused command to Retry, not the box, when the store keeps it as interrupted work', async () => {
+  const { store, scope, dealId, navigate } = await start();
+  const key = convKey(scope);
+  const followUp = instructions[61];
+  const { repo } = store.services;
+  const write = repo.transaction.bind(repo);
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => { release = resolve; });
+  // The question's write is refused, and so is the journal note that it failed, so the store keeps it to retry.
+  repo.transaction = async (transaction) => {
+    const failedNote = transaction.writes.some((change) => change.kind === 'op'
+      && (change.data as { state?: string }).state === 'failed');
+    if (failedNote) return fail({ kind: 'storageFull', message: 'The disk is full' });
+    if (!transaction.writes.some((change) => change.kind === 'question')) return write(transaction);
+    await hold;
+    return fail({ kind: 'storageFull', message: 'The disk is full' });
+  };
+  setComposerText(key, `Log a question: ${instructions[60]}`);
+  const sending = sendTyped(store, scope, { navigate });
+  await vi.waitFor(() => expect(composerText(key)).toBe(''));
+  setComposerText(key, followUp);
+  release();
+  await sending;
+  repo.transaction = write;
+  expect(composerText(key)).toBe(followUp);
+  const [offered] = store.interruptedOps().filter((operation) => operation.state === 'interrupted');
+  expect(offered).toMatchObject({ command: 'CreateQuestion', input: { dealId, text: instructions[60] } });
+  expect((await store.retryOp(offered.id))?.ok).toBe(true);
+  expect(Object.values(store.get().questions).map((question) => question.text)).toEqual([instructions[60]]);
+});
 
 it('does not repeat a refused command that was typed again during its save', async () => {
   const { store, scope, navigate } = await start();
