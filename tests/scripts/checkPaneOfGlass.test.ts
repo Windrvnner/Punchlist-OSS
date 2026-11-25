@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 const script = path.resolve('scripts/check-pane-of-glass.mjs');
 const baselineFile = 'scripts/pane-of-glass-baseline.json';
 const directories: string[] = [];
-type Baseline = Record<string, Partial<Record<'import' | 'storage' | 'services' | 'repo', number>>>;
+type Baseline = Record<string, Partial<Record<'import' | 'storage' | 'network' | 'services' | 'repo', number>>>;
 
 function git(dir: string, ...args: string[]) {
   const identity = ['-c', 'user.name=test', '-c', 'user.email=test@example.com'];
@@ -85,7 +85,14 @@ describe('UI dependency checks', () => {
         "const table = import(`../../${available ? 'backend' : 'ui'}/table`)",
         "const table = import(optionalPath ?? '../../backend/table')",
       ],
-      storage: ['localStorage.getItem(key)', 'indexedDB.open(key)', 'window.sessionStorage.length'],
+      storage: [
+        'localStorage.getItem(key)', 'indexedDB.open(key)', 'window.sessionStorage.length',
+        'document.cookie = `draft=${text}`', "caches.open('drafts')",
+      ],
+      network: [
+        "fetch('https://api.example.com/v1/messages', { method: 'POST' })", 'window.fetch(url)',
+        'new XMLHttpRequest()', 'new WebSocket(url)', 'new EventSource(url)',
+      ],
       services: ['store.services.ai.phrase(point)', 'const { services: ports } = store', 'store?.services'],
       repo: ['ports.repo.audit(id)', 'ports.repo?.seen?.()'],
     };
