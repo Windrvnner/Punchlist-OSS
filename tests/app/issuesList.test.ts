@@ -15,6 +15,9 @@ import { MemoryLocal } from '../../src/adapters/local';
 import { dealFindings } from '../../src/app/state';
 import { deletedIssuesLists, issuesListRemoval } from '../../src/app/deletedView';
 import { fail } from '../../src/domain/result';
+import { Finding, Question } from '../../src/domain/model';
+import { derivedId } from '../../src/domain/derivedId';
+import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { issuesListClock, planIssuesListSeed } from './issuesListKit';
 
 const COMMANDS = [CreateDeal, CreateFinding, DeleteFinding, RestoreFinding, EditFinding, SetFindingStatus, CreateQuestion, ImportIssuesList, RevertIssuesList, RemoveIssuesList, RestoreIssuesList];
@@ -72,6 +75,101 @@ describe('confirmed issues list removal', () => {
     expect(await store.retryOp(failed.id)).toMatchObject({ ok: false, error: { kind: 'rejected' } });
     expect(had.map((id) => store.get().findings[id].onLists?.[0].text)).toEqual([first.text, second.text]);
   });
+});
+/** Another PC's import of the same list reaches this PC after the removal was planned and before it commits (#410). */
+describe('removal while another PC changes the approved list', () => {
+  const listMark = (n: string, text: string) => ({ doc: DOC, list: LIST, n, text, at: '2026-11-17T09:00:00.000Z' });
+  const asked = (dealId: string) => portfolioQuestions().map((text, index) => Question.parse({
+    id: derivedId('q', [dealId, text]), dealId, n: index + 1, text, rev: 0,
+    createdAt: '2026-11-10T10:00:00.000Z', updatedAt: '2026-11-10T10:00:00.000Z',
+  }));
+
+  async function bigDeal() {
+    const { store, dealId } = await startDeal();
+    await seedEarlierFindings(store, dealId, 120);
+    const questions = asked(dealId);
+    expect(questions.length).toBeGreaterThan(2000);
+    const filed = await store.services.repo.transaction({
+      writes: questions.map((data) => ({ kind: 'question' as const, id: data.id, data, expectedRev: null })),
+      index: { dealId, add: questions.map(({ id }) => ({ kind: 'question' as const, id })) },
+      audit: [],
+    });
+    expect(filed.ok).toBe(true);
+    await store.loadDeal(dealId);
+    const had = findingIds(store, dealId);
+    const list = { dealId, doc: DOC, list: LIST };
+    const imported = await store.dispatch(ImportIssuesList, { ...list, points: [
+      addMark(had[0], 'Distributions are permitted before the debt service test.', '1'),
+      { n: '2', text: 'The hedge covenant lacks a minimum term.', title: 'Hedge covenant term', workstream: 'Legal' },
+    ] });
+    expect(imported.ok).toBe(true);
+    return { store, dealId, had };
+  }
+
+  type Peer = (store: Store, dealId: string, target: string) => Promise<unknown>;
+  const peers: Record<string, Peer> = {
+    'a mark on a finding the list was not on': async (store, _dealId, target) => {
+      const finding = store.get().findings[target];
+      const mark = listMark('3', 'The reserve replenishment period is not defined.');
+      return store.services.repo.transaction({
+        writes: [{ kind: 'finding', id: target, data: { ...finding, onLists: [mark] }, expectedRev: finding.rev }],
+        audit: [],
+      });
+    },
+    'a new finding on the list': async (store, dealId) => {
+      const mark = listMark('3', 'The reserve replenishment period is not defined.');
+      const finding = Finding.parse({
+        id: derivedId('f', [dealId, DOC, '3', 'reserve']), dealId, rev: 0, createdAt: mark.at, updatedAt: mark.at,
+        title: 'Reserve replenishment', workstream: 'Legal', raisedAt: mark.at, body: [mark.text], origin: 'human',
+        raisedBy: 'Peer', onLists: [mark], aiTitle: true, aiWorkstream: true,
+      });
+      return store.services.repo.transaction({
+        writes: [{ kind: 'finding', id: finding.id, data: finding, expectedRev: null }],
+        index: { dealId, add: [{ kind: 'finding', id: finding.id }] }, audit: [],
+      });
+    },
+  };
+
+  it.each(Object.keys(peers))('refuses the write when %s arrives before commit, in each way it runs', async (name) => {
+    for (const how of ['direct', 'queued', 'retry'] as const) {
+      const { store, dealId, had } = await bigDeal();
+      const approval = approvedRemoval(store, dealId);
+      const repo = store.services.repo;
+      const transact = repo.transaction.bind(repo);
+      let armed = how !== 'retry';
+      const removing = (tx: Parameters<typeof transact>[0]) =>
+        !!tx.audit?.some((entry) => entry.text === 'Issues list removed');
+      const spy = vi.spyOn(repo, 'transaction').mockImplementation(async (tx) => {
+        if (!removing(tx)) return transact(tx);
+        if (!armed) return fail({ kind: 'failed', message: 'Write refused' });
+        armed = false;
+        await peers[name](store, dealId, had[7]);
+        return transact(tx);
+      });
+      const edit = {
+        dealId, findingId: had[3], title: 'Finding 3, as edited', workstream: 'Legal', body: ['What finding 3 says.'],
+      };
+      const editing = how === 'queued' ? store.dispatch(EditFinding, edit) : undefined;
+      let result = await store.dispatch(RemoveIssuesList, approval);
+      await editing;
+      if (how === 'retry') {
+        const failed = Object.values(store.get().ops)
+          .find((op) => op.command === 'RemoveIssuesList' && op.state === 'failed')!;
+        armed = true;
+        result = (await store.retryOp(failed.id))!;
+      }
+      spy.mockRestore();
+      expect(result.ok).toBe(false);
+      // the stored records, not this window's copy: the refused removal left the peer's mark and every other mark on
+      const stored = await repo.list('finding', dealId);
+      const onList = (loaded: { envelope: { data: unknown } }) =>
+        (loaded.envelope.data as Finding).onLists?.some((mark) => mark.doc === DOC);
+      const marked = stored.ok ? stored.value.filter(onList) : [];
+      expect(marked.length).toBe(3);
+      const removed = await repo.list('tombstone', dealId);
+      expect(removed.ok && removed.value.length).toBe(0);
+    }
+  }, 120_000);
 });
 const findingIds = (store: Store, dealId: string) =>
   dealFindings(store.get(), dealId).map((finding) => finding.id).sort();

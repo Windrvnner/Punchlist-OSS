@@ -6,6 +6,7 @@
  */
 import { z } from 'zod';
 import { define, type Upsert, type AuditDraft } from '../command';
+import type { State } from '../state';
 import { Finding, DealId, FindingId, ListPoint, Tombstone } from '../../domain/model';
 import { checkFinding } from '../../domain/transitions';
 import { ok, fail, notFound, rejected } from '../../domain/result';
@@ -122,10 +123,7 @@ export const RemoveIssuesList = define({
     const d = state.deals[input.dealId];
     if (!d) return fail(notFound('Deal not found', input.dealId));
     const parts = removable(state, d.id, input.doc);
-    const retry = state.ops[ctx.opId]?.command === 'RemoveIssuesList';
-    const stale = input.approvedImpact === undefined ? retry
-      : input.approvedImpact !== removalImpact(d.id, input.doc, parts);
-    if (stale) {
+    if (staleApproval(state, ctx.opId, input, parts)) {
       return fail(rejected('This issues list changed. Review it again before removing it.'));
     }
     if (!parts.made.length && !parts.joined.length) return fail(rejected('Nothing of this list is left to remove'));
@@ -143,13 +141,34 @@ export const RemoveIssuesList = define({
     }
     const made = parts.made.map((f) => f.id);
     return ok({
-      dealId: d.id, upserts, removes, audit,
+      dealId: d.id, upserts, removes, audit, ...approvedSet(state, d.id, upserts),
       index: made.length ? { dealId: d.id, remove: made.map((id) => ({ kind: 'finding' as const, id })), add: made.map((id) => ({ kind: 'tombstone' as const, id })) } : undefined,
       inverse: { command: 'RestoreIssuesList', input: { dealId: d.id, made, marked, doc: input.doc } }, undoesSafely: true,
       message: `Removed ${plural(made.length, 'finding')}${parts.kept ? ` · ${plural(parts.kept, 'finding')} kept, changed since` : ''}`,
     });
   },
 });
+
+/** Whether the approval no longer matches the list, or a retry has none to match (#410). */
+function staleApproval(state: State, opId: string, input: { dealId: string; doc: string; approvedImpact?: string },
+  parts: ReturnType<typeof removable>) {
+  if (input.approvedImpact === undefined) return state.ops[opId]?.command === 'RemoveIssuesList';
+  return input.approvedImpact !== removalImpact(input.dealId, input.doc, parts);
+}
+
+/**
+ * The approval covers every finding of the deal, not only those the removal writes: a peer's mark added to another
+ * finding, or a new finding that carries the list, changes what was approved. Findings not written are held at their
+ * rev, and the set of findings must be the same at commit, so the store plans again on the newer state (#410).
+ */
+function approvedSet(state: State, dealId: string, upserts: Upsert[]) {
+  const written = new Set(upserts.map(({ record }) => record.id));
+  const all = Object.values(state.findings).filter((finding) => finding.dealId === dealId);
+  return {
+    expects: all.filter(({ id }) => !written.has(id)).map(({ id, rev }) => ({ kind: 'finding' as const, id, rev })),
+    expectsMembers: { dealId, kind: 'finding' as const, ids: all.map(({ id }) => id) },
+  };
+}
 
 const listMarks = (finding: Finding, doc: string) => (finding.onLists ?? []).filter((mark) => mark.doc === doc);
 
