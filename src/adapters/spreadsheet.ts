@@ -24,6 +24,8 @@ function encodingOf(bytes: Uint8Array): Encoding {
   if (n >= 4 && evenZero > n / 8 && oddZero < n / 64) return 'utf-16be';
   try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); return 'utf-8'; } catch { return 'windows-1252'; }
 }
+/** read by the streaming CSV reader (backend/csvFile), which tells the encoding from the start of a file */
+export { encodingOf };
 export function decodeText(bytes: Uint8Array): string {
   const e = encodingOf(bytes); const bom = e.endsWith('-bom') ? (e.startsWith('utf-16') ? 2 : 3) : 0;
   return new TextDecoder(e.replace('-bom', '')).decode(bytes.subarray(bom));
