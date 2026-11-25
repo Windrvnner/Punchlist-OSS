@@ -10,6 +10,7 @@ import {
 import { focusCard, closeOnEscape } from './focus';
 import { workstreamChoices } from '../domain/order';
 import { TEXT_MAX } from '../domain/importExport';
+import { limitClass, limitTitle } from './limit';
 import { dealIdOf, findingFromAnswer, type Scope } from '../app/conversations';
 import type { Message } from '../app/state';
 import { TITLE_MAX } from '../app/commands/findings';
@@ -73,7 +74,8 @@ export function QuestionCard({ scope, answerId, initial, onDone }: {
   return (
     <div class="card addq" data-holds-work onKeyDown={closeOnEscape(onDone)}>
       <div class="lbl">New Question for {deal.counterparty || 'the Counterparty'}</div>
-      <textarea class="in ta" id="aq-text" maxLength={TEXT_MAX} rows={3} aria-label="Question" ref={focusCard}
+      <textarea class={`in ta${limitClass(text)}`} title={limitTitle(text)} id="aq-text" maxLength={TEXT_MAX} rows={3}
+        aria-label="Question" ref={focusCard}
         value={text} onInput={(e) => draft.change({ text: (e.currentTarget as HTMLTextAreaElement).value })} />
       <WorkstreamSelect id="aq-ws" value={workstream} onChange={(ws) => draft.change({ ws })} />
       {finding && <span class="clink">Linked to “{finding.title}”</span>}

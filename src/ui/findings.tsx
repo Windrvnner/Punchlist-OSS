@@ -2,6 +2,7 @@ import { Fragment } from 'preact';
 import { onListText, OnListMark } from './issuesList';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { TEXT_MAX } from '../domain/importExport';
+import { limitClass, limitTitle } from './limit';
 import { checkingSays, watchCheck } from '../app/checking';
 import { showTip, hideTip } from './tip';
 import { ReadOnlyContext } from './editField';
@@ -335,7 +336,7 @@ function NewFindingCard({ deal: d, onDone }: { deal: Deal; onDone: () => void })
       class="lbl">New Finding on {d.name}</div>
       <input class="in" id="af-title" placeholder="What did you find?" aria-label="Title" maxLength={TITLE_MAX} ref={(el) => { if (el && !el.dataset.f) { el.dataset.f = '1'; el.focus(); } }} value={title} onInput={(e) => setTitle((e.currentTarget as HTMLInputElement).value)} />
       <select class={`field ${ws ? '' : 'unset'}`} id="af-ws" aria-label="Workstream" value={ws} onChange={(e) => setWs((e.currentTarget as HTMLSelectElement).value)}><option value="">Workstream</option>{workstreamChoices().map((w) => <option key={w} value={w}>{w}</option>)}</select>
-      <textarea class="in ta" id="af-body" maxLength={TEXT_MAX} rows={3} placeholder="What you found and where" aria-label="Detail" value={body} onInput={(e) => setBody((e.currentTarget as HTMLTextAreaElement).value)} />
+      <textarea class={`in ta${limitClass(body)}`} title={limitTitle(body)} id="af-body" maxLength={TEXT_MAX} rows={3} placeholder="What you found and where" aria-label="Detail" value={body} onInput={(e) => setBody((e.currentTarget as HTMLTextAreaElement).value)} />
       <div class="cacts"><button type="button" class="btn sm pri" id="af-create" disabled={busy || !title.trim() || !ws}
         onClick={() => void create()}>Create Finding</button><button type="button" class="btn sm" id="af-cancel"
         onClick={cancel}>Cancel</button></div>

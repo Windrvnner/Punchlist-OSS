@@ -605,6 +605,7 @@ table.dg{width:100%;border-collapse:collapse}
 .dlg h2{font:600 19px/1.2 var(--display);letter-spacing:-.3px;margin:0 0 6px}
 .fl{font-size:13px;color:var(--ink-2);font-weight:600;margin:16px 0 6px}
 .in{width:100%;height:38px;border:1px solid var(--line);background:var(--card);border-radius:9px;padding:0 12px;font-size:14px;color:var(--ink);outline:0}
+.in.atlimit,.in.atlimit:focus{border-color:var(--high);box-shadow:0 0 0 3px color-mix(in srgb,var(--high) 22%,transparent)}   /* at the Excel cell limit */
 .in:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}   /* a ring, not only a color change */
 .ndlist{display:flex;flex-direction:column;gap:6px;max-height:calc(100vh - 360px);overflow:auto;scrollbar-width:thin}
 .ndrow{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:12px;align-items:center;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:var(--card);font-size:13px}

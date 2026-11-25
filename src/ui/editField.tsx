@@ -5,6 +5,7 @@
  * debounce. Shows pending / not-saved / updated-elsewhere beside the field.
  */
 import { TEXT_MAX } from '../domain/importExport';
+import { limitClass, limitTitle } from './limit';
 import {
   type FieldDraft, type FieldValue, type ReadField, restoreFieldDraft, showFieldDraft, takeHandedText,
 } from '../app/fieldDrafts';
@@ -89,8 +90,8 @@ export function EditField({
   const common = {
     ref: ref as any, value: draft, placeholder, dir: 'auto' as const, 'aria-label': label,
     onInput, onBlur, onKeyUp, onFocus, maxLength, onKeyDown: onKey, readOnly: !!locked && !held,
-    title: locked ?? undefined,
-    class: `ef ${className ?? ''} ${locked ? 'idle' : status} ${external && !locked ? 'external' : ''}`,
+    title: locked ?? limitTitle(draft),
+    class: `ef ${className ?? ''} ${locked ? 'idle' : status} ${external && !locked ? 'external' : ''}${limitClass(draft)}`,
   };
   // a date at rest reads as the rest of the app writes one ("Oct 28"); the browser's own field sits over it, unseen,
   // so a click or Tab lands in it and it shows itself while focused

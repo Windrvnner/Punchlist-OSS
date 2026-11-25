@@ -6,10 +6,11 @@
  * The box is filled once, when it opens. From then on the browser edits it as a person types, so the caret and
  * the browser's own Undo are never disturbed by a redraw.
  */
-import { useLayoutEffect, useRef } from 'preact/hooks';
+import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { Source } from '../domain/model';
 import { markerPieces, withoutMarkers } from '../domain/cite';
 import { TEXT_MAX } from '../domain/importExport';
+import { limitClass, limitTitle } from './limit';
 import { docTitle, displayName, graphemes } from './docName';
 import { showTip, hideTip } from './tip';
 
@@ -221,14 +222,18 @@ export function CitedEditor({ id, label, text, sources, onText }: CitedEditorPro
   useLayoutEffect(() => {
     box.current?.replaceChildren(...citedNodes(text, sources));
   }, []);
+  const [held, setHeld] = useState(text);   // what the box holds, for its outline at the limit
   const changed = () => {
-    if (box.current) onText(editorText(box.current));
+    if (!box.current) return;
+    const now = editorText(box.current);
+    setHeld(now);
+    onText(now);
   };
   const element = () => box.current as HTMLDivElement;
   // text is not dragged out of the box (Cut and Paste move it), so a tag is never left behind its sentence
   const noDrag = (event: DragEvent) => event.preventDefault();
   return (
-    <div class="in ta ced" id={id} ref={box} role="textbox" aria-multiline="true" aria-label={label}
+    <div class={`in ta ced${limitClass(held)}`} title={limitTitle(held)} id={id} ref={box} role="textbox" aria-multiline="true" aria-label={label}
       contentEditable spellcheck onInput={changed}
       onBeforeInput={(event) => guardInput(event as InputEvent, element())}
       onPaste={(event) => pasteCited(event, element(), sources)}
