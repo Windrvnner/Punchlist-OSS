@@ -14,7 +14,6 @@ import { setResponse, setQuestionStatus, checkQuestion } from '../../domain/tran
 import { numbering } from './questions';
 import { sameText, sameWords, type ImportRow } from '../../domain/importExport';
 import { misreadKey, canMatchNumber, identifierSig, sameIdentifiers } from '../../domain/logWrite';
-import { damagedImportText } from '../../domain/importDamage';
 import { ok, fail, notFound, rejected } from '../../domain/result';
 import { dealQuestions, nextQuestionNumber } from '../state';
 import { derivedId } from '../../domain/derivedId';
@@ -28,11 +27,6 @@ import type { State } from '../state';
 
 /** fields that name someone or something rather than say something: spaces around them are not part of the name */
 const IDENTITIES = new Set(['askedBy', 'respondedBy', 'workstream']);
-/** Merge keeps saved text when the incoming cell only lost characters. Spacing edits still import (#256). */
-function importsText(saved: string, incoming: string): boolean {
-  return !!incoming.trim() && !sameText(saved, incoming) && !damagedImportText(saved, incoming);
-}
-
 const Ymd = z.string().refine((v) => v === '' || isRealDate(v));
 export const ImportRowSchema = z.object({ line: z.number().int().positive().optional(), n: z.number().int().positive().nullable(), text: z.string().min(1), askedBy: z.string(), received: Ymd, workstream: z.string(), priority: z.enum(['', 'High', 'Medium', 'Low']), response: z.string(), respondedBy: z.string(), responded: Ymd, status: z.union([QuestionStatus, z.literal('')]) });
 
@@ -128,10 +122,7 @@ export const ImportQuestions = define({
         q = { ...existing };
         // a cell of only spaces is as good as empty here: it never overwrites what the log holds. A name or workstream is an
         // identity: one the log holds with spaces around it (typed so in the app) is the same one, and is left as it is.
-        const same = (k: string, a: string, b: string) => {
-          if (IDENTITIES.has(k)) return a.trim() === b.trim();
-          return k === 'text' ? !importsText(b, a) : sameText(a, b);
-        };
+        const same = (k: string, a: string, b: string) => (IDENTITIES.has(k) ? a.trim() === b.trim() : sameText(a, b));
         // A Submitted by that names no one (only a period, say) matched as naming no one, so it leaves the party as it is.
         const given = (k: string, v: string) => (k === 'askedBy' ? key(v) !== '' : v.trim() !== '');
         for (const k of ['text', 'askedBy', 'received', 'workstream', 'priority', 'respondedBy', 'responded'] as const) if (given(k, row[k]) && !same(k, row[k], (q as any)[k])) (q as any)[k] = row[k];
@@ -158,7 +149,7 @@ export const ImportQuestions = define({
         });
         numbers.set(n, id); created.push(id); audit.push({ kind: 'created', recordId: id, dealId: d.id, text: 'Imported' });
       }
-      if (importsText(q.response, row.response)) {
+      if (row.response.trim() && !sameText(row.response, q.response)) {         // only spaces is no response, as when typed in the app
         const linked = linkedOf(q);
         // the response was written by whoever the file says responded, not by the person running the import (who is in the history entry); a row that names nobody claims no author.
         // The same words with other spaces or line breaks are still the words the response came with: its origin and sources stay.
