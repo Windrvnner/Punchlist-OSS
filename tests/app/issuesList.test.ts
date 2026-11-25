@@ -52,7 +52,7 @@ describe('confirmed issues list removal', () => {
     expect(store.get().findings[had[0]].onLists).toBeUndefined();
   });
 
-  it.each([true, false])('checks a failed removal from the journal again (has original approval: %s)', async (confirmed) => {
+  it.each([true, false])('rechecks a journal retry (has approval: %s)', async (confirmed) => {
     const { store, dealId, had } = await dealWith(2);
     const first = addMark(had[0], 'The reserve replenishment period is not defined.', '1');
     const second = addMark(had[1], 'The hedge covenant lacks a minimum term.', '2');
