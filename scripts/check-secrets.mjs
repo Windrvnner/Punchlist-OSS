@@ -22,8 +22,8 @@ const KEY_SHAPES = [
   'eyJ[A-Za-z0-9_-]{10,}\\.eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}',
 ];
 const KEY = new RegExp(`\\b(${KEY_SHAPES.join('|')})`);
-// and a private key in PEM form (a cloud service account). It starts with dashes, where \b cannot match.
-const PRIVATE_KEY = /-----BEGIN ([A-Z]+ )*PRIVATE KEY-----/;
+// and a private key in PEM form (a cloud service account) or PGP armor. It starts with dashes, where \b cannot match.
+const PRIVATE_KEY = /-----BEGIN ([A-Z]+ )*PRIVATE KEY( BLOCK)?-----/;
 // and the project's own key, whatever its shape, read from .env on this PC (never printed)
 let own = '';
 try { own = /^PUNCHLIST_AI_KEY=(.+)$/m.exec(fs.readFileSync('.env', 'utf8'))?.[1].trim() ?? ''; } catch { /* no .env here (CI) */ }
