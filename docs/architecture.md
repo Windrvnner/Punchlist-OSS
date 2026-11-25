@@ -99,7 +99,9 @@ reports a lost connection, timeout, rate limit, or server error as `unreachable`
 **Desktop shell.** The desktop app is an Electron app. The main process (`src/desktop/main.ts`) assembles the backend and serves it to a single window across a bridge. The window runs the same Store and UI as the browser demo.
 
 - `src/shell/bridge.ts` lists every method the window may call, and the main process refuses anything else. The window has no access to Node or to file paths (context isolation and the sandbox are on). PDF pages are served by token, never by path.
-- Every bridged call resolves to a `Result`. If the main process can't be reached, the call resolves to `unreachable`; if a method throws, it resolves to `failed`.
+- Bridged service calls resolve to a `Result`. An unreachable main process produces `unreachable`. A thrown method
+  produces `failed`.
+- After saving a snapshot of kept drafts, the window asks the main process to flush local storage to disk (#825).
 - Everything the PC keeps is stored in `%LOCALAPPDATA%\Punchlist`. The shared folder is the one connected on this PC, recorded in `settings.json`. A PC that has never signed in shows the sign-in page first. Then, until a folder is connected, it shows only the connect page (`src/ui/connect.tsx`), which finds the team's Punchlist folders in OneDrive by itself (`teamFolders` in `src/desktop/host.ts`).
 - Each install has an ID for each shared folder (`install.json`, written twice so that one copy is always complete) and its own undo journal (`ops-<id>.json`).
 - Sign-in (`src/desktop/signin.ts`) accepts an API key or single sign-on, as the control file allows. The token is stored encrypted with Electron's `safeStorage`. While nobody is signed in, the app is read-only (`Store.readOnly`), and calls already under way wait for a sign-in.
