@@ -8,23 +8,33 @@ import {
 } from '../../src/app/checklistImport';
 import { CreateDeal } from '../../src/app/commands/deals';
 import { ImportIssuesList } from '../../src/app/commands/issuesList';
+import { SetResponse } from '../../src/app/commands/questions';
 import { readDealFolder, type DealForm } from '../../src/app/dealFolders';
 import { findDealTwin } from '../../src/app/dealSetup';
+import {
+  keepResponseVersion, responseMergeView, selectResponseMerge, watchResponseMerges,
+} from '../../src/app/drafting';
 import { readIssuesList, reviewIssuesList } from '../../src/app/issuesList';
 import { importKey, initializeKeptImports, keptImportsReady } from '../../src/app/keptImports';
 import { initializeKeptText } from '../../src/app/keptText';
 import {
   checklistItemsAsRead, checklistPaste, checklistReading, checklistRequests, checklistSourceLines, tieChecklistLines,
 } from '../../src/app/listRead';
-import { dealFindings, dealQuestions } from '../../src/app/state';
+import {
+  keepQaImport, keptQaImport, loadQaImport, prepareQaImport, submitQaImport, type QaChoices,
+} from '../../src/app/qaImport';
+import { logOf, updateQaLog } from '../../src/app/qaLog';
+import { dealFindings, dealQuestions, qaKept } from '../../src/app/state';
 import type { Store } from '../../src/app/store';
+import { proposeLayout } from '../../src/app/transfer';
 import { firmOf, listId, norm } from '../../src/domain/checklist';
+import { cell } from '../../src/domain/keptMerge';
 import { ok } from '../../src/domain/result';
-import type { AiService } from '../../src/ports';
+import type { AiService, QaLogFiles } from '../../src/ports';
 import { val } from '../backend/reviewKit';
 import { ITEMS } from '../fixtures/pastedList';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
-import { recoveryApp, type RecoveryApp } from './recoveryKit';
+import { recoveryApp, recoveryDeal, type RecoveryApp } from './recoveryKit';
 
 const applications: RecoveryApp[] = [];
 
@@ -178,4 +188,108 @@ it('reads, reviews, and installs the master checklist with selected model sugges
   expect(selected.some(({ text }) => text === norm(alternate))).toBe(false);
   val(await submitChecklist(store, key, target, selected, ''));
   expect(store.get().firmList[listId('broad', '')].items).toEqual(selected);
+});
+
+const LOG_NAME = 'Southridge lender requests.csv';
+const LOG_COLUMNS = ['Number', 'Lender inquiry', 'Sponsor reply'];
+const BASE_RESPONSE = 'Lender counsel received the draft EPC contract.';
+const APP_RESPONSE = 'The signed EPC contract is in the Construction folder.';
+const LOG_RESPONSE = 'The first change order is in the Construction Change Orders folder.';
+const MERGED_RESPONSE = `${APP_RESPONSE} ${LOG_RESPONSE}`;
+
+async function retainLenderLog(store: Store, dealId: string, rows: string[][]) {
+  const grid = [['Southridge lender requests'], LOG_COLUMNS, ...rows];
+  const { bytes } = val(await store.services.sheets.write('Sheet1', grid));
+  const file = new File([bytes.slice().buffer], LOG_NAME);
+  store.services.fs.pathFor = () => `/Due diligence/Southridge/${LOG_NAME}`;
+  const layout = vi.fn(async () => ok({
+    sheet: 'Sheet1', headerRow: 2, fields: { text: 'Lender inquiry', response: 'Sponsor reply' },
+  }));
+  store.services.ai.layout = layout;
+  const loaded = val(await loadQaImport(store, dealId, file));
+  expect(loaded.askForLayout).toBe(true);
+  const table = val(await proposeLayout(store, loaded.table));
+  expect(layout).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ fileName: LOG_NAME }));
+  expect(table).toMatchObject({ headerRow: 2, proposedByAi: true, mapping: { n: 0, text: 1, response: 2 } });
+  const choices: QaChoices = {
+    mapping: table.mapping, mode: 'append', path: loaded.path, answered: true, makeLog: true, touched: true,
+  };
+  keepQaImport(importKey.qa(dealId), table, choices);
+  return { bytes, choices };
+}
+
+function standInForLog(store: Store, rows: string[][]) {
+  const save = vi.fn<QaLogFiles['save']>(async () =>
+    ok({ status: 'written', archive: 'Southridge lender archive.csv' }));
+  const read = vi.fn<QaLogFiles['read']>(async () => ok({
+    columns: LOG_COLUMNS, cols: [0, 1, 2], rows, lines: rows.map((_, index) => index + 3),
+    lastRow: rows.length + 2, stamp: 'counsel-revision',
+  }));
+  store.services.qaLogs = { ...store.services.qaLogs!, read, save };
+  return { read, save };
+}
+
+async function mergeAndUpdateLog(store: Store, dealId: string, rows: string[][]) {
+  const [question] = dealQuestions(store.get(), dealId);
+  const { read, save } = standInForLog(store, [[rows[0][0], rows[0][1], LOG_RESPONSE], ...rows.slice(1)]);
+  val(await store.dispatch(SetResponse, { dealId, questionId: question.id, response: APP_RESPONSE }));
+  expect(await updateQaLog(store, dealId)).toMatchObject({ kind: 'updated', versions: 1, action: { kind: 'resolve' } });
+  expect(save).not.toHaveBeenCalled();
+  const current = store.get().questions[question.id];
+  const kept = qaKept(store.get(), current);
+  expect(kept.response).toBe(LOG_RESPONSE);
+  const merge = vi.fn(async () => ok({ text: MERGED_RESPONSE }));
+  store.services.ai.merge = merge;
+  const heard = vi.fn();
+  const stop = watchResponseMerges(heard);
+  try {
+    expect(selectResponseMerge(store, current, kept.response)).toEqual({ text: '', busy: true });
+    await vi.waitFor(() => expect(heard).toHaveBeenCalledExactlyOnceWith(question.id, undefined));
+    expect(merge).toHaveBeenCalledExactlyOnceWith({
+      dealId, question: question.text, app: APP_RESPONSE, log: LOG_RESPONSE,
+    });
+    const shown = responseMergeView(question.id);
+    expect(shown).toMatchObject({ hasDraft: true, busy: false, draft: { text: MERGED_RESPONSE } });
+    const seen = logOf(store, dealId)?.last?.at;
+    val(await keepResponseVersion(store, dealId, question.id, 'merged', {
+      merged: shown.draft!.text, fields: shown.fields, seen,
+    }));
+  } finally {
+    stop();
+  }
+  expect(store.get().questions[question.id]).toMatchObject({ response: MERGED_RESPONSE, provenance: { origin: 'ai' } });
+  expect(await updateQaLog(store, dealId)).toMatchObject({ kind: 'updated', versions: 0, counts: { updated: 1 } });
+  expect(read).toHaveBeenLastCalledWith(expect.objectContaining({ file: LOG_NAME }), expect.anything());
+  expect(save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    file: LOG_NAME, steps: [cell(2, 2, MERGED_RESPONSE)], stamp: 'counsel-revision',
+  }));
+  expect(logOf(store, dealId)?.last?.sent[question.id].response).toBe(MERGED_RESPONSE);
+}
+
+it('restores a kept Q&A import, merges a conflicting answer, and updates the external log', async () => {
+  const app = application();
+  const dealId = await recoveryDeal(app);
+  const port = new MemoryKeptImports();
+  initializeKeptImports(port);
+  await keptImportsReady;
+  const questions = portfolioQuestions().slice(0, 2_000);
+  const rows = questions.map((text, index) => [String(index + 1), text, index === 0 ? BASE_RESPONSE : '']);
+  const { bytes, choices } = await retainLenderLog(app.store, dealId, rows);
+  const key = importKey.qa(dealId);
+  await vi.waitFor(async () => expect(await port.read()).toContainEqual({ key, part: 'choices', value: choices }));
+  await closeApplication(app);
+
+  const { store } = application(app.saved);
+  await store.boot();
+  await store.loadDeal(dealId, { gaps: false });
+  initializeKeptImports(port);
+  await keptImportsReady;
+  const saved = keptQaImport(key);
+  expect(saved).toMatchObject({ table: { bytes, rows }, choices });
+  if (!saved) throw new Error('Expected the kept import to reopen');
+  const { prepared } = prepareQaImport(saved.table, saved.choices.mapping);
+  val(await submitQaImport(store, dealId, saved, prepared.rows));
+  expect(dealQuestions(store.get(), dealId).map(({ text }) => text)).toEqual(questions);
+  expect(keptQaImport(key)).toBeNull();
+  await mergeAndUpdateLog(store, dealId, rows);
 });

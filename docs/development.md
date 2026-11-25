@@ -52,6 +52,13 @@ npm run installer       # build the Windows installer into out/installer (on Win
 | `npm run screens` | Takes screenshots of every main screen into `out/` (add `-- 1440x900 --pdfs <folder>` for options). Needs `npm run serve`. |
 | `npm run package` | Optional local release ZIP containing the app, source, and `docs/`, written to `out/punchlist-<version>.zip`. |
 
+The app workflow test runs deal-scale imports, question drafting, folder matching, and Q&A log updates through a
+Store with stand-in ports. Run the test in Node without a window.
+
+```sh
+npx vitest run tests/app/coreWorkflows.test.ts --environment node --no-file-parallelism
+```
+
 The static checks scan tracked files for secrets and attribution, and commit messages for attribution.
 After readability hints, `scripts/check-pane-of-glass.mjs` checks UI imports, service and repository access,
 and browser storage against the counts in `scripts/pane-of-glass-baseline.json`. For Vite globs with literal patterns and
