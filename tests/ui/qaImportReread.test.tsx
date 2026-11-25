@@ -148,14 +148,73 @@ describe('a heading row read again in the Q&A import (#63)', () => {
     }
   });
 
-  it('names a picked column that did not carry over to the reread (#741)', async () => {
-    const { get, heading, letGo, pickResponse, done } = await dialog(COLUMN_CHANGES);
+  it('names an unapplied choice until that field is corrected, including after reopening (#741)', async () => {
+    const { get, heading, letGo, pickResponse, choose, reopen, done } = await dialog(COLUMN_CHANGES);
     try {
       await heading(3);
       await pickResponse('1');
       await letGo(3);
       await vi.waitFor(() => expect(get('#im-line').textContent).toBe('Column choice not applied for Response.'));
       expect(get('#im-line').getAttribute('role')).toBe('alert');
+      await choose('[data-immap="priority"]', '1');
+      expect(get('#im-line').textContent).toBe('Column choice not applied for Response.');
+      await reopen();
+      expect(get('#im-line').textContent).toBe('Column choice not applied for Response.');
+      expect(get<HTMLSelectElement>('[data-immap="response"]').selectedOptions[0].text).toBe('Choose a Column');
+      expect(get<HTMLButtonElement>('#im-go').disabled).toBe(true);
+      await pickResponse('');
+      expect(get('#im-line').textContent).not.toContain('choice not applied');
+      expect(get<HTMLButtonElement>('#im-go').disabled).toBe(false);
+    } finally {
+      await done();
+    }
+  });
+
+  it('carries a choice through sheet selection and its queued heading read (#741)', async () => {
+    const { app, dealId, get, heading, letGo, pickResponse, choose, done } =
+      await dialog(COLUMN_CHANGES, { otherSheet: true });
+    try {
+      await choose('#im-sheet', 'Updated review');
+      await heading(3);
+      await pickResponse('2');
+      await letGo('Updated review');
+      await letGo(3);
+      await vi.waitFor(() => expect(get('#im-line').textContent).toBe('Import 1 question · 1 new'));
+      expect(get<HTMLSelectElement>('[data-immap="response"]').selectedOptions[0].text).toBe('Final Notes');
+      await act(() => get<HTMLButtonElement>('#im-go').click());
+      await vi.waitFor(() => expect(dealQuestions(app.store.get(), dealId)[0]?.response)
+        .toBe('Scheduled for the second quarter'));
+    } finally {
+      await done();
+    }
+  });
+
+  it('recovers the selected source column from a kept import saved before column positions (#741)', async () => {
+    const { get, heading, letGo, pickResponse, done } = await dialog(COLUMN_CHANGES, { legacy: true });
+    try {
+      await heading(3);
+      await pickResponse('2');
+      await letGo(3);
+      await vi.waitFor(() => expect(get('#im-line').textContent).toBe('Import 1 question · 1 new'));
+      expect(get<HTMLSelectElement>('[data-immap="response"]').selectedOptions[0].text).toBe('Final Notes');
+    } finally {
+      await done();
+    }
+  });
+
+  it('carries an exclusion through a failed reread and retry (#741)', async () => {
+    const { get, heading, letGo, pickResponse, failing, done } = await dialog();
+    try {
+      failing.add(3);
+      await heading(3);
+      await pickResponse('');
+      await letGo(3);
+      await vi.waitFor(() => expect(get('#im-line').textContent).toContain('file is locked'));
+      failing.delete(3);
+      await heading(1);
+      await heading(3);
+      await letGo(3);
+      await vi.waitFor(() => expect(get('#im-line').textContent).toBe('Import 30 questions · 30 new'));
       expect(get<HTMLSelectElement>('[data-immap="response"]').value).toBe('');
     } finally {
       await done();
