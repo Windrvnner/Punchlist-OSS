@@ -1,6 +1,7 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { dealRows, interruptedOperations, isInterrupted, railDealGroups } from '../app/dealView';
 import { commandLabel } from '../app/commandLabels';
+import { undoFromNotice } from '../app/undoNotice';
 import { StoreContext, useAppState, useStore, lastInput, nameDir } from './hooks';
 import { Icon } from './icons';
 import { Notice, NoticeWords, glyphOf } from './notice';
@@ -95,7 +96,7 @@ function Shell() {
       // Ctrl Z takes back the last action while its message is still showing, the same as its Undo button
       if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'z' && !typing) {
         const t = [...st.toasts].reverse().find((x) => x.action?.opId);
-        if (t) { e.preventDefault(); void undoFrom(store, t); }
+        if (t) { e.preventDefault(); void undoFromNotice(store, t); }
         return;
       }
       // Escape closes the document; from the composer too, where it has no other meaning
@@ -327,18 +328,6 @@ export function middleName(name: string): string {
 }
 
 /**
- * A notice's Undo. The notice goes when it is pressed; a refusal that can clear (storage full, the folder out of reach)
- * puts it back with its Undo, to be tried again once there is room. A refusal for good leaves it gone.
- */
-async function undoFrom(store: ReturnType<typeof useStore>, t: { id: number; text: string; action?: { label: string; opId?: string } }) {
-  // signed out: the notice comes back to stay, with its Undo, until it is used after sign-in or dismissed (it would otherwise go in 8 seconds)
-  const ro = store.readOnly(); if (ro) { store.dismissToast(t.id); store.toast(ro); store.toast(t.text, t.action, true); return; }
-  store.dismissToast(t.id);   // at once, as before: the panel the undo changes takes back the focus the button had
-  const r = await store.undo(t.action!.opId!);
-  if (!r.ok && (r.error.kind === 'storageFull' || r.error.kind === 'unreachable')) store.toast(t.text, t.action);
-}
-
-/**
  * Notices sit in one stack at the top of the page column (right of the sidebar), clear of the composer and the
  * reading bar at the bottom. Up to three toasts stack as a deck: the newest in front and the
  * older ones peeking behind it; pointing at the deck or tabbing into it spreads them, so each keeps its Undo.
@@ -363,7 +352,15 @@ function Notices() {
     place(); reach(); const ro = new ResizeObserver(place); ro.observe(v); const rn = new ResizeObserver(reach); rn.observe(n); return () => { ro.disconnect(); rn.disconnect(); };
   }, []);
   const said = (text: string) => Object.values(s.deals).reduce((t, d) => (t.includes(d.name) ? t.split(d.name).join(middleName(d.name)) : t), text);
-  const run = (t: typeof shown[number]) => { const act = t.action; if (act?.opId) void undoFrom(store, t); else { act?.run?.(); store.dismissToast(t.id); } };
+  const run = (t: typeof shown[number]) => {
+    const act = t.action;
+    if (act?.opId) {
+      void undoFromNotice(store, t);
+      return;
+    }
+    act?.run?.();
+    store.dismissToast(t.id);
+  };
   return (
     <div class="notices" ref={root}>
       {s.net.down && <NetBar />}

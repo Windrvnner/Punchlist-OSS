@@ -34,6 +34,7 @@ import { seenSince } from './draftsSeen';
 import { freshen, FOLDER_CHECK } from './folderWatch';
 import { reassess } from './findings';
 import { indexCommittedFolders } from './indexing';
+import { keepUntilSignedIn } from './undoNotice';
 
 type Listener = (s: State) => void;
 
@@ -1100,7 +1101,7 @@ export class Store {
       ? () => void this.reloadTargets(command.targets(this.state, input))
       : () => {
         // signed out, nothing can run: the change is kept and its notice comes back, to be retried after sign-in
-        const ro = this.readOnly(); if (ro) { this.toast(ro); this.toast(text, { label, run }, true); return; }   // it stays until used or dismissed
+        if (keepUntilSignedIn(this, text, { label, run })) return;   // it stays until used or dismissed
         if (this.state.ops[opId]) {
           void this.retryOp(opId);
           return;

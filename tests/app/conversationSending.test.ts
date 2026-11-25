@@ -21,6 +21,7 @@ import { fail, ok } from '../../src/domain/result';
 import { KEPT_TEXT_KEY, type DocumentService } from '../../src/ports';
 import { disk, memRepo } from '../adapters/memRepo';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
+import { copyRecoveryDisk, holdRecoveryWrite, operationWrite, recoveryApp, recoveryDeal } from './recoveryKit';
 
 const local = new MemoryLocal();
 initializeKeptText(local);
@@ -62,6 +63,26 @@ async function start(docs: Partial<DocumentService> = {}) {
   const scope: Scope = { kind: 'deal', dealId };
   const navigate = vi.fn();
   return { store, scope, dealId, navigate, asked };
+}
+
+/** Send `command` from the box, type `typedSince` while its save is out, and have the save refused (#955). */
+async function refusedWhileTyping(store: Store, scope: Scope, command: string, typedSince: string) {
+  const key = convKey(scope);
+  const original = store.dispatch.bind(store);
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => { release = resolve; });
+  const refusing = vi.spyOn(store, 'dispatch').mockImplementation(async (sent, input, options) => {
+    if (sent !== CreateQuestion) return original(sent, input, options);
+    await hold;
+    return fail({ kind: 'storageFull', message: 'The disk is full' });
+  });
+  setComposerText(key, command);
+  const sending = sendTyped(store, scope, { navigate: vi.fn() });
+  await vi.waitFor(() => expect(composerText(key)).toBe(''));
+  setComposerText(key, typedSince);
+  release();
+  await sending;
+  refusing.mockRestore();
 }
 
 it('runs navigation, unresolved, and logging before falling through to a model answer', async () => {
@@ -195,13 +216,125 @@ it.each([
   release();
   await sending;
 
-  const restores = outcome === 'refused' && newer === 'erased';
-  expect(composerText(key)).toBe(restores ? submitted.trim() : newer === 'kept' ? next : '');
-  expect(refused).toHaveBeenCalledTimes(restores ? 1 : 0);
+  // A refused command comes back ahead of anything typed since, so neither text is lost (#955).
+  const settled = outcome === 'saved' ? (newer === 'kept' ? next : '')
+    : newer === 'kept' ? `${submitted.trim()}\n\n${next}` : submitted.trim();
+  expect(composerText(key)).toBe(settled);
+  expect(refused).toHaveBeenCalledTimes(outcome === 'refused' ? 1 : 0);
   expect(Object.values(store.get().questions)).toHaveLength(outcome === 'saved' ? 1 : 0);
   expect(pending.get(key)).toBe(newer === 'kept' ? next : undefined);
   saveKeptDrafts();
-  expect(keptComposer().get(key)).toBe(restores ? submitted.trim() : newer === 'kept' ? next : undefined);
+  expect(keptComposer().get(key)).toBe(settled || undefined);
+});
+
+it('keeps every refused command and all typing on a deal with thousands of questions (#955)', async () => {
+  const { store, scope, dealId, navigate } = await start();
+  const key = convKey(scope);
+  const logged = instructions.slice(0, 2000);
+  for (const text of logged) expect((await store.dispatch(CreateQuestion, { dealId, text })).ok).toBe(true);
+  // The disk refuses the question's write, held until the newer typing is in, so the store's own checks run.
+  const { repo } = store.services;
+  const write = repo.transaction.bind(repo);
+  const holds: (() => void)[] = [];
+  repo.transaction = async (transaction) => {
+    if (!transaction.writes.some((change) => change.kind === 'question')) return write(transaction);
+    await new Promise<void>((resolve) => holds.push(resolve));
+    return fail({ kind: 'storageFull', message: 'The disk is full' });
+  };
+  const first = `Log a question: ${instructions[2001]}`;
+  const second = `Add a question: ${instructions[2002]}\n\n${instructions[2003]}`;
+  const third = instructions[2004];
+  setComposerText(key, first);
+  const sending = sendTyped(store, scope, { navigate });
+  await vi.waitFor(() => expect(holds).toHaveLength(1));
+  // A second command sent while the first is out is turned away at once and goes back in the box.
+  setComposerText(key, second);
+  await sendTyped(store, scope, { navigate });
+  expect(composerText(key)).toBe(second);
+  setComposerText(key, `${second}\n\n${third}`);
+  holds[0]();
+  await sending;
+  expect(composerText(key)).toBe(`${first}\n\n${second}\n\n${third}`);
+  saveKeptDrafts();
+  expect(keptComposer().get(key)).toBe(`${first}\n\n${second}\n\n${third}`);
+  expect(Object.values(store.get().questions)).toHaveLength(logged.length);
+
+  // Sent again, the refused command is logged alone, and what follows it stays in the box as it was.
+  repo.transaction = write;
+  await sendTyped(store, scope, { navigate });
+  const texts = Object.values(store.get().questions).map((question) => question.text);
+  expect(texts).toHaveLength(logged.length + 1);
+  expect(texts.at(-1)).toBe(instructions[2001]);
+  expect(composerText(key)).toBe(`${second}\n\n${third}`);
+}, 30_000);
+
+it('logs a refused command alone and asks the AI what was typed during its save', async () => {
+  const { store, scope, navigate, asked } = await start();
+  const key = convKey(scope);
+  const command = `Log a question: ${instructions[50]}`;
+  const followUp = `${instructions[51]}\n\n${instructions[52]}`;
+  await refusedWhileTyping(store, scope, command, followUp);
+  // A restart keeps which part of the box is the refused command.
+  saveKeptDrafts();
+  const kept = local.read(KEPT_TEXT_KEY) as { 'refused-commands'?: [string, unknown][] } | null;
+  expect(new Map(kept?.['refused-commands']).get(key)).toEqual([command]);
+  await sendTyped(store, scope, { navigate });
+  expect(Object.values(store.get().questions).map((question) => question.text)).toEqual([instructions[50]]);
+  expect(composerText(key)).toBe(followUp);
+  await sendTyped(store, scope, { navigate });
+  expect(asked).toHaveBeenCalledOnce();
+  expect(store.get().threads[key][0].text).toBe(followUp);
+  expect(Object.values(store.get().questions)).toHaveLength(1);
+});
+
+it('logs a refused command alone after the text typed during its save was edited', async () => {
+  const { store, scope, navigate } = await start();
+  const key = convKey(scope);
+  const command = `Log a question: ${instructions[70]}`;
+  await refusedWhileTyping(store, scope, command, 'Waht is the revenue?');
+  setComposerText(key, `${command}\n\nWhat is the revenue?`);
+  await sendTyped(store, scope, { navigate });
+  expect(Object.values(store.get().questions).map((question) => question.text)).toEqual([instructions[70]]);
+  expect(composerText(key)).toBe('What is the revenue?');
+});
+
+it('leaves a refused command to Retry, not the box, when the store keeps it as interrupted work', async () => {
+  const { store, scope, dealId, navigate } = await start();
+  const key = convKey(scope);
+  const followUp = instructions[61];
+  const { repo } = store.services;
+  const write = repo.transaction.bind(repo);
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => { release = resolve; });
+  // The question's write is refused, and so is the journal note that it failed, so the store keeps it to retry.
+  repo.transaction = async (transaction) => {
+    const failedNote = transaction.writes.some((change) => change.kind === 'op'
+      && (change.data as { state?: string }).state === 'failed');
+    if (failedNote) return fail({ kind: 'storageFull', message: 'The disk is full' });
+    if (!transaction.writes.some((change) => change.kind === 'question')) return write(transaction);
+    await hold;
+    return fail({ kind: 'storageFull', message: 'The disk is full' });
+  };
+  setComposerText(key, `Log a question: ${instructions[60]}`);
+  const sending = sendTyped(store, scope, { navigate });
+  await vi.waitFor(() => expect(composerText(key)).toBe(''));
+  setComposerText(key, followUp);
+  release();
+  await sending;
+  repo.transaction = write;
+  expect(composerText(key)).toBe(followUp);
+  const [offered] = store.interruptedOps().filter((operation) => operation.state === 'interrupted');
+  expect(offered).toMatchObject({ command: 'CreateQuestion', input: { dealId, text: instructions[60] } });
+  expect((await store.retryOp(offered.id))?.ok).toBe(true);
+  expect(Object.values(store.get().questions).map((question) => question.text)).toEqual([instructions[60]]);
+});
+
+it('does not repeat a refused command that was typed again during its save', async () => {
+  const { store, scope, navigate } = await start();
+  const key = convKey(scope);
+  const command = `Log a question: ${instructions[40]}`;
+  await refusedWhileTyping(store, scope, command, `${command}  `);
+  expect(composerText(key)).toBe(command);
 });
 
 it('keeps text in finding and question scopes deleted since they were opened', async () => {
@@ -321,3 +454,38 @@ it('counts open questions before applying the picker search', () => {
   expect(all.openCount).toBe(open.openCount);
   expect(open.hasQuestions).toBe(true);
 });
+
+it('offers a typed question again after the app closes mid-save, and logs it once', async () => {
+  const app = recoveryApp();
+  const dealId = await recoveryDeal(app);
+  for (const text of instructions.slice(0, 2000)) {
+    expect((await app.store.dispatch(CreateQuestion, { dealId, text })).ok).toBe(true);
+  }
+  const scope: Scope = { kind: 'deal', dealId };
+  const key = convKey(scope);
+  const typed = `Log a question: ${instructions[2010]}`;
+  const hold = holdRecoveryWrite(app, (transaction) => operationWrite(transaction, 'CreateQuestion', 'succeeded'));
+  setComposerText(key, typed);
+  const sending = sendTyped(app.store, scope, { navigate: vi.fn() });
+  await hold.entered;
+  // The app closes here: the box held nothing kept, and the journal holds the question as pending.
+  saveKeptDrafts();
+  expect(keptComposer().has(key)).toBe(false);
+  const closed = copyRecoveryDisk(app.saved);
+  hold.release();
+  await sending;
+  app.store.closing();
+  await app.repo.close();
+
+  const next = recoveryApp(closed);
+  await next.store.boot();
+  await next.store.loadDeal(dealId, { gaps: false });
+  expect(Object.values(next.store.get().questions)).toHaveLength(2000);
+  const [offered] = next.store.interruptedOps();
+  expect(offered).toMatchObject({ command: 'CreateQuestion', input: { dealId, text: instructions[2010] } });
+  expect((await next.store.retryOp(offered.id))?.ok).toBe(true);
+  const texts = Object.values(next.store.get().questions).map((question) => question.text);
+  expect(texts.filter((text) => text === instructions[2010])).toHaveLength(1);
+  expect(texts).toHaveLength(2001);
+  await next.repo.close();
+}, 30_000);

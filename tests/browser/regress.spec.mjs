@@ -63,5 +63,27 @@ async function start(name = 'Datum') {
   say('a delete that could not be saved says so, with a Retry that deletes it once the folder is back', failed.still && failed.bar && failed.toasts.includes('Couldn’t save ·|Retry') && gone && page.errors.length === 0, JSON.stringify({ failed, gone, errors: page.errors }));
   await ctx.close();
 }
+{
+  const { ctx, page, id } = await start();
+  const findingId = await page.evaluate(() => Object.values(store.get().findings)[0].id);
+  const review = { by: 'Prior reviewer', at: '2026-11-01T08:00:00.000Z' };
+  await page.evaluate(([key, reviewed]) => __peer.change(key, { reviewed }, { ...reviewed, from: 'PC B' }),
+    [findingId, review]);
+  await page.goto(`${URL}#finding-${id}-${findingId}`);
+  const reviewButton = page.locator('#f-review');
+  const metadata = page.locator('.opening .fmeta > span').first();
+  await page.waitForFunction(() => document.querySelector('.opening .fmeta')?.textContent.includes('Prior reviewer'));
+  const before = (await metadata.textContent()).split(' · ').find((part) => part.startsWith('reviewed by'));
+  await reviewButton.click();
+  await page.waitForFunction(() => document.querySelector('#f-review')?.getAttribute('aria-pressed') === 'false');
+  await page.locator('#toast .tundo').click();
+  await page.waitForFunction(() => document.querySelector('#f-review')?.getAttribute('aria-pressed') === 'true');
+  const after = (await metadata.textContent()).split(' · ').find((part) => part.startsWith('reviewed by'));
+  const restored = await page.evaluate((key) => store.get().findings[key].reviewed, findingId);
+  say('Undo of Review cleared shows the original reviewer and date (#337)',
+    !!before && before === after && restored.by === review.by && restored.at === review.at,
+    JSON.stringify({ before, after, restored }));
+  await ctx.close();
+}
 await browser.close();
 const failed = results.filter(([, ok]) => !ok).length; console.log(`\n${results.length - failed}/${results.length} passed`); process.exit(failed ? 1 : 0);

@@ -15,6 +15,9 @@ import type { Research } from '../ports';
 import { bareDealName, cleanName } from './commands/deals';
 import { chipsSendable, dealCopied, filesSendable } from './attachments';
 import { isText, keptDrafts } from './keptText';
+import {
+  boxWithRefused, initializeRefusedCommands, interruptedNow, keptForRetry, takeFromBox,
+} from './refusedCommands';
 
 /**
  * A conversation about a deal, or across deals, has its own id (`conv`): each question asked from a deal page's ask
@@ -185,6 +188,7 @@ const composerDrafts = () => drafts ??= {
 /** Load both maps before recovery can move saved drafts and their conversation slots to a copy. */
 export function initializeComposerDrafts() {
   composerDrafts();
+  initializeRefusedCommands();
 }
 
 /** The ask box's next conversation is kept with its draft. Within a conversation, keep using that scope. */
@@ -216,18 +220,20 @@ type SendView = {
 /**
  * The box and its saved draft are already clear, so a restart after the save cannot bring the command back. A refusal
  * (storage full, a copied install, ...) has been told by the store, except input rejected before planning, said here.
- * The typed command then goes back in the box, unless something new has been typed since, so it can be sent again.
+ * The typed command then goes back at the head of its box, ahead of anything typed since, so it can be sent again,
+ * unless the store kept it as interrupted work to retry (#955).
  */
 async function logTypedQuestion(store: Store, dealId: string, question: string, typed: string, key: string,
   view: SendView) {
   // The text going back in the box is the way to try again: a Retry as well could log it twice.
+  const before = interruptedNow(store);
   const result = await store.dispatch(CreateQuestion, { dealId, text: question }, {
     idempotencyKey: 'ask-addq-' + dealId, noRetry: true,
   });
   if (result.ok) return;
   if (result.error.kind === 'invalid') store.toast(result.error.message);
-  if (composerText(key)) return;
-  setComposerText(key, typed);
+  if (keptForRetry(store, before, dealId, question)) return;
+  setComposerText(key, boxWithRefused(key, typed, composerText(key)));
   view.textChanged?.();
   view.refused?.();
 }
@@ -241,10 +247,11 @@ export async function sendTyped(store: Store, scope: Scope, view: SendView) {
   const filesDeal = filesDealOf(state, scope);
   // A recovered copy now has the draft and files (#117). Do not clear or send them from the old scope.
   if (store.readOnly() || scopeValid(state, scope) !== true || (filesDeal && dealCopied(store, filesDeal))) return;
-  const text = composerText(key).trim();
+  // A command put back after a refusal is sent alone, and what was typed after it stays in the box (#955).
+  const { send: text, rest } = takeFromBox(key, composerText(key).trim());
   if (!text) return;
   const take = () => {
-    setComposerText(key, '');
+    setComposerText(key, rest);
     view.textChanged?.();
     view.sending?.();
   };

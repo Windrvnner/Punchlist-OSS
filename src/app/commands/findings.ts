@@ -139,7 +139,7 @@ export const ReviewFinding = define({
       dealId: f.dealId,
       upserts: [{ kind: 'finding', record: r.value.record, expectedRev: f.rev }],
       audit: r.value.audit.map((a) => ({ ...a, kind: a.kind as any, recordId: f.id, dealId: f.dealId })),
-      inverse: { command: 'ReviewFinding', input: { ...input, reviewed: !input.reviewed } },
+      inverse: { command: 'RestoreFindingSnapshot', input: { dealId: f.dealId, findingId: f.id, snapshot: f } },
       message: input.reviewed ? 'Finding marked reviewed' : 'Review cleared',
     });
   },
@@ -223,6 +223,18 @@ const responsesOn = (state: { questions: Record<string, { id: string; dealId: st
   Object.values(state.questions).filter((q) => q.dealId === f.dealId && q.linkedFinding === f.id && q.response.trim()).map((q) => `${q.id}:${wordingHash(q.response)}`).sort().join(' ');
 const startOf = (state: Parameters<typeof responsesOn>[0], f: Finding): z.infer<typeof From> => ({ body: f.body, reviewed: f.reviewed ?? null, sources: f.sources, mark: markOf(f), responses: responsesOn(state, f) });
 
+/** A response withdrawn during an update may have cleared its own mark while the reply still used it (#328). */
+function reassessedMark(finding: Finding, news: boolean, before: string | undefined, after: string) {
+  if (finding.updated && news) return {};
+  if (before && before !== after) {
+    const current = new Set(after.split(' '));
+    if (before.split(' ').some((response) => !current.has(response))) {
+      return { updated: true, updatedWhy: 'A linked response changed during the update', updatedOn: undefined };
+    }
+  }
+  return { updated: false, updatedWhy: '', updatedOn: undefined };
+}
+
 /** Reassess: the model re-reads the finding against the documents and responses now in the deal. Two phases like drafts. */
 export const Reassess = define({
   name: 'Reassess',
@@ -273,13 +285,13 @@ export const ApplyReassessment = define({
     const was = input.from?.sources.map((x) => JSON.stringify(x)); const cited = new Set(input.result.sources.map(docKey));
     const added = was ? f.sources.filter((x) => !was.includes(JSON.stringify(x))) : []; const unread = added.filter((x) => !cited.has(docKey(x)));
     const sources = input.result.sources.length ? [...input.result.sources, ...unread] : f.sources;
-    // The mark is cleared only when nothing arrived while the update ran that it has not read: a mark set or changed meanwhile,
-    // a source added that the reply does not cite, or a response on one of the finding's questions given, reworded or removed
-    // (this only keeps a mark: one cleared meanwhile, as an emptied response clears its own, stays cleared; #328).
+    // Keep the mark for evidence the reply did not read: a new mark, an uncited attachment or changed linked responses.
     // A document the reply cites it has read, so the mark that attaching it set (its last change) does not count.
     const fromCited = added.some((x) => cited.has(docKey(x)) && markOf(f) === JSON.stringify([true, `${x.doc} attached`, null]));
-    const news = !!input.from && ((markOf(f) !== input.from.mark && !fromCited) || unread.length > 0 || responsesOn(state, f) !== input.from.responses);
-    const mark = f.updated && news ? {} : { updated: false, updatedWhy: '', updatedOn: undefined };
+    const responses = input.from ? responsesOn(state, f) : '';
+    const news = !!input.from
+      && ((markOf(f) !== input.from.mark && !fromCited) || unread.length > 0 || responses !== input.from.responses);
+    const mark = reassessedMark(f, news, input.from?.responses, responses);
     const next: Finding = { ...f, body: fitParas(input.result.body), sources, ownWords: reworded ? undefined : f.ownWords, ...mark, updatedAt: ctx.at, ...(cleared ? { reviewed: null } : {}) };
     return ok({
       dealId: f.dealId,
