@@ -166,9 +166,12 @@ export function listTarget(state: State, firm: FirmList, layer: Layer, name: str
   return { layer, name, named, replaces, split, splitSays, generalTexts, listNames, hasGeneral: !!general };
 }
 
-/** What the review was asked about: a review asked for other choices is not shown again. */
-const askedAbout = (texts: string[], askReword: boolean, askSame: boolean, generalTexts: string[]) =>
-  JSON.stringify([texts, askReword, askSame, generalTexts]);
+/**
+ * What the review was asked about: a review asked for other choices, or made for the same wording in other sections
+ * (another worksheet or header row), is not shown again (#821).
+ */
+const askedAbout = (items: ListItem[], askReword: boolean, askSame: boolean, generalTexts: string[]) =>
+  JSON.stringify([items, askReword, askSame, generalTexts]);
 
 /** What a new review is made from: the items, the person's choices, and the model's replies (null when not asked). */
 interface ReviewInput {
@@ -285,7 +288,7 @@ function checklistReviewPlan(
   review: Review | null, askedFor: string,
 ) {
   const texts = items.map((item) => item.text);
-  const signature = askedAbout(texts, options.askReword, options.askSame, target.generalTexts);
+  const signature = askedAbout(items, options.askReword, options.askSame, target.generalTexts);
   const cached = review && askedFor === signature ? review : null;
   const needsCall = cached
     ? can.sameMeaning && hasMissedDuplicates(cached)
@@ -404,13 +407,13 @@ export function checklistReviewSession(store: Store, requests: ChecklistRequests
     });
   }
   function duplicates(review: Review, generalTexts: string[], show: ShowReview, open = false, texts?: string[]) {
-    if (!store.get().can.sameMeaning) return;
+    if (!store.get().can.sameMeaning || requests.tableReadPending()) return;
     return askModel(() => retryChecklistDuplicates(store, review, generalTexts, texts), (next) => {
       show({ kind: 'retry', ...next, open });
     });
   }
   function wording(review: Review, show: ShowReview) {
-    if (!store.get().can.reword) return;
+    if (!store.get().can.reword || requests.tableReadPending()) return;
     const requested = currentTexts;
     return flight.ask(() => retryChecklistWording(store, review), (next) => {
       // Wording uses the imported items. General's items are only inputs to duplicate matching.
@@ -421,6 +424,8 @@ export function checklistReviewSession(store: Store, requests: ChecklistRequests
   }
   function next(plan: ReviewPlan, show: ShowReview) {
     const { can, items, target, options, texts, cached, needsCall } = plan;
+    // the items are those of the worksheet being read until that read ends (#821)
+    if (requests.tableReadPending()) return;
     if (!texts.length || !target.named || signature !== plan.signature) return;
     if (cached) {
       if (!needsCall) return show({ kind: 'open' });

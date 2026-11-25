@@ -34,7 +34,7 @@ function nextFooter(view: ImportView, line: string, tip?: string) {
   const why = whyNoNext(view);
   const noColumn = source.byColumns && source.mapping.item === null;
   const waiting = listReview.waiting && !why && !noColumn;
-  const status = waiting && !work.error ? `Asking ${SERVICE}` : line;
+  const status = waiting && !work.busy && !work.error ? `Asking ${SERVICE}` : line;
   return (
     <div class="xfoot">{statusLine(view, status, tip)}<span class="grow" />
       {split && chooseButton(view)}
@@ -155,7 +155,8 @@ export function readStep(view: ImportView, lines: string[]) {
       <Head title={title} onClose={exit.close} />
       {fileRow(view, text && !text.name ? 'Text' : 'File', said)}
       {table && table.sheets.length > 1 && <div class="srow"><div class="k">Sheet</div><div class="imwhere">
-        <select class="field" id="cl-sheet" aria-label="Sheet" value={table.sheet} disabled={!!work.busy}
+        <select class="field" id="cl-sheet" aria-label="Sheet"
+          value={source.wantedSheet ?? table.sheet} disabled={!!work.busy}
           onChange={(e) => void source.reread({ sheet: (e.currentTarget as HTMLSelectElement).value })}>
           {sheetOptions(table.sheets)}
         </select>
