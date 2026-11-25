@@ -23,7 +23,9 @@ Start with these documents:
 
 ## Commands
 
-These commands need Node.js 22, Google Chrome at `/usr/bin/google-chrome`, and LibreOffice at `/usr/bin/soffice`. Tests that need LibreOffice are skipped when it is missing, except under `npm run check:all`, which checks LibreOffice first and fails without it.
+These commands need Node.js 22, Google Chrome at `/usr/bin/google-chrome`, and LibreOffice at `/usr/bin/soffice`.
+Tests that need LibreOffice are skipped when it is missing, except under `npm run check:all`, which checks LibreOffice
+first and fails without it. `check:all` also needs LibreOffice Impress and Calibri or Carlito (docs/development.md).
 
 ```sh
 npm ci                                       # install dependencies and the pre-commit hook
