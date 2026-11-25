@@ -55,7 +55,7 @@ export const Source = z.object({
   loc: z.string(),
   docId: z.string().min(1),
   version: z.string().optional(),
-  quote: z.string().max(600).optional(),
+  quote: z.string().max(32_767).optional(),
   dealId: z.string().optional(),
   reading: z.literal(true).optional(),
   precedent: z.literal(true).optional(),

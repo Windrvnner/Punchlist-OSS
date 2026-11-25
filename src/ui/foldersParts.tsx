@@ -66,7 +66,7 @@ function DealFolders({ deal, locked, waiting, restore, ask }: DealFoldersProps &
         ))}</div>}
         {removed.length > 0 && <div class="fdsec" id="folders-removed" role="heading" aria-level={3}>Removed</div>}
         {removed.length > 0 && <div class="fdgroup">{removed.map(({ gone, restoreOff }) => (
-          <FolderRow key={gone.path} path={gone.path} gone name={<span class="fdname">{gone.label}</span>}
+          <FolderRow key={gone.path} path={gone.path} gone name={<span class="fdname">{gone.label || gone.path}</span>}
             action={<Restore locked={restoreOff} path={gone.path} run={() => restore(gone)} />} />
         ))}</div>}
       </div>
