@@ -160,7 +160,12 @@ describe('export and import through the ports', () => {
 });
 
 describe('Merge imports the file exactly as it reads (#256)', () => {
-  it('lists a "?" for a character as an ordinary overwrite, applies it, and can undo it', async () => {
+  const wrongEncoding = (text: string) => new TextDecoder('windows-1252').decode(new TextEncoder().encode(text));
+  it.each([
+    ['a "?" for a character', (text: string) => text.replace(/[’—]/g, '?')],
+    ['a replacement character', (text: string) => text.replace(/[’—]/g, '\uFFFD')],
+    ['wrongly decoded text', wrongEncoding],
+  ])('lists %s as an ordinary overwrite, applies it, and can undo it', async (_name, damage) => {
     const { store } = make();
     await store.boot();
     await store.dispatch(CreateDeal, { name: 'Deal', folders: [] });
@@ -171,7 +176,7 @@ describe('Merge imports the file exactly as it reads (#256)', () => {
     const saved = ['1', 'What’s the lock-up ratio — tested when?', 'It’s 1.25x — tested semi-annually'];
     expect((await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: rowsOf([saved]) })).ok).toBe(true);
     const [before] = dealQuestions(store.get(), dealId);
-    const file = rowsOf([['1', 'What?s the lock-up ratio ? tested when?', 'It?s 1.25x ? tested semi-annually']]);
+    const file = rowsOf([['1', damage(saved[1]), damage(saved[2])]]);
     const preview = previewImport(store, dealId, 'merge', file);
     if (!preview.ok) throw new Error(preview.error.message);
     expect(preview.value.changes.map((change) => change.field)).toEqual(['Question', 'Response']);
