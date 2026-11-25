@@ -78,6 +78,8 @@ async function keepTypedMergeResolvedElsewhere(page, dealId, tag) {
   }, [dealId, questionId, LOG]);
   await page.waitForSelector('#rsv-done');
   const tip = await page.getAttribute('#rsv-done', 'title');
+  // nothing is left to merge, so Draft Again goes too
+  const again = await page.$('#rsv-again');
   await page.keyboard.press('Escape');
   await page.waitForSelector('.rsvdlg', { state: 'detached' });
   const showsTyped = () => page.waitForFunction(
@@ -90,7 +92,7 @@ async function keepTypedMergeResolvedElsewhere(page, dealId, tag) {
   await showsTyped();
   const shown = await box();
   say(tag + 'a-typed-merge-resolved-elsewhere-waits-in-the-response-box',
-    shown.text === TYPED && /^Changed elsewhere/.test(shown.note) && !!tip, JSON.stringify({ shown, tip }));
+    shown.text === TYPED && /^Changed elsewhere/.test(shown.note) && !!tip && !again, JSON.stringify({ shown, tip }));
 
   await page.reload(); await page.waitForSelector('.dtabs', { state: 'attached' });
   await page.evaluate((id) => store.ui({ selectedQuestion: id }), questionId);

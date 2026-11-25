@@ -261,7 +261,8 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
         </> : <p class="emptyline" id="rsv-done" title={typedResponse(q) ? HANDED_TIP : undefined}>Resolved</p>}
       </div>
       <ResolveFoot at={at} total={queue.length} left={inTwoVersions(s, dealId).length}
-        onStep={(by) => go(queue[at + by])} again={pick === 'merged' && s.can.merge ? () => mergeIt(true) : null}
+        onStep={(by) => go(queue[at + by])}
+        again={pick === 'merged' && s.can.merge && Object.keys(kept).length ? () => mergeIt(true) : null}
         againOff={merged.busy || busy} canKeep={canKeep} picked={!!pick} onKeep={() => void keep()} />
     </Modal>
   );
