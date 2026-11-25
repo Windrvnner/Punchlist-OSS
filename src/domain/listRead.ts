@@ -113,8 +113,8 @@ export function tieOut(lines: string[], reads: ReadonlyMap<number, LineRead>, br
   return { items, left, count };
 
   function leave(n: number) {
-    // a line brought in keeps its words; only a leading bullet or list number goes (not a figure that is part of the wording), as the model leaves those off an item
-    if (bringIn.has(n)) { add(lines[n - 1].trim().replace(/^([-•*]+|\d+(\.\d+)+[.)]?|\d+[.)]|[a-z]\))\s+/i, '') || lines[n - 1], n); last = null; return; }
+    // a line brought in comes in exactly as written, its bullet or list number included
+    if (bringIn.has(n)) { add(lines[n - 1], n); last = null; return; }
     left.push(n); count.left++;
   }
 }
