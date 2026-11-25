@@ -218,7 +218,7 @@ export interface AiService {
   sameMeaning?(input: { items: string[]; against: string[]; only?: number[] }): Promise<Result<{ pairs: { a: number; b: number; inAgainst: boolean; why: string }[]; missed?: { kind: 'unreachable' | 'failed'; at: number[] } }>>;
   /**
    * Optional. The points of an issues list, read from a file a person attached to the deal (`doc`): a PDF, a Word
-   * file or an email. Each point keeps its own number on the list (`n`, as the list writes it, or its place when the list
+   * file or pasted text. Each point keeps its own number on the list (`n`, as the list writes it, or its place when the list
    * numbers nothing) and its words as written (`text`), with a short title and one of `workstreams` for the finding it
    * becomes. `same` names what the point already raises: one of `findings` (by id) or an earlier point (by its place in
    * `points`). Only what the model is sure of is named. The whole list is compared in one call where it can be, as

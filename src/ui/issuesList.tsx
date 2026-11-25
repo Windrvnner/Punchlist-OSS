@@ -1,26 +1,26 @@
 /**
- * Import an issues list into a deal's Findings. The person chooses the list (a PDF, a Word file or an email); it is
+ * Import an issues list into a deal's Findings. The person chooses the list (a PDF, a Word file or pasted text); it is
  * attached to the deal as a chat attachment is, and the model reads its points and says which repeat a finding already
  * raised (open or closed) or an earlier point. Those are listed under "Already raised", each saying what it joins, unless
  * the person checks "Keep separate". Every other point is listed under "New findings", read only, with the title and
  * workstream the model gave it. Nothing is recorded until Import.
  */
-import { useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { useAppState, useStore } from './hooks';
 import { Icon } from './icons';
 import { Modal, LeaveFoot } from './dialogs';
 import { num, plural } from './counts';
 import { FileInput, PickFileRow } from './fileDrop';
 import { showTip, hideTip } from './tip';
-import { issuesListTitle, readIssuesList, reviewIssuesList, type ReadIssuesList } from '../app/issuesList';
+import { issuesListTitle, readIssuesList, readPastedIssuesList, reviewIssuesList, type ReadIssuesList } from '../app/issuesList';
 import { ImportIssuesList } from '../app/commands/issuesList';
 import { AI_LABEL } from '../control';
 import type { Finding, ListPoint } from '../domain/model';
 import { keptImport, keepImport, dropImport, importKey } from '../app/keptImports';
 import { useKeptImportsReady, useFreshOnCrash } from './keptImports';
 
-/** the files a list comes as: a PDF, a Word file or an email */
-const ACCEPT = '.pdf,.docx,.msg,.eml';
+/** the files a list comes as: a PDF, a Word file or pasted text */
+const ACCEPT = '.pdf,.docx';
 
 /** "#3 on issues list", or "#3, #41 on issues list" for a finding more than one point is on */
 export const onListText = (marks: ListPoint[]) => `${marks.map((m) => `#${m.n}`).join(', ')} on issues list`;
@@ -82,22 +82,35 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
   const close = () => { if (busy === 'importing') return; setSwapping(false); token.current++; store.ui({ dialog: null }); };
   const startOver = () => { token.current++; dropImport(KEY); setRestart(false); setSwapping(false); setBusy(''); setError(''); setList(null); setKept(new Set()); };
 
-  const load = async (file: File) => {
+  type Reader = (current: () => boolean) => ReturnType<typeof readIssuesList>;
+  const load = async (name: string, reader: Reader) => {
     if (busy === 'importing') return;
     const mine = ++token.current;
     setBusy('reading');
     setError('');
-    const read = await readIssuesList(store, dealId, file, () => token.current === mine);
+    const read = await reader(() => token.current === mine);
     if (!read || token.current !== mine) return;
     setBusy('');
     if (!read.ok) {
-      setError(`Couldn’t read ${file.name}: ${read.error.message}`);
+      setError(`Couldn’t read ${name}: ${read.error.message}`);
       return;
     }
     setList(read.value);
     setKept(new Set());
   };
-  const read = (file: File) => void load(file);
+  const read = (file: File) => void load(file.name, (current) => readIssuesList(store, dealId, file, current));
+  // text pasted (Ctrl+V) while no list is read is the list, as a pasted checklist is
+  useEffect(() => {
+    if (list) return;
+    const onPaste = (event: ClipboardEvent) => {
+      const text = event.clipboardData?.getData('text/plain') ?? '';
+      if (!text.trim()) return;
+      event.preventDefault();
+      void load('the pasted list', (current) => readPastedIssuesList(store, dealId, text, current));
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  });
   const pick = <FileInput id="il-file" accept={ACCEPT} inputRef={fileRef} onFile={read} />;
   const browse = () => fileRef.current?.click();
 
@@ -105,7 +118,7 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
     <Modal onClose={close} label="Import an issues list" blur className="sdlg imdlg ilf">
       <Head onClose={close} />
       <PickFileRow dropId="il-drop" errorId="il-error" error={error} onFile={read}>
-        Drop the list here, or{' '}
+        Drop or paste the list here, or{' '}
         <button type="button" class="linkb" id="il-browse" onClick={browse}>choose a file…</button>
         {pick}
       </PickFileRow>

@@ -143,7 +143,7 @@ export async function readImportBytes(
 
 /** Read a chosen file into a table of strings with a suggested column mapping. Nothing is changed. */
 export async function readImportFile(store: Store, file: { name: string; size: number; arrayBuffer(): Promise<ArrayBuffer> }): Promise<Result<ImportTable>> {
-  if (!/\.(xlsx|xlsm|xls|xlsb|ods|csv)$/i.test(file.name)) return fail({ kind: 'invalid', message: 'Choose a spreadsheet: .xlsx, .xls, .ods or .csv' });
+  if (!/\.(xlsx|xlsm|xls|xlsb|csv)$/i.test(file.name)) return fail({ kind: 'invalid', message: 'Choose a spreadsheet: .xlsx, .xlsm, .xls, .xlsb or .csv' });
   if (file.size > MAX_IMPORT_BYTES) return fail({ kind: 'invalid', message: 'That file is larger than 20 MB' });
   let bytes: Uint8Array;
   try { bytes = new Uint8Array(await file.arrayBuffer()); } catch { return fail({ kind: 'failed', message: 'The file could not be opened' }); }

@@ -22,7 +22,7 @@ import type { Store } from '../app/store';
 /** What the dialog is doing while the person waits */
 export type Busy = '' | 'reading' | 'importing' | 'asking';
 /** The files the Q&A import reads */
-const SPREADSHEETS = '.xlsx,.xlsm,.xls,.xlsb,.ods,.csv';
+const SPREADSHEETS = '.xlsx,.xlsm,.xls,.xlsb,.csv';
 
 /** The Q&A import picks up where it was left on this PC: it waits the moment it takes to read what was kept */
 export function ImportDialog({ dealId }: { dealId: string }) {

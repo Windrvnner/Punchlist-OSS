@@ -1,4 +1,4 @@
-// An edit kept aside beside an .xlsx, .xls or .ods Q&A log, read and written through LibreOffice as the app does: their cells come
+// An edit kept aside beside an .xlsx or .xls Q&A log, read and written through LibreOffice as the app does: their cells come
 // back into the workbook, a formula is never written over, and their version goes to the archive. 2,000 questions.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
@@ -168,7 +168,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     if (!r.ok) throw new Error(r.error.message);
     expect(r.value.kept!.steps).toEqual([]); expect(r.value.kept!.ask?.map((a) => [a.question, a.rows.map((x) => x.line)])).toEqual([['List material contracts.', [1500]]]);
   }, 240_000);
-  for (const ext of ['.ods', '.xls']) it(`comes back into a ${ext} log, written through LibreOffice`, async () => {
+  for (const ext of ['.xls']) it(`comes back into a ${ext} log, written through LibreOffice`, async () => {
     const rows: (string | number)[][] = [['No.', 'Question', 'Response', 'Notes'], ...Array.from({ length: N }, (_, k) => [k + 1, q(k + 1), '', ''])];
     const work = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-conv-'));
     fs.writeFileSync(path.join(work, 'log.xlsx'), await workbook(exportDocument(SHEET, rows)));
@@ -192,7 +192,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     expect(fs.readdirSync(folder).filter((n) => n.endsWith('.old'))).toEqual([]);
   }, 240_000);
   // a formula the team keeps (here the length of each question) gives another value where they reworded one
-  for (const ext of ['.ods', '.xls']) it(`never writes over a formula in a ${ext} log, nor takes a formula's new value for their change`, async () => {
+  for (const ext of ['.xls']) it(`never writes over a formula in a ${ext} log, nor takes a formula's new value for their change`, async () => {
     const rows: (string | number)[][] = [['No.', 'Question', 'Response', 'Notes'], ...Array.from({ length: N }, (_, k) => [k + 1, q(k + 1), '', ''])];
     let x = await workbook(exportDocument(SHEET, rows)); for (const r of [7, 8, 9]) x = withFormula(x, r);
     const work = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-conv-')); fs.writeFileSync(path.join(work, 'log.xlsx'), x);
