@@ -120,7 +120,8 @@ describe('a draft reuses an answer already given to another party', () => {
     };
 
     it('stays, whatever the date format, and the prompt carries no question number', async () => {
-      for (const quarter of ['Q3 2027', 'Q3-2027', 'Q3/2027', 'Q3 (2027)', 'Q3 in fiscal year 2027', 'FY 2027 (Q3)', 'Q3, 2027', 'Q3']) {
+      const quarters = ['Q3 2027', 'Q3-2027', 'Q3/2027', 'Q3 (2027)', 'Q3 in fiscal year 2027', 'FY 2027 (Q3)', 'Q3, 2027', 'Q3'];
+      for (const quarter of quarters) {
         const { reply, prompt } = await draftWith(`Commercial operation is expected in ${quarter}. [1]`);
         expect(reply).toMatchObject({ status: 'found', text: `Commercial operation is expected in ${quarter}. [1]` });
         expect(reply.sources).toHaveLength(2);   // a source listed without a marker stays
@@ -131,7 +132,8 @@ describe('a draft reuses an answer already given to another party', () => {
     it('stays beside a real credit, which goes with its source while the next citation is renumbered', async () => {
       const text = 'As answered in R1, 2027 capex is capped at $20 million. [1] Commercial operation is expected in Q3 2027. [2]';
       const { reply } = await draftWith(text, ['R1']);
-      expect(reply.text).toBe('As answered to Lender B (Q3): The lock-up ratio is 1.20x from financial close; the credit agreement prevails over the term sheet.\n\nCommercial operation is expected in Q3 2027. [1]');
+      const quoted = 'As answered to Lender B (Q3): The lock-up ratio is 1.20x from financial close; the credit agreement prevails over the term sheet.';
+      expect(reply.text).toBe(`${quoted}\n\nCommercial operation is expected in Q3 2027. [1]`);
       expect(reply.sources).toEqual([expect.objectContaining({ loc: 'p. 16' })]);
     });
   });

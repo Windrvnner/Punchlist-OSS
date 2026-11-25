@@ -1455,11 +1455,12 @@ export function nodeAi(o: AiOptions) {
       // any source only it cited. The model never sees question numbers, so a quarter (Q3 2027) is never one (#286).
       // a draft rests only on this deal's own documents: another project's, or a blackline against one, never answers
       // by itself
-      const own0 = out.sources.some((x) => mainIn(r.value.sent, x)) ? withoutDraftCredits(out, earlier.length) : { text: '', sources: [] as typeof out.sources };
-      const kept = own0.text;
+      const none = { text: '', sources: [] as typeof out.sources };
+      const ownReply = out.sources.some((x) => mainIn(r.value.sent, x)) ? withoutDraftCredits(out, earlier.length) : none;
+      const kept = ownReply.text;
       const own = kept.charAt(0).toUpperCase() + kept.slice(1);
       if (!quoted.length && !own) return ok({ status: 'none', text: '', sources: [] });             // a draft rests on a document it cites or on an earlier response it names
-      return ok({ status: 'found', text: [...quoted, own].filter(Boolean).join('\n\n'), sources: own ? own0.sources : [] });
+      return ok({ status: 'found', text: [...quoted, own].filter(Boolean).join('\n\n'), sources: own ? ownReply.sources : [] });
     },
     async reassess(i) {
       const f = await record<{ title: string; body: string[]; sources: Source[] }>('finding', i.findingId); if (!f) return fail({ kind: 'notFound', message: 'No such finding' });
