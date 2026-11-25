@@ -36,7 +36,12 @@ export function suggestMapping(columns: string[]): Mapping {
   };
 }
 
-const MON: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+/** a month written as a word: its full name, or its first three letters (and "sept"), as Excel takes it; any other word is no month */
+const monthOf = (word: string): number | undefined => {
+  const w = word.toLowerCase(); const i = MONTHS.findIndex((m) => m === w || m.slice(0, 3) === w || (m === 'september' && w === 'sept'));
+  return i < 0 ? undefined : i + 1;
+};
 const ymd = (y: number, m: number, d: number) => { const s = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`; return isRealDate(s) ? s : null; };
 
 /** a two-digit year as Excel reads one typed in a cell: 00–29 are 2000–2029, 30–99 are 1930–1999 */
@@ -68,8 +73,8 @@ export function dateReadings(v: unknown): string[] {
   if ((m = /^(\d{4})([\/.])(\d{1,2})\2(\d{1,2})$/.exec(s))) return one(ymd(+m[1], +m[3], +m[4]));   // year first: 2026/11/02
   if ((m = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4}|\d{2})$/.exec(s))) { const a = +m[1], b = +m[2], y = fullYear(m[3]); if (a > 12 && b <= 12) return one(ymd(y, b, a)); if (a <= 12 && b <= 12 && a !== b) return [ymd(y, a, b)!, ymd(y, b, a)!]; return one(ymd(y, a, b)); }
   const day = String.raw`(\d{1,2})(?:st|nd|rd|th)?`; const sep = String.raw`[\s,\-]+`;
-  if ((m = new RegExp(`^([A-Za-z]{3,9})\\.?${sep}${day}${sep}(\\d{4}|\\d{2})$`, 'i').exec(s))) { const mo = MON[m[1].slice(0, 3).toLowerCase()]; return one(mo ? ymd(fullYear(m[3]), mo, +m[2]) : null); }
-  if ((m = new RegExp(`^${day}${sep}([A-Za-z]{3,9})\\.?${sep}(\\d{4}|\\d{2})$`, 'i').exec(s))) { const mo = MON[m[2].slice(0, 3).toLowerCase()]; return one(mo ? ymd(fullYear(m[3]), mo, +m[1]) : null); }
+  if ((m = new RegExp(`^([A-Za-z]{3,9})\\.?${sep}${day}${sep}(\\d{4}|\\d{2})$`, 'i').exec(s))) { const mo = monthOf(m[1]); return one(mo ? ymd(fullYear(m[3]), mo, +m[2]) : null); }
+  if ((m = new RegExp(`^${day}${sep}([A-Za-z]{3,9})\\.?${sep}(\\d{4}|\\d{2})$`, 'i').exec(s))) { const mo = monthOf(m[2]); return one(mo ? ymd(fullYear(m[3]), mo, +m[1]) : null); }
   return [];
 }
 
@@ -94,8 +99,7 @@ const STATUS: Record<string, QuestionStatus> = { open: 'open', outstanding: 'ope
  */
 export function prepareImport(table: string[][], mapping: Mapping, lines?: number[], o: { today?: string } = {}): Prepared {
   const today = o.today ?? localYmd(new Date().toISOString());
-  // control characters (NUL, BEL, ESC and the like) are never content; tabs and line breaks are
-  const get = (r: string[], k: ImportField) => (mapping[k] == null ? '' : String(r[mapping[k]!] ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ''));
+  const get = (r: string[], k: ImportField) => (mapping[k] == null ? '' : String(r[mapping[k]!] ?? ''));
   const out: Prepared = { rows: [], skipped: 0, badDates: 0, unknownValues: 0, unread: [] };
   const nameOf = (k: ImportField) => IMPORT_FIELDS.find(([f]) => f === k)?.[1] ?? k;
   type DateCell = { raw: string; readings: string[]; done: (d: string) => void; bad: () => void };

@@ -150,3 +150,10 @@ describe('prepareImport', () => {
     expect(importCounts(rows, existing, 'append')).toEqual({ add: 3, match: 0 });
   });
 });
+
+describe('a month written as a word', () => {
+  it('is read only as its full name or its three-letter abbreviation, as Excel takes it', () => {
+    for (const text of ['Jun 3 2026', 'June 3, 2026', '3 Sept 2026', '3-Sep-2026']) expect(parseDate(text), text).not.toBeNull();
+    for (const text of ['Junk 3 2026', 'Marching 3 2026', '3 Decimal 2026', 'Mayhem 3 2026']) expect(parseDate(text), text).toBeNull();
+  });
+});
