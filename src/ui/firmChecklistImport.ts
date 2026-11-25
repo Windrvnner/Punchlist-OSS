@@ -12,7 +12,7 @@ import {
 } from '../app/checklistImport';
 import {
   checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistReading, checklistRequests,
-  checklistSourceLines, clearChecklistHeading, loadChecklistSource, readChecklistColumns, tieChecklistLines,
+  checklistSourceLines, clearChecklistHeading, loadChecklistSource, rereadChecklistTable, tieChecklistLines,
 } from '../app/listRead';
 import type { LineRead } from '../domain/listRead';
 import type { ChecklistMapping } from '../domain/checklistImport';
@@ -64,6 +64,10 @@ export function useListSource(store: Store, work: Work, keeper: Keeper) {
     () => checklistItemsAsRead(byColumns, table, mapping, reading.tied),
     [byColumns, table, mapping, reading.tied],
   );
+  const reread: typeof file.reread = (opts, accept) => file.reread(opts, (read) => {
+    if (!byColumns) reading.forget();
+    accept?.(read);
+  });
   /** back to the first step, the paste box as it was left */
   const forget = () => {
     file.forget();
@@ -76,7 +80,7 @@ export function useListSource(store: Store, work: Work, keeper: Keeper) {
     reading.reset();
   };
   const counts = checklistReadCounts(table, lines, pasteSource);
-  return { ...file, ...reading, lines, paste, setPaste, prepared, counts, forget, reset };
+  return { ...file, ...reading, lines, paste, setPaste, prepared, counts, reread, forget, reset };
 }
 
 const NO_MAPPING: ChecklistMapping = { item: null, section: null, subsection: null };
@@ -113,7 +117,7 @@ function useListFile(store: Store, work: Work, { key, left }: Keeper, pasteSourc
   };
   const reread = async (opts: { sheet?: string; headerRow?: number }, accept?: (read: ImportTable) => void) => {
     if (!table || (work.busy && !(byColumns && work.busy === 'reading'))) return;
-    if (byColumns && opts.headerRow === undefined) setSheetRead(opts);
+    if (opts.headerRow === undefined) setSheetRead(opts);
     await updateTableRead(store, work, table, opts, byColumns, (read, suggested) => {
       take(read, suggested);
       accept?.(read);
@@ -162,17 +166,21 @@ async function updateTableRead(
   take: (read: ImportTable, suggested: ChecklistMapping) => void,
   onSettled?: () => void,
 ) {
-  const mine = byColumns ? work.begin('reading') : work.newToken();
-  const read = await readChecklistColumns(store, table, opts, byColumns);
-  if (!work.isLatest(mine)) return;
-  if (byColumns) work.setBusy('');
-  onSettled?.();
-  if (!read.ok) {
-    work.setError(`Could not read ${table.name}: ${read.error.message}`);
-    return;
-  }
-  work.setError('');
-  take(read.value.table, read.value.mapping);
+  await rereadChecklistTable(store, work, table, opts, byColumns, {
+    started: () => {
+      work.setBusy('reading');
+      work.setError('');
+    },
+    finished: (read) => {
+      work.setBusy('');
+      onSettled?.();
+      if (!read.ok) {
+        work.setError(`Could not read ${opts.sheet ?? table.name}: ${read.error.message}`);
+        return;
+      }
+      take(read.value.table, read.value.mapping);
+    },
+  });
 }
 
 /**
@@ -255,7 +263,7 @@ export function useListReview(
     if (change.kind !== 'retry' || change.open) setShown(true);
   };
   const next = () => {
-    if (plan && !work.busy) return session.next(plan, show);
+    if (plan && !work.busy && !work.tableReadPending()) return session.next(plan, show);
   };
   const retry = () => {
     if (review && !work.busy) return session.duplicates(review, target.generalTexts, show);
