@@ -10,13 +10,17 @@ describe('parseDate', () => {
     expect(parseDate('  2026-11-01 ')).toBe('2026-11-01');
     expect(parseDate('2026-11-14 12:00:00')).toBe('2026-11-14');   // a date-and-time cell is its date
     // text typed in a cell is not a date and is never parsed into one, however it is written
-    for (const typed of ['11/02/2026', '31/12/2026', 'Nov 1, 2026', '2-Nov-26', '2026/11/02', '11/14/2026 12:00:00', '44866']) expect([typed, parseDate(typed)]).toEqual([typed, null]);
+    const typedDates = [
+      '11/02/2026', '31/12/2026', 'Nov 1, 2026', '2-Nov-26', '2026/11/02', '11/14/2026 12:00:00', '44866',
+    ];
+    for (const typed of typedDates) expect([typed, parseDate(typed)]).toEqual([typed, null]);
     for (const bad of ['2026-99-99', '2026-02-31', 'soon']) expect(parseDate(bad)).toBeNull();
   });
   it('keeps a typed date in an import as written, and does not list it', () => {
     const m = suggestMapping(['Question', 'Received', 'Date']);
     const p = prepareImport([['Cell', '2026-10-13', '2026-11-02'], ['Typed', '13.10.2026', '02/11/2026']], m);
-    expect(p.rows.map((r) => [r.received, r.responded])).toEqual([['2026-10-13', '2026-11-02'], ['13.10.2026', '02/11/2026']]);
+    expect(p.rows.map((r) => [r.received, r.responded]))
+      .toEqual([['2026-10-13', '2026-11-02'], ['13.10.2026', '02/11/2026']]);
     expect(p.unread).toEqual([]);
   });
 });
@@ -59,7 +63,9 @@ describe('prepareImport', () => {
     // and says which, by row (the heading is row 1) and column
     expect(p.unread).toEqual(['Row 3 Priority: urgent', 'Row 3 Status: weird']);
     expect(p.rows[0]).toMatchObject({ n: 2, priority: 'High', status: 'closed', received: '2026-11-01' });
-    expect(p.rows[1]).toMatchObject({ n: null, priority: '', status: '', received: 'Feb 31, 2026', responded: 'April 31, 2026' });
+    expect(p.rows[1]).toMatchObject({
+      n: null, priority: '', status: '', received: 'Feb 31, 2026', responded: 'April 31, 2026',
+    });
   });
   it('reads back a number past Q999999, as the app numbers them', () => {
     const m = suggestMapping(['Number', 'Question']);

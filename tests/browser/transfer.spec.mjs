@@ -95,15 +95,21 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
   await page.click('#qa-cols'); await page.click('#qa-import'); await page.waitForSelector('.imdlg');
   await page.setInputFiles('#im-file', csv); await page.waitForSelector('.immap');
   const step2 = await page.evaluate(() => ({ file: document.querySelector('.imfile').textContent, line: document.getElementById('im-line').textContent, head: [...document.querySelectorAll('.imprev:not(.imchg) th')].map((x) => x.textContent), first: [...document.querySelectorAll('.imprev:not(.imchg) tbody tr:first-child td')].map((x) => x.textContent), second: [...document.querySelectorAll('.imprev:not(.imchg) tbody tr:nth-child(2) td')].map((x) => x.textContent), rows: document.querySelectorAll('.imprev:not(.imchg) tbody tr').length, changes: [...document.querySelectorAll('#im-changes tbody tr')].map((r) => [...r.children].map((c) => c.textContent)) }));
-  say('import-preview', /log\.csv · 3 rows/.test(step2.file) && step2.rows === 3 && step2.first[2] === '11/02/2026' && step2.second[2] === 'Feb 31, 2026' && /Import 3 questions · 2 new · 1 existing will change · 1 value not recognized/.test(step2.line), JSON.stringify(step2));
+  say('import-preview', /log\.csv · 3 rows/.test(step2.file) && step2.rows === 3
+    && step2.first[2] === '11/02/2026' && step2.second[2] === 'Feb 31, 2026'
+    && /Import 3 questions · 2 new · 1 existing will change · 1 value not recognized/.test(step2.line),
+    JSON.stringify(step2));
   // which they are, on hover and to a screen reader
   await page.hover('#im-line'); await page.waitForSelector('.tip'); const which = { tip: await page.textContent('.tip'), sr: await page.getAttribute('#im-line', 'aria-description') };
-  say('import-names-what-it-did-not-read', which.tip === 'Row 3 Priority: urgent' && which.sr === which.tip, JSON.stringify(which));
+  say('import-names-what-it-did-not-read', which.tip === 'Row 3 Priority: urgent' && which.sr === which.tip,
+    JSON.stringify(which));
   await page.mouse.move(5, 5);
   // before anything is written: which question a merge overwrites, field by field, now and after
   say('import-shows-what-it-overwrites', step2.changes.length >= 2 && step2.changes.every((c) => c[0] === '1') && step2.changes.some((c) => c[1] === 'Question' && /And the lock-up level\?/.test(c[2]) && c[3] === 'What is the DSCR covenant, and the lock-up?') && step2.changes.some((c) => c[1] === 'Response' && c[3] === 'Updated response'), JSON.stringify(step2.changes));
   await page.click('[data-immode="append"]');
-  say('import-append-counts', /Import 3 questions · 3 new · 1 value/.test(await page.textContent('#im-line')) && !(await page.$('#im-changes')), await page.textContent('#im-line'));
+  const appendLine = await page.textContent('#im-line');
+  say('import-append-counts', /Import 3 questions · 3 new · 1 value/.test(appendLine)
+    && !(await page.$('#im-changes')), appendLine);
   await page.click('[data-immode="merge"]');
   await page.selectOption('.immap select[data-immap="text"]', '');
   say('import-needs-question-column', /Choose the question column/.test(await page.textContent('#im-line')) && await page.isDisabled('#im-go'));
@@ -111,8 +117,11 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
   const beforeImport = await qs(page, dealId);
   await page.click('#im-go'); await page.waitForFunction(() => !document.querySelector('.imdlg'));
   const after = await qs(page, dealId); const t2 = await page.textContent('#toast');
-  say('import-applied', after.length === 4 && after[0].text === 'What is the DSCR covenant, and the lock-up?' && after[0].response === 'Updated response' && after[0].received === '11/02/2026' && after[0].status === 'open'
-    && after[2].n === 3 && after[2].response === 'Has a response' && after[2].status === 'open' && after[2].received === 'Feb 31, 2026' && after[3].n === 7 && after[3].status === 'closed' && /Imported · 2 new · 1 updated/.test(t2), JSON.stringify({ after, t2 }));
+  say('import-applied', after.length === 4 && after[0].text === 'What is the DSCR covenant, and the lock-up?'
+    && after[0].response === 'Updated response' && after[0].received === '11/02/2026' && after[0].status === 'open'
+    && after[2].n === 3 && after[2].response === 'Has a response' && after[2].status === 'open'
+    && after[2].received === 'Feb 31, 2026' && after[3].n === 7 && after[3].status === 'closed'
+    && /Imported · 2 new · 1 updated/.test(t2), JSON.stringify({ after, t2 }));
   await page.click('#toast .tundo'); await page.waitForFunction((n) => Object.values(store.get().questions).length === n, beforeImport.length);
   say('import-undo', JSON.stringify(await qs(page, dealId)) === JSON.stringify(beforeImport), JSON.stringify(await qs(page, dealId)));
   await page.reload(); await page.waitForSelector('.md .li');

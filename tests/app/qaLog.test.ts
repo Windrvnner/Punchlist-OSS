@@ -207,7 +207,8 @@ describe('a deal\'s Q&A log', () => {
     ]);
     expect(logOf(store, dealId)!.last!.sent[q2.id].response).toBe('Fabrikam');
   });
-  // a log that writes a status its own way ("Outstanding") is read in the app's terms; a real date cell reads as YYYY-MM-DD
+  // a log that writes a status its own way ("Outstanding") is read in the app's terms;
+  // a real date cell reads as YYYY-MM-DD
   it('takes in a status or date only the log changed, written its own way, as Changed and not as two versions', async () => {
     const cols4 = ['No.', 'Question', 'Response', 'Status', 'Date'];
     const at = (st: string, dt: string) => ({

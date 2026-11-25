@@ -329,7 +329,9 @@ async function writeQaLog(store: Store, dealId: string, place?: PlaceKept): Prom
   const keptText = { ...w.keptText }; const changed: Record<string, Record<string, string>> = {};
   const was = new Map(qs.filter((q) => w.taken[q.id]).map((q) => [q.id, q] as const));
   if (Object.keys(w.taken).length) {
-    const set = Object.fromEntries(Object.entries(w.taken).map(([id, cells]) => [id, readCells(store.get().questions[id], cells)]));
+    const set = Object.fromEntries(
+      Object.entries(w.taken).map(([id, cells]) => [id, readCells(store.get().questions[id], cells)]),
+    );
     const expect = comparedValues(qs, w.taken);
     const took = await store.dispatch(TakeFromQaLog, { dealId, set, expect }, { quiet: true });
     if (!took.ok) return settleThen(took);

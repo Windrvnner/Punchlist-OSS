@@ -196,7 +196,8 @@ export const Question = Record.extend({
   n: z.number().int().positive(),
   text: z.string(),
   askedBy: z.string().default(''),
-  received: z.string().default(''),   // a real date (YYYY-MM-DD), or the text an imported log had there, kept as written
+  // a real date (YYYY-MM-DD), or the text an imported log had there, kept as written
+  received: z.string().default(''),
   workstream: z.string().default(''),
   priority: Priority.default(''),
   status: QuestionStatus.default('open'),

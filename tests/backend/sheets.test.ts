@@ -115,7 +115,9 @@ describe.skipIf(!has)('spreadsheets through LibreOffice', () => {
     expect(file.value.ext).toBe('xlsx');
     const r = await codec.read(file.value.bytes, 'log.xlsx'); if (!r.ok) throw new Error(r.error.message);
     const p = prepareImport(r.value.rows, suggestMapping(r.value.columns));
-    expect(p.rows[0]).toMatchObject({ n: 37, text: q.text, received: '2026-11-01', responded: '2026-11-02', status: 'answered', priority: 'High' });
+    expect(p.rows[0]).toMatchObject({
+      n: 37, text: q.text, received: '2026-11-01', responded: '2026-11-02', status: 'answered', priority: 'High',
+    });
   }, 60_000);
 
   it('an export keeps leading spaces, trailing line breaks and a question of only spaces through LibreOffice', async () => {

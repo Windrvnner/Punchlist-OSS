@@ -114,7 +114,7 @@ export function EditField({
   );
 }
 
-/** a date input while being edited or holding a date; text typed in a log stays a text field at rest, shown as written */
+/** a date input while edited or holding a date; text typed in a log stays a text field at rest, as written */
 function dateEditable(focused: boolean, half: boolean, draft: string): boolean {
   const typedTextAtRest = !focused && !half && !!draft && !/^\d{4}-\d{2}-\d{2}$/.test(draft);
   return (focused || half || !!draft) && !typedTextAtRest;

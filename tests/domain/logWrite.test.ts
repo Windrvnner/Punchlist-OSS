@@ -143,7 +143,9 @@ describe('matching and keeping, in awkward logs', () => {
 describe('a log that writes its cells its own way', () => {
   const cols = ['No.', 'Question', 'Priority', 'Date received', 'Status', 'Response'];
   const m = suggestMapping(cols);
-  const log = { columns: cols, cols: cols.map((_, i) => i), rows: [['1', 'What is the minimum DSCR covenant?', '', '2026-11-12', 'Outstanding', '']], lines: [2], lastRow: 2 };   // a workbook's real date cell reads as YYYY-MM-DD
+  // a workbook's real date cell reads as YYYY-MM-DD
+  const rows = [['1', 'What is the minimum DSCR covenant?', '', '2026-11-12', 'Outstanding', '']];
+  const log = { columns: cols, cols: cols.map((_, i) => i), rows, lines: [2], lastRow: 2 };
   it('leaves a blank Priority blank: the High a question with none came in with is the app\'s default, not a value anyone gave', () => {
     const w = logWrite(log, m, [q(1, 'What is the minimum DSCR covenant?', { priority: 'High', received: '2026-11-12', status: 'open' })]);
     expect(w.steps).toEqual([]); expect(w).toMatchObject({ updated: 0, kept: [] }); expect(w.sent.q1.priority).toBeUndefined();
@@ -152,7 +154,8 @@ describe('a log that writes its cells its own way', () => {
   });
   it('keeps a date or status the log already says its own way as ours, so a later change in the app still reaches it', () => {
     const first = logWrite(log, m, [q(1, 'What is the minimum DSCR covenant?', { received: '2026-11-12', status: 'open' })]);
-    expect(first.steps).toEqual([]); expect(first.sent.q1).toMatchObject({ received: '2026-11-12', status: 'Outstanding' });
+    expect(first.steps).toEqual([]);
+    expect(first.sent.q1).toMatchObject({ received: '2026-11-12', status: 'Outstanding' });
     const next = logWrite(log, m, [q(1, 'What is the minimum DSCR covenant?', { received: '2026-11-13', status: 'answered', response: 'Yes' })], new Map(Object.entries(first.sent)));
     expect(next.steps).toEqual([{ kind: 'cell', row: 1, col: 3, value: '2026-11-13', date: true }, { kind: 'cell', row: 1, col: 4, value: 'Answered' }, { kind: 'cell', row: 1, col: 5, value: 'Yes' }]);
     expect(next.kept).toEqual([]);
@@ -165,9 +168,11 @@ describe('a log that writes its cells its own way', () => {
 
 describe('a date typed as text in a log', () => {
   const cols = ['No.', 'Question', 'Date received'];
-  const typed = { columns: cols, cols: [0, 1, 2], rows: [['1', 'What is the minimum DSCR covenant?', '11/12/2026']], lines: [2], lastRow: 2 };
+  const rows = [['1', 'What is the minimum DSCR covenant?', '11/12/2026']];
+  const typed = { columns: cols, cols: [0, 1, 2], rows, lines: [2], lastRow: 2 };
   it('stays as the log has it: not a date, so the app never writes over it, and it is listed as kept', () => {
-    const w = logWrite(typed, suggestMapping(cols), [q(1, 'What is the minimum DSCR covenant?', { received: '2026-11-14' })]);
+    const asked = q(1, 'What is the minimum DSCR covenant?', { received: '2026-11-14' });
+    const w = logWrite(typed, suggestMapping(cols), [asked]);
     expect(w.steps).toEqual([]); expect(w.kept).toEqual([1]);
   });
 });

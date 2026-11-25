@@ -38,17 +38,28 @@ export function suggestMapping(columns: string[]): Mapping {
 
 /**
  * A date cell → YYYY-MM-DD, '' for blank, or null when it is not a date. A workbook's real date cell arrives as
- * YYYY-MM-DD, with a time when it has one (convert.ts); text typed in a cell is not a date and is never read as one (decision 99).
+ * YYYY-MM-DD, with a time when it has one (convert.ts); text typed in a cell is not a date and is never read as
+ * one (decision 99).
  */
 export function parseDate(v: unknown): string | null {
   const s = String(v ?? '').trim();
-  const day = /^(\d{4}-\d{2}-\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/.exec(s)?.[1];   // a date-and-time cell is its date
+  // a date-and-time cell is its date
+  const day = /^(\d{4}-\d{2}-\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/.exec(s)?.[1];
   if (day !== undefined) return isRealDate(day) ? day : null;
   return s ? null : '';
 }
 
 export interface ImportRow { /** the row's line in the file, header being line 1 */ line?: number; n: number | null; text: string; askedBy: string; received: string; workstream: string; priority: '' | 'High' | 'Medium' | 'Low'; response: string; respondedBy: string; responded: string; status: QuestionStatus | '' }
-export interface Prepared { rows: ImportRow[]; skipped: number; unknownValues: number; /** each date or value counted above, where it is: "Row 14 Received: 31/31/2026" */ unread: string[] }
+export interface Prepared {
+  rows: ImportRow[];
+  skipped: number;
+  unknownValues: number;
+  /** each value counted above, where it is: "Row 14 Priority: urgent" */
+  unread: string[];
+}
+
+/** a date cell as the date field keeps it: a real date, or the text typed there as written (decision 99) */
+const keptDate = (raw: string): string => parseDate(raw) ?? raw;
 
 const PRIORITY: Record<string, ImportRow['priority']> = { high: 'High', medium: 'Medium', low: 'Low' };
 const STATUS: Record<string, QuestionStatus> = { open: 'open', outstanding: 'open', answered: 'answered', closed: 'closed' };
@@ -71,15 +82,14 @@ export function prepareImport(table: string[][], mapping: Mapping, lines?: numbe
   for (const [at, r] of table.entries()) {
     const text = get(r, 'text'); if (!text) { out.skipped++; continue; }
     const line = lines?.[at] ?? at + 2; const unread = (k: ImportField, v: string) => out.unread.push(`Row ${line} ${nameOf(k)}: ${v.trim()}`);
-    // a typed date is kept as written, and is not a date to sort or count by
-    const date = (k: 'received' | 'responded') => { const raw = get(r, k); row[k] = parseDate(raw) ?? raw; };
     const pr = get(r, 'priority').trim(); const st = get(r, 'status').trim(); const nRaw = get(r, 'n').trim().replace(/^q/i, ''); const n = /^\d{1,9}$/.test(nRaw) && +nRaw > 0 ? +nRaw : null;   // the app numbers past Q999999, so a 7-digit number it exported reads back
     const wsRaw = get(r, 'workstream').trim(); const ws = WORKSTREAMS.find((w) => w.toLowerCase() === wsRaw.toLowerCase()) ?? wsRaw;   // the app's spelling where it is one of ours; otherwise kept as written
     if (pr && !PRIORITY[pr.toLowerCase()]) { out.unknownValues++; unread('priority', pr); }
     if (st && !STATUS[st.toLowerCase()]) { out.unknownValues++; unread('status', st); }
     const row: ImportRow = { n, text, askedBy: get(r, 'askedBy').trim(), received: '', workstream: ws, priority: PRIORITY[pr.toLowerCase()] ?? '', response: get(r, 'response'), respondedBy: get(r, 'respondedBy').trim(), responded: '', status: STATUS[st.toLowerCase()] ?? '', line };
     out.rows.push(row);
-    date('received'); date('responded');
+    row.received = keptDate(get(r, 'received'));
+    row.responded = keptDate(get(r, 'responded'));
   }
   out.unread.sort((x, y) => +x.split(' ')[1] - +y.split(' ')[1]);   // in row order, as the file reads; the sort keeps each row's own order
   return out;

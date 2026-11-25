@@ -388,7 +388,8 @@ export function readLogCells(q: Question, cells: Record<string, string>): Record
   const keys = Object.keys(cells) as ImportField[]; if (!keys.length) return {};
   const cols: ImportField[] = keys.includes('text') ? keys : [...keys, 'text'];   // a row is read only with its question
   const mapping = Object.fromEntries(IMPORT_FIELDS.map(([k]) => [k, cols.indexOf(k) < 0 ? null : cols.indexOf(k)])) as Mapping;
-  const read = prepareImport([cols.map((k) => cells[k] ?? q.text)], mapping, [2]).rows[0] as unknown as Record<string, unknown> | undefined;
+  const row = prepareImport([cols.map((k) => cells[k] ?? q.text)], mapping, [2]).rows[0];
+  const read = row as unknown as Record<string, unknown> | undefined;
   return Object.fromEntries(keys.map((k) => [k, read?.[k] == null || read[k] === '' && cells[k].trim() ? cells[k] : String(read[k])]));
 }
 /** whether a question's field already says `value` (in the app's terms, as readLogCells gives it); the words exactly as written */
