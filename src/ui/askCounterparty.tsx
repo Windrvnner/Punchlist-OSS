@@ -4,6 +4,7 @@
  */
 import { logQuestionDraft, questionDraftAt, questionLogKey } from '../app/logQuestionDraft';
 import { TEXT_MAX } from '../domain/importExport';
+import { limitClass, limitTitle } from './limit';
 import type { Question } from '../domain/model';
 import { closeOnEscape, focusCard } from './focus';
 import { useStore } from './hooks';
@@ -83,7 +84,9 @@ export function AskCard(p: AskCardProps) {
   return (
     <div class={`card addq ${p.cls}`} onKeyDown={closeOnEscape(p.onEscape)}>
       <div class="lbl">New Question for {p.counterparty || 'the Counterparty'}</div>
-      <textarea class="in ta" id={`${p.ids}-text`} maxLength={TEXT_MAX} rows={3} aria-label="Question" ref={focusCard}
+      <textarea class={`in ta${limitClass(p.text)}`}
+        title={limitTitle(p.text)} id={`${p.ids}-text`} maxLength={TEXT_MAX}
+        rows={3} aria-label="Question" ref={focusCard}
         value={p.text} onInput={type} />
       <span class="clink">Linked to “{p.linked}”</span>
       <div class="cacts">

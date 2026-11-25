@@ -20,7 +20,8 @@ import {
 } from '../app/drafting';
 import { typedResponse } from '../app/fieldDrafts';
 import { cellValue } from '../domain/logWrite';
-import { IMPORT_FIELDS, type ImportField } from '../domain/importExport';
+import { IMPORT_FIELDS, TEXT_MAX, type ImportField } from '../domain/importExport';
+import { limitClass, limitTitle } from './limit';
 import { AI_LABEL } from '../control';
 import type { Question } from '../domain/model';
 
@@ -243,8 +244,10 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
               onMerge={(byKey) => { lost.current = byKey; void mergeIt(); }} />}
             {pick === 'merged' && merged.error && <p class="emptyline" role="alert">{merged.error}</p>}
             {/* text already there stays in view under an error, so what Keep Selected would use is never unseen */}
-            {pick === 'merged' && (!merged.error || merged.text) && <textarea class="rsv-r draftbox" id="rsv-merged"
-              aria-label="Merged response" dir="auto" disabled={merged.busy} value={merged.text}
+            {pick === 'merged' && (!merged.error || merged.text) &&
+              <textarea class={`rsv-r draftbox${limitClass(merged.text)}`}
+              id="rsv-merged" aria-label="Merged response" dir="auto" disabled={merged.busy} value={merged.text}
+              maxLength={TEXT_MAX} title={limitTitle(merged.text)}
               onInput={(e) => {
                 const text = e.currentTarget.value;
                 setMerged({ ...merged, text });
