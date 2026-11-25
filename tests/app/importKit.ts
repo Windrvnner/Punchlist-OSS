@@ -34,9 +34,9 @@ export async function deal(store: Store) {
   await store.boot(); await store.dispatch(CreateDeal, { name: 'Datum', folders: [] });
   const id = Object.keys(store.get().deals)[0]; await store.loadDeal(id); return id;
 }
-/** a CSV file's rows as the import reads them */
+/** a CSV file's rows as the import reads them; the file is marked UTF-8, as Excel writes one */
 export const rowsFrom = (csv: string) => {
-  const table = readCsv(new TextEncoder().encode(csv)); if (!table.ok) throw new Error('csv');
+  const table = readCsv(new TextEncoder().encode('\uFEFF' + csv)); if (!table.ok) throw new Error('csv');
   return prepareImport(table.value.rows, suggestMapping(table.value.columns)).rows;
 };
 /** rows under a header line, each cell quoted */
