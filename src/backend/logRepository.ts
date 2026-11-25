@@ -18,7 +18,7 @@ import type { Repository, Transaction, Loaded, Version, SyncState, Recovered, Wr
 import { CURRENT_SCHEMA, CLASH_KINDS, Envelope, schemaOf, type AuditEntry, type ClashKind, type RecordKind } from '../domain/model';
 import { ok, fail, type Result, type Failure } from '../domain/result';
 import { Combined, isLine, recKey, type Line, type RecChange, type RecState } from './changeLog';
-import type { Ver } from './changeLines';
+import { lineSchema, type Ver } from './changeLines';
 import { shareOwn, wholeLines } from './ownFile';
 import { LocalChanges } from './localChanges';
 import { recoveredWriteClashes } from './recoveredWrite';
@@ -1181,7 +1181,7 @@ export class LogRepository implements Repository {
     }
     this.markForwardedChanges(recs, moved);
     for (const d of deletes) recs.push({ kind: d.kind, id: d.id, ver: ver(), base: this.view.bases(d.kind, d.id, had(d.kind, d.id)), del: true, ...(d.undoesImport ? { undoesImport: true as const } : {}) });
-    const line: Line = { v: 1, schema: CURRENT_SCHEMA, pc: this.id, seq, at: this.clock(), by: tx.by ?? tx.audit?.[0]?.actor ?? this.o.user(), from: this.o.label, recs,
+    const line: Line = { v: 1, schema: lineSchema(recs), pc: this.id, seq, at: this.clock(), by: tx.by ?? tx.audit?.[0]?.actor ?? this.o.user(), from: this.o.label, recs,
       ...(tx.audit?.length ? { audit: tx.audit } : {}), ...(tx.index ? { index: tx.index } : {}), ...(retract.length ? { retract } : {}),
       // a deal deleted says what this PC had seen of everyone's changes, so a PC with changes it had not seen keeps them
       ...(tx.purgeDeal ? { purge: tx.purgeDeal, seen } : {}),
