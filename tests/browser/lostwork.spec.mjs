@@ -598,7 +598,9 @@ async function dealOnFindings(page, name = 'Proseware') {
 
 { // #931: a reload while the master checklist is written keeps the paste and its review
   const { ctx, page } = await open();
-  await page.click('#fr-new'); await page.fill('#nd-name', 'Proseware'); await page.click('#nd-create');
+  await page.click('#fr-new');
+  await page.fill('#nd-name', 'Proseware');
+  await page.click('#nd-create');
   await page.waitForSelector('#u-menu');
   await checkChecklistPasteReload(page, say);
   say('#931 no page errors', !page.errors.length, JSON.stringify(page.errors));

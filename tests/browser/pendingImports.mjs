@@ -15,8 +15,11 @@ async function holdWrites(page, kind) {
 const settle = (page) => page.waitForTimeout(800);
 
 async function openChecklistImport(page) {
-  await page.click('#u-menu'); await page.waitForSelector('#s-checklist-open'); await page.click('#s-checklist-open');
-  await page.waitForSelector('#fl-import'); await page.click('#fl-import');
+  await page.click('#u-menu');
+  await page.waitForSelector('#s-checklist-open');
+  await page.click('#s-checklist-open');
+  await page.waitForSelector('#fl-import');
+  await page.click('#fl-import');
 }
 
 const SITES = ['Northwind Solar', 'Trey Wind', 'Fabrikam Storage', 'Contoso Hydro', 'Litware Biogas'];
@@ -41,14 +44,19 @@ export async function checkChecklistPasteReload(page, say) {
   });
   await openChecklistImport(page);
   await page.fill('#cl-paste', ['Facility checklist', ...lines].join('\n'));
-  await page.click('#cl-paste-next'); await page.waitForSelector('#cl-line');
+  await page.click('#cl-paste-next');
+  await page.waitForSelector('#cl-line');
   await page.waitForFunction(() => !/^Asking/.test(document.querySelector('#cl-line')?.textContent ?? 'Asking'), null,
     { timeout: 30000 });
-  await page.click('[data-layer=broad]'); await page.click('#cl-next'); await page.waitForSelector('#cl-go');
+  await page.click('[data-layer=broad]');
+  await page.click('#cl-next');
+  await page.waitForSelector('#cl-go');
   const before = await page.textContent('#cl-line');
   await holdWrites(page, 'firmList');
-  await page.click('#cl-go'); await settle(page);
-  await page.reload(); await page.waitForSelector('#u-menu');
+  await page.click('#cl-go');
+  await settle(page);
+  await page.reload();
+  await page.waitForSelector('#u-menu');
   await openChecklistImport(page);
   const shown = await page.waitForSelector('#cl-go', { timeout: 5000 }).then(() => true, () => false);
   const after = shown ? await page.textContent('#cl-line') : await page.inputValue('#cl-paste').catch(() => '');
