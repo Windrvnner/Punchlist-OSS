@@ -1,19 +1,29 @@
 // @vitest-environment node
 import { afterEach, beforeAll, expect, it, vi } from 'vitest';
+import { MemoryKeptImports } from '../../src/adapters/keptImports';
 import { MemoryLocal } from '../../src/adapters/local';
 import { prepareUnresolved, retryUnresolved, submitUnresolved } from '../../src/app/addUnresolved';
+import {
+  checklistReviewSession, checklistSelection, listTarget, submitChecklist, type ChecklistReviewChange,
+} from '../../src/app/checklistImport';
 import { CreateDeal } from '../../src/app/commands/deals';
 import { ImportIssuesList } from '../../src/app/commands/issuesList';
 import { readDealFolder, type DealForm } from '../../src/app/dealFolders';
 import { findDealTwin } from '../../src/app/dealSetup';
 import { readIssuesList, reviewIssuesList } from '../../src/app/issuesList';
+import { importKey, initializeKeptImports, keptImportsReady } from '../../src/app/keptImports';
 import { initializeKeptText } from '../../src/app/keptText';
+import {
+  checklistItemsAsRead, checklistPaste, checklistReading, checklistRequests, checklistSourceLines, tieChecklistLines,
+} from '../../src/app/listRead';
 import { dealFindings, dealQuestions } from '../../src/app/state';
 import type { Store } from '../../src/app/store';
+import { firmOf, listId, norm } from '../../src/domain/checklist';
 import { ok } from '../../src/domain/result';
 import type { AiService } from '../../src/ports';
 import { val } from '../backend/reviewKit';
 import { ITEMS } from '../fixtures/pastedList';
+import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { recoveryApp, type RecoveryApp } from './recoveryKit';
 
 const applications: RecoveryApp[] = [];
@@ -119,4 +129,53 @@ it('scans a folder, matches its deal, imports lender issues, and adds the result
   expect(new Set(questions.map(({ linkedFinding }) => linkedFinding))).toEqual(new Set(findings.map(({ id }) => id)));
   expect(questions.find(({ linkedFinding }) => linkedFinding === findings[0].id)?.text)
     .toBe(phraseQuestion(findings[0].title));
+});
+
+async function readMasterChecklist(store: Store, questions: string[], requests: ReturnType<typeof checklistRequests>) {
+  const source = checklistPaste(['Portfolio due diligence', ...questions].join('\n'));
+  const lines = checklistSourceLines(source, null)!;
+  store.services.ai.readList = async ({ lines }) => ok(lines.map((text, index) => ({
+    n: index + 1, k: index === 0 ? 'section' : 'item', text,
+  })));
+  const reader = checklistReading(store, requests);
+  const readings = val((await reader.sourceChanged(lines, false, { started: () => {}, finished: () => {} }))!);
+  const tied = tieChecklistLines(lines, readings);
+  const prepared = checklistItemsAsRead(false, null, { item: null, section: null }, tied)!;
+  expect(prepared.items).toHaveLength(questions.length);
+  return prepared.items;
+}
+
+it('reads, reviews, and installs the master checklist with selected model suggestions', async () => {
+  const { store } = application();
+  await store.boot();
+  initializeKeptImports(new MemoryKeptImports());
+  await keptImportsReady;
+  const key = importKey.checklist();
+  const requests = checklistRequests();
+  const alternate = 'Verify that the project company took the Contoso Solar interconnection agreement in FY2024.';
+  const questions = [...portfolioQuestions(), alternate];
+  const items = await readMasterChecklist(store, questions, requests);
+  const clearer = 'Provide the executed FY2024 Contoso Solar EPC contract and each amendment and change order';
+  const duplicate = { a: 1, b: questions.length - 1, inAgainst: false, why: 'Both ask about the same assignment' };
+  const reword = vi.fn(async () => ok([{ at: 0, text: clearer, why: 'Put the reporting period first' }]));
+  const sameMeaning = vi.fn(async () => ok({ pairs: [duplicate] }));
+  store.services.ai.reword = reword;
+  store.services.ai.sameMeaning = sameMeaning;
+  const state = store.get();
+  const target = listTarget(state, firmOf(state.firmList), 'broad', '');
+  const session = checklistReviewSession(store, requests, { started: () => {}, settled: () => {} });
+  const plan = session.plan(items, target, { askReword: true, askSame: true }, null, '')!;
+  const show = vi.fn<(change: ChecklistReviewChange) => void>();
+  await session.next(plan, show);
+  expect(reword).toHaveBeenCalledExactlyOnceWith({ items: questions.map(norm) });
+  expect(sameMeaning).toHaveBeenCalledExactlyOnceWith({ items: questions.map(norm), against: [] });
+  const result = show.mock.lastCall?.[0];
+  if (result?.kind !== 'fresh') throw new Error('Expected a checklist review');
+  expect(result.review.pairs).toContainEqual(duplicate);
+  const { items: selected } = checklistSelection(result.review, new Set([duplicate.b]), new Set([0]));
+  expect(selected).toHaveLength(questions.length - 1);
+  expect(selected[0]).toMatchObject({ text: clearer, was: items[0].text, section: 'Portfolio due diligence' });
+  expect(selected.some(({ text }) => text === norm(alternate))).toBe(false);
+  val(await submitChecklist(store, key, target, selected, ''));
+  expect(store.get().firmList[listId('broad', '')].items).toEqual(selected);
 });
