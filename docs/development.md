@@ -60,6 +60,7 @@ npx vitest run tests/app/coreWorkflows.test.ts --environment node --no-file-para
 ```
 
 The static checks scan tracked files for secrets and attribution, and commit messages for attribution.
+The readability script also lists added `src/` lines that name a guess (overlap, fuzzy, fallback, repair and the like).
 After readability hints, `scripts/check-pane-of-glass.mjs` checks UI imports, service and repository access,
 and browser storage. The committed `scripts/pane-of-glass-baseline.json` is `{}`, so any match fails. For Vite globs
 with literal patterns and direct literal options or no options, the guard reports the original call if either

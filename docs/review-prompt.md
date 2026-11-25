@@ -12,7 +12,8 @@ verdict, and no criteria in your own words.
 > evidence: repeat them. Reproduce each finding, or cite its file and line, and say how.
 >
 > Take the acceptance criteria from the linked issue (or the request, when there is no issue) and the pull request.
-> A criterion the pull request drops or narrows is not met. Attack at least:
+> A criterion the pull request drops or narrows is not met, unless the criterion itself asks for guessing; then
+> raise it as a blocker on the issue. Attack at least:
 >
 > - Deal scale: 2,000+ questions (the browser demo deal) and 100+ conflicts, with realistic wording. A few sample
 >   rows or rows numbered 1..N don't count.
@@ -31,6 +32,9 @@ verdict, and no criteria in your own words.
 >   functions. When the addition serves a workflow, check that the workflow runs from a test with no component
 >   rendered.
 > - Scope: name everything the diff does that the issue didn't ask for, at the top of the review.
+> - Simplicity: list every score, threshold, fallback, text normalization or guess the diff adds, with the decision
+>   that asks for it, and say what the simplest version of the stated need would be. `npm run check` lists the added
+>   lines that name a guess. If the diff does more, that is a blocker even when the issue asked for it.
 >
 > A finding blocks the merge only when it is one of these:
 >
@@ -56,7 +60,9 @@ verdict, and no criteria in your own words.
 >    documentation, wording that is not provider-neutral, or a change not described in technical terms.
 > 8. Existing documentation that the changes in the pull request make inaccurate.
 > 9. Changing or reinterpreting content handed to the app, or machinery beyond what was asked, including an
->    acceptance criterion that asks for more than the issue did.
+>    acceptance criterion that asks for more than the issue did, or code that guesses (similarity scores,
+>    thresholds, inferred structure, text repair, fallbacks) where an exact rule or the person's choice would do. Each
+>    such rule must cite the decision that asks for it.
 >
 > Anything else is minor. A minor finding that is small and in code the pull request already touches is fixed in
 > the same pull request, without a review round of its own. File every other minor finding (in other code, or too

@@ -1,6 +1,7 @@
 // Readability hints for the code a branch changes (CLAUDE.md, "Readable code"). Lists the changed lines over
 // 120 characters and the new functions Biome finds too complex. It only reports: it never fails the check,
-// whatever goes wrong, and code the branch did not touch is never listed.
+// whatever goes wrong, and code the branch did not touch is never listed. It also lists the added lines in `src/`
+// that name a guess (CLAUDE.md, "Do the simplest thing"), so a reviewer asks what decision asks for each.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -8,6 +9,8 @@ import { join } from 'node:path';
 const MAX_LINE = 120;
 const MAX_LISTED = 40; // a long list helps nobody; the first ones show where to look
 const COMPLEXITY_RULE = 'complexity/noExcessiveCognitiveComplexity';
+// Words that mark a guess: a score, a threshold, a fallback, a similarity, a normalization or a repair of text.
+const GUESS_WORDS = /overlap|similar|fuzzy|normali[sz]|guess|heuristic|threshold|fallback|repair/i;
 const CODE_FILE = /\.(ts|tsx|mjs|js)$/;
 // Code Biome lints: src, tests and scripts, and files at the top of the repo, but not the test fixtures.
 const LINTED = /^(src\/|tests\/|scripts\/|[^/]+$)/;
@@ -94,6 +97,19 @@ function readLines(file) {
   }
 }
 
+/** Added lines in `src/` that name a guess. A list for the reviewer to question, not a verdict. */
+function guessLines(changed) {
+  const found = [];
+  for (const [file, lines] of changed) {
+    if (!file.startsWith('src/')) continue;
+    const text = readLines(file);
+    for (const n of lines) {
+      if (GUESS_WORDS.test(text[n - 1] ?? '')) found.push(`${file}:${n}  ${text[n - 1].trim().slice(0, 80)}`);
+    }
+  }
+  return found;
+}
+
 function longLines(changed) {
   const found = [];
   for (const [file, lines] of changed) {
@@ -138,7 +154,7 @@ function complexFunctions(changed) {
 
 function list(title, items) {
   if (items.length === 0) return;
-  console.log(`\nReadability: ${title} (${items.length})`);
+  console.log(`\n${title} (${items.length})`);
   for (const item of items.slice(0, MAX_LISTED)) console.log(`  ${item}`);
   if (items.length > MAX_LISTED) console.log(`  and ${items.length - MAX_LISTED} more`);
 }
@@ -149,8 +165,9 @@ function main() {
   if (!base) return;
   const changed = changedLines(base);
   addUntracked(changed);
-  list(`changed lines over ${MAX_LINE} characters`, longLines(changed));
-  list('new functions that are too complex', complexFunctions(changed));
+  list(`Readability: changed lines over ${MAX_LINE} characters`, longLines(changed));
+  list('Readability: new functions that are too complex', complexFunctions(changed));
+  list('Simplicity: added lines naming a guess, to match to a decision', guessLines(changed));
 }
 
 try {

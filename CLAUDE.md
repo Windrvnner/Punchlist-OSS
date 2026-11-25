@@ -76,7 +76,9 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   application shows it: never change, repair, normalize, or reinterpret content handed to the app, and never guess.
   Use plain code before a model call. Build nothing beyond what an issue or a decision in docs/decisions.md asks
   for: no speculative edge cases, options, or fallbacks. Example: matching imported rows to existing questions is a
-  lookup on number plus text, then on text alone; every row left over is unmatched.
+  lookup on number plus text, then on text alone; every row left over is unmatched. Each score, threshold,
+  fallback, or text normalization needs the decision that asks for it, and `npm run check` lists the added lines
+  that name a guess (`scripts/check-readability.mjs`). It does not fail on them.
 - **Send deal PDFs whole for AI analysis.** Send the original file so the model can read the pages directly.
   Word counts may be used to rank and pick documents. See docs/decisions.md for the planned handling of PDFs that
   the model service refuses as too large (#119) and the current checklist import behavior.
