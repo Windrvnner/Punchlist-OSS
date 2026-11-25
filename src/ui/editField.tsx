@@ -103,7 +103,7 @@ export function EditField({
   const asText = dateAtRest(type, focused, half, draft);
   const shown = dateLabel(asText, className);
   const field = multiline ? <textarea rows={1} {...common} />
-    : type === 'date' ? dateControl(common, (focused || half || !!draft) && (!draft || /^\d{4}-\d{2}-\d{2}$/.test(draft))) : <input type="text" {...common} />;
+    : type === 'date' ? dateControl(common, dateEditable(focused, half, draft)) : <input type="text" {...common} />;
   return (
     <span class={`efwrap ${asText ? 'dtext' : ''} ${cap ? 'capped' : ''}`}>
       {cap ? <span class={`efcap ${cap.cls ?? ''}`} title={cap.title}
@@ -112,6 +112,12 @@ export function EditField({
       {fieldNotes(input, value, () => retry(false), () => retry(true), takeTheirs)}
     </span>
   );
+}
+
+/** a date input while being edited or holding a date; text typed in a log stays a text field at rest, shown as written */
+function dateEditable(focused: boolean, half: boolean, draft: string): boolean {
+  const typedTextAtRest = !focused && !half && !!draft && !/^\d{4}-\d{2}-\d{2}$/.test(draft);
+  return (focused || half || !!draft) && !typedTextAtRest;
 }
 
 function dateAtRest(type: 'date' | 'text', focused: boolean, half: boolean, value: string): string {
