@@ -146,8 +146,8 @@ function channelProduces(saved: string, incoming: string): boolean {
 
 /**
  * The incoming positions where `char` may be read, in order. Inside a run of marks every mark is lost, so only its end
- * (or a literal "?") can start an ordinary character. A character outside ASCII starting inside a run already read by an
- * earlier mark of it adds nothing new, so only the first mark of each run is kept.
+ * (or a literal "?") can start an ordinary character. A character outside ASCII starting inside a run already
+ * read by an earlier mark of it adds nothing new, so only the first mark of each run is kept.
  */
 function startsFor(char: string, incoming: string, ends: number[], plain: Set<number>, lost: Ranges): number[] {
   const starts = new Set([...plain, ...lost.ends()]);
