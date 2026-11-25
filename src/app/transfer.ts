@@ -6,7 +6,7 @@
  */
 import type { Store } from './store';
 import type { SheetPreview } from '../ports';
-import { IMPORT_FIELDS } from '../domain/importExport';
+import { IMPORT_FIELDS, type ImportField } from '../domain/importExport';
 import {
   type State, dealQuestions, dealFindings, findingWorkstreams, FIRM,
   workstreamHead, qaStatusOnly, qaWorkstream, qaWorkstreamChoices,
@@ -105,14 +105,81 @@ export async function exportFindings(
   return r.ok ? ok(r.value === 'canceled' ? 'canceled' : rows.length) : r;
 }
 
-export interface ImportTable { name: string; columns: string[]; rows: string[][]; lines?: number[]; mapping: Mapping; /** kept so the file can be read again when the person picks another sheet or heading row */ bytes: Uint8Array; sheets: string[]; sheet: string; headerRow: number; lastRow: number; previews: SheetPreview[]; /** the layout shown came from the model, not from the app's own rules */ proposedByAi?: boolean }
+export interface ImportTable {
+  name: string;
+  columns: string[];
+  /** Source positions, before the reader leaves out unused columns. Older kept imports may omit them. */
+  cols?: number[];
+  rows: string[][];
+  lines?: number[];
+  mapping: Mapping;
+  /** Kept so the file can be read again when the person picks another sheet or heading row. */
+  bytes: Uint8Array;
+  sheets: string[];
+  sheet: string;
+  headerRow: number;
+  lastRow: number;
+  previews: SheetPreview[];
+  /** The layout shown came from the model. */
+  proposedByAi?: boolean;
+}
+
+export type ImportLocation = { sheet?: string; headerRow?: number };
 
 /** Read (or re-read) a file's bytes with the person's choice of sheet and heading row. */
-export async function readImportBytes(store: Store, name: string, bytes: Uint8Array, opts?: { sheet?: string; headerRow?: number }): Promise<Result<ImportTable>> {
+export async function readImportBytes(
+  store: Store, name: string, bytes: Uint8Array, opts?: ImportLocation,
+): Promise<Result<ImportTable>> {
   const t = await store.services.sheets.read(bytes, name, opts);
   if (!t.ok) return t;
   if (!t.value.columns.length) return fail({ kind: 'invalid', message: 'The file has no rows' });
-  return ok({ name, columns: t.value.columns, rows: t.value.rows, lines: t.value.lines, mapping: suggestMapping(t.value.columns), bytes, sheets: t.value.sheets ?? [], sheet: t.value.sheet ?? '', headerRow: t.value.headerRow ?? 1, lastRow: t.value.lastRow ?? t.value.rows.length + 1, previews: t.value.previews ?? [] });
+  const { columns, cols, rows, lines, sheets = [], sheet = '', headerRow = 1, previews = [] } = t.value;
+  const lastRow = t.value.lastRow ?? rows.length + 1;
+  return ok({
+    name, columns, cols, rows, lines, mapping: suggestMapping(columns), bytes, sheets, sheet, headerRow, lastRow,
+    previews,
+  });
+}
+
+/** Keep choices made during the reread (#741). A missing choice stays unmapped and is named in the footer. */
+export async function rereadImportTable(
+  store: Store, before: ImportTable, location: ImportLocation, choices: ReadonlyMap<ImportField, number | null>,
+) {
+  const read = await readImportBytes(store, before.name, before.bytes, location);
+  if (!read.ok) return fail({ ...read.error, message: `Could not read ${before.name}: ${read.error.message}` });
+  return ok({ table: read.value, ...applyImportColumnChoices(before, read.value, choices) });
+}
+
+function applyImportColumnChoices(
+  before: ImportTable, after: ImportTable, choices: ReadonlyMap<ImportField, number | null>,
+) {
+  const mapping = { ...after.mapping };
+  const missed: string[] = [];
+  for (const [field, label] of IMPORT_FIELDS) {
+    const picked = choices.get(field);
+    if (picked === undefined) continue;
+    mapping[field] = picked === null ? null : rereadColumn(before, after, picked);
+    if (picked !== null && mapping[field] === null) missed.push(label);
+  }
+  const error = missed.length ? `Column choice not applied for ${missed.join(', ')}.` : '';
+  return { mapping, error };
+}
+
+function rereadColumn(before: ImportTable, after: ImportTable, picked: number) {
+  const sourceColumn = before.cols?.[picked];
+  if (before.sheet === after.sheet && sourceColumn !== undefined && after.cols) {
+    const position = after.cols.indexOf(sourceColumn);
+    return position < 0 ? null : position;
+  }
+  // Without a shared sheet position, only an unambiguous heading can identify the chosen column.
+  const heading = before.columns[picked]?.trim().toLowerCase();
+  if (!heading || uniqueImportHeading(before.columns, heading) === null) return null;
+  return uniqueImportHeading(after.columns, heading);
+}
+
+function uniqueImportHeading(columns: string[], heading: string) {
+  const matches = columns.flatMap((name, index) => name.trim().toLowerCase() === heading ? [index] : []);
+  return matches.length === 1 ? matches[0] : null;
 }
 /** Read a chosen file into a table of strings with a suggested column mapping. Nothing is changed. */
 export async function readImportFile(store: Store, file: { name: string; size: number; arrayBuffer(): Promise<ArrayBuffer> }): Promise<Result<ImportTable>> {
