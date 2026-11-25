@@ -17,8 +17,20 @@ import { control } from '../control';
 export const MAX_ATTACHED = control.limits.docsPerCall;
 const WAITING_FOR_ATTACHMENTS = 'Still attaching — send when it finishes';
 
+type AttachmentTarget = Pick<Attachment, 'dealId' | 'findingId' | 'conv'>;
+const retryTargets = new WeakMap<() => void, AttachmentTarget>();
+
+/** A failed attachment no longer has a chip to move when its deal is recovered (#745). */
+function offerAttachmentRetry(store: Store, target: AttachmentTarget, file: File) {
+  const run = () => void attachFiles(store, retryTargets.get(run) ?? target, [file]);
+  retryTargets.set(run, target);
+  const dealName = store.get().deals[target.dealId]?.name;
+  const destination = dealName ? ` to ${dealName}` : '';
+  store.toast(`Couldn’t attach ${file.name}${destination} ·`, { label: 'Retry', run });
+}
+
 let seq = 0;
-export async function attachFiles(store: Store, ctx: { dealId: string; findingId?: string; conv: string }, files: File[]) {
+export async function attachFiles(store: Store, ctx: AttachmentTarget, files: File[]) {
   // past the most one message can take, a file is not attached, and the person is told, rather than it being dropped when sent
   const room = Math.max(0, MAX_ATTACHED - store.get().ui.attachments.filter((a) => a.conv === ctx.conv).length);
   if (files.length > room) store.toast(`${files.length - room} not attached: ${MAX_ATTACHED} files is the most for one message`);
@@ -28,11 +40,11 @@ export async function attachFiles(store: Store, ctx: { dealId: string; findingId
     void (async () => {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const r = await store.services.docs.attach(ctx.dealId, { name: file.name, bytes });
-      if (!store.get().ui.attachments.some((a) => a.id === id)) return; // removed while uploading
+      const chip = store.get().ui.attachments.find((attachment) => attachment.id === id);
+      if (!chip) return; // removed while uploading
       if (!r.ok) {
         store.ui((ui) => ({ attachments: ui.attachments.filter((a) => a.id !== id) }));
-        const dealName = store.get().deals[ctx.dealId]?.name;             // on Home the file goes in no deal
-        store.toast(`Couldn’t attach ${file.name}${dealName ? ` to ${dealName}` : ''} ·`, { label: 'Retry', run: () => void attachFiles(store, ctx, [file]) });
+        offerAttachmentRetry(store, chip, file);
         return;
       }
       store.ui((ui) => ({ attachments: ui.attachments.map((a) => (a.id === id ? { ...a, state: 'done' as const, doc: r.value.doc, docId: r.value.docId } : a)) }));
@@ -105,12 +117,21 @@ function carryPublishedUpload(store: Store, original: string, id: string) {
 }
 
 /** The attachment, moved to the copy's ids when its deal was kept as a copy; else as it was. */
-function movedAttachment(attachment: Attachment, ids: Record<string, string>): Attachment {
+function movedAttachment<T extends AttachmentTarget>(attachment: T, ids: Record<string, string>): T {
   const dealId = ids[attachment.dealId];
   if (!dealId) return attachment;
   const conv = attachment.conv.split(':').map((part) => ids[part] ?? part).join(':');
   const findingId = attachment.findingId ? ids[attachment.findingId] ?? attachment.findingId : undefined;
   return { ...attachment, dealId, conv, ...(findingId ? { findingId } : {}) };
+}
+
+function moveRetryTargets(store: Store, ids: Record<string, string>) {
+  for (const toast of store.get().ui.toasts) {
+    const run = toast.action?.run;
+    if (!run) continue;
+    const target = retryTargets.get(run);
+    if (target) retryTargets.set(run, movedAttachment(target, ids));
+  }
 }
 
 /**
@@ -124,6 +145,7 @@ export function followCopies(store: Store): () => void {
     // the deal's own id among its records' (a deal's id starts d_), whether or not the copy has loaded yet
     const deals = Object.entries(ids).filter(([was, now]) => was !== now && was.startsWith('d_'));
     if (!deals.length) return;
+    moveRetryTargets(store, ids);
     store.ui((ui) => ({ attachments: ui.attachments.map((attachment) => movedAttachment(attachment, ids)) }));
     const from = copiedFrom.get(store) ?? new Map<string, string>();
     copiedFrom.set(store, from);
