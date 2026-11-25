@@ -53,8 +53,8 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   and services only through `src/ports`, so that every workflow can run without a window. The UI never imports the
   backend, adapters, desktop, or shell. Formatting a value for display, and screen-only state such as focus, an open
   menu, or scroll position, stay in `src/ui`. New or changed UI code that breaks this is a review blocker.
-  `npm run check` fails on forbidden UI imports, service or repository access, and browser storage
-  (`scripts/check-pane-of-glass.mjs`).
+  `npm run check` fails on forbidden UI imports, service or repository access, browser storage, cookies, the Cache
+  API, and network calls (`scripts/check-pane-of-glass.mjs`).
 - **Readable code.** Every change must be easy for a person to review on GitHub. New or changed code that breaks the rules below is a review blocker, just like lost work or a crash. Code that a pull request did not touch never is.
   - Put one statement on each line, and keep lines to 120 characters at most, comments included.
   - Keep new functions to about 60 lines and files to about 500. Don't grow a function that is already past that limit; add a named helper instead.
@@ -108,6 +108,8 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   decided, or said something (names, "the owner wants", "the maintainer asked", quotes of the user, or notes that
   carry a person and a date) and carry no AI attribution trailers. Product terms and data fields such as `owner` are
   fine. State decisions plainly ("Decision: X"). Attribution blocks a merge, like lost work.
+  `scripts/check-attribution.mjs` refuses a role credited with a decision ("the owner wants") and any email address
+  other than an example or no-reply one, in tracked files and the branch's commit messages.
 - Clean contributions: everything written to GitHub (issues, comments, pull requests, reviews, commit messages,
   docs, and code comments) follows ordinary open-source hygiene. It carries no personal information, no internal or
   private links, no references to non-public systems or services, and no text copied from third-party documentation.

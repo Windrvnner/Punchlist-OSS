@@ -2,12 +2,13 @@
 //   node scripts/browser-all.mjs [--jobs 5] [name ...]     e.g.  npm run browser -- --jobs 4 decisions keyboard
 //   --shard 2/4 runs only the second of four groups of suites of about equal time, for parallel CI jobs
 // Each suite starts its own browser and shares nothing with the others, so they can run side by side. A suite that fails
-// while others are running is run once more on its own; if it passes then, that is reported as such, not hidden.
+// while others are running is run once more on its own; if it passes then, that is reported as such, not hidden,
+// and on GitHub Actions as a warning on the checks page.
 // Exit code 0 only if every suite passed (alone or alongside). Logs go to out/browser/<suite>.log; the suites that took
 // longest last time start first (out/browser/times.json, else the CI times in tests/browser/suite-times.json).
 import { spawn } from 'node:child_process'; import fs from 'node:fs'; import http from 'node:http';
 import path from 'node:path';
-import { noResultReason, summaryOf } from './browser-reason.mjs';
+import { noResultReason, rerunWarnings, summaryOf } from './browser-reason.mjs';
 import { browserSuites, longestFirst, shardOf } from './browser-shard.mjs';
 import { insideGate } from './gate-dir.mjs';
 
@@ -191,6 +192,9 @@ writeGateResult();
 const bundle = fs.readdirSync('dist/assets').find((f) => /^index-.*\.js$/.test(f)); const bad = results.filter((r) => r.code !== 0); const rerun = results.filter((r) => r.rerun && r.code === 0);
 console.log(`\n${results.reduce((a, r) => a + r.passed, 0)}/${results.reduce((a, r) => a + r.total, 0)} checks passed in ${results.length} suites · ${bundle} · ${Math.round((Date.now() - started) / 1000)}s with ${jobs} at a time`);
 if (rerun.length) console.log(`Passed only on their own: ${rerun.map((r) => r.name).join(', ')}`);
+for (const warning of rerunWarnings(rerun.map((r) => r.name), process.env.GITHUB_ACTIONS === 'true')) {
+  console.log(warning);
+}
 if (bad.length) {
   const failed = bad.map((result) => {
     const names = result.fails.map((failure) => failure.split(' ')[1]).join(', ');

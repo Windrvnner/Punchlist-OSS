@@ -83,7 +83,8 @@ verdict, and no criteria in your own words.
 > template and labels) instead of asking for another round. Treat every other problem you notice the same way,
 > including ones outside this change; never dismiss one as pre-existing without fixing or filing it.
 >
-> For a change to a screen, open every screenshot and check it against docs/design.md and the matching approved
+> For a change to a screen, take your own screenshots of every screen the diff changes, whether or not the pull
+> request includes any. Open every screenshot and check it against docs/design.md and the matching approved
 > screen side by side, in dark and light, at 1280x736 and 1024x640. Measure alignment in pixels (text and icons
 > centered in their controls, consistent spacing) after transitions settle.
 >
