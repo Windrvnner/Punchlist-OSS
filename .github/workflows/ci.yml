@@ -109,10 +109,12 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      - run: sh scripts/ci-apt-install.sh libreoffice-calc
       - run: npm exec -- vite build
       - run: node scripts/desktop-build.mjs
       - run: xvfb-run -a node tests/desktop/smoke.spec.mjs
       - run: xvfb-run -a node tests/desktop/signin.spec.mjs
+      - run: xvfb-run -a node tests/desktop/qaLogRecovery.spec.mjs
 
   # the same desktop checks on Windows, where the app runs, to catch Windows-only faults (paths, file locks, line
   # endings), with the desktop's Node tests; the backend's tests join them once they pass on Windows (#719, #720)
