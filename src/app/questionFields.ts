@@ -15,9 +15,9 @@ export function questionFieldCommit(store: Store, question: Question, field: Edi
       quiet: true,
       over: pick ? question[field] : over,
     });
-    if (!result.ok && result.error.kind !== 'storageFull' && (pick || !isChangedElsewhere(result.error))) {
-      store.toast(result.error.message, undefined, pick ? { glyph: 'warn' } : undefined);
-    }
+    if (result.ok || result.error.kind === 'storageFull') return result;
+    const changed = isChangedElsewhere(result.error);
+    if (pick || !changed) store.toast(result.error.message, undefined, changed ? { glyph: 'warn' } : undefined);
     return result;
   };
 }

@@ -27,8 +27,8 @@ async function newDeal(page, name, rows = ROWS) {
 // opens the question numbered n and waits for the panel to settle
 const openQ = async (page, n) => { await page.click(`.md .li:has(.n:text-is("${n}"))`); await page.waitForFunction((n) => document.querySelector('.qpanel .qph .n')?.textContent === 'Q' + n, n); await page.waitForTimeout(250); };
 
-async function pickWhileSaving(page, field, button, option, peerValue) {
-  await page.evaluate((field) => {
+async function holdSubmittedBySave(page, field, beforeWrite) {
+  await page.evaluate(({ field, beforeWrite }) => {
     const question = store.get().questions[store.get().ui.selectedQuestion];
     const repo = store.services.repo;
     const transaction = repo.transaction.bind(repo);
@@ -37,9 +37,11 @@ async function pickWhileSaving(page, field, button, option, peerValue) {
     const gate = new Promise((resolve) => { run.release = resolve; });
     window.__queuedQuestionPick = run;
     repo.transaction = async (tx) => {
-      const write = tx.writes[0];
-      const isSettlement = tx.writes.length === 1 && write.kind === 'op' && write.data.state === 'succeeded';
-      if (isSettlement && write.data.input?.questionId === question.id && write.data.input.field === 'askedBy') {
+      const operation = tx.writes.find((write) => write.kind === 'op')?.data;
+      const isFieldSave = operation?.state === 'succeeded'
+        && operation.input?.questionId === question.id && operation.input.field === 'askedBy';
+      const writesQuestion = tx.writes.some((write) => write.kind === 'question' && write.id === question.id);
+      if (isFieldSave && writesQuestion === beforeWrite) {
         repo.transaction = transaction;
         run.held = true;
         await gate;
@@ -48,41 +50,69 @@ async function pickWhileSaving(page, field, button, option, peerValue) {
     };
     store.dispatch = (command, input, options) => {
       const promise = dispatch(command, input, options);
-      if (input?.questionId === question.id && input.field === field) {
-        store.dispatch = dispatch;
-        run.picked = promise;
+      if (input?.questionId === question.id) {
+        if (input.field === 'askedBy') run.first = promise;
+        if (input.field === field) {
+          store.dispatch = dispatch;
+          run.picked = promise;
+        }
       }
       return promise;
     };
-    const value = field === 'workstream' ? 'The reviewer' : 'The lender';
-    run.first = store.dispatch(store.commandNamed('EditQuestionField'), {
-      dealId: question.dealId, questionId: question.id, field: 'askedBy', value,
-    }, { quiet: true });
+  }, { field, beforeWrite });
+}
+
+async function savedPickFields(page, field) {
+  return page.evaluate(async (field) => {
+    const result = await store.services.repo.get('question', store.get().ui.selectedQuestion);
+    if (!result.ok || !result.value) throw new Error('Could not read the saved question');
+    const data = result.value.envelope.data;
+    return { submitted: data.askedBy, choice: data[field] };
   }, field);
+}
+
+async function syncQuestionPick(page, field, value) {
+  const pick = { field, value };
+  await page.evaluate(({ field, value }) => __peer.change(store.get().ui.selectedQuestion, { [field]: value }), pick);
+  await page.waitForFunction(({ field, value }) => {
+    const { questions, ui } = store.get();
+    return questions[ui.selectedQuestion][field] === value;
+  }, pick);
+}
+
+async function pickWhileSaving(page, field, button, option, peerValue, beforeWrite) {
+  const submitted = page.getByRole('textbox', { name: 'Submitted by' });
+  const original = await submitted.inputValue();
+  const typed = original === 'The lender' ? 'The reviewer' : 'The lender';
+  await holdSubmittedBySave(page, field, beforeWrite);
+  await submitted.fill(typed);
+  await submitted.press('Enter');
   await page.waitForFunction(() => window.__queuedQuestionPick.held);
   await page.click(button);
   await page.click(option);
-  await page.evaluate(([field, value]) => __peer.change(store.get().ui.selectedQuestion, { [field]: value }),
-    [field, peerValue]);
-  await page.waitForFunction(([field, value]) => {
-    const { questions, ui } = store.get();
-    return questions[ui.selectedQuestion][field] === value;
-  }, [field, peerValue]);
-  const outcome = await page.evaluate(async (field) => {
+  await syncQuestionPick(page, field, peerValue);
+  const outcome = await page.evaluate(async () => {
     const run = window.__queuedQuestionPick;
     run.release();
     const first = await run.first;
     const picked = await run.picked;
-    const { questions, ui } = store.get();
-    return { first: first.ok, picked: picked?.ok, saved: questions[ui.selectedQuestion][field] };
-  }, field);
+    return { first: first.ok, picked: picked?.ok };
+  });
+  const saved = await savedPickFields(page, field);
   const notices = page.locator('.toast', { has: page.locator('.ttitle').filter({ hasText: /^Changed elsewhere$/ }) });
   if (outcome.picked === false) await notices.first().waitFor({ timeout: 3000 });
   const count = await notices.count();
   await notices.evaluateAll((nodes) => {
     for (const node of nodes) node.querySelector('.tclose').click();
   });
-  return { ...outcome, notices: count };
+  const result = { ...outcome, notices: count, saved, original, typed };
+  if (!beforeWrite || outcome.first) return result;
+  const retry = page.locator('.qprops').getByRole('button', { name: 'Not saved · Retry', exact: true });
+  await retry.waitFor();
+  const retained = await submitted.inputValue();
+  await retry.click();
+  await page.waitForFunction((text) => store.get().questions[store.get().ui.selectedQuestion].askedBy === text, typed);
+  return { ...result, retained, retried: await savedPickFields(page, field) };
 }
 
 for (const scheme of ['dark', 'light']) {
@@ -196,13 +226,22 @@ for (const scheme of ['dark', 'light']) {
   await page.click('.qpanel [aria-label="Priority"]'); await page.click('#q-prlist [role="option"]:has-text("Low")', { timeout: 3000 }).catch(() => {}); await page.waitForTimeout(300); const p5 = await prop('Priority', 'q-prlist');
   say(`${scheme}:priority-opens-its-list-without-saving-and-picks-with-keys-or-mouse`, p1.pr === 'High' && p1.list && p1.seen && p1.hi === 'High' && p1.opts === 'High|Medium|Low' && p1.focus
     && p2.pr === 'Medium' && !p2.list && p2.focus && p3.list && p3.hi === 'Medium' && p4.pr === 'Medium' && !p4.list && p5.pr === 'Low' && !p5.list && p5.focus, JSON.stringify({ p1, p2, p3, p4, p5 }));
-  for (const [field, button, option, other] of [
-    ['workstream', '#q-ws', '#q-ws-tax', 'Technical'],
-    ['priority', '#q-pr', '#q-pr-medium', 'High'],
+  for (const [field, button, option, start, settledPeer, beforeWritePeer] of [
+    ['workstream', '#q-ws', '#q-ws-tax', 'Legal', 'Technical', 'Compliance'],
+    ['priority', '#q-pr', '#q-pr-medium', 'Low', 'High', 'High'],
   ]) {
-    const pick = await pickWhileSaving(page, field, button, option, other);
+    const pick = await pickWhileSaving(page, field, button, option, settledPeer, false);
     say(`${scheme}:queued-${field}-pick-keeps-the-synced-choice-and-says-why`,
-      pick.first && pick.picked === false && pick.saved === other && pick.notices === 1, JSON.stringify(pick));
+      pick.first && pick.picked === false && pick.saved.choice === settledPeer && pick.notices === 1
+        && pick.saved.submitted === pick.typed, JSON.stringify(pick));
+    await syncQuestionPick(page, field, start);
+    const pending = await pickWhileSaving(page, field, button, option, beforeWritePeer, true);
+    const textKept = pending.first ? pending.saved.submitted === pending.typed
+      : pending.saved.submitted === pending.original && pending.retained === pending.typed
+        && pending.retried.submitted === pending.typed && pending.retried.choice === beforeWritePeer;
+    say(`${scheme}:queued-${field}-pick-keeps-the-peer-choice-and-earlier-typing`,
+      pending.picked === false && pending.saved.choice === beforeWritePeer && pending.notices === 1 && textKept,
+      JSON.stringify(pending));
   }
   await page.evaluate(async () => { for (const q of Object.values(store.get().questions).filter((x) => x.text.startsWith('Provide the executed') || x.text.startsWith('Has the interconnection'))) for (const [field, value] of [['workstream', 'Legal'], ['priority', 'High']]) await store.dispatch(store.commandNamed('EditQuestionField'), { dealId: q.dealId, questionId: q.id, field, value }, { quiet: true }); });
 
