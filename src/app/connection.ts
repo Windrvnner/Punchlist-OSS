@@ -92,7 +92,8 @@ export function canUseSignInKey({ key, busy }: Pick<SignInForm, 'key' | 'busy'>)
 /** Sign-in at first setup and in Settings. The read-only watcher in Store also looks for later sign-outs. */
 export class SignInConnection {
   private form = formState<SignInForm>({ status: null, mode: 'idle', key: '', busy: false, error: null });
-  private statusRequest?: Promise<void>;
+  private lastStatusRequest = 0;
+  private ignoreStatusThrough = 0;
   private timer?: ReturnType<typeof setInterval>;
   private active = false;
 
@@ -103,35 +104,34 @@ export class SignInConnection {
 
   start = () => {
     this.active = true;
-    void this.pollStatus().then(() => {
-      if (this.active && this.get().status?.signedIn === false) {
-        this.timer = setInterval(() => void this.pollStatus(), 2000);
+    let stopped = false;
+    void this.readStatus().then(() => {
+      if (!stopped && this.get().status?.signedIn === false) {
+        this.timer = setInterval(() => void this.readStatus(), 2000);
       }
     });
     return () => {
+      stopped = true;
       this.active = false;
+      this.ignoreStatusThrough = this.lastStatusRequest;
       clearInterval(this.timer);
     };
   };
 
-  private pollStatus() {
-    return this.statusRequest ?? this.readStatus();
-  }
-
   private readStatus() {
-    const request = this.signin.status().then((result) => {
-      if (!this.active || this.statusRequest !== request || !result.ok) return;
+    // A later tick can get through a stalled status call. A slow reply still counts until a newer result is shown.
+    const request = ++this.lastStatusRequest;
+    return this.signin.status().then((result) => {
+      if (!this.active || request <= this.ignoreStatusThrough || !result.ok) return;
+      // Once signed in, ignore all outstanding replies from this round of polling.
+      this.ignoreStatusThrough = result.value.signedIn ? this.lastStatusRequest : request;
       const wasSignedIn = this.get().status?.signedIn;
       this.form.update({ status: result.value });
       if (result.value.signedIn) {
         clearInterval(this.timer);
         if (!wasSignedIn) this.onSignedIn?.();
       }
-    }, () => undefined).finally(() => {
-      if (this.statusRequest === request) this.statusRequest = undefined;
-    });
-    this.statusRequest = request;
-    return request;
+    }, () => undefined);
   }
 
   setKey = (key: string) => this.form.update({ key, error: null });
@@ -160,8 +160,9 @@ export class SignInConnection {
       return;
     }
     this.form.update({ key: '', busy: false, ...(this.onSignedIn ? {} : { mode: 'idle' }) });
-    // The old poll can still be waiting on a status read taken before the key was accepted.
-    if (this.active) await this.readStatus();
+    // Reads started before the key was accepted can still report the old credential status.
+    this.ignoreStatusThrough = this.lastStatusRequest;
+    if (this.active) void this.readStatus();
   };
 }
 
