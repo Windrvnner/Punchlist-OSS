@@ -23,7 +23,7 @@ Before this design, three things were missing for a redline against another proj
 Nothing in this design guesses at names to call something another project's:
 - **Capitalized names after "compared to" or "vs"** would flag this deal's own blacklines: "SPA v3 Redline to SPA v2" names "SPA v2".
 - **Other deals' names** depended on which deals a person has and how far start-up has loaded them (startup in [architecture.md](architecture.md#storage-shared-between-pcs)), so people got different answers.
-- **Documents 3 or more other deals hold** (`SHARED_BY`, `sameRoom.ts`; this design's first draft): with four deals made from one data room, `alsoIn` drops every document 3 others hold ([`alsoIn`](../src/backend/ai.ts)), so the whole room would be another project's; and it depends on loaded deals.
+- **Documents 3 or more other deals hold** (`SHARED_BY`, `ai.ts`; this design's first draft): with four deals made from one data room, `alsoIn` drops every document 3 others hold ([`alsoIn`](../src/backend/ai.ts)), so the whole room would be another project's; and it depends on loaded deals.
 - **"A vs B" with different first words** (this design's second draft): it made "Budget vs Actual Q3.pdf" and "Base Case vs Downside Case.pdf" into blacklines, and "Doe vs Roe judgment.pdf" and "Landlord vs Tenant dispute summary.pdf" too, against the cases in [`blacklines.test.ts`](../tests/backend/blacklines.test.ts). A comparison tool's output is a blackline by its cover page whatever its name, so only an uncovered, oddly named comparison is missed, and it is read as now.
 - **"Precedent" in a file's name** (second draft): "Gas Transportation Precedent Agreement.pdf" is this deal's own contract.
 

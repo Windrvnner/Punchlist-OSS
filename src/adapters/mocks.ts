@@ -187,7 +187,8 @@ export function mockDocuments(opts: MockOptions = {}): DocumentService {
     // a folder holds another deal's data room only when window.__sameRoom = { [folder path]: deal id } says so
     sameRoom: (paths, dealIds) => gate(opts, 'sameRoom', () => {
       const given = (globalThis as { __sameRoom?: Record<string, string> }).__sameRoom ?? {};
-      return [...new Set(paths.map((p) => given[p]).filter((id): id is string => !!id && dealIds.includes(id)))].map((dealId) => ({ dealId, files: 2100, matched: 1840, printed: 5, same: 5 }));
+      const held = paths.map((p) => given[p]).filter((id): id is string => !!id && dealIds.includes(id));
+      return [...new Set(held)].map((dealId) => ({ dealId, files: 2100, matched: 1840 }));
     }),
     // the demo's credit agreement has three drafts in dated folders; every other document is in no family
     drafts: (dealId, docId) => gate(opts, 'drafts', () => {
