@@ -205,7 +205,13 @@ type ArchiveCopy = { name: string; file: string; size: number; hash?: string };
 function archiveCopies(archive: string | undefined, ext: string): Map<string, ArchiveCopy> {
   const copies = new Map<string, ArchiveCopy>();
   if (!archive) return copies;
-  for (const entry of fs.readdirSync(archive)) {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(archive);
+  } catch {
+    return copies;   // an archive that vanished holds no copies
+  }
+  for (const entry of entries) {
     if (path.extname(entry).toLowerCase() !== ext.toLowerCase()) continue;
     try {
       const file = path.join(archive, entry);
