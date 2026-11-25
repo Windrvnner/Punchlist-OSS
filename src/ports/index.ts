@@ -222,7 +222,8 @@ export interface AiService {
    * the list numbers nothing) and its words as written (`text`), with a short title and one of `workstreams` for
    * the finding it becomes. `same` names what the point already raises: one of `findings` (by id) or an earlier
    * point (by its place in `points`). Only what the model is sure of is named. The whole list is compared in one
-   * call where it can be, as `sameMeaning` does. Proposals only: nothing is recorded until a person imports. No model is named: the fast model's job.
+   * call where it can be, as `sameMeaning` does. Proposals only: nothing is recorded until a person imports. No
+   * model is named: the fast model's job.
    */
   issuesList?(input: { dealId: string; doc: DocumentRef; findings: { id: string; title: string; text: string }[]; workstreams: readonly string[] }): Promise<Result<{ points: IssuePoint[] }>>;
   /**
