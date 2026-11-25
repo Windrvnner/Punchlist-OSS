@@ -105,6 +105,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Two questions with the same number are both kept and marked; a person renumbers one. Undo, Restore, and a kept
   version's Restore bring a deleted question back under its own number, even when another question holds it (#13, #116).
 - Export has no finding or link columns and always carries every column of the log.
+- Excel's cell limit (32,767 characters) is the most any one text can hold. At the limit a text box's outline turns red, typing stops, and its tooltip says why; text a model returns that runs longer is cut at a sentence and ends with a visible note.
 - No person in the app is named in a prompt, export, spreadsheet, or the memo. An accepted AI draft exports as "AI draft, accepted on" a date, and findings export the date reviewed but not the reviewer. Who responded from outside the firm is kept.
 - Each deal has one consolidated Q&A log, in the team's own folder and format; the app keeps no copy and never gates it. One file is one deal's Q&A log: a file another deal already uses as its log can't be imported into a second deal (#38).
 - An import can make a spreadsheet the deal's log ("Make this the deal's Q&A log", checked for a file with two or more parties). If there is no log, the first update creates one in the app's layout, in a folder a person picks. A later party's file only adds and updates questions and is never written to.
