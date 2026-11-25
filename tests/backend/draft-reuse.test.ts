@@ -22,17 +22,17 @@ async function questions(repo: Repository, rows: { n: number; text: string; resp
 const Q12 = { n: 12, text: 'Confirm the lock-up ratio that applies from financial close and which document prevails.', response: 'The lock-up ratio is 1.20x from financial close; the credit agreement prevails over the term sheet.', askedBy: 'Lender B' };
 const NEW = 'Please confirm which lock-up ratio applies from financial close, and which document prevails if they differ.';
 const isDraft = (c: Call) => c.prompt.includes('Draft a response to this question');
-/** the earlier responses a draft was shown: R tag, question number and party */
-const shown = (c: Call) => [...c.prompt.matchAll(/^R(\d+): Q(\d+)(?:, submitted by ([^:]+))?:/gm)].map((m) => ({ r: +m[1], q: +m[2], by: m[3] ?? '' }));
+/** the earlier responses a draft was shown: R tag and party. Question numbers are never shown to the model (#286). */
+const shown = (c: Call) => [...c.prompt.matchAll(/^R(\d+)(?:, submitted by ([^:]+))?:/gm)].map((m) => ({ r: +m[1], by: m[2] ?? '' }));
 
 describe('a draft reuses an answer already given to another party', () => {
   it('among 2,500 questions, the one asked before in other words is found and the draft uses it, named as asked', async () => {
-    const s = setup((c) => (isDraft(c) ? { status: 'found', text: 'The lock-up ratio is 1.20x from financial close, and the credit agreement prevails. [1] As answered to Lender B (Q12).', sources: [{ doc: 'D1', page: 14 }], reused: ['R1'] } : {}), { d1: [FA] });
+    const s = setup((c) => (isDraft(c) ? { status: 'found', text: 'The lock-up ratio is 1.20x from financial close, and the credit agreement prevails. [1] As answered to Lender B (R1).', sources: [{ doc: 'D1', page: 14 }], reused: ['R1'] } : {}), { d1: [FA] });
     await deal(s.repo); await questions(s.repo, [Q12, ...log()]);
     const t0 = performance.now(); const r = val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW })); const ms = performance.now() - t0;
     const c = s.calls.find(isDraft)!;
-    expect(shown(c)[0]).toEqual({ r: 1, q: 12, by: 'Lender B' }); expect(shown(c).length).toBeLessThanOrEqual(5);   // the log's 2,500 others share words like "confirm" and "provide", which weigh little
-    expect(c.prompt).toContain('Response to Q12: “The lock-up ratio is 1.20x from financial close; the credit agreement prevails over the term sheet.”');
+    expect(shown(c)[0]).toEqual({ r: 1, by: 'Lender B' }); expect(shown(c).length).toBeLessThanOrEqual(5);   // the log's 2,500 others share words like "confirm" and "provide", which weigh little
+    expect(c.prompt).toContain('Response to R1: “The lock-up ratio is 1.20x from financial close; the credit agreement prevails over the term sheet.”');
     expect(c.prompt).toContain('name it in "reused": it is put in the draft word for word, credited to whoever asked it');
     expect(r).toMatchObject({ status: 'found', text: 'As answered to Lender B (Q12): The lock-up ratio is 1.20x from financial close; the credit agreement prevails over the term sheet.\n\nThe lock-up ratio is 1.20x from financial close, and the credit agreement prevails. [1]' }); expect(r.sources.map((x) => x.doc)).toEqual(['Credit Agreement.pdf']);   // the model's own credit is taken out: the quoted response carries it
     expect(ms).toBeLessThan(1500);
@@ -44,11 +44,11 @@ describe('a draft reuses an answer already given to another party', () => {
     const r = val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW }));
     expect(r.text).toBe('As answered to Lender B (Q12): The lock-up ratio is 1.20x from financial close; the credit agreement prevails over the term sheet.\n\nThe ratio is 1.20x. [1]');                       // R9 was never shown: it is ignored
     // the credit is never put on the model's wording: a figure that differs from the response stays beside it, in sight
-    const differs = setup((c) => (isDraft(c) ? { status: 'found', text: 'As answered to Lender B (Q12). The lock-up ratio is 1.35x. [1]', sources: [{ doc: 'D1', page: 14 }], reused: ['R1'] } : {}), { d1: [FA] });
+    const differs = setup((c) => (isDraft(c) ? { status: 'found', text: 'As answered to Lender B (R1). The lock-up ratio is 1.35x. [1]', sources: [{ doc: 'D1', page: 14 }], reused: ['R1'] } : {}), { d1: [FA] });
     await deal(differs.repo); await questions(differs.repo, [Q12]);
     const d = val(await differs.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW }));
-    expect(d.text).toBe('As answered to Lender B (Q12): The lock-up ratio is 1.20x from financial close; the credit agreement prevails over the term sheet.\n\nThe lock-up ratio is 1.35x. [1]'); expect(d.text).not.toMatch(/\(Q12\)\. The lock-up ratio is 1\.35x/);
-    for (const said of ['Lender B was told in Q12 that the ratio is 1.35x. [1] The credit agreement sets 1.35x. [1]', 'the credit agreement sets 1.35x. [1] This is as previously answered in Q12.']) {
+    expect(d.text).toBe('As answered to Lender B (Q12): The lock-up ratio is 1.20x from financial close; the credit agreement prevails over the term sheet.\n\nThe lock-up ratio is 1.35x. [1]'); expect(d.text).not.toMatch(/\(R1\)\. The lock-up ratio is 1\.35x/);
+    for (const said of ['Lender B was told in R1 that the ratio is 1.35x. [1] The credit agreement sets 1.35x. [1]', 'the credit agreement sets 1.35x. [1] This is as previously answered in R1.']) {
       const w = setup((c) => (isDraft(c) ? { status: 'found', text: said, sources: [{ doc: 'D1', page: 14 }], reused: ['R1'] } : {}), { d1: [FA] });
       await deal(w.repo); await questions(w.repo, [Q12]);
       expect(val(await w.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW })).text).toBe('As answered to Lender B (Q12): The lock-up ratio is 1.20x from financial close; the credit agreement prevails over the term sheet.\n\nThe credit agreement sets 1.35x. [1]');   // a credit in other words is dropped too
@@ -58,7 +58,7 @@ describe('a draft reuses an answer already given to another party', () => {
   });
 
   it('with no document behind it, an earlier response is enough for a draft; with neither, there is no draft', async () => {
-    const s = setup((c) => (isDraft(c) ? { status: 'found', text: 'As answered to Lender B (Q12): the ratio is 1.20x.', sources: [], reused: ['R1'] } : {}), { d1: [] });
+    const s = setup((c) => (isDraft(c) ? { status: 'found', text: 'As answered to Lender B (R1): the ratio is 1.20x.', sources: [], reused: ['R1'] } : {}), { d1: [] });
     await deal(s.repo); await questions(s.repo, [Q12]);
     expect(val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW }))).toEqual({ status: 'found', text: 'As answered to Lender B (Q12): The lock-up ratio is 1.20x from financial close; the credit agreement prevails over the term sheet.', sources: [] });   // the response itself, not the model's wording
     expect(s.calls.find(isDraft)!.prompt).toContain('No document in the data room was found to bear on this.');
@@ -80,8 +80,8 @@ describe('a draft reuses an answer already given to another party', () => {
     val(await s.repo.transaction({ writes: [{ kind: 'question', id: 'q_20', data: { id: 'q_20', dealId: 'd1', n: 20, text: Q12.text, response: 'Half-typed: 1.2', askedBy: 'Lender C', status: 'open' }, expectedRev: null }], index: { dealId: 'd1', add: [{ kind: 'question', id: 'q_20' }] } }));
     val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW }));
     const c = s.calls.find(isDraft)!;
-    expect(shown(c)).toEqual([{ r: 1, q: 12, by: 'Lender B' }]);
-    expect(c.prompt).toContain('Response to Q12: “The lock-up ratio is 1.20x from financial close. The credit agreement prevails.”');
+    expect(shown(c)).toEqual([{ r: 1, by: 'Lender B' }]);
+    expect(c.prompt).toContain('Response to R1: “The lock-up ratio is 1.20x from financial close. The credit agreement prevails.”');
   });
 
   it('a draft with no document behind it is the response it names, word for word: nothing made up, added or turned round is put in another party’s answer', async () => {
@@ -98,13 +98,41 @@ describe('a draft reuses an answer already given to another party', () => {
     await deal(s.repo);
     val(await s.repo.transaction({ writes: [{ kind: 'question', id: 'q_12', data: { id: 'q_12', dealId: 'd1', status: 'answered', ...Q12, provenance: { origin: 'ai', sources: [], actor: 'me', at: '2026-11-15T09:00:00.000Z' } }, expectedRev: null }], index: { dealId: 'd1', add: [{ kind: 'question', id: 'q_12' }] } }));
     val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW }));
-    expect(s.calls.find(isDraft)!.prompt).toContain('Response to Q12 (drafted by AI from the data room, not received from anyone): “The lock-up ratio');
+    expect(s.calls.find(isDraft)!.prompt).toContain('Response to R1 (drafted by AI from the data room, not received from anyone): “The lock-up ratio');
   });
 
   it('"lockup" finds "lock-up" among 2,500 questions', async () => {
     const s = setup((c) => (isDraft(c) ? { status: 'none' } : {}), { d1: [FA] });
     await deal(s.repo); await questions(s.repo, [Q12, ...log()]);
     val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: 'Which lockup ratio applies from financial close?' }));
-    expect(shown(s.calls.find(isDraft)!)[0]).toEqual({ r: 1, q: 12, by: 'Lender B' });
+    expect(shown(s.calls.find(isDraft)!)[0]).toEqual({ r: 1, by: 'Lender B' });
+  });
+
+  // #286: question numbers are never shown to the model, so a calendar quarter is never taken for a credit
+  describe('a calendar quarter in a draft', () => {
+    const Q3 = { ...Q12, n: 3 };
+    const sources = [{ doc: 'D1', page: 14 }, { doc: 'D1', page: 16 }];
+    const draftWith = async (text: string, reused: string[] = []) => {
+      const s = setup((c) => (isDraft(c) ? { status: 'found', text, sources, reused } : {}), { d1: [FA] });
+      await deal(s.repo); await questions(s.repo, [Q3, ...log(2377)]);
+      const reply = val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW }));
+      return { reply, prompt: s.calls.find(isDraft)!.prompt };
+    };
+
+    it('stays, whatever the date format, and the prompt carries no question number', async () => {
+      for (const quarter of ['Q3 2027', 'Q3-2027', 'Q3/2027', 'Q3 (2027)', 'Q3 in fiscal year 2027', 'FY 2027 (Q3)', 'Q3, 2027', 'Q3']) {
+        const { reply, prompt } = await draftWith(`Commercial operation is expected in ${quarter}. [1]`);
+        expect(reply).toMatchObject({ status: 'found', text: `Commercial operation is expected in ${quarter}. [1]` });
+        expect(reply.sources).toHaveLength(2);   // a source listed without a marker stays
+        expect(prompt).not.toMatch(/\bQ3\b/);
+      }
+    });
+
+    it('stays beside a real credit, which goes with its source while the next citation is renumbered', async () => {
+      const text = 'As answered in R1, 2027 capex is capped at $20 million. [1] Commercial operation is expected in Q3 2027. [2]';
+      const { reply } = await draftWith(text, ['R1']);
+      expect(reply.text).toBe('As answered to Lender B (Q3): The lock-up ratio is 1.20x from financial close; the credit agreement prevails over the term sheet.\n\nCommercial operation is expected in Q3 2027. [1]');
+      expect(reply.sources).toEqual([expect.objectContaining({ loc: 'p. 16' })]);
+    });
   });
 });
