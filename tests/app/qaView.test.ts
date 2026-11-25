@@ -143,6 +143,26 @@ it('keeps the selection in number order and applies status, workstream and text 
   expect(view(state).list).toEqual([]);
 });
 
+it.each(['log', 'two-PC'])('keeps Status visible for %s versions with identical saved statuses', (source) => {
+  const state = fixture();
+  for (const question of Object.values(state.questions)) question.status = 'answered';
+  if (source === 'log') state.conflicts = {};
+  else state.deals[DEAL].qaLogs = [];
+
+  filter(state, 'versions');
+  const page = view(state);
+  expect(numbers(page.list)).toEqual(source === 'log' ? [12, 15] : [23, 40, 1200]);
+  expect(new Set(page.list.map((question) => question.status))).toEqual(new Set(['answered']));
+  expect(page.oneStatus).toBe(false);
+
+  state.conflicts = {};
+  state.deals[DEAL].qaLogs = [];
+  filter(state, 'answered');
+  const settled = view(state);
+  expect(settled.list).toHaveLength(2376);
+  expect(settled.oneStatus).toBe(true);
+});
+
 it('searches the strip separately, wraps and keeps its place when search hides the current row', () => {
   const state = fixture();
   const scope = { kind: 'question' as const, dealId: DEAL, questionId: qid(2) };
