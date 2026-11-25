@@ -251,6 +251,70 @@ describe('sign-in connection', () => {
   });
 });
 
+// #948: a first status read that fails, throws or stalls is read again, so first setup never stays blank.
+describe('sign-in connection after a failed first status read', () => {
+  const unreachable = () => fail({ kind: 'unreachable', message: 'The app’s backend could not be reached.' });
+  const firstReads: [string, (signin: ReturnType<typeof signInPort>) => void][] = [
+    ['fails', (signin) => signin.status.mockResolvedValueOnce(unreachable())],
+    ['throws', (signin) => signin.status.mockRejectedValueOnce(new Error('The bridge briefly disconnected.'))],
+    ['stalls', (signin) => signin.status.mockReturnValueOnce(pendingSignInStatus().promise)],
+  ];
+
+  it.each(firstReads)('shows the form once a later read succeeds when the first read %s', async (_, first) => {
+    const signin = signInPort();
+    first(signin);
+    const form = new SignInConnection(signin, vi.fn());
+    const stop = form.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(form.get().status).toBeNull();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(signin.status).toHaveBeenCalledTimes(2);
+    expect(form.get().status).toEqual(signedOut);
+    stop();
+  });
+
+  it('keeps reading through repeated failures and hands off once signed in', async () => {
+    const signin = signInPort();
+    signin.status.mockResolvedValue(unreachable());
+    const onSignedIn = vi.fn();
+    const form = new SignInConnection(signin, onSignedIn);
+    const stop = form.start();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(signin.status).toHaveBeenCalledTimes(6);
+    expect(form.get().status).toBeNull();
+    signin.status.mockResolvedValue(ok(signedIn));
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(onSignedIn).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(signin.status).toHaveBeenCalledTimes(7);
+    stop();
+  });
+
+  it('stops reading in Settings once the first read says signed in, as before', async () => {
+    const signin = signInPort();
+    signin.status.mockResolvedValue(ok(signedIn));
+    const form = new SignInConnection(signin);
+    const stop = form.start();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(signin.status).toHaveBeenCalledOnce();
+    expect(form.get().status).toEqual(signedIn);
+    stop();
+  });
+
+  it('reads nothing more and ignores a late first reply once the form closes', async () => {
+    const signin = signInPort();
+    const first = pendingSignInStatus();
+    signin.status.mockReturnValueOnce(first.promise);
+    const form = new SignInConnection(signin, vi.fn());
+    const stop = form.start();
+    stop();
+    first.resolve(ok(signedOut));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(signin.status).toHaveBeenCalledOnce();
+    expect(form.get().status).toBeNull();
+  });
+});
+
 describe('shared-folder connection', () => {
   it('uses the only local match once and offers a retry when using it fails', async () => {
     const place = folderPort();
