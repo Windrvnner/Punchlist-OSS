@@ -91,7 +91,7 @@ describe('UI dependency checks', () => {
       ],
       network: [
         "fetch('https://api.example.com/v1/messages', { method: 'POST' })", 'window.fetch(url)',
-        'new XMLHttpRequest()', 'new WebSocket(url)', 'new EventSource(url)',
+        'new XMLHttpRequest()', 'new WebSocket(url)', 'new EventSource(url)', 'navigator.sendBeacon(url, body)',
       ],
       services: ['store.services.ai.phrase(point)', 'const { services: ports } = store', 'store?.services'],
       repo: ['ports.repo.audit(id)', 'ports.repo?.seen?.()'],
@@ -410,13 +410,14 @@ describe('UI dependency checks', () => {
       'const title = <b>store.services.repo and localStorage</b>',
       'const choices = { services: true }',
       "const table = import(checked ? './table' : '../app/table')",
+      'const cookie = draft.label',
     ].join('\n');
     repo.write('src/ui/view.test.tsx', examples);
     repo.write('src/ui/nested/view.test.ts', examples);
     repo.write(page, clean);
     expect(repo.run().status).toBe(0);
     repo.write(page, clean + '\nconst value = <b>{`${store.services}`}</b>');
-    expect(repo.run().stderr).toContain(`${page} services (lines 9)`);
+    expect(repo.run().stderr).toContain(`${page} services (lines 10)`);
   });
 });
 
