@@ -915,6 +915,7 @@ export class Store {
       ],
       deletes: (plan.removes ?? []).map((r) => ({ kind: r.kind, id: r.id, expectedRev: r.rev, ...(r.resolves ? { resolves: r.resolves } : {}), ...(r.undoesImport ? { undoesImport: true as const } : {}), ...this.seenOf(r.kind, r.id) })),
       ...(plan.expects ? { expects: plan.expects } : {}),
+      ...(plan.expectsMembers ? { expectsMembers: plan.expectsMembers } : {}),
       index: plan.index,
       purgeDeal: plan.purgeDeal,
       ...(plan.seen ? { seen: plan.seen } : {}),

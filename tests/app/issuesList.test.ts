@@ -1,7 +1,7 @@
 // Importing an issues list, at deal scale: a 164-point list into a deal with 126 findings. Each point becomes a
 // finding unless it joins one: 23 join a finding already raised and 4 join an earlier point's. Every finding a point is on
 // is marked with it. Undo takes the import back exactly: its findings go and only its marks come off.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Store } from '../../src/app/store';
 import { memRepo, disk } from '../adapters/memRepo';
 import { mockAi, mockDocuments, mockSession } from '../../src/adapters/mocks';
@@ -13,6 +13,11 @@ import { registry, Undo } from '../../src/app/commands/undo';
 import { csvCodec } from '../../src/adapters/spreadsheet';
 import { MemoryLocal } from '../../src/adapters/local';
 import { dealFindings } from '../../src/app/state';
+import { deletedIssuesLists, issuesListRemoval } from '../../src/app/deletedView';
+import { fail } from '../../src/domain/result';
+import { Finding, Question } from '../../src/domain/model';
+import { derivedId } from '../../src/domain/derivedId';
+import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { issuesListClock, planIssuesListSeed } from './issuesListKit';
 
 const COMMANDS = [CreateDeal, CreateFinding, DeleteFinding, RestoreFinding, EditFinding, SetFindingStatus, CreateQuestion, ImportIssuesList, RevertIssuesList, RemoveIssuesList, RestoreIssuesList];
@@ -22,6 +27,149 @@ let seq = 0; const ids = { next: (p: string) => `${p}_01HZZZZZZZZZZZZZZZZ${Strin
 const LIST = 'Credit Agreement Issues List – Sponsor counsel (Nov 14).pdf'; const DOC = 'doc_sponsorlist14';
 const findingInput = (dealId: string, index: number) => ({
   dealId, title: `Finding ${index}`, workstream: 'Legal', body: [`What finding ${index} says.`],
+});
+
+const addMark = (findingId: string, text: string, n: string) => ({
+  n, text, title: text, workstream: 'Legal', join: findingId,
+});
+
+function approvedRemoval(store: Store, dealId: string) {
+  const list = deletedIssuesLists(store.get(), dealId).find(({ doc }) => doc === DOC)!;
+  return issuesListRemoval(list, dealId).input;
+}
+
+describe('confirmed issues list removal', () => {
+  it('refuses a queued removal when another mark has joined the same finding', async () => {
+    const { store, dealId, had } = await dealWith(1);
+    const first = addMark(had[0], 'Distributions are permitted before the debt service test.', '1');
+    const second = addMark(had[0], 'The debt service test does not define adjusted cash flow.', '2');
+    const list = { dealId, doc: DOC, list: LIST };
+    expect((await store.dispatch(ImportIssuesList, { ...list, points: [first] })).ok).toBe(true);
+    const approval = approvedRemoval(store, dealId);
+    const adding = store.dispatch(ImportIssuesList, { ...list, points: [second] });
+    const removing = store.dispatch(RemoveIssuesList, approval);
+    expect((await adding).ok).toBe(true);
+    expect(await removing).toMatchObject({ ok: false, error: { kind: 'rejected' } });
+    expect(store.get().findings[had[0]].onLists?.map(({ text }) => text)).toEqual([first.text, second.text]);
+    expect((await store.dispatch(RemoveIssuesList, approvedRemoval(store, dealId))).ok).toBe(true);
+    expect(store.get().findings[had[0]].onLists).toBeUndefined();
+  });
+
+  it.each([true, false])('rechecks a journal retry (has approval: %s)', async (confirmed) => {
+    const { store, dealId, had } = await dealWith(2);
+    const first = addMark(had[0], 'The reserve replenishment period is not defined.', '1');
+    const second = addMark(had[1], 'The hedge covenant lacks a minimum term.', '2');
+    const list = { dealId, doc: DOC, list: LIST };
+    expect((await store.dispatch(ImportIssuesList, { ...list, points: [first] })).ok).toBe(true);
+    const approval = confirmed ? approvedRemoval(store, dealId) : { dealId, doc: DOC };
+    const repo = store.services.repo;
+    const transact = repo.transaction.bind(repo);
+    const hold = vi.spyOn(repo, 'transaction').mockImplementation((tx) => tx.writes.some((w) => w.kind === 'finding')
+      ? Promise.resolve(fail({ kind: 'failed', message: 'Write refused' })) : transact(tx));
+    expect(await store.dispatch(RemoveIssuesList, approval)).toMatchObject({ ok: false });
+    hold.mockRestore();
+    const failed = Object.values(store.get().ops)
+      .find((op) => op.command === 'RemoveIssuesList' && op.state === 'failed')!;
+    expect(failed.input).toEqual(approval);
+    expect((await store.dispatch(ImportIssuesList, { ...list, points: [second] })).ok).toBe(true);
+    expect(await store.retryOp(failed.id)).toMatchObject({ ok: false, error: { kind: 'rejected' } });
+    expect(had.map((id) => store.get().findings[id].onLists?.[0].text)).toEqual([first.text, second.text]);
+  });
+});
+/** Another PC's import of the same list reaches this PC after the removal was planned and before it commits (#410). */
+describe('removal while another PC changes the approved list', () => {
+  const listMark = (n: string, text: string) => ({ doc: DOC, list: LIST, n, text, at: '2026-11-17T09:00:00.000Z' });
+  const asked = (dealId: string) => portfolioQuestions().map((text, index) => Question.parse({
+    id: derivedId('q', [dealId, text]), dealId, n: index + 1, text, rev: 0,
+    createdAt: '2026-11-10T10:00:00.000Z', updatedAt: '2026-11-10T10:00:00.000Z',
+  }));
+
+  async function bigDeal() {
+    const { store, dealId } = await startDeal();
+    await seedEarlierFindings(store, dealId, 120);
+    const questions = asked(dealId);
+    expect(questions.length).toBeGreaterThan(2000);
+    const filed = await store.services.repo.transaction({
+      writes: questions.map((data) => ({ kind: 'question' as const, id: data.id, data, expectedRev: null })),
+      index: { dealId, add: questions.map(({ id }) => ({ kind: 'question' as const, id })) },
+      audit: [],
+    });
+    expect(filed.ok).toBe(true);
+    await store.loadDeal(dealId);
+    const had = findingIds(store, dealId);
+    const list = { dealId, doc: DOC, list: LIST };
+    const imported = await store.dispatch(ImportIssuesList, { ...list, points: [
+      addMark(had[0], 'Distributions are permitted before the debt service test.', '1'),
+      { n: '2', text: 'The hedge covenant lacks a minimum term.', title: 'Hedge covenant term', workstream: 'Legal' },
+    ] });
+    expect(imported.ok).toBe(true);
+    return { store, dealId, had };
+  }
+
+  type Peer = (store: Store, dealId: string, target: string) => Promise<unknown>;
+  const peers: Record<string, Peer> = {
+    'a mark on a finding the list was not on': async (store, _dealId, target) => {
+      const finding = store.get().findings[target];
+      const mark = listMark('3', 'The reserve replenishment period is not defined.');
+      return store.services.repo.transaction({
+        writes: [{ kind: 'finding', id: target, data: { ...finding, onLists: [mark] }, expectedRev: finding.rev }],
+        audit: [],
+      });
+    },
+    'a new finding on the list': async (store, dealId) => {
+      const mark = listMark('3', 'The reserve replenishment period is not defined.');
+      const finding = Finding.parse({
+        id: derivedId('f', [dealId, DOC, '3', 'reserve']), dealId, rev: 0, createdAt: mark.at, updatedAt: mark.at,
+        title: 'Reserve replenishment', workstream: 'Legal', raisedAt: mark.at, body: [mark.text], origin: 'human',
+        raisedBy: 'Peer', onLists: [mark], aiTitle: true, aiWorkstream: true,
+      });
+      return store.services.repo.transaction({
+        writes: [{ kind: 'finding', id: finding.id, data: finding, expectedRev: null }],
+        index: { dealId, add: [{ kind: 'finding', id: finding.id }] }, audit: [],
+      });
+    },
+  };
+
+  it.each(Object.keys(peers))('refuses the write when %s arrives before commit, in each way it runs', async (name) => {
+    for (const how of ['direct', 'queued', 'retry'] as const) {
+      const { store, dealId, had } = await bigDeal();
+      const approval = approvedRemoval(store, dealId);
+      const repo = store.services.repo;
+      const transact = repo.transaction.bind(repo);
+      let armed = how !== 'retry';
+      const removing = (tx: Parameters<typeof transact>[0]) =>
+        !!tx.audit?.some((entry) => entry.text === 'Issues list removed');
+      const spy = vi.spyOn(repo, 'transaction').mockImplementation(async (tx) => {
+        if (!removing(tx)) return transact(tx);
+        if (!armed) return fail({ kind: 'failed', message: 'Write refused' });
+        armed = false;
+        await peers[name](store, dealId, had[7]);
+        return transact(tx);
+      });
+      const edit = {
+        dealId, findingId: had[3], title: 'Finding 3, as edited', workstream: 'Legal', body: ['What finding 3 says.'],
+      };
+      const editing = how === 'queued' ? store.dispatch(EditFinding, edit) : undefined;
+      let result = await store.dispatch(RemoveIssuesList, approval);
+      await editing;
+      if (how === 'retry') {
+        const failed = Object.values(store.get().ops)
+          .find((op) => op.command === 'RemoveIssuesList' && op.state === 'failed')!;
+        armed = true;
+        result = (await store.retryOp(failed.id))!;
+      }
+      spy.mockRestore();
+      expect(result.ok).toBe(false);
+      // the stored records, not this window's copy: the refused removal left the peer's mark and every other mark on
+      const stored = await repo.list('finding', dealId);
+      const onList = (loaded: { envelope: { data: unknown } }) =>
+        (loaded.envelope.data as Finding).onLists?.some((mark) => mark.doc === DOC);
+      const marked = stored.ok ? stored.value.filter(onList) : [];
+      expect(marked.length).toBe(3);
+      const removed = await repo.list('tombstone', dealId);
+      expect(removed.ok && removed.value.length).toBe(0);
+    }
+  }, 120_000);
 });
 const findingIds = (store: Store, dealId: string) =>
   dealFindings(store.get(), dealId).map((finding) => finding.id).sort();

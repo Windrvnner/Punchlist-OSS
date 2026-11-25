@@ -9,7 +9,7 @@ import type { AiService, DocumentService, FileSystem, Session, Clock, Ids, Repos
 import { CHECK_REASON, type Deal, type Folder, type RecordKind } from '../domain/model';
 import { ok, fail, type Result } from '../domain/result';
 import { tellingWords } from '../domain/suggest';
-import { key, norm } from '../domain/checklist';
+import { key } from '../domain/checklist';
 import type { LineRead } from '../domain/listRead';
 import { suggestChecklistColumns, type ChecklistMapping } from '../domain/checklistImport';
 
@@ -514,7 +514,7 @@ async function mockChecklist(repo: Repository | undefined, dealId: string): Prom
   if (its?.ok && its.value.length) {
     const items = its.value.map((l) => l.envelope.data as { id: string; text: string; off?: boolean }).filter((it) => !it.off);
     const rows = mockChecked.has(dealId) || stored.length ? await sampleRows() : [];
-    return items.map((it) => { const r = rows.find((x) => norm(x.text).toLowerCase() === it.text.toLowerCase()); return r ? { ...r, id: it.id } : { id: it.id, text: it.text, result: 'unchecked' as const, docs: [] }; });
+    return items.map((it) => { const r = rows.find((x) => key(x.text) === key(it.text)); return r ? { ...r, id: it.id } : { id: it.id, text: it.text, result: 'unchecked' as const, docs: [] }; });
   }
   if (!mockChecked.has(dealId) && !stored.length) return [];
   return sampleRows();
@@ -581,9 +581,9 @@ export async function mockFirstPass(repo: Announcing, dealId: string, dealName: 
     },
   ].filter((f) => !titles.has(f.title));
   // as in the product, a finding names the deal's item whose check raised it, when the deal holds that sample item
-  const its = await repo.list('item', dealId); const itemOf = new Map((its.ok ? its.value : []).map((l) => l.envelope.data as { id: string; text: string }).map((it) => [it.text.toLowerCase(), it.id]));
+  const its = await repo.list('item', dealId); const itemOf = new Map((its.ok ? its.value : []).map((l) => l.envelope.data as { id: string; text: string }).map((it) => [key(it.text), it.id]));
   for (const f of seeds) {
-    const id = `f_${ulid()}`; const sample = MOCK_ITEMS.find((m) => m.finding === f.title); const item = sample && itemOf.get(norm(sample.text).toLowerCase());
+    const id = `f_${ulid()}`; const sample = MOCK_ITEMS.find((m) => m.finding === f.title); const item = sample && itemOf.get(key(sample.text));
     const data = {
       id, dealId, rev: 0, createdAt: now, updatedAt: now, title: f.title, workstream: f.workstream, status: 'open',
       raisedAt: now, body: f.body, sources: withIds(opts, dealId, f.sources), origin: 'ai', note: '', reviewed: null,
