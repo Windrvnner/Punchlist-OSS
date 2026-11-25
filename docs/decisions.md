@@ -98,7 +98,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A responder column is read as the response's author.
 - On import, real date cells are read as dates and plain numbers are not. An ambiguous date is settled by the row's other date, its neighbors, and the rule that no date is in the future; otherwise it is left blank and listed.
 - Marking imported questions that have a response as Answered is optional and off by default.
-- Merge matches a row to a question on sender plus text, preferring the same number but not requiring it; every row left over is a new question. A row that matches a deleted question brings it back. A row that names who submitted it never matches another party's question. "Will overwrite" is shown field by field first.
+- Merge matches a row by wording first, then by number; a row that matches a deleted question brings it back. A row that names who submitted it never matches another party's question. "Will overwrite" is shown field by field first.
 - Merge never matches a row to a question that names a different identifier: anything with a digit, a Roman numeral or code in capitals, a single capital letter, or a letter or numeral in parentheses or after a word such as class, tranche, part or clause (Class A and B, Tranche II and IV, clause 4(a) and 4(b)). A row matched by number alone names exactly the question's identifiers, in the same capitals (the SPA and the spa are two questions there); any other row is a question of its own. Otherwise spacing, capitals and punctuation alone never make identifiers differ (#125, #127, #128).
 - In a number, an I, l or O before a single digit, or an I or l before a point and a digit, is a letter (Facility I1 is l1 but not 11, Class I.1 is not 1.1); an I, l or O elsewhere in a number reads as 1 or 0 (I00, 2O24, O.5). The word I is not an identifier (#127, #128).
 - Spacing around the points of a reference after a word such as class or clause never changes its identifier
@@ -185,7 +185,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Answers cite sources sentence by sentence with a dotted underline, without numbered markers (#636). While a finding is being edited, each citation shows as a tag of at most 30 characters after its sentence (#636). An answer can become a finding, a question, or a response.
 - Cited phrases show the pointer cursor when they open a source. Hover-only citations keep the default cursor (#440).
 - Source chips keep the cited location and tags whole. The name shortens to fit and appears in full on hover (#441).
-- Chat is an agent with search, read, and folder tools. A folder read always covers the whole folder; reading more than `limits.folderDocs` documents asks first, and **Stop** answers from what was found.
+- Chat is an agent with search, read, folder, and brief tools. The brief tool catches up on a deal with the deal brief, two AI paragraphs on its open findings (#1017). A folder read always covers the whole folder; reading more than `limits.folderDocs` documents asks first, and **Stop** answers from what was found.
 - While chat works, it shows "Researching" with the full trace; once it has answered, it shows "Researched · N steps · N of M documents searched · time", never "read" (option D).
 - Tool calls run inline by default; the hybrid and native modes are set by `models.toolCalls`.
 - A question asked across deals reaches only the person's own deals.
