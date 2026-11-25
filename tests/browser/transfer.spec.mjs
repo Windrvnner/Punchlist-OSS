@@ -156,7 +156,7 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
   const questions = portfolioQuestions().slice(0, count);
   const before = 'Approval is pending.';
   const after = 'Approval is complete.';
-  async function openCsv(response) {
+  async function openCsv(page, response) {
     const rows = questions.map((question, index) => `${index + 1},"${question.replaceAll('"', '""')}",${response}`);
     const csv = file('merge-review.csv', ['Number,Question,Response', ...rows].join('\n'));
     await page.click('#qa-cols');
@@ -164,30 +164,58 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
     await page.setInputFiles('#im-file', csv);
     await page.waitForSelector('.immap');
   }
-  await openCsv(before);
+  await openCsv(page, before);
   await page.click('#im-go');
   await page.waitForSelector('.imdlg', { state: 'detached' });
-  await openCsv(after);
-  const table = page.locator('#im-changes');
-  await table.waitFor();
-  await table.locator('tbody tr').last().scrollIntoViewIfNeeded();
-
-  const preview = await table.evaluate((pane, { before, after }) => {
-    const rows = [...pane.querySelectorAll('tbody tr')];
-    const allPairsMatch = rows.every((row, index) => {
-      const cells = [...row.cells].map((cell) => cell.textContent);
-      return cells.join('|') === [String(index + 1), 'Response', before, after].join('|');
-    });
-    const frame = pane.getBoundingClientRect();
-    const last = rows.at(-1).getBoundingClientRect();
-    const lastVisible = pane.scrollTop > 0 && last.top >= frame.top && last.bottom <= frame.bottom;
-    return { rows: rows.length, allPairsMatch, lastVisible };
-  }, { before, after });
-  say('merge-previews-every-overwrite', preview.rows === count && preview.allPairsMatch && preview.lastVisible,
-    JSON.stringify(preview));
-  const saved = await qs(page, dealId);
-  say('merge-preview-leaves-responses-unchanged', saved.length === count && saved.every((q) => q.response === before));
+  const storageState = await ctx.storageState();
   await ctx.close();
+
+  async function checkPreview(colorScheme, width, height) {
+    const label = `${colorScheme}-${width}x${height}`;
+    const context = await browser.newContext({ colorScheme, viewport: { width, height }, storageState });
+    try {
+      const review = await context.newPage();
+      await review.goto(`${URL}#qa-${dealId}`);
+      await openCsv(review, after);
+      const table = review.locator('#im-changes');
+      await table.waitFor();
+      await table.locator('tbody tr').last().scrollIntoViewIfNeeded();
+
+      const preview = await table.evaluate((pane, { before, after }) => {
+        const rows = [...pane.querySelectorAll('tbody tr')];
+        const allPairsMatch = rows.every((row, index) => {
+          const cells = [...row.cells].map((cell) => cell.textContent);
+          return cells.join('|') === [String(index + 1), 'Response', before, after].join('|');
+        });
+        const last = rows.at(-1);
+        const frame = pane.getBoundingClientRect();
+        const row = last.getBoundingClientRect();
+        const cellsExposed = [...last.cells].every((cell) => {
+          const rect = cell.getBoundingClientRect();
+          return cell.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+        });
+        const lastVisible = pane.scrollTop > 0 && row.top >= frame.top && row.bottom <= frame.bottom && cellsExposed;
+        return { rows: rows.length, allPairsMatch, lastVisible, theme: document.documentElement.dataset.theme };
+      }, { before, after });
+      say(`merge-previews-every-overwrite-${label}`,
+        preview.rows === count && preview.allPairsMatch && preview.lastVisible && preview.theme === colorScheme,
+        JSON.stringify(preview));
+
+      const importReachable = await review.locator('#im-go').click({ trial: true, timeout: 3_000 })
+        .then(() => true, () => false);
+      say(`merge-import-stays-reachable-${label}`, importReachable);
+      const saved = await qs(review, dealId);
+      say(`merge-preview-leaves-responses-unchanged-${label}`,
+        saved.length === count && saved.every((question) => question.response === before));
+    } finally {
+      await context.close();
+    }
+  }
+
+  for (const theme of ['dark', 'light']) {
+    await checkPreview(theme, 1280, 736);
+    await checkPreview(theme, 1024, 640);
+  }
 }
 
 // ---- 2 Excel's two date systems: read through LibreOffice, tested in tests/backend/sheets.test.ts (the stand-in reads CSV only)
