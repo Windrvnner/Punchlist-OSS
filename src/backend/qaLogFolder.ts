@@ -45,18 +45,58 @@ function fit(name: string, rest: string): string {
   return n.trimEnd();
 }
 /**
- * writes a new file under the first free name: "<base><ext>", then "<base> (2)<ext>" and so on; never replaces one. A write
- * that fails part-way (a share that drops) takes its own half-written file away again, so no version is ever a partial one.
+ * writes a new file under the first free name: "<base><ext>", then "<base> (2)<ext>" and so on; never replaces one. The
+ * name is claimed first, with an exclusive open: from then on the file there is this call's own (no copy is ever
+ * replaced or renamed over), and a failure to claim takes nothing away (#21). The bytes go through the claimed handle,
+ * and the copy counts as written only when the handle closes cleanly and the name still holds that file. A write that
+ * fails part-way (a share that drops) takes away only that file, so no version is ever a partial one.
  */
 function create(dir: string, base: string, ext: string, bytes: Uint8Array): string {
   for (let k = 1; ; k++) {
-    const name = `${base}${k > 1 ? ` (${k})` : ''}${ext}`; const at = path.join(dir, name);
-    try { fs.writeFileSync(at, bytes, { flag: 'wx' }); return name; } catch (e) {
+    const name = `${base}${k > 1 ? ` (${k})` : ''}${ext}`;
+    const at = path.join(dir, name);
+    let fd: number;
+    try { fd = fs.openSync(at, 'wx'); } catch (e) {
       if ((e as NodeJS.ErrnoException).code === 'EEXIST' && k <= 99) continue;
-      try { if (fs.existsSync(at) && fs.statSync(at).size !== bytes.length) fs.rmSync(at); } catch { /* the share is gone: the next save finds the name taken and moves on */ }
+      throw e;   // nothing was claimed, so nothing is taken away
+    }
+    let mine: fs.BigIntStats | undefined;
+    try {
+      mine = fs.fstatSync(fd, { bigint: true });
+      fs.writeFileSync(fd, bytes);
+      const open = fd;
+      fd = -1;   // a closed handle's number may be given to another file: it is never used again
+      fs.closeSync(open);
+      if (identityOf(at, mine) === 'other') throw new Error('Another file took the name of the copy being written');
+      return name;
+    } catch (e) {
+      takeAway(at, fd, mine);
       throw e;
+    } finally {
+      if (fd >= 0) try { fs.closeSync(fd); } catch { /* already failing */ }
     }
   }
+}
+/**
+ * Whether `at` is still the file `claimed`: 'same' or 'other' by device, file number and creation time, or 'unknown'
+ * when the share gives no file number or creation time to tell files apart by.
+ */
+function identityOf(at: string, claimed: fs.BigIntStats): 'same' | 'other' | 'unknown' {
+  const now = fs.lstatSync(at, { bigint: true });
+  if (claimed.ino === 0n || claimed.birthtimeNs === 0n) return 'unknown';
+  const same = now.ino === claimed.ino && now.dev === claimed.dev && now.birthtimeNs === claimed.birthtimeNs;
+  return same ? 'same' : 'other';
+}
+/**
+ * Empties the file claimed as `fd` (if its handle is still open), which only touches that file, then removes `at` if it
+ * is still that file. A file another PC put there since (even one given a freed file number) stays. Where a share
+ * cannot tell files apart, an empty file stays: the next save moves on to the next name.
+ */
+function takeAway(at: string, fd: number, claimed: fs.BigIntStats | undefined): void {
+  if (fd >= 0) try { fs.ftruncateSync(fd, 0); } catch { /* the removal below is tried all the same */ }
+  try {
+    if (claimed && identityOf(at, claimed) === 'same') fs.rmSync(at);
+  } catch { /* the share is gone: the next save finds the name taken and moves on */ }
 }
 export type LogSave = { status: 'written'; archive: string } | { status: 'later'; by?: string };
 
