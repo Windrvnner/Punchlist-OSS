@@ -1,7 +1,7 @@
 import { followCopies, keepAttachments } from './attachments';
 import { initializeComposerDrafts } from './conversations';
-import { initializeResponseMergeDrafts } from './drafting';
-import { staleKept } from './fieldDrafts';
+import { initializeResponseMergeDrafts, keepResolvedMerges } from './drafting';
+import { handFieldText, staleKept } from './fieldDrafts';
 import { renameKept } from './keptText';
 import type { Store } from './store';
 
@@ -12,7 +12,9 @@ export function startKeepingDrafts(store: Store): () => void {
   const stopAttachments = keepAttachments(store);
   const stopCopies = followCopies(store);
   const stopRenames = store.onRenamed((ids) => renameKept(ids, staleKept));
+  const stopMerges = keepResolvedMerges(store, handFieldText);
   return () => {
+    stopMerges();
     stopRenames();
     stopCopies();
     stopAttachments();
