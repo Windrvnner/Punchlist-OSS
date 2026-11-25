@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { byDocument } from '../../src/ui/ref';
+import { byDocument } from '../../src/app/citations';
 
 // a pop and a finding's list of sources count and list documents, each with its places
 describe('byDocument', () => {
