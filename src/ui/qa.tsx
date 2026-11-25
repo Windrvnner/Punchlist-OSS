@@ -56,7 +56,6 @@ export function QaPage({ dealId }: { dealId: string }) {
   const { list, outsideFilter, selected: sel } = view;
   const hide = view.oneStatus ? { ...s.prefs.hideCols, status: true } : s.prefs.hideCols;
   // The table is always the full table: an open question goes across the top of the page instead (design G)
-  const wide = true;
   // In the full table nothing is selected, so the keyboard has a place of its own: the row the arrows last reached.
   const [cursor, setCursor] = useState<string | null>(null);
   const at = sel?.id ?? (cursor && list.some((r) => r.id === cursor) ? cursor : list[0]?.id ?? null);
@@ -192,7 +191,7 @@ export function QaPage({ dealId }: { dealId: string }) {
     if (sel) select(list[j].id); else setCursor(list[j].id);      // with the pane open the arrows change the open question; in the full table they only move, and Enter opens
     reveal(j); focusRow(list[j].id);
   };
-  const cols = ['auto', !hide.priority && 'auto', !hide.askedBy && 'auto', wide ? 'minmax(170px,1.1fr)' : 'minmax(0,1fr)', wide && !hide.response && 'minmax(140px,1fr)',   /* the two text columns keep a width worth reading; names and dates give way first */ wide && !hide.respondedBy && 'auto', wide && !hide.responded && 'auto', wide && !hide.status && 'auto'].filter(Boolean).join(' ');
+  const cols = ['auto', !hide.priority && 'auto', !hide.askedBy && 'auto', 'minmax(170px,1.1fr)', !hide.response && 'minmax(140px,1fr)',   /* the two text columns keep a width worth reading; names and dates give way first */ !hide.respondedBy && 'auto', !hide.responded && 'auto', !hide.status && 'auto'].filter(Boolean).join(' ');
   // While the new question is being saved the detail pane still shows the previous one. It is made inert for
   // that moment so nothing typed lands in the wrong question — with a real backend the save takes a while.
   const [adding, setAdding] = useState(false);
@@ -218,10 +217,10 @@ export function QaPage({ dealId }: { dealId: string }) {
       <section class="tracker">
         <SettledLine dealId={dealId} />
         <QaTools dealId={dealId} view={view} ro={ro} onAdd={() => void add()} />
-        {wide && load === 'loaded' && list.length > 0 && <Heads listRef={listRef} />}
-        <div class={`md ${wide ? 'wide' : ''} ${hide.priority ? 'nopr' : ''} ${hide.askedBy ? 'noby' : ''}`} onKeyDown={(e) => { if (e.key === 'Escape' && sel && !e.defaultPrevented) { e.preventDefault(); close(); } }}>
+        {load === 'loaded' && list.length > 0 && <Heads listRef={listRef} />}
+        <div class={`md wide ${hide.priority ? 'nopr' : ''} ${hide.askedBy ? 'noby' : ''}`} onKeyDown={(e) => { if (e.key === 'Escape' && sel && !e.defaultPrevented) { e.preventDefault(); close(); } }}>
           <div class="list" role="listbox" aria-label="Questions" ref={listRef} onKeyDown={onKey} onScroll={onScroll} style={`grid-template-columns:${cols}`}>
-            {wide && load === 'loaded' && list.length > 0 && <div class="lh" aria-hidden="true" data-sizes><span
+            {load === 'loaded' && list.length > 0 && <div class="lh" aria-hidden="true" data-sizes><span
               class="n">#</span>{!hide.priority && <span>Priority</span>}{!hide.askedBy &&
               <span>Submitted By</span>}<span>Question</span>{!hide.response &&
               <span>Response</span>}{!hide.respondedBy && <span>Responded By</span>}{!hide.responded &&
@@ -240,10 +239,10 @@ export function QaPage({ dealId }: { dealId: string }) {
                     else if (sel?.id === r.id && e.detail === 0) intoPanel();
                     else select(r.id);
                   }}>
-                  <QaRow r={r} hide={hide} wide={wide} versions={qaVersions(s, r)} changed={qaChanged(s, r)}
+                  <QaRow r={r} hide={hide} versions={qaVersions(s, r)} changed={qaChanged(s, r)}
                     was={d.qaLogs[0]?.last?.changed?.[r.id]} mark={mark(r)} waiting={waiting(r)} beside={beside(r)}
                     draftNote={waiting(r) ? rowDraftNote(r) : ''} />
-                </button>)), ...(big ? [<div key="vend" aria-hidden="true" style={{ height: `${(list.length - shownTo) * rowH.current}px` }} />, <Sizer key="vsize" list={list} wide={wide} hide={hide} />] : [])]
+                </button>)), ...(big ? [<div key="vend" aria-hidden="true" style={{ height: `${(list.length - shownTo) * rowH.current}px` }} />, <Sizer key="vsize" list={list} hide={hide} />] : [])]
               : <p class="emptyline" id="qa-empty" style="padding:28px 12px">{view.hasQuestions ? <>Nothing matches
                 {F.text || F.workstream ? <>. <button type="button" class="linkb" id="qa-clear"
                   onClick={() => store.ui({ qaFilter: { ...F, text: '', workstream: '' } })}>Clear the filter</button>
@@ -911,8 +910,8 @@ const FIELD_NAME: Record<string, string> = { text: 'Question', askedBy: 'Submitt
  * Response cell says only "Two versions", in --high (the Status cell does, with the Response column off); a cell taken in
  * from the Q&A log at the last update, and not yet seen by this person, has the log icon at its right, its value in full ink.
  */
-function QaRow({ r, hide, wide, versions, changed, was = {}, mark, waiting, beside, draftNote }: { r: Question; hide: Record<string, boolean>; wide: boolean; versions: string; changed: string[]; /** what each changed field held before, for the tooltip */ was?: Record<string, string>; mark: string; waiting: string; /** a ready draft beside a response, for the cell's tooltip */ beside: string; draftNote: string }) {
-  const shown = (c: string) => ({ pr: !hide.priority, by: !hide.askedBy, q: true, rs: wide && !hide.response, rby: wide && !hide.respondedBy, rdt: wide && !hide.responded, stc: wide && !hide.status })[c];
+function QaRow({ r, hide, versions, changed, was = {}, mark, waiting, beside, draftNote }: { r: Question; hide: Record<string, boolean>; versions: string; changed: string[]; /** what each changed field held before, for the tooltip */ was?: Record<string, string>; mark: string; waiting: string; /** a ready draft beside a response, for the cell's tooltip */ beside: string; draftNote: string }) {
+  const shown = (c: string) => ({ pr: !hide.priority, by: !hide.askedBy, q: true, rs: !hide.response, rby: !hide.respondedBy, rdt: !hide.responded, stc: !hide.status })[c];
   // a changed field with no column showing marks the question cell
   const at = new Set(changed.map((k) => (COLUMN[k] && shown(COLUMN[k]) ? COLUMN[k] : 'q')));
   const names = (c: string) => changed.filter((k) => (COLUMN[k] && shown(COLUMN[k]) ? COLUMN[k] : 'q') === c).map((k) => FIELD_NAME[k] ?? k).join(', ');
@@ -955,11 +954,11 @@ function Heads({ listRef }: { listRef: RefObject<HTMLDivElement | null> }) {
 }
 
 /** A hidden row holding each column's widest value, so a long list drawn a part at a time keeps its column widths. */
-function Sizer({ list, wide, hide }: { list: Question[]; wide: boolean; hide: Record<string, boolean> }) {
+function Sizer({ list, hide }: { list: Question[]; hide: Record<string, boolean> }) {
   const widest = (f: (r: Question) => string) => list.reduce((w, r) => { const v = f(r) ?? ''; return v.length > w.length ? v : w; }, '');
   return (
     <div class="li vsize" aria-hidden="true">
-      <span class="n">{widest((r) => String(r.n))}</span>{!hide.priority && <span class="pr">{widest((r) => r.priority)}</span>}{!hide.askedBy && <span class="by">{widest((r) => r.askedBy)}</span>}<span class="q" />{wide && !hide.response && <span class="rs" />}{wide && !hide.respondedBy && <span class="rby">{widest((r) => r.respondedBy)}</span>}{wide && !hide.responded && <span class="rdt">{widest((r) => fmtDate(r.responded))}</span>}{wide && !hide.status && <span class="stc">{widest((r) => STATUS_LABEL[r.status])}</span>}
+      <span class="n">{widest((r) => String(r.n))}</span>{!hide.priority && <span class="pr">{widest((r) => r.priority)}</span>}{!hide.askedBy && <span class="by">{widest((r) => r.askedBy)}</span>}<span class="q" />{!hide.response && <span class="rs" />}{!hide.respondedBy && <span class="rby">{widest((r) => r.respondedBy)}</span>}{!hide.responded && <span class="rdt">{widest((r) => fmtDate(r.responded))}</span>}{!hide.status && <span class="stc">{widest((r) => STATUS_LABEL[r.status])}</span>}
     </div>
   );
 }
