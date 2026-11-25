@@ -1,6 +1,7 @@
 import { launchChrome } from './chrome.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { openOnFindings } from './landing.mjs';
+import { portfolioQuestions } from '../fixtures/portfolioQuestions.ts';
 
 /** the stand-in exports CSV (the app itself writes .xlsx through LibreOffice): read it back the way Excel would */
 const readCsvFile = (file) => { const t = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''); const rows = []; let row = [], f = '', q = false;
@@ -145,6 +146,77 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
   say('import-seen-in-second-tab', (await page2.evaluate(() => document.querySelectorAll('.md .li').length)) === before2 + 1);
   say('no-page-errors-1', page.errors.length === 0 && true, JSON.stringify(page.errors));
   await ctx.close(); }
+
+// A complete, scrollable overwrite preview for a deal-scale merge (#272).
+{
+  const { ctx, page } = await fresh();
+  const dealId = await newDeal(page, 'Import review');
+  await page.goto(`${URL}#qa-${dealId}`);
+  const count = 2_000;
+  const questions = portfolioQuestions().slice(0, count);
+  const before = 'Approval is pending.';
+  const after = 'Approval is complete.';
+  async function openCsv(page, response) {
+    const rows = questions.map((question, index) => `${index + 1},"${question.replaceAll('"', '""')}",${response}`);
+    const csv = file('merge-review.csv', ['Number,Question,Response', ...rows].join('\n'));
+    await page.click('#qa-cols');
+    await page.click('#qa-import');
+    await page.setInputFiles('#im-file', csv);
+    await page.waitForSelector('.immap');
+  }
+  await openCsv(page, before);
+  await page.click('#im-go');
+  await page.waitForSelector('.imdlg', { state: 'detached' });
+  const storageState = await ctx.storageState();
+  await ctx.close();
+
+  async function checkPreview(colorScheme, width, height) {
+    const label = `${colorScheme}-${width}x${height}`;
+    const context = await browser.newContext({ colorScheme, viewport: { width, height }, storageState });
+    try {
+      const review = await context.newPage();
+      await review.goto(`${URL}#qa-${dealId}`);
+      await openCsv(review, after);
+      const table = review.locator('#im-changes');
+      await table.waitFor();
+      await table.locator('tbody tr').last().scrollIntoViewIfNeeded();
+
+      const preview = await table.evaluate((pane, { before, after }) => {
+        const rows = [...pane.querySelectorAll('tbody tr')];
+        const allPairsMatch = rows.every((row, index) => {
+          const cells = [...row.cells].map((cell) => cell.textContent);
+          return cells.join('|') === [String(index + 1), 'Response', before, after].join('|');
+        });
+        const last = rows.at(-1);
+        const frame = pane.getBoundingClientRect();
+        const row = last.getBoundingClientRect();
+        const cellsExposed = [...last.cells].every((cell) => {
+          const rect = cell.getBoundingClientRect();
+          return cell.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+        });
+        const lastVisible = pane.scrollTop > 0 && row.top >= frame.top && row.bottom <= frame.bottom && cellsExposed;
+        return { rows: rows.length, allPairsMatch, lastVisible, theme: document.documentElement.dataset.theme };
+      }, { before, after });
+      say(`merge-previews-every-overwrite-${label}`,
+        preview.rows === count && preview.allPairsMatch && preview.lastVisible && preview.theme === colorScheme,
+        JSON.stringify(preview));
+
+      const importReachable = await review.locator('#im-go').click({ trial: true, timeout: 3_000 })
+        .then(() => true, () => false);
+      say(`merge-import-stays-reachable-${label}`, importReachable);
+      const saved = await qs(review, dealId);
+      say(`merge-preview-leaves-responses-unchanged-${label}`,
+        saved.length === count && saved.every((question) => question.response === before));
+    } finally {
+      await context.close();
+    }
+  }
+
+  for (const theme of ['dark', 'light']) {
+    await checkPreview(theme, 1280, 736);
+    await checkPreview(theme, 1024, 640);
+  }
+}
 
 // ---- 2 Excel's two date systems: read through LibreOffice, tested in tests/backend/sheets.test.ts (the stand-in reads CSV only)
 
