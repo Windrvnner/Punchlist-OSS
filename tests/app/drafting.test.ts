@@ -113,3 +113,93 @@ it('refuses replacement after a colleague changes the response and leaves the ty
   expect(unsavedFields.get(`${q.id}:response`)).toEqual(entry);
 });
 
+const LOG_NAME = 'Portfolio Q&A.csv';
+const LOG_DATE = '2026-11-20T11:00:00.000Z';
+const APP_RESPONSE = 'The operating permits are indexed in the Compliance folder.';
+const LOG_RESPONSE = 'The transmission permit was renewed in November.';
+const MERGED = `${APP_RESPONSE} ${LOG_RESPONSE}`;
+
+async function mergeFixture() {
+  const app = await fixture();
+  const { store, dealId, rows, question } = app;
+  const q = question(165);
+  expect(await store.dispatch(SetResponse, {
+    dealId, questionId: q.id, response: APP_RESPONSE,
+  }, { quiet: true })).toMatchObject({ ok: true });
+  expect(await keepImportedLog(store, dealId, {
+    path: `X:\\Deals\\Portfolio\\${LOG_NAME}`, sheet: 'Log', headerRow: 1, mapping: MAPPING, make: true, rows,
+  })).toMatchObject({ ok: true });
+  expect(await store.dispatch(RecordQaLogExport, {
+    dealId, name: LOG_NAME.replace(/\.csv$/, ''),
+    last: {
+      archive: 'Previous lender Q&A.csv', at: LOG_DATE, by: 'Deal team', sent: {},
+      kept: { [q.id]: { response: LOG_RESPONSE, priority: 'High' } },
+    },
+  }, { quiet: true })).toMatchObject({ ok: true });
+  expect(hasLogVersion(store.get(), question(165))).toBe(true);
+  const model = vi.fn<NonNullable<AiService['merge']>>().mockResolvedValue(ok({ text: MERGED }));
+  store.services.ai.merge = model;
+  return { store, dealId, model, q: question(165) };
+}
+
+it('drafts the displayed versions once, keeps edits and field choices, and preserves the choice’s Undo', async () => {
+  const { store, dealId, model, q } = await mergeFixture();
+  expect(await lastQuestionEditor(store, q.id)).toBe(store.get().user?.name);
+  expect(selectResponseMerge(store, q, LOG_RESPONSE)).toMatchObject({ busy: true });
+  expect(selectResponseMerge(store, q, LOG_RESPONSE)).toMatchObject({ busy: true });
+  await vi.waitFor(() => expect(responseMergeView(q.id).draft).toEqual({ text: MERGED, ai: MERGED }));
+  expect(model).toHaveBeenCalledExactlyOnceWith({
+    dealId, question: q.text, app: APP_RESPONSE, log: LOG_RESPONSE,
+  });
+  editResponseMerge(q.id, TYPED);
+  setResponseMergeSide(q.id, 'priority', 'log');
+  saveKeptDrafts();
+  expect(storage.read(KEPT_TEXT_KEY)).toMatchObject({
+    'qa-merge': [[q.id, { text: TYPED, ai: MERGED }]],
+    'qa-merge-sides': [[q.id, { priority: 'log' }]],
+  });
+  delete store.services.ai.merge;
+  expect(selectResponseMerge(store, q, LOG_RESPONSE)).toEqual({ text: TYPED, busy: false });
+  expect(selectResponseMerge(store, q, LOG_RESPONSE, true)).toBeUndefined();
+  const stale = await keepResponseVersion(store, dealId, q.id, 'merged', TYPED, '2026-11-20T10:00:00.000Z');
+  expect(stale).toMatchObject({ ok: false, error: { kind: 'rejected' } });
+  expect(responseMergeView(q.id)).toMatchObject({ draft: { text: TYPED }, fields: { priority: 'log' } });
+  const used = await keepResponseVersion(store, dealId, q.id, 'merged', TYPED, LOG_DATE);
+  if (!used.ok) throw new Error(used.error.message);
+  expect(store.get().questions[q.id])
+    .toMatchObject({ response: TYPED, priority: 'High', provenance: { origin: 'human' } });
+  expect(responseMergeView(q.id)).toMatchObject({ hasDraft: false, fields: {} });
+  expect(await store.undo(used.value.opId)).toMatchObject({ ok: true });
+  expect(store.get().questions[q.id]).toMatchObject({ response: APP_RESPONSE, priority: q.priority });
+  expect(hasLogVersion(store.get(), store.get().questions[q.id])).toBe(true);
+});
+
+it('reports a failed merge quietly and leaves later typing intact when the retry lands', async () => {
+  const { store, model, q } = await mergeFixture();
+  const landed = vi.fn();
+  const stop = watchResponseMerges(landed);
+  const previousToasts = store.get().ui.toasts;
+  model.mockResolvedValueOnce(fail({ kind: 'failed', message: 'The draft could not be completed' }));
+  try {
+    selectResponseMerge(store, q, LOG_RESPONSE);
+    await vi.waitFor(() => expect(landed).toHaveBeenCalledWith(q.id, 'The draft could not be completed'));
+    expect(responseMergeView(q.id)).toMatchObject({ busy: false, hasDraft: false });
+    expect(store.get().ui.toasts).toEqual(previousToasts);
+
+    expect(selectResponseMerge(store, q, LOG_RESPONSE, true)).toMatchObject({ busy: true });
+    await vi.waitFor(() => expect(responseMergeView(q.id).draft?.text).toBe(MERGED));
+    expect(store.get().ui.toasts).toEqual(previousToasts);
+
+    const reply = Promise.withResolvers<Result<{ text: string }>>();
+    model.mockReturnValueOnce(reply.promise);
+    expect(selectResponseMerge(store, q, LOG_RESPONSE, true)).toMatchObject({ busy: true });
+    editResponseMerge(q.id, TYPED);
+    reply.resolve(ok({ text: MERGED }));
+    await vi.waitFor(() => expect(landed).toHaveBeenCalledTimes(3));
+    expect(landed).toHaveBeenLastCalledWith(q.id, undefined);
+    expect(responseMergeView(q.id)).toMatchObject({ busy: false, draft: { text: TYPED, ai: MERGED } });
+    expect(model).toHaveBeenCalledTimes(3);
+  } finally {
+    stop();
+  }
+});
