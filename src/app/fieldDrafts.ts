@@ -1,4 +1,5 @@
 import { hasTexts, keptDrafts } from './keptText';
+import type { Question } from '../domain/model';
 import type { State } from './state';
 
 export type FieldValue = { value: string; rev: number };
@@ -15,6 +16,12 @@ export const staleKept = (value: unknown) => (isKept(value) ? { ...value, rev: -
 export const keepsUnsaved = (keep: string) => unsavedFields.has(keep);
 export const unsavedText = (keep: string) => unsavedFields.get(keep)?.text;
 export const unsavedBase = (keep: string) => unsavedFields.get(keep)?.base;
+
+/** Text typed into a question's response box that still differs from the saved response. */
+export function typedResponse(question: Question): boolean {
+  const text = unsavedText(`${question.id}:response`);
+  return text !== undefined && text !== question.response && !!text.trim();
+}
 
 /** A save may have landed after the field went away. Restore just the text the record still does not hold. */
 export function restoreFieldDraft(keep: string | undefined, value: string): FieldDraft | undefined {

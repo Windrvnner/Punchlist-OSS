@@ -1,13 +1,12 @@
-import { useAppState, useStore, fmtDateTime, fmtDateTimeSeconds } from './hooks';
+import { useAppState, useStore, fmtDateTime } from './hooks';
 import { Modal } from './dialogs';
 import { Icon } from './icons';
 import { RestoreFinding } from '../app/commands/findings';
 import { RestoreQuestion } from '../app/commands/questions';
 import { RemoveIssuesList } from '../app/commands/issuesList';
-import { removableIssuesLists, visibleDeletedNotes } from '../app/deletedView';
-import { bare } from './issuesList';
+import { deletedGroups, deletedIssuesLists, visibleDeletedNotes, type DeletedRow } from '../app/deletedView';
 import { type Finding, type Question } from '../domain/model';
-import { RestoreVersion, type ShownNote, type DeletedCopy } from '../app/commands/keptVersions';
+import { RestoreVersion } from '../app/commands/keptVersions';
 
 /**
  * What has been deleted from a deal and can be put back. A delete still asks first: few people would think to look
@@ -16,22 +15,6 @@ import { RestoreVersion, type ShownNote, type DeletedCopy } from '../app/command
  * response (or detail) that tells them apart, whole.
  */
 const plural = (n: number, w: string) => `${n.toLocaleString('en-US')} ${w}${n === 1 ? '' : 's'}`;
-export const deletedOf = visibleDeletedNotes;
-
-/** One row: a deletion note or entry, or one of a note's other copies. */
-interface Row { key: string; t: ShownNote; copy?: DeletedCopy; snapshot: unknown; at: string; actor: string; from?: string }
-const rowsOf = (notes: ShownNote[]): Row[] => notes.flatMap((t) => [{ key: t.id, t, snapshot: t.snapshot, at: t.at, actor: t.actor, from: t.from }, ...(t.copies ?? []).map((c) => ({ key: `${t.id}@${c.ver}`, t, copy: c, snapshot: c.snapshot, at: c.at, actor: c.actor, from: c.from }))]).sort((a, b) => b.at.localeCompare(a.at));
-
-/**
- * The issues lists on a deal that can still be removed: a list with findings of its own nobody has changed since,
- * or marks on findings its points joined. The Deleted list is where an import is taken back once its notice has gone.
- */
-export const listsOf = (...args: Parameters<typeof removableIssuesLists>) => {
-  const out = removableIssuesLists(...args);
-  // to the second when two of them came in within the same minute
-  return out.map((l) => { const twins = out.filter((o) => o !== l && bare(o.list) === bare(l.list)); return { ...l, twin: twins.length > 0, when: !l.at ? '' : twins.some((o) => o.at && fmtDateTime(o.at) === fmtDateTime(l.at)) ? fmtDateTimeSeconds(l.at) : fmtDateTime(l.at) }; });
-};
-
 /** A group's label in title style, with how many it holds beside it in gray. */
 function GroupLabel({ label, count }: { label: string; count: number }) {
   return <div class="lbl">{label}<span class="n">{count.toLocaleString('en-US')}</span></div>;
@@ -40,14 +23,14 @@ function GroupLabel({ label, count }: { label: string; count: number }) {
 export function DeletedDialog({ dealId }: { dealId: string }) {
   const store = useStore(); const s = useAppState();
   const close = () => store.ui({ dialog: null });
-  const all = rowsOf(deletedOf(s, dealId));
-  const groups = ([['finding', 'Findings'], ['question', 'Questions']] as const).map(([k, label]) => ({ k, label, rows: all.filter((r) => r.t.kind === k) })).filter((g) => g.rows.length);
-  const lists = listsOf(s, dealId);
+  const groups = deletedGroups(s, dealId);
+  const lists = deletedIssuesLists(s, dealId);
   // with the last one put back there is nothing left to show: the dialog closes, and because the button that opened it
   // has gone with the list, the focus goes to the page's list instead of to nowhere
   const buttons = () => [...document.querySelectorAll<HTMLElement>('.deldlg [data-restore]')];
-  const restore = (r: Row) => {
-    const { t } = r; const copy = r.copy ? { copy: r.copy.ver } : {};
+  const restore = (r: DeletedRow) => {
+    const { t } = r;
+    const copy = r.copy ? { copy: r.copy.ver } : {};
     return act(r.key, () => (t.of
       ? store.dispatch(RestoreVersion, { dealId, entryId: t.id }, { idempotencyKey: 'restore-' + t.id })
       : t.kind === 'finding'
@@ -61,13 +44,26 @@ export function DeletedDialog({ dealId }: { dealId: string }) {
     if (!(await run()).ok) return;
     // its row has gone with the button that had the focus: the focus goes to the button that took its place, else the last one
     // (two frames: a removed list's findings are new rows, drawn a frame later)
-    if (deletedOf(store.get(), dealId).length || listsOf(store.get(), dealId).length) { requestAnimationFrame(() => requestAnimationFrame(() => { const left = buttons(); if (at >= 0 && left.length && (!document.activeElement || document.activeElement === document.body)) left[Math.min(at, left.length - 1)].focus(); })); return; }
+    const current = store.get();
+    if (visibleDeletedNotes(current, dealId).length || deletedIssuesLists(current, dealId).length) {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const left = buttons();
+        if (at >= 0 && left.length && (!document.activeElement || document.activeElement === document.body)) {
+          left[Math.min(at, left.length - 1)].focus();
+        }
+      }));
+      return;
+    }
     close();
     requestAnimationFrame(() => { if (!document.activeElement || document.activeElement === document.body) (document.querySelector<HTMLElement>('.flags .flagrow, .md .li[tabindex="0"]') ?? document.getElementById('view'))?.focus({ preventScroll: true }); });
   };
-  const text = (r: Row) => r.t.kind === 'finding' ? ((r.snapshot as Finding | undefined)?.title || r.t.title) : ((r.snapshot as Question | undefined)?.text || r.t.title || 'No text');
+  const text = (row: DeletedRow) => row.t.kind === 'finding'
+    ? (row.snapshot as Finding | undefined)?.title || row.t.title
+    : (row.snapshot as Question | undefined)?.text || row.t.title || 'No text';
   // what tells two versions of one record apart: a question's response, a finding's detail
-  const said = (r: Row) => r.t.kind === 'question' ? ((r.snapshot as Question | undefined)?.response ?? '') : ((r.snapshot as Finding | undefined)?.body ?? []).join('\n\n');
+  const said = (row: DeletedRow) => row.t.kind === 'question'
+    ? (row.snapshot as Question | undefined)?.response ?? ''
+    : ((row.snapshot as Finding | undefined)?.body ?? []).join('\n\n');
   return (
     <Modal onClose={close} label="Deleted" blur className="sdlg deldlg">
       <div class="shead"><h2>Deleted</h2><button type="button" class="x" aria-label="Close" title="Close (Esc)" onClick={close}><Icon name="close" size={15} /></button></div>
@@ -75,8 +71,9 @@ export function DeletedDialog({ dealId }: { dealId: string }) {
       <div class="delscroll" tabIndex={-1} role="group" aria-label="Deleted items" data-autofocus={groups.length ? true : undefined}>
         {!groups.length && !lists.length && <p class="emptyline" id="del-none">Nothing deleted on {s.deals[dealId]?.name ?? 'this deal'}.</p>}
         {groups.map((g) => (
-          <div key={g.k}>
-            {(groups.length > 1 || lists.length > 0) && <GroupLabel label={g.label} count={g.rows.length} />}
+          <div key={g.kind}>
+            {(groups.length > 1 || lists.length > 0) && (
+              <GroupLabel label={g.kind === 'finding' ? 'Findings' : 'Questions'} count={g.rows.length} />)}
             {g.rows.map((r) => { const who = r.actor.split(' · ')[0]; const q = r.t.kind === 'question' ? (r.snapshot as Question | undefined) : undefined; const words = r.from ? said(r) : null;
               return (
               <div class={`delrow ${r.from ? 'twin' : ''} ${q ? '' : 'nocode'}`} key={r.key} data-del={r.t.kind}>
@@ -92,7 +89,12 @@ export function DeletedDialog({ dealId }: { dealId: string }) {
             <GroupLabel label="Issues Lists" count={lists.length} />
             {lists.map((l) => (
               <div class="delrow nocode" key={l.doc} data-del="list">
-                <span class="dtext"><b title={l.list}>{bare(l.list)}</b><span class="dmeta">{l.twin && l.when ? `Imported ${l.when} · ` : ''}{plural(l.made.length, 'finding')} · {l.raised.toLocaleString('en-US')} already raised</span></span>
+                <span class="dtext"><b title={l.list}>{l.title}</b>
+                  <span class="dmeta">
+                    {l.twin && l.when ? `Imported ${l.when} · ` : ''}
+                    {`${plural(l.made.length, 'finding')} · ${l.raised.toLocaleString('en-US')} already raised`}
+                  </span>
+                </span>
                 <button type="button" class="btn sm" data-restore={'list:' + l.doc} title={`Send its ${plural(l.made.length, 'finding')} to Deleted and take its marks off the findings it joined${l.kept ? `. ${plural(l.kept, 'finding')} changed since ${l.kept === 1 ? 'stays' : 'stay'}` : ''}`} onClick={() => void remove(l.doc)}>Remove</button>
               </div>))}
           </div>)}

@@ -4,7 +4,7 @@
  * record is written once, through a command, when indexing finishes. Stops when the deal disappears.
  */
 import type { Store } from './store';
-import { RecordIndexingProgress } from './commands/deals';
+import { pathKey, RecordIndexingProgress } from './commands/deals';
 import type { Deal, Folder } from '../domain/model';
 import type { DealProgress, FolderSearch } from '../ports';
 import type { State } from './state';
@@ -190,6 +190,18 @@ const away = (kind: string) => kind === 'notFound';
 /** the "Couldn't start indexing" notice showing for each deal, so a second failure replaces it rather than adding another */
 const noticesOf = new WeakMap<Store, Map<string, number>>();
 const stalled = (store: Store, dealId: string, on: boolean) => store.ui((ui) => ({ indexStalled: on ? [...new Set([...ui.indexStalled, dealId])] : ui.indexStalled.filter((x) => x !== dealId) }));
+
+/** A re-added folder can return to its old row, so select the committed paths by identity. */
+export function indexCommittedFolders(store: Store, dealId: string, paths: string[]) {
+  const deal = store.get().deals[dealId];
+  if (!deal) return;
+  const folders = new Map(deal.folders.map((folder) => [pathKey(folder.path), folder]));
+  const requested = paths.flatMap((path) => {
+    const folder = folders.get(pathKey(path));
+    return folder ? [folder] : [];
+  });
+  if (requested.length) void startIndexing(store, dealId, requested);
+}
 
 export async function startIndexing(store: Store, dealId: string, folders: Folder[]) {
   if (!store.get().deals[dealId]) return;                  // the deal has gone (a Retry pressed on a notice that outlived it): nothing is started for it

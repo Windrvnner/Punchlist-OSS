@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { pc, carry, settle, syncAll, twoPcs, okd, type PC } from './pcs';
 import '../ui/keptTextSession';
-import { deletedOf } from '../../src/ui/deleted';
+import { visibleDeletedNotes as deletedOf } from '../../src/app/deletedView';
 import { DeleteDeal } from '../../src/app/commands/deals';
 import { EditQuestionField, SetResponse, DeleteQuestion, RestoreQuestion } from '../../src/app/commands/questions';
 import { EditFinding, DeleteFinding, RestoreFinding } from '../../src/app/commands/findings';
