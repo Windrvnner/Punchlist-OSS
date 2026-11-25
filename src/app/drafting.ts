@@ -225,6 +225,8 @@ function typedMerge(draft: MergeDraft, question: Question): boolean {
 
 /** set while the app watches for resolved merges: fieldDrafts loads only after kept text is read, so it is passed in */
 let handText: typeof handFieldText | undefined;
+/** the state the kept merges were last settled against */
+let settledFrom: State | undefined;
 
 /**
  * A kept merge whose question has no versions left (resolved on another PC, or settled by a log update) is cleared.
@@ -233,6 +235,7 @@ let handText: typeof handFieldText | undefined;
  */
 function settleResolvedMerges(state: State) {
   if (!handText) return;
+  settledFrom = state;
   for (const [questionId, draft] of [...mergeDrafts()]) {
     if (!settledQuestion(state, questionId)) continue;
     const question = state.questions[questionId];
@@ -256,10 +259,15 @@ function settledQuestion(state: State, questionId: string): boolean {
 export function keepResolvedMerges(store: Store, hand: typeof handFieldText): () => void {
   handText = hand;
   settleResolvedMerges(store.get());
-  const stop = store.subscribe(() => settleResolvedMerges(store.get()));
+  const stop = store.subscribe(() => {
+    const state = store.get();
+    // Most changes are the screen's own (a selection, a scroll): questions and deals are then the same objects.
+    if (state.questions !== settledFrom?.questions || state.deals !== settledFrom?.deals) settleResolvedMerges(state);
+  });
   return () => {
     stop();
     handText = undefined;
+    settledFrom = undefined;
   };
 }
 
