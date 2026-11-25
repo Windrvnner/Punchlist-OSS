@@ -119,6 +119,29 @@ async function searchQuestions(run: AgentRun, queryWords: Set<string>, report: R
 }
 
 /**
+ * The catch-up tool: each deal's brief on its open findings, named by deal when there are several. The brief is one
+ * model call, which is not made again while the deal's findings are unchanged (ai.ts dealBrief).
+ */
+export async function catchUp(run: AgentRun): Promise<string> {
+  const { kit, question } = run;
+  const step = run.step({ kind: 'search', text: 'Caught up on the open findings' });
+  const multi = question.deals.length > 1;
+  let paragraphs = 0;
+  const parts = await Promise.all(question.deals.map(async (dealId) => {
+    const heading = multi ? `${await kit.dealName(dealId)}: ` : '';
+    const brief = await kit.brief(dealId);
+    if (brief.ok) paragraphs += brief.value.length;
+    if (brief.ok) return `${heading}${brief.value.join('\n') || 'no open findings.'}`;
+    if (brief.error.kind === 'unreachable') {
+      throw Object.assign(new Error(brief.error.message), { code: 'unreachable' });
+    }
+    return `${heading}the catch-up could not be written: ${brief.error.message}.`;
+  }));
+  Object.assign(step, { result: `${paragraphs} ${noun(paragraphs, 'paragraph')}`, done: true });
+  return `The catch-up on the open findings:\n${parts.join('\n\n')}`;
+}
+
+/**
  * Every deal's records, each with its deal's name when the question is about several deals. A deal whose records
  * cannot be read just now is `missed`, in the order the reads failed.
  */

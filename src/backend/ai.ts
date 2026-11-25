@@ -1201,6 +1201,11 @@ export function nodeAi(o: AiOptions) {
     findings: async (d) => (await live<{ title?: string; body?: string[]; status?: string }>('finding', d))?.map((f) => ({ title: String(f.title ?? ''), body: strings(f.body), status: String(f.status ?? 'open') })) ?? null,
     questions: (d) => live('question', d),
     dealName: async (d) => { const r = await o.repo.get('deal', d); return String((r.ok && (r.value?.envelope.data as { name?: string } | undefined)?.name) || 'another deal'); },
+    // the chat's catch-up tool reuses the deal brief, its finding links put back to their words
+    brief: async (d) => {
+      const r = await service.dealBrief(d);
+      return r.ok ? ok(r.value.paragraphs.map((p) => withoutMemoMarks(p))) : r;
+    },
   };
   // a kept conversation is compacted by 80% of what one call to its model may send at most, leaving room for the turn's own question and documents
   const agentOpts = { turns: o.turns ?? control.limits.chatTurns, width, compactAt: (model: string) => Math.min(o.compactAt ?? control.limits.compactAt, Math.floor((inLimit(model) * control.limits.compactShare) / 100)), folderDocs: o.folderDocs ?? control.limits.folderDocs };
