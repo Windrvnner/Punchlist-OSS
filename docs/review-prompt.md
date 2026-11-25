@@ -20,8 +20,8 @@ verdict, and no criteria in your own words.
 >   rows or rows numbered 1..N don't count.
 > - Lost work: anything that can discard, overwrite, or hide what a person typed or chose, or that silently drops,
 >   skips, caps, truncates, alters or marks unreadable what the app reads, or saves a failed read as "no text".
->   Two PCs or two people changing, or deleting and changing, the same record: both versions are kept and a person chooses. A deal deleted
->   on another PC, and a PC out of sync. Big actions, including deletes, ask first in the app's own dialog.
+>   Two PCs or two people changing, or deleting and changing, the same record: both versions are kept and a person
+>   chooses. A deal deleted on another PC, and a PC out of sync. Big actions, including deletes, ask first in the app's own dialog.
 > - Failure and recovery: retryable model failures and empty replies are retried quietly, up to twice by default.
 >   An unreachable service follows its own recovery path. Keep everything the person typed and adapt to a
 >   cut-off reply or a request that is too long. Use the test hooks (docs/development.md)
