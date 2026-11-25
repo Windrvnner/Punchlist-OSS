@@ -6,14 +6,13 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import { useAppState, useStore } from './hooks';
 import { Modal, DialogHead } from './dialogs';
 import { FileInput, PickFileRow } from './fileDrop';
-import {
-  rereadImportTable, proposeLayout, previewImport, type ImportLocation, type ImportTable,
-} from '../app/transfer';
-import type { ImportField, Mapping } from '../domain/importExport';
+import { proposeLayout, previewImport, type ImportLocation, type ImportTable } from '../app/transfer';
+import type { ImportField } from '../domain/importExport';
 import {
   clearQaImport, keepQaImport, keptQaImport, loadQaImport, prepareQaImport, qaImportPartyCount,
   replaceQaImport, submitQaImport, summarizeQaImport, type ImportMode, type QaChoices,
 } from '../app/qaImport';
+import { QaImportLayout, type QaImportLayoutView } from '../app/qaImportLayout';
 import { SERVICE } from '../control';
 import { importKey } from '../app/keptImports';
 import { useKeptImportsReady, useFreshOnCrash } from './keptImports';
@@ -34,7 +33,7 @@ export function ImportDialog({ dealId }: { dealId: string }) {
 
 function QaImportDialog({ dealId, fresh }: { dealId: string; fresh: boolean }) {
   const store = useStore();
-  const qa = useQaImportState(dealId, fresh);
+  const qa = useQaImportState(store, dealId, fresh);
   const plan = useImportPlan(store, dealId, qa);
   const actions = useQaImportActions(store, dealId, qa, plan);
   const { table, mapping, busy, error } = qa;
@@ -62,12 +61,14 @@ function QaImportDialog({ dealId, fresh }: { dealId: string; fresh: boolean }) {
 }
 
 /** The file as read and every choice made for it, starting from what was kept on this PC unless it starts fresh */
-function useQaImportState(dealId: string, fresh: boolean) {
+function useQaImportState(store: Store, dealId: string, fresh: boolean) {
   const key = importKey.qa(dealId);
   const [kept] = useState(() => (fresh ? null : keptQaImport(key)));
   const choices = kept?.choices;
-  const [table, setTable] = useState<ImportTable | null>(kept?.table ?? null);
-  const [mapping, setMapping] = useState<Mapping | null>(choices?.mapping ?? null);
+  const [layout, setLayout] = useState<QaImportLayoutView>();
+  const [reader] = useState(() => new QaImportLayout(store, kept?.table ?? null, choices?.mapping ?? null, setLayout));
+  const { table, mapping, reading, wantedSheet, error: readError, unapplied, warning } = layout ?? reader.view;
+  useEffect(() => () => reader.cancel(), [reader]);
   // where the file is, which the desktop app knows: the deal's log is that file
   const [path, setPath] = useState<string | null>(choices?.path ?? null);
   const [mode, setMode] = useState<ImportMode>(choices?.mode ?? 'merge');
@@ -82,9 +83,6 @@ function useQaImportState(dealId: string, fresh: boolean) {
     if (!touched.current) setMakeLog(parties >= 2);
   }, [parties, table]);
   const [busy, setBusy] = useState<Busy>('');
-  // the sheet a reread is reading: shown in its picker until the read settles (#63)
-  const [wantedSheet, setWantedSheet] = useState<string>();
-  const rereadChoices = useRef<Map<ImportField, number | null> | null>(null);
   const [error, setError] = useState('');
   const [restart, setRestart] = useState(false);   // "start over" asks first, in the footer
   const fileRef = useRef<HTMLInputElement>(null);
@@ -92,9 +90,9 @@ function useQaImportState(dealId: string, fresh: boolean) {
   // (another file, another choice, the dialog closed) and changes nothing
   const token = useRef(0);
   return {
-    key, table, setTable, mapping, setMapping, path, setPath, mode, setMode, answered, setAnswered,
-    makeLog, setMakeLog, touched, busy, setBusy, wantedSheet, setWantedSheet,
-    error, setError, restart, setRestart, fileRef, token, rereadChoices,
+    key, table, mapping, reader, path, setPath, mode, setMode, answered, setAnswered,
+    makeLog, setMakeLog, touched, busy: reading ? 'reading' as const : busy, setBusy, wantedSheet,
+    error: error || readError, setError, restart, setRestart, fileRef, token, unapplied, warning,
   };
 }
 export type QaImportState = ReturnType<typeof useQaImportState>;
@@ -135,24 +133,23 @@ function useKeepAsItChanges(qa: QaImportState) {
 
 /** What the person can do in the dialog: read a file, ask the model, read the file again, import, start over, close */
 function useQaImportActions(store: Store, dealId: string, qa: QaImportState, plan: ImportPlan) {
-  const { busy, token, setBusy, setError, setTable, setMapping } = qa;
+  const { busy, token, setBusy, setError, reader } = qa;
   useKeepAsItChanges(qa);
 
   const close = () => {
     if (busy === 'importing') return;
     token.current++;
+    reader.cancel();
     store.ui({ dialog: null });
   };
 
   const startOver = () => {
     token.current++;
-    qa.rereadChoices.current = null;
     clearQaImport(store, qa.key);
     qa.setRestart(false);
     setBusy('');
     setError('');
-    setTable(null);
-    setMapping(null);
+    reader.replace(null);
     qa.setPath(null);
     qa.setMode('merge');
     qa.setAnswered(false);
@@ -163,18 +160,15 @@ function useQaImportActions(store: Store, dealId: string, qa: QaImportState, pla
   /** "change": back to the file pick. What was kept stays until another file is read in its place */
   const changeFile = () => {
     token.current++;
-    qa.rereadChoices.current = null;
     setBusy('');
-    setTable(null);
-    setMapping(null);
+    reader.replace(null);
     setError('');
     qa.setRestart(false);
   };
 
   const run = () => runImport(store, dealId, qa, plan);
   const pickColumn = (field: ImportField, column: number | null) => {
-    qa.rereadChoices.current?.set(field, column);
-    setMapping((mapping) => mapping && { ...mapping, [field]: column });
+    reader.pick(field, column);
     setError('');
   };
   return { close, startOver, changeFile, run, pickColumn, ...fileReading(store, dealId, qa) };
@@ -183,7 +177,7 @@ export type QaImportActions = ReturnType<typeof useQaImportActions>;
 
 /** Reading the file: the file the person picks, the model's proposal of its layout, and another sheet or heading row */
 function fileReading(store: Store, dealId: string, qa: QaImportState) {
-  const { table, busy, token, setBusy, setError, setTable, setMapping } = qa;
+  const { busy, token, setBusy, setError, reader } = qa;
 
   const load = async (file: File) => {
     if (busy) return;
@@ -199,8 +193,7 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
     }
     replaceQaImport(store, qa.key);
     const { table, path, askForLayout } = read.value;
-    setTable(table);
-    setMapping(table.mapping);
+    reader.replace(table);
     qa.setPath(path);
     qa.touched.current = false;
     if (askForLayout) void askAi(table, mine);
@@ -218,40 +211,20 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
     setBusy('');
     if (proposal.ok) {
       setError('');
-      setTable(proposal.value);
-      setMapping(proposal.value.mapping);
+      reader.replace(proposal.value);
     } else if (asked.mapping.text != null) {
       setError(`${SERVICE} had no better proposal`);
     }
   };
 
-  const reread = (where: ImportLocation, accept?: (read: ImportTable) => void) =>
-    rereadTable(store, qa, where, accept);
+  const reread = async (where: ImportLocation, accept?: (read: ImportTable) => void) => {
+    if (busy === 'importing') return;
+    token.current++;
+    setBusy('');
+    setError('');
+    await reader.reread(where, accept);
+  };
   return { load, canAsk, askAi, reread, cancelProposal: () => cancelProposal(qa) };
-}
-
-/** A later sheet or heading choice takes over while Import waits for the accepted table (#63, #380). */
-async function rereadTable(
-  store: Store, qa: QaImportState, where: ImportLocation, accept?: (read: ImportTable) => void,
-) {
-  const { table, busy, token, setBusy, setError, setTable, setMapping, rereadChoices } = qa;
-  if (!table || busy === 'importing') return;
-  const mine = ++token.current;
-  const choices = rereadChoices.current ??= new Map();
-  setBusy('reading');
-  qa.setWantedSheet(where.sheet);
-  const again = await rereadImportTable(store, table, where, choices);
-  if (token.current !== mine) return;
-  rereadChoices.current = null;
-  setBusy('');
-  if (!again.ok) {
-    setError(again.error.message);
-    return;
-  }
-  setError(again.value.error);
-  setTable(again.value.table);
-  setMapping(again.value.mapping);
-  accept?.(again.value.table);
 }
 
 /** A manual heading edit takes over from an outstanding layout proposal (#380). */
@@ -264,7 +237,8 @@ function cancelProposal(qa: QaImportState) {
 /** Display the app's submission outcome and restore the original controls when requested. */
 async function runImport(store: Store, dealId: string, qa: QaImportState, plan: ImportPlan) {
   const { table, mapping, path, mode, answered, makeLog, touched } = qa;
-  if (qa.busy || !table || !mapping || !plan.total || plan.dryError) return;
+  const { reading, warning } = qa.reader.view;
+  if (qa.busy || reading || warning || !table || !mapping || !plan.total || plan.dryError) return;
   qa.setBusy('importing');
   qa.setError('');
   qa.setRestart(false);
@@ -282,8 +256,7 @@ async function runImport(store: Store, dealId: string, qa: QaImportState, plan: 
 }
 
 function restoreChoices(qa: QaImportState, table: ImportTable, choices: QaChoices) {
-  qa.setTable(table);
-  qa.setMapping(choices.mapping);
+  qa.reader.replace(table, choices.mapping);
   qa.setPath(choices.path);
   qa.setMode(choices.mode);
   qa.setAnswered(choices.answered);
