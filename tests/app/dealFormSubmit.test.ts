@@ -144,6 +144,7 @@ describe('submitting the deal form', () => {
     const submitted = submitDealForm(store, submitting(store, ROOM[5].path).submit);
     expect(store.get().ui.newDeal).toMatchObject({ busy: true, error: '' });
     await vi.waitFor(() => expect(finish).toBeDefined());
+    expect(store.get().ui.newDeal?.busy).toBe(true);
     finish(ok({ files: ROOM[5].files, size: ROOM[5].size }));
     expect((await submitted).deal!.folders).toHaveLength(6);
   });
