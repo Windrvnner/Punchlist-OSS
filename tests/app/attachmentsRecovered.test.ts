@@ -1,15 +1,17 @@
 // @vitest-environment node
 // Files attached in a deal's ask boxes and not yet sent, when another PC deletes the deal and this PC keeps it as a
 // copy (#117): they follow their conversations to the copy, as typed text does, and go with the next message there.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { okd, syncAll, twoPcs, type PC } from './pcs';
 import { DeleteDeal } from '../../src/app/commands/deals';
 import { EditQuestionField } from '../../src/app/commands/questions';
 import { ImportQuestions } from '../../src/app/commands/importQuestions';
-import { attachFiles, followCopies, MAX_ATTACHED } from '../../src/app/attachments';
+import { attachFiles, filesSendable, followCopies, MAX_ATTACHED } from '../../src/app/attachments';
 import { ask, convKey, type Scope } from '../../src/app/conversations';
+import { Store } from '../../src/app/store';
+import { MemoryLocal } from '../../src/adapters/local';
 import type { AiService, DocumentService } from '../../src/ports';
-import { ok } from '../../src/domain/result';
+import { fail, ok } from '../../src/domain/result';
 
 const ROWS = Array.from({ length: 2000 }, (_, i) => ({
   n: i + 1, text: `Please provide the lender consent for facility ${i + 1}.`, askedBy: 'Lender A', received: '',
@@ -41,6 +43,88 @@ async function deleteUnseen(A: PC, B: PC, dealId: string, qid: string) {
   await syncAll(A, B);
 }
 const settleFiles = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+function standInDocumentFolders(B: PC, dealId: string, delayUpload: boolean) {
+  const doc = 'Executed facility agreement.pdf';
+  const docId = 'executed-facility-agreement';
+  let finishUpload = () => {};
+  const upload = new Promise<void>((resolve) => { finishUpload = resolve; });
+  const source = new Set<string>();
+  const destination = new Set<string>();
+  const carries: string[] = [];
+  const docs = B.store.services.docs;
+  let available = false;
+  docs.attach = async () => {
+    if (delayUpload) await upload;
+    source.add(docId);
+    return ok({ doc, docId });
+  };
+  docs.carryAttached = async (_from, to) => {
+    carries.push(to);
+    if (!available && (!delayUpload || source.size)) return fail({ kind: 'unreachable', message: 'Folder unavailable' });
+    for (const id of source) destination.add(id);
+    return ok(undefined);
+  };
+  docs.unsendable = async (deal, ids) => ok(ids.filter((id) => !(deal === dealId ? source : destination).has(id)));
+  return { doc, docId, finishUpload, source, destination, carries, reconnect: () => { available = true; } };
+}
+
+describe('attachment carry after a restart (#744)', () => {
+  it.each([
+    { caseName: 'the first carry missed the unfinished upload', delayUpload: true, olderCopy: false },
+    { caseName: 'the first carry and the startup carry were refused', delayUpload: false, olderCopy: false },
+    { caseName: 'the copy predates the persisted carry', delayUpload: false, olderCopy: true },
+  ])('carries a published attachment after restart when $caseName', async ({ delayUpload, olderCopy }) => {
+    const { A, B, dealId, qid } = await twoPcs();
+    const docs = standInDocumentFolders(B, dealId, delayUpload);
+    const stop = followCopies(B.store);
+    try {
+      const conv = convKey({ kind: 'deal', dealId });
+      await attachFiles(B.store, { dealId, conv }, [new File(['facility agreement'], docs.doc)]);
+      if (!delayUpload) await expect.poll(() => B.store.get().ui.attachments[0]?.state).toBe('done');
+      await deleteUnseen(A, B, dealId, qid);
+      await expect.poll(() => docs.carries.length).toBeGreaterThan(0);
+      docs.finishUpload();
+      await expect.poll(() => B.store.get().ui.attachments[0]?.state).toBe('done');
+      const [kept] = B.store.get().ui.attachments;
+      expect(kept.dealId).not.toBe(dealId);
+      expect(docs.source.has(docs.docId)).toBe(true);
+      expect(docs.destination.has(docs.docId)).toBe(false);
+
+      stop();
+      const local = olderCopy ? new MemoryLocal() : B.store.services.local;
+      const reopened = new Store({ ...B.store.services, local }, []);
+      reopened.ui({ attachments: [kept] });
+      vi.useFakeTimers();
+      if (delayUpload || olderCopy) docs.reconnect();
+      const stopReopened = followCopies(reopened);
+      try {
+        await reopened.boot();
+        const sendable = () => filesSendable(reopened, kept.dealId, [docs]);
+        if (!delayUpload && !olderCopy) {
+          await expect(sendable()).resolves.toBe(false);
+          expect(reopened.get().ui.attachments[0]).toEqual(kept);
+          docs.reconnect();
+          await vi.advanceTimersByTimeAsync(30_000);
+          expect(docs.destination.has(docs.docId)).toBe(true);
+        }
+        await expect(sendable()).resolves.toBe(true);
+        expect(docs.destination.has(docs.docId)).toBe(true);
+        expect(reopened.get().ui.attachments[0]).toEqual(kept);
+      } finally {
+        stopReopened();
+        reopened.closing();
+        vi.useRealTimers();
+      }
+    } finally {
+      stop();
+      A.store.closing();
+      B.store.closing();
+      await A.repo.close();
+      await B.repo.close();
+    }
+  });
+});
 
 describe('files attached and not yet sent on a deal another PC deletes (#117)', () => {
   it('follow their conversations to the copy, at deal scale, and go with the next message there', async () => {
