@@ -3,7 +3,6 @@ import { NewDealDraftSession } from '../app/newDealDraft';
 import type { UiState } from '../app/state';
 
 type NewDeal = NonNullable<UiState['newDeal']>;
-type Folder = NewDeal['folders'][number];
 
 interface NewDealDraftOptions {
   nd: NewDeal;
@@ -33,8 +32,6 @@ export function useNewDealDraft({ nd, path, restore, read }: NewDealDraftOptions
     keepNow: () => draft.keep(nd, path),
     readEach: (paths: string[]) => draft.readEach(paths, read),
     busy: () => draft.busy(),
-    isReading: (path: string) => draft.isReading(path),
-    started: (path: string) => draft.started(path),
-    finished: (path: string, folder: Folder | null) => draft.finished(path, folder),
+    draft,
   };
 }

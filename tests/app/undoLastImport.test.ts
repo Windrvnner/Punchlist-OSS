@@ -13,7 +13,7 @@ import { ImportQuestions, RevertImport, UndoLastImport, lastImport } from '../..
 import { registry, Undo } from '../../src/app/commands/undo';
 import { dealQuestions, dealFindings } from '../../src/app/state';
 import '../ui/keptTextSession';
-import { deletedOf } from '../../src/ui/deleted';
+import { visibleDeletedNotes as deletedOf } from '../../src/app/deletedView';
 
 const COMMANDS = [
   CreateDeal, DeleteDeal, CreateQuestion, SetResponse, DeleteQuestion, RestoreQuestion, EditQuestionField,
