@@ -1,6 +1,7 @@
 // The Q&A log in its folder: saved over in place, the version it replaces first dated in the archive, nothing ever lost.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
+import { trackPaths } from './openedPaths';
 import { archiveOf, saveLog, createLog, sha256, restoreAside, whoHasOpen } from '../../src/backend/qaLogFolder';
 import { asideFixtureName } from './qaLogWorkingFiles';
 
@@ -99,8 +100,8 @@ describe('saving the log', () => {
       real(a, b); if (++n === 1) { fs.writeFileSync(b, 'theirs + sroe\'s edit'); fs.writeFileSync(path.join(d, FILE), 'someone made a new file'); }
     }) as typeof fs.renameSync); };
     /** the archive refusing the "saved meanwhile" copy with `code` */
-    const refuse = (code: string) => { const real = fs.writeFileSync; vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: fs.PathOrFileDescriptor, data: Uint8Array, o?: fs.WriteFileOptions) => {
-      if (String(p).includes('saved meanwhile')) throw Object.assign(new Error(code), { code }); return real(p, data, o);
+    const refuse = (code: string) => { const real = fs.writeFileSync; const where = trackPaths(); vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: fs.PathOrFileDescriptor, data: Uint8Array, o?: fs.WriteFileOptions) => {
+      if (where(p).includes('saved meanwhile')) throw Object.assign(new Error(code), { code }); return real(p, data, o);
     }) as typeof fs.writeFileSync); };
     for (const code of ['EACCES', 'EBUSY', 'EPERM']) it(`when the archive refuses their copy (${code}): their edit stays in the folder`, () => {
       const d = withLog(); raced(d); refuse(code);
@@ -284,10 +285,71 @@ describe('saving the log', () => {
     expect(save(d, 'ours')).toEqual({ status: 'later' }); expect(read(d)).toBe('theirs'); expect(list(d).filter((f) => f.startsWith('~'))).toEqual([]);
   });
   it('a share that drops while the archive copy is written leaves the log as it was and no half-written copy', () => {
-    const d = withLog(); const real = fs.writeFileSync;
-    vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: fs.PathOrFileDescriptor, data: Uint8Array, o?: fs.WriteFileOptions) => { if (String(p).includes('Archive')) { real(p, data.slice(0, 2), o); throw Object.assign(new Error('EIO'), { code: 'EIO' }); } return real(p, data, o); }) as typeof fs.writeFileSync);
+    const d = withLog(); const real = fs.writeFileSync; const where = trackPaths();
+    vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: fs.PathOrFileDescriptor, data: Uint8Array, o?: fs.WriteFileOptions) => { if (where(p).includes('Archive')) { real(p, data.slice(0, 2), o); throw Object.assign(new Error('EIO'), { code: 'EIO' }); } return real(p, data, o); }) as typeof fs.writeFileSync);
     expect(() => save(d, 'ours')).toThrow(); vi.restoreAllMocks();
     expect(list(path.join(d, '01. Archive'))).toEqual([]); expect(read(d)).toBe('theirs');
+  });
+  describe('an archive copy that fails never takes away another PC\'s file (#21)', () => {
+    const eio = () => Object.assign(new Error('EIO'), { code: 'EIO' });
+    const theirs = 'other PC archived this, the only copy';
+    const archived = (d: string) => list(path.join(d, '01. Archive')).map((f) => read(path.join(d, '01. Archive'), f));
+    it('when the name is refused after another PC made it (EIO on the claim)', () => {
+      const d = withLog(); const real = fs.openSync;
+      vi.spyOn(fs, 'openSync').mockImplementation(((p: fs.PathLike, flags: fs.OpenMode, mode?: fs.Mode) => {
+        if (String(p).includes('Archive') && flags === 'wx') { fs.writeFileSync(p, theirs); throw eio(); }
+        return real(p, flags, mode);
+      }) as typeof fs.openSync);
+      expect(() => save(d, 'ours')).toThrow(); vi.restoreAllMocks();
+      expect(archived(d)).toEqual([theirs]); expect(read(d)).toBe('theirs');
+    });
+    const swapped = (fails: boolean) =>
+      `when another PC put its copy over the claimed name before the write ${fails ? 'failed' : 'ran'}`;
+    for (const fails of [true, false]) it(swapped(fails), () => {
+      const d = withLog(); const real = fs.writeFileSync; const where = trackPaths();
+      vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: fs.PathOrFileDescriptor, data: Uint8Array, o?: fs.WriteFileOptions) => {
+        if (!where(p).includes('Archive')) return real(p, data, o);
+        fs.rmSync(where(p)); real(where(p), theirs);   // their copy takes the name this moment
+        if (fails) throw eio();
+        return real(p, data, o);
+      }) as typeof fs.writeFileSync);
+      try { save(d, 'ours'); } catch { /* the failing write */ } vi.restoreAllMocks();
+      expect(archived(d)).toEqual([theirs]); expect(read(d)).toBe('theirs');   // the save failed: the log is as it was
+    });
+    it('a copy whose handle cannot be emptied or closed after a part-way write is still taken away', () => {
+      const d = withLog(); const real = fs.writeFileSync;
+      vi.spyOn(fs, 'writeFileSync').mockImplementation(((p: fs.PathOrFileDescriptor, data: Uint8Array) => {
+        if (typeof p === 'number') { fs.writeSync(p, data.slice(0, 2)); throw eio(); }
+        return real(p, data);
+      }) as typeof fs.writeFileSync);
+      vi.spyOn(fs, 'ftruncateSync').mockImplementation(() => { throw eio(); });
+      expect(() => save(d, 'ours')).toThrow(); vi.restoreAllMocks();
+      expect(archived(d)).toEqual([]);
+    });
+    it('a copy whose handle fails to close is not reported written, and is taken away', () => {
+      const d = withLog(); const real = fs.closeSync; const where = trackPaths();
+      vi.spyOn(fs, 'closeSync').mockImplementation(((fd: number) => {
+        const archive = where(fd).includes('Archive'); real(fd); if (archive) throw eio();
+      }) as typeof fs.closeSync);
+      expect(() => save(d, 'ours')).toThrow(); vi.restoreAllMocks();
+      expect(archived(d)).toEqual([]); expect(read(d)).toBe('theirs');
+    });
+    it('on a share that gives no file numbers, a copy is still written and reported', () => {
+      const d = withLog(); const real = fs.fstatSync;
+      vi.spyOn(fs, 'fstatSync').mockImplementation(((fd: number, o?: never) => {
+        const st = real(fd, o) as unknown as fs.BigIntStats;
+        const noFileNumber = Object.create(Object.getPrototypeOf(st));
+        return typeof st.ino === 'bigint' ? Object.assign(noFileNumber, st, { ino: 0n }) : st;
+      }) as typeof fs.fstatSync);
+      expect(save(d, 'ours')).toMatchObject({ status: 'written' }); vi.restoreAllMocks();
+      expect(archived(d)).toEqual(['theirs']); expect(read(d)).toBe('ours');
+    });
+    it('a copy whose write fails after its name was claimed leaves no empty file', () => {
+      const d = withLog();
+      vi.spyOn(fs, 'writeFileSync').mockImplementation((() => { throw eio(); }) as typeof fs.writeFileSync);
+      expect(() => save(d, 'ours')).toThrow(); vi.restoreAllMocks();
+      expect(archived(d)).toEqual([]);
+    });
   });
   it('a file called "01. Archive" does not stop the save: the archive is "01. Archive (2)"', () => {
     const d = withLog(); fs.writeFileSync(path.join(d, '01. Archive'), 'x');
