@@ -44,7 +44,8 @@ function draftStore(repo: Repository, ai: AiService) {
 async function mixedDraft(earlierResponse = savedResponse) {
   const backend = setup((call) => {
     if (!call.prompt.includes('Draft a response to this question')) return {};
-    const reusedDraft = /^R(\d+): Q2[,:]/m.exec(call.prompt);
+    // the earlier response that was drafted by AI (question 2's accepted draft); the model sees only R numbers (#286)
+    const reusedDraft = /^Response to R(\d+) \(drafted by AI/m.exec(call.prompt);
     if (reusedDraft) return { status: 'found', text: '', sources: [], reused: [`R${reusedDraft[1]}`] };
     return {
       status: 'found',
@@ -104,7 +105,7 @@ async function checkReuse(world: Awaited<ReturnType<typeof mixedDraft>>, expecte
   expect(repeatedDraft?.text.match(/\[1\]/g)).toHaveLength(2);
   expect(repeatedDraft?.sources).toEqual([]);
   const lastPrompt = backend.calls.filter((call) => call.prompt.includes('Draft a response to this question')).at(-1);
-  const reuseLine = lastPrompt?.prompt.split('\n').find((line) => line.startsWith('Response to Q2'));
+  const reuseLine = lastPrompt?.prompt.split('\n').find((line) => line.startsWith('Response to R') && line.includes('drafted by AI'));
   expect(reuseLine).toContain(`${expected.replace(/\s+/g, ' ')} ${documentText}”`);
 }
 

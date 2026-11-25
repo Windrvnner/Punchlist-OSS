@@ -37,6 +37,7 @@
  *
  * Nothing here asks the person a question part-way: every call and every run ends with a result or a failure.
  */
+import { withoutDraftCredits } from './draftReply';
 import { MODEL_TEXT_MAX, fitText, fitParas } from '../domain/importExport';
 import { withoutMarkers } from '../domain/cite';
 import { ok, fail, type Result } from '../domain/result';
@@ -1619,7 +1620,7 @@ export function nodeAi(o: AiOptions) {
       if (!o.docs.records(i.dealId).length && !earlier.length) return ok({ status: 'none', text: '', sources: [] });
       let m: Awaited<ReturnType<typeof models>>; try { m = await models(); } catch (e) { return failure(e, `${SERVICE} did not answer`); }
       const asAnswered = (q: Alike) => `As answered ${q.by ? `to ${q.by} ` : ''}(Q${q.n})`;
-      const prior = earlier.length ? `\nResponses already given on this deal to questions that read like it:\n${earlier.map((q, k) => `R${k + 1}: Q${q.n}${q.by ? `, submitted by ${q.by}` : ''}: “${one(q.text)}”\nResponse to Q${q.n}${q.ai ? ' (drafted by AI from the data room, not received from anyone)' : ''}: “${one(q.response)}”`).join('\n')}\nIf one of them answers this question as it is asked, name it in "reused": it is put in the draft word for word, credited to whoever asked it. Do not repeat or restate it in "text": write there only what the documents add, with [n] markers, or nothing. Use none that answers a different question, however alike the words.` : '';
+      const prior = earlier.length ? `\nResponses already given on this deal to questions that read like it:\n${earlier.map((q, k) => `R${k + 1}${q.by ? `, submitted by ${q.by}` : ''}: “${one(q.text)}”\nResponse to R${k + 1}${q.ai ? ' (drafted by AI from the data room, not received from anyone)' : ''}: “${one(q.response)}”`).join('\n')}\nIf one of them answers this question as it is asked, name it in "reused": it is put in the draft word for word, credited to whoever asked it. Earlier responses are named only by their R numbers. Do not repeat or restate one in "text": write there only what the documents add, with [n] markers, or nothing. Use none that answers a different question, however alike the words.` : '';
       const ask = `Draft a response to this question from the documents: ${i.questionText}${prior}\nIf ${earlier.length ? 'neither the documents nor those responses answer' : 'the documents do not answer'} it, say so with "status": "none" and nothing else.\nThe response must be under ${MODEL_TEXT_MAX.toLocaleString('en-US')} characters (it goes into one Excel cell); if it would be longer, cut it down to what matters.`;
       const shape = `{"status": "found" | "none", "text": "the response, with [n] markers", "sources": [...]${earlier.length ? ', "reused": ["R1"]' : ''}}`;
       const again = { escalate: m.thorough, usable: (reply: Record<string, unknown>) => strings(reply.text).join('\n\n').length <= MODEL_TEXT_MAX, wrong: `"text" is longer than ${MODEL_TEXT_MAX.toLocaleString('en-US')} characters: cut it down to fit` };
@@ -1641,18 +1642,20 @@ export function nodeAi(o: AiOptions) {
       // the earlier responses the model chose go in word for word, each credited: nothing is added to another party's answer, or turned round.
       // What the documents add follows, as the model wrote it, with any credit of its own taken out, so a difference between the two stays in sight.
       const quoted = reused.map((q) => `${asAnswered(q)}: ${q.response}`);
-      // a sentence of the model's that names a question it was shown is a credit in its own words: dropped, whatever the wording
-      const names = new RegExp(`\\bQ(?:${earlier.map((q) => q.n).join('|') || '0'})\\b`);
+      // a sentence of the model's that names an earlier response by its R number is a credit in its own words: dropped, with
+      // any source only it cited. The model never sees question numbers, so a quarter (Q3 2027) is never one (#286).
       // a draft rests only on this deal's own documents: another project's, or a blackline against one, never answers
       // by itself
-      const kept = out.sources.some((x) => mainIn(r.value.sent, x)) ? out.text.split(/(?<=[.!?](?:\s*\[\d+\])*)\s+(?!\[)/).filter((x) => !names.test(x)).join(' ').trim() : '';
+      const none = { text: '', sources: [] as typeof out.sources };
+      const ownReply = out.sources.some((x) => mainIn(r.value.sent, x)) ? withoutDraftCredits(out, earlier.length) : none;
+      const kept = ownReply.text;
       const own = kept.charAt(0).toUpperCase() + kept.slice(1);
       if (!quoted.length && !own) return ok({ status: 'none', text: '', sources: [] });             // a draft rests on a document it cites or on an earlier response it names
       const quotation = quoted.join('\n\n');
       return ok({
         status: 'found',
         text: [quotation, own].filter(Boolean).join('\n\n'),
-        sources: own ? draftSources(out.sources, quotation) : [],
+        sources: own ? draftSources(ownReply.sources, quotation) : [],
       });
     },
     async reassess(i) {

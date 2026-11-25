@@ -6,7 +6,7 @@
  */
 import { TEXT_MAX } from '../domain/importExport';
 import {
-  type FieldDraft, type FieldValue, type ReadField, restoreFieldDraft, showFieldDraft,
+  type FieldDraft, type FieldValue, type ReadField, restoreFieldDraft, showFieldDraft, takeHandedText,
 } from '../app/fieldDrafts';
 import { type FieldAtFocus, type FieldCommit, FieldSave, type FieldSaveView } from '../app/fieldSave';
 import { saveKeptDrafts } from '../app/keptText';
@@ -349,7 +349,9 @@ function useFieldLifecycle({
   useLayoutEffect(() => {
     if (keep === undefined) return;
     const leave = showFieldDraft(keep);
+    const stopTaking = takeHandedText(keep, (text) => save.takeHanded(text));
     return () => {
+      stopTaking();
       save.offScreen();
       leave(store, readRef.current);
     };
