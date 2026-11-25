@@ -1,0 +1,31 @@
+// @vitest-environment node
+import { describe, it, expect } from 'vitest';
+import { withoutDraftCredits } from '../../src/backend/draftReply';
+import type { Source } from '../../src/domain/model';
+
+const source = (name: string): Source => ({ doc: name, loc: 'p. 1' }) as Source;
+const [a, b, c] = [source('A'), source('B'), source('C')];
+
+describe('withoutDraftCredits (#286)', () => {
+  it('keeps a quarter and a reply with no earlier responses as they are', () => {
+    const reply = { text: 'COD is Q3 2027. [1]', sources: [a] };
+    expect(withoutDraftCredits(reply, 0)).toBe(reply);
+    expect(withoutDraftCredits(reply, 2)).toEqual(reply);
+  });
+
+  it('drops a credit with the source only it cited and renumbers the rest, adjacent markers included', () => {
+    const reply = { text: 'See R1 for it. [1][2] Capex is $5m. [2][3]', sources: [a, b, c] };
+    expect(withoutDraftCredits(reply, 1)).toEqual({ text: 'Capex is $5m. [1][2]', sources: [b, c] });
+  });
+
+  it('keeps a source that a kept sentence also cites, and one listed without any marker', () => {
+    const reply = { text: 'As in R1. [1] COD is Q3 2027. [1] Capex is $5m. [2]', sources: [a, b, c] };
+    const kept = { text: 'COD is Q3 2027. [1] Capex is $5m. [2]', sources: [a, b, c] };
+    expect(withoutDraftCredits(reply, 1)).toEqual(kept);
+  });
+
+  it('leaves nothing when the whole reply is a credit, and ignores a marker with no source', () => {
+    expect(withoutDraftCredits({ text: 'As in R1. [1]', sources: [a] }, 1)).toEqual({ text: '', sources: [] });
+    expect(withoutDraftCredits({ text: 'See R1. [1] Done. [5]', sources: [a] }, 1).text).toBe('Done. [5]');
+  });
+});
