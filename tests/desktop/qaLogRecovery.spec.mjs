@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  addedAnswer, addedQuestion, book, launch, logFolder, prepareFiles, room, seedDeals, server,
+  addedAnswer, addedQuestion, book, csv, launch, logFolder, prepareFiles, room, seedDeals, server,
 } from './qaLogRecoverySetup.mjs';
 
 async function update(page, dealId) {
@@ -86,14 +86,17 @@ try {
   await once(server, 'listening');
   const endpoint = `http://127.0.0.1:${server.address().port}`;
   desktop = await launch(endpoint);
-  // a .csv log is never written to (it is left as given; an update writes a new workbook), so only the workbook is moved
-  const [, bookDeal] = await seedDeals(desktop.page);
-  const aside = await interrupt(desktop, bookDeal, book.file);
-  assert.deepEqual(fs.readFileSync(aside), original.get(book.file));
-  assert(!fs.existsSync(path.join(logFolder, book.file)));
+  const [csvDeal, bookDeal] = await seedDeals(desktop.page);
+  const first = await interrupt(desktop, csvDeal, csv.file);
+  desktop = await launch(endpoint);
+  const second = await interrupt(desktop, bookDeal, book.file);
+  assert.deepEqual(fs.readFileSync(first), original.get(csv.file));
+  assert.deepEqual(fs.readFileSync(second), original.get(book.file));
+  assert(!fs.existsSync(path.join(logFolder, csv.file)) && !fs.existsSync(path.join(logFolder, book.file)));
 
   desktop = await launch(endpoint);
-  await ageAsides(desktop.app, [aside]);
+  await ageAsides(desktop.app, [first, second]);
+  await checkRecovery(desktop.page, csvDeal, csv);
   await checkRecovery(desktop.page, bookDeal, book);
   console.log('PASS desktop-qalog-recovery');
 } finally {
