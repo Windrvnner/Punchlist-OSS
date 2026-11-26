@@ -5,6 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { nodeAi, type AiOptions } from '../../src/backend/ai';
+import { listingChars } from '../../src/backend/agentFolder';
 import { StandInService } from '../../src/backend/service';
 import { StoreKeeper } from '../../src/backend/storeKeeper';
 import { memRepo } from '../adapters/memRepo';
@@ -259,3 +260,9 @@ function setupWithout(recs: DocRecord[], missing: Set<string>) {
   const s = setup(recs.map((r) => r), (_c, k) => (k === 1 ? { tool: 'folder', folder: 'permits' } : { text: 'ok', sources: [] }), { reads: (_c, k) => (k === 2 ? 'not json at all' : { text: '', sources: [] }), docs: { records: (d) => (d === 'd1' ? recs : []), wanted: async (_d, ids) => recs.filter((r) => ids.includes(r.docId) && !missing.has(r.docId)).map((r) => ({ docId: r.docId, name: r.name, read: () => new TextEncoder().encode(r.name) })) } });
   return s;
 }
+
+it('counts a document\'s listing by the handle it is listed by, deal id included when a run spans deals (#1162)', () => {
+  const docId = `doc_${'a'.repeat(24)}`;
+  expect(listingChars(`d1/${docId}`) - listingChars(docId)).toBe('d1/'.length);
+  expect(listingChars(docId)).toBeGreaterThan(docId.length);
+});

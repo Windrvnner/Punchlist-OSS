@@ -9,7 +9,7 @@ import type { AgentRun } from './agentRun';
 import { cites, dealDocKey, foundAt, sameDoc, withPlaces } from './agentRun';
 import { codeOf, type AgentKit, type Cited, type DealDoc, type Run, type Sent } from './agentKit';
 import type { ResearchStep } from '../ports';
-import { docIdFor, type DocRecord } from './documents';
+import type { DocRecord } from './documents';
 import { batchAsk, noun, oneLine, quoted, shorten } from './agentPrompts';
 import { docsUnusable } from './recordIds';
 
@@ -22,11 +22,13 @@ const AT_ONCE = 3;
 const FOLDER_TEXT = 24_000;
 /** the fields a batch's reply is read for */
 const BATCH_KEYS = ['text', 'sources'];
+/** about how many characters listing one document to cite adds to the main session's prompt, apart from its handle */
+const LISTING_CHARS = 60;
 /**
  * about how many characters listing one document to cite adds to the main session's prompt: its path and pages, and
- * the docId it is listed by (#1162)
+ * the handle it is listed by: its docId, or `<deal id>/<doc id>` in a run that spans deals (#1162)
  */
-const LISTING_CHARS = 60 + docIdFor('0'.repeat(24)).length;
+export const listingChars = (handle: string): number => LISTING_CHARS + handle.length;
 /** how many conversations the agent keeps folder reads and asks for */
 const KEPT = 30;
 
@@ -357,7 +359,7 @@ class FolderPass {
       const full = `${finding.at}: ${finding.ids}. ${finding.text}`;
       const short = `${finding.at}: passages at ${finding.places}.`;
       const newDocs = finding.got.filter((x) => !this.before.has(x));
-      const listing = newDocs.length * LISTING_CHARS;
+      const listing = newDocs.reduce((sum, x) => sum + listingChars(this.run.idOf(x)), 0);
       const line = used + full.length + listing <= FOLDER_TEXT / 2 ? full
         : used + short.length + listing <= FOLDER_TEXT ? short
         : '';
