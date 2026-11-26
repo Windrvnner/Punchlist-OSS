@@ -2866,7 +2866,8 @@ export function nodeAi(o: AiOptions) {
      * `counts`), which is why nothing is written for a held item until the agent has had its turn.
      *
      * The limit: the agent's own ceilings hold (about `limits.chatTurns` turns a run, `limits.searchCalls` a search),
-     * as in a chat. A run that has failed hands no more items over. A gap already searched for on these documents and
+     * as in a chat; it runs outside any call budget, so each of its searches has `limits.searchCalls` of its own. A run
+     * that has failed hands no more items over. A gap already searched for on these documents and
      * wording (`searched`) is not held, so not handed over again.
      */
     const filler = chatAgent(agentKit, agentOpts);
