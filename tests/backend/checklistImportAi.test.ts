@@ -301,11 +301,10 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
       const bounded = a.runs.every((r) => r.ok && r.calls <= bound(2000));
       expect([name, a.left, bounded, a.runs.length <= most]).toEqual([name, [], true, true]);
     }
-    // a model that gives running numbers in place of the tags is understood only for a point asked alone: slow, as each
-    // point takes a call, but nothing lands on the wrong point, each run is bounded, and each brings more
+    // a model that gives running numbers in place of the tags is never understood, even for a point asked alone: no
+    // question lands on any point, each run is bounded, and every point is offered for Retry
     const n = await retrying(2000, (c) => ({ items: numbered(answer(c).items) }), 4, real);
-    expect(n.runs.every((r, j) => r.calls <= bound(2000) && (!r.ok || r.left < (j ? n.runs[j - 1].left : 2000))))
-      .toBe(true);
+    expect([n.left.length, n.runs.every((r) => !r.ok && r.calls <= bound(2000))]).toEqual([2000, true]);
     // spread-out points that bring back an empty reply (1 in 30), and 200 failing points of both kinds at the top, cut
     // off: each run is bounded, and the Retries reach every good point
     for (const [bad, f] of [[(j: number) => j % 30 === 3, () => ({ items: [] })], [(j: number) => j < 200, cut]] as const) {
@@ -334,8 +333,8 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
     // a model that answers only its first 50 points and closes the reply is asked 50 at a time from then on
     const s3 = setup((c) => { if (!isPhrase(c)) return {}; const r = answer(c); r.items = r.items.slice(0, 50); return r; }, {}, { shared: new Mem(), installId: 'pc' });
     val(await s3.ai.phrase!({ dealId: 'd', items: points(2000) }));
-    // each call still gets 50 back, the points left out asked again as parts of their own kind
-    expect(s3.calls.filter(isPhrase).length).toBeLessThan(70);
+    // each call still gets 50 back, and the points a list's replies left out are asked again together
+    expect(s3.calls.filter(isPhrase).length).toBeLessThan(45);
     // a whole reply with an unescaped quote in a question is not taken for one cut off
     const t = setup((c) => (!isPhrase(c) ? {} : `{"items":[${lines(c).map((_, n) => `{"id":"${ids(c)[n]}","text":"Please send the 5" pipe spec ${n + 1}"}`).join(',')}]}`), {}, { shared: new Mem(), installId: 'pc' });
     expect(val(await t.ai.phrase!({ dealId: 'd', items: points(3) }))[2]).toBe('Please send the 5" pipe spec 3');

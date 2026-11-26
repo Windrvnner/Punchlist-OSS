@@ -625,17 +625,16 @@ export function nodeAi(o: AiOptions) {
   const givenTwice = (items: { m?: number }[]) =>
     new Set(items.filter((x, j) => x.m !== undefined && items.findIndex((y) => y.m === x.m) !== j).map((x) => x.m));
   /**
-   * The questions of a `phrase` reply, by place in the call: asked alone, a point's one question is its own; the last
-   * entry of a cut reply may be cut short, so it is left out
+   * The questions of a `phrase` reply, by place in the call: only an entry with one of the call's tags is kept, even
+   * for a point asked alone, so stray text is never taken for a question; the last entry of a cut reply may be cut
+   * short, so it is left out
    */
-  const phraseGot = (items: { m?: number; text: string }[], size: number, cut: boolean) => {
+  const phraseGot = (items: { m?: number; text: string }[], cut: boolean) => {
     const twice = givenTwice(items);
-    const texts = items.filter((x) => x.text);
-    if (size === 1 && texts.length === 1) texts[0].m = 0;
     const got = new Map<number, string>();
     let last = -1;
-    for (const x of texts) {
-      if (x.m === undefined) continue;
+    for (const x of items) {
+      if (x.m === undefined || !x.text) continue;
       last = x.m;
       if (!twice.has(x.m)) got.set(x.m, fitText(x.text));
     }
@@ -663,19 +662,17 @@ export function nodeAi(o: AiOptions) {
     }
     const reply = json<{ items?: unknown }>(raw, 'items');
     if (jsonEnd(raw, 'items') === 'open') cut = true;
-    const got = phraseGot(phraseEntries(reply, tags), points.length, cut);
+    const got = phraseGot(phraseEntries(reply, tags), cut);
     return { got, cut, why: got.size ? '' : phraseWhy(cut, reply) };
   }
   /** some points of a `phrase` run, by kind (gaps, then findings), leaving out a kind with none */
   const phraseByKind = (points: PhrasePoint[], part: number[]) =>
     (['gap', 'finding'] as const).map((kind) => part.filter((k) => points[k].kind === kind)).filter((l) => l.length);
   /**
-   * What a whole `phrase` reply leaves to ask again: the points it left out, as parts of their own kind; or, when it
-   * brought nothing, the part split, by kind when it holds both (so a model that fails every finding fails only parts
-   * of findings), otherwise in halves; nothing for a single point, which is offered for Retry
+   * A part whose whole reply brought nothing, to ask again: split by kind when it holds both (so a model that fails
+   * every finding fails only parts of findings), otherwise in halves; nothing for a single point, offered for Retry
    */
-  const phraseAgain = (points: PhrasePoint[], part: number[], got: Map<number, string>) => {
-    if (got.size) return phraseByKind(points, part.filter((_, m) => !got.has(m)));
+  const splitPhrasePart = (points: PhrasePoint[], part: number[]) => {
     const kinds = phraseByKind(points, part);
     if (kinds.length > 1) return kinds;
     const half = Math.ceil(part.length / 2);
@@ -687,7 +684,7 @@ export function nodeAi(o: AiOptions) {
    */
   type PhraseRun = {
     points: PhrasePoint[]; had: Map<string, string>; failed: Set<string>;
-    out: (string | null | undefined)[]; queue: number[][]; why: string;
+    out: (string | null | undefined)[]; queue: number[][]; leftOut: number[]; why: string;
   };
   /** a `phrase` run: points kept from a failed run are not asked; points that failed alone before are asked last */
   const phraseRunFor = (dealId: string, points: PhrasePoint[]): PhraseRun => {
@@ -699,11 +696,12 @@ export function nodeAi(o: AiOptions) {
     const todo = range(0, points.length).filter((k) => out[k] === undefined);
     const was = (k: number) => failed.has(phraseKey(points[k]));
     const queue = [todo.filter((k) => !was(k)), todo.filter(was)].filter((l) => l.length);
-    return { points, had, failed, out, queue, why: '' };
+    return { points, had, failed, out, queue, leftOut: [], why: '' };
   };
   /**
    * One part of a `phrase` run asked, for inParts: a cut reply is handed to it (parts.ts); what a whole reply leaves
-   * goes on the run's lists (phraseAgain), and a single point that brought nothing is offered for Retry (null)
+   * is asked again: the points it left out with those the rest of the list leaves (keepPhrased), a part that brought
+   * nothing split (splitPhrasePart); a single point that brought nothing is offered for Retry (null)
    */
   const askPhrasePart = async (run: PhraseRun, model: string, part: number[]): Promise<PartReply<string>> => {
     const reply = await askPhrase(model, part.map((k) => run.points[k]));
@@ -712,7 +710,8 @@ export function nodeAi(o: AiOptions) {
     if (alone) run.failed.add(phraseKey(run.points[part[0]]));      // asked last by a later run
     if (reply.cut) return { got: reply.got, cut: range(0, part.length).filter((m) => !reply.got.has(m)) };
     if (alone) run.out[part[0]] = null;
-    run.queue.push(...phraseAgain(run.points, part, reply.got));
+    if (reply.got.size) run.leftOut.push(...part.filter((_, m) => !reply.got.has(m)));
+    else run.queue.push(...splitPhrasePart(run.points, part));
     return { got: reply.got };
   };
   /** what one list of a `phrase` run brought back (inParts), kept in the run */
@@ -726,6 +725,9 @@ export function nodeAi(o: AiOptions) {
     for (const at of done.left) run.out[list[at]] = null;      // cut off even alone (parts.ts): offered for Retry
     // not asked, as three points in a row were cut off alone (parts.ts): asked again as a list of their own
     if (done.unasked.length) run.queue.push(done.unasked.map((at) => list[at]));
+    // the points the list's whole replies left out, asked again together, a list for each kind, in parts as any list
+    run.queue.push(...phraseByKind(run.points, run.leftOut));
+    run.leftOut = [];
   };
   /**
    * items asked about in one call of the duplicate check: a list of deal size is asked about whole, in one call (2,400
@@ -2099,7 +2101,7 @@ export function nodeAi(o: AiOptions) {
       // Add All Unresolved sizes its calls to the model's limits; #1109), each call asked again only by the shared
       // quiet retry (`complete`). A reply cut off is dealt with as everywhere else (parts.ts): the points that came
       // back whole are kept, and a point cut off even alone is offered for Retry (null). What a whole reply leaves is
-      // asked again (phraseAgain), down to single points; a single point that brings nothing is offered for Retry.
+      // asked again (askPhrasePart), down to single points; a single point that brings nothing is offered for Retry.
       // Points that failed alone in an earlier run of the deal are asked last. Any other error from the service fails
       // the run; questions that came back are kept through it (phraseKept), so asking again pays only for the rest.
       let fast: string;
