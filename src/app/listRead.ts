@@ -47,7 +47,10 @@ export const pastedLines = (text: string): string[] => textLines(text).map((l) =
  * A chosen file as a source for the model: a spreadsheet as its table (`table`, every row from the top of the sheet, so
  * that nothing above a heading row is passed over), anything else as its text. Nothing is changed.
  */
-export async function readListFile(store: Store, file: { name: string; arrayBuffer(): Promise<ArrayBuffer> }): Promise<Result<{ table: ImportTable } | { lines: string[] }>> {
+export async function readListFile(
+  store: Store,
+  file: { name: string; arrayBuffer(): Promise<ArrayBuffer> },
+): Promise<Result<{ table: ImportTable } | { lines: string[] }>> {
   if (!LIST_FILES.test(file.name)) return fail({ kind: 'invalid', message: 'Choose a spreadsheet, a Word file, a PDF or a text file' });
   let bytes: Uint8Array;
   try { bytes = new Uint8Array(await file.arrayBuffer()); } catch { return fail({ kind: 'failed', message: 'The file could not be opened' }); }

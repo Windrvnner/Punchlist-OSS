@@ -172,15 +172,19 @@ describe('files of any size are read (#1060)', () => {
   };
 
   it('reads a Q&A log over 20 MB', async () => {
-    const { store } = make(); const bytes = bigLog();
+    const { store } = make();
+    const bytes = bigLog();
     expect(bytes.length).toBeGreaterThan(20 * 1024 * 1024);
-    const back = await readImportFile(store, fileOf('log.csv', bytes)); if (!back.ok) throw new Error(back.error.message);
+    const back = await readImportFile(store, fileOf('log.csv', bytes));
+    if (!back.ok) throw new Error(back.error.message);
     expect(back.value.rows.length).toBe(2500);
   });
 
   it('reads a checklist file over 20 MB', async () => {
-    const { store } = make(); const bytes = bigLog();
-    const back = await readListFile(store, fileOf('list.csv', bytes)); if (!back.ok) throw new Error(back.error.message);
+    const { store } = make();
+    const bytes = bigLog();
+    const back = await readListFile(store, fileOf('list.csv', bytes));
+    if (!back.ok) throw new Error(back.error.message);
     expect('table' in back.value && back.value.table.rows.length).toBe(2500);
   });
 
