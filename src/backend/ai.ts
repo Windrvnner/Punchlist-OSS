@@ -259,7 +259,8 @@ const PICK_INTRO = 'These are files from the data room of a project-finance deal
 
 const RULES = `Answer only from the documents you are given. Reply with one JSON object and nothing else.
 Cite like this: put [1], [2] … after each sentence that rests on a document, and list the sources in the same order:
-"sources": [{"doc": "its id", "page": 12, "quote": "a few words from that page"}]. For a spreadsheet give "cell": "Sheet name!B12" in place of "page".
+"sources": [{"doc": "its id", "page": 12, "quote": "a few words from that page"}]. \
+For a spreadsheet give "cell": "Sheet name!B12" in place of "page".
 Cite pages only: no clause, section or paragraph numbers. A sentence with no document behind it gets no marker. Never cite a document you were not given.
 Never refer to a finding by an id or a code: say what it is about in words.
 A calculation may use plain symbols (+ − × ÷ * / = %) without writing them out in words, like this: "CFADS / debt service = 41.2m / 31.2m = 1.32x". No LaTeX or other math markup: no \\frac, \\times, ^{…} or _{…}, and no $ around a formula.
@@ -1269,7 +1270,10 @@ export function nodeAi(o: AiOptions) {
     const id = idOf(s);
     const clean = cleanId ? mine.find((x) => x.rec.docId === cleanId) : undefined; const rec = cleanId ? o.docs.records(s.dealId).find((r) => r.docId === cleanId) : undefined;
     // a standalone blackline: no clean draft is in the data room, so what it shows is never taken as the deal's terms
-    const of = clean ? `its clean draft is ${idOf(clean)}. ${idOf(clean)} is what the deal's terms are` : rec ? `its clean draft is ${where(rec)}, which is not given here. The terms are what that clean draft says`
+    const of = clean
+      ? `its clean draft is ${idOf(clean)}. ${idOf(clean)} is what the deal's terms are`
+      : rec
+        ? `its clean draft is ${where(rec)}, which is not given here. The terms are what that clean draft says`
       : cleanId === false
         ? 'no clean draft of it was found by its cover or name. '
           + 'What it shows is not confirmed as the deal\'s terms: say so wherever you rely on it'
@@ -1277,11 +1281,19 @@ export function nodeAi(o: AiOptions) {
     const sees = (o.blackline ?? control.blackline.pipeline) === 'A' ? ' Its strike-through and colors may not come through to you, so deleted words can read as if they were kept: be careful which wording is the new one.' : ' Struck-through words are deleted and colored words are inserted.';
     // what it was compared against (docs/other-project-documents-design.md): only this deal's own earlier draft makes its changes the deal's
     const vs = against === 'own' ? '' : against === 'other' && cleanId === false
-      ? ` ${id} was made on another project: neither side of it is this deal's. Use it only to compare, and cite it only beside a document of this deal.`
-      : against === 'other' ? ` ${id} compares this deal's draft with another project's document. Its deleted wording is the other project's, not an earlier draft of this deal: never report a deletion or insertion as a change made in this deal.`
-      : ` ${id} compares its clean draft with another document, which may be an earlier draft of this deal or another project's. Do not report a difference as a change made in this deal unless a draft of this deal shows it.`;
+      ? ` ${id} was made on another project: neither side of it is this deal's. Use it only to compare, and cite it `
+        + 'only beside a document of this deal.'
+      : against === 'other'
+        ? ` ${id} compares this deal's draft with another project's document. Its deleted wording is the other `
+          + 'project\'s, not an earlier draft of this deal: never report a deletion or insertion as a change made in '
+          + 'this deal.'
+      : ` ${id} compares its clean draft with another document, which may be an earlier draft of this deal or another `
+        + 'project\'s. Do not report a difference as a change made in this deal unless a draft of this deal shows it.';
     const alone = against === 'own' ? '' : ` By itself it never shows that a finding is put right or that its problem is back.`;
-    return `  ${id} is a blackline: a comparison of two ${against === 'own' ? 'drafts' : 'documents'} with the changes marked, made by a comparison tool; ${of}. Read ${id} only for what changed, and give each change as what ${id} appears to show, citing its page.${sees}${vs}${alone}`;
+    const compared = against === 'own' ? 'drafts' : 'documents';
+    return `  ${id} is a blackline: a comparison of two ${compared} with the changes marked, made by a comparison `
+      + `tool; ${of}. Read ${id} only for what changed, and give each change as what ${id} appears to show, citing `
+      + `its page.${sees}${vs}${alone}`;
   }
   /** `spansDeals`: the prompt spans several deals, so each document is named with its deal (#1162) */
   async function send(sent: Sent[], spansDeals = false): Promise<{ files: string[]; listing: string; got: Sent[] }> {
@@ -1305,7 +1317,11 @@ export function nodeAi(o: AiOptions) {
         const against = k.against.get(rec.docId) ?? 'own';
         if (k.pairs.has(rec.docId)) lines.push(blacklineLine(s, mine, k.pairs.get(rec.docId) ?? null, against, idOf));
         // another project's document (docs/other-project-documents-design.md): read, never a main source
-        else if (k.precedents.has(rec.docId)) lines.push(`  ${idOf(s)} is another project's document, not this deal's. Its terms are never this deal's: use it only to compare, and cite it only beside a document of this deal. By itself it never shows that a finding is put right or that its problem is back.`);
+        else if (k.precedents.has(rec.docId)) {
+          lines.push(`  ${idOf(s)} is another project's document, not this deal's. Its terms are never this deal's: `
+            + 'use it only to compare, and cite it only beside a document of this deal. By itself it never shows that '
+            + 'a finding is put right or that its problem is back.');
+        }
       }
     }
     return { files, listing: lines.join('\n'), got };
@@ -1470,7 +1486,12 @@ export function nodeAi(o: AiOptions) {
     page?: DealDoc[],
   ): Promise<Result<{ reply: Record<string, unknown>; sent: Sent[] }>> {
     const keys = [...shape.matchAll(/"([a-z]+)":/g)].map((m) => m[1]).concat('need');                // the fields this question asks for
-    const sent: Sent[] = []; const add = (dealId: string, recs: DocRecord[]) => { for (const rec of withClean(dealId, recs)) if (!sent.some((s) => s.rec.docId === rec.docId && s.dealId === dealId)) sent.push({ dealId, rec }); };
+    const sent: Sent[] = [];
+    const add = (dealId: string, recs: DocRecord[]) => {
+      for (const rec of withClean(dealId, recs)) {
+        if (!sent.some((s) => s.rec.docId === rec.docId && s.dealId === dealId)) sent.push({ dealId, rec });
+      }
+    };
     const core: Record<string, string[]> = {};
     await Promise.all(deals.map(async (d) => { core[d] = await coreOf(d); }));
     try { for (const x of await firstRead(deals, lookFor, must, core, page)) add(x.dealId, x.recs); }
@@ -1759,7 +1780,10 @@ export function nodeAi(o: AiOptions) {
         // a blackline's pages are the model's reading of a change, and another project's document is not this deal's:
         // alone they never settle an item
         if (!quick && where.length && where.every((x) => x.reading || x.precedent)) { out.set(it.id, { kind: 'none', need: `a document of this deal that shows it, not only a blackline or another project's document: ${it.text}` }); continue; }
-        out.set(it.id, quick || where.length ? { kind: 'ok', where } : { kind: 'weak', why: 'As "ok" it needs "where": at least one place that shows it, naming a document you were given, by its id, and a page that document has (or a sheet and cell for a spreadsheet).', said: r, reason: 'It was found satisfied, but no page that shows it could be pointed to.' });
+        const why = 'As "ok" it needs "where": at least one place that shows it, naming a document you were given, '
+          + 'by its id, and a page that document has (or a sheet and cell for a spreadsheet).';
+        const reason = 'It was found satisfied, but no page that shows it could be pointed to.';
+        out.set(it.id, quick || where.length ? { kind: 'ok', where } : { kind: 'weak', why, said: r, reason });
       }
       else if (result === 'more') out.set(it.id, { kind: 'none', need: strings(r.need).join('; ') || it.text });
       else if (result === 'finding') {
@@ -1769,7 +1793,10 @@ export function nodeAi(o: AiOptions) {
         // finding by itself
         if (fitted.sources.length && !fitted.sources.some((x) => mainIn(sent, x))) { out.set(it.id, { kind: 'none', need: `a document of this deal that shows it, not only another project's document or a blackline against one: ${it.text}` }); continue; }
         // a finding stands on one source we can open: what matters most is often said in a single place
-        const short = [!title && 'it has no title', !paras.length && 'it has no body', !fitted.sources.length && 'it needs at least one citation naming a document you were given, by its id, and a page that document has (or a sheet and cell for a spreadsheet), and none of yours do'].filter(Boolean);
+        const uncited = 'it needs at least one citation naming a document you were given, by its id, and a page '
+          + 'that document has (or a sheet and cell for a spreadsheet), and none of yours do';
+        const short = [!title && 'it has no title', !paras.length && 'it has no body',
+          !fitted.sources.length && uncited].filter(Boolean);
         const body = fitParas(fitted.text.split(/\s*\u0000\s*/).filter(Boolean));
         const workstream = workstreamOf(r.workstream);
         const raised: Seen = { kind: 'finding', title, workstream, body, sources: fitted.sources };
