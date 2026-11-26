@@ -35,28 +35,29 @@ export function curable(e: unknown): boolean {
 }
 
 /**
- * The retry policy. `go` makes one try. `empty` says whether a reply has nothing in it; after the last try an empty reply
- * is returned as it is, for the caller to treat as it always has.
+ * The retry policy. `go` makes one try. `empty` says whether a reply has nothing in it; after the last try an empty
+ * reply is returned as it is, for the caller to treat as it always has.
  */
 export function retrier(o: RetryOptions = {}) {
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   /** how many times a failed call is asked again: the same for every call */
   const retries = () => o.retries ?? control.limits.aiRetries;
   /** `tried`: tries this call has already had elsewhere */
-  return Object.assign(async function retried<T>(go: () => Promise<T>, empty: (reply: T) => boolean = () => false, tried = 0): Promise<T> {
+  async function retried<T>(go: () => Promise<T>, empty: (reply: T) => boolean = () => false, tried = 0): Promise<T> {
     const wait = o.waitMs ?? control.timings.aiRetryWait;
     const tries = Math.max(1, 1 + retries() - tried);
-    if (tried > 0 && retries() > 0) await sleep(wait * 2 ** Math.min(tried - 1, 2));     // its try elsewhere failed: this one is its retry, and waits as one
+    // its try elsewhere failed: this one is its retry, and waits as one
+    if (tried > 0 && retries() > 0) await sleep(wait * 2 ** Math.min(tried - 1, 2));
     for (let i = 0; ; i++) {
       try {
         const reply = await go();
-        if (!empty(reply)) return reply;
-        if (i + 1 >= tries) return reply;
+        if (!empty(reply) || i + 1 >= tries) return reply;
       } catch (e) {
         if (!curable(e)) throw e;
         if (i + 1 >= tries) throw e;
       }
       await sleep(wait * 2 ** Math.min(i + tried, 2));                             // 2, 4, then 8 seconds at most between tries
     }
-  }, { retries });
+  }
+  return Object.assign(retried, { retries });
 }

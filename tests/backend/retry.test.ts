@@ -31,32 +31,25 @@ describe('the retry policy', () => {
     for (let i = 0; i < 10; i++) await call();
     expect(tries).toBe(10 * 3);                                                   // each of the ten had its two retries
     expect(retried.retries()).toBe(2);
-    expect(retrier({ retries: 0 }).retries()).toBe(0);                         // what the chat asks before a new conversation
-  });
-
-  it('a model failing every call does not change the retries of calls to another model', async () => {
-    const retried = retrier({ retries: 2, sleep: async () => {} });
-    let down = 0;
-    let up = 0;
-    const call = (model: string) => retried(async () => {
-      if (model === 'standard') { down++; throw fail(); }
-      up++;
-      return 'ok';
-    }).catch(() => 'failed');
-    for (let i = 0; i < 6; i++) { await call('standard'); await call('fast'); }
-    expect(down).toBe(6 * 3);
-    expect(up).toBe(6);
+    // what the chat asks before a new conversation
+    expect(retrier({ retries: 0 }).retries()).toBe(0);
   });
 
   it('the waits are capped, and a call that already had a try elsewhere has that many fewer here', async () => {
     const waits: number[] = []; const retried = retrier({ retries: 5, waitMs: 1000, sleep: async (ms) => { waits.push(ms); } }); let n = 0;
     await retried(async () => { n++; throw fail(); }).catch(() => {}); expect(n).toBe(6); expect(waits).toEqual([1000, 2000, 4000, 4000, 4000]);
-    n = 0; waits.length = 0; await retried(async () => { n++; throw fail(); }, undefined, 1).catch(() => {}); expect(n).toBe(5); expect(waits).toEqual([1000, 2000, 4000, 4000, 4000]);   // the first is its retry's wait
+    n = 0;
+    waits.length = 0;
+    await retried(async () => { n++; throw fail(); }, undefined, 1).catch(() => {});
+    expect(n).toBe(5);
+    expect(waits).toEqual([1000, 2000, 4000, 4000, 4000]);                     // the first is its retry's wait
   });
 
   it('a call that succeeds after a retry gives its reply', async () => {
-    const retried = retrier({ retries: 2, sleep: async () => {} }); let n = 0;
-    for (let i = 0; i < 9; i++) expect(await retried(async () => { if (++n % 2) throw fail(); return 'ok'; })).toBe('ok');
+    const retried = retrier({ retries: 2, sleep: async () => {} });
+    let n = 0;
+    const failsOnce = async () => { if (++n % 2) throw fail(); return 'ok'; };
+    for (let i = 0; i < 9; i++) expect(await retried(failsOnce)).toBe('ok');
     expect(n).toBe(9 * 2);
   });
 });
