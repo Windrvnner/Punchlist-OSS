@@ -230,6 +230,15 @@ describe('answers', () => {
     const r = val(await s.ai.answer(ask('What is the lock-up?')));
     expect(r.text).toBe(' Edge answer.\t');
   });
+  it('keeps a quote for a place cited twice as written, spacing and all', async () => {
+    const cited = (c: Call) => ({
+      text: 'The lock-up is 1.25x. [1] It is also stated here. [2]',
+      sources: [{ doc: tag(c, FA), page: 14 }, { doc: tag(c, FA), page: 14, quote: ' Edge quote\t' }],
+    });
+    const s = setup(cited, { d1: [FA] }, { library: [] });
+    const r = val(await s.ai.answer(ask('What is the lock-up?')));
+    expect(r.sources.map((x) => x.quote)).toEqual([' Edge quote\t']);
+  });
   it("ranks documents by this PC's word index: a word deep in a document's body finds it, and its name still counts most", async () => {
     const ix = makeIndex(new Mem()); const A = doc(21, 'Annex 4.pdf'), B = doc(22, 'Curtailment letter.pdf'), C = doc(23, 'Schedule 7.pdf');
     ix.add('d1', A.docId, countWords(`${'General provisions. '.repeat(200)} Curtailment compensation is paid monthly.`, 'General provisions'));
