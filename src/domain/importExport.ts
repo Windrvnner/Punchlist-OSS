@@ -119,7 +119,8 @@ export function prepareImport(table: string[][], mapping: Mapping, lines?: numbe
   const cells: Record<'received' | 'responded', DateCell[]> = { received: [], responded: [] };
   for (const [at, r] of table.entries()) {
     const text = get(r, 'text'); if (!text) { out.skipped++; continue; }
-    const line = lines?.[at] ?? at + 2; const unread = (k: ImportField, v: string) => out.unread.push(`Row ${line} ${nameOf(k)}: ${v.trim()}`);
+    const line = lines?.[at] ?? at + 2;
+    const unread = (k: ImportField, v: string) => out.unread.push(`Row ${line} ${nameOf(k)}: ${v}`);
     const date = (k: 'received' | 'responded') => {
       const raw = read(r, k);
       const c = {

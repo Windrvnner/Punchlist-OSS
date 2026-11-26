@@ -54,7 +54,9 @@ import { createHash } from 'node:crypto';
 import { ListRecord, Item, firmOf, orderItems, key } from '../domain/checklist';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ulid } from 'ulid';
-import { readJson, unfinished, list as listOf, strings, int, pageOf, word, tagNumber, isObject } from './lenient';
+import {
+  readJson, unfinished, list as listOf, strings, prose, PARAGRAPH_SEAM, int, pageOf, word, tagNumber, isObject,
+} from './lenient';
 import type { LineRead } from '../domain/listRead';
 import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK } from './limits';
 import { UNREAD_REPLY, UNUSABLE_REPLY, UNREACHED, CUT_ON_IT, CUT_BEFORE_IT, UNUSABLE_ON_IT } from './limits';
@@ -429,13 +431,13 @@ export function unid(text: string, ids: Set<string>): string {
 /** Ignore malformed entries individually so a usable group beside one still stands (#658). */
 function memoGroupRows(value: unknown, ids: Set<string>): RiskGroup[] {
   return listOf(value).filter(isObject).map((row) => ({
-    title: unid(strings(row.title)[0] ?? '', ids),
+    title: unid(prose(row.title)[0] ?? '', ids),
     findings: strings(row.findings),
   })).filter((group) => group.findings.length);
 }
 
 const withoutMemoMarks = (text: string, space = '') => text.replace(/\s*\[\d+\]/g, space)
-  .replace(/\{([^{}|]+)\|[^{}]*\}/g, '$1').trim();
+  .replace(/\{([^{}|]+)\|[^{}]*\}/g, '$1');
 const MEMO_RISK_WORDS = 200;
 const MEMO_RISK_TEXT_CHARS = 4_000;
 const MEMO_RISK_TOKEN_CHARS = 256;
@@ -443,8 +445,8 @@ const MEMO_RISK_SHAPE = '{"paragraphs": ["one paragraph per string, with [n] mar
 
 /** Count paragraph breaks inside strings, including the separator used to fit citations across paragraphs (#659). */
 function memoRiskParagraphs(value: unknown): string[] {
-  return strings(value).flatMap((paragraph) => paragraph.split(/\r?\n[^\S\r\n]*\r?\n|\u0000/))
-    .map((paragraph) => paragraph.trim()).filter(Boolean);
+  return prose(value).flatMap((paragraph) => paragraph.split(/\r?\n[^\S\r\n]*\r?\n|\u0000/))
+    .filter((paragraph) => paragraph.trim());
 }
 
 /** Bound the write-up even when malformed text fits the word count (#659). */
@@ -473,7 +475,7 @@ function verdictOf(reply: { verdict?: unknown } | null): 'yes' | 'partly' | 'no'
 
 /** A reconciled answer, or '' when the reply is empty or asks a person to fill something in. */
 function mergedText(reply: { text?: unknown } | null): string {
-  const text = (strings(reply?.text)[0] ?? '').trim();
+  const text = prose(reply?.text)[0] ?? '';
   return /\[[^\]]*(confirm|tbc|tbd|check)[^\]]*\]/i.test(text) ? '' : text;
 }
 
@@ -667,7 +669,7 @@ export function nodeAi(o: AiOptions) {
     const at = new Map(tags.map((t, m) => [t, m]));
     return (listOf(reply?.items) as { id?: unknown; text?: unknown }[]).map((x) => ({
       m: typeof x?.id === 'string' ? at.get(x.id.trim().toLowerCase()) : undefined,
-      text: typeof x?.text === 'string' ? x.text.replace(/\s+/g, ' ').trim() : '',
+      text: typeof x?.text === 'string' && x.text.trim() ? x.text : '',   // as the model wrote it (#1215)
     }));
   };
   /** the places a reply gives more than one question: such a question is not known to belong to either */
@@ -947,7 +949,8 @@ export function nodeAi(o: AiOptions) {
       // 'licence' is the UK spelling on purpose: other parties name documents that way, and search must find them
       prompt: `Describe the document ${doc.name}.\n"summary": two or three sentences: what it is, the parties, its date, what it covers.\n"keywords": up to thirty terms someone would search for to find it. Include the other words people use for the same things (for a permit: consent, license, licence, approval), since it is found by these words.\nReply as JSON: {"summary": "…", "keywords": ["…"]}` }, ['summary', 'keywords']);
     if (!reply || typeof reply.summary !== 'string' || !reply.summary.trim()) return null;
-    return { summary: reply.summary.trim(), keywords: strings(typeof reply.keywords === 'string' ? reply.keywords.split(/[,;\n]/) : reply.keywords).slice(0, 30) };
+    const keywords = typeof reply.keywords === 'string' ? reply.keywords.split(/[,;\n]/) : reply.keywords;
+    return { summary: reply.summary, keywords: strings(keywords).slice(0, 30) };
   }
   const AT_ONCE = 4;                                                             // documents described at a time
   const TRIES = 3;                                                               // a document the model cannot describe is asked about this many times, and then left alone for good
@@ -1494,11 +1497,14 @@ export function nodeAi(o: AiOptions) {
       // (a finding may stand on one place). Answers keep each citation, since two passages may share a page.
       // A cell is the same place however it is written ("Sheet1!$B$2", "sheet1!b2"); a quote of only spaces is no quote.
       const key = `${s.dealId}|${s.rec.docId}|${loc.replace(/\$/g, '').toLowerCase()}`; const at = once ? placed.get(key) : undefined;
-      if (at) { const had = sources[at - 1]; const q = typeof c.quote === 'string' ? c.quote.trim() : ''; if (!had.quote?.trim() && q) had.quote = q; renumber.set(i + 1, at); return; }
+      if (at) { const had = sources[at - 1]; const q = typeof c.quote === 'string' ? c.quote : ''; if (!had.quote?.trim() && q.trim()) had.quote = q; renumber.set(i + 1, at); return; }
       placed.set(key, sources.length + 1); renumber.set(i + 1, sources.length + 1);
       sources.push({ doc: s.rec.name, loc, docId: s.rec.docId, ...(typeof c.quote === 'string' && c.quote ? { quote: c.quote } : {}), ...(withDeal ? { dealId: s.dealId } : {}), ...(blacklines(s.dealId).has(s.rec.docId) ? { reading: true } : precedents(s.dealId).has(s.rec.docId) ? { precedent: true } : {}) } as Source);   // a blackline's page is the model's reading of it; another project's document is tagged so
     });
-    const out = String(text ?? '').replace(/\s*\[(\d+)\]/g, (_m, n) => (renumber.has(+n) ? ` [${renumber.get(+n)}]` : '')).replace(/\{([^{}|]+)\|[^{}]*\}/g, '$1').replace(/ \[(\d+)\](?: ?\[\1\])+/g, once ? ' [$1]' : '$&').trim();
+    const out = String(text ?? '')
+      .replace(/\s*\[(\d+)\]/g, (_m, n) => (renumber.has(+n) ? ` [${renumber.get(+n)}]` : ''))
+      .replace(/\{([^{}|]+)\|[^{}]*\}/g, '$1')
+      .replace(/ \[(\d+)\](?: ?\[\1\])+/g, once ? ' [$1]' : '$&');
     return { text: out, sources };
   }
   const dealIds = async (): Promise<string[]> => { const r = await o.repo.list('deal', '_'); return r.ok ? r.value.map((l) => l.id) : []; };
@@ -1664,7 +1670,7 @@ export function nodeAi(o: AiOptions) {
         return failure(e, 'The documents could not be read');
       }
       if (!reply) return fail({ kind: 'failed', message: UNREAD_REPLY });
-      const need = strings(reply.need);
+      const need = prose(reply.need);
       if (round > 1 || !need.length || page) return ok({ reply, sent });
       // The second round stays within `width` documents too, however many deals are asked about. Priority: what the
       // question must have (attachments, a finding's own documents) is kept; what the model still needs takes up to
@@ -1862,19 +1868,19 @@ export function nodeAi(o: AiOptions) {
   function merge(c: Checklist): ChecklistItem[] {
     const seenText = new Set<string>(); const seenId = new Set<string>(); const out: ChecklistItem[] = [];
     for (const raw of [...(c?.broad ?? []), ...(c?.product ?? []), ...(c?.sector ?? []), ...(c?.technology ?? [])]) {
-      const { id, text } = trimmedItem(raw);
+      const { id, text } = givenItem(raw);
       const wording = key(text);
-      if (!id || !text || seenId.has(id) || seenText.has(wording)) continue;
+      if (!id || !text.trim() || seenId.has(id) || seenText.has(wording)) continue;
       seenId.add(id);
       seenText.add(wording);
       out.push({ id, text });
     }
     return out;
   }
-  /** an item's id and wording with the white space at each end trimmed; anything not text is empty */
-  function trimmedItem(it: { id?: unknown; text?: unknown } | undefined): { id: string; text: string } {
+  /** an item's id (a handle, its edge white space dropped) and its wording as given; anything not text is empty */
+  function givenItem(it: { id?: unknown; text?: unknown } | undefined): { id: string; text: string } {
     const id = typeof it?.id === 'string' ? it.id.trim() : '';
-    const text = typeof it?.text === 'string' ? it.text.trim() : '';
+    const text = typeof it?.text === 'string' ? it.text : '';
     return { id, text };
   }
   /**
@@ -1914,16 +1920,22 @@ export function nodeAi(o: AiOptions) {
         if (!quick && where.length && where.every((x) => x.reading || x.precedent)) { out.set(it.id, { kind: 'none', need: `a document of this deal that shows it, not only a blackline or another project's document: ${it.text}` }); continue; }
         out.set(it.id, quick || where.length ? { kind: 'ok', where } : { kind: 'weak', why: 'As "ok" it needs "where": at least one place that shows it, naming a document you were given, by its D number, and a page that document has (or a sheet and cell for a spreadsheet).', said: r, reason: 'It was found satisfied, but no page that shows it could be pointed to.' });
       }
-      else if (result === 'more') out.set(it.id, { kind: 'none', need: strings(r.need).join('; ') || it.text });
+      else if (result === 'more') out.set(it.id, { kind: 'none', need: prose(r.need).join('; ') || it.text });
       else if (result === 'finding') {
-        const title = typeof r.title === 'string' ? r.title.trim() : ''; const paras = strings(r.body);
-        const fitted = fit(paras.join('\n\u0000\n'), r.sources as Cited[], sent, false, true);
+        const title = typeof r.title === 'string' ? r.title : ''; const paras = prose(r.body);
+        const fitted = fit(paras.join(PARAGRAPH_SEAM), r.sources as Cited[], sent, false, true);
         // another project's document, or a blackline not shown to be against this deal's own draft, never raises a
         // finding by itself
         if (fitted.sources.length && !fitted.sources.some((x) => mainIn(sent, x))) { out.set(it.id, { kind: 'none', need: `a document of this deal that shows it, not only another project's document or a blackline against one: ${it.text}` }); continue; }
         // a finding stands on one source we can open: what matters most is often said in a single place
-        const short = [!title && 'it has no title', !paras.length && 'it has no body', !fitted.sources.length && 'it needs at least one citation naming a document you were given, by its D number, and a page that document has (or a sheet and cell for a spreadsheet), and none of yours do'].filter(Boolean);
-        const body = fitParas(fitted.text.split(/\s*\u0000\s*/).filter(Boolean));
+        const needsCitation = 'it needs at least one citation naming a document you were given, by its D number, '
+          + 'and a page that document has (or a sheet and cell for a spreadsheet), and none of yours do';
+        const short = [
+          !title.trim() && 'it has no title',
+          !paras.length && 'it has no body',
+          !fitted.sources.length && needsCitation,
+        ].filter(Boolean);
+        const body = fitParas(fitted.text.split(PARAGRAPH_SEAM).filter((p) => p.trim()));
         const workstream = workstreamOf(r.workstream);
         const raised: Seen = { kind: 'finding', title, workstream, body, sources: fitted.sources };
         const unsupported = 'A finding was raised on it that could not be supported from a place in the documents.';
@@ -2018,7 +2030,7 @@ export function nodeAi(o: AiOptions) {
     const reusedShown = (reply: Record<string, unknown>) =>
       listOf(reply.reused).every((x) => ids.includes(String(x).trim()));
     const usable = (reply: Record<string, unknown>) =>
-      strings(reply.text).join('\n\n').length <= MODEL_TEXT_MAX && reusedShown(reply);
+      prose(reply.text).join('\n\n').length <= MODEL_TEXT_MAX && reusedShown(reply);
     const wrong = `"text" must be under ${MODEL_TEXT_MAX.toLocaleString('en-US')} characters, and "reused" `
       + 'may name only the earlier responses above, by their ids: put it right';
     const unusable = (text: string) => !namesOnlyShown(text, ids);
@@ -2074,7 +2086,7 @@ export function nodeAi(o: AiOptions) {
         } catch (e) { return failure(e, `${SERVICE} did not answer`); }
       }
       if (!r.ok) return r;
-      const out = fit(strings(r.value.reply.text).join('\n\n'), r.value.reply.sources as Cited[], r.value.sent, false);
+      const out = fit(prose(r.value.reply.text).join('\n\n'), r.value.reply.sources as Cited[], r.value.sent, false);
       // in the order the model named them; a reply escalated past its retry may still name one never shown: not reused
       const reused = [...new Set(listOf(r.value.reply.reused).map((x) => String(x).trim()))]
         .map((id) => earlier.find((q) => q.id === id))
@@ -2103,7 +2115,8 @@ export function nodeAi(o: AiOptions) {
     async reassess(i) {
       const f = await record<{ title: string; body: string[]; sources: Source[] }>('finding', i.findingId); if (!f) return fail({ kind: 'notFound', message: 'No such finding' });
       let m: Awaited<ReturnType<typeof models>>; try { m = await models(); } catch (e) { return failure(e, `${SERVICE} did not answer`); }
-      const parasOf = (reply: Record<string, unknown>) => strings(reply.body).flatMap((p) => p.split(/\n\s*\n/)).map((p) => p.trim()).filter(Boolean);
+      const parasOf = (reply: Record<string, unknown>) => prose(reply.body)
+        .flatMap((p) => p.split(/\n\s*\n/)).filter((p) => p.trim());
       const said = await respondedOn(i.dealId, i.findingId);
       const ask = 'Reassess this finding against the documents as they stand now.\n'
         + `Title: ${f.title}\nAs written: ${f.body.join(' ')}${responsesText(said)}`;
@@ -2122,10 +2135,11 @@ export function nodeAi(o: AiOptions) {
       const numbers = new Map(said.flatMap((q) => (q.n === undefined ? [] : [[q.id, q.n] as const])));
       const paras = parasOf(r.value.reply).map((p) => questionsForIds(p, numbers));
       if (!paras.length) return fail({ kind: 'failed', message: UNREAD_REPLY });
-      const out = fit(paras.join('\n\u0000\n'), r.value.reply.sources as Cited[], r.value.sent, false, true);   // a finding: a place cited twice is one source, as when it was raised
+      // a finding: a place cited twice is one source, as when it was raised
+      const out = fit(paras.join(PARAGRAPH_SEAM), r.value.reply.sources as Cited[], r.value.sent, false, true);
       // a finding stays as written unless one of this deal's own documents bears it out
       if (!out.sources.some((x) => mainIn(r.value.sent, x))) return fail({ kind: 'failed', message: out.sources.length ? 'Only another project’s documents or a blackline against one bear on it, so it stays as written' : 'No page of the deal’s documents bears it out, so it stays as written' });
-      return ok({ body: out.text.split(/\s*\u0000\s*/).filter(Boolean), sources: out.sources });
+      return ok({ body: out.text.split(PARAGRAPH_SEAM).filter((p) => p.trim()), sources: out.sources });
     },
     async dealBrief(dealId) {
       const all = await o.repo.list('finding', dealId);
@@ -2135,7 +2149,8 @@ export function nodeAi(o: AiOptions) {
       if (!open.length) return ok({ paragraphs: [] });
       const key = open.map((f) => `${f.id}:${f.rev}`).join('|'); const had = briefs.get(dealId); if (had?.key === key) return ok({ paragraphs: had.paragraphs });       // nothing changed: not asked again
       const ids = new Set(open.map((f) => f.id));
-      const parasOf = (reply: { paragraphs?: unknown } | null) => strings(reply?.paragraphs).flatMap((p) => p.split(/\n\s*\n/)).map((p) => p.trim()).filter(Boolean).slice(0, 2)
+      const parasOf = (reply: { paragraphs?: unknown } | null) => prose(reply?.paragraphs)
+        .flatMap((p) => p.split(/\n\s*\n/)).filter((p) => p.trim()).slice(0, 2)
         // a link to a finding that is not there becomes plain words
         .map((p) =>
           p
@@ -2224,9 +2239,9 @@ export function nodeAi(o: AiOptions) {
           MEMO_RISK_SHAPE, options);
         if (!r.ok) { if (r.error.kind === 'unreachable') throw Object.assign(new Error(r.error.message), { code: 'unreachable' }); return g; }
         if (!options.usable(r.value.reply) || !r.value.sent.length) return g;
-        const paras = memoRiskParagraphs(r.value.reply.paragraphs).map((p) => unid(p, ids).trim()).filter(Boolean);
-        const out = fit(paras.join('\n\u0000\n'), r.value.reply.sources as Cited[], r.value.sent, false, true);
-        return { ...g, body: out.text.split(/\s*\u0000\s*/).filter(Boolean), sources: out.sources };
+        const paras = memoRiskParagraphs(r.value.reply.paragraphs).map((p) => unid(p, ids)).filter((p) => p.trim());
+        const out = fit(paras.join(PARAGRAPH_SEAM), r.value.reply.sources as Cited[], r.value.sent, false, true);
+        return { ...g, body: out.text.split(PARAGRAPH_SEAM).filter((p) => p.trim()), sources: out.sources };
       };
       const written = new Map<(typeof key)[number], RiskGroup>();
       try { for (let k = 0; k < key.length; k += 3) await Promise.all(key.slice(k, k + 3).map(async (g) => { written.set(g, await writeUp(g)); })); }   // three at a time
@@ -2240,8 +2255,8 @@ export function nodeAi(o: AiOptions) {
         const finding = byId.get(id)!;
         return `(${finding.workstream || 'no workstream'}) ${plain(finding)}`;
       });
-      const parasOf = (reply: { paragraphs?: unknown } | null) => strings(reply?.paragraphs)
-        .map((p) => unid(withoutMemoMarks(p), ids)).filter(Boolean).slice(0, 2);
+      const parasOf = (reply: { paragraphs?: unknown } | null) => prose(reply?.paragraphs)
+        .map((p) => unid(withoutMemoMarks(p), ids)).filter((p) => p.trim()).slice(0, 2);
       const summary = await readMemoSummary(dealId, m, prompt, facts, parasOf, advises);
       if (!summary.ok) return summary;
       return ok({ summary: summary.value, ratings, risks });
@@ -2274,7 +2289,7 @@ export function nodeAi(o: AiOptions) {
       const verdict = verdictOf(reply);
       if (!verdict) return fail({ kind: 'failed', message: UNREAD_REPLY });
       // one short line on the card, however much it wrote
-      return ok({ verdict, why: (strings(reply!.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 200) });
+      return ok({ verdict, why: prose(reply!.why)[0] ?? '' });
     },
     /**
      * Which open questions an answer addresses (#1120): the standard model reads the answer and the questions, each by
@@ -2344,11 +2359,12 @@ export function nodeAi(o: AiOptions) {
         for (const x of kept) {
           // an item split in two comes as "texts"; one reworded as "text"
           const n = int(x?.n);
-          const given = Array.isArray(x?.texts) ? strings(x.texts) : typeof x?.text === 'string' ? [x.text] : [];
-          const texts = given.map((t) => fitText(t.replace(/\s+/g, ' ').trim())).filter(Boolean);
+          const given = Array.isArray(x?.texts) ? prose(x.texts) : typeof x?.text === 'string' ? [x.text] : [];
+          const texts = given.map((t) => fitText(t)).filter((t) => t.trim());
           if (n === null || n < 1 || n > part.length) continue; if (n <= last) inOrder = false; last = Math.max(last, n);
-          if (!texts.length || (texts.length === 1 && texts[0] === part[n - 1].trim()) || got.has(n - 1)) continue;
-          got.set(n - 1, { text: texts[0], why: (strings(x.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 120), ...(texts.length > 1 ? { also: texts.slice(1) } : {}) });
+          const unchanged = texts.length === 1 && texts[0].trim() === part[n - 1].trim();
+          if (!texts.length || unchanged || got.has(n - 1)) continue;
+          got.set(n - 1, { text: texts[0], why: prose(x.why)[0] ?? '', ...(texts.length > 1 ? { also: texts.slice(1) } : {}) });
         }
         // a cut reply listed in order has dealt with every item up to its last whole one; out of order, every item it did not reword is asked again
         return { got, ...(cut ? { cut: inOrder ? range(last, part.length) : range(0, part.length).filter((k) => !got.has(k)) } : {}) };
@@ -2467,7 +2483,7 @@ export function nodeAi(o: AiOptions) {
             const x = shown[a - 1], y = shown[b - 1]; const pair = { a: x, b: y < n ? y : y - n, inAgainst: y >= n };
             if (!pair.inAgainst && pair.b < pair.a) [pair.a, pair.b] = [pair.b, pair.a];
             const k = `${pair.a}:${pair.b}:${pair.inAgainst}`; if (seen.has(k)) continue; seen.add(k);
-            out.push({ ...pair, why: (strings(p.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 120) });
+            out.push({ ...pair, why: prose(p.why)[0] ?? '' });
           }
         }
       };
@@ -2675,7 +2691,7 @@ export function nodeAi(o: AiOptions) {
       : `This finding was raised on the deal earlier.\nTitle: ${f.title}\nAs written: ${f.body.join(' ').replace(/\s*\[\d+\]/g, '')}${await responsesOn(dealId, f.id, heard)}\n\nGoing by the documents as they are now, and any responses above, does it still stand as written? It does not if a document or a response now says otherwise, settles it, or makes it worse.\nReply as JSON: {"stands": true, "why": "one line"}`;
     const reply = await askJson<{ stands?: unknown; why?: unknown }>({ kind: 'verify', model, system: JSON_ONLY, files, prompt: `Documents:\n${listing}\n\n${ask}` }, ['stands', 'why']);
     const said = typeof reply?.stands === 'boolean' ? reply.stands : ['true', 'yes'].includes(word(reply?.stands)) ? true : ['false', 'no'].includes(word(reply?.stands)) ? false : null;
-    return said === null ? null : { stands: said, why: typeof reply!.why === 'string' ? reply!.why.replace(/\s+/g, ' ').trim().slice(0, 200) : '' };
+    return said === null ? null : { stands: said, why: typeof reply!.why === 'string' ? reply!.why : '' };
   }
   /**
    * Mark an open finding as one to reassess, with the reason in a few plain words. This is the one thing the backend

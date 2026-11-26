@@ -57,7 +57,7 @@ describe('long file names', () => {
     it('line breaks, tabs and control characters are shown as a space; a blank name says so; the stored name is not changed', () => {
       expect(displayName('Credit\r\nagreement\t(draft)\u0000\u0007.pdf')).toBe('Credit agreement (draft) .pdf');
       expect(displayName('  \n\t ')).toBe('Unnamed file');
-      expect(displayName('  padded name.pdf  ')).toBe('padded name.pdf');
+      expect(displayName('  padded name.pdf  ')).toBe('  padded name.pdf  ');
       const host = document.createElement('div'); render(<DocName name={'Term\nsheet.pdf'} />, host);
       expect(host.textContent).toBe('Term sheet.pdf');
     });

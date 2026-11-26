@@ -125,7 +125,8 @@ export function riskGroups(open: { id: string; title: string; raisedAt: string }
   const make = (g: RiskGroup, ids: string[]): Grouped => {
     const fs = ids.map((id) => byId.get(id)!);
     const rating = fs.map((f) => ratings[f.id]).filter(Boolean).sort((a, b) => severity(a) - severity(b))[0] ?? null;
-    return { ...g, title: g.title.replace(/\s+/g, ' ').trim() || fs[0].title, findings: ids, rating, raisedAt: fs.map((f) => f.raisedAt).sort()[0] };
+    const title = g.title.trim() ? g.title : fs[0].title;
+    return { ...g, title, findings: ids, rating, raisedAt: fs.map((f) => f.raisedAt).sort()[0] };
   };
   for (const g of groups) {
     const ids = [...new Set(g.findings)].filter((id) => byId.has(id) && !taken.has(id)); if (!ids.length) continue;
@@ -165,7 +166,10 @@ export function memoContent(i: MemoInput): Memo {
   const refs: string[] = []; const refOf = (s: Source) => { const label = `${s.doc.replace(/\.[a-z0-9]{2,5}$/i, '')}${s.loc ? `, ${s.loc}` : ''}`; let k = refs.indexOf(label); if (k < 0) { refs.push(label); k = refs.length - 1; } return k + 1; };
   const cited = (text: string, sources: Source[]) => splitCited(text, sources.length).map((p) => ({ text: p.text, refs: p.refs.map((r) => refOf(sources[r - 1])) }));
   const byId = new Map(open.map((f) => [f.id, f]));
-  const workstreams = (g: Grouped) => [...new Set(g.findings.map((id) => byId.get(id)!.workstream.trim() || NO_WORKSTREAM))].sort(byName).join(', ');
+  const head = (w: string) => (w.trim() ? w : NO_WORKSTREAM);
+  const workstreams = (g: Grouped) => (
+    [...new Set(g.findings.map((id) => head(byId.get(id)!.workstream)))].sort(byName).join(', ')
+  );
   // a finding's own words: its first paragraph, as written
   const own = (f: Finding) => cited(f.body.find((p) => p.trim()) ?? '', f.sources);
   const grouped = riskGroups(open, i.ratings, i.groups);
@@ -173,7 +177,7 @@ export function memoContent(i: MemoInput): Memo {
   const risks: MemoRisk[] = key.map((g) => {
     const fs = g.findings.map((id) => byId.get(id)!); const sources = g.sources ?? [];
     // the model's write-up when there is one; else each finding's own first paragraph, as before
-    const written = (g.body ?? []).map((p) => p.trim()).filter(Boolean);
+    const written = (g.body ?? []).filter((p) => p.trim());
     const paras = written.length ? written.map((p) => cited(p, sources)) : fs.map(own).filter((p) => p.length);
     return { rating: g.rating!, title: g.title, workstream: workstreams(g), paras, open: stillOpen(g.findings, i.questions, i.today) };
   });
@@ -187,7 +191,6 @@ export function memoContent(i: MemoInput): Memo {
   // It counts risks, not findings, as the counts above it do: a risk of several findings is
   // counted once, under the workstream of its most severe finding (the oldest of those on a tie), so the rows add up to
   // the number of risks.
-  const head = (w: string) => w.trim() || NO_WORKSTREAM;
   const home = (g: Grouped) => head(g.findings.map((id) => byId.get(id)!).sort((a, b) => severity(i.ratings[a.id]) - severity(i.ratings[b.id]) || byAge(a, b))[0].workstream);
   const risksIn = [...key, ...rest].map((g) => ({ rating: g.rating, workstream: home(g) }));
   const ws = [...new Set([...risksIn.map((r) => r.workstream), ...openQs.map((q) => head(q.workstream))])];

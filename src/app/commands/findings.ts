@@ -47,6 +47,19 @@ export const CreateFinding = define({
 });
 
 /**
+ * The detail a person edited, as paragraphs: what they typed is trimmed, but a paragraph that is one the finding
+ * holds but for its edge spaces is that paragraph as the model or file wrote it, so editing one paragraph leaves the
+ * others as written (#1215).
+ */
+export function typedParagraphs(typed: string[], held: string[]): string[] {
+  const unused = held.filter((p) => p.trim());
+  return typed.map((p) => p.trim()).filter(Boolean).map((p) => {
+    const at = unused.findIndex((h) => h.trim() === p);
+    return at < 0 ? p : unused.splice(at, 1)[0];
+  });
+}
+
+/**
  * A person corrects a finding's own words: title, workstream, detail. Its status, its review
  * mark and its sources are not touched. Citation markers in the detail are kept as typed.
  */
@@ -67,7 +80,7 @@ export const EditFinding = define({
     if (!f) return fail(notFound('Finding not found', input.findingId));
     // a title may not grow past the limit, but one already longer (written before the limit, or by the model) can still be edited
     if (input.title.length > TITLE_MAX && input.title.length > f.title.length) return fail(invalid(`Keep the title under ${TITLE_MAX} characters`, { title: `Keep the title under ${TITLE_MAX} characters` }));
-    let body = input.body.map((b) => b.trim()).filter(Boolean);
+    let body = typedParagraphs(input.body, input.base?.body ?? f.body);
     let title = input.title;
     let workstream = input.workstream;
     if (input.base) {
@@ -76,7 +89,7 @@ export const EditFinding = define({
       const b = input.base; const same = (x: unknown, y: unknown) => JSON.stringify(x) === JSON.stringify(y); const clashes: string[] = [];
       const merge = <T,>(name: string, mine: T, was: T, now: T): T => { if (same(mine, was)) return now; if (!same(now, was) && !same(now, mine)) clashes.push(name); return mine; };
       title = merge('title', title, b.title, f.title); workstream = merge('workstream', workstream, b.workstream, f.workstream);
-      body = merge('detail', body, b.body.map((x) => x.trim()).filter(Boolean), f.body);
+      body = merge('detail', body, b.body.filter((x) => x.trim()), f.body);
       if (clashes.length) return fail(rejected(`The ${clashes.join(' and ')} changed elsewhere while you were editing. Cancel to see the latest, then make your change again`));
     }
     const changed = [

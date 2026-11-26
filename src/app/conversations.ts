@@ -317,7 +317,7 @@ async function proposeFor(store: Store, scope: Scope, messageId: string) {
 }
 
 /** The texts of a conversation's answers as they leave it, which a suggested question's response may already be. */
-const answeredTexts = (list: Message[]) => new Set(list.map((m) => answerText(m).trim()));
+const answeredTexts = (list: Message[]) => new Set(list.map((m) => answerText(m)));
 
 /** The open question each answer may address, on a deal's or a finding's conversation (a question's is its own). */
 export function suggestions(s: State, scope: Scope): Map<string, string[]> {
@@ -367,7 +367,7 @@ export const responseToReplace = (question?: Question) => question?.response.tri
 /** Read the question itself so undoing the response brings the check back. */
 export function answerWasUsed(question: Question, answer: Message) {
   const response = responseToReplace(question);
-  return response !== null && response.trim() === answerText(answer).trim();
+  return response !== null && response === answerText(answer);
 }
 
 /** A person makes an answer the response, with its sources and only once however often it is pressed. */

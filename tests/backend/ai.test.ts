@@ -225,6 +225,22 @@ describe('answers', () => {
     const r = val(await s.ai.answer(ask('When is delivery due under the supply contract?')));
     expect(r.sources.map((x) => x.loc)).toEqual(['p. 3']); expect(r.text).toBe('Delivery is due in June. [1] Or later.');
   });
+  it('keeps the answer the model wrote as written: its leading and trailing spacing stay', async () => {
+    const s = setup(() => ({ text: ' Edge answer.\t', sources: [] }), { d1: [FA] }, { library: [] });
+    const r = val(await s.ai.answer(ask('What is the lock-up?')));
+    expect(r.text).toBe(' Edge answer.\t');
+  });
+  it('a place a reassessment cites twice keeps the quote as written, spacing and all', async () => {
+    const twice = (c: Call) => ({
+      body: ['It is 1.25x. [1] It is stated again. [2]'],
+      sources: [{ doc: tag(c, FA), page: 14 }, { doc: tag(c, FA), page: 14, quote: ' Edge quote\t' }],
+    });
+    const s = setup(twice, { d1: [FA] }, { library: [] });
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'Lock-up differs', { sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }] });
+    const r = val(await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' }));
+    expect(r.sources.map((x) => x.quote)).toEqual([' Edge quote\t']);
+  });
   it("ranks documents by this PC's word index: a word deep in a document's body finds it, and its name still counts most", async () => {
     const ix = makeIndex(new Mem()); const A = doc(21, 'Annex 4.pdf'), B = doc(22, 'Curtailment letter.pdf'), C = doc(23, 'Schedule 7.pdf');
     ix.add('d1', A.docId, countWords(`${'General provisions. '.repeat(200)} Curtailment compensation is paid monthly.`, 'General provisions'));
@@ -1039,13 +1055,13 @@ describe('drafts, reassessments, the brief, the import layout and whether an ans
     const wrong = await setup(() => ({ sheet: 'Nowhere', headerRow: 1, fields: {} })).ai.layout!({ fileName: 'log.xlsx', bytes: new Uint8Array(), sheets, fields: ['text'] }); expect(!wrong.ok && wrong.error.message).toBe('No table found');
   });
 
-  it('whether an answer addresses a question is judged by the standard model from the two texts alone, in one short line', async () => {
+  it('whether an answer addresses a question is judged by the standard model from the two texts alone, and its reason is kept as written', async () => {
     const s = setup(() => ({ verdict: ' Partly ', why: 'It gives the figure the base case uses,\n  not where it comes from.' }));
     const i = { dealId: 'd1', question: 'Which operating assumption does the base case use, and where does it come from?', answer: 'The base case uses 98% availability.' };
-    expect(val(await s.ai.addresses!(i))).toEqual({ verdict: 'partly', why: 'It gives the figure the base case uses, not where it comes from.' });
+    expect(val(await s.ai.addresses!(i))).toEqual({ verdict: 'partly', why: 'It gives the figure the base case uses,\n  not where it comes from.' });
     expect(s.calls.map((c) => c.model)).toEqual(['standard']); expect(s.calls[0].files).toEqual([]);   // no documents go with it
     expect(s.calls[0].prompt).toContain(i.question); expect(s.calls[0].prompt).toContain(i.answer);
-    const long = setup(() => ({ verdict: 'no', why: 'x'.repeat(500) })); expect(val(await long.ai.addresses!(i)).why).toHaveLength(200);
+    const long = setup(() => ({ verdict: 'no', why: 'x'.repeat(500) })); expect(val(await long.ai.addresses!(i)).why).toHaveLength(500);
     const odd = setup(() => ({ verdict: 'maybe', why: 'Hard to say.' }));
     const oddResult = await odd.ai.addresses!(i);
     expect(!oddResult.ok && oddResult.error.message).toBe('The AI’s reply could not be read');
@@ -1310,6 +1326,13 @@ describe('deal memo model replies', () => {
     ]);
     expect(content.refs.slice(0, 2)).toEqual(['Credit Agreement, p. 14', 'Term sheet (signed), p. 3']);
   });
+
+  it('keeps the edge spaces and tabs of the paragraphs a key risk write-up comes back with', async () => {
+    const edged = [` ${creditWords} [1]`, `\t${termWords} [2]`];
+    const standIn = await setupMemoReplies([distributionRisk], (call) => citedRiskReply(call, edged));
+    const memo = val(await standIn.ai.memo!('d1'));
+    expect(memo.risks![0].body).toEqual(edged);
+  });
 });
 
 describe('what a document is', () => {
@@ -1346,7 +1369,10 @@ describe('what a document is', () => {
     const s = setup(() => ({ text: 'ok', sources: [] }), bareTwo, { describes: true,
       describe: () => ({ summary: ' A senior credit agreement. ', keywords: ['lock-up', ' covenant ', 7, '', ...Array.from({ length: 40 }, (_, i) => `k${i}`)], type: 'Credit agreement' }) });
     val(await s.ai.answer(ask('Lender step-in?'))); await s.ai.described('d1');
-    const fa = s.recs.d1.find((r) => r.name === FA.name)!; expect(fa.summary).toBe('A senior credit agreement.'); expect(fa.keywords!.slice(0, 3)).toEqual(['lock-up', 'covenant', 'k0']); expect(fa.keywords!.length).toBe(30);
+    const fa = s.recs.d1.find((r) => r.name === FA.name)!;
+    expect(fa.summary).toBe(' A senior credit agreement. ');
+    expect(fa.keywords!.slice(0, 3)).toEqual(['lock-up', 'covenant', 'k0']);
+    expect(fa.keywords!.length).toBe(30);
     expect(s.describeCalls[0].prompt).toContain('Include the other words people use for the same things');
     // the service down while describing: nothing is kept, no try is counted against the document, the answer is not held up, and the next read asks again
     let down = true;
@@ -2161,5 +2187,47 @@ describe('documents and runners together, on a real folder', () => {
     expect(svc.calls.filter((c) => c.prompt.startsWith('Describe')).length).toBe(3);
     expect(svc.calls.filter(isCoreAsk).length).toBe(0);                                                                        // and no model is asked which are core
     fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('text the model writes is kept as given, edge spaces and tabs included', () => {
+  it('a reassessment keeps its paragraphs as written', async () => {
+    const written = [' The draft still has 1.25x. [1]', '\tThe term sheet has 1.30x. [2]'];
+    const s = setup((c) => ({ body: written, sources: [{ doc: tag(c, FA), page: 14 }, { doc: tag(c, TS), page: 3 }] }));
+    await deal(s.repo);
+    const sources = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }, { doc: TS.name, loc: 'p. 3', docId: TS.docId }];
+    await finding(s.repo, 'f_1', 'Lock-up differs', { sources });
+    expect(val(await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' })).body).toEqual(written);
+  });
+
+  it('the catch-up brief keeps its paragraphs as written', async () => {
+    const briefOrSearch = (c: Call) => (c.prompt.includes('These are the open findings on a deal')
+      ? { paragraphs: [' The lock-up mismatch matters most.', '\tNothing else is open.'] }
+      : { text: 'Done.', sources: [] });
+    const catchUp = (_c: Call, n: number) => (n === 1 ? { tool: 'brief' } : { text: 'Done.', sources: [] });
+    const s = setup(briefOrSearch, { d1: [FA] }, { turn: catchUp });
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'Lock-up ratio differs from the term sheet');
+    val(await s.ai.answer(ask('Catch me up on the deal')));
+    const brief = ' The lock-up mismatch matters most.\n\tNothing else is open.';
+    expect(s.turns[1].prompt).toContain(`The catch-up on the open findings:\n${brief}`);
+  });
+
+  it('a merged answer keeps its edges', async () => {
+    const s = setup((c) => (c.prompt.includes('Two people answered it differently') ? { text: ' One answer.\t' } : {}));
+    const merged = val(await s.ai.merge!({ dealId: 'd1', question: 'Q?', app: 'A', log: 'B' }));
+    expect(merged).toEqual({ text: ' One answer.\t' });
+  });
+
+  it('a finding raised in a check keeps its title as written', async () => {
+    const edged = (c: Call) => ({ ...LOCKUP(c), title: ' Lock-up ratio differs\t' });
+    const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...edged(c) })) }),
+      { d1: [FA, TS] }, {
+        checklist: () => ({ broad: [LIST.broad[0]], product: [], sector: [] }),
+        pick: (c) => ({ read: numbersOf(c, FA, TS) }),
+      });
+    await deal(s.repo);
+    const r = val(await s.ai.firstPass('d1'));
+    expect((await findingData(s.repo, r.written[0])).title).toBe(' Lock-up ratio differs\t');
   });
 });
