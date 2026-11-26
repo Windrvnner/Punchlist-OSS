@@ -14,11 +14,17 @@ import {
 } from '../../src/app/conversations';
 import { MAX_ATTACHED, attachFiles, addToSources } from '../../src/app/attachments';
 import { checkedOffer, runOffer } from '../../src/app/answerOffer';
+import { SetDealMember } from '../../src/app/commands/members';
 import { dealFindings } from '../../src/app/state';
 import type { AiService, DocumentService, LocalStore } from '../../src/ports';
 import { ok, fail } from '../../src/domain/result';
 
-const COMMANDS = [CreateDeal, AddFolders, DeleteDeal, RecordIndexingProgress, CreateQuestion, EditQuestionField, SetQuestionStatus, SetResponse, DeleteQuestion, RestoreQuestion, UseAsResponse, RequestDraft, ApplyDraft, RecoverDrafts, DiscardDraft, AcceptDraft, RestoreQuestionSnapshot, CreateFinding, SetFindingStatus, ReviewFinding, DeleteFinding, RestoreFinding, RestoreFindingSnapshot, Reassess, ApplyReassessment, AttachDocumentToFinding];
+const COMMANDS = [
+  CreateDeal, AddFolders, DeleteDeal, RecordIndexingProgress, CreateQuestion, EditQuestionField, SetQuestionStatus,
+  SetResponse, DeleteQuestion, RestoreQuestion, UseAsResponse, RequestDraft, ApplyDraft, RecoverDrafts, DiscardDraft,
+  AcceptDraft, RestoreQuestionSnapshot, CreateFinding, SetFindingStatus, ReviewFinding, DeleteFinding, RestoreFinding,
+  RestoreFindingSnapshot, Reassess, ApplyReassessment, AttachDocumentToFinding, SetDealMember,
+];
 for (const c of COMMANDS) registry.set(c.name, c);
 let t = 0; const clock = { now: () => new Date(Date.UTC(2026, 10, 9, 10, 0, 0, t++)).toISOString() };
 let seq = 0; const ids = { next: (p: string) => `${p}_01HZZZZZZZZZZZZZZZZ${String(seq++).padStart(7, '0')}` };
@@ -401,6 +407,10 @@ describe('actions the model offers under its answer (#1054)', () => {
     runOffer(store, { kind: 'page', dealId: 'd_gone', page: 'qa' }, navigate);
     expect(navigate).toHaveBeenCalledTimes(1);
     expect(store.get().ui.toasts.at(-1)!.text).toBe('That deal is no longer in your list');
+    // a deal taken off the person's list since the answer came is not opened either
+    await store.dispatch(SetDealMember, { dealId, on: false });
+    runOffer(store, { kind: 'page', dealId, page: 'qa' }, navigate);
+    expect(navigate).toHaveBeenCalledTimes(1);
     vi.spyOn(store, 'readOnly').mockReturnValue('Read-only');
     store.ui({ newDeal: null });
     runOffer(store, { kind: 'newDeal' }, navigate);
