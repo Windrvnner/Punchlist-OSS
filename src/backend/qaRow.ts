@@ -31,9 +31,8 @@ const NAMED = new RegExp(`\\b(?:([Tt]he) )?(?:([Rr]esponse) (?:to )?)?(q_${ULID}
 /** the question ids a model's text names, each once */
 export const questionIdsIn = (text: string): string[] => [...new Set(text.match(QUESTION_ID) ?? [])];
 
-/** whether every question id in a model's text is one of the questions it was shown (#1105) */
-export const namesOnlyShown = (text: string, shown: readonly string[]): boolean =>
-  questionIdsIn(text).every((id) => shown.includes(id));
+/** whether every permanent id in a model's text is one it was shown (#1105); see recordIds.ts */
+export { namesOnlyShown } from './recordIds';
 
 /**
  * A model's text with each question id put back as its number now: "response q_…" (or "the response q_…", "response
