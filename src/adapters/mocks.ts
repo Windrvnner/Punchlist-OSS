@@ -218,6 +218,21 @@ async function storedFolders(repo: Repository | undefined, dealId: string): Prom
 
 /** the stand-in chat agent's answers being worked on, by run id */
 const researching = new Map<string, { steps: ResearchStep[]; t0: number; stopped?: boolean }>();
+/**
+ * Stand-in for the model offering an action under its answer (#1054), so the demo and the browser suites can show the
+ * button: a few fixed requests, each offering what a model would. The real model decides from the words itself.
+ */
+function standInOffer(message: string): { offer?: unknown } {
+  const said = message.trim().toLowerCase();
+  if (said === 'set up a new deal') return { offer: { action: 'new deal' } };
+  if (said === 'take me to the q&a') return { offer: { action: 'open page', page: 'qa' } };
+  if (said === 'put every gap in the q&a log') return { offer: { action: 'add unresolved' } };
+  if (said === 'ask them for the permit list') {
+    return { offer: { action: 'log question', question: 'Please provide the list of permits held for the project.' } };
+  }
+  return {};
+}
+
 export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => ({
   dealBrief: (dealId) => gate(opts, 'dealBrief', async () => {
     const fs = (await storedFindings(repo, dealId)).filter((f) => f.status === 'open');
@@ -303,7 +318,8 @@ export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => 
       await wait(opts.latency ? opts.latency[1] : 700); read.done = true; read.result = cited.filter((x) => x.doc === doc).map((x) => x.loc).join(', ');
     }
     if (i.runId) researching.delete(i.runId);
-    return ok({ ...r.value, research: { steps: steps.map((step) => ({ ...step })), ms: Date.now() - t0, read } });
+    const research = { steps: steps.map((step) => ({ ...step })), ms: Date.now() - t0, read };
+    return ok({ ...r.value, research, ...standInOffer(i.message) });
   },
   research: async (runId) => { const r = researching.get(runId); return ok(r ? { steps: r.steps.map((x) => ({ ...x })), ms: Date.now() - r.t0 } : null); },
   stop: async (runId) => { const r = researching.get(runId); if (r) r.stopped = true; return ok(!!r); },

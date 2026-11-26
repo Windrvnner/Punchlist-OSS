@@ -6,7 +6,7 @@ import { MemoryLocal } from '../../src/adapters/local';
 import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
 import { mockAi, mockDocuments, mockSession, mockFirstPass, type MockOptions } from '../../src/adapters/mocks';
 import { CreateDeal, EditDeal, DeleteDeal, withProject, dealNameRoom } from '../../src/app/commands/deals';
-import { navIntent } from '../../src/app/conversations';
+import { checkedOffer } from '../../src/app/answerOffer';
 import { nameDir } from '../../src/ui/hooks';
 import { CreateQuestion, DeleteQuestion, RestoreQuestion, EditQuestionField, SetResponse, SetQuestionStatus } from '../../src/app/commands/questions';
 import { CreateFinding, EditFinding, ReviewFinding, DeleteFinding, RestoreFinding, RestoreFindingSnapshot, ApplyReassessment } from '../../src/app/commands/findings';
@@ -86,39 +86,37 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
     expect(full.ok).toBe(true);
   });
 
-  it('a "Project-…" or "Project: …" name is found by "go to" and runs the way its words do', async () => {
+  it('a "Project-…" or "Project: …" name is found by an offered page and runs the way its words do', async () => {
     const m = make();
     const a = await deal(m, 'Project-Lucerne Solar');
-    expect(navIntent(m.store, 'go to Lucerne Solar findings')).toBe(true);
-    expect(location.hash).toBe(`#${pageHash('findings', a)}`);
+    const offer = { action: 'open page', deal: 'Lucerne Solar', page: 'findings' };
+    expect(checkedOffer(m.store.get(), { kind: 'all' }, offer)).toEqual({ kind: 'page', dealId: a, page: 'findings' });
     expect(nameDir('Project: \u05e9\u05de\u05e9')).toBe('rtl');             // Hebrew after "Project: "
     expect(nameDir('Projector \u05e9\u05de\u05e9')).toBe('auto');           // another word that starts with the letters
     expect(nameDir('Project Lucerne \u05e9\u05de\u05e9')).toBe('auto');     // a Hebrew word later on doesn't decide it
   });
 
-  it('routes explicit navigation for Unicode and hyphenated deal names (#500)', async () => {
+  it('finds the deal an offered page names, for Unicode and hyphenated deal names (#500, #1054)', async () => {
     const m = make();
     const hyphenated = await deal(m, 'Harbor-Refinance');
     const spaced = await deal(m, 'Harbor Refinance');
     const accented = await deal(m, 'Énergie-Refinance');
     const suffix = await deal(m, 'Harbor Overview');
     const base = await deal(m, 'Harbor');
-    await deal(m, "Harbor's");
     const article = await deal(m, 'The');
+    const offered = (name: string) =>
+      checkedOffer(m.store.get(), { kind: 'all' }, { action: 'open page', deal: name, page: 'qa' });
     for (const [name, id] of [
       ['Harbor-Refinance', hyphenated],
       ['Project Harbor Refinance', spaced],
       ['Project: Énergie-Refinance', accented],
       ['E\u0301nergie-Refinance\n', accented],
       ['Harbor Overview', suffix],
-      ['Harbor’s', base],
+      ['Harbor', base],
       ['The', article],
-    ]) {
-      expect(navIntent(m.store, `Open ${name} Q&A`)).toBe(true);
-      expect(location.hash).toBe(`#${pageHash('qa', id)}`);
-    }
-    expect(navIntent(m.store, 'Open Unknown-Deal Q&A')).toBe(false);
-    expect(navIntent(m.store, 'What is in Harbor-Refinance Q&A?')).toBe(false);
+    ]) expect(offered(name)).toEqual({ kind: 'page', dealId: id, page: 'qa' });
+    expect(offered('Unknown-Deal')).toBeUndefined();
+    expect(offered('Harbor-Refinance Q&A')).toBeUndefined();
   });
 
   it('Undo brings back a capitalized "Project"; an accent or hidden character is not the word', async () => {
