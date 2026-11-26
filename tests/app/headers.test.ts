@@ -1,6 +1,6 @@
 // A due diligence log rarely starts in cell A1: there is a title, some padding, sometimes a cover sheet.
 import { describe, it, expect } from 'vitest';
-import { readCsv } from '../../src/adapters/spreadsheet';
+import { readCsv } from '../../src/domain/sheets';
 import { tableFrom, type Sheet } from '../../src/domain/sheets';
 import { findHeaderRow, suggestMapping, prepareImport } from '../../src/domain/importExport';
 
