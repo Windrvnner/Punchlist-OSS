@@ -120,16 +120,17 @@ describe('a draft reuses an answer already given to another party', () => {
   });
 
   it('an earlier response the model uses is quoted word for word and named, ahead of what the documents add; '
-    + 'one never shown is sent back, then ignored', async () => {
+    + 'one never shown fails the draft', async () => {
     const page14 = [{ doc: 'D1', page: 14 }];
     const neverShown = { status: 'found', text: 'The ratio is 1.20x. [1]', sources: page14, reused: [ID12, qid(9)] };
     const s = drafting(neverShown, [FA]);
     await deal(s.repo); await questions(s.repo, [Q12, ...log(300)]);
-    const r = val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW }));
-    // Q9 was never shown: the reply is sent back to be put right (#1105), and if it still names Q9, Q9 is ignored
+    // Q9 was never shown: the reply is asked again, and still naming Q9 when its tries run out, it is no draft (#1105)
+    expect((await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW })).ok).toBe(false);
+    const named = drafting({ status: 'found', text: 'The ratio is 1.20x. [1]', sources: page14, reused: [ID12] }, [FA]);
+    await deal(named.repo); await questions(named.repo, [Q12]);
+    const r = val(await named.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW }));
     expect(r.text).toBe(`${AS_ANSWERED_12}\n\nThe ratio is 1.20x. [1]`);
-    const sentBack = (c: Call) => isDraft(c) && c.prompt.includes('may name only the earlier responses above');
-    expect(s.calls.some(sentBack)).toBe(true);
     // the credit is never put on the model's wording: a figure that differs from the response stays beside it, in sight
     const credit = `As answered to Lender B (${ID12}). The lock-up ratio is 1.35x. [1]`;
     const differs = drafting({ status: 'found', text: credit, sources: page14, reused: [ID12] }, [FA]);
@@ -151,17 +152,33 @@ describe('a draft reuses an answer already given to another party', () => {
     await deal(plain.repo); await questions(plain.repo, [Q12]); expect(val(await plain.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW })).text).toBe('The ratio is 1.20x. [1]');
   });
 
-  it('a draft whose text names a question it was not shown is sent back to be put right (#1105)', async () => {
-    const said = (c: Call) => (c.prompt.includes('That cannot be used') ? 'The ratio is 1.20x. [1]'
-      : `The ratio is 1.20x, as answered in ${qid(9)}. [1]`);
-    const s = setup((c) => (isDraft(c) ? { status: 'found', text: said(c), sources: [{ doc: 'D1', page: 14 }] } : {}), {
+  it('a draft whose text names a question it was not shown is asked again (#1105)', async () => {
+    let drafts = 0;
+    const said = () => (++drafts > 1 ? 'The ratio is 1.20x. [1]' : `The ratio is 1.20x, as answered in ${qid(9)}. [1]`);
+    const s = setup((c) => (isDraft(c) ? { status: 'found', text: said(), sources: [{ doc: 'D1', page: 14 }] } : {}), {
       d1: [FA],
     });
     await deal(s.repo); await questions(s.repo, [Q12]);
     const r = val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW }));
     expect(r.text).toBe('The ratio is 1.20x. [1]');
-    expect(s.calls.filter(isDraft).length).toBe(2);
+    const asked = s.calls.filter(isDraft);
+    expect(asked.length).toBe(2);
+    expect(asked[1].prompt).toBe(asked[0].prompt);
   });
+
+  it.each([['documents', [FA]], ['no document', []]])(
+    'a draft with %s still naming an unshown question id when its tries run out fails (#1105)',
+    async (_label, library) => {
+      const text = `The ratio is 1.20x, as answered in ${qid(9)}. [1]`;
+      const sources = library.length ? [{ doc: 'D1', page: 14 }] : [];
+      for (const thorough of ['thorough', 'standard']) {
+        const s = drafting({ status: 'found', text, sources, reused: [ID12] }, library);
+        s.svc.offered = { ...s.svc.offered, thorough };
+        await deal(s.repo); await questions(s.repo, [Q12]);
+        expect((await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW })).ok).toBe(false);
+      }
+    },
+  );
 
   it('with no document behind it, an earlier response is enough for a draft; with neither, there is no draft', async () => {
     const credit = `As answered to Lender B (${ID12}): the ratio is 1.20x.`;

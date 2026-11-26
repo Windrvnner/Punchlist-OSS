@@ -1404,10 +1404,15 @@ export function nodeAi(o: AiOptions) {
    * One question, read from documents, in up to two rounds: the second only if the model says what is missing and
    * something answers to it. With `again`, a reply that cannot be used is sent back to the same model with what is
    * wrong with it (`wrong`), to be put right; and only if that fails too, the question goes once to the `escalate` model.
+   * A reply its `unusable` names (one naming a question id it was not shown) is asked again as an empty one is, and
+   * fails the read if it is still unusable when its tries run out (#1105).
    */
   async function read(
     kind: string, deals: string[], model: string, ask: string, lookFor: string, must: Record<string, string[]>,
-    shape: string, again?: { escalate: string; usable: (reply: Record<string, unknown>) => boolean; wrong: string },
+    shape: string,
+    again?: {
+      escalate: string; usable: (reply: Record<string, unknown>) => boolean; wrong: string; unusable?: Unusable;
+    },
     page?: DealDoc[],
   ): Promise<Result<{ reply: Record<string, unknown>; sent: Sent[] }>> {
     const keys = [...shape.matchAll(/"([a-z]+)":/g)].map((m) => m[1]).concat('need');                // the fields this question asks for
@@ -1420,6 +1425,7 @@ export function nodeAi(o: AiOptions) {
     let using = model;
     let pool: Sent[] | undefined;
     let canRetry = readCanRetry(model, again);
+    const unusable = again?.unusable;   // checked on every reply, whether or not it can be sent back (#1105)
     for (let round = 1; ; round++) {
       let reply: Record<string, unknown> | null;
       try {
@@ -1430,14 +1436,15 @@ export function nodeAi(o: AiOptions) {
         if (!sent.length) return fail({ kind: 'failed', message: 'The documents for this could not be opened on this PC' });
         const inAll = deals.reduce((sum, d) => sum + o.docs.records(d).length, 0);
         const prompt = `Documents:\n${listing}\n\nThese are ${sent.length} of the ${inAll} documents in ${deals.length > 1 ? 'these data rooms' : 'the data room'}: the ones chosen as likeliest to bear on this. You have not seen the others, so do not say what the data room as a whole does or does not contain; say what these documents show.\n\n${ask}\n\nReply as JSON: ${shape}${round === 1 ? ' If a document you were not given is needed to answer, add "need": ["a few words describing it"].' : ''}`;
-        reply = await askJson({ kind, model: using, system: RULES, files, prompt }, keys, shape);
+        reply = await askJson({ kind, model: using, system: RULES, files, prompt, unusable }, keys, shape);
         if (again && canRetry && (!reply || !again.usable(reply))) {
           const correction = readCorrection(prompt, reply, again);
-          reply = await askCorrection({ kind, model: using, system: RULES, files, prompt: correction }, keys, shape);
+          const sendBack = { kind, model: using, system: RULES, files, prompt: correction, unusable };
+          reply = await askCorrection(sendBack, keys, shape);
           if (!reply || !again.usable(reply)) {
             canRetry = false;
             using = again.escalate;
-            reply = await askJson({ kind, model: using, system: RULES, files, prompt }, keys, shape, false);
+            reply = await askJson({ kind, model: using, system: RULES, files, prompt, unusable }, keys, shape, false);
           }
         }
       } catch (e) {
@@ -1793,19 +1800,18 @@ export function nodeAi(o: AiOptions) {
   }
   /**
    * A draft's reply that can be used: its text fits one Excel cell, and it names only earlier responses it was shown,
-   * in "reused" and in "text"; one that names another question id is a failed reply, sent back (#1105)
+   * in "reused" and in "text"; one that names another question id is a failed reply, asked again (#1105)
    */
   function draftCheck(earlier: Alike[], escalate: string) {
     const ids = earlier.map((q) => q.id);
     const reusedShown = (reply: Record<string, unknown>) =>
       listOf(reply.reused).every((x) => ids.includes(String(x).trim()));
-    const shownOnly = (reply: Record<string, unknown>) =>
-      reusedShown(reply) && namesOnlyShown(strings(reply.text).join('\n\n'), ids);
     const usable = (reply: Record<string, unknown>) =>
-      strings(reply.text).join('\n\n').length <= MODEL_TEXT_MAX && shownOnly(reply);
-    const wrong = `"text" must be under ${MODEL_TEXT_MAX.toLocaleString('en-US')} characters, and "text" and "reused" `
+      strings(reply.text).join('\n\n').length <= MODEL_TEXT_MAX && reusedShown(reply);
+    const wrong = `"text" must be under ${MODEL_TEXT_MAX.toLocaleString('en-US')} characters, and "reused" `
       + 'may name only the earlier responses above, by their ids: put it right';
-    return { escalate, usable, wrong };
+    const unusable = (text: string) => !namesOnlyShown(text, ids);
+    return { escalate, usable, wrong, unusable };
   }
   let briefs = new Map<string, { key: string; paragraphs: string[] }>();
   const service: AiService = {
@@ -1845,8 +1851,14 @@ export function nodeAi(o: AiOptions) {
         // the system rules say to answer from the earlier responses here, since there are no documents; a reply too long is sent back once to be cut down
         const prompt = `No document in the data room was found to bear on this.\n\n${ask}\n\nReply as JSON: ${shape}`;
         try {
-          let reply = await askJson({ kind: 'draft', model: m.standard, system: PRIOR_RULES, prompt }, ['status', 'text', 'reused'], shape);
-          if (reply && !again.usable(reply)) reply = await askJson({ kind: 'draft', model: m.standard, system: PRIOR_RULES, prompt: `${prompt}\n\nYou replied:\n${JSON.stringify(reply)}\n\nThat cannot be used: ${again.wrong}. Send the whole reply again, put right.` }, ['status', 'text', 'reused'], shape, false);
+          const keys = ['status', 'text', 'reused'];
+          const input = { kind: 'draft', model: m.standard, system: PRIOR_RULES, prompt, unusable: again.unusable };
+          let reply = await askJson(input, keys, shape);
+          const correction = `${prompt}\n\nYou replied:\n${JSON.stringify(reply)}\n\n`
+            + `That cannot be used: ${again.wrong}. Send the whole reply again, put right.`;
+          if (reply && !again.usable(reply)) {
+            reply = await askJson({ ...input, prompt: correction }, keys, shape, false);
+          }
           r = reply ? ok({ reply, sent: [] }) : fail({ kind: 'failed', message: UNREAD_REPLY });
         } catch (e) { return failure(e, `${SERVICE} did not answer`); }
       }
