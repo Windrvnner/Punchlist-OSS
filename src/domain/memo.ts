@@ -203,7 +203,7 @@ export function memoContent(i: MemoInput): Memo {
   }
 
   const items = i.checklist ?? [];
-  const oldestQ = openQs.filter((q) => parts(q.received)).sort((a, b) => (a.received < b.received ? -1 : 1))[0];
+  const oldestQ = openQs.filter((q) => q.received).sort((a, b) => (a.received < b.received ? -1 : 1))[0];
   const age = oldestQ ? days(oldestQ.received, i.today) : null;
 
   const counts = [

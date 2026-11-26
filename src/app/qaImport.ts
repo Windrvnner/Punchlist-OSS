@@ -111,7 +111,7 @@ export interface QaPreviewRow {
   dates: Pick<ImportRow, 'received' | 'responded'>;
 }
 
-/** Prepare the rows, and the preview from them (dates as the import reads them: real dates, typed text as written). */
+/** Use the import's contextual date readings wherever the preview shows a prepared row. */
 export function prepareQaImport(table: ImportTable, mapping: Mapping) {
   const prepared = prepareImport(table.rows, mapping, table.lines);
   return { prepared, previewRows: previewQaRows(table, mapping, prepared) };

@@ -10,7 +10,7 @@
  */
 import { z } from 'zod';
 import { define, type Upsert, type AuditDraft } from '../command';
-import { Question, Finding, Tombstone, DealId, QuestionId, FindingId, QuestionStatus } from '../../domain/model';
+import { Question, Finding, Tombstone, DealId, QuestionId, FindingId, QuestionStatus, isRealDate } from '../../domain/model';
 import { setResponse, setQuestionStatus, checkQuestion } from '../../domain/transitions';
 import { numbering } from './questions';
 import { matchQuestions, withAccepted, AcceptedMatch } from '../../domain/qaMatch';
@@ -26,7 +26,7 @@ import type { State } from '../state';
 
 /** fields that name someone or something rather than say something: spaces around them are not part of the name */
 const IDENTITIES = new Set(['askedBy', 'respondedBy', 'workstream']);
-const Ymd = z.string();   // a real date, or the text the log had there
+const Ymd = z.string().refine((v) => v === '' || isRealDate(v));
 export const ImportRowSchema = z.object({ line: z.number().int().positive().optional(), n: z.number().int().positive().nullable(), text: z.string().min(1), askedBy: z.string(), received: Ymd, workstream: z.string(), priority: z.enum(['', 'High', 'Medium', 'Low']), response: z.string(), respondedBy: z.string(), responded: Ymd, status: z.union([QuestionStatus, z.literal('')]) });
 
 /** a deal's deleted questions, newest deletion first: their tombstones, and each question as it was, by id */

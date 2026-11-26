@@ -36,27 +36,60 @@ export function suggestMapping(columns: string[]): Mapping {
   };
 }
 
+const MONTHS = [
+  'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november',
+  'december',
+];
+/** a month written as a word: its full name or first three letters (and "sept"), as Excel takes it; no other */
+const monthOf = (word: string): number | undefined => {
+  const w = word.toLowerCase();
+  const i = MONTHS.findIndex((m) => m === w || m.slice(0, 3) === w || (m === 'september' && w === 'sept'));
+  return i < 0 ? undefined : i + 1;
+};
+const ymd = (y: number, m: number, d: number) => { const s = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`; return isRealDate(s) ? s : null; };
+
+/** a two-digit year as Excel reads one typed in a cell: 00–29 are 2000–2029, 30–99 are 1930–1999 */
+const fullYear = (y: string) => (y.length === 4 ? +y : +y < 30 ? 2000 + +y : 1900 + +y);
+/** a time after a date ("12:00:00", "3:30 PM"), as a date-and-time cell reads */
+const TIME = /[ T]+([01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:\s*[AaPp]\.?[Mm]\.?)?$/;
+
 /**
- * A date cell → YYYY-MM-DD, '' for blank, or null when it is not a date. A workbook's real date cell arrives as
- * YYYY-MM-DD, with a time when it has one (convert.ts); text typed in a cell is not a date and is never read as
- * one (decision 99).
+ * A date as typed in a spreadsheet cell → YYYY-MM-DD, '' for blank, or null when it is not a real calendar date.
+ * Never rolls an impossible date forward. On its own, a numeric date valid both ways gives its month-first reading; in an
+ * import, prepareImport settles it from the dates around it (dateReadings). A year written with two digits is read as
+ * Excel reads it. A month written as a word may come before or after the day, with an ordinal ("2nd") and with spaces,
+ * hyphens or commas between. A date with a time is read as its date. A workbook's real date cell arrives as YYYY-MM-DD
+ * (convert.ts), so it is never in doubt. A bare number (a serial date typed as text, or a cell with no date format) is not
+ * read: it could as well be a plain number.
  */
-export function parseDate(v: unknown): string | null {
-  const s = String(v ?? '').trim();
-  // a date-and-time cell is its date
-  const day = /^(\d{4}-\d{2}-\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?$/.exec(s)?.[1];
-  if (day !== undefined) return isRealDate(day) ? day : null;
-  return s ? null : '';
+export function parseDate(v: unknown): string | null { const c = dateReadings(v); return c.length ? c[0] : null; }
+
+/**
+ * Every way a date cell can be read: [''] for blank, [] when it is not a real calendar date, one date, or for a numeric
+ * date valid both ways ("02.11.2026") the month-first reading then the day-first one. prepareImport chooses between the two.
+ */
+export function dateReadings(v: unknown): string[] {
+  const one = (d: string | null) => (d === null ? [] : [d]);
+  const s0 = String(v ?? '').trim(); if (!s0) return [''];
+  let m: RegExpExecArray | null;
+  if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ].*)?$/.exec(s0))) return one(ymd(+m[1], +m[2], +m[3]));
+  const s = s0.replace(TIME, '');
+  if ((m = /^(\d{4})([\/.])(\d{1,2})\2(\d{1,2})$/.exec(s))) return one(ymd(+m[1], +m[3], +m[4]));   // year first: 2026/11/02
+  if ((m = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4}|\d{2})$/.exec(s))) { const a = +m[1], b = +m[2], y = fullYear(m[3]); if (a > 12 && b <= 12) return one(ymd(y, b, a)); if (a <= 12 && b <= 12 && a !== b) return [ymd(y, a, b)!, ymd(y, b, a)!]; return one(ymd(y, a, b)); }
+  const day = String.raw`(\d{1,2})(?:st|nd|rd|th)?`; const sep = String.raw`[\s,\-]+`;
+  if ((m = new RegExp(`^([A-Za-z]{3,9})\\.?${sep}${day}${sep}(\\d{4}|\\d{2})$`, 'i').exec(s))) {
+    const mo = monthOf(m[1]);
+    return one(mo ? ymd(fullYear(m[3]), mo, +m[2]) : null);
+  }
+  if ((m = new RegExp(`^${day}${sep}([A-Za-z]{3,9})\\.?${sep}(\\d{4}|\\d{2})$`, 'i').exec(s))) {
+    const mo = monthOf(m[2]);
+    return one(mo ? ymd(fullYear(m[3]), mo, +m[1]) : null);
+  }
+  return [];
 }
 
 export interface ImportRow { /** the row's line in the file, header being line 1 */ line?: number; n: number | null; text: string; askedBy: string; received: string; workstream: string; priority: '' | 'High' | 'Medium' | 'Low'; response: string; respondedBy: string; responded: string; status: QuestionStatus | '' }
-export interface Prepared {
-  rows: ImportRow[];
-  skipped: number;
-  unknownValues: number;
-  /** each value counted above, where it is: "Row 14 Priority: urgent" */
-  unread: string[];
-}
+export interface Prepared { rows: ImportRow[]; skipped: number; badDates: number; unknownValues: number; /** each date or value counted above, where it is: "Row 14 Received: 31/31/2026" */ unread: string[] }
 
 const PRIORITY: Record<string, ImportRow['priority']> = { high: 'High', medium: 'Medium', low: 'Low' };
 const STATUS: Record<string, QuestionStatus> = { open: 'open', outstanding: 'open', answered: 'answered', closed: 'closed' };
@@ -68,21 +101,38 @@ const STATUS: Record<string, QuestionStatus> = { open: 'open', outstanding: 'ope
  * "Lender A", so the spaces around them go (the text inside is untouched). The values that are read as something else
  * (number, dates, priority, status) ignore the spaces around them too. A question of only spaces is a question, as one
  * made in the app can be.
- * A date cell is read only when it is a real date (YYYY-MM-DD, as a workbook's date cell arrives; see convert.ts);
- * anything else in a date column is kept as written, never parsed.
+ * A numeric date valid both ways is settled by context, not by one format per file or column:
+ * first the row's other date (a question is received before it is responded to), then the nearest settled dates above
+ * and below it in its column (logs mostly run in date order: the reading between them, else the one much nearer them),
+ * then no date after today. Unsettled, it is left blank and
+ * counted as not read. A workbook's real date cells reach here as YYYY-MM-DD (see convert.ts), so only typed dates are in doubt.
  */
-export function prepareImport(table: string[][], mapping: Mapping, lines?: number[]): Prepared {
+export function prepareImport(table: string[][], mapping: Mapping, lines?: number[], o: { today?: string } = {}): Prepared {
+  const today = o.today ?? localYmd(new Date().toISOString());
   const get = (r: string[], k: ImportField) => (mapping[k] == null ? '' : String(r[mapping[k]!] ?? ''));
   // a value read as a number, date, priority, status or workstream is read without control characters; text is
   // kept whole
   const read = (r: string[], k: ImportField) => (
     get(r, k).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
   );
-  const out: Prepared = { rows: [], skipped: 0, unknownValues: 0, unread: [] };
+  const out: Prepared = { rows: [], skipped: 0, badDates: 0, unknownValues: 0, unread: [] };
   const nameOf = (k: ImportField) => IMPORT_FIELDS.find(([f]) => f === k)?.[1] ?? k;
+  type DateCell = { raw: string; readings: string[]; done: (d: string) => void; bad: () => void };
+  const cells: Record<'received' | 'responded', DateCell[]> = { received: [], responded: [] };
   for (const [at, r] of table.entries()) {
     const text = get(r, 'text'); if (!text) { out.skipped++; continue; }
     const line = lines?.[at] ?? at + 2; const unread = (k: ImportField, v: string) => out.unread.push(`Row ${line} ${nameOf(k)}: ${v.trim()}`);
+    const date = (k: 'received' | 'responded') => {
+      const raw = read(r, k);
+      const c = {
+        raw,
+        readings: dateReadings(raw),
+        done: (d: string) => { row[k] = d; },
+        bad: () => { out.badDates++; unread(k, raw); },
+      };
+      cells[k].push(c);
+      return c;
+    };
     const pr = read(r, 'priority').trim();
     const st = read(r, 'status').trim();
     const nRaw = read(r, 'n').trim().replace(/^q/i, '');
@@ -101,9 +151,29 @@ export function prepareImport(table: string[][], mapping: Mapping, lines?: numbe
       respondedBy: get(r, 'respondedBy'), responded: '', status: STATUS[st.toLowerCase()] ?? '', line,
     };
     out.rows.push(row);
-    // a real date cell is its date; anything else typed there is kept whole, as written (decision 99)
-    row.received = parseDate(read(r, 'received')) ?? get(r, 'received');
-    row.responded = parseDate(read(r, 'responded')) ?? get(r, 'responded');
+    const rec = date('received'), res = date('responded');
+    // the row's other date: keep the readings that leave received on or before responded
+    if (rec.readings.length > 1 || res.readings.length > 1) {
+      const fits = (x: string, y: string) => !x || !y || x <= y;
+      const a = rec.readings.filter((x) => res.readings.some((y) => fits(x, y))), b = res.readings.filter((y) => rec.readings.some((x) => fits(x, y)));
+      if (a.length) rec.readings = a; if (b.length) res.readings = b;
+    }
+  }
+  for (const col of [cells.received, cells.responded]) {
+    // the nearest dates above and below that are already settled, as they stood after the row's own check
+    const settled = col.map((c) => (c.readings.length === 1 && c.readings[0] ? c.readings[0] : ''));
+    for (const [i, c] of col.entries()) {
+      if (c.readings.length < 2) continue;
+      const above = settled.slice(0, i).reverse().find(Boolean), below = settled.slice(i + 1).find(Boolean);
+      const near = c.readings.filter((x) => (!above || above <= x) && (!below || x <= below));
+      // both fit (or neither): the one much nearer the dates around it, as a log in date order would have it
+      const days = (x: string) => Math.min(...[above, below].filter((y): y is string => !!y).map((y) => Math.abs(Date.parse(x) - Date.parse(y)) / 864e5));
+      const [a, b] = (near.length ? near : c.readings).map((x) => ({ x, d: days(x) })).sort((p, q) => p.d - q.d);
+      if (near.length === 1) c.readings = near;
+      else if (b && (above || below) && a.d * 2 < b.d) c.readings = [a.x];
+      else { const past = c.readings.filter((x) => x <= today); if (past.length === 1) c.readings = past; }
+    }
+    for (const c of col) { if (c.readings.length === 1) c.done(c.readings[0]); else c.bad(); }
   }
   out.unread.sort((x, y) => +x.split(' ')[1] - +y.split(' ')[1]);   // in row order, as the file reads; the sort keeps each row's own order
   return out;

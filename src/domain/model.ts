@@ -11,6 +11,8 @@ import { z } from 'zod';
 import { control } from '../control';
 
 const ISO = z.string().min(20); // full ISO 8601 timestamp
+const YMD = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isRealDate, 'not a calendar date');
+const YMDorBlank = z.union([z.literal(''), YMD]);
 
 export function isRealDate(s: string): boolean {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
@@ -194,14 +196,13 @@ export const Question = Record.extend({
   n: z.number().int().positive(),
   text: z.string(),
   askedBy: z.string().default(''),
-  // a real date (YYYY-MM-DD), or the text an imported log had there, kept as written
-  received: z.string().default(''),
+  received: YMDorBlank.default(''),
   workstream: z.string().default(''),
   priority: Priority.default(''),
   status: QuestionStatus.default('open'),
   response: z.string().default(''),
   respondedBy: z.string().default(''),
-  responded: z.string().default(''),   // as received
+  responded: YMDorBlank.default(''),
   provenance: Provenance.optional(),
   linkedFinding: FindingId.optional(),
   /** the checklist item it was asked for (Ask the counterparty on a gap or a flagged item, Add all unresolved); linking design, section 6 */

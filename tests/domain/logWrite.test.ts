@@ -154,9 +154,7 @@ describe('matching and keeping, in awkward logs', () => {
 describe('a log that writes its cells its own way', () => {
   const cols = ['No.', 'Question', 'Priority', 'Date received', 'Status', 'Response'];
   const m = suggestMapping(cols);
-  // a workbook's real date cell reads as YYYY-MM-DD
-  const rows = [['1', 'What is the minimum DSCR covenant?', '', '2026-11-12', 'Outstanding', '']];
-  const log = { columns: cols, cols: cols.map((_, i) => i), rows, lines: [2], lastRow: 2 };
+  const log = { columns: cols, cols: cols.map((_, i) => i), rows: [['1', 'What is the minimum DSCR covenant?', '', '11/12/2026', 'Outstanding', '']], lines: [2], lastRow: 2 };
   it('leaves a blank Priority blank: the High a question with none came in with is the app\'s default, not a value anyone gave', () => {
     const w = logWrite(log, m, [q(1, 'What is the minimum DSCR covenant?', { priority: 'High', received: '2026-11-12', status: 'open' })]);
     expect(w.steps).toEqual([]); expect(w).toMatchObject({ updated: 0, kept: [] }); expect(w.sent.q1.priority).toBeUndefined();
@@ -165,26 +163,14 @@ describe('a log that writes its cells its own way', () => {
   });
   it('keeps a date or status the log already says its own way as ours, so a later change in the app still reaches it', () => {
     const first = logWrite(log, m, [q(1, 'What is the minimum DSCR covenant?', { received: '2026-11-12', status: 'open' })]);
-    expect(first.steps).toEqual([]);
-    expect(first.sent.q1).toMatchObject({ received: '2026-11-12', status: 'Outstanding' });
+    expect(first.steps).toEqual([]); expect(first.sent.q1).toMatchObject({ received: '11/12/2026', status: 'Outstanding' });
     const next = logWrite(log, m, [q(1, 'What is the minimum DSCR covenant?', { received: '2026-11-13', status: 'answered', response: 'Yes' })], new Map(Object.entries(first.sent)));
     expect(next.steps).toEqual([{ kind: 'cell', row: 1, col: 3, value: '2026-11-13', date: true }, { kind: 'cell', row: 1, col: 4, value: 'Answered' }, { kind: 'cell', row: 1, col: 5, value: 'Yes' }]);
     expect(next.kept).toEqual([]);
   });
-  it('knows a date it wrote, read back from the log, as its own', () => {
+  it('knows a date it wrote, read back in the column\'s own date format, as its own', () => {
     const w = logWrite(log, m, [q(1, 'What is the minimum DSCR covenant?', { received: '2026-11-14', status: 'open' })], new Map([['q1', { received: '2026-11-12', status: 'Open' }]]));
     expect(w.steps).toEqual([{ kind: 'cell', row: 1, col: 3, value: '2026-11-14', date: true }]); expect(w.kept).toEqual([]);
-  });
-});
-
-describe('a date typed as text in a log', () => {
-  const cols = ['No.', 'Question', 'Date received'];
-  const rows = [['1', 'What is the minimum DSCR covenant?', '11/12/2026']];
-  const typed = { columns: cols, cols: [0, 1, 2], rows, lines: [2], lastRow: 2 };
-  it('stays as the log has it: not a date, so the app never writes over it, and it is listed as kept', () => {
-    const asked = q(1, 'What is the minimum DSCR covenant?', { received: '2026-11-14' });
-    const w = logWrite(typed, suggestMapping(cols), [asked]);
-    expect(w.steps).toEqual([]); expect(w.kept).toEqual([1]);
   });
 });
 
@@ -210,9 +196,9 @@ describe('every column of the log', () => {
     expect(w.steps).toEqual([{ kind: 'cell', row: 1, col: 3, value: '2026-11-02', date: true }, { kind: 'cell', row: 1, col: 4, value: 'Answered' }, { kind: 'cell', row: 1, col: 6, value: '2026-11-14', date: true }]);
     expect(w).toMatchObject({ updated: 1, kept: [] });
   });
-  it('takes "Outstanding" for open, but a typed date is not the app\'s date: it is kept as the log has it', () => {
+  it('takes a cell that says what the app holds in other words ("Outstanding", 10/30/2026) for no change', () => {
     const w = logWrite(T([['1', 'Lender A', 'DSCR?', '10/30/2026', 'Outstanding', '', '']]), m, [q(1, 'DSCR?', { status: 'open', received: '2026-10-30' })]);
-    expect(w).toMatchObject({ steps: [], kept: [1] });
+    expect(w).toMatchObject({ steps: [], kept: [] });
   });
   // an edit made in the log is the latest; two versions only where the app changed the cell too
   it('takes a status only the log changed since the app wrote it', () => {

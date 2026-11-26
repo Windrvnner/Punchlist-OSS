@@ -8,7 +8,7 @@
  * Submitted by, not a write into their file.
  */
 import type { Store } from './store';
-import { type QaLog, type Question } from '../domain/model';
+import { localYmd, type QaLog, type Question } from '../domain/model';
 import { dealQuestions, dealTwin, qaChanged, qaKept } from './state';
 import { logWrite, logHolds, matchRows, cellValue, readLogCells, holds } from '../domain/logWrite';
 import {
@@ -93,8 +93,8 @@ export function withPicks(log: QaLog, qs: Question[]): { sent: Record<string, Re
   return { sent, kept };
 }
 
-/** a question's cells as the log writes them, in the app's terms (readLogCells) */
-const readCells = (q: Question, cells: Record<string, string>) => readLogCells(q, cells);
+/** a question's cells as the log writes them, in the app's terms (readLogCells), dated by the app's clock */
+const readCells = (store: Store, q: Question, cells: Record<string, string>) => readLogCells(q, cells, localYmd(store.services.clock.now()));
 
 /** which of a question's cells in two versions the person picked: the app's, the log's, or a merged response (with the app's other cells) */
 export type VersionPick = 'app' | 'log' | 'merged';
@@ -116,7 +116,7 @@ export async function chooseVersion(store: Store, dealId: string, questionId: st
   if (o.seen !== undefined && o.seen !== log.last?.at) return fail({ kind: 'rejected', message: 'The Q&A log was updated since. Look at the versions again' });
   const side = (k: string) => o.fields?.[k] ?? (pick === 'log' ? 'log' : 'app');
   const theirs = Object.fromEntries(Object.entries(shown).filter(([k]) => side(k) === 'log' && !(pick === 'merged' && k === 'response')));
-  const set = readCells(q, theirs);
+  const set = readCells(store, q, theirs);
   if (pick === 'merged') set.response = o.merged ?? '';
   // Every cell shown is recorded as what the log holds of the app's. The file is not read again here (a full read of the
   // workbook per choice, and none at all while the drive is out of reach): the next update settles it. Where the cell still
@@ -329,9 +329,7 @@ async function writeQaLog(store: Store, dealId: string, place?: PlaceKept): Prom
   const keptText = { ...w.keptText }; const changed: Record<string, Record<string, string>> = {};
   const was = new Map(qs.filter((q) => w.taken[q.id]).map((q) => [q.id, q] as const));
   if (Object.keys(w.taken).length) {
-    const set = Object.fromEntries(
-      Object.entries(w.taken).map(([id, cells]) => [id, readCells(store.get().questions[id], cells)]),
-    );
+    const set = Object.fromEntries(Object.entries(w.taken).map(([id, cells]) => [id, readCells(store, store.get().questions[id], cells)]));
     const expect = comparedValues(qs, w.taken);
     const took = await store.dispatch(TakeFromQaLog, { dealId, set, expect }, { quiet: true });
     if (!took.ok) return settleThen(took);

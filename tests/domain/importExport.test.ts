@@ -4,24 +4,26 @@ import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
 import { Question } from '../../src/domain/model';
 
 describe('parseDate', () => {
-  it('reads a real date (as a workbook\'s date cell arrives) and blank, and nothing typed', () => {
+  it('accepts unambiguous dates with a full year', () => {
     expect(parseDate('2026-11-01')).toBe('2026-11-01');
+    expect(parseDate('11/02/2026')).toBe('2026-11-02');      // month first
+    expect(parseDate('31/12/2026')).toBe('2026-12-31');      // only day-first is possible
+    expect(parseDate('Nov 1, 2026')).toBe('2026-11-01');
+    expect(parseDate('October 3, 2026')).toBe('2026-10-03');
+    expect(parseDate('Sept 5, 2026')).toBe('2026-09-05');
     expect(parseDate('')).toBe('');
-    expect(parseDate('  2026-11-01 ')).toBe('2026-11-01');
-    expect(parseDate('2026-11-14 12:00:00')).toBe('2026-11-14');   // a date-and-time cell is its date
-    // text typed in a cell is not a date and is never parsed into one, however it is written
-    const typedDates = [
-      '11/02/2026', '31/12/2026', 'Nov 1, 2026', '2-Nov-26', '2026/11/02', '11/14/2026 12:00:00', '44866',
-    ];
-    for (const typed of typedDates) expect([typed, parseDate(typed)]).toEqual([typed, null]);
-    for (const bad of ['2026-99-99', '2026-02-31', 'soon']) expect(parseDate(bad)).toBeNull();
   });
-  it('keeps a typed date in an import as written, and does not list it', () => {
-    const m = suggestMapping(['Question', 'Received', 'Date']);
-    const p = prepareImport([['Cell', '2026-10-13', '2026-11-02'], ['Typed', '13.10.2026', '02/11/2026']], m);
-    expect(p.rows.map((r) => [r.received, r.responded]))
-      .toEqual([['2026-10-13', '2026-11-02'], ['13.10.2026', '02/11/2026']]);
-    expect(p.unread).toEqual([]);
+  it('reads the other common ways of writing a date', () => {
+    for (const [typed, iso] of [['2-Nov-2026', '2026-11-02'], ['02-Nov-26', '2026-11-02'], ['2026/11/02', '2026-11-02'], ['2026.11.2', '2026-11-02'], ['Nov 2nd 2026', '2026-11-02'], ['November 3rd, 2026', '2026-11-03'], ['21st Nov 2026', '2026-11-21'], ['Nov-02-2026', '2026-11-02']]) expect([typed, parseDate(typed)]).toEqual([typed, iso]);
+    // a two-digit year is read as Excel reads it, and the day and month in the order four-digit years are
+    expect(parseDate('11/02/26')).toBe('2026-11-02'); expect(parseDate('13/02/26')).toBe('2026-02-13'); expect(parseDate('02.11.26')).toBe(parseDate('02.11.2026')); expect(parseDate('1/2/99')).toBe('1999-01-02');
+  });
+  it('reads a date with a time as its date', () => {
+    for (const [typed, iso] of [['11/14/2026 12:00:00', '2026-11-14'], ['11/14/2026 3:30 PM', '2026-11-14'], ['Nov 14, 2026 09:15', '2026-11-14'], ['2026/11/14 23:59:59.5', '2026-11-14']]) expect([typed, parseDate(typed)]).toEqual([typed, iso]);
+    for (const bad of ['11/14/2026 25:00', '12:00:00', '11/31/2026 12:00:00']) expect([bad, parseDate(bad)]).toEqual([bad, null]);
+  });
+  it('rejects impossible or year-less dates instead of changing them', () => {
+    for (const bad of ['2026-99-99', '31/02/2026', 'Feb 31, 2026', 'April 31, 2026', 'Nov 1', '1 Nov', 'soon', '44866']) expect(parseDate(bad)).toBeNull();
   });
 });
 
@@ -59,13 +61,26 @@ describe('prepareImport', () => {
     const cols = ['Number', 'Question', 'Priority', 'Status', 'Received', 'Date'];
     const m = suggestMapping(cols);
     const p = prepareImport([['2', 'Datum', 'High', 'Closed', '2026-11-01', ''], ['', 'Coho', 'urgent', 'weird', 'Feb 31, 2026', 'April 31, 2026'], ['', '', '', '', '', '']], m);
-    expect(p.rows.length).toBe(2); expect(p.skipped).toBe(1); expect(p.unknownValues).toBe(2);
+    expect(p.rows.length).toBe(2); expect(p.skipped).toBe(1); expect(p.badDates).toBe(2); expect(p.unknownValues).toBe(2);
     // and says which, by row (the heading is row 1) and column
-    expect(p.unread).toEqual(['Row 3 Priority: urgent', 'Row 3 Status: weird']);
+    expect(p.unread).toEqual(['Row 3 Priority: urgent', 'Row 3 Status: weird', 'Row 3 Received: Feb 31, 2026', 'Row 3 Date: April 31, 2026']);
     expect(p.rows[0]).toMatchObject({ n: 2, priority: 'High', status: 'closed', received: '2026-11-01' });
-    expect(p.rows[1]).toMatchObject({
-      n: null, priority: '', status: '', received: 'Feb 31, 2026', responded: 'April 31, 2026',
-    });
+    expect(p.rows[1]).toMatchObject({ n: null, priority: '', status: '', received: '', responded: '' });
+  });
+  it('settles a date valid both ways by context, and leaves it blank when nothing settles it', () => {
+    const m = suggestMapping(['Question', 'Received', 'Date']);
+    const p = prepareImport([
+      ['Row other date', '13.10.2026', '02.11.2026'],   // received Oct 13, so responded is Nov 2, not Feb 11
+      ['Rows around', '20.10.2026', ''], ['Middle', '05.11.2026', ''], ['After', '20.11.2026', ''],   // between Oct 20 and Nov 20: Nov 5, not May 11
+    ], m, undefined, { today: '2026-11-15' });
+    expect(p.rows.map((r) => [r.received, r.responded])).toEqual([['2026-10-13', '2026-11-02'], ['2026-10-20', ''], ['2026-11-05', ''], ['2026-11-20', '']]);
+    // both readings come before the next row's date: the one much nearer it (Nov 2, a day before Nov 3, not Feb 11)
+    expect(prepareImport([['Near', '11/02/2026', ''], ['Next', '2026-11-03', '']], m, undefined, { today: '2026-11-15' }).rows[0].received).toBe('2026-11-02');
+    // no other date to go by: Dec 1 is after today, so Jan 12
+    expect(prepareImport([['Not in the future', '12.01.2026', '']], m, undefined, { today: '2026-11-15' }).rows[0].received).toBe('2026-01-12');
+    // nothing to go by and both readings in the past: left blank and listed
+    const q = prepareImport([['Alone', '02.03.2026', '']], m, undefined, { today: '2026-11-15' });
+    expect(q.rows[0].received).toBe(''); expect(q.badDates).toBe(1); expect(q.unread).toEqual(['Row 2 Received: 02.03.2026']);
   });
   it('reads back a number past Q999999, as the app numbers them', () => {
     const m = suggestMapping(['Number', 'Question']);
@@ -78,6 +93,7 @@ describe('prepareImport', () => {
     const t = readCsv(file.value.bytes); expect(t.ok).toBe(true);
     if (!t.ok) return;
     const p = prepareImport(t.value.rows, suggestMapping(t.value.columns));
+    expect(p.badDates).toBe(0);
     expect(p.rows[0]).toEqual({ n: 37, text: 'First\nSecond', askedBy: 'Lender', received: '2026-11-01', workstream: 'Legal', priority: 'High', response: 'Yes.', respondedBy: 'Sponsor', responded: '2026-11-02', status: 'answered', line: 2 });
   });
   it('an export, and a new Q&A log, never name the person in the app who accepted a draft; who responded is kept', () => {
@@ -122,7 +138,7 @@ describe('prepareImport', () => {
   it('keeps text as written: leading spaces, trailing line breaks and a question of only spaces', () => {
     const m = suggestMapping(['Number', 'Question', 'Response', 'Submitted by', 'Priority', 'Received']);
     const p = prepareImport([[' 3 ', '  Indented question', 'Yes.\n', ' Lender A ', ' High ', ' 2026-11-02 '], ['4', '   ', '', '', '', '']], m);
-    expect(p.skipped).toBe(0); expect(p.unknownValues).toBe(0);
+    expect(p.skipped).toBe(0); expect(p.badDates).toBe(0); expect(p.unknownValues).toBe(0);
     // a name is stored as the cell gives it
     expect(p.rows[0]).toMatchObject({
       n: 3, text: '  Indented question', response: 'Yes.\n', askedBy: ' Lender A ',
@@ -133,9 +149,11 @@ describe('prepareImport', () => {
 });
 
 describe('a month written as a word', () => {
-  it('is typed text, never read as a date (decision 99)', () => {
-    const typed = ['Jun 3 2026', 'June 3, 2026', '3 Sept 2026', '3-Sep-2026', 'Junk 3 2026'];
-    for (const text of typed) expect(parseDate(text), text).toBeNull();
+  it('is read only as its full name or its three-letter abbreviation, as Excel takes it', () => {
+    const named = ['Jun 3 2026', 'June 3, 2026', '3 Sept 2026', '3-Sep-2026'];
+    for (const text of named) expect(parseDate(text), text).not.toBeNull();
+    const notMonths = ['Junk 3 2026', 'Marching 3 2026', '3 Decimal 2026', 'Mayhem 3 2026'];
+    for (const text of notMonths) expect(parseDate(text), text).toBeNull();
   });
 });
 
