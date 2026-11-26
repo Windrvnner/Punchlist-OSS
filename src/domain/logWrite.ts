@@ -7,7 +7,7 @@
  */
 import type { Question } from './model';
 import type { ReadTable, SheetEdit } from './sheets';
-import { sameWords, prepareImport, IMPORT_FIELDS, type Mapping, type ImportField, type ImportRow } from './importExport';
+import { prepareImport, IMPORT_FIELDS, type Mapping, type ImportField, type ImportRow } from './importExport';
 import { key } from './checklist';
 import { ROMAN_NUMERAL, NAMING_WORDS, normalizeReferences, setApartParts, isNamedChain } from './references';
 
@@ -85,9 +85,6 @@ function repairWord(word: string, offset: number, text: string): string {
   if (word.length < 2 || ROMAN_NUMERAL.test(word)) return word;
   return word.replace(/[I|]/g, 'l');
 }
-
-/** two wordings of one question: the same words, or differing only as a misreading could make them differ (same words have one key too) */
-export const sameQuestion = (a: string, b: string) => sameWords(a, b) || misreadKey(a) === misreadKey(b);
 
 /** a log's question number as it is written ("Q4", "4.", "#004", "A-4"): what comes before the number, the number, and what after */
 const numberParts = (v: string) => { const m = /^\s*(\D*?)0*(\d+)\s*([.)]?)\s*$/.exec(v); return m ? { pre: m[1], n: +m[2], post: m[3] } : null; };
