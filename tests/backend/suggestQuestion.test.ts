@@ -15,7 +15,7 @@ describe('the open question an answer addresses', () => {
   it('shows the questions under neutral handles and maps the one named back to its place', async () => {
     const s = setup((c) => (isSuggest(c) ? { question: ' A2 ' } : {}), {}, opts);
     const asked = ['Q7 Provide the insurance certificates', 'Which operating assumption does the base case use?'];
-    expect(val(await s.ai.suggestQuestion!({ dealId: 'd1', answer, questions: asked }))).toBe(1);
+    expect(val(await s.ai.suggestQuestion!({ dealId: 'd1', answer, questions: asked }))).toEqual([1]);
     const call = s.calls.filter(isSuggest)[0];
     expect(handles(call)).toEqual(['A1', 'A2']);
     expect(call.prompt).toContain(answer);
@@ -26,11 +26,11 @@ describe('the open question an answer addresses', () => {
   it('a handle not shown, or none, proposes no question', async () => {
     for (const named of ['A3', 'none', 'Q2', 2]) {
       const s = setup((c) => (isSuggest(c) ? { question: named } : {}), {}, opts);
-      expect(val(await s.ai.suggestQuestion!({ dealId: 'd1', answer, questions: questions(2) }))).toBeNull();
+      expect(val(await s.ai.suggestQuestion!({ dealId: 'd1', answer, questions: questions(2) }))).toEqual([]);
     }
   });
 
-  it('at 2,000 open questions the calls are sized to the input limit; the earliest one named is taken', async () => {
+  it('at 2,000 open questions the calls are sized to the input limit; every part named is kept', async () => {
     // the model names the last question of every part that shows document 300 or document 1500
     const s = setup((c) => {
       if (!isSuggest(c)) return {};
@@ -38,14 +38,16 @@ describe('the open question an answer addresses', () => {
       return { question: named ? `A${handles(c).length}` : 'none' };
     }, {}, opts);
     s.svc.inputLimit = () => 20000;
-    const at = val(await s.ai.suggestQuestion!({ dealId: 'd1', answer, questions: questions(2000) }));
+    const places = val(await s.ai.suggestQuestion!({ dealId: 'd1', answer, questions: questions(2000) }));
     const calls = s.calls.filter(isSuggest);
     expect(calls.length).toBeGreaterThan(1);
     expect(calls.flatMap(handles).length).toBe(2000);
-    expect(at).toBeGreaterThanOrEqual(299);
-    expect(at).toBeLessThan(1499);
+    expect(places).toHaveLength(2);
+    expect(places[0]).toBeGreaterThanOrEqual(299);
+    expect(places[0]).toBeLessThan(places[1]);
+    expect(places[1]).toBeGreaterThanOrEqual(1499);
     const whole = setup((c) => (isSuggest(c) ? { question: 'none' } : {}), {}, opts);
-    expect(val(await whole.ai.suggestQuestion!({ dealId: 'd1', answer, questions: questions(2000) }))).toBeNull();
+    expect(val(await whole.ai.suggestQuestion!({ dealId: 'd1', answer, questions: questions(2000) }))).toEqual([]);
     expect(whole.calls.filter(isSuggest)).toHaveLength(1);
   });
 });

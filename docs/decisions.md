@@ -194,7 +194,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Switching PDFs opens the cited page at the top and keeps the zoom (#447).
 - In the browser demo, a PDF without a preview shows its title, page number, and a preview status (#443).
 - Decided but not built: plain-symbol math, a named finding opening in a side pane, and answer actions as icons.
-- A card under an answer suggests the open question the model proposes it addresses; only a person uses it (#1120).
+- A card under an answer suggests each open question the model proposes it addresses; every part's named question is
+  kept and shown, each usable on its own, and only a person uses one (#1120).
 
 ## Deal memo
 

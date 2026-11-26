@@ -42,7 +42,7 @@ async function deal(store: Store, name = 'Datum') { await store.boot(); await st
 const OPERATING = 'Confirm the operating assumption in the base case, and whether the technical advisor and the'
   + ' information memorandum agree.';
 const proposing = (text: string): Partial<AiService> => ({
-  suggestQuestion: async ({ questions }) => ok(questions.includes(text) ? questions.indexOf(text) : null),
+  suggestQuestion: async ({ questions }) => ok(questions.includes(text) ? [questions.indexOf(text)] : []),
 });
 
 describe('conversations', () => {
@@ -191,7 +191,7 @@ describe('conversations', () => {
     const scope: Scope = { kind: 'deal', dealId };
     await ask(store, scope, 'What are the three biggest issues?'); await ask(store, scope, 'Which of these would hold up financial close?');
     const [, first, , second] = store.get().threads[convKey(scope)];
-    expect([...suggestions(store.get(), scope)]).toEqual([[second.id, q.id]]);   // not under the first answer as well
+    expect([...suggestions(store.get(), scope)]).toEqual([[second.id, [q.id]]]);   // not under the first answer as well
     expect(suggestions(store.get(), { kind: 'question', dealId, questionId: q.id }).size).toBe(0);
     store.ui({ notThese: [`${second.id}|${q.id}`] });
     expect(suggestions(store.get(), scope).size).toBe(0);                          // "not this one" does not move it to the first answer
@@ -250,7 +250,7 @@ describe('conversations', () => {
     await store.dispatch(CreateQuestion, { dealId, text: 'Confirm the operating assumption in the base case, and whether the technical advisor and the information memorandum agree.' });
     const q = Object.values(store.get().questions)[0]; const scope: Scope = { kind: 'deal', dealId };
     await ask(store, scope, 'Which of these would hold up financial close?'); const answer = store.get().threads[convKey(scope)][1];
-    expect([...suggestions(store.get(), scope)]).toEqual([[answer.id, q.id]]);
+    expect([...suggestions(store.get(), scope)]).toEqual([[answer.id, [q.id]]]);
     store.putAway(answer.id, q.id); store.putAway(answer.id, q.id);              // pressed twice, kept once
     expect(local.read('notThese')).toEqual([`${answer.id}|${q.id}`]); expect(suggestions(store.get(), scope).size).toBe(0);
     const { store: again } = make({ kv, local }); await again.boot(); await again.loadDeal(dealId);      // the app opened again on this PC
