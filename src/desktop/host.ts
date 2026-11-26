@@ -120,13 +120,18 @@ export async function teamFolders(synced: string[], env: NodeJS.ProcessEnv = pro
  */
 function readSettings(file: string): Record<string, unknown> {
   let text: string;
-  try { text = fs.readFileSync(file, 'utf8'); }
-  catch (e) {
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return {};
-    throw new Error(`The settings file can’t be read, so it was left as it is: ${plainReason(e)}`);
+    throw new Error('The settings file can’t be read right now, so it was left as it is');
   }
-  let parsed: unknown;
-  try { parsed = JSON.parse(text); } catch { parsed = null; }
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    // left null: refused below like any other content that is not settings
+  }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new Error('The settings file isn’t valid settings, so it was left as it is');
   }

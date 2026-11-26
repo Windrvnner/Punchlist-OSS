@@ -305,7 +305,8 @@ describe('the Punchlist folder', () => {
 
 describe('saveSharedFolder with a settings file that cannot be read (#1118)', () => {
   const settingsIn = (root: string, text?: string) => {
-    const local = path.join(root, 'local'); fs.mkdirSync(local);
+    const local = path.join(root, 'local');
+    fs.mkdirSync(local);
     const file = path.join(local, 'settings.json');
     if (text !== undefined) fs.writeFileSync(file, text);
     return { local, file };
@@ -345,7 +346,8 @@ describe('saveSharedFolder with a settings file that cannot be read (#1118)', ()
   });
 
   it('fails the change of folder with the reason, keeping the file, when settings cannot be read', async () => {
-    const root = tmp(); const { file } = settingsIn(root, '{not json');
+    const root = tmp();
+    const { file } = settingsIn(root, '{not json');
     const p = pc(root);
     const result = await p.keeper.use(path.join(root, 'Punchlist'));
     expect(result.ok).toBe(false);
