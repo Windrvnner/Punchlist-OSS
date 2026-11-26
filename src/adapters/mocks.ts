@@ -435,8 +435,7 @@ export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => 
     const WS: [RegExp, string][] = [[/\b(tax|vat|withholding)\b/i, 'Tax'], [/\b(insur\w*)\b/i, 'Insurance'], [/\b(dscr|reserve|waterfall|debt|fees?|financ\w*)\b/i, 'Financial'], [/\b(ppa|offtake|o&m|epc|contractor)\b/i, 'Commercial'], [/\b(engineer\w*|technical|turbine|module)\b/i, 'Technical']];
     return { points: read.map((p, k) => {
       const f = fs.findIndex((x) => like(ps[k], x) >= 0.8); const e = ps.slice(0, k).findIndex((x) => like(ps[k], x) >= 0.8);
-      const words = p.text.replace(/[.;:]+$/, '').split(/\s+/);
-      return { n: p.n, text: p.text, title: words.length > 10 ? `${words.slice(0, 10).join(' ')}…` : words.join(' '), workstream: WS.find(([re]) => re.test(p.text))?.[1] ?? 'Legal', ...(f >= 0 ? { same: { finding: i.findings[f].id } } : e >= 0 ? { same: { point: e } } : {}) };
+      return { n: p.n, text: p.text, title: p.text, workstream: WS.find(([re]) => re.test(p.text))?.[1] ?? 'Legal', ...(f >= 0 ? { same: { finding: i.findings[f].id } } : e >= 0 ? { same: { point: e } } : {}) };
     }) };
   }).then((r) => (!r.ok ? r : r.value ? ok(r.value) : fail({ kind: 'failed', message: 'It could not be read as an issues list' }))),
   reassess: () => gate(opts, 'reassess', () => ({ body: ['Reassessed.'], sources: [] })),
