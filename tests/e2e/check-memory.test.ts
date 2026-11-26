@@ -8,7 +8,7 @@ import path from 'node:path';
 import v8 from 'node:v8';
 import vm from 'node:vm';
 import { tmp, put, pdf, pcApp, newDeal, StandInService } from './kit';
-import { isPickAsk, isPickForAsk, isDescribeAsk, isAffectsAsk, isVerifyAsk, isHearAsk, itemsIn, OK, val, type Call } from '../backend/reviewKit';
+import { isPickAsk, isPickForAsk, isDescribeAsk, isAffectsAsk, isVerifyAsk, isHearAsk, itemsIn, OK, val, type Call, nth } from '../backend/reviewKit';
 
 const ITEMS = 2000, DOCS = 120, CHECKS = 3;
 const roots: string[] = []; afterAll(() => { for (const r of roots) fs.rmSync(r, { recursive: true, force: true }); });
@@ -23,7 +23,7 @@ const model = () => new StandInService((x) => {
   if (isAffectsAsk(c)) return JSON.stringify({ items: [], findings: [] });
   if (isHearAsk(c)) return JSON.stringify({ affected: [] });
   if (isVerifyAsk(c)) return JSON.stringify({ stands: true, why: '' });
-  return JSON.stringify({ text: 'It is signed. [1]', sources: [{ doc: 'D1', page: 1 }] });
+  return JSON.stringify({ text: 'It is signed. [1]', sources: [{ doc: nth(c, 1), page: 1 }] });
 });
 
 /** the heap in use, in MB, after a full garbage collection (`gc` is turned on here, so the test needs no node flag) */
