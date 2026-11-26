@@ -52,6 +52,11 @@ export const affectsShown = (c: { prompt: string }) => ({
   findings: affectsBlock(c, "These are the deal's open findings"),
   items: affectsBlock(c, 'These are the checklist items already settled'),
 });
+/** a look at responses whose pairs name the nth finding its prompt lists (F1) by that finding's id (#1162) */
+export function heardAs(c: { prompt: string }, ...pairs: string[]) {
+  const findings = affectsBlock(c, 'These are open findings on the deal');
+  return { affected: pairs.map((p) => p.replace(/\bF(\d+)\b/g, (_m, n: string) => findings[+n - 1])) };
+}
 /** an affects reply whose pairs name the nth finding (F1), settled item (C7) or new document (N3) shown, by its id */
 export function affectedAs(c: { prompt: string }, ...pairs: string[]) {
   const shown = affectsShown(c);

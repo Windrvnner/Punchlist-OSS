@@ -3,7 +3,7 @@
 // their permanent ids, never by per-prompt labels; a reply naming an id it was not shown is asked again (#1162).
 import { describe, expect, it } from 'vitest';
 import { tokensOf } from '../../src/backend/limits';
-import { affectsShown, deal, doc, finding, itemsIn, Mem, OK, setup, val, type Call } from './reviewKit';
+import { affectsShown, deal, doc, finding, itemsIn, Mem, OK, question, setup, val, type Call } from './reviewKit';
 
 const FA = doc(1, 'Credit Agreement.pdf', { words: ['facility', 'agreement', 'margin'] });
 const NOTICE = doc(2, 'Offtake notice.pdf', { summary: 'Notice terminating the offtake agreement.' });
@@ -84,4 +84,38 @@ describe('the affects prompt at deal scale (#1162)', () => {
     expect(shown.flatMap((x) => x.items).sort()).toEqual([...items].sort());
     expect(shown.every((x) => x.docs.join() === NOTICE.docId)).toBe(true);
   }, 60_000);
+});
+
+/** a deal with two open findings and one answered question tied to neither; `hears` answers the fast model */
+async function heard(hears: (c: Call, n: number) => unknown) {
+  const s = setup(() => ({}), { d1: [FA] }, { hears, verify: () => ({ stands: false, why: 'settled' }) });
+  await deal(s.repo);
+  const src = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }];
+  await finding(s.repo, 'f_1', 'Lock-up differs', { sources: src });
+  await finding(s.repo, 'f_2', 'Hedging not approved', { sources: src });
+  await question(s.repo, 'q_12', 12, 'Which lock-up ratio was agreed?', 'The agreed ratio is 1.25x.');
+  return { s, got: await s.ai.responses('d1') };
+}
+
+describe('the fast model names the findings a response affects by their ids (#1162)', () => {
+  it('lists each open finding by its id and asks for pairs of ids', async () => {
+    const { s } = await heard(() => ({ affected: [] }));
+    expect(s.hearCalls[0].prompt).toContain('\nf_1: Lock-up differs\nf_2: Hedging not approved\n');
+    expect(s.hearCalls[0].prompt).not.toMatch(/^F\d+: /m);
+    expect(s.hearCalls[0].prompt).toContain('Reply as JSON: {"affected": ["<finding id> <question id>"]}');
+  });
+
+  it('maps a finding and its question back by their ids', async () => {
+    const { s, got } = await heard(() => ({ affected: ['f_2 q_12'] }));
+    expect(val(got)).toEqual({ heard: ['q_12'], marked: ['f_2'] });
+    expect(s.hearCalls.length).toBe(1);
+  });
+
+  it('asks again, with the same prompt, when a reply names a label or an id it was not shown', async () => {
+    const replies = [['F1 q_12'], ['f_9 q_12'], ['f_1 q_12']];
+    const { s, got } = await heard((_c, n) => ({ affected: replies[n - 1] }));
+    expect(s.hearCalls.length).toBe(3);
+    expect(s.hearCalls[2].prompt).toBe(s.hearCalls[0].prompt);
+    expect(val(got).marked).toEqual(['f_1']);
+  });
 });
