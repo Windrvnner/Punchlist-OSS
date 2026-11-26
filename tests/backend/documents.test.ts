@@ -339,6 +339,48 @@ describe('documents on real folders', () => {
     expect(val(await restarted.docs.freshen!('d1'))).toBe('same');
   });
 
+  it('a failed read of a spreadsheet recorded with an empty word list is not saved as no text (#1023)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Credit Agreement.pdf', FA);
+    put(vdr, 'Budget.xlsx', MODEL);
+    const down = { now: false };
+    await indexAll(pc(root, 'office', undefined, { index: true, convert: flakyConverter(down) }), vdr);
+    // what an earlier build left: an empty record, and an index that lacks the file while another document keeps it
+    const docId = idOf(MODEL);
+    const indexFile = path.join(root, 'local-office', 'words2-d1.jsonl');
+    const others = fs.readFileSync(indexFile, 'utf8').split('\n').filter((l) => l && JSON.parse(l).d !== docId);
+    fs.writeFileSync(indexFile, `${others.join('\n')}\n`);
+    const emptied = { v: 1, pc: 'office', at: '2026-12-01T00:00:00.000Z', docId, hash: hashBytes(MODEL),
+      name: 'Budget.xlsx', folder: vdr, rel: 'Budget.xlsx', size: MODEL.length, words: [] };
+    fs.appendFileSync(path.join(root, 'shared', 'docs-office-d1.jsonl'), `${JSON.stringify(emptied)}\n`);
+    down.now = true;
+    const a = pc(root, 'office', undefined, { index: true, convert: flakyConverter(down) });
+    const log = (await indexAll(a, vdr)).log.join(' ');
+    expect(log).toContain('1 file could not be read: Budget.xlsx');
+    expect(log).not.toContain('no readable text');
+    down.now = false;
+    expect(val(await a.docs.freshen!('d1'))).toBe('running');
+    await a.docs.settled('d1');
+    expect(a.docs.records('d1').find((r) => r.name === 'Budget.xlsx')?.words).toEqual(MODEL_WORDS);
+  });
+
+  it('a spreadsheet that really has no words is read once and not said again by later runs (#1023)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Blank.csv', ',,\n,,\n');
+    const a = pc(root, 'office', undefined, { index: true });
+    await indexAll(a, vdr);
+    const docId = idOf(',,\n,,\n');
+    const said = () => fs.readFileSync(path.join(root, 'shared', 'docs-office-d1.jsonl'), 'utf8')
+      .split('\n').filter((l) => l.includes(docId)).length;
+    expect(a.docs.records('d1').find((r) => r.docId === docId)?.words).toEqual([]);
+    const before = said();
+    await indexAll(a, vdr);
+    await indexAll(pc(root, 'office', undefined, { index: true }), vdr);
+    expect(said()).toBe(before);
+  });
+
   it('a spreadsheet of 250,000 different words is counted as the same text read whole (#427)', async () => {
     const root = tmp();
     const vdr = path.join(root, 'vdr');
