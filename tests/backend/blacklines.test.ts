@@ -33,7 +33,7 @@ describe('blacklines', () => {
   });
   it('compares the first index word of "A vs B", so a number or a short token in it counts (#1224)', () => {
     const m = cleanDrafts([
-      doc('q', 'Tax/Q3 Report vs Q2 Report.pdf'), doc('q3', 'Tax/Q3 Report.docx'),                    // two periods, not two drafts
+      doc('q', 'Tax/Q3 Report vs Q2 Report.pdf'), doc('q3', 'Tax/Q3 Report.docx'), // two periods, not two drafts
       // the next two passed before the change too: they pin that a short or numeric first word still pairs
       doc('om', 'Tech/O&M Manual v2 vs O&M Manual v1.pdf'), doc('omm', 'Tech/O&M Manual v2.docx'),
       doc('n', 'Deal/2024 Budget v2 vs 2024 Budget v1.pdf'), doc('nb', 'Deal/2024 Budget v2.xlsx'),
@@ -42,8 +42,8 @@ describe('blacklines', () => {
   });
   it('leaves filler words and plural endings out of the first-word compare, as the index does (#1224)', () => {
     const m = cleanDrafts([
-      doc('f', 'Legal/The Plan vs Our Plan.pdf'), doc('tp', 'Legal/The Plan.docx'),                   // "the" and "our" are filler
-      doc('p', 'Legal/Reports vs Report v1.pdf'), doc('rs', 'Legal/Reports.docx'),                    // a plural and its singular
+      doc('f', 'Legal/The Plan vs Our Plan.pdf'), doc('tp', 'Legal/The Plan.docx'), // "the" and "our" are filler
+      doc('p', 'Legal/Reports vs Report v1.pdf'), doc('rs', 'Legal/Reports.docx'), // a plural and its singular
     ]);
     expect(Object.fromEntries(m)).toEqual({ f: 'tp', p: 'rs' });
   });

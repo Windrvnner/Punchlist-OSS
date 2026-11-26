@@ -53,7 +53,7 @@ const namedLater = (cover: string, name: string, at: number) => /\s(?:docx?|pdf|
  * "A vs B" share it when they are two drafts of one document
  */
 const head = (folded: string) => indexWords(folded)[0];
-/** whether two folded names share a first index word; names with no index word at all (only filler) share none (#1224) */
+/** whether two folded names share a first index word; names with only filler words share none (#1224) */
 const shareHead = (a: string, b: string) => head(a) !== undefined && head(a) === head(b);
 
 /** what blacklines need of a document: its id, name, place in the data room, when first seen, and its cover page if it has one */
