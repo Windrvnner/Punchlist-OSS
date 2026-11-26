@@ -187,7 +187,8 @@ export function mockDocuments(opts: MockOptions = {}): DocumentService {
     // a folder holds another deal's data room only when window.__sameRoom = { [folder path]: deal id } says so
     sameRoom: (paths, dealIds) => gate(opts, 'sameRoom', () => {
       const given = (globalThis as { __sameRoom?: Record<string, string> }).__sameRoom ?? {};
-      return [...new Set(paths.map((p) => given[p]).filter((id): id is string => !!id && dealIds.includes(id)))].map((dealId) => ({ dealId, files: 2100, matched: 1840, printed: 5, same: 5 }));
+      const held = paths.map((p) => given[p]).filter((id): id is string => !!id && dealIds.includes(id));
+      return [...new Set(held)].map((dealId) => ({ dealId, files: 2100, matched: 1840 }));
     }),
     // the demo's credit agreement has three drafts in dated folders; every other document is in no family
     drafts: (dealId, docId) => gate(opts, 'drafts', () => {
@@ -367,7 +368,7 @@ export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => 
       if (!line) { inItem = false; return; }
       if (table) {
         // the columns are told apart by the heading row, as the columns step suggests them
-        cols ??= suggestChecklistColumns(i.lines[0].split(' | ').map((c) => c.trim()), i.lines.slice(1).map((l) => l.split(' | ').map((c) => c.trim())));
+        cols ??= suggestChecklistColumns(i.lines[0].split(' | ').map((c) => c.trim()));
         const cells = raw.split(' | ').map((c) => c.trim()); const cell = (c: number | null | undefined) => (c == null ? '' : cells[c] ?? '');
         const text = cell(cols.item); const section = cell(cols.section); const subsection = cell(cols.subsection);
         r = n === 1 ? { n, k: 'columns' } : text ? { n, k: 'item', text, ...(section ? { section } : {}), ...(subsection ? { subsection } : {}) } : { n, k: 'left' };

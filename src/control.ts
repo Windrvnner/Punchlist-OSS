@@ -437,6 +437,18 @@ const ssoFields = {
   vertex: ['clientId'],
 } as const;
 
+/**
+ * What a cloud service's saved sign-in belongs to: the service, its address and its sign-in fields. A change to any of
+ * them asks the person to sign in again; a change to anything else, such as a model ID, does not.
+ */
+export function signInBinding(c: Control): string | undefined {
+  const provider = c.models.service;
+  if (!isCloudProvider(provider)) return undefined;
+  const settings = c[provider] as Record<string, unknown>;
+  const fields = ['address', ...ssoFields[provider]].map((field) => [field, settings[field]]);
+  return JSON.stringify({ provider, ...Object.fromEntries(fields) });
+}
+
 function cloudProblem(c: Control): string | null {
   const provider = c.models.service;
   if (!isCloudProvider(provider)) return null;

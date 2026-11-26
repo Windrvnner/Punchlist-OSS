@@ -9,7 +9,9 @@ import { RequestDraft, ApplyDraft, RecoverDrafts, DiscardDraft, AcceptDraft, Res
 import { CreateFinding, SetFindingStatus, ReviewFinding, DeleteFinding, RestoreFinding, RestoreFindingSnapshot, Reassess, ApplyReassessment, AttachDocumentToFinding } from '../../src/app/commands/findings';
 import { registry } from '../../src/app/commands/undo';
 import { csvCodec } from '../../src/adapters/spreadsheet';
-import { ask, retry, convKey, conversationDocs, docIndex, suggestions, useAnswer, answerText, asksOpenQuestions, askVerdict, type Scope } from '../../src/app/conversations';
+import {
+  ask, retry, convKey, conversationDocs, docIndex, suggestions, useAnswer, answerText, askVerdict, type Scope,
+} from '../../src/app/conversations';
 import { MAX_ATTACHED, attachFiles, addToSources } from '../../src/app/attachments';
 import { dealFindings } from '../../src/app/state';
 import type { AiService, DocumentService, LocalStore } from '../../src/ports';
@@ -208,27 +210,19 @@ describe('conversations', () => {
     expect((await ai.addresses!({ dealId: 'd', question, answer: 'The lock-up ratio is 1.25x.' }) as any).value).toEqual({ verdict: 'partly', why: 'It gives some of what the question asks for, not all of it.' });
     expect((await ai.addresses!({ dealId: 'd', question, answer: 'Insurance is in place.' }) as any).value.verdict).toBe('no');
   });
-  it('a person can ask in words whether the answer above addresses an open question; the app answers without a model', async () => {
-    expect(['Does this answer any of our open questions?', 'would that address an open question', 'Do any open questions get answered by this?'].every(asksOpenQuestions)).toBe(true);
-    expect(['Which questions are still open?', 'What is still open across my deals?', 'Answer the question about the lock-up'].some(asksOpenQuestions)).toBe(false);
-    let calls = 0; const { store, repo, local } = make({ ai: { answer: async (i) => { calls++; return mockAi({ latency: [0, 0] }, repo).answer(i); } } }); const dealId = await deal(store);
+  it('a typed question about the open questions goes to the model like any other', async () => {
+    let calls = 0;
+    const answer: AiService['answer'] = async (i) => {
+      calls++;
+      return mockAi({ latency: [0, 0] }, repo).answer(i);
+    };
+    const { store, repo } = make({ ai: { answer: (i) => answer(i) } });
+    const dealId = await deal(store);
     await mockFirstPass(repo, dealId, 'Project Datum'); await sleep(20); await store.loadDeal(dealId);
     const scope: Scope = { kind: 'deal', dealId };
-    await ask(store, scope, 'Does this answer any of our open questions?');
-    expect(store.get().threads[convKey(scope)][1].text).toBe('There is no answer in this conversation yet to check against the open questions.');
-    await ask(store, scope, 'Which of these would hold up financial close?');
-    await ask(store, scope, 'Does this answer any of our open questions?');
-    expect(store.get().threads[convKey(scope)][5].text).toBe('None of the open questions looks to be addressed by the answer above.');
-    await store.dispatch(CreateQuestion, { dealId, text: 'Confirm the operating assumption in the base case, and whether the technical advisor and the information memorandum agree.' });
-    const q = Object.values(store.get().questions)[0]; const answer = store.get().threads[convKey(scope)][3];
-    store.putAway(answer.id, q.id);                                                // put away earlier; asking brings it back, on this PC too
-    expect(local.read('notThese')).toEqual([`${answer.id}|${q.id}`]);
-    await ask(store, scope, 'does that answer an open question?');
-    const list = store.get().threads[convKey(scope)];
-    expect(list[7].text).toMatch(/^The answer above may address Q1: “Confirm the operating assumption/);
-    expect([...suggestions(store.get(), scope)]).toEqual([[answer.id, q.id]]);   // under the answer, never under the app's replies
-    expect(calls).toBe(1); expect(local.read('notThese')).toEqual([]);
-    expect(store.get().questions[q.id].response).toBe('');
+    await ask(store, scope, 'What answers do we still need for the open questions?');
+    expect(calls).toBe(1);
+    expect(store.get().threads[convKey(scope)][1]).toMatchObject({ role: 'ai', state: 'done' });
   });
   it('"Not this one" is remembered on this PC across a reload, by answer and question, ' +
     'and changes no record', async () => {
@@ -245,7 +239,6 @@ describe('conversations', () => {
     expect(again.get().ui.notThese).toEqual([`${answer.id}|${q.id}`]); expect(suggestions(again.get(), scope).size).toBe(0);
     expect(again.get().questions[q.id]).toMatchObject({ response: '', status: 'open' });
     const { store: elsewhere } = make({ kv: { ...disk(), shared: kv.shared } }); await elsewhere.boot(); expect(elsewhere.get().ui.notThese).toEqual([]);   // another PC has its own
-    again.bringBack(answer.id); expect(local.read('notThese')).toEqual([]); expect(suggestions(again.get(), scope).size).toBe(1);
   });
   it('another window of the same person follows what is put away, and adds to it rather than writing over it', async () => {
     // a local store two windows share, telling each of the other's writes, as the browser's storage event does
