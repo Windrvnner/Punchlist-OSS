@@ -22,7 +22,8 @@ function setup(rate: (c: Call, n: number) => unknown, sum: (c: Call, n: number) 
   const rates: Call[] = []; const sums: Call[] = []; const groups: Call[] = [];
   const svc = new StandInService((c) => { const call = c as Call; const r = isRate(call) ? (rates.push(call), rate(call, rates.length)) : isGroup(call) ? (groups.push(call), group(call)) : (sums.push(call), sum(call, sums.length)); return typeof r === 'string' ? r : JSON.stringify(r); });
   const docs: AiDocs = { records: () => [], wanted: async () => [] };
-  const ai = nodeAi({ service: svc, docs, keeper: new StoreKeeper(svc, new Mem(), { recheckMs: 0, clock }), repo, shared, installId: pc, clock });
+  const ai = nodeAi({ service: svc, docs, keeper: new StoreKeeper(svc, new Mem(), { recheckMs: 0, clock }), repo, shared, installId: pc, clock,
+    retry: { sleep: async () => {} } });   // retries without the waits
   return { ai, rates, sums, groups, repo, shared };
 }
 const val = <T,>(r: { ok: boolean; value?: T }) => { expect(r.ok).toBe(true); return r.value as T; };
@@ -112,15 +113,27 @@ describe('the deal memo’s ratings and summary', () => {
     expect(s.rates[1].prompt).toContain('f_1 (Technical)'); expect(s.rates[1].prompt).not.toContain('f_2 (Technical)');
   });
 
-  it('sends back a summary that advises, and leaves it out if it still does', async () => {
+  it('sends back a summary that advises, and fails the memo if it still does (#1065)', async () => {
     const advice = { paragraphs: ['A solar project. The lenders should insist on a higher contingency.'] };
     const once = setup(by({ f_1: 'High' }), (_c, n) => (n === 1 ? advice : { paragraphs: ['A solar project. Contingency is 4% of EPC.'] }));
     await deal(once.repo); await finding(once.repo, 'f_1', 'One');
     expect(val(await once.ai.memo!('d1')).summary).toEqual(['A solar project. Contingency is 4% of EPC.']);
     expect(once.sums[1].prompt).toContain('That gives advice or a judgment. Write it again with facts only.');
     const never = setup(by({ f_1: 'High' }), () => advice); await deal(never.repo); await finding(never.repo, 'f_1', 'One');
-    const m = val(await never.ai.memo!('d1')); expect(m.summary).toEqual([]); expect(m.ratings).toEqual({ f_1: 'High' });
+    const m = await never.ai.memo!('d1');
+    expect(!m.ok && m.error.kind).toBe('failed');
     expect(never.sums.map((c) => c.model)).toEqual(['standard', 'standard', 'thorough']);
+  });
+
+  it('fails the memo, rather than leaving its summary blank, when the summary call fails on every try (#1065)', async () => {
+    const serverError = () => { throw Object.assign(new Error('Internal server error'), { status: 500 }); };
+    const s = setup(by({ f_1: 'High' }), serverError);
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'One');
+    const r = await s.ai.memo!('d1');
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error.kind).not.toBe('unreachable');
+    expect(s.sums.length).toBeGreaterThan(0);
   });
 
   it('rates a deal with many findings a part at a time', async () => {

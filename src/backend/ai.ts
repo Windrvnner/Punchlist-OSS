@@ -1385,9 +1385,11 @@ export function nodeAi(o: AiOptions) {
       const summary = fromDocs.ok && fromDocs.value.sent.length
         ? parasOf(fromDocs.value.reply)
         : await withoutDocuments();
-      return ok(summary.some(advises) ? [] : summary);
+      // the memo opens with its one-page summary: one that is empty or still advises fails the memo (#1065)
+      if (!summary.length || summary.some(advises)) return fail({ kind: 'failed', message: UNREAD_REPLY });
+      return ok(summary);
     } catch (e) {
-      return unreachable(e) ? failure(e, `${SERVICE} did not answer`) : ok([]);
+      return failure(e, 'The summary could not be written');
     }
   }
 
@@ -1752,7 +1754,7 @@ export function nodeAi(o: AiOptions) {
      * The deal memo's summary and ratings. Each open finding is rated High, Medium or Low against the control file's
      * definitions; a rating is kept in the deal's check log, which every PC reads, and holds until the finding's words
      * change, so two memos agree. The summary is facts only: a reply that advises is sent back once, then to the thorough
-     * model, then left out (the memo's own counts still stand).
+     * model; one that still advises, or a summary that cannot be written, fails the memo (#1065).
      * The open findings are then grouped into risks, and each key risk is written up from its findings' documents;
      * the summary says what the project is, read from the core documents.
      */
