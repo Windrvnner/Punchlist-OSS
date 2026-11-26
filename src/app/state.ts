@@ -107,8 +107,8 @@ export interface UiState {
   /** what the model said, when a person asked, about whether an answer addresses the question suggested under it, as `answer message id|question id`; for this session only */
   verdicts: Record<string, 'asking' | 'failed' | { verdict: 'yes' | 'partly' | 'no'; why: string }>;
   /** the open question the model proposed, once an answer finished, as one it may address: answer message id to
-   * the question's id and the text it was proposed for; for this session only (#1120) */
-  proposed: Record<string, { id: string; text: string }>;
+   * the questions' ids and the text each was proposed for; for this session only (#1120) */
+  proposed: Record<string, { id: string; text: string }[]>;
   /** the steps of answers still being worked on, by the pending message's id, as the backend last said them; for this session only */
   researching: Record<string, Research>;
   queueSearch: string;

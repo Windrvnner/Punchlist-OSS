@@ -63,7 +63,7 @@ function useUseAsResponse({ store, scope, answer, from, closeUseCard, closeList 
  * under it for a person to check (or ask the model about) and use, or not.
  */
 export function Answer({ scope, message: answer, asked, onOpen, suggest }: {
-  scope: Scope; message: Message; asked: string; onOpen: (s: Source, ask?: string) => void; suggest?: string;
+  scope: Scope; message: Message; asked: string; onOpen: (s: Source, ask?: string) => void; suggest?: string[];
 }) {
   const store = useStore();
   const state = useAppState();
@@ -80,7 +80,7 @@ export function Answer({ scope, message: answer, asked, onOpen, suggest }: {
     setCard(null);
     focusBack();
   };
-  const suggested = suggest && deal ? state.questions[suggest] : null;
+  const suggested = deal ? (suggest ?? []).map((id) => state.questions[id]).filter((q) => !!q) : [];
   const plain = withoutFindingLinks(answer.text);
   // An answer is cited the way a finding is: [n] after a sentence points at the nth source. Without markers the whole
   // answer rests on all its sources. Text that leaves as a response or a question goes without the markers.
@@ -116,8 +116,8 @@ export function Answer({ scope, message: answer, asked, onOpen, suggest }: {
       {answer.offer && <OfferButton offer={answer.offer} openCard={(button) => openCard(button, 'offer')} />}
       {card === 'use' && deal && <UsePicker id={answer.id} deal={deal}
         onPick={(questionId) => use.askUse(questionId, true)} onClose={closeCard} />}
-      {suggested && deal && <SuggestedQuestion question={suggested} dealId={deal.id} answer={answer}
-        verdict={state.ui.verdicts[`${answer.id}|${suggested.id}`]} askUse={use.askUse} />}
+      {deal && suggested.map((question) => <SuggestedQuestion key={question.id} question={question} dealId={deal.id}
+        answer={answer} verdict={state.ui.verdicts[`${answer.id}|${question.id}`]} askUse={use.askUse} />)}
       {replacing && <ReplacePrompt question={replacing} onReplace={replaceIt} onKeep={closeReplace} />}
       {card === 'q' && deal && <QuestionCard scope={scope} answerId={answer.id}
         initial={questionFromAnswer(scope, answer, asked)} onDone={closeCard} />}

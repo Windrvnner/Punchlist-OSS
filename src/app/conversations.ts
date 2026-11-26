@@ -320,7 +320,7 @@ async function proposeFor(store: Store, scope: Scope, messageId: string) {
 const answeredTexts = (list: Message[]) => new Set(list.map((m) => answerText(m).trim()));
 
 /** The open question each answer may address, on a deal's or a finding's conversation (a question's is its own). */
-export function suggestions(s: State, scope: Scope): Map<string, string> {
+export function suggestions(s: State, scope: Scope): Map<string, string[]> {
   if (scope.kind !== 'deal' && scope.kind !== 'finding') return new Map();
   const list = s.threads[convKey(scope)] ?? [];
   return suggestedFor(s, scope.dealId, list, answeredTexts(list));
