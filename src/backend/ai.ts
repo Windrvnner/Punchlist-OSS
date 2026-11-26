@@ -828,6 +828,27 @@ export function nodeAi(o: AiOptions) {
   const MEMO_RATE_BATCH = 40;   // open findings rated in one call for the deal memo
   /** a reply's text with its white space collapsed */
   const clean = (t: unknown) => String(t ?? '').replace(/\s+/g, ' ').trim();
+  /** the findings an issues-list call shows, from and to: a share of them, or all when there is no share */
+  type FindingShare = [number, number];
+  /** the ids of the findings an issues-list call shows (#1162) */
+  const shownFindingIds = (findings: { id: string }[], share?: FindingShare) =>
+    findings.slice(...(share ?? [0, findings.length])).map((f) => f.id);
+  /** what a point repeats: an earlier point, or a finding by its id, exactly, among those its call showed (#1162) */
+  const sameOf = (findings: { id: string }[], said: unknown, k: number, share?: FindingShare) => {
+    const point = /^P\s*(\d+)$/i.exec(clean(said));
+    if (point) return +point[1] >= 1 && +point[1] <= k ? { point: +point[1] - 1 } : undefined;
+    return typeof said === 'string' && shownFindingIds(findings, share).includes(said) ? { finding: said } : undefined;
+  };
+  /**
+   * An issues-list reply whose "same" names a finding its call did not show, asked again (#1162); none ("") and an
+   * earlier point are not finding ids
+   */
+  const sameUnusable = (findings: { id: string }[], share?: FindingShare) => (text: string) => {
+    const shown = shownFindingIds(findings, share);
+    const rows = listOf(json<{ points?: unknown }>(text, 'points')?.points).filter(isObject);
+    const named = rows.map((row) => row.same).filter((v) => clean(v) !== '' && !/^P\s*\d+$/i.test(clean(v)));
+    return !namesOnlyShown(text, shown) || unknownIds(named, shown).length > 0;
+  };
 
   /**
    * An issues list's points, read from its file in one call, as every other document is read: the model gives each
@@ -2686,22 +2707,29 @@ export function nodeAi(o: AiOptions) {
       type Share = [number, number];                                                       // findings from, to (level 3)
       const promptOf = (mine: number[], level: number, share?: Share) => {
         const upto = mine[mine.length - 1] + 1; const own = new Set(mine);
-        const shown = level >= 3 ? titles.slice(share![0], share![1]).map((t, k) => `F${share![0] + k + 1}: ${t}`) : (level >= 2 ? titles : fs).map((t, k) => `F${k + 1}: ${t}`);
+        // each finding by its id (#1162)
+        const byId = (t: string, k: number) => `${i.findings[k].id}: ${t}`;
+        const shown = level >= 3
+          ? titles.slice(share![0], share![1]).map((t, k) => byId(t, share![0] + k))
+          : (level >= 2 ? titles : fs).map(byId);
         const findingsHead = `These are the findings already raised on a deal${level >= 3
-          ? `, F${share![0] + 1} to F${share![1]} of ${titles.length}, by their titles`
+          ? `, ${share![1] - share![0]} of ${titles.length}, by their titles`
           : level >= 2 ? ', by their titles' : ''}`;
         const pointsHead = `These are points of an issues list brought in${level >= 1 && upto > mine.length
           ? ', those not asked about here by their opening words' : ''}`;
+        // a point read from the list is no saved record: it keeps its per-prompt label (#1162)
         const pointLines = range(0, upto)
           .map((k) => `P${k + 1}: ${level === 0 || own.has(k) ? points[k].text : opening(points[k].text)}`);
         const asked = mine.length === upto ? 'the points' : `points ${mine.map((k) => `P${k + 1}`).join(', ')}`;
         return `${findingsHead}:\n${shown.join('\n') || '(none)'}\n\n${pointsHead}:\n${pointLines.join('\n')}\n\n`
           + `For each of ${asked}: "workstream": one of ${i.workstreams.join(', ')}; `
-          + '"same": the finding (F3) or the earlier point (P2) that raises the same issue, so that settling one '
-          + 'settles the other, or "" when none does. Be strict: only when you are sure. Two points on the same clause '
-          + 'that ask for different things are not the same.\n'
+          + '"same": the id of the finding, or the earlier point (P2), that raises the same issue, so that settling '
+          + 'one settles the other, or "" when none does. Be strict: only when you are sure. Two points on the same '
+          + 'clause that ask for different things are not the same.\n'
           + 'Reply as JSON: {"points": [{"p": 1, "workstream": "Legal", "same": ""}]}';
       };
+      // a finding's line in a share, counted with the id it is shown by (#1162)
+      const lineTokens = (f: number) => tokensOf(`${i.findings[f].id}: ${titles[f]}\n`);
       // the points whose "same" came from a call that showed either side shorter than it is: each is confirmed below
       const loose = new Set<number>();
       // `from`: the fullest form still to try, raised when the service refused a fuller one as too long though it was
@@ -2715,14 +2743,18 @@ export function nodeAi(o: AiOptions) {
           if (room < budget / 4) { if (mine.length > 1) return halved(); throw tooLong(TOO_LONG_ASK); }
           let at = 0;
           while (at < titles.length) {
-            let to = at, used = 0; while (to < titles.length && (to === at || used + tokensOf(`F${to + 1}: ${titles[to]}\n`) <= room)) used += tokensOf(`F${to + 1}: ${titles[to++]}\n`);
+            let to = at, used = 0;
+            while (to < titles.length && (to === at || used + lineTokens(to) <= room)) used += lineTokens(to++);
             if (!(await ask(mine, halves, 3, [at, to]))) return false;
             at = to;
           }
           return true;
         }
         let reply: { points?: unknown } | null = null; const own = new Set(mine);
-        try { reply = await tried(() => askJson({ kind: 'issuesList', split: true, model: fast, system: JSON_ONLY, prompt: promptOf(mine, level, share) }, ['points'])); }
+        const prompt = promptOf(mine, level, share);
+        const input: Ask = { kind: 'issuesList', split: true, model: fast, system: JSON_ONLY, prompt,
+          unusable: sameUnusable(i.findings, share) };
+        try { reply = await tried(() => askJson(input, ['points'])); }
         catch (e) {
           if (isTooLong(e)) { if (level < 2) return ask(mine, halves, level + 1); if (mine.length > 1) return halved(); }
           if ((e as { code?: string })?.code !== 'cutoff') throw e;
@@ -2736,9 +2768,7 @@ export function nodeAi(o: AiOptions) {
           if (!own.has(k)) continue;
           // the finding's title is the point's own text, never a model's wording (#1026)
           const title = points[k].text;
-          const m = /^([FP])\s*(\d+)$/i.exec(clean(r?.same)); const at = m ? +m[2] - 1 : -1;
-          const shown = (f: number) => !share || (f >= share[0] && f < share[1]);         // a share's call can name only the findings it was shown
-          const same = !m ? undefined : m[1].toUpperCase() === 'F' ? (i.findings[at] && shown(at) ? { finding: i.findings[at].id } : undefined) : at >= 0 && at < k ? { point: at } : undefined;
+          const same = sameOf(i.findings, r?.same, k, share);
           // a point asked about with several shares keeps its first title, and the first thing any share says it repeats
           const had = sorted.get(k);
           if (!had) sorted.set(k, { title, workstream, ...(same ? { same } : {}) }); else if (!had.same && same) had.same = same;
