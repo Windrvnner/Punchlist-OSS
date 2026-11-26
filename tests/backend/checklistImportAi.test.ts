@@ -470,11 +470,11 @@ describe('reading a list in, whole, in one call', () => {
   it('a reply that cannot be read fails the read, so half a list is never shown as all of it', async () => {
     expect((await replying('not JSON at all').ai.readList!({ lines: list.slice(0, 5) })).ok).toBe(false);
   });
-  it('a reply still cut off when asked once for a shorter reply fails the read, saying so', async () => {
+  it('a reply cut off at the length limit fails the read, saying so, and is never asked for shorter', async () => {
     const cut = () => { throw Object.assign(new Error('cut off'), { code: 'cutoff' }); };
     const s = setup((c) => (isRead(c) ? cut() : {}), {}, pc);
     const r = await s.ai.readList!({ lines: list });
     expect(r.ok ? '' : r.error.message).toBe(TOO_LONG_REPLY);
-    expect(s.calls.filter(isRead).length).toBe(2);
+    expect(s.calls.filter(isRead).length).toBe(1);
   });
 });

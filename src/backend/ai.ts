@@ -1921,8 +1921,8 @@ export function nodeAi(o: AiOptions) {
     async readList(i) {
       // What each line of a list is, read whole in one call as the app's other reads are (#1026): the standard model,
       // or the thorough one when asked, names each line's kind by number and a table's columns (listReadAi.ts). A reply
-      // cut off at the length limit is asked for once more, shorter (askJson); one that still cannot be read fails the
-      // read, so half a list is never shown as all of it.
+      // cut off at the length limit fails the read, as the issues list's does (`split`, readIssuePoints), so half a
+      // list is never shown as all of it.
       let model: string;
       try {
         const m = await models();
@@ -1930,7 +1930,7 @@ export function nodeAi(o: AiOptions) {
       } catch (e) { return failure(e, UNREACHED); }
       if (!i.lines.some((l) => l.trim())) return ok({ lines: [] });
       try {
-        const ask: Ask = { kind: 'readList', model, system: JSON_ONLY, prompt: listReadPrompt(i.lines) };
+        const ask: Ask = { kind: 'readList', split: true, model, system: JSON_ONLY, prompt: listReadPrompt(i.lines) };
         const reply = await askJson(ask, [...LIST_KINDS, 'cells']);
         return reply ? ok(listReply(reply, i.lines)) : fail({ kind: 'failed', message: UNREAD_REPLY });
       } catch (e) { return failure(e, UNREAD_REPLY); }
