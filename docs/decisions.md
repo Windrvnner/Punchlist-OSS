@@ -206,6 +206,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - The memo limits a key risk write-up to two paragraphs and 200 words. If retries yield no usable write-up,
   it uses the findings' own cited words (#659).
 - The memo reports facts only: no recommendation, mitigants, next steps, or judging words.
+- A memo whose one-page summary can't be written fails with Retry and is not saved (#1065).
 - **Deal Memo…** in the deal header's ⋯ menu asks where to save (Word or PDF), then makes the memo; there is no review step.
 - The memo has no text in capitals, headings included.
 - Risks are rated High, Medium, or Low, only in the memo, by the model against the control file's definitions. A finding keeps its rating until the finding changes, so two memos agree. The memo carries no AI mark, only one disclaimer at the end. High prints in red; Medium and Low print in the text color.

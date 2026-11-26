@@ -444,6 +444,18 @@ function memoRiskFits(paragraphs: string[], ids: Set<string>): boolean {
   return words.length > 0 && words.length <= MEMO_RISK_WORDS;
 }
 
+/** A Check verdict, or null when the reply gives none of the three. */
+function verdictOf(reply: { verdict?: unknown } | null): 'yes' | 'partly' | 'no' | null {
+  const verdict = word(reply?.verdict);
+  return verdict === 'yes' || verdict === 'partly' || verdict === 'no' ? verdict : null;
+}
+
+/** A reconciled answer, or '' when the reply is empty or asks a person to fill something in. */
+function mergedText(reply: { text?: unknown } | null): string {
+  const text = (strings(reply?.text)[0] ?? '').trim();
+  return /\[[^\]]*(confirm|tbc|tbd|check)[^\]]*\]/i.test(text) ? '' : text;
+}
+
 function readCorrection(
   prompt: string, reply: Record<string, unknown> | null, again: { wrong: string; maxEcho?: number },
 ): string {
@@ -1386,6 +1398,19 @@ export function nodeAi(o: AiOptions) {
     }
   }
 
+  /**
+   * One JSON reply that `usable` accepts: one it rejects is sent back once with what is wrong, as `draft` does (#1058).
+   * The send-back is read as written, with no second reading; the caller decides what a reply still unusable means.
+   */
+  async function askSentBack<T extends Record<string, unknown>>(
+    ask: Ask, keys: string[], usable: (reply: T | null) => boolean, wrong: string,
+  ): Promise<T | null> {
+    const reply = await askJson<T>(ask, keys);
+    if (usable(reply)) return reply;
+    const prompt = readCorrection(ask.prompt, reply, { wrong });
+    return askJson<T>({ ...ask, prompt }, keys, undefined, false);
+  }
+
   function readCanRetry(model: string, again: { escalate: string; retrySharedModel?: boolean } | undefined): boolean {
     return !!again && (model !== again.escalate || again.retrySharedModel === true);
   }
@@ -1519,9 +1544,11 @@ export function nodeAi(o: AiOptions) {
       const summary = fromDocs.ok && fromDocs.value.sent.length
         ? parasOf(fromDocs.value.reply)
         : await withoutDocuments();
-      return ok(summary.some(advises) ? [] : summary);
+      // the memo opens with its one-page summary: one that is empty or still advises fails the memo (#1065)
+      if (!summary.length || summary.some(advises)) return fail({ kind: 'failed', message: UNREAD_REPLY });
+      return ok(summary);
     } catch (e) {
-      return unreachable(e) ? failure(e, `${SERVICE} did not answer`) : ok([]);
+      return failure(e, 'The summary could not be written');
     }
   }
 
@@ -1950,7 +1977,7 @@ export function nodeAi(o: AiOptions) {
      * The deal memo's summary and ratings. Each open finding is rated High, Medium or Low against the control file's
      * definitions; a rating is kept in the deal's check log, which every PC reads, and holds until the finding's words
      * change, so two memos agree. The summary is facts only: a reply that advises is sent back once, then to the thorough
-     * model, then left out (the memo's own counts still stand).
+     * model; one that still advises, or a summary that cannot be written, fails the memo (#1065).
      * The open findings are then grouped into risks, and each key risk is written up from its findings' documents;
      * the summary says what the project is, read from the core documents.
      */
@@ -2040,26 +2067,51 @@ export function nodeAi(o: AiOptions) {
       try { const { latest, done } = await outcomes(dealId); return ok(gapsOf(latest, done)); }
       catch { return fail({ kind: 'failed', message: 'The checklist results could not be read' }); }
     },
-    /** Whether an answer addresses a question: the standard model judges from the two texts, with no documents. */
+    /**
+     * Whether an answer addresses a question: the standard model judges from the two texts, with no documents.
+     * A verdict that is not one of the three is sent back once with what is wrong (decisions: AI and models; #1058).
+     */
     async addresses(i) {
+      const prompt = [
+        `This question was asked on a project-finance deal:\n${i.question}\n\n`,
+        `This answer was written from the deal's documents:\n${i.answer}\n\n`,
+        'Does the answer address the question: does it give what the question asks for? ',
+        'Say "yes" if it does, "partly" if it gives some of it, "no" if it does not. ',
+        'Add "why": one short sentence, under twenty words, saying what it gives or leaves out.\n',
+        'Reply as JSON: {"verdict": "yes" | "partly" | "no", "why": "…"}',
+      ].join('');
+      const keys = ['verdict', 'why'];
+      const wrong = '"verdict" is not "yes", "partly" or "no"';
       let reply: { verdict?: unknown; why?: unknown } | null;
-      try { reply = await askJson({ kind: 'addresses', model: (await models()).standard, system: JSON_ONLY, prompt: `This question was asked on a project-finance deal:\n${i.question}\n\nThis answer was written from the deal's documents:\n${i.answer}\n\nDoes the answer address the question: does it give what the question asks for? Say "yes" if it does, "partly" if it gives some of it, "no" if it does not. Add "why": one short sentence, under twenty words, saying what it gives or leaves out.\nReply as JSON: {"verdict": "yes" | "partly" | "no", "why": "…"}` }, ['verdict', 'why']); }
-      catch (e) { return failure(e, UNREACHED); }
-      const verdict = word(reply?.verdict);
-      if (verdict !== 'yes' && verdict !== 'partly' && verdict !== 'no') {
-        return fail({ kind: 'failed', message: UNREAD_REPLY });
-      }
-      return ok({ verdict, why: (strings(reply!.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 200) });     // one short line on the card, however much it wrote
+      try {
+        const ask = { kind: 'addresses', model: (await models()).standard, system: JSON_ONLY, prompt } as const;
+        reply = await askSentBack(ask, keys, (r) => !!verdictOf(r), wrong);
+      } catch (e) { return failure(e, UNREACHED); }
+      const verdict = verdictOf(reply);
+      if (!verdict) return fail({ kind: 'failed', message: UNREAD_REPLY });
+      // one short line on the card, however much it wrote
+      return ok({ verdict, why: (strings(reply!.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 200) });
     },
+    /** One answer from two versions. An empty reply, or one with a note to confirm, is sent back once (#1058). */
     async merge(i) {
+      const prompt = [
+        `This question was asked on a project-finance deal:\n${i.question}\n\n`,
+        `Two people answered it differently.\nFirst version:\n${i.app}\n\nSecond version:\n${i.log}\n\n`,
+        'Write one answer that reconciles them: every fact from both, each said once, in plain sentences, ',
+        "as a lender's counsel would write it. Where the two disagree, keep the more specific statement ",
+        '(a date, a figure, a document reference) and leave the other out. ',
+        'Do not put the two versions one after the other, do not mention that there were two versions, ',
+        'and add no notes, brackets, placeholders or anything for a person to confirm.\n',
+        'Reply as JSON: {"text": "…"}',
+      ].join('');
+      const wrong = '"text" is empty or holds a bracketed note for a person to confirm';
       let reply: { text?: unknown } | null;
-      try { reply = await askJson({ kind: 'merge', model: (await models()).fast, system: JSON_ONLY, prompt: `This question was asked on a project-finance deal:\n${i.question}\n\nTwo people answered it differently.\nFirst version:\n${i.app}\n\nSecond version:\n${i.log}\n\nWrite one answer that reconciles them: every fact from both, each said once, in plain sentences, as a lender's counsel would write it. Where the two disagree, keep the more specific statement (a date, a figure, a document reference) and leave the other out. Do not put the two versions one after the other, do not mention that there were two versions, and add no notes, brackets, placeholders or anything for a person to confirm.\nReply as JSON: {"text": "…"}` }, ['text']); }
-      catch (e) { return failure(e, UNREACHED); }
-      const text = (strings(reply?.text)[0] ?? '').trim();
-      // a draft that asks a person to fill something in is not a reconciled answer
-      if (!text || /\[[^\]]*(confirm|tbc|tbd|check)[^\]]*\]/i.test(text)) {
-        return fail({ kind: 'failed', message: UNUSABLE_REPLY });
-      }
+      try {
+        const ask = { kind: 'merge', model: (await models()).fast, system: JSON_ONLY, prompt } as const;
+        reply = await askSentBack(ask, ['text'], (r) => !!mergedText(r), wrong);
+      } catch (e) { return failure(e, UNREACHED); }
+      const text = mergedText(reply);
+      if (!text) return fail({ kind: 'failed', message: UNUSABLE_REPLY });
       return ok({ text });
     },
     async reword(i) {
