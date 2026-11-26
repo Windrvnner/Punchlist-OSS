@@ -145,9 +145,12 @@ describe('other', () => {
     for (let d = 0; d < 12; d++) { recs[`d${d}`] = [doc(d * 10 + 1, `Credit Agreement ${d}.pdf`, { words: ['facility', 'agreement'] }), doc(d * 10 + 2, `Notes ${d}.pdf`, { words: ['notes'] })]; await deal(repo, `d${d}`, `Project ${d}`); }
     const start = (installId = 'office') => setup(() => ({ text: 'x', sources: [] }), recs, { repo, shared, installId, pick: () => ({ read: [1] }) });
     const starred = (c: { prompt: string }) => (c.prompt.match(/^\d+\*: .*$/gm) ?? []).map((l) => l.replace(/^\d+\*: /, ''));
-    const a = start(); val(await a.ai.answer({ message: 'Which deals have a lock-up?', history: [], model: 'standard' }));
-    const b = start(); val(await b.ai.answer({ message: 'Which deals have a lock-up?', history: [], model: 'standard' }));   // the app is started again
-    const home = start('home'); val(await home.ai.answer({ message: 'Which deals have a lock-up?', history: [], model: 'standard' }));
+    // a draft's pick lists the ranking, core documents starred
+    const draft = (x: ReturnType<typeof start>) =>
+      x.ai.draft({ dealId: 'd0', questionId: 'q_1', questionText: 'Is there a lock-up?' });
+    const a = start(); val(await draft(a));
+    const b = start(); val(await draft(b));   // the app is started again
+    const home = start('home'); val(await draft(home));
     // the credit agreement answers to a library group, the notes to nothing: the same on each start and each PC
     expect(starred(a.pickCalls[0]).some((p) => p.includes('Credit Agreement'))).toBe(true); expect(starred(a.pickCalls[0]).some((p) => p.includes('Notes'))).toBe(false);
     expect(starred(b.pickCalls[0])).toEqual(starred(a.pickCalls[0])); expect(starred(home.pickCalls[0])).toEqual(starred(a.pickCalls[0]));
