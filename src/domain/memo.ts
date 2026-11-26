@@ -173,7 +173,7 @@ export function memoContent(i: MemoInput): Memo {
   const risks: MemoRisk[] = key.map((g) => {
     const fs = g.findings.map((id) => byId.get(id)!); const sources = g.sources ?? [];
     // the model's write-up when there is one; else each finding's own first paragraph, as before
-    const written = (g.body ?? []).map((p) => p.trim()).filter(Boolean);
+    const written = (g.body ?? []).filter((p) => p.trim());
     const paras = written.length ? written.map((p) => cited(p, sources)) : fs.map(own).filter((p) => p.length);
     return { rating: g.rating!, title: g.title, workstream: workstreams(g), paras, open: stillOpen(g.findings, i.questions, i.today) };
   });
