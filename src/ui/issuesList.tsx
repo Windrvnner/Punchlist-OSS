@@ -1,9 +1,9 @@
 /**
  * Import an issues list into a deal's Findings. The person chooses the list (a PDF, a Word file or an email) or pastes
  * its text; it is attached to the deal as a chat attachment is, and the model reads its points and says which repeat
- * a finding already raised (open or closed) or an earlier point. Those are listed under "Already raised", each saying what it joins, unless
- * the person checks "Keep separate". Every other point is listed under "New findings", read only, with the title and
- * workstream the model gave it. Nothing is recorded until Import.
+ * a finding already raised (open or closed) or an earlier point. Those are listed under "Already raised", each saying
+ * what it joins, unless the person checks "Keep separate". Every other point is listed under "New findings", read
+ * only, with the title and workstream the model gave it. Nothing is recorded until Import.
  */
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { useAppState, useStore } from './hooks';
