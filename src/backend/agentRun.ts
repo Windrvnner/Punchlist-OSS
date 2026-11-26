@@ -54,7 +54,7 @@ export class AgentRun {
     readonly kit: AgentKit,
     readonly question: AgentQuestion,
     readonly progress: Run,
-    readonly pages = { width: 8, searchPage: 25 },
+    readonly pages: { width: number; searchPage: number },
   ) {
     if (kit.talk) this.keepTags(question.thread?.tags ?? []);
   }

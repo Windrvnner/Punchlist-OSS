@@ -4,7 +4,7 @@
  * the app holds, with no model call.
  */
 import { int, strings } from './lenient';
-import { pageOf, rankRecords, type Page } from './recordSearch';
+import { pageOf, pageOfGroups, rankRecords, type Page } from './recordSearch';
 import { qaRow, qaText } from './qaRow';
 import type { AgentRun } from './agentRun';
 import { foundAt, withPlaces } from './agentRun';
@@ -65,11 +65,11 @@ function queryWords(run: AgentRun, query: string): Set<string> {
 async function searchDocuments(run: AgentRun, asked: Asked, query: string, report: Report): Promise<void> {
   const { kit, question } = run;
   const ranking = await kit.ranking(question.deals, query);
-  const shown = pageOf(ranking, asked.page, run.pages.width);
+  const shown = pageOfGroups(ranking, asked.page, run.pages.width);
   if (!shown.items.length) {
     const none = 'Documents: none answers to these words.';
     report.out.push(ranking.length ? noPage('Documents', 'documents', asked, shown) : none);
-    report.said.push(`${ranking.length} listed · none opened`);
+    report.said.push(`${shown.total} listed · none opened`);
     return;
   }
   const ask = findAsk('these documents', query, question.message);
@@ -95,7 +95,7 @@ async function searchDocuments(run: AgentRun, asked: Asked, query: string, repor
   const page = pageLine('documents', asked, shown);
   report.out.push(`Documents: the helper opened ${opens.join(', ')}.${says}${passages}\n${page}`);
   const passageCount = `${sources.length} ${noun(sources.length, 'passage')}`;
-  report.said.push(`${ranking.length} listed · ${sent.length} opened · ${passageCount}`);
+  report.said.push(`${shown.total} listed · ${sent.length} opened · ${passageCount}`);
 }
 
 /** the deal's findings ranked by the query's words, a page of them, each whole */

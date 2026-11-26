@@ -28,6 +28,22 @@ export function rankRecords<T>(records: T[], q: Set<string>, text: (x: T) => str
   return scored.sort((a, b) => b.score - a.score).map((r) => r.x);
 }
 
+/**
+ * Page `page` (from 1) of a ranking of groups, `size` items a page, with no group split between pages: a group that
+ * does not fit on the page under way starts the next one, and one larger than a page has a page of its own. A
+ * blackline and its clean draft are one group, read together (#1102).
+ */
+export function pageOfGroups<T>(groups: T[][], page: number, size: number): Page<T> {
+  const pages: T[][] = [];
+  for (const group of groups) {
+    const last = pages.at(-1);
+    if (last && last.length + group.length <= size) last.push(...group);
+    else pages.push([...group]);
+  }
+  const total = groups.reduce((sum, g) => sum + g.length, 0);
+  return { items: pages[page - 1] ?? [], page, pages: pages.length, total };
+}
+
 /** page `page` (from 1) of a ranking, `size` a page; a page past the last has no items */
 export function pageOf<T>(ranked: T[], page: number, size: number): Page<T> {
   const items = ranked.slice((page - 1) * size, page * size);

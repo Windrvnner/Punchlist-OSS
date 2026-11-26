@@ -52,10 +52,11 @@ export interface AgentKit {
    */
   folder(deals: string[], said: string, what: string): Promise<FolderFound>;
   /**
-   * the chat's document search as fixed pages: every document of these deals that answers to a word of the query, best
-   * first by the keyword ranking, each blackline's clean draft just before it, the deals taken in turn
+   * the chat's document search as fixed pages: the documents of these deals that answer to a word of the query, best
+   * first by the keyword ranking, then the core documents, the deals taken in turn. Each entry is a group read
+   * together: one document, or a clean draft with its blacklines, so a page never splits them.
    */
-  ranking(deals: string[], query: string): Promise<DealDoc[]>;
+  ranking(deals: string[], query: string): Promise<DealDoc[][]>;
   /** the search helper's reading of one page of that ranking, on the service, as it is: no pick, one round */
   readPage(deals: string[], model: string, ask: string, docs: DealDoc[]): Promise<Looked>;
   /** the words of a text as a search compares them; with `dealId`, the deal's short names given their long form too */

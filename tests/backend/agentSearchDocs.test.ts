@@ -16,18 +16,21 @@ const clock = () => new Date(Date.UTC(2026, 10, 26, 9, 0, 0, t++)).toISOString()
 const doc = (n: number, name: string): DocRecord =>
   ({ docId: `doc_${String(n).padStart(24, '0')}`, hash: 'h', name, folder: 'vdr', rel: name, size: 1, pages: 4 });
 const two = (i: number) => String(i).padStart(2, '0');
-/** 30 turbine warranties, a blackline of the fifth, and 30 permits that share no word with the query */
-const ROOM: DocRecord[] = [
+/** 30 turbine warranties, a blackline of one of them, and 30 permits that share no word with the query */
+const roomWith = (blacklined: string): DocRecord[] => [
   ...Array.from({ length: 30 }, (_v, i) => doc(i + 1, `Turbine warranty ${two(i + 1)}.pdf`)),
-  doc(31, 'Turbine warranty 05 (blackline).pdf'),
+  doc(31, `Turbine warranty ${blacklined} (blackline).pdf`),
   ...Array.from({ length: 30 }, (_v, i) => doc(i + 40, `Permit ${two(i + 1)}.pdf`)),
 ];
+const ROOM = roomWith('05');
 const isTurn = (c: Call) => !!c.system?.includes('You work in turns');
 const isPick = (c: Call) => c.prompt.includes('Which of them should be read');
 const isRead = (c: Call) => c.prompt.startsWith('Documents:\n');
 const answer = { text: 'ok', sources: [] };
 
-function setup(...tools: Record<string, unknown>[]) {
+const setup = (...tools: Record<string, unknown>[]) => setupIn(ROOM, ...tools);
+
+function setupIn(room: DocRecord[], ...tools: Record<string, unknown>[]) {
   const turns: Call[] = []; const reads: Call[] = []; const picks: Call[] = [];
   const svc = new StandInService(async (c) => {
     const call = c as Call;
@@ -39,8 +42,8 @@ function setup(...tools: Record<string, unknown>[]) {
   (svc as { converse?: unknown }).converse = undefined;
   const keeper = new StoreKeeper(svc, new Mem(), { recheckMs: 0, clock });
   const docs = {
-    records: () => ROOM,
-    wanted: async (_d: string, ids: string[]) => ROOM.filter((r) => ids.includes(r.docId))
+    records: () => room,
+    wanted: async (_d: string, ids: string[]) => room.filter((r) => ids.includes(r.docId))
       .map((r) => ({ docId: r.docId, name: r.name, read: () => new TextEncoder().encode(r.name) })),
   };
   const ai = nodeAi({ service: svc, keeper, repo: memRepo(clock), clock, docs, width: 8, library: [] });
@@ -72,6 +75,16 @@ describe('searching documents from the chat, a page at a time', () => {
     const got = names(s.reads[s.reads.length - 1]);
     expect(got).toHaveLength(8);
     expect(got.indexOf('Turbine warranty 05.pdf') + 1).toBe(got.indexOf('Turbine warranty 05 (blackline).pdf'));
+  }, 60_000);
+
+  it('never splits a blackline from its clean draft across pages: the pair starts the next page', async () => {
+    const s = setupIn(roomWith('08'), docs(), docs(2));
+    expect((await s.ai.answer(ask('Hello'))).ok).toBe(true);
+    const [first, second] = s.reads.slice(-2).map(names);
+    const warranty = (x: string) => `Turbine warranty ${x}.pdf`;
+    expect(first).toEqual(['01', '02', '03', '04', '05', '06', '07'].map(warranty));
+    expect(second).toEqual(['08', '08 (blackline)', '09', '10', '11', '12', '13', '14'].map(warranty));
+    expect(s.turns[1].prompt).toContain('Page 1 of 4. Ask for page 2 for more.');
   }, 60_000);
 
   it('can be asked for the last page first: it holds the last 7', async () => {

@@ -956,11 +956,25 @@ export function nodeAi(o: AiOptions) {
   const mainIn = (sent: Sent[], x: Source) => { const sec = new Map<string, Set<string>>(); const of = (d: string) => sec.get(d) ?? (sec.set(d, kindsOf(d).secondary), sec.get(d)!); return sent.some((s) => s.rec.docId === x.docId && (!x.dealId || x.dealId === s.dealId) && !of(s.dealId).has(x.docId)); };
   /** whether a source is never a main one: another project's document, or a blackline not shown to be against this deal's own draft */
   const secondary = (dealId: string, docId: string) => kindsOf(dealId).secondary.has(docId);
+  /** a deal's blackline pairs and records, and the clean draft a document is the blackline of, if any */
+  function draftsOf(dealId: string): { size: number; of: (r: DocRecord) => DocRecord | undefined } {
+    const pairs = cleanOf(dealId);
+    const all = new Map(o.docs.records(dealId).map((r) => [r.docId, r]));
+    const of = (r: DocRecord) => {
+      const clean = pairs.get(r.docId);
+      return clean ? all.get(clean) : undefined;
+    };
+    return { size: pairs.size, of };
+  }
   /** these documents, each blackline's clean draft put just before it when it is not there already */
   function withClean(dealId: string, recs: DocRecord[]): DocRecord[] {
-    const pairs = cleanOf(dealId); if (!pairs.size) return recs;
-    const all = new Map(o.docs.records(dealId).map((r) => [r.docId, r])); const out: DocRecord[] = [];
-    for (const r of recs) { const c = pairs.get(r.docId); const clean = c ? all.get(c) : undefined; if (clean && !recs.includes(clean) && !out.includes(clean)) out.push(clean); out.push(r); }
+    const drafts = draftsOf(dealId); if (!drafts.size) return recs;
+    const out: DocRecord[] = [];
+    for (const r of recs) {
+      const clean = drafts.of(r);
+      if (clean && !recs.includes(clean) && !out.includes(clean)) out.push(clean);
+      out.push(r);
+    }
     return out;
   }
   /** `hits`: only the documents that answer to the words at all, so a search sorts its hits, not the whole data room */
@@ -1004,35 +1018,27 @@ export function nodeAi(o: AiOptions) {
    * documents that answer to the most words first and then the core documents, each blackline's clean draft beside it,
    * across deals in turn as `folderList` takes them.
    */
-  async function searchRanking(deals: string[], query: string): Promise<DealDoc[]> {
+  async function searchRanking(deals: string[], query: string): Promise<DealDoc[][]> {
     const per = await Promise.all(deals.map(async (dealId) => {
-      const order = besideClean(dealId, top(dealId, query, new Set(), Infinity, await coreOf(dealId), true));
-      return order.map((rec) => ({ dealId, rec }));
+      const groups = besideClean(dealId, top(dealId, query, new Set(), Infinity, await coreOf(dealId), true));
+      return groups.map((group) => group.map((rec) => ({ dealId, rec })));
     }));
     return interleave(per);
   }
   /**
-   * A ranking with each blackline and its clean draft side by side, the clean draft first, at the place of whichever
-   * of the two ranks higher; each document once. The two are read together, so a page never splits them.
+   * A ranking as groups read together: each clean draft with the blacklines of it that the ranking holds, the clean
+   * draft first, at the place of whichever of them ranks highest; any other document on its own; each document once.
    */
-  function besideClean(dealId: string, recs: DocRecord[]): DocRecord[] {
-    const pairs = cleanOf(dealId);
-    const all = new Map(o.docs.records(dealId).map((r) => [r.docId, r]));
-    const cleanOfRec = (r: DocRecord) => { const c = pairs.get(r.docId); return c ? all.get(c) : undefined; };
-    const blacklinesOf = new Map<string, DocRecord[]>();
+  function besideClean(dealId: string, recs: DocRecord[]): DocRecord[][] {
+    const drafts = draftsOf(dealId);
+    const groups = new Map<string, DocRecord[]>();
     for (const r of recs) {
-      const clean = cleanOfRec(r);
-      if (clean) blacklinesOf.set(clean.docId, [...(blacklinesOf.get(clean.docId) ?? []), r]);
+      const clean = drafts.of(r) ?? r;
+      const group = groups.get(clean.docId) ?? [clean];
+      if (!group.includes(r)) group.push(r);
+      groups.set(clean.docId, group);
     }
-    const out = new Map<string, DocRecord>();
-    const put = (r: DocRecord) => { if (!out.has(r.docId)) out.set(r.docId, r); };
-    for (const r of recs) {
-      const clean = cleanOfRec(r) ?? r;
-      put(clean);
-      for (const b of blacklinesOf.get(clean.docId) ?? []) put(b);
-      put(r);
-    }
-    return [...out.values()];
+    return [...groups.values()];
   }
   /** one page of the chat's document search, read by the helper under a search's budget of calls (`spend`) */
   function readSearchPage(spend: { left: number; deal?: { left: number } }, deals: string[], model: string, ask: string,
