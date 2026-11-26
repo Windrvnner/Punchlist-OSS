@@ -97,7 +97,9 @@ describe('what is recorded and shown as checked', () => {
   });
 
   it('a PC signed out while looking at responses lets go of the look after the cap, so another PC can look', async () => {
-    const shared = new Mem(); const s = setup(() => 'x', room(), { shared, installId: 'pc', timing: { giveUp: 50 }, hears: () => ({ affected: ['F1 Q7'] }) });
+    const shared = new Mem();
+    const hears = () => ({ affected: ['F1 q_7'] });
+    const s = setup(() => 'x', room(), { shared, installId: 'pc', timing: { giveUp: 50 }, hears });
     await deal(s.repo); await finding(s.repo, 'f_1', 'Margin differs between the credit agreement and the term sheet', { sources: [{ doc: FA.name, loc: 'p. 2', docId: FA.docId }] });
     await question(s.repo, 'q_7', 7, 'What margin was agreed?', 'The margin was corrected to 2.25% in the signed credit agreement.');
     const signedOut = tokenHolder({}); const answer = s.svc.script;
@@ -108,13 +110,17 @@ describe('what is recorded and shown as checked', () => {
   });
 
   it('a response is not recorded as looked at when the look failed or there was nothing to look at, and it is set against a finding raised later', async () => {
-    const shared = new Mem(); const s = setup(() => 'x', room(), { shared, installId: 'pc', hears: () => ({ affected: ['F1 Q7'] }), verify: () => 'I cannot say.' });
+    const shared = new Mem();
+    const hears = () => ({ affected: ['F1 q_7'] });
+    const s = setup(() => 'x', room(), { shared, installId: 'pc', hears, verify: () => 'I cannot say.' });
     await deal(s.repo); await finding(s.repo, 'f_1', 'Margin differs between the credit agreement and the term sheet', { sources: [{ doc: FA.name, loc: 'p. 2', docId: FA.docId }] });
     await question(s.repo, 'q_7', 7, 'What margin was agreed?', 'The margin was corrected to 2.25% in the signed credit agreement.');
     const r = val(await s.ai.responses('d1')); const again = val(await s.ai.responses('d1'));
     expect(r).toEqual({ heard: ['q_7'], marked: [] }); expect(again.heard).toEqual(['q_7']); expect(s.hearCalls.length).toBe(2); expect(checkLines(shared).filter((l) => l.heard).every((l) => !l.heard.against.includes('f_1'))).toBe(true);   // tried again, since no model gave an answer on the finding
     // no open finding yet: the response is recorded as heard with no model asked; a finding raised afterwards never meets it
-    const sh2 = new Mem(); const t = setup(() => 'x', room(), { shared: sh2, installId: 'pc', hears: () => ({ affected: ['F1 Q7'] }), verify: () => ({ stands: false, why: 'the response settles it' }) });
+    const sh2 = new Mem();
+    const settles = () => ({ stands: false, why: 'the response settles it' });
+    const t = setup(() => 'x', room(), { shared: sh2, installId: 'pc', hears, verify: settles });
     await deal(t.repo); await question(t.repo, 'q_7', 7, 'What margin was agreed?', 'The margin was corrected to 2.25% in the signed credit agreement.');
     const r1 = val(await t.ai.responses('d1')); await finding(t.repo, 'f_1', 'Margin differs between the credit agreement and the term sheet', { sources: [{ doc: FA.name, loc: 'p. 2', docId: FA.docId }] });
     const r2 = val(await t.ai.responses('d1'));
