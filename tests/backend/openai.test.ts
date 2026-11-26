@@ -279,6 +279,15 @@ describe('the OpenAI-compatible connector', () => {
     await expect(s.list()).rejects.toMatchObject({ code: 'unreachable' });
     expect(tries).toBe(1);
   });
+
+  it('retries a busy service twice by default, then reports it unreachable (#1110)', async () => {
+    const api = fakeServer({ replies: [{ status: 429 }, { status: 429 }, { status: 429 }, { status: 429 }] });
+    const service = openAiService({
+      base: 'https://models.example/v1/', key: 'k1', models: MODELS, fetch: api.fetch, retryMs: 1,
+    });
+    await expect(service.complete({ model: 'fast', prompt: 'q' })).rejects.toMatchObject({ code: 'unreachable' });
+    expect(api.sent).toHaveLength(3);
+  });
 });
 
 function networkFailure(code: string) {
