@@ -61,7 +61,7 @@ import { UNREAD_REPLY, UNUSABLE_REPLY, UNREACHED, CUT_ON_IT, CUT_BEFORE_IT, UNUS
 import { inParts, partSize } from './parts';
 import { tokens, fold } from './words';
 import type { WordIndex } from './wordIndex';
-import { families, roomPath, inPrecedents } from './families';
+import { families, roomPath } from './families';
 import { foldersOf, matchFolders, inside } from './folderList';
 import { cleanDrafts, againstOf, otherProject, isBlackline, type Against } from './blacklines';
 import { coreSet, shortNamesIn, BEST as CORE_BEST } from './core';
@@ -863,8 +863,6 @@ export function nodeAi(o: AiOptions) {
     if (!quiet) describeSoon(dealId, set.ids.slice(0, set.best));
     return set.ids;
   }
-  /** kept for callers that waited on the model's choice: the set is worked out at once now */
-  const cored = async (_dealId: string): Promise<void> => {};
   /** the core documents marked for the fast model when it picks: the best 100, which come first in the set */
   const starred = (core: string[]) => new Set(core.slice(0, CORE_BEST));
   /** take in a deal's short names, as `words` reads them */
@@ -3832,6 +3830,5 @@ export function nodeAi(o: AiOptions) {
     usage: (): UsageLine[] => [...total.values()].map((l) => ({ ...l })),
     /** resolves when the documents of a deal that were waiting to be described have been */
     described,
-    cored,
   };
 }

@@ -19,3 +19,12 @@ export function noResultReason(code, signal, out, serverUp) {
   const exit = signal ? `signal ${signal}` : `exit ${code}`;
   return `${exit}; server ${serverUp ? 'up' : 'down'}; last lines: ${last}`;
 }
+
+/**
+ * A GitHub Actions warning for each suite that failed alongside others and passed only on its own, so the pull
+ * request's checks page shows it though the job passes. Empty outside GitHub Actions.
+ */
+export function rerunWarnings(names, onGitHub) {
+  if (!onGitHub) return [];
+  return names.map((name) => `::warning title=Browser suite passed only on its own::${name} failed alongside others`);
+}

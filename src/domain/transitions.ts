@@ -31,10 +31,6 @@ export type QuestionField = 'text' | 'askedBy' | 'received' | 'workstream' | 'pr
 export function editQuestionField(q: Question, field: QuestionField, value: string, ctx: Ctx): Result<Changed<Question>> {
   if ((q as any)[field] === value) return ok({ record: q, audit: [] });
   const next: Question = { ...q, [field]: value, updatedAt: ctx.at } as Question;
-  // Changing the wording makes an existing draft stale: it answered different words.
-  if (field === 'text' && q.draft && q.draft.status === 'found' && q.draft.forWording !== wordingHash(value)) {
-    // draft kept, but no longer matches; the UI reads staleness from the hash
-  }
   return ok({ record: next, audit: [{ kind: 'edited', field, from: (q as any)[field], to: value }] });
 }
 

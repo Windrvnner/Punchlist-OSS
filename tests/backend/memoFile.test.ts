@@ -1,7 +1,8 @@
 // The deal memo made into a Word file and a PDF by LibreOffice, as the app does it.
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { libreOfficeConverter, pdfText } from '../../src/backend/convert';
+import { libreOfficeConverter } from '../../src/backend/convert';
+import { pdfText } from '../fixtures/pdfText';
 import { libreOfficeSheets } from '../../src/backend/spreadsheets';
 import { memoDocument } from '../../src/domain/memoDoc';
 import { sampleMemo } from '../fixtures/memoSample';
