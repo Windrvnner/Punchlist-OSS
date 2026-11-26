@@ -17,9 +17,6 @@ function records(text: string): { raw: string; end: string }[] {
   return out;
 }
 
-/** Excel runs a CSV cell that starts with = + - or @ as a formula: a space in front keeps such text as text (a plain number stays) */
-export const csvSafe = (v: string) => (/^[=+\-@]/.test(v) && !/^[+-]?\d[\d.,]*%?$/.test(v) ? ` ${v}` : v);
-
 /** a record's fields as they are written in the file, quotes and all */
 function rawFields(raw: string): string[] {
   const out: string[] = []; let start = 0; let quoted = false;
