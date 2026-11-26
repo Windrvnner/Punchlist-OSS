@@ -956,11 +956,29 @@ export function nodeAi(o: AiOptions) {
   const mainIn = (sent: Sent[], x: Source) => { const sec = new Map<string, Set<string>>(); const of = (d: string) => sec.get(d) ?? (sec.set(d, kindsOf(d).secondary), sec.get(d)!); return sent.some((s) => s.rec.docId === x.docId && (!x.dealId || x.dealId === s.dealId) && !of(s.dealId).has(x.docId)); };
   /** whether a source is never a main one: another project's document, or a blackline not shown to be against this deal's own draft */
   const secondary = (dealId: string, docId: string) => kindsOf(dealId).secondary.has(docId);
+  /**
+   * each blackline of a deal, by id, with its clean draft's record, worked out once for a whole list: pairing each of
+   * many documents on its own would look the deal's blacklines up again for every one of them
+   */
+  function cleanDraftsOf(dealId: string): Map<string, DocRecord> {
+    const all = new Map(o.docs.records(dealId).map((r) => [r.docId, r]));
+    const out = new Map<string, DocRecord>();
+    for (const [id, c] of cleanOf(dealId)) {
+      const clean = c ? all.get(c) : undefined;
+      if (clean) out.set(id, clean);
+    }
+    return out;
+  }
   /** these documents, each blackline's clean draft put just before it when it is not there already */
   function withClean(dealId: string, recs: DocRecord[]): DocRecord[] {
-    const pairs = cleanOf(dealId); if (!pairs.size) return recs;
-    const all = new Map(o.docs.records(dealId).map((r) => [r.docId, r])); const out: DocRecord[] = [];
-    for (const r of recs) { const c = pairs.get(r.docId); const clean = c ? all.get(c) : undefined; if (clean && !recs.includes(clean) && !out.includes(clean)) out.push(clean); out.push(r); }
+    const cleans = cleanDraftsOf(dealId);
+    if (!cleans.size) return recs;
+    const out: DocRecord[] = [];
+    for (const r of recs) {
+      const clean = cleans.get(r.docId);
+      if (clean && !recs.includes(clean) && !out.includes(clean)) out.push(clean);
+      out.push(r);
+    }
     return out;
   }
   /** `hits`: only the documents that answer to the words at all, so a search sorts its hits, not the whole data room */
@@ -1295,7 +1313,8 @@ export function nodeAi(o: AiOptions) {
   const live = async <T>(kind: 'finding' | 'question', dealId: string): Promise<T[] | null> => { const r = await o.repo.list(kind, dealId); return r.ok ? r.value.map((l) => l.envelope.data as T) : null; };
   /** what the chat agent is made of: the main session's turns, with search (the helper below reads on the fast model) and read; the checks reuse it to fill their gaps (`fill`) */
   const agentKit: AgentKit = {
-    models, records: (d) => o.docs.records(d), words, send, fit, where, withClean, rules: RULES, now: () => Date.now(),
+    models, records: (d) => o.docs.records(d), words, send, fit, where, cleanDrafts: cleanDraftsOf, rules: RULES,
+    now: () => Date.now(),
     askJson: (input, keys, shape) => askJson(input, keys, shape),
     folder: (deals, said, what) => folderList(deals, said, what),
     // a chat is one conversation on a service that keeps them (decisions: Long conversations); its transcript, at a compaction, is a file of its own, which the store's upkeep never touches (storeKeeper.ts)

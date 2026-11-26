@@ -66,8 +66,8 @@ export interface AgentKit {
   fit(text: string, cited: Cited[] | undefined, sent: Sent[], withDeal: boolean): { text: string; sources: Source[] };
   /** a document's path from its deal's folder, as prompts show it */
   where(rec: DocRecord): string;
-  /** these documents with each blackline's clean draft put just before it: a blackline is read with its clean draft */
-  withClean?(dealId: string, recs: DocRecord[]): DocRecord[];
+  /** each blackline of a deal, by id, with its clean draft: a blackline is read with its clean draft */
+  cleanDrafts?(dealId: string): Map<string, DocRecord>;
   /** null when the deal's records cannot be read just now: the agent is told so, never that the deal has none */
   findings(dealId: string): Promise<FindingRecord[] | null>;
   questions(dealId: string): Promise<QuestionRecord[] | null>;

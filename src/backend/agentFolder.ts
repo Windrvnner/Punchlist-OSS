@@ -9,6 +9,7 @@ import type { AgentRun } from './agentRun';
 import { cites, dealDocKey, foundAt, sameDoc, withPlaces } from './agentRun';
 import { codeOf, type AgentKit, type Cited, type DealDoc, type Run, type Sent } from './agentKit';
 import type { ResearchStep } from '../ports';
+import type { DocRecord } from './documents';
 import { batchAsk, noun, oneLine, quoted, shorten } from './agentPrompts';
 
 /** batches of a folder review read at the same time */
@@ -180,7 +181,7 @@ export class FolderReader {
 
   /** the batches: `width` documents each, a blackline with its clean draft (`batchesOf`) */
   private batches(todo: DealDoc[]): Batch[] {
-    return batchesOf(todo, this.run.kit.withClean, this.limits.width);
+    return batchesOf(todo, this.run.kit.cleanDrafts, this.limits.width);
   }
 }
 
@@ -378,12 +379,12 @@ function finish(step: ResearchStep, result: string): void {
  * pair. Each batch keeps the places in the list of the first and last document it reads. A folder read's batches, and
  * the pages of the chat's document search (agentSearch.ts).
  */
-export function batchesOf(todo: DealDoc[], withClean: AgentKit['withClean'], width: number): Batch[] {
+export function batchesOf(todo: DealDoc[], cleanDrafts: AgentKit['cleanDrafts'], width: number): Batch[] {
   const batches: Batch[] = [];
+  const cleansOf = new Map<string, Map<string, DocRecord>>();
   for (let i = 0; i < todo.length; i++) {
     const doc = todo[i];
-    const recs = withClean ? withClean(doc.dealId, [doc.rec]) : [doc.rec];
-    const pair = recs.map((rec) => ({ dealId: doc.dealId, rec }));
+    const pair = [...withCleanDraft(doc, cleanDrafts, cleansOf), doc];
     let current = batches.at(-1);
     const notIn = (batch: Batch) => pair.filter((p) => !batch.recs.some((y) => sameDoc(y, p)));
     const full = !!current && current.recs.length > 0 && current.recs.length + notIn(current).length > width;
@@ -395,4 +396,17 @@ export function batchesOf(todo: DealDoc[], withClean: AgentKit['withClean'], wid
     current.last = i + 1;
   }
   return batches;
+}
+
+/** a document's clean draft, when it is a blackline that has one; each deal's pairs looked up once (`cleansOf`) */
+function withCleanDraft(doc: DealDoc, cleanDrafts: AgentKit['cleanDrafts'],
+  cleansOf: Map<string, Map<string, DocRecord>>): DealDoc[] {
+  if (!cleanDrafts) return [];
+  let cleans = cleansOf.get(doc.dealId);
+  if (!cleans) {
+    cleans = cleanDrafts(doc.dealId);
+    cleansOf.set(doc.dealId, cleans);
+  }
+  const clean = cleans.get(doc.rec.docId);
+  return clean ? [{ dealId: doc.dealId, rec: clean }] : [];
 }

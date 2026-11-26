@@ -48,13 +48,13 @@ export class AgentRun {
 
   /**
    * `pages`: how many a search gives at a time, documents (`width`) and findings or questions (`searchPage`), as the
-   * agent's limits set them
+   * agent's limits set them; `chars`: the most characters a page of findings or questions may hold
    */
   constructor(
     readonly kit: AgentKit,
     readonly question: AgentQuestion,
     readonly progress: Run,
-    readonly pages: { width: number; searchPage: number },
+    readonly pages: { width: number; searchPage: number; chars: number },
   ) {
     if (kit.talk) this.keepTags(question.thread?.tags ?? []);
   }
@@ -164,9 +164,13 @@ export class AgentRun {
 
   /** these documents with each blackline's clean draft put just before it, each once */
   private withCleanDrafts(picked: Sent[]): Sent[] {
-    if (!this.kit.withClean) return picked;
-    const paired = picked.flatMap((s) =>
-      this.kit.withClean!(s.dealId, [s.rec]).map((rec) => (rec === s.rec ? s : this.tagOf(s.dealId, rec))));
+    if (!this.kit.cleanDrafts) return picked;
+    const cleans = new Map(picked.map((s) => [s.dealId, new Map<string, DocRecord>()]));
+    for (const dealId of cleans.keys()) cleans.set(dealId, this.kit.cleanDrafts(dealId));
+    const paired = picked.flatMap((s) => {
+      const clean = cleans.get(s.dealId)?.get(s.rec.docId);
+      return clean ? [this.tagOf(s.dealId, clean), s] : [s];
+    });
     return paired.filter((s, i, all) => all.indexOf(s) === i);
   }
 }
