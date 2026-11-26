@@ -275,7 +275,8 @@ export interface AiService {
 /**
  * One step the chat agent took: a search of the documents, findings or Q&A, or documents given to it whole. `text` says
  * what it did, in the past tense ("Searched documents for “lock-up”", "Read Credit agreement.pdf"); `result` says what
- * came of it in a few words ("214 listed · 5 opened · 3 passages", "p. 41"); `found` are the passages a search
+ * came of it in a few words ("214 listed · 5 opened · 3 passages": for documents, every one that answers to a word
+ * of the search; "p. 41"); `found` are the passages a search
  * returned, each with where it is. `done` is false only for the step being taken now.
  */
 /**
