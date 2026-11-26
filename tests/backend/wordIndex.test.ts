@@ -62,10 +62,15 @@ describe("each PC's word index", () => {
   it('is kept on this PC, read back after a restart, and a document read again replaces its old words', () => {
     const d = dir(); const a = wordIndex(nodeFolder(d));
     a.add('deal', 'x', countWords('Turbine supply agreement.')); a.add('deal', 'x', countWords('Operation and maintenance agreement.'));
-    expect(fs.readdirSync(d)).toEqual(['words-deal.jsonl']);
+    expect(fs.readdirSync(d)).toEqual(['words2-deal.jsonl']);
     const b = wordIndex(nodeFolder(d)); expect(b.has('deal', 'x')).toBe(true);
     expect(b.score('deal', q('turbine'), [named('x', 'x.pdf')]).get('x')).toBe(0);
     expect(b.score('deal', q('maintenance'), [named('x', 'x.pdf')]).get('x')).toBeGreaterThan(0);
-    fs.appendFileSync(path.join(d, 'words-deal.jsonl'), '{"d":"y","n":3,"t":"'); expect(wordIndex(nodeFolder(d)).has('deal', 'y')).toBe(false);   // a line cut short is read again later
+    fs.appendFileSync(path.join(d, 'words2-deal.jsonl'), '{"d":"y","n":3,"t":"'); expect(wordIndex(nodeFolder(d)).has('deal', 'y')).toBe(false);   // a line cut short is read again later
+  });
+  it('does not read an index built under older rules, so each document is read again', () => {
+    const d = dir();
+    fs.writeFileSync(path.join(d, 'words-deal.jsonl'), '{"d":"x","n":1,"t":"","w":"turbine:1"}\n');
+    expect(wordIndex(nodeFolder(d)).has('deal', 'x')).toBe(false);
   });
 });
