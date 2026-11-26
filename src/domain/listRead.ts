@@ -20,8 +20,14 @@ export interface LineRead {
 /** for a table, the columns (from 1) that hold each row's item, section and subsection */
 export interface ListCells { item: number; section?: number; subsection?: number }
 
-/** the model's reading of a whole list: each line's kind, by its number, and a table's columns */
+/** the model's reading of a whole list, as the service sends it: each named line's kind, and a table's columns */
+export interface ListReply { lines: LineRead[]; cells?: ListCells }
+
+/** the reading the app ties out: each line's kind, by its number, and a table's columns */
 export interface ListReading { reads: Map<number, LineRead>; cells?: ListCells }
+
+export const readingOf = (reply: ListReply): ListReading =>
+  ({ reads: new Map(reply.lines.map((r) => [r.n, r])), ...(reply.cells ? { cells: reply.cells } : {}) });
 
 /** an item, with the lines it came from */
 export type ReadItem = ListItem & { lines: number[] };

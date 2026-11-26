@@ -1,35 +1,28 @@
 /**
- * Reading a list in with the model, every line accounted for, with accuracy over cost. The standard model reads
- * every line; the lines its readings leave unplaced (skipped, or answered with words the line does not hold) are asked
- * about once more, and any still unplaced are asked of the thorough model. What is still unplaced after that is left
- * out, where a person sees it and can bring it in (domain/listRead). The calls are retried as every AI call is
+ * Reading a list in with the model, every line accounted for, with accuracy over cost. The standard model reads the
+ * whole list in one call; when its reading leaves lines unplaced (not named, or a table row whose named cell is blank),
+ * the thorough model reads the whole list once more and its reading is taken. What is still unplaced is left out,
+ * where a person sees it and can bring it in (domain/listRead). The calls are retried as every AI call is
  * (backend/retry.ts).
  */
 import type { AiService } from '../ports';
-import { unplaced, textLines, tableLines, tieOut, type LineRead, type TiedOut } from '../domain/listRead';
+import { unplaced, textLines, tableLines, tieOut, readingOf, type ListReading, type TiedOut } from '../domain/listRead';
 import { prepareChecklist, suggestChecklistColumns, type ChecklistMapping } from '../domain/checklistImport';
 import { keepImport } from './keptImports';
 import { readImportBytes, MAX_IMPORT_BYTES, type ImportTable } from './transfer';
 import type { Store } from './store';
 import { ok, fail, type Result } from '../domain/result';
 
-export async function readList(ai: AiService, lines: string[]): Promise<Result<Map<number, LineRead>>> {
+export async function readList(ai: AiService, lines: string[]): Promise<Result<ListReading>> {
   if (!ai.readList) return fail({ kind: 'rejected', message: 'The backend does not offer this' });
   const first = await ai.readList({ lines });
   // the first reading failing fails the read: the person sees why, with Retry, and the text stays as it is
   if (!first.ok) return first;
-  const reads = new Map<number, LineRead>(); const take = (rs: LineRead[]) => { for (const r of rs) reads.set(r.n, r); };
-  take(first.value);
-  for (const thorough of [false, true]) {
-    const missing = unplaced(lines, reads); if (!missing.length) break;
-    // a reading still unusable is dropped first, so the line is never taken from a reading the line does not bear out
-    for (const n of missing) reads.delete(n);
-    const again = await ai.readList({ lines, only: missing, thorough });
-    // a later pass that fails leaves those lines out, listed for the person, rather than losing the reading already made
-    if (again.ok) take(again.value.filter((r) => missing.includes(r.n)));
-  }
-  for (const n of unplaced(lines, reads)) reads.delete(n);
-  return ok(reads);
+  const reading = readingOf(first.value);
+  if (!unplaced(lines, reading).length) return ok(reading);
+  const again = await ai.readList({ lines, thorough: true });
+  // a thorough reading that fails leaves the unplaced lines out, listed for the person, keeping the first reading
+  return ok(again.ok ? readingOf(again.value) : reading);
 }
 
 /** The files a list can be brought in from: spreadsheets, documents and plain text. */
@@ -151,13 +144,13 @@ interface ReadSource {
 }
 
 interface KeptReading {
-  reads?: Map<number, LineRead> | null;
+  reads?: ListReading | null;
   readFailed?: string;
 }
 
 interface ReadingEvents {
   started(): void;
-  finished(reply: Result<Map<number, LineRead>>): void;
+  finished(reply: Result<ListReading>): void;
 }
 
 /** Resume an unfinished read, and ask again only when its source changes or the person chooses Retry. */
@@ -194,8 +187,8 @@ export function checklistReading(store: Store, requests: ReturnType<typeof check
   return { sourceChanged, retry };
 }
 
-export function tieChecklistLines(lines: string[] | null, reads: Map<number, LineRead> | null, bringIn?: Set<number>) {
-  return lines && reads ? tieOut(lines, reads, bringIn) : null;
+export function tieChecklistLines(lines: string[] | null, reading: ListReading | null, bringIn?: Set<number>) {
+  return lines && reading ? tieOut(lines, reading, bringIn) : null;
 }
 
 export function checklistItemsAsRead(

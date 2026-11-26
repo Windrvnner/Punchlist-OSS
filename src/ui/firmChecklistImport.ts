@@ -14,7 +14,7 @@ import {
   checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistReading, checklistRequests,
   checklistSourceLines, clearChecklistHeading, loadChecklistSource, rereadChecklistTable, tieChecklistLines,
 } from '../app/listRead';
-import type { LineRead } from '../domain/listRead';
+import type { ListReading } from '../domain/listRead';
 import type { ChecklistMapping } from '../domain/checklistImport';
 import type { ListItem } from '../domain/checklist';
 import { NOT_DONE, broughtInSays, toggled } from './firmChecklistReview';
@@ -191,7 +191,7 @@ async function updateTableRead(
 function useModelReading(
   store: Store, work: Work, lines: string[] | null, byColumns: boolean, left: ChecklistKept | null,
 ) {
-  const [reads, setReads] = useState<Map<number, LineRead> | null>(left?.reads ?? null);
+  const [reads, setReads] = useState<ListReading | null>(left?.reads ?? null);
   const [readFailed, setReadFailed] = useState<Asked | ''>(left?.choices?.readFailed ?? '');
   const [bringIn, setBringIn] = useState<Set<number>>(left?.choices?.bringIn ?? new Set());
   const [reading] = useState(() => checklistReading(store, work, {

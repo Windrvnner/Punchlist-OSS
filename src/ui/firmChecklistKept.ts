@@ -7,7 +7,7 @@
  */
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { ImportTable } from '../app/transfer';
-import type { LineRead } from '../domain/listRead';
+import type { ListReading } from '../domain/listRead';
 import type { ChecklistMapping } from '../domain/checklistImport';
 import { LAYERS, type Layer } from '../domain/checklist';
 import { keptImport, keepImport, dropImport, importKey } from '../app/keptImports';
@@ -38,7 +38,7 @@ export interface ChecklistKept {
   paste?: string;
   table?: ImportTable | null;
   text?: { name: string; lines: string[] } | null;
-  reads?: Map<number, LineRead> | null;
+  reads?: ListReading | null;
   review?: Review | null;
   choices?: ChecklistChoices;
 }
@@ -64,7 +64,7 @@ function isChecklistKept(value: unknown): value is ChecklistKept {
   if (!kept || typeof kept !== 'object') return false;
   if (kept.paste !== undefined && typeof kept.paste !== 'string') return false;
   if (kept.text && !Array.isArray(kept.text.lines)) return false;
-  if (kept.reads && !(kept.reads instanceof Map)) return false;
+  if (kept.reads && !(kept.reads.reads instanceof Map)) return false;
   return isKeptTable(kept.table) && isKeptReview(kept.review) && isKeptChoices(kept.choices);
 }
 
@@ -93,7 +93,7 @@ export interface KeptNow {
   paste: string;
   table: ImportTable | null;
   text: { name: string; lines: string[] } | null;
-  reads: Map<number, LineRead> | null;
+  reads: ListReading | null;
   review: Review | null;
   /** read when the import is written, as it is then */
   askedFor: { current: string };

@@ -1,37 +1,48 @@
-// Reading a list in: every line accounted for, lines left unplaced asked about again, then of the thorough model.
+// Reading a list in, whole: one reading, and when it leaves lines unplaced, one whole reading by the thorough model.
 import { describe, it, expect } from 'vitest';
 import { readList } from '../../src/app/listRead';
-import { tieOut, textLines, type LineRead } from '../../src/domain/listRead';
+import { tieOut, textLines, type LineRead, type ListReply } from '../../src/domain/listRead';
 import { mockAi } from '../../src/adapters/mocks';
 import { ok, fail } from '../../src/domain/result';
 import type { AiService } from '../../src/ports';
 import { ITEMS, LEFT_OUT, pastedLines } from '../fixtures/pastedList';
 
 const LINES = ['1. Site', '1.1 Title report', '1.2 Leases cover the array', 'Page 2 of 6'];
-const RIGHT: LineRead[] = [{ n: 1, k: 'section', text: 'Site' }, { n: 2, k: 'item', text: 'Title report' }, { n: 3, k: 'item', text: 'Leases cover the array' }, { n: 4, k: 'left' }];
-/** a model that answers each call from the list given, and records what it was asked */
-function fake(answers: ((only?: number[]) => LineRead[] | null)[]) {
-  const calls: { only?: number[]; thorough?: boolean }[] = [];
-  const ai = { readList: async (i: { lines: string[]; only?: number[]; thorough?: boolean }) => { calls.push({ only: i.only, thorough: i.thorough }); const a = answers[calls.length - 1]?.(i.only); return a ? ok(a) : fail({ kind: 'failed' as const, message: 'no' }); } } as unknown as AiService;
-  return { ai, calls };
+const RIGHT: LineRead[] = [{ n: 1, k: 'section' }, { n: 2, k: 'item' }, { n: 3, k: 'item' }, { n: 4, k: 'left' }];
+const reading = (rs: LineRead[]): ListReply => ({ lines: rs });
+/** a model that answers each call in turn, and records what it was asked */
+function fake(answers: (ListReply | null)[]) {
+  const calls: { lines: number; thorough?: boolean }[] = [];
+  const readList = async (i: { lines: string[]; thorough?: boolean }) => {
+    calls.push({ lines: i.lines.length, thorough: i.thorough });
+    const a = answers[calls.length - 1];
+    return a ? ok(a) : fail({ kind: 'failed' as const, message: 'no' });
+  };
+  return { ai: { readList } as unknown as AiService, calls };
 }
 
-describe('reading a list in, every line accounted for', () => {
+describe('reading a list in, whole, every line accounted for', () => {
   it('asks once when every line is placed', async () => {
-    const { ai, calls } = fake([() => RIGHT]);
-    const r = await readList(ai, LINES); expect(r.ok && r.value.size).toBe(4); expect(calls).toHaveLength(1);
+    const { ai, calls } = fake([reading(RIGHT)]);
+    const r = await readList(ai, LINES); expect(r.ok && r.value.reads.size).toBe(4); expect(calls).toHaveLength(1);
   });
-  it('asks again about the lines left unplaced, then the thorough model, and leaves out what neither placed', async () => {
-    const { ai, calls } = fake([() => RIGHT.filter((x) => x.n !== 2 && x.n !== 3).concat({ n: 3, k: 'item', text: 'Leases reworded' }), () => [RIGHT[2]], () => []]);
+  it('reads the whole list again on the thorough model when lines are unplaced, and takes that reading', async () => {
+    const { ai, calls } = fake([reading(RIGHT.filter((x) => x.n !== 2 && x.n !== 3)), reading(RIGHT.filter((x) => x.n !== 2))]);
     const r = await readList(ai, LINES); if (!r.ok) throw new Error(r.error.message);
-    expect(calls).toEqual([{ only: undefined, thorough: undefined }, { only: [2, 3], thorough: false }, { only: [2], thorough: true }]);
+    expect(calls).toEqual([{ lines: 4, thorough: undefined }, { lines: 4, thorough: true }]);
     const t = tieOut(LINES, r.value);
     expect(t.items.map((i) => i.text)).toEqual(['1.2 Leases cover the array']); expect(t.left).toEqual([2, 4]);
   });
-  it('fails when the first reading fails, and keeps the first reading when a later pass fails', async () => {
-    expect((await readList(fake([() => null]).ai, LINES)).ok).toBe(false);
-    const r = await readList(fake([() => RIGHT.slice(0, 3), () => null, () => null]).ai, LINES);
-    expect(r.ok && [...r.value.keys()]).toEqual([1, 2, 3]);
+  it('fails when the first reading fails, and keeps the first reading when the thorough one fails', async () => {
+    expect((await readList(fake([null]).ai, LINES)).ok).toBe(false);
+    const r = await readList(fake([reading(RIGHT.slice(0, 3)), null]).ai, LINES);
+    expect(r.ok && [...r.value.reads.keys()]).toEqual([1, 2, 3]);
+  });
+  it('reads a 2,000-line list in one call when every line is placed', async () => {
+    const lines = Array.from({ length: 2000 }, (_, k) => `${k + 1}. Item ${k + 1} is in place`);
+    const { ai, calls } = fake([reading(lines.map((_, k) => ({ n: k + 1, k: 'item' })))]);
+    const r = await readList(ai, lines); if (!r.ok) throw new Error(r.error.message);
+    expect(calls).toEqual([{ lines: 2000, thorough: undefined }]); expect(tieOut(lines, r.value).count.items).toBe(2000);
   });
 });
 
