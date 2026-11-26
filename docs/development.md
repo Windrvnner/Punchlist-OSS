@@ -96,9 +96,10 @@ copy `tests/browser/fonts.conf` to `/etc/fonts/conf.d/56-prefer-inter.conf`, as 
 
 The `approved` suite compares five main screens (Home, Findings, Q&A, a finding, and Settings), in dark and light at
 1280x736 and 1024x640, with the images in `tests/browser/approved/`. A pull request that changes one of those screens
-on purpose replaces its images in the same pull request. `PUNCHLIST_APPROVE=1 node tests/browser/approved.spec.mjs`
-writes them from this machine. A failed CI run uploads the new images from the CI machine in its `browser-logs`
-artifact, under `approved/`, with a `.diff.png` that marks the changed pixels in red.
+on purpose replaces its images in the same pull request. The images come from CI, because text edges render slightly
+differently on other machines: a failed CI run uploads the new images in its `browser-logs` artifact, under
+`approved/`, with a `.diff.png` that marks the changed pixels in red. `PUNCHLIST_APPROVE=1 node
+tests/browser/approved.spec.mjs` writes them from this machine, for comparing local runs only.
 
 Run one `npm run check:all` at a time on a shared runner. CPU contention can push the checklist Retry test past
 Vitest's five-second timeout and the document-family test past its one-second limit per large room. On Linux

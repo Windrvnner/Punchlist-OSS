@@ -1,7 +1,7 @@
 // The main screens look as approved (#1027): each is compared with its image in tests/browser/approved/, in dark and
-// light, at 1280x736 and 1024x640. A screen changed on purpose gets a new image in the same pull request:
-//   PUNCHLIST_APPROVE=1 node tests/browser/approved.spec.mjs     (writes every image again, from this machine)
-// or take the images a failed CI run uploads (browser-logs-<shard>, approved/), which come from the CI machine.
+// light, at 1280x736 and 1024x640. A screen changed on purpose gets a new image in the same pull request, taken from
+// a failed CI run's upload (browser-logs-<shard>, approved/): text edges render slightly differently elsewhere.
+//   PUNCHLIST_APPROVE=1 node tests/browser/approved.spec.mjs     (writes every image from this machine, for local runs)
 import { launchChrome } from './chrome.mjs';
 import { approve, approvedPath, differingPixels, keepChanged } from './approvedImages.mjs';
 import { openOnFindings } from './landing.mjs';
