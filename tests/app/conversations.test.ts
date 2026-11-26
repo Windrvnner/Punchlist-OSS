@@ -407,10 +407,13 @@ describe('actions the model offers under its answer (#1054)', () => {
     runOffer(store, { kind: 'page', dealId: 'd_gone', page: 'qa' }, navigate);
     expect(navigate).toHaveBeenCalledTimes(1);
     expect(store.get().ui.toasts.at(-1)!.text).toBe('That deal is no longer in your list');
-    // a deal taken off the person's list since the answer came is not opened either
+    // a deal taken off the person's list keeps its conversations, and their offers run as its slash commands do
     await store.dispatch(SetDealMember, { dealId, on: false });
+    store.ui({ dialog: null });
+    runOffer(store, { kind: 'unresolved', dealId }, navigate);
+    expect(store.get().ui.dialog).toEqual({ kind: 'addUnresolved', dealId });
     runOffer(store, { kind: 'page', dealId, page: 'qa' }, navigate);
-    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledTimes(2);
     vi.spyOn(store, 'readOnly').mockReturnValue('Read-only');
     store.ui({ newDeal: null });
     runOffer(store, { kind: 'newDeal' }, navigate);

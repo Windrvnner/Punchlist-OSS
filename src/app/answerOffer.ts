@@ -71,7 +71,7 @@ export function runOffer(store: Store, offer: RunOffer, navigate: (hash: string)
     openNewDeal(store);
     return;
   }
-  if (!store.get().deals[offer.dealId] || !isMine(store.get(), offer.dealId)) {
+  if (!store.get().deals[offer.dealId]) {
     store.toast('That deal is no longer in your list');
     return;
   }
