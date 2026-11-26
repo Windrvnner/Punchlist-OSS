@@ -72,8 +72,8 @@ import {
 import { docFamilies } from './related';
 import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
-import { responseHeader } from './qaRow';
-import type { DealDoc, Looked } from './agentKit';
+import { AI_DRAFTED, namesOnlyShown, questionsForIds, responseHeader } from './qaRow';
+import type { DealDoc, Looked, Unusable } from './agentKit';
 import {
   RATINGS, riskGroups, keyRisksOf, unratedFindings, type Grouped, type Rating, type RiskGroup,
 } from '../domain/memo';
@@ -563,7 +563,8 @@ export function nodeAi(o: AiOptions) {
     finally { if (tally.size) { try { o.usage?.({ run, ...(dealId ? { dealId } : {}), at: clock(), calls: [...tally.values()].map((l) => ({ ...l })) }); } catch { /* the log is not worth failing a run for */ } } }
   }
   /** a call: what it is for (`kind`, for the usage log), and with `split`, a caller that asks about less when a reply is cut off rather than for a shorter reply */
-  type Ask = Parameters<ModelService['complete']>[0] & { kind: string; split?: boolean };
+  // `unusable`: a reply its caller cannot use however it reads, asked again as an empty one is (#1105)
+  type Ask = Parameters<ModelService['complete']>[0] & { kind: string; split?: boolean; unusable?: Unusable };
   /** the most tokens one reply from this model may hold, and one call to it may send, as the service says (limits.ts) */
   const outLimit = (model: string) => o.service.outputLimit?.(model) ?? control.limits.outputTokens;
   const inLimit = (model: string) => o.service.inputLimit?.(model) ?? control.limits.inputTokens;
@@ -579,13 +580,15 @@ export function nodeAi(o: AiOptions) {
   const budget = new AsyncLocalStorage<{ left: number; deal?: { left: number } }>();
   /** every call to the model is asked again quietly when it fails or comes back empty (src/backend/retry.ts) */
   const retried = retrier(o.retry);
-  const complete = async ({ kind, split: _split, ...input }: Ask): Promise<string> => {
+  /** a reply that failed: nothing in it, or what its caller cannot use (#1105); asked again (retry.ts) */
+  const failedReply = async (text: string, unusable?: Unusable) => !text.trim() || (!!unusable && await unusable(text));
+  const complete = async ({ kind, split: _split, unusable, ...input }: Ask): Promise<string> => {
     const b = kind === 'describe' ? undefined : budget.getStore();
     // each try is counted in the usage log and against a search's calls, since each is paid for; a search out of calls is not asked again
     return retried(async () => {
       if (b && (b.left-- <= 0 || (b.deal && b.deal.left-- <= 0))) throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
       let reply = ''; try { reply = await o.service.complete(input); return reply; } finally { count(kind, input, String(reply ?? '')); }
-    }, (r) => !String(r ?? '').trim());
+    }, (r) => failedReply(String(r ?? ''), unusable));
   };
   /**
    * Ask, and read the reply. A reply that cannot be read even loosely is sent back once to the model that wrote it, with
@@ -660,13 +663,20 @@ export function nodeAi(o: AiOptions) {
       return failure(e, 'The file could not be read');
     }
   }
+  /** a reply read as JSON, or none (`unusable`) when its caller cannot use it once its tries ran out (#1105) */
+  async function usableJson<T>(text: string, keys: string[], unusable?: Unusable) {
+    if (unusable && await unusable(text)) return { got: null, unusable: true };
+    return { got: json<T>(text, ...keys), unusable: false };
+  }
   async function askJson<T = Record<string, unknown>>(input: Ask, keys: string[], shape?: string, fix = true): Promise<T | null> {
-    const raw = await whole(input, keys); const got = json<T>(raw, ...keys); if (got || !fix || !String(raw ?? '').trim()) return got;
+    const raw = await whole(input, keys);
+    const read = await usableJson<T>(raw, keys, input.unusable);
+    if (read.got || read.unusable || !fix || !String(raw ?? '').trim()) return read.got;
     let fixed: string;
     try { fixed = await complete({ kind: 'fix', model: input.model, system: JSON_ONLY, prompt: `The reply below was meant to be one JSON object${shape ? ` in this shape: ${shape}` : ` with these fields: ${keys.join(', ')}`}. It cannot be read as written. Send it again as valid JSON, changing nothing else. If it is not an answer at all, reply {}.\n\n${raw}` }); }
     catch (e) { if (isCutOff(e)) throw cutReply(e, keys); if (unreachable(e)) throw e; return null; }
     if (unfinished(fixed)) throw cutReply(cutOff('The repaired reply stopped before its end', fixed), keys);
-    return json<T>(fixed, ...keys);
+    return (await usableJson<T>(fixed, keys, input.unusable)).got;
   }
   /**
    * A reply cut off at the output limit, whether the service said so or its JSON stops partway (limits.ts, decisions:
@@ -696,19 +706,34 @@ export function nodeAi(o: AiOptions) {
    */
   /** `tried`: tries a turn already had in the conversation it failed in, before the chat asked it again as a new one (agent.ts) */
   type Talk = Ask & ConverseInput & { tried?: number };
+  /** a turn's reply as text: its text, or the tool calls it made */
+  const conversedText = (r: Conversed) => r.text || JSON.stringify(r.calls ?? '');
+  /** a turn its caller still cannot use fails as an empty one in a conversation does, to be asked again (#1105) */
+  async function refuseUnusable(r: Conversed, unusable?: Unusable): Promise<void> {
+    if (unusable && await unusable(conversedText(r))) throw new Error('The reply could not be used.');
+  }
   // Only a turn that begins a conversation is asked again, and as a new one: in a kept conversation the failed or empty turn
   // may already be part of it (North keeps it), and asking there again would send the turn, and its documents, twice, or an
   // empty turn some services refuse. Not a turn that answers tool calls either: its failure is how a model says it does not
   // take tool results (talkJson steps down to sending them in the message).
-  const converse = async ({ kind, tried, ...input }: Talk) => {
+  const converse = async ({ kind, tried, unusable, ...input }: Talk) => {
     // a turn the checks' gap filling makes counts against its calls (`fill`); the chat runs outside any budget, so is not counted
     const b = budget.getStore();
     const once = async () => {
       if (b && (b.left-- <= 0 || (b.deal && b.deal.left-- <= 0))) throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
-      let reply = ''; try { const r = await o.service.converse!(input); reply = r.text || JSON.stringify(r.calls ?? ''); return r; } finally { count(kind, input, String(reply ?? '')); }
+      let reply = '';
+      try {
+        const r = await o.service.converse!(input);
+        reply = conversedText(r);
+        return r;
+      } finally {
+        count(kind, input, String(reply ?? ''));
+      }
     };
     if (input.results?.length || input.conversation) return once();
-    return retried(once, (r) => !String(r.text ?? '').trim() && !r.calls?.length, tried);
+    const failed = async (r: Conversed) => (!String(r.text ?? '').trim() && !r.calls?.length)
+      || (!!unusable && await unusable(conversedText(r)));
+    return retried(once, failed, tried);
   };
   /** models that refused a way of calling tools in this run of the app, and the way they stepped down to */
   const stepped = new Map<string, ToolMode>();
@@ -734,6 +759,7 @@ export function nodeAi(o: AiOptions) {
       if (shorter) throw cutReply(cutOff('The reply stopped before its end', r.text), keys);
     }
     if (input.results?.length) doubted.delete(`${input.model}\nhybrid`);   // the model took tool results: an earlier passing 500 is forgotten
+    await refuseUnusable(r, input.unusable);
     const got = replyOf(r, keys);
     // an empty turn inside a conversation: failed, not answered. The chat asks it again as a new conversation (agent.ts;
     // decisions: Retries), since only a turn that begins one is asked again here
@@ -742,6 +768,7 @@ export function nodeAi(o: AiOptions) {
     try {
       const f = await converse({ kind: 'fix', model: input.model, conversation: r.conversation, prompt: `Your reply cannot be read as one JSON object in this shape: ${shape}. Send it again as valid JSON, changing nothing else.`, ...(input.tools ? { tools: input.tools } : {}) });
       if (unfinished(f.text ?? '')) throw cutReply(cutOff('The repaired reply stopped before its end', f.text), keys);   // a cut repair is never shown either
+      await refuseUnusable(f, input.unusable);
       return out(f, replyOf(f, keys), f.tokens ?? r.tokens);
     } catch (e) { if (unreachable(e)) throw e; return out(r, null); }
   }
@@ -1402,10 +1429,15 @@ export function nodeAi(o: AiOptions) {
    * One question, read from documents, in up to two rounds: the second only if the model says what is missing and
    * something answers to it. With `again`, a reply that cannot be used is sent back to the same model with what is
    * wrong with it (`wrong`), to be put right; and only if that fails too, the question goes once to the `escalate` model.
+   * A reply its `unusable` names (one naming a question id it was not shown) is asked again as an empty one is, and
+   * fails the read if it is still unusable when its tries run out (#1105).
    */
   async function read(
     kind: string, deals: string[], model: string, ask: string, lookFor: string, must: Record<string, string[]>,
-    shape: string, again?: { escalate: string; usable: (reply: Record<string, unknown>) => boolean; wrong: string },
+    shape: string,
+    again?: {
+      escalate: string; usable: (reply: Record<string, unknown>) => boolean; wrong: string; unusable?: Unusable;
+    },
     page?: DealDoc[],
   ): Promise<Result<{ reply: Record<string, unknown>; sent: Sent[] }>> {
     const keys = [...shape.matchAll(/"([a-z]+)":/g)].map((m) => m[1]).concat('need');                // the fields this question asks for
@@ -1418,6 +1450,7 @@ export function nodeAi(o: AiOptions) {
     let using = model;
     let pool: Sent[] | undefined;
     let canRetry = readCanRetry(model, again);
+    const unusable = again?.unusable;   // checked on every reply, whether or not it can be sent back (#1105)
     for (let round = 1; ; round++) {
       let reply: Record<string, unknown> | null;
       try {
@@ -1428,14 +1461,15 @@ export function nodeAi(o: AiOptions) {
         if (!sent.length) return fail({ kind: 'failed', message: 'The documents for this could not be opened on this PC' });
         const inAll = deals.reduce((sum, d) => sum + o.docs.records(d).length, 0);
         const prompt = `Documents:\n${listing}\n\nThese are ${sent.length} of the ${inAll} documents in ${deals.length > 1 ? 'these data rooms' : 'the data room'}: the ones chosen as likeliest to bear on this. You have not seen the others, so do not say what the data room as a whole does or does not contain; say what these documents show.\n\n${ask}\n\nReply as JSON: ${shape}${round === 1 ? ' If a document you were not given is needed to answer, add "need": ["a few words describing it"].' : ''}`;
-        reply = await askJson({ kind, model: using, system: RULES, files, prompt }, keys, shape);
+        reply = await askJson({ kind, model: using, system: RULES, files, prompt, unusable }, keys, shape);
         if (again && canRetry && (!reply || !again.usable(reply))) {
           const correction = readCorrection(prompt, reply, again);
-          reply = await askCorrection({ kind, model: using, system: RULES, files, prompt: correction }, keys, shape);
+          const sendBack = { kind, model: using, system: RULES, files, prompt: correction, unusable };
+          reply = await askCorrection(sendBack, keys, shape);
           if (!reply || !again.usable(reply)) {
             canRetry = false;
             using = again.escalate;
-            reply = await askJson({ kind, model: using, system: RULES, files, prompt }, keys, shape, false);
+            reply = await askJson({ kind, model: using, system: RULES, files, prompt, unusable }, keys, shape, false);
           }
         }
       } catch (e) {
@@ -1719,7 +1753,7 @@ export function nodeAi(o: AiOptions) {
   }
 
   /** a response already given on the deal, to a question that reads like the one being drafted for */
-  type Alike = { n: number; text: string; response: string; by: string; ai: boolean };
+  type Alike = { id: string; n: number; text: string; response: string; by: string; ai: boolean };
   type AlikeQuestion = Pick<Question, 'id'> & Partial<Pick<Question,
     'n' | 'text' | 'response' | 'askedBy' | 'status' | 'provenance'>>;
   const ALIKE = 5;                                                               // earlier responses one draft is shown at most
@@ -1768,6 +1802,7 @@ export function nodeAi(o: AiOptions) {
     return log.map((q, k) => { if (!given(q)) return { q, share: 0 }; let got = 0; for (const w of mine) if (sets[k].has(w)) got += weight(w); return { q, share: got / whole }; })
       .filter((x) => x.share >= ALIKE_SHARE).sort((a, b) => b.share - a.share || a.q.n! - b.q.n!).slice(0, ALIKE)
       .map(({ q }) => ({
+        id: q.id,
         n: q.n!,
         text: q.text!,
         response: priorResponse(q.response!, q.provenance),
@@ -1776,6 +1811,35 @@ export function nodeAi(o: AiOptions) {
       }));
   }
   const one = (t: string) => t.replace(/\s+/g, ' ').trim();
+  /** what a draft is told of earlier responses: each named only by its question's id, never its number (#286, #1105) */
+  function priorResponses(earlier: Alike[]): string {
+    if (!earlier.length) return '';
+    const shown = earlier.map((q) => {
+      const by = q.by ? `, submitted by ${q.by}` : '';
+      const response = `Response to ${q.id}${q.ai ? AI_DRAFTED : ''}: “${one(q.response)}”`;
+      return `${q.id}${by}: “${one(q.text)}”\n${response}`;
+    });
+    const use = 'If one of them answers this question as it is asked, name it in "reused": it is put in the draft '
+      + 'word for word, credited to whoever asked it. Earlier responses are named only by their ids. Do not '
+      + 'repeat or restate one in "text": write there only what the documents add, with [n] markers, or nothing. '
+      + 'Use none that answers a different question, however alike the words.';
+    return `\nResponses already given on this deal to questions that read like it:\n${shown.join('\n')}\n${use}`;
+  }
+  /**
+   * A draft's reply that can be used: its text fits one Excel cell, and it names only earlier responses it was shown,
+   * in "reused" and in "text"; one that names another question id is a failed reply, asked again (#1105)
+   */
+  function draftCheck(earlier: Alike[], escalate: string) {
+    const ids = earlier.map((q) => q.id);
+    const reusedShown = (reply: Record<string, unknown>) =>
+      listOf(reply.reused).every((x) => ids.includes(String(x).trim()));
+    const usable = (reply: Record<string, unknown>) =>
+      strings(reply.text).join('\n\n').length <= MODEL_TEXT_MAX && reusedShown(reply);
+    const wrong = `"text" must be under ${MODEL_TEXT_MAX.toLocaleString('en-US')} characters, and "reused" `
+      + 'may name only the earlier responses above, by their ids: put it right';
+    const unusable = (text: string) => !namesOnlyShown(text, ids);
+    return { escalate, usable, wrong, unusable };
+  }
   let briefs = new Map<string, { key: string; paragraphs: string[] }>();
   const service: AiService = {
     async answer(i) {
@@ -1802,34 +1866,46 @@ export function nodeAi(o: AiOptions) {
       if (!o.docs.records(i.dealId).length && !earlier.length) return ok({ status: 'none', text: '', sources: [] });
       let m: Awaited<ReturnType<typeof models>>; try { m = await models(); } catch (e) { return failure(e, `${SERVICE} did not answer`); }
       const asAnswered = (q: Alike) => `As answered ${q.by ? `to ${q.by} ` : ''}(Q${q.n})`;
-      const prior = earlier.length ? `\nResponses already given on this deal to questions that read like it:\n${earlier.map((q, k) => `R${k + 1}${q.by ? `, submitted by ${q.by}` : ''}: “${one(q.text)}”\nResponse to R${k + 1}${q.ai ? ' (drafted by AI from the data room, not received from anyone)' : ''}: “${one(q.response)}”`).join('\n')}\nIf one of them answers this question as it is asked, name it in "reused": it is put in the draft word for word, credited to whoever asked it. Earlier responses are named only by their R numbers. Do not repeat or restate one in "text": write there only what the documents add, with [n] markers, or nothing. Use none that answers a different question, however alike the words.` : '';
+      const prior = priorResponses(earlier);
       const ask = `Draft a response to this question from the documents: ${i.questionText}${prior}\nIf ${earlier.length ? 'neither the documents nor those responses answer' : 'the documents do not answer'} it, say so with "status": "none" and nothing else.\nThe response must be under ${MODEL_TEXT_MAX.toLocaleString('en-US')} characters (it goes into one Excel cell); if it would be longer, cut it down to what matters.`;
-      const shape = `{"status": "found" | "none", "text": "the response, with [n] markers", "sources": [...]${earlier.length ? ', "reused": ["R1"]' : ''}}`;
-      const again = { escalate: m.thorough, usable: (reply: Record<string, unknown>) => strings(reply.text).join('\n\n').length <= MODEL_TEXT_MAX, wrong: `"text" is longer than ${MODEL_TEXT_MAX.toLocaleString('en-US')} characters: cut it down to fit` };
+      const reusedShape = earlier.length ? ', "reused": ["the id of an earlier response it uses"]' : '';
+      const fields = '"status": "found" | "none", "text": "the response, with [n] markers", "sources": [...]';
+      const shape = `{${fields}${reusedShape}}`;
+      const again = draftCheck(earlier, m.thorough);
       let r = await read('draft', [i.dealId], m.standard, ask, i.questionText, {}, shape, again);
       if (r.ok && !r.value.sent.length && earlier.length) {
         // no document bears on it, but earlier responses may: they are asked about on their own
         // the system rules say to answer from the earlier responses here, since there are no documents; a reply too long is sent back once to be cut down
         const prompt = `No document in the data room was found to bear on this.\n\n${ask}\n\nReply as JSON: ${shape}`;
         try {
-          let reply = await askJson({ kind: 'draft', model: m.standard, system: PRIOR_RULES, prompt }, ['status', 'text', 'reused'], shape);
-          if (reply && !again.usable(reply)) reply = await askJson({ kind: 'draft', model: m.standard, system: PRIOR_RULES, prompt: `${prompt}\n\nYou replied:\n${JSON.stringify(reply)}\n\nThat cannot be used: ${again.wrong}. Send the whole reply again, put right.` }, ['status', 'text', 'reused'], shape, false);
+          const keys = ['status', 'text', 'reused'];
+          const input = { kind: 'draft', model: m.standard, system: PRIOR_RULES, prompt, unusable: again.unusable };
+          let reply = await askJson(input, keys, shape);
+          const correction = `${prompt}\n\nYou replied:\n${JSON.stringify(reply)}\n\n`
+            + `That cannot be used: ${again.wrong}. Send the whole reply again, put right.`;
+          if (reply && !again.usable(reply)) {
+            reply = await askJson({ ...input, prompt: correction }, keys, shape, false);
+          }
           r = reply ? ok({ reply, sent: [] }) : fail({ kind: 'failed', message: UNREAD_REPLY });
         } catch (e) { return failure(e, `${SERVICE} did not answer`); }
       }
       if (!r.ok) return r;
       const out = fit(strings(r.value.reply.text).join('\n\n'), r.value.reply.sources as Cited[], r.value.sent, false);
-      const reused = listOf(r.value.reply.reused).map((x) => tagNumber(x, 'R')).filter((n): n is number => n !== null && n >= 1 && n <= earlier.length).map((n) => earlier[n - 1]).filter((q, k, all) => all.indexOf(q) === k);
+      // in the order the model named them; a reply escalated past its retry may still name one never shown: not reused
+      const reused = [...new Set(listOf(r.value.reply.reused).map((x) => String(x).trim()))]
+        .map((id) => earlier.find((q) => q.id === id))
+        .filter((q): q is Alike => !!q);
       if (word(r.value.reply.status) !== 'found') return ok({ status: 'none', text: '', sources: [] });
       // the earlier responses the model chose go in word for word, each credited: nothing is added to another party's answer, or turned round.
       // What the documents add follows, as the model wrote it, with any credit of its own taken out, so a difference between the two stays in sight.
       const quoted = reused.map((q) => `${asAnswered(q)}: ${q.response}`);
-      // a sentence of the model's that names an earlier response by its R number is a credit in its own words: dropped, with
+      // a sentence of the model's that names an earlier response by its id is a credit in its own words: dropped, with
       // any source only it cited. The model never sees question numbers, so a quarter (Q3 2027) is never one (#286).
       // a draft rests only on this deal's own documents: another project's, or a blackline against one, never answers
       // by itself
       const none = { text: '', sources: [] as typeof out.sources };
-      const ownReply = out.sources.some((x) => mainIn(r.value.sent, x)) ? withoutDraftCredits(out, earlier.length) : none;
+      const credited = earlier.map((q) => q.id);
+      const ownReply = out.sources.some((x) => mainIn(r.value.sent, x)) ? withoutDraftCredits(out, credited) : none;
       const kept = ownReply.text;
       const own = kept.charAt(0).toUpperCase() + kept.slice(1);
       if (!quoted.length && !own) return ok({ status: 'none', text: '', sources: [] });             // a draft rests on a document it cites or on an earlier response it names
@@ -1844,10 +1920,23 @@ export function nodeAi(o: AiOptions) {
       const f = await record<{ title: string; body: string[]; sources: Source[] }>('finding', i.findingId); if (!f) return fail({ kind: 'notFound', message: 'No such finding' });
       let m: Awaited<ReturnType<typeof models>>; try { m = await models(); } catch (e) { return failure(e, `${SERVICE} did not answer`); }
       const parasOf = (reply: Record<string, unknown>) => strings(reply.body).flatMap((p) => p.split(/\n\s*\n/)).map((p) => p.trim()).filter(Boolean);
-      const r = await read('reassess', [i.dealId], m.standard, `Reassess this finding against the documents as they stand now.\nTitle: ${f.title}\nAs written: ${f.body.join(' ')}${await responsesOn(i.dealId, i.findingId)}`, `${f.title} ${f.body.join(' ')}`, { [i.dealId]: f.sources.map((s) => s.docId).filter((x): x is string => !!x) }, '{"body": ["one paragraph per string, with [n] markers"], "sources": [...]}', { escalate: m.thorough, usable: (reply) => parasOf(reply).length > 0, wrong: '"body" has no paragraphs in it' });
+      const said = await respondedOn(i.dealId, i.findingId);
+      const ask = 'Reassess this finding against the documents as they stand now.\n'
+        + `Title: ${f.title}\nAs written: ${f.body.join(' ')}${responsesText(said)}`;
+      const own = { [i.dealId]: f.sources.map((s) => s.docId).filter((x): x is string => !!x) };
+      const shape = '{"body": ["one paragraph per string, with [n] markers"], "sources": [...]}';
+      // a reply that names a question id it was not shown is a failed reply, asked again (#1105)
+      const ids = said.map((q) => q.id);
+      const unusable = (text: string) => !namesOnlyShown(text, ids);
+      const usable = (reply: Record<string, unknown>) => parasOf(reply).length > 0;
+      const again = { escalate: m.thorough, usable, wrong: '"body" has no paragraphs in it', unusable };
+      const about = `${f.title} ${f.body.join(' ')}`;
+      const r = await read('reassess', [i.dealId], m.standard, ask, about, own, shape, again);
       if (!r.ok) return r;
       if (!r.value.sent.length) return fail({ kind: 'failed', message: 'None of this finding’s documents are indexed, so there is nothing to reassess it against' });
-      const paras = parasOf(r.value.reply);
+      // the responses it was shown by id are named by their questions' numbers before the finding is kept (#1105)
+      const numbers = new Map(said.flatMap((q) => (q.n === undefined ? [] : [[q.id, q.n] as const])));
+      const paras = parasOf(r.value.reply).map((p) => questionsForIds(p, numbers));
       if (!paras.length) return fail({ kind: 'failed', message: UNREAD_REPLY });
       const out = fit(paras.join('\n\u0000\n'), r.value.reply.sources as Cited[], r.value.sent, false, true);   // a finding: a place cited twice is one source, as when it was raised
       // a finding stays as written unless one of this deal's own documents bears it out
@@ -2410,8 +2499,9 @@ export function nodeAi(o: AiOptions) {
 
   type Asked = { id: string; n?: number; text?: string; response?: string; respondedBy?: string; responded?: string; linkedFinding?: string; provenance?: { origin?: string } };
   const saidOf = (q: Asked) => createHash('sha256').update(String(q.response ?? '').replace(/\s+/g, ' ').trim()).digest('hex').slice(0, 16);
+  /** the questions with their responses, each labeled by its id, never its number (#1105) */
   const responseLines = (qs: Asked[]) => qs.map((q) => {
-    const asked = `Q${q.n}: ${String(q.text ?? '').replace(/\s+/g, ' ').trim()}`;
+    const asked = `${q.id}: ${String(q.text ?? '').replace(/\s+/g, ' ').trim()}`;
     return `${asked}\n${responseHeader(q)}: ${q.response!.replace(/\s+/g, ' ').trim()}`;
   }).join('\n');
   /** a deal's questions that have a response, by number */
@@ -2426,12 +2516,23 @@ export function nodeAi(o: AiOptions) {
    * new information about a finding just as a document is, but it is not a document and cannot be cited as one.
    * `also` are responses to include whatever is recorded.
    */
-  async function responsesOn(dealId: string, findingId: string, also: Asked[] = []): Promise<string> {
+  async function respondedOn(dealId: string, findingId: string, also: Asked[] = []): Promise<Asked[]> {
     const all = await answered(dealId); let heard = new Set<string>();
     try { heard = new Set((await lines(dealId)).filter((l) => l.heard?.findings?.includes(findingId)).map((l) => l.heard!.question)); } catch { /* the linked ones still count */ }
     const said = all.filter((q) => q.linkedFinding === findingId || (!q.linkedFinding && heard.has(q.id)) || also.some((a) => a.id === q.id));
+    return said;
+  }
+  /** those responses for the prompt (`respondedOn`), each named by its question's id */
+  async function responsesOn(dealId: string, findingId: string, also: Asked[] = []): Promise<string> {
+    return responsesText(await respondedOn(dealId, findingId, also));
+  }
+  /** responses for the prompt, each named by its question's id, which code puts back as its number (questionsForIds) */
+  function responsesText(said: Asked[]): string {
     if (!said.length) return '';
-    return `\n\nResponses received on the questions asked about this finding:\n${responseLines(said)}\nTake these into account. A response is not a document: refer to it as "the response to Q${said[0].n}" and give it no [n] marker.`;
+    const heading = '\n\nResponses received on the questions asked about this finding:';
+    const named = 'A response is not a document: refer to it as "response <id>", with the id its question is shown '
+      + 'by, and give it no [n] marker.';
+    return `${heading}\n${responseLines(said)}\nTake these into account. ${named}`;
   }
   const tagged = (dealId: string, docs: DocRecord[]): Sent[] => docs.map((rec, i) => ({ tag: `D${i + 1}`, dealId, rec }));
   /** a finding as the checks see it; `closed`: a person closed it, and documents may bring that into question */
@@ -3206,6 +3307,25 @@ export function nodeAi(o: AiOptions) {
     responses(dealId: string): Promise<Result<{ heard: string[]; marked: string[] }>> { return hear(dealId); },
   };
   const HEARD_AT_ONCE = 50;
+  /**
+   * The fast model's question on responses tied to no finding: which of the open findings `listed` each could change.
+   * Each question is named by its id, never by its number (#1105).
+   */
+  async function askAffects(group: Asked[], listed: Raised[]): Promise<{ affected?: unknown } | null> {
+    const intro = 'These responses have been received to questions asked on a project-finance deal. '
+      + 'None of the questions is tied to a finding.';
+    const open = listed.map((f, i) => `F${i + 1}: ${f.title}`).join('\n');
+    const question = 'Which findings could a response change? Think of knock-on effects, not only of matching words. '
+      + 'Pair each finding with the question whose response bears on it; if no finding is touched, give an empty list.';
+    const prompt = `${intro}\n${responseLines(group)}\n\nThese are open findings on the deal:\n${open}\n\n${question}\n`
+      + 'Reply as JSON: {"affected": ["F2 <id>", "F5 <id>"]}';
+    const model = (await models()).fast;
+    // a reply naming a question id it was not shown is a failed reply, asked again (#1105)
+    const shown = group.map((q) => q.id);
+    const unusable = (text: string) => !namesOnlyShown(text, shown);
+    const input: Ask = { kind: 'affects', split: true, model, system: JSON_ONLY, prompt, unusable };
+    return askJson<{ affected?: unknown }>(input, ['affected']);
+  }
   async function hear(dealId: string): Promise<Result<{ heard: string[]; marked: string[] }>> {
     const marked: string[] = [];
     try {
@@ -3219,11 +3339,12 @@ export function nodeAi(o: AiOptions) {
       const bearsOn = new Map<string, Asked[]>();                                // finding → the responses said to bear on it
       for (let at = 0; at < fresh.length; at += HEARD_AT_ONCE) {
         const group = fresh.slice(at, at + HEARD_AT_ONCE); const listed = findings.filter((f) => group.some((q) => todo(q).includes(f)));
-        const reply = await askJson<{ affected?: unknown }>({ kind: 'affects', split: true, model: (await models()).fast, system: JSON_ONLY, prompt: `These responses have been received to questions asked on a project-finance deal. None of the questions is tied to a finding.\n${responseLines(group)}\n\nThese are open findings on the deal:\n${listed.map((f, i) => `F${i + 1}: ${f.title}`).join('\n')}\n\nWhich findings could a response change? Think of knock-on effects, not only of matching words. Pair each finding with the question whose response bears on it; if no finding is touched, give an empty list.\nReply as JSON: {"affected": ["F2 Q12", "F5 Q14"]}` }, ['affected']);
+        const reply = await askAffects(group, listed);
         if (!reply || !('affected' in reply)) return fail({ kind: 'failed', message: 'The responses could not be looked at' });      // nothing is recorded, so they are looked at the next time
         for (const t of strings(reply.affected)) {
           const f = listed[+(/F\s*(\d+)/i.exec(t)?.[1] ?? 0) - 1]; if (!f) continue;
-          const named = [...t.matchAll(/Q\s*(\d+)/gi)].map((m) => group.find((q) => q.n === +m[1])).filter((q): q is Asked => !!q);
+          const tokens = t.split(/\W+/);
+          const named = group.filter((q) => tokens.includes(q.id));
           const qs = bearsOn.get(f.id) ?? []; for (const q of (named.length ? named : group).filter((y) => todo(y).includes(f))) if (!qs.includes(q)) qs.push(q); if (qs.length) bearsOn.set(f.id, qs);       // a finding named with no question we know: every response in the call is put beside it
         }
       }
