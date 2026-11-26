@@ -58,10 +58,13 @@ describe('core documents with no model and no cap', () => {
     const a = run(docs, items).ids; expect(a.length).toBeGreaterThan(4);
     expect(run([...docs].reverse(), [...items].reverse()).ids).toEqual(a); expect(run([docs[3], docs[0], docs[5], docs[1], docs[4], docs[2]], [items[2], items[5], items[0], items[4], items[1], items[3]]).ids).toEqual(a);
   });
-  it('reads a bare abbreviation as a file name', () => {
+  it('reads a bare abbreviation as a file name, and a number in a folder name is a word like any other (#1147)', () => {
     const docs = [doc('Room/03 Offtake/PPA.pdf'), doc('Room/03 Offtake/Purchase order 12.pdf'), doc('Room/03 Offtake/Power meter readings.pdf'), doc('Room/03 Offtake/Agreement on metering.pdf'), ...['Tax return', 'Property tax bill', 'Tax opinion'].map((n) => doc(`Room/10 Tax/${n}.pdf`))];
     const s = run(docs, [item('i1', 'The power purchase agreement is in full force'), item('i2', 'The PPA term is at least 10 years', { heads: 'Section 10 Offtake' }), item('i3', 'Interconnection is in place'), item('i4', 'Insurance is in force'), item('i5', 'Site access is secured')]);   // (a word half the items use counts for nothing, so more than two)
     expect(names(s.ids.slice(0, 1))).toEqual(['PPA.pdf']);
+    // "10 years" under "Section 10 Offtake" shares only "10" with the "10 Tax" folder, and that now counts
+    const tax = s.ids.filter((id) => id.includes('/10 Tax/'));
+    expect(names(tax).sort()).toEqual(['Property tax bill.pdf', 'Tax opinion.pdf', 'Tax return.pdf']);
   });
   it('keeps numbers and single letters as words, as the word index does (#1147)', () => {
     const kept = ['wind', 'farm', '2', 'schedule', 'a', 'tax', '10'];
