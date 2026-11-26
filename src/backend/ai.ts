@@ -2857,9 +2857,9 @@ export function nodeAi(o: AiOptions) {
      * handed over again.
      */
     const filled = { left: o.checkSearchCalls ?? L.checkSearchCalls };
-    const fillSpend = { left: o.searchCalls ?? L.searchCalls, deal: filled };
+    // each document search has its own `limits.searchCalls`, as a chat's does, and all of them count against `filled`
     const readPage: AgentKit['readPage'] = (deals, model, ask, docs) =>
-      readSearchPage(fillSpend, deals, model, ask, docs);
+      readSearchPage({ left: o.searchCalls ?? L.searchCalls, deal: filled }, deals, model, ask, docs);
     const filler = chatAgent({ ...agentKit, readPage }, agentOpts);
     let filling = true;
     const fill = async () => {

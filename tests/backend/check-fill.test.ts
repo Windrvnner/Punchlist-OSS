@@ -58,3 +58,24 @@ it('a problem whose finding could not be saved is never handed to the agent, so 
   expect(val(await s.ai.checklist('d1')).find((x) => x.id === 'x1')).toMatchObject({ result: 'unsettled', why: 'The finding it raised could not be saved.' });
   expect(s.fillCalls).toEqual([]);
 });
+
+it('each document search the gap filler makes has a search\'s own calls, as a chat\'s does', async () => {
+  const X1 = { id: 'x1', text: 'Water rights are secured' };
+  const isSearchRead = (c: Call) => !isTurn(c) && c.prompt.includes('what they say, with [n] markers');
+  let n = 0;
+  // 20 searches, each in other words, then an answer
+  const turn = () => {
+    n++;
+    const search = { tool: 'search', what: 'documents', query: `term sheet ${'x'.repeat(n)}` };
+    return n <= 20 ? search : { text: 'Nothing.', sources: [] };
+  };
+  const reply = (c: Call) => (isTurn(c) ? turn() : isSearchRead(c) ? { text: 'nothing here', sources: [] }
+    : { items: itemsIn(c).map((it) => ({ id: it.tag, result: 'more', need: 'the water rights' })) });
+  const s = setup(reply, { d1: [FA, TS] }, { checklist: () => ({ broad: [X1], product: [], sector: [] }),
+    pick: () => ({ read: [] }), pickFor: () => ({ read: {} }), fill: reply, searchCalls: 15 });
+  await deal(s.repo);
+  val(await s.ai.firstPass('d1'));
+  const turns = s.all.filter(isTurn);
+  expect(turns.filter((c) => c.prompt.includes('as many calls as one search may'))).toEqual([]);
+  expect(s.all.filter(isSearchRead).length).toBeGreaterThan(15);
+}, 120_000);
