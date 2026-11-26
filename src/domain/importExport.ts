@@ -139,10 +139,15 @@ export function prepareImport(table: string[][], mapping: Mapping, lines?: numbe
     // the app numbers past Q999999, so a 7-digit number it exported reads back
     const n = /^\d{1,9}$/.test(nRaw) && +nRaw > 0 ? +nRaw : null;
     // the workstream as the log writes it, capitals included: never put into the app's spelling (#1059)
-    const ws = get(r, 'workstream').trim();
+    const ws = get(r, 'workstream');
     if (pr && !PRIORITY[pr.toLowerCase()]) { out.unknownValues++; unread('priority', pr); }
     if (st && !STATUS[st.toLowerCase()]) { out.unknownValues++; unread('status', st); }
-    const row: ImportRow = { n, text, askedBy: get(r, 'askedBy').trim(), received: '', workstream: ws, priority: PRIORITY[pr.toLowerCase()] ?? '', response: get(r, 'response'), respondedBy: get(r, 'respondedBy').trim(), responded: '', status: STATUS[st.toLowerCase()] ?? '', line };
+    // names and workstream are stored as the cell gives them
+    const row: ImportRow = {
+      n, text, askedBy: get(r, 'askedBy'), received: '', workstream: ws,
+      priority: PRIORITY[pr.toLowerCase()] ?? '', response: get(r, 'response'),
+      respondedBy: get(r, 'respondedBy'), responded: '', status: STATUS[st.toLowerCase()] ?? '', line,
+    };
     out.rows.push(row);
     const rec = date('received'), res = date('responded');
     // the row's other date: keep the readings that leave received on or before responded

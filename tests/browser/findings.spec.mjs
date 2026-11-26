@@ -222,7 +222,10 @@ for (const scheme of ['light', 'dark']) { const ctx = await browser.newContext({
   await page.click('#f-filter'); await page.waitForSelector('.fmenu'); await page.keyboard.press('Escape'); await page.waitForSelector('.fmenu', { state: 'detached' }); const back = await page.evaluate(() => document.activeElement.id);
   say(`folded-filter-menu-${scheme}`, opened.items === 'Open 2|To update 1|Closed 1|All' && opened.focus === 'Open 2' && opened.inView && closedOnly.rows === 1 && closedOnly.status === 'closed' && closedOnly.on && closedOnly.label === 'Filter (on)' && back === 'f-filter', JSON.stringify({ opened, closedOnly, back }));
   // back to a wide window: the row takes its words and its filter back
-  await page.evaluate(() => store.ui({ findingFilter: { status: 'open', workstream: '', text: '', reviewed: '' } })); await page.setViewportSize({ width: 1280, height: 736 }); await page.waitForTimeout(400); const again = await settle();
+  await page.evaluate(() => store.ui({ findingFilter: { status: 'open', workstream: '', reviewed: '' } }));
+  await page.setViewportSize({ width: 1280, height: 736 });
+  await page.waitForTimeout(400);
+  const again = await settle();
   say(`findings-head-recovers-when-there-is-room-${scheme}`, again.mode === 0 && again.acts === 'New Finding'
     && again.seg === 'Open 2|To update 1|Closed 1|All' && again.oneRow, JSON.stringify(again));
   say(`no-page-errors-check-${scheme}`, page.errors.length === 0, JSON.stringify(page.errors));

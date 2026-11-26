@@ -80,6 +80,10 @@ verdict, and no criteria in your own words.
 >    A cap or limit that no service refusal or decision sets, on what the model reads (pages, documents, sizes, words,
 >    counts); content marked unreadable or dropped from a check or search though the model can read it, unless a
 >    decision says so; and a failed read saved as "no text" instead of retried, are blockers.
+>    A pull request can't authorize itself, and matching existing code is never a justification by itself: a decision
+>    line the diff adds or narrows, or behavior that already exists, never justifies a rule, limit, filter or
+>    behavior that breaks a rule in CLAUDE.md. Check each one the diff adds, keeps or touches, and each decision line
+>    it adds or narrows, against CLAUDE.md and docs/decisions.md, not only against the existing code.
 > 10. A change that does the same kind of job as existing code (an AI read of documents, an import, saving, retries,
 >     a dialog) that uses a new or different approach instead of the existing approach and code, or whose pull
 >     request description does not name the existing path it follows.
@@ -108,7 +112,8 @@ verdict, and no criteria in your own words.
 
 - The author fixes the class of problem, not only the reported case, and attacks the fix at deal scale with the
   repo's realistic data before asking for re-review.
-- After three rounds, one short fresh-context review of only the fixes since round three is allowed. If it still
-  finds a blocker, the work is cut or split instead of starting another round.
+- After three rounds, one short fresh-context review of only the fixes since round three is allowed. It checks
+  those fixes against CLAUDE.md and docs/decisions.md, not only against the code. If it still finds a blocker, the
+  work is cut or split instead of starting another round.
 - A pull request that passes with no blockers and whose required GitHub checks pass on its latest commit is merged,
   in the merge order.

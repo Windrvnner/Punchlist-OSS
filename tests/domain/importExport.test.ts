@@ -153,7 +153,11 @@ describe('prepareImport', () => {
     const m = suggestMapping(['Number', 'Question', 'Response', 'Submitted by', 'Priority', 'Received']);
     const p = prepareImport([[' 3 ', '  Indented question', 'Yes.\n', ' Lender A ', ' High ', ' 2026-11-02 '], ['4', '   ', '', '', '', '']], m);
     expect(p.skipped).toBe(0); expect(p.badDates).toBe(0); expect(p.unknownValues).toBe(0);
-    expect(p.rows[0]).toMatchObject({ n: 3, text: '  Indented question', response: 'Yes.\n', askedBy: 'Lender A', priority: 'High', received: '2026-11-02' });   // a name is an identity: the spaces around it go
+    // a name is stored as the cell gives it
+    expect(p.rows[0]).toMatchObject({
+      n: 3, text: '  Indented question', response: 'Yes.\n', askedBy: ' Lender A ',
+      priority: 'High', received: '2026-11-02',
+    });
     expect(p.rows[1]).toMatchObject({ n: 4, text: '   ' });
   });
 });
