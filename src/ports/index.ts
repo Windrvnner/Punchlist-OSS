@@ -192,13 +192,13 @@ export interface AiService {
    */
   reword?(input: { items: string[] }): Promise<Result<{ at: number; text: string; why: string; also?: string[] }[]>>;
   /**
-   * Optional. What each line of a list is, as a firm's list is brought in: a section or subsection heading, an item
-   * (its words as the line has them, numbering and bullets included), the rest of the item above it, a table's heading row,
-   * or not an item. Lines are numbered from 1; `only` asks about just those lines, the others given for context.
-   * `thorough` asks the thorough model, for lines the standard model's readings left unplaced. Proposals only: the app
-   * checks each reading against its line and accounts for every line (domain/listRead).
+   * Optional. What each line of a list is, as a firm's list is brought in, read whole in one call: a section or
+   * subsection heading, an item, the rest of the item above it, a table's heading row, or not an item; and for a table,
+   * the columns that hold the item, section and subsection. Lines are numbered from 1. `thorough` asks the thorough
+   * model, when the standard model's reading left lines unplaced. Proposals only: the app words every item as its line
+   * and accounts for every line (domain/listRead).
    */
-  readList?(input: { lines: string[]; only?: number[]; thorough?: boolean }): Promise<Result<import('../domain/listRead').LineRead[]>>;
+  readList?(input: { lines: string[]; thorough?: boolean }): Promise<Result<import('../domain/listRead').ListReply>>;
   /**
    * Optional. Questions for the counterparty, one for each thing `items` lists as unresolved on a deal: a checklist item
    * with no document that settles it (`need` says what would), or an open finding (`what` is its title, `need` its next
