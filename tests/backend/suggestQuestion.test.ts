@@ -51,7 +51,7 @@ describe('the open question an answer addresses', () => {
     expect(whole.calls.filter(isSuggest)).toHaveLength(1);
   });
 
-  it('a later part that fails keeps what earlier parts named; with nothing named, the failure is returned', async () => {
+  it('a later part that fails keeps what earlier parts named; none named, the failure is returned', async () => {
     const down = Object.assign(new Error('down'), { code: 'ECONNRESET' });
     const s = setup((c) => {
       if (!isSuggest(c)) return {};
