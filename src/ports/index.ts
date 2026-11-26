@@ -130,6 +130,9 @@ export interface Repository {
   seen?(): Promise<Result<Seen>>;
 }
 
+/** a point `AiService.phrase` puts as a question: a checklist gap or an open finding, by its record id (#1162) */
+export type PhraseItem = { kind: 'gap' | 'finding'; id: string; what: string; need: string };
+
 export interface AiService {
   /**
    * `read`, where the backend gives it, is how many documents the answer was read from, out of how many the deal (or deals) hold.
@@ -237,8 +240,10 @@ export interface AiService {
    * step). Each question asks plainly for what would settle it, in the deal team's voice. A reply cut off or
    * missing items is asked for again in smaller parts; an item that gets no question even when asked alone is null, for
    * the dialog to name, and the run fails only when no item got one (linking design, section 13). The fast model's job.
+   * `id` is the item's record id, which the model is shown it by: a checklist item id for a gap, a finding id for a
+   * finding (#1162).
    */
-  phrase?(input: { dealId: string; items: { kind: 'gap' | 'finding'; what: string; need: string }[] }): Promise<Result<(string | null)[]>>;
+  phrase?(input: { dealId: string; items: PhraseItem[] }): Promise<Result<(string | null)[]>>;
   /**
    * Optional. Pairs of checklist items that ask for the same thing, as a checklist is brought in: within `items`, and between
    * an item of `items` and one of `against` (the general list, when a structure, sector or technology list is brought in).

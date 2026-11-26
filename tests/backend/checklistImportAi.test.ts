@@ -16,6 +16,9 @@ const isSame = (c: { prompt: string }) => c.prompt.includes('ask for exactly the
 const asking = (c: { prompt: string }) => Number(/Items 1 to (\d+)/.exec(c.prompt)![1]);
 const mineIn = (c: { prompt: string }) => lines(c).slice(0, asking(c));
 const items = (n: number) => Array.from({ length: n }, (_, i) => `Item ${i + 1} is in place`);
+/** the record id of the `i`th point to phrase, shaped as the app gives it: an item id for a gap, else a finding id */
+const recordId = (kind: 'gap' | 'finding', i: number) =>
+  (kind === 'gap' ? `i_${i.toString(16).padStart(24, '0')}` : `f_${String(i).padStart(26, '0')}`);
 
 describe('rewording a checklist being brought in', () => {
   it('asks in parts of 120 and gives each suggestion its place in the whole list; numbers out of range, unchanged wording and repeats are left out', async () => {
@@ -59,7 +62,10 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
   const tagged = (c: { prompt: string }) => c.prompt.split('\n').flatMap((l) => { const m = TAG.exec(l); return m ? [{ id: m[1], line: m[2] }] : []; });
   const lines = (c: { prompt: string }) => tagged(c).map((x) => x.line);
   const ids = (c: { prompt: string }) => tagged(c).map((x) => x.id);
-  const points = (n: number) => Array.from({ length: n }, (_, i) => ({ kind: (i % 5 ? 'gap' : 'finding') as 'gap' | 'finding', what: `Point ${i + 1}`, need: i % 5 ? `The signed copy ${i + 1}` : '' }));
+  const kindOf = (i: number) => (i % 5 ? 'gap' : 'finding') as 'gap' | 'finding';
+  const points = (n: number) => Array.from({ length: n }, (_, i) => ({
+    kind: kindOf(i), id: recordId(kindOf(i), i), what: `Point ${i + 1}`, need: i % 5 ? `The signed copy ${i + 1}` : '',
+  }));
   it('asks in parts of 120 and gives each question back in the order of the points, whatever order the reply takes', async () => {
     const s = setup((c) => (isPhrase(c) ? { items: lines(c).map((l, n) => ({ id: ids(c)[n], text: `Q for ${l.split(' — ')[0]}` })).reverse() } : {}), {}, { shared: new Mem(), installId: 'pc' });
     const out = val(await s.ai.phrase!({ dealId: 'd', items: points(250) }));
@@ -290,7 +296,8 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
     // a tag of its part, so a model that leaves the third (and fourth, or sixth) point out, swaps the third and seventh,
     // reverses the third to sixth, or gives running numbers in place of the tags, places nothing wrongly (retrying checks
     // every question against its point), and all come back
-    const real = dealList().items.slice(0, 2000).map((what) => ({ kind: 'gap' as const, what, need: '' }));
+    const gap = (what: string, k: number) => ({ kind: 'gap' as const, id: recordId('gap', k), what, need: '' });
+    const real = dealList().items.slice(0, 2000).map(gap);
     type It = { id?: string; n?: number; text: string };
     const drop = (at: number[]) => (it: It[]) => (it.length <= Math.max(...at) + 1 ? it : it.filter((_, k) => !at.includes(k)));
     const swap = (it: It[]) => (it.length < 8 ? it : it.map((x, k) => (k === 2 ? it[6] : k === 6 ? it[2] : x)));
@@ -524,7 +531,7 @@ describe('reading a list in, line by line', () => {
 describe('model-written text is kept whole up to one Excel cell (#1104)', () => {
   const isPhrase = (c: Call) => c.prompt.includes('Write one question for the counterparty');
   const tagOf = (c: { prompt: string }) => /^([bcdfghjkmnpqrstvwxz]{3}): /m.exec(c.prompt)![1];
-  const point = [{ kind: 'gap' as const, what: 'Point 1', need: 'The signed copy' }];
+  const point = [{ kind: 'gap' as const, id: recordId('gap', 0), what: 'Point 1', need: 'The signed copy' }];
   const stand = { shared: new Mem(), installId: 'pc' };
   const phraseWith = (text: string) => setup(
     (c) => (isPhrase(c) ? { items: [{ id: tagOf(c), text }] } : {}),
