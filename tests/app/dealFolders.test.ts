@@ -172,7 +172,7 @@ describe('deal checks with the repository and document service', () => {
   it('captures what the PC saw when deletion opened and shares its name match with the command', async () => {
     const { store, repo } = await fixture();
     const { deal } = await createDealFromForm(store, form);
-    const match = '  Project   Luce\u0301rne  ';
+    const match = '  Project   Lucérne  ';
     expect(matchesDealName(match, deal!.name)).toBe(true);
     expect(matchesDealName('project lucérne', deal!.name)).toBe(false);
     const before = await repo.seen();
