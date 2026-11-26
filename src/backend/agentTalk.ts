@@ -106,6 +106,7 @@ export class KeptConversation {
     if (!this.id) return undefined;
     const { opened, gone, question } = this.run;
     const tags = [...opened.map((s) => ({ tag: s.tag, dealId: s.dealId, docId: s.rec.docId })), ...gone];
+    const questions = this.run.keptHandles();
     return {
       id: this.id,
       model: question.model,
@@ -113,6 +114,7 @@ export class KeptConversation {
       tags,
       ...(this.transcript ? { transcript: this.transcript } : {}),
       ...(this.calls[0] ? { call: this.calls[0] } : {}),
+      ...(questions.length ? { questions } : {}),
     };
   }
 

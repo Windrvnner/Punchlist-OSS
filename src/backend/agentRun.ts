@@ -3,7 +3,7 @@
  * steps the window shows, what each tool found for the main session, and the read tool, which attaches documents to
  * the main session's next turn.
  */
-import type { ModelThread, ResearchStep } from '../ports';
+import type { ModelThread, QuestionHandle, ResearchStep } from '../ports';
 import type { Source } from '../domain/model';
 import type { DocRecord } from './documents';
 import type { AgentKit, AgentQuestion, DealDoc, Run, Sent } from './agentKit';
@@ -63,6 +63,7 @@ export class AgentRun {
     readonly pages: { width: number; searchPage: number; chars: number },
   ) {
     if (kit.talk) this.keepTags(question.thread?.tags ?? []);
+    if (kit.talk) this.keepHandles(question.thread?.questions ?? []);
   }
 
   get steps(): ResearchStep[] {
@@ -92,6 +93,28 @@ export class AgentRun {
     }
   }
 
+  /**
+   * A kept conversation already showed the model some questions, by handle: they keep their handles, and new ones
+   * number on from them (#1105)
+   */
+  private keepHandles(kept: QuestionHandle[]): void {
+    for (const { handle, id, n } of kept) {
+      const number = /^R(\d+)$/.exec(handle);
+      if (!number) continue;
+      const at = +number[1] - 1;
+      this.handles.set(id, at);
+      this.handled[at] = n;
+    }
+  }
+
+  /** every question shown by handle in this conversation, to be kept with it */
+  keptHandles(): QuestionHandle[] {
+    return [...this.handles].map(([id, at]) => {
+      const n = this.handled[at];
+      return { handle: handleOf(at), id, ...(n === undefined ? {} : { n }) };
+    });
+  }
+
   /** a document a model is given in this run: its tag, a new one if it has none yet */
   tagOf(dealId: string, rec: DocRecord): Sent {
     let sent = this.opened.find((x) => sameDoc(x, { dealId, rec }));
@@ -104,14 +127,15 @@ export class AgentRun {
     return sent;
   }
 
-  /** the handle a question is shown by in this run: the one it was first given, so it keeps it across searches */
+  /** the handle a question is shown by: the one it was first given in this conversation, or the next free one */
   handleOf(question: { id: string; n?: number }): string {
     let at = this.handles.get(question.id);
     if (at === undefined) {
       at = this.handled.length;
       this.handles.set(question.id, at);
-      this.handled.push(question.n);
     }
+    // its number as it is now, should it have been renumbered since the handle was given
+    this.handled[at] = question.n;
     return handleOf(at);
   }
 

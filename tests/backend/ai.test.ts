@@ -631,6 +631,33 @@ describe('a kept conversation', () => {
     expect(two.thread!.tags.slice(0, one.thread!.tags.length)).toEqual(one.thread!.tags); expect(two.thread!.tokens).toBeGreaterThan(one.thread!.tokens);
   });
 
+  it('a question keeps its handle on later turns of a conversation; a new one takes the next (#1105)', async () => {
+    const handleIn = (prompt: string, text: string) =>
+      new RegExp(`(R\\d+) · Answered\nQuestion: ${text}`).exec(prompt)?.[1];
+    let revenue = '';
+    const turn = (c: Call) => {
+      revenue ||= handleIn(c.prompt, 'How did revenue move') ?? '';
+      const tariff = handleIn(c.prompt, 'Was the tariff reset');
+      if (!tariff) return { text: `Response ${revenue} says revenue fell.`, sources: [] };
+      const text = `Response ${tariff} says the tariff is R1.2 billion; response ${revenue} still stands.`;
+      return { text, sources: [] };
+    };
+    const s = setup(reader, undefined, { talks: true, turn });
+    await deal(s.repo);
+    const fell = { n: 3, status: 'answered', text: 'How did revenue move?', response: 'It fell.' };
+    val(await question(s.repo, 'q_3', fell));
+    const one = val(await s.ai.answer(ask('How did revenue move?')));
+    expect(one.text).toBe('The response to Q3 says revenue fell.');
+    expect(one.thread!.questions).toEqual([{ handle: revenue, id: 'q_3', n: 3 }]);
+    const reset = { n: 7, status: 'answered', text: 'Was the tariff reset?', response: 'R1.2 billion.' };
+    val(await question(s.repo, 'q_7', reset));
+    const later = { history: said(['How did revenue move?']), thread: one.thread };
+    const two = val(await s.ai.answer(ask('Was the tariff reset?', later)));
+    expect(two.text).toBe('The response to Q7 says the tariff is R1.2 billion; the response to Q3 still stands.');
+    const kept = [{ handle: revenue, id: 'q_3', n: 3 }, { handle: 'R2', id: 'q_7', n: 7 }];
+    expect(two.thread!.questions).toEqual(kept);
+  });
+
   it('a full conversation is compacted: the conversation so far goes in a transcript file, attached to a new one, and the last transcript is deleted', async () => {
     const s = setup(reader, undefined, { talks: true, turn: twoTurns, compactAt: 20_000 });
     const one = val(await s.ai.answer(ask('What is the lock-up?')));
