@@ -81,8 +81,9 @@ describe('asking', () => {
     await expect(s.complete({ model: 'fast', prompt: 'q' })).rejects.toMatchObject({ code: 'cutoff' });
     await expect(s.converse!({ model: 'fast', prompt: 'q' })).rejects.toMatchObject({ code: 'cutoff' });
     await expect(s.complete({ model: 'fast', prompt: 'q' })).rejects.toMatchObject({ code: 'toolong', status: 400 });
-    expect(api.sent.map((b) => b.max_tokens)).toEqual([16000, 16000, 16000]);                  // the control file's limits.outputTokens
-    expect([s.outputLimit!('fast'), s.inputLimit!('fast')]).toEqual([16000, 180000]);
+    // the control file's limits.outputTokens
+    expect(api.sent.map((b) => b.max_tokens)).toEqual([32000, 32000, 32000]);
+    expect([s.outputLimit!('fast'), s.inputLimit!('fast')]).toEqual([32000, 180000]);
   });
   it('stops at its call limit before sending', async () => {
     const api = fakeApi(); const s = svc(api, { maxCalls: 1 });
@@ -382,5 +383,18 @@ describe('request retries', () => {
     });
     await expect(service.complete(question)).resolves.toBe('ok');
     expect(attempts).toBe(2);
+  });
+
+  it('retries a busy service twice by default, then reports it unreachable (#1110)', async () => {
+    let attempts = 0;
+    const service = claudeService({
+      key: 'test',
+      fetch: async () => {
+        attempts++;
+        return new Response(null, { status: 429, headers: { 'retry-after-ms': '1' } });
+      },
+    });
+    await expect(service.complete(question)).rejects.toMatchObject({ code: 'unreachable' });
+    expect(attempts).toBe(3);
   });
 });

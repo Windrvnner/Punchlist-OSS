@@ -247,6 +247,13 @@ details.fsrcs .sgp .srcbtn:hover{color:var(--ink);text-decoration-color:var(--ac
 }
 .imchg td:first-child,.imchg th:first-child{width:44px}
 
+/* ---- import: rows that could slot in as a question ---- */
+.imsug{max-height:150px}
+.imsug td:first-child,.imsug th:first-child{width:44px}
+.imsug td:last-child,.imsug th:last-child{width:84px}
+.imsug td{vertical-align:middle}
+.imsug td:last-child{text-align:right}
+
 /* ---- search: a field in the rail, results drop from it ---- */
 .rsearch{margin:6px 12px 8px;height:34px;border:1px solid var(--line);background:var(--card);border-radius:var(--r-ctl);display:flex;align-items:center;gap:8px;padding:0 10px;color:var(--ink-2);font-size:13px;position:relative;z-index:1;cursor:text}
 .rsearch svg{flex:none}
@@ -318,7 +325,6 @@ details.fsrcs .sgp .srcbtn:hover{color:var(--ink);text-decoration-color:var(--ac
 .iln .ws{font-size:13px;line-height:1.45;color:var(--ink-2);white-space:nowrap}
 /* a long list's rows are laid out only near the view */
 .ilf .ilr,.ilf .iln{content-visibility:auto;contain-intrinsic-size:auto 40px}.ilf .ilr{contain-intrinsic-size:auto 100px}
-.ilf .k .aim{font-family:var(--body);color:var(--accent);font-size:11px;font-weight:600;letter-spacing:.4px;margin-left:8px;vertical-align:1px}
 /* "#3 on issues list" on a finding's page: the list and the point's words on hover */
 .ilh{cursor:default;outline-offset:2px}
 /* the preview's short fields keep a fixed width that fits their heading; the question and the response share the rest */
@@ -546,7 +552,6 @@ body.reading{--colw:clamp(320px,calc(100vw - 1000px),560px)}
 .md .li .rs.dr.has{color:var(--ink-2)}   /* a response taken from a draft: marked, in the color any response reads in */
 .md .li .rs.dr .aim,.msgs .suggest .verdict .aim{
   color:var(--accent);font-size:11px;font-weight:600;letter-spacing:.4px;margin-inline-end:6px}
-.flagrow .ft .aim,.qtxt .aim{font-family:var(--body);color:var(--accent);font-size:11px;font-weight:600;letter-spacing:.4px;margin-inline-end:7px;vertical-align:1px}
 /* Option A. A question in two versions: the stripe an open finding has, on its own row only (design.md Marks), and
    its Response cell says only "Two versions" in --high. A cell taken in from the Q&A log and not yet seen: its value in full ink,
    and the log icon in --ink-2 hung at the cell's top right, so every value keeps its column's left edge. */
@@ -1040,11 +1045,13 @@ body.qopen .g span{text-overflow:clip;mask-image:linear-gradient(to right,#000 c
 .pastpop.down{top:calc(100% + 9px);right:-1px}
 .pastpop.up{bottom:calc(100% + 9px);left:-1px}
 .pastpop .ptop{display:flex;align-items:center;gap:10px;padding:12px 14px 10px;flex:none}
-.pastpop .psearch,.fhead .fmenu .psearch{position:relative;flex:1;min-width:0;display:block}
-:is(.pastpop,.fhead .fmenu) .psearch svg{position:absolute;left:11px;top:8px;color:var(--ink-3);pointer-events:none}
-.pastpop .psearch input,.fhead .fmenu .psearch input{width:100%;box-sizing:border-box;height:30px;padding:0 12px 0 32px;border:1px solid var(--line);border-radius:var(--r-ctl);background:transparent;font:inherit;font-size:13px;color:var(--ink);outline:0}
-:is(.pastpop,.fhead .fmenu) .psearch input:focus-visible{border-color:color-mix(in srgb,var(--accent) 70%,transparent)}
-:is(.pastpop,.fhead .fmenu) .psearch input::placeholder{color:var(--ink-3)}
+.pastpop .psearch{position:relative;flex:1;min-width:0;display:block}
+.pastpop .psearch svg{position:absolute;left:11px;top:8px;color:var(--ink-3);pointer-events:none}
+.pastpop .psearch input{width:100%;box-sizing:border-box;height:30px;padding:0 12px 0 32px;
+  border:1px solid var(--line);border-radius:var(--r-ctl);background:transparent;font:inherit;font-size:13px;
+  color:var(--ink);outline:0}
+.pastpop .psearch input:focus-visible{border-color:color-mix(in srgb,var(--accent) 70%,transparent)}
+.pastpop .psearch input::placeholder{color:var(--ink-3)}
 .pastpop .pseg{display:inline-flex;flex:none;padding:2px;border:1px solid var(--line);border-radius:999px}
 .pastpop .pseg button{height:24px;padding:0 10px;border:0;border-radius:999px;background:none;font:inherit;font-size:12.5px;color:var(--ink-2);white-space:nowrap;cursor:pointer}
 .pastpop .pseg button.on{background:color-mix(in srgb,var(--ink) 11%,transparent);color:var(--ink)}

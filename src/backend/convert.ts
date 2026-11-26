@@ -14,47 +14,7 @@ import { spawn } from 'node:child_process';
 import { parseCsv, type Sheet, type SheetEdit } from '../domain/sheets';
 
 /** `id` names the converter and its setting. It is recorded with a document's page count, so that a PC with a different one does not show pages that may break elsewhere. */
-/** one sheet of a spreadsheet, exported as a CSV file (UTF-8, dates as YYYY-MM-DD) */
-export interface SheetFile { name: string; path: string }
-export type Converter = ((
-  file: string,
-  outDir: string,
-  outName: string,
-  info?: { tracked?: number },
-  /** the document's own name, when the file is kept under another (an attached file): what a file-name field prints */
-  shownAs?: string,
-) => Promise<string>) & {
-  id: string;
-  /**
-   * every sheet of a spreadsheet as text, in order; `asShown` gives values as the file shows them (1,234.50) rather
-   * than plain (1234.5; dates always month first); `formulas` gives a formula cell's formula ("=LEN(B2)") in place of
-   * its value
-   */
-  sheets?: (file: string, asShown?: boolean, formulas?: boolean) => Promise<Sheet[]>;
-  /** the same sheets as CSV files on disk, in order, while `visit` runs: read a piece at a time, never whole */
-  sheetFiles?: <T>(file: string, visit: (sheets: SheetFile[]) => Promise<T>) => Promise<T>;
-  /** an .xlsx made from an OpenDocument spreadsheet in one file (domain/sheets exportDocument) */
-  workbook?: (fods: string) => Promise<Uint8Array>;
-  /** a Word file and a PDF made from an OpenDocument text in one file (the deal memo, domain/memoDoc) */
-  document?: (fodt: string) => Promise<{ docx: Uint8Array; pdf: Uint8Array }>;
-  /**
-   * writes values into a copy of a spreadsheet, keeping everything else in it, and returns the copy's bytes (see
-   * `SheetEdit` in domain/sheets)
-   */
-  edit?: (file: string, sheet: string, steps: SheetEdit[]) => Promise<Uint8Array>;
-  /** a word-processing file's text (.docx, .doc, .odt, .rtf), one paragraph or list entry a line, numbering as shown */
-  text?: (file: string) => Promise<string>;
-  /** the tracked changes and comments in a file, for a converter that can list them */
-  changes?: (file: string) => Promise<{
-    passages: {
-      before: string;
-      after: string;
-      changes: { kind: 'insert' | 'delete' | 'format' | 'comment'; by: string; at: string; text: string }[];
-    }[];
-    tracked: number;
-    complete: boolean;
-  }>;
-};
+export type Converter = ((file: string, outDir: string, outName: string, info?: { tracked?: number }, /** the document's own name, when the file is kept under another (an attached file): what a file-name field in it prints */ shownAs?: string) => Promise<string>) & { id: string; /** every sheet of a spreadsheet as text, in order; `asShown` gives values as the file shows them (1,234.50) rather than plain (1234.5; dates always month first); `formulas` gives a formula cell's formula ("=LEN(B2)") in place of its value */ sheets?: (file: string, asShown?: boolean, formulas?: boolean) => Promise<Sheet[]>; /** an .xlsx made from an OpenDocument spreadsheet in one file (domain/sheets exportDocument) */ workbook?: (fods: string) => Promise<Uint8Array>; /** a Word file and a PDF made from an OpenDocument text in one file (the deal memo, domain/memoDoc) */ document?: (fodt: string) => Promise<{ docx: Uint8Array; pdf: Uint8Array }>; /** writes values into a copy of a spreadsheet, keeping everything else in it, and returns the copy's bytes (see `SheetEdit` in domain/sheets) */ edit?: (file: string, sheet: string, steps: SheetEdit[]) => Promise<Uint8Array>; /** a word-processing file's text (.docx, .doc, .odt, .rtf), one paragraph or list entry a line, numbering kept as the file shows it */ text?: (file: string) => Promise<string>; /** the tracked changes and comments in a file, for a converter that can list them */ changes?: (file: string) => Promise<{ passages: { before: string; after: string; changes: { kind: 'insert' | 'delete' | 'format' | 'comment'; by: string; at: string; text: string }[] }[]; tracked: number; complete: boolean }> };
 
 
 
@@ -87,11 +47,11 @@ function looksRight(file: string): boolean {
 
 /**
  * The lines of LibreOffice's own macro language that do the work. A run reads its job from a small file beside the macro:
- * the file to open, where to put the PDF (or "-" for none), whether to keep markup, where to write the list of
- * tracked changes (or "-" for none), and the document's own name, which its file-name fields are set to (`NameFields`). It opens the file out of sight; writes the list if asked; accepts every tracked
- * change (LibreOffice's own "accept all": deletions go, insertions stay, moved text is where it was moved to, deleted
- * table rows and paragraph breaks go) unless markup was asked for; writes the PDF; and reports "ok", how many tracked
- * changes are left, and how many there were, in a second small file.
+ * the file to open, where to put the PDF (or "-" for none), where to write the list of
+ * tracked changes (or "-" for none), and the document's own name, which its file-name fields are set to
+ * (`NameFields`). It opens the file out of sight; writes the list if asked; writes the PDF, which shows a
+ * document's tracked changes as markup (a document with none is unchanged); and reports "ok" and how many tracked
+ * changes there were, in a second small file.
  *
  * The list is one line per thing, fields separated by tabs: "N" and the number of tracked changes; "C", kind, author, time
  * and words for each change or comment; and after the changes of a paragraph, "P" with the paragraph as it was and as it is.
@@ -102,14 +62,15 @@ Dim gType As String, gBy As String, gAt As String, gText As String
 Sub Run
   On Error GoTo Failed
   Dim ps As Object, sfa As Object, tin As Object, doc As Object, d As Object
-  Dim userUrl As String, src As String, out As String, markup As String, list As String, shown As String, note As String, filter As String, had As Long
+  Dim userUrl As String, src As String, out As String, list As String, shown As String, note As String
+  Dim filter As String, had As Long
   ps = createUnoService("com.sun.star.util.PathSubstitution")
   userUrl = ps.getSubstituteVariableValue("$(user)")
   sfa = createUnoService("com.sun.star.ucb.SimpleFileAccess")
   tin = createUnoService("com.sun.star.io.TextInputStream")
   tin.setInputStream(sfa.openFileRead(userUrl & "/punchlist-job.txt"))
   tin.setEncoding("UTF-8")
-  src = tin.readLine() : out = tin.readLine() : markup = tin.readLine() : list = tin.readLine() : shown = tin.readLine()
+  src = tin.readLine() : out = tin.readLine() : list = tin.readLine() : shown = tin.readLine()
   tin.closeInput()
   Dim a(0) As New com.sun.star.beans.PropertyValue
   a(0).Name = "Hidden" : a(0).Value = True
@@ -123,11 +84,7 @@ Sub Run
     had = doc.Redlines.Count
     If Left(list, 1) <> "-" Then ListChanges doc, sfa, list
     If Left(out, 1) <> "-" Then NameFields doc, shown
-    If Left(out, 1) <> "-" And Left(markup, 1) <> "1" Then
-      d = createUnoService("com.sun.star.frame.DispatchHelper")
-      d.executeDispatch(doc.CurrentController.Frame, ".uno:AcceptAllTrackedChanges", "", 0, Array())
-    End If
-    note = "ok " & doc.Redlines.Count & " " & had
+    note = "ok " & had
   End If
   If Left(out, 1) <> "-" And (filter = "impress_pdf_Export" Or filter = "draw_pdf_Export") Then
     NameShapes doc.DrawPages, shown
@@ -437,12 +394,11 @@ export function holdFolder(profile: string): { folder: string; free: () => void 
  * LibreOffice, run without a window and with settings of its own, so it is apart from any Office or LibreOffice the
  * person has open. One conversion at a time, and no two runs at once share a settings folder (see `holdFolder`).
  *
- * Tracked changes: left to itself LibreOffice prints them into the PDF, deleted words included. So unless `markup` is
- * asked for, every change is accepted first, by LibreOffice itself, and the PDF is the document as it then reads. A
- * conversion that leaves any tracked change behind is thrown away rather than passed off as clean. Comments are not
- * printed either way.
+ * Tracked changes: LibreOffice prints them into the PDF as markup, deleted words included, and the converter leaves
+ * them so. A document with no tracked changes converts as it is, so only a document that has some is marked up.
+ * Comments are not printed.
  */
-export function libreOfficeConverter(o: { soffice?: string; timeoutMs?: number; markup?: boolean; profile?: string } = {}): Converter {
+export function libreOfficeConverter(o: { soffice?: string; timeoutMs?: number; profile?: string } = {}): Converter {
   const soffice = o.soffice ?? 'soffice'; const timeoutMs = o.timeoutMs ?? 120_000;
   const profile = o.profile ?? path.join(os.tmpdir(), 'punchlist-libreoffice');
   let folder = profile;                                                                               // the settings folder this run holds, set by `one`
@@ -475,10 +431,12 @@ export function libreOfficeConverter(o: { soffice?: string; timeoutMs?: number; 
     });
     queue = next.catch(() => undefined); return next;
   };
-  /** one run of the macro; returns how many tracked changes were left and how many there had been (both undefined for a file that is not text) */
+  /** one run of the macro; returns how many tracked changes there were (undefined for a file that is not text) */
   // LibreOffice is never given the file where it is: names from comparison tools can run past what Windows lets older
   // programs open (260 characters for the whole path), so it opens a copy under a short name in its own settings folder
-  async function job(file: string, out: string | null, list: string | null, shownAs = path.basename(file)): Promise<{ left?: number; had?: number }> {
+  async function job(
+    file: string, out: string | null, list: string | null, shownAs = path.basename(file),
+  ): Promise<{ had?: number }> {
     if (!looksRight(file)) throw new Error('the file is not what its name says');
     await ready();
     const done = path.join(user, 'punchlist-done.txt'); fs.rmSync(done, { force: true });
@@ -487,12 +445,16 @@ export function libreOfficeConverter(o: { soffice?: string; timeoutMs?: number; 
     let copy = ''; for (let n = 1; !copy || fs.existsSync(copy); n++) copy = path.join(user, `punchlist-in${n > 1 ? `-${n}` : ''}${shortExt(file)}`);
     try {
       fs.copyFileSync(file, copy);
-      fs.writeFileSync(path.join(user, 'punchlist-job.txt'), [pathToFileURL(copy).href, out ? pathToFileURL(out).href : '-', o.markup ? '1' : '0', list ? pathToFileURL(list).href : '-', shownAs.replace(/[\u0000-\u001f\u007f]+/g, ' '), 'end', ''].join('\n'));
+      const jobLines = [
+        pathToFileURL(copy).href, out ? pathToFileURL(out).href : '-', list ? pathToFileURL(list).href : '-',
+        shownAs.replace(/[\u0000-\u001f\u007f]+/g, ' '), 'end', '',
+      ];
+      fs.writeFileSync(path.join(user, 'punchlist-job.txt'), jobLines.join('\n'));
       await start('macro:///Standard.Punchlist.Run');
     } finally { try { fs.rmSync(copy, { force: true }); } catch { /* still held by a LibreOffice being stopped: cleared at the next run */ } }
     const note = fs.existsSync(done) ? fs.readFileSync(done, 'utf8').trim() : 'failed: nothing was reported';
     if (!note.startsWith('ok')) throw new Error(note.replace(/^failed: /, '') || 'it did not finish');
-    const [, left, had] = note.split(' '); return left === undefined ? {} : { left: Number(left), had: Number(had) };
+    const [, had] = note.split(' '); return had === undefined ? {} : { had: Number(had) };
   }
   const convert = (file: string, outDir: string, outName: string, info?: ConvertInfo, shownAs?: string) => one(async () => {
     fs.mkdirSync(outDir, { recursive: true });
@@ -500,7 +462,6 @@ export function libreOfficeConverter(o: { soffice?: string; timeoutMs?: number; 
     try {
       const r = await job(file, part, null, shownAs);
       if (!fs.existsSync(part)) throw new Error('no PDF was produced');
-      if (!o.markup && r.left !== undefined && r.left !== 0) throw new Error('tracked changes were left in the document');
       if (info && r.had !== undefined) info.tracked = r.had;
       fs.renameSync(part, out); return out;
     } finally { fs.rmSync(part, { force: true }); }
@@ -517,33 +478,17 @@ export function libreOfficeConverter(o: { soffice?: string; timeoutMs?: number; 
   // A real date cell comes out unquoted and month first (11/02/2026, with its time if it has one); a text cell is always
   // quoted. The date cell is written YYYY-MM-DD so the import never doubts it; a date typed as text is left as typed.
   const isoDate = (v: string) => v.replace(/^(\d{2})\/(\d{2})\/(\d{4})(?=$| )/, '$3-$1-$2');
-  /** every sheet exported as a CSV file, in sheet order; the files are there while `visit` runs and removed after */
-  type Visit<T> = (sheets: SheetFile[]) => Promise<T>;
-  const exported = <T>(file: string, asShown: boolean, formulas: boolean, visit: Visit<T>) => one(async () => {
+  const sheets = (file: string, asShown = false, formulas = false) => one(async (): Promise<Sheet[]> => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-sheets-'));
     try {
-      const src = path.join(dir, `in${path.extname(file).toLowerCase()}`);
-      fs.copyFileSync(file, src);
-      const options = `44,34,76,1,,1033,true,true,${asShown},${formulas},false,-1`;
-      await start('--convert-to', `csv:Text - txt - csv (StarCalc):${options}`, '--outdir', path.join(dir, 'out'), src);
-      const out = path.join(dir, 'out');
-      const files = fs.existsSync(out) ? fs.readdirSync(out).filter((f) => f.endsWith('.csv')) : [];
+      const src = path.join(dir, `in${path.extname(file).toLowerCase()}`); fs.copyFileSync(file, src);
+      await start('--convert-to', `csv:Text - txt - csv (StarCalc):44,34,76,1,,1033,true,true,${asShown},${formulas},false,-1`, '--outdir', path.join(dir, 'out'), src);
+      const out = path.join(dir, 'out'); const files = fs.existsSync(out) ? fs.readdirSync(out).filter((f) => f.endsWith('.csv')) : [];
       if (!files.length) throw new Error('it could not be read as a spreadsheet');
-      // finer than milliseconds, so sheets written in one millisecond keep their order
-      const at = (f: string) => fs.statSync(path.join(out, f), { bigint: true }).mtimeNs;
-      const ordered = files.sort((a, b) => (at(a) < at(b) ? -1 : at(a) > at(b) ? 1 : 0));
-      const sheetName = (f: string) => f.replace(/^in-/, '').replace(/\.csv$/, '');
-      const named = ordered.map((f) => ({ name: sheetName(f), path: path.join(out, f) }));
-      return await visit(named);
+      const at = (f: string) => fs.statSync(path.join(out, f), { bigint: true }).mtimeNs;                // finer than milliseconds, so sheets written in one millisecond keep their order
+      return files.sort((a, b) => (at(a) < at(b) ? -1 : at(a) > at(b) ? 1 : 0)).map((f) => ({ name: f.replace(/^in-/, '').replace(/\.csv$/, ''), grid: parseCsv(fs.readFileSync(path.join(out, f), 'utf8').replace(/^\uFEFF/, ''), asShown ? undefined : isoDate) }));
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
-  const sheetFiles = <T>(file: string, visit: Visit<T>) => exported(file, false, false, visit);
-  const gridsOf = (asShown: boolean) => async (list: SheetFile[]) => list.map((sheet) => {
-    const text = fs.readFileSync(sheet.path, 'utf8').replace(/^\uFEFF/, '');
-    return { name: sheet.name, grid: parseCsv(text, asShown ? undefined : isoDate) };
-  });
-  const sheets = (file: string, asShown = false, formulas = false) =>
-    exported(file, asShown, formulas, gridsOf(asShown));
   const workbook = (fods: string) => one(async (): Promise<Uint8Array> => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-export-'));
     try {
@@ -586,8 +531,7 @@ export function libreOfficeConverter(o: { soffice?: string; timeoutMs?: number; 
       return { docx: new Uint8Array(fs.readFileSync(path.join(dir, 'memo.docx'))), pdf: new Uint8Array(fs.readFileSync(path.join(dir, 'memo.pdf'))) };
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
-  const id = o.markup ? 'libreoffice+markup' : 'libreoffice';
-  return Object.assign(convert, { id, changes, sheets, sheetFiles, workbook, edit, document, text });
+  return Object.assign(convert, { id: 'libreoffice', changes, sheets, workbook, edit, document, text });
 }
 
 /** A PDF's text, line by line as the file breaks its lines, pages one after another: a list brought in from a PDF. */

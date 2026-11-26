@@ -5,19 +5,20 @@
  * cannot misplace it.
  */
 import { isMine } from './commands/members';
+import { checkedOffer } from './answerOffer';
 import type { Store } from './store';
-import { dealHash, pageHash, dealQuestions, type State, type Message } from './state';
+import { dealQuestions, type State, type Message } from './state';
 import { docKey, ownFilesId, type Question, type Source } from '../domain/model';
 import { CreateQuestion, UseAsResponse } from './commands/questions';
 import { findQuestions, mayAddress } from '../domain/suggest';
 import { withoutMarkers } from '../domain/cite';
 import type { Research } from '../ports';
-import { bareDealName, cleanName } from './commands/deals';
 import { TITLE_MAX } from './commands/findings';
 import { chipsSendable, dealCopied, filesSendable } from './attachments';
 import { isText, keptDrafts } from './keptText';
 import {
-  boxWithRefused, initializeRefusedCommands, interruptedNow, keptForRetry, takeFromBox,
+  boxWithRefused, initializeRefusedCommands, interruptedNow, keptForRetry, setLogQuestion, showsLogQuestion,
+  takeFromBox,
 } from './refusedCommands';
 
 /**
@@ -121,65 +122,6 @@ export function pastConversationList(store: Store, { dealId, allDeals, search }:
 let seq = 0;
 const mid = () => `m${Date.now().toString(36)}${(seq++).toString(36)}`;
 
-// #500: only the explicit verb and page suffix are syntax; a deal name can contain punctuation or Unicode.
-function typedDealDestination(store: Store, text: string) {
-  const command = /^(?:take me to|go to|open|show me|show|switch to|jump to)\s+(.+)$/is.exec(text);
-  if (!command) return;
-  const target = cleanName(command[1]);
-  const lookup = (name: string) => {
-    const key = bareDealName(name.trim(), 'navigation').toLowerCase();
-    if (!key) return;
-    return Object.values(store.get().deals).find((candidate) =>
-      bareDealName(candidate.name, 'navigation').toLowerCase() === key);
-  };
-  const possessive = (name: string) => lookup(name.replace(/['’]s$/i, '')) ?? lookup(name);
-  const named = (name: string) => {
-    const withoutArticle = name.replace(/^the\s+/i, '');
-    return possessive(withoutArticle) ?? (withoutArticle !== name ? possessive(name) : undefined);
-  };
-  const suffix = /^(.+?)\s+(q ?& ?a|questions|findings|checklist|overview)$/i.exec(target);
-  const deal = suffix && named(suffix[1]);
-  return deal ? { deal, page: suffix[2].toLowerCase() } : { deal: named(target), page: '' };
-}
-
-function destinationHash(store: Store, text: string) {
-  const destination = typedDealDestination(store, text);
-  if (!destination?.deal) return;
-  const { deal, page } = destination;
-  return page
-    ? pageHash(/q|question/.test(page) ? 'qa' : page as 'findings' | 'checklist' | 'overview', deal.id)
-    : dealHash(store.get().prefs, deal.id);
-}
-
-/** "Go to Proseware findings", "open Trey Q&A", or "new deal", resolved against loaded deals. */
-export function navIntent(
-  store: Store, text: string, navigate = navigateWindow, handled?: () => void,
-): boolean {
-  const typed = text.trim();
-  if (/^(new|create|add|start) (a )?(new )?deal\b/i.test(typed)) {
-    handled?.();
-    store.ui({ newDeal: { name: '', folders: [], error: '', busy: false } });
-    return true;
-  }
-  const hash = destinationHash(store, typed);
-  if (!hash) return false;
-  handled?.();
-  navigate(hash);
-  return true;
-}
-
-function navigateWindow(hash: string) {
-  if (typeof location !== 'undefined') location.hash = hash;
-}
-
-/** "Add all unresolved to Q&A" opens the same preview as the Checklist menu (decisions, #2). */
-function unresolvedIntent(text: string) {
-  const command = '^(?:please\\s+)?add (?:all )?(?:the )?unresolved';
-  const points = '(?: (?:items|points|gaps(?: and(?: open)? findings)?))?';
-  const destination = '(?: (?:to|into|in) (?:the )?(?:q ?& ?a|questions))?\\s*[.!]?$';
-  return new RegExp(command + points + destination, 'i').test(text);
-}
-
 let drafts: { text: Map<string, string>; next: Map<string, string> } | undefined;
 const composerDrafts = () => drafts ??= {
   text: keptDrafts('composer', isText),
@@ -219,13 +161,12 @@ type SendView = {
 };
 
 /**
- * The box and its saved draft are already clear, so a restart after the save cannot bring the command back. A refusal
+ * The box and its saved draft are already clear, so a restart after the save cannot bring the question back. A refusal
  * (storage full, a copied install, ...) has been told by the store, except input rejected before planning, said here.
- * The typed command then goes back at the head of its box, ahead of anything typed since, so it can be sent again,
+ * The question then goes back at the head of its box, ahead of anything typed since, so it can be sent again,
  * unless the store kept it as interrupted work to retry (#955).
  */
-async function logTypedQuestion(store: Store, dealId: string, question: string, typed: string, key: string,
-  view: SendView) {
+async function logTypedQuestion(store: Store, dealId: string, question: string, key: string, view: SendView) {
   // The text going back in the box is the way to try again: a Retry as well could log it twice.
   const before = interruptedNow(store);
   const result = await store.dispatch(CreateQuestion, { dealId, text: question }, {
@@ -234,12 +175,15 @@ async function logTypedQuestion(store: Store, dealId: string, question: string, 
   if (result.ok) return;
   if (result.error.kind === 'invalid') store.toast(result.error.message);
   if (keptForRetry(store, before, dealId, question)) return;
-  setComposerText(key, boxWithRefused(key, typed, composerText(key)));
+  setComposerText(key, boxWithRefused(key, question, composerText(key)));
   view.textChanged?.();
   view.refused?.();
 }
 
-/** Send the latest draft after file checks. Navigation and question commands take precedence over a model answer. */
+/**
+ * Send the latest draft after file checks. A **Log Question** box logs its question; everything else is asked of the
+ * model. Typed words are never taken as a command (#1054).
+ */
 export async function sendTyped(store: Store, scope: Scope, view: SendView) {
   const key = convKey(scope);
   if (!composerText(key).trim() || store.readOnly() || scopeValid(store.get(), scope) !== true) return;
@@ -248,28 +192,15 @@ export async function sendTyped(store: Store, scope: Scope, view: SendView) {
   const filesDeal = filesDealOf(state, scope);
   // A recovered copy now has the draft and files (#117). Do not clear or send them from the old scope.
   if (store.readOnly() || scopeValid(state, scope) !== true || (filesDeal && dealCopied(store, filesDeal))) return;
-  // A command put back after a refusal is sent alone, and what was typed after it stays in the box (#955).
-  const { send: text, rest } = takeFromBox(key, composerText(key).trim());
-  if (!text) return;
-  const take = () => {
-    setComposerText(key, rest);
-    view.textChanged?.();
-    view.sending?.();
-  };
-  if (navIntent(store, text, view.navigate, take)) return;
   const dealId = scope.kind === 'deal' ? scope.dealId : undefined;
-  if (dealId && unresolvedIntent(text)) {
-    take();
-    store.ui({ dialog: { kind: 'addUnresolved', dealId } });
+  if (dealId && showsLogQuestion(key, composerText(key))) {
+    await sendLogQuestion(store, dealId, key, view);
     return;
   }
-  const question = dealId ? /^(?:add|log) (?:a )?question[:\s]+(.+)/is.exec(text) : null;
-  if (dealId && question) {
-    take();
-    await logTypedQuestion(store, dealId, question[1].trim(), text, key, view);
-    return;
-  }
-  take();
+  const text = composerText(key).trim();
+  setComposerText(key, '');
+  view.textChanged?.();
+  view.sending?.();
   if (view.launchSlot) {
     composerDrafts().next.delete(view.launchSlot);
     view.navigate(scopeHash(scope));
@@ -277,20 +208,18 @@ export async function sendTyped(store: Store, scope: Scope, view: SendView) {
   void ask(store, scope, text);
 }
 
-/** "Does this answer any of our open questions?", "would that address an open question": a person asking in words */
-export const asksOpenQuestions = (text: string) => /\b(answer|address|respond|cover|settle|resolve)\w*\b.*\bopen questions?\b|\bopen questions?\b.*\b(answer|address|cover|settle|resolve)\w*\b/i.test(text);
-/** the app's own reply to that, at `i`: it stands for no answer of its own, so nothing is suggested under it */
-const isCheck = (list: Message[], i: number) => list[i].role === 'ai' && list[i - 1]?.role === 'me' && asksOpenQuestions(list[i - 1].text);
 /**
- * The reply to a person asking whether the answer above addresses any open question. No model is asked: the answer is
- * checked as every answer is (suggestions), and the card under it shows again if a person had put it away.
+ * A refused question put back at the head of the box is logged alone, and what was typed after it stays (#955);
+ * otherwise the whole box is the question, and the chip comes off with it.
  */
-function checkOpenQuestions(store: Store, scope: Scope & { dealId: string }, prior: Message[]): string {
-  let j = prior.length - 1; while (j >= 0 && (prior[j].role !== 'ai' || prior[j].state !== 'done' || isCheck(prior, j))) j--;
-  if (j < 0) return 'There is no answer in this conversation yet to check against the open questions.';
-  const id = prior[j].id; store.bringBack(id);
-  const q = store.get().questions[suggestions(store.get(), scope).get(id) ?? ''];
-  return q ? `The answer above may address Q${q.n}: “${q.text}” It is named under that answer, to check and use as the response if it does.` : 'None of the open questions looks to be addressed by the answer above.';
+async function sendLogQuestion(store: Store, dealId: string, key: string, view: SendView) {
+  const { send: question, rest, held } = takeFromBox(key, composerText(key).trim());
+  if (!question) return;
+  if (!held) setLogQuestion(key, false);
+  setComposerText(key, rest);
+  view.textChanged?.();
+  view.sending?.();
+  await logTypedQuestion(store, dealId, question, key, view);
 }
 
 export async function ask(store: Store, scope: Scope, text: string) {
@@ -302,7 +231,6 @@ export async function ask(store: Store, scope: Scope, text: string) {
   const prior = store.get().threads[key] ?? [];
   const sent = atts.map((a) => ({ doc: a.doc!, docId: a.docId! }));
   const me: Message = { id: mid(), role: 'me', text, state: 'done', at: store.services.clock.now(), ...(sent.length ? { attached: sent } : {}) };
-  if ((scope.kind === 'deal' || scope.kind === 'finding') && asksOpenQuestions(text)) { store.setThread(key, [...prior, me, { id: mid(), role: 'ai', text: checkOpenQuestions(store, scope, prior), state: 'done', at: me.at }]); return; }
   const pending: Message = { id: mid(), role: 'ai', text: '', state: 'pending', at: me.at };
   store.setThread(key, [...prior, me, pending]);
   await answer(store, scope, pending.id, text, prior, sent);
@@ -366,7 +294,23 @@ async function answer(store: Store, scope: Scope, messageId: string, text: strin
   // apply only to the message this request was made for, if it is still pending
   const list = store.get().threads[key] ?? [];
   if (!list.some((m) => m.id === messageId && m.state === 'pending')) return;
-  store.setThread(key, list.map((m) => m.id !== messageId ? m : r.ok ? { ...m, text: r.value.text, sources: r.value.sources, ...(r.value.research ? { research: r.value.research } : {}), ...(r.value.thread ? { thread: r.value.thread } : {}), state: 'done' as const } : { ...m, state: 'failed' as const }));
+  store.setThread(key, list.map((m) => (m.id !== messageId ? m : answered(store, scope, m, r))));
+}
+
+type Replied = Awaited<ReturnType<Store['services']['ai']['answer']>>;
+
+/**
+ * The pending message once its reply is in: the answer, with what the agent did, its conversation, and the action it
+ * offered once checked (none when it offered none or the offer does not check out); or failed.
+ */
+function answered(store: Store, scope: Scope, pending: Message, replied: Replied): Message {
+  if (!replied.ok) return { ...pending, state: 'failed' };
+  const { text, sources, research, thread } = replied.value;
+  const offer = checkedOffer(store.get(), scope, replied.value.offer);
+  return {
+    ...pending, text, sources, ...(research ? { research } : {}), ...(thread ? { thread } : {}),
+    ...(offer ? { offer } : {}), state: 'done',
+  };
 }
 
 /** An answer's text as it leaves the conversation, as a response or a question: finding links as words, no [n] markers. */
@@ -440,7 +384,7 @@ export function suggestions(s: State, scope: Scope): Map<string, string> {
   const used = new Set(texts.values());
   const open = dealQuestions(s, scope.dealId).filter((q) => q.status === 'open' && !used.has(q.response.trim())); const offered = new Set<string>();
   for (let i = list.length - 1; i >= 0; i--) {
-    const m = list[i]; if (m.role !== 'ai' || m.state !== 'done' || isCheck(list, i)) continue;
+    const m = list[i]; if (m.role !== 'ai' || m.state !== 'done') continue;
     const q = mayAddress(texts.get(m.id)!, open.filter((x) => !offered.has(x.id)))[0];
     if (!q) continue;
     offered.add(q.id); if (!s.ui.notThese.includes(`${m.id}|${q.id}`)) out.set(m.id, q.id);

@@ -119,7 +119,7 @@ for (const [w, h, scheme] of [[1280, 736, 'dark'], [1024, 640, 'light']]) {
       lefts: [...new Set([...r.slice(0, 3), ...n.slice(0, 3)].map((x) => Math.round(x.children[1].getBoundingClientRect().left)))] };
   });
   say(`an already-raised point says what it joins, by the finding Import will put it on (${w})`, rows.first.n === '#1' && rows.first.was === 'JoinsChange of control definition omits the sponsor fund vehicles' && rows.first.box === 'Keep separate' && rows.chain.was === 'JoinsFinding 80 on the credit agreement' && rows.point.was === 'Joins#26 Issue 26 on the credit agreement', JSON.stringify(rows));
-  say(`every new finding is listed, read only, with its title and workstream (${w})`, rows.head === 'New Findings137AI'
+  say(`every new finding is listed, read only, with its title and workstream (${w})`, rows.head === 'New Findings137'
     && rows.newRows === 137 && rows.firstNew.join('|') === '#2|Issue 2 on the credit agreement|Legal'
     && rows.inputs === 0, JSON.stringify(rows));
   say(`the titles in both sections start at the same place (${w})`, rows.lefts.length === 1, JSON.stringify(rows.lefts));
@@ -127,7 +127,7 @@ for (const [w, h, scheme] of [[1280, 736, 'dark'], [1024, 640, 'light']]) {
   const checked = await page.evaluate(() => { const r = document.querySelector('#il-raised .ilr:nth-child(2)'); return { off: r.querySelector('.was').classList.contains('off'), strike: getComputedStyle(r.querySelector('.was')).textDecorationLine, n: r.querySelector('.n').textContent, listed: [...document.querySelectorAll('#il-new .iln .n')].map((x) => x.textContent).includes(r.querySelector('.n').textContent), head: document.querySelectorAll('.ilf .srow.top .k')[1].textContent }; });
   say(`checking a point keeps it as its own finding: its join is struck through and it is listed as new (${w})`,
     (await page.textContent('#il-line')) === '138 new findings' && checked.off && checked.strike === 'line-through'
-    && checked.listed && checked.head === 'New Findings138AI', JSON.stringify(checked));
+    && checked.listed && checked.head === 'New Findings138', JSON.stringify(checked));
   // a point joining an earlier one follows it: kept separate, the earlier point is a new finding, and the later joins that
   await page.click('#il-raised .ilr:nth-child(20) .keep');
   const follow = await page.evaluate(() => [...document.querySelectorAll('#il-raised .ilr')].find((x) => x.querySelector('.n').textContent === '#142').querySelector('.was').textContent);
@@ -149,7 +149,8 @@ for (const [w, h, scheme] of [[1280, 736, 'dark'], [1024, 640, 'light']]) {
   const after = await page.evaluate((ids) => { const fs = Object.values(store.get().findings); const madeBy = (f, n) => f.onLists?.length === 1 && f.onLists[0].n === n && f.id !== ids[0]; // the list is grouped by workstream: point 2's row is found by its finding, and each group keeps the list's order
     const row = () => document.querySelector(`a.flagrow[href$="${fs.find((f) => madeBy(f, '2')).id}"]`); const byId = new Map(fs.map((f) => [f.id, f])); const groups = () => { const out = new Map(); for (const a of document.querySelectorAll('a.flagrow')) { const f = [...byId.values()].find((x) => a.getAttribute('href').endsWith(x.id)); if (!f || f.id === ids[0] || f.onLists?.length !== 1 || ids.includes(f.id)) continue; const g = out.get(f.workstream) ?? []; g.push(+f.onLists[0].n); out.set(f.workstream, g); } return [...out.values()]; }; const t = store.get().ui.toasts.at(-1); return { n: fs.length, toast: t?.text, undo: t?.action?.label, op: t?.action?.opId, marked: fs.filter((f) => f.onLists?.length).length, first: row().querySelector('.ft').textContent, meta: row().querySelector('.fm').textContent, inOrder: groups().every((g) => g.every((n, k) => !k || g[k - 1] < n)), joined: store.get().findings[ids[0]].onLists?.map((m) => m.n), older: document.querySelector(`a.flagrow[href$="${ids[0]}"] .fm`)?.textContent, aim: row().querySelector('.ft .aim')?.title, olderAim: !!document.querySelector(`a.flagrow[href$="${ids[0]}"] .aim`) }; }, ids);
   say(`Import makes 138 findings, in the list's order, with one Undo (${w})`, after.n === 264 && after.toast === 'Imported 138 findings · 26 already raised' && after.undo === 'Undo' && after.first.endsWith('Issue 2 on the credit agreement') && after.inOrder, JSON.stringify(after));
-  say(`an imported finding's title is marked as written by AI, a person's is not (${w})`, after.first === 'AIIssue 2 on the credit agreement' && after.aim === 'Title written by AI' && !after.olderAim, JSON.stringify(after));
+  say(`an imported finding's title is the point's own words, with no AI mark (${w})`,
+    after.first === 'Issue 2 on the credit agreement' && !after.aim && !after.olderAim, JSON.stringify(after));
   say(`every finding a point is on says so in its row (${w})`, after.marked === 160 && after.meta.endsWith(' · #2 on issues list') && after.joined?.join() === '1' && !!after.older?.endsWith(' · #1 on issues list'), JSON.stringify(after));
   // the finding's page: the mark, and the list and the point's words on hover
   await page.goto(`${URL}#finding-${dealId}-${ids[0]}`); await page.waitForSelector('.ilh');

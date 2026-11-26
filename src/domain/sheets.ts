@@ -3,29 +3,47 @@
  * (.xlsx, .xlsm, .xls, .xlsb, .ods) into one CSV per sheet, values as the file shows them; a .csv is read as it is.
  * Everything here is pure: which sheet and heading row an import uses, and the workbook an export is written as.
  */
+import { CsvCells } from './csvCells';
 import { findHeaderRow, suggestMapping } from './importExport';
 import type { SheetPreview } from '../ports';
+import { fail, ok } from './result';
+import { decodeText, encodingOf } from './textEncoding';
 
 export interface Sheet { name: string; grid: string[][] }
+
+/** a real date cell as LibreOffice's plain reading gives it: YYYY-MM-DD, with its time if it has one */
+const PLAIN_DATE = /^\d{4}-\d{2}-\d{2}( \d.*)?$/;
+
+/**
+ * A workbook's cells as the file shows them ("1,234.50", "15%", "007"), except a real date cell, which stays in the
+ * plain reading's YYYY-MM-DD: the import settles a date from that, never from a display format that may be day or month
+ * first. `plain` and `shown` are the same workbook read both ways, so their sheets and cells line up.
+ */
+export function cellsAsShown(plain: Sheet[], shown: Sheet[]): Sheet[] {
+  return plain.map((sheet, s) => ({
+    name: sheet.name,
+    grid: sheet.grid.map((row, r) => row.map((cell, c) => {
+      const seen = shown[s]?.name === sheet.name ? shown[s].grid[r]?.[c] : undefined;
+      return seen === undefined || PLAIN_DATE.test(cell) ? cell : seen;
+    })),
+  }));
+}
 
 /** CSV as written by Excel and LibreOffice: commas, fields in double quotes when they hold a comma, quote or line break, "" for a quote. */
 export function parseCsv(text: string, bare?: (field: string) => string): string[][] {
   // `bare` rewrites a field written without quotes; LibreOffice quotes every text cell, so a bare field is a number or a date
-  const rows: string[][] = []; let row: string[] = []; let field = ''; let quoted = false; let wasQuoted = false;
-  const end = () => { row.push(bare && !wasQuoted ? bare(field) : field); field = ''; wasQuoted = false; };
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (quoted) {
-      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
-      else if (c === '"') quoted = false;
-      else field += c;
-    } else if (c === '"') { quoted = true; wasQuoted = true; }
-    else if (c === ',') end();
-    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; end(); rows.push(row); row = []; }
-    else field += c;
-  }
-  if (field || row.length) { end(); rows.push(row); }
-  return rows.map((r) => r.map((x) => x.replace(/\r\n?/g, '\n')));
+  const rows: string[][] = [];
+  let row: string[] = [];
+  const cells = new CsvCells(
+    (cell, quoted) => row.push(bare && !quoted ? bare(cell) : cell),
+    () => {
+      rows.push(row);
+      row = [];
+    },
+  );
+  cells.push(text);
+  cells.end();
+  return rows;
 }
 
 /** a sheet's used rows, and the sheet row number of the first of them (rows above are blank) */
@@ -150,3 +168,55 @@ export function writtenAsMeant(before: Sheet[], after: Sheet[], sheet: string, s
 
 /** a path or file name as Windows compares it: case and slash direction don't matter, nor a separator at the end */
 export const windowsPath = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLocaleLowerCase('en-US');
+
+/** the characters Windows-1252 puts at 0x80–0x9F; the rest of its range is the same as Unicode */
+const CP1252 = '€\u0081‚ƒ„…†‡ˆ‰Š‹Œ\u008DŽ\u008F\u0090‘’“”•–—˜™š›œ\u009DžŸ';
+
+/** `text` as UTF-16 code units, two bytes each, big- or little-endian */
+function utf16Bytes(text: string, bigEndian: boolean): number[] {
+  return [...Array(text.length).keys()].flatMap((i) => {
+    const code = text.charCodeAt(i);
+    return bigEndian ? [code >> 8, code & 255] : [code & 255, code >> 8];
+  });
+}
+
+/** `text` in the encoding `like` is in, byte-order mark included; throws when a character has no place in it */
+export function encodeLike(text: string, like: Uint8Array): Uint8Array {
+  switch (encodingOf(like)) {
+    case 'utf-8-bom': return new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(text)]);
+    case 'utf-8': return new TextEncoder().encode(text);
+    case 'utf-16le-bom': return new Uint8Array([0xff, 0xfe, ...utf16Bytes(text, false)]);
+    case 'utf-16be-bom': return new Uint8Array([0xfe, 0xff, ...utf16Bytes(text, true)]);
+    case 'utf-16le': return new Uint8Array(utf16Bytes(text, false));
+    case 'utf-16be': return new Uint8Array(utf16Bytes(text, true));
+    case 'windows-1252-bom': return new Uint8Array([0xef, 0xbb, 0xbf, ...cp1252(text)]);
+    default: return new Uint8Array(cp1252(text));
+  }
+}
+
+/** `text` as Windows-1252 bytes */
+function cp1252(text: string): number[] {
+  return [...text].map((ch) => {
+    const code = ch.codePointAt(0)!;
+    const high = CP1252.indexOf(ch);
+    if (high >= 0) return 0x80 + high;
+    if (code < 0x80 || (code >= 0xa0 && code <= 0xff)) return code;
+    throw new Error(`“${ch}” can’t be written in this CSV log’s encoding (Windows-1252)`);
+  });
+}
+
+/** a workbook is a ZIP (.xlsx, .xlsm, .xlsb, .ods) or an OLE container (.xls), whatever it is called */
+export function isWorkbook(b: Uint8Array): boolean {
+  const zip = b[0] === 0x50 && b[1] === 0x4b;
+  return zip || (b[0] === 0xd0 && b[1] === 0xcf && b[2] === 0x11 && b[3] === 0xe0);
+}
+
+/** A .csv read as text: raw strings, no number or date guessing. One sheet. */
+export function readCsv(bytes: Uint8Array, opts?: { sheet?: string; headerRow?: number }) {
+  if (isWorkbook(bytes)) {
+    const message = 'That file is a workbook saved with a .csv name. Rename it to .xlsx and try again';
+    return fail({ kind: 'invalid' as const, message });
+  }
+  const table = tableFrom([{ name: 'Sheet1', grid: parseCsv(decodeText(bytes)) }], opts);
+  return table ? ok(table) : fail({ kind: 'invalid' as const, message: 'The file has no rows' });
+}

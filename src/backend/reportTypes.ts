@@ -125,17 +125,12 @@ export interface ReportKit {
 
 /** paths shown to the fast model in one call when sorting */
 export const SORT_PART = 150;
-/** issues asked for in one call: each comes back as a finding in full, so a long report takes a few calls */
-export const ISSUE_PAGE = 25;
-/** calls that read one report at most: 20 pages of issues is 500, far past any report's */
-export const ISSUE_READS = 20;
 /** looks or reads of one document that could not finish before it is left alone, as describing a document is */
 export const TRIES = 3;
 
 const codeOf = (e: unknown) => (e as { code?: string } | null)?.code;
 /** a reply the service cut off: it carries what came back as `partial` */
 export const isCut = (e: unknown) => codeOf(e) === 'cutoff';
-export const partialOf = (e: unknown) => (e as { partial?: Record<string, unknown> | null }).partial ?? null;
 /** the service could not be reached, or this PC is signed out: the whole sweep stops */
 export const isUnreachable = (e: unknown) => codeOf(e) === 'unreachable';
 /**

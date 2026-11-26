@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { Store } from '../../src/app/store';
 import { memRepo, disk } from '../adapters/memRepo';
 import { MemoryLocal } from '../../src/adapters/local';
-import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
+import { csvCodec } from '../../src/adapters/spreadsheet';
+import { readCsv } from '../../src/domain/sheets';
 import { mockAi, mockDocuments, mockSession } from '../../src/adapters/mocks';
 import { CreateDeal } from '../../src/app/commands/deals';
 import { CreateQuestion, SetResponse, DeleteQuestion, RestoreQuestion, EditQuestionField, SetQuestionStatus } from '../../src/app/commands/questions';
@@ -106,14 +107,15 @@ describe('ImportQuestions', () => {
     expect(!u.ok && u.error.message).toMatch(/Changed since/);
     expect(dealQuestions(store.get(), dealId)[0].text).toBe('One, edited');
   });
-  it('merge: a cell of only spaces is as good as empty and overwrites nothing; text with spaces around it is taken as written', async () => {
+  it('merge: a cell of only spaces overwrites nothing; text with spaces around it is another question', async () => {
     const { store } = make(); const dealId = await deal(store);
     await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: rowsFrom('Number,Question,Submitted by,Response\n1,One,Lender A,Yes\n') });
     await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: rowsFrom('Number,Question,Submitted by,Response\n1,"   "," ","  "\n2,"   ",,\n') });
     expect(byN(store, dealId)[1]).toMatchObject({ text: 'One', askedBy: 'Lender A', response: 'Yes' });
     expect(byN(store, dealId)[2]).toMatchObject({ text: '   ', response: '' });
     await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: rowsFrom('Number,Question\n1,"  One\n"\n') });
-    expect(byN(store, dealId)[1].text).toBe('  One\n');
+    expect(byN(store, dealId)[1].text).toBe('One');
+    expect(dealQuestions(store.get(), dealId).map((q) => q.text)).toContain('  One\n');
   });
   it('a file that changes nothing writes nothing and leaves nothing to undo', async () => {
     const { store } = make(); const dealId = await deal(store);

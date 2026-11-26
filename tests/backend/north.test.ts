@@ -60,7 +60,7 @@ describe('asking', () => {
     expect(b).toEqual({
       stream: false,
       model: 'model-fast',
-      max_tokens: 16000,
+      max_tokens: 32000,
       messages: [
         { role: 'system', content: 'JSON only' },
         { role: 'user', content: 'What ratio?' },
@@ -162,11 +162,13 @@ describe('asking', () => {
   it('asks for no more than the model allows: the control file\'s limits, or a model\'s own max_tokens and context_length from /v2/models', async () => {
     const replies = [{ text: '{"cut', finish: 'MAX_TOKENS' }];
     const { north, svc } = await setUp({ answer: () => replies.shift() ?? 'ok' });
-    expect([svc.outputLimit!('fast'), svc.inputLimit!('fast')]).toEqual([16000, 180000]);         // nothing listed yet: the control file's
+    // nothing listed yet: the control file's
+    expect([svc.outputLimit!('fast'), svc.inputLimit!('fast')]).toEqual([32000, 180000]);
     await expect(svc.complete({ model: 'fast', prompt: 'q' })).rejects.toMatchObject({ code: 'cutoff' });
     await svc.models();
     expect([svc.outputLimit!('command-a'), svc.inputLimit!('command-a')]).toEqual([4000, 124000]);   // its context less room for the reply
-    expect([svc.outputLimit!('fast'), svc.inputLimit!('fast')]).toEqual([16000, 180000]);           // a model that lists no limits
+    // a model that lists no limits
+    expect([svc.outputLimit!('fast'), svc.inputLimit!('fast')]).toEqual([32000, 180000]);
     await svc.complete({ model: 'command-a', prompt: 'q' });
     expect((north.chats.at(-1) as Record<string, unknown>).max_tokens).toBe(4000);
     // a request refused as too long says so, whatever North calls it
@@ -201,8 +203,9 @@ describe('failures', () => {
   });
   it('busy for too long counts as unreachable, so the check carries on later', async () => {
     const { north, svc } = await setUp();
-    for (let i = 0; i < 4; i++) north.faults.push({ path: '/v1/chat', status: 503 });
+    for (const status of [429, 503, 429, 503]) north.faults.push({ path: '/v1/chat', status });
     await expect(svc.complete({ model: 'fast', prompt: 'q' })).rejects.toMatchObject({ code: 'unreachable' });
+    expect(north.seen.filter((s) => s.path === '/v1/chat')).toHaveLength(3);   // one try and two retries (#1110)
   });
   it('an expired token pauses the call; after a new sign-in it carries on', async () => {
     const live = jwt({ sub: 'u1', exp: Math.floor(Date.now() / 1000) + 3600 });

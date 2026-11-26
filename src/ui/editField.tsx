@@ -1,8 +1,8 @@
 /**
  * A field bound to one record attribute. Native <textarea>/<input>, so the
  * browser owns editing, focus, line breaks and the caret. Keeps a local draft
- * while focused; commits through a command on blur, Enter (single-line) or a
- * debounce. Shows pending / not-saved / updated-elsewhere beside the field.
+ * while focused and reports typing, blur and Enter (single-line) to the app's FieldSave, which decides when to save.
+ * Shows pending / not-saved / updated-elsewhere beside the field.
  */
 import { TEXT_MAX } from '../domain/importExport';
 import { limitClass, limitTitle } from './limit';
@@ -167,7 +167,7 @@ function useFieldInput(
   const input = useLocalInput(kept?.text ?? value, value, type);
   const [save, view] = useFieldSave({ value, rev }, keep, kept, input, lockedRef);
   const flush = (text: string, chosen = false) => save.save(text, commit, chosen);
-  const events = inputEvents(input, save, { commit, flush, debounceMs, multiline, locked });
+  const events = inputEvents(input, save, { commit, debounceMs, multiline, locked });
   const retry = (chosen: boolean) => {
     if (input.composition.current === 'held') input.composition.current = 'idle';
     void flush(input.draftRef.current, chosen);
@@ -179,7 +179,7 @@ function useFieldInput(
     save.takeTheirs(value, commit);
   };
 
-  useFieldLifecycle({ save, keep, read, commit, flush, onText, input, locked });
+  useFieldLifecycle({ save, keep, read, commit, onText, input, locked });
   return {
     ...view, ...events, locked, retry, takeTheirs, draft: input.draft, focused: input.focused, half: input.half,
     held: input.held, ref: input.ref,
@@ -208,16 +208,9 @@ function useLocalInput(start: string, value: string, type: 'text' | 'date') {
   const date = useDateInput(type, ref);
   const composition = useRef<FieldComposition>('idle');
   const compositionEnd = useRef<number | null>(null);
-  const timer = useRef<number | null>(null);
-  const stopTimer = () => {
-    if (timer.current === null) return false;
-    window.clearTimeout(timer.current);
-    timer.current = null;
-    return true;
-  };
   return {
     ...date, draft, draftRef, setDraft, focused, focusedRef, setFocused, held, setHeld, atFocus, halfAtFocus,
-    notSavedAtFocus, untouched, ref, composition, compositionEnd, timer, stopTimer,
+    notSavedAtFocus, untouched, ref, composition, compositionEnd,
   };
 }
 type LocalInput = ReturnType<typeof useLocalInput>;
@@ -259,7 +252,6 @@ function useFieldSave(
     partialNow: input.halfTyped,
     locked: () => !!locked.current,
     focused: () => input.focusedRef.current,
-    stopTimer: input.stopTimer,
     markPartial: () => markHalf(input, save),
     replaceText: input.setDraft,
     adoptBase: (text) => {
@@ -280,8 +272,6 @@ function markHalf(input: LocalInput, save: FieldSave) {
   save.refuseInput('Enter a real date');
 }
 
-type Flush = (text: string, chosen?: boolean) => Promise<unknown>;
-
 function cancelCompositionEnd(input: LocalInput) {
   if (input.compositionEnd.current === null) return;
   window.clearTimeout(input.compositionEnd.current);
@@ -301,7 +291,7 @@ function compositionEvents(input: LocalInput, save: FieldSave, typed: (text: str
   const onCompositionStart = () => {
     cancelCompositionEnd(input);
     input.composition.current = 'active';
-    input.stopTimer();
+    save.stopTimer();
   };
   const onCompositionEnd = (event: CompositionEvent) => {
     if (input.composition.current === 'idle') return;
@@ -337,16 +327,16 @@ function isCompositionKey(event: KeyboardEvent, composing: boolean) {
 }
 
 function inputEvents(
-  input: LocalInput, save: FieldSave, { commit, flush, debounceMs, multiline, locked }: {
-    commit: FieldCommit; flush: Flush; debounceMs: number; multiline?: boolean; locked: string | null;
+  input: LocalInput, save: FieldSave, { commit, debounceMs, multiline, locked }: {
+    commit: FieldCommit; debounceMs: number; multiline?: boolean; locked: string | null;
   },
 ) {
-  const { atFocus, halfAtFocus, notSavedAtFocus, untouched, draftRef, halfRef, halfTyped, timer, ref } = input;
+  const { atFocus, halfAtFocus, notSavedAtFocus, untouched, draftRef, halfRef, halfTyped, ref } = input;
   const typed = (text: string) => {
     input.setHalf(halfTyped());
     input.setDraft(text);
     untouched.current = false;
-    if (save.typed(text)) timer.current = window.setTimeout(() => void flush(draftRef.current), debounceMs);
+    save.typed(text, commit, debounceMs);
   };
   const onFocus = () => {
     const text = draftRef.current;
@@ -367,11 +357,8 @@ function inputEvents(
       markHalf(input, save);
       return;
     }
-    if (notSavedAtFocus.current && untouched.current && draftRef.current === atFocus.current) {
-      input.stopTimer(); // The person can Retry text that was already not saved on entry.
-      return;
-    }
-    void flush(draftRef.current);
+    // The person can Retry text that was already not saved on entry.
+    save.blur(commit, !!notSavedAtFocus.current && untouched.current && draftRef.current === atFocus.current);
   };
   const onKeyUp = () => {
     if (halfTyped() !== halfRef.current && ref.current) typed(ref.current.value);
@@ -389,7 +376,7 @@ function inputEvents(
     if (draftRef.current === text && (!halfTyped() || halfAtFocus.current)) return;
     event.stopPropagation();
     event.preventDefault();
-    input.stopTimer();
+    save.stopTimer();
     input.putBack(text);
     input.setDraft(text);
     if (notSavedAtFocus.current) untouched.current = true;
@@ -399,13 +386,12 @@ function inputEvents(
 }
 
 function useFieldLifecycle({
-  save, keep, read, commit, flush, onText, input, locked,
+  save, keep, read, commit, onText, input, locked,
 }: {
   save: FieldSave;
   keep: string | undefined;
   read: ReadField | undefined;
   commit: FieldCommit;
-  flush: Flush;
   onText: EditFieldProps['onText'];
   input: LocalInput;
   locked: string | null;
@@ -431,8 +417,7 @@ function useFieldLifecycle({
   const onLeave = useRef(() => {});
   onLeave.current = () => {
     if (holdComposition(input, save)) return;
-    save.keepCurrent();
-    if (input.timer.current !== null) void flush(input.draftRef.current);
+    save.leave(commit);
   };
   useLayoutEffect(() => {
     const leave = () => onLeave.current();

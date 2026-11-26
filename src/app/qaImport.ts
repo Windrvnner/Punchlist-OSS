@@ -1,13 +1,13 @@
 import { Operation } from '../domain/model';
 import { fail, ok, type Result } from '../domain/result';
 import {
-  importCounts, parseDate, prepareImport, type ImportRow, type Mapping, type Prepared,
+  parseDate, prepareImport, type ImportRow, type Mapping, type Prepared,
 } from '../domain/importExport';
 import { ImportQuestions } from './commands/importQuestions';
+import type { AcceptedMatch } from '../domain/qaMatch';
 import { dropImport, finishKeptSubmission, importKey, keepImport, keptImport } from './keptImports';
 import { unappliedColumnsWarning, unappliedImportColumns } from './qaImportColumns';
 import { keepImportedLog, logTakenBy } from './qaLog';
-import { dealQuestions, type State } from './state';
 import type { Store } from './store';
 import { readImportFile, type ImportPreview, type ImportTable } from './transfer';
 
@@ -21,6 +21,8 @@ export interface QaChoices {
   answered: boolean;
   makeLog: boolean;
   touched: boolean;
+  /** suggestions the person accepted for rows that matched no question (a kept import from before has none) */
+  accepted?: AcceptedMatch[];
 }
 interface QaKept { table: ImportTable; choices: QaChoices }
 interface Submission {
@@ -65,11 +67,22 @@ function isKeptChoices(choices: QaChoices | undefined) {
 }
 
 /** How many parties the Submitted by column names, in any case or spacing. */
-export function qaImportPartyCount(table: ImportTable | null, mapping: Mapping | null) {
+function qaImportPartyCount(table: ImportTable | null, mapping: Mapping | null) {
   const column = mapping?.askedBy;
   if (!table || column == null) return 0;
   const names = table.rows.map((row) => String(row[column] ?? '').trim().toLowerCase());
   return new Set(names.filter(Boolean)).size;
+}
+
+/**
+ * Whether the file becomes the deal's Q&A log. It starts so only for a consolidated log, one with two or more parties
+ * under Submitted by; one party's own list is not the deal's log. Once the person checks or unchecks it (touched),
+ * it stays as they set it.
+ */
+export function qaImportMakesLog(
+  table: ImportTable | null, mapping: Mapping | null, choice: { makeLog: boolean; touched: boolean },
+) {
+  return choice.touched ? choice.makeLog : qaImportPartyCount(table, mapping) >= 2;
 }
 
 /** Save the latest file and choices, except while the correlated submission owns them. */
@@ -131,18 +144,15 @@ function previewQaRows(table: ImportTable, mapping: Mapping, prepared: Prepared)
   return previewRows;
 }
 
-export function summarizeQaImport(
-  state: State, dealId: string, key: string, mode: ImportMode, prepared: Prepared | null,
-  dry: Result<ImportPreview> | null,
-) {
-  const counts = prepared ? importCounts(prepared.rows, dealQuestions(state, dealId), mode) : { add: 0, match: 0 };
-  const total = counts.add + counts.match;
+export function summarizeQaImport(key: string, prepared: Prepared | null, dry: Result<ImportPreview> | null) {
+  // what the import adds and changes comes only from its own plan (`dry`), never from a count of its own (#1080)
+  const total = prepared?.rows.length ?? 0;
   const preview = dry?.ok ? dry.value : null;
   const dryError = dry && !dry.ok ? dry.error.message : '';
   const submission = savedSubmission(key);
   // Recovery validates the original operation, rather than replanning already committed rows.
   return {
-    counts, total: submission ? Math.max(total, submission.rows.length) : total,
+    total: submission ? Math.max(total, submission.rows.length) : total,
     preview, dryError: submission ? '' : dryError,
   };
 }
@@ -238,7 +248,7 @@ async function resumeSubmission(store: Store, dealId: string, submission: Submis
   const taken = logTakenBy(store, dealId, choices.path);
   if (taken) return fail({ kind: 'rejected', message: taken });
   return store.dispatch(ImportQuestions, {
-    dealId, mode: choices.mode, rows, answerResponded: choices.answered,
+    dealId, mode: choices.mode, rows, answerResponded: choices.answered, accepted: choices.accepted ?? [],
   }, { idempotencyKey: submission.key });
 }
 

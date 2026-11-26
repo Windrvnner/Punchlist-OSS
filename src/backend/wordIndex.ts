@@ -2,10 +2,10 @@
  * Each PC's own index of every word in a deal's documents. Nothing of it goes to
  * the shared folder: each PC reads the words of the files in its own copy of the data room.
  *
- * What is kept for a document: how often it uses each word (filler words and bare numbers left out, plurals folded,
- * no word order), how many words it has, and its title: the first 40 words of its first page. Kept in this PC's local
- * folder as one line per document in words-<deal id>.jsonl, written once when the document is read and never changed;
- * a later line for the same document replaces an earlier one.
+ * What is kept for a document: how often it uses each word of any length (filler words left out, numbers
+ * kept, plurals folded, no word order), how many words it has, and its title: the first 40 words of its first page.
+ * Kept in this PC's local folder as one line per document in words2-<deal id>.jsonl, written once when the document is
+ * read and never changed; a later line for the same document replaces an earlier one.
  *
  * How a document answers to some words: each word counts by how rare it is in the deal (BM25's idf),
  * times 10 when it is in the document's name or folder path, 4 when it is in the title, and BM25's term weight for
@@ -13,10 +13,8 @@
  * that uses the word on every page.
  */
 import type { Folder } from './logRepository';
-import { tokens, fold } from './words';
-import { control } from '../control';
+import { indexWords } from './words';
 
-const FILLER = new Set(control.lists.indexFiller.map((w) => w.toLowerCase()));   // matched against words in lower case
 /** BM25's usual constants: how soon repeated use levels off, and how much a long document's length is held against it */
 const K1 = 1.2, B = 0.75;
 /** the weights agreed for a match in the name or folder path, and in the title, against one body match */
@@ -24,33 +22,32 @@ export const WEIGHT = { name: 10, title: 4 } as const;
 /** how many words of the first page make the title */
 export const TITLE_WORDS = 40;
 
-/** a word as the index keeps it, or null for one it leaves out */
-const keep = (w: string) => (w.length < 2 || /^\d+$/.test(w) || FILLER.has(w) ? null : fold(w));
-
 /** what the index keeps of one document's text */
 export interface DocWords { counts: Map<string, number>; length: number; title: string[] }
 /** Count the words of a document. `first` is its first page, when the text has pages; otherwise the text's own start is the title. */
 export function countWords(text: string, first = text): DocWords {
-  const counts = new Map<string, number>(); let length = 0;
-  for (const t of tokens(text)) { const w = keep(t); if (!w) continue; counts.set(w, (counts.get(w) ?? 0) + 1); length++; }
-  const title: string[] = [];
-  for (const t of tokens(first)) { if (title.length >= TITLE_WORDS) break; const w = keep(t); if (w && !title.includes(w)) title.push(w); }
-  return { counts, length, title };
+  const tally = new WordTally();
+  tally.add(text, first);
+  return tally.words();
 }
 
-/** the words of a text counted a piece at a time as `countWords` counts them, the first making the title */
+/**
+ * The words of a text counted a piece at a time, as `countWords` counts a whole text: the pieces' first words make the
+ * title, unless `first` gives the text it is taken from.
+ */
 export class WordTally {
   private readonly counts = new Map<string, number>();
   private length = 0;
   private readonly title: string[] = [];
 
-  add(text: string): void {
-    for (const t of tokens(text)) {
-      const w = keep(t);
-      if (!w) continue;
+  add(text: string, first = text): void {
+    for (const w of indexWords(text)) {
       this.counts.set(w, (this.counts.get(w) ?? 0) + 1);
       this.length++;
-      if (this.title.length < TITLE_WORDS && !this.title.includes(w)) this.title.push(w);
+    }
+    for (const w of this.title.length < TITLE_WORDS ? indexWords(first) : []) {
+      if (this.title.length >= TITLE_WORDS) break;
+      if (!this.title.includes(w)) this.title.push(w);
     }
   }
 
@@ -70,6 +67,8 @@ interface Line { d: string; n: number; t: string; w: string }
 export interface WordIndex {
   /** whether this PC has read the words of this document */
   has(dealId: string, docId: string): boolean;
+  /** whether this PC's index file for the deal, of the current version, exists */
+  built(dealId: string): boolean;
   /** keep a document's words; said again for a document already kept, it replaces them */
   add(dealId: string, docId: string, words: DocWords): void;
   /**
@@ -80,9 +79,47 @@ export interface WordIndex {
   score(dealId: string, q: Set<string>, docs: { docId: string; named: Set<string> }[], namedOnly?: boolean): Map<string, number>;
 }
 
+/** one thing scored: the words of its name, of its title, how often its body uses a word, and its length in words */
+export interface Scored {
+  id: string; named: Set<string>; title: Set<string>; tf: (w: string) => number; length: number;
+}
+/** what rarity and length are measured against: how many things there are, their mean length, how many use a word */
+export interface Corpus { size: number; avgLength: number; docsWith: (w: string) => number }
+
+/**
+ * How well each thing answers to the words `q`, by BM25: each word counts by how rare it is in the corpus (its idf),
+ * times `WEIGHT.name` in the name, `WEIGHT.title` in the title, and BM25's term weight for how often the body uses it.
+ * The one scoring of every keyword search: documents through the index, and the findings and questions a chat searches.
+ */
+export function bm25(q: Set<string>, entries: Scored[], corpus: Corpus): Map<string, number> {
+  const idf = new Map<string, number>();
+  for (const w of q) {
+    const n = corpus.docsWith(w);
+    idf.set(w, Math.log(1 + (corpus.size - n + 0.5) / (n + 0.5)));
+  }
+  const out = new Map<string, number>();
+  for (const e of entries) {
+    const terms = [...q].map((w) => weightOf(e, w, corpus.avgLength) * (idf.get(w) ?? 0));
+    // added smallest first, so two things with the same evidence score the same whatever order the words were asked
+    // in: a tie is decided by the ranking's own tie-break, never by rounding
+    out.set(e.id, terms.sort((x, y) => x - y).reduce((sum, t) => sum + t, 0));
+  }
+  return out;
+}
+
+/** what one word is worth in one thing before its rarity: its name, its title, and its body's use of it */
+function weightOf(e: Scored, w: string, avgLength: number): number {
+  let m = e.named.has(w) ? WEIGHT.name : 0;
+  if (e.title.has(w)) m += WEIGHT.title;
+  const tf = e.tf(w);
+  if (tf) m += (tf * (K1 + 1)) / (tf + K1 * (1 - B + (B * e.length) / avgLength));
+  return m;
+}
+
 export function wordIndex(local: Folder): WordIndex {
   const deals = new Map<string, DealIndex>();
-  const file = (dealId: string) => `words-${dealId}.jsonl`;
+  // the name carries the index's version: an index built under older rules is not read, so each document is read again
+  const file = (dealId: string) => `words2-${dealId}.jsonl`;
   const put = (ix: DealIndex, l: Line) => {
     const was = ix.num.get(l.d);
     if (was !== undefined) { ix.alive[was] = false; ix.words[was] = ''; ix.total -= ix.length[was]; ix.live--; }      // a document read again: its old words go
@@ -96,6 +133,12 @@ export function wordIndex(local: Folder): WordIndex {
     for (let k = 0; k < ix.words.length; k++) { if (!ix.alive[k]) continue; const s = ix.words[k]; const i = s.indexOf(key); if (i >= 0) m.set(k, Number(s.slice(i + key.length, s.indexOf(' ', i + key.length)))); }
     ix.uses.set(w, m); return m;
   };
+  /** a document as BM25 scores it: by its name alone when the index has not read it (`k` undefined) */
+  const scoredOf = (ix: DealIndex, d: { docId: string; named: Set<string> }, k: number | undefined): Scored => {
+    if (k === undefined) return { id: d.docId, named: d.named, title: new Set(), tf: () => 0, length: 0 };
+    const tf = (w: string) => usesOf(ix, w).get(k) ?? 0;
+    return { id: d.docId, named: d.named, title: ix.title[k], tf, length: ix.length[k] };
+  };
   const of = (dealId: string): DealIndex => {
     let ix = deals.get(dealId); if (ix) return ix;
     ix = { num: new Map(), length: [], title: [], alive: [], words: [], uses: new Map(), total: 0, live: 0 }; deals.set(dealId, ix);
@@ -104,30 +147,16 @@ export function wordIndex(local: Folder): WordIndex {
   };
   return {
     has: (dealId, docId) => of(dealId).num.has(docId),
+    built: (dealId) => local.list().includes(file(dealId)),
     add(dealId, docId, words) {
       const l: Line = { d: docId, n: words.length, t: words.title.join(' '), w: [...words.counts].map(([w, n]) => `${w}:${n}`).join(' ') };
       local.append(file(dealId), `${JSON.stringify(l)}\n`); put(of(dealId), l);
     },
     score(dealId, q, docs, namedOnly = false) {
-      const ix = of(dealId); const n = Math.max(ix.live, docs.length, 1); const avg = ix.total / Math.max(ix.live, 1) || 1;
-      // for each word asked about: how often each live document uses it, and in how many documents it is (for its idf)
-      const uses = new Map<string, Map<number, number>>(); const idf = new Map<string, number>();
-      for (const w of q) { const m = usesOf(ix, w); uses.set(w, m); idf.set(w, Math.log(1 + (n - m.size + 0.5) / (m.size + 0.5))); }
-      const out = new Map<string, number>();
-      for (const d of docs) {
-        const k = namedOnly ? undefined : ix.num.get(d.docId); let s = 0;
-        for (const w of q) {
-          let m = d.named.has(w) ? WEIGHT.name : 0;
-          if (k !== undefined) {
-            if (ix.title[k].has(w)) m += WEIGHT.title;
-            const tf = uses.get(w)?.get(k) ?? 0;
-            if (tf) m += (tf * (K1 + 1)) / (tf + K1 * (1 - B + (B * ix.length[k]) / avg));
-          }
-          s += m * (idf.get(w) ?? 0);
-        }
-        out.set(d.docId, s);
-      }
-      return out;
+      const ix = of(dealId);
+      const corpus = { size: Math.max(ix.live, docs.length, 1), avgLength: ix.total / Math.max(ix.live, 1) || 1,
+        docsWith: (w: string) => usesOf(ix, w).size };
+      return bm25(q, docs.map((d) => scoredOf(ix, d, namedOnly ? undefined : ix.num.get(d.docId))), corpus);
     },
   };
 }

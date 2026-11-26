@@ -13,7 +13,7 @@ import { hasLogVersion, qaEditorWorkstreams, qaPageView } from '../app/qaView';
 import { settledQuestion } from '../app/settledView';
 import { SettledLine, CloseThisQuestion } from './closeSettled';
 import { ConflictView } from './conflict';
-import { AskFirst } from './dialogs';
+import { AskFirst, DialogHead } from './dialogs';
 import { AskedFor } from './askedFor';
 import {
   CreateQuestion, SetQuestionStatus, SetResponse, DeleteQuestion, RenumberQuestion,
@@ -211,7 +211,7 @@ export function QaPage({ dealId }: { dealId: string }) {
 
   return (
     <div class={`home top wide qapage ${tuck ? 'tuck' : ''}`} style={tuck ? `--tuck:${tuck}px` : undefined}>
-      <PageTop deal={d} route="qa" noAsk={!!sel} placeholder="Ask what is still open, or type “add a question: …”" />
+      <PageTop deal={d} route="qa" noAsk={!!sel} placeholder="Ask what is still open, or type / for commands" />
       {sel && (s.conflicts[sel.id]
         ? <ConflictPanel key={sel.id} q={sel} busy={adding} onClose={close} onKeyDown={escClose} />
         : <Detail q={sel} busy={adding} onClose={close} onKeyDown={escClose} pos={selAt + 1} of={list.length} step={step} nextId={(list[selAt + 1] ?? list[selAt - 1])?.id ?? null} onDeleted={(id) => { back.current = { id, to: store.get().ui.selectedQuestion }; }} />)}
@@ -432,12 +432,14 @@ export function UndoImportDialog({ dealId }: { dealId: string }) {
   const named = w.ok ? w.value.named : [];
   return (
     <Modal onClose={close} label="Undo the last import?" blur className="sdlg dddlg">
-      <div class="shead"><h2>Undo the last import?</h2><button type="button" class="x" aria-label="Close" title="Close (Esc)" onClick={close}><Icon name="close" size={15} /></button></div>
+      <DialogHead title="Undo the last import?" onClose={close} />
       <p class="ddtext" id="ui-what">{w.ok ? `${what}.` : w.error.message}</p>
       {named.length > 0 && <p class="ddtext" id="ui-kept">{count(named.length, 'question changed', 'questions changed')} since and {named.length === 1 ? 'stays as it is' : 'stay as they are'}: {named.slice(0, LISTED).map((n) => `Q${n}`).join(', ')}{named.length > LISTED ? ` and ${(named.length - LISTED).toLocaleString('en-US')} more` : ''}.</p>}
-      <div class="xfoot"><span class="grow" /><button type="button" class="btn sm" id="ui-keep" data-autofocus
-        onClick={close}>{w.ok ? 'Keep the Import' : 'Close'}</button>{w.ok && <button type="button" class="btn sm pri"
-        id="ui-go" onClick={() => void go()}>Undo Import</button>}</div>
+      {/* refused, there is nothing to choose: the × closes it, as every dialog (design.md; #1069) */}
+      {w.ok && <div class="xfoot"><span class="grow" />
+        <button type="button" class="btn sm" id="ui-keep" data-autofocus onClick={close}>Keep the Import</button>
+        <button type="button" class="btn sm pri" id="ui-go" onClick={() => void go()}>Undo Import</button>
+      </div>}
     </Modal>
   );
 }

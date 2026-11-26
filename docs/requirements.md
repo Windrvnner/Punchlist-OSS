@@ -48,7 +48,10 @@ authorization code with PKCE (S256). Use `http://127.0.0.1` as the loopback redi
 keeps the token until it expires and starts a fresh authorization flow when needed. Bedrock uses IAM Identity
 Center's device authorization flow. [OAuth for native apps](https://datatracker.ietf.org/doc/html/rfc8252)
 
-Every connector asks for at most `limits.outputTokens` output tokens per call (16,000 by default). The app sizes the parts of a request it can count to fit `limits.inputTokens` (180,000 by default). Where the service reports a smaller limit for a model (as North's model list does), the app uses that limit instead. Set both values to what the deployment's models allow.
+Every connector asks for at most `limits.outputTokens` output tokens per call (32,000 by default). The app sizes the
+parts of a request it can count to fit `limits.inputTokens` (180,000 by default). Where the service reports a smaller
+limit for a model (as North's model list does), the app uses that limit instead. Set both values to what the
+deployment's models allow.
 
 When a reply is cut off at the length limit, the app asks again in smaller parts, or once more for a shorter reply. When
 a request is refused as too long, the app asks again with fewer documents (see "AI and models" in
@@ -280,7 +283,7 @@ The reference titles below are from Cohere's North documentation.
 - **Limits:** North accepts an optional `max_tokens`. The **Chat** reference gives no default or maximum.
   The app sends `limits.outputTokens` or the model's own `max_tokens` from `/v2/models` when that is smaller.
   A reply ending with `finish_reason: MAX_TOKENS` is treated as cut off. When North is busy (429 or 503), the app
-  waits as North asks, for up to four tries. North's My files has a 100 MB total limit. See **Supported files**.
+  waits as North asks, for up to three tries. North's My files has a 100 MB total limit. See **Supported files**.
   The app's separate `limits.storedFiles` limit counts files, so large files may reach North's limit first.
 - **Control file:** Set the following values.
 
@@ -306,7 +309,7 @@ Other files in a provider's store are left alone.
 | `names.aiContent` | The label that marks text the model wrote (default "AI"). |
 | `models.toolCalls` | How the chat agent calls its tools: `'inline'` (the default), `'hybrid'`, or `'native'`. |
 | `picker.fast`, `picker.standard`, `picker.thorough` | Which tiers the model picker offers. At least one must be on. |
-| `limits.outputTokens` | The most tokens one reply may hold (default 16,000). Must not exceed what the deployment's models allow. |
+| `limits.outputTokens` | Most tokens one reply may hold (default 32,000); not above what the models allow. |
 | `limits.inputTokens` | The most tokens one request may send, documents included (default 180,000). Must not exceed the models' context window, less the output limit. |
 
 ## 2. Name and defaults

@@ -1,12 +1,12 @@
 import type { Deal } from '../domain/model';
 import type { RoomMatch } from '../ports';
 import type { DealKinds, State } from './state';
-import { cleanName, withProject } from './commands/deals';
+import { cleanName, sameName, withProject } from './commands/deals';
 
 /**
  * Is a new deal one the team already has? Two deals may share a name, and are told apart by their counterparty and
  * the day each was made, so a name alone never counts. What does count, the data room first:
- *   - the data room: the document service found most of the new folders' files in the deal's documents (`room`);
+ *   - the data room: every document of the deal's data room is among the new folders' files (`room`);
  *   - the name and the counterparty both: the same name, and the same counterparty, given on both.
  * A folder another deal also reads does not count by itself: a shared folder (precedents, say) can serve many deals, and
  * when it is that deal's data room, the data room check finds it. The likeliest deal comes back, with what was found,
@@ -16,7 +16,7 @@ import { cleanName, withProject } from './commands/deals';
 export interface TwinFound { dealId: string; room?: RoomMatch; named: boolean }
 export interface Twin { deal: Deal; room?: RoomMatch; named: boolean }
 
-const key = (s: string) => cleanName(s).toLocaleLowerCase('en-US');
+const key = (s: string) => sameName(s).toLocaleLowerCase('en-US');
 
 export function likelyTwin(s: Pick<State, 'deals'>, want: { name: string; counterparty?: string }, room: RoomMatch[] = []): Twin | null {
   const name = key(withProject(cleanName(want.name))); const cp = key(want.counterparty ?? '');

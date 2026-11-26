@@ -17,7 +17,8 @@ const room = subjects.filter((s) => !MISSING.some((m) => s.includes(m))).map((s,
 const reply = (c: Call) => ({ items: itemsIn(c).map((it) => { const has = room.some((d) => it.text.includes(d.name.slice(0, -4)) && c.prompt.includes(`/${d.name}`)); return { id: it.tag, ...(has ? OK(c) : { result: 'more', need: 'the agreement itself' }) }; }) });
 
 it('on the 2,400-item checklist every item a check leaves open goes to the chat agent once, four to a run, and the deal\'s search calls stop it', async () => {
-  // the deal's search calls set high enough that nothing stops the handing over; the agent's search helper picks nothing, as when nothing is there
+  // the deal's search calls set high enough that nothing stops the handing over; the agent's search helper finds
+  // nothing in a page it reads, as when nothing is there
   const fill = (c: Call) => (c.system?.includes('You work in turns') ? { text: 'Nothing in the data room settles them.', sources: [] } : c.prompt.includes('Which of them should be read for this?') ? { read: [] } : { text: '', sources: [] });
   const s = setup(reply, { d1: room }, { checklist: () => ({ broad: items, product: [], sector: [] }), checkSearchCalls: 100_000, fill }); await deal(s.repo);
   const t = performance.now(); const r = val(await s.ai.firstPass('d1')); const ms = performance.now() - t;
