@@ -211,7 +211,7 @@ export function QaPage({ dealId }: { dealId: string }) {
 
   return (
     <div class={`home top wide qapage ${tuck ? 'tuck' : ''}`} style={tuck ? `--tuck:${tuck}px` : undefined}>
-      <PageTop deal={d} route="qa" noAsk={!!sel} placeholder="Ask what is still open, or type “log a question: …”" />
+      <PageTop deal={d} route="qa" noAsk={!!sel} placeholder="Ask what is still open, or type “add a question: …”" />
       {sel && (s.conflicts[sel.id]
         ? <ConflictPanel key={sel.id} q={sel} busy={adding} onClose={close} onKeyDown={escClose} />
         : <Detail q={sel} busy={adding} onClose={close} onKeyDown={escClose} pos={selAt + 1} of={list.length} step={step} nextId={(list[selAt + 1] ?? list[selAt - 1])?.id ?? null} onDeleted={(id) => { back.current = { id, to: store.get().ui.selectedQuestion }; }} />)}
