@@ -5,12 +5,14 @@
  * the person checks "Keep separate". Every other point is listed under "New findings", read only, with the title and
  * workstream the model gave it. Nothing is recorded until Import.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import type { ComponentChildren } from 'preact';
+import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { useAppState, useStore } from './hooks';
 import { Icon } from './icons';
 import { Modal, LeaveFoot } from './dialogs';
 import { num, plural } from './counts';
-import { FileInput, PickFileRow } from './fileDrop';
+import { FileInput, PasteNext, PasteRow, PickFileRow } from './fileDrop';
+import { pastedLineCount } from '../app/listRead';
 import { showTip, hideTip } from './tip';
 import {
   issuesListTitle, readIssuesList, readPastedIssuesList, reviewIssuesList, type ReadIssuesList,
@@ -101,35 +103,13 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
     setKept(new Set());
   };
   const read = (file: File) => void load(file.name, (current) => readIssuesList(store, dealId, file, current));
-  // the paste listener calls the latest load, so it sees the state of the render at the paste
-  const loadNow = useRef(load);
-  loadNow.current = load;
-  // text pasted (Ctrl+V) while no list is read is the list, as a pasted checklist is
-  useEffect(() => {
-    if (list) return;
-    const onPaste = (event: ClipboardEvent) => {
-      const text = event.clipboardData?.getData('text/plain') ?? '';
-      if (!text.trim()) return;
-      event.preventDefault();
-      void loadNow.current('the pasted list', (current) => readPastedIssuesList(store, dealId, text, current));
-    };
-    document.addEventListener('paste', onPaste);
-    return () => document.removeEventListener('paste', onPaste);
-  }, [list, store, dealId]);
+  const pasted = (text: string) => void load('the pasted list',
+    (current) => readPastedIssuesList(store, dealId, text, current));
   const pick = <FileInput id="il-file" accept={ACCEPT} inputRef={fileRef} onFile={read} />;
   const browse = () => fileRef.current?.click();
 
-  if (!list) return (
-    <Modal onClose={close} label="Import an issues list" blur className="sdlg imdlg ilf">
-      <Head onClose={close} />
-      <PickFileRow dropId="il-drop" errorId="il-error" error={error} onFile={read}>
-        Drop or paste the list here, or{' '}
-        <button type="button" class="linkb" id="il-browse" onClick={browse}>choose a file…</button>
-        {pick}
-      </PickFileRow>
-      {busy === 'reading' && <div class="xfoot"><span>Reading the list</span></div>}
-    </Modal>
-  );
+  if (!list) return <PickStep keyName={KEY} fresh={afresh} error={error} reading={busy === 'reading'} onFile={read}
+    onPaste={pasted} onClose={close} browse={browse}>{pick}</PickStep>;
 
   const { points } = list;
   const { shown, raised, fresh, input } = reviewIssuesList(s, dealId, list, kept);
@@ -172,6 +152,51 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
         : restart ? <LeaveFoot id="il-restart-ask" ask="Clear this import and start over?" go="Start Over"
           keep={() => setRestart(false)} leave={startOver} />
         : <div class="xfoot"><span id="il-line" class={error ? 'err' : ''} role={error ? 'alert' : undefined}>{error || (busy === 'reading' ? 'Reading the list' : busy === 'importing' ? 'Importing' : plural(fresh.length, 'new finding'))}</span><span class="grow" /><button class="btn sm pri" type="button" id="il-go" disabled={!!busy} onClick={() => void run()}>Import</button></div>}
+    </Modal>
+  );
+}
+
+/** a paste typed into the box and not yet read, as it was kept on this PC; nothing if what was kept is not text */
+const keptPaste = (key: string) => {
+  const paste = keptImport(key)?.paste;
+  return typeof paste === 'string' ? paste : '';
+};
+
+interface PickProps {
+  keyName: string;
+  /** opened past a kept import it could not show: the paste kept with it is not shown either */
+  fresh: boolean;
+  error: string;
+  reading: boolean;
+  onFile: (file: File) => void;
+  onPaste: (text: string) => void;
+  onClose: () => void;
+  browse: () => void;
+  /** the hidden file input */
+  children: ComponentChildren;
+}
+
+/** Step 1: a file, or the list pasted into the box and sent with Next, as a checklist is pasted (firmChecklistSteps) */
+function PickStep({ keyName, fresh, error, reading, onFile, onPaste, onClose, browse, children }: PickProps) {
+  const [paste, setPaste] = useState(() => (fresh ? '' : keptPaste(keyName)));
+  // what is typed in the box is kept on this PC as it changes, so closing, a reload or a restart loses none of it
+  useLayoutEffect(() => {
+    if (paste.trim() || (!fresh && keptPaste(keyName))) keepImport(keyName, { paste });
+  }, [keyName, fresh, paste]);
+  const lines = pastedLineCount(paste);
+  const line = reading ? 'Reading the list' : lines ? plural(lines, 'line') : '';
+  return (
+    <Modal onClose={onClose} label="Import an issues list" blur className="sdlg imdlg ilf">
+      <Head onClose={onClose} />
+      <PickFileRow dropId="il-drop" errorId="il-error" error={error} onFile={onFile}>
+        Drop a file here, or{' '}
+        <button type="button" class="linkb" id="il-browse" onClick={browse}>choose a file…</button>
+        {children}
+      </PickFileRow>
+      <PasteRow id="il-paste" value={paste} onInput={setPaste} />
+      <div class="xfoot"><span id="il-line">{line}</span><span class="grow" />
+        <PasteNext id="il-paste-next" lines={lines} busy={reading} onNext={() => onPaste(paste)} />
+      </div>
     </Modal>
   );
 }

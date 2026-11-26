@@ -1,6 +1,6 @@
 // Reading a list in: every line accounted for, lines left unplaced asked about again, then of the thorough model.
 import { describe, it, expect } from 'vitest';
-import { readList } from '../../src/app/listRead';
+import { pastedLineCount, readList } from '../../src/app/listRead';
 import { tieOut, textLines, type LineRead } from '../../src/domain/listRead';
 import { mockAi } from '../../src/adapters/mocks';
 import { ok, fail } from '../../src/domain/result';
@@ -47,5 +47,16 @@ describe('the stand-in reading the mock-up list', () => {
     expect(t.items.map((i) => unnumbered(i.section ?? ''))).toEqual(ITEMS.map((i) => i.s));
     expect(t.left.map((n) => lines[n - 1].trim())).toEqual(LEFT_OUT);
     const c = t.count; expect(c.items + c.more + c.headings + c.blank + c.left).toBe(lines.length);
+  });
+});
+
+describe('pastedLineCount', () => {
+  it('counts no lines in an empty box or one of spaces, so Next stays off', () => {
+    expect(pastedLineCount('')).toBe(0);
+    expect(pastedLineCount(' \n\t ')).toBe(0);
+  });
+
+  it('counts every line of a paste, as the paste step shows it', () => {
+    expect(pastedLineCount('Comments\r\n1. Fees letter\n2. Hedging policy')).toBe(3);
   });
 });
