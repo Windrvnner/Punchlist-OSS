@@ -4,7 +4,7 @@
  *
  * What is kept for a document: how often it uses each word of any length (filler words left out, numbers
  * kept, plurals folded, no word order), how many words it has, and its title: the first 40 words of its first page.
- * Kept in this PC's local folder as one line per document in words2-<deal id>.jsonl, written once when the document is
+ * Kept in this PC's local folder as one line per document in words3-<deal id>.jsonl, written once when the document is
  * read and never changed; a later line for the same document replaces an earlier one.
  *
  * How a document answers to some words: each word counts by how rare it is in the deal (BM25's idf),
@@ -99,7 +99,7 @@ function weightOf(e: Scored, w: string, avgLength: number): number {
 export function wordIndex(local: Folder): WordIndex {
   const deals = new Map<string, DealIndex>();
   // the name carries the index's version: an index built under older rules is not read, so each document is read again
-  const file = (dealId: string) => `words2-${dealId}.jsonl`;
+  const file = (dealId: string) => `words3-${dealId}.jsonl`;
   const put = (ix: DealIndex, l: Line) => {
     const was = ix.num.get(l.d);
     if (was !== undefined) { ix.alive[was] = false; ix.words[was] = ''; ix.total -= ix.length[was]; ix.live--; }      // a document read again: its old words go
