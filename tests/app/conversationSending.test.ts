@@ -126,6 +126,16 @@ it('runs slash commands only when picked, and asks the model everything typed (#
   expect(Object.values(store.get().questions)).toHaveLength(1);
 });
 
+it('asks the model "Add question marks to the summary" and logs nothing (#1112)', async () => {
+  const { store, scope, navigate, asked } = await start();
+  const key = convKey(scope);
+  setComposerText(key, 'Add question marks to the summary');
+  await sendTyped(store, scope, { navigate });
+  expect(asked).toHaveBeenCalledOnce();
+  expect(store.get().threads[key][0].text).toBe('Add question marks to the summary');
+  expect(Object.values(store.get().questions)).toHaveLength(0);
+});
+
 it('waits for pending attachments, checks new files, and sends the latest text only once', async () => {
   let release!: () => void;
   const hold = new Promise<void>((resolve) => { release = resolve; });
@@ -321,6 +331,19 @@ it('logs a refused command alone after the text typed during its save was edited
   await sendTyped(store, scope, { navigate });
   expect(Object.values(store.get().questions).map((question) => question.text)).toEqual([instructions[70]]);
   expect(composerText(key)).toBe('What is the revenue?');
+});
+
+it('logs a refused question that is left alone in its box once the text after it is deleted (#955)', async () => {
+  const { store, scope, navigate, asked } = await start();
+  const key = convKey(scope);
+  const command = instructions[90];
+  await refusedWhileTyping(store, scope, command, 'What is the revenue?');
+  setComposerText(key, `${command}\n`);
+  expect(showsLogQuestion(key, composerText(key))).toBe(true);
+  await sendTyped(store, scope, { navigate });
+  expect(Object.values(store.get().questions).map((question) => question.text)).toEqual([command]);
+  expect(asked).not.toHaveBeenCalled();
+  expect(composerText(key)).toBe('');
 });
 
 it('asks the model, and drops the chip, once the refused question no longer heads the box (#1054)', async () => {

@@ -73,11 +73,15 @@ export function takeFromBox(key: string, text: string): { send: string; rest: st
   return { send: head, rest: text.slice(head.length).trim(), held: true };
 }
 
-/** The remembered commands that still stand, unchanged and in order, at the head of the box, each followed by more. */
+/**
+ * The remembered commands that still stand, unchanged and in order, at the head of the box, each followed by more or
+ * left alone in it once the text after it was deleted (#955).
+ */
 function commandsAtHead(text: string, commands: string[]): string[] {
   const standing: string[] = [];
   let rest = text;
   for (const command of commands) {
+    if (rest === command) return [...standing, command];
     if (!rest.startsWith(`${command}\n\n`)) break;
     standing.push(command);
     rest = rest.slice(command.length + 2);
