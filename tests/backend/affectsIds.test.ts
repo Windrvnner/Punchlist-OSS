@@ -29,7 +29,8 @@ describe('the fast model names what new documents affect by permanent ids (#1162
   it('lists each new document by its docId, each finding by its id and each settled item by its id', async () => {
     const { s } = await arrive(() => ({ affected: [] }));
     const prompt = s.affectCalls[0].prompt;
-    expect(prompt).toContain(`\n${NOTICE.docId}: vdr/Offtake notice.pdf — Notice terminating the offtake agreement.\n`);
+    const notice = 'vdr/Offtake notice.pdf — Notice terminating the offtake agreement.';
+    expect(prompt).toContain(`\n${NOTICE.docId}: ${notice}\n`);
     expect(prompt).toContain('\nf_1: Offtake may end early\n');
     expect(prompt).toContain('\ni1: The offtake agreement is signed\ni2: The margin is agreed\n');
     expect(prompt).not.toMatch(/^[NFC]\d+: /m);

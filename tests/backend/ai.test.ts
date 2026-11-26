@@ -1928,14 +1928,24 @@ describe('when something changes', () => {
   it('new documents are followed through: the fast model says what they could affect, and a finding that no longer stands is marked for a person', async () => {
     const recs = { d1: [FA, TS, IM, MODEL] }; const NOTICE = doc(30, 'Offtake termination notice.pdf', { rel: 'Notes/Offtake termination notice.pdf', pages: 2, summary: 'Notice terminating the offtake agreement.' });
     let stands = false;
-    const s = setup(twelve(), recs, { checklist: () => TWELVE, affects: (c) => affectedAs(c, 'F1', 'C7'), verify: () => ({ stands, why: 'The offtake has been terminated.' }) }); await deal(s.repo);
+    const s = setup(twelve(), recs, { checklist: () => TWELVE, affects: (c) => affectedAs(c, 'F1', 'C7'),
+      verify: () => ({ stands, why: 'The offtake has been terminated.' }) });
+    await deal(s.repo);
     const first = val(await s.ai.firstPass('d1')); expect(first.written.length).toBe(1); expect(first.marked).toEqual([]); expect(s.affectCalls.length + s.verifyCalls.length).toBe(0);   // nothing has changed yet: nothing to follow
     const f1 = first.written[0]; const n1 = s.calls.length; recs.d1.push(NOTICE);
     const next = val(await s.ai.firstPass('d1'));
     expect(s.affectCalls.map((c) => [c.model, c.files.length])).toEqual([['fast', 0]]);
-    expect(s.affectCalls[0].prompt).toContain('vdr/Notes/Offtake termination notice.pdf — Notice terminating the offtake agreement.'); expect(s.affectCalls[0].prompt).toContain(`${f1}: Lock-up ratio differs between the credit agreement and the term sheet`);
-    expect(s.affectCalls[0].prompt).toContain('i2: Point 2 of the finance documents is in order'); expect(s.affectCalls[0].prompt).not.toContain('The lock-up ratio is the same');   // an item with a finding is the finding's business
-    expect(s.calls.slice(n1).map((c) => [c.model, itemsIn(c).map((it) => it.text).join()])).toEqual([['fast', 'Point 8 of the finance documents is in order']]);      // i8: no word in common with the notice, but the fast model saw the link. It still comes out satisfied, so the standard model is not asked
+    const notice = 'vdr/Notes/Offtake termination notice.pdf — Notice terminating the offtake agreement.';
+    expect(s.affectCalls[0].prompt).toContain(notice);
+    const lockUp = 'Lock-up ratio differs between the credit agreement and the term sheet';
+    expect(s.affectCalls[0].prompt).toContain(`${f1}: ${lockUp}`);
+    expect(s.affectCalls[0].prompt).toContain('i2: Point 2 of the finance documents is in order');
+    // an item with a finding is the finding's business
+    expect(s.affectCalls[0].prompt).not.toContain('The lock-up ratio is the same');
+    // i8: no word in common with the notice, but the fast model saw the link. It still comes out satisfied, so the
+    // standard model is not asked
+    expect(s.calls.slice(n1).map((c) => [c.model, itemsIn(c).map((it) => it.text).join()]))
+      .toEqual([['fast', 'Point 8 of the finance documents is in order']]);
     expect(s.verifyCalls.map((c) => c.model)).toEqual(['fast', 'standard']); expect(sentNames(s.verifyCalls[1])).toEqual(expect.arrayContaining(['Credit Agreement.pdf', 'Term sheet (signed).pdf', 'Offtake termination notice.pdf']));   // the finding's own documents and the new one
     expect(next.marked).toEqual([f1]); expect(s.announced).toContain(f1);
     expect(await findingData(s.repo, f1)).toMatchObject({ updated: true, updatedWhy: 'Offtake termination notice.pdf arrived', status: 'open', reviewed: null, body: ['The draft sets it at 1.25x. [1]', 'The term sheet has 1.30x. [2]'] });   // marked, and not a word of it changed
@@ -1981,7 +1991,11 @@ describe('when something changes', () => {
   });
 
   it('the fast model’s doubt alone marks nothing, and when it says nothing is affected a shared word sets off nothing', async () => {
-    const recs = { d1: [FA, TS, IM, MODEL] }; const s = setup(twelve(), recs, { checklist: () => TWELVE, affects: (c, n) => (n === 1 ? affectedAs(c, 'F1') : { affected: [] }), verify: (c) => ({ stands: c.model !== 'fast', why: '' }) }); await deal(s.repo);
+    const recs = { d1: [FA, TS, IM, MODEL] };
+    const s = setup(twelve(), recs, { checklist: () => TWELVE,
+      affects: (c, n) => (n === 1 ? affectedAs(c, 'F1') : { affected: [] }),
+      verify: (c) => ({ stands: c.model !== 'fast', why: '' }) });
+    await deal(s.repo);
     const f1 = val(await s.ai.firstPass('d1')).written[0]; recs.d1.push(doc(35, 'Lock-up waiver letter.pdf', { summary: 'Lenders waive the lock-up ratio test.' }));
     expect(val(await s.ai.firstPass('d1')).marked).toEqual([]); expect(s.verifyCalls.map((c) => c.model)).toEqual(['fast', 'standard']); expect((await findingData(s.repo, f1)).updated ?? false).toBe(false);
     const n = s.calls.length; const v = s.verifyCalls.length; recs.d1.push(doc(36, 'Finance documents index.pdf', { summary: 'Index of the finance documents and the lock-up ratio, point by point.' }));
@@ -1990,7 +2004,10 @@ describe('when something changes', () => {
 
   it('one batch of new documents is one question; everything it is said to affect is looked at, by the fast model first; and nothing written sets off more', async () => {
     const recs = { d1: [FA, TS, IM, MODEL] };
-    const s = setup(twelve(), recs, { checklist: () => TWELVE, affects: (c) => affectedAs(c, 'F2', 'F1', 'F3', 'C4', 'C1', 'C9', 'C2', 'C6', 'C11'), verify: (c) => ({ stands: !c.prompt.includes('Second finding'), why: '' }) }); await deal(s.repo);
+    const s = setup(twelve(), recs, { checklist: () => TWELVE,
+      affects: (c) => affectedAs(c, 'F2', 'F1', 'F3', 'C4', 'C1', 'C9', 'C2', 'C6', 'C11'),
+      verify: (c) => ({ stands: !c.prompt.includes('Second finding'), why: '' }) });
+    await deal(s.repo);
     const f1 = val(await s.ai.firstPass('d1')).written[0];
     await finding(s.repo, 'f_two', 'Second finding', { sources: [{ doc: IM.name, loc: 'p. 2', docId: IM.docId }] }); await finding(s.repo, 'f_three', 'Third finding', { sources: [{ doc: FA.name, loc: 'p. 9', docId: FA.docId }] });
     const n = s.calls.length; recs.d1.push(doc(40, 'Board pack.pdf', { summary: 'Everything at once.' }), doc(41, 'Second pack.pdf', { summary: 'More of everything.' }));
@@ -2218,9 +2235,15 @@ describe('when something changes', () => {
     expect(val(await none.ai.responses('d1'))).toEqual({ heard: [], marked: [] }); expect(none.svc.calls.length).toBe(1);
     // a finding raised afterwards: the same response is put to the fast model again, against that finding only
     await finding(none.repo, 'f_2', 'Hedging not approved'); expect(val(await none.ai.responses('d1')).heard).toEqual(['q_12']); expect(none.hearCalls.length).toBe(2);
-    expect(none.hearCalls[1].prompt).toContain('f_2: Hedging not approved'); expect(none.hearCalls[1].prompt).not.toContain('Lock-up differs'); expect(val(await none.ai.responses('d1')).heard).toEqual([]);
+    expect(none.hearCalls[1].prompt).toContain('f_2: Hedging not approved');
+    expect(none.hearCalls[1].prompt).not.toContain('Lock-up differs');
+    expect(val(await none.ai.responses('d1')).heard).toEqual([]);
     // the fast model doubts, the standard model does not: nothing is marked
-    const doubt = setup(() => ({}), undefined, { hears: () => ({ affected: ['f_1'] }), verify: (c) => ({ stands: c.model !== 'fast', why: '' }) }); await deal(doubt.repo); await finding(doubt.repo, 'f_1', 'Lock-up differs', { sources: src }); val(await question(doubt.repo, 'q_12', q12));
+    const doubt = setup(() => ({}), undefined, { hears: () => ({ affected: ['f_1'] }),
+      verify: (c) => ({ stands: c.model !== 'fast', why: '' }) });
+    await deal(doubt.repo);
+    await finding(doubt.repo, 'f_1', 'Lock-up differs', { sources: src });
+    val(await question(doubt.repo, 'q_12', q12));
     expect(val(await doubt.ai.responses('d1'))).toEqual({ heard: ['q_12'], marked: [] });
     expect(doubt.verifyCalls.map((c) => c.model)).toEqual(['fast', 'standard']);
     // named with no question: the response in the call goes beside it

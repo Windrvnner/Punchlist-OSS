@@ -5,7 +5,9 @@
 // for an item whose first one had not synced yet. At deal scale: 2,000 checklist items and 300 documents.
 import { describe, it, expect } from 'vitest';
 import { view, docsHash, findingIdFor } from '../../src/backend/rounds';
-import { setup, doc, val, deal, finding, Mem, itemsIn, OK, checkLines, type Call, nth, affectsShown } from './reviewKit';
+import {
+  setup, doc, val, deal, finding, Mem, itemsIn, OK, checkLines, type Call, nth, affectsShown,
+} from './reviewKit';
 import { dealList } from './dealList';
 import { paths } from './fixtures/relecloudRoom';
 
