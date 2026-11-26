@@ -33,48 +33,68 @@ export type AskedCandidate = { point: Unresolved; q: Question; confidence: numbe
 /** What a point says to the model: its wording, and what it needs when it says so. */
 export const pointText = (point: Unresolved) => (point.need ? `${point.what} — needed: ${point.need}` : point.what);
 
+/** The exact links a person approved that still hold, by point key: each question is kept for one point only. */
+function keepApproved(points: Unresolved[], pool: Question[], approved?: ApprovedLinks) {
+  const kept = new Map<string, Question>();
+  if (!approved?.size) return kept;
+  const available = new Map(pool.map((q) => [q.id, q]));
+  const taken = new Set<string>();
+  for (const point of points) {
+    const choice = approved.get(point.key);
+    const q = choice && available.get(choice.questionId);
+    if (!q || taken.has(q.id) || !isApprovedLink({ point, q }, choice)) continue;
+    kept.set(point.key, q);
+    taken.add(q.id);
+  }
+  return kept;
+}
+
+/** A question is a candidate for one point only: the one that names most of its words (the earlier on a tie). */
+function strongestPerQuestion(points: Unresolved[], pool: Question[], cutoff: number) {
+  const match = askedMatcher(pool);
+  const best = new Map<string, AskedCandidate>();
+  for (const point of points) {
+    const found = match(`${point.what} ${point.need}`);
+    if (!found || found.confidence < cutoff) continue;
+    const rival = best.get(found.q.id);
+    if (!rival || found.confidence > rival.confidence) {
+      best.set(found.q.id, { point, q: found.q, confidence: found.confidence });
+    }
+  }
+  return [...best.values()];
+}
+
 /**
  * Where each unresolved point's offer comes from (#1218). The exact links a person approved are kept first. Every other
  * point gets its best-matching open question as a candidate only when the match's confidence reaches `cutoff`
- * (`limits.askedCutoff`); a question is a candidate for one point only, the one it names most of the words of.
- * The model is asked about the candidates (`confirmedLinks`), never about a match below the cutoff.
+ * (`limits.askedCutoff`). The model is asked about the candidates (`confirmedLinks`), never about a match below it.
  */
 export function askedCandidates(
   points: Unresolved[], pool: Question[], approved?: ApprovedLinks, cutoff = control.limits.askedCutoff,
 ) {
-  const kept = new Map<string, Question>();
-  const taken = new Set<string>();
-  if (approved?.size) {
-    const available = new Map(pool.map((q) => [q.id, q]));
-    for (const point of points) {
-      const choice = approved.get(point.key);
-      const q = choice && available.get(choice.questionId);
-      if (!q || taken.has(q.id) || !isApprovedLink({ point, q }, choice)) continue;
-      kept.set(point.key, q);
-      taken.add(q.id);
-    }
-  }
-  const match = askedMatcher(pool.filter((q) => !taken.has(q.id)));
-  const best = new Map<string, AskedCandidate>();
-  for (const point of points) {
-    const found = kept.has(point.key) ? undefined : match(`${point.what} ${point.need}`);
-    const rival = found && best.get(found.q.id);
-    if (!found || found.confidence < cutoff || (rival && rival.confidence >= found.confidence)) continue;
-    best.set(found.q.id, { point, q: found.q, confidence: found.confidence });
-  }
+  const kept = keepApproved(points, pool, approved);
+  const taken = new Set([...kept.values()].map((q) => q.id));
+  const open = points.filter((point) => !kept.has(point.key));
   const order = new Map(points.map((point, index) => [point.key, index]));
-  const candidates = [...best.values()].sort((a, b) => order.get(a.point.key)! - order.get(b.point.key)!);
-  return { kept: points.flatMap((point) => (kept.has(point.key) ? [{ point: point.key, q: kept.get(point.key)! }] : [])), candidates };
+  const candidates = strongestPerQuestion(open, pool.filter((q) => !taken.has(q.id)), cutoff)
+    .sort((a, b) => order.get(a.point.key)! - order.get(b.point.key)!);
+  const links = points.flatMap((point) => {
+    const q = kept.get(point.key);
+    return q ? [{ point: point.key, q }] : [];
+  });
+  return { kept: links, candidates };
 }
 
 /**
  * The candidates the model says already cover their point. A model that is missing, fails, or gives no answer for a
- * pair makes no offer for it: the point is then asked as a new question. Nothing is linked here; a person ticks each one.
+ * pair makes no offer for it: the point is then asked as a new question. Nothing is linked here; a person ticks
+ * each one.
  */
 export async function confirmedLinks(ai: AiService, dealId: string, candidates: AskedCandidate[]) {
   if (!candidates.length || !ai.covers) return [];
   const checks = candidates.map(({ point, q }) => ({ point: pointText(point), question: q.text }));
   const verdicts = await ai.covers({ dealId, checks });
   if (!verdicts.ok) return [];
-  return candidates.filter((_, index) => verdicts.value[index] === true).map(({ point, q }) => ({ point: point.key, q }));
+  const confirmed = candidates.filter((_, index) => verdicts.value[index] === true);
+  return confirmed.map(({ point, q }) => ({ point: point.key, q }));
 }

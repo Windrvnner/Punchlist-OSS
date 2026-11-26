@@ -366,8 +366,8 @@ export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => 
       : share >= 1 / 3 ? { verdict: 'partly' as const, why: 'It gives some of what the question asks for, not all of it.' }
       : { verdict: 'no' as const, why: 'It does not give what the question asks for.' };
   }),
-  // Stand-in for the model's check of an Already Asked? pair: a question covers a point when it names two thirds or more
-  // of the point's telling words. The real one is a model's judgment of whether answering the question settles the point.
+  // Stand-in for the model's check of an Already Asked? pair: a question covers a point when it names two thirds or
+  // more of the point's telling words. The real one judges whether answering the question settles the point.
   covers: (i) => gate(opts, 'covers', () => i.checks.map(({ point, question }) => {
     const own = [...tellingWords(point)]; const named = tellingWords(question);
     return own.length > 0 && own.filter((w) => named.has(w)).length / own.length >= 2 / 3;

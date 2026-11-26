@@ -138,7 +138,7 @@ describe('the firm’s checklist and each deal’s items', () => {
     const got = unresolvedPoints(st(), a);
     // the model gap has a question already; the finding and two gaps do not
     expect(got.points.map((p) => [p.kind, p.what])).toEqual([['finding', f.title], ['gap', texts[0]], ['gap', texts[1]]]);
-    // no link is approved yet; the insurance gap's question names all its words, so it is a candidate for the model's check
+    // no link is approved yet; the insurance gap's question names all its words: a candidate for the model's check
     expect(got.links).toEqual([]);
     expect(got.candidates.map((c) => [c.point.key, c.q.n, c.confidence])).toEqual([['i:' + insurance, 1, 100]]);
     // a turned-off item keeps its last result in the rows, but is not offered (as the Checklist page drops it), nor is a finding raised on it

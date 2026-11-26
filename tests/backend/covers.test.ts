@@ -1,6 +1,7 @@
 // @vitest-environment node
-// The model's check of an Already Asked? pair (#1218): whether an open question already asks for what an unresolved point
-// lacks. The model sees each pair under a neutral tag only; code takes an answer only for a tag that was offered, once.
+// The model's check of an Already Asked? pair (#1218): whether an open question already asks for what an unresolved
+// point lacks. The model sees each pair under a neutral tag only; code takes an answer only for a tag that was
+// offered, once.
 import { describe, it, expect } from 'vitest';
 import { setup, val, Mem, type Call } from './reviewKit';
 
@@ -35,7 +36,8 @@ describe('covers: does an open question already ask for what a point lacks', () 
   it('takes no answer for a tag it did not offer, or one named twice, or one that is not true or false', async () => {
     const { ask } = run((c) => {
       const [a, b] = tagsIn(c);
-      return { items: [{ id: 'zzz', covers: true }, { id: a, covers: true }, { id: a, covers: false }, { id: b, covers: 'yes' }] };
+      const items = [{ id: 'zzz', covers: true }, { id: a, covers: true }, { id: a, covers: false }];
+      return { items: [...items, { id: b, covers: 'yes' }] };
     });
     expect(val(await ask())).toEqual([null, null, null]);
   });

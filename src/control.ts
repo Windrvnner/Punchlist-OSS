@@ -287,7 +287,13 @@ const SPEC = {
     compactShare: count(80, 'Percent of limits.inputTokens at which a long conversation is compacted, when that comes before limits.compactAt.', 30, 95),
     partShare: count(60, 'Percent of limits.outputTokens, and of limits.inputTokens, that a batch of items is sized to fill. The rest is margin: what an item takes is only estimated, and the prompt\'s own words and documents also count.', 20, 95),
     checkReplyTokens: count(250, 'About how many tokens the standard model\'s reply on one checklist item takes (a place and its quote, or a finding written up), to size a check\'s batches.', 10, 5_000),
-    glanceReplyTokens: count(20, 'The same for the fast model\'s quick look at one item, and for the standard model\'s check of one Already Asked? pair.', 5, 1_000),
+    glanceReplyTokens: count(
+      20,
+      'The same for the fast model\'s quick look at one item, and for the standard model\'s check of one ' +
+        'Already Asked? pair.',
+      5,
+      1_000,
+    ),
     rewordReplyTokens: count(80, 'The same for one item\'s new wording on import.', 10, 2_000),
     readLineTokens: count(40, 'The same for what one line of a list brought in is (a heading, an item and its words, or not an item).', 5, 1_000),
     phraseReplyTokens: count(80, 'The same for one question to the counterparty drafted by Add all unresolved.', 10, 2_000),
@@ -295,7 +301,15 @@ const SPEC = {
     charsPerToken: count(3, 'Characters taken as one token when the app counts the text it sends (English averages about four, so three counts on the high side).', 1, 8),
     chatTurns: count(25, 'About how many turns the chat agent takes before it answers with what it has.', 1, 100),
     aiRetries: count(2, 'Times an AI call that failed, or gave an empty reply, is asked again quietly before the failure is shown. A service that cannot be reached is waited for instead.', 0, 5),
-    askedCutoff: count(80, "Percent of an unresolved point's telling words that an open question must name before the model is asked whether it already asks for the point (Add All Unresolved's Already Asked?). Below it no call is made and nothing is offered; at 50 a question naming half the point's words is checked, at 100 only one naming every word.", 50, 100),
+    askedCutoff: count(
+      80,
+      "Percent of an unresolved point's telling words that an open question must name before the model is asked " +
+        "whether it already asks for the point (Add All Unresolved's Already Asked?). Below it no call is made and " +
+        "nothing is offered; at 50 a question naming half the point's words is checked, at 100 only one naming " +
+        'every word.',
+      50,
+      100,
+    ),
     searchCalls: count(15, 'About how many calls one search run makes before it returns what it found.', 1, 50),
     checkSearchCalls: count(1000, "Most calls the checks' search for documents makes on one PC for one deal, counted afresh each time this PC takes up a check or a new share of one, each quiet retry counted as a call; past it, documents are picked as they were before searches.", 0, 100_000),
     sameFolder: count(70, "Percent of what is recorded in a deal folder that a PC must find unchanged in its copy before what it does not find there (deleted, or a new version saved over it) leaves the deal for every PC. Below it, the PC takes away only what it had seen itself, so a PC with part of a folder takes nothing from the others.", 51, 100),
