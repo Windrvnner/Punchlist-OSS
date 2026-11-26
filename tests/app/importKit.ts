@@ -2,12 +2,14 @@
 import { Store } from '../../src/app/store';
 import { memRepo, disk } from '../adapters/memRepo';
 import { MemoryLocal } from '../../src/adapters/local';
-import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
+import { csvCodec } from '../../src/adapters/spreadsheet';
+import { readCsv } from '../../src/domain/sheets';
 import { mockAi, mockDocuments, mockSession } from '../../src/adapters/mocks';
 import { CreateDeal } from '../../src/app/commands/deals';
-import { CreateQuestion, SetResponse, DeleteQuestion, RestoreQuestion, EditQuestionField, SetQuestionStatus }
-  from '../../src/app/commands/questions';
-import { CreateFinding, DeleteFinding, RestoreFindingSnapshot } from '../../src/app/commands/findings';
+import {
+  CreateQuestion, SetResponse, DeleteQuestion, RestoreQuestion, EditQuestionField, SetQuestionStatus, UseAsResponse,
+} from '../../src/app/commands/questions';
+import { CreateFinding, DeleteFinding, EditFinding, RestoreFindingSnapshot } from '../../src/app/commands/findings';
 import { ImportQuestions, RevertImport } from '../../src/app/commands/importQuestions';
 import { RestoreQuestionSnapshot } from '../../src/app/commands/drafts';
 import { registry } from '../../src/app/commands/undo';
@@ -15,7 +17,7 @@ import { prepareImport, suggestMapping } from '../../src/domain/importExport';
 
 const COMMANDS = [CreateDeal, CreateQuestion, SetResponse, DeleteQuestion, RestoreQuestion, EditQuestionField,
   SetQuestionStatus, CreateFinding, DeleteFinding, RestoreFindingSnapshot, ImportQuestions, RevertImport,
-  RestoreQuestionSnapshot];
+  RestoreQuestionSnapshot, EditFinding, UseAsResponse];
 for (const c of COMMANDS) registry.set(c.name, c);
 let t = 0; const clock = { now: () => new Date(Date.UTC(2026, 10, 9, 10, 0, 0, t++)).toISOString() };
 let seq = 0; const ids = { next: (p: string) => `${p}_01HZZZZZZZZZZZZZZZZ${String(seq++).padStart(7, '0')}` };

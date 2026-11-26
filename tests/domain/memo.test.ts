@@ -173,7 +173,9 @@ describe('the deal memo’s content', () => {
     const sources = [{ doc: 'Financial model.xlsx', docId: 'doc_2', loc: 'Inputs!F22' }, { doc: 'Technical advisor report.pdf', docId: 'doc_1', loc: 'p. 41' }];
     const groups = [{ title: '  Debt is sized on a yield the advisor does not support ', findings: [a.id, b.id, closed.id, 'f_gone'], body: ['The base case uses 2,085. [1] The advisor supports 2,010. [2]', 'The model has no P90 case. [1]'], sources }, { title: 'Again', findings: [a.id] }];
     const m = memoContent(input({ findings: [a, b, c, d, closed], questions: qs, ratings, groups, keyRisks: 2 }));
-    expect(m.risks.map((r) => [r.rating, r.title, r.workstream])).toEqual([['High', 'Debt is sized on a yield the advisor does not support', 'Financial, Technical'], ['Medium', 'Lock-up differs', 'Legal']]);
+    const debt = '  Debt is sized on a yield the advisor does not support ';
+    const risks = m.risks.map((r) => [r.rating, r.title, r.workstream]);
+    expect(risks).toEqual([['High', debt, 'Financial, Technical'], ['Medium', 'Lock-up differs', 'Legal']]);
     expect(m.risks[0].paras).toEqual([[{ text: 'The base case uses 2,085.', refs: [1] }, { text: ' ', refs: [] }, { text: 'The advisor supports 2,010.', refs: [2] }], [{ text: 'The model has no P90 case.', refs: [1] }]]);
     expect(m.refs).toEqual(['Financial model, Inputs!F22', 'Technical advisor report, p. 41']);
     // what is still open, from every finding in it: only the unanswered
@@ -199,5 +201,16 @@ describe('the deal memo’s content', () => {
     const f = finding('F', { body: ['Fact. [1]'], sources: [{ doc: 'x.pdf', docId: 'doc_3', loc: 'p. 1' }], next: 'You should renegotiate.' });
     const text = JSON.stringify(memoContent(input({ findings: [f], ratings: { [f.id]: 'Medium' }, checklist: [{ text: 'a', list: 'General', kind: 'gap' }] })));
     expect(text).not.toMatch(/\b(should|recommend|suggest|advise|consider|next step|mitigant)\b/i);
+  });
+
+  it('keeps a group title and a workstream as given, white space included', () => {
+    const a = finding('A', { workstream: ' Legal' });
+    const groups = [{ title: ' Two  spaces\t', findings: [a.id], body: [' A written paragraph.\t', ' ', 'Another.'] }];
+    const m = memoContent(input({ findings: [a], ratings: { [a.id]: 'High' }, groups }));
+    expect(m.risks[0].title).toBe(' Two  spaces\t');
+    expect(m.risks[0].workstream).toBe(' Legal');
+    const written = m.risks[0].paras.map((para) => para.map((part) => part.text).join(''));
+    expect(written).toEqual([' A written paragraph.\t', 'Another.']);
+    expect(m.glance.map((row) => row.workstream)).toContain(' Legal');
   });
 });

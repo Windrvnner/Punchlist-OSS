@@ -3,10 +3,12 @@ import { describe, it, expect, vi } from 'vitest';
 import { Store } from '../../src/app/store';
 import { memRepo } from '../adapters/memRepo';
 import { MemoryLocal } from '../../src/adapters/local';
-import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
+import { csvCodec } from '../../src/adapters/spreadsheet';
+import { readCsv } from '../../src/domain/sheets';
 import { mockAi, mockDocuments, mockSession, mockFirstPass, type MockOptions } from '../../src/adapters/mocks';
 import { CreateDeal, EditDeal, DeleteDeal, withProject, dealNameRoom } from '../../src/app/commands/deals';
-import { navIntent } from '../../src/app/conversations';
+import { SetDealMember } from '../../src/app/commands/members';
+import { checkedOffer } from '../../src/app/answerOffer';
 import { nameDir } from '../../src/ui/hooks';
 import { CreateQuestion, DeleteQuestion, RestoreQuestion, EditQuestionField, SetResponse, SetQuestionStatus } from '../../src/app/commands/questions';
 import { CreateFinding, EditFinding, ReviewFinding, DeleteFinding, RestoreFinding, RestoreFindingSnapshot, ApplyReassessment } from '../../src/app/commands/findings';
@@ -23,6 +25,7 @@ import { prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { toParagraphs, withoutMarkers, splitCited } from '../../src/domain/cite';
 
 const COMMANDS = [RestoreQuestionSnapshot, SetQuestionStatus, ApplyReassessment, CreateDeal, EditDeal, CreateQuestion, DeleteQuestion, RestoreQuestion, EditQuestionField, SetResponse, CreateFinding, EditFinding, ReviewFinding, DeleteFinding, RestoreFinding, RestoreFindingSnapshot, ImportQuestions, RevertImport, RecoverDrafts];
+COMMANDS.push(SetDealMember);   // the offered-page test takes a deal off the person's list
 for (const c of COMMANDS) registry.set(c.name, c);
 let t = 0; const clock = { now: () => new Date(Date.UTC(2026, 10, 9, 16, 0, 0, t++)).toISOString() };
 let seq = 0; const ids = { next: (p: string) => `${p}_01HYYYYYYYYYYYYYYYV${String(seq++).padStart(7, '0')}` };
@@ -86,53 +89,50 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
     expect(full.ok).toBe(true);
   });
 
-  it('a "Project-…" or "Project: …" name is found by "go to" and runs the way its words do', async () => {
-    const m = make();
-    const a = await deal(m, 'Project-Lucerne Solar');
-    expect(navIntent(m.store, 'go to Lucerne Solar findings')).toBe(true);
-    expect(location.hash).toBe(`#${pageHash('findings', a)}`);
+  it('a name after "Project: " reads in its own direction', () => {
     expect(nameDir('Project: \u05e9\u05de\u05e9')).toBe('rtl');             // Hebrew after "Project: "
     expect(nameDir('Projector \u05e9\u05de\u05e9')).toBe('auto');           // another word that starts with the letters
     expect(nameDir('Project Lucerne \u05e9\u05de\u05e9')).toBe('auto');     // a Hebrew word later on doesn't decide it
   });
 
-  it('routes explicit navigation for Unicode and hyphenated deal names (#500)', async () => {
+  it('an offered page opens the deal of exactly that name, nothing folded or stripped (#1054, #1115)', async () => {
     const m = make();
     const hyphenated = await deal(m, 'Harbor-Refinance');
     const spaced = await deal(m, 'Harbor Refinance');
-    const accented = await deal(m, 'Énergie-Refinance');
-    const suffix = await deal(m, 'Harbor Overview');
     const base = await deal(m, 'Harbor');
-    await deal(m, "Harbor's");
+    const possessive = await deal(m, "Harbor's");
     const article = await deal(m, 'The');
+    const fund = await deal(m, 'Fund IV');
+    await deal(m, '(Kestrel)');
+    const offered = (name: string) =>
+      checkedOffer(m.store.get(), { kind: 'all' }, { action: 'open page', deal: name, page: 'qa' });
     for (const [name, id] of [
-      ['Harbor-Refinance', hyphenated],
+      ['Project Harbor-Refinance', hyphenated],
       ['Project Harbor Refinance', spaced],
-      ['Project: Énergie-Refinance', accented],
-      ['E\u0301nergie-Refinance\n', accented],
-      ['Harbor Overview', suffix],
-      ['Harbor’s', base],
-      ['The', article],
-    ]) {
-      expect(navIntent(m.store, `Open ${name} Q&A`)).toBe(true);
-      expect(location.hash).toBe(`#${pageHash('qa', id)}`);
+      ['Project Harbor', base],
+      ["Project Harbor's", possessive],
+      ['Project The', article],
+      ['Project Fund IV', fund],
+    ]) expect(offered(name)).toEqual({ kind: 'page', dealId: id, page: 'qa' });
+    const notNames = ['Harbor', 'project harbor', 'Project  Harbor', 'Project Harbor\n', 'Project Kestrel', 'Unknown'];
+    for (const name of notNames) {
+      expect(offered(name)).toBeUndefined();
     }
-    expect(navIntent(m.store, 'Open Unknown-Deal Q&A')).toBe(false);
-    expect(navIntent(m.store, 'What is in Harbor-Refinance Q&A?')).toBe(false);
   });
 
-  it('a typed deal name opens the deal of that exact name, in any case, with or without "Project"', async () => {
+  it('an offered page names one of the person\'s own deals, or none (#1054)', async () => {
     const m = make();
-    const fund = await deal(m, 'Fund IV');
-    const plus = await deal(m, 'C++');
-    await deal(m, '(Kestrel)');
-    for (const [name, id] of [['fund iv', fund], ['Project Fund IV', fund], ['C++', plus]]) {
-      expect(navIntent(m.store, `Open ${name} Q&A`)).toBe(true);
-      expect(location.hash).toBe(`#${pageHash('qa', id)}`);
+    await deal(m, 'Lumen');
+    for (const counterparty of ['Wingtip', 'Halyard']) {
+      await m.store.dispatch(CreateDeal, { name: 'Southridge', counterparty, folders: [] });
     }
-    // the name without its punctuation is not the name
-    expect(navIntent(m.store, 'Open Kestrel Q&A')).toBe(false);
-    expect(navIntent(m.store, 'Open C Q&A')).toBe(false);
+    const left = await deal(m, 'Quarry');
+    await m.store.dispatch(SetDealMember, { dealId: left, on: false });
+    const offered = (name: string) =>
+      checkedOffer(m.store.get(), { kind: 'all' }, { action: 'open page', deal: name, page: 'qa' });
+    expect(offered('Project Lumen')).toMatchObject({ kind: 'page' });
+    expect(offered('Project Southridge')).toBeUndefined();   // two deals of that name: the name alone can't say which
+    expect(offered('Project Quarry')).toBeUndefined();       // a team deal not in the person's list
   });
 
   it('Undo brings back a capitalized "Project"; an accent or hidden character is not the word', async () => {
@@ -144,8 +144,8 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
     expect(m.store.get().deals[a].name).toBe('Project Wingtip Storage');
     await m.store.dispatch(CreateDeal, { name: 'Project\u0301 Adatum', folders: [] });   // an accent on the t
     expect(Object.values(m.store.get().deals).some((d) => d.name === 'Project Project\u0301 Adatum')).toBe(true);
-    // the field's limit is worked out on the name as it will be kept: a hidden space after "Project" is dropped
-    expect(dealNameRoom('Project\u200Bx')).toBe(112);
+    // the field's limit is worked out on the name as typed: a hidden space after "Project" still follows the word
+    expect(dealNameRoom('Project\u200Bx')).toBe(120);
     expect(dealNameRoom('  project Contoso')).toBe(120);
   });
 
@@ -159,16 +159,16 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
     expect(Object.values(m.store.get().deals).filter((d) => d.name === 'Project Wingtip')).toHaveLength(3);
   });
 
-  it('keeps names in one form, and the name as shown deletes the deal; none over 120', async () => {
+  it('keeps names as typed, and the name as shown deletes the deal; none over 120', async () => {
     const m = make();
     expect((await m.store.dispatch(CreateDeal, { name: 'Proseware  Wind', folders: [] })).ok).toBe(true);
     const named = (name: string) => Object.values(m.store.get().deals).filter((d) => d.name === name);
     expect(named('Project Proseware  Wind')).toHaveLength(1);   // the double space is kept as typed
     expect((await m.store.dispatch(CreateDeal, { name: 'Proseware Wind\u200b', folders: [] })).ok).toBe(true);
-    expect(named('Project Proseware Wind')).toHaveLength(1);   // the hidden character is dropped, the spaces left alone
+    expect(named('Project Proseware Wind\u200b')).toHaveLength(1);   // the hidden character is kept as typed
     expect((await m.store.dispatch(CreateDeal, { name: 'Luce\u0301rne', folders: [] })).ok).toBe(true);   // e and a combining accent
     const b = Object.values(m.store.get().deals).find((d) => d.name.includes('rne') && !d.name.includes('Wind'))!;
-    expect(b.name).toBe('Project Luc\u00e9rne');
+    expect(b.name).toBe('Project Luce\u0301rne');   // stored as typed, not recomposed
     expect((await m.store.dispatch(CreateDeal, { name: 'x'.repeat(113), folders: [] }, { quiet: true })).ok).toBe(false);   // 121 with "Project "
     expect((await m.store.dispatch(CreateDeal, { name: 'x'.repeat(112), folders: [] }, { quiet: true })).ok).toBe(true);
     expect((await m.store.dispatch(DeleteDeal, { dealId: b.id, typedName: 'Project Luce\u0301rne' }, { quiet: true })).ok).toBe(true);
@@ -371,7 +371,8 @@ describe('toasts', () => {
     const m = make(); await m.store.boot();
     vi.useFakeTimers();
     try {
-      m.store.toast('First', { label: 'Undo', run() {} }); m.store.toast('Second', { label: 'Undo', run() {} });
+      m.store.toast('First', 'done', { label: 'Undo', run() {} });
+      m.store.toast('Second', 'done', { label: 'Undo', run() {} });
       expect(m.store.get().ui.toasts.map((x) => x.text)).toEqual(['First', 'Second']);
       vi.advanceTimersByTime(Store.TOAST_MS - 100);
       m.store.holdToasts(); vi.advanceTimersByTime(60000);
@@ -637,7 +638,7 @@ describe('Undo of a withdrawn response', () => {
 describe('notices', () => {
   it('at most three show: a fourth pushes out the oldest and its Undo with it, so Ctrl Z never reaches one that was not on screen', async () => {
     const m = make(); await m.store.boot();
-    for (const n of [1, 2, 3, 4]) m.store.toast(`Notice ${n}`, { label: 'Undo', run: () => {} });
+    for (const n of [1, 2, 3, 4]) m.store.toast(`Notice ${n}`, 'done', { label: 'Undo', run: () => {} });
     expect(m.store.get().ui.toasts.map((t) => t.text)).toEqual(['Notice 2', 'Notice 3', 'Notice 4']);
   });
 });

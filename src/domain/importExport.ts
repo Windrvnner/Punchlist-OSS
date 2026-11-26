@@ -14,14 +14,12 @@ export type Mapping = Record<ImportField, number | null>;
 
 /**
  * Which row of a sheet holds the column headings. A log often sits under a title and some padding, so this is the first
- * row (of the first 50) with a heading we recognize as the question column; failing that the first row with two or more
- * filled cells; failing that the first row. It is a starting point only: the dialog shows it and the person can change it.
+ * row, anywhere in the sheet, with a heading we recognize as the question column; failing that the first row. It is a
+ * starting point only: the dialog shows it and the person can change it.
  */
 export function findHeaderRow(table: string[][]): number {
-  const limit = Math.min(table.length, 50); const filled = (r: string[]) => r.filter((c) => c.trim()).length;
-  for (let i = 0; i < limit; i++) if (suggestMapping(table[i]).text != null) return i;
-  for (let i = 0; i < limit; i++) if (filled(table[i]) >= 2) return i;
-  return 0;
+  const headingRow = table.findIndex((row) => suggestMapping(row).text != null);
+  return headingRow < 0 ? 0 : headingRow;
 }
 
 export function suggestMapping(columns: string[]): Mapping {
@@ -120,7 +118,8 @@ export function prepareImport(table: string[][], mapping: Mapping, lines?: numbe
   const cells: Record<'received' | 'responded', DateCell[]> = { received: [], responded: [] };
   for (const [at, r] of table.entries()) {
     const text = get(r, 'text'); if (!text) { out.skipped++; continue; }
-    const line = lines?.[at] ?? at + 2; const unread = (k: ImportField, v: string) => out.unread.push(`Row ${line} ${nameOf(k)}: ${v.trim()}`);
+    const line = lines?.[at] ?? at + 2;
+    const unread = (k: ImportField, v: string) => out.unread.push(`Row ${line} ${nameOf(k)}: ${v}`);
     const date = (k: 'received' | 'responded') => {
       const raw = read(r, k);
       const c = {

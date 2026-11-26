@@ -4,7 +4,7 @@ import { commandLabel } from '../app/commandLabels';
 import { undoFromNotice } from '../app/undoNotice';
 import { StoreContext, useAppState, useStore, lastInput, nameDir } from './hooks';
 import { Icon } from './icons';
-import { Notice, NoticeWords, glyphOf } from './notice';
+import { Notice, NoticeWords } from './notice';
 import type { Store } from '../app/store';
 import type { State } from '../app/state';
 import { QaPage, UndoImportDialog } from './qa';
@@ -36,6 +36,7 @@ import { SERVICE } from '../control';
 import { takeNavPatch, closeDocument, takeFocusAfter } from './nav';
 import { isReading, dealHash, dealTwinLabels } from '../app/state';
 import { num } from './counts';
+import { openNewDeal } from '../app/dealFolders';
 
 function routeFromHash(): State['ui']['route'] {
   const h = (location.hash || '#deals').slice(1);
@@ -310,7 +311,7 @@ function Home() {
         : <button type="button" class="btn pri fr-new" id="fr-new"
           title={ro ??
           'Name the deal and point it at the data-room folders. Indexing and the first pass start on their own.'}
-          disabled={!!ro} onClick={() => store.ui({ newDeal: { name: '', folders: [], error: '', busy: false } })}><Icon
+          disabled={!!ro} onClick={() => openNewDeal(store)}><Icon
           name="plus" size={15} /> New Deal</button>}
     </div></div>
   );
@@ -336,7 +337,7 @@ export function middleName(name: string): string {
  * reading bar at the bottom. Up to three toasts stack as a deck: the newest in front and the
  * older ones peeking behind it; pointing at the deck or tabbing into it spreads them, so each keeps its Undo.
  */
-function Notices() {
+export function Notices() {
   const store = useStore(); const s = useAppState();
   const shown = s.ui.toasts.slice(-3);
   const newest = shown[shown.length - 1];
@@ -372,7 +373,7 @@ function Notices() {
       <InterruptedBar />
       <div class="toasts" role="status" ref={box} onMouseEnter={sync} onMouseLeave={sync} onFocusIn={sync} onFocusOut={() => requestAnimationFrame(sync)}>
         {shown.map((t) => (
-          <Notice key={t.id} id={t === newest ? 'toast' : undefined} glyph={t.glyph ?? glyphOf(t.text, t.action?.label)}
+          <Notice key={t.id} id={t === newest ? 'toast' : undefined} glyph={t.glyph}
             tip={t.more ?? (t.cut || said(t.text) !== t.text ? t.text : undefined)} full={t.text}
             actions={t.action ? [{ label: t.action.label, run: () => run(t) }] : []}
             onClose={() => store.dismissToast(t.id)}>

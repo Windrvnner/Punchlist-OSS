@@ -1,7 +1,7 @@
 import { distinguishingWords, type TwinFocus } from './dealLabel';
 import type { Deal, Question, Finding, Tombstone, Member, Operation, DealId, QuestionId, FindingId, AuditEntry, Source, Folder, RecordKind, ClashKind } from '../domain/model';
 import type { Item, ListRecord } from '../domain/checklist';
-import type { CheckState, ModelThread, Research } from '../ports';
+import type { AnswerOffer, CheckState, ModelThread, Research } from '../ports';
 import type { PageView, SyncState, FolderSearch, FolderPlace, Seen } from '../ports';
 import { control } from '../control';
 import { readLogCells, holds } from '../domain/logWrite';
@@ -14,7 +14,22 @@ import { canLinkUnresolved, suggestUnresolvedLinks, type ApprovedLinks } from '.
 
 export type BootStage = 'session' | 'deals' | 'journal' | 'ready';
 
-export interface Message { id: string; role: 'me' | 'ai'; text: string; sources?: Source[]; state: 'done' | 'pending' | 'failed'; at: string; /** files sent with this message */ attached?: { doc: string; docId: string }[]; /** what the chat agent did to find this answer */ research?: Research; /** the model service's conversation as this answer left it */ thread?: ModelThread }
+export interface Message {
+  id: string;
+  role: 'me' | 'ai';
+  text: string;
+  sources?: Source[];
+  state: 'done' | 'pending' | 'failed';
+  at: string;
+  /** files sent with this message */
+  attached?: { doc: string; docId: string }[];
+  /** what the chat agent did to find this answer */
+  research?: Research;
+  /** the model service's conversation as this answer left it */
+  thread?: ModelThread;
+  /** the action offered under it, checked (#1054) */
+  offer?: AnswerOffer;
+}
 /** The firm's name, which questions we ask and responses we give are stamped with: set in the control file (firm.name),
  * not in Settings. */
 export const FIRM = control.firm.name;
@@ -68,7 +83,8 @@ export interface Toast {
   more?: string;
   /** The part of the message that gives way when it does not fit. */
   cut?: string;
-  glyph?: 'done' | 'warn';
+  /** What the notice reports: completed work, or a failure or refusal. Set by the caller, never read from the words. */
+  glyph: 'done' | 'warn';
 }
 
 /** What kind of deal a new deal is, picked on the New deal form: its structure, sector and technology. */
@@ -90,6 +106,9 @@ export interface UiState {
   notThese: string[];
   /** what the model said, when a person asked, about whether an answer addresses the question suggested under it, as `answer message id|question id`; for this session only */
   verdicts: Record<string, 'asking' | 'failed' | { verdict: 'yes' | 'partly' | 'no'; why: string }>;
+  /** the open question the model proposed, once an answer finished, as one it may address: answer message id to
+   * the questions' ids and the text each was proposed for; for this session only (#1120) */
+  proposed: Record<string, { id: string; text: string }[]>;
   /** the steps of answers still being worked on, by the pending message's id, as the backend last said them; for this session only */
   researching: Record<string, Research>;
   queueSearch: string;
@@ -223,6 +242,7 @@ export const initialState = (can = capabilities()): State => ({
     side: null,
     notThese: [],
     verdicts: {},
+    proposed: {},
     researching: {},
     queueSearch: '',
     attachments: [],
@@ -470,7 +490,7 @@ export function unresolvedTargets(s: UnresolvedState, dealId: string, qs = dealQ
   return [...points, ...unresolvedGaps(s, dealId, askedItems)];
 }
 
-/** An unresolved point gets at most one suggestion, and each eligible question is offered once. */
+/** An unresolved point gets at most one link, and each eligible question is offered once. */
 export function unresolvedPoints(s: UnresolvedState, dealId: string, approved?: ApprovedLinks) {
   const questions = dealQuestions(s as State, dealId);
   const points = unresolvedTargets(s, dealId, questions);

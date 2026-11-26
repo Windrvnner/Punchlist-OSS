@@ -20,7 +20,7 @@ export const placeKept = (store: Store, dealId: string): PlaceKept => (ask) => n
   waiting.set(dealId, { ask, done }); store.ui({ dialog: { kind: 'placeKept', dealId } });
 });
 
-const shown = (v: string) => v.trim() || '—';
+const shown = (v: string) => (v.trim() ? v : '—');
 
 export function PlaceKeptDialog({ dealId }: { dealId: string }) {
   const store = useStore(); const [w] = useState(() => waiting.get(dealId));

@@ -8,7 +8,7 @@ import { ulid } from 'ulid';
 import type { AiService, DocumentService, FileSystem, Session, Clock, Ids, Repository, ChecklistRow, Research, ResearchStep, CheckState, IssuePoint } from '../ports';
 import { CHECK_REASON, type Deal, type Folder, type RecordKind } from '../domain/model';
 import { ok, fail, type Result } from '../domain/result';
-import { tellingWords } from '../domain/suggest';
+import { fold, indexWords } from '../backend/words';
 import { key } from '../domain/checklist';
 import type { LineRead } from '../domain/listRead';
 import { suggestChecklistColumns, type ChecklistMapping } from '../domain/checklistImport';
@@ -34,6 +34,24 @@ export function mockLatency(opts: MockOptions) {
 /** a title read mid-sentence: its first letter lower-cased, unless the first word is an acronym ("DSRA") */
 const midSentence = (t: string) => (/^\p{Lu}{2}/u.test(t) ? t : t.charAt(0).toLowerCase() + t.slice(1));
 const findingLink = (f: { id: string; title?: string; }) => { const p = String(f.title ?? '').replace(/[{}|]/g, ' ').replace(/\s+/g, ' ').trim(); return `{${p ? midSentence(p) : 'finding'}|${f.id}}`; };
+
+/**
+ * The stand-ins' rough reading of a text, in place of a model's: its words of four letters or more, a plain plural
+ * taken as its singular, leaving out words any diligence text uses. Only the stand-ins below use it.
+ */
+const COMMON = new Set([
+  'about', 'also', 'been', 'being', 'between', 'both', 'cannot', 'come', 'comes', 'confirm', 'could', 'detail',
+  'does', 'done', 'each', 'either', 'from', 'have', 'here', 'into', 'just', 'like', 'made', 'make', 'many', 'more',
+  'most', 'much', 'must', 'only', 'other', 'over', 'please', 'provide', 'same', 'should', 'show', 'some', 'such',
+  'than', 'that', 'their', 'them', 'then', 'there', 'these', 'they', 'this', 'those', 'through', 'throughout',
+  'under', 'upon', 'used', 'uses', 'using', 'very', 'want', 'were', 'what', 'when', 'where', 'whether', 'which',
+  'while', 'will', 'with', 'within', 'would', 'your', 'document', 'documents', 'project', 'question', 'answer',
+  'response', 'closest', 'support', 'data', 'room', 'matter', 'finding', 'findings',
+].map(fold));   // folded, as indexWords gives its words (#1220)
+/** the words a question or answer is compared by: the search index's, minus this list (#1220) */
+function tellingWords(text: string): Set<string> {
+  return new Set(indexWords(text).filter((word) => !COMMON.has(word)));
+}
 
 async function gate<T>(opts: MockOptions, name: string, fn: () => T | Promise<T>): Promise<Result<T>> {
   await mockLatency(opts)();
@@ -219,6 +237,30 @@ async function storedFolders(repo: Repository | undefined, dealId: string): Prom
 
 /** the stand-in chat agent's answers being worked on, by run id */
 const researching = new Map<string, { steps: ResearchStep[]; t0: number; stopped?: boolean }>();
+/**
+ * Stand-in for the model offering an action under its answer (#1054), so the demo and the browser suites can show the
+ * button: a few fixed requests, each offering what a model would. The real model decides from the words itself.
+ */
+function standInOffer(message: string): { text?: string; sources?: []; offer?: unknown } {
+  const said = message.trim().toLowerCase();
+  const offering = (text: string, offer: unknown) => ({ text, sources: [] as [], offer });
+  if (said === 'set up a new deal') {
+    return offering('You can start the new deal here.', { action: 'new deal' });
+  }
+  if (said === 'take me to the q&a') {
+    return offering('Here is this deal’s Q&A log.', { action: 'open page', page: 'qa' });
+  }
+  if (said === 'put every gap in the q&a log') {
+    const text = 'Each gap and open finding without a question can go to the Q&A log.';
+    return offering(text, { action: 'add unresolved' });
+  }
+  if (said === 'ask them for the permit list') {
+    const question = 'Please provide the list of permits held for the project.';
+    return offering(`Here is a question for the counterparty: “${question}”`, { action: 'log question', question });
+  }
+  return {};
+}
+
 export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => ({
   dealBrief: (dealId) => gate(opts, 'dealBrief', async () => {
     const fs = (await storedFindings(repo, dealId)).filter((f) => f.status === 'open');
@@ -304,7 +346,8 @@ export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => 
       await wait(opts.latency ? opts.latency[1] : 700); read.done = true; read.result = cited.filter((x) => x.doc === doc).map((x) => x.loc).join(', ');
     }
     if (i.runId) researching.delete(i.runId);
-    return ok({ ...r.value, research: { steps: steps.map((step) => ({ ...step })), ms: Date.now() - t0, read } });
+    const research = { steps: steps.map((step) => ({ ...step })), ms: Date.now() - t0, read };
+    return ok({ ...r.value, research, ...standInOffer(i.message) });
   },
   research: async (runId) => { const r = researching.get(runId); return ok(r ? { steps: r.steps.map((x) => ({ ...x })), ms: Date.now() - r.t0 } : null); },
   stop: async (runId) => { const r = researching.get(runId); if (r) r.stopped = true; return ok(!!r); },
@@ -313,8 +356,8 @@ export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => 
     // The best match, not the first: a finding must share a telling word with the question (words any diligence
     // question uses do not count) and must beat every other finding. Otherwise nothing is found, and nothing is
     // made up: the mock never claims a source it was not given.
-    const GENERIC = new Set(['signed', 'agreement', 'agreements', 'report', 'reports', 'adviser', 'advisor', 'ratio', 'executed', 'please', 'confirm', 'provide', 'sponsor', 'project', 'document', 'documents', 'information', 'memorandum', 'draft', 'final', 'between', 'under', 'which', 'there', 'their', 'about', 'should', 'would', 'could', 'where', 'figure', 'level', 'terms', 'sheet', 'facility', 'technical', 'question', 'response', 'details', 'provided', 'whether']);
-    const words = (t: string) => new Set((t.toLowerCase().match(/[a-z][a-z-]{3,}/g) ?? []).filter((w) => !GENERIC.has(w)));
+    const GENERIC = new Set(['signed', 'agreement', 'agreements', 'report', 'reports', 'adviser', 'advisor', 'ratio', 'executed', 'please', 'confirm', 'provide', 'sponsor', 'project', 'document', 'documents', 'information', 'memorandum', 'draft', 'final', 'between', 'under', 'which', 'there', 'their', 'about', 'should', 'would', 'could', 'where', 'figure', 'level', 'terms', 'sheet', 'facility', 'technical', 'question', 'response', 'details', 'provided', 'whether'].map(fold));   // folded, as indexWords gives its words (#1220)
+    const words = (t: string) => new Set(indexWords(t).filter((w) => !GENERIC.has(w)));   // the index's words (#1220)
     const asked = words(i.questionText);
     const scored = (await storedFindings(repo, i.dealId)).filter((f) => f.status === 'open' && (f.sources || []).length)
       .map((f) => ({ f, n: [...words(`${f.title} ${(f.body || []).join(' ')}`)].filter((w) => asked.has(w)).length })).sort((a, b) => b.n - a.n);
@@ -340,6 +383,12 @@ export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => 
     return share >= 2 / 3 ? { verdict: 'yes' as const, why: 'It gives what the question asks for.' }
       : share >= 1 / 3 ? { verdict: 'partly' as const, why: 'It gives some of what the question asks for, not all of it.' }
       : { verdict: 'no' as const, why: 'It does not give what the question asks for.' };
+  }),
+  // Stand-in for the model proposing the open questions an answer addresses (#1120): those whose text is listed in
+  // `__addressed` on the window (screens and tests), else none. The real one is a model's judgment.
+  suggestQuestion: (i) => gate(opts, 'suggestQuestion', () => {
+    const listed = (globalThis as { __addressed?: string[] }).__addressed ?? [];
+    return i.questions.filter((q) => listed.includes(q.text)).map((q) => q.id);
   }),
   // Stand-in for the model's merged response: the first version's sentences, then each of the second's that says something
   // the first does not (fewer than half its telling words already said), so no fact is said twice. The real one rewrites.

@@ -19,7 +19,8 @@ import type { LineRead } from '../domain/listRead';
 import type { ChecklistMapping } from '../domain/checklistImport';
 import type { ListItem } from '../domain/checklist';
 import { NOT_DONE, broughtInSays, toggled } from './firmChecklistReview';
-import type { ChecklistChoices, ChecklistKept, Keeper } from './firmChecklistKept';
+import type { Keeper } from './firmChecklistKept';
+import type { ChecklistChoices, ChecklistKept } from '../app/checklistKept';
 
 export type Busy = '' | 'reading' | 'asking' | 'reviewing' | 'importing';
 
@@ -365,9 +366,9 @@ function useBringIn(
     const said = broughtInSays(target.layer, target.name, result.value);
     const ids = result.value.opIds;
     const undo = () => void undoBringIn(store, ids).then((undone) => {
-      store.toast(undone.ok ? 'Undone' : undone.error.message);
+      store.toast(undone.ok ? 'Undone' : undone.error.message, undone.ok ? 'done' : 'warn');
     });
-    store.toast(said, { label: 'Undo All', run: undo });
+    store.toast(said, 'done', { label: 'Undo All', run: undo });
   };
   return { counts: selection.counts, run };
 }

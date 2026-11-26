@@ -1,10 +1,11 @@
 /**
  * The chat agent (decisions page, Conversations). A conversation's answer is worked out in turns by the
  * model the person chose (the main session), which has four tools:
- *   - search: what (documents, findings, Q&A or all) and a query. For documents, a search helper on the fast model runs
- *     the keyword search (folder paths and file names included), picks a few, reads them on the model service and
- *     returns passages with document and page. Findings and Q&A are records the app holds, searched by their words
- *     with no model call: the matching records go back as they are (agentSearch.ts).
+ *   - search: what (documents, findings, Q&A or all), a query and a page. Every kind is ranked by the same keyword
+ *     scoring and comes a page at a time. A document page is the next `width` documents of the keyword ranking
+ *     (folder paths and file names included), which a search helper on the fast model reads on the model service,
+ *     returning passages with document and page. Findings and Q&A are records the app holds, `searchPage` a page,
+ *     each whole, with no model call (agentSearch.ts).
  *   - read: documents named by tag or path, at most eight in one call, attached to the main session's next turn.
  *   - folder: a folder named as the person says it, and what to look for. The documents in it are put in the
  *     order to read them (ai.ts: a keyword and core-document ranking, then the fast model's order of its top), and the
@@ -59,16 +60,17 @@ import { ok, fail, type Result } from '../domain/result';
 import type { ModelThread, Research } from '../ports';
 import type { Source } from '../domain/model';
 import type { DocRecord } from './documents';
-import { strings, list as listOf, int } from './lenient';
+import { strings, prose, list as listOf, int } from './lenient';
 import { TOO_LONG_ASK, TOO_LONG_REPLY, UNREAD_REPLY } from './limits';
-import { SERVICE } from '../control';
+import { control, SERVICE } from '../control';
 import { codeOf, type AgentKit, type AgentOptions, type AgentQuestion } from './agentKit';
 import type { Cited, Run, Sent } from './agentKit';
 import { AgentRun } from './agentRun';
-import { catchUp, search, type What } from './agentSearch';
+import { catchUp, pageNumber, search, type What } from './agentSearch';
 import { FolderMemory, FolderReader } from './agentFolder';
 import { KeptConversation, type Turn } from './agentTalk';
 import { inlineTools } from './agentPrompts';
+import { questionIdsIn, questionsForIds } from './qaRow';
 
 export type { AgentKit, AgentOptions, AgentQuestion, Cited, Sent, ToolMode } from './agentKit';
 
@@ -78,18 +80,31 @@ type Answered = {
   read: { docs: number; of: number };
   research: Research;
   thread?: ModelThread;
+  /** the action the model offers under its answer, as it gave it: the app checks it (app/answerOffer.ts) */
+  offer?: unknown;
 };
 /** the agent's limits, its options with their defaults */
-type Limits = { turns: number; width: number; folderDocs: number; compactAt: (model: string) => number };
+type Limits = {
+  turns: number; width: number; folderDocs: number; searchPage: number; compactAt: (model: string) => number;
+};
+
+/**
+ * the most characters a page of findings or questions may hold: half of what the kept conversation holds before it is
+ * compacted, so that a search of everything, which gives a page of each in one result, never outgrows what one call
+ * may send; the same whichever is searched, so that a page asked for by kind starts where a search of everything's
+ * page of that kind stopped (recordSearch.ts `pageOf`, #1091)
+ */
+const pageChars = (limits: Limits, model: string) => (limits.compactAt(model) * control.limits.charsPerToken) / 2;
 
 const SEARCHES: readonly What[] = ['documents', 'findings', 'qa', 'all'];
-const REPLY_SHAPE = '{"tool": …} or {"text": "…", "sources": […]}';
+const REPLY_SHAPE = '{"tool": …} or {"text": "…", "sources": […], "offer": {…}}';
 
 export function chatAgent(kit: AgentKit, opts: AgentOptions = {}) {
   const limits: Limits = {
     turns: Math.max(1, opts.turns ?? 25),
     width: Math.max(1, opts.width ?? 8),
     folderDocs: Math.max(1, opts.folderDocs ?? 200),
+    searchPage: Math.max(1, opts.searchPage ?? 25),
     compactAt: (model) => (typeof opts.compactAt === 'function' ? opts.compactAt(model) : opts.compactAt ?? 125_000),
   };
   /**
@@ -143,7 +158,8 @@ class Answering {
     private readonly limits: Limits,
     folderMemory: FolderMemory,
   ) {
-    this.run = new AgentRun(kit, question, progress);
+    const { width, searchPage } = limits;
+    this.run = new AgentRun(kit, question, progress, { width, searchPage, chars: pageChars(limits, question.model) });
     this.folders = new FolderReader(this.run, folderMemory, limits);
     this.conversation = new KeptConversation(this.run, limits.compactAt, limits.width);
   }
@@ -188,14 +204,17 @@ class Answering {
     if (this.stopped && !run.steps.some((x) => x.text === 'Stopped')) {
       run.steps.push({ kind: 'stop', text: 'Stopped', result: 'answered from what was found', done: true });
     }
-    const { files, listing, got } = await kit.send(run.whole);
+    const { files, listing, got } = await kit.send(run.whole, question.model);
     // a document that cannot be opened on this PC was not read
     if (got.length < run.whole.length) run.whole = got;
     const turn = this.turnOf(turnNumber, last, files, listing);
     const reply = kit.talk
       ? await this.conversation.ask(turn)
       : await kit.askJson(
-        { kind: 'answer', model: question.model, system: turn.system, prompt: turn.full(true), files },
+        {
+          kind: 'answer', model: question.model, system: turn.system, prompt: turn.full(true), files,
+          unusable: turn.unusable,
+        },
         turn.keys,
         turn.shape,
       );
@@ -227,7 +246,19 @@ class Answering {
       system: `${inlineTools(this.limits.width)}\n\n${kit.rules}`,
       keys: ['tool', 'text'],
       shape: REPLY_SHAPE,
+      unusable: (text) => this.namesUnknownQuestion(text),
     };
+  }
+
+  /**
+   * Whether a reply names a question id that is in none of the run's deals: a failed reply, asked again (#1105). The
+   * questions shown in earlier answers of a kept conversation are not kept, so any question in the deals may be named.
+   */
+  private async namesUnknownQuestion(text: string): Promise<boolean> {
+    const named = questionIdsIn(text);
+    if (!named.length) return false;
+    const numbers = await this.run.questionNumbers([text]);
+    return named.some((id) => !numbers.has(id));
   }
 
   /** the turn's whole prompt; `history`: with the conversation's last messages and its transcript */
@@ -259,7 +290,8 @@ class Answering {
       const asked = String(reply.what ?? '').trim().toLowerCase().replace(/[^a-z]/g, '');
       const what = SEARCHES.find((w) => w === asked) ?? 'documents';
       const query = strings(reply.query).join(' ');
-      return query ? search(this.run, what, query) : 'You asked for a search without a query: give "query".';
+      if (!query) return 'You asked for a search without a query: give "query".';
+      return search(this.run, what, query, pageNumber(reply.page));
     }
     if (tool === 'read') {
       const named = listOf(reply.docs).map((x) => (int(x) !== null ? `D${x}` : String(x)));
@@ -278,16 +310,20 @@ class Answering {
   }
 
   /** the main session's answer, with the citations that can be stood behind; on the last turn, its notes if no text */
-  private answered(reply: Record<string, unknown>, last: boolean): Result<Answered> {
+  private async answered(reply: Record<string, unknown>, last: boolean): Promise<Result<Answered>> {
     const { kit, question, run } = this;
-    const text = strings(reply.text).join('\n\n') || (last ? run.notes : '');
+    // the questions it names by id are named by their numbers now before the answer is shown or kept (#1105)
+    const said = prose(reply.text).join('\n\n') || (last ? run.notes : '');
+    const numbers = await run.questionNumbers([said, draftedQuestion(reply.offer) ?? '']);
+    const text = questionsForIds(said, numbers);
     if (!text) return fail({ kind: 'failed', message: UNREAD_REPLY });
     const fitted = kit.fit(text, reply.sources as Cited[], run.opened, question.withDeal);
     this.showCitedPlaces(fitted.sources);
     const read = { docs: run.touched.size, of: question.deals.reduce((sum, d) => sum + kit.records(d).length, 0) };
     const thread = this.conversation.thread();
     const research = { steps: run.steps.map((s) => ({ ...s })), ms: kit.now() - run.progress.t0, read };
-    return ok({ ...fitted, read, research, ...(thread ? { thread } : {}) });
+    const offer = reply.offer === undefined ? {} : { offer: offerOf(reply.offer, numbers) };
+    return ok({ ...fitted, read, research, ...(thread ? { thread } : {}), ...offer });
   }
 
   /** an attached document's step shows the places the answer cites in it */
@@ -298,6 +334,19 @@ class Answering {
       if (places.length) step.result = [...new Set(places)].join(', ');
     }
   }
+}
+
+/** the question an offer drafts for the log, if it drafts one */
+function draftedQuestion(offer: unknown): string | undefined {
+  const drafted = (offer as { question?: unknown } | null | undefined)?.question;
+  return typeof drafted === 'string' ? drafted : undefined;
+}
+
+/** the offer as the model gave it, with the questions a drafted question names by id put back as `numbers` (#1105) */
+function offerOf(offer: unknown, numbers: ReadonlyMap<string, number>): unknown {
+  const drafted = draftedQuestion(offer);
+  if (drafted === undefined) return offer;
+  return { ...(offer as object), question: questionsForIds(drafted, numbers) };
 }
 
 /** what the person is told when an answer failed */
