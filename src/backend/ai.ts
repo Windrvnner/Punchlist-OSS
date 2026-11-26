@@ -1068,7 +1068,7 @@ export function nodeAi(o: AiOptions) {
   const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
   /** words a model gives in place of a search when it has none ("None", "not applicable", "TBD"); a search of only these, or of nothing the index keeps, is no search */
   // folded as the index folds words (`kept`), so each entry matches the form a reply's words take; "n" and "a" are the
-  // words of "N/A" and "n.a.", which the index now keeps whatever their length
+  // words of "N/A" and "n.a.", which `kept` keeps whatever their length
   const NO_SEARCH = new Set([
     'additional', 'a', 'applicable', 'applies', 'apply', 'available', 'cannot', 'cant', 'empty', 'extra', 'find',
     'found', 'further', 'given', 'idea', 'keyword', 'keywords', 'missing', 'more', 'n', 'na', 'nan', 'necessary',
