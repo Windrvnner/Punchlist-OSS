@@ -1,10 +1,7 @@
-/** Which encoding a text file is in, and its text: shared by every reader of CSV and plain text files. */
+/** Which encoding a text file is in, and its text: shared by the readers of CSV files and plain-text lists. */
 type Encoding =
   | 'utf-8' | 'utf-8-bom' | 'utf-16le' | 'utf-16le-bom' | 'utf-16be' | 'utf-16be-bom'
   | 'windows-1252' | 'windows-1252-bom';
-
-/** the files read as a spreadsheet program reads a text file: a CSV and plain text */
-export const TEXT_FILE = /\.(csv|txt|text|md)$/i;
 
 function isUtf8(bytes: Uint8Array): boolean {
   try {
@@ -54,11 +51,4 @@ export function decodeText(bytes: Uint8Array): string {
   const encoding = encodingOf(bytes);
   const markLength = !encoding.endsWith('-bom') ? 0 : encoding.startsWith('utf-16') ? 2 : 3;
   return new TextDecoder(encoding.replace('-bom', '')).decode(bytes.subarray(markLength));
-}
-
-/** a text file's bytes as UTF-8: unchanged when they are UTF-8 already, otherwise decoded as decodeText reads them */
-export function utf8Bytes(bytes: Uint8Array): Uint8Array {
-  const encoding = encodingOf(bytes);
-  if (encoding === 'utf-8' || encoding === 'utf-8-bom') return bytes;
-  return new TextEncoder().encode(decodeText(bytes));
 }

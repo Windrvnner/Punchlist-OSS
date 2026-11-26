@@ -5,7 +5,7 @@
  * out, where a person sees it and can bring it in (domain/listRead). The calls are retried as every AI call is
  * (backend/retry.ts).
  */
-import { decodeText, TEXT_FILE } from '../domain/textEncoding';
+import { decodeText } from '../domain/textEncoding';
 import type { AiService } from '../ports';
 import { unplaced, textLines, tableLines, tieOut, type LineRead, type TiedOut } from '../domain/listRead';
 import { prepareChecklist, suggestChecklistColumns, type ChecklistMapping } from '../domain/checklistImport';
@@ -36,7 +36,7 @@ export async function readList(ai: AiService, lines: string[]): Promise<Result<M
 /** The files a list can be brought in from: spreadsheets, documents and plain text. */
 export const LIST_FILES = /\.(xlsx|xlsm|xls|xlsb|ods|csv|docx|docm|doc|odt|rtf|pdf|txt|text|md)$/i;
 export const LIST_ACCEPT = '.xlsx,.xlsm,.xls,.xlsb,.ods,.csv,.docx,.docm,.doc,.odt,.rtf,.pdf,.txt,.text,.md';
-const SHEET = /\.(xlsx|xlsm|xls|xlsb|ods|csv)$/i;
+const SHEET = /\.(xlsx|xlsm|xls|xlsb|ods|csv)$/i; const PLAIN = /\.(txt|text|md)$/i;
 
 /**
  * Pasted text as lines. Text copied from a spreadsheet comes with its cells split by tabs: those are written " | ", as a
@@ -55,8 +55,8 @@ export async function readListFile(store: Store, file: { name: string; size: num
   try { bytes = new Uint8Array(await file.arrayBuffer()); } catch { return fail({ kind: 'failed', message: 'The file could not be opened' }); }
   if (SHEET.test(file.name)) { const t = await readImportBytes(store, file.name, bytes, { headerRow: 1 }); return t.ok ? ok({ table: t.value }) : t; }
   let text: string;
-  // UTF-8, UTF-16 or Windows-1252, as a spreadsheet program reads a text file (a CSV was read as a sheet above)
-  if (TEXT_FILE.test(file.name)) text = decodeText(bytes);
+  // UTF-8, UTF-16 or Windows-1252, as a CSV is read (#382)
+  if (PLAIN.test(file.name)) text = decodeText(bytes);
   else { const sheets = store.services.sheets; if (!sheets.text) return fail({ kind: 'invalid', message: 'Only spreadsheets and text files can be read here' }); const r = await sheets.text(bytes, file.name); if (!r.ok) return r; text = r.value; }
   const lines = textLines(text.replace(/^\uFEFF/, ''));
   return lines.some((l) => l.trim()) ? ok({ lines }) : fail({ kind: 'invalid', message: 'The file has no text' });

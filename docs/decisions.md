@@ -374,4 +374,4 @@ These decisions are built and wait to be confirmed:
 - Once two PCs' imports of one list have synced, the second PC's Undo of its import is refused.
 - The recovered copy of a deal deleted elsewhere is built, including who sees it, what it holds, and its notice's wording (#220).
 - Periodic records whose names differ only by a period are a series and take one place in the core set, their newest member's; every document stays searchable (docs/core-families-design.md).
-- A text or CSV file is read as the program that saved it wrote it (UTF-8, UTF-16 or Windows-1252), for lists and for the model service alike, with or without a byte-order mark (#1024).
+- A plain-text list (.txt, .text, .md) is read as a CSV file is: UTF-8, UTF-16 or Windows-1252, with or without a byte-order mark (#382).
