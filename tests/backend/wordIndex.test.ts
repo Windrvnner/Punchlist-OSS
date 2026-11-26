@@ -66,7 +66,8 @@ describe("each PC's word index", () => {
     const b = wordIndex(nodeFolder(d)); expect(b.has('deal', 'x')).toBe(true);
     expect(b.score('deal', q('turbine'), [named('x', 'x.pdf')]).get('x')).toBe(0);
     expect(b.score('deal', q('maintenance'), [named('x', 'x.pdf')]).get('x')).toBeGreaterThan(0);
-    fs.appendFileSync(path.join(d, 'words2-deal.jsonl'), '{"d":"y","n":3,"t":"'); expect(wordIndex(nodeFolder(d)).has('deal', 'y')).toBe(false);   // a line cut short is read again later
+    fs.appendFileSync(path.join(d, 'words2-deal.jsonl'), '{"d":"y","n":3,"t":"');
+    expect(wordIndex(nodeFolder(d)).has('deal', 'y')).toBe(false);   // a line cut short is read again later
   });
   it('does not read an index built under older rules, so each document is read again', () => {
     const d = dir();
