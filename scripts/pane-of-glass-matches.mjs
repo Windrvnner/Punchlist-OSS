@@ -10,6 +10,7 @@ const networkNames = new Set(['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSour
 // Read only as a property (document.cookie, navigator.sendBeacon), so a local variable of that name is fine.
 const propertyOnlyNames = new Set(['cookie', 'sendBeacon']);
 const layerPath = /^(?:backend|adapters|desktop|shell)(?:\/|$)/;
+const requireNames = new Set(['require', 'createRequire']);
 const externalModule = /^(?:node:|(?:electron|fs|path)(?:\/|$))/;
 
 function concatenate(left, right) {
@@ -59,8 +60,9 @@ function computedPath(argument) {
 
 // Decision: the UI reads import.meta only as import.meta.env, so a Vite glob cannot load another layer (#848).
 function envRead(node) {
-  const { object, property } = node;
-  return object.type === 'MetaProperty' && object.meta.name === 'import' && !node.computed && property.name === 'env';
+  const object = unwrapped(node.object);
+  return object.type === 'MetaProperty' && object.meta.name === 'import' && !node.computed
+    && node.property.name === 'env';
 }
 
 // What a UI module loads: other modules, by a plain string only, and import.meta only as import.meta.env.
@@ -72,8 +74,9 @@ function moduleChecks(file, record) {
     if (computedPath(argument)) record('import', node);
     else checkModule(node, argument);
   }
-  // The visitor reaches a member before its object, so import.meta.env is known by the time import.meta is.
+  // The visitor reaches a node before its parts, so import.meta.env and require('…') are known by then.
   const envMeta = new Set();
+  const calledRequire = new Set();
   const moduleSource = (node) => checkModule(node.source);
   return {
     ImportDeclaration: moduleSource,
@@ -83,13 +86,20 @@ function moduleChecks(file, record) {
     TSImportType: moduleSource,
     TSExternalModuleReference: (node) => checkModule(node.expression),
     CallExpression(node) {
-      if (node.callee.type === 'Identifier' && node.callee.name === 'require') checkLoaded(node, node.arguments[0]);
+      const callee = unwrapped(node.callee);
+      if (callee.type !== 'Identifier' || callee.name !== 'require') return;
+      calledRequire.add(callee);
+      checkLoaded(node, node.arguments[0]);
+    },
+    // Any other use of require (an alias, require.call, module.require, createRequire) loads an unchecked path.
+    usesRequire(node) {
+      if (requireNames.has(node.name) && !calledRequire.has(node)) record('import', node);
     },
     MetaProperty(node) {
       if (node.meta.name === 'import' && !envMeta.has(node)) record('import', node);
     },
     readsEnv(node) {
-      if (envRead(node)) envMeta.add(node.object);
+      if (envRead(node)) envMeta.add(unwrapped(node.object));
     },
   };
 }
@@ -127,7 +137,7 @@ export function matchesIn(file, source) {
       if (entry.type === 'Property') checkProperty(entry.key, entry.computed);
     }
   }
-  const { readsEnv, ...modules } = moduleChecks(file, record);
+  const { readsEnv, usesRequire, ...modules } = moduleChecks(file, record);
   new Visitor({
     ...modules,
     MemberExpression(node) {
@@ -137,6 +147,7 @@ export function matchesIn(file, source) {
     JSXOpeningElement: checkTag,
     ObjectPattern: checkPattern,
     Identifier(node) {
+      usesRequire(node);
       if (propertyOnlyNames.has(node.name)) return;
       if (storageNames.has(node.name)) record('storage', node);
       if (networkNames.has(node.name)) record('network', node);

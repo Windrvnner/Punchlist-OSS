@@ -121,11 +121,16 @@ describe('UI dependency checks', () => {
       "export const bracketed = import.meta['glob']('../backend/*.ts')",
       'const meta = import.meta',
       'export const env = import.meta.env.DEV',
+      "export const viaCall = require.call(null, '../backend/reader')",
+      "export const wrapped = (require as (name: string) => unknown)('../backend/reader')",
+      "export const fromModule = module.require('../backend/reader')",
+      "export const created = createRequire('/app')('../backend/reader')",
+      'export const parenthesized = (import.meta).env.MODE',
     ];
     repo.write(file, lines.join('\n'));
     const result = repo.run();
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(`${file} import (lines 2, 4, 5, 6, 7, 8, 9, 10, 11): 9 exceeds`);
+    expect(result.stderr).toContain(`${file} import (lines 2, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16): 13 exceeds`);
   });
 
   it('allows modules named with a plain string', () => {

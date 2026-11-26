@@ -65,8 +65,8 @@ includes a role credited with a decision and an email address other than an exam
 The readability script also lists added `src/` lines that name a guess (overlap, fuzzy, fallback, repair and the like).
 After readability hints, `scripts/check-pane-of-glass.mjs` checks UI imports, service and repository access,
 browser storage, cookies, the Cache API, and network calls. The committed `scripts/pane-of-glass-baseline.json` is
-`{}`, so any match fails. A UI `import()` or `require()` must name its module with a plain string, and UI code reads
-`import.meta` only as `import.meta.env`; anything else counts as an import.
+`{}`, so any match fails. A UI `import()` or `require()` call must name its module with a plain string, `require` is
+used only in such a call, and UI code reads `import.meta` only as `import.meta.env`; anything else counts as an import.
 The guard compares the baseline with the branch point on `main` and refuses increases. On a branch with existing
 entries, use `node scripts/check-pane-of-glass.mjs --lower` and commit the lower baseline when removing an access.
 If the checkout lacks the history needed for comparison, the diagnostic gives the Git command to fetch it.
