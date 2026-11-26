@@ -22,16 +22,17 @@ export function listReadPrompt(lines: string[]): string {
     '- "more": the rest of the item on the line above (a long item wrapped onto the next line);',
     '- "columns": a table\'s heading row;',
     '- "left": anything else (a title, a note, a page number or footer, a date).',
-    'For a table, "cells" gives the column numbers, counted from 1, that hold each row\'s item and, when the table has',
-    'them, its section and subsection; a heading row\'s heading is in its section or subsection column.',
+    'For a table, "cells" gives the column numbers, counted from 1: "item", the column that holds each row\'s item;',
+    '"section" and "subsection", columns of their own that hold a row\'s section and subsection, when the table has',
+    'them; "heading", the column that holds a heading row\'s heading.',
     'Reply as JSON: {"section": ["3"], "subsection": [], "item": ["4-39", "41"], "more": ["12"], "columns": ["1"],',
-    '"left": ["2", "40"], "cells": {"item": 3, "section": 1, "subsection": 2}}',
+    '"left": ["2", "40"], "cells": {"item": 3, "section": 1, "subsection": 2, "heading": 1}}',
   ].join('\n');
 }
 
-/** the line numbers an entry names: a number, or a range "a-b" (both ends in), within the list */
+/** the line numbers an entry names: a number, or a range "a-b" or "a–b" (both ends in), within the list */
 function numbersIn(entry: unknown, count: number): number[] {
-  const range = typeof entry === 'string' ? /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(entry) : null;
+  const range = typeof entry === 'string' ? /^\s*(\d+)\s*[-–]\s*(\d+)\s*$/.exec(entry) : null;
   const [from, to] = range ? [Number(range[1]), Number(range[2])] : [int(entry), int(entry)];
   if (from === null || to === null) return [];
   const out: number[] = [];
@@ -39,13 +40,26 @@ function numbersIn(entry: unknown, count: number): number[] {
   return out;
 }
 
-/** a table's columns as the reply gives them; none without a usable item column */
-function cellsOf(value: unknown): ListCells | undefined {
+/** a column number from the reply, counted from 1 */
+function column(value: unknown): number | undefined {
+  const c = int(value);
+  return c !== null && c >= 1 ? c : undefined;
+}
+
+/**
+ * A table's columns as the reply gives them; none without an item column. A row's section and subsection are cells
+ * of their own, so a section or subsection column that is the item column is not taken.
+ */
+function columnsOf(value: unknown): ListCells | undefined {
   if (!isObject(value)) return undefined;
-  const column = (v: unknown) => { const c = int(v); return c !== null && c >= 1 ? c : undefined; };
-  const item = column(value.item); if (!item) return undefined;
-  const section = column(value.section); const subsection = column(value.subsection);
-  return { item, ...(section ? { section } : {}), ...(subsection ? { subsection } : {}) };
+  const item = column(value.item);
+  if (!item) return undefined;
+  const own = (v: unknown) => (column(v) !== item ? column(v) : undefined);
+  const section = own(value.section);
+  const subsection = own(value.subsection);
+  const heading = column(value.heading);
+  const named = { ...(section ? { section } : {}), ...(subsection ? { subsection } : {}) };
+  return { item, ...named, ...(heading ? { heading } : {}) };
 }
 
 /**
@@ -54,10 +68,14 @@ function cellsOf(value: unknown): ListCells | undefined {
  */
 export function listReply(reply: Record<string, unknown>, lines: string[]): ListReply {
   const named = new Map<number, Set<LineRead['k']>>();
-  for (const k of LIST_KINDS) for (const entry of list(reply[k])) for (const n of numbersIn(entry, lines.length)) {
-    if (lines[n - 1].trim()) named.set(n, (named.get(n) ?? new Set()).add(k));
+  for (const k of LIST_KINDS) {
+    for (const entry of list(reply[k])) {
+      for (const n of numbersIn(entry, lines.length)) {
+        if (lines[n - 1].trim()) named.set(n, (named.get(n) ?? new Set()).add(k));
+      }
+    }
   }
   const read = [...named].filter(([, kinds]) => kinds.size === 1).sort((a, b) => a[0] - b[0]);
-  const cells = cellsOf(reply.cells);
+  const cells = columnsOf(reply.cells);
   return { lines: read.map(([n, kinds]) => ({ n, k: [...kinds][0] })), ...(cells ? { cells } : {}) };
 }
