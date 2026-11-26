@@ -472,19 +472,23 @@ export function nodeDocuments(o: DocumentsOptions) {
     saveHashes(true); return { folder, matched, checked: sample.length };
   }
 
-  /** the words a spreadsheet uses most: its sheet names and the text in its cells, not its numbers. None for one too large to read quickly, or that cannot be read. */
   /** a spreadsheet's sheets: a .csv is text already; any other is read through LibreOffice */
   async function sheetsOf(at: string, asShown = false): Promise<Sheet[]> {
     if (/\.csv$/i.test(at)) return [{ name: 'Sheet1', grid: parseCsv(decodeText(fs.readFileSync(at))) }];
     if (!o.convert?.sheets) throw new Error('no converter');
     return o.convert.sheets(at, asShown);
   }
+  /**
+   * The words a spreadsheet uses most: its sheet names and its cells. None for one too large to read quickly, or that
+   * cannot be read.
+   */
   async function sheetWords(at: string, bytes: number, dealId?: string, docId?: string): Promise<string[]> {
     if (bytes > WORDS_UP_TO) return [];
     try {
       const sheets = await sheetsOf(at);
       const text = sheets.map((sh) => sh.name).filter((n) => !/^Sheet\d+$/.test(n));                         // a name nobody gave a sheet says nothing
-      for (const sh of sheets) for (const row of sh.grid) for (const c of row) if (/\p{L}/u.test(c)) text.push(c);   // a cell with no letters is a number or a date
+      // every cell, numbers and dates too: no number is left out (#1147)
+      for (const sh of sheets) for (const row of sh.grid) for (const c of row) text.push(c);
       if (dealId && docId) o.index?.add(dealId, docId, countWords(text.join('\n')));        // sheet names come first, so they make its title
       return topWords(text.join('\n'));
     } catch { return []; }

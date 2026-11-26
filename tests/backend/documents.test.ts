@@ -46,6 +46,12 @@ const NOTES = new Uint8Array(fs.readFileSync(path.join(__dirname, 'fixtures', 'N
 /** a financial model: what the converter gives for it (a cover and a debt sheet), and stand-in bytes for the file */
 const MODEL_SHEETS: Sheet[] = [{ name: 'Cover', grid: [['Cover']] }, { name: 'Debt', grid: Array.from({ length: 40 }, (_, r) => ['Line ' + (r + 1), String(r + 1), String((r + 1) * 1.5)]) }];
 const MODEL = new TextEncoder().encode('PK\u0003\u0004 stands in for Model v12.xlsx');
+/**
+ * The model's most-used words: "line" in every row, then its numbers (#1147), "5" from every half figure such as "1.5";
+ * numbers used equally often come in the order of the alphabet. "cover" and "debt", used twice, fall outside the 30.
+ */
+const MODEL_WORDS = ['line', '5', '1', '10', '12', '13', '15', '16', '18', '19', '21', '22', '24', '25', '27', '28',
+  '3', '30', '31', '33', '34', '36', '37', '39', '4', '40', '6', '7', '9', '11'];
 
 /** a data room with five documents, two system files that are not documents, and an empty one */
 function room() {
@@ -126,10 +132,9 @@ describe('documents on real folders', () => {
     await indexAll(pc(root, 'office', undefined, { index: true }), vdr);
     const reread = pc(root, 'office', undefined, { index: true }).docs.records('d1');
     const wordsOf = (bytes: Uint8Array) => reread.find((r) => r.docId === idOf(bytes))?.words;
-    const rowNumbers = Array.from({ length: 40 }, (_, i) => String(i + 1)).sort().slice(0, 28);
     expect(wordsOf(FA)).toEqual(['agreement', 'credit', '1', '2', '3']);
     expect(wordsOf(NOTES)).toEqual(['note', 'three', 'two']);
-    expect(wordsOf(MODEL)).toEqual(['line', 'cover', ...rowNumbers]);
+    expect(wordsOf(MODEL)).toEqual(MODEL_WORDS);
   });
   it('reads again a PDF and a sheet attached in the app that its index under older rules held (#1147)', async () => {
     const root = tmp();
@@ -150,9 +155,20 @@ describe('documents on real folders', () => {
     expect(attached.map(([bytes]) => ix.has('d1', idOf(bytes)))).toEqual([true, true]);
     const reread = pc(root, 'office', undefined, { index: true }).docs.records('d1');
     const wordsOf = (bytes: Uint8Array) => reread.find((r) => r.docId === idOf(bytes))?.words;
-    const rowNumbers = Array.from({ length: 40 }, (_, i) => String(i + 1)).sort().slice(0, 28);
     expect(wordsOf(TERMS)).toEqual(['sheet', 'term', '1', '2']);
-    expect(wordsOf(MODEL)).toEqual(['line', 'cover', ...rowNumbers]);
+    expect(wordsOf(MODEL)).toEqual(MODEL_WORDS);
+  });
+  it('keeps the numbers in a spreadsheet\'s cells in its words and this PC\'s index (#1147)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Rates.csv', 'Maturity,2027\nMargin,1.25\n');
+    const a = pc(root, 'office', undefined, { index: true });
+    await indexAll(a, vdr);
+    const rates = a.docs.records('d1').find((r) => r.name === 'Rates.csv')!;
+    expect(rates.words).toContain('2027');
+    const ix = wordIndex(a.local);
+    const score = ix.score('d1', new Set(['2027']), [{ docId: rates.docId, named: new Set<string>() }]);
+    expect(score.get(rates.docId)).toBeGreaterThan(0);
   });
   it('a folder taken off the deal stops feeding checks and questions, and its documents still open', async () => {
     const { root, vdr } = room(); const extra = path.join(root, 'extra'); put(extra, 'Side Letter.pdf', pdf('side letter'));
@@ -188,12 +204,10 @@ describe('documents on real folders', () => {
     expect([by('Energy Yield Report.pdf').pages, by('Notes.docx').pages, by('Model v12.xlsx').pages]).toEqual([2, undefined, undefined]);   // a spreadsheet has cells, not pages; a Word file has none until it is first converted
     expect(by('Notes.docx').words).toEqual(['note', 'three', 'two']);
     expect(a.converted).toEqual([]);   // its words were read straight from the file
-    // a Word file's words come from the PDF made of it; a spreadsheet's from its sheet names and the text in its cells, not its numbers
-    // numbers are words too (#1147): the model's row numbers, used once each, come before "debt" in the alphabet
-    const rowNumbers = Array.from({ length: 40 }, (_, i) => String(i + 1)).sort().slice(0, 28);
+    // a Word file's words come from the PDF made of it; a spreadsheet's from its sheet names and its cells (#1147)
     expect(by('Energy Yield Report.pdf').words).toEqual(['energy', 'yield', '1', '2']);
     expect(by('Notes.docx').words).toEqual(['note', 'three', 'two']);
-    expect(by('Model v12.xlsx').words).toEqual(['line', 'cover', ...rowNumbers]);
+    expect(by('Model v12.xlsx').words).toEqual(MODEL_WORDS);
     expect(a.svc.uploads).toBe(0); expect(a.svc.calls.length).toBe(0); expect(val(await a.docs.cached())).toEqual([]);
     expect(a.converted).toEqual([]); expect(a.work()).toEqual([]);                                                                  // nothing converted, and nothing kept
     // again: nothing is recorded or converted twice
