@@ -382,18 +382,27 @@ for (const [index, size] of SIZES.entries()) {
     unchecked: document.getElementById('au-unchecked')?.textContent ?? null,
     retries: ['au-retry-out', 'au-retry-links'].filter((b) => document.getElementById(b)).length,
     go: !document.getElementById('au-go').disabled,
+    // the count stays on one line and the footer at its height, with nothing running past it
+    countLines: Math.round(document.getElementById('au-count').getBoundingClientRect().height
+      / parseFloat(getComputedStyle(document.getElementById('au-count')).lineHeight)),
+    footHeight: Math.round(document.querySelector('.lnkdlg .xfoot').getBoundingClientRect().height),
+    fits: document.querySelector('.lnkdlg .xfoot').scrollWidth <= document.querySelector('.lnkdlg .xfoot').clientWidth,
+    linkRetry: document.getElementById('au-retry-links') && getComputedStyle(document.getElementById('au-retry-links'))
+      .borderTopStyle,
   }));
   const seen = await foot();
   say('a failed link check keeps the count and both Retry lines in the footer',
     seen.rows > 0 && /^\d+ questions?$/.test(seen.count) && /could not be drafted/.test(seen.out ?? '')
-      && /^· \d+ points? not checked against open questions\. Retry$/.test(seen.unchecked ?? '')
-      && seen.retries === 2 && seen.go, JSON.stringify(seen));
+      && /^· \d+ unchecked\. Retry$/.test(seen.unchecked ?? '')
+      && seen.retries === 2 && seen.go && seen.countLines === 1 && seen.fits && seen.linkRetry === 'none',
+    JSON.stringify(seen));
   await page.evaluate(() => { window.__fail = {}; });
   await page.click('#au-retry-links');
   await page.waitForSelector('#au-unchecked', { state: 'detached', timeout: 10000 });
   const after = await foot();
   say('Retry checks the open questions and takes its line away, leaving the other',
-    after.unchecked === null && /could not be drafted/.test(after.out ?? ''), JSON.stringify(after));
+    after.unchecked === null && /could not be drafted/.test(after.out ?? '') && after.footHeight === seen.footHeight,
+    JSON.stringify(after));
   await ctx.close();
 }
 
