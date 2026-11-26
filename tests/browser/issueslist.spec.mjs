@@ -119,7 +119,7 @@ for (const [w, h, scheme] of [[1280, 736, 'dark'], [1024, 640, 'light']]) {
       lefts: [...new Set([...r.slice(0, 3), ...n.slice(0, 3)].map((x) => Math.round(x.children[1].getBoundingClientRect().left)))] };
   });
   say(`an already-raised point says what it joins, by the finding Import will put it on (${w})`, rows.first.n === '#1' && rows.first.was === 'JoinsChange of control definition omits the sponsor fund vehicles' && rows.first.box === 'Keep separate' && rows.chain.was === 'JoinsFinding 80 on the credit agreement' && rows.point.was === 'Joins#26 Issue 26 on the credit agreement', JSON.stringify(rows));
-  say(`every new finding is listed, read only, with its title and workstream (${w})`, rows.head === 'New Findings137AI'
+  say(`every new finding is listed, read only, with its title and workstream (${w})`, rows.head === 'New Findings137'
     && rows.newRows === 137 && rows.firstNew.join('|') === '#2|Issue 2 on the credit agreement|Legal'
     && rows.inputs === 0, JSON.stringify(rows));
   say(`the titles in both sections start at the same place (${w})`, rows.lefts.length === 1, JSON.stringify(rows.lefts));
@@ -127,7 +127,7 @@ for (const [w, h, scheme] of [[1280, 736, 'dark'], [1024, 640, 'light']]) {
   const checked = await page.evaluate(() => { const r = document.querySelector('#il-raised .ilr:nth-child(2)'); return { off: r.querySelector('.was').classList.contains('off'), strike: getComputedStyle(r.querySelector('.was')).textDecorationLine, n: r.querySelector('.n').textContent, listed: [...document.querySelectorAll('#il-new .iln .n')].map((x) => x.textContent).includes(r.querySelector('.n').textContent), head: document.querySelectorAll('.ilf .srow.top .k')[1].textContent }; });
   say(`checking a point keeps it as its own finding: its join is struck through and it is listed as new (${w})`,
     (await page.textContent('#il-line')) === '138 new findings' && checked.off && checked.strike === 'line-through'
-    && checked.listed && checked.head === 'New Findings138AI', JSON.stringify(checked));
+    && checked.listed && checked.head === 'New Findings138', JSON.stringify(checked));
   // a point joining an earlier one follows it: kept separate, the earlier point is a new finding, and the later joins that
   await page.click('#il-raised .ilr:nth-child(20) .keep');
   const follow = await page.evaluate(() => [...document.querySelectorAll('#il-raised .ilr')].find((x) => x.querySelector('.n').textContent === '#142').querySelector('.was').textContent);

@@ -449,4 +449,3 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
   );
 }
 
-/** the mark before a title the model wrote: the words beneath it are counsel's own */

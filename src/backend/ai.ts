@@ -599,16 +599,16 @@ export function nodeAi(o: AiOptions) {
   /** points titled and compared with the findings in one call: a list of deal size (a few hundred points) is one call */
   const ISSUES_BATCH = 400;
   const MEMO_RATE_BATCH = 40;   // open findings rated in one call for the deal memo
+  /** a reply's text with its white space collapsed */
+  const clean = (t: unknown) => String(t ?? '').replace(/\s+/g, ' ').trim();
+
   /**
    * An issues list's points, read from its file in one call, as every other document is read: the model gives each
    * point with the words the list gives it and the number or reference the list gives it (#1026). The reply is not paged,
    * checked against the file's text or matched to it. A reply that cannot be read is asked for again (`tried`); one cut
    * off at the length limit fails the read, as it does anywhere else.
    */
-  /** a reply's text with its white space collapsed */
-const clean = (t: unknown) => String(t ?? '').replace(/\s+/g, ' ').trim();
-
-async function readIssuePoints(
+  async function readIssuePoints(
     name: string, fileId: string, model: Ask['model'], tried: <T>(ask: () => Promise<T>) => Promise<T>,
   ): Promise<Result<{ n: string; text: string }[]>> {
     const prompt = [
@@ -625,7 +625,9 @@ async function readIssuePoints(
         return fail({ kind: 'failed', message: 'It could not be read as an issues list' });
       }
       const given = reply.points as { n?: unknown; text?: unknown }[];
-      return ok(given.map((p) => ({ n: clean(p?.n), text: clean(p?.text) })).filter((p) => p.text));
+      // the point's text is the model's reply as given: the list's words are never normalized (#1026)
+      const texts = given.map((p) => ({ n: clean(p?.n), text: typeof p?.text === 'string' ? p.text : '' }));
+      return ok(texts.filter((p) => p.text.trim()));
     } catch (e) { return failure(e, 'The file could not be read'); }
   }
   async function askJson<T = Record<string, unknown>>(input: Ask, keys: string[], shape?: string, fix = true): Promise<T | null> {
@@ -2121,8 +2123,8 @@ async function readIssuePoints(
     },
     async issuesList(i) {
       // Two steps. The list is read from its file in one call, each point in the list's own words. Then the points are
-      // sorted into workstreams and compared with the deal's findings and each other, with no file: the whole list in one call, as the
-      // checklist's duplicate check is asked, in parts only for a list longer than ISSUES_BATCH. A reply that cannot be
+      // sorted into workstreams and compared with the deal's findings and each other, with no file: the whole list in
+      // one call, as the checklist's duplicate check is asked, in parts only for a list longer than ISSUES_BATCH. A reply that cannot be
       // read is asked for again for half as many points. Nothing is half done: a point that cannot be read or sorted
       // fails the whole, to be asked again.
       // a call that fails (a timeout, a server error) is asked again twice by every call's own retry (retry.ts), which

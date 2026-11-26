@@ -325,7 +325,6 @@ details.fsrcs .sgp .srcbtn:hover{color:var(--ink);text-decoration-color:var(--ac
 .iln .ws{font-size:13px;line-height:1.45;color:var(--ink-2);white-space:nowrap}
 /* a long list's rows are laid out only near the view */
 .ilf .ilr,.ilf .iln{content-visibility:auto;contain-intrinsic-size:auto 40px}.ilf .ilr{contain-intrinsic-size:auto 100px}
-.ilf .k .aim{font-family:var(--body);color:var(--accent);font-size:11px;font-weight:600;letter-spacing:.4px;margin-left:8px;vertical-align:1px}
 /* "#3 on issues list" on a finding's page: the list and the point's words on hover */
 .ilh{cursor:default;outline-offset:2px}
 /* the preview's short fields keep a fixed width that fits their heading; the question and the response share the rest */
@@ -553,7 +552,6 @@ body.reading{--colw:clamp(320px,calc(100vw - 1000px),560px)}
 .md .li .rs.dr.has{color:var(--ink-2)}   /* a response taken from a draft: marked, in the color any response reads in */
 .md .li .rs.dr .aim,.msgs .suggest .verdict .aim{
   color:var(--accent);font-size:11px;font-weight:600;letter-spacing:.4px;margin-inline-end:6px}
-.flagrow .ft .aim,.qtxt .aim{font-family:var(--body);color:var(--accent);font-size:11px;font-weight:600;letter-spacing:.4px;margin-inline-end:7px;vertical-align:1px}
 /* Option A. A question in two versions: the stripe an open finding has, on its own row only (design.md Marks), and
    its Response cell says only "Two versions" in --high. A cell taken in from the Q&A log and not yet seen: its value in full ink,
    and the log icon in --ink-2 hung at the cell's top right, so every value keeps its column's left edge. */

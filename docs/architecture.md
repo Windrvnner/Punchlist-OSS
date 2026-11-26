@@ -118,7 +118,7 @@ with a record's current versions in `changeLogHeads.ts` and the folding of draft
   names the versions it was based on. Two current versions that differ are a clash, which is kept for a person to
   resolve; the app never picks one. A question's draft is written by the app, so it folds into a person's change rather
   than clashing with it (`DraftFold` in `src/backend/changeLogDrafts.ts`). Any field that two PCs can write differently
-  for the same content (a timestamp, who made the change, or a title the model wrote) must be listed as a bookkeeping
+  for the same content (a timestamp, who made the change, or the model's workstream choice) must be listed as a bookkeeping
   field in `src/domain/versions.ts`. Otherwise, records with derived IDs clash when they should not.
 - **Clashes stay local to one record.** A line built on a version that hasn't arrived yet is held back until that version arrives, without pausing the rest of the deal. A held line more than a day old is let go and shown as a choice (`letGoStuck`).
 - **Nothing is thrown away.** Every version that is not kept becomes a deletion entry under **Deleted** (`src/app/commands/keptVersions.ts`). When a deal is deleted on one PC, another PC keeps any changes the deleting PC hadn't seen, as a recovered copy (`src/domain/recovered.ts`).

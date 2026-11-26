@@ -57,7 +57,7 @@ const read = async (f: (c: Call) => unknown) => {
 describe('reading an issues list', () => {
   it('reads the list in one call, then compares its points with 126 findings in one call, and maps each '
     + 'repeat', async () => {
-    // the reader sends the words with stray spaces and a line break, as a file's text often has them
+    // the reader's words are kept exactly as given, spaces and line break included
     const spaced = (pts: P[]) => ({ points: pts.map((p) => ({ ...p, text: `  ${p.text}\n` })) });
     const { r, s, reads } = await read(stand(LIST, { edit: spaced }));
     const out = val(r);
@@ -67,14 +67,14 @@ describe('reading an issues list', () => {
     expect(s.calls.filter(isSort).length).toBe(1);
     expect(s.calls.filter(isSort)[0].files).toEqual([]);
     expect(out.points.length).toBe(164);
-    expect(out.points[0]).toEqual({ n: '1', text: POINTS[0], title: POINTS[0], workstream: 'Legal', same: { finding: 'f0' } });
+    expect(out.points[0]).toEqual({ n: '1', text: `  ${POINTS[0]}\n`, title: `  ${POINTS[0]}\n`, workstream: 'Legal', same: { finding: 'f0' } });
     expect(out.points[1].workstream).toBe('Financial');
     expect(out.points[2].workstream).toBe('Legal');   // the workstream as the app names it, whatever the case
     expect(out.points.filter((p) => p.same && 'finding' in p.same).length).toBe(23);
     expect(out.points[60].same).toEqual({ point: 25 });
     expect(out.points[141].same).toEqual({ point: 112 });
-    expect(s.calls.filter(isSort)[0].prompt).toContain('F1: Finding 0 on the credit agreement: What finding 0 says.');
-    expect(s.calls.filter(isSort)[0].prompt).not.toContain('"title"');   // no model title: the point's own words are the title   // citation markers left out
+    expect(s.calls.filter(isSort)[0].prompt).toContain('F1: Finding 0 on the credit agreement: What finding 0 says.');   // citation markers left out
+    expect(s.calls.filter(isSort)[0].prompt).not.toContain('"title"');   // the sorter is not asked for a title
   });
   it('asks for each point in the list\'s own words, never reworded', async () => {
     const { reads } = await read(stand(plain(3)));
