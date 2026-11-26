@@ -32,7 +32,7 @@ export function rankRecords<T>(records: T[], q: Set<string>, text: (x: T) => str
  * Page `page` (from 1) of a ranking of groups, at most `size` items a page, with no group split between pages: a group
  * that does not fit on the page under way starts the next one. A group larger than a page is cut into pages that each
  * begin with its first item. A clean draft and its blacklines are one group, the clean draft first, so each blackline
- * is read beside it (#1102).
+ * is read beside it (architecture.md, Blacklines), as a folder read's batches keep them (agentFolder.ts `batches`).
  */
 export function pageOfGroups<T>(groups: T[][], page: number, size: number): Page<T> {
   const pages: T[][] = [];
