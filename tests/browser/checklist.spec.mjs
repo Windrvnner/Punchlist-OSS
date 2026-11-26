@@ -284,6 +284,8 @@ async function certificateSetup(page, dealId, partial) {
       ok: true,
       value: items.map(({ what }) => partial && what === betaTitle ? null : `Please document ${what}.`),
     });
+    // these cases are about retained links, not the check: the model confirms every candidate
+    ai.covers = async ({ checks }) => ({ ok: true, value: checks.map(() => true) });
     for (const title of [betaTitle, alphaTitle]) await run('CreateFinding', { title, workstream: 'Legal' });
     await run('CreateQuestion', { text: certificate });
     const alpha = Object.values(store.get().findings).find((finding) => finding.title === alphaTitle).id;
