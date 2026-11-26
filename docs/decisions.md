@@ -88,7 +88,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A draft that can't be saved is retried five times with backoff, then shows as failed, with its text kept for **Retry** (#22).
 - **Draft from Documents** is offered on any open question without a draft; when it would replace typed text, it asks for confirmation on the button and offers **Undo**. **Draft All** drafts only questions with no response. An accepted draft records the firm as the responder.
 - A used draft, or a response taken from a conversation, keeps its label and sources only until a person changes its words.
-- Drafting quotes, word for word and with credit, a response already given to a similar question, then adds what the documents say. The model sees earlier responses and questions only by their permanent ids, never their numbers, so a calendar quarter such as Q3 2027 stays in a draft, and a sentence naming an earlier response's id is dropped with the source only it cited. (#286, #1105).
+- Drafting quotes, word for word and with credit, a response already given to a similar question, then adds what the documents say. The model sees earlier responses and questions only by their permanent ids, never their numbers, so a calendar quarter such as Q3 2027 stays in a draft, and a sentence naming an earlier response's id is dropped with the source only it cited (#286, #1105).
 - A typed response, or one taken from a conversation, doesn't change the status; a person marks the question Answered.
 - Emptying a response is announced in a notice with **Undo**.
 - A response on a question linked to a finding marks that finding; a response on an unlinked question is checked once against the open findings.
