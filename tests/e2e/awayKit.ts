@@ -8,6 +8,12 @@ import { isPickAsk, isPickForAsk, isDescribeAsk, isAffectsAsk, isVerifyAsk, isHe
 
 export const N_ITEMS = 2000, N_DOCS = 120;
 export const LIST = () => ({ broad: Array.from({ length: N_ITEMS }, (_, i) => ({ id: `b${i}`, text: `Agreement number ${i} is signed and dated` })), product: [], sector: [] });
+/**
+ * The document a stand-in cites for an item whose own agreement is not in the call: the first one outside the closed
+ * folder. Which document ranks first in a call depends on the index, so citing the call's first document would make
+ * which items wait on the closed folder depend on ranking order, not on the item's own document.
+ */
+const openDoc = (docs: RegExpMatchArray[]) => docs.find((m) => !m[2].includes('Legal D/'));
 /** a model that finds every item satisfied; `onCheck` is called before each reply on checklist items */
 export function model(onCheck: () => void = () => {}) {
   return new StandInService((x) => {
@@ -16,7 +22,17 @@ export function model(onCheck: () => void = () => {}) {
     if (isPickAsk(c) || isPickForAsk(c)) return 'I cannot say';
     const items = itemsIn(c);
     // each item is settled on its own agreement when the call has it, as a real model would cite it (a Check again starts from it)
-    if (items.length) { onCheck(); const docs = [...c.prompt.matchAll(/^(D\d+): ([^\n]*)$/gm)]; return JSON.stringify({ items: items.map((it) => { const n = /Agreement number (\d+)/.exec(it.text)?.[1]; const d = n && c.prompt.includes('Add "where"') ? docs.find((m) => new RegExp(`Agreement ${n}\\.pdf`).test(m[2])) : undefined; return { id: it.tag, ...(d ? { result: 'ok', where: [{ doc: d[1], page: 1, quote: 'As the item requires.' }] } : OK(c)) }; }) }); }
+    if (items.length) {
+      onCheck();
+      const docs = [...c.prompt.matchAll(/^(D\d+): ([^\n]*)$/gm)];
+      return JSON.stringify({ items: items.map((it) => {
+        const n = /Agreement number (\d+)/.exec(it.text)?.[1];
+        const own = docs.find((m) => new RegExp(`Agreement ${n}\\.pdf`).test(m[2]));
+        const d = n && c.prompt.includes('Add "where"') ? own ?? openDoc(docs) : undefined;
+        const cited = d && { result: 'ok', where: [{ doc: d[1], page: 1, quote: 'As the item requires.' }] };
+        return { id: it.tag, ...(cited ?? OK(c)) };
+      }) });
+    }
     if (isAffectsAsk(c)) return JSON.stringify({ items: [], findings: [] });
     if (isHearAsk(c)) return JSON.stringify({ affected: [] });
     if (isVerifyAsk(c)) return JSON.stringify({ stands: true, why: '' });

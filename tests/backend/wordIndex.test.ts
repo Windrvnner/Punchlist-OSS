@@ -13,10 +13,13 @@ const q = (t: string) => new Set(tokens(t).map(fold));
 const named = (docId: string, name: string) => ({ docId, named: q(name) });
 
 describe("each PC's word index", () => {
-  it('counts every word, leaving out filler words and bare numbers, with plurals folded, and takes the title from the first page', () => {
-    const w = countWords('The Permits were granted. Permit 12 of 2026 covers air emissions.', 'Environmental Permit Schedule');
-    expect(Object.fromEntries(w.counts)).toEqual({ permit: 2, granted: 1, cover: 1, air: 1, emission: 1 });
-    expect(w.length).toBe(6); expect(w.title).toEqual(['environmental', 'permit', 'schedule']);
+  it('counts every word, numbers included, not filler words, folds plurals, and takes the title from page one', () => {
+    const text = 'The Permits were granted. Permit 12 of 2026 covers air emissions.';
+    const w = countWords(text, 'Environmental Permit Schedule');
+    expect(Object.fromEntries(w.counts))
+      .toEqual({ permit: 2, granted: 1, '12': 1, '2026': 1, cover: 1, air: 1, emission: 1 });
+    expect(w.length).toBe(8);
+    expect(w.title).toEqual(['environmental', 'permit', 'schedule']);
     expect(countWords(Array.from({ length: 60 }, (_, i) => `word${String.fromCharCode(97 + (i % 26))}${String.fromCharCode(97 + Math.floor(i / 26))}`).join(' ')).title.length).toBe(TITLE_WORDS);
   });
   it('ranks a match in the name above the title, and the title above the body, by the agreed weights', () => {

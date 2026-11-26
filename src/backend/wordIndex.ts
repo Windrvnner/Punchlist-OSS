@@ -2,10 +2,10 @@
  * Each PC's own index of every word in a deal's documents. Nothing of it goes to
  * the shared folder: each PC reads the words of the files in its own copy of the data room.
  *
- * What is kept for a document: how often it uses each word (filler words and bare numbers left out, plurals folded,
- * no word order), how many words it has, and its title: the first 40 words of its first page. Kept in this PC's local
- * folder as one line per document in words-<deal id>.jsonl, written once when the document is read and never changed;
- * a later line for the same document replaces an earlier one.
+ * What is kept for a document: how often it uses each word of two characters or more (filler words left out, numbers
+ * kept, plurals folded, no word order), how many words it has, and its title: the first 40 words of its first page.
+ * Kept in this PC's local folder as one line per document in words-<deal id>.jsonl, written once when the document is
+ * read and never changed; a later line for the same document replaces an earlier one.
  *
  * How a document answers to some words: each word counts by how rare it is in the deal (BM25's idf),
  * times 10 when it is in the document's name or folder path, 4 when it is in the title, and BM25's term weight for
@@ -25,7 +25,7 @@ export const WEIGHT = { name: 10, title: 4 } as const;
 export const TITLE_WORDS = 40;
 
 /** a word as the index keeps it, or null for one it leaves out */
-const keep = (w: string) => (w.length < 2 || /^\d+$/.test(w) || FILLER.has(w) ? null : fold(w));
+const keep = (w: string) => (w.length < 2 || FILLER.has(w) ? null : fold(w));
 
 /** what the index keeps of one document's text */
 export interface DocWords { counts: Map<string, number>; length: number; title: string[] }
