@@ -34,7 +34,8 @@ export async function search(run: AgentRun, what: What, query: string): Promise<
   const report: Report = { out: [], said: [], found: [] };
   if (what === 'documents' || what === 'all') await searchDocuments(run, query, report);
   const queryWords = run.kit.words(query);
-  if (what === 'findings' || what === 'all') await searchFindings(run, queryWords, report);
+  // a search of everything gives findings half of what the documents left, and Q&A the rest
+  if (what === 'findings' || what === 'all') await searchFindings(run, queryWords, report, what === 'all' ? 2 : 1);
   if (what === 'qa' || what === 'all') await searchQuestions(run, queryWords, report);
   const found = report.found.length ? { found: report.found } : {};
   Object.assign(step, { result: report.said.join(' · '), done: true }, found);
@@ -73,15 +74,21 @@ async function searchDocuments(run: AgentRun, query: string, report: Report): Pr
   report.said.push(`${listed} listed · ${sent.length} opened · ${sources.length} ${noun(sources.length, 'passage')}`);
 }
 
-/** the deal's findings that share the most words with the query */
-async function searchFindings(run: AgentRun, queryWords: Set<string>, report: Report): Promise<void> {
+/**
+ * The deal's findings that share a word with the query, the most first, each whole while they fit `1 / parts` of what
+ * is left of the room; the rest are counted.
+ */
+async function searchFindings(run: AgentRun, queryWords: Set<string>, report: Report, parts: number): Promise<void> {
   const deals = run.question.deals;
   const { all, missed } = await gather(run, (dealId) => run.kit.findings(dealId));
-  const got = bestMatches(run, queryWords, all, (f) => `${f.title} ${f.body.join(' ')}`);
-  const line = (f: (typeof got)[number]) =>
-    `Finding “${f.title}” (${f.status}${f.deal ? `, ${f.deal}` : ''}): ${shorten(oneLine(f.body.join(' ')), 500)}`;
-  const listing = got.length
-    ? `Findings:\n${got.map(line).join('\n')}`
+  const matched = bestMatches(run, queryWords, all, (f) => `${f.title} ${f.body.join(' ')}`);
+  const line = (f: (typeof matched)[number]) =>
+    `Finding “${f.title}” (${f.status}${f.deal ? `, ${f.deal}` : ''}): ${oneLine(f.body.join(' '))}`;
+  const lines = matched.map(line);
+  const listed = fitting(lines, roomLeft(run, report) / parts);
+  const got = matched.slice(0, listed);
+  const listing = matched.length
+    ? fitted('Findings', lines, listed)
     : noneFound('Findings', 'none answers to these words', missed.length, deals.length);
   report.out.push(listing + await unread(run, 'Findings', missed));
   for (const f of got) {
@@ -90,22 +97,28 @@ async function searchFindings(run: AgentRun, queryWords: Set<string>, report: Re
   const some = missed.length ? ' · some could not be read' : '';
   report.said.push(missed.length === deals.length
     ? 'findings could not be read'
-    : `${got.length} ${noun(got.length, 'finding')}${some}`);
+    : `${got.length} ${noun(got.length, 'finding')}${moreMatched(matched.length - listed)}${some}`);
 }
 
-/** the deal's questions and their responses that share the most words with the query */
+/**
+ * The deal's questions and their responses that share a word with the query, the most first, each whole while they
+ * fit what is left of the room; the rest are counted.
+ */
 async function searchQuestions(run: AgentRun, queryWords: Set<string>, report: Report): Promise<void> {
   const deals = run.question.deals;
   const { all, missed } = await gather(run, (dealId) => run.kit.questions(dealId));
-  const got = bestMatches(run, queryWords, all, (x) => `${x.text ?? ''} ${x.response ?? ''}`);
-  const line = (x: (typeof got)[number]) => {
+  const matched = bestMatches(run, queryWords, all, (x) => `${x.text ?? ''} ${x.response ?? ''}`);
+  const line = (x: (typeof matched)[number]) => {
     const state = `${x.status ?? 'open'}${x.deal ? `, ${x.deal}` : ''}`;
-    const asked = `Q${x.n} (${state}): ${shorten(oneLine(x.text ?? ''), 300)}`;
-    const response = x.response?.trim() ? shorten(oneLine(x.response), 500) : 'none yet';
+    const asked = `Q${x.n} (${state}): ${oneLine(x.text ?? '')}`;
+    const response = x.response?.trim() ? oneLine(x.response) : 'none yet';
     return `${asked}\nResponse to Q${x.n}: ${response}`;
   };
-  const listing = got.length
-    ? `Q&A:\n${got.map(line).join('\n')}`
+  const lines = matched.map(line);
+  const listed = fitting(lines, roomLeft(run, report));
+  const got = matched.slice(0, listed);
+  const listing = matched.length
+    ? fitted('Q&A', lines, listed)
     : noneFound('Q&A', 'no question answers to these words', missed.length, deals.length);
   report.out.push(listing + await unread(run, 'Questions', missed));
   for (const x of got) {
@@ -114,7 +127,10 @@ async function searchQuestions(run: AgentRun, queryWords: Set<string>, report: R
   }
   const more = got.length > 4 ? ` and ${got.length - 4} more` : '';
   const named = got.slice(0, 4).map((x) => `Q${x.n}`).join(', ') + more;
-  const which = got.length ? named : missed.length === deals.length ? 'questions could not be read' : 'no questions';
+  const unlisted = matched.length - listed;
+  const which = got.length ? named + moreMatched(unlisted)
+    : unlisted ? `${unlisted} matched`
+    : missed.length === deals.length ? 'questions could not be read' : 'no questions';
   report.said.push(which + (missed.length && missed.length < deals.length ? ' · some could not be read' : ''));
 }
 
@@ -174,7 +190,7 @@ async function gather<T>(run: AgentRun, read: (dealId: string) => Promise<T[] | 
   return { all: perDeal.flat(), missed };
 }
 
-/** the six records that share the most words with the query, the most first; none that shares none */
+/** the records that share a word with the query, those that share the most first */
 function bestMatches<T>(run: AgentRun, queryWords: Set<string>, all: T[], text: (x: T) => string): T[] {
   const scored = all.map((x) => {
     const has = run.kit.words(text(x));
@@ -182,8 +198,36 @@ function bestMatches<T>(run: AgentRun, queryWords: Set<string>, all: T[], text: 
     for (const word of queryWords) if (has.has(word)) shared++;
     return { x, shared };
   });
-  return scored.filter((h) => h.shared > 0).sort((a, b) => b.shared - a.shared).slice(0, 6).map((h) => h.x);
+  return scored.filter((h) => h.shared > 0).sort((a, b) => b.shared - a.shared).map((h) => h.x);
 }
+
+/** the characters of the reply's room left for this search's next part: less what its earlier parts found (#480) */
+function roomLeft(run: AgentRun, report: Report): number {
+  return Math.max(0, run.left() - report.out.join('\n').length);
+}
+
+/** how many of these lines, from the first, fit in `room` characters with their line breaks */
+function fitting(lines: string[], room: number): number {
+  let used = 0;
+  let count = 0;
+  for (const line of lines) {
+    used += line.length + 1;
+    if (used > room) break;
+    count++;
+  }
+  return count;
+}
+
+/** a heading with the first `listed` lines under it, and the rest counted; only the count when none fits */
+function fitted(heading: string, lines: string[], listed: number): string {
+  const rest = lines.length - listed;
+  if (!listed) return `${heading}: ${rest} matched, past what fits here: search with more words.`;
+  const more = rest ? `\nand ${rest} more matched; search with more words.` : '';
+  return `${heading}:\n${lines.slice(0, listed).join('\n')}${more}`;
+}
+
+/** the step's note of the records that matched but were not listed */
+const moreMatched = (count: number) => (count ? ` · ${count} more matched` : '');
 
 /**
  * What a search of records says when none answers: only the heading when no deal's records could be read (the deals
