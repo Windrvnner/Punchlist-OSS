@@ -855,7 +855,7 @@ body.reading .chatwrap.withdoc .reading-pane{animation:settle var(--slow) var(--
 .mwrap{position:relative;display:inline-flex}
 .mmenu{right:auto;left:0;top:auto;bottom:calc(100% + 8px);min-width:160px}
 .home .mmenu{bottom:auto;top:calc(100% + 8px)}
-/* the slash commands (#1054): under the box, or over a conversation's composer, item text in line with the typed text */
+/* the slash commands (#1054): under the box, or over a conversation's composer, text in line with the typed text */
 .slashmenu{left:0;right:0;width:auto;top:auto;bottom:calc(100% + 8px);border-radius:var(--r-pane);padding:8px;gap:2px}
 /* Home's and a deal page's boxes sit high: their menus drop below */
 .slashmenu.down{bottom:auto;top:calc(100% + 8px)}

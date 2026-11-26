@@ -1,5 +1,5 @@
 /**
- * The composer's slash commands (#1054): typing "/" at the start of an empty box offers them in a menu, and what
+ * The composer's slash commands (#1054): a one-line box that starts with "/" offers them in a menu, and what
  * follows the "/" narrows it. A command runs only when picked; typed words are never taken as one.
  */
 import type { Store } from './store';

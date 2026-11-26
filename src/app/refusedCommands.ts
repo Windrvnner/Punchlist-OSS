@@ -1,6 +1,6 @@
 /**
- * **Log Question** drafts in the composer (#1054), and those whose save was refused while something new was typed in
- * the same box (#955).
+ * The composer's **Log Question** chip (#1054), and the questions whose save was refused while something new was typed
+ * in the same box (#955).
  * Each goes back at the head of its box, ahead of what was typed since, with a blank line between, so nothing typed is
  * written over. The commands are remembered per box, newest first as they stand in the box, so that sending the box
  * logs the head command alone and leaves the rest in the box. Kept across a restart, and moved with the box's text.
@@ -27,7 +27,7 @@ export function initializeRefusedCommands() {
   keptDrafts('refused-commands', isTexts).clear();
 }
 
-/** Whether the box's text, after any refused question at its head, is a question to log (**Log Question**). */
+/** Whether the box has its **Log Question** chip on, so that what is sent is logged as a question. */
 export const logQuestionOn = (key: string) => loggingBoxes().has(key);
 
 export function setLogQuestion(key: string, on: boolean) {
