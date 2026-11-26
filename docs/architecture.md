@@ -203,7 +203,8 @@ A deal's checklist is made up of its own item records, linked to the findings an
   parts sized by `inParts` and asks again, one at a time, about any points that failed. Points still without a question
   are counted and offered with **Retry**. The duplicate check (`sameMeaning`, `kind: 'questions'`) proposes a link
   from a point to an open question that already asks for it, a part of the open questions at a time when they do not
-  fit one call; points it could not check are named in the footer (#1120).
+  fit one call. Its pairs are kept per deal until the points or the open questions change; points it could not check
+  are counted in the footer with their own **Retry** (#1120).
 
 ## Q&A log, imports, and the memo
 

@@ -359,24 +359,41 @@ for (const [index, size] of SIZES.entries()) {
   await retainedLinkCase('dark', size, index === 0);
 }
 
-{ // open questions that cannot be checked for links: the rows still draft, with no link, and the footer says so (#1120)
+{ // open questions that cannot be checked for links: the rows still draft, and the footer keeps the count, the points
+  // not drafted with their Retry, and the points not checked with theirs (#1120)
   const { ctx, page, id } = await checklist('light', SIZES[1]);
   const open = { dealId: id, text: 'Please provide the executed interconnection agreement.' };
   await page.evaluate((q) => store.dispatch(store.commandNamed('CreateQuestion'), q, { quiet: true }), open);
-  await page.evaluate(() => { window.__fail = { sameMeaning: true }; });
+  await page.evaluate(() => {
+    const ai = store.services.ai;
+    const was = ai.phrase.bind(ai);
+    ai.phrase = async (i) => {
+      const r = await was(i);
+      return r.ok ? { ok: true, value: r.value.map((text, k) => (k === 0 ? null : text)) } : r;
+    };
+    window.__fail = { sameMeaning: true };
+  });
   await page.click('#ck-pmore'); await page.click('#ck-add-unresolved');
   await page.waitForSelector('#au-list .lrow', { timeout: 10000 });
-  const seen = await page.evaluate(() => ({
+  const foot = () => page.evaluate(() => ({
     rows: document.querySelectorAll('#au-list .lrow').length,
-    links: [...document.querySelectorAll('#au-list .lrow')].filter((r) => r.textContent.includes('Link to')).length,
-    foot: document.getElementById('au-count').textContent,
-    alert: document.getElementById('au-count').getAttribute('role'),
+    count: document.getElementById('au-count').textContent,
+    out: document.getElementById('au-out')?.textContent ?? null,
+    unchecked: document.getElementById('au-unchecked')?.textContent ?? null,
+    retries: ['au-retry-out', 'au-retry-links'].filter((b) => document.getElementById(b)).length,
     go: !document.getElementById('au-go').disabled,
   }));
-  const notice = 'Couldn’t check the open questions, so no links are suggested';
-  say('a failed link check drafts every row with no link and says so in the footer',
-    seen.rows > 0 && seen.links === 0 && seen.foot === notice && seen.alert === 'alert' && seen.go,
-    JSON.stringify(seen));
+  const seen = await foot();
+  say('a failed link check keeps the count and both Retry lines in the footer',
+    seen.rows > 0 && /^\d+ questions?$/.test(seen.count) && /could not be drafted/.test(seen.out ?? '')
+      && /^· \d+ points? not checked against open questions\. Retry$/.test(seen.unchecked ?? '')
+      && seen.retries === 2 && seen.go, JSON.stringify(seen));
+  await page.evaluate(() => { window.__fail = {}; });
+  await page.click('#au-retry-links');
+  await page.waitForSelector('#au-unchecked', { state: 'detached', timeout: 10000 });
+  const after = await foot();
+  say('Retry checks the open questions and takes its line away, leaving the other',
+    after.unchecked === null && /could not be drafted/.test(after.out ?? ''), JSON.stringify(after));
   await ctx.close();
 }
 
