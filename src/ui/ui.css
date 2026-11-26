@@ -1047,7 +1047,9 @@ body.qopen .g span{text-overflow:clip;mask-image:linear-gradient(to right,#000 c
 .pastpop .ptop{display:flex;align-items:center;gap:10px;padding:12px 14px 10px;flex:none}
 .pastpop .psearch{position:relative;flex:1;min-width:0;display:block}
 .pastpop .psearch svg{position:absolute;left:11px;top:8px;color:var(--ink-3);pointer-events:none}
-.pastpop .psearch input{width:100%;box-sizing:border-box;height:30px;padding:0 12px 0 32px;border:1px solid var(--line);border-radius:var(--r-ctl);background:transparent;font:inherit;font-size:13px;color:var(--ink);outline:0}
+.pastpop .psearch input{width:100%;box-sizing:border-box;height:30px;padding:0 12px 0 32px;
+  border:1px solid var(--line);border-radius:var(--r-ctl);background:transparent;font:inherit;font-size:13px;
+  color:var(--ink);outline:0}
 .pastpop .psearch input:focus-visible{border-color:color-mix(in srgb,var(--accent) 70%,transparent)}
 .pastpop .psearch input::placeholder{color:var(--ink-3)}
 .pastpop .pseg{display:inline-flex;flex:none;padding:2px;border:1px solid var(--line);border-radius:999px}

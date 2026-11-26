@@ -29,10 +29,13 @@ describe("each PC's word index", () => {
   it('scores documents with the same evidence the same, whatever order the words were asked in', () => {
     const ix = wordIndex(nodeFolder(dir()));
     const docs = Array.from({ length: 12 }, (_, i) => `Agreement ${i}`);
-    docs.forEach((name, i) => ix.add('d', `doc${i}`, countWords(`${name} is signed.`, name)));
+    for (const [i, name] of docs.entries()) ix.add('d', `doc${i}`, countWords(`${name} is signed.`, name));
     const files = docs.map((name, i) => named(`doc${i}`, name));
     // each document's own number sits at a different place among the other words asked about
-    const ask = q(docs.flatMap((_, i) => [String(i), ...(i % 4 === 1 ? ['agreement'] : []), ...(i % 5 === 2 ? ['signed'] : [])]).join(' '));
+    const words = docs.flatMap((_, i) => [
+      String(i), ...(i % 4 === 1 ? ['agreement'] : []), ...(i % 5 === 2 ? ['signed'] : []),
+    ]);
+    const ask = q(words.join(' '));
     const scores = [...ix.score('d', ask, files).values()];
     expect(new Set(scores).size).toBe(1);
   });
