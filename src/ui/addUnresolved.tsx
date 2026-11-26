@@ -54,7 +54,7 @@ function UncheckedLine({ preview, hidden, after, busy, retry, onRetried }: Unche
   };
   const points = `${count.toLocaleString('en-US')} point${count === 1 ? '' : 's'}`;
   return <span id="au-unchecked" title={`${points} not checked against open questions`}>{after ? '· ' : ''}
-    {checking ? 'Checking…' : <>{count.toLocaleString('en-US')} unchecked. <button type="button" class="tundo"
+    {checking ? 'Checking…' : <>{count.toLocaleString('en-US')} not checked. <button type="button" class="tundo"
       id="au-retry-links" disabled={busy} onClick={() => void again()}>Retry</button></>}</span>;
 }
 
@@ -152,11 +152,22 @@ export function AddUnresolvedDialog({ dealId }: { dealId: string }) {
               checkPoint={checkPoint} checkLink={checkLink} />}
       </div>
       {/* an unreadable checklist leaves only Retry, in the line above: no footer with a button that can do nothing */}
-      {!(!ready && error === unread) && <div class="xfoot"><span id="au-count" class={error ? 'err' : ''} role={error ? 'alert' : undefined}>{(!ready && error === unread ? '' : error) || (!ready ? (count ? `Phrasing ${plural(count)}` : '') : [kept.length && plural(kept.length), links.length && `${links.length.toLocaleString('en-US')} linked`].filter(Boolean).join(' · '))}</span>
+      {!(!ready && error === unread) && <div class="xfoot"><span id="au-notes">
+        <span id="au-count" class={error ? 'err' : ''} role={error ? 'alert' : undefined}>
+          {(!ready && error === unread ? '' : error) || (!ready ? (count ? `Phrasing ${plural(count)}` : '')
+            : [kept.length && plural(kept.length), links.length && `${links.length.toLocaleString('en-US')} linked`]
+              .filter(Boolean).join(' · '))}
+        </span>
         <UncheckedLine preview={ready} hidden={!!error} after={kept.length + links.length > 0} busy={busy}
           retry={() => retryUnresolvedLinks(store, dealId, choices.linked)} onRetried={setReady} />
         {/* points with no question, beside the count, where it stays in view however long the list */}
-        {ready && !error && ready.out.length > 0 && <span id="au-out">{kept.length || links.length ? '· ' : ''}{redo ? `Drafting ${ready.out.length.toLocaleString('en-US')} more…` : <>{ready.out.length.toLocaleString('en-US')} point{ready.out.length === 1 ? '' : 's'} could not be drafted. <button type="button" class="tundo" id="au-retry-out" disabled={busy} onClick={() => void retryOut()}>Retry</button></>}</span>}<span class="grow" />
+        {ready && !error && ready.out.length > 0 && <span id="au-out">{kept.length || links.length ? '· ' : ''}
+          {redo ? `Drafting ${ready.out.length.toLocaleString('en-US')} more…` : <>
+            {ready.out.length.toLocaleString('en-US')} point{ready.out.length === 1 ? '' : 's'} could not be
+            drafted.{' '}
+            <button type="button" class="tundo" id="au-retry-out" disabled={busy}
+              onClick={() => void retryOut()}>Retry</button></>}</span>}
+      </span>
         {error && !ready && error !== unread ? <button class="btn sm pri" type="button" id="au-retry" onClick={() => setTries(tries + 1)}>Retry</button>
           : <button class="btn sm pri" type="button" id="au-go" disabled={!ready || busy || (!kept.length && !links.length)} onClick={() => void run()}>{go}</button>}</div>}
     </Modal>
