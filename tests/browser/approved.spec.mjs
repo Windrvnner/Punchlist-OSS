@@ -3,14 +3,12 @@
 // a failed CI run's upload (browser-logs-<shard>, approved/): text edges render slightly differently elsewhere.
 //   PUNCHLIST_APPROVE=1 node tests/browser/approved.spec.mjs     (writes every image from this machine, for local runs)
 import { launchChrome } from './chrome.mjs';
-import { approve, approvedPath, differingPixels, keepChanged } from './approvedImages.mjs';
+import { approve, approvedPath, clearChanged, differingPixels, keepChanged } from './approvedImages.mjs';
 import { openOnFindings } from './landing.mjs';
 import fs from 'node:fs';
 
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const SIZES = [[1280, 736], [1024, 640]];
-// Pixels that may differ on a screen before it counts as changed: room for text edges that shift by a shade.
-const MAX_DIFFERING = 50;
 // Times and dates on screen are drawn from this moment, so every run shows the same ones.
 const FIXED_TIME = new Date('2026-06-01T14:00:00Z');
 const results = [];
@@ -18,6 +16,7 @@ const say = (id, ok, note = '') => {
   results.push([id, ok]);
   console.log(ok ? 'PASS' : 'FAIL', id, note);
 };
+clearChanged();
 const browser = await launchChrome();
 openOnFindings(browser);
 
@@ -94,7 +93,7 @@ async function checkScreen(deal, name, show) {
     return;
   }
   const { differing, total, diffPng } = await differingPixels(deal.page, fs.readFileSync(expected), png);
-  const same = differing >= 0 && differing <= MAX_DIFFERING;
+  const same = differing === 0;
   if (!same) keepChanged(name, png, diffPng);
   const note = differing < 0 ? 'the size changed' : `${differing} of ${total} pixels differ`;
   say(`${name}:looks-as-approved`, same, note);
