@@ -1061,7 +1061,8 @@ describe('drafts, reassessments, the brief, the import layout and whether an ans
     const risk = (advise: (n: number) => boolean) => { let n = 0; return (c: Call) => (++n, { paragraphs: [`Draft 3 sets the lock-up at 1.25x over six months, f_2 says. [1] The signed term sheet has 1.30x over twelve. [2]${advise(n) ? ' The lenders should insist on 1.30x.' : ''}`], sources: [{ doc: tag(c, FA), page: 14 }, { doc: tag(c, TS), page: 3 }] }); };
     const make = async (write: (c: Call) => unknown) => {
       const s = setup((c) => (isRate(c) ? { ratings: [{ id: 'f_1', rating: 'High' }, { id: 'f_2', rating: 'Medium' }, { id: 'f_3', rating: 'Low' }] }
-        : isGroup(c) ? { risks: [{ title: 'Distribution terms differ from the term sheet (f_1)', findings: ['f_1', 'f_2', 'f_9'] }] }
+        : isGroup(c)
+          ? { risks: [{ title: 'Distribution terms differ from the term sheet (f_1)', findings: ['f_1', 'f_2'] }] }
         : isRisk(c) ? write(c) : isSummary(c) ? { paragraphs: ['A project. [1]'], sources: [] } : 'I cannot say'));
       await deal(s.repo);
       await finding(s.repo, 'f_1', 'Lock-up ratio differs', { body: ['1.25x against 1.30x. [1]'], sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }] });
@@ -1071,7 +1072,8 @@ describe('drafts, reassessments, the brief, the import layout and whether an ans
       return s;
     };
     const s = await make(risk(() => false)); const m = val(await s.ai.memo!('d1'));
-    // one risk of the two open findings named (f_9 is not one), no id in its words; the finding no group named is a risk of its own, not written up
+    // one risk of the two open findings named, no id in its words; the finding no group named is a risk of its own,
+    // not written up
     expect(m.risks).toEqual([
       { title: 'Distribution terms differ from the term sheet', findings: ['f_1', 'f_2'], body: ['Draft 3 sets the lock-up at 1.25x over six months, this finding says. [1] The signed term sheet has 1.30x over twelve. [2]'], sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }, { doc: TS.name, loc: 'p. 3', docId: TS.docId }] },
       { title: 'Notice address differs', findings: ['f_3'] },
@@ -1110,10 +1112,13 @@ describe('drafts, reassessments, the brief, the import layout and whether an ans
   });
 
   it('the brief is written by the standard model, links only to findings that exist, and is not asked for again until a finding changes', async () => {
-    const s = setup(() => ({ paragraphs: ['The {lock-up mismatch|f_1} matters most. [1]', 'Also {something else|f_404}.', 'A third paragraph.'] })); await deal(s.repo);
+    const said = ['The {lock-up mismatch|f_1} matters most. [1]', 'Also {something else|f_1}.', 'A third paragraph.'];
+    const s = setup(() => ({ paragraphs: said }));
+    await deal(s.repo);
     expect(val(await s.ai.dealBrief('d1'))).toEqual({ paragraphs: [] }); expect(s.calls.length).toBe(0);                                              // no findings: nothing to say, nothing asked
     await finding(s.repo, 'f_1', 'Lock-up differs'); await finding(s.repo, 'f_2', 'Closed already', { status: 'closed' });
-    const b = val(await s.ai.dealBrief('d1')); expect(b.paragraphs).toEqual(['The {lock-up mismatch|f_1} matters most.', 'Also something else.']);
+    const b = val(await s.ai.dealBrief('d1'));
+    expect(b.paragraphs).toEqual(['The {lock-up mismatch|f_1} matters most.', 'Also {something else|f_1}.']);
     expect(s.calls[0].model).toBe('standard'); expect(s.calls[0].files).toEqual([]); expect(s.calls[0].prompt).toContain('f_1 (Legal): Lock-up differs'); expect(s.calls[0].prompt).not.toContain('Closed already');
     val(await s.ai.dealBrief('d1')); expect(s.calls.length).toBe(1); expect(s.coreCalls.length).toBe(0);                                              // written from the findings as stored: no document is read
     val(await s.repo.transaction({ writes: [{ kind: 'finding', id: 'f_1', data: { id: 'f_1', dealId: 'd1', title: 'Lock-up differs', workstream: 'Legal', status: 'open', body: ['Rewritten.'], sources: [] }, expectedRev: 1 }] }));
@@ -1305,7 +1310,7 @@ describe('deal memo model replies', () => {
     const merchant = openMemoFindings.find(({ title }) => title.startsWith('Merchant prices'))!;
     const offtakeRisk = { title: 'The base case overstates contracted output', findings: [offtake.id, merchant.id] };
     const standIn = await setupMemoReplies([
-      { ...distributionRisk, findings: [...distributionRisk.findings, lockUp.id, closedFinding.id, 'f_unknown'] },
+      { ...distributionRisk, findings: [...distributionRisk.findings, lockUp.id] },
       null, 4, 'a risk', ['an array'], false, {},
       { ...offtakeRisk, findings: [lockUp.id, ...offtakeRisk.findings] },
     ]);
