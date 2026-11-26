@@ -10,7 +10,7 @@
  */
 import { z } from 'zod';
 import { define, type Upsert, type AuditDraft } from '../command';
-import { Question, Finding, Tombstone, DealId, QuestionId, FindingId, QuestionStatus, isRealDate } from '../../domain/model';
+import { Question, Finding, Tombstone, DealId, QuestionId, FindingId, QuestionStatus } from '../../domain/model';
 import { setResponse, setQuestionStatus, checkQuestion } from '../../domain/transitions';
 import { numbering } from './questions';
 import { matchExactly, withAccepted, AcceptedMatch } from './importMatching';

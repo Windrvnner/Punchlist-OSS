@@ -11,8 +11,6 @@ import { z } from 'zod';
 import { control } from '../control';
 
 const ISO = z.string().min(20); // full ISO 8601 timestamp
-const YMD = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isRealDate, 'not a calendar date');
-const YMDorBlank = z.union([z.literal(''), YMD]);
 
 export function isRealDate(s: string): boolean {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
