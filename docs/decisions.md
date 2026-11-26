@@ -199,6 +199,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 ## Deal memo
 
 - The deal memo is a templated memo of Findings, Checklist, and Q&A: a one-page summary, the memo itself from page two, and an appendix.
+- The memo's first-page checklist counts match Overview's, with turned-off items as "N turned off" (#1064).
 - Risk at a glance ranks workstreams by weighted risk (High 9, Medium 3, Low 1), in at most 12 rows.
 - Key risks lists every High risk, then the oldest Medium risks up to `memo.keyRisks`, A to Z within each severity.
 - The memo keeps usable risk groups when other entries in the model's reply are malformed.

@@ -23,7 +23,7 @@ export function unratedFindings<T extends { id: string }>(
   return open.filter((finding) => !ratings[finding.id]);
 }
 
-/** The checklist's line on page one, turned-off items in Overview's words (#1064); empty with no checklist */
+/** The checklist's line on page one, turned-off items counted as Overview counts them (#1064); empty with no checklist */
 function checklistCounts(items: MemoItem[]): string {
   if (!items.length) return '';
   const k = (kind: MemoItem['kind']) => items.filter((x) => x.kind === kind).length;

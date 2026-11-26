@@ -7,7 +7,7 @@
  */
 import type { Store } from './store';
 import { dealFindings, dealQuestions, FIRM, type State } from './state';
-import { checklistRows } from './checklistView';
+import { checklistRows, listName } from './checklistView';
 import type { ChecklistRow } from '../ports';
 import { memoContent, type MemoItem, type Rating } from '../domain/memo';
 import { memoDocument } from '../domain/memoDoc';
@@ -16,7 +16,6 @@ import { localYmd } from '../domain/model';
 import { AI_LABEL, SERVICE, control } from '../control';
 import { ok, fail, type Failure, type Result } from '../domain/result';
 
-const RANK: Record<string, number> = { broad: 0, product: 1, sector: 2, technology: 3, deal: 4 };
 /**
  * The checklist as the memo counts it: each row under the list it comes from (the first of its lists, general first, as
  * the Checklist page groups it), standing as Overview counts it through the shared `checklistRows`: items added since
@@ -27,18 +26,13 @@ export function memoItems(s: State, dealId: string): MemoItem[] | null {
   const { active, offRows, kinds } = checklistRows(s, dealId);
   if (!active.length && !offRows.length) return null;
   // a deleted finding's item still counts as to resolve, as on the Overview
-  const kindOf = (id: string) => { const kind = kinds.get(id)!; return kind === 'gone' ? 'finding' : kind; };
+  const kindOf = (id: string) => {
+    const kind = kinds.get(id)!;
+    return kind === 'gone' ? 'finding' : kind;
+  };
   const item = (r: ChecklistRow, kind: MemoItem['kind']): MemoItem =>
-    ({ text: r.text, list: listOf(s, r.id), kind, ...(r.need ? { need: r.need } : {}) });
+    ({ text: r.text, list: listName(s.items[r.id]), kind, ...(r.need ? { need: r.need } : {}) });
   return [...active.map((r) => item(r, kindOf(r.id))), ...offRows.map((r) => item(r, 'off'))];
-}
-
-/** The list an item comes from: the first of its lists, general first, as the Checklist page groups it */
-function listOf(s: State, id: string): string {
-  const it = s.items[id];
-  const from = it ? [...it.from].sort((a, b) => RANK[a.layer] - RANK[b.layer])[0] : undefined;
-  if (!from) return 'Other';
-  return from.layer === 'broad' ? 'General' : from.layer === 'deal' ? 'Added on this deal' : from.value;
 }
 
 const WORD = { label: 'Word document', ext: 'docx' };
