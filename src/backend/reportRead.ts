@@ -93,7 +93,7 @@ function isOwn(k: ReportKit, doc: string, f: Known) {
   return false;
 }
 
-const titleOf = (row: Record<string, unknown>) => (typeof row.title === 'string' ? row.title.trim() : '');
+const titleOf = (row: Record<string, unknown>) => (typeof row.title === 'string' && row.title.trim() ? row.title : '');
 
 /** One read of one report, in one call: what it has found. */
 class ReportRead {
@@ -184,8 +184,8 @@ class ReportRead {
 
   /** what the reply says beside its issues: who wrote the report, and which of the earlier draft's it drops */
   heard(reply: Record<string, unknown>) {
-    const advisor = typeof reply.advisor === 'string' ? reply.advisor.trim() : '';
-    if (advisor && !this.advisor) this.advisor = advisor.slice(0, 120);
+    const advisor = typeof reply.advisor === 'string' ? reply.advisor : '';
+    if (advisor.trim() && !this.advisor) this.advisor = advisor.slice(0, 120);
     for (const e of strings(reply.dropped)) {
       const f = this.before?.issues[(tagNumber(e, 'E') ?? 0) - 1]?.finding;
       if (f) this.dropped.add(f);

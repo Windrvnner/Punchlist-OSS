@@ -49,7 +49,7 @@ describe('reading a reply that is nearly JSON', () => {
 describe('reading a field that is nearly the shape asked for', () => {
   it('a list, strings, whole numbers and a chosen word', () => {
     expect([list([1, 2]), list('a'), list(null), list(undefined), list({ a: 1 })]).toEqual([[1, 2], ['a'], [], [], [{ a: 1 }]]);
-    expect([strings([' a ', '', 7, 'b']), strings(' one '), strings(undefined)]).toEqual([['a', 'b'], ['one'], []]);
+    expect([strings([' a ', '', 7, 'b']), strings(' one '), strings(undefined)]).toEqual([[' a ', 'b'], [' one '], []]);
     expect([int(3), int('3'), int(' 12 '), int('3*'), int(1.5), int('x'), int('1.5'), int(null), int('3 and 4')]).toEqual([3, 3, 12, 3, null, null, null, null, null]);
     expect([word(' OK '), word('Finding'), word(1), word(undefined)]).toEqual(['ok', 'finding', '', '']);
   });

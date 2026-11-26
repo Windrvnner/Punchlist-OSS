@@ -414,7 +414,7 @@ function memoGroupRows(value: unknown, ids: Set<string>): RiskGroup[] {
 }
 
 const withoutMemoMarks = (text: string, space = '') => text.replace(/\s*\[\d+\]/g, space)
-  .replace(/\{([^{}|]+)\|[^{}]*\}/g, '$1').trim();
+  .replace(/\{([^{}|]+)\|[^{}]*\}/g, '$1');
 const MEMO_RISK_WORDS = 200;
 const MEMO_RISK_TEXT_CHARS = 4_000;
 const MEMO_RISK_TOKEN_CHARS = 256;
@@ -423,7 +423,7 @@ const MEMO_RISK_SHAPE = '{"paragraphs": ["one paragraph per string, with [n] mar
 /** Count paragraph breaks inside strings, including the separator used to fit citations across paragraphs (#659). */
 function memoRiskParagraphs(value: unknown): string[] {
   return strings(value).flatMap((paragraph) => paragraph.split(/\r?\n[^\S\r\n]*\r?\n|\u0000/))
-    .map((paragraph) => paragraph.trim()).filter(Boolean);
+    .filter((paragraph) => paragraph.trim());
 }
 
 /** Bound the write-up even when malformed text fits the word count (#659). */
@@ -741,7 +741,8 @@ export function nodeAi(o: AiOptions) {
       // 'licence' is the UK spelling on purpose: other parties name documents that way, and search must find them
       prompt: `Describe the document ${doc.name}.\n"summary": two or three sentences: what it is, the parties, its date, what it covers.\n"keywords": up to thirty terms someone would search for to find it. Include the other words people use for the same things (for a permit: consent, license, licence, approval), since it is found by these words.\nReply as JSON: {"summary": "…", "keywords": ["…"]}` }, ['summary', 'keywords']);
     if (!reply || typeof reply.summary !== 'string' || !reply.summary.trim()) return null;
-    return { summary: reply.summary.trim(), keywords: strings(typeof reply.keywords === 'string' ? reply.keywords.split(/[,;\n]/) : reply.keywords).slice(0, 30) };
+    const keywords = typeof reply.keywords === 'string' ? reply.keywords.split(/[,;\n]/) : reply.keywords;
+    return { summary: reply.summary, keywords: strings(keywords).slice(0, 30) };
   }
   const AT_ONCE = 4;                                                             // documents described at a time
   const TRIES = 3;                                                               // a document the model cannot describe is asked about this many times, and then left alone for good
@@ -1617,19 +1618,19 @@ export function nodeAi(o: AiOptions) {
   function merge(c: Checklist): ChecklistItem[] {
     const seenText = new Set<string>(); const seenId = new Set<string>(); const out: ChecklistItem[] = [];
     for (const raw of [...(c?.broad ?? []), ...(c?.product ?? []), ...(c?.sector ?? []), ...(c?.technology ?? [])]) {
-      const { id, text } = trimmedItem(raw);
+      const { id, text } = givenItem(raw);
       const wording = key(text);
-      if (!id || !text || seenId.has(id) || seenText.has(wording)) continue;
+      if (!id || !text.trim() || seenId.has(id) || seenText.has(wording)) continue;
       seenId.add(id);
       seenText.add(wording);
       out.push({ id, text });
     }
     return out;
   }
-  /** an item's id and wording with the white space at each end trimmed; anything not text is empty */
-  function trimmedItem(it: { id?: unknown; text?: unknown } | undefined): { id: string; text: string } {
+  /** an item's id (a handle, its edge white space dropped) and its wording as given; anything not text is empty */
+  function givenItem(it: { id?: unknown; text?: unknown } | undefined): { id: string; text: string } {
     const id = typeof it?.id === 'string' ? it.id.trim() : '';
-    const text = typeof it?.text === 'string' ? it.text.trim() : '';
+    const text = typeof it?.text === 'string' ? it.text : '';
     return { id, text };
   }
   /**
@@ -1671,13 +1672,19 @@ export function nodeAi(o: AiOptions) {
       }
       else if (result === 'more') out.set(it.id, { kind: 'none', need: strings(r.need).join('; ') || it.text });
       else if (result === 'finding') {
-        const title = typeof r.title === 'string' ? r.title.trim() : ''; const paras = strings(r.body);
+        const title = typeof r.title === 'string' ? r.title : ''; const paras = strings(r.body);
         const fitted = fit(paras.join('\n\u0000\n'), r.sources as Cited[], sent, false, true);
         // another project's document, or a blackline not shown to be against this deal's own draft, never raises a
         // finding by itself
         if (fitted.sources.length && !fitted.sources.some((x) => mainIn(sent, x))) { out.set(it.id, { kind: 'none', need: `a document of this deal that shows it, not only another project's document or a blackline against one: ${it.text}` }); continue; }
         // a finding stands on one source we can open: what matters most is often said in a single place
-        const short = [!title && 'it has no title', !paras.length && 'it has no body', !fitted.sources.length && 'it needs at least one citation naming a document you were given, by its D number, and a page that document has (or a sheet and cell for a spreadsheet), and none of yours do'].filter(Boolean);
+        const needsCitation = 'it needs at least one citation naming a document you were given, by its D number, '
+          + 'and a page that document has (or a sheet and cell for a spreadsheet), and none of yours do';
+        const short = [
+          !title.trim() && 'it has no title',
+          !paras.length && 'it has no body',
+          !fitted.sources.length && needsCitation,
+        ].filter(Boolean);
         const body = fitParas(fitted.text.split(/\s*\u0000\s*/).filter(Boolean));
         const workstream = workstreamOf(r.workstream);
         const raised: Seen = { kind: 'finding', title, workstream, body, sources: fitted.sources };
@@ -1816,7 +1823,8 @@ export function nodeAi(o: AiOptions) {
     async reassess(i) {
       const f = await record<{ title: string; body: string[]; sources: Source[] }>('finding', i.findingId); if (!f) return fail({ kind: 'notFound', message: 'No such finding' });
       let m: Awaited<ReturnType<typeof models>>; try { m = await models(); } catch (e) { return failure(e, `${SERVICE} did not answer`); }
-      const parasOf = (reply: Record<string, unknown>) => strings(reply.body).flatMap((p) => p.split(/\n\s*\n/)).map((p) => p.trim()).filter(Boolean);
+      const parasOf = (reply: Record<string, unknown>) => strings(reply.body)
+        .flatMap((p) => p.split(/\n\s*\n/)).filter((p) => p.trim());
       const r = await read('reassess', [i.dealId], m.standard, `Reassess this finding against the documents as they stand now.\nTitle: ${f.title}\nAs written: ${f.body.join(' ')}${await responsesOn(i.dealId, i.findingId)}`, `${f.title} ${f.body.join(' ')}`, { [i.dealId]: f.sources.map((s) => s.docId).filter((x): x is string => !!x) }, '{"body": ["one paragraph per string, with [n] markers"], "sources": [...]}', { escalate: m.thorough, usable: (reply) => parasOf(reply).length > 0, wrong: '"body" has no paragraphs in it' });
       if (!r.ok) return r;
       if (!r.value.sent.length) return fail({ kind: 'failed', message: 'None of this finding’s documents are indexed, so there is nothing to reassess it against' });
@@ -1835,7 +1843,8 @@ export function nodeAi(o: AiOptions) {
       if (!open.length) return ok({ paragraphs: [] });
       const key = open.map((f) => `${f.id}:${f.rev}`).join('|'); const had = briefs.get(dealId); if (had?.key === key) return ok({ paragraphs: had.paragraphs });       // nothing changed: not asked again
       const ids = new Set(open.map((f) => f.id));
-      const parasOf = (reply: { paragraphs?: unknown } | null) => strings(reply?.paragraphs).flatMap((p) => p.split(/\n\s*\n/)).map((p) => p.trim()).filter(Boolean).slice(0, 2)
+      const parasOf = (reply: { paragraphs?: unknown } | null) => strings(reply?.paragraphs)
+        .flatMap((p) => p.split(/\n\s*\n/)).filter((p) => p.trim()).slice(0, 2)
         // a link to a finding that is not there becomes plain words
         .map((p) =>
           p
@@ -1924,7 +1933,7 @@ export function nodeAi(o: AiOptions) {
           MEMO_RISK_SHAPE, options);
         if (!r.ok) { if (r.error.kind === 'unreachable') throw Object.assign(new Error(r.error.message), { code: 'unreachable' }); return g; }
         if (!options.usable(r.value.reply) || !r.value.sent.length) return g;
-        const paras = memoRiskParagraphs(r.value.reply.paragraphs).map((p) => unid(p, ids).trim()).filter(Boolean);
+        const paras = memoRiskParagraphs(r.value.reply.paragraphs).map((p) => unid(p, ids)).filter((p) => p.trim());
         const out = fit(paras.join('\n\u0000\n'), r.value.reply.sources as Cited[], r.value.sent, false, true);
         return { ...g, body: out.text.split(/\s*\u0000\s*/).filter(Boolean), sources: out.sources };
       };
@@ -1966,7 +1975,7 @@ export function nodeAi(o: AiOptions) {
       let reply: { text?: unknown } | null;
       try { reply = await askJson({ kind: 'merge', model: (await models()).fast, system: JSON_ONLY, prompt: `This question was asked on a project-finance deal:\n${i.question}\n\nTwo people answered it differently.\nFirst version:\n${i.app}\n\nSecond version:\n${i.log}\n\nWrite one answer that reconciles them: every fact from both, each said once, in plain sentences, as a lender's counsel would write it. Where the two disagree, keep the more specific statement (a date, a figure, a document reference) and leave the other out. Do not put the two versions one after the other, do not mention that there were two versions, and add no notes, brackets, placeholders or anything for a person to confirm.\nReply as JSON: {"text": "…"}` }, ['text']); }
       catch (e) { return failure(e, UNREACHED); }
-      const text = (strings(reply?.text)[0] ?? '').trim();
+      const text = strings(reply?.text)[0] ?? '';
       // a draft that asks a person to fill something in is not a reconciled answer
       if (!text || /\[[^\]]*(confirm|tbc|tbd|check)[^\]]*\]/i.test(text)) {
         return fail({ kind: 'failed', message: UNUSABLE_REPLY });
@@ -1990,9 +1999,10 @@ export function nodeAi(o: AiOptions) {
           // an item split in two comes as "texts"; one reworded as "text"
           const n = int(x?.n);
           const given = Array.isArray(x?.texts) ? strings(x.texts) : typeof x?.text === 'string' ? [x.text] : [];
-          const texts = given.map((t) => fitText(t.replace(/\s+/g, ' ').trim())).filter(Boolean);
+          const texts = given.map((t) => fitText(t)).filter((t) => t.trim());
           if (n === null || n < 1 || n > part.length) continue; if (n <= last) inOrder = false; last = Math.max(last, n);
-          if (!texts.length || (texts.length === 1 && texts[0] === part[n - 1].trim()) || got.has(n - 1)) continue;
+          const unchanged = texts.length === 1 && texts[0].trim() === part[n - 1].trim();
+          if (!texts.length || unchanged || got.has(n - 1)) continue;
           got.set(n - 1, { text: texts[0], why: (strings(x.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 120), ...(texts.length > 1 ? { also: texts.slice(1) } : {}) });
         }
         // a cut reply listed in order has dealt with every item up to its last whole one; out of order, every item it did not reword is asked again

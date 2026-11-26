@@ -1188,7 +1188,10 @@ describe('what a document is', () => {
     const s = setup(() => ({ text: 'ok', sources: [] }), bareTwo, { describes: true,
       describe: () => ({ summary: ' A senior credit agreement. ', keywords: ['lock-up', ' covenant ', 7, '', ...Array.from({ length: 40 }, (_, i) => `k${i}`)], type: 'Credit agreement' }) });
     val(await s.ai.answer(ask('Lender step-in?'))); await s.ai.described('d1');
-    const fa = s.recs.d1.find((r) => r.name === FA.name)!; expect(fa.summary).toBe('A senior credit agreement.'); expect(fa.keywords!.slice(0, 3)).toEqual(['lock-up', 'covenant', 'k0']); expect(fa.keywords!.length).toBe(30);
+    const fa = s.recs.d1.find((r) => r.name === FA.name)!;
+    expect(fa.summary).toBe(' A senior credit agreement. ');
+    expect(fa.keywords!.slice(0, 3)).toEqual(['lock-up', ' covenant ', 'k0']);
+    expect(fa.keywords!.length).toBe(30);
     expect(s.describeCalls[0].prompt).toContain('Include the other words people use for the same things');
     // the service down while describing: nothing is kept, no try is counted against the document, the answer is not held up, and the next read asks again
     let down = true;

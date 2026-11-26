@@ -32,7 +32,9 @@ describe('rewording a checklist being brought in', () => {
   it('takes an item split in two as its first item and the rest, and asks for "(if applicable)" only where it fits', async () => {
     const s = setup((c) => (!isReword(c) ? {} : { items: [{ n: 1, texts: ['Wetlands delineation complete (if applicable).', '  Section 404 permit in hand (if applicable).'], why: 'two conditions' }, { n: 2, texts: [], why: 'empty' }] }), {}, { shared: new Mem(), installId: 'pc' });
     const out = val(await s.ai.reword!({ items: ['Wetlands delineation complete; any Section 404 permit in hand', 'Insurance in place'] }));
-    expect(out).toEqual([{ at: 0, text: 'Wetlands delineation complete (if applicable).', also: ['Section 404 permit in hand (if applicable).'], why: 'two conditions' }]);
+    const also = ['  Section 404 permit in hand (if applicable).'];
+    const text = 'Wetlands delineation complete (if applicable).';
+    expect(out).toEqual([{ at: 0, text, also, why: 'two conditions' }]);
     expect(s.calls.find(isReword)!.prompt).toContain('never to every item');
   });
   it('a reply that cannot be read fails the whole review, so nothing half-asked is shown', async () => {

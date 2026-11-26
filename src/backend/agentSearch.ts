@@ -152,7 +152,7 @@ async function searchQuestions(run: AgentRun, asked: Asked, report: Report): Pro
   report.out.push(listing + await unread(run, 'Questions', missed));
   for (const x of shown.items) {
     const where = `Q${x.n}${x.response?.trim() ? ' · response received' : ''}`;
-    report.found.push({ where, quote: shorten(oneLine(x.response?.trim() || x.text || ''), 160) });
+    report.found.push({ where, quote: shorten(oneLine(x.response?.trim() ? x.response : x.text || ''), 160) });
   }
   const got = shown.items;
   const more = got.length > 4 ? ` and ${got.length - 4} more` : '';
