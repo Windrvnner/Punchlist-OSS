@@ -48,7 +48,7 @@ authorization code with PKCE (S256). Use `http://127.0.0.1` as the loopback redi
 keeps the token until it expires and starts a fresh authorization flow when needed. Bedrock uses IAM Identity
 Center's device authorization flow. [OAuth for native apps](https://datatracker.ietf.org/doc/html/rfc8252)
 
-Every connector asks for at most `limits.outputTokens` output tokens per call (32,000 by default). The app sizes the parts of a request it can count to fit `limits.inputTokens` (180,000 by default). Where the service reports a smaller limit for a model (as North's model list does), the app uses that limit instead. Set both values to what the deployment's models allow.
+Every connector asks for at most `limits.outputTokens` output tokens per call (32,000 by default). The app sizes the parts of a request it can count to fit `limits.inputTokens` (180,000 by default). Where the service reports a smaller limit for a model (North's and the Claude API's model lists, or an OpenAI-compatible refusal that says "supports at most N" tokens), the app uses that limit instead. Claude on Bedrock or Vertex reports none, so set both values to what the deployment's models allow.
 
 When a reply is cut off at the length limit, the app asks again in smaller parts, or once more for a shorter reply. When
 a request is refused as too long, the app asks again with fewer documents (see "AI and models" in
