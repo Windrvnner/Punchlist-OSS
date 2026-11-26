@@ -60,8 +60,8 @@ export interface AgentKit {
   readPage(deals: string[], model: string, ask: string, docs: DealDoc[]): Promise<Looked>;
   /** the words of a text as a search compares them; with `dealId`, the deal's short names given their long form too */
   words(text: string, dealId?: string): Set<string>;
-  /** put documents in the store and list them for a prompt; `got` are those really there */
-  send(sent: Sent[]): Promise<{ files: string[]; listing: string; got: Sent[] }>;
+  /** put documents in the store and list them for a prompt to `model`; `got` are those really there */
+  send(sent: Sent[], model: string): Promise<{ files: string[]; listing: string; got: Sent[] }>;
   /** keep the citations that can be stood behind, renumbering the markers in the text */
   fit(text: string, cited: Cited[] | undefined, sent: Sent[], withDeal: boolean): { text: string; sources: Source[] };
   /** a document's path from its deal's folder, as prompts show it */

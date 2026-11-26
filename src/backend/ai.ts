@@ -822,8 +822,8 @@ export function nodeAi(o: AiOptions) {
       claim: (keys) => claimReports(dealId, keys),
       release: async (keys) => { if (o.shared) await release(dealId, keys).catch(() => undefined); },
       ask: (input, keys) => askJson(input, keys),
-      send: async (rec) => {
-        const r = await send(tagged(dealId, [rec]));
+      send: async (rec, model) => {
+        const r = await send(tagged(dealId, [rec]), model);
         return r.got.length ? { files: r.files, listing: r.listing, sent: r.got } : null;
       },
       fit: (text, cited, sent) => fit(text, cited, sent, false, true),
@@ -1156,26 +1156,33 @@ export function nodeAi(o: AiOptions) {
     const not = new Set([...given.map((r) => r.docId), ...skip]);
     return withClean(dealId, [...given, ...((await pick(dealId, question, not, room - given.length, core)) ?? top(dealId, question, not, room - given.length, core, true))]);
   }
+  /** a draft's tracked changes as prompt lines, and the tokens they take */
+  type ChangeLines = { lines: string[]; used: number };
   /**
-   * Put these documents in the store and describe them for the prompt. `got` are the ones that are really there: a
-   * document whose file cannot be found on this PC is left out, and nothing may be recorded as read from it.
+   * A Word file's tracked changes as prompt lines: each changed passage as it was and as it reads now, with who changed
+   * what and when. They are listed while their tokens fit in `room`, what is left of the prompt's budget for tracked
+   * changes, and the rest is counted (#1092). `used` is the tokens the listed passages took.
    */
-  /** how much of a draft's change list goes into a prompt, in characters; past it the rest is counted, not listed */
-  const CHANGES_UP_TO = 6000;
-  /** A Word file's tracked changes as prompt lines: each changed passage as it was and as it reads now, with who changed what and when. */
-  async function changesOf(dealId: string, tag: string, docId: string): Promise<string[]> {
-    if (!o.docs.changes) return [];
-    let r: Result<ChangeList>; try { r = await o.docs.changes(dealId, docId); } catch { return []; }
-    if (!r.ok || !r.value.passages.length) return [];
+  async function changesOf(dealId: string, tag: string, docId: string, room: number): Promise<ChangeLines> {
+    const none: ChangeLines = { lines: [], used: 0 };
+    if (!o.docs.changes) return none;
+    let r: Result<ChangeList>; try { r = await o.docs.changes(dealId, docId); } catch { return none; }
+    if (!r.ok || !r.value.passages.length) return none;
     const out = [`  The changes in ${tag}, read from the file itself (these are fact, not a reading):`]; let used = 0, left = 0;
     for (const p of r.value.passages) {
       const who = p.changes.map((c) => `${c.kind}${c.text ? ` "${c.text.replace(/\s+/g, ' ').trim()}"` : ''}${c.by ? ` by ${c.by}` : ''}${c.at ? ` on ${c.at.slice(0, 10)}` : ''}`).join('; ');
       const line = `  - was: "${p.before.replace(/\s+/g, ' ').trim()}" / now: "${p.after.replace(/\s+/g, ' ').trim()}" (${who})`;
-      if (used + line.length > CHANGES_UP_TO) { left++; continue; } out.push(line); used += line.length;
+      const tokens = tokensOf(line);
+      if (used + tokens > room) {
+        left++;
+        continue;
+      }
+      out.push(line);
+      used += tokens;
     }
     if (left) out.push(`  - and ${left} more changed passage${left === 1 ? '' : 's'}, not listed here.`);
     if (!r.value.complete) out.push('  Some changes are in parts of the file this list does not reach.');
-    return out;
+    return { lines: out, used };
   }
   /**
    * What the model is told of a blackline: the clean draft is the truth for the deal's terms,
@@ -1199,8 +1206,15 @@ export function nodeAi(o: AiOptions) {
     const alone = against === 'own' ? '' : ` By itself it never shows that a finding is put right or that its problem is back.`;
     return `  ${s.tag} is a blackline: a comparison of two ${against === 'own' ? 'drafts' : 'documents'} with the changes marked, made by a comparison tool; ${of}. Read ${s.tag} only for what changed, and give each change as what ${s.tag} appears to show, citing its page.${sees}${vs}${alone}`;
   }
-  async function send(sent: Sent[]): Promise<{ files: string[]; listing: string; got: Sent[] }> {
+  /**
+   * Put these documents in the store and describe them for the prompt. `got` are the ones that are really there: a
+   * document whose file cannot be found on this PC is left out, and nothing may be recorded as read from it. `model`
+   * is the one the prompt goes to: the drafts' tracked changes share one budget, the share of its input limit that a
+   * part may fill, drawn on in the order the drafts are listed (#1092).
+   */
+  async function send(sent: Sent[], model: string): Promise<{ files: string[]; listing: string; got: Sent[] }> {
     const files: string[] = []; const lines: string[] = []; const got: Sent[] = [];
+    let changesRoom = Math.floor((inLimit(model) * control.limits.partShare) / 100);
     for (const dealId of new Set(sent.map((s) => s.dealId))) {
       const mine = sent.filter((s) => s.dealId === dealId); const ids = await o.keeper.ensure(await o.docs.wanted(dealId, mine.map((s) => s.rec.docId)));
       describeSoon(dealId, mine.map((s) => s.rec.docId));                          // a document that is read is worth describing: once, and not waited for
@@ -1213,7 +1227,9 @@ export function nodeAi(o: AiOptions) {
         if (rec.tracked) {
           lines.push(`  ${s.tag} has ${rec.tracked} tracked changes. Its pages show them as markup, `
             + 'so its wording is proposed, not agreed.');
-          lines.push(...await changesOf(dealId, s.tag, rec.docId));
+          const changes = await changesOf(dealId, s.tag, rec.docId, changesRoom);
+          lines.push(...changes.lines);
+          changesRoom -= changes.used;
         }
         const k = kindsOf(dealId); if (k.pairs.has(rec.docId)) lines.push(blacklineLine(s, mine, k.pairs.get(rec.docId) ?? null, k.against.get(rec.docId)));
         // another project's document (docs/other-project-documents-design.md): read, never a main source
@@ -1396,7 +1412,7 @@ export function nodeAi(o: AiOptions) {
     for (let round = 1; ; round++) {
       let reply: Record<string, unknown> | null;
       try {
-        const { files, listing, got } = await send(sent);
+        const { files, listing, got } = await send(sent, using);
         // a finding is not reassessed on part of what was chosen while the rest is out of reach
         if (kind === 'reassess' && lostSome(sent, got)) return fail({ kind: 'failed', message: 'The documents for this could not be opened on this PC' });
         if (got.length < sent.length) sent.splice(0, sent.length, ...got);        // what could not be opened on this PC was not read, and cannot be cited
@@ -1638,7 +1654,7 @@ export function nodeAi(o: AiOptions) {
    * what was wrong with it, to be put right.
    */
   async function check(items: ChecklistItem[], sent: Sent[], model: string, redo?: Map<string, { why: string; said?: unknown }>, fix = true): Promise<(Map<string, Seen> & { cut?: ChecklistItem[] }) | null> {
-    const { files, listing, got } = await send(sent);
+    const { files, listing, got } = await send(sent, model);
     // the folder of one of them stopped answering since they were chosen: the items are not settled on the rest
     if (lostSome(sent, got)) { const why = awayWhy(sent[0].dealId, sent.filter((x) => !got.includes(x)).map((x) => x.rec.docId)); return new Map(items.map((it) => [it.id, { kind: 'weak' as const, why, reason: why }])); }
     if (!got.length) return null; sent = got;
@@ -2390,7 +2406,7 @@ export function nodeAi(o: AiOptions) {
    */
   async function verify(dealId: string, f: Raised, model: string, core: string[], also: string[] = [], heard: Asked[] = []): Promise<{ stands: boolean; why: string } | null> {
     const docs = await sendable(dealId, await start(dealId, `${f.title} ${f.body.join(' ')}`, [...also, ...f.sources.map((x) => x.docId).filter((x): x is string => !!x)]   /* what prompted the re-check first: the cap never drops it */, width, core)); if (!docs.length) return null;
-    const sent = tagged(dealId, docs); const { files, listing, got } = await send(sent);
+    const sent = tagged(dealId, docs); const { files, listing, got } = await send(sent, model);
     if (!got.length || lostSome(sent, got)) return null;                        // a folder stopped answering since they were chosen: not judged on the rest
     // a closed finding is asked the other way round: "stands" is whether it stays closed
     const ask = f.closed ? `This finding was raised on the deal earlier, and a person has closed it.\nTitle: ${f.title}\nAs written: ${f.body.join(' ').replace(/\s*\[\d+\]/g, '')}\n\nGoing by the documents as they are now, does it stay closed? It does not if a document now shows the problem again, shows it was not settled, or makes it worse.\nReply as JSON: {"stands": true, "why": "one line"}`
