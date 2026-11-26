@@ -1578,11 +1578,15 @@ describe('a place named by a record stays inside the folder it is in (#1156)', (
     await docs.page('d1', { doc: 'outside.pdf', docId: idOf(bytes) }, 'p. 1')
   ).ok;
   /** where each unsafe name of a place in the attachments folder leads, and the name itself */
-  const unsafe = (root: string): [string, string][] => [
-    ['../outside.pdf', path.join(root, 'shared', 'outside.pdf')],
-    ['../attachments-evil/outside.pdf', path.join(root, 'shared', 'attachments-evil', 'outside.pdf')],
-    [path.join(root, 'elsewhere', 'outside.pdf'), path.join(root, 'elsewhere', 'outside.pdf')],
-  ];
+  const unsafe = (root: string): [string, string][] => {
+    const absolute = path.join(root, 'elsewhere', 'outside.pdf');
+    return [
+      ['../outside.pdf', path.join(root, 'shared', 'outside.pdf')],
+      ['../attachments-evil/outside.pdf', path.join(root, 'shared', 'attachments-evil', 'outside.pdf')],
+      // a join keeps an absolute place inside the folder, so the file is put where a join would find it
+      [absolute, path.join(root, 'shared', 'attachments', absolute)],
+    ];
+  };
   for (const [index, name] of [0, 1, 2].map((i) => [i, ['dotdot', 'sibling', 'absolute'][i]] as const)) {
     it(`never opens or reads a file attached by a ${name} place, and says it cannot be found`, async () => {
       const root = tmp(); const bytes = pdf('outside'); const [rel, file] = unsafe(root)[index];
@@ -1618,6 +1622,21 @@ describe('a place named by a record stays inside the folder it is in (#1156)', (
     expect(page.ok).toBe(false);
     expect(fs.existsSync(path.join(root, 'escape.pdf'))).toBe(false);
     expect(x.converted).toEqual([]);
+  });
+  it('does not find a folder for the deal because a record placed outside it matches there', async () => {
+    const root = tmp(); const old = path.join(root, 'old', 'vdr'); const now = path.join(root, 'new', 'vdr');
+    fs.mkdirSync(path.join(root, 'local-office'), { recursive: true });
+    const rule = { from: path.join(root, 'old'), to: path.join(root, 'new') };
+    fs.writeFileSync(path.join(root, 'local-office', 'folder-rules.json'), JSON.stringify([rule]));
+    // 25 records fill the sample the comparison looks at; the one that leads out of the folder sorts after them
+    const name = (i: number) => `f${String(i).padStart(2, '0')}.pdf`;
+    const files = Array.from({ length: 25 }, (_, i) => [pdf(`doc ${i}`), name(i)] as const);
+    for (const [bytes, rel] of files) put(now, rel, bytes);
+    const outside = pdf('outside'); put(path.join(root, 'new'), 'outside.pdf', outside);
+    const inside = files.map(([bytes, rel]) => olderLine(old, bytes, rel, ['doc'], 1));
+    keepLines(root, [...inside, olderLine(old, outside, 'z/../../outside.pdf', ['outside'], 1)]);
+    const x = pc(root, 'office', undefined, { folders: [old] });
+    expect(val(await x.docs.findFolders(['d1']))).toMatchObject({ placed: 0 });
   });
   it('opens a copy kept inside its folder, and never one placed outside it', async () => {
     const root = tmp(); const bytes = pdf('outside'); put(root, 'shared/outside.pdf', bytes);
