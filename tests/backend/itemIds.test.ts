@@ -49,7 +49,8 @@ describe('a check names checklist items by their ids (#1162)', () => {
   });
 
   it('asks again when an item id has one character changed, and takes the correct retry', async () => {
-    const { s, results } = await firstPass((c, n) => settle(c, n === 1 ? [nearly(permitId), roadId] : [permitId, roadId]));
+    const ids = (n: number) => (n === 1 ? [nearly(permitId), roadId] : [permitId, roadId]);
+    const { s, results } = await firstPass((c, n) => settle(c, ids(n)));
     expect(s.calls.length).toBe(2);
     expect(s.calls[1].prompt).toBe(s.calls[0].prompt);
     expect([results.get(permitId), results.get(roadId)]).toEqual(['ok', 'ok']);

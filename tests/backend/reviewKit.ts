@@ -45,6 +45,8 @@ export const isAffectsAsk = (c: { prompt: string }) => c.prompt.includes('Which 
 export const isVerifyAsk = (c: { prompt: string }) => c.prompt.includes('does it still stand as written?') || c.prompt.includes('does it stay closed?');
 export const isPickAsk = (c: { prompt: string }) => c.prompt.includes('Which of them should be read for this?');
 export const isQueryAsk = (c: { prompt: string }) => c.prompt.includes('write up to 3 short searches');
+/** the words that head the items of a check prompt */
+const CHECK_ITEMS = 'Check each of these checklist items, each with its id, against the documents:\n';
 export const isPickForAsk = (c: { prompt: string }) => c.prompt.includes('Which of them should be read for each of these?');
 export const isDescribeAsk = (c: { prompt: string }) => c.prompt.startsWith('Describe the document ');
 export const isHearAsk = (c: { prompt: string }) => c.prompt.includes('Which findings could a response change?');
@@ -52,8 +54,6 @@ export const isHearAsk = (c: { prompt: string }) => c.prompt.includes('Which fin
  * A satisfied result that says where, as a real reply must: the first document in the call that has pages, at page 1
  * (or, with only spreadsheets, a cell of the first). In the fast model's quick look no place is asked for, and none is given.
  */
-/** the words that head the items of a check prompt */
-const CHECK_ITEMS = 'Check each of these checklist items, each with its id, against the documents:\n';
 export const OK = (c: Call): { result: string; where?: object[] } => {
   if (!c.prompt.includes('Add "where"')) return { result: 'ok' };
   const docs = [
