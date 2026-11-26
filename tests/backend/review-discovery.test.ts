@@ -18,7 +18,7 @@ describe('discovery: file names', () => {
       const scan = doc(1, name, { rel: `09 Executed/${name}`, words: [] });                     // a signed copy: scanned, so no words
       const s = setup(() => ({ text: 'x', sources: [] }), { d1: [...filler(150), scan] });
       const q = name.startsWith('O&M') ? 'What does the O&M agreement say about availability?' : 'What is the tariff under the power purchase agreement (PPA)?';
-      val(await s.ai.answer(ask(q)));
+      val(await s.ai.draft({ dealId: 'd1', questionId: 'q_1', questionText: q }));                 // a draft's pick lists the ranking
       const rows = listed(s.pickCalls[0] as Call); const at = rows.findIndex((r) => r.path.endsWith(name));
       out[name] = { question: q, shortlistSize: rows.length, placeInShortlist: at < 0 ? 'NOT IN THE 100 SHOWN TO THE FAST MODEL' : at + 1, sentToAnsweringModel: s.calls[0] ? sentNames(s.calls[0]).includes(name) : false };
     }
@@ -57,7 +57,7 @@ describe('discovery: the core documents', () => {
   it('a library abbreviation in a file name answers to the long form a checklist item uses, and the document is core', async () => {
     const recs = { d1: [doc(1, 'PPA_final.pdf'), doc(2, 'Site photos.pdf'), doc(3, 'Board minutes.pdf')] };
     const s = setup(() => ({ text: 'x', sources: [] }), recs, { checklist: () => ({ broad: [{ id: 'c1', text: 'The power purchase agreement is signed' }], product: [], sector: [] }) });
-    await deal(s.repo); val(await s.ai.answer(ask('Is the offtaker creditworthy?')));
+    await deal(s.repo); val(await s.ai.draft({ dealId: 'd1', questionId: 'q_1', questionText: 'Is the offtaker creditworthy?' }));
     expect((s.pickCalls[0].prompt.match(/^\d+\*: .*$/gm) ?? []).map((l) => l.replace(/^\d+\*: /, ''))).toEqual([expect.stringContaining('PPA_final.pdf')]);
   });
 });
