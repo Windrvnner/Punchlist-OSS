@@ -336,13 +336,11 @@ function footLine(qa: ReadQa, plan: ImportPlan) {
 
 /** "Import 2,000 questions · 1,950 new · 50 existing will change", then what was left out or not read */
 function importSummary(mode: ImportMode, plan: ImportPlan) {
-  const { preview, counts, total } = plan;
-  const created = preview ? preview.created : counts.add;
-  const updated = preview ? preview.updated : counts.match;
+  const { preview, total } = plan;
   return [
     `Import ${plural(total, 'question')}`,
-    `${num(created)} new`,
-    mode === 'merge' ? `${num(updated)} existing will change` : '',
+    preview ? `${num(preview.created)} new` : '',
+    preview && mode === 'merge' ? `${num(preview.updated)} existing will change` : '',
     preview?.restored ? `${num(preview.restored)} deleted brought back` : '',
     ...leftOutNotes(plan.prepared),
   ].filter(Boolean);

@@ -112,7 +112,7 @@ function useImportPlan(store: Store, dealId: string, qa: QaImportState) {
     [prepared, mode, answered, accepted, state.questions, state.tombstones],
   );
   return {
-    ...summarizeQaImport(state, dealId, qa.key, mode, prepared, dry),
+    ...summarizeQaImport(qa.key, prepared, dry),
     prepared,
     previewRows: file?.previewRows ?? [],
   };

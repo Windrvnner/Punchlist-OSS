@@ -190,13 +190,6 @@ export const sameText = (a: string, b: string) => {
 /** Two texts with the same words, differing at most in their spaces and line breaks. */
 export const sameWords = (a: string, b: string) => a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
 
-/** How many rows would be new and how many match an existing number, for the preview. */
-export function importCounts(rows: ImportRow[], existing: Question[], mode: 'merge' | 'append') {
-  const have = new Set(existing.map((q) => q.n)); let add = 0, match = 0; const seen = new Set<number>();
-  for (const r of rows) { if (mode === 'merge' && r.n != null && (have.has(r.n) || seen.has(r.n))) match++; else { add++; if (r.n != null) seen.add(r.n); } }
-  return { add, match };
-}
-
 const longDate = (iso: string) => (iso ? localYmd(iso) : ''); // the local calendar date, written YYYY-MM-DD so it round-trips and sorts in a spreadsheet
 const STATUS_LABEL: Record<QuestionStatus, string> = { open: 'Open', answered: 'Answered', closed: 'Closed' };
 

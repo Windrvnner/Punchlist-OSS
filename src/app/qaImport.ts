@@ -1,14 +1,13 @@
 import { Operation } from '../domain/model';
 import { fail, ok, type Result } from '../domain/result';
 import {
-  importCounts, parseDate, prepareImport, type ImportRow, type Mapping, type Prepared,
+  parseDate, prepareImport, type ImportRow, type Mapping, type Prepared,
 } from '../domain/importExport';
 import { ImportQuestions } from './commands/importQuestions';
 import type { AcceptedMatch } from '../domain/qaMatch';
 import { dropImport, finishKeptSubmission, importKey, keepImport, keptImport } from './keptImports';
 import { unappliedColumnsWarning, unappliedImportColumns } from './qaImportColumns';
 import { keepImportedLog, logTakenBy } from './qaLog';
-import { dealQuestions, type State } from './state';
 import type { Store } from './store';
 import { readImportFile, type ImportPreview, type ImportTable } from './transfer';
 
@@ -134,18 +133,15 @@ function previewQaRows(table: ImportTable, mapping: Mapping, prepared: Prepared)
   return previewRows;
 }
 
-export function summarizeQaImport(
-  state: State, dealId: string, key: string, mode: ImportMode, prepared: Prepared | null,
-  dry: Result<ImportPreview> | null,
-) {
-  const counts = prepared ? importCounts(prepared.rows, dealQuestions(state, dealId), mode) : { add: 0, match: 0 };
-  const total = counts.add + counts.match;
+export function summarizeQaImport(key: string, prepared: Prepared | null, dry: Result<ImportPreview> | null) {
+  // what the import adds and changes comes only from its own plan (`dry`), never from a count of its own (#1080)
+  const total = prepared?.rows.length ?? 0;
   const preview = dry?.ok ? dry.value : null;
   const dryError = dry && !dry.ok ? dry.error.message : '';
   const submission = savedSubmission(key);
   // Recovery validates the original operation, rather than replanning already committed rows.
   return {
-    counts, total: submission ? Math.max(total, submission.rows.length) : total,
+    total: submission ? Math.max(total, submission.rows.length) : total,
     preview, dryError: submission ? '' : dryError,
   };
 }
