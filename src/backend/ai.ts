@@ -385,6 +385,37 @@ type Seen =
   }
   | { kind: 'finding'; title: string; workstream: string; body: string[]; sources: Source[] };
 const JSON_ONLY = 'Reply with one JSON object and nothing else.';
+const SAME_RULES = 'Be strict: only pairs you are sure of, each named once.';
+const SAME_REPLY = 'Reply as JSON: {"pairs": [{"a": 2, "b": 9, "why": "…"}]}';
+/**
+ * The duplicate check's prompt for one part: `count` items asked about first, then the rest they are compared
+ * with. With `kind: 'questions'`, a deal's unresolved points against its open questions, each line marked as one or
+ * the other (#1120).
+ */
+function samePrompt(kind: 'questions' | undefined, count: number, shown: { text: string; point: boolean }[]) {
+  if (kind === 'questions') {
+    const listed = shown.map((x, k) => `${k + 1}: [${x.point ? 'point' : 'question'}] ${x.text}`).join('\n');
+    return [
+      'These are points still unresolved on a project-finance deal and the open questions already asked on its Q&A'
+        + ` log, each marked [point] or [question]. Items 1 to ${count} are being matched.`,
+      `${listed}\n`,
+      `Which of items 1 to ${count} does an open question already ask for, so that its answer would settle the point?`
+        + ` ${SAME_RULES} A question on the same subject that asks for something different is not a pair.`
+        + ' "why": a few words on what both ask for.',
+      SAME_REPLY,
+    ].join('\n');
+  }
+  const listed = shown.map((x, k) => `${k + 1}: ${x.text}`).join('\n');
+  return [
+    `These are items of a due diligence checklist for project-finance deals. Items 1 to ${count} are being brought`
+      + ' in; the others are already listed.',
+    `${listed}\n`,
+    `Which of items 1 to ${count} ask for exactly the same thing as another item, so that checking one settles the`
+      + ` other? ${SAME_RULES} Two items on the same subject that ask for different things are not a pair (an executed`
+      + ' agreement and its terms are different things). "why": a few words on what both ask for.',
+    SAME_REPLY,
+  ].join('\n');
+}
 /** the rules for a draft from earlier responses alone, when no document bears on the question */
 const PRIOR_RULES = 'Answer only from the earlier responses you are given: choose those that answer the question as it is asked. Reply with one JSON object and nothing else. Cite no documents: give "sources": [].';
 /**
@@ -2087,7 +2118,11 @@ export function nodeAi(o: AiOptions) {
         if (stop) { missed[stop] += part.mine.length; lost.push(...part.mine); return; }     // a half begun after another part's service error
         const { mine } = part; const shown = [...mine, ...part.rest];
         let reply: { pairs?: unknown } | null = null; let cut = false;
-        try { reply = await askJson({ kind: 'sameMeaning', split: true, model: (await models()).fast, system: JSON_ONLY, prompt: `These are items of a due diligence checklist for project-finance deals. Items 1 to ${mine.length} are being brought in; the others are already listed.\n${shown.map((g, k) => `${k + 1}: ${text(g)}`).join('\n')}\n\nWhich of items 1 to ${mine.length} ask for exactly the same thing as another item, so that checking one settles the other? Be strict: only pairs you are sure of, each named once. Two items on the same subject that ask for different things are not a pair (an executed agreement and its terms are different things). "why": a few words on what both ask for.\nReply as JSON: {"pairs": [{"a": 2, "b": 9, "why": "…"}]}` }, ['pairs']); }
+        const prompt = samePrompt(i.kind, mine.length, shown.map((g) => ({ text: text(g), point: g < n })));
+        try {
+          const fast = (await models()).fast;
+          reply = await askJson({ kind: 'sameMeaning', split: true, model: fast, system: JSON_ONLY, prompt }, ['pairs']);
+        }
         // An error from the service would most likely come again, and a service that does not answer may take the
         // connector's whole wait each time: no more parts are begun, and those not begun are counted as missed with it
         catch (e) {
