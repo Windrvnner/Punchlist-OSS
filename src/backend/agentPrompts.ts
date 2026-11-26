@@ -18,7 +18,8 @@ export const noun = (count: number, one: string, many = `${one}s`) => (count ===
 const ROLE = 'You are researching a question about a project-finance deal from its data room, its findings and its Q&A '
   + 'log. You work in turns.';
 const CITE_RULE = 'Cite only documents listed under "Documents opened so far", by their tag. A finding or a response '
-  + 'from the Q&A log is not a document: say what it is in words and give it no marker.';
+  + 'from the Q&A log is not a document: say what it is in words and give it no marker. Name a question of the Q&A log '
+  + 'only as "response <id>", with the id its row is shown by.';
 const SEARCH_HELP = 'A helper searches the documents by their words, file names and folder paths, reads a page of '
   + 'the best matches, and returns passages with document and page. "findings" and "qa" search the deal\'s findings '
   + 'and its questions and responses. Search in other words, or for a document by the name it is likely to have, when '
@@ -30,6 +31,10 @@ const FOLDER_WHEN = 'Have every document in a folder read, the most important fi
 const FOLDER_NAMED = 'Name the folder as it is named in the data room, or as the question names it.';
 const BRIEF_HELP = 'Have the deal\'s open findings summed up in two short paragraphs: what matters most and why. '
   + 'Use it when you are asked to catch up on a deal or for an overview of where it stands.';
+const OFFER_HELP = 'When the person asks to start a new deal, to open a page of a deal, to add all unresolved items to '
+  + 'the Q&A log, or to log a question, answer briefly and offer that action: the app shows it as a button under your '
+  + 'answer, and nothing happens until the person presses it. For "log question", draft the question in "question". '
+  + 'For "open page", name the deal by its exact name, or leave it out for this conversation\'s deal.';
 const FOLDER_RESULT = 'You get what each batch of its documents says, with document and page. A large folder is read '
   + 'only once the person has agreed: you are told when to ask them, and then';
 
@@ -46,8 +51,9 @@ export const inlineTools = (width: number) => [
   '{"tool": "brief", "notes": "…"}',
   `  ${BRIEF_HELP}`,
   '{"text": "the answer, with [n] markers", "sources": [{"doc": "D3", "page": 12, "quote": "a few words from that '
-    + 'page"}]}',
-  `  Your answer, once you have what you need. ${CITE_RULE}`,
+    + 'page"}], "offer": {"action": "new deal" | "open page" | "add unresolved" | "log question", "deal": "…", '
+    + '"page": "overview" | "findings" | "checklist" | "qa", "question": "…"}}',
+  `  Your answer, once you have what you need. ${CITE_RULE} "offer" is optional. ${OFFER_HELP}`,
   '"notes" carry what you have learned from one turn to the next: only your notes and the results listed below are '
     + 'kept.',
 ].join('\n');
@@ -73,6 +79,19 @@ const answerSource = {
     quote: text('A few words from that page.'),
   },
   required: ['doc'],
+};
+
+/** the action the answer tool may offer as a button under the answer (#1054) */
+const answerOffer = {
+  type: 'object',
+  description: OFFER_HELP,
+  properties: {
+    action: { type: 'string', enum: ['new deal', 'open page', 'add unresolved', 'log question'] },
+    deal: text('For "open page": the deal\'s exact name.'),
+    page: { type: 'string', enum: ['overview', 'findings', 'checklist', 'qa'] },
+    question: text('For "log question": the question to log, as drafted for the counterparty.'),
+  },
+  required: ['action'],
 };
 
 /** the tools as the service's own function tools */
@@ -127,6 +146,7 @@ export const toolSpecs = (width: number): ToolSpec[] => [
       properties: {
         text: text('The answer, with [n] markers.'),
         sources: { type: 'array', items: answerSource },
+        offer: answerOffer,
       },
       required: ['text', 'sources'],
     },

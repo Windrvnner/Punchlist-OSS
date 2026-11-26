@@ -158,18 +158,6 @@ export function letterCut(text: string): { head: string; tail: string } {
   return { head: parts.name.join(' '), tail: ` (${first})` };
 }
 
-/** words that say something did not happen */
-const NOT_DONE = /\b(not|couldn’t|couldn't|can’t|can't|cannot|didn’t|didn't|failed|isn’t|wasn’t|unable|full|in use)\b/i;
-/**
- * Undo marks completed work. Retry and failure wording in the title mark work that did not finish (#565).
- */
-export function glyphOf(text: string, action?: string): Glyph {
-  if (action === 'Undo') return 'done';
-  if (action === 'Retry' || action === 'Retry Now') return 'warn';
-  const [title] = text.split(' · ', 1);
-  return NOT_DONE.test(title) ? 'warn' : 'done';
-}
-
 /**
  * The part of a notice that gives way when the line does not fit: a deal named apart from its twin is cut at a whole
  * word (see shorterForms); other text, or a label none of whose shorter forms fits, at a whole character (see

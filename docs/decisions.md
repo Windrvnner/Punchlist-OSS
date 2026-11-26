@@ -88,7 +88,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A draft that can't be saved is retried five times with backoff, then shows as failed, with its text kept for **Retry** (#22).
 - **Draft from Documents** is offered on any open question without a draft; when it would replace typed text, it asks for confirmation on the button and offers **Undo**. **Draft All** drafts only questions with no response. An accepted draft records the firm as the responder.
 - A used draft, or a response taken from a conversation, keeps its label and sources only until a person changes its words.
-- Drafting quotes, word for word and with credit, a response already given to a similar question, then adds what the documents say. The model sees earlier responses only as R1, R2 and so on, never their question numbers, so a calendar quarter such as Q3 2027 stays in a draft, and a sentence naming an R number is dropped with the source only it cited (#286).
+- Drafting quotes, word for word and with credit, a response already given to a similar question, then adds what the documents say. The model sees earlier responses and questions only by their permanent ids, never their numbers, so a calendar quarter such as Q3 2027 stays in a draft, and a sentence naming an earlier response's id is dropped with the source only it cited (#286, #1105).
 - A typed response, or one taken from a conversation, doesn't change the status; a person marks the question Answered.
 - Emptying a response is announced in a notice with **Undo**.
 - A response on a question linked to a finding marks that finding; a response on an unlinked question is checked once against the open findings.
@@ -110,7 +110,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - An import can make a spreadsheet the deal's log ("Make this the deal's Q&A log", checked for a file with two or more parties). If there is no log, the first update creates one in the app's layout, in a folder a person picks. A later party's file only adds and updates questions and is never written to.
 - Updates add no columns and never write to a formula cell. To reply to one party, use Export filtered by Submitted By.
 - **Update Q&A Log** brings every column up to date and first saves the old version to the folder's archive; it never deletes anything else. A log open elsewhere is retried every 30 seconds for 20 minutes; the notice names who has it open only when the lock file does.
-- An edit made in the log wins over the app's value, exactly as written: a cell is compared character for character, so a "?" stays a "?". Only the file's own storage (line breaks kept as one "\n", control characters stored as a space or left out) is allowed for. Matching a row to a question only picks the row and never changes text. Where both changed, the question is in two versions.
+- An edit made in the log wins over the app's value, exactly as written: a cell is compared character for character, so a "?" stays a "?". Only the file's own storage (line breaks kept as one "\n", an .xlsx keeps control characters exactly, through Excel's own "_xHHHH_" codes (#1149), and other formats keep their own storage) is allowed for. Matching a row to a question only picks the row and never changes text. Where both changed, the question is in two versions.
+- A Q&A log cell is written exactly as given, in every format; a CSV cell that starts with =, +, - or @ gets no added character (#1107).
 - An edit saved to the log just before an update moved the log is merged in. Where its row is unclear, the person places it, and what can't be merged stays in the archive. "Not fully merged" comes first in the notice, which stays until dismissed.
 
 ## Findings
@@ -172,17 +173,20 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Home asks “What would you like to know?” and shows example questions in its composer (#654).
 - No conversation shows sample questions above its composer.
 - Each question asked from an ask box starts a new conversation; follow-ups continue it.
+- The composer takes no typed-word commands: everything typed is asked of the AI. A one-line box that starts with "/" offers `/add-unresolved` (**Add All Unresolved to Q&A…**), `/log-question` (**Log Question**), and `/new-deal` (**New Deal…**), the first two on a deal, and what follows the "/" narrows them. The AI can offer one of them, or opening a deal's page, as a button under its answer; nothing runs until a person presses it (#1054).
 - Every chat shows AI text the same way: a finding's or question's text at the answer's size, with its sources as the answer's chips above it. The send button is a paper airplane pointing to the top right. Screen text says "AI", never "the model".
 - A deal page's ask box is the conversation composer in place: it is one line at rest and pushes the page down when used (option A).
 - **Past Conversations** in every composer opens a searchable list, set to This Deal or All Deals.
-- A typed "Log a question" that can't be saved goes back at the head of its box, ahead of anything typed while it was saving, with a blank line between; sending the box then logs that question alone and leaves the rest in the box. One the app keeps to retry stays with **Retry** instead (#955).
-- Typed text goes to the chat agent, except the typed commands: "open", "go to", "show", "take me to", "switch to", or "jump to" a deal by its name (in any case, with or without "Project"), "new deal", "add all unresolved to Q&A", and "log a question". (#1018)
+- A **Log Question** that can't be saved goes back at the head of its box with the chip on, ahead of anything typed while it was saving, with a blank line between; sending the box then logs that question alone and leaves the rest in the box. One the app keeps to retry stays with **Retry** instead (#955).
 - There is no Conversations tab.
+- One run of the chat agent, in a chat or in the checks' gap search, takes up to `limits.chatTurns` (25) turns, and one
+  search run up to `limits.searchCalls` (15) calls. Both are inputs in the control file (`src/control.ts`) and are the
+  only stops on a check's calls; its cost per deal is not otherwise bounded (#1066).
 - Conversations are kept per person in the shared folder and follow the person between PCs. In the app, each person sees only their own; the files are readable by anyone with access to the folder, and no encryption is planned.
 - Answers cite sources sentence by sentence with a dotted underline, without numbered markers (#636). While a finding is being edited, each citation shows as a tag of at most 30 characters after its sentence (#636). An answer can become a finding, a question, or a response.
 - Cited phrases show the pointer cursor when they open a source. Hover-only citations keep the default cursor (#440).
 - Source chips keep the cited location and tags whole. The name shortens to fit and appears in full on hover (#441).
-- Chat is an agent with search, read, folder, and brief tools. The brief tool catches up on a deal with the deal brief, two AI paragraphs on its open findings (#1017). A folder read always covers the whole folder; reading more than `limits.folderDocs` documents asks first, and **Stop** answers from what was found.
+- Chat is an agent with search, read, folder, and brief tools. Its answer may offer one action, which the app checks against the deals and the conversation before it shows the button, and checks that its deal still exists when it is pressed. A deal the answer names must be in the person's own list, by its exact name, which no other deal there has (#1054). The brief tool catches up on a deal with the deal brief, two AI paragraphs on its open findings (#1017). A folder read always covers the whole folder; reading more than `limits.folderDocs` documents asks first, and **Stop** answers from what was found.
 - While chat works, it shows "Researching" with the full trace; once it has answered, it shows "Researched · N steps · N of M documents searched · time", never "read" (option D).
 - Tool calls run inline by default; the hybrid and native modes are set by `models.toolCalls`.
 - The chat's search gives its results a page at a time, ranked by one keyword scoring (BM25): documents `limits.docsPerCall` a page from the ranking, findings and Q&A `limits.searchPage` a page, or fewer when that many would hold more than half of what the kept conversation holds before it is compacted, each record whole and each Q&A row in full. The model asks for any page (#1102, #1091).
@@ -192,7 +196,9 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Documents open in reading mode beside the conversation, with page keys and zoom.
 - Switching PDFs opens the cited page at the top and keeps the zoom (#447).
 - In the browser demo, a PDF without a preview shows its title, page number, and a preview status (#443).
-- Decided but not built: plain-symbol math, a named finding opening in a side pane, answer actions as icons, and a suggested open question card.
+- Decided but not built: plain-symbol math, a named finding opening in a side pane, and answer actions as icons.
+- A card under an answer suggests each open question the model proposes it addresses; every part's named question is
+  kept and shown, each usable on its own, and only a person uses one (#1120).
 
 ## Deal memo
 
@@ -205,6 +211,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - The memo limits a key risk write-up to two paragraphs and 200 words. If retries yield no usable write-up,
   it uses the findings' own cited words (#659).
 - The memo reports facts only: no recommendation, mitigants, next steps, or judging words.
+- A memo whose one-page summary can't be written fails with Retry and is not saved (#1065).
 - **Deal Memo…** in the deal header's ⋯ menu asks where to save (Word or PDF), then makes the memo; there is no review step.
 - The memo has no text in capitals, headings included.
 - Risks are rated High, Medium, or Low, only in the memo, by the model against the control file's definitions. A finding keeps its rating until the finding changes, so two memos agree. The memo carries no AI mark, only one disclaimer at the end. High prints in red; Medium and Low print in the text color.
@@ -219,10 +226,21 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A document's id is the SHA-256 hash of its bytes, so identical copies are one document.
 - The chat agent opens a document only by its tag, its whole path, or its whole file name (in any case); anything else is "Not found" (#1018).
 - Indexing (building each PC's word index of the data room) asks no model and uploads nothing, and it resumes by itself once the data room is available again.
+- A spreadsheet is read for its words whatever its size, after every other file; a .csv is read a piece at a time.
+  One that cannot be read is named in the indexing log on every run and never recorded as having no text; it is read
+  again by every later run and every 5-minute check of the folders (#427).
+- Every cell of a spreadsheet is content, numbers and dates included, in its words and in the index (#1023).
+- A successful read of a deal-folder document's words replaces a recorded empty word list for every PC (#1023).
+- A deal whose word index file of the current version is missing has its folders read again at the next check, once
+  (#1023).
+- A PDF, or a document converted to one, any page of whose text cannot be read keeps its pages and is listed without
+  words, named as not read on every run and read again by the next run and the next check of the folders, also after a
+  restart; it is never recorded with no words or with only some pages' words (#1056).
 - A deal's folders are checked for changes every 5 minutes.
 - LibreOffice, bundled with the app, is the only document converter; a converted document that has tracked changes shows them as markup, and one with none is converted as it is.
 - For tracked changes and blacklines, a Word file's own tracked changes are fact, and the clean draft is the source of truth for the deal's terms. A blackline is the model's reading: it never settles an item or closes a finding by itself. A control-file switch selects pipeline A (the default) or pipeline B. What a blackline was compared against is determined from its cover and name, never guessed (docs/other-project-documents-design.md).
 - A blackline whose clean draft neither its cover nor its name finds stands alone and is read on its own; a file that only shares a word of its name never makes it unclear (#1018).
+- An "A vs B" blackline pairs only when both names share their first index word: numbers and short tokens count, filler words and plural endings follow the index split, and names with no index word share none (#1224).
 - A deleted or replaced document leaves the deal under the rules in architecture.md; nothing linked to it is deleted (#413).
 - A folder that this person may not open doesn't stop indexing, and a check that couldn't read it says "Not complete".
 - The app never deletes documents. Drafts of one agreement form a family: the newest is read first, and reading mode shows a draft's date and lists its family's drafts, any two of which can be compared. Versions in one folder count only with an explicit mark such as v3 or Rev A.
@@ -254,6 +272,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A change that arrives before a change it builds on is held back without pausing the deal; one more than a day old is let go as a choice. A deal can't be deleted while such changes are on their way.
 - The connection status card shows only when something is wrong. The avatar's dot is the accent color or red, and OneDrive being unavailable for 15 minutes produces one notice.
 - A copied install is detected and stops writing. A build never changes a record written by a newer version.
+- The app carries no compatibility code for builds or data from before its release; the schema version gate stays
+  (#1119).
 - A damaged undo journal (each PC's record of its actions, used for Undo and to recover interrupted work) is set aside, and its complete entries are still offered.
 - **Discard** on an interrupted action asks first in the confirm dialog, naming the action (#1055).
 - A deal's analysis is split between the PCs that have the deal open, in rounds (a round is one shared run of checks on the deal, split into pieces of work) that any PC can take over. A requested check that an abandoned round doesn't cover writes that round off.
@@ -264,10 +284,17 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Attachments are kept in the shared folder under their document's id. A file attached on Home is kept with the person's conversations.
 - A deal's recovered copy keeps the deal's attached files, and files attached and not yet sent follow their conversation to the copy (#117).
 - A message goes with all of its attached files or not at all: a file this PC can no longer send is named, its chip is marked, and nothing is sent (#671).
+- A place, a folder name inside a folder, or an id that a shared record gives a document is used only if the file it
+  makes stays inside its folder: the attachments folder, the deal folder as this PC has it (the deal's folder, or
+  where it was located here, which is the root and is not checked further), a folder being compared, or the work
+  folder. One that leads out of it is a file that is not there: it is not read, opened, listed, written, deleted or
+  counted as a match (#1156).
 
 ## AI and models
 
-- A model is used only for work that needs language understanding. Parsing, matching, numbering, dates and periods, sorting, counting, and formatting are done in code, including the selecting, matching, formatting, and checking around an AI feature's model call; a model sees neutral handles, never identifiers its prose could be confused with (#286).
+- A model is used only for work that needs language understanding. Parsing, matching, numbering, dates and periods, sorting, counting, and formatting are done in code, including the selecting, matching, formatting, and checking around an AI feature's model call; a model sees questions and earlier responses by their permanent ids, never their numbers or other identifiers its prose could be confused with (#286, #1105).
+- A model reply naming a question id it was not shown, or one that must name a question and names none, is a failed
+  reply and is asked again (#1105).
 - There are three tiers, Fast, Standard, and Thorough, named only by tier. The control file sets each tier's model and which ones people can pick. For automated checks, Thorough is a fallback
   after Standard fails twice.
 - To manage cost, use the fast model for initial sorting and Standard for confirmation. Batch work to fit the
@@ -280,6 +307,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - An unreadable reply is repaired or sent back once; a thin reply is sent back with what is wrong.
 - Retryable model failures and empty replies are retried quietly, up to twice by default after 2 and 4 seconds.
   An unreachable service follows its own recovery path. Keep everything the person typed.
+- A connector retries a busy or failing service up to twice, honoring Retry-After, before it reports the service
+  unreachable (#1110).
 - Every AI feature adapts to a reply that is cut off or a request that is too long, at limits the control file sets (#451 and #452 are still to do).
 - A model reply may hold up to 32,000 tokens (`limits.outputTokens`): a temporary hold until real reply sizes are
   measured (#1079).
@@ -314,6 +343,11 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 [CLAUDE.md](../CLAUDE.md) covers how to work on the app: commits, checks, mock-ups, readable code, and asking before design decisions. Beyond it, these rules apply:
 
 - The file is the source of truth. The app never changes, repairs, normalizes or reinterprets content handed to it; what it shows matches what the file's native app shows.
+- Text a file holds or the model writes is stored, shown and written back as given, edge spaces and tabs included (#1215).
+- That covers a model's answer, title, quote, reason, paragraphs, rewording, question wording and merged answer, a left-out line, a firm, a log's name and a file's name (#1215).
+- A value a file gives is compared with the app's character for character: a name, a workstream, a response, a cell of a kept edit (#1215).
+- A file response that differs from a drafted or quoted one only in spacing is stored as the file has it and keeps its origin and sources; other words make it a person's own, with none (#1215).
+- A paragraph typed into a finding's detail is trimmed; the model's paragraphs beside it stay as written. A title, name or response typed in the app is trimmed, as are a lookup key, a structural token and the one-line text sent in a prompt (#1215).
 - Keep friction low, with as few controls and steps as possible.
 - The attribution check allows a `Co-authored-by` trailer naming exactly the repository's own coding-agent identity (set in `scripts/aiAttribution.mjs`) and refuses every other AI co-author trailer (#877).
 - Never guess identities. Never cite finding codes.
@@ -395,5 +429,9 @@ These decisions are built and wait to be confirmed:
 - An issues list or an advisor report is read like the app's other documents: the model reads the whole file once and returns each issues-list point in the list's own words, never reworded, and each advisor-report issue with its place in the file. There is no paging and no stop rule (#1026).
 - A document's word index and a search no longer drop a word or number for its length, and a Word file is indexed from
   its body and all its header, footer, footnote and endnote parts (#1025).
+- The core set and a document's most-used words split text as the word index does and drop no word, letter or number
+  for its length (#1147).
+- The browser demo's word-comparing stand-ins use the words the search index keeps (one split, the control file's
+  filler left out) and drop no word, letter or number for its length (#1220).
 - A text or CSV file is decoded by its byte-order mark (UTF-8 or UTF-16); with none, as UTF-8, else Windows-1252.
   A plain-text list (.txt, .text, .md) is read the same way (#382).

@@ -22,7 +22,10 @@ import type { SheetEdit } from '../domain/sheets';
 import type { QaLogFiles } from '../ports';
 
 /** a log's name: its file's name without the extension, and without " - vCurrent" */
-export const logName = (file: string) => file.replace(/\.[^.]+$/, '').replace(/\s+-\s+vCurrent$/i, '').trim() || 'Q&A log';
+export const logName = (file: string) => {
+  const name = file.replace(/\.[^.]+$/, '').replace(/\s+-\s+vCurrent$/i, '');
+  return name.trim() ? name : 'Q&A log';
+};
 
 /** the deal's log, if it has one */
 export const logOf = (store: Store, dealId: string): QaLog | undefined => store.get().deals[dealId]?.qaLogs[0];

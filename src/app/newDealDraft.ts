@@ -4,7 +4,7 @@
  * nothing. Folders still being read when the form went are kept as paths and read again when it opens (#113).
  */
 import type { DealKinds } from './state';
-import { pathKey } from './commands/deals';
+import { windowsPath } from '../domain/sheets';
 import { keptDrafts } from './keptText';
 
 type KeptFolder = { path: string; label: string; files: number; size: string };
@@ -61,7 +61,7 @@ export function hasNewDealDraft(d: KeptNewDeal) {
  */
 function keepLateRead(path: string, folder: KeptFolder | null) {
   const draft = keptNewDeal();
-  const same = (p: string) => pathKey(p) === pathKey(path);
+  const same = (p: string) => windowsPath(p) === windowsPath(path);
   // a folder no longer waiting was read again, or removed, by a form opened since: the read ending late is old news
   if (!draft || !folder || !(draft.reading ?? []).some(same)) return;
   const stillWaiting = (draft.reading ?? []).filter((p) => !same(p));
@@ -74,10 +74,10 @@ type DraftFields = Pick<KeptNewDeal, 'name' | 'counterparty' | 'kinds' | 'folder
 function restoreDraft(form: DraftFields) {
   const draft = !form.name && !form.folders.length ? keptNewDeal() : null;
   if (!draft) return null;
-  const listed = (path: string) => draft.folders.some((folder) => pathKey(folder.path) === pathKey(path));
+  const listed = (path: string) => draft.folders.some((folder) => windowsPath(folder.path) === windowsPath(path));
   const reading = (draft.reading ?? []).filter((path) => !listed(path));
   // A typed path that Create was reading goes back as a pending folder, without a duplicate in the path field (#113).
-  const path = reading.some((pending) => pathKey(pending) === pathKey(draft.path)) ? '' : draft.path;
+  const path = reading.some((pending) => windowsPath(pending) === windowsPath(draft.path)) ? '' : draft.path;
   const { name, folders, kinds, counterparty } = draft;
   return { fields: { name, folders, kinds, counterparty }, path, reading };
 }
@@ -130,17 +130,17 @@ export class NewDealDraftSession {
   }
 
   isReading(path: string) {
-    return this.reading.has(pathKey(path));
+    return this.reading.has(windowsPath(path));
   }
 
   started(path: string) {
-    this.reading.set(pathKey(path), path);
+    this.reading.set(windowsPath(path), path);
     this.show(this.waiting());
   }
 
   /** True when the open form should receive the result. A late read can only update its own kept draft (#113). */
   finished(path: string, folder: KeptFolder | null) {
-    this.reading.delete(pathKey(path));
+    this.reading.delete(windowsPath(path));
     this.show(this.waiting());
     if (this.live) return true;
     if (this.keeps && !formsOpen) keepLateRead(path, folder);

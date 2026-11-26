@@ -98,8 +98,13 @@ reports a lost connection, timeout, rate limit, or server error as `unreachable`
 file, and lowered where the service reports a smaller limit) and the two errors that every connector throws in the
 same way: `cutoff` and `toolong`. `src/backend/parts.ts` sizes work on many items so that each part fits, and halves
 the parts after a reply is cut off. Every model call goes through one retry policy (`src/backend/retry.ts`): two more
-tries, with a doubling wait, for an empty reply or for a failure that resending can fix (that is, not unreachable, cut
-off, too long, or a 4xx error). Every call gets these retries, however many calls before it failed.
+tries, with a doubling wait, for an empty reply, for a reply its caller cannot use (one naming a question id it was
+not shown), or for a failure that resending can fix (that is, not unreachable, cut off, too long, or a 4xx error).
+Every call gets these retries, however many calls before it failed. A reply still unusable when its tries run out,
+or a JSON repair of one that names such an id, is a failed reply and is never used: a draft or a reassessment then
+goes on to its next try where it has one (once more, then once to the thorough model) and fails after the last; a
+check of which responses a change affects fails. A chat turn inside a kept conversation is not retried there: an
+unusable one fails and the chat asks it again in a new conversation, as it does an empty one.
 
 **Desktop shell.** The desktop app is an Electron app. The main process (`src/desktop/main.ts`) assembles the backend and serves it to a single window across a bridge. The window runs the same Store and UI as the browser demo.
 
@@ -170,7 +175,7 @@ The code is in `src/backend/ai.ts`, `agent.ts`, and `lenient.ts`.
 - **Nothing unverifiable is passed on.** Replies are read leniently, but a citation is kept only if it names a document that was sent and a page that document has.
 - **Model tiers.** The fast model sorts and the standard model answers. For automated checks, Thorough is a fallback
   after Standard fails twice. Chat can use Thorough if it is enabled in the picker.
-- **The chat agent** (`src/backend/agent.ts`) works in turns on the model the person chose, calling its `search`, `read`, `folder`, and `brief` tools until it answers, within `limits.chatTurns` turns. Before its first turn, code attaches the files given with the question (a finding's own documents among them) and searches everything once with the question's own words; after that the model chooses each tool and what to search. Every search is ranked by the same keyword scoring (BM25, `bm25` in `wordIndex.ts`) and comes a page at a time: a document page is the next batch of the ranking's matches, at most `limits.docsPerCall`, cut as a folder read's batches are (a blackline with its clean draft), which a helper on the fast model reads with no pick of its own, naming any it could not open, and findings and Q&A come `limits.searchPage` records a page, each whole, or fewer when that many would hold more than half of what the kept conversation holds before it is compacted (`limits.compactAt`), so that a search of everything fits its page of each. The model asks for any page. `brief` returns each deal's brief on its open findings (`dealBrief`), written once until a finding changes. Its steps are shown live and kept with the answer. The checks hand what they would otherwise leave as a gap to the same agent.
+- **The chat agent** (`src/backend/agent.ts`) works in turns on the model the person chose, calling its `search`, `read`, `folder`, and `brief` tools until it answers, within `limits.chatTurns` turns. Before its first turn, code attaches the files given with the question (a finding's own documents among them) and searches everything once with the question's own words; after that the model chooses each tool and what to search. Every search is ranked by the same keyword scoring (BM25, `bm25` in `wordIndex.ts`) and comes a page at a time: a document page is the next batch of the ranking's matches, at most `limits.docsPerCall`, cut as a folder read's batches are (a blackline with its clean draft), which a helper on the fast model reads with no pick of its own, naming any it could not open, and findings and Q&A come `limits.searchPage` records a page, each whole, or fewer when that many would hold more than half of what the kept conversation holds before it is compacted (`limits.compactAt`), so that a search of everything fits its page of each. The model asks for any page. `brief` returns each deal's brief on its open findings (`dealBrief`), written once until a finding changes. Its steps are shown live and kept with the answer. The answer may carry an `offer` (new deal, open page, add unresolved, log question), which `src/app/answerOffer.ts` checks against the deals and the conversation, keeps with the answer, and runs only when the person presses its button. The composer's slash commands are in `src/app/slashCommands.ts`. The checks hand what they would otherwise leave as a gap to the same agent.
 - **No model call starts on a timer.** Background retries only continue work that a person or an event started.
 
 ## Checks, and how PCs share them
@@ -205,12 +210,14 @@ A deal's checklist is made up of its own item records, linked to the findings an
   If any selected question is no longer settled, none are closed. Each close is one change with one **Undo**.
 - **Add All Unresolved to Q&A…** (`AddUnresolved`) reads the rows again before writing and applies one change with one
   **Undo**. The fast model phrases a question for each gap or open finding that has no linked question. It works in
-  parts sized by `inParts` and asks again, one at a time, about any points that failed. Points still without a question
-  are counted and offered with **Retry**.
+  parts sized by `inParts`, and each call gets only the shared quiet retry. Points a reply left out are asked again as
+  a part; a part that brings nothing is split down to single points. Points still without a question are counted and
+  offered with **Retry**. A link from a point to an open question is offered only when a person approved it (#88);
+  no question is matched to a point by similar words.
 
 ## Q&A log, imports, and the memo
 
-- **The Q&A log** (`src/app/qaLog.ts`, `src/backend/qaLogs.ts`) is the team's own spreadsheet; the deal records only where it is. An update reads the log as it is, works out the cells to change (`logWrite` in `src/domain/logWrite.ts`, which finds each question's row with the import's own lookup, `matchQuestions` in `src/domain/qaMatch.ts`), and writes them into a copy (`editLog` in `src/backend/spreadsheets.ts`). It then checks that only those cells changed, archives the old version, and saves the copy over the log (`src/backend/qaLogFolder.ts`).
+- **The Q&A log** (`src/app/qaLog.ts`, `src/backend/qaLogs.ts`) is the team's own spreadsheet; the deal records only where it is. An update reads the log as it is, works out the cells to change (`logWrite` in `src/domain/logWrite.ts`, which finds each question's row with the import's own lookup, `matchQuestions` in `src/domain/qaMatch.ts`), and writes them into a copy (`editLog` in `src/backend/spreadsheets.ts`). It then checks that only those cells changed, archives the old version, and saves the copy over the log (`src/backend/qaLogFolder.ts`). An edit saved to the log just before an update moved it is merged back in cell by cell (`mergeKept` in `src/domain/keptMerge.ts`), with its rows lined up by the same lookup.
 - **Q&A import** reads and proposes a table layout through `src/app/transfer.ts`. Its preview uses prepared dates
   where available. `src/app/qaImport.ts` submits the prepared rows through `ImportQuestions`. That workflow resumes retained
   submissions by their journal correlation and finishes the saved log choice.
@@ -228,6 +235,14 @@ A deal's checklist is made up of its own item records, linked to the findings an
 ## Conversations
 
 A conversation belongs to one person and follows them between PCs. `src/backend/conversationLog.ts` keeps finished messages in per-PC `talk-<install>-<n>.jsonl` files in the shared folder, separate from the records, because a conversation never needs a choice between versions.
+
+Once an answer on a deal's or a finding's conversation finishes, `suggestQuestion` asks the standard model which open
+questions it addresses, showing each question by its permanent id in calls sized to its input limit. When the open
+questions take more than one call, they are asked in parts (`inParts`) and every question any part names is kept. A
+reply naming an id it was not shown, or no id and not "none", is a failed reply and is asked again (`namesOnlyShown`);
+code keeps only ids it offered. Each proposal is kept for the session with the question's text as asked
+(`src/app/suggestedQuestion.ts`), and shows only while that question is still open with exactly that text
+(`stillAsks`). The card under the answer lists each one, with its own Check, Use as Response and Not this one (#1120).
 
 ## UI rules
 

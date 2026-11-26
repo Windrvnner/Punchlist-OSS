@@ -27,10 +27,18 @@ let freezeClock = false;
 const clock = () => new Date(Date.UTC(2026, 10, 17, 9, 0, 0, freezeClock ? t : t++) + skew).toISOString();
 // spreadsheets as .csv: indexed with no converter, so thousands of files index quickly
 const csv = (n: number | string) => `Item,Value\nline ${n},${n}\n`;
-function pc(root: string, o: { folders?: () => string[]; settleMs?: number; id?: string } = {}) {
+type PcOptions = { folders?: () => string[]; foldersNow?: () => string[]; settleMs?: number; id?: string };
+function pc(root: string, o: PcOptions = {}) {
   const sharedPath = path.join(root, 'shared'); const shared = nodeFolder(sharedPath), local = nodeFolder(path.join(root, o.id ? `local-${o.id}` : 'local'));
   const keeper = new StoreKeeper(new StandInService(), local, { limit: 500, clock, recheckMs: 0 }); const indexed: string[] = [];
-  const docs = nodeDocuments({ shared, local, sharedPath, installId: o.id ?? 'A', keeper, clock, workPath: path.join(root, o.id ? `work-${o.id}` : 'work'), folders: async () => o.folders?.() ?? [path.join(root, 'vdr')], onIndexed: (d) => indexed.push(d), settleMs: o.settleMs ?? 50 });
+  const docs = nodeDocuments({
+    shared, local, sharedPath, installId: o.id ?? 'A', keeper, clock,
+    workPath: path.join(root, o.id ? `work-${o.id}` : 'work'),
+    folders: async () => o.folders?.() ?? [path.join(root, 'vdr')],
+    ...(o.foldersNow ? { foldersNow: o.foldersNow } : {}),
+    onIndexed: (d) => indexed.push(d),
+    settleMs: o.settleMs ?? 50,
+  });
   return { docs, indexed, shared };
 }
 const folder = (p: string) => ({ path: p, label: path.basename(p), files: 0, size: '', indexed: 0, reviewed: 0 });
@@ -306,6 +314,21 @@ describe('looking at an indexed deal’s folders again', () => {
       expect(val(await x.docs.freshen!('d1'))).toBe('running'); await x.docs.settled('d1');
       expect(names(x.docs)).toHaveLength(301); expect(val(await x.docs.freshen!('d1'))).toBe('same');
     } finally { (fs as any).readdirSync = realSync; (fs.promises as any).readdir = realAsync; }
+  }, 60000);
+
+  it('a deal folder written another way still lists its unread folders', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'a/x.csv', csv('x'));
+    put(vdr, 'a/b/y.csv', csv('y'));
+    const undo = bar(() => [path.join(vdr, 'a', 'b')]);
+    try {
+      const written = vdr.replace(/\//g, '\\').toUpperCase() + '\\';
+      const office = pc(root, { id: 'office', foldersNow: () => [written] });
+      val(await office.docs.index('d1', [folder(vdr)]));
+      await office.docs.settled('d1');
+      expect(office.docs.unread!('d1')).toEqual(['a/b']);
+    } finally { undo(); }
   }, 60000);
 
   it('a folder inside a closed folder stays unread when a PC that cannot open the outer one reads later', async () => {
