@@ -72,7 +72,7 @@ import {
 import { docFamilies } from './related';
 import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
-import { responseHeader } from './qaRow';
+import { handleOf, questionsForHandles, responseHeader } from './qaRow';
 import type { DealDoc, Looked } from './agentKit';
 import {
   RATINGS, riskGroups, keyRisksOf, unratedFindings, type Grouped, type Rating, type RiskGroup,
@@ -1817,10 +1817,20 @@ export function nodeAi(o: AiOptions) {
       const f = await record<{ title: string; body: string[]; sources: Source[] }>('finding', i.findingId); if (!f) return fail({ kind: 'notFound', message: 'No such finding' });
       let m: Awaited<ReturnType<typeof models>>; try { m = await models(); } catch (e) { return failure(e, `${SERVICE} did not answer`); }
       const parasOf = (reply: Record<string, unknown>) => strings(reply.body).flatMap((p) => p.split(/\n\s*\n/)).map((p) => p.trim()).filter(Boolean);
-      const r = await read('reassess', [i.dealId], m.standard, `Reassess this finding against the documents as they stand now.\nTitle: ${f.title}\nAs written: ${f.body.join(' ')}${await responsesOn(i.dealId, i.findingId)}`, `${f.title} ${f.body.join(' ')}`, { [i.dealId]: f.sources.map((s) => s.docId).filter((x): x is string => !!x) }, '{"body": ["one paragraph per string, with [n] markers"], "sources": [...]}', { escalate: m.thorough, usable: (reply) => parasOf(reply).length > 0, wrong: '"body" has no paragraphs in it' });
+      const said = await respondedOn(i.dealId, i.findingId);
+      const ask = 'Reassess this finding against the documents as they stand now.\n'
+        + `Title: ${f.title}\nAs written: ${f.body.join(' ')}${responsesText(said)}`;
+      const own = { [i.dealId]: f.sources.map((s) => s.docId).filter((x): x is string => !!x) };
+      const shape = '{"body": ["one paragraph per string, with [n] markers"], "sources": [...]}';
+      const usable = (reply: Record<string, unknown>) => parasOf(reply).length > 0;
+      const again = { escalate: m.thorough, usable, wrong: '"body" has no paragraphs in it' };
+      const about = `${f.title} ${f.body.join(' ')}`;
+      const r = await read('reassess', [i.dealId], m.standard, ask, about, own, shape, again);
       if (!r.ok) return r;
       if (!r.value.sent.length) return fail({ kind: 'failed', message: 'None of this finding’s documents are indexed, so there is nothing to reassess it against' });
-      const paras = parasOf(r.value.reply);
+      // the responses it was shown by handle are named by their questions' numbers before the finding is kept (#1105)
+      const handles = said.map((q) => q.n);
+      const paras = parasOf(r.value.reply).map((p) => questionsForHandles(p, handles));
       if (!paras.length) return fail({ kind: 'failed', message: UNREAD_REPLY });
       const out = fit(paras.join('\n\u0000\n'), r.value.reply.sources as Cited[], r.value.sent, false, true);   // a finding: a place cited twice is one source, as when it was raised
       // a finding stays as written unless one of this deal's own documents bears it out
@@ -2358,9 +2368,10 @@ export function nodeAi(o: AiOptions) {
 
   type Asked = { id: string; n?: number; text?: string; response?: string; respondedBy?: string; responded?: string; linkedFinding?: string; provenance?: { origin?: string } };
   const saidOf = (q: Asked) => createHash('sha256').update(String(q.response ?? '').replace(/\s+/g, ' ').trim()).digest('hex').slice(0, 16);
-  const responseLines = (qs: Asked[]) => qs.map((q) => {
-    const asked = `Q${q.n}: ${String(q.text ?? '').replace(/\s+/g, ' ').trim()}`;
-    return `${asked}\n${responseHeader(q)}: ${q.response!.replace(/\s+/g, ' ').trim()}`;
+  /** the questions with their responses, each labeled by its handle (R1, R2, … in order), not its number (#1105) */
+  const responseLines = (qs: Asked[]) => qs.map((q, k) => {
+    const asked = `${handleOf(k)}: ${String(q.text ?? '').replace(/\s+/g, ' ').trim()}`;
+    return `${asked}\n${responseHeader(q, handleOf(k))}: ${q.response!.replace(/\s+/g, ' ').trim()}`;
   }).join('\n');
   /** a deal's questions that have a response, by number */
   // (called only for a deal already read: after its findings were listed, or for a finding read by id, which reads its deal)
@@ -2374,12 +2385,22 @@ export function nodeAi(o: AiOptions) {
    * new information about a finding just as a document is, but it is not a document and cannot be cited as one.
    * `also` are responses to include whatever is recorded.
    */
-  async function responsesOn(dealId: string, findingId: string, also: Asked[] = []): Promise<string> {
+  async function respondedOn(dealId: string, findingId: string, also: Asked[] = []): Promise<Asked[]> {
     const all = await answered(dealId); let heard = new Set<string>();
     try { heard = new Set((await lines(dealId)).filter((l) => l.heard?.findings?.includes(findingId)).map((l) => l.heard!.question)); } catch { /* the linked ones still count */ }
     const said = all.filter((q) => q.linkedFinding === findingId || (!q.linkedFinding && heard.has(q.id)) || also.some((a) => a.id === q.id));
+    return said;
+  }
+  /** those responses for the prompt (`respondedOn`), each named by its handle */
+  async function responsesOn(dealId: string, findingId: string, also: Asked[] = []): Promise<string> {
+    return responsesText(await respondedOn(dealId, findingId, also));
+  }
+  /** responses for the prompt, each named by its handle, which code puts back as its number (`questionsForHandles`) */
+  function responsesText(said: Asked[]): string {
     if (!said.length) return '';
-    return `\n\nResponses received on the questions asked about this finding:\n${responseLines(said)}\nTake these into account. A response is not a document: refer to it as "the response to Q${said[0].n}" and give it no [n] marker.`;
+    const heading = '\n\nResponses received on the questions asked about this finding:';
+    const named = 'A response is not a document: refer to it as "response R<k>" and give it no [n] marker.';
+    return `${heading}\n${responseLines(said)}\nTake these into account. ${named}`;
   }
   const tagged = (dealId: string, docs: DocRecord[]): Sent[] => docs.map((rec, i) => ({ tag: `D${i + 1}`, dealId, rec }));
   /** a finding as the checks see it; `closed`: a person closed it, and documents may bring that into question */
@@ -3154,6 +3175,22 @@ export function nodeAi(o: AiOptions) {
     responses(dealId: string): Promise<Result<{ heard: string[]; marked: string[] }>> { return hear(dealId); },
   };
   const HEARD_AT_ONCE = 50;
+  /**
+   * The fast model's question on responses tied to no finding: which of the open findings `listed` each could change.
+   * Each question is named by its handle (R1, … in the order of `group`), never by its number (#1105).
+   */
+  async function askAffects(group: Asked[], listed: Raised[]): Promise<{ affected?: unknown } | null> {
+    const intro = 'These responses have been received to questions asked on a project-finance deal. '
+      + 'None of the questions is tied to a finding.';
+    const open = listed.map((f, i) => `F${i + 1}: ${f.title}`).join('\n');
+    const question = 'Which findings could a response change? Think of knock-on effects, not only of matching words. '
+      + 'Pair each finding with the question whose response bears on it; if no finding is touched, give an empty list.';
+    const prompt = `${intro}\n${responseLines(group)}\n\nThese are open findings on the deal:\n${open}\n\n${question}\n`
+      + 'Reply as JSON: {"affected": ["F2 R1", "F5 R3"]}';
+    const model = (await models()).fast;
+    const input: Ask = { kind: 'affects', split: true, model, system: JSON_ONLY, prompt };
+    return askJson<{ affected?: unknown }>(input, ['affected']);
+  }
   async function hear(dealId: string): Promise<Result<{ heard: string[]; marked: string[] }>> {
     const marked: string[] = [];
     try {
@@ -3167,11 +3204,11 @@ export function nodeAi(o: AiOptions) {
       const bearsOn = new Map<string, Asked[]>();                                // finding → the responses said to bear on it
       for (let at = 0; at < fresh.length; at += HEARD_AT_ONCE) {
         const group = fresh.slice(at, at + HEARD_AT_ONCE); const listed = findings.filter((f) => group.some((q) => todo(q).includes(f)));
-        const reply = await askJson<{ affected?: unknown }>({ kind: 'affects', split: true, model: (await models()).fast, system: JSON_ONLY, prompt: `These responses have been received to questions asked on a project-finance deal. None of the questions is tied to a finding.\n${responseLines(group)}\n\nThese are open findings on the deal:\n${listed.map((f, i) => `F${i + 1}: ${f.title}`).join('\n')}\n\nWhich findings could a response change? Think of knock-on effects, not only of matching words. Pair each finding with the question whose response bears on it; if no finding is touched, give an empty list.\nReply as JSON: {"affected": ["F2 Q12", "F5 Q14"]}` }, ['affected']);
+        const reply = await askAffects(group, listed);
         if (!reply || !('affected' in reply)) return fail({ kind: 'failed', message: 'The responses could not be looked at' });      // nothing is recorded, so they are looked at the next time
         for (const t of strings(reply.affected)) {
           const f = listed[+(/F\s*(\d+)/i.exec(t)?.[1] ?? 0) - 1]; if (!f) continue;
-          const named = [...t.matchAll(/Q\s*(\d+)/gi)].map((m) => group.find((q) => q.n === +m[1])).filter((q): q is Asked => !!q);
+          const named = [...t.matchAll(/\bR\s*(\d+)/gi)].map((m) => group[+m[1] - 1]).filter((q): q is Asked => !!q);
           const qs = bearsOn.get(f.id) ?? []; for (const q of (named.length ? named : group).filter((y) => todo(y).includes(f))) if (!qs.includes(q)) qs.push(q); if (qs.length) bearsOn.set(f.id, qs);       // a finding named with no question we know: every response in the call is put beside it
         }
       }

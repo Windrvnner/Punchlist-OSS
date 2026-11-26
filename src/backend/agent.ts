@@ -296,7 +296,8 @@ class Answering {
   /** the main session's answer, with the citations that can be stood behind; on the last turn, its notes if no text */
   private answered(reply: Record<string, unknown>, last: boolean): Result<Answered> {
     const { kit, question, run } = this;
-    const text = strings(reply.text).join('\n\n') || (last ? run.notes : '');
+    // the questions it was shown by handle are named by their numbers before the answer is shown or kept (#1105)
+    const text = run.withQuestionNumbers(strings(reply.text).join('\n\n') || (last ? run.notes : ''));
     if (!text) return fail({ kind: 'failed', message: UNREAD_REPLY });
     const fitted = kit.fit(text, reply.sources as Cited[], run.opened, question.withDeal);
     this.showCitedPlaces(fitted.sources);
