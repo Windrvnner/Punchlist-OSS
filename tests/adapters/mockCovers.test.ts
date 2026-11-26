@@ -1,5 +1,5 @@
 // The stand-in for the model's check of an Already Asked? pair (#1218), which needs no credentials: a question covers a
-// point when it names every one of the point's telling words; a pair naming most of them is refused.
+// point when it names every one of the point's words; a pair naming most of them is refused.
 import { describe, it, expect } from 'vitest';
 import { mockAi } from '../../src/adapters/mocks';
 

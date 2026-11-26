@@ -16,15 +16,5 @@ export function topWords(text: string, n = 30): string[] {
   return [...count].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, n).map(([w]) => w);
 }
 
-/**
- * A text as the words a search compares: split wherever a name is split, so that a file is found however it was
- * named. "Power-Purchase-Agreement_executed", "PowerPurchaseAgreement" and "power purchase agreement" give the same
- * words; "O&M" is one word, "om"; letters of any alphabet and digits are kept. Nothing is left out here for being
- * short or common: that is for whoever compares.
- */
-export function tokens(text: string): string[] {
-  return text.replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, '$1 $2').replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, '$1 $2').toLowerCase()
-    .replace(/(^|[^\p{L}\p{N}])(\p{L})\s*&\s*(\p{L})(?![\p{L}\p{N}])/gu, '$1$2$3').match(/[\p{L}\p{N}]+/gu) ?? [];
-}
-/** a word as a search compares it: a plural and its singular are one word */
-export const fold = (w: string) => (w.length > 4 && w.endsWith('ies') ? `${w.slice(0, -3)}y` : w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w);
+// `tokens` and `fold` are the app's own words too (#1218), so they live in the domain
+export { tokens, fold } from '../domain/words';

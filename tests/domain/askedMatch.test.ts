@@ -24,10 +24,17 @@ describe('the open question that most likely asks what an unresolved point lacks
     expect(askedMatcher([other])('and the of')).toBeUndefined();
     expect(askedMatcher([])(GAP)).toBeUndefined();
   });
-  it('counts words of four letters or more: DSCR counts, EPC and O&M do not', () => {
-    const asks = q(1, 'Is the DSCR lock-up in the EPC contract?');
-    expect(askedMatcher([asks])('DSCR')).toMatchObject({ shared: 1, total: 1 });
-    expect(askedMatcher([asks])('EPC')).toBeUndefined();
+  it('counts the words the search index keeps: DSCR, EPC, O&M and numbers all count, whatever their length', () => {
+    const asks = q(1, 'Is the DSCR lock-up in the EPC contract, with O&M reserves, after 2027?');
+    for (const word of ['DSCR', 'EPC', 'O&M', '2027']) {
+      expect(askedMatcher([asks])(word)).toMatchObject({ shared: 1, total: 1, confidence: 100 });
+    }
+    expect(askedMatcher([asks])('DSCR EPC O&M 2027 sculpting')).toMatchObject({ shared: 4, total: 5, confidence: 80 });
+  });
+  it('leaves out the index filler and folds plurals, as the index does', () => {
+    const asks = q(1, 'Please send the executed agreements.');
+    expect(askedMatcher([asks])('the agreement of the')).toMatchObject({ shared: 1, total: 1 });
+    expect(askedMatcher([asks])('the of and')).toBeUndefined();
   });
   it('a short point whose every word a long question names is 100 percent, and no minimum is set', () => {
     const long = q(1, 'Please describe the insurance programme: the advisor’s report, the broker and more.');

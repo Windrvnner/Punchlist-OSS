@@ -303,8 +303,9 @@ const SPEC = {
     aiRetries: count(2, 'Times an AI call that failed, or gave an empty reply, is asked again quietly before the failure is shown. A service that cannot be reached is waited for instead.', 0, 5),
     askedCutoff: count(
       80,
-      "Percent of an unresolved point's telling words that an open question must name before the model is asked " +
-        "whether it already asks for the point (Add All Unresolved's Already Asked?). Below it no call is made and " +
+      "Percent of an unresolved point's words (as the search index keeps them) that an open question must name " +
+        "before the model is asked whether it already asks for the point (Add All Unresolved's Already Asked?). " +
+        'Below it no call is made and ' +
         'nothing is offered; at 0 the best question for every point is checked, at 100 only one naming every word.',
       0,
       100,

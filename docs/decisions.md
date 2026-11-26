@@ -166,14 +166,15 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
   and footer show the latest retry failure, and a partial check keeps its pairs and checked removals (#378).
 - **Add All Unresolved to Q&A…** keeps a chosen link with its exact question and point, and writes it only if both are unchanged at commit (#88).
 - **Add All Unresolved to Q&A…** offers an open question under **Already Asked?** for a gap or open finding only when
-  it passes two steps (#1218). First, keyword matching: a point's confidence is the share of its telling words (its
-  wording and what it needs; words of four or more letters, so DSCR counts and EPC does not) that the open question
-  naming most of them names, reached when shared x 100 is at least `limits.askedCutoff` x the point's words (default
-  80; whole percent from 0, which checks every point's best question, to 100, only a question naming every word);
-  ties go to the lower question number. A point of one or two words fully named is checked like any other: there is
-  no minimum word count. Second, only then, the model is asked once for all such pairs whether the question already
-  asks for what the point lacks. A pair it does not confirm, or a service that cannot check, makes no offer and the
-  point is asked as a new question. A person ticks each offer; nothing is linked automatically.
+  it passes two steps (#1218). First, keyword matching with the search index's own words (numbers and short words
+  such as DSCR, EPC, and O&M count; its filler words are left out and plurals are folded): a point's confidence is the
+  share of its words (its wording and what it needs) that the open question naming most of them names, reached when
+  shared x 100 is at least `limits.askedCutoff` x the point's words (default 80; whole percent from 0, which checks
+  every point's best question, to 100, only a question naming every word); ties go to the lower question number. A
+  point of one or two words fully named is checked like any other: there is no minimum word count. Second, only then,
+  the model is asked once for all such pairs whether the question already asks for what the point lacks. A pair it
+  does not confirm, or a service that cannot check, makes no offer and the point is asked as a new question. A person
+  ticks each offer; nothing is linked automatically.
 - **Add All Unresolved to Q&A…** sizes its calls to the model's limits and retries quietly; whatever still fails is offered for Retry.
 - Names of structures, sectors, and technologies stay at about 24 characters or fewer.
 
