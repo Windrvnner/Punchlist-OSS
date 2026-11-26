@@ -70,7 +70,7 @@ import { catchUp, pageNumber, search, type What } from './agentSearch';
 import { FolderMemory, FolderReader } from './agentFolder';
 import { KeptConversation, type Turn } from './agentTalk';
 import { inlineTools } from './agentPrompts';
-import { questionsForIds } from './qaRow';
+import { questionIdsIn, questionsForIds } from './qaRow';
 
 export type { AgentKit, AgentOptions, AgentQuestion, Cited, Sent, ToolMode } from './agentKit';
 
@@ -211,7 +211,10 @@ class Answering {
     const reply = kit.talk
       ? await this.conversation.ask(turn)
       : await kit.askJson(
-        { kind: 'answer', model: question.model, system: turn.system, prompt: turn.full(true), files },
+        {
+          kind: 'answer', model: question.model, system: turn.system, prompt: turn.full(true), files,
+          unusable: turn.unusable,
+        },
         turn.keys,
         turn.shape,
       );
@@ -243,7 +246,19 @@ class Answering {
       system: `${inlineTools(this.limits.width)}\n\n${kit.rules}`,
       keys: ['tool', 'text'],
       shape: REPLY_SHAPE,
+      unusable: (text) => this.namesUnknownQuestion(text),
     };
+  }
+
+  /**
+   * Whether a reply names a question id that is in none of the run's deals: a failed reply, asked again (#1105). The
+   * questions shown in earlier answers of a kept conversation are not kept, so any question in the deals may be named.
+   */
+  private async namesUnknownQuestion(text: string): Promise<boolean> {
+    const named = questionIdsIn(text);
+    if (!named.length) return false;
+    const numbers = await this.run.questionNumbers([text]);
+    return named.some((id) => !numbers.has(id));
   }
 
   /** the turn's whole prompt; `history`: with the conversation's last messages and its transcript */
