@@ -103,7 +103,8 @@ describe('rows are lined up with the one Q&A row lookup (#1111)', () => {
   it('a row they added naming no sender, that the log added for two parties, goes to the person', () => {
     const base = deal();
     const kept = [...deal(), ['', 'Provide the new lease.', '', 'Their answer']];
-    const log = [...deal(), ['2001', 'Provide the new lease.', 'Lender A', ''], ['2002', 'Provide the new lease.', 'Lender B', '']];
+    const lease = (n: string, by: string) => [n, 'Provide the new lease.', by, ''];
+    const log = [...deal(), lease('2001', 'Lender A'), lease('2002', 'Lender B')];
     const m = merge(base, kept, log);
     expect(m).toMatchObject({ steps: [], added: 0, left: 0 });
     expect(lines(m)).toEqual([[N + 2, N + 3]]);
@@ -123,7 +124,8 @@ describe('rows are lined up with the one Q&A row lookup (#1111)', () => {
     const H2 = ['No.', 'Question', 'Response'];
     const base = [H2, ['1', 'First question', ''], ['Section B', '', ''], ['2', 'Second question', '']];
     const kept = [...base.map((r) => [...r]), ['Section B', '', '']];
-    const m = mergeKept(table(base), table(kept), table(base.map((r) => [...r])), 'Question', undefined, undefined, 'No.');
+    const log = base.map((r) => [...r]);
+    const m = mergeKept(table(base), table(kept), table(log), 'Question', undefined, undefined, 'No.');
     expect(m.added).toBe(1);
     expect(after(base, m.steps).slice(-2)).toEqual([['2', 'Second question', ''], ['Section B']]);
   });

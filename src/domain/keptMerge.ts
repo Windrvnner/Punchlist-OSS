@@ -89,39 +89,76 @@ function lookupCols(text: [number, number], n: [number, number], by: [number, nu
   const side = (s: 0 | 1) => ({ text: text[s], n: both(n, s), by: both(by, s) });
   return [side(0), side(1)];
 }
+/** a row's keys for the lookup's identity: its text forms, each with its sender and number */
+const identityKeys = (row: MatchRow) => formKeys(row.text)
+  .map((form) => `${form}\u0000${row.askedBy.trim()}\u0000${row.n ?? ''}`);
 /**
  * Rows another row of the list has the same number, text (as the file holds it) and sender as: the lookup can't tell
  * them apart.
  */
 function lookalikes(rows: MatchRow[]): boolean[] {
-  const keysOf = (row: MatchRow) => formKeys(row.text)
-    .map((form) => `${form}\u0000${row.askedBy.trim()}\u0000${row.n ?? ''}`);
   const count = new Map<string, number>();
-  for (const row of rows) for (const key of keysOf(row)) count.set(key, (count.get(key) ?? 0) + 1);
-  return rows.map((row) => keysOf(row).some((key) => (count.get(key) ?? 0) > 1));
+  for (const row of rows) for (const key of identityKeys(row)) count.set(key, (count.get(key) ?? 0) + 1);
+  return rows.map((row) => identityKeys(row).some((key) => (count.get(key) ?? 0) > 1));
 }
 
+/** how many of `rows` (by index in `at`) have each text form */
+function formCounts(rows: MatchRow[], at: number[]): Map<string, number> {
+  const count = new Map<string, number>();
+  for (const k of at) for (const key of formKeys(rows[k].text)) count.set(key, (count.get(key) ?? 0) + 1);
+  return count;
+}
+
+/** Rows lined up (`out`, -1: none), and rows of `base` whose row is unclear, with the rows of `x` it may be */
+type LinedUp = { out: number[]; unclear: Map<number, number[]> };
 /**
- * Which row of `x` stands for each row of `base` (-1: none), by the one Q&A row lookup (`matchQuestions`,
- * docs/decisions.md): the same number, text and sender, else the same text and sender; a row naming no sender matches
- * any, the same sender first. `onlyBase` and `onlyX` narrow the rows looked at. A row the lookup can't tell from
- * another of its table (the same number, text and sender) is lined up with none: where its row is unclear, the person
- * places it (KeptAsk, #1111). A row not lined up is never written into.
+ * Which row of `x` stands for each row of `base`, by the one Q&A row lookup (`matchQuestions`, docs/decisions.md): the
+ * same number, text and sender, else the same text and sender; a row naming no sender matches any, the same sender
+ * first. `onlyBase` and `onlyX` narrow the rows looked at. Where its row is unclear, the person places it (KeptAsk,
+ * decisions.md:114), so it is lined up with none and listed in `unclear` (#1111): a row of `x` that another of its
+ * table has the same number, text and sender as, or a match across senders (one names none) while another row with
+ * that text is left over. A row of `base` that another of its own has the same identity as is lined up with none
+ * (the caller asks about rows of `base` that read alike). A row not lined up is never written into.
  */
 function lineUp(base: string[][], bc: LookupCols, x: string[][], xc: LookupCols,
-  onlyBase: (i: number) => boolean = () => true, onlyX: (j: number) => boolean = () => true): number[] {
+  onlyBase: (i: number) => boolean = () => true, onlyX: (j: number) => boolean = () => true): LinedUp {
   const at = base.flatMap((r, i) => (hasQuestion(r, bc.text) && onlyBase(i) ? [i] : []));
   const xAt = x.flatMap((r, j) => (hasQuestion(r, xc.text) && onlyX(j) ? [j] : []));
   const rows = at.map((i) => lookupRow(base[i], bc));
   const xRows = xAt.map((j) => lookupRow(x[j], xc));
   const alike = lookalikes(rows);
   const xAlike = lookalikes(xRows);
-  const out = new Array<number>(base.length).fill(-1);
-  for (const [k, id] of matchQuestions(xRows, [rows.map((row, b) => ({ ...row, id: String(b) }))])) {
-    const b = Number(id);
-    if (!alike[b] && !xAlike[k]) out[at[b]] = xAt[k];
+  const matched = matchQuestions(xRows, [rows.map((row, b) => ({ ...row, id: String(b) }))]);
+  const pairs = [...matched].map(([k, id]) => [k, Number(id)] as const);
+  const takenX = new Set(pairs.map(([k]) => k));
+  const takenB = new Set(pairs.map(([, b]) => b));
+  const freeX = formCounts(xRows, xRows.map((_, k) => k).filter((k) => !takenX.has(k)));
+  const freeB = formCounts(rows, rows.map((_, b) => b).filter((b) => !takenB.has(b)));
+  const out: LinedUp = { out: new Array<number>(base.length).fill(-1), unclear: new Map() };
+  for (const [k, b] of pairs) {
+    if (alike[b]) continue;
+    const others = otherCandidates(rows[b], xRows, k, xAlike[k], freeX, freeB, takenX);
+    if (others) out.unclear.set(at[b], [k, ...others].sort((p, q) => p - q).map((c) => xAt[c]));
+    else out.out[at[b]] = xAt[k];
   }
   return out;
+}
+/**
+ * The other rows of `x` (by index in `xRows`) the row of `base` matched with `k` may be, or null when its row is clear
+ * (#1111): those with the same identity as `k`, or, for a match across senders while another row with that text
+ * is left over on either side, the left-over rows of `x` with its text.
+ */
+function otherCandidates(row: MatchRow, xRows: MatchRow[], k: number, xAlike: boolean,
+  freeX: Map<string, number>, freeB: Map<string, number>, takenX: Set<number>): number[] | null {
+  if (xAlike) {
+    const keys = new Set(identityKeys(xRows[k]));
+    return xRows.flatMap((r, c) => (c !== k && identityKeys(r).some((key) => keys.has(key)) ? [c] : []));
+  }
+  if (row.askedBy.trim() === xRows[k].askedBy.trim()) return null;
+  const forms = formKeys(xRows[k].text);
+  if (!forms.some((key) => freeX.has(key) || freeB.has(key))) return null;
+  const sameText = (r: MatchRow) => formKeys(r.text).some((key) => forms.includes(key));
+  return xRows.flatMap((r, c) => (c !== k && !takenX.has(c) && sameText(r) ? [c] : []));
 }
 
 /** each table's question column, and the number's and Submitted by's of theirs and the log's (-1: none) */
@@ -188,19 +225,25 @@ export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text
   const nkey = number ? kl[log.columns.indexOf(number)] : undefined; const nb = nkey ? kb.indexOf(nkey) : -1, nkk = nkey ? kk.indexOf(nkey) : -1, nll = nkey ? kl.indexOf(nkey) : -1;
   const bkey = by ? kl[log.columns.indexOf(by)] : undefined; const bb = bkey ? kb.indexOf(bkey) : -1, bkk = bkey ? kk.indexOf(bkey) : -1, bll = bkey ? kl.indexOf(bkey) : -1;
   const [baseForKept, keptCols] = lookupCols([bt, kt], [nb, nkk], [bb, bkk]);
-  const ks = lineUp(base.rows, baseForKept, kept.rows, keptCols);
+  const ks = lineUp(base.rows, baseForKept, kept.rows, keptCols).out;
   const [baseForLog, logCols] = lookupCols([bt, lt], [nb, nll], [bb, bll]);
-  const ls = lineUp(base.rows, baseForLog, log.rows, logCols);
+  const { out: ls, unclear } = lineUp(base.rows, baseForLog, log.rows, logCols);
   const clash = new Set<number>(); const used = new Uint8Array(kept.rows.length); const written = new Map<string, string>();   // the cells written, by "row,col"
   // Rows of the version they edited that read alike (a question asked twice): where nothing tells which is which, the
   // person says where their edit goes (`asks`, made into KeptAsk below)
   const baseBy = byQuestion(base.rows, bt);
   const alike = (w: string) => (baseBy.get(w)?.length ?? 0) > 1;
-  const asks: { j: number; b?: number }[] = []; const told = new Set<number>();   // rows of the version they edited an ask, or their row as it was, accounts for
+  // their rows to ask about (`only`: the log's rows they may be, when the lookup found them)
+  const asks: { j: number; b?: number; only?: number[] }[] = [];
+  const told = new Set<number>();   // rows of the version they edited an ask, or their row as it was, accounts for
   base.rows.forEach((br, i) => {
     const k = ks[i], l = ls[i]; if (k >= 0) used[k] = 1;
     // the log's rows that ask it can't be told apart
-    if (k >= 0 && l < 0 && alike(br[bt])) { asks.push({ j: k, b: i }); told.add(i); return; }
+    if (k >= 0 && l < 0 && (alike(br[bt]) || unclear.has(i))) {
+      asks.push({ j: k, b: i, only: unclear.get(i) });
+      told.add(i);
+      return;
+    }
     if (k < 0 || l < 0) { if (k >= 0) lost(k, i, true); return; }                      // a row they or the log took out: nothing to bring in
     lost(k, i);
     for (const c of both) {
@@ -264,7 +307,7 @@ export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text
     const differ = both.filter((c) => c.k !== kt && !changed.includes(c) && new Set(rows.map((l) => (log.rows[l][c.l] ?? '').trim())).size > 1);
     out.ask.push({ question: r[kt] ?? '', cells: [...shown.map((c) => ({ c, changed: true })), ...differ.map((c) => ({ c, changed: false }))].sort((x, y) => x.c.l - y.c.l).map(({ c, changed: ch }) => ({ heading: log.columns[c.l], theirs: r[c.k] ?? '', rows: rows.map((l) => log.rows[l][c.l] ?? ''), changed: ch })), rows: options, add: cellsOf(a.j) });
   };
-  for (const a of asks) ask(a);
+  for (const a of asks) ask(a, a.only);
   // the words of rows of the version they edited that their version no longer lines up: one of theirs added at the end with
   // those words is likely that row changed (closed, answered) and can't be told from a new one, so it is counted
   const unlined = new Set(base.rows.filter((r, i) => ks[i] < 0 && !told.has(i) && hasQuestion(r, bt))
@@ -288,10 +331,13 @@ export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text
     if (used[j] || !r.some((v) => v.trim()) || unchangedHeading(r, kt, base.rows, bt, (i) => asWas(j, i))) return;
     const mine = bkk >= 0 ? (r[bkk] ?? '').trim() : ''; const theirsBy = (l: number) => (bll >= 0 ? (log.rows[l][bll] ?? '').trim() : '');
     if (heldAlready(r)) return;
-    const same = savedAgain[j] >= 0 ? savedAgain[j] : undefined;
+    const same = savedAgain.out[j] >= 0 ? savedAgain.out[j] : undefined;
     lost(j, undefined);
     // a formula they put in a row they added is never written: counted, unless the log's row holds one there too (saved again)
     for (const p of lp) if (keptWorked(j, p.a) && (r[p.a] ?? '').trim() && (same === undefined || !logWorked(same, p.b))) out.left++;
+    // the log added it for several parties, or twice: which row it is goes to the person (decisions.md:114, #1111)
+    const mayBe = savedAgain.unclear.get(j);
+    if (mayBe) { used[j] = 1; ask({ j }, mayBe, true); return; }
     // Added while a row of the version they edited is not lined up in theirs (one they reworded, say): it may be that row,
     // so the person says, among the log's rows for those (a few at most), or it is added and counted
     if (same === undefined && (unlined.has(r[kt] ?? '') || reworded)) {
