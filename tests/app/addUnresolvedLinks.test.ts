@@ -120,3 +120,22 @@ it('two openings at once share one call, and a new open question asks again', as
   await preview(env);
   expect(calls).toBe(2);
 });
+
+it('a call that throws leaves the points unchecked for every opening waiting on it, and fails none', async () => {
+  const env = await fixture(3, 2, async () => {
+    throw new Error('The bridge dropped the call');
+  });
+  const [first, second] = await Promise.all([preview(env), preview(env)]);
+  expect(first.unchecked).toHaveLength(3);
+  expect(second.unchecked).toHaveLength(3);
+  expect(second.points).toHaveLength(3);
+});
+
+it('where the model cannot be asked, no point is left unchecked and nothing is linked', async () => {
+  const env = await fixture(3, 2, async () => ok({ pairs: [] }));
+  delete env.store.services.ai.sameMeaning;
+  const ready = await preview(env);
+  expect(ready.unchecked).toEqual([]);
+  expect(ready.links).toEqual([]);
+  expect(ready.points).toHaveLength(3);
+});

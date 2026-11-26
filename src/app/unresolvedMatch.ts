@@ -27,16 +27,16 @@ function matchFor(store: Store, dealId: string, points: Unresolved[], pool: Ques
 }
 
 /**
- * Ask the model about the points not checked yet, against every open question in `pool`. A failed call leaves them
- * unchecked, as does a point the call missed; nothing is linked unless a person checks it.
+ * Ask the model about the points not checked yet, against every open question in `pool`. A failed or thrown call
+ * leaves them unchecked, as does a point the call missed; nothing is linked unless a person checks it. With no open
+ * question, or where the model cannot be asked (`can.sameMeaning`), there is nothing to check.
  */
 export async function checkLinks(store: Store, dealId: string, points: Unresolved[], pool: Question[]) {
   const match = matchFor(store, dealId, points, pool);
-  while (match.run) await match.run;
-  const ai = store.services.ai;
-  if (!pool.length) match.unchecked.clear();
-  if (match.unchecked.size && ai.sameMeaning) {
-    match.run = askAbout(store, match, points, pool);
+  while (match.run) await match.run.catch(() => {});
+  if (!pool.length || !store.get().can.sameMeaning) match.unchecked.clear();
+  if (match.unchecked.size) {
+    match.run = askAbout(store, match, points, pool).catch(() => {});
     try {
       await match.run;
     } finally {
