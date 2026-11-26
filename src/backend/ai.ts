@@ -3480,6 +3480,8 @@ export function nodeAi(o: AiOptions) {
     }
     return out;
   }
+  /** the values an affects reply gives under "affected" */
+  const affectedIn = (text: string) => listOf(json<{ affected?: unknown }>(text, 'affected')?.affected);
   /** a finding as the affects prompt lists it: by its id, with its title */
   const findingLine = (f: Raised) => `${f.id}: ${f.title}${f.closed ? ' (closed)' : ''}`;
   /** a settled checklist item as the affects prompt lists it: by its id, with its words */
@@ -3508,7 +3510,7 @@ export function nodeAi(o: AiOptions) {
     const targets = [...findings.map((f) => f.id), ...items.map((it) => it.id)];
     const docIds = part.map((r) => r.docId);
     const unusable = (text: string) => !namesOnlyShown(text, [...targets, ...docIds])
-      || unknownInPairs(listOf(json<{ affected?: unknown }>(text, 'affected')?.affected), targets, docIds).length > 0;
+      || unknownInPairs(affectedIn(text), targets, docIds).length > 0;
     const prompt = affectsPrompt(part, findings, items);
     const input: Ask = { kind: 'affects', split: true, model, system: JSON_ONLY, prompt, unusable };
     let reply: { affected?: unknown } | null;
@@ -3670,20 +3672,22 @@ export function nodeAi(o: AiOptions) {
   const HEARD_AT_ONCE = 50;
   /**
    * The fast model's question on responses tied to no finding: which of the open findings `listed` each could change.
-   * Each question is named by its id, never by its number (#1105).
+   * Each question is named by its id, never by its number (#1105), and each finding by its id (#1162).
    */
   async function askAffects(group: Asked[], listed: Raised[]): Promise<{ affected?: unknown } | null> {
     const intro = 'These responses have been received to questions asked on a project-finance deal. '
       + 'None of the questions is tied to a finding.';
-    const open = listed.map((f, i) => `F${i + 1}: ${f.title}`).join('\n');
+    const open = listed.map((f) => `${f.id}: ${f.title}`).join('\n');
     const question = 'Which findings could a response change? Think of knock-on effects, not only of matching words. '
       + 'Pair each finding with the question whose response bears on it; if no finding is touched, give an empty list.';
     const prompt = `${intro}\n${responseLines(group)}\n\nThese are open findings on the deal:\n${open}\n\n${question}\n`
-      + 'Reply as JSON: {"affected": ["F2 <id>", "F5 <id>"]}';
+      + 'Reply as JSON: {"affected": ["<finding id> <question id>"]}';
     const model = (await models()).fast;
-    // a reply naming a question id it was not shown is a failed reply, asked again (#1105)
-    const shown = group.map((q) => q.id);
-    const unusable = (text: string) => !namesOnlyShown(text, shown);
+    // a reply naming a question or finding id it was not shown is a failed reply, asked again (#1105, #1162)
+    const questions = group.map((q) => q.id);
+    const findings = listed.map((f) => f.id);
+    const unusable = (text: string) => !namesOnlyShown(text, [...questions, ...findings])
+      || unknownInPairs(affectedIn(text), findings, questions).length > 0;
     const input: Ask = { kind: 'affects', split: true, model, system: JSON_ONLY, prompt, unusable };
     return askJson<{ affected?: unknown }>(input, ['affected']);
   }
@@ -3703,9 +3707,10 @@ export function nodeAi(o: AiOptions) {
         const reply = await askAffects(group, listed);
         if (!reply || !('affected' in reply)) return fail({ kind: 'failed', message: 'The responses could not be looked at' });      // nothing is recorded, so they are looked at the next time
         for (const t of strings(reply.affected)) {
-          const f = listed[+(/F\s*(\d+)/i.exec(t)?.[1] ?? 0) - 1]; if (!f) continue;
-          const tokens = t.split(/\W+/);
-          const named = group.filter((q) => tokens.includes(q.id));
+          const [id, ...asked] = t.split(' ');
+          const f = listed.find((x) => x.id === id);
+          if (!f) continue;
+          const named = group.filter((q) => asked.includes(q.id));
           const qs = bearsOn.get(f.id) ?? []; for (const q of (named.length ? named : group).filter((y) => todo(y).includes(f))) if (!qs.includes(q)) qs.push(q); if (qs.length) bearsOn.set(f.id, qs);       // a finding named with no question we know: every response in the call is put beside it
         }
       }

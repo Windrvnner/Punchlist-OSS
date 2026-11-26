@@ -16,6 +16,7 @@ import {
   type Call,
   OK,
   nth,
+  heardAs,
 } from './reviewKit';
 import type { DocRecord } from '../../src/backend/documents';
 import { tokenHolder } from '../../src/backend/signInToken';
@@ -132,7 +133,7 @@ describe('what is recorded and shown as checked', () => {
 
   it('a PC signed out while looking at responses lets go of the look after the cap, so another PC can look', async () => {
     const shared = new Mem();
-    const hears = () => ({ affected: ['F1 q_7'] });
+    const hears = (c: Call) => heardAs(c, 'F1 q_7');
     const s = setup(() => 'x', room(), { shared, installId: 'pc', timing: { giveUp: 50 }, hears });
     await deal(s.repo); await finding(s.repo, 'f_1', 'Margin differs between the credit agreement and the term sheet', { sources: [{ doc: FA.name, loc: 'p. 2', docId: FA.docId }] });
     await question(s.repo, 'q_7', 7, 'What margin was agreed?', 'The margin was corrected to 2.25% in the signed credit agreement.');
@@ -145,7 +146,7 @@ describe('what is recorded and shown as checked', () => {
 
   it('a response is not recorded as looked at when the look failed or there was nothing to look at, and it is set against a finding raised later', async () => {
     const shared = new Mem();
-    const hears = () => ({ affected: ['F1 q_7'] });
+    const hears = (c: Call) => heardAs(c, 'F1 q_7');
     const s = setup(() => 'x', room(), { shared, installId: 'pc', hears, verify: () => 'I cannot say.' });
     await deal(s.repo); await finding(s.repo, 'f_1', 'Margin differs between the credit agreement and the term sheet', { sources: [{ doc: FA.name, loc: 'p. 2', docId: FA.docId }] });
     await question(s.repo, 'q_7', 7, 'What margin was agreed?', 'The margin was corrected to 2.25% in the signed credit agreement.');

@@ -47,7 +47,8 @@ function model() {
       : /signed/.test(it.text) ? (c.prompt.includes('Add "where"') ? { id: it.tag, result: 'ok', where: [{ doc: ref('Term sheet (signed).pdf'), page: 1, quote: 'term sheet' }] } : { id: it.tag, result: 'ok' })
       : { id: it.tag, result: 'more', need: 'The model audit report' }) });
     if (isAffectsAsk(c as any)) return JSON.stringify({ items: [], findings: [] });
-    if (isHearAsk(c as any)) return JSON.stringify({ affected: [...c.prompt.matchAll(/^(F\d+):/gm)].map((m) => `${m[1]} Q1`) });
+    // every finding, each by its id alone: the response in the call goes beside it (#1162)
+    if (isHearAsk(c as any)) return JSON.stringify({ affected: [...c.prompt.matchAll(/^(f_\w+):/gm)].map((m) => m[1]) });
     if (isVerifyAsk(c as any)) return JSON.stringify({ stands: false, why: 'The sponsor confirmed 1.30x, so the agreement draft will change.' });
     return JSON.stringify({
       text: 'The lock-up is 1.25x in the agreement. [1]',

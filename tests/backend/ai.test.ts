@@ -2113,7 +2113,7 @@ describe('when something changes', () => {
   it('a response on a question linked to no finding is followed through like a new document: the fast model says which findings it could change, and one that no longer stands is marked', async () => {
     const shared = new Mem(); const src = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }];
     const s = setup((c) => ({ body: ['Settled by the response to Q12. [1]'], sources: [{ doc: tag(c, FA), page: 14 }] }), undefined, { shared, installId: 'office',
-      hears: () => ({ affected: ['F1 q_12', 'F2: q_15', 'F9 q_12', 'nonsense'] }),
+      hears: (_c, n) => ({ affected: n === 1 ? ['f_1 q_12', 'f_2 q_15'] : [] }),
       verify: (c) => (c.model === 'fast' && c.prompt.includes('Title: Lock-up differs')
         ? { stands: false, why: 'the response settles it' }
         : c.model === 'standard' ? { stands: false, why: 'agreed' } : { stands: true, why: '' }) });
@@ -2129,8 +2129,8 @@ describe('when something changes', () => {
       'q_15: Has the board approved the hedging?',
       'Response to q_15: Not yet.\n',
     ].join('\n'));
-    expect(s.hearCalls[0].prompt).toContain('F1: Lock-up differs\nF2: Hedging not approved\n');
-    expect(s.hearCalls[0].prompt).toContain('Reply as JSON: {"affected": ["F2 <id>", "F5 <id>"]}');
+    expect(s.hearCalls[0].prompt).toContain('f_1: Lock-up differs\nf_2: Hedging not approved\n');
+    expect(s.hearCalls[0].prompt).toContain('Reply as JSON: {"affected": ["<finding id> <question id>"]}');
     expect(s.hearCalls[0].prompt).not.toMatch(/Q\d|Tied to a finding|Closed already/);
     // each finding it named was looked at with its response beside it, by the fast model first; only the one that doubted went to the standard model
     const firstResponse = (c: { prompt: string }) => /Response to q_\d+[^:]*: (.*)/.exec(c.prompt)![1];
@@ -2160,7 +2160,7 @@ describe('when something changes', () => {
 
   it('a look at responses naming a question id it was not shown is a failed reply, asked again (#1105)', async () => {
     const src = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }];
-    const named = (n: number) => ({ affected: [`F1 ${n === 1 ? qid(99) : qid(12)}`] });
+    const named = (n: number) => ({ affected: [`f_1 ${n === 1 ? qid(99) : qid(12)}`] });
     const verify = () => ({ stands: false, why: 'settled' });
     const s = setup(() => ({}), undefined, { hears: (_c, n) => named(n), verify });
     await deal(s.repo);
@@ -2180,7 +2180,7 @@ describe('when something changes', () => {
   it('a response mark adds its questions to an earlier one from responses, and leaves a mark set for another reason as it is', async () => {
     const src = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }];
     const verify = (c: any) => ({ stands: c.model === 'never', why: 'the response settles it' });
-    const opts = { hears: () => ({ affected: ['F1 q_12'] }), verify };
+    const opts = { hears: () => ({ affected: ['f_1 q_12'] }), verify };
     const data = async (s: any) => (val(await s.repo.get('finding', 'f_1')) as any).envelope.data as { updated?: boolean; updatedWhy?: string; updatedOn?: { questions: string[] } };
     // marked by a response to a question linked to it: the backend's mark adds Q12 to it
     const a = setup(() => ({}), undefined, opts); await deal(a.repo); await finding(a.repo, 'f_1', 'Lock-up differs', { sources: src, updated: true, updatedWhy: 'Response received on Q3', updatedOn: { questions: ['q_3'] } });
@@ -2195,7 +2195,7 @@ describe('when something changes', () => {
   it('a mark that cannot be written leaves the work undone: the response is set against the finding again next time, and the finding is marked then', async () => {
     const src = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }];
     const verify = () => ({ stands: false, why: 'the response settles it' });
-    const s = setup(() => ({}), undefined, { hears: () => ({ affected: ['F1 q_12'] }), verify });
+    const s = setup(() => ({}), undefined, { hears: () => ({ affected: ['f_1 q_12'] }), verify });
     await deal(s.repo);
     await finding(s.repo, 'f_1', 'Lock-up differs', { sources: src });
     val(await question(s.repo, 'q_12', { n: 12, text: 'Which ratio?', response: '1.25x.' }));
@@ -2218,9 +2218,9 @@ describe('when something changes', () => {
     expect(val(await none.ai.responses('d1'))).toEqual({ heard: [], marked: [] }); expect(none.svc.calls.length).toBe(1);
     // a finding raised afterwards: the same response is put to the fast model again, against that finding only
     await finding(none.repo, 'f_2', 'Hedging not approved'); expect(val(await none.ai.responses('d1')).heard).toEqual(['q_12']); expect(none.hearCalls.length).toBe(2);
-    expect(none.hearCalls[1].prompt).toContain('F1: Hedging not approved'); expect(none.hearCalls[1].prompt).not.toContain('Lock-up differs'); expect(val(await none.ai.responses('d1')).heard).toEqual([]);
+    expect(none.hearCalls[1].prompt).toContain('f_2: Hedging not approved'); expect(none.hearCalls[1].prompt).not.toContain('Lock-up differs'); expect(val(await none.ai.responses('d1')).heard).toEqual([]);
     // the fast model doubts, the standard model does not: nothing is marked
-    const doubt = setup(() => ({}), undefined, { hears: () => ({ affected: ['F1'] }), verify: (c) => ({ stands: c.model !== 'fast', why: '' }) }); await deal(doubt.repo); await finding(doubt.repo, 'f_1', 'Lock-up differs', { sources: src }); val(await question(doubt.repo, 'q_12', q12));
+    const doubt = setup(() => ({}), undefined, { hears: () => ({ affected: ['f_1'] }), verify: (c) => ({ stands: c.model !== 'fast', why: '' }) }); await deal(doubt.repo); await finding(doubt.repo, 'f_1', 'Lock-up differs', { sources: src }); val(await question(doubt.repo, 'q_12', q12));
     expect(val(await doubt.ai.responses('d1'))).toEqual({ heard: ['q_12'], marked: [] });
     expect(doubt.verifyCalls.map((c) => c.model)).toEqual(['fast', 'standard']);
     // named with no question: the response in the call goes beside it
@@ -2229,7 +2229,7 @@ describe('when something changes', () => {
     // neither model gives a usable answer on the finding: that was not a look, and the next call tries again
     let ok = false;
     const unsure = () => (ok ? { stands: false, why: 'settled' } : 'no idea');
-    const mute = setup(() => ({}), undefined, { hears: () => ({ affected: ['F1 q_12'] }), verify: unsure });
+    const mute = setup(() => ({}), undefined, { hears: () => ({ affected: ['f_1 q_12'] }), verify: unsure });
     await deal(mute.repo);
     await finding(mute.repo, 'f_1', 'Lock-up differs', { sources: src });
     val(await question(mute.repo, 'q_12', q12));
