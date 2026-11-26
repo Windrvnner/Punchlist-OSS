@@ -28,7 +28,8 @@
  * raises again only what it titles differently from the first.
  */
 import type { DocRecord } from './documents';
-import { list as listOf, word } from './lenient';
+import { list as listOf, readJson, word } from './lenient';
+import { unknownIds } from './recordIds';
 import { read } from './reportRead';
 import {
   type ReportKit, type ReportLine, type ReadLine,
@@ -38,14 +39,12 @@ import {
 export type { ReportKit, ReportLine, ReadIssue, Known, Issue } from './reportTypes';
 export { SORT_PART, TRIES } from './reportTypes';
 
-/** whole numbers above 0 in a reply's list, given as numbers or as text such as "#12" */
-function numbers(x: unknown) {
-  const asNumber = (v: unknown) => {
-    if (typeof v === 'number') return v;
-    return typeof v === 'string' ? Number.parseInt(v.replace(/\D+/g, ''), 10) : Number.NaN;
-  };
-  return listOf(x).map(asNumber).filter((n) => Number.isInteger(n) && n > 0);
-}
+/** a sort's reply that names a file by an id it was not shown: a failed reply, asked again (#1162) */
+const sortUnusable = (part: DocRecord[]) => (text: string) => {
+  const reply = readJson(text, SORT_KEYS);
+  const named = [...listOf(reply?.reports), ...listOf(reply?.unsure)];
+  return unknownIds(named, part.map((r) => r.docId)).length > 0;
+};
 
 /** a sort line's verdicts: true a report, false not, null not told by its path. A later sort may tell an unclear one */
 function addSorted(verdict: Map<string, boolean | null>, sorted: NonNullable<ReportLine['sorted']>) {
@@ -85,6 +84,9 @@ export function stateOf(lines: ReportLine[]) {
   return { verdict, read, owed, tries: triesOf };
 }
 
+/** the fields a sort's reply is read for */
+const SORT_KEYS = ['reports', 'unsure'];
+
 const SORT_ASK = [
   'Which of them are reports by a third-party advisor or consultant: an outside firm’s report, review, assessment,',
   'opinion or memo on the project, such as an independent or technical engineer’s report, an environmental or social',
@@ -95,12 +97,13 @@ const SORT_ASK = [
 
 /** the prompt that sorts a part of the deal's paths */
 function sortAsk(k: ReportKit, part: DocRecord[]) {
-  const paths = part.map((r, i) => `${i + 1}: ${k.where(r)}`).join('\n');
+  const paths = part.map((r) => `${r.docId}: ${k.where(r)}`).join('\n');
   return [
-    `These are files in the data room of a project-finance deal, each by its path:\n${paths}\n`,
+    `These are files in the data room of a project-finance deal, each by its id and path:\n${paths}\n`,
     SORT_ASK,
     'List under "unsure" any whose path does not say either way.',
-    'Reply as JSON: {"reports": [3, 7], "unsure": [12]} with the numbers of the files, or empty lists.',
+    'Reply as JSON: {"reports": ["an id", "another id"], "unsure": ["an id"]} with the ids of the files, or empty '
+      + 'lists.',
   ].join('\n');
 }
 
@@ -109,17 +112,17 @@ async function sort(k: ReportKit, todo: DocRecord[]) {
   for (let at = 0; at < todo.length; at += SORT_PART) {
     const part = todo.slice(at, at + SORT_PART);
     const prompt = sortAsk(k, part);
-    const input = { kind: 'reportSort', split: true, model: k.models.fast, system: k.system, prompt };
+    const unusable = sortUnusable(part);
+    const input = { kind: 'reportSort', split: true, model: k.models.fast, system: k.system, prompt, unusable };
     let reply: Record<string, unknown> | null;
     try {
-      reply = await k.ask(input, ['reports', 'unsure']);
+      reply = await k.ask(input, SORT_KEYS);
     } catch (e) {
       if (isCut(e)) continue;                  // a list to choose from cut off is no answer (decisions: Cut-off output)
       throw e;
     }
     if (!reply || (!('reports' in reply) && !('unsure' in reply))) continue;
-    const pick = (x: unknown) =>
-      [...new Set(numbers(x))].map((n) => part[n - 1]?.docId).filter((d): d is string => !!d);
+    const pick = (x: unknown) => [...new Set(listOf(x))].filter((d): d is string => typeof d === 'string');
     const reports = pick(reply.reports);
     const unsure = pick(reply.unsure).filter((d) => !reports.includes(d));
     await k.say({ sorted: { docs: part.map((r) => r.docId), reports, unsure } });
@@ -133,7 +136,7 @@ async function look(k: ReportKit, rec: DocRecord): Promise<boolean | null> {
   const question = SORT_ASK.replace('Which of them are', 'Is it one of the');
   const prompt = [
     `Documents:\n${s.listing}\n`,
-    `Read the first pages of ${s.sent[0].tag}. ${question}`,
+    `Read the first pages of ${s.sent[0].rec.docId}. ${question}`,
     'Reply as JSON: {"report": true} or {"report": false}.',
   ].join('\n');
   const input = { kind: 'reportLook', model: k.models.fast, system: k.system, files: s.files, prompt };

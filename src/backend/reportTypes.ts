@@ -3,7 +3,7 @@
  * findings it compares a report with, and the kit of services the backend gives it.
  */
 import type { DocRecord } from './documents';
-import type { Sent, Cited } from './agent';
+import type { Sent, Cited, Unusable } from './agentKit';
 import type { Source } from '../domain/model';
 import { word } from './lenient';
 
@@ -72,9 +72,10 @@ export interface AskInput {
   files?: string[];
   system?: string;
   split?: boolean;
+  unusable?: Unusable;
 }
 
-/** a document put in the service's store: its file id, tag and listing line */
+/** a document put in the service's store: its file id, listing line and what was sent */
 export interface SentDoc { files: string[]; listing: string; sent: Sent[] }
 
 export interface ReportKit {
@@ -97,6 +98,8 @@ export interface ReportKit {
    * `code: 'cutoff'` and `partial` when the reply was cut off
    */
   ask: (input: AskInput, keys: string[]) => Promise<Record<string, unknown> | null>;
+  /** a reply naming an id it was not shown, or citing a document it was not given, as `ask` refuses it (#1162) */
+  unusable: (sent: Sent[], keys: string[]) => Unusable;
   /** put a document in the service's store; null when it cannot be sent from this PC */
   send: (rec: DocRecord) => Promise<SentDoc | null>;
   /** keep the citations that name the document sent and a page it has, and renumber the markers to match */

@@ -15,9 +15,9 @@ import {
 const sentences = (...parts: string[]) => parts.join(' ');
 
 /** the opening of the prompt: what to list, and what to leave out */
-function issuesAsk(k: ReportKit, tag: string) {
+function issuesAsk(k: ReportKit, id: string) {
   const what = sentences(
-    `${tag} is a report by an outside advisor or consultant on this deal.`,
+    `${id} is a report by an outside advisor or consultant on this deal.`,
     'List every issue the advisor raises in it: anything they flag as a problem, risk, concern, shortfall,',
     'non-compliance, a missing, expired or doubtful permit, consent or license, or a point still open for the',
     'lenders or the deal. Where it is unclear whether something is an issue, list it.',
@@ -29,46 +29,47 @@ function issuesAsk(k: ReportKit, tag: string) {
     'Write each issue up as a finding: a one-line "title",',
     `a "workstream" (one of ${k.workstreams.join(' | ')}, or "" when unsure),`,
     'a "body" of one or two paragraphs with [n] markers that names the advisor and says what they raised,',
-    `and "sources" citing the page of ${tag} where it is raised.`,
+    `and "sources" citing the page of ${id} where it is raised.`,
     'Number each issue’s markers from [1].',
   );
   return `${what}\n${how}`;
 }
 
 /** the deal's findings, so an issue one already covers is named rather than raised again */
-function knownAsk(tag: string, known: Known[]) {
+function knownAsk(id: string, known: Known[]) {
   if (!known.length) return '';
   const mark = (f: Known) => (f.deleted ? ' (deleted)' : f.closed ? ' (closed)' : '');
   const listed = known.map((f, i) => `F${i + 1}: ${f.title}${mark(f)}`).join('\n');
   const rule = sentences(
     'An issue an open finding, or one marked (deleted), already covers is given as {"covered": "F3"}',
-    `with its "sources", the page of ${tag} where it is raised, and nothing else.`,
+    `with its "sources", the page of ${id} where it is raised, and nothing else.`,
     'An issue only a finding marked (closed) covers is written up in full like any other, with "earlier": "F3".',
   );
   return `\n\nThese findings are already on the deal:\n${listed}\n${rule}`;
 }
 
 /** what an earlier draft of the report raised, so a new draft raises only what is new */
-function earlierAsk(tag: string, before: ReadIssue[] | undefined) {
+function earlierAsk(id: string, before: ReadIssue[] | undefined) {
   if (!before?.length) return '';
+  // an earlier draft's issue is no saved record with an id of its own: it keeps its per-prompt label (#1162)
   const listed = before.map((x, i) => `E${i + 1}: ${x.title}`).join('\n');
   const rule = sentences(
     'An issue it raised that this report still raises is given as {"still": "E2"}',
-    `with its "sources", the page of ${tag} where it is raised now, and nothing else.`,
+    `with its "sources", the page of ${id} where it is raised now, and nothing else.`,
     'Put in "dropped" the E numbers of those this report no longer raises.',
   );
   return `\n\nAn earlier draft of this report raised these issues:\n${listed}\n${rule}`;
 }
 
 /** the reply's shape */
-function replyAsk(tag: string, before: ReadIssue[] | undefined) {
-  const source = (page: number) => `"sources": [{"doc": "${tag}", "page": ${page}, "quote": "…"}]`;
+function replyAsk(id: string, before: ReadIssue[] | undefined) {
+  const source = (page: number) => `"sources": [{"doc": "${id}", "page": ${page}, "quote": "…"}]`;
   const full = `{"title": "…", "workstream": "…", "body": ["…"], ${source(12)}}`;
   const still = before?.length ? `, {"still": "E1", ${source(8)}}` : '';
   const dropped = before?.length ? '"dropped": ["E1"], ' : '';
   const advisor = sentences(
     'Also give "advisor": who wrote the report, in a few words (such as "the independent engineer").',
-    `If ${tag} is not in fact a report by an outside advisor, reply {"report": false}.`,
+    `If ${id} is not in fact a report by an outside advisor, reply {"report": false}.`,
   );
   const order = 'Give every issue, in the order the report raises them.';
   const issues = `[${full}, {"covered": "F2", ${source(30)}}${still}]`;
@@ -82,9 +83,9 @@ interface ReadAt { k: ReportKit; s: SentDoc; before?: ReadLine }
 
 /** the prompt that reads a report's issues */
 export function readAsk(r: ReadAt, known: Known[]) {
-  const tag = r.s.sent[0].tag;
-  const body = issuesAsk(r.k, tag) + knownAsk(tag, known) + earlierAsk(tag, r.before?.issues);
-  return `Documents:\n${r.s.listing}\n\n${body}${replyAsk(tag, r.before?.issues)}`;
+  const id = r.s.sent[0].rec.docId;
+  const body = issuesAsk(r.k, id) + knownAsk(id, known) + earlierAsk(id, r.before?.issues);
+  return `Documents:\n${r.s.listing}\n\n${body}${replyAsk(id, r.before?.issues)}`;
 }
 
 /** a finding this report raised: its id is the one `idFor` gives the report and its title */
@@ -211,9 +212,13 @@ class ReportRead {
 async function ask(r: ReportRead, known: Known[]) {
   const k = r.k;
   const prompt = readAsk(r, known);
-  const input = { kind: 'report', split: true, model: k.models.standard, system: k.system, files: r.s.files, prompt };
+  const keys = ['issues', 'report'];
+  // a reply citing a document other than the report is asked again (#1162)
+  const unusable = k.unusable(r.s.sent, keys);
+  const input = { kind: 'report', split: true, model: k.models.standard, system: k.system, files: r.s.files, prompt,
+    unusable };
   try {
-    return { reply: await k.ask(input, ['issues', 'report']), cut: false };
+    return { reply: await k.ask(input, keys), cut: false };
   } catch (e) {
     if (!isCut(e)) throw e;
     return { reply: null, cut: true };

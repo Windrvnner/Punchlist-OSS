@@ -855,8 +855,9 @@ export function nodeAi(o: AiOptions) {
       claim: (keys) => claimReports(dealId, keys),
       release: async (keys) => { if (o.shared) await release(dealId, keys).catch(() => undefined); },
       ask: (input, keys) => askJson(input, keys),
+      unusable: (sent, keys) => docsUnusable(sent, false, keys, where),
       send: async (rec) => {
-        const r = await send(tagged(dealId, [rec]));
+        const r = await send(sentOf(dealId, [rec]));
         return r.got.length ? { files: r.files, listing: r.listing, sent: r.got } : null;
       },
       fit: (text, cited, sent) => fit(text, cited, sent, false, true),
