@@ -102,7 +102,7 @@ async function searchFindings(run: AgentRun, queryWords: Set<string>, report: Re
 
 /**
  * The deal's questions and their responses that share a word with the query, the most first, each whole while they
- * fit what is left of the room; the rest are counted.
+ * fit this result's share of the room; the rest are counted.
  */
 async function searchQuestions(run: AgentRun, queryWords: Set<string>, report: Report): Promise<void> {
   const deals = run.question.deals;
@@ -201,9 +201,9 @@ function bestMatches<T>(run: AgentRun, queryWords: Set<string>, all: T[], text: 
   return scored.filter((h) => h.shared > 0).sort((a, b) => b.shared - a.shared).map((h) => h.x);
 }
 
-/** the characters of the reply's room left for this search's next part: less what its earlier parts found (#480) */
+/** the characters of this result's share of the room left for the search's next part: less what earlier parts found */
 function roomLeft(run: AgentRun, report: Report): number {
-  return Math.max(0, run.left() - report.out.join('\n').length);
+  return Math.max(0, run.share() - report.out.join('\n').length);
 }
 
 /** how many of these lines, from the first, fit in `room` characters with their line breaks */

@@ -155,6 +155,15 @@ describe('what the searches of one reply hand back, together', () => {
     expect(got).toMatch(/^Response to Q/m);
   }, 30_000);
 
+  it("a search after the first turn's search still has room, however much that one matched", async () => {
+    const s = setup(searchOnce('qa', 'margin'));
+    await questions(s.repo, 2_000);
+    expect((await s.ai.answer(ask('What about the lock-up ratio?'))).ok).toBe(true);
+    const got = result(s);
+    for (let i = 0; i < 5; i++) expect(got).toContain(`Response to Q${i + 1}: ${longText(i).trim()}`);
+    expect(got).not.toContain('more matched');
+  }, 60_000);
+
   it('a search once the room is used comes back counted, and the reply answers on its last turn', async () => {
     const queries = (n: number) => `lock-up ${n}`;
     const turn = (c: Call, n: number) =>

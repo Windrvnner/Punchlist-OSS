@@ -84,11 +84,15 @@ type Limits = { turns: number; width: number; folderDocs: number; compactAt: (mo
 
 /**
  * The characters one reply's tool results may take together: sized the way batches are, `limits.partShare` of the
- * tokens at which its conversation is compacted, at `limits.charsPerToken` (#480). What is left of it bounds each
- * result, so that a fresh prompt holding all of them fits the model however many turns the reply takes.
+ * tokens at which its conversation is compacted, at `limits.charsPerToken`, less what the prompt already carries of
+ * the conversation (#480). Each result takes half of what is left of it (`AgentRun.share`), so that a fresh prompt
+ * holding all of them stays within it however many turns the reply takes.
  */
-const roomOf = (compactAt: number) =>
-  Math.floor((compactAt * control.limits.partShare) / 100) * control.limits.charsPerToken;
+const roomOf = (compactAt: number, question: AgentQuestion) => {
+  const room = Math.floor((compactAt * control.limits.partShare) / 100) * control.limits.charsPerToken;
+  const carried = (question.about ?? '').length + (question.history ?? '').length;
+  return Math.max(0, room - carried);
+};
 
 const SEARCHES: readonly What[] = ['documents', 'findings', 'qa', 'all'];
 const REPLY_SHAPE = '{"tool": …} or {"text": "…", "sources": […]}';
@@ -151,7 +155,7 @@ class Answering {
     private readonly limits: Limits,
     folderMemory: FolderMemory,
   ) {
-    this.run = new AgentRun(kit, question, progress, roomOf(limits.compactAt(question.model)));
+    this.run = new AgentRun(kit, question, progress, roomOf(limits.compactAt(question.model), question));
     this.folders = new FolderReader(this.run, folderMemory, limits);
     this.conversation = new KeptConversation(this.run, limits.compactAt, limits.width);
   }

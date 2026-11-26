@@ -59,10 +59,13 @@ export class AgentRun {
     if (kit.talk) this.keepTags(question.thread?.tags ?? []);
   }
 
-  /** the characters of the room the tool results so far have left (#480) */
-  left(): number {
+  /**
+   * the characters the next tool result may take: half of what the results so far have left of the room, so that the
+   * first search, however much it matched, leaves room for every later tool (#480)
+   */
+  share(): number {
     const used = this.done.reduce((sum, x) => sum + x.length, 0);
-    return Math.max(0, this.room - used);
+    return Math.max(0, this.room - used) / 2;
   }
 
   get steps(): ResearchStep[] {
