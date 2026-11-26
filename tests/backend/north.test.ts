@@ -238,23 +238,6 @@ describe('the file store', () => {
     await svc.upload({ name: 'doc_000000000000000000000004__Société – 契約.pdf', bytes: text('%PDF') });
     expect([...north.files.values()][0].filename).toBe('doc_000000000000000000000004__Societe _ __.pdf');
   });
-  it('a CSV in UTF-16 (no byte-order mark) or Windows-1252 goes up as UTF-8, as other connectors send it', async () => {
-    const { north, svc } = await setUp();
-    const rows = Array.from({ length: 2500 }, (_, i) => `Société ${i + 1},€${i}`).join('\r\n');
-    const utf16 = Uint8Array.from([...rows].flatMap((c) => [c.charCodeAt(0) & 255, c.charCodeAt(0) >> 8]));
-    const cp1252 = Uint8Array.from([...rows].map((c) => (c === '€' ? 0x80 : c.charCodeAt(0))));
-    await svc.upload({ name: 'doc_000000000000000000000005__Rates.csv', bytes: utf16 });
-    await svc.upload({ name: 'doc_000000000000000000000006__Fees.csv', bytes: cp1252 });
-    for (const file of north.files.values()) {
-      expect(new TextDecoder('utf-8', { fatal: true }).decode(file.bytes)).toBe(rows);
-    }
-  });
-  it('a file that is not a text file goes up byte for byte', async () => {
-    const { north, svc } = await setUp();
-    const deck = Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0xff, 0x00, 0x80]);
-    await svc.upload({ name: 'doc_000000000000000000000007__Deck.pptx', bytes: deck });
-    expect([...north.files.values()][0].bytes).toEqual(deck);
-  });
   it('list reads every page; remove takes a file out, and one already gone is not an error', async () => {
     const { svc } = await setUp({ pageSize: 2 });
     const ids: string[] = []; for (let i = 0; i < 5; i++) ids.push(await svc.upload({ name: `f${i}.txt`, bytes: text('t') }));

@@ -27,7 +27,6 @@
 import type { ConverseInput, Conversed, ModelService } from './service';
 import type { SignInToken } from './signInToken';
 import { SERVICE } from '../control';
-import { TEXT_FILE, utf8Bytes } from '../domain/textEncoding';
 import { cutOff, limitsOf, saysTooLong, tooLong } from './limits';
 import { retryDroppedRequest } from './requestRetry';
 
@@ -62,11 +61,6 @@ const unreachable = (why: string) => Object.assign(new Error(`${SERVICE} could n
 
 /** a file name North accepts: Latin letters, digits and plain punctuation; accents dropped, anything else an underscore */
 export const latinName = (name: string) => name.replace(/[\\/]/g, '_').normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9 ._()&,+'-]/g, '_');
-
-/** a CSV or plain text file goes up as UTF-8, as storable sends it to the other connectors (claude.ts) */
-function uploadBytes(file: { name: string; bytes: Uint8Array }): Uint8Array {
-  return TEXT_FILE.test(file.name) ? utf8Bytes(file.bytes) : file.bytes;
-}
 
 export function northService(o: NorthOptions): ModelService & { chat(input: Parameters<ModelService['complete']>[0] & Partial<ConverseInput>): Promise<Conversed>; agentTools(): Promise<string[]> } {
   const base = `${o.address.replace(/\/+$/, '')}/api`;
@@ -160,7 +154,7 @@ export function northService(o: NorthOptions): ModelService & { chat(input: Para
     },
     async upload(file) {
       const form = new FormData();
-      form.append('file', new Blob([uploadBytes(file) as Uint8Array<ArrayBuffer>]), latinName(file.name));
+      form.append('file', new Blob([file.bytes as Uint8Array<ArrayBuffer>]), latinName(file.name));
       let f = await call<{ id: string; status: string; status_details?: string | null }>('POST', '/v1/files', form, false);
       const until = Date.now() + (o.processMs ?? 5 * 60_000);
       while (f.status !== 'processed') {
