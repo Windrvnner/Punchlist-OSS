@@ -21,4 +21,10 @@ describe('the stand-in draft finds a finding by the index words', () => {
     const r = await draft(repoOf('the and of'), 'the and of');
     expect(r.ok && r.value.status).toBe('none');
   });
+  it('the demo filler words still do not match once folded', async () => {
+    for (const word of ['terms', 'details']) {
+      const r = await draft(repoOf(word), word);
+      expect(r.ok && r.value.status).toBe('none');
+    }
+  });
 });
