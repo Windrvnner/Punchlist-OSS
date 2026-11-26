@@ -51,8 +51,7 @@ function modelRead(line: string, index: number, last: number): LineRead[] {
   return line ? [{ n, k: 'item' }] : [];
 }
 
-const readingOf = (reads: LineRead[]): ListReply => ({ lines: reads });
-const modelReading = (lines: string[]) => readingOf(lines.flatMap((line, at) => modelRead(line, at, lines.length)));
+const modelReading = (lines: string[]) => ({ lines: lines.flatMap((l, k) => modelRead(l, k, lines.length)) });
 
 async function preparePaste(app: Awaited<ReturnType<typeof readyApp>>, questions: string[]) {
   const paste = [HEADING, '', ...questions, questions[0], NOTE].join('\n');
@@ -60,7 +59,7 @@ async function preparePaste(app: Awaited<ReturnType<typeof readyApp>>, questions
   const lines = checklistSourceLines(source, null)!;
   const answers = lines.flatMap((line, at) => modelRead(line, at, lines.length - 1));
   const readList = vi.fn<NonNullable<typeof app.store.services.ai.readList>>(async ({ thorough }) =>
-    ok(readingOf(thorough ? answers : answers.filter(({ n }) => n !== 4))));
+    ok({ lines: thorough ? answers : answers.filter(({ n }) => n !== 4) }));
   app.store.services.ai.readList = readList;
   const reading = checklistReading(app.store, checklistRequests());
   const reads = value((await reading.sourceChanged(lines, false, READ_EVENTS))!);
@@ -386,7 +385,7 @@ it('discards late model replies when the source changes or the dialog leaves', a
     const revised = [HEADING, ...lines.slice(1)];
     let release!: (result: Result<ListReply>) => void;
     const held = new Promise<Result<ListReply>>((resolve) => { release = resolve; });
-    const model = vi.fn<NonNullable<typeof store.services.ai.readList>>(async ({ lines: input }) => ok(modelReading(input)));
+    const model = vi.fn<NonNullable<typeof store.services.ai.readList>>(async (i) => ok(modelReading(i.lines)));
     model.mockReturnValueOnce(held);
     store.services.ai.readList = model;
     const requests = checklistRequests();
