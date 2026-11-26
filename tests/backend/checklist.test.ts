@@ -112,6 +112,22 @@ describe('the checklist as it stands', () => {
     expect(after.map((r) => [r.id, r.result, r.sources])).toEqual(before.map((r) => [r.id, r.result, r.sources]));       // nothing lost by being looked at again
     expect(after.some((r, i) => r.at !== before[i].at)).toBe(true);                                                       // and it was written down again, not skipped
   });
+  it('layers merge on the checklist’s own key: wording differing only in quotes, case or a period is one', async () => {
+    const list = () => ({
+      broad: [{ id: 'b1', text: 'Permits obtained.' }, { id: 'b2', text: 'The “permits” are obtained.' }],
+      product: [],
+      sector: [
+        { id: 's1', text: 'permits obtained' },
+        { id: 's2', text: 'The "permits" are obtained' },
+        { id: 's3', text: 'Lenders consent is given' },
+      ],
+    });
+    const script = (c: Call) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...OK(c) })) });
+    const s = setup(script, { d1: [FA, TS, IM] }, { shared: new Mem(), installId: 'pc', checklist: list });
+    await deal(s.repo); val(await s.ai.firstPass('d1'));
+    const asked = [...new Set(s.calls.flatMap((c) => itemsIn(c).map((it) => it.text)))];
+    expect(asked).toEqual(['Permits obtained.', 'The “permits” are obtained.', 'Lenders consent is given']);
+  });
   it('an item whose id changes but whose wording does not keeps what was settled: it is not checked again and raises nothing twice', async () => {
     const recs = { d1: [FA, TS, IM] }; let ids = ['c1', 'c2', 'c3', 'c4'];
     const list = () => ({ broad: LIST().broad.map((it, i) => ({ id: ids[i], text: it.text })), product: [], sector: [] });
