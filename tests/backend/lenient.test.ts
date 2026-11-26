@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { readJson, list, strings, int, pageOf, word, tagNumber } from '../../src/backend/lenient';
+import { readJson, list, strings, prose, int, pageOf, word, tagNumber } from '../../src/backend/lenient';
 
 const want = { text: 'It is 1.25x. [1]', sources: [{ doc: 'D1', page: 14 }] };
 const read = (reply: string) => readJson(reply, ['text', 'sources']);
@@ -63,5 +63,10 @@ describe('reading a field that is nearly the shape asked for', () => {
     expect(['D3', 'd3', '[D3]', ' D3: Credit Agreement.pdf', 'Document 3', 'doc #3', '3', '[3]', 3].map((x) => tagNumber(x, 'D'))).toEqual([3, 3, 3, 3, 3, 3, 3, 3, 3]);
     expect(['I7', 'i7', 'Item 7', '7.', 'I7:'].map((x) => tagNumber(x, 'I'))).toEqual([7, 7, 7, 7, 7]);
     expect(['3 Model.xlsx', '2024 accounts.pdf', 'Credit Agreement.pdf', 'D', '', 0, -1, 1.5, null].map((x) => tagNumber(x, 'D'))).toEqual([null, null, null, null, null, null, null, null, null]);
+  });
+
+  it('prose is the strings of a reply as given: edge spaces and tabs kept, a blank one left out', () => {
+    expect(prose([' a\t', ' ', '', 7, 'b'])).toEqual([' a\t', 'b']);
+    expect(prose(' one ')).toEqual([' one ']);
   });
 });

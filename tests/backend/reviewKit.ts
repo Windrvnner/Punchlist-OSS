@@ -73,6 +73,8 @@ export function setup(script: Hook, recs: Record<string, DocRecord[]>, more: Par
   const ai = nodeAi({ service: svc, docs, keeper, usage: (e) => usage.push(e), clock, newId: () => `01HZZZZZZZZZZZZZZZZ${String(n++).padStart(7, '0')}`, retry: { sleep: async () => {} }, ...options, repo });
   return { ai, svc, all, calls, fillCalls, coreCalls, pickCalls, pickForCalls, queryCalls, fixCalls, affectCalls, verifyCalls, hearCalls, describeCalls, usage, repo, recs };
 }
+/** a question id in the shape the app draws one (`q_` and a ULID), made from `n` so a test can name it (#1105) */
+export const qid = (n: number | string) => `q_${String(n).padStart(26, '0')}`;
 export const val = <T,>(r: { ok: boolean; value?: T }) => { expect(r.ok).toBe(true); return r.value as T; };
 export const ask = (message: string, extra: object = {}) => ({ dealId: 'd1', message, history: [], model: 'standard', ...extra });
 export async function deal(repo: Repository, id = 'd1', name = 'Project Proseware') { val(await repo.transaction({ writes: [{ kind: 'deal', id, data: { id, name }, expectedRev: null }], index: { dealId: '_', add: [{ kind: 'deal', id }] } })); }

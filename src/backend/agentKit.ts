@@ -19,7 +19,14 @@ export interface Cited {
   sheet?: unknown;
   quote?: unknown;
 }
-export type Ask = { kind: string; model: string; system?: string; prompt: string; files?: string[] };
+/**
+ * Whether a reply, as its text, is one its caller cannot use however it reads, such as one naming a question id it was
+ * not shown: a failed reply, asked again as an empty one is (retry.ts; #1105)
+ */
+export type Unusable = (text: string) => boolean | Promise<boolean>;
+export type Ask = {
+  kind: string; model: string; system?: string; prompt: string; files?: string[]; unusable?: Unusable;
+};
 /** one turn of a kept conversation, as `talk` takes it */
 export type TalkAsk = Ask & {
   conversation?: string;
@@ -60,8 +67,8 @@ export interface AgentKit {
   readPage(deals: string[], model: string, ask: string, docs: DealDoc[]): Promise<Looked>;
   /** the words of a text as a search compares them; with `dealId`, the deal's short names given their long form too */
   words(text: string, dealId?: string): Set<string>;
-  /** put documents in the store and list them for a prompt; `got` are those really there */
-  send(sent: Sent[]): Promise<{ files: string[]; listing: string; got: Sent[] }>;
+  /** put documents in the store and list them for a prompt to `model`; `got` are those really there */
+  send(sent: Sent[], model: string): Promise<{ files: string[]; listing: string; got: Sent[] }>;
   /** keep the citations that can be stood behind, renumbering the markers in the text */
   fit(text: string, cited: Cited[] | undefined, sent: Sent[], withDeal: boolean): { text: string; sources: Source[] };
   /** a document's path from its deal's folder, as prompts show it */

@@ -56,7 +56,7 @@ describe('two PCs share a deal\'s checks', () => {
       expect(await rows(p.A, p.dealId)).toEqual(await rows(p.B, p.dealId)); expect((await rows(p.A, p.dealId)).filter((r) => r.includes(':finding:')).length).toBe(11);
       const fa = await findings(p.A, p.dealId); expect(fa.length).toBe(11); expect(new Set(fa.map((x) => x.split(' ')[0])).size).toBe(11); expect(await findings(p.B, p.dealId)).toEqual(fa);
       expect([...roundsOf(p.sync.A, p.dealId).values()].filter((r) => r.end?.kind === 'done').length).toBe(1);
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
 
   it('2. a second PC joins half-way: it takes its share at its next batch, and nothing is done twice beyond the one block the known limit allows', async () => {
@@ -79,7 +79,7 @@ describe('two PCs share a deal\'s checks', () => {
       // clock, so a busy machine can write it more than once (#131)
       const openings = new Set(logOf(p.sync.A, p.dealId).filter((l) => l.opening).map((l) => l.opening!.id));
       expect(openings.size).toBe(1);
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
 
   it('17. one PC alone: today\'s calls in today\'s order, at once', async () => {
@@ -114,7 +114,7 @@ describe('two PCs share a deal\'s checks', () => {
         'done', 'full', 'claim', 'release',
       ]);
       expect(Date.now() - t0).toBeLessThan(FAST.lapse!);                                                 // no wait for others to join
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
   it('3. a PC that drops off half-way with no `left`: the other takes its pieces over after the lapse; every piece is done once, apart from the batch in flight', async () => {
     // batches of five: twenty blocks, given out by a hash of the PCs' ids, so the laptop all but always owns two
@@ -156,7 +156,7 @@ describe('two PCs share a deal\'s checks', () => {
       expect(laptopBatches.length, JSON.stringify(laptopBatches)).toBe(2);
       const inFlight = [...laptopBatches[1][1]].sort((x, y) => x - y);
       expect(twice, JSON.stringify({ office: checks(p.svcA), laptop: laptopBatches })).toEqual(inFlight);
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
 
   it('4. a PC that closes half-way: the other takes its pieces over at once', async () => {
@@ -171,7 +171,7 @@ describe('two PCs share a deal\'s checks', () => {
       // the laptop said it left, whichever PC planned the round (on a busy machine the laptop can be first) (#131)
       const bId = p.B.backend.installId;
       expect(logOf(p.sync.A, p.dealId).some((l) => l.pc === bId && l.left?.pc === bId)).toBe(true);
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
 
   it('9. a quick check that ends with one item unsettled, on one PC and on two: the request ends, no `full` is written, and it says what was left', async () => {
@@ -187,7 +187,7 @@ describe('two PCs share a deal\'s checks', () => {
         await allEnded(p); expect(logOf(p.sync.A, p.dealId).filter((l) => l.full).length).toBe(fullsBefore);
         const ends = [...view(logOf(p.sync.A, p.dealId)).rounds.values()].map((x) => `${x.def.kind}:${x.end?.kind}`).sort();
         expect(ends.filter((e) => e.endsWith(':done'))).toEqual(['first:done', 'quick:done']); expect(ends.filter((e) => !e.endsWith(':done')).every((e) => e === 'quick:merged')).toBe(true);   // one first pass and one check: the two asks shared it (if both opened one at once, one was merged into the other)
-      } finally { p.close(); }
+      } finally { await p.close(); }
     }
   }, 90000);
 
@@ -207,7 +207,7 @@ describe('two PCs share a deal\'s checks', () => {
       const lines = logOf(p.sync.A, p.dealId); expect(lines.some((l) => l.skipped?.key === `finding:${fs2[0].id}`)).toBe(true); expect(lines.some((l) => l.skipped?.key === `finding:${fs2[1].id}`)).toBe(false);
       expect(p.svcA.calls.some((c) => c.prompt.includes('a person has closed it') && c.prompt.includes(fs2[1].title))).toBe(true);
       expect([...view(lines).rounds.values()].every((x) => x.end?.kind === 'done')).toBe(true);
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
 
   it('13. a ghost round, left by a PC that crashed with the documents since changed: it is written off, a check is not started again on its own, and the first pass runs afresh', async () => {
@@ -223,7 +223,7 @@ describe('two PCs share a deal\'s checks', () => {
       expect([...roundsOf(p.sync.A, p.dealId).values()].filter((r) => r.def.id !== plan.id)).toEqual([]);   // no check was started again on its own
       val(await aiOf(p.A).firstPass(p.dealId)); await allEnded(p);
       expect([...roundsOf(p.sync.A, p.dealId).values()].filter((r) => r.def.id !== plan.id).map((r) => [r.def.kind, r.end?.kind])).toEqual([['first', 'done']]);
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
 
   it('15. a deep check with one PC dropping out and the data room unchanged: it completes', async () => {
@@ -236,7 +236,7 @@ describe('two PCs share a deal\'s checks', () => {
       stuck = true; p.net.pause('ba');
       const r = val(await Promise.race([a, new Promise<never>((_, no) => setTimeout(() => no(new Error(`the check did not end. Office sees: ${state(p, 'A')}. Laptop sees: ${state(p, 'B')}`)), 25000))]));
       expect(r).toMatchObject({ items: 100, unchecked: { items: 0, findings: 0 } }); expect(r.at).not.toBeNull();
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
 
   it('16. a quick check split across two PCs: every `full` line for it says the same, the sample is added up once per piece, and the standard calls are few', async () => {
@@ -276,7 +276,7 @@ describe('two PCs share a deal\'s checks', () => {
       const standardOf = (svc: typeof p.svcA) => checks(svc).filter(([m]) => m === 'standard');
       const byPc = { office: standardOf(p.svcA), laptop: standardOf(p.svcB) };
       expect(std.length, JSON.stringify(byPc)).toBeLessThanOrEqual(4);
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 90000);
   it('5. a PC that sleeps and wakes after its share was taken: its batch is thrown away, and nothing is written twice', async () => {
     // the laptop's lid closes during its first check call: the call hangs, and nothing more of the laptop reaches the office
@@ -291,7 +291,7 @@ describe('two PCs share a deal\'s checks', () => {
       const per = new Map<string, number>(); for (const l of lines) if (l.item && l.result && l.round && done.ids.has(l.round)) per.set(l.item, (per.get(l.item) ?? 0) + 1);
       expect(per.size).toBe(100); expect([...per.values()].every((x) => x === 1)).toBe(true);              // the sleeper's batch was not written
       const titles = val(await p.A.backend.repo.list('finding', p.dealId)).map((l) => (l.envelope.data as any).title); expect(titles.length).toBe(10); expect(new Set(titles).size).toBe(10);
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
 
   it('6. sync paused for longer than the lapse, the model still reachable: the PC out of touch takes nothing over and stops; its request ends; it reports how the check ended once back in touch', async () => {
@@ -312,7 +312,7 @@ describe('two PCs share a deal\'s checks', () => {
       p.touch.B = true; p.net.resume(); const ra = val(await a); await allEnded(p);
       expect(ra.unchecked).toEqual({ items: 0, findings: 0 });
       const told = val(await p.B.backend.ai.checked!(p.dealId)); expect(told.ended?.summary).toMatchObject({ items: 100 }); expect(val(await p.B.backend.ai.checked!(p.dealId)).ended).toBeUndefined();   // told once
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
 
   it('6b. both PCs out of touch at once: neither says the other is working, and each says how the check ended once back in touch', async () => {
@@ -332,7 +332,7 @@ describe('two PCs share a deal\'s checks', () => {
       const told: { a?: unknown; b?: unknown } = {};
       await until('both to be told', async () => { told.a ??= val(await p.A.backend.ai.checked!(p.dealId)).ended; told.b ??= val(await p.B.backend.ai.checked!(p.dealId)).ended; return !!told.a && !!told.b; }, 30000);
       expect(told.a).toEqual(told.b); expect((told.a as any).summary).toMatchObject({ items: 100, unchecked: { items: 0, findings: 0 } });
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
 
   it('7 and 11d. two rounds opened while out of sync with each other: they end as one; what both did counts once, and a finding beats the other\'s pass on the same item', async () => {
@@ -352,7 +352,7 @@ describe('two PCs share a deal\'s checks', () => {
       const c3 = ra.find((r) => r.startsWith('c3:'))!; expect(c3).toMatch(/^c3:finding:f_/);                     // the office raised it, the laptop passed it: the finding counts on both PCs
       const f = val(await p.A.backend.repo.get('finding', c3.split(':')[2])); expect((f!.envelope.data as any).status).toBe('open');
       expect(val(await p.A.backend.repo.list('finding', p.dealId)).length).toBe(1);
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
 
   it('8. "Check again" pressed while another PC works a first pass: it waits, then runs as a check; out of touch, it ends, and is started once back in touch did not start', async () => {
@@ -376,7 +376,7 @@ describe('two PCs share a deal\'s checks', () => {
           expect(told!.restart).toBe('quick'); expect(val(await p.B.backend.ai.checked!(p.dealId)).ended).toBeUndefined();
           expect([...roundsOf(p.sync.A, p.dealId).values()].map((x) => x.def.kind)).toEqual(['first']);
         }
-      } finally { p.close(); }
+      } finally { await p.close(); }
     }
   }, 90000);
 
@@ -392,7 +392,7 @@ describe('two PCs share a deal\'s checks', () => {
       await allEnded(p);
       expect(logOf(p.sync.A, p.dealId).some((l) => l.due)).toBe(true);
       expect([...p.svcA.calls, ...p.svcB.calls].some((c) => c.prompt.includes('have just arrived') && c.prompt.includes('Amended credit agreement'))).toBe(true);
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
 
   it('11. a member whose model service is away while the other PC has gone: it keeps trying in the background and finishes once the service is back; a short outage does not end a lone check', async () => {
@@ -408,7 +408,7 @@ describe('two PCs share a deal\'s checks', () => {
       down = false;                                                                                          // the service is back
       await until('the laptop to finish the round', () => [...roundsOf(p.sync.B, p.dealId).values()].some((r) => r.end?.kind === 'done'), 30000);
       expect(tally(p).size).toBe(100); expect(logOf(p.sync.B, p.dealId).some((l) => l.left && l.pc === p.B.backend.installId)).toBe(false);
-    } finally { p.close(); }
+    } finally { await p.close(); }
     // alone, with the service away for one call: the check ends as usual, even when the rest of it, once the service
     // is back, takes longer than the time a person is kept waiting (#131). Two items a call keep the rest over it.
     let off = false;
@@ -426,7 +426,7 @@ describe('two PCs share a deal\'s checks', () => {
       const r = q.A.backend.ai.checkAll!({ dealId: q.dealId, deep: true });
       expect(val(await r)).toMatchObject({ items: 30, unchecked: { items: 0, findings: 0 } });
       expect(Date.now() - at).toBeGreaterThan(FAST.giveUp!);                       // the rest did outlast the wait
-    } finally { q.close(); }
+    } finally { await q.close(); }
   }, 90000);
 
   it('11h. alone: a second outage after the service answered again starts its own wait, '
@@ -448,7 +448,7 @@ describe('two PCs share a deal\'s checks', () => {
       expect(!r.ok && r.error.message).toMatch(/can’t be reached/);
       // the wait was counted from the second outage, not from the first
       expect(Date.now() - awayAgainAt).toBeGreaterThanOrEqual(FAST.giveUp!);
-    } finally { q.close(); }
+    } finally { await q.close(); }
   }, 60000);
 
   it('11b. the only other member lacks a document the round needs: the round is not stuck', async () => {
@@ -457,10 +457,13 @@ describe('two PCs share a deal\'s checks', () => {
       const { docsHash } = await import('../../src/backend/rounds');
       const by = p.A.backend.installId; const plan = { id: `r_00000000000000000000000000_${by}`, kind: 'first', by, label: 'Office', docs: docsHash(['doc_gone']), docList: ['doc_gone'], core: { key: 'c', ids: ['doc_gone'] }, codeBase: 0, block: 10, pieces: [{ key: 'item:c1', text: 'Clause 1 of the finance documents is in order', reason: 'new', stage: 'check' }] };
       fs.appendFileSync(`${p.sync.A}/checks-${by}-${p.dealId}.jsonl`, [{ v: 1, at: new Date().toISOString(), n: 900, pc: by, plan }, { v: 1, at: new Date().toISOString(), n: 901, pc: by, left: { round: plan.id, pc: by } }].map((l) => JSON.stringify(l)).join('\n') + '\n');
-      p.net.now(); const t0 = Date.now(); void aiOf(p.B).firstPass(p.dealId);
+      p.net.now();
+      const t0 = Date.now();
+      const started = aiOf(p.B).firstPass(p.dealId);
       await until('that round to end', () => { p.net.now(); return roundsOf(p.sync.B, p.dealId).get(plan.id)?.end?.kind === 'abandoned'; }, 30000);
       expect(Date.now() - t0).toBeLessThan(4 * FAST.lapse!);
-    } finally { p.close(); }
+      val(await started);                                  // the laptop's own pass ends before the case does
+    } finally { await p.close(); }
   }, 60000);
 
   it('14. one PC\'s clock five hours fast: liveness and claims are still right', async () => {
@@ -492,7 +495,7 @@ describe('two PCs share a deal\'s checks', () => {
       await a;
       await until('the office to finish the round', () => [...roundsOf(p.sync.A, p.dealId).values()].some((r) => r.end?.kind === 'done'), 20000);
       expect(tally(p).size).toBe(100);
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
   it('11a. two checks opened out of sync with each other end as one round: both requests end, with the same summary', async () => {
     const p = await pair({ items: 40, scriptA: { delay: 40 }, scriptB: { delay: 40 } });
@@ -503,7 +506,7 @@ describe('two PCs share a deal\'s checks', () => {
       await until('both to have written a check round', () => logOf(p.sync.A, p.dealId).some((l) => l.plan?.kind === 'quick') && logOf(p.sync.B, p.dealId).some((l) => l.plan?.kind === 'quick'));
       p.net.resume(); const [ra, rb] = (await Promise.all([a, b])).map((r) => val(r)); await allEnded(p);
       expect(ra).toEqual(rb); expect([...roundsOf(p.sync.A, p.dealId).values()].filter((r) => r.def.kind === 'quick').map((r) => r.end?.kind).sort()).toEqual(['done', 'merged']);
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
 
   it('11c. a document both PCs have, arriving while a round runs: when the round ends both go to follow it, and one round does, each finding once', async () => {
@@ -522,7 +525,7 @@ describe('two PCs share a deal\'s checks', () => {
       p.net.now();
       await p.A.backend.repo.sync!();
       const titles = val(await p.A.backend.repo.list('finding', p.dealId)).map((l) => (l.envelope.data as any).title); expect(titles.length).toBe(1);
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
   it('19. while a check is shared, each PC can say who the other person is, and which of their PCs', async () => {
     const p = await pair({ meet: true, items: 100, scriptA: { delay: 60 }, scriptB: { delay: 60 } });
@@ -533,7 +536,7 @@ describe('two PCs share a deal\'s checks', () => {
       expect(val(await p.A.backend.ai.checked!(p.dealId)).checking!.with).toEqual([{ who: 'sroe', pc: 'Laptop', same: false }]);
       await Promise.all([a, b]); await allEnded(p);
       expect(val(await p.A.backend.ai.checked!(p.dealId)).checking).toBeUndefined();                         // over: nothing to say
-      p.close();
+      await p.close();
       // the same person name on both PCs (jdoe on a desktop and a laptop, or two people called jdoe): each is told the other's device id too
       const q = await pair({ items: 100, users: ['jdoe', 'jdoe'], scriptA: { delay: 60 }, scriptB: { delay: 60 } });
       try {
@@ -541,8 +544,8 @@ describe('two PCs share a deal\'s checks', () => {
         await until('the office to see the laptop in it', async () => (val(await q.A.backend.ai.checked!(q.dealId)).checking?.with.length ?? 0) > 0);
         expect(val(await q.A.backend.ai.checked!(q.dealId)).checking!.with).toEqual([{ who: 'jdoe', pc: 'Laptop', same: true }]);
         await Promise.all([qa, qb]); await allEnded(q);
-      } finally { q.close(); }
-    } finally { p.close(); }
+      } finally { await q.close(); }
+    } finally { await p.close(); }
   }, 60000);
   it('21. a check whose round is written off while the person waits on it: it starts again by itself and ends with a summary, not "could not finish"', async () => {
     let held = false; let release = () => {}; const gate = new Promise<void>((r) => { release = r; });
@@ -558,7 +561,7 @@ describe('two PCs share a deal\'s checks', () => {
       const r = await ask; expect(r.ok, r.ok ? '' : r.error.message).toBe(true);
       const ends = [...roundsOf(p.sync.A, p.dealId).values()].filter((x) => x.def.kind === 'quick').map((x) => [x.def.id === quick, x.end?.kind]);
       expect(ends).toEqual(expect.arrayContaining([[true, 'abandoned'], [false, 'done']]));
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
 
   it('20. a PC that was not part of the round, with the app open, finishes a round the only PC in it left unfinished', async () => {
@@ -584,7 +587,7 @@ describe('two PCs share a deal\'s checks', () => {
         }
         expect(checks(p.svcB).length).toBeGreaterThan(0); expect(tally(p).size).toBe(60);
         expect([...roundsOf(p.sync.B, p.dealId).values()].filter((x) => x.end?.kind === 'done').length).toBe(1);   // the same round, finished: not a fresh one
-      } finally { p.close(); }
+      } finally { await p.close(); }
     }
   }, 90000);
   it('11f. a PC alone in a check, signed out: the check resumes as soon as someone signs in, not after the five-minute retry', async () => {
@@ -600,7 +603,7 @@ describe('two PCs share a deal\'s checks', () => {
       out = false; const signedIn = Date.now();                                                               // signed in again
       await until('the check to finish', () => [...roundsOf(q.sync.A, q.dealId).values()].filter((r) => r.def.kind === 'deep').some((r) => r.end?.kind === 'done'), 20000);
       expect(Date.now() - signedIn).toBeLessThan(20000);                                                      // well inside the minute the retry would otherwise wait
-    } finally { q.close(); }
+    } finally { await q.close(); }
   }, 60000);
   it('11g. a PC signed out mid-check with another PC in the round: it keeps the long wait and claims nothing more, so the other PC finishes the check', async () => {
     let out = false; const q = await pair({ meet: true, items: 60, scriptA: { delay: 10, signedOut: () => out }, scriptB: { delay: 30 }, timing: { retryFirst: 100, retryMax: 800, retryEvery: 60000 } });
@@ -611,7 +614,7 @@ describe('two PCs share a deal\'s checks', () => {
       const mine = () => logOf(q.sync.A, q.dealId).filter((l) => l.claim?.pc === q.A.backend.installId).length; const before = mine();
       await until('the laptop to finish the check', () => [...roundsOf(q.sync.B, q.dealId).values()].filter((r) => r.def.kind === 'deep').some((r) => r.end?.kind === 'done'), 30000);
       expect(mine() - before).toBeLessThanOrEqual(1);                        // no short retries while another PC is there to take over its pieces
-    } finally { q.close(); }
+    } finally { await q.close(); }
   }, 60000);
   it('11e. a PC signed out mid-check: its line says the check waits for sign-in, not that the service is out of reach, and it finishes after sign-in', async () => {
     let out = false; const q = await pair({ items: 30, one: true, scriptA: { delay: 10, signedOut: () => out } });
@@ -626,7 +629,7 @@ describe('two PCs share a deal\'s checks', () => {
       out = false;                                                                                           // signed in again
       await until('the check to finish', () => [...roundsOf(q.sync.A, q.dealId).values()].filter((r) => r.def.kind === 'deep').some((r) => r.end?.kind === 'done'), 30000);
       expect(val(await q.A.backend.ai.checked!(q.dealId)).checking?.signIn).toBeFalsy();
-    } finally { q.close(); }
+    } finally { await q.close(); }
   }, 60000);
   it('20b. a check left by a PC that has gone, over fewer documents than this PC holds: this PC finishes that check, notes the rest as due, and a first pass follows them', async () => {
     const p = await pair({ items: 6, one: true });
@@ -639,7 +642,7 @@ describe('two PCs share a deal\'s checks', () => {
       await until('the left round to be finished', () => { p.net.now(); return roundsOf(p.sync.A, p.dealId).get(plan.id)?.end?.kind === 'done'; }, 15000);
       expect(logOf(p.sync.A, p.dealId).some((l) => l.due?.round === plan.id)).toBe(true);
       await until('a first pass to follow the other document', () => { p.net.now(); return logOf(p.sync.A, p.dealId).some((l) => l.done && (l.done.docs ?? []).length === 2); }, 15000);
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
   it('20c. this PC restarts with a deep check it was in left open, and a document has arrived since: its first pass finishes that check rather than writing it off, and follows the document after', async () => {
     const p = await pair({ items: 6, one: true });
@@ -653,7 +656,7 @@ describe('two PCs share a deal\'s checks', () => {
       expect(logOf(p.sync.A, p.dealId).some((l) => l.abandoned?.round === plan.id)).toBe(false);
       expect(logOf(p.sync.A, p.dealId).some((l) => l.due?.round === plan.id)).toBe(true);
       await until('a first pass to follow the other document', () => { p.net.now(); return logOf(p.sync.A, p.dealId).some((l) => l.done && (l.done.docs ?? []).length === 2); }, 15000);
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
   it('20d. a first pass left by a PC that has gone, over fewer documents than this PC holds: this PC finishes it, '
     + 'and a first pass follows the rest', async () => {
@@ -679,7 +682,7 @@ describe('two PCs share a deal\'s checks', () => {
       const both = () => log().some((l) => l.done && (l.done.docs ?? []).length === 2);
       await until('a first pass to follow the other document', () => { p.net.now(); return both(); }, 15000);
       expect(log().some((l) => l.abandoned?.round === plan.id)).toBe(false);
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 60000);
   it('20e. a document indexed while this PC runs its own first pass alone: the pass carries on rather than being '
     + 'written off, and no item goes to the model twice', async () => {
@@ -703,6 +706,6 @@ describe('two PCs share a deal\'s checks', () => {
       const findingLines = val(await p.A.backend.repo.list('finding', p.dealId)) as Line[];
       const items = findingLines.map((l) => l.envelope.data.itemId);
       expect(new Set(items).size).toBe(items.length);
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 90000);
 });

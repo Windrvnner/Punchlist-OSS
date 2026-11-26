@@ -51,7 +51,11 @@ t = await toasts();
 say('retry-now-saves-and-says-what-changed-with-the-two-versions-first', t.length === 1 && t[0] === '1 in two versions · 1 added [Resolve]', JSON.stringify(t));
 say('the-updated-notice-fits-on-one-line-at-1024', await fits());
 // at a real deal's size the end may not fit; what comes first, the kept count, always shows, and the rest is on hover
-await page.evaluate(() => { store.ui({ toasts: [] }); store.toast('26 in two versions · 1,900 added, 707 answered, 120 updated', { label: 'Resolve', run: () => {} }, true); });
+await page.evaluate(() => {
+  store.ui({ toasts: [] });
+  store.toast('26 in two versions · 1,900 added, 707 answered, 120 updated', 'warn',
+    { label: 'Resolve', run: () => {} }, true);
+});
 await page.waitForTimeout(150); await page.hover('#toast .ttext');
 const big = await page.$eval('#toast .ttext', (e) => ({ fits: e.scrollWidth <= e.clientWidth, title: e.title, shown: e.clientWidth }));
 say('a-long-notice-keeps-the-kept-count-in-view-and-the-whole-text-on-hover', big.shown > 150 && (big.fits || big.title === '26 in two versions · 1,900 added, 707 answered, 120 updated'), JSON.stringify(big));
