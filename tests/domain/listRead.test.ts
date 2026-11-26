@@ -57,8 +57,8 @@ describe('a list read by the model, tied out line by line', () => {
     expect(tieOut(lines, read, new Set(), written).left).toEqual([3]);
     const brought = tieOut(lines, read, new Set([3]), written).items.map((i) => i.text);
     expect(brought).toEqual(['Title report', '1.2\tInsurance certificates\tLender to confirm', 'Survey']);
-    // empty cells at a row's edges are not text the file holds; a line break inside a cell is
-    expect(tableRowsAsWritten(columns, [['', 'Two\nlines', '']])[1]).toBe('Two\nlines');
+    // empty cells at a row's edges and a line break inside a cell are kept
+    expect(tableRowsAsWritten(columns, [['', 'Two\nlines', '']])[1]).toBe('\tTwo\nlines\t');
   });
 
   it('reads a table row with its own section and subsection, and the heading row as a heading', () => {

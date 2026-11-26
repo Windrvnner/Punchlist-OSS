@@ -41,13 +41,16 @@ export function tableLines(columns: string[], rows: string[][]): string[] {
 
 /**
  * A table's rows as a spreadsheet copies them, line for line with `tableLines`: each row's cells separated by tabs, its
- * cells' own line breaks kept, empty cells at the row's edges left out. A left-out row a person brings in comes in so
- * (decisions: Checklist; #1061).
+ * cells' own line breaks kept, and so are empty cells at the row's edges. A left-out row a person brings in comes in
+ * so (decisions: Checklist; #1061).
  */
 export function tableRowsAsWritten(columns: string[], rows: string[][]): string[] {
-  const row = (r: string[]) => r.map((c) => String(c ?? '')).join('\t').trim();
+  const row = (r: string[]) => r.map((c) => String(c ?? '')).join('\t');
   return [row(columns), ...rows.map(row)];
 }
+
+/** A line without the spaces at its ends (decisions: Checklist, "its edge spaces aside"); tabs and line breaks stay. */
+const withoutEdgeSpaces = (line: string) => line.replace(/^[^\S\t\r\n]+|[^\S\t\r\n]+$/g, '');
 
 /** Text as lines: every line break counts, so a line number means the same line to the person, the model and the app. */
 export const textLines = (text: string): string[] => text.replace(/\r\n?/g, '\n').split('\n');
@@ -121,7 +124,7 @@ export function tieOut(
     if (r!.k === 'columns') { count.headings++; return; }
     if (r!.k === 'more') {
       if (!last) { leave(n); return; }
-      const it: ReadItem = last; it.text = `${it.text} ${written[i].trim()}`; it.lines.push(n); count.more++; return;
+      const it: ReadItem = last; it.text = `${it.text} ${withoutEdgeSpaces(written[i])}`; it.lines.push(n); count.more++; return;
     }
     if (r!.k === 'item') {
       // a table row's own section cell starts that section (and no subsection) for it and the rows under it, as a section

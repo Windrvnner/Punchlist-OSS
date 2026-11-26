@@ -72,7 +72,7 @@ describe('a pasted line keeps its own text (#1061)', () => {
 
   it('joins the rest of an item on the line below as pasted, not as the model reads it', () => {
     const tied = tieChecklistLines(lines, reads, new Set(), written)!;
-    expect(tied.items.map((i) => i.text)).toEqual(['Broker letter and cover note']);
+    expect(tied.items.map((i) => i.text)).toEqual(['Broker letter \tand cover note']);
     const table = tieChecklistLines(['A | b', 'c | d'], new Map<number, LineRead>([
       [1, { n: 1, k: 'item', text: 'b' }], [2, { n: 2, k: 'more' }]]), new Set(), ['A\tb', 'c\td'])!;
     expect(table.items[0].text).toBe('b c\td');
