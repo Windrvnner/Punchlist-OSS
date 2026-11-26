@@ -19,7 +19,7 @@ import type { Deal, Question, Source } from '../domain/model';
 import { QuestionCard, FindingCard } from './answerCards';
 import { runOffer } from '../app/answerOffer';
 import { bareDealName } from '../app/commands/deals';
-import type { Offer as AnswerOffer } from '../app/answerOffer';
+import type { AnswerOffer } from '../ports';
 
 type Verdict = State['ui']['verdicts'][string];
 

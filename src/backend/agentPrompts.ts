@@ -33,7 +33,7 @@ const BRIEF_HELP = 'Have the deal\'s open findings summed up in two short paragr
 const OFFER_HELP = 'When the person asks to start a new deal, to open a page of a deal, to add all unresolved items to '
   + 'the Q&A log, or to log a question, answer briefly and offer that action: the app shows it as a button under your '
   + 'answer, and nothing happens until the person presses it. For "log question", draft the question in "question". '
-  + 'For "open page", name the deal as the person did, or leave it out for this conversation\'s deal.';
+  + 'For "open page", name the deal by its exact name, or leave it out for this conversation\'s deal.';
 const FOLDER_RESULT = 'You get what each batch of its documents says, with document and page. A large folder is read '
   + 'only once the person has agreed: you are told when to ask them, and then';
 
@@ -86,7 +86,7 @@ const answerOffer = {
   description: OFFER_HELP,
   properties: {
     action: { type: 'string', enum: ['new deal', 'open page', 'add unresolved', 'log question'] },
-    deal: text('For "open page": the deal, as the person named it.'),
+    deal: text('For "open page": the deal\'s exact name.'),
     page: { type: 'string', enum: ['overview', 'findings', 'checklist', 'qa'] },
     question: text('For "log question": the question to log, as drafted for the counterparty.'),
   },

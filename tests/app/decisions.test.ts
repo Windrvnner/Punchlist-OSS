@@ -88,54 +88,35 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
     expect(full.ok).toBe(true);
   });
 
-  it('a "Project-…" or "Project: …" name is found by an offered page and runs the way its words do', async () => {
-    const m = make();
-    const a = await deal(m, 'Project-Lucerne Solar');
-    const offer = { action: 'open page', deal: 'Lucerne Solar', page: 'findings' };
-    expect(checkedOffer(m.store.get(), { kind: 'all' }, offer)).toEqual({ kind: 'page', dealId: a, page: 'findings' });
+  it('a name after "Project: " reads in its own direction', () => {
     expect(nameDir('Project: \u05e9\u05de\u05e9')).toBe('rtl');             // Hebrew after "Project: "
     expect(nameDir('Projector \u05e9\u05de\u05e9')).toBe('auto');           // another word that starts with the letters
     expect(nameDir('Project Lucerne \u05e9\u05de\u05e9')).toBe('auto');     // a Hebrew word later on doesn't decide it
   });
 
-  it('finds the deal an offered page names, for Unicode and hyphenated deal names (#500, #1054)', async () => {
+  it('an offered page opens the deal of exactly that name, nothing folded or stripped (#1054, #1115)', async () => {
     const m = make();
     const hyphenated = await deal(m, 'Harbor-Refinance');
     const spaced = await deal(m, 'Harbor Refinance');
-    const accented = await deal(m, 'Énergie-Refinance');
-    const suffix = await deal(m, 'Harbor Overview');
     const base = await deal(m, 'Harbor');
     const possessive = await deal(m, "Harbor's");
     const article = await deal(m, 'The');
-    const offered = (name: string) =>
-      checkedOffer(m.store.get(), { kind: 'all' }, { action: 'open page', deal: name, page: 'qa' });
-    for (const [name, id] of [
-      ['Harbor-Refinance', hyphenated],
-      ['Project Harbor Refinance', spaced],
-      ['Project: Énergie-Refinance', accented],
-      ['E\u0301nergie-Refinance\n', accented],
-      ['Harbor Overview', suffix],
-      ['Harbor', base],
-      ["Harbor's", possessive],   // each name opens its own deal: nothing is stripped from it (#1115)
-      ['The', article],
-    ]) expect(offered(name)).toEqual({ kind: 'page', dealId: id, page: 'qa' });
-    expect(offered('Unknown-Deal')).toBeUndefined();
-    expect(offered('Harbor-Refinance Q&A')).toBeUndefined();
-  });
-
-  it('an offered page names the deal of that exact name, in any case, with or without "Project"', async () => {
-    const m = make();
     const fund = await deal(m, 'Fund IV');
-    const plus = await deal(m, 'C++');
     await deal(m, '(Kestrel)');
     const offered = (name: string) =>
       checkedOffer(m.store.get(), { kind: 'all' }, { action: 'open page', deal: name, page: 'qa' });
-    for (const [name, id] of [['fund iv', fund], ['Project Fund IV', fund], ['C++', plus], ['Fund  IV', fund]]) {
-      expect(offered(name)).toEqual({ kind: 'page', dealId: id, page: 'qa' });
+    for (const [name, id] of [
+      ['Project Harbor-Refinance', hyphenated],
+      ['Project Harbor Refinance', spaced],
+      ['Project Harbor', base],
+      ["Project Harbor's", possessive],
+      ['Project The', article],
+      ['Project Fund IV', fund],
+    ]) expect(offered(name)).toEqual({ kind: 'page', dealId: id, page: 'qa' });
+    const notNames = ['Harbor', 'project harbor', 'Project  Harbor', 'Project Harbor\n', 'Project Kestrel', 'Unknown'];
+    for (const name of notNames) {
+      expect(offered(name)).toBeUndefined();
     }
-    // the name without its punctuation is not the name
-    expect(offered('Kestrel')).toBeUndefined();
-    expect(offered('C')).toBeUndefined();
   });
 
   it('an offered page names one of the person\'s own deals, or none (#1054)', async () => {
@@ -148,9 +129,9 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
     await m.store.dispatch(SetDealMember, { dealId: left, on: false });
     const offered = (name: string) =>
       checkedOffer(m.store.get(), { kind: 'all' }, { action: 'open page', deal: name, page: 'qa' });
-    expect(offered('Lumen')).toMatchObject({ kind: 'page' });
-    expect(offered('Southridge')).toBeUndefined();   // two deals of that name: the name alone can't say which
-    expect(offered('Quarry')).toBeUndefined();       // a team deal not in the person's list
+    expect(offered('Project Lumen')).toMatchObject({ kind: 'page' });
+    expect(offered('Project Southridge')).toBeUndefined();   // two deals of that name: the name alone can't say which
+    expect(offered('Project Quarry')).toBeUndefined();       // a team deal not in the person's list
   });
 
   it('Undo brings back a capitalized "Project"; an accent or hidden character is not the word', async () => {
