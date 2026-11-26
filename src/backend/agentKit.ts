@@ -19,7 +19,14 @@ export interface Cited {
   sheet?: unknown;
   quote?: unknown;
 }
-export type Ask = { kind: string; model: string; system?: string; prompt: string; files?: string[] };
+/**
+ * Whether a reply, as its text, is one its caller cannot use however it reads, such as one naming a question id it was
+ * not shown: a failed reply, asked again as an empty one is (retry.ts; #1105)
+ */
+export type Unusable = (text: string) => boolean | Promise<boolean>;
+export type Ask = {
+  kind: string; model: string; system?: string; prompt: string; files?: string[]; unusable?: Unusable;
+};
 /** one turn of a kept conversation, as `talk` takes it */
 export type TalkAsk = Ask & {
   conversation?: string;

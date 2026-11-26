@@ -48,7 +48,7 @@ export interface MemoInput {
   findings: Finding[]; questions: Question[];
   /** the deal's checklist items; null when the deal has none, or they could not be read */
   checklist: MemoItem[] | null;
-  /** the model's summary paragraphs; may be empty */
+  /** the model's summary paragraphs; a memo without them is not made (#1065) */
   summary: string[];
   /** the model's rating of each open finding, by id */
   ratings: Record<string, Rating>;

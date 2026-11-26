@@ -172,7 +172,7 @@ function noteWithCopies(t: Tombstone, versions: Version[] | undefined): ShownNot
 /** the AI service's calls that go to the model service (the others only read what is recorded) */
 const MODEL_CALLS = new Set<PropertyKey>([
   'answer', 'draft', 'reassess', 'dealBrief', 'gaps', 'addresses', 'suggestQuestion', 'merge', 'layout', 'reword',
-  'sameMeaning', 'issuesList', 'phrase', 'checkAll', 'responses',
+  'sameMeaning', 'issuesList', 'phrase', 'checkAll', 'responses', 'readList', 'memo',
 ]);
 
 /**

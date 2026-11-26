@@ -23,11 +23,23 @@ describe('the open question an answer addresses', () => {
     expect(call.model).toBe('standard');
   });
 
-  it('a handle not shown, or none, proposes no question', async () => {
-    for (const named of ['A3', 'none', 'Q2', 2]) {
+  it('none proposes no question', async () => {
+    const s = setup((c) => (isSuggest(c) ? { question: 'none' } : {}), {}, opts);
+    expect(val(await s.ai.suggestQuestion!({ dealId: 'd1', answer, questions: questions(2) }))).toEqual([]);
+    expect(s.calls.filter(isSuggest)).toHaveLength(1);
+  });
+
+  it('a handle not shown is sent back once; still wrong, the reply failed and none is proposed', async () => {
+    for (const named of ['A3', 'Q2', 2]) {
       const s = setup((c) => (isSuggest(c) ? { question: named } : {}), {}, opts);
-      expect(val(await s.ai.suggestQuestion!({ dealId: 'd1', answer, questions: questions(2) }))).toEqual([]);
+      const r = await s.ai.suggestQuestion!({ dealId: 'd1', answer, questions: questions(2) });
+      expect(r.ok).toBe(false);
+      expect(s.calls.filter(isSuggest)).toHaveLength(2);
     }
+    // a corrected reply is taken
+    let asked = 0;
+    const fixed = setup((c) => (isSuggest(c) ? { question: asked++ === 0 ? 'A9' : 'A2' } : {}), {}, opts);
+    expect(val(await fixed.ai.suggestQuestion!({ dealId: 'd1', answer, questions: questions(2) }))).toEqual([1]);
   });
 
   it('at 2,000 open questions the calls are sized to the input limit; every part named is kept', async () => {
