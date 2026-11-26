@@ -361,7 +361,8 @@ export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text
     for (const p of lp) {
       const row = log.lines[same] - 1, col = log.cols[p.l]; const v = r[p.a] ?? '', had = written.get(`${row},${col}`);
       if (!v.trim() || keptWorked(j, p.a)) continue;
-      if (had !== undefined) { if (v !== had) clash.add(same); continue; }   // they gave this cell already (cleared, it may be)
+      // they gave this cell already (cleared, it may be)
+      if (had !== undefined) { if (v !== had) clash.add(same); continue; }
       const now = log.rows[same][p.b] ?? ''; if (v === now) continue;
       if (!now.trim() && !fixed(row, col)) { out.steps.push(cell(row, col, v)); out.cells++; written.set(`${row},${col}`, v); } else clash.add(same);
     }
