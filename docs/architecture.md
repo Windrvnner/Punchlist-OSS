@@ -227,7 +227,8 @@ A deal's checklist is made up of its own item records, linked to the findings an
 A conversation belongs to one person and follows them between PCs. `src/backend/conversationLog.ts` keeps finished messages in per-PC `talk-<install>-<n>.jsonl` files in the shared folder, separate from the records, because a conversation never needs a choice between versions.
 
 Once an answer on a deal's or a finding's conversation finishes, `suggestQuestion` asks the standard model which open
-question it addresses, showing the questions as A1, A2 and so on in calls sized to its input limit. The proposal is
+question it addresses, showing the questions as A1, A2 and so on in calls sized to its input limit; when the open
+questions take more than one call, the first part that names a question gives the proposal. The proposal is
 kept for the session (`src/app/suggestedQuestion.ts`), and the card under the answer shows it (#1120).
 
 ## UI rules
