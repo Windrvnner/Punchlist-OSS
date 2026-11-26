@@ -1371,6 +1371,19 @@ export function nodeAi(o: AiOptions) {
     }
   }
 
+  /**
+   * One JSON reply that `usable` accepts: one it rejects is sent back once with what is wrong, as `draft` does (#1058).
+   * The send-back is read as written, with no repair call; the caller decides what a reply still unusable means.
+   */
+  async function askSentBack<T extends Record<string, unknown>>(
+    ask: Ask, keys: string[], usable: (reply: T | null) => boolean, wrong: string,
+  ): Promise<T | null> {
+    const reply = await askJson<T>(ask, keys);
+    if (usable(reply)) return reply;
+    const prompt = readCorrection(ask.prompt, reply, { wrong });
+    return askJson<T>({ ...ask, prompt }, keys, undefined, false);
+  }
+
   function readCanRetry(model: string, again: { escalate: string; retrySharedModel?: boolean } | undefined): boolean {
     return !!again && (model !== again.escalate || again.retrySharedModel === true);
   }
@@ -1973,12 +1986,8 @@ export function nodeAi(o: AiOptions) {
       const wrong = '"verdict" is not "yes", "partly" or "no"';
       let reply: { verdict?: unknown; why?: unknown } | null;
       try {
-        const model = (await models()).standard;
-        reply = await askJson({ kind: 'addresses', model, system: JSON_ONLY, prompt }, keys);
-        if (!verdictOf(reply)) {
-          const again = readCorrection(prompt, reply, { wrong });
-          reply = await askJson({ kind: 'addresses', model, system: JSON_ONLY, prompt: again }, keys, undefined, false);
-        }
+        const ask = { kind: 'addresses', model: (await models()).standard, system: JSON_ONLY, prompt } as const;
+        reply = await askSentBack(ask, keys, (r) => !!verdictOf(r), wrong);
       } catch (e) { return failure(e, UNREACHED); }
       const verdict = verdictOf(reply);
       if (!verdict) return fail({ kind: 'failed', message: UNREAD_REPLY });
@@ -2000,12 +2009,8 @@ export function nodeAi(o: AiOptions) {
       const wrong = '"text" is empty or holds a bracketed note for a person to confirm';
       let reply: { text?: unknown } | null;
       try {
-        const model = (await models()).fast;
-        reply = await askJson({ kind: 'merge', model, system: JSON_ONLY, prompt }, ['text']);
-        if (!mergedText(reply)) {
-          const again = readCorrection(prompt, reply, { wrong });
-          reply = await askJson({ kind: 'merge', model, system: JSON_ONLY, prompt: again }, ['text'], undefined, false);
-        }
+        const ask = { kind: 'merge', model: (await models()).fast, system: JSON_ONLY, prompt } as const;
+        reply = await askSentBack(ask, ['text'], (r) => !!mergedText(r), wrong);
       } catch (e) { return failure(e, UNREACHED); }
       const text = mergedText(reply);
       if (!text) return fail({ kind: 'failed', message: UNUSABLE_REPLY });
