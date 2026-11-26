@@ -72,3 +72,27 @@ describe('a party corrected in the app, beside a question still under the old na
     expect(matchRows({ rows }, withParty, [q('a', 1, 'Provide the model.', 'Lender A'), q('b', 2, 'Provide the model.', 'Lendr A')], sent)).toEqual(new Map([['b', 0], ['a', 1]]));
   });
 });
+
+describe('the same lookup as the import (#1080)', () => {
+  it('keeps each question\'s own row in a log numbered its own way ("7.", "3."), so no two responses are swapped', () => {
+    const rows = [['7.', 'Same words'], ['3.', 'Same words']];
+    expect(matchRows({ rows }, mapping, [q('a', 3, 'Same words'), q('b', 7, 'Same words')])).toEqual(new Map([['b', 0], ['a', 1]]));
+  });
+  it('gives the row of the question\'s number before a row of its sender under another number', () => {
+    const withParty = { ...mapping, askedBy: 2 } as Mapping;
+    const rows = [['9', 'X', 'Lender A'], ['5', 'X', '']];
+    expect(matchRows({ rows }, withParty, [q('q5', 5, 'X', 'Lender A')])).toEqual(new Map([['q5', 1]]));
+  });
+  it('matches 2,000 rows by their place in the table, blank rows and headings between them shifting nothing', () => {
+    const rows: string[][] = [];
+    const qs: Question[] = [];
+    for (let k = 0; k < 2000; k++) {
+      if (k % 100 === 0) rows.push(['', k % 200 ? '' : 'Section heading'], ['', '   ']);
+      rows.push([String(k + 1), `Question ${k % 50}`]);
+      qs.push(q(`q${k}`, k + 1, `Question ${k % 50}`));
+    }
+    const m = matchRows({ rows }, mapping, qs);
+    expect(m.size).toBe(2000);
+    for (const x of qs) expect(rows[m.get(x.id)!][0]).toBe(String(x.n));
+  });
+});
