@@ -111,20 +111,20 @@ describe('what is recorded and shown as checked', () => {
   it('when the fast model says a new document touches a finding, the check that follows is given that document, and the reason on the mark names it', async () => {
     const recs: Record<string, DocRecord[]> = room(); const LIST = { broad: [{ id: 'k1', text: 'The margin is as in the term sheet' }], product: [], sector: [] };
     const s = setup(okAll, recs, { checklist: () => LIST, verify: (c) => ({ stands: c.files.some((f) => f.name.includes('Notice')), why: 'x' }).stands ? { stands: false, why: 'the offtaker has terminated' } : (c.model === 'fast' ? { stands: true, why: 'nothing new' } : { stands: true, why: 'nothing new' }),
-      affects: (c) => ({ affected: ['F1'] }) });
+      affects: () => ({ affected: ['f_1'] }) });
     await deal(s.repo); await finding(s.repo, 'f_1', 'Revenue contract covers less capacity than the base case assumes', { body: ['The offtake contract covers part of the capacity only. [1]'], sources: [{ doc: IM.name, loc: 'p. 2', docId: IM.docId }] });
     val(await s.ai.firstPass('d1'));
     recs.d1.push(doc(11, 'Capacity study.pdf', { words: ['capacity', 'base', 'case'] }), doc(12, 'Revenue forecast.pdf', { words: ['revenue', 'capacity'] }), doc(13, 'Offtake pricing note.pdf', { words: ['offtake', 'contract'] }), doc(14, 'Notice March 14.pdf', { words: [] }));   // the last is a scanned termination notice
     const r = val(await s.ai.firstPass('d1'));
     expect(s.verifyCalls.map((c) => c.model)).toEqual(['fast', 'standard']); expect(sentNames(s.verifyCalls[0])).toContain('Notice March 14.pdf'); expect(r.marked).toEqual(['f_1']);   // the model named the finding and no document: the arrival that words cannot place goes first
     // and when the model names the document, that is the one the check is given and the one the reason names, however little its words say
-    const s2 = setup(okAll, recs, { checklist: () => LIST, verify: () => ({ stands: false, why: 'terminated' }), affects: () => ({ affected: ['F1 N2'] }) });
+    const s2 = setup(okAll, recs, { checklist: () => LIST, verify: () => ({ stands: false, why: 'terminated' }), affects: () => ({ affected: [`f_1 ${doc(14, '').docId}`] }) });
     recs.d1 = [FA, TS, IM]; await deal(s2.repo); await finding(s2.repo, 'f_1', 'Revenue contract covers less capacity than the base case assumes', { body: ['The offtake contract covers part of the capacity only. [1]'], sources: [{ doc: IM.name, loc: 'p. 2', docId: IM.docId }] });
     val(await s2.ai.firstPass('d1')); recs.d1.push(doc(11, 'Capacity study.pdf', { words: ['capacity', 'base', 'case'] }), doc(14, 'Notice March 14.pdf', { words: [] }));
     val(await s2.ai.firstPass('d1')); const f = val(await s2.repo.get('finding', 'f_1'))!.envelope.data as any;
-    expect(s2.affectCalls[0].prompt).toContain('N1: vdr/Capacity study.pdf — words: capacity, base, case\nN2: vdr/Notice March 14.pdf\n'); expect(sentNames(s2.verifyCalls[0])).toContain('Notice March 14.pdf'); expect(f.updatedWhy).toBe('Notice March 14.pdf arrived');
+    expect(s2.affectCalls[0].prompt).toContain(`${doc(11, '').docId}: vdr/Capacity study.pdf — words: capacity, base, case\n${doc(14, '').docId}: vdr/Notice March 14.pdf\n`); expect(sentNames(s2.verifyCalls[0])).toContain('Notice March 14.pdf'); expect(f.updatedWhy).toBe('Notice March 14.pdf arrived');
     // the document the model names is the one, even when another arrival has no words to go by
-    const s3 = setup(okAll, recs, { checklist: () => LIST, verify: () => ({ stands: false, why: 'superseded' }), affects: () => ({ affected: ['F1 N1'] }) });
+    const s3 = setup(okAll, recs, { checklist: () => LIST, verify: () => ({ stands: false, why: 'superseded' }), affects: () => ({ affected: [`f_1 ${doc(11, '').docId}`] }) });
     recs.d1 = [FA, TS, IM]; await deal(s3.repo); await finding(s3.repo, 'f_1', 'Revenue contract covers less capacity than the base case assumes', { sources: [{ doc: IM.name, loc: 'p. 2', docId: IM.docId }] });
     val(await s3.ai.firstPass('d1')); recs.d1.push(doc(11, 'Capacity study.pdf', { words: ['capacity', 'base', 'case'] }), doc(14, 'Notice March 14.pdf', { words: [] })); val(await s3.ai.firstPass('d1'));
     expect((val(await s3.repo.get('finding', 'f_1'))!.envelope.data as any).updatedWhy).toBe('Capacity study.pdf arrived'); expect(sentNames(s3.verifyCalls[0])).not.toContain('Notice March 14.pdf');

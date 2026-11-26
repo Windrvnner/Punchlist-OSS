@@ -8,7 +8,7 @@ import { StoreKeeper } from '../../src/backend/storeKeeper';
 import { StandInService } from '../../src/backend/service';
 import { nodeAi } from '../../src/backend/ai';
 import { memRepo } from '../adapters/memRepo';
-import { setup, doc, val, ask, deal, finding, listed, itemsIn, Mem, checkLines, type Call, OK, nth } from './reviewKit';
+import { setup, doc, val, ask, deal, finding, listed, itemsIn, Mem, checkLines, type Call, OK, nth, affectedAs } from './reviewKit';
 import type { DocRecord } from '../../src/backend/documents';
 
 const made: string[] = []; afterAll(() => { for (const d of made) fs.rmSync(d, { recursive: true, force: true }); });
@@ -91,7 +91,7 @@ describe('other', () => {
     const office = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, result: 'more', need: 'decommissioning bond' })) }), recs, { shared, installId: 'office', repo, clock: ahead, checklist: LIST, pick: () => ({ read: [1] }) }); await deal(repo);
     const r1 = val(await office.ai.firstPass('d1'));                                                          // office: a gap
     recs.d1.push(doc(2, 'Decommissioning bond.pdf', { words: ['decommissioning', 'bond'] }));                // the bond arrives; home, later in real time, follows it through and finds the item satisfied
-    const home = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...OK(c) })) }), recs, { shared, installId: 'home', repo, clock: behind, checklist: LIST, affects: () => ({ affected: ['C1'] }), pick: () => ({ read: [1, 2] }) });
+    const home = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...OK(c) })) }), recs, { shared, installId: 'home', repo, clock: behind, checklist: LIST, affects: (c) => affectedAs(c, 'C1'), pick: () => ({ read: [1, 2] }) });
     const r2 = val(await home.ai.firstPass('d1'));
     expect(r2.gaps).toEqual([]); expect(val(await home.ai.gaps('d1'))).toEqual([]); expect(val(await office.ai.gaps('d1'))).toEqual([]);
     expect(checkLines(shared).filter((l) => l.item).map((l) => [l.at.slice(11, 16), l.result, l.n > 0])).toEqual([['09:05', 'gap', true], ['09:00', 'ok', true]]);   // written later, stamped earlier, and still the later one
@@ -185,14 +185,14 @@ describe('other', () => {
     val(await s.ai.firstPass('d1'));
     for (let i = 0; i < 2000; i++) recs.d1.push(doc(1000 + i, `Document ${i}.pdf`, { rel: `10 New folder/Sub ${i % 40}/Document ${i}.pdf`, words: ['agreement', 'borrower', 'lender', 'facility', 'clause', 'schedule', 'notice', 'party', 'security', 'project', 'company', 'date'] }));
     val(await s.ai.firstPass('d1'));
-    expect(s.affectCalls.length).toBe(20); expect(Math.max(...s.affectCalls.map((c) => c.prompt.length))).toBeLessThan(40_000); expect(s.affectCalls[19].prompt).toContain('N100: vdr/10 New folder/Sub 39/Document 1999.pdf');
+    expect(s.affectCalls.length).toBe(20); expect(Math.max(...s.affectCalls.map((c) => c.prompt.length))).toBeLessThan(40_000); expect(s.affectCalls[19].prompt).toContain(`${doc(2999, '').docId}: vdr/10 New folder/Sub 39/Document 1999.pdf`);
   });
 
   it('one cited document that cannot be sent does not stop the follow-through: the run ends, and is not repeated', async () => {
     const recs: Record<string, DocRecord[]> = { d1: [doc(1, 'Credit Agreement.docx', { words: ['facility', 'agreement', 'margin'] }), doc(2, 'Term sheet.pdf', { words: ['term', 'sheet'] })] };
     const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...OK(c) })) }), recs, {
       checklist: () => ({ broad: [{ id: 'k1', text: 'The term sheet is signed' }], product: [], sector: [] }),
-      affects: () => ({ affected: ['F1'] }),
+      affects: (c) => affectedAs(c, 'F1'),
       pick: (c) => ({
         read: listed(c as Call)
           .filter((r) => /Term sheet/.test(r.path))

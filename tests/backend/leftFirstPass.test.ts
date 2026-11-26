@@ -5,7 +5,7 @@
 // for an item whose first one had not synced yet. At deal scale: 2,000 checklist items and 300 documents.
 import { describe, it, expect } from 'vitest';
 import { view, docsHash, findingIdFor } from '../../src/backend/rounds';
-import { setup, doc, val, deal, finding, Mem, itemsIn, OK, checkLines, type Call, nth } from './reviewKit';
+import { setup, doc, val, deal, finding, Mem, itemsIn, OK, checkLines, type Call, nth, affectsShown } from './reviewKit';
 import { dealList } from './dealList';
 import { paths } from './fixtures/relecloudRoom';
 
@@ -62,7 +62,12 @@ describe('a first pass whose PCs have all gone, with documents added since', () 
     const room = paths.slice(0, 300).map(roomDoc);
     const shared = new Mem();
     const recs = { d1: room.slice(0, 280) };
-    const affects = () => ({ affected: Array.from({ length: 10 }, (_, i) => `C${i + 1} N1`) });
+    // the first ten items, wherever the parts of the question show them, each with the first new document
+    const firstTen = new Set(Array.from({ length: 10 }, (_, i) => `c${i + 1}`));
+    const affects = (c: Call) => {
+      const shown = affectsShown(c);
+      return { affected: shown.items.filter((id) => firstTen.has(id)).map((id) => `${id} ${shown.docs[0]}`) };
+    };
     const s = setup(allOk, recs, { shared, installId: 'pc', checklist: listOf(items), affects, timing: { watch: 20 } });
     await deal(s.repo);
     // the PC that left had settled half the items
@@ -88,7 +93,9 @@ describe('a first pass whose PCs have all gone, with documents added since', () 
     expect(new Set(asked('standard')).size).toBe(asked('standard').length);
     expect(asked('standard').length).toBe(items.length - settled.length);
     expect(asked('fast').length).toBeLessThanOrEqual(10);
-    expect(s.affectCalls.length).toBe(1);
+    // one question, in parts that show each settled item once
+    const shownItems = s.affectCalls.flatMap((c) => affectsShown(c).items);
+    expect(new Set(shownItems).size).toBe(shownItems.length);
     // and the watcher starts nothing more
     await s.ai.settled();
     expect(roundsIn(shared).size).toBe(2);

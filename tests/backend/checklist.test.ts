@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { setup, doc, val, deal, itemsIn, Mem, type Call, OK, nth } from './reviewKit';
+import { setup, doc, val, deal, itemsIn, Mem, type Call, OK, nth, affectedAs } from './reviewKit';
 import { fromStoreName } from '../../src/backend/storeKeeper';
 import { itemId } from '../../src/domain/checklist';
 import type { Repository } from '../../src/ports';
@@ -104,7 +104,7 @@ describe('the checklist as it stands', () => {
   it('the fast model’s quick look is not asked for a place, and an item it finds still satisfied keeps the places it was settled on', async () => {
     const list = () => ({ broad: Array.from({ length: 3 }, (_, i) => ({ id: `q${i + 1}`, text: `Point ${i + 1} is dealt with in the credit agreement` })), product: [], sector: [] });
     const recs = { d1: [FA, TS, IM] };
-    const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...OK(c) })) }), recs, { shared: new Mem(), installId: 'pc', checklist: list, affects: () => ({ affected: ['C1', 'C2', 'C3'] }) }); await deal(s.repo);
+    const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...OK(c) })) }), recs, { shared: new Mem(), installId: 'pc', checklist: list, affects: (c) => affectedAs(c, 'C1', 'C2', 'C3') }); await deal(s.repo);
     val(await s.ai.firstPass('d1'));
     const before = val(await s.ai.checklist('d1')); expect(before.every((r) => r.result === 'satisfied' && r.sources?.length === 1 && r.sources[0].loc === 'p. 1')).toBe(true);
     // a new document arrives that is said to bear on all three: the fast model looks at them again and finds them as they were

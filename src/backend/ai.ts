@@ -73,7 +73,7 @@ import { docFamilies } from './related';
 import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
 import { AI_DRAFTED, namesOnlyShown, questionIdsIn, questionsForIds, responseHeader } from './qaRow';
-import { citesUnsent, docHandle, docsUnusable, sentAs, unknownIds } from './recordIds';
+import { citesUnsent, docHandle, docsUnusable, sentAs, unknownIds, unknownInPairs } from './recordIds';
 import type { DealDoc, Looked, Unusable } from './agentKit';
 import {
   RATINGS, riskGroups, keyRisksOf, unratedFindings, type Grouped, type Rating, type RiskGroup,
@@ -3457,23 +3457,81 @@ export function nodeAi(o: AiOptions) {
   /**
    * Which of a deal's open findings and settled items some new documents could affect, and for each finding which of
    * the new documents it is: the fast model's view, knock-on effects included. A hundred arrivals to a question, so a
-   * large folder arriving is several questions and not one too long to answer. Null when it cannot say.
+   * large folder arriving is several questions and not one too long to answer, and the findings and items in parts
+   * sized to the input limit (parts.ts). Null when it cannot say.
    */
   async function affects(arrived: DocRecord[], findings: Raised[], items: ChecklistItem[]): Promise<{ findings: Map<string, DocRecord[]>; items: Set<string> } | null> {
     const out = { findings: new Map<string, DocRecord[]>(), items: new Set<string>() };
     if (!arrived.length || (!findings.length && !items.length)) return out;
+    const fast = (await models()).fast;
+    const lines = [...findings.map(findingLine), ...items.map(itemLine)];
+    // the fast model names each one it could change, so its reply grows as a quick look's does (#1162)
+    const size = partSize({ cap: lines.length, out: control.limits.glanceReplyTokens, outLimit: outLimit(fast),
+      in: tokensEach(lines), inLimit: inLimit(fast) });
     for (let at = 0; at < arrived.length; at += ARRIVALS) {
-      const part = arrived.slice(at, at + ARRIVALS); let reply: { affected?: unknown } | null;
-      try { reply = await askJson({ kind: 'affects', split: true, model: (await models()).fast, system: JSON_ONLY, prompt: `These documents have just arrived in the data room of a project-finance deal:\n${part.map((r, n) => `N${n + 1}: ${shown(r)}`).join('\n')}\n\nThese are the deal's open findings (F)${findings.some((f) => f.closed) ? ', findings a person has closed, marked (closed), which new documents may bring into question,' : ''} and the checklist items already settled (C):\n${[...findings.map((f, n) => `F${n + 1}: ${f.title}${f.closed ? ' (closed)' : ''}`), ...items.map((it, n) => `C${n + 1}: ${it.text}`)].join('\n')}\n\nWhich of them could the new documents change? Think of knock-on effects, not only of matching words: a contract that ends changes everything that rested on it. Name each with the new document that could change it.\nReply as JSON: {"affected": ["F2 N3", "C7 N1"]}` }, ['affected']); }
-      catch (e) { if (unreachable(e)) throw e; return null; }
-      if (!reply || !('affected' in reply)) return null;
-      for (const t of strings(reply.affected)) {
-        const f = /^\W*F\s*(\d+)\b/i.exec(t); const c = /^\W*C\s*(\d+)\b/i.exec(t); const by = [...t.matchAll(/\bN\s*(\d+)\b/gi)].map((m) => part[+m[1] - 1]).filter((r): r is DocRecord => !!r);
-        if (f && findings[+f[1] - 1]) { const id = findings[+f[1] - 1].id; const had = out.findings.get(id) ?? []; for (const r of by) if (!had.includes(r)) had.push(r); out.findings.set(id, had); }
-        if (c && items[+c[1] - 1]) out.items.add(items[+c[1] - 1].id);
+      const part = arrived.slice(at, at + ARRIVALS);
+      for (let from = 0; from < lines.length; from += size) {
+        const these = findings.slice(from, from + size);
+        const theseItems = items.slice(Math.max(0, from - findings.length), Math.max(0, from + size - findings.length));
+        const reply = await askAffected(part, these, theseItems, fast);
+        if (!reply) return null;
+        takeAffected(strings(reply.affected), part, these, theseItems, out);
       }
     }
     return out;
+  }
+  /** a finding as the affects prompt lists it: by its id, with its title */
+  const findingLine = (f: Raised) => `${f.id}: ${f.title}${f.closed ? ' (closed)' : ''}`;
+  /** a settled checklist item as the affects prompt lists it: by its id, with its words */
+  const itemLine = (it: ChecklistItem) => `${it.id}: ${it.text}`;
+  /** the affects prompt for some arrivals, findings and items, each listed by its permanent id (#1162) */
+  function affectsPrompt(part: DocRecord[], findings: Raised[], items: ChecklistItem[]) {
+    const closed = findings.some((f) => f.closed)
+      ? ', and findings a person has closed, marked (closed), which new documents may bring into question' : '';
+    const arrivals = part.map((r) => `${r.docId}: ${shown(r)}`).join('\n');
+    const blocks = [
+      `These documents have just arrived in the data room of a project-finance deal:\n${arrivals}`,
+      ...(findings.length ? [`These are the deal's open findings${closed}:\n${findings.map(findingLine).join('\n')}`]
+        : []),
+      ...(items.length ? [`These are the checklist items already settled:\n${items.map(itemLine).join('\n')}`] : []),
+    ];
+    const question = 'Which of them could the new documents change? Think of knock-on effects, not only of matching '
+      + 'words: a contract that ends changes everything that rested on it. Name each by its id, with the id of the new '
+      + 'document that could change it.';
+    return `${blocks.join('\n\n')}\n\n${question}\nReply as JSON: {"affected": ["<finding or item id> <document id>"]}`;
+  }
+  /**
+   * The fast model's answer on some arrivals, findings and items, or null when it cannot say. A reply naming any id it
+   * was not shown, on either side of a pair, is a failed reply, asked again (#1162).
+   */
+  async function askAffected(part: DocRecord[], findings: Raised[], items: ChecklistItem[], model: string) {
+    const targets = [...findings.map((f) => f.id), ...items.map((it) => it.id)];
+    const docIds = part.map((r) => r.docId);
+    const unusable = (text: string) => !namesOnlyShown(text, [...targets, ...docIds])
+      || unknownInPairs(listOf(json<{ affected?: unknown }>(text, 'affected')?.affected), targets, docIds).length > 0;
+    const prompt = affectsPrompt(part, findings, items);
+    const input: Ask = { kind: 'affects', split: true, model, system: JSON_ONLY, prompt, unusable };
+    let reply: { affected?: unknown } | null;
+    try {
+      reply = await askJson<{ affected?: unknown }>(input, ['affected']);
+    } catch (e) {
+      if (unreachable(e)) throw e;
+      return null;
+    }
+    return reply && 'affected' in reply ? reply : null;
+  }
+  /** each pair of a usable affects reply, mapped back by exact id: a finding with the arrivals beside it, or an item */
+  function takeAffected(pairs: string[], part: DocRecord[], findings: Raised[], items: ChecklistItem[],
+    out: { findings: Map<string, DocRecord[]>; items: Set<string> }) {
+    for (const pair of pairs) {
+      const [target, ...docIds] = pair.split(' ');
+      const by = part.filter((r) => docIds.includes(r.docId));
+      if (items.some((it) => it.id === target)) out.items.add(target);
+      if (!findings.some((f) => f.id === target)) continue;
+      const had = out.findings.get(target) ?? [];
+      for (const r of by) if (!had.includes(r)) had.push(r);
+      out.findings.set(target, had);
+    }
   }
 
   const extras = {
