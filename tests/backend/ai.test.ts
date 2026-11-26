@@ -846,6 +846,23 @@ describe('a kept conversation', () => {
     expect(other.thread).toMatchObject({ id: 'conv_2', model: 'standard' }); expect(s.svc.removed).toEqual([gone.thread!.transcript]);
   });
 
+  it('a kept conversation citing a document it opened before, since gone, keeps its answer and drops that citation '
+    + '(#1162)', async () => {
+    const GONE = `doc_${'9'.repeat(24)}`;
+    const cites = (c: Call) => (c.prompt.includes('And the margin?')
+      ? { text: `The margin was 2.25% in ${GONE}. [1]`, sources: [{ doc: GONE, page: 2 }] }
+      : twoTurns(c));
+    const s = setup(reader, undefined, { talks: true, turn: cites });
+    const one = val(await s.ai.answer(ask('What is the lock-up?')));
+    const thread = { ...one.thread!, opened: [...one.thread!.opened, { dealId: 'd1', docId: GONE }] };
+    const later = { history: said(['What is the lock-up?']), thread };
+    const two = await s.ai.answer(ask('And the margin?', later));
+    expect(two).toMatchObject({ ok: true });
+    expect(val(two).text).toContain('The margin was 2.25%');
+    expect(val(two).sources).toEqual([]);
+    expect(val(two).thread!.opened).toContainEqual({ dealId: 'd1', docId: GONE });
+  });
+
   it('a chat reply whose JSON repair names a question id on no deal is never shown (#1105)', async () => {
     const repaired = { text: `It is 1.25x, per ${qid(99)}.`, sources: [] };
     const turn = (c: Call) => (c.prompt.startsWith('Your reply cannot be read') ? repaired : 'I think it is 1.25x');
