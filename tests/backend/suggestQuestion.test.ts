@@ -35,7 +35,7 @@ describe('the open question an answer addresses', () => {
   });
 
   it('an id not shown, or no id at all, is a failed reply asked again; still wrong, none is proposed', async () => {
-    for (const named of [qid(99), 'Q2', 2]) {
+    for (const named of [qid(99), 'Q2', 2, null]) {
       const s = setup((c) => (isSuggest(c) ? { question: named } : {}), {}, opts);
       const r = await s.ai.suggestQuestion!({ dealId: 'd1', answer, questions: questions(2) });
       expect(r.ok).toBe(false);

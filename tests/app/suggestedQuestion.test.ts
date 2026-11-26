@@ -184,3 +184,13 @@ it('an id the model names that was not offered is not suggested, though that que
   // the id that was not offered is never kept
   expect(env.store.get().ui.proposed[answer.id].map((p) => p.id)).toEqual([env.byText(OPERATING).id]);
 });
+
+it('an id named twice is kept once', async () => {
+  const env = await fixture(async ({ questions }) => {
+    const operating = named(questions, OPERATING);
+    return ok([...operating, ...operating]);
+  });
+  await ask(env.store, env.scope, 'What does the base case assume?');
+  const [answer] = env.answers();
+  expect(env.store.get().ui.proposed[answer.id]).toEqual([{ id: env.byText(OPERATING).id, text: OPERATING }]);
+});
