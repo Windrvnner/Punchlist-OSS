@@ -14,7 +14,7 @@ import { ChecklistPage } from './checklist';
 import { ConversationPage, Composer } from './conversation';
 import { QueueStrip } from './queueStrip';
 import { scopeOfRoute, scopeValid } from '../app/conversations';
-import { NewDealDialog, DeleteDealDialog } from './dialogs';
+import { AskFirst, NewDealDialog, DeleteDealDialog } from './dialogs';
 import { AddDealDialog, DealMore, RemoveDealDialog } from './addDeal';
 import { ExportQaDialog, ExportFindingsDialog } from './transfer';
 import { ImportDialog } from './qaImport';
@@ -440,14 +440,24 @@ function InterruptedBar() {
 
 function Interrupted({ id, what, where, onHide }: { id: string; what: string; where: string; onHide: () => void }) {
   const store = useStore();
+  // Discard drops what was typed into the action, so it asks first in the app's confirm (#1055)
+  const [asking, setAsking] = useState(false);
   const text = `${what} interrupted${where ? ` · ${where}` : ''}`;
+  const discard = () => {
+    setAsking(false);
+    void store.discardOp(id);
+  };
   return (
-    <Notice id={`interrupted-${id}`} class="intop" glyph="warn" full={text} onClose={onHide}
-      actions={[
-        { label: 'Retry', run: () => void store.retryOp(id) },
-        { label: 'Discard', run: () => void store.discardOp(id) },
-      ]}>
-      <NoticeWords text={text} />
-    </Notice>
+    <>
+      <Notice id={`interrupted-${id}`} class="intop" glyph="warn" full={text} onClose={onHide}
+        actions={[
+          { label: 'Retry', run: () => void store.retryOp(id) },
+          { label: 'Discard', run: () => setAsking(true) },
+        ]}>
+        <NoticeWords text={text} />
+      </Notice>
+      {asking && <AskFirst ask="Discard this interrupted action?" text={text} go="Discard"
+        onKeep={() => setAsking(false)} onGo={discard} />}
+    </>
   );
 }
