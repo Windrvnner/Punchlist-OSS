@@ -214,14 +214,9 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
     expect([d.got, d.runs <= 4, d.most <= bound(2000)]).toEqual([want(points(2000)), true, true]);
     // a stray preface with the last point left out, or the first left out with a stray item after: nothing misplaced.
     // The stray item's id has vowels, so it can never be one of the call's tags, which are drawn at random from
-    // consonants only ('xxx' could be drawn, and then the stray item was rightly placed as that point's question).
-    // A point asked alone takes the one question of its reply whatever its id (a model that numbers its answers), so
-    // these stray forms are given only for parts of more than one point
-    type Entry = { id?: string; text: string };
-    const preface = (it: Entry[]) => [{ text: 'Here are the questions:' }, ...it.slice(0, -1)];
-    const thanks = (it: Entry[]) => [...it.slice(1), { id: 'aei', text: 'Thank you.' }];
-    for (const f of [preface, thanks]) {
-      const e = await run((c) => ({ items: lines(c).length > 1 ? f(answer(c).items) : answer(c).items }), points(500));
+    // consonants only ('xxx' could be drawn, and then the stray item was rightly placed as that point's question)
+    for (const f of [(it: { id?: string; text: string }[]) => [{ text: 'Here are the questions:' }, ...it.slice(0, -1)], (it: { id?: string; text: string }[]) => [...it.slice(1), { id: 'aei', text: 'Thank you.' }]]) {
+      const e = await run((c) => ({ items: f(answer(c).items) }), points(500));
       val(e.r).forEach((t, k) => { expect([null, want(points(500))[k]]).toContain(t); });
     }
   });
