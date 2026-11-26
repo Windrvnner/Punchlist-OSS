@@ -73,13 +73,13 @@ function cellAt(line: string, column: number | undefined): string {
 }
 
 /**
- * The words a line's item or heading stands for, exactly as the file has them: a text line whole (its edge spaces
- * aside), a table row the cell the model's columns name: the item column for an item, the heading or subheading
- * column for a section or subsection row. '' when there are none.
+ * The words a line's item or heading stands for, exactly as the file has them, edge spaces and tabs included (#1215):
+ * a line that is not a table row whole, a table row the cell the model's columns name: the item column for an item,
+ * the heading or subheading column for a section or subsection row. '' when there are none.
  */
 function wordsOf(line: string, k: LineRead['k'], cells: ListCells | undefined): string {
-  // edge spaces are layout; with columns named the line is a table's one-cell row, written as cellText writes it
-  if (rowCells(line).length === 1) return cells ? uncellText(line.trim()) : line.trim();
+  // a line with no " | " is text, as it is: its backslashes and pipes are its own, whatever columns the model names
+  if (rowCells(line).length === 1) return line.trim() ? line : '';
   const column = k === 'item' ? cells?.item : k === 'section' ? cells?.heading : cells?.subheading;
   const cell = cellAt(line, column);
   return key(cell) ? cell : '';
@@ -96,11 +96,11 @@ export function unplaced(lines: string[], reading: ListReading): number[] {
 
 /**
  * The first reading, with the lines it left unplaced taken from a second reading of the whole list: what the first
- * placed is kept. A table is read by the first reading's columns, or by the second's when the first named none; a
- * line those columns cannot place stays unplaced.
+ * placed is kept. A table's columns are the first reading's, or the second's when the first's place no item or
+ * heading (none named, or named wrong); a line those columns cannot place stays unplaced.
  */
 export function fillUnplaced(lines: string[], first: ListReading, second: ListReading): ListReading {
-  const columns = first.cells ?? second.cells;
+  const columns = placesWords(lines, first) ? first.cells : (second.cells ?? first.cells);
   const reads = new Map(first.reads);
   for (const n of unplaced(lines, first)) {
     const again = second.reads.get(n);
@@ -109,12 +109,18 @@ export function fillUnplaced(lines: string[], first: ListReading, second: ListRe
   return columns ? { reads, cells: columns } : { reads };
 }
 
+/** whether the reading places any item or heading, by its own columns */
+const placesWords = (lines: string[], reading: ListReading): boolean => lines.some((line, i) => {
+  const r = reading.reads.get(i + 1);
+  return !!r && (r.k === 'item' || r.k === 'section' || r.k === 'subsection') && usable(line, r, reading.cells);
+});
+
 /** a reading is usable when its kind is known and an item or heading has words in its line */
 function usable(line: string, r: LineRead | undefined, cells: ListCells | undefined): boolean {
   if (!r) return false;
   if (r.k === 'left' || r.k === 'columns' || r.k === 'more') return true;
   if (r.k !== 'item' && r.k !== 'section' && r.k !== 'subsection') return false;
-  return !!wordsOf(line, r.k, cells);
+  return !!wordsOf(line, r.k, cells).trim();
 }
 
 /**
@@ -178,7 +184,8 @@ function place(tied: TiedOut, at: TieState, line: string, r: LineRead, cells: Li
   }
   if (r.k === 'more') {
     if (!at.last) return false;
-    at.last.text = `${at.last.text} ${line.trim()}`;
+    // the rest of the item as written, after a space (#1215)
+    at.last.text = `${at.last.text} ${line}`;
     at.last.lines.push(r.n);
     tied.count.more++;
     return true;

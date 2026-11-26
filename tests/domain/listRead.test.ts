@@ -20,9 +20,9 @@ describe('a list read whole by the model, tied out line by line', () => {
   it('accounts for every line, joins a wrapped item, and keeps each item under its heading', () => {
     const t = tieOut(LINES, reading(READ));
     expect(t.items.map((i) => [i.section, i.text, i.lines])).toEqual([
-      ['1. Site', '1.1  Title report for the whole site', [4]],
-      ['1. Site', '1.2  Leases cover the array and the gen-tie route', [5, 6]],
-      ['2. Permits', '2.1  Conditional use permit issued', [9]]]);
+      ['1. Site', '   1.1  Title report for the whole site', [4]],
+      ['1. Site', '   1.2  Leases cover the array and the         gen-tie route', [5, 6]],
+      ['2. Permits', '   2.1  Conditional use permit issued', [9]]]);
     expect(t.left).toEqual([1, 7]);
     expect(addsUp(t)).toBe(true);
     expect(t.count).toEqual({ lines: 9, items: 3, more: 1, headings: 2, blank: 1, left: 2 });
@@ -34,8 +34,21 @@ describe('a list read whole by the model, tied out line by line', () => {
     const t = tieOut(LINES, r);
     expect(t.left).toEqual([1, 4, 7, 9]);
     // the wrapped line of the next item still joins its own item, not one before it
-    expect(t.items.map((i) => i.text)).toEqual(['1.2  Leases cover the array and the gen-tie route']);
+    expect(t.items.map((i) => i.text)).toEqual(['   1.2  Leases cover the array and the         gen-tie route']);
     expect(addsUp(t)).toBe(true);
+  });
+
+  it('words an item and a heading as its line is written, edge spaces and tabs included (#1215)', () => {
+    const lines = ['\tPermits  ', '  Item one \t', '\tand more  '];
+    const t = tieOut(lines, reading(kinds([[1, 'section'], [2, 'item'], [3, 'more']])));
+    expect(t.items).toEqual([{ section: '\tPermits  ', text: '  Item one \t \tand more  ', lines: [2, 3] }]);
+  });
+
+  it('keeps a text line\'s own backslashes and pipes even when the model names columns for it', () => {
+    const lines = ['Check C:\\dir and a\\|b', 'Second'];
+    const cells = { item: 1 };
+    const t = tieOut(lines, reading(kinds([[1, 'item'], [2, 'item']]), cells));
+    expect(t.items.map((i) => i.text)).toEqual(lines);
   });
 
   it('never joins a "more" line to an item across a heading', () => {
@@ -115,6 +128,15 @@ describe('a list read whole by the model, tied out line by line', () => {
     expect(unplaced(lines, filled)).toEqual([]);
   });
 
+  it('reads the table from the second reading\'s columns when the first reading\'s place no row', () => {
+    const lines = tableLines(['No', 'Description'], [['1', 'Site'], ['2', 'Title report']]);
+    const first = reading(kinds([[1, 'columns'], [2, 'item'], [3, 'item']]), { item: 5 });
+    const second = reading(kinds([[1, 'columns'], [2, 'item'], [3, 'item']]), { item: 2 });
+    const filled = fillUnplaced(lines, first, second);
+    expect(filled.cells).toEqual({ item: 2 });
+    expect(tieOut(lines, filled).items.map((i) => i.text)).toEqual(['Site', 'Title report']);
+  });
+
   it('keeps a cell whole when its own text holds " | " or a backslash, and the columns after it in place', () => {
     const rows = [['1', 'Check Debt | Equity obligations', 'Debt'], ['2', 'Path C:\\\\dir\\| x', 'Equity']];
     const lines = tableLines(['No', 'Requirement', 'Area'], rows);
@@ -170,6 +192,6 @@ describe('a list read whole by the model, tied out line by line', () => {
     expect(t.count.items).toBe(1900);
     expect(t.left).toEqual([]);
     expect(addsUp(t)).toBe(true);
-    expect(t.items[1899]).toMatchObject({ section: '100. Area 100', text: '100.19  Item 19 of area 100 is in place' });
+    expect(t.items[1899]).toMatchObject({ section: '100. Area 100', text: '   100.19  Item 19 of area 100 is in place' });
   });
 });
