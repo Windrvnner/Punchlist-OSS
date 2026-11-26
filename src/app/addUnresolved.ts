@@ -5,7 +5,7 @@ import { AddUnresolved, UNRESOLVED_LINK_CHANGED } from './commands/addUnresolved
 import { unresolvedPoints, unresolvedTargets, type State, type Unresolved } from './state';
 import type { Store } from './store';
 import {
-  canLinkUnresolved, isApprovedLink, linkApproval, unresolvedPointFingerprint,
+  canLinkUnresolved, confirmedLinks, isApprovedLink, linkApproval, unresolvedPointFingerprint,
   type ApprovedLinks, type UnresolvedLink,
 } from './unresolvedLinks';
 
@@ -85,13 +85,18 @@ export async function prepareUnresolved(
   if (progress?.signal.aborted) return;
   const state = store.get();
   if (!Array.isArray(state.checklists[dealId])) return fail({ kind: 'failed', message: UNREAD_CHECKLIST });
-  const { points, links } = unresolvedPoints(state, dealId, approved);
+  const { points, links: kept, candidates } = unresolvedPoints(state, dealId, approved);
   progress?.count(points.length);
   if (!points.length) return ok({ points: [], links: [], out: [] });
   const result = await phrasePoints(store, dealId, points);
   if (progress?.signal.aborted) return;
   if (!result.ok) return result;
+  // Asked only once the points are phrased: a failed phrasing makes no model call for links.
+  const confirmed = await confirmedLinks(store.services.ai, dealId, candidates);
+  if (progress?.signal.aborted) return;
   const byKey = new Map(points.map((p) => [p.key, p]));
+  const order = new Map(points.map((p, index) => [p.key, index]));
+  const links = [...kept, ...confirmed].sort((a, b) => order.get(a.point)! - order.get(b.point)!);
   const suggested = links.map((link) => ({ point: byKey.get(link.point)!, q: link.q }));
   return ok({ ...drafts(points, result.value), links: suggested });
 }

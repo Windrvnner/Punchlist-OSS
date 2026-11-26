@@ -138,16 +138,17 @@ describe('the firm’s checklist and each deal’s items', () => {
     const got = unresolvedPoints(st(), a);
     // the model gap has a question already; the finding and two gaps do not
     expect(got.points.map((p) => [p.kind, p.what])).toEqual([['finding', f.title], ['gap', texts[0]], ['gap', texts[1]]]);
-    // no question is offered for a point by similar words: only a link a person approved is kept
+    // no link is approved yet; the insurance gap's question names all its words: a candidate for the model's check
     expect(got.links).toEqual([]);
+    expect(got.candidates.map((c) => [c.point.key, c.q.n, c.confidence])).toEqual([['i:' + insurance, 1, 100]]);
     // a turned-off item keeps its last result in the rows, but is not offered (as the Checklist page drops it), nor is a finding raised on it
     const off = (x: ReturnType<typeof st>, id: string) => ({ ...x, items: { ...x.items, [id]: { ...x.items[id], off: true } } });
     expect(unresolvedPoints(off(st(), direct), a).points.map((p) => p.what)).toEqual([f.title, texts[1]]);
     expect(unresolvedPoints({ ...off(st(), direct), findings: { ...st().findings, [f.id]: { ...f, itemId: direct } } }, a).points.map((p) => p.what)).toEqual([texts[1]]);
     // the person keeps two new questions and the link; the store must see the checklist to check the items
     (A.store as any).set(st());
-    const q = Object.values(A.store.get().questions).find((x) => x.dealId === a && x.n === 1)!;
-    const approval = linkApproval({ q, point: got.points.find((point) => point.key === 'i:' + insurance)! });
+    const { q, point } = got.candidates[0];
+    const approval = linkApproval({ q, point });
     const r = await A.store.dispatch(AddUnresolved, {
       dealId: a,
       add: [
