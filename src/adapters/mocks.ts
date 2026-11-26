@@ -566,4 +566,3 @@ export async function mockFirstPass(repo: Announcing, dealId: string, dealName: 
     if (r.ok) repo.announce('finding', id);
   }
 }
-
