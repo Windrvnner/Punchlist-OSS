@@ -65,11 +65,22 @@ function isKeptChoices(choices: QaChoices | undefined) {
 }
 
 /** How many parties the Submitted by column names, in any case or spacing. */
-export function qaImportPartyCount(table: ImportTable | null, mapping: Mapping | null) {
+function qaImportPartyCount(table: ImportTable | null, mapping: Mapping | null) {
   const column = mapping?.askedBy;
   if (!table || column == null) return 0;
   const names = table.rows.map((row) => String(row[column] ?? '').trim().toLowerCase());
   return new Set(names.filter(Boolean)).size;
+}
+
+/**
+ * Whether the file becomes the deal's Q&A log. It starts so only for a consolidated log, one with two or more parties
+ * under Submitted by; one party's own list is not the deal's log. Once the person checks or unchecks it (touched),
+ * it stays as they set it.
+ */
+export function qaImportMakesLog(
+  table: ImportTable | null, mapping: Mapping | null, choice: { makeLog: boolean; touched: boolean },
+) {
+  return choice.touched ? choice.makeLog : qaImportPartyCount(table, mapping) >= 2;
 }
 
 /** Save the latest file and choices, except while the correlated submission owns them. */

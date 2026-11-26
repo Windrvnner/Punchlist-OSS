@@ -9,7 +9,7 @@ import { FileInput, PickFileRow } from './fileDrop';
 import { proposeLayout, previewImport, type ImportLocation, type ImportTable } from '../app/transfer';
 import type { ImportField } from '../domain/importExport';
 import {
-  clearQaImport, keepQaImport, keptQaImport, loadQaImport, prepareQaImport, qaImportPartyCount,
+  clearQaImport, keepQaImport, keptQaImport, loadQaImport, prepareQaImport, qaImportMakesLog,
   replaceQaImport, submitQaImport, summarizeQaImport, type ImportMode, type QaChoices,
 } from '../app/qaImport';
 import { QaImportLayout, type QaImportLayoutView } from '../app/qaImportLayout';
@@ -73,15 +73,12 @@ function useQaImportState(store: Store, dealId: string, fresh: boolean) {
   const [path, setPath] = useState<string | null>(choices?.path ?? null);
   const [mode, setMode] = useState<ImportMode>(choices?.mode ?? 'merge');
   const [answered, setAnswered] = useState(!!choices?.answered);
-  // the file becomes the deal's log only if this stays checked. It starts checked only for a
-  // consolidated log, one with two or more parties under Submitted by; one party's own list is not the deal's log
-  // Once the person checks or unchecks it (touched), the app leaves it as they set it.
+  // the file becomes the deal's log only if this stays checked; the app sets it until the person does (touched)
   const [makeLog, setMakeLog] = useState(!!choices?.makeLog);
   const touched = useRef(!!choices?.touched);
-  const parties = qaImportPartyCount(table, mapping);
   useEffect(() => {
-    if (!touched.current) setMakeLog(parties >= 2);
-  }, [parties, table]);
+    setMakeLog((now) => qaImportMakesLog(table, mapping, { makeLog: now, touched: touched.current }));
+  }, [table, mapping]);
   const [busy, setBusy] = useState<Busy>('');
   const [error, setError] = useState('');
   const [restart, setRestart] = useState(false);   // "start over" asks first, in the footer
