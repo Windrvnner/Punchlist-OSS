@@ -7,7 +7,7 @@
 import type { ModelThread } from '../ports';
 import { curable } from './retry';
 import type { AgentRun } from './agentRun';
-import { codeOf, type Sent, type TalkAsk, type ToolMode } from './agentKit';
+import { codeOf, type Sent, type TalkAsk, type ToolMode, type Unusable } from './agentKit';
 import { NATIVE_TOOLS, toolSpecs } from './agentPrompts';
 
 /** one turn of the main session, as the agent's loop puts it together */
@@ -28,6 +28,8 @@ export interface Turn {
   system: string;
   keys: string[];
   shape: string;
+  /** a reply the answer cannot use however it reads: a failed reply, asked again (#1105) */
+  unusable: Unusable;
 }
 
 /** a turn's message to the kept conversation */
@@ -86,6 +88,7 @@ export class KeptConversation {
       ...(this.mode !== 'inline' ? { tools: toolSpecs(this.width) } : {}),
       ...(message.results ? { results: message.results } : {}),
       ...(tried ? { tried } : {}),
+      unusable: turn.unusable,
     };
     try {
       const talked = await kit.talk!(input, turn.keys, turn.shape);

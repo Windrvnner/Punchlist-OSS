@@ -108,6 +108,11 @@ describe('complete families: what the design promises', () => {
     expect(f.of.get('Projects/Amendment No. 1 to EPC Contract.pdf')).toHaveLength(2); expect(f.alone.has('Projects/Amendment No. 1 to EPC Contract.pdf')).toBe(false);
     expect(f.alone.has('Projects/Relecloud/EPC/Schedule 1 - Scope.pdf')).toBe(true);
   });
+  it('a single letter tells two agreements apart: an amendment to Class B goes under Class B alone (#1147)', () => {
+    const classes = ['Equity/Class A Membership Agreement.pdf', 'Equity/Class B Membership Agreement.pdf'];
+    const amendment = 'Equity/First Amendment to Class B Membership Agreement.pdf';
+    expect(read([...classes, amendment]).of.get(amendment)).toEqual(['Equity/Class B Membership Agreement.pdf']);
+  });
   it('undated monthly records of several assets stay apart; a running number after the record\'s word is a period', () => {
     expect(read([1, 2, 3].map((n) => `Rep/Monthly Report - Solar ${n}.pdf`)).series).toEqual([]);
     expect(read([1, 2, 3].map((n) => `Rep/Wind Farm ${n} Monthly Reports/Report.pdf`)).series).toEqual([]);

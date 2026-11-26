@@ -106,7 +106,7 @@ describe('a batch still out when its round is merged away (#795)', () => {
         expect(ra.find((r) => r.startsWith(`c${FOUND}:`))).toMatch(new RegExp(`^c${FOUND}:finding:f_`));
         const found = val(await p.A.backend.repo.list('finding', p.dealId));
         expect(found.map((l) => (l.envelope.data as { itemId?: string }).itemId)).toEqual([`c${FOUND}`]);
-      } finally { p.close(); }
+      } finally { await p.close(); }
     }, 120000);
   }
 
@@ -117,7 +117,7 @@ describe('a batch still out when its round is merged away (#795)', () => {
       await allEnded(p, 60000);
       const ra = await settled(p, () => true);
       expect(ra.find((r) => r.startsWith(`c${FOUND}:`))).toBe(`c${FOUND}:satisfied`);   // as the later check left it
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 120000);
 
   for (const release of ['closed', 'slept'] as const) it(`once the PC has ${release}, it is not written`, async () => {
@@ -130,6 +130,6 @@ describe('a batch still out when its round is merged away (#795)', () => {
       }, 60000);
       const aId = p.A.backend.installId;
       expect(logOf(p.sync.A, p.dealId).filter((l) => l.pc === aId && l.item)).toEqual([]);
-    } finally { p.close(); }
+    } finally { await p.close(); }
   }, 120000);
 });

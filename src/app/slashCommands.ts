@@ -37,7 +37,7 @@ export function slashCommands(scope: Scope, text: string): SlashCommand[] | null
 export function runSlashCommand(store: Store, scope: Scope, id: SlashCommandId) {
   const readOnly = store.readOnly();
   if (readOnly) {
-    store.toast(readOnly);
+    store.toast(readOnly, 'warn');
     return;
   }
   if (id !== 'newDeal' && scope.kind !== 'deal') return;

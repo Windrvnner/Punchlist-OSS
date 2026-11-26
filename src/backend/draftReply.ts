@@ -11,19 +11,18 @@ const SENTENCE_END = /(?<=[.!?](?:\s*\[\d+\])*)(\s+)(?!\[)/;
 /**
  * Take the model's credits to earlier responses out of its draft (#286).
  *
- * The model is shown earlier responses only as R1, R2, … and never their question numbers, so a credit can only name
- * one of those handles. A calendar quarter ("Q3 2027") can never be mistaken for one, whatever the words around it.
+ * The model is shown earlier responses only by their questions' ids and never their numbers, so a credit can only name
+ * one of those ids (#1105). A calendar quarter ("Q3 2027") can never be mistaken for one, whatever the words around it.
  * A source that only a dropped sentence cited goes with it and the markers that remain are renumbered; a source the
  * reply listed without any marker stays.
  */
 export function withoutDraftCredits(
   reply: { text: string; sources: Source[] },
-  handleCount: number,
+  shownIds: readonly string[],
 ): { text: string; sources: Source[] } {
-  if (!handleCount) return reply;
-  const credit = new RegExp(`\\bR(?:${Array.from({ length: handleCount }, (_, k) => k + 1).join('|')})\\b`);
+  if (!shownIds.length) return reply;
   const parts = reply.text.split(SENTENCE_END);
-  const credited = (part: number) => credit.test(parts[part]);
+  const credited = (part: number) => shownIds.some((id) => parts[part].includes(id));
   if (!parts.some((_, part) => part % 2 === 0 && credited(part))) return reply;
   const text = joinSentences(parts, credited);
 

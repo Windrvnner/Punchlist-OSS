@@ -36,8 +36,8 @@ function noticeShowing(outcome: Failure | null, signedOut = false) {
   vi.spyOn(store, 'readOnly').mockReturnValue(signedOut ? SIGNED_OUT : null);
   const undo = vi.spyOn(store, 'undo').mockResolvedValue(outcome ? fail(outcome) : ok({ opId: 'op_undo' }));
   const action = { label: 'Undo', opId: 'op_1' };
-  const id = store.toast(TEXT, action);
-  return { store, undo, notice: { id, text: TEXT, action } };
+  const id = store.toast(TEXT, 'done', action);
+  return { store, undo, notice: { id, text: TEXT, glyph: 'done' as const, action } };
 }
 const shown = (store: Store) => store.get().ui.toasts
   .map((t) => ({ text: t.text, sticky: t.sticky, action: t.action }));
@@ -86,7 +86,7 @@ describe('a notice\'s Undo', () => {
 
   it('signed in, keeping until sign-in does nothing', () => {
     const { store } = noticeShowing(null);
-    expect(keepUntilSignedIn(store, 'Couldn’t save ·', { label: 'Retry', run: () => {} })).toBe(false);
+    expect(keepUntilSignedIn(store, 'Couldn’t save ·', 'warn', { label: 'Retry', run: () => {} })).toBe(false);
     expect(shown(store)).toHaveLength(1);
   });
 

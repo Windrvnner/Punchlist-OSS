@@ -54,7 +54,7 @@ export function ExportQaDialog({ dealId }: { dealId: string }) {
         {firms.map((firm) => <label key={firm}>
           <input type="checkbox" checked={filter.askedBy.includes(firm)}
             onChange={(e) => pickFirm(firm, checkedOf(e))} />
-          <span>{firm.trim() || 'Not recorded'}</span><span class="c">{firmCounts.get(firm)}</span>
+          <span>{firm.trim() ? firm : 'Not recorded'}</span><span class="c">{firmCounts.get(firm)}</span>
         </label>)}
       </div></div>
       <div class="srow"><div class="k">Workstream</div>
@@ -118,7 +118,7 @@ function useExport(store: Store, write: () => Promise<Result<number | 'canceled'
     }
     if (written.value === 'canceled') return;
     store.ui({ dialog: null });
-    store.toast(`Exported ${plural(written.value, word)} to Excel`);
+    store.toast(`Exported ${plural(written.value, word)} to Excel`, 'done');
   };
   return { busy, error, close, run };
 }

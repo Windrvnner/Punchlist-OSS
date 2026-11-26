@@ -34,8 +34,10 @@ async function fixture(partial: boolean) {
   val(await store.dispatch(CreateFinding, { dealId, title: alphaTitle, workstream: 'Legal' }));
   val(await store.dispatch(CreateQuestion, { dealId, text: base }));
   const initial = await previewOf(store, dealId);
-  const link = initial.links.find((suggestion) => suggestion.point.what === alphaTitle)!;
-  expect(link.q.text).toBe(base);
+  // no question is matched to a point by similar words: the pair is one a person approved
+  expect(initial.links).toEqual([]);
+  const point = initial.points.find((p) => p.what === alphaTitle)!;
+  const link = { point, q: Object.values(store.get().questions).find((q) => q.text === base)! };
   const approved = new Map([[link.point.key, linkApproval(link)]]);
   return { store, repo, dealId, link, approved };
 }

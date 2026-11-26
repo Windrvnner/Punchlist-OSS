@@ -212,7 +212,7 @@ function leftOutRow(source: ListSource, lines: string[]) {
         <label class="rv-row" key={line} title={`Line ${line}. Check to import it as an item, where it sits`}>
           <input type="checkbox" data-bringin={line} checked={source.bringIn.has(line)}
             onChange={() => source.flipBringIn(line)} />
-          <div class="rv-new">{lines[line - 1].trim()}</div>
+          <div class="rv-new">{lines[line - 1]}</div>
         </label>))}
       </div>
     </div></div>
