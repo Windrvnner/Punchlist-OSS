@@ -384,3 +384,4 @@ These decisions are built and wait to be confirmed:
 - Periodic records whose names differ only by a period are a series and take one place in the core set, their newest member's; every document stays searchable (docs/core-families-design.md).
 - An issues list or an advisor report is read page after page to its end, however long it is; a page that only repeats rows or points already given fails the read, so a model that repeats itself cannot read on for ever (#1026).
 - A document's word index keeps its numbers, and a Word or PowerPoint file is indexed from everything its PDF shows: body, headers, footers, footnotes, endnotes and speaker notes.
+- A text or CSV file is read as the program that saved it wrote it (UTF-8, UTF-16 or Windows-1252), for lists and for the model service alike, with or without a byte-order mark (#1024).

@@ -17,6 +17,7 @@ import type { ModelService } from './service';
 import type { SignInToken } from './signInToken';
 import type { Converter } from './convert';
 import { SERVICE, control } from '../control';
+import { decodeText, encodingOf, TEXT_FILE } from '../domain/textEncoding';
 import { cutOff, limitsOf, saysTooLong, tooLong } from './limits';
 import { retryDroppedRequest } from './requestRetry';
 
@@ -132,15 +133,25 @@ async function sheetText(convert: Converter, file: { name: string; bytes: Uint8A
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
-/** what goes into the store for a file: a PDF as it is, a spreadsheet as text, any other text as it is */
+/**
+ * a text file as UTF-8: its own bytes when they are UTF-8, else (for a .csv or plain text file) read as a spreadsheet
+ * program reads it: UTF-16, with or without a mark, or Windows-1252
+ */
+function plainTextBytes(file: { name: string; bytes: Uint8Array }): Uint8Array {
+  const encoding = encodingOf(file.bytes);
+  if (encoding === 'utf-8' || encoding === 'utf-8-bom') return file.bytes;
+  if (TEXT_FILE.test(file.name)) return new TextEncoder().encode(decodeText(file.bytes));
+  throw new Error(`${SERVICE} cannot read ${file.name}: only PDFs, text and spreadsheets`);
+}
+
+/** what goes into the store for a file: a PDF as it is, a spreadsheet as text, other text as UTF-8 */
 export async function storable(file: { name: string; bytes: Uint8Array }, convert?: Converter): Promise<{ bytes: Uint8Array; type: string }> {
   if (file.bytes[0] === 0x25 && file.bytes[1] === 0x50 && file.bytes[2] === 0x44 && file.bytes[3] === 0x46) return { bytes: file.bytes, type: 'application/pdf' };   // %PDF
   if (SHEET.test(file.name)) {
     if (!convert) throw new Error(`${file.name} is a spreadsheet, and there is no converter to read it with`);
     return { bytes: new TextEncoder().encode(await sheetText(convert, file)), type: 'text/plain' };
   }
-  try { new TextDecoder('utf-8', { fatal: true }).decode(file.bytes); } catch { throw new Error(`${SERVICE} cannot read ${file.name}: only PDFs, text and spreadsheets`); }
-  return { bytes: file.bytes, type: 'text/plain' };
+  return { bytes: plainTextBytes(file), type: 'text/plain' };
 }
 
 export function claudeService(o: ClaudeOptions): ModelService & { use: ClaudeUse } {
