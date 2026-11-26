@@ -10,6 +10,7 @@
  * than one file would do, it is unclear, and it is not read for its changes. Where no file of that name is in the data
  * room at all, it stands alone: it is read by itself, still as the model's reading. Nothing here asks a model.
  */
+import { indexWords } from './words';
 import { families, roomPath, inPrecedents, versionOf } from './families';
 
 const PDF = /\.pdf$/i;
@@ -47,8 +48,11 @@ export function coverOf(first: string): string | null {
 const namedAt = (cover: string, name: string) => { const c = ` ${base(cover)} `; const n = ` ${base(name)} `; return n.trim() ? c.lastIndexOf(n) : -1; };
 /** whether a cover names another file after `name`, found at `at`: then `name` is the original, not the newer draft */
 const namedLater = (cover: string, name: string, at: number) => /\s(?:docx?|pdf|rtf)\s/.test(` ${base(cover)} `.slice(at + ` ${base(name)}`.length).replace(/^\s*(?:docx?|pdf|rtf)\s/, ' '));
-/** a name's first word: both sides of "A vs B" share it when they are two drafts of one document */
-const head = (folded: string) => folded.split(' ').find((w) => /\p{L}{2}/u.test(w));
+/**
+ * a name's first index word, numbers and short words included, filler words left out (#1220): both sides of
+ * "A vs B" share it when they are two drafts of one document
+ */
+const head = (folded: string) => indexWords(folded)[0];
 
 /** what blacklines need of a document: its id, name, place in the data room, when first seen, and its cover page if it has one */
 export interface BlacklineDoc { docId: string; name: string; folder: string; rel: string; seen?: string; cover?: string; /** the other places the same file is in */ copies?: { folder: string; rel: string; name?: string }[] }

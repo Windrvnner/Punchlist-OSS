@@ -31,6 +31,14 @@ describe('blacklines', () => {
     ]);
     expect(Object.fromEntries(m)).toEqual({ vs: 'v4', both: 'ex', old: null, us: 'tm' });
   });
+  it('compares the first index word of "A vs B", so a number or a short token in it counts (#1220)', () => {
+    const m = cleanDrafts([
+      doc('q', 'Tax/Q3 Report vs Q2 Report.pdf'), doc('q3', 'Tax/Q3 Report.docx'),   // two periods, not two drafts
+      doc('om', 'Tech/O&M Manual v2 vs O&M Manual v1.pdf'), doc('omm', 'Tech/O&M Manual v2.docx'),  // one draft name
+      doc('n', 'Deal/2024 Budget v2 vs 2024 Budget v1.pdf'), doc('nb', 'Deal/2024 Budget v2.xlsx'),
+    ]);
+    expect(Object.fromEntries(m)).toEqual({ om: 'omm', n: 'nb' });
+  });
   it('takes "X Redline to Y" as a blackline of X', () => {
     const m = cleanDrafts([
       doc('a', 'Deal/Project Bellows SPA Redline to Project Bellows SPA v1.pdf'), doc('pa', 'Deal/Project Bellows SPA.docx'),
