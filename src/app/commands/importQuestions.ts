@@ -14,7 +14,7 @@ import { Question, Finding, Tombstone, DealId, QuestionId, FindingId, QuestionSt
 import { setResponse, setQuestionStatus, checkQuestion } from '../../domain/transitions';
 import { numbering } from './questions';
 import { matchQuestions, withAccepted, AcceptedMatch } from '../../domain/qaMatch';
-import { sameText, type ImportRow } from '../../domain/importExport';
+import { sameText, sameWords, type ImportRow } from '../../domain/importExport';
 import { ok, fail, notFound, rejected } from '../../domain/result';
 import { dealQuestions, nextQuestionNumber } from '../state';
 import { derivedId } from '../../domain/derivedId';
@@ -144,7 +144,11 @@ export const ImportQuestions = define({
       if (row.response.trim() && !sameText(row.response, q.response)) {         // only spaces is no response, as when typed in the app
         const linked = linkedOf(q);
         // the response was written by whoever the file says responded, not by the person running the import (who is in the history entry); a row that names nobody claims no author.
-        const prov = { origin: 'human' as const, sources: [], actor: row.respondedBy, at: ctx.at };
+        // The same words with other spaces or line breaks are still the words the response came with: its origin and
+        // sources stay, and the file's text is what is stored (#1215).
+        const prov = q.provenance && sameWords(row.response, q.response)
+          ? q.provenance
+          : { origin: 'human' as const, sources: [], actor: row.respondedBy, at: ctx.at };
         const r = setResponse(q, row.response, prov, linked, c);
         if (!r.ok) return r;
         q = { ...r.value.question.record, text: q.text };

@@ -669,7 +669,7 @@ export function nodeAi(o: AiOptions) {
     const at = new Map(tags.map((t, m) => [t, m]));
     return (listOf(reply?.items) as { id?: unknown; text?: unknown }[]).map((x) => ({
       m: typeof x?.id === 'string' ? at.get(x.id.trim().toLowerCase()) : undefined,
-      text: typeof x?.text === 'string' ? x.text.replace(/\s+/g, ' ').trim() : '',
+      text: typeof x?.text === 'string' && x.text.trim() ? x.text : '',   // as the model wrote it (#1215)
     }));
   };
   /** the places a reply gives more than one question: such a question is not known to belong to either */
@@ -2289,7 +2289,7 @@ export function nodeAi(o: AiOptions) {
       const verdict = verdictOf(reply);
       if (!verdict) return fail({ kind: 'failed', message: UNREAD_REPLY });
       // one short line on the card, however much it wrote
-      return ok({ verdict, why: (strings(reply!.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 200) });
+      return ok({ verdict, why: prose(reply!.why)[0] ?? '' });
     },
     /**
      * Which open questions an answer addresses (#1120): the standard model reads the answer and the questions, each by
@@ -2364,7 +2364,7 @@ export function nodeAi(o: AiOptions) {
           if (n === null || n < 1 || n > part.length) continue; if (n <= last) inOrder = false; last = Math.max(last, n);
           const unchanged = texts.length === 1 && texts[0].trim() === part[n - 1].trim();
           if (!texts.length || unchanged || got.has(n - 1)) continue;
-          got.set(n - 1, { text: texts[0], why: (strings(x.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 120), ...(texts.length > 1 ? { also: texts.slice(1) } : {}) });
+          got.set(n - 1, { text: texts[0], why: prose(x.why)[0] ?? '', ...(texts.length > 1 ? { also: texts.slice(1) } : {}) });
         }
         // a cut reply listed in order has dealt with every item up to its last whole one; out of order, every item it did not reword is asked again
         return { got, ...(cut ? { cut: inOrder ? range(last, part.length) : range(0, part.length).filter((k) => !got.has(k)) } : {}) };
@@ -2483,7 +2483,7 @@ export function nodeAi(o: AiOptions) {
             const x = shown[a - 1], y = shown[b - 1]; const pair = { a: x, b: y < n ? y : y - n, inAgainst: y >= n };
             if (!pair.inAgainst && pair.b < pair.a) [pair.a, pair.b] = [pair.b, pair.a];
             const k = `${pair.a}:${pair.b}:${pair.inAgainst}`; if (seen.has(k)) continue; seen.add(k);
-            out.push({ ...pair, why: (strings(p.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 120) });
+            out.push({ ...pair, why: prose(p.why)[0] ?? '' });
           }
         }
       };
@@ -2691,7 +2691,7 @@ export function nodeAi(o: AiOptions) {
       : `This finding was raised on the deal earlier.\nTitle: ${f.title}\nAs written: ${f.body.join(' ').replace(/\s*\[\d+\]/g, '')}${await responsesOn(dealId, f.id, heard)}\n\nGoing by the documents as they are now, and any responses above, does it still stand as written? It does not if a document or a response now says otherwise, settles it, or makes it worse.\nReply as JSON: {"stands": true, "why": "one line"}`;
     const reply = await askJson<{ stands?: unknown; why?: unknown }>({ kind: 'verify', model, system: JSON_ONLY, files, prompt: `Documents:\n${listing}\n\n${ask}` }, ['stands', 'why']);
     const said = typeof reply?.stands === 'boolean' ? reply.stands : ['true', 'yes'].includes(word(reply?.stands)) ? true : ['false', 'no'].includes(word(reply?.stands)) ? false : null;
-    return said === null ? null : { stands: said, why: typeof reply!.why === 'string' ? reply!.why.replace(/\s+/g, ' ').trim().slice(0, 200) : '' };
+    return said === null ? null : { stands: said, why: typeof reply!.why === 'string' ? reply!.why : '' };
   }
   /**
    * Mark an open finding as one to reassess, with the reason in a few plain words. This is the one thing the backend

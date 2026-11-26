@@ -1055,13 +1055,13 @@ describe('drafts, reassessments, the brief, the import layout and whether an ans
     const wrong = await setup(() => ({ sheet: 'Nowhere', headerRow: 1, fields: {} })).ai.layout!({ fileName: 'log.xlsx', bytes: new Uint8Array(), sheets, fields: ['text'] }); expect(!wrong.ok && wrong.error.message).toBe('No table found');
   });
 
-  it('whether an answer addresses a question is judged by the standard model from the two texts alone, in one short line', async () => {
+  it('whether an answer addresses a question is judged by the standard model from the two texts alone, and its reason is kept as written', async () => {
     const s = setup(() => ({ verdict: ' Partly ', why: 'It gives the figure the base case uses,\n  not where it comes from.' }));
     const i = { dealId: 'd1', question: 'Which operating assumption does the base case use, and where does it come from?', answer: 'The base case uses 98% availability.' };
-    expect(val(await s.ai.addresses!(i))).toEqual({ verdict: 'partly', why: 'It gives the figure the base case uses, not where it comes from.' });
+    expect(val(await s.ai.addresses!(i))).toEqual({ verdict: 'partly', why: 'It gives the figure the base case uses,\n  not where it comes from.' });
     expect(s.calls.map((c) => c.model)).toEqual(['standard']); expect(s.calls[0].files).toEqual([]);   // no documents go with it
     expect(s.calls[0].prompt).toContain(i.question); expect(s.calls[0].prompt).toContain(i.answer);
-    const long = setup(() => ({ verdict: 'no', why: 'x'.repeat(500) })); expect(val(await long.ai.addresses!(i)).why).toHaveLength(200);
+    const long = setup(() => ({ verdict: 'no', why: 'x'.repeat(500) })); expect(val(await long.ai.addresses!(i)).why).toHaveLength(500);
     const odd = setup(() => ({ verdict: 'maybe', why: 'Hard to say.' }));
     const oddResult = await odd.ai.addresses!(i);
     expect(!oddResult.ok && oddResult.error.message).toBe('The AI’s reply could not be read');

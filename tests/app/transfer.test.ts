@@ -93,7 +93,7 @@ describe('export and import through the ports', () => {
     const rows = prepareImport(t.value.rows, suggestMapping(t.value.columns)).rows;
     expect(previewImport(store, dealId, 'merge', rows)).toMatchObject({ ok: true, value: { changes: [{ n: 1, field: 'Response', from: 'The lock-up is 1.10x.', to: 'The lock-up  is 1.10x.\n', spacing: true }] } });
     await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows });
-    const kept = { response: 'The lock-up  is 1.10x.\n', provenance: { origin: 'human' } };
+    const kept = { response: 'The lock-up  is 1.10x.\n', provenance: { origin: 'ai', sources: was.provenance!.sources } };
     expect(store.get().questions[q1.id]).toMatchObject(kept);
     expect(was.provenance).toMatchObject({ origin: 'ai' });
     // other words are a new response, written by whoever the file says responded
@@ -152,7 +152,7 @@ describe('export and import through the ports', () => {
     expect(store.get().questions[first.id].askedBy).toBe('Lender A');
   });
 
-  it('a file response differing from an accepted draft only in spaces is the file’s own: origin human', async () => {
+  it('a file response differing from an accepted draft only in spaces is stored as the file has it, origin kept', async () => {
     const { store, dealId, first } = await oneQuestion();
     await store.dispatch(RequestDraft, { dealId, questionId: first.id });
     for (let i = 0; i < 100 && store.get().questions[first.id].draft?.status !== 'found'; i++) {
@@ -162,7 +162,9 @@ describe('export and import through the ports', () => {
     const text = store.get().questions[first.id].response;
     const rows = fileRows(`Number,Question,Response\n1,One,"${text}  "\n`);
     await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows });
-    expect(store.get().questions[first.id].provenance).toMatchObject({ origin: 'human' });
+    const kept = store.get().questions[first.id];
+    expect(kept.response).toBe(`${text}  `);
+    expect(kept.provenance).toMatchObject({ origin: 'ai' });
   });
 
   it('nothing longer than one Excel cell is ever saved, so the Q&A log exports whole and comes back unchanged', async () => {
