@@ -44,6 +44,18 @@ describe('a notice shows the glyph it was raised with', () => {
     expect(warning).not.toBe(check);
   });
 
+  it('the same words raised as done and as warn show the glyph of each argument', async () => {
+    const { store, host } = await start();
+    await act(() => { store.toast('Saved', 'done'); });
+    const doneGlyph = glyphs(host)[0];
+    await act(() => { store.toast('Same words', 'done'); });
+    await act(() => { store.toast('Same words', 'warn'); });
+    const [, sameDone, sameWarn] = glyphs(host);
+    expect(store.get().ui.toasts.map((x) => x.glyph)).toEqual(['done', 'done', 'warn']);
+    expect(sameDone).toBe(doneGlyph);
+    expect(sameWarn).not.toBe(doneGlyph);
+  });
+
   it('a kept notice re-raised after a restart keeps its glyph', async () => {
     const first = await start();
     await act(() => { first.store.toast('Changes kept', 'done', undefined, 'kept'); });
