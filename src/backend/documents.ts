@@ -529,10 +529,9 @@ export function nodeDocuments(o: DocumentsOptions) {
       const place = [d, ...(d.copies ?? [])].find((p) => p.folder === ATTACHED);
       if (!place || paged(d.name) || d.words !== undefined) continue;
       const at = path.join(attachments, place.rel);
-      // an attached file is named by its contents, so it never changes: only a restart reads a failed one again
-      const words = unpagedHere.has(at) ? undefined : await sheetWords(at, dealId, d.docId);
+      // a failed read is read again on every run, never skipped (#427)
+      const words = await sheetWords(at, dealId, d.docId);
       if (words === undefined) {
-        unpagedHere.set(at, { size: d.size, mtimeMs: 0 });
         unreadNames.push(place.name);
         continue;
       }

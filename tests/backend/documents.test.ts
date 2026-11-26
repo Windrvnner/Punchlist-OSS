@@ -809,7 +809,7 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     expect(val(await a.docs.page('d1', { doc: 'Model v12.xlsx', docId: idOf(MODEL) }, 'Debt!B20'))).toEqual(v);
   });
 
-  it('an attached spreadsheet that cannot be read is named, and read again on the next start (#427)', async () => {
+  it('an attached spreadsheet that cannot be read is named, and read again on the next run (#427)', async () => {
     const root = tmp();
     const vdr = path.join(root, 'vdr');
     put(vdr, 'Credit Agreement.pdf', FA);
@@ -826,13 +826,11 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     const budget = (x: ReturnType<typeof pc>) => x.docs.records('d1').find((d) => d.docId === r.docId)!;
     expect(budget(a).words).toBeUndefined();
     expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Budget.xlsx');
-    // named on every run, and not read again until the next start
-    down = false;
+    // named while it fails, and read again on the next run, without a restart
     expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Budget.xlsx');
-    expect(budget(a).words).toBeUndefined();
-    const again = pc(root, 'office', undefined, { convert: flaky() });
-    expect((await indexAll(again, vdr)).log.join(' ')).not.toContain('could not be read');
-    expect(budget(again).words).toEqual(['line', 'cover', 'debt']);
+    down = false;
+    expect((await indexAll(a, vdr)).log.join(' ')).not.toContain('could not be read');
+    expect(budget(a).words).toEqual(['line', 'cover', 'debt']);
   });
 
   it('a file attached in the app is kept in the shared folder under this copy’s own name, loaded into the store, and opens on another PC', async () => {
