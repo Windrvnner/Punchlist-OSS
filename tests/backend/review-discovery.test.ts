@@ -30,13 +30,50 @@ describe('discovery: file names', () => {
     const esia = filler(150, 2000, (i) => `ESIA Chapter ${pad(i)}.pdf`, ['environmental', 'impact', 'assessment', 'habitat', 'noise', 'mitigation']).map((r) => ({ ...r, rel: `04 Environmental/ESIA/${r.name}` }));
     const permit = doc(1, 'Environmental Permit.pdf', { rel: '07 Permitting/Environmental Permit.pdf', words: [] });   // a scan of the permit itself
     const shared = new Mem();
-    const s = setup((c) => ({ items: itemsIn(c).map((it) => (c.files.some((f) => /Permit/.test(f.name)) ? { id: it.tag, ...OK(c) } : { id: it.tag, result: 'more', need: 'the environmental permits' })) }), { d1: [...esia, permit] },
-      { shared, installId: 'pc', checklist: () => ({ broad: [{ id: 'x1', text: 'The environmental permits are in place' }], product: [], sector: [] }), pick: (c) => ({ read: listed(c as Call).filter((r) => /Permit/.test(r.path)).map((r) => r.id) }) });   // a fast model that picks the permit whenever it is shown it
+    const s = setup(
+      (c) => ({
+        items: itemsIn(c).map((it) =>
+          c.files.some((f) => /Permit/.test(f.name))
+            ? { id: it.tag, ...OK(c) }
+            : { id: it.tag, result: 'more', need: 'the environmental permits' },
+        ),
+      }),
+      { d1: [...esia, permit] },
+      {
+        shared,
+        installId: 'pc',
+        checklist: () => ({
+          broad: [{ id: 'x1', text: 'The environmental permits are in place' }],
+          product: [],
+          sector: [],
+        }),
+        pick: (c) => ({
+          read: listed(c as Call)
+            .filter((r) => /Permit/.test(r.path))
+            .map((r) => r.id),
+        }),
+      },
+    ); // a fast model that picks the permit whenever it is shown it
     await deal(s.repo); const r = val(await s.ai.firstPass('d1'));
     const shownIn = s.pickCalls.map((c) => listed(c as Call).some((x) => x.path.endsWith('Environmental Permit.pdf')));
     expect(shownIn).toEqual([true]); expect(listed(s.pickCalls[0] as Call)[0].path).toBe('vdr/07 Permitting/Environmental Permit.pdf'); expect(r.gaps).toEqual([]); expect(sentNames(s.calls[0])).toEqual(['Environmental Permit.pdf']);
     // the control: the item says "permit", singular
-    const s2 = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...OK(c) })) }), { d1: [...esia, permit] }, { checklist: () => ({ broad: [{ id: 'x1', text: 'The environmental permit is in place' }], product: [], sector: [] }), pick: (c) => ({ read: listed(c as Call).filter((r) => /Permit/.test(r.path)).map((r) => r.id) }) });
+    const s2 = setup(
+      (c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...OK(c) })) }),
+      { d1: [...esia, permit] },
+      {
+        checklist: () => ({
+          broad: [{ id: 'x1', text: 'The environmental permit is in place' }],
+          product: [],
+          sector: [],
+        }),
+        pick: (c) => ({
+          read: listed(c as Call)
+            .filter((r) => /Permit/.test(r.path))
+            .map((r) => r.id),
+        }),
+      },
+    );
     await deal(s2.repo); val(await s2.ai.firstPass('d1')); expect(listed(s2.pickCalls[0] as Call)[0].path).toBe('vdr/07 Permitting/Environmental Permit.pdf');
   });
 
@@ -60,6 +97,10 @@ describe('discovery: the core documents', () => {
     const s = setup(() => ({ text: 'x', sources: [] }), recs, { checklist: () => ({ broad: [{ id: 'c1', text: 'The power purchase agreement is signed' }], product: [], sector: [] }) });
     await deal(s.repo);
     val(await s.ai.draft({ dealId: 'd1', questionId: 'q_1', questionText: 'Is the offtaker creditworthy?' }));
-    expect((s.pickCalls[0].prompt.match(/^doc_[0-9a-f]{24} \*: .*$/gm) ?? []).map((l) => l.replace(/^doc_[0-9a-f]{24} \*: /, ''))).toEqual([expect.stringContaining('PPA_final.pdf')]);
+    expect(
+      (s.pickCalls[0].prompt.match(/^doc_[0-9a-f]{24} \*: .*$/gm) ?? []).map((l) =>
+        l.replace(/^doc_[0-9a-f]{24} \*: /, ''),
+      ),
+    ).toEqual([expect.stringContaining('PPA_final.pdf')]);
   });
 });
