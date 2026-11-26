@@ -28,4 +28,15 @@ describe('withoutDraftCredits (#286)', () => {
     expect(withoutDraftCredits({ text: 'As in R1. [1]', sources: [a] }, 1)).toEqual({ text: '', sources: [] });
     expect(withoutDraftCredits({ text: 'See R1. [1] Done. [5]', sources: [a] }, 1).text).toBe('Done. [5]');
   });
+
+  it('keeps the model\'s own line breaks and paragraphs around what it drops', () => {
+    const text = 'COD is Q3 2027. [1]\n\nSee R1 for it. [2] Capex is $5m. [3]\n\n  Done.';
+    expect(withoutDraftCredits({ text, sources: [a, b, c] }, 1))
+      .toEqual({ text: 'COD is Q3 2027. [1]\n\nCapex is $5m. [2]\n\n  Done.', sources: [a, c] });
+  });
+
+  it('returns a reply with no credit untouched, line breaks and edges included', () => {
+    const reply = { text: ' One. [1]\nTwo.\n\nThree. ', sources: [a] };
+    expect(withoutDraftCredits(reply, 2)).toBe(reply);
+  });
 });
