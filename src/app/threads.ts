@@ -83,8 +83,7 @@ const Kept = z.object({
   at: z.string(),
   attached: z.array(z.object({ doc: z.string(), docId: z.string().min(1) })).optional(),
   research: Research.optional(),
-  // a conversation kept when documents were shown by tag is carried on as a new one, its messages kept (#1162)
-  thread: Thread.optional().catch(undefined),
+  thread: Thread.optional(),
   offer: Offer.optional(),
 });
 /**

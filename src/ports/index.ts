@@ -286,7 +286,14 @@ export interface AiService {
  * that holds the conversation as it was when it was last compacted. `call` is the tool call the answer was given by, when
  * the model called tools natively: the next question answers it first.
  */
-export interface ModelThread { id: string; model: string; tokens: number; opened: { dealId: string; docId: string }[]; transcript?: string; call?: string }
+export interface ModelThread {
+  id: string;
+  model: string;
+  tokens: number;
+  opened: { dealId: string; docId: string }[];
+  transcript?: string;
+  call?: string;
+}
 export interface ResearchStep { /** 'stop': the person stopped the answer */ kind: 'search' | 'read' | 'stop'; text: string; result: string; done: boolean; found?: { where: string; quote: string }[] }
 /** What the chat agent did for one answer: its steps, in order, how long it took in all (milliseconds), and how many of the deal's (or deals') documents a model was given (`read.docs` of `read.of`). */
 export interface Research { steps: ResearchStep[]; ms: number; read?: { docs: number; of: number } }
