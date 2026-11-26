@@ -604,9 +604,9 @@ export function nodeAi(o: AiOptions) {
 
   /**
    * An issues list's points, read from its file in one call, as every other document is read: the model gives each
-   * point with the words the list gives it and the number or reference the list gives it (#1026). The reply is not paged,
-   * checked against the file's text or matched to it. A reply that cannot be read is asked for again (`tried`); one cut
-   * off at the length limit fails the read, as it does anywhere else.
+   * point with the words the list gives it and the number or reference the list gives it (#1026). The reply is
+   * not paged, checked against the file's text or matched to it. A reply that cannot be read is asked for again
+   * (`tried`); one cut off at the length limit fails the read, as it does anywhere else.
    */
   async function readIssuePoints(
     name: string, fileId: string, model: Ask['model'], tried: <T>(ask: () => Promise<T>) => Promise<T>,
@@ -614,8 +614,8 @@ export function nodeAi(o: AiOptions) {
     const prompt = [
       `${name} is an issues list: the points one party raises on a deal's documents. List every point of it, in order.`,
       'For each: "n": its number or reference as the list writes it ("" when it has none); "text": the point, in the',
-      'list\'s own words exactly as written. Never reword, shorten or merge. Leave out headings, introductions and notes',
-      'that raise no point.',
+      'list\'s own words exactly as written. Never reword, shorten or merge. Leave out headings, introductions',
+      'and notes that raise no point.',
       'Reply as JSON: {"points": [{"n": "1", "text": "…"}]}',
     ].join('\n');
     const ask: Ask = { kind: 'issuesList', split: true, model, system: JSON_ONLY, files: [fileId], prompt };
@@ -2159,7 +2159,20 @@ export function nodeAi(o: AiOptions) {
       const promptOf = (mine: number[], level: number, share?: Share) => {
         const upto = mine[mine.length - 1] + 1; const own = new Set(mine);
         const shown = level >= 3 ? titles.slice(share![0], share![1]).map((t, k) => `F${share![0] + k + 1}: ${t}`) : (level >= 2 ? titles : fs).map((t, k) => `F${k + 1}: ${t}`);
-        return `These are the findings already raised on a deal${level >= 3 ? `, F${share![0] + 1} to F${share![1]} of ${titles.length}, by their titles` : level >= 2 ? ', by their titles' : ''}:\n${shown.join('\n') || '(none)'}\n\nThese are points of an issues list brought in${level >= 1 && upto > mine.length ? ', those not asked about here by their opening words' : ''}:\n${range(0, upto).map((k) => `P${k + 1}: ${level === 0 || own.has(k) ? points[k].text : opening(points[k].text)}`).join('\n')}\n\nFor each of ${mine.length === upto ? 'the points' : `points ${mine.map((k) => `P${k + 1}`).join(', ')}`}: "workstream": one of ${i.workstreams.join(', ')}; "same": the finding (F3) or the earlier point (P2) that raises the same issue, so that settling one settles the other, or "" when none does. Be strict: only when you are sure. Two points on the same clause that ask for different things are not the same.\nReply as JSON: {"points": [{"p": 1, "workstream": "Legal", "same": ""}]}`;
+        const findingsHead = `These are the findings already raised on a deal${level >= 3
+          ? `, F${share![0] + 1} to F${share![1]} of ${titles.length}, by their titles`
+          : level >= 2 ? ', by their titles' : ''}`;
+        const pointsHead = `These are points of an issues list brought in${level >= 1 && upto > mine.length
+          ? ', those not asked about here by their opening words' : ''}`;
+        const pointLines = range(0, upto)
+          .map((k) => `P${k + 1}: ${level === 0 || own.has(k) ? points[k].text : opening(points[k].text)}`);
+        const asked = mine.length === upto ? 'the points' : `points ${mine.map((k) => `P${k + 1}`).join(', ')}`;
+        return `${findingsHead}:\n${shown.join('\n') || '(none)'}\n\n${pointsHead}:\n${pointLines.join('\n')}\n\n`
+          + `For each of ${asked}: "workstream": one of ${i.workstreams.join(', ')}; `
+          + '"same": the finding (F3) or the earlier point (P2) that raises the same issue, so that settling one '
+          + 'settles the other, or "" when none does. Be strict: only when you are sure. Two points on the same clause '
+          + 'that ask for different things are not the same.\n'
+          + 'Reply as JSON: {"points": [{"p": 1, "workstream": "Legal", "same": ""}]}';
       };
       // the points whose "same" came from a call that showed either side shorter than it is: each is confirmed below
       const loose = new Set<number>();
@@ -2187,8 +2200,11 @@ export function nodeAi(o: AiOptions) {
           if ((e as { code?: string })?.code !== 'cutoff') throw e;
         }
         const missing = new Set(mine);
-        if (reply && Array.isArray(reply.points)) for (const r of reply.points as { p?: unknown; workstream?: unknown; same?: unknown }[]) {
-          const k = (int(r?.p) ?? 0) - 1; const workstream = ws.get(clean(r?.workstream).toLowerCase()) ?? '';   // none of the firm's: left blank for a person, as a new finding's is (decisions)
+        type Sorted = { p?: unknown; workstream?: unknown; same?: unknown };
+        if (reply && Array.isArray(reply.points)) for (const r of reply.points as Sorted[]) {
+          const k = (int(r?.p) ?? 0) - 1;
+          // none of the firm's: left blank for a person, as a new finding's is (decisions)
+          const workstream = ws.get(clean(r?.workstream).toLowerCase()) ?? '';
           if (!own.has(k)) continue;
           // the finding's title is the point's own text, never a model's wording (#1026)
           const title = points[k].text;

@@ -68,7 +68,9 @@ describe('reading an issues list', () => {
     expect(s.calls.filter(isSort).length).toBe(1);
     expect(s.calls.filter(isSort)[0].files).toEqual([]);
     expect(out.points.length).toBe(164);
-    expect(out.points[0]).toEqual({ n: '1', text: POINTS[0], title: POINTS[0], workstream: 'Legal', same: { finding: 'f0' } });
+    expect(out.points[0]).toEqual({
+      n: '1', text: POINTS[0], title: POINTS[0], workstream: 'Legal', same: { finding: 'f0' },
+    });
     // inner spacing and line breaks kept
     expect(out.points[1].text).toBe(`${POINTS[1]}\n  and  more`);
     expect(out.points[1].workstream).toBe('Financial');
@@ -146,7 +148,8 @@ describe('reading an issues list', () => {
       const r = await s.ai.issuesList!({ dealId: 'd1', doc, findings: F, workstreams: ['Legal', 'Financial'] });
       expect(r.ok ? r.value.points.length : r.error.message).toBe(L.length);
       expect(biggest).toBeLessThanOrEqual(180_000);
-      expect(r.ok && r.value.points.every((p, k) => p.text === L[k].text && p.title === L[k].text)).toBe(true);   // every point titled with its own words
+      // every point titled with its own words
+      expect(r.ok && r.value.points.every((p, k) => p.text === L[k].text && p.title === L[k].text)).toBe(true);
     }
   }, 120_000);
   it('a long list against 5,000 findings is compared with the findings a share at a time, each call within the budget', async () => {
