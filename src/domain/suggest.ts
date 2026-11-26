@@ -4,17 +4,25 @@
  * telling words they share, words that any diligence text uses not counting. A question must share at least MIN_SHARED
  * of them, and at least a third of its own, so a passing mention of one subject is not taken for an answer.
  */
-const COMMON = new Set(['about', 'also', 'been', 'being', 'between', 'both', 'cannot', 'come', 'comes', 'confirm', 'could', 'detail', 'does', 'done', 'each', 'either', 'from', 'have', 'here', 'into', 'just', 'like', 'made', 'make', 'many', 'more', 'most', 'much', 'must', 'only', 'other', 'over', 'please', 'provide', 'same', 'should', 'show', 'some', 'such', 'than', 'that', 'their', 'them', 'then', 'there', 'these', 'they', 'this', 'those', 'through', 'throughout', 'under', 'upon', 'used', 'uses', 'using', 'very', 'want', 'were', 'what', 'when', 'where', 'whether', 'which', 'while', 'will', 'with', 'within', 'would', 'your', 'document', 'documents', 'project', 'question', 'answer', 'response', 'closest', 'support', 'data', 'room', 'matter', 'finding', 'findings']);
+import { indexWords } from './words';
+
+const COMMON = new Set([
+  'about', 'also', 'been', 'being', 'between', 'both', 'cannot', 'come', 'comes', 'confirm', 'could', 'detail',
+  'does', 'done', 'each', 'either', 'from', 'have', 'here', 'into', 'just', 'like', 'made', 'make', 'many', 'more',
+  'most', 'much', 'must', 'only', 'other', 'over', 'please', 'provide', 'same', 'should', 'show', 'some', 'such',
+  'than', 'that', 'their', 'them', 'then', 'there', 'these', 'they', 'this', 'those', 'through', 'throughout',
+  'under', 'upon', 'used', 'use', 'using', 'very', 'want', 'were', 'what', 'when', 'where', 'whether', 'which',
+  'while', 'will', 'with', 'within', 'would', 'your', 'document', 'documents', 'project', 'question', 'answer',
+  'response', 'closest', 'support', 'data', 'room', 'matter', 'finding', 'findings',
+]);
 export const MIN_SHARED = 3;
 
-/** the telling words of a text: four letters or more, a plain plural taken as its singular */
+/**
+ * the telling words of a text: its words as the search index keeps them (numbers, letters and short tokens included,
+ * a plain plural taken as its singular), without the words any diligence text uses (#1220)
+ */
 export function tellingWords(text: string): Set<string> {
-  const out = new Set<string>();
-  for (const w of text.toLowerCase().match(/[a-z][a-z-]{3,}/g) ?? []) {
-    const one = w.length > 4 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w;
-    if (!COMMON.has(w) && !COMMON.has(one)) out.add(one);
-  }
-  return out;
+  return new Set(indexWords(text).filter((w) => !COMMON.has(w)));
 }
 
 /** a question's telling words, worked out once per question record (a record is replaced, never changed, so its text is fixed) */

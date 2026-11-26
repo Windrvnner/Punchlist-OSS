@@ -9,6 +9,7 @@ import type { AiService, DocumentService, FileSystem, Session, Clock, Ids, Repos
 import { CHECK_REASON, type Deal, type Folder, type RecordKind } from '../domain/model';
 import { ok, fail, type Result } from '../domain/result';
 import { tellingWords } from '../domain/suggest';
+import { indexWords } from '../domain/words';
 import { key } from '../domain/checklist';
 import type { LineRead } from '../domain/listRead';
 import { suggestChecklistColumns, type ChecklistMapping } from '../domain/checklistImport';
@@ -339,7 +340,7 @@ export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => 
     // question uses do not count) and must beat every other finding. Otherwise nothing is found, and nothing is
     // made up: the mock never claims a source it was not given.
     const GENERIC = new Set(['signed', 'agreement', 'agreements', 'report', 'reports', 'adviser', 'advisor', 'ratio', 'executed', 'please', 'confirm', 'provide', 'sponsor', 'project', 'document', 'documents', 'information', 'memorandum', 'draft', 'final', 'between', 'under', 'which', 'there', 'their', 'about', 'should', 'would', 'could', 'where', 'figure', 'level', 'terms', 'sheet', 'facility', 'technical', 'question', 'response', 'details', 'provided', 'whether']);
-    const words = (t: string) => new Set((t.toLowerCase().match(/[a-z][a-z-]{3,}/g) ?? []).filter((w) => !GENERIC.has(w)));
+    const words = (t: string) => new Set(indexWords(t).filter((w) => !GENERIC.has(w)));   // the index's words (#1220)
     const asked = words(i.questionText);
     const scored = (await storedFindings(repo, i.dealId)).filter((f) => f.status === 'open' && (f.sources || []).length)
       .map((f) => ({ f, n: [...words(`${f.title} ${(f.body || []).join(' ')}`)].filter((w) => asked.has(w)).length })).sort((a, b) => b.n - a.n);

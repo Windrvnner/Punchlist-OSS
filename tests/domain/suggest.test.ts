@@ -15,6 +15,12 @@ describe('which open questions an answer may address', () => {
     expect([...tellingWords('Please confirm the documents and provide the agreements')]).toEqual(['agreement']);
     expect(mayAddress('Please provide the documents and confirm the response to this question.', [q(1, 'Please provide the documents and confirm the response.')])).toEqual([]);
   });
+  it('numbers, single letters and short tokens are telling words, split as the index splits them (#1220)', () => {
+    const words = [...tellingWords('DSCR of 1.25x, EPC and O&M for unit 2')].sort();
+    expect(words).toEqual(['1', '2', '25x', 'dscr', 'epc', 'om', 'unit']);
+    const named = [...tellingWords('PowerPurchase-Agreement_executed')];
+    expect(named).toEqual(['power', 'purchase', 'agreement', 'executed']);
+  });
   it('a passing mention is not an answer: at least three shared words, and a third of the question’s', () => {
     expect(mayAddress('The term sheet was signed in March.', [LOCKUP])).toEqual([]);
     const long = q(9, 'Describe the operating assumption, availability, degradation, curtailment, outages, warranties, spares, staffing, budget and reporting of the operator.');
