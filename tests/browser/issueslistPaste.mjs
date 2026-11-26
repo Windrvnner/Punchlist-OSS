@@ -1,5 +1,6 @@
-// An issues list pasted with Ctrl+V into the import dialog is read as a chosen file is; once a list is shown, a paste
-// starts no new read. The paste is a real key press on the system clipboard, so it reaches the dialog's own listener.
+// An issues list pasted into the import dialog's paste box and sent with Next is read as a chosen file is, the way
+// a checklist is pasted. The paste is a real Ctrl+V from the system clipboard. Once a list is shown, a paste reads
+// nothing.
 const LIST_TEXT = [
   'Comments',
   '1. Change of control definition omits the sponsor fund vehicles',
@@ -23,13 +24,40 @@ const countAttaches = (page) => page.evaluate(() => {
   };
 });
 
+/** Close the dialog with its × and open it again from the ⋯ menu. */
+async function reopen(page) {
+  await page.click('.ilf .shead .x');
+  await page.waitForSelector('.ilf', { state: 'detached' });
+  await page.click('#f-more');
+  await page.click('#f-import');
+  await page.waitForSelector('#il-paste');
+}
+
 /**
- * With the import dialog open and no list read, paste a list and check its points; paste again and check nothing is
- * read; then start over, leaving the dialog open with no list, as it was found. The context needs clipboard access.
+ * With the import dialog open and no list read, paste a list into the box, keep it over a close, send it with Next and
+ * check its points; paste again and check nothing is read; then start over, leaving the dialog open with no list, as it
+ * was found. The context needs clipboard access.
  */
 export async function checkPastedList(page, say, w) {
   await countAttaches(page);
+  const box = await page.waitForSelector('#il-paste', { timeout: 5000 }).then(() => true, () => false);
+  if (!box) return say(`the dialog has a paste box (${w})`, false);
+  const offAtFirst = await page.isDisabled('#il-paste-next');
+  await page.focus('#il-paste');
   await pasteText(page, LIST_TEXT);
+  const typed = {
+    offAtFirst,
+    line: await page.textContent('#il-line'),
+    attaches: await page.evaluate(() => window.__attaches),
+    onAfter: !(await page.isDisabled('#il-paste-next')),
+  };
+  say(`a paste fills the box and reads nothing until Next (${w})`, typed.offAtFirst && typed.line === '3 lines'
+    && typed.attaches === 0 && typed.onAfter, JSON.stringify(typed));
+  await reopen(page);
+  const keptPaste = await page.inputValue('#il-paste');
+  say(`closing keeps what was pasted in the box (${w})`, keptPaste === LIST_TEXT, JSON.stringify(keptPaste));
+
+  await page.click('#il-paste-next');
   const shown = await page.waitForSelector('#il-raised', { timeout: 10000 }).then(() => true, () => false);
   const read = await page.evaluate(() => ({
     count: document.querySelector('#il-count')?.textContent,
@@ -38,10 +66,11 @@ export async function checkPastedList(page, say, w) {
     file: document.querySelector('.ilfile .fnw')?.getAttribute('title'),
     attaches: window.__attaches,
   }));
-  say(`Ctrl+V reads the pasted list, attached as a text file (${w})`, shown && read.count === '2 points'
+  say(`Next reads the pasted list, attached as a text file (${w})`, shown && read.count === '2 points'
     && read.raised === 1 && read.fresh.join() === 'Fees letter is not yet agreed'
     && read.file === 'Pasted issues list.txt' && read.attaches === 1, JSON.stringify(read));
 
+  await page.focus('#il-go');
   await pasteText(page, '1. Another point pasted over the list');
   // a read would attach the paste at once and say "Reading the list"; give it time to start
   await page.waitForTimeout(500);
@@ -56,4 +85,5 @@ export async function checkPastedList(page, say, w) {
   await page.click('#il-restart');
   await page.click('#il-restart-ask-go');
   await page.waitForSelector('#il-drop');
+  say(`start over empties the paste box (${w})`, (await page.inputValue('#il-paste')) === '');
 }
