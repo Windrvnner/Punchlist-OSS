@@ -4,6 +4,7 @@ import {
   importCounts, parseDate, prepareImport, type ImportRow, type Mapping, type Prepared,
 } from '../domain/importExport';
 import { ImportQuestions } from './commands/importQuestions';
+import type { AcceptedMatch } from './commands/importMatching';
 import { dropImport, finishKeptSubmission, importKey, keepImport, keptImport } from './keptImports';
 import { unappliedColumnsWarning, unappliedImportColumns } from './qaImportColumns';
 import { keepImportedLog, logTakenBy } from './qaLog';
@@ -21,6 +22,8 @@ export interface QaChoices {
   answered: boolean;
   makeLog: boolean;
   touched: boolean;
+  /** suggestions the person accepted for rows that matched no question (a kept import from before has none) */
+  accepted?: AcceptedMatch[];
 }
 interface QaKept { table: ImportTable; choices: QaChoices }
 interface Submission {
@@ -249,7 +252,7 @@ async function resumeSubmission(store: Store, dealId: string, submission: Submis
   const taken = logTakenBy(store, dealId, choices.path);
   if (taken) return fail({ kind: 'rejected', message: taken });
   return store.dispatch(ImportQuestions, {
-    dealId, mode: choices.mode, rows, answerResponded: choices.answered,
+    dealId, mode: choices.mode, rows, answerResponded: choices.answered, accepted: choices.accepted ?? [],
   }, { idempotencyKey: submission.key });
 }
 

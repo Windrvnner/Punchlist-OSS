@@ -195,7 +195,7 @@ it('reopens the kept choices after a committed Append loses its reply, without a
   }
 });
 
-it('previews a control-only question from the file and submits only the sanitized rows', async () => {
+it('previews a control-only question from the file and imports it exactly as given', async () => {
   await useKeptPort();
   const app = recoveryApp();
   try {
@@ -212,11 +212,11 @@ it('previews a control-only question from the file and submits only the sanitize
     const { prepared, previewRows } = prepareQaImport(table, choices.mapping);
     expect(previewRows).toHaveLength(2);
     expect(previewRows[0]).toMatchObject({ cells: shown, dates: { received: '2026-09-30' } });
-    expect(prepared.skipped).toBe(1);
-    expect(prepared.rows.map((row) => row.text)).toEqual([question]);
+    expect(prepared.skipped).toBe(0);
+    expect(prepared.rows.map((row) => row.text)).toEqual(['\u007f', question]);
     const submitted = await submitQaImport(app.store, dealId, { table, choices }, prepared.rows);
     expect(submitted).toEqual(ok(undefined));
-    expect(dealQuestions(app.store.get(), dealId).map((row) => row.text)).toEqual([question]);
+    expect(dealQuestions(app.store.get(), dealId).map((row) => row.text)).toEqual(['\u007f', question]);
   } finally {
     app.store.closing();
     await app.repo.close();
