@@ -518,8 +518,11 @@ describe('documents on real folders', () => {
     put(vdr, 'Broken.xlsx', MODEL);
     await indexAll(a, vdr);
     expect(by('Broken.xlsx').words).toEqual(MODEL_WORDS);
-    const long = await pdfLook(pdf('long report', 100), 10); expect(long.pages).toBe(100); expect(long.text.split('\n').map((l) => +l.split('page ')[1])).toEqual([1, 11, 21, 31, 41, 51, 61, 71, 81, 91]);
-    expect((await pdfLook(pdf('short report', 4), 10)).text.split('\n').length).toBe(4);
+    const long = await pdfLook(pdf('long report', 100), 10);
+    expect(long.pages).toBe(100);
+    const sampled = (long.text ?? '').split('\n').map((l) => +l.split('page ')[1]);
+    expect(sampled).toEqual([1, 11, 21, 31, 41, 51, 61, 71, 81, 91]);
+    expect((await pdfLook(pdf('short report', 4), 10)).text?.split('\n').length).toBe(4);
     // a document another copy of the app recorded before words were kept: indexing here adds them, once
     const OLD = pdf('interconnection agreement', 2); put(vdr, 'Grid.pdf', OLD); const file = path.join(root, 'shared', 'docs-older-d1.jsonl');
     fs.appendFileSync(file, JSON.stringify({ v: 1, pc: 'older', at: '2026-11-01T00:00:00.000Z', docId: idOf(OLD), hash: hashBytes(OLD), name: 'Grid.pdf', folder: vdr, rel: 'Grid.pdf', size: OLD.length, pages: 2 }) + '\n');
@@ -1834,6 +1837,103 @@ describe('warm document collections', () => {
       listed.mockRestore();
       sized.mockRestore();
     }
+  });
+});
+
+/** PDFs holding this text have a page whose text cannot be read, as if pdf.js failed on it, while it is set (#1056) */
+const textFails = { marker: 'page text fails', on: false };
+vi.mock('pdfjs-dist/legacy/build/pdf.mjs', async (original) => {
+  const pdfjs = await original<typeof import('pdfjs-dist/legacy/build/pdf.mjs')>();
+  const getDocument: typeof pdfjs.getDocument = (source) => {
+    const task = pdfjs.getDocument(source);
+    const data = (source as { data?: Uint8Array }).data;
+    const failing = textFails.on && !!data && Buffer.from(data).toString('latin1').includes(textFails.marker);
+    if (!failing) return task;
+    const promise = task.promise.then((doc) => Object.assign(doc, {
+      getPage: async () => { throw new Error('page could not be read'); },
+    }));
+    // the loading task's promise is a getter: a stand-in task carries the changed document
+    return { promise, destroy: () => task.destroy() } as unknown as ReturnType<typeof pdfjs.getDocument>;
+  };
+  return { ...pdfjs, getDocument };
+});
+
+describe('a PDF whose page text cannot be read (#1056)', () => {
+  afterAll(() => { textFails.on = false; });
+
+  it('pdfLook gives its pages and no text', async () => {
+    textFails.on = true;
+    const look = await pdfLook(pdf(textFails.marker, 3), Infinity);
+    textFails.on = false;
+    expect(look.pages).toBe(3);
+    expect(look.text).toBeUndefined();
+  });
+
+  it('is listed with its pages and no words, named as not read, and read on the next run', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    for (let n = 1; n <= 200; n++) put(vdr, `Reports/Report ${n}.pdf`, pdf(`monthly report ${n}`, 2));
+    put(vdr, 'Legal/Guarantee.pdf', pdf(`guarantee ${textFails.marker}`, 3));
+    const a = pc(root, 'office', undefined, { index: true });
+    const record = (name: string) => a.docs.records('d1').find((r) => r.name === name);
+    textFails.on = true;
+    const first = await indexAll(a, vdr);
+    expect(record('Guarantee.pdf')).toMatchObject({ pages: 3 });
+    expect(record('Guarantee.pdf')?.words).toBeUndefined();
+    expect(first.log).toContain('1 file could not be read: Legal/Guarantee.pdf');
+    expect(first.log.join(' ')).not.toContain('no readable text');
+    expect(a.docs.records('d1').filter((r) => r.words?.includes('monthly')).length).toBe(200);
+    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Legal/Guarantee.pdf');
+    textFails.on = false;
+    const after = await indexAll(a, vdr);
+    expect(after.log.join(' ')).not.toContain('could not be read');
+    expect(record('Guarantee.pdf')?.words).toContain('guarantee');
+  }, 120_000);
+
+  it('a recovered PDF is read by the next freshen, also after a restart (#1056)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Credit Agreement.pdf', pdf('credit agreement', 2));
+    put(vdr, 'Legal/Guarantee.pdf', pdf(`guarantee ${textFails.marker}`, 3));
+    const a = pc(root, 'office', undefined, { index: true });
+    textFails.on = true;
+    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Legal/Guarantee.pdf');
+    // still failing: the folder is listed unchanged, and is read again, not taken as complete
+    expect(val(await a.docs.freshen!('d1'))).toBe('running');
+    await a.docs.settled('d1');
+    textFails.on = false;
+    const restarted = pc(root, 'office', undefined, { index: true });
+    expect(val(await restarted.docs.freshen!('d1'))).toBe('running');
+    await restarted.docs.settled('d1');
+    const record = restarted.docs.records('d1').find((r) => r.name === 'Guarantee.pdf');
+    expect(record?.words).toContain('guarantee');
+    expect(val(await restarted.docs.freshen!('d1'))).toBe('same');
+  }, 60_000);
+
+  it('an attached PDF whose text is unread is named on every run, and read when it can be (#1056)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Credit Agreement.pdf', pdf('credit agreement', 2));
+    const a = pc(root, 'office', undefined, { index: true });
+    textFails.on = true;
+    const attached = val(await a.docs.attach('d1', { name: 'Guarantee.pdf', bytes: pdf(textFails.marker, 2) }));
+    const record = () => a.docs.records('d1').find((r) => r.docId === attached.docId);
+    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Guarantee.pdf');
+    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Guarantee.pdf');
+    textFails.on = false;
+    expect((await indexAll(a, vdr)).log.join(' ')).not.toContain('could not be read');
+    expect(record()?.words).toBeDefined();
+  });
+
+  it('is attached with its pages and no words', async () => {
+    const root = tmp();
+    const a = pc(root, 'office');
+    textFails.on = true;
+    const attached = val(await a.docs.attach('d1', { name: 'Guarantee.pdf', bytes: pdf(textFails.marker, 2) }));
+    textFails.on = false;
+    const record = a.docs.records('d1').find((r) => r.docId === attached.docId);
+    expect(record).toMatchObject({ pages: 2 });
+    expect(record?.words).toBeUndefined();
   });
 });
 

@@ -526,6 +526,31 @@ export function nodeDocuments(o: DocumentsOptions) {
     return [{ name: 'Sheet1', each: (onCell) => eachCsvCell(at, onCell) }];
   }
   /**
+   * The words a document read as a PDF uses most, added to this PC's word index; undefined when its text could not be
+   * read, which is not the same as having none (#1056).
+   */
+  function lookWords(dealId: string, docId: string, look: { text: string | undefined; first: string }) {
+    if (look.text === undefined) return undefined;
+    o.index?.add(dealId, docId, countWords(look.text, look.first));
+    return topWords(look.text);
+  }
+  /**
+   * A paged document read as a PDF: its pages, its words (`lookWords`), its first page's text, and what converting it
+   * said when it was converted. Throws when it cannot be turned into a PDF or opened.
+   */
+  async function readAsPdf(dealId: string, doc: { docId: string; name: string; via?: string }, file: string) {
+    const info: ConvertInfo = {};
+    const pdf = await asPdf(doc, file, info);
+    try {
+      const look = await pdfLook(fs.readFileSync(pdf), Infinity);
+      const converted = pdf !== file ? info : undefined;
+      return { pages: look.pages, words: lookWords(dealId, doc.docId, look), first: look.first, converted };
+    } finally { if (pdf !== file) discard(doc.docId); }
+  }
+  /** a converted document's converter, and its tracked changes when the conversion counted any */
+  const convertedBy = (info: ConvertInfo, tracked: number | undefined) =>
+    ({ via: o.convert?.id, tracked: info.tracked || tracked });
+  /**
    * The words a spreadsheet uses most; undefined when it could not be read, which is not the same as having none (it is
    * read again). A .csv is read a piece at a time, so the file is never held whole. Its words are counted twice, as
    * every other document's are: for this PC's index and for its `words` list.
@@ -621,23 +646,19 @@ export function nodeDocuments(o: DocumentsOptions) {
       return true;
     } catch { return false; }   // to the converter
   }
-  /** a file's pages and words, read from the PDF made of it (or itself) into `r`; throws for one that won't convert */
+  /**
+   * A file's pages and words, read from the PDF made of it (or itself) into `r`; throws for one that won't convert.
+   * Pages whose text could not be read leave the words unread (#1056).
+   */
   async function readPages(
     dealId: string, docId: string, name: string, src: string, via: string | undefined, r: FileRead,
   ) {
-    const info: ConvertInfo = {};
-    const pdf = await asPdf({ docId, name, ...(via !== undefined ? { via } : {}) }, src, info);
-    if (pdf !== src) {
-      r.via = o.convert?.id;
-      if (info.tracked) r.tracked = info.tracked;
-    }
-    try {
-      const look = await pdfLook(fs.readFileSync(pdf), Infinity);
-      r.pages = look.pages;
-      r.words = topWords(look.text);
-      o.index?.add(dealId, docId, countWords(look.text, look.first));
-      if (PDF.test(name)) r.cover = coverOf(look.first) ?? undefined;
-    } finally { if (pdf !== src) discard(docId); }
+    const read = await readAsPdf(dealId, { docId, name, ...(via !== undefined ? { via } : {}) }, src);
+    if (read.converted) ({ via: r.via, tracked: r.tracked } = convertedBy(read.converted, r.tracked));
+    r.pages = read.pages;
+    r.words = read.words;
+    r.textUnread = read.words === undefined;
+    if (!r.textUnread && PDF.test(name)) r.cover = coverOf(read.first) ?? undefined;
   }
   /**
    * Read a file's pages and words on this PC, as far as its record (`had`) lacks them or this PC's own index lacks the
@@ -804,6 +825,7 @@ export function nodeDocuments(o: DocumentsOptions) {
               unpaged++;
               skipped.unpaged.push(f.rel);
             }
+            // listed without words; its folder keeps no listing, so it is read again (#1056, #1023)
             if (textUnread) noteUnread(skipped.unread, unreadAt, folder.path, f.rel);
             workMs += Date.now() - t0;
             if (asPages) {
@@ -1099,7 +1121,12 @@ export function nodeDocuments(o: DocumentsOptions) {
         fs.mkdirSync(path.dirname(at), { recursive: true }); fs.writeFileSync(at, file.bytes);
         let pages: number | undefined; let via: string | undefined; let tracked: number | undefined; let words: string[] | undefined;
         if (paged(file.name)) {
-          try { const info: ConvertInfo = {}; const pdf = await asPdf({ docId, name: file.name }, at, info); if (pdf !== at) { via = o.convert?.id; if (info.tracked) tracked = info.tracked; } try { const look = await pdfLook(fs.readFileSync(pdf), Infinity); pages = look.pages; words = topWords(look.text); o.index?.add(dealId, docId, countWords(look.text, look.first)); } finally { if (pdf !== at) discard(docId); } }
+          try {
+            const read = await readAsPdf(dealId, { docId, name: file.name }, at);
+            if (read.converted) ({ via, tracked } = convertedBy(read.converted, tracked));
+            pages = read.pages;
+            words = read.words;
+          }
           catch { fs.rmSync(at, { force: true }); return fail({ kind: 'rejected', message: `${file.name} could not be ${PDF.test(file.name) ? 'opened' : 'converted to PDF'}, so it was not attached` }); }
         }
         else words = await sheetWords(at, dealId, docId);
