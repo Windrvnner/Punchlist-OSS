@@ -168,6 +168,12 @@ export interface AiService {
    */
   addresses?(input: { dealId: string; question: string; answer: string }): Promise<Result<{ verdict: 'yes' | 'partly' | 'no'; why: string }>>;
   /**
+   * Optional. Which of a deal's open questions, if any, an answer from a conversation addresses: its place in
+   * `questions`, or null. Asked once an answer finishes, for the suggested open question card (#1120). The backend
+   * shows the questions under neutral handles, in calls sized to the model's input limit. Only a proposal.
+   */
+  suggestQuestion?(input: { dealId: string; answer: string; questions: string[] }): Promise<Result<number | null>>;
+  /**
    * Optional. One response that reconciles two versions of a question's response (the app's and the Q&A log's):
    * every fact from both, said once, as one answer. Where they disagree, the more specific (a date, a figure, a document
    * reference) stands. Never the two pasted together, and never a note, bracket or placeholder for a person to fill in. It

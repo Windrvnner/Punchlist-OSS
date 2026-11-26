@@ -385,6 +385,25 @@ type Seen =
   }
   | { kind: 'finding'; title: string; workstream: string; body: string[]; sources: Source[] };
 const JSON_ONLY = 'Reply with one JSON object and nothing else.';
+/** the words the two answer judgements share: whether an answer addresses a question, and which one (#1120) */
+const answerFromDocs = (answer: string) => `This answer was written from the deal's documents:\n${answer}`;
+const GIVES_WHAT_ASKED = 'does it give what the question asks for?';
+/** the prompt naming open questions A1…An, never by their numbers, for the answer to be matched to one (#1120) */
+function suggestPrompt(answer: string, questions: string[]) {
+  const listed = questions.map((q, k) => `A${k + 1}: ${q.replace(/\s+/g, ' ')}`).join('\n');
+  return [
+    `These open questions were asked on a project-finance deal:\n${listed}\n`,
+    `${answerFromDocs(answer)}\n`,
+    `Which one of these open questions does the answer address: for which ${GIVES_WHAT_ASKED} Name the one it`
+      + ' addresses most fully, or "none" if it addresses none of them.',
+    'Reply as JSON: {"question": "A2" | "none"}',
+  ].join('\n');
+}
+/** the place, from 0, of the handle a reply names among `count` shown; null for "none" or a handle not shown */
+function handleAt(named: unknown, count: number): number | null {
+  const n = typeof named === 'string' ? /^A(\d+)$/.exec(named.trim())?.[1] : undefined;
+  return n && +n >= 1 && +n <= count ? +n - 1 : null;
+}
 const SAME_RULES = 'Be strict: only pairs you are sure of, each named once.';
 const SAME_REPLY = 'Reply as JSON: {"pairs": [{"a": 2, "b": 9, "why": "…"}]}';
 /**
@@ -1902,13 +1921,48 @@ export function nodeAi(o: AiOptions) {
     /** Whether an answer addresses a question: the standard model judges from the two texts, with no documents. */
     async addresses(i) {
       let reply: { verdict?: unknown; why?: unknown } | null;
-      try { reply = await askJson({ kind: 'addresses', model: (await models()).standard, system: JSON_ONLY, prompt: `This question was asked on a project-finance deal:\n${i.question}\n\nThis answer was written from the deal's documents:\n${i.answer}\n\nDoes the answer address the question: does it give what the question asks for? Say "yes" if it does, "partly" if it gives some of it, "no" if it does not. Add "why": one short sentence, under twenty words, saying what it gives or leaves out.\nReply as JSON: {"verdict": "yes" | "partly" | "no", "why": "…"}` }, ['verdict', 'why']); }
+      const prompt = [
+        `This question was asked on a project-finance deal:\n${i.question}\n`,
+        `${answerFromDocs(i.answer)}\n`,
+        `Does the answer address the question: ${GIVES_WHAT_ASKED} Say "yes" if it does, "partly" if it gives`
+          + ' some of it, "no" if it does not. Add "why": one short sentence, under twenty words, saying what it gives'
+          + ' or leaves out.',
+        'Reply as JSON: {"verdict": "yes" | "partly" | "no", "why": "…"}',
+      ].join('\n');
+      try {
+        reply = await askJson({ kind: 'addresses', model: (await models()).standard, system: JSON_ONLY, prompt }, [
+          'verdict', 'why',
+        ]);
+      }
       catch (e) { return failure(e, UNREACHED); }
       const verdict = word(reply?.verdict);
       if (verdict !== 'yes' && verdict !== 'partly' && verdict !== 'no') {
         return fail({ kind: 'failed', message: UNREAD_REPLY });
       }
       return ok({ verdict, why: (strings(reply!.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 200) });     // one short line on the card, however much it wrote
+    },
+    /**
+     * Which open question an answer addresses (#1120): the standard model reads the answer and the questions, under
+     * neutral handles, in parts sized to its input limit; the first part that names one gives the proposal.
+     */
+    async suggestQuestion(i) {
+      try {
+        const model = (await models()).standard;
+        // the reply is one handle however many questions are shown, so only the input limit sizes a part
+        const size = partSize({
+          cap: i.questions.length, out: 1, outLimit: Infinity, in: tokensEach(i.questions), inLimit: inLimit(model),
+        });
+        for (let from = 0; from < i.questions.length; from += size) {
+          const part = i.questions.slice(from, from + size);
+          const prompt = suggestPrompt(i.answer, part);
+          const reply = await askJson<{ question?: unknown }>({
+            kind: 'suggestQuestion', model, system: JSON_ONLY, prompt,
+          }, ['question']);
+          const at = handleAt(reply?.question, part.length);
+          if (at !== null) return ok(from + at);
+        }
+        return ok(null);
+      } catch (e) { return failure(e, UNREACHED); }
     },
     async merge(i) {
       let reply: { text?: unknown } | null;
