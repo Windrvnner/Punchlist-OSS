@@ -95,10 +95,3 @@ export function differingFields(versions: (Record<string, unknown> | null)[], fi
   if (readable.length < 2) return [];
   return fields.filter((f) => new Set(readable.map((v) => JSON.stringify(canonical(v[f] ?? null)))).size > 1);
 }
-
-/** Fields that differ and are not among the named ones (so a view can say that something else differs too). */
-export function otherDifferences(versions: (Record<string, unknown> | null)[], named: readonly string[]): string[] {
-  const readable = versions.filter((v): v is Record<string, unknown> => !!v);
-  const keys = new Set<string>(); for (const v of readable) for (const k of Object.keys(v)) if (!BOOKKEEPING.has(k) && !named.includes(k)) keys.add(k);
-  return differingFields(readable, [...keys].sort());
-}
