@@ -514,18 +514,23 @@ export function nodeAi(o: AiOptions) {
   let offered: Awaited<ReturnType<ModelService['models']>> | null = null;
   const models = async () => (offered ??= await o.service.models());
   // ── the words a search compares ─────────────────────────────────────────────────────────────────────────────────────
-  const kept = (t: string) => tokens(t).filter((w) => w.length >= 2 && !STOP.has(w)).map(fold);
+  const kept = (t: string) => tokens(t).filter((w) => !STOP.has(w)).map(fold);
   /** a short name as a search compares it: "O&M" and "PPAs" as "om" and "ppa" */
   const shortKey = (k: string) => fold(tokens(k).join(''));
   /** each deal's short names, as the fast model saw them in its file paths (see `coreOf`), read from its latest core line by `lines` */
   const shorts = new Map<string, { from: unknown; map: Map<string, string[]> }>();
   /**
-   * The words of a text as they are compared: split wherever a name is split, plurals folded, common words and single
-   * letters left out, and, with `dealId`, every short name the deal's files use given its long form as well.
+   * The words of a text as they are compared: split wherever a name is split, plurals folded, common words left
+   * out, and, with `dealId`, every short name the deal's files use given its long form as well.
    */
   const words = (t: string, dealId?: string): Set<string> => {
-    const long = dealId ? shorts.get(dealId)?.map : undefined; const out = new Set<string>();
-    for (const w of tokens(t)) { if (w.length < 2 || STOP.has(w)) continue; out.add(fold(w)); for (const x of long?.get(fold(w)) ?? []) out.add(x); }
+    const long = dealId ? shorts.get(dealId)?.map : undefined;
+    const out = new Set<string>();
+    for (const w of tokens(t)) {
+      if (STOP.has(w)) continue;
+      out.add(fold(w));
+      for (const x of long?.get(fold(w)) ?? []) out.add(x);
+    }
     return out;
   };
 
@@ -564,7 +569,7 @@ export function nodeAi(o: AiOptions) {
     return retried(async () => {
       if (b && (b.left-- <= 0 || (b.deal && b.deal.left-- <= 0))) throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
       let reply = ''; try { reply = await o.service.complete(input); return reply; } finally { count(kind, input, String(reply ?? '')); }
-    }, (r) => !String(r ?? '').trim(), input.model);
+    }, (r) => !String(r ?? '').trim());
   };
   /**
    * Ask, and read the reply. A reply that cannot be read even loosely is sent back once to the model that wrote it, with
@@ -624,16 +629,20 @@ export function nodeAi(o: AiOptions) {
     ].join('\n');
     const ask: Ask = { kind: 'issuesList', split: true, model, system: JSON_ONLY, files: [fileId], prompt };
     try {
-      const reply = await tried(() => askJson<{ points?: unknown }>(ask, ['points']));
-      if (!reply || !Array.isArray(reply.points)) {
-        return fail({ kind: 'failed', message: 'It could not be read as an issues list' });
-      }
-      const given = reply.points as { n?: unknown; text?: unknown }[];
-      // the point's words are the reply's as given, inner spacing and line breaks included: only its edges are
-      // trimmed, as the import command trims them too (#1026)
-      const texts = given.map((p) => ({ n: clean(p?.n), text: typeof p?.text === 'string' ? p.text.trim() : '' }));
-      return ok(texts.filter((p) => p.text));
-    } catch (e) { return failure(e, 'The file could not be read'); }
+      // a reply that is not an object with its points is asked for again (`tried`), as every other read is
+      const reply = await tried(async () => {
+        const got = await askJson<{ points?: unknown }>(ask, ['points']);
+        if (!got || !Array.isArray(got.points)) throw Object.assign(new Error(UNREAD_REPLY), { code: 'unread' });
+        return got.points as { n?: unknown; text?: unknown }[];
+      });
+      // the list's own words, number and point alike, are the reply's as given, inner spacing and line breaks
+      // included: only their edges are trimmed, as the import command trims them too (#1026)
+      const edges = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+      return ok(reply.map((p) => ({ n: edges(p?.n), text: edges(p?.text) })).filter((p) => p.text));
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'unread') return fail({ kind: 'failed', message: UNREAD_REPLY });
+      return failure(e, 'The file could not be read');
+    }
   }
   async function askJson<T = Record<string, unknown>>(input: Ask, keys: string[], shape?: string, fix = true): Promise<T | null> {
     const raw = await whole(input, keys); const got = json<T>(raw, ...keys); if (got || !fix || !String(raw ?? '').trim()) return got;
@@ -682,7 +691,8 @@ export function nodeAi(o: AiOptions) {
       if (b && (b.left-- <= 0 || (b.deal && b.deal.left-- <= 0))) throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
       let reply = ''; try { const r = await o.service.converse!(input); reply = r.text || JSON.stringify(r.calls ?? ''); return r; } finally { count(kind, input, String(reply ?? '')); }
     };
-    return input.results?.length || input.conversation ? once() : retried(once, (r) => !String(r.text ?? '').trim() && !r.calls?.length, input.model, tried);
+    if (input.results?.length || input.conversation) return once();
+    return retried(once, (r) => !String(r.text ?? '').trim() && !r.calls?.length, tried);
   };
   /** models that refused a way of calling tools in this run of the app, and the way they stepped down to */
   const stepped = new Map<string, ToolMode>();
@@ -1057,8 +1067,17 @@ export function nodeAi(o: AiOptions) {
   type Trail = { q: string; n: number }[];
   const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
   /** words a model gives in place of a search when it has none ("None", "not applicable", "TBD"); a search of only these, or of nothing the index keeps, is no search */
-  // folded as the index folds words (`kept`), so each entry matches the form a reply's words take
-  const NO_SEARCH = new Set(['additional', 'applicable', 'applies', 'apply', 'available', 'cannot', 'cant', 'empty', 'extra', 'find', 'found', 'further', 'given', 'idea', 'keyword', 'keywords', 'missing', 'more', 'na', 'nan', 'necessary', 'need', 'needed', 'needs', 'neither', 'never', 'nil', 'no', 'non', 'none', 'nor', 'not', 'nothing', 'null', 'other', 'others', 'pass', 'pending', 'placeholder', 'provided', 'queries', 'query', 'relevant', 'require', 'required', 'requires', 'result', 'results', 'search', 'searched', 'searches', 'searching', 'skip', 'skipped', 'specific', 'sure', 'tba', 'tbc', 'tbd', 'term', 'terms', 'unable', 'unclear', 'undefined', 'unknown', 'unsure', 'word', 'words'].map(fold));
+  // folded as the index folds words (`kept`), so each entry matches the form a reply's words take; "n" and "a" are the
+  // words of "N/A" and "n.a.", which `kept` keeps whatever their length
+  const NO_SEARCH = new Set([
+    'additional', 'a', 'applicable', 'applies', 'apply', 'available', 'cannot', 'cant', 'empty', 'extra', 'find',
+    'found', 'further', 'given', 'idea', 'keyword', 'keywords', 'missing', 'more', 'n', 'na', 'nan', 'necessary',
+    'need', 'needed', 'needs', 'neither', 'never', 'nil', 'no', 'non', 'none', 'nor', 'not', 'nothing', 'null',
+    'other', 'others', 'pass', 'pending', 'placeholder', 'provided', 'queries', 'query', 'relevant', 'require',
+    'required', 'requires', 'result', 'results', 'search', 'searched', 'searches', 'searching', 'skip', 'skipped',
+    'specific', 'sure', 'tba', 'tbc', 'tbd', 'term', 'terms', 'unable', 'unclear', 'undefined', 'unknown', 'unsure',
+    'word', 'words'
+  ].map(fold));
   const isSearch = (x: string) => kept(x).some((w) => !NO_SEARCH.has(w));
   const SEARCHES = 3;                                                            // searches the fast model may give one item at a time
   const FOUND = 12;                                                              // documents one item's searches put at the head of the pick list
@@ -1265,7 +1284,7 @@ export function nodeAi(o: AiOptions) {
       toolMode: (model: string) => stepped.get(model) ?? o.toolCalls ?? control.models.toolCalls,
       // a refusal that could also be a passing error (a 500 on a turn of tool results) holds for the run only when it comes twice with no tool results taken between
       steppedDown: (model: string, to: ToolMode, sure = true) => { const k = `${model}\n${to}`; if (sure || doubted.has(k)) stepped.set(model, to); else doubted.add(k); },
-      retriesFor: retried.retriesFor,
+      retries: retried.retries,
       ...(o.service.upload ? { keepTranscript: (text: string) => o.service.upload!({ name: `conversation-${Date.now().toString(36)}.txt`, bytes: new TextEncoder().encode(text) }) } : {}),
       ...(o.service.remove ? { drop: (fileId: string) => o.service.remove!(fileId) } : {}),
     } : {}),

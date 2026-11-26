@@ -54,7 +54,8 @@ export const EditFinding = define({
   name: 'EditFinding',
   input: Target.extend({
     title: trimmedFindingTitle.min(1, 'Give the finding a title'),
-    workstream: z.string().min(1, 'Choose a workstream'),
+    /** blank where the model left it blank (an issues-list point): the rest stays editable (#1062) */
+    workstream: z.string(),
     body: z.array(z.string()),
     /** the finding as the edit began: only fields the person changed from it are written, so a change made elsewhere
      *  meanwhile stays */

@@ -94,7 +94,12 @@ connector with a provider-specific transport. [Windows setup requirements](requi
 above the interface is tested against `StandInService`, and each connector is tested against a stand-in. A connector
 reports a lost connection, timeout, rate limit, or server error as `unreachable` so a check waits and resumes.
 
-**Limits and retries.** `src/backend/limits.ts` holds each model's output and input limits (taken from the control file, and lowered where the service reports a smaller limit) and the two errors that every connector throws in the same way: `cutoff` and `toolong`. `src/backend/parts.ts` sizes work on many items so that each part fits, and halves the parts after a reply is cut off. Every model call goes through one retry policy (`src/backend/retry.ts`): two more tries, with a doubling wait, for an empty reply or for a failure that resending can fix (that is, not unreachable, cut off, too long, or a 4xx error). After three failed calls in a row to one model, retries stop until a call succeeds.
+**Limits and retries.** `src/backend/limits.ts` holds each model's output and input limits (taken from the control
+file, and lowered where the service reports a smaller limit) and the two errors that every connector throws in the
+same way: `cutoff` and `toolong`. `src/backend/parts.ts` sizes work on many items so that each part fits, and halves
+the parts after a reply is cut off. Every model call goes through one retry policy (`src/backend/retry.ts`): two more
+tries, with a doubling wait, for an empty reply or for a failure that resending can fix (that is, not unreachable, cut
+off, too long, or a 4xx error). Every call gets these retries, however many calls before it failed.
 
 **Desktop shell.** The desktop app is an Electron app. The main process (`src/desktop/main.ts`) assembles the backend and serves it to a single window across a bridge. The window runs the same Store and UI as the browser demo.
 
@@ -118,8 +123,8 @@ with a record's current versions in `changeLogHeads.ts` and the folding of draft
   names the versions it was based on. Two current versions that differ are a clash, which is kept for a person to
   resolve; the app never picks one. A question's draft is written by the app, so it folds into a person's change rather
   than clashing with it (`DraftFold` in `src/backend/changeLogDrafts.ts`). Any field that two PCs can write differently
-  for the same content (a timestamp, who made the change, or the model's workstream choice) must be listed as a bookkeeping
-  field in `src/domain/versions.ts`. Otherwise, records with derived IDs clash when they should not.
+  for the same content (a timestamp, who made the change, or the model's workstream choice) must be listed as a
+  bookkeeping field in `src/domain/versions.ts`. Otherwise, records with derived IDs clash when they should not.
 - **Clashes stay local to one record.** A line built on a version that hasn't arrived yet is held back until that version arrives, without pausing the rest of the deal. A held line more than a day old is let go and shown as a choice (`letGoStuck`).
 - **Nothing is thrown away.** Every version that is not kept becomes a deletion entry under **Deleted** (`src/app/commands/keptVersions.ts`). When a deal is deleted on one PC, another PC keeps any changes the deleting PC hadn't seen, as a recovered copy (`src/domain/recovered.ts`).
 - **A local copy guards against sync loss.** Each PC keeps its own files outside the synced folder, and restores any lines that the shared copy loses, even when the shared folder lost all of them and the PC lost its install files too.
