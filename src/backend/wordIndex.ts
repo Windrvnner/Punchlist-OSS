@@ -60,7 +60,9 @@ export interface WordIndex {
 }
 
 /** one thing scored: the words of its name, of its title, how often its body uses a word, and its length in words */
-export interface Scored { id: string; named: Set<string>; title: Set<string>; tf: (w: string) => number; length: number }
+export interface Scored {
+  id: string; named: Set<string>; title: Set<string>; tf: (w: string) => number; length: number;
+}
 /** what rarity and length are measured against: how many things there are, their mean length, how many use a word */
 export interface Corpus { size: number; avgLength: number; docsWith: (w: string) => number }
 
@@ -112,7 +114,8 @@ export function wordIndex(local: Folder): WordIndex {
   /** a document as BM25 scores it: by its name alone when the index has not read it (`k` undefined) */
   const scoredOf = (ix: DealIndex, d: { docId: string; named: Set<string> }, k: number | undefined): Scored => {
     if (k === undefined) return { id: d.docId, named: d.named, title: new Set(), tf: () => 0, length: 0 };
-    return { id: d.docId, named: d.named, title: ix.title[k], tf: (w) => usesOf(ix, w).get(k) ?? 0, length: ix.length[k] };
+    const tf = (w: string) => usesOf(ix, w).get(k) ?? 0;
+    return { id: d.docId, named: d.named, title: ix.title[k], tf, length: ix.length[k] };
   };
   const of = (dealId: string): DealIndex => {
     let ix = deals.get(dealId); if (ix) return ix;

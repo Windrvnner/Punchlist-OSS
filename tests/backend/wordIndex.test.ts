@@ -63,7 +63,8 @@ describe("each PC's word index", () => {
     ], corpus);
     expect(got.get('named')).toBeCloseTo(WEIGHT.name * idf(1), 10);
     expect(got.get('titled')).toBeCloseTo(WEIGHT.title * idf(1), 10);
-    expect(got.get('body')).toBeCloseTo(idf(1), 10);       // one use in a document of average length: a term weight of 1
+    // one use in a document of average length: a term weight of 1
+    expect(got.get('body')).toBeCloseTo(idf(1), 10);
     expect(got.get('none')).toBe(0);
     expect(bm25(new Set(['other']), [{ id: 'b', named: new Set(['other']), title: new Set(), tf: none, length: 20 }],
       corpus).get('b')).toBeCloseTo(WEIGHT.name * idf(9), 10);
