@@ -81,7 +81,11 @@ describe('the checklist as it stands', () => {
       const n = (seen[it.text] = (seen[it.text] ?? 0) + 1);
       if (it.text.includes('data room')) return { id: it.tag, result: 'ok', where: [{ doc: tag(c, FA.name), page: 2, quote: 'This Credit Agreement is dated March 3.' }, { doc: tag(c, TS.name), page: '7' }] };
       if (it.text.includes('sponsor')) return n === 1 ? { id: it.tag, result: 'ok' } : { id: it.tag, result: 'ok', where: { document: tag(c, FA.name), page: 'p. 9', quote: 'Proseware Energy Holdings (the "Sponsor")' } };
-      return n === 1 ? { id: it.tag, result: 'ok', where: [{ doc: tag(c, TS.name), page: 99 }] } : n === 2 ? { id: it.tag, result: 'ok', where: [{ doc: tag(c, TS.name), cell: 'A1' }] } : { id: it.tag, result: 'ok' };
+      return n === 1
+        ? { id: it.tag, result: 'ok', where: [{ doc: tag(c, TS.name), page: 99 }] }
+        : n === 2
+          ? { id: it.tag, result: 'ok', where: [{ doc: tag(c, TS.name), cell: 'A1' }] }
+          : { id: it.tag, result: 'ok' };
     }) }), { d1: [FA, TS, IM] }, { shared: new Mem(), installId: 'pc', checklist: one }); await deal(s.repo);
     const p = val(await s.ai.firstPass('d1'));
     expect(p.unsettled).toEqual(['c3']); expect(p.gaps).toEqual([]);

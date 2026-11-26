@@ -54,12 +54,20 @@ export const isHearAsk = (c: { prompt: string }) => c.prompt.includes('Which fin
  */
 export const OK = (c: Call): { result: string; where?: object[] } => {
   if (!c.prompt.includes('Add "where"')) return { result: 'ok' };
-  const docs = [...c.prompt.split('\n\nCheck each of these')[0].matchAll(new RegExp(`^(${LISTED_ID}): ([^\\n]*)$`, 'gm'))]; const paged = docs.find((m) => !/\.(xlsx|xlsm|xlsb|xls|ods|csv)\b/i.test(m[2]));
+  const docs = [
+    ...c.prompt.split('\n\nCheck each of these')[0].matchAll(new RegExp(`^(${LISTED_ID}): ([^\\n]*)$`, 'gm')),
+  ];
+  const paged = docs.find((m) => !/\.(xlsx|xlsm|xlsb|xls|ods|csv)\b/i.test(m[2]));
   return paged ? { result: 'ok', where: [{ doc: paged[1], page: 1, quote: 'As the item requires.' }] } : docs[0] ? { result: 'ok', where: [{ doc: docs[0][1], sheet: 'Sheet1', cell: 'A1' }] } : { result: 'ok' };
 };
 export const itemsIn = (c: Call) => c.prompt.includes('write up to 3 short searches') ? [] : [...c.prompt.split('\n\nGive each item one')[0].matchAll(/^(I\d+): (.*)$/gm)].map((m) => ({ tag: m[1], text: m[2] }));
 /** the rows of a pick's listing: docId and path (#1162) */
-export const listed = (c: Call) => [...c.prompt.matchAll(/^(doc_[0-9a-f]{24})(?: \*)?: ([^\n]*)$/gm)].map((m) => ({ id: m[1], line: m[2], path: m[2].split(' — ')[0] }));
+export const listed = (c: Call) =>
+  [...c.prompt.matchAll(/^(doc_[0-9a-f]{24})(?: \*)?: ([^\n]*)$/gm)].map((m) => ({
+    id: m[1],
+    line: m[2],
+    path: m[2].split(' — ')[0],
+  }));
 
 /** what the stand-in fast model knows short names to stand for, as a real one would */
 

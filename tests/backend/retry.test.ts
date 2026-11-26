@@ -76,7 +76,21 @@ describe('every AI feature gets it', () => {
   }, 60_000);
 
   it('a draft whose first reply is empty is asked again and drafted; one that fails every try says so, as it always has', async () => {
-    let n = 0; const s = setup((c) => (itemsIn(c).length ? {} : ++n === 1 ? '' : { status: 'found', text: 'The lock-up ratio is 1.25x. [D1 p. 3]', sources: [{ doc: nth(c, 1), page: 3 }] }), docs, {});
+    let n = 0;
+    const s = setup(
+      (c) =>
+        itemsIn(c).length
+          ? {}
+          : ++n === 1
+            ? ''
+            : {
+                status: 'found',
+                text: 'The lock-up ratio is 1.25x. [D1 p. 3]',
+                sources: [{ doc: nth(c, 1), page: 3 }],
+              },
+      docs,
+      {},
+    );
     await deal(s.repo);
     const r = await s.ai.draft({ dealId: 'd1', questionId: 'q1', questionText: 'What is the lock-up ratio?' });
     expect(r.ok).toBe(true); expect(n).toBeGreaterThanOrEqual(2);
