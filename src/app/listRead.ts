@@ -33,9 +33,9 @@ export async function readList(ai: AiService, lines: string[]): Promise<Result<M
 }
 
 /** The files a list can be brought in from: spreadsheets, documents and plain text. */
-export const LIST_FILES = /\.(xlsx|xlsm|xls|xlsb|csv|docx|docm|doc|odt|rtf|pdf|txt|text|md)$/i;
-export const LIST_ACCEPT = '.xlsx,.xlsm,.xls,.xlsb,.csv,.docx,.docm,.doc,.odt,.rtf,.pdf,.txt,.text,.md';
-const SHEET = /\.(xlsx|xlsm|xls|xlsb|csv)$/i; const PLAIN = /\.(txt|text|md)$/i;
+export const LIST_FILES = /\.(xlsx|xlsm|xls|xlsb|ods|csv|docx|docm|doc|odt|rtf|pdf|txt|text|md)$/i;
+export const LIST_ACCEPT = '.xlsx,.xlsm,.xls,.xlsb,.ods,.csv,.docx,.docm,.doc,.odt,.rtf,.pdf,.txt,.text,.md';
+const SHEET = /\.(xlsx|xlsm|xls|xlsb|ods|csv)$/i; const PLAIN = /\.(txt|text|md)$/i;
 
 /**
  * Pasted text as lines. Text copied from a spreadsheet comes with its cells split by tabs: those are written " | ", as a
@@ -97,9 +97,6 @@ export function clearChecklistHeading(key: string) {
 export function checklistPaste(paste: string): ChecklistText | null {
   return paste.trim() ? { name: '', lines: pastedLines(paste) } : null;
 }
-
-/** The lines in a paste box, as the paste step counts them: none while it holds only spaces */
-export const pastedLineCount = (paste: string) => checklistPaste(paste)?.lines.length ?? 0;
 
 export function checklistSourceLines(text: ChecklistText | null, table: ImportTable | null) {
   return text?.lines ?? (table ? tableLines(table.columns, table.rows) : null);

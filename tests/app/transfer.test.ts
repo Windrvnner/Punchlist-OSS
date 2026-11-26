@@ -226,11 +226,3 @@ describe('search across deals', () => {
     expect(calls.brief).toBe(0);
   });
 });
-
-describe('a file that is not an Excel or CSV Q&A log', () => {
-  it('refuses an OpenDocument spreadsheet', async () => {
-    const { store } = make(); await store.boot();
-    const back = await readImportFile(store, fileOf('log.ods', new Uint8Array([0x50, 0x4b])));
-    expect(!back.ok && back.error.message).toBe('Choose a spreadsheet: .xlsx, .xlsm, .xls, .xlsb or .csv');
-  });
-});

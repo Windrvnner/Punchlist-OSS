@@ -2,7 +2,7 @@
  * Writing into an .xlsx or .xlsm by editing the package itself. Only the sheet written into is changed, and in
  * it only the rows given values; an Excel table whose last row is the one new rows go below grows to take them in.
  * Every other part (styles, tables' looks, macros, comments, other sheets) is copied byte for byte. LibreOffice, which
- * saves the whole workbook again, is kept for the formats this cannot open (.xls).
+ * saves the whole workbook again, is kept for the formats this cannot open (.xls, .ods).
  */
 import type { SheetEdit } from '../domain/sheets';
 import { readZip, partText, setPart, writeZip, type ZipPackage } from './zipParts';

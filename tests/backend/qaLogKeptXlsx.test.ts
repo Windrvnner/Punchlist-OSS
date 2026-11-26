@@ -1,6 +1,5 @@
-// An edit kept aside beside an .xlsx or .xls Q&A log, read and written through LibreOffice as the app does: their
-// cells come back into the workbook, a formula is never written over, and their version goes to the archive.
-// 2,000 questions.
+// An edit kept aside beside an .xlsx, .xls or .ods Q&A log, read and written through LibreOffice as the app does: their cells come
+// back into the workbook, a formula is never written over, and their version goes to the archive. 2,000 questions.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -169,7 +168,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     if (!r.ok) throw new Error(r.error.message);
     expect(r.value.kept!.steps).toEqual([]); expect(r.value.kept!.ask?.map((a) => [a.question, a.rows.map((x) => x.line)])).toEqual([['List material contracts.', [1500]]]);
   }, 240_000);
-  for (const ext of ['.xls']) it(`comes back into a ${ext} log, written through LibreOffice`, async () => {
+  for (const ext of ['.ods', '.xls']) it(`comes back into a ${ext} log, written through LibreOffice`, async () => {
     const rows: (string | number)[][] = [['No.', 'Question', 'Response', 'Notes'], ...Array.from({ length: N }, (_, k) => [k + 1, q(k + 1), '', ''])];
     const work = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-conv-'));
     fs.writeFileSync(path.join(work, 'log.xlsx'), await workbook(exportDocument(SHEET, rows)));
@@ -193,8 +192,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     expect(fs.readdirSync(folder).filter((n) => n.endsWith('.old'))).toEqual([]);
   }, 240_000);
   // a formula the team keeps (here the length of each question) gives another value where they reworded one
-  const formulaTest = (ext: string) => `never writes over a formula in a ${ext} log, nor takes it for a change`;
-  for (const ext of ['.xls']) it(formulaTest(ext), async () => {
+  for (const ext of ['.ods', '.xls']) it(`never writes over a formula in a ${ext} log, nor takes a formula's new value for their change`, async () => {
     const rows: (string | number)[][] = [['No.', 'Question', 'Response', 'Notes'], ...Array.from({ length: N }, (_, k) => [k + 1, q(k + 1), '', ''])];
     let x = await workbook(exportDocument(SHEET, rows)); for (const r of [7, 8, 9]) x = withFormula(x, r);
     const work = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-conv-')); fs.writeFileSync(path.join(work, 'log.xlsx'), x);
@@ -233,11 +231,11 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
   }, 240_000);
 });
 
-it('an .xlsx log’s kept edit beside a .csv log of the same name is the .xlsx log’s alone', () => {
+it('an .xlsx log’s kept edit beside an .ods log of the same name is the .xlsx log’s alone', () => {
   const workbook = fs.readFileSync(path.resolve('tests/fixtures/excel-1900.xlsx'));
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-kept-kind-'));
   const xlsx = 'Proseware Q&A log.xlsx';
-  const csv = 'Proseware Q&A log.csv';
+  const ods = 'Proseware Q&A log.ods';
   const kept = asideFixtureName(xlsx);
   const damaged = asideFixtureName(xlsx, { attempt: '0a1b2c3e' });
   const recent = asideFixtureName(xlsx, { attempt: '0a1b2c3f' });
@@ -249,11 +247,11 @@ it('an .xlsx log’s kept edit beside a .csv log of the same name is the .xlsx l
     return stats;
   }) as never);
   try {
-    for (const log of [xlsx, csv]) fs.writeFileSync(path.join(folder, log), 'a log');
+    for (const log of [xlsx, ods]) fs.writeFileSync(path.join(folder, log), 'a log');
     fs.writeFileSync(path.join(folder, kept), workbook);
     fs.writeFileSync(path.join(folder, damaged), workbook.subarray(0, workbook.length - 30));
     fs.writeFileSync(path.join(folder, recent), workbook);
-    expect(keptEdits(folder, csv)).toEqual([]);
+    expect(keptEdits(folder, ods)).toEqual([]);
     expect(keptEdits(folder, xlsx).map((edit) => edit.name).sort()).toEqual([kept, damaged]);
   } finally {
     spy.mockRestore();

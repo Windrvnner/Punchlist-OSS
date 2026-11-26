@@ -112,8 +112,8 @@ describe.skipIf(!has)('what used to be refused', () => {
   });
 });
 
-describe.skipIf(!has)('the LibreOffice path (.xls)', () => {
-  for (const ext of ['xls']) {
+describe.skipIf(!has)('the LibreOffice path (.xls, .ods)', () => {
+  for (const ext of ['ods', 'xls']) {
     it(`.${ext}: a new row below a hidden last row is visible, and quotes, tabs and newlines survive`, async () => {
       const x = book({ name: 'Lender&apos;s &quot;Q&amp;A&quot;', rows: [`<row r="2">${n('A2', 1)}${t('B2', 'DSCR?')}</row>`, `<row r="3" hidden="1">${n('A3', 2)}${t('B3', 'EPC?')}</row>`] });
       const dir = path.dirname(x);
