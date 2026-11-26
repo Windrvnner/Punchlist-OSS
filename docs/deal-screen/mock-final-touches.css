@@ -96,7 +96,6 @@
 .x-prow .nm {
   display: block;
   color: var(--ink);
-  font-weight: 400;
   line-height: 18px;
   white-space: nowrap;
   overflow: hidden;
