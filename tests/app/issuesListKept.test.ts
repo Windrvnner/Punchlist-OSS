@@ -7,7 +7,7 @@ import {
   importKey, initializeKeptImports, keepImport, keptImport, keptImportsReady,
 } from '../../src/app/keptImports';
 import {
-  keptIssuesList, pointsByList, reviewIssuesList, submitIssuesList, type ReadIssuesList,
+  keptIssuesList, keptIssuesPaste, pointsByList, reviewIssuesList, submitIssuesList, type ReadIssuesList,
 } from '../../src/app/issuesList';
 import { dealFindings } from '../../src/app/state';
 import type { ListPoint } from '../../src/domain/model';
@@ -57,7 +57,7 @@ it('lets the kept list go while the import runs and keeps it again when the impo
     const list = readList();
     const kept = new Set([5]);
     const { input } = reviewIssuesList(app.store.get(), dealId, list, kept);
-    keepImport(key, { list, kept });
+    keepImport(key, { list, kept, paste: '1. a' });
     // the import keeps the state as it is when it fails, not as Import found it
     let atFailure = kept;
     const now = () => ({ list, kept: atFailure });
@@ -68,7 +68,9 @@ it('lets the kept list go while the import runs and keeps it again when the impo
     const refused = await submitIssuesList(app.store, key, { dealId, list, points: input }, now);
     restore();
     expect(refused.ok).toBe(false);
-    expect(keptIssuesList(key)).toEqual({ list, kept: new Set([5, 9]) });
+    expect(keptIssuesList(key)).toMatchObject({ list, kept: new Set([5, 9]) });
+    // the paste typed and not read survives the failed import, and goes with a successful one (#1021)
+    expect(keptIssuesPaste(key)).toBe('1. a');
     const held = holdRecoveryWrite(app, (tx) => tx.writes.some((write) => write.kind === 'finding'));
     const sending = submitIssuesList(app.store, key, { dealId, list, points: input }, now);
     await held.entered;
@@ -76,6 +78,7 @@ it('lets the kept list go while the import runs and keeps it again when the impo
     held.release();
     expect((await sending).ok).toBe(true);
     expect(keptImport(key)).toBeUndefined();
+    expect(keptIssuesPaste(key)).toBe('');
     expect(dealFindings(app.store.get(), dealId)).toHaveLength(POINTS);
   } finally {
     app.store.closing();

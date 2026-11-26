@@ -100,17 +100,18 @@ export interface IssuesListSubmission {
 
 /**
  * Imports the list. The kept list is let go first, so a reload while it runs never offers it again; a failure keeps
- * it again as it is then (`now`), not as Import found it.
+ * it again as it is then (`now`), not as Import found it. A paste typed and not read is kept again with it (#1021).
  */
 export async function submitIssuesList(
   store: Store, key: string, { dealId, list, points }: IssuesListSubmission, now: () => IssuesListKept | null,
 ) {
+  const paste = keptIssuesPaste(key);
   dropImport(key);
   const input = { dealId, doc: list.doc.docId, list: list.doc.doc, points };
   const idempotencyKey = `issues-${dealId}-${list.doc.docId}`;
   const result = await store.dispatch(ImportIssuesList, input, { idempotencyKey });
   const keptNow = result.ok ? null : now();
-  if (keptNow) keepImport(key, keptNow);
+  if (keptNow) keepImport(key, paste ? { ...keptNow, paste } : keptNow);
   return result;
 }
 
