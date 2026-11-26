@@ -1079,6 +1079,38 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     expect(budget().words).toEqual(MODEL_WORDS);
   });
 
+  /** the converter of `flakyConverter`, counting the spreadsheets it is asked to read */
+  const countingConverter = (down: { now: boolean }, asked: string[]) => {
+    const convert = flakyConverter(down);
+    const read = convert.sheets!;
+    return Object.assign(convert, { sheets: (file: string) => { asked.push(file); return read(file); } });
+  };
+  it('an attached spreadsheet not read is read once in a run, with the index on, and named (#1023)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Credit Agreement.pdf', FA);
+    const down = { now: true };
+    const asked: string[] = [];
+    const a = pc(root, 'office', undefined, { index: true, convert: countingConverter(down, asked) });
+    val(await a.docs.attach('d1', { name: 'Budget.xlsx', bytes: MODEL }));
+    asked.length = 0;
+    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Budget.xlsx');
+    expect(asked.length).toBe(1);
+  });
+  it('never reads a spreadsheet attached by a place that leads out of its folder (#1156)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Credit Agreement.pdf', FA);
+    put(path.join(root, 'shared'), 'outside.xlsx', MODEL);
+    const { words: _none, ...line } = olderLine(ATTACHED, MODEL, '../outside.xlsx', []);
+    keepLines(root, [line]);
+    const asked: string[] = [];
+    const a = pc(root, 'office', undefined, { convert: countingConverter({ now: false }, asked) });
+    await indexAll(a, vdr);
+    expect(asked).toEqual([]);
+    expect(a.docs.records('d1').find((r) => r.docId === idOf(MODEL))?.words).toBeUndefined();
+  });
+
   it('a file attached in the app is kept in the shared folder under this copy’s own name, loaded into the store, and opens on another PC', async () => {
     const { root } = room(); const svc = new StandInService(); const a = pc(root, 'office', svc), b = pc(root, 'home', svc);
     const bytes = pdf('term sheet', 2); const r = val(await a.docs.attach('d1', { name: 'Term sheet: v3.pdf', bytes }));
@@ -1877,6 +1909,21 @@ describe('a PDF whose page text cannot be read (#1056)', () => {
     expect(record?.words).toContain('guarantee');
     expect(val(await restarted.docs.freshen!('d1'))).toBe('same');
   }, 60_000);
+
+  it('an attached PDF whose text is unread is named on every run, and read when it can be (#1056)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Credit Agreement.pdf', pdf('credit agreement', 2));
+    const a = pc(root, 'office', undefined, { index: true });
+    textFails.on = true;
+    const attached = val(await a.docs.attach('d1', { name: 'Guarantee.pdf', bytes: pdf(textFails.marker, 2) }));
+    const record = () => a.docs.records('d1').find((r) => r.docId === attached.docId);
+    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Guarantee.pdf');
+    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Guarantee.pdf');
+    textFails.on = false;
+    expect((await indexAll(a, vdr)).log.join(' ')).not.toContain('could not be read');
+    expect(record()?.words).toBeDefined();
+  });
 
   it('is attached with its pages and no words', async () => {
     const root = tmp();

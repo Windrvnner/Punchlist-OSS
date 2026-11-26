@@ -625,35 +625,6 @@ export function nodeDocuments(o: DocumentsOptions) {
     try { o.local.write('indexing-last.txt', line); } catch { /* the times are a convenience */ }
   }
 
-  /**
-   * The spreadsheets attached in the app whose words could not be read (#427): each run reads them again, adds the
-   * names still unread to `names`, and returns how many there are. They are in no folder's listing, so while any is
-   * unread no folder of the run keeps its listing, and the next look reads them again.
-   */
-  async function readAttachedSheets(
-    dealId: string,
-    names: string[],
-    unreadAt: Set<string>,
-    folders: DealFolder[],
-  ): Promise<number> {
-    let unreadCount = 0;
-    for (const d of records(dealId).values()) {
-      const place = [d, ...(d.copies ?? [])].find((p) => p.folder === ATTACHED);
-      if (!place || paged(d.name) || d.words !== undefined) continue;
-      const at = path.join(attachments, place.rel);
-      const words = await sheetWords(at, dealId, d.docId);
-      if (words === undefined) {
-        names.push(place.name);
-        unreadCount++;
-        continue;
-      }
-      const line = { docId: d.docId, hash: d.hash, name: place.name, folder: ATTACHED, rel: place.rel, size: d.size };
-      say(dealId, { ...line, words });
-    }
-    if (unreadCount) for (const f of folders) unreadAt.add(placeKey(f.path, ''));
-    return unreadCount;
-  }
-
   /** what reading a file gave; `stuck`: it did not turn into pages; `unpageable`: it would not this time */
   interface FileRead {
     pages?: number; via?: string; tracked?: number; words?: string[]; cover?: string;
@@ -720,22 +691,36 @@ export function nodeDocuments(o: DocumentsOptions) {
     return r;
   }
   /**
-   * The files attached in the app that this PC's index does not hold (after the index's version changed, #1147): they
-   * are in no folder the run reads, so each is read where it is kept, and its record said again if it changed.
+   * The files attached in the app that have no words yet, or that this PC's index does not hold (after the index's
+   * version changed, #1147). They are in no folder the run reads, so each is read once here, where it is kept, and its
+   * record said again if it changed. One whose text could not be read is named in `names` and counted in the result:
+   * each run reads it again, and while any is unread no folder of the run keeps its listing (#427).
    */
-  async function readAttachedUnindexed(dealId: string) {
-    if (!o.index) return;
+  async function readAttached(
+    dealId: string,
+    names: string[],
+    unreadAt: Set<string>,
+    folders: DealFolder[],
+  ): Promise<number> {
+    let unreadCount = 0;
     for (const d of all(dealId).values()) {
       const place = [d, ...(d.copies ?? [])].find((p) => p.folder === ATTACHED);
-      if (!place || o.index.has(dealId, d.docId)) continue;
+      const unindexed = !!o.index && !o.index.has(dealId, d.docId);
+      if (!place || (d.words !== undefined && !unindexed)) continue;
       // a place leading out of the folder is not read (#1156)
       const at = insideRoot(attachments, place.rel);
       if (at === null || !fs.existsSync(at)) continue;
       const read = await readFile(dealId, d.docId, place.name, at, d, false);
+      if (read.textUnread) {
+        names.push(place.name);
+        unreadCount++;
+      }
       if (!wordsChanged(d.words, read.words) && read.pages === d.pages) continue;
       const line = { docId: d.docId, hash: d.hash, name: place.name, folder: ATTACHED, rel: place.rel, size: d.size };
       say(dealId, { ...line, ...readOf(read) });
     }
+    if (unreadCount) for (const f of folders) unreadAt.add(placeKey(f.path, ''));
+    return unreadCount;
   }
 
   // ---- indexing
@@ -865,7 +850,6 @@ export function nodeDocuments(o: DocumentsOptions) {
       if (inbox) { try { fs.rmdirSync(inbox); } catch { /* another deal is being indexed, or it was never made */ } }
     }
     saveHashes(true);
-    await readAttachedUnindexed(dealId);
     // what is no longer where it was seen in these folders has left that place; it may still be at another. A folder that reads as empty is taken as unreadable, not as emptied.
     for (const { folder, files, shut } of found) {
       if (!files.length) continue;
@@ -916,7 +900,7 @@ export function nodeDocuments(o: DocumentsOptions) {
       const had = both(dealId).shuts.get(folder.path)?.get(o.installId); const opened = openedHere(dealId, folder.path, localOf(dealId, folder.path), shut);
       if (told.has(folder.path) || !sameList(had?.shut ?? [], shut) || !sameList(had?.opened ?? [], opened) || (readBy?.get(o.installId) ?? '') < ago(DAY)) say(dealId, { docId: '', read: folder.path, ...(shut.length ? { shut } : {}), ...(opened.length ? { opened } : {}) });
     }
-    const attachedUnread = await readAttachedSheets(dealId, skipped.unread, unreadAt, job.folders);
+    const attachedUnread = await readAttached(dealId, skipped.unread, unreadAt, job.folders);
     unread = skipped.unread.length;                       // every file not read is named
     // a file that was left out is named, so that a person can see which
     const shut = found.flatMap((x) => x.shut);
