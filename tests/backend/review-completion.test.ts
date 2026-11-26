@@ -1,23 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import {
-  setup,
-  doc,
-  val,
-  ask,
-  deal,
-  finding,
-  question,
-  sentNames,
-  itemsIn,
-  thingsIn,
-  Mem,
-  checkLines,
-  type Call,
-  OK,
-  nth,
-  heardAs,
-} from './reviewKit';
+import { setup, doc, val, ask, deal, finding, question, sentNames, itemsIn, thingsIn, Mem, checkLines, type Call, OK,
+  nth, heardAs } from './reviewKit';
 import type { DocRecord } from '../../src/backend/documents';
 import { tokenHolder } from '../../src/backend/signInToken';
 
@@ -55,11 +39,9 @@ describe('what is recorded and shown as checked', () => {
 
   it('documents that cannot be found on this PC are not read: no model is asked without them, nothing is recorded as satisfied against them, and an answer says so', async () => {
     const shared = new Mem();
-    const s = setup(
-      (c) => (c.prompt.includes('Check each of these') ? okAll(c) : { text: 'The margin is 2.25%.', sources: [] }),
-      room(),
-      { shared, installId: 'pc', checklist: list(3), wanted: async () => [] },
-    ); // as when the deal's folder is not at that path on this PC, or the files were replaced
+    const s = setup((c) => (c.prompt.includes('Check each of these')
+      ? okAll(c) : { text: 'The margin is 2.25%.', sources: [] }), room(),
+      { shared, installId: 'pc', checklist: list(3), wanted: async () => [] });                         // as when the deal's folder is not at that path on this PC, or the files were replaced
     await deal(s.repo); const r = val(await s.ai.firstPass('d1')); const lines = checkLines(shared).filter((l) => l.item);
     expect(s.calls.length).toBe(0); expect(s.pickForCalls.length).toBe(0); expect(r.unsettled.length).toBe(3); expect(lines.every((l) => l.result === 'unsettled' && l.docs.length === 0)).toBe(true); expect(val(await s.ai.checked('d1')).at).toBeNull();
     const a = await s.ai.answer(ask('What is the margin in the credit agreement?'));

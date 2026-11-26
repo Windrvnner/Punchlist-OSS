@@ -8,9 +8,8 @@ import { StoreKeeper } from '../../src/backend/storeKeeper';
 import { StandInService } from '../../src/backend/service';
 import { nodeAi } from '../../src/backend/ai';
 import { memRepo } from '../adapters/memRepo';
-import {
-  setup, doc, val, ask, deal, finding, listed, itemsIn, Mem, checkLines, type Call, OK, nth, affectedAs,
-} from './reviewKit';
+import { setup, doc, val, ask, deal, finding, listed, itemsIn, Mem, checkLines, type Call, OK, nth, affectedAs }
+  from './reviewKit';
 import type { DocRecord } from '../../src/backend/documents';
 
 const made: string[] = []; afterAll(() => { for (const d of made) fs.rmSync(d, { recursive: true, force: true }); });
@@ -54,13 +53,9 @@ describe('the document service on real folders', () => {
     const wanted = await a.docs.wanted('d1', recs.map((r) => r.docId));
     expect(recs.map((r) => [r.name, r.pages, r.summary])).toEqual([['Credit Agreement.pdf', 4, undefined]]); expect(wanted.length).toBe(1);   // one credit agreement, the new draft; no side letter
     // with the real document service behind it, the first pass sees the document as gone: the finding that cites it is marked, and the item it satisfied is looked at again
-    const svc = new StandInService((c) =>
-      c.prompt.includes('Check each of these')
-        ? JSON.stringify({ items: [{ id: 'k1', result: 'ok', where: [{ doc: nth(c, 1), page: 1 }] }] })
-        : c.prompt.includes('core documents')
-          ? '{"core": []}'
-          : 'I cannot say',
-    );
+    const svc = new StandInService((c) => (c.prompt.includes('Check each of these')
+      ? JSON.stringify({ items: [{ id: 'k1', result: 'ok', where: [{ doc: nth(c, 1), page: 1 }] }] })
+      : c.prompt.includes('core documents') ? '{"core": []}' : 'I cannot say'));
     const keeper = new StoreKeeper(svc, new Mem(), { recheckMs: 0, clock }); const repo = memRepo(clock); const shared = new Mem();
     const root2 = tmp(); const vdr2 = path.join(root2, 'vdr'); put(vdr2, 'Side letter.pdf', pdf('side letter step-in rights')); const b = pc(root2, 'office'); await indexAll(b, vdr2);
     const ai = nodeAi({ service: svc, docs: b.docs, keeper, repo, shared, installId: 'office', clock, checklist: () => ({ broad: [{ id: 'k1', text: 'The side letter gives step-in rights' }], product: [], sector: [] }) });
@@ -103,34 +98,10 @@ describe('other', () => {
 
   it('"Check again" pressed while the first pass is starting: the two share one round, and no finding is written twice', async () => {
     const recs = { d1: [doc(1, 'Credit Agreement.pdf', { words: ['facility', 'agreement', 'margin'] })] };
-    const s = setup(
-      (c) => ({
-        items: itemsIn(c).map((it) => ({
-          id: it.tag,
-          result: 'finding',
-          title: `Problem: ${it.text}`,
-          workstream: 'Legal',
-          body: ['A. [1] B. [2]'],
-          next: '',
-          sources: [
-            { doc: nth(c, 1), page: 1 },
-            { doc: nth(c, 1), page: 2 },
-          ],
-        })),
-      }),
-      recs,
-      {
-        checklist: () => ({
-          broad: [
-            { id: 'k1', text: 'The margin in the credit agreement is as agreed' },
-            { id: 'k2', text: 'The credit agreement has a lock-up' },
-          ],
-          product: [],
-          sector: [],
-        }),
-      },
-    );
-    await deal(s.repo);
+    const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, result: 'finding',
+      title: `Problem: ${it.text}`, workstream: 'Legal', body: ['A. [1] B. [2]'], next: '',
+      sources: [{ doc: nth(c, 1), page: 1 }, { doc: nth(c, 1), page: 2 }] })) }), recs,
+      { checklist: () => ({ broad: [{ id: 'k1', text: 'The margin in the credit agreement is as agreed' }, { id: 'k2', text: 'The credit agreement has a lock-up' }], product: [], sector: [] }) }); await deal(s.repo);
     const [a, b] = await Promise.all([s.ai.firstPass('d1'), s.ai.checkAll({ dealId: 'd1' })]);
     const titles = val(await s.repo.list('finding', 'd1')).map((l) => (l.envelope.data as any).title).sort();
     // whichever started its round first, the other joined it (a first pass joins a round of any kind; a check waits behind a first pass and then runs): each finding once
@@ -139,34 +110,11 @@ describe('other', () => {
 
   it('a finding another PC wrote while this run was under way is not written a second time', async () => {
     const recs = { d1: [doc(1, 'Credit Agreement.pdf', { words: ['facility', 'agreement', 'margin'] })] }; let other: Promise<unknown> | null = null;
-    const s = setup(
-      (c) => {
-        other ??= finding(s.repo, 'f_other', 'Margin looks high', { itemId: 'k1' });
-        return {
-          items: itemsIn(c).map((it) => ({
-            id: it.tag,
-            result: 'finding',
-            title: 'Margin looks high',
-            workstream: 'Legal',
-            body: ['A. [1] B. [2]'],
-            next: '',
-            sources: [
-              { doc: nth(c, 1), page: 1 },
-              { doc: nth(c, 1), page: 2 },
-            ],
-          })),
-        };
-      },
-      recs,
-      {
-        checklist: () => ({
-          broad: [{ id: 'k1', text: 'The margin in the credit agreement is as agreed' }],
-          product: [],
-          sector: [],
-        }),
-      },
-    );
-    await deal(s.repo);
+    const s = setup((c) => { other ??= finding(s.repo, 'f_other', 'Margin looks high', { itemId: 'k1' });
+      return { items: itemsIn(c).map((it) => ({ id: it.tag, result: 'finding', title: 'Margin looks high',
+        workstream: 'Legal', body: ['A. [1] B. [2]'], next: '',
+        sources: [{ doc: nth(c, 1), page: 1 }, { doc: nth(c, 1), page: 2 }] })) }; }, recs,
+      { checklist: () => ({ broad: [{ id: 'k1', text: 'The margin in the credit agreement is as agreed' }], product: [], sector: [] }) }); await deal(s.repo);
     const r = val(await s.ai.firstPass('d1')); await other;
     expect(r.written).toEqual([]); expect(val(await s.repo.list('finding', 'd1')).map((l) => l.id)).toEqual(['f_other']);        // the item is recorded as a finding; the finding is the one already there
   });
@@ -199,23 +147,8 @@ describe('other', () => {
     const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...OK(c) })) }), recs, {
       checklist: () => ({ broad: [{ id: 'k1', text: 'The term sheet is signed' }], product: [], sector: [] }),
       affects: (c) => affectedAs(c, 'F1'),
-      pick: (c) => ({
-        read: listed(c as Call)
-          .filter((r) => /Term sheet/.test(r.path))
-          .map((r) => r.id),
-      }),
-      wanted: async (d, ids) =>
-        recs[d]
-          .filter((r) => ids.includes(r.docId))
-          .map((r) => ({
-            docId: r.docId,
-            name: r.name,
-            read: () => {
-              if (/docx$/.test(r.name)) throw new Error('indexed with a different converter than this PC has');
-              return new TextEncoder().encode(r.name);
-            },
-          })),
-    });
+      pick: (c) => ({ read: listed(c as Call).filter((r) => /Term sheet/.test(r.path)).map((r) => r.id) }),
+      wanted: async (d, ids) => recs[d].filter((r) => ids.includes(r.docId)).map((r) => ({ docId: r.docId, name: r.name, read: () => { if (/docx$/.test(r.name)) throw new Error('indexed with a different converter than this PC has'); return new TextEncoder().encode(r.name); } })) });
     await deal(s.repo); await finding(s.repo, 'f_1', 'Margin differs', { sources: [{ doc: 'Credit Agreement.docx', loc: 'p. 2', docId: recs.d1[0].docId }] });
     val(await s.ai.firstPass('d1')); recs.d1.push(doc(3, 'Amendment letter.pdf', { words: ['amendment', 'margin'] }));
     const runs = []; for (let i = 0; i < 3; i++) { const r = await s.ai.firstPass('d1'); runs.push(r.ok ? 'ok' : `${r.error.kind}: ${r.error.message}`); }
