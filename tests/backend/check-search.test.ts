@@ -3,7 +3,7 @@
 // kept and shown on a gap, a search that cannot be made never makes a gap by itself, and Check again starts from each
 // satisfied item's own documents.
 import { describe, it, expect } from 'vitest';
-import { setup, doc, val, deal, listed, sentNames, itemsIn, checkLines, Mem, type Call, OK } from './reviewKit';
+import { setup, doc, val, deal, listed, sentNames, itemsIn, checkLines, Mem, type Call, OK, LISTED_ID } from './reviewKit';
 import type { DocRecord } from '../../src/backend/documents';
 
 const pad = (n: number) => String(n).padStart(4, '0');
@@ -27,7 +27,7 @@ const queries = (c: Call) => { const out: Record<string, string[]> = {}; for (co
 const answer = (c: Call) => ({
   items: itemsIn(c).map((it) => {
     const name = /permit/i.test(it.text) ? 'EPA' : /insurance/i.test(it.text) ? 'Litware' : null;
-    const d = name ? new RegExp(`^(D\\d+): [^\\n]*${name}`, 'm').exec(c.prompt) : null;
+    const d = name ? new RegExp(`^(${LISTED_ID}): [^\\n]*${name}`, 'm').exec(c.prompt) : null;
     return d
       ? {
           id: it.tag,
@@ -38,8 +38,12 @@ const answer = (c: Call) => ({
   }),
 });
 /** a fast model that picks whatever its searches found, the first of them first */
-const pickFound = (c: Call) => ({ read: listed(c).slice(0, 2).map((r) => r.n) });
-const pickForFound = (c: Call) => { const out: Record<string, number[]> = {}; for (const m of c.prompt.matchAll(/^(I\d+): .*\(its searches found ([\d, ]+)\)$/gm)) out[m[1]] = m[2].split(', ').map(Number).slice(0, 2); return { read: out }; };
+const pickFound = (c: Call) => ({ read: listed(c).slice(0, 2).map((r) => r.id) });
+const pickForFound = (c: Call) => {
+  const out: Record<string, string[]> = {};
+  for (const m of c.prompt.matchAll(/^(I\d+): .*\(its searches found ([\w, ]+)\)$/gm)) out[m[1]] = m[2].split(', ').slice(0, 2);
+  return { read: out };
+};
 
 describe('checks on the search agent', () => {
   it('the documents an item’s searches find head the pick, the item is settled on them, and a gap keeps the trail of what was searched for', async () => {
@@ -74,7 +78,7 @@ describe('checks on the search agent', () => {
         pick: (c) => ({
           read: listed(c as Call)
             .filter((r) => /EPA|Litware/.test(r.path))
-            .map((r) => r.n),
+            .map((r) => r.id),
         }),
         pickFor: () => ({ read: { I1: [] } }),
       },
@@ -98,7 +102,7 @@ describe('checks on the search agent', () => {
           pick: (c) => ({
             read: listed(c as Call)
               .filter((r) => /EPA|Litware/.test(r.path))
-              .map((r) => r.n),
+              .map((r) => r.id),
           }),
           pickFor: () => ({ read: { I1: [] } }),
         },
@@ -127,7 +131,7 @@ describe('checks on the search agent', () => {
           pick: (c) => ({
             read: listed(c as Call)
               .filter((r) => /EPA|Litware/.test(r.path))
-              .map((r) => r.n),
+              .map((r) => r.id),
           }),
           pickFor: () => ({ read: { I1: [] } }),
         },
@@ -162,7 +166,7 @@ describe('checks on the search agent', () => {
   });
 
   it('the search keeps to its budget per deal: with none left it asks no more, and the check still ends', async () => {
-    const s = setup(answer, { d1: room }, { checklist, checkSearchCalls: 1, query: queries, pick: pickFound, pickFor: (c) => ({ read: { I1: [listed(c as Call)[0].n] } }) });
+    const s = setup(answer, { d1: room }, { checklist, checkSearchCalls: 1, query: queries, pick: pickFound, pickFor: (c) => ({ read: { I1: [listed(c as Call)[0].id] } }) });
     await deal(s.repo); const r = val(await s.ai.firstPass('d1'));
     expect(s.queryCalls.length).toBe(1); expect(s.pickForCalls.length).toBe(1);
     expect(r.gaps.length + r.unsettled.length).toBeLessThanOrEqual(1);
@@ -179,14 +183,14 @@ describe('checks on the search agent', () => {
     expect(r.gaps).toEqual([{ title: 'A hedging strategy has been approved by the board' }]);
     expect(val(await s.ai.checklist('d1')).find((x) => x.id === 'h1')!.searched?.length).toBe(4);
     // with three calls for the deal, the three tries of step one spend them all: everything after is picked for as before
-    const tight = setup(answer, { d1: room }, { checklist, checkSearchCalls: 3, query: flaky, pick: pickFound, pickFor: (c) => ({ read: { I1: [listed(c as Call)[0].n] } }) });
+    const tight = setup(answer, { d1: room }, { checklist, checkSearchCalls: 3, query: flaky, pick: pickFound, pickFor: (c) => ({ read: { I1: [listed(c as Call)[0].id] } }) });
     await deal(tight.repo); val(await tight.ai.firstPass('d1'));
     expect(tight.queryCalls.length).toBe(3); expect(tight.pickForCalls.length).toBe(1);
   });
 
   it('an item whose second search in other words cannot be made is picked for as before, not taken as a gap', async () => {
     // three calls: step one, the hedging item once more in other words, and its second look; the second look's retry is past the budget
-    const s = setup(answer, { d1: room }, { checklist, checkSearchCalls: 3, query: queries, pick: pickFound, pickFor: (c) => ({ read: { I1: [listed(c as Call)[0].n] } }) });
+    const s = setup(answer, { d1: room }, { checklist, checkSearchCalls: 3, query: queries, pick: pickFound, pickFor: (c) => ({ read: { I1: [listed(c as Call)[0].id] } }) });
     await deal(s.repo); val(await s.ai.firstPass('d1'));
     expect(s.queryCalls.length).toBe(3); expect(s.queryCalls[2].prompt).not.toContain('searched already');
     expect(s.pickForCalls.length).toBe(1); expect(s.pickForCalls[0].prompt).toContain('A hedging strategy');
