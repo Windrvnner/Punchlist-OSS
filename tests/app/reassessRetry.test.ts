@@ -11,7 +11,8 @@ import { CreateFinding, EditFinding, Reassess, ApplyReassessment } from '../../s
 import { ImportQuestions } from '../../src/app/commands/importQuestions';
 import { reassess } from '../../src/app/findings';
 import { registry } from '../../src/app/commands/undo';
-import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
+import { csvCodec } from '../../src/adapters/spreadsheet';
+import { readCsv } from '../../src/domain/sheets';
 import { prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { MemoryLocal } from '../../src/adapters/local';
 import { ok, fail } from '../../src/domain/result';

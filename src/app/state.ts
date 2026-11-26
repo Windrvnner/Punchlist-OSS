@@ -1,7 +1,7 @@
 import { distinguishingWords, type TwinFocus } from './dealLabel';
 import type { Deal, Question, Finding, Tombstone, Member, Operation, DealId, QuestionId, FindingId, AuditEntry, Source, Folder, RecordKind, ClashKind } from '../domain/model';
 import type { Item, ListRecord } from '../domain/checklist';
-import type { CheckState, ModelThread, Research } from '../ports';
+import type { AnswerOffer, CheckState, ModelThread, Research } from '../ports';
 import type { PageView, SyncState, FolderSearch, FolderPlace, Seen } from '../ports';
 import { control } from '../control';
 import { readLogCells, holds } from '../domain/logWrite';
@@ -14,7 +14,22 @@ import { canLinkUnresolved, suggestUnresolvedLinks, type ApprovedLinks } from '.
 
 export type BootStage = 'session' | 'deals' | 'journal' | 'ready';
 
-export interface Message { id: string; role: 'me' | 'ai'; text: string; sources?: Source[]; state: 'done' | 'pending' | 'failed'; at: string; /** files sent with this message */ attached?: { doc: string; docId: string }[]; /** what the chat agent did to find this answer */ research?: Research; /** the model service's conversation as this answer left it */ thread?: ModelThread }
+export interface Message {
+  id: string;
+  role: 'me' | 'ai';
+  text: string;
+  sources?: Source[];
+  state: 'done' | 'pending' | 'failed';
+  at: string;
+  /** files sent with this message */
+  attached?: { doc: string; docId: string }[];
+  /** what the chat agent did to find this answer */
+  research?: Research;
+  /** the model service's conversation as this answer left it */
+  thread?: ModelThread;
+  /** the action offered under it, checked (#1054) */
+  offer?: AnswerOffer;
+}
 /** The firm's name, which questions we ask and responses we give are stamped with: set in the control file (firm.name),
  * not in Settings. */
 export const FIRM = control.firm.name;
@@ -115,7 +130,7 @@ export interface UiState {
   /** `sure`: the name has been typed and the second pop-up, which asks once more, is showing */
   /** `seen`: what this PC had taken in as the first pop-up opened, given with the delete */
   deleteDeal: null | { dealId: DealId; typed: string; error: string; sure?: boolean; seen?: Seen };
-  findingFilter: { status: 'open' | 'reassess' | 'closed' | 'all'; workstream: string; text: string; reviewed: '' | 'yes' | 'no' };
+  findingFilter: { status: 'open' | 'reassess' | 'closed' | 'all'; workstream: string; reviewed: '' | 'yes' | 'no' };
   /** which checklist items the Checklist page lists: all of them, or those that stand one way. `open` is the items not settled, `person` those resolved by a person, `gone` those whose finding was deleted. */
   checklistFilter: 'all' | 'finding' | 'gone' | 'gap' | 'open' | 'person' | 'satisfied' | 'off';
   reassessing: string[];
@@ -239,7 +254,7 @@ export const initialState = (can = capabilities()): State => ({
     toasts: [],
     newDeal: null,
     deleteDeal: null,
-    findingFilter: { status: 'open', workstream: '', text: '', reviewed: '' },
+    findingFilter: { status: 'open', workstream: '', reviewed: '' },
     checklistFilter: 'all',
     reassessing: [],
     indexStalled: [],
@@ -509,7 +524,13 @@ export function offFindingCount(s: Pick<State, 'items' | 'findings'>, dealId: st
 
 /** Whether the Findings filter shows this finding. A finding with two versions needs a decision, so no filter hides it. */
 export const findingListed = (s: Pick<State, 'conflicts'>, f: Finding, FF: State['ui']['findingFilter']): boolean =>
-  !!s.conflicts[f.id] || ((FF.status === 'all' || (FF.status === 'reassess' ? f.status === 'open' && f.updated : f.status === FF.status)) && (!FF.workstream || workstreamHead(f) === FF.workstream) && (!FF.reviewed || (FF.reviewed === 'yes') === !!f.reviewed) && (!FF.text || f.title.toLowerCase().includes(FF.text.toLowerCase())));
+  !!s.conflicts[f.id] || (findingStatusListed(f, FF.status)
+    && (!FF.workstream || workstreamHead(f) === FF.workstream)
+    && (!FF.reviewed || (FF.reviewed === 'yes') === !!f.reviewed));
+/** Whether the Findings status filter shows this finding: "to update" is an open finding the documents changed. */
+const findingStatusListed = (f: Finding, status: State['ui']['findingFilter']['status']) => (
+  status === 'all' || (status === 'reassess' ? f.status === 'open' && !!f.updated : f.status === status)
+);
 
 /**
  * What tells a deal from another of the same name: its counterparty and the day it was created, as "Northwind LP · Nov

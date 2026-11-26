@@ -1,6 +1,6 @@
 /** Every AI call is asked again quietly before a failure is shown (decisions: Retries; src/backend/retry.ts). */
 import { describe, it, expect } from 'vitest';
-import { retrier, curable, BREAK } from '../../src/backend/retry';
+import { retrier, curable } from '../../src/backend/retry';
 import { setup, val, deal, doc, OK, itemsIn, Mem, type Call } from './reviewKit';
 import type { Checklist } from '../../src/backend/ai';
 
@@ -24,34 +24,33 @@ describe('the retry policy', () => {
     for (const e of [fail(), fail({ status: 500 }), fail({ status: 503 }), new SyntaxError('Unexpected end of JSON input'), new Error('declined to answer this'), null, undefined]) expect(curable(e)).toBe(true);
   });
 
-  it(`after ${BREAK} calls in a row fail on every try, calls are tried once until one succeeds, so an outage does not triple the calls`, async () => {
-    const retried = retrier({ retries: 2, sleep: async () => {} }); let n = 0; let up = false;
-    const call = () => retried(async () => { n++; if (!up) throw fail(); return 'ok'; }).catch(() => 'failed');
-    for (let i = 0; i < BREAK; i++) await call(); expect(n).toBe(BREAK * 3);
-    n = 0; await call(); await call(); expect(n).toBe(2);                         // tried once each
-    up = true; n = 0; expect(await call()).toBe('ok'); expect(n).toBe(1);
-    up = false; n = 0; await call(); expect(n).toBe(3);                           // a success puts the retries back
-    expect(retrier({ retries: 0 }).retriesFor()).toBe(0); expect(retried.retriesFor()).toBe(2);                     // what the chat asks before it starts a new conversation
-    up = false; for (let i = 0; i < BREAK; i++) await call(); expect(retried.retriesFor()).toBe(0); expect(retried.retriesFor('other')).toBe(2);
-  });
-
-  it('the run of failures is counted per model: one model down while another answers stops being asked again', async () => {
-    const retried = retrier({ retries: 2, sleep: async () => {} }); let down = 0;
-    const call = (model: string) => retried(async () => { if (model === 'standard') { down++; throw fail(); } return 'ok'; }, undefined, model).catch(() => 'failed');
-    for (let i = 0; i < BREAK + 3; i++) { await call('standard'); await call('fast'); }
-    expect(down).toBe(BREAK * 3 + 3);                                             // after BREAK calls of three tries, one try each
+  it('every call gets its retries, however many calls before it failed', async () => {
+    const retried = retrier({ retries: 2, sleep: async () => {} });
+    let tries = 0;
+    const call = () => retried(async () => { tries++; throw fail(); }).catch(() => 'failed');
+    for (let i = 0; i < 10; i++) await call();
+    expect(tries).toBe(10 * 3);                                                   // each of the ten had its two retries
+    expect(retried.retries()).toBe(2);
+    // what the chat asks before a new conversation
+    expect(retrier({ retries: 0 }).retries()).toBe(0);
   });
 
   it('the waits are capped, and a call that already had a try elsewhere has that many fewer here', async () => {
     const waits: number[] = []; const retried = retrier({ retries: 5, waitMs: 1000, sleep: async (ms) => { waits.push(ms); } }); let n = 0;
     await retried(async () => { n++; throw fail(); }).catch(() => {}); expect(n).toBe(6); expect(waits).toEqual([1000, 2000, 4000, 4000, 4000]);
-    n = 0; waits.length = 0; await retried(async () => { n++; throw fail(); }, undefined, 'other', 1).catch(() => {}); expect(n).toBe(5); expect(waits).toEqual([1000, 2000, 4000, 4000, 4000]);   // the first is its retry's wait
+    n = 0;
+    waits.length = 0;
+    await retried(async () => { n++; throw fail(); }, undefined, 1).catch(() => {});
+    expect(n).toBe(5);
+    expect(waits).toEqual([1000, 2000, 4000, 4000, 4000]);                     // the first is its retry's wait
   });
 
-  it('a call that succeeds after a retry counts as a success: the run of failures starts again', async () => {
-    const retried = retrier({ retries: 2, sleep: async () => {} }); let n = 0;
-    for (let i = 0; i < BREAK * 3; i++) expect(await retried(async () => { if (++n % 2) throw fail(); return 'ok'; })).toBe('ok');
-    expect(n).toBe(BREAK * 3 * 2);
+  it('a call that succeeds after a retry gives its reply', async () => {
+    const retried = retrier({ retries: 2, sleep: async () => {} });
+    let n = 0;
+    const failsOnce = async () => { if (++n % 2) throw fail(); return 'ok'; };
+    for (let i = 0; i < 9; i++) expect(await retried(failsOnce)).toBe('ok');
+    expect(n).toBe(9 * 2);
   });
 });
 

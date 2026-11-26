@@ -14,7 +14,7 @@ import { ChecklistPage } from './checklist';
 import { ConversationPage, Composer } from './conversation';
 import { QueueStrip } from './queueStrip';
 import { scopeOfRoute, scopeValid } from '../app/conversations';
-import { NewDealDialog, DeleteDealDialog } from './dialogs';
+import { AskFirst, NewDealDialog, DeleteDealDialog } from './dialogs';
 import { AddDealDialog, DealMore, RemoveDealDialog } from './addDeal';
 import { ExportQaDialog, ExportFindingsDialog } from './transfer';
 import { ImportDialog } from './qaImport';
@@ -36,6 +36,7 @@ import { SERVICE } from '../control';
 import { takeNavPatch, closeDocument, takeFocusAfter } from './nav';
 import { isReading, dealHash, dealTwinLabels } from '../app/state';
 import { num } from './counts';
+import { openNewDeal } from '../app/dealFolders';
 
 function routeFromHash(): State['ui']['route'] {
   const h = (location.hash || '#deals').slice(1);
@@ -61,7 +62,11 @@ function Shell() {
       const route = routeFromHash(); const was = store.get().ui.route;
       const deal = (r: State['ui']['route']) => ('dealId' in r && r.dealId ? r.dealId : null);
       // list filters and the selected question belong to one deal: moving to another deal starts clean
-      const fresh = deal(route) !== deal(was) ? { findingFilter: { status: 'open' as const, workstream: '', text: '', reviewed: '' as const }, qaFilter: { status: 'open' as const, workstream: '', text: '' }, checklistFilter: 'all' as const, selectedQuestion: null, selectedChecklist: null } : {};
+      const fresh = deal(route) !== deal(was) ? {
+        findingFilter: { status: 'open' as const, workstream: '', reviewed: '' as const },
+        qaFilter: { status: 'open' as const, workstream: '', text: '' },
+        checklistFilter: 'all' as const, selectedQuestion: null, selectedChecklist: null,
+      } : {};
       store.ui({ route, doc: null, docAside: null, side: null, queueSearch: '', dialog: null,
         searchFocus: null, ...fresh, ...takeNavPatch() });
       // the link or button that was pressed is gone with the old page: focus goes to what opened the document being closed, else to the new page, not to nowhere
@@ -306,7 +311,7 @@ function Home() {
         : <button type="button" class="btn pri fr-new" id="fr-new"
           title={ro ??
           'Name the deal and point it at the data-room folders. Indexing and the first pass start on their own.'}
-          disabled={!!ro} onClick={() => store.ui({ newDeal: { name: '', folders: [], error: '', busy: false } })}><Icon
+          disabled={!!ro} onClick={() => openNewDeal(store)}><Icon
           name="plus" size={15} /> New Deal</button>}
     </div></div>
   );
@@ -440,14 +445,26 @@ function InterruptedBar() {
 
 function Interrupted({ id, what, where, onHide }: { id: string; what: string; where: string; onHide: () => void }) {
   const store = useStore();
-  const text = `${what} interrupted${where ? ` · ${where}` : ''}`;
+  // Discard drops what was typed into the action, so it asks first in the app's confirm (#1055)
+  const [asking, setAsking] = useState(false);
+  const place = where ? ` · ${where}` : '';
+  const named = `${what}${place}`;
+  const text = `${what} interrupted${place}`;
+  const discard = () => {
+    setAsking(false);
+    void store.discardOp(id);
+  };
   return (
-    <Notice id={`interrupted-${id}`} class="intop" glyph="warn" full={text} onClose={onHide}
-      actions={[
-        { label: 'Retry', run: () => void store.retryOp(id) },
-        { label: 'Discard', run: () => void store.discardOp(id) },
-      ]}>
-      <NoticeWords text={text} />
-    </Notice>
+    <>
+      <Notice id={`interrupted-${id}`} class="intop" glyph="warn" full={text} onClose={onHide}
+        actions={[
+          { label: 'Retry', run: () => void store.retryOp(id) },
+          { label: 'Discard', run: () => setAsking(true) },
+        ]}>
+        <NoticeWords text={text} />
+      </Notice>
+      {asking && <AskFirst ask="Discard this interrupted action?" text={named} go="Discard"
+        onKeep={() => setAsking(false)} onGo={discard} />}
+    </>
   );
 }

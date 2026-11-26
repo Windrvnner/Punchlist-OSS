@@ -1,6 +1,6 @@
 // A due diligence log rarely starts in cell A1: there is a title, some padding, sometimes a cover sheet.
 import { describe, it, expect } from 'vitest';
-import { readCsv } from '../../src/adapters/spreadsheet';
+import { readCsv } from '../../src/domain/sheets';
 import { tableFrom, type Sheet } from '../../src/domain/sheets';
 import { findHeaderRow, suggestMapping, prepareImport } from '../../src/domain/importExport';
 
@@ -52,7 +52,7 @@ describe('finding where the table starts', () => {
     const odd = [['Ref', 'Lender query', 'Sponsor reply'], ['A1', 'Is the EPC wrap fixed price?', 'Yes']];
     const bytes = book({ Log: [{ cells: [['Queries', 'for', 'the sponsor']], origin: 'A1' }, { cells: odd, origin: 'A4' }] });
     const guess = read(bytes);
-    // nothing recognizable: the first row with several cells
+    // nothing recognizable: the first row
     expect(guess.headerRow).toBe(1);
     const said = read(bytes, { headerRow: 4 });
     expect(said.columns).toEqual(['Ref', 'Lender query', 'Sponsor reply']); expect(said.rows).toEqual([['A1', 'Is the EPC wrap fixed price?', 'Yes']]); expect(said.lines).toEqual([5]);
@@ -70,7 +70,19 @@ describe('finding where the table starts', () => {
     expect([plain.headerRow, plain.columns, plain.rows, plain.lines]).toEqual([1, ['Number', 'Question'], [['1', 'First']], [2]]);
     const one = read(new TextEncoder().encode('Question\nFrom the other tab\n'));
     expect([one.headerRow, one.columns, one.rows]).toEqual([1, ['Question'], [['From the other tab']]]);
-    expect(findHeaderRow([['just a title'], ['a', 'b'], ['1', '2']])).toBe(1);
+    expect(findHeaderRow([['just a title'], ['a', 'b'], ['1', '2']])).toBe(0);
     expect(findHeaderRow([['only'], ['one'], ['column']])).toBe(0);
+  });
+
+  it('the heading row is found wherever it is, even past row 50 of a long sheet', () => {
+    const padding = Array.from({ length: 59 }, (_, i) => [`Padding line ${i + 1}`, '']);
+    const longLog = [...padding, ['#', 'Question', 'Response', 'Status'], ['1', 'First question', '', '']];
+    expect(findHeaderRow(longLog)).toBe(59);
+    expect(read(book({ Log: [{ cells: longLog, origin: 'A1' }] })).headerRow).toBe(60);
+  });
+
+  it('with no known heading anywhere, the first row is the guess, even when a later row has two filled cells', () => {
+    const noHeading = [['just a title', ''], ['', ''], ['x', 'y'], ['1', '2']];
+    expect(findHeaderRow(noHeading)).toBe(0);
   });
 });

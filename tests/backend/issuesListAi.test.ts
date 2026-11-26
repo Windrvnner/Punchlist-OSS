@@ -4,7 +4,7 @@
 // list against 126 findings, 23 points repeating a finding and 4 repeating an earlier point, and a 400-point list.
 import { describe, it, expect } from 'vitest';
 import { setup, val, Mem, type Call } from './reviewKit';
-import { tokensOf, tooLong } from '../../src/backend/limits';
+import { tokensOf, tooLong, UNREAD_REPLY } from '../../src/backend/limits';
 
 type P = { n: string; text: string };
 const isRead = (c: Call) => c.prompt.includes('is an issues list');
@@ -86,6 +86,19 @@ describe('reading an issues list', () => {
     expect(reads[0].prompt).toContain('exactly as written. Never reword, shorten or merge');
     expect(reads[0].prompt).not.toContain('your own words');
   });
+  it('asks again, twice, for a reply that cannot be read, then succeeds or fails the import', async () => {
+    const unreadable = (until: number) => {
+      let tries = 0;
+      const answers = stand(LIST);
+      return (c: Call) => (isRead(c) && ++tries <= until ? 'Here are the points, in prose.' : answers(c));
+    };
+    const twice = await read(unreadable(2));
+    expect(twice.reads.length).toBe(3);
+    expect(twice.n).toBe(164);
+    const never = await read(unreadable(9));
+    expect(never.reads.length).toBe(3);
+    expect(never.r.ok).toBe(false);
+  });
   it('reads a 400-point list in one call, whatever its length, with no paging and no check', async () => {
     const { n, reads, s } = await read(stand(plain(400)));
     expect(n).toBe(400);
@@ -98,7 +111,7 @@ describe('reading an issues list', () => {
     expect(reads.length).toBe(1);
   });
   it('fails, importing nothing, when the reply is not a list or has no points', async () => {
-    expect((await read(stand(LIST, { edit: () => 'no list here' }))).n).toBe('It could not be read as an issues list');
+    expect((await read(stand(LIST, { edit: () => 'no list here' }))).n).toBe(UNREAD_REPLY);
     expect((await read(stand([]))).n).toBe('No points were found in it');
   });
   it('keeps the points of a list whose own points repeat, numbered or not', async () => {
@@ -183,21 +196,19 @@ describe('reading an issues list', () => {
     const r = await s.ai.issuesList!({ dealId: 'd1', doc, findings: FINDINGS, workstreams: ['Legal', 'Financial'] });
     expect(r.ok ? r.value.points.length : r.error.message).toBe(1200);
   }, 120_000);
-  it('a revised point joined to the finding its first version made is confirmed with both in full, since the comparison cuts a finding\'s text short', async () => {
-    // a first list made these findings, each holding counsel's whole point; the revised list changes point 4 only after its 240th character
+  it('compares each finding by its whole text, so a point differing only past character 400 is joined to the right '
+    + 'finding without a confirming call (#1108)', async () => {
     const words = (k: number, end: string) => `Point ${k + 1}: ${'The borrower shall deliver the executed direct agreement with the offtaker and the EPC contractor before financial close, in a form satisfactory to the lenders. '.repeat(3)}${end}`;
     const F = Array.from({ length: 10 }, (_, k) => ({ id: `f${k}`, title: `Finding ${k}`, text: words(k, 'The lenders bear the cost.') }));
     const L = Array.from({ length: 20 }, (_, k) => ({ n: String(k + 1), text: k === 3 ? words(2, 'The borrower bears the cost.') : `Point ${k + 1} raises clause ${k} of the agreement here.` }));
-    expect(F[2].text.slice(0, 240)).toBe(L[3].text.slice(0, 240));
+    expect(F[2].text.length).toBeGreaterThan(400);
     const sort = (c: Call) => { const shown = [...c.prompt.matchAll(/^P(\d+): /gm)].map((m) => +m[1]); return { points: shown.map((p) => ({ p, title: `T${p}`, workstream: 'Legal', same: p === 4 ? 'F3' : '' })) }; };
-    for (const agree of [false, true]) {
-      let asked = '';
-      const confirm = (c: Call) => { asked += c.prompt; return { same: agree ? [1] : [] }; };
-      const s = setup(stand(L, { sort, confirm }), { d1: rec }, { shared: new Mem(), installId: 'pc' });
-      const r = await s.ai.issuesList!({ dealId: 'd1', doc, findings: F, workstreams: ['Legal', 'Financial'] });
-      expect(s.calls.filter(isSort).length).toBe(1); expect(s.calls.filter(isConfirm).length).toBe(1);   // the fullest form, then the confirmation
-      expect(asked).toContain(F[2].text); expect(asked).toContain(L[3].text);                         // both in full
-      expect(r.ok && r.value.points[3].same).toEqual(agree ? { finding: 'f2' } : undefined);
-    }
+    const s = setup(stand(L, { sort }), { d1: rec }, { shared: new Mem(), installId: 'pc' });
+    const r = await s.ai.issuesList!({ dealId: 'd1', doc, findings: F, workstreams: ['Legal', 'Financial'] });
+    const sorts = s.calls.filter(isSort);
+    expect(sorts.length).toBe(1);
+    expect(sorts[0].prompt).toContain(F[2].text);                                // the whole text, past character 240
+    expect(s.calls.filter(isConfirm).length).toBe(0);                           // nothing was shown shortened
+    expect(r.ok && r.value.points[3].same).toEqual({ finding: 'f2' });
   });
 });

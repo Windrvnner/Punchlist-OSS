@@ -55,28 +55,91 @@ async function mount(name: string, docs: Partial<DocumentService> = {}, underCon
   return { store, kv, repo, dealId, host, box, type, press, enter, questions, toasts };
 }
 
-describe('"add a question: …" in a deal’s ask box', () => {
-  it('makes the question and empties the box', async () => {
+describe('slash commands in a deal’s ask box (#1054)', () => {
+  const key = (k: string) => (m: Awaited<ReturnType<typeof mount>>) => act(() => {
+    m.box().dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+  });
+  const options = (m: Awaited<ReturnType<typeof mount>>) =>
+    [...m.host.querySelectorAll('.slashmenu [role="option"] .sc')].map((el) => el.textContent);
+  /** "/lo" and Enter: the Log Question chip, then the question typed after it */
+  const logQuestion = async (m: Awaited<ReturnType<typeof mount>>, question: string) => {
+    await m.type('/lo');
+    await m.press();
+    await m.enter(question);
+  };
+
+  it('"/" offers the commands, typing narrows them, and Enter picks one without sending', async () => {
     const m = await mount('Yonder');
-    await m.enter('add a question: Please confirm the O&M term.');
-    expect(m.questions().map((q) => q.text)).toEqual(['Please confirm the O&M term.']);
+    await m.type('/');
+    expect(options(m)).toEqual(['/add-unresolved', '/log-question', '/new-deal']);
+    expect(m.box().getAttribute('aria-activedescendant')).toMatch(/-slash-0$/);
+    await key('ArrowDown')(m);
+    expect(m.host.querySelector('[role="option"][aria-selected="true"] .sc')?.textContent).toBe('/log-question');
+    await m.type('/deal');
+    expect(options(m)).toEqual(['/new-deal']);
+    await m.press();
+    expect(m.store.get().ui.newDeal).toMatchObject({ name: '' });
     expect(m.box().value).toBe('');
+    expect(m.store.get().threads).toEqual({});
   });
 
-  it('with storage full, keeps the text in the box and says why', async () => {
+  it('Escape puts the menu away and keeps the text, which then goes as a question', async () => {
+    const m = await mount('Quarry');
+    await m.type('/permits');
+    expect(options(m)).toEqual([]);
+    await m.type('/new');
+    let reachedPage = false;
+    const pageKeys = (e: KeyboardEvent) => { if (e.key === 'Escape') reachedPage = true; };
+    document.addEventListener('keydown', pageKeys);
+    await key('Escape')(m);
+    document.removeEventListener('keydown', pageKeys);
+    expect(reachedPage).toBe(false);   // the reading pane behind the box stays open
+    expect(options(m)).toEqual([]);
+    expect(m.box().value).toBe('/new');
+    await m.press();
+    await settle();
+    expect(Object.values(m.store.get().threads)[0]?.[0]?.text).toBe('/new');
+  });
+
+  it('Log Question puts its chip in the box, and the question typed after it is logged', async () => {
+    const m = await mount('Lumen');
+    await logQuestion(m, 'Please confirm the O&M term.');
+    expect(m.questions().map((q) => q.text)).toEqual(['Please confirm the O&M term.']);
+    expect(m.box().value).toBe('');
+    expect(m.host.querySelector('#log-question-chip')).toBeNull();
+    expect(m.store.get().threads).toEqual({});
+  });
+
+  it('Backspace in an empty box, or ×, takes the chip off and keeps the text', async () => {
+    const m = await mount('Tarn');
+    await m.type('/log');
+    await m.press();
+    expect(m.host.querySelector('#log-question-chip')).not.toBeNull();
+    await key('Backspace')(m);
+    expect(m.host.querySelector('#log-question-chip')).toBeNull();
+    await m.type('/log');
+    await m.press();
+    await m.type('Is the permit final?');
+    await act(() => { m.host.querySelector<HTMLButtonElement>('#log-question-chip button')!.click(); });
+    expect(m.host.querySelector('#log-question-chip')).toBeNull();
+    expect(m.box().value).toBe('Is the permit final?');
+  });
+
+  it('with storage full, keeps the question and its chip in the box and says why', async () => {
     const m = await mount('Bellows');
     refuse(m.kv.local, toAQuestion, quota);
-    await m.enter('add a question: Please provide the insurance schedule.');
+    await logQuestion(m, 'Please provide the insurance schedule.');
     expect(m.questions()).toHaveLength(0);
-    expect(m.box().value).toBe('add a question: Please provide the insurance schedule.');
+    expect(m.box().value).toBe('Please provide the insurance schedule.');
+    expect(m.host.querySelector('#log-question-chip')).not.toBeNull();
     expect(m.toasts().some((x) => /storage is full/.test(x))).toBe(true);
   });
 
   it('when saving fails, says why without a Retry: the text back in the box is how to send it again, so it is never logged twice', async () => {
     const m = await mount('Datum');
     refuse(m.kv.local, toAQuestion, () => new Error('This PC’s own copy of the changes cannot be written to'));
-    await m.enter('add a question: Please send the waiver.');
-    expect(m.box().value).toBe('add a question: Please send the waiver.');
+    await logQuestion(m, 'Please send the waiver.');
+    expect(m.box().value).toBe('Please send the waiver.');
     const last = m.store.get().ui.toasts.at(-1);
     expect(last?.text).toMatch(/Couldn’t save/); expect(last?.action).toBeUndefined();
   });
