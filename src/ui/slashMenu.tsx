@@ -90,7 +90,7 @@ function SlashMenu({ id, commands, at, up, pick }: {
 /** What is typed after it is a question to log; × takes it off and keeps the text. */
 function LogQuestionChip({ remove }: { remove: () => void }) {
   return (
-    <span class="chip att cmd" id="log-question-chip">
+    <span class="chip att" id="log-question-chip">
       <span class="t">Log Question</span>
       <button type="button" aria-label="Remove Log Question" title="Remove Log Question" onClick={remove}>
         <Icon name="close" size={11} />
