@@ -50,6 +50,27 @@ describe.each(['flagged', 'silent'] as Mode[])('a reply cut off at the length li
     expect(rows.filter((x) => x.result === 'satisfied').length).toBe(24); expect(val(await s.repo.list('finding', 'd1'))).toEqual([]);
   });
 
+  it('a whole item before the cut that cites a document it was not given is asked again, not kept without it (#1162)',
+    async () => {
+      const unsent = `doc_${'f'.repeat(24)}`;
+      const long = (c: Call, tag: string) => ({
+        id: tag, result: 'finding', title: 'Margin differs', workstream: 'Legal', body: [LONG.repeat(30)], next: 'Ask.',
+        sources: [{ doc: nth(c, 1), page: 3 }],
+      });
+      const reply = (c: Call) => ({
+        items: itemsIn(c).map((it) => (/point 1 /.test(it.text)
+          ? { id: it.tag, result: 'ok', where: [{ doc: unsent, page: 1, quote: 'As the item requires.' }] }
+          : /point 3 /.test(it.text) ? long(c, it.tag) : { id: it.tag, ...OK(c) })),
+      });
+      const s = setup(reply, room(), { checklist: () => ({ broad: items(5), product: [], sector: [] }) });
+      await deal(s.repo);
+      capped(s, 1500, mode, isCheck);
+      const r = val(await s.ai.firstPass('d1'));
+      // never settled on a citation dropped from it: no reply was kept without it, to be asked again for a place
+      expect(s.calls.some((c) => c.prompt.includes('As "ok" it needs "where"'))).toBe(false);
+      expect(r.unsettled).toContain('c1');
+    });
+
   it('one item cut off even alone does not leave the rest of the check asked one item per call', async () => {
     const shared = new Mem();
     const s = setup((c: Call) => ({ items: itemsIn(c).map((it) => (/point 3 /.test(it.text) ? { id: it.tag, result: 'finding', title: 'Margin differs', workstream: 'Legal', body: [LONG.repeat(300)], next: 'Ask.', sources: [{ doc: nth(c, 1), page: 3 }, { doc: nth(c, 1), page: 7 }] } : { id: it.tag, ...OK(c) })) }), room(), { shared, installId: 'pc', checklist: () => ({ broad: items(400), product: [], sector: [] }) });

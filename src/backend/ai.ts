@@ -73,7 +73,7 @@ import { docFamilies } from './related';
 import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
 import { AI_DRAFTED, namesOnlyShown, questionsForIds, responseHeader } from './qaRow';
-import { docHandle, docsUnusable, sentAs, unknownIds } from './recordIds';
+import { citesUnsent, docHandle, docsUnusable, sentAs, unknownIds } from './recordIds';
 import type { DealDoc, Looked, Unusable } from './agentKit';
 import {
   RATINGS, riskGroups, keyRisksOf, unratedFindings, type Grouped, type Rating, type RiskGroup,
@@ -1771,6 +1771,9 @@ export function nodeAi(o: AiOptions) {
     // a list of items, or the same keyed by item: {"I1": {…}}
     const all = (Array.isArray(reply.items) ? reply.items : Object.entries(reply.items as Record<string, unknown>).map(([id, v]) => (v && typeof v === 'object' ? { id, ...(v as object) } : { id, result: v }))) as Record<string, unknown>[];
     const rows = cut ? all.slice(0, -1) : all;                                     // the last item before a cut may itself be cut short
+    // a whole item before the cut that cites a document it was not given makes the reply unusable, as it does a whole
+    // reply: the items are asked again, never kept without that citation (#1162)
+    if (cut && citesUnsent(rows, sent, false, where)) return null;
     const out: Map<string, Seen> & { cut?: ChecklistItem[] } = new Map<string, Seen>();
     for (const r of rows) {
       const n = r && typeof r === 'object' ? tagNumber(r.id, 'I') : null; const it = n ? items[n - 1] : undefined; if (!it || out.has(it.id)) continue;
