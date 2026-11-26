@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { namesOnlyShown, recordIdsIn, unknownIds } from '../../src/backend/recordIds';
+import {
+  citedDocs, citesUnsent, docHandle, docsUnusable, namesOnlyShown, recordIdsIn, sentAs, unknownIds,
+} from '../../src/backend/recordIds';
 
 const ULID = '01HZX3K9Q4V7M2B5N8C1D6E0FG';
 const HEX = 'a1b2c3d4e5f60718293a4b5c';
@@ -40,5 +42,51 @@ describe('unknownIds', () => {
     expect(unknownIds(['f_X', finding], [finding])).toEqual(['f_X']);
     expect(unknownIds([`DOC_${HEX}`, doc], [doc])).toEqual([`DOC_${HEX}`]);
     expect(unknownIds([` ${doc}`, 5, undefined], [doc])).toEqual([` ${doc}`, 5, undefined]);
+  });
+});
+
+describe('documents by their permanent id (#1162)', () => {
+  const rec = (docId: string, name: string) => ({ docId, hash: 'h', name, folder: 'vdr', rel: name, size: 1 });
+  const where = (r: { rel: string }) => `vdr/${r.rel}`;
+  const fa = { dealId: 'd_1', rec: rec(doc, 'Credit Agreement.pdf') };
+  const copy = { dealId: 'd_2', rec: rec(doc, 'Credit Agreement.pdf') };
+
+  it('names a document by its docId, or by deal and docId in a prompt that spans deals', () => {
+    expect(docHandle(fa, false)).toBe(doc);
+    expect(docHandle(fa, true)).toBe(`d_1/${doc}`);
+  });
+
+  it('finds the documents a reply cites, at any depth, under "doc" or "document"', () => {
+    const reply = { sources: [{ doc: 'a' }], items: [{ where: [{ document: 'b' }], sources: [{ doc: 3 }] }] };
+    expect(citedDocs(reply)).toEqual(['a', 'b', 3]);
+    expect(citedDocs(null)).toEqual([]);
+  });
+
+  it('takes a citation by its id, exactly, or by its whole name or path', () => {
+    expect(sentAs(doc, [fa], where)).toBe(fa);
+    expect(sentAs(`d_2/${doc}`, [fa, copy], where)).toBe(copy);
+    expect(sentAs(doc.toUpperCase(), [fa], where)).toBeUndefined();
+    expect(sentAs('vdr/Credit Agreement.pdf', [fa], where)).toBe(fa);
+    expect(sentAs('D1', [fa], where)).toBeUndefined();
+  });
+
+  it('a reply cites only documents it was given, by the id it was shown or a name or path', () => {
+    expect(citesUnsent({ sources: [{ doc }] }, [fa], false, where)).toBe(false);
+    expect(citesUnsent({ sources: [{ doc: 'Credit Agreement.pdf' }] }, [fa], false, where)).toBe(false);
+    expect(citesUnsent({ sources: [{ doc: `doc_${HEX.slice(0, 23)}` }] }, [fa], false, where)).toBe(true);
+    expect(citesUnsent({ sources: [{ doc }] }, [fa, copy], true, where)).toBe(true);
+    expect(citesUnsent({ sources: [{ doc: `d_2/${doc}` }] }, [fa, copy], true, where)).toBe(false);
+  });
+});
+
+describe('docsUnusable (#1162)', () => {
+  const fa = { dealId: 'd_1', rec: { docId: doc, hash: 'h', name: 'FA.pdf', folder: 'vdr', rel: 'FA.pdf', size: 1 } };
+  const check = docsUnusable([fa], false, ['text'], (r) => r.rel, [question]);
+  it('takes a reply that cites and names only what it was shown', () => {
+    expect(check(JSON.stringify({ text: `Per ${question} and ${doc}.`, sources: [{ doc, page: 1 }] }))).toBe(false);
+  });
+  it('refuses one naming an id it was not shown in its words, or citing a document it was not given', () => {
+    expect(check(JSON.stringify({ text: `Per ${finding}.`, sources: [] }))).toBe(true);
+    expect(check(JSON.stringify({ text: 'So. [1]', sources: [{ doc: 'D1', page: 1 }] }))).toBe(true);
   });
 });
