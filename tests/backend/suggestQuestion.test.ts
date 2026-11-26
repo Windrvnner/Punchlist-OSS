@@ -30,7 +30,7 @@ describe('the open question an answer addresses', () => {
     }
   });
 
-  it('at 2,000 open questions the calls are sized to the input limit, and the earliest one named is taken', async () => {
+  it('at 2,000 open questions the calls are sized to the input limit; the earliest one named is taken', async () => {
     // the model names the last question of every part that shows document 300 or document 1500
     const s = setup((c) => {
       if (!isSuggest(c)) return {};
