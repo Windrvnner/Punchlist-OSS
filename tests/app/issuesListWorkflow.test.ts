@@ -6,7 +6,7 @@ import { ImportIssuesList } from '../../src/app/commands/issuesList';
 import { readIssuesList, readPastedIssuesList, reviewIssuesList } from '../../src/app/issuesList';
 import { dealFindings } from '../../src/app/state';
 import { WORKSTREAMS } from '../../src/domain/model';
-import { ok } from '../../src/domain/result';
+import { fail, ok, rejected } from '../../src/domain/result';
 import type { AiService, DocumentService, IssuePoint } from '../../src/ports';
 import { val } from '../backend/reviewKit';
 import { ITEMS } from '../fixtures/pastedList';
@@ -165,4 +165,24 @@ it('reads a pasted list as a text file holding exactly the pasted words', async 
   expect(attach).toHaveBeenCalledExactlyOnceWith(dealId, {
     name: 'Pasted issues list.txt', bytes: new TextEncoder().encode(text),
   });
+});
+
+it('hands a pasted list over untouched: tabs, CRLF and edge spaces stay as typed', async () => {
+  const { store, dealId } = await seedDeal();
+  const attach = vi.fn<DocumentService['attach']>(async () => ok(DOC));
+  store.services.docs.attach = attach;
+  store.services.ai.issuesList = vi.fn(proposedIssues);
+  const text = '  1.\tChange of control\r\n2. Fees letter  \r\n\r\n';
+  val((await readPastedIssuesList(store, dealId, text))!);
+  expect(attach.mock.calls[0][1].bytes).toEqual(new TextEncoder().encode(text));
+});
+
+it('reads no pasted list the model has not been given: a refused attach fails the read before the model call', async () => {
+  const { store, dealId } = await seedDeal();
+  store.services.docs.attach = async () => fail(rejected('Disk full'));
+  const issuesList = vi.fn(proposedIssues);
+  store.services.ai.issuesList = issuesList;
+  const read = await readPastedIssuesList(store, dealId, '1. Fees letter');
+  expect(read?.ok).toBe(false);
+  expect(issuesList).not.toHaveBeenCalled();
 });

@@ -7,7 +7,7 @@ import {
   importKey, initializeKeptImports, keepImport, keptImport, keptImportsReady,
 } from '../../src/app/keptImports';
 import {
-  keptIssuesList, keptIssuesPaste, pointsByList, reviewIssuesList, submitIssuesList, type ReadIssuesList,
+  keepIssuesPaste, keptIssuesList, keptIssuesPaste, pointsByList, reviewIssuesList, submitIssuesList, type ReadIssuesList,
 } from '../../src/app/issuesList';
 import { dealFindings } from '../../src/app/state';
 import type { ListPoint } from '../../src/domain/model';
@@ -84,6 +84,34 @@ it('lets the kept list go while the import runs and keeps it again when the impo
     app.store.closing();
     await app.repo.close();
   }
+});
+
+it('keeps the paste typed in the box, and writes nothing for a box that is empty or only spaces', async () => {
+  await keptPort();
+  const key = importKey.issues('d_paste');
+  keepIssuesPaste(key, ' \n ', false);
+  expect(keptImport(key)).toBeUndefined();
+  keepIssuesPaste(key, '1. Fees letter', false);
+  expect(keptIssuesPaste(key)).toBe('1. Fees letter');
+  keepIssuesPaste(key, '', false);
+  expect(keptIssuesPaste(key)).toBe('');
+});
+
+it('leaves a kept paste alone when the dialog opened fresh past a kept import it could not show', async () => {
+  await keptPort();
+  const key = importKey.issues('d_fresh');
+  keepImport(key, { paste: '1. Fees letter' });
+  keepIssuesPaste(key, '', true);
+  expect(keptIssuesPaste(key)).toBe('1. Fees letter');
+  keepIssuesPaste(key, '2. New', true);
+  expect(keptIssuesPaste(key)).toBe('2. New');
+});
+
+it('takes a kept paste only when it is text', async () => {
+  await keptPort();
+  const key = importKey.issues('d_notext');
+  keepImport(key, { paste: 7 });
+  expect(keptIssuesPaste(key)).toBe('');
 });
 
 it('groups a finding\'s points by list in first-seen order, with a heading for each list file', () => {
