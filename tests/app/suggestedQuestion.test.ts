@@ -47,6 +47,8 @@ it('no proposal, a place out of range, or a failed call gives no card, however m
     const env = await fixture(async () => reply);
     await ask(env.store, env.scope, 'What does the base case assume?');
     expect(suggestions(env.store.get(), env.scope).size).toBe(0);
+    // a failed call is not saved as a verdict of its own
+    expect(env.store.get().ui.proposed).toEqual({});
   }
 });
 

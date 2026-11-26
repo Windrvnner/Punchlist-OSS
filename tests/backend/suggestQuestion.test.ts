@@ -50,4 +50,25 @@ describe('the open question an answer addresses', () => {
     expect(val(await whole.ai.suggestQuestion!({ dealId: 'd1', answer, questions: questions(2000) }))).toEqual([]);
     expect(whole.calls.filter(isSuggest)).toHaveLength(1);
   });
+
+  it('a later part that fails keeps what earlier parts named; with nothing named, the failure is returned', async () => {
+    const down = Object.assign(new Error('down'), { code: 'ECONNRESET' });
+    const s = setup((c) => {
+      if (!isSuggest(c)) return {};
+      if (c.prompt.includes('document 1500 for')) throw down;
+      return { question: c.prompt.includes('document 300 for') ? `A${handles(c).length}` : 'none' };
+    }, {}, opts);
+    s.svc.inputLimit = () => 20000;
+    const places = val(await s.ai.suggestQuestion!({ dealId: 'd1', answer, questions: questions(2000) }));
+    expect(places).toHaveLength(1);
+    expect(places[0]).toBeGreaterThanOrEqual(299);
+    expect(places[0]).toBeLessThan(1499);
+    const none = setup((c) => {
+      if (isSuggest(c) && c.prompt.includes('document 1500 for')) throw down;
+      return isSuggest(c) ? { question: 'none' } : {};
+    }, {}, opts);
+    none.svc.inputLimit = () => 20000;
+    const r = await none.ai.suggestQuestion!({ dealId: 'd1', answer, questions: questions(2000) });
+    expect(r.ok).toBe(false);
+  });
 });
