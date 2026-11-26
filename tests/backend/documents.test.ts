@@ -833,14 +833,15 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     expect(budget(a).words).toEqual(['line', 'cover', 'debt']);
   });
 
-  it('a deal-folder spreadsheet that failed to read is read again on the next run, without a restart (#427)', async () => {
+  it('a deal-folder spreadsheet that failed to read is read again on the next run (#427)', async () => {
     const root = tmp();
     const vdr = path.join(root, 'vdr');
     // a converter that cannot read any spreadsheet until `down` is set back
     let down = true;
     const { convert } = standInConverter();
     const read = convert.sheets!;
-    const flaky = Object.assign(convert, { sheets: (file: string) => (down ? Promise.reject(new Error('down')) : read(file)) });
+    const sheets = (file: string) => (down ? Promise.reject(new Error('down')) : read(file));
+    const flaky = Object.assign(convert, { sheets });
     put(vdr, 'Budget.xlsx', MODEL);
     const a = pc(root, 'office', undefined, { convert: flaky });
     expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Budget.xlsx');
