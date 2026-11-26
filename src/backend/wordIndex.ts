@@ -94,7 +94,8 @@ export function wordIndex(local: Folder): WordIndex {
       for (const w of q) { const m = usesOf(ix, w); uses.set(w, m); idf.set(w, Math.log(1 + (n - m.size + 0.5) / (m.size + 0.5))); }
       const out = new Map<string, number>();
       for (const d of docs) {
-        const k = namedOnly ? undefined : ix.num.get(d.docId); let s = 0;
+        const k = namedOnly ? undefined : ix.num.get(d.docId);
+        const terms: number[] = [];
         for (const w of q) {
           let m = d.named.has(w) ? WEIGHT.name : 0;
           if (k !== undefined) {
@@ -102,9 +103,11 @@ export function wordIndex(local: Folder): WordIndex {
             const tf = uses.get(w)?.get(k) ?? 0;
             if (tf) m += (tf * (K1 + 1)) / (tf + K1 * (1 - B + (B * ix.length[k]) / avg));
           }
-          s += m * (idf.get(w) ?? 0);
+          terms.push(m * (idf.get(w) ?? 0));
         }
-        out.set(d.docId, s);
+        // added smallest first, so two documents with the same evidence score the same whatever order the words
+        // were asked in: a tie is decided by the ranking's own tie-break, never by rounding
+        out.set(d.docId, terms.sort((x, y) => x - y).reduce((sum, t) => sum + t, 0));
       }
       return out;
     },
