@@ -694,6 +694,14 @@ export function nodeAi(o: AiOptions) {
     return !namesOnlyShown(text, ids) || unknownIds(named, ids).length > 0;
   };
   /**
+   * Whether the entries of a `phrase` reply name an id the call did not show, as `phraseUnusable` reads them; the
+   * last entry of a cut reply is left out, since it may be cut short, its id with it (#1162)
+   */
+  const namesUnshown = (reply: { items?: unknown } | null, cut: boolean, unusable: (text: string) => boolean) => {
+    const entries = listOf(reply?.items);
+    return unusable(JSON.stringify({ items: cut ? entries.slice(0, -1) : entries }));
+  };
+  /**
    * The questions of a `phrase` reply, by place in the call: only an entry with one of the call's ids is kept, even
    * for a point asked alone, so stray text is never taken for a question; the last entry of a cut reply may be cut
    * short, so it is left out
@@ -732,6 +740,9 @@ export function nodeAi(o: AiOptions) {
     }
     const reply = json<{ items?: unknown }>(raw, 'items');
     if (jsonEnd(raw, 'items') === 'open') cut = true;
+    // a reply still naming an id it was not shown when its tries ran out brings nothing: the part fails (#1162)
+    const none = new Map<number, string>();
+    if (namesUnshown(reply, cut, unusable)) return { got: none, cut: false, why: phraseWhy(false, null) };
     const got = phraseGot(phraseEntries(reply, ids), cut);
     return { got, cut, why: got.size ? '' : phraseWhy(cut, reply) };
   }

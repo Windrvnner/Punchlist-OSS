@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { itemId } from '../../src/domain/checklist';
 import { tokensOf } from '../../src/backend/limits';
+import { control } from '../../src/control';
 import { checkLines, deal, doc, itemsIn, listed, Mem, OK, setup, val, type Call } from './reviewKit';
 
 const PERMIT = 'The environmental permit for operation is in place';
@@ -127,8 +128,8 @@ describe('phrasing names each point by its record id (#1162)', () => {
   const isPhrase = (c: Call) => c.prompt.includes('Write one question for the counterparty');
   /** a phrase reply with a question for each point, under the given ids, the finding's first */
   const questions = (ids: string[]) => ({ items: [{ id: ids[1], text: 'Q2' }, { id: ids[0], text: 'Q1' }] });
-  async function phrase(script: (n: number) => unknown) {
-    const s = setup((c, n) => (isPhrase(c) ? script(n) : {}), {}, { shared: new Mem(), installId: 'pc' });
+  async function phrase(script: (n: number, c: Call) => unknown) {
+    const s = setup((c, n) => (isPhrase(c) ? script(n, c) : {}), {}, { shared: new Mem(), installId: 'pc' });
     const out = val(await s.ai.phrase!({ dealId: 'd1', items: points }));
     return { calls: s.calls.filter(isPhrase), out };
   }
@@ -146,15 +147,35 @@ describe('phrasing names each point by its record id (#1162)', () => {
     expect(calls[1].prompt).toBe(calls[0].prompt);
     expect(out).toEqual(['Q1', 'Q2']);
   });
+
+  /** the ids of the points a phrase call shows */
+  const shownIn = (c: Call) => [...c.prompt.matchAll(/^((?:i|f)_\w+): \[/gm)].map((m) => m[1]);
+  /** a question for each point the call shows, with what `say` puts in it */
+  const replyWith = (c: Call, say: (id: string) => string) =>
+    ({ items: shownIn(c).map((id) => ({ id, text: say(id) })) });
+
+  it('keeps a question whose words name an id the call showed', async () => {
+    const { out } = await phrase((_n, c) => replyWith(c, (id) => (id === FINDING ? `Q2, as for ${permitId}` : 'Q1')));
+    expect(out).toEqual(['Q1', `Q2, as for ${permitId}`]);
+  });
+
+  it('keeps nothing from a reply whose words name an id the call did not show, once its tries run out', async () => {
+    const other = itemId('d1', 'An item of another list');
+    const say = (id: string) => (id === permitId ? `Q1, as for ${other}` : 'Q2');
+    const { calls, out } = await phrase((_n, c) => replyWith(c, say));
+    // the pair is asked, then each point alone: only the point whose question names the unshown id is left for Retry
+    expect(calls.length).toBeGreaterThan(2);
+    expect(out).toEqual([null, 'Q2']);
+  });
 });
 
 describe('parts are sized with each item\'s id counted (#1162)', () => {
   /** the tokens the lines of a prompt that start with an item id take, ids included */
   const idLines = (prompt: string) =>
     (prompt.match(/^i_[0-9a-f]{24}: .*$/gm) ?? []).reduce((n, l) => n + tokensOf(l), 0);
-  /** 60% of the input limit: what a part's items are sized to fill (control: limits.partShare) */
+  /** the share of the input limit a part's items are sized to fill (control: limits.partShare) */
   const LIMIT = 500;
-  const share = LIMIT * 0.6;
+  const share = (LIMIT * control.limits.partShare) / 100;
   const short = Array.from({ length: 40 }, (_, k) => `Item ${k + 1} is in place`)
     .map((text) => ({ id: itemId('d1', text), text }));
 

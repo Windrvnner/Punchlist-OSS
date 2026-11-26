@@ -182,11 +182,15 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
       val(await v.ai.phrase!({ dealId: 'd', items: points(2000) })); const went = v.calls.filter(isPhrase).length; console.log('outage', m, went);
       expect(went).toBeLessThan(80);
     }
-    // a stray item with no id, or one not of the part, moves nothing
-    const strays = [{ text: 'Here are the questions' }, { id: 'zzz', text: 'Thank you' }];
+    // a stray item with no id moves nothing
+    const strays = [{ text: 'Here are the questions' }];
     const stand = { shared: new Mem(), installId: 'pc' };
     const w = setup((c) => (!isPhrase(c) ? {} : { items: [...strays, ...answer(c).items] }), {}, stand);
     expect(val(await w.ai.phrase!({ dealId: 'd', items: points(300) }))).toEqual(points(300).map((p, k) => `Q for [${p.kind}] Point ${k + 1}`));
+    // a stray item under an id the part did not show makes every reply unusable: nothing is kept (#1162)
+    const withUnshown = (c: Call) => ({ items: [{ id: 'zzz', text: 'Thank you' }, ...answer(c).items] });
+    const unshown = setup((c) => (!isPhrase(c) ? {} : withUnshown(c)), {}, stand);
+    expect((await unshown.ai.phrase!({ dealId: 'd', items: points(3) })).ok).toBe(false);
     // an id is matched exactly (#1162): one in capitals or with spaces is not its point's, and no question is placed
     const mangled = (c: Call) => answer(c).items.map((x) => ({ ...x, id: ` ${x.id.toUpperCase()} ` }));
     const m = setup((c) => (!isPhrase(c) ? {} : { items: mangled(c) }), {}, { shared: new Mem(), installId: 'pc' });
@@ -226,13 +230,15 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
     let seed = 5; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
     const d = await retried((c) => { if (rnd() < 1 / 3) throw cut(); return answer(c); }, points(2000));
     expect([d.got, d.runs <= 4, d.most <= bound(2000)]).toEqual([want(points(2000)), true, true]);
-    // a stray preface with the last point left out, or the first left out with a stray item after: nothing misplaced.
-    // The stray item's id is not one the call showed: the reply is asked again (#1162), and the stray item is never
-    // placed
-    for (const f of [(it: { id?: string; text: string }[]) => [{ text: 'Here are the questions:' }, ...it.slice(0, -1)], (it: { id?: string; text: string }[]) => [...it.slice(1), { id: 'aei', text: 'Thank you.' }]]) {
-      const e = await run((c) => ({ items: f(answer(c).items) }), points(500));
-      val(e.r).forEach((t, k) => { expect([null, want(points(500))[k]]).toContain(t); });
-    }
+    // a stray preface with the last point left out: nothing misplaced
+    const preface = (c: Call) => ({ items: [{ text: 'Here are the questions:' }, ...answer(c).items.slice(0, -1)] });
+    const prefaced = await run(preface, points(500));
+    val(prefaced.r).forEach((t, k) => { expect([null, want(points(500))[k]]).toContain(t); });
+    // the first left out with a stray item after, under an id the call did not show: every reply is unusable, and
+    // nothing is placed (#1162)
+    const after = (c: Call) => ({ items: [...answer(c).items.slice(1), { id: 'aei', text: 'Thank you.' }] });
+    const stray = await run(after, points(5));
+    expect(stray.r.ok).toBe(false);
   });
   // a run's asks are bounded by the halving: each part that brings nothing is split down to single points (#1109)
   const bound = (n: number) => 2 * n - 1;
