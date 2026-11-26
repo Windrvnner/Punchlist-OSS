@@ -133,9 +133,8 @@ describe('the deal memo’s ratings and summary', () => {
     await deal(s.repo);
     await finding(s.repo, 'f_1', 'One');
     const r = await s.ai.memo!('d1');
-    expect(r.ok).toBe(false);
-    expect(!r.ok && r.error.kind).not.toBe('unreachable');
-    expect(s.sums.length).toBeGreaterThan(0);
+    expect(!r.ok && r.error).toEqual({ kind: 'failed', message: 'The summary could not be written' });
+    expect(s.sums.length).toBeGreaterThan(1);   // retried before it fails
   });
 
   it('rates a deal with many findings a part at a time', async () => {

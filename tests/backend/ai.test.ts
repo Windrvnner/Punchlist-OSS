@@ -825,6 +825,16 @@ describe('drafts, reassessments, the brief, the import layout and whether an ans
     expect(!r.ok && r.error.message).toBe('The AI’s reply could not be used');
     expect(never.calls).toHaveLength(2);
   });
+
+  it('reports an unreachable service on the send-back as unreachable, for Check and Merge (#1058)', async () => {
+    const down = () => { throw Object.assign(new Error('down'), { code: 'unreachable' }); };
+    const merging = setup((_c, n) => (n === 1 ? { text: '' } : down()));
+    const merged = await merging.ai.merge!({ dealId: 'd1', question: 'When is COD?', app: 'March.', log: 'March 3.' });
+    expect(!merged.ok && merged.error.kind).toBe('unreachable');
+    const checking = setup((_c, n) => (n === 1 ? { verdict: 'maybe', why: '' } : down()));
+    const checked = await checking.ai.addresses!({ dealId: 'd1', question: 'What is the ratio?', answer: '1.25x.' });
+    expect(!checked.ok && checked.error.kind).toBe('unreachable');
+  });
 });
 
 // ── the first pass ──────────────────────────────────────────────────────────────────────────────────────────────────────
