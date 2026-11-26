@@ -105,15 +105,14 @@ describe('a list read whole by the model, tied out line by line', () => {
     expect(unplaced(lines, filled)).toEqual([]);
   });
 
-  it('takes the second reading\'s columns when they leave fewer lines unplaced than the first\'s', () => {
+  it('keeps the first reading\'s columns where it names them, so the items it placed keep their words', () => {
     const lines = tableLines(['Section', 'Subsection', 'Item'], [['A. Site', '', ''], ['', 'A.1 Real estate', ''],
       ['', '', 'Title report']]);
     const read = kinds([[1, 'columns'], [2, 'section'], [3, 'subsection'], [4, 'item']]);
     const first = reading(read, { item: 3, heading: 1, subheading: 1 });
-    expect(unplaced(lines, first)).toEqual([3]);
     const filled = fillUnplaced(lines, first, reading(read, { item: 3, heading: 1, subheading: 2 }));
-    expect(unplaced(lines, filled)).toEqual([]);
-    expect(tieOut(lines, filled).items[0]).toMatchObject({ section: 'A. Site', subsection: 'A.1 Real estate' });
+    expect(filled.cells).toEqual({ item: 3, heading: 1, subheading: 1 });
+    expect(unplaced(lines, filled)).toEqual([3]);
   });
 
   it('leaves out a table row whose item cell is blank or past the row, or a heading row with a blank heading', () => {

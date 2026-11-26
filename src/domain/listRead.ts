@@ -88,9 +88,8 @@ export function unplaced(lines: string[], reading: ListReading): number[] {
 
 /**
  * The first reading, with the lines it left unplaced taken from a second reading of the whole list: what the first
- * placed is kept. A column one reading did not name is taken from the other. Where both name a column, the first's
- * columns stand unless the second's leave fewer lines unplaced, since a wrong column is what leaves table rows
- * unplaced (#1073).
+ * placed is kept, and so are its columns, since another column would re-word the items it placed. A column the first
+ * reading did not name is taken from the second.
  */
 export function fillUnplaced(lines: string[], first: ListReading, second: ListReading): ListReading {
   const reads = new Map(first.reads);
@@ -98,10 +97,7 @@ export function fillUnplaced(lines: string[], first: ListReading, second: ListRe
     const again = second.reads.get(n);
     if (again) reads.set(n, again);
   }
-  if (!first.cells && !second.cells) return { reads };
-  const firstWins = { reads, cells: { ...second.cells, ...first.cells } as ListCells };
-  const secondWins = { reads, cells: { ...first.cells, ...second.cells } as ListCells };
-  return unplaced(lines, secondWins).length < unplaced(lines, firstWins).length ? secondWins : firstWins;
+  return first.cells || second.cells ? { reads, cells: { ...second.cells, ...first.cells } as ListCells } : { reads };
 }
 
 /** a reading is usable when its kind is known and an item or heading has words in its line */
