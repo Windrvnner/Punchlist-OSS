@@ -2397,9 +2397,11 @@ export function nodeAi(o: AiOptions) {
       try {
         // a rating of a finding by an id the part did not show is a failed reply, asked again (#1162)
         const rateUnusable = (fs: typeof open) => memoUnusable(fs.map((f) => f.id), ratedIds);
+        /** a finding as the ratings prompt lists it, its id counted (#1162) */
+        const rateLine = (f: (typeof open)[number]) => `${f.id} (${f.workstream}): ${plain(f)}`;
         const ratePrompt = (fs: typeof open) => 'Rate each of these open findings on a deal as High, Medium or Low '
           + `risk, by these definitions and nothing else:\nHigh: ${d.high}.\nMedium: ${d.medium}.\nLow: ${d.low}.\n\n`
-          + `${fs.map((f) => `${f.id} (${f.workstream}): ${plain(f)}`).join('\n')}\n\n`
+          + `${fs.map(rateLine).join('\n')}\n\n`
           + 'Reply as JSON, with every finding above once: '
           + '{"ratings": [{"id": "its id", "rating": "High" | "Medium" | "Low"}]}';
         const ask = (model: string, fs: typeof open) => askJson<{ ratings?: unknown }>({ kind: 'memoRatings',
@@ -2410,11 +2412,14 @@ export function nodeAi(o: AiOptions) {
           if (!fs.length) break;
           // a deal with many findings is rated a part at a time, as the checks are: parts that fit the output limit, halved
           // after a cut-off, keeping the ratings that came whole (parts.ts). One left unrated is asked again by the next model.
-          const size = Math.min(rateRoom, partSize({ cap: MEMO_RATE_BATCH, out: control.limits.ratingReplyTokens, outLimit: outLimit(model), in: tokensEach(fs.map((f) => `${f.title} ${f.body.join(' ')}`)), inLimit: inLimit(model) }));
+          const size = Math.min(rateRoom, partSize({ cap: MEMO_RATE_BATCH, out: control.limits.ratingReplyTokens, outLimit: outLimit(model), in: tokensEach(fs.map(rateLine)), inLimit: inLimit(model) }));
           const done = await inParts(fs, size, async (part) => {
             let reply: { ratings?: unknown } | null; let cut = false;
             try { reply = await ask(model, part); } catch (e) { if (!isCutOff(e)) throw e; cut = true; reply = (e as { partial?: { ratings?: unknown } | null }).partial ?? null; }
             const rows = listOf(reply?.ratings).map((x) => x as { id?: unknown; rating?: unknown }); const got = new Map<number, Rating>();
+            // a whole entry of a cut reply naming an id the part did not show fails the reply, as a whole reply's does: the
+            // findings are asked again by the next pass, none kept from it (#1162)
+            if (cut && unknownIds(rows.slice(0, -1).map((x) => x.id), part.map((f) => f.id)).length) return { got };
             for (const x of cut ? rows.slice(0, -1) : rows) {
               const r = RATINGS.find((k) => k.toLowerCase() === String(x.rating ?? '').trim().toLowerCase());
               // the finding by its id, exactly (#1162)

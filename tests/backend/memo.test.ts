@@ -6,7 +6,7 @@ import { nodeAi, type AiDocs } from '../../src/backend/ai';
 import { StandInService } from '../../src/backend/service';
 import { StoreKeeper } from '../../src/backend/storeKeeper';
 import type { Folder } from '../../src/backend/logRepository';
-import { TOO_LONG_REPLY } from '../../src/backend/limits';
+import { TOO_LONG_REPLY, tokensOf } from '../../src/backend/limits';
 import { memoContent, type Rating } from '../../src/domain/memo';
 import { memoDocument } from '../../src/domain/memoDoc';
 import { memRepo, type MemRepo } from '../adapters/memRepo';
@@ -27,7 +27,7 @@ function setup(rate: (c: Call, n: number) => unknown, sum: (c: Call, n: number) 
   // retries without the waits
   const retry = { sleep: async () => {} };
   const ai = nodeAi({ service: svc, docs, keeper, repo, shared, installId: pc, clock, retry });
-  return { ai, rates, sums, groups, repo, shared };
+  return { ai, rates, sums, groups, repo, shared, svc };
 }
 const val = <T,>(r: { ok: boolean; value?: T }) => { expect(r.ok).toBe(true); return r.value as T; };
 async function deal(repo: MemRepo) { val(await repo.transaction({ writes: [{ kind: 'deal', id: 'd1', data: { id: 'd1', name: 'Project Southridge', counterparty: 'Southridge Solar', sector: 'Solar' }, expectedRev: null }], index: { dealId: '_', add: [{ kind: 'deal', id: 'd1' }] } })); }
@@ -163,6 +163,17 @@ describe('the deal memo’s ratings and summary', () => {
     expect(Object.keys(m.ratings).length).toBe(45); expect(s.rates.map((c) => c.prompt.match(/^f_\w+ \(/gm)!.length)).toEqual([40, 5]);
   });
 
+  it('sizes a part of findings to the input limit with each finding\'s id counted (#1162)', async () => {
+    const LIMIT = 900;
+    const s = setup(by({}));
+    s.svc.inputLimit = () => LIMIT;
+    await deal(s.repo);
+    for (let k = 0; k < 80; k++) await finding(s.repo, `f_01HZX3K9Q4V7M2B5N8C1D6${String(k).padStart(4, '0')}`, `Finding ${k}`);
+    val(await s.ai.memo!('d1'));
+    expect(s.rates.length).toBeGreaterThan(2);
+    for (const call of s.rates) expect(tokensOf(call.prompt)).toBeLessThanOrEqual(LIMIT);
+  });
+
   it.each(ratingCases)('reports the state of open-finding ratings at scale with $name', async (testCase) => {
     const { actualRatings, expectedRatings, sums, pageOne } = await scriptedScaleMemo(testCase);
     expect(SCALE_FINDINGS.length).toBeGreaterThanOrEqual(40);
@@ -229,6 +240,14 @@ describe('the memo asks name findings only by the ids they were shown (#1162)', 
     await two(s);
     expect(val(await s.ai.memo!('d1')).ratings).toEqual({});
     expect([...s.shared.files.values()].join('')).not.toContain('"rated"');
+  });
+
+  it('takes nothing from a cut-off reply whose whole entries name an unknown id, and asks the part again', async () => {
+    const cutOff = '{"ratings": [{"id": "f_1", "rating": "High"}, {"id": "f_7", "rating": "Low"}, {"id": "f_2", "rating": "Low"}, {"id": "f_';
+    const s = setup((_c, n) => (n === 1 ? cutOff : by({ f_1: 'Low', f_2: 'Low' })(_c)));
+    await two(s);
+    expect(val(await s.ai.memo!('d1')).ratings).toEqual({ f_1: 'Low', f_2: 'Low' });
+    expect(s.rates.length).toBeGreaterThan(1);
   });
 
   it('asks again for a grouping that names an id one character off, and groups by the right one', async () => {
