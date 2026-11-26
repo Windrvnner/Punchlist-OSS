@@ -230,13 +230,15 @@ describe('answers', () => {
     const r = val(await s.ai.answer(ask('What is the lock-up?')));
     expect(r.text).toBe(' Edge answer.\t');
   });
-  it('keeps a quote for a place cited twice as written, spacing and all', async () => {
-    const cited = (c: Call) => ({
-      text: 'The lock-up is 1.25x. [1] It is also stated here. [2]',
+  it('a place a reassessment cites twice keeps the quote as written, spacing and all', async () => {
+    const twice = (c: Call) => ({
+      body: ['It is 1.25x. [1] It is stated again. [2]'],
       sources: [{ doc: tag(c, FA), page: 14 }, { doc: tag(c, FA), page: 14, quote: ' Edge quote\t' }],
     });
-    const s = setup(cited, { d1: [FA] }, { library: [] });
-    const r = val(await s.ai.answer(ask('What is the lock-up?')));
+    const s = setup(twice, { d1: [FA] }, { library: [] });
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'Lock-up differs', { sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }] });
+    const r = val(await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' }));
     expect(r.sources.map((x) => x.quote)).toEqual([' Edge quote\t']);
   });
   it("ranks documents by this PC's word index: a word deep in a document's body finds it, and its name still counts most", async () => {
