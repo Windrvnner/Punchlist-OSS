@@ -541,20 +541,10 @@ describe('the chat agent', () => {
   it('searches, reads whole what it asks for, and answers citing only documents a model was given', async () => {
     const search =
       { tool: 'search', what: 'documents', query: 'board minutes hedging', notes: 'FA p. 1 has the ratio' };
-    const s = setup(helper, undefined, {
-      turn: (c, n) =>
-        n === 1
-          ? search
-          : n === 2
-            ? { tool: 'read', docs: [tag(c, FA), 'vdr/Board minutes March.pdf', 'nowhere.pdf'] }
-            : {
-                text: 'The ratio is 1.25x. [1] The board approved. [2] A side letter agrees. [3]',
-                sources: [
-                  { doc: tag(c, FA), page: 14 },
-                  { doc: tag(c, MINUTES), page: 2 },
-                  { doc: tag(c, FA), page: 999 },
-                ],
-              },
+    const s = setup(helper, undefined, { turn: (c, n) => n === 1 ? search
+      : n === 2 ? { tool: 'read', docs: [tag(c, FA), 'vdr/Board minutes March.pdf', 'nowhere.pdf'] }
+      : { text: 'The ratio is 1.25x. [1] The board approved. [2] A side letter agrees. [3]',
+        sources: [{ doc: tag(c, FA), page: 14 }, { doc: tag(c, MINUTES), page: 2 }, { doc: tag(c, FA), page: 999 }] },
     });
     const r = val(await s.ai.answer({ ...ask('What is the lock-up, and did the board approve the swap?'), runId: 'r1' }));
     expect(s.turns.map((c) => c.model)).toEqual(['thorough', 'thorough', 'thorough']); expect(s.calls.map((c) => c.model)).toEqual(['fast', 'fast']);   // the person's model for the turns; the fast one reads for the helper
@@ -1228,47 +1218,16 @@ const SIZING = (c: Call) => ({ result: 'finding', title: 'Debt sizing in the mod
 /** how the stand-in model reads the standard deal: one clear finding, one that is thin the first time, two gaps, one item that needs a minor document */
 /** the asks to fix a reply of a given kind (the stand-in's unreadable picks are sent back to be fixed too) */
 const fixesOf = (s: { fixCalls: Call[] }, field: string) => s.fixCalls.filter((c) => c.prompt.split('\n')[0].includes(`"${field}"`) || c.prompt.split('\n')[0].includes(`fields: ${field}`));
-const usualFor = (id: string, c: Call): object | undefined =>
-  id === 'b1'
-    ? LOCKUP(c)
-    : id === 'b2'
-      ? OK(c)
-      : id === 'b3'
-        ? { result: 'more', need: 'insurance advisor report' }
-        : id === 'b4'
-          ? {
-              result: 'finding',
-              title: 'Deleted by a person before',
-              workstream: 'Legal',
-              body: ['A. [1] B. [2]'],
-              sources: [
-                { doc: tag(c, IM), page: 2 },
-                { doc: tag(c, FA), page: 2 },
-              ],
-            }
-          : id === 'p1'
-            ? has(c, MINUTES)
-              ? OK(c)
-              : { result: 'more', need: 'board minutes on hedging' }
-            : id === 's1'
-              ? { result: 'more', need: 'interconnection permit' }
-              : id === 's2'
-                ? c.model === 'thorough'
-                  ? SIZING(c)
-                  : {
-                      result: 'finding',
-                      title: 'Debt sizing',
-                      body: ['Cited nowhere that opens. [1] [2]'],
-                      sources: [
-                        { doc: tag(c, MODEL), cell: 'B2' },
-                        { doc: tag(c, MODEL), page: 1 },
-                      ],
-                    }
-                : id === 's3'
-                  ? c.model === 'thorough'
-                    ? { result: 'maybe' }
-                    : undefined
-                  : undefined;
+const usualFor = (id: string, c: Call): object | undefined => (
+  id === 'b1' ? LOCKUP(c) : id === 'b2' ? OK(c)
+  : id === 'b3' ? { result: 'more', need: 'insurance advisor report' }
+  : id === 'b4' ? { result: 'finding', title: 'Deleted by a person before', workstream: 'Legal', body: ['A. [1] B. [2]'], sources: [{ doc: tag(c, IM), page: 2 }, { doc: tag(c, FA), page: 2 }] }
+  : id === 'p1' ? (has(c, MINUTES) ? OK(c) : { result: 'more', need: 'board minutes on hedging' })
+  : id === 's1' ? { result: 'more', need: 'interconnection permit' }
+  : id === 's2' ? (c.model === 'thorough' ? SIZING(c) : { result: 'finding', title: 'Debt sizing',
+    body: ['Cited nowhere that opens. [1] [2]'],
+    sources: [{ doc: tag(c, MODEL), cell: 'B2' }, { doc: tag(c, MODEL), page: 1 }] })
+  : id === 's3' ? (c.model === 'thorough' ? { result: 'maybe' } : undefined) : undefined);
 const usual = (c: Call) => itemReply(c, (id) => usualFor(id, c));
 /** a finding a person deleted; `item` is the checklist item it was raised on, which is what a later check matches it by */
 const tomb = (repo: Repository, id: string, title: string, item?: string) => repo.transaction({ writes: [{ kind: 'tombstone', id, data: { kind: 'finding', dealId: 'd1', id, title, snapshot: item ? { itemId: item } : {} }, expectedRev: null }], index: { dealId: 'd1', add: [{ kind: 'tombstone', id }] } });
@@ -1683,17 +1642,10 @@ describe('the first pass', () => {
   });
 
   it('on a data room nothing has described, the first pass has the core documents described before it chooses what to read, and what the run cost is reported as one run', async () => {
-    let core = 0;
-    const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...OK(c) })) }), BARE(), {
-      describes: true,
-      checklist: () => ({ broad: [LIST.broad[0]], product: [], sector: [] }),
-      describe: (c) => {
-        core++;
-        return { summary: `This is ${/Describe the document (.*)\.\n/.exec(c.prompt)![1]}.`, keywords: [] };
-      },
-      pick: (c) => ({ read: idsOf(c, FA, TS) }),
-    });
-    await deal(s.repo);
+    let core = 0; const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...OK(c) })) }), BARE(), { describes: true, checklist: () => ({ broad: [LIST.broad[0]], product: [], sector: [] }),
+      describe: (c) => { core++;
+        return { summary: `This is ${/Describe the document (.*)\.\n/.exec(c.prompt)![1]}.`, keywords: [] }; },
+      pick: (c) => ({ read: idsOf(c, FA, TS) }) }); await deal(s.repo);
     val(await s.ai.firstPass('d1'));
     expect(core).toBe(2); expect(s.pickCalls[0].prompt).toContain('*: vdr/Credit Agreement.pdf — This is Credit Agreement.pdf.'); expect(s.pickCalls[0].prompt).toContain(': vdr/Side letter.pdf — words: step-in, lender');   // the descriptions were in before the pick
     expect(s.svc.uploads).toBe(2);                                                                                                                     // the core documents (the item names the credit agreement and the term sheet); nothing else left this PC
