@@ -18,6 +18,7 @@ import {
 } from '../../src/backend/reports';
 import type { DocRecord } from '../../src/backend/documents';
 import type { Sent, Cited } from '../../src/backend/agent';
+import type { Unusable } from '../../src/backend/agentKit';
 import { paths } from './fixtures/relecloudRoom';
 import { setup, deal, val, itemsIn, OK, Mem, type Call } from './reviewKit';
 import { fromStoreName } from '../../src/backend/storeKeeper';
@@ -90,8 +91,10 @@ function sortReply(prompt: string) {
  * {"covered"}
  */
 function readReply(prompt: string, name: string, issues = ISSUES[name] ?? []) {
-  const known = [...prompt.matchAll(/^F(\d+): (.*?)(?: \((?:closed|deleted)\))?$/gm)].map((m) => ({
-    f: `F${m[1]}`,
+  // the deal's findings, each by its id (#1162)
+  const listed = prompt.split('These findings are already on the deal:\n')[1]?.split('\nAn issue an open finding')[0];
+  const known = [...(listed ?? '').matchAll(/^(.*?): (.*?)(?: \((?:closed|deleted)\))?$/gm)].map((m) => ({
+    f: m[1],
     title: m[2],
   }));
   const earlier = [...prompt.matchAll(/^E(\d+): (.*)$/gm)].map((m) => ({ e: `E${m[1]}`, title: m[2] }));
@@ -134,7 +137,8 @@ function kit(
 ) {
   const log: ReportLine[] = o.log ?? [];
   const findings = o.findings ?? new Map<string, Known & { issue?: Issue }>();
-  const calls: { kind: string; prompt: string; name: string }[] = [];
+  const calls: { kind: string; prompt: string; name: string; unusable?: Unusable }[] = [];
+  const shownTo: (readonly string[] | undefined)[] = [];
   const marks: { id: string; why: string }[] = [];
   const cites: { id: string; locs: string[] }[] = [];
   const held = new Set<string>();
@@ -162,10 +166,13 @@ function kit(
     release: async (keys) => {
       for (const x of keys) held.delete(x);
     },
-    unusable: () => () => false,
+    unusable: (_sent, _keys, shown) => {
+      shownTo.push(shown);
+      return () => false;
+    },
     ask: async (input) => {
       const name = input.files?.length ? byFile.get(input.files[0])!.name : '';
-      calls.push({ kind: input.kind, prompt: input.prompt, name });
+      calls.push({ kind: input.kind, prompt: input.prompt, name, unusable: input.unusable });
       const custom = o.answer?.({ kind: input.kind, prompt: input.prompt, name, n: calls.length });
       if (custom !== undefined) {
         if (custom instanceof Error) throw custom;
@@ -206,7 +213,7 @@ function kit(
     },
     idFor: (doc, title, n) => `f_${doc}_${title}_${n}`,
   };
-  return { k, log, findings, calls, marks, cites };
+  return { k, log, findings, calls, marks, cites, shownTo };
 }
 const raisedTitles = (f: Map<string, Known & { issue?: Issue }>) =>
   [...f.values()].filter((x) => x.issue).map((x) => x.title);
@@ -473,19 +480,20 @@ describe('third-party reports at deal scale', () => {
       // the stand-in gives {"covered"} for both: a model told the rule writes the closed one out with "earlier"
       const r = readReply(prompt, name);
       expect(prompt).toContain(
-        'An issue only a finding marked (closed) covers is written up in full like any other, with "earlier": "F3".',
+        'An issue only a finding marked (closed) covers is written up in full like any other, '
+          + 'with "earlier": "<finding id>".',
       );
       return {
         ...r,
         issues: r.issues.map((x, i) =>
-          'covered' in x && x.covered === 'F2'
+          'covered' in x && x.covered === 'f_closed'
             ? {
                 title: 'Two lease parcels lack recorded memoranda',
                 workstream: 'Legal',
                 body: ['Raised again. [1]'],
                 next: '',
                 sources: [{ doc: reportId(prompt), page: 4 + i }],
-                earlier: 'F2',
+                earlier: 'f_closed',
               }
             : x,
         ),
@@ -585,7 +593,7 @@ describe('third-party reports at deal scale', () => {
   });
 
   it('an issue only a closed finding covers is never taken as covered: given with no words it is counted as '
-    + 'not placed, and a wrong "earlier" falls back to the covering one', async () => {
+    + 'not placed, and with no "earlier" the covering one is named', async () => {
     const docs = room().filter((d) => d.name === 'Legal Due Diligence Report.pdf');
     const findings = new Map<string, Known & { issue?: Issue }>([
       ['f_closed', { id: 'f_closed', title: 'Two lease parcels lack recorded memoranda', closed: true }],
@@ -595,10 +603,9 @@ describe('third-party reports at deal scale', () => {
         ? {
             advisor: 'Counsel',
             issues: [
-              { covered: 'F1', sources: [{ doc: reportId(prompt), page: 3 }] },
+              { covered: 'f_closed', sources: [{ doc: reportId(prompt), page: 3 }] },
               {
-                covered: 'F1',
-                earlier: 'F99',
+                covered: 'f_closed',
                 title: 'Lease parcels unrecorded',
                 workstream: 'Legal',
                 body: ['Raised again. [1]'],
@@ -984,4 +991,55 @@ describe('third-party reports in the app’s checks', () => {
     expect(had.updated).toBe(false);
     expect(fs.length).toBe(3); // the other two issues are findings of their own
   });
+});
+
+describe('a report read names the deal\'s findings by their ids (#1162)', () => {
+  const docs = () => room().filter((d) => d.name === 'Legal Due Diligence Report.pdf');
+  const known = () => new Map<string, Known & { issue?: Issue }>([
+    ['f_open', { id: 'f_open', title: 'PPA assignment needs offtaker consent not yet given' }],
+    ['f_closed', { id: 'f_closed', title: 'Two lease parcels lack recorded memoranda', closed: true }],
+  ]);
+
+  it('lists each finding by its id and asks for "covered" and "earlier" by id', async () => {
+    const { k, calls } = kit(docs(), { findings: known() });
+    await sweep(k);
+    const prompt = calls.find((c) => c.kind === 'report')!.prompt;
+    expect(prompt).toContain('\nf_open: PPA assignment needs offtaker consent not yet given\n'
+      + 'f_closed: Two lease parcels lack recorded memoranda (closed)\n');
+    expect(prompt).not.toMatch(/^F\d+: /m);
+    expect(prompt).toContain('already covers is given as {"covered": "<finding id>"}');
+    expect(prompt).toContain('with "earlier": "<finding id>".');
+  });
+
+  it('maps "covered" and "earlier" back to the findings with those ids', async () => {
+    const findings = known();
+    const answer = ({ kind, prompt }: { kind: string; prompt: string }) => (kind !== 'report' ? undefined : {
+      advisor: 'Counsel',
+      issues: [
+        { covered: 'f_open', sources: [{ doc: reportId(prompt), page: 3 }] },
+        { title: 'Lease parcels unrecorded', earlier: 'f_closed', workstream: 'Legal', body: ['Again. [1]'],
+          sources: [{ doc: reportId(prompt), page: 4 }] },
+      ],
+    });
+    const { k, cites } = kit(docs(), { findings, answer });
+    await sweep(k);
+    expect(cites).toEqual([{ id: 'f_open', locs: ['p. 3'] }]);
+    expect(raisedTitles(findings)).toEqual(['Lease parcels unrecorded']);
+    expect([...findings.values()].find((f) => f.issue)!.issue!.earlier).toBe('f_closed');
+  });
+
+  it('refuses a reply whose "covered" or "earlier" is a label or an id it was not shown, to be asked again',
+    async () => {
+      const { k, calls, shownTo } = kit(docs(), { findings: known() });
+      await sweep(k);
+      const unusable = calls.find((c) => c.kind === 'report')!.unusable!;
+      const reply = (row: object) => JSON.stringify({ advisor: 'Counsel', issues: [row] });
+      expect(await unusable(reply({ covered: 'F1' }))).toBe(true);
+      expect(await unusable(reply({ title: 'T', earlier: 'f_9' }))).toBe(true);
+      expect(await unusable(reply({ covered: 'f_open ' }))).toBe(true);
+      expect(await unusable(reply({ covered: 'f_open' }))).toBe(false);
+      expect(await unusable(reply({ title: 'T', earlier: 'f_closed', covered: '' }))).toBe(false);
+      // and the words of the reply are held to the same ids (docsUnusable's `shown`)
+      expect(shownTo.at(-1)).toEqual(['f_open', 'f_closed']);
+    });
 });
