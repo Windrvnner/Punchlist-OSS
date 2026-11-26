@@ -74,4 +74,27 @@ describe('the Intelligence row’s source', () => {
     await store.services.ai.dealBrief('d1').then(() => undefined); ai.dealBrief = async () => ({ ok: true as const, value: { paragraphs: [] } }) as any;
     await store.services.ai.dealBrief('d1'); expect(store.get().net.model).toBe(false);              // a later call that reaches it clears it
   });
+
+  it('hears an unreachable service from checklist import and the deal memo (#1067)', async () => {
+    const { Store } = await import('../../src/app/store'); const { memRepo } = await import('../adapters/memRepo');
+    const { mockAi, mockDocuments, mockSession } = await import('../../src/adapters/mocks');
+    const { MemoryLocal } = await import('../../src/adapters/local');
+    const { csvCodec } = await import('../../src/adapters/spreadsheet');
+    const opts = { latency: [0, 0] as [number, number] }; const repo = memRepo();
+    const error = { kind: 'unreachable' as const, message: 'Intelligence could not be reached.' };
+    const down = { ok: false as const, error };
+    const reached = { ok: true as const, value: { paragraphs: [] } };
+    const ai = {
+      ...mockAi(opts, repo), readList: async () => down, memo: async () => down, dealBrief: async () => reached,
+    };
+    const fs = { pickFolders: null, pathFor: null, save: async () => ({ ok: true as const, value: 'saved' as const }) };
+    const services = {
+      repo, ai, docs: mockDocuments(opts), fs, sheets: csvCodec, session: mockSession(opts), local: new MemoryLocal(),
+      clock: { now: () => new Date().toISOString() }, ids: { next: (p: string) => `${p}_x` },
+    };
+    const store = new Store(services, []);
+    await store.services.ai.readList!({ lines: ['Item'] }); expect(store.get().net.model).toBe(true);
+    await store.services.ai.dealBrief('d1'); expect(store.get().net.model).toBe(false);
+    await store.services.ai.memo!('d1'); expect(store.get().net.model).toBe(true);
+  });
 });
