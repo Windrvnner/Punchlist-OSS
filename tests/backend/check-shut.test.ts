@@ -30,7 +30,8 @@ function kit(DOCS: DocRecord[], items: string[], pick: (what: string, paths: str
     away: (_d, ids) => ids,                                                        // as decided: of those not sent, every one that has not left
     shut: (_d, ids) => new Map(ids.filter((id) => where(id) === 'Legal').map((id) => [id, 'Legal'])),
   };
-  const by = (want: string[], rows: ReturnType<typeof listed>) => want.flatMap((w) => rows.filter((r) => r.path.includes(w)).map((r) => r.id));
+  const by = (want: string[], rows: ReturnType<typeof listed>) =>
+    want.flatMap((w) => rows.filter((r) => r.path.includes(w)).map((r) => r.id));
   return setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...(o.script ? o.script(c, it) : OK(c)) })) }), { d1: DOCS }, {
     shared: new Mem(), installId: 'pc', batch: Math.min(20, items.length), docs, coreFor: () => o.core ?? [],   // which are core is set here, so that the closed folder is the only thing these tests vary
     ...(o.width ? { width: o.width } : {}),
@@ -43,7 +44,8 @@ const results = async (s: ReturnType<typeof kit>) => val(await s.ai.checklist('d
 /** each item's own pick: the file named by its first word */
 const first = (what: string) => [`/${what.split(' ')[0]}.`];
 /** the files a call to the standard model was given */
-const filesOf = (c: Call) => [...c.prompt.split('\n\nCheck each of these')[0].matchAll(/^(doc_[0-9a-f]{24}): ([^\n]*)$/gm)].map((m) => m[2]);
+const filesOf = (c: Call) =>
+  [...c.prompt.split('\n\nCheck each of these')[0].matchAll(/^(doc_[0-9a-f]{24}): ([^\n]*)$/gm)].map((m) => m[2]);
 
 describe('a check while a folder may not be opened by this person', () => {
   it('when a closed document is chosen for a batch, each item\'s own documents are asked for in one question: only an item whose own include it waits, naming the folder', async () => {
@@ -116,14 +118,48 @@ describe('a check while a folder may not be opened by this person', () => {
     const DOCS = [SHUT(1, 'PPA.pdf'), ...Array.from({ length: 4 }, (_, i) => OPEN(i + 2, `Doc${i}.pdf`))];
     const readable = (id: string) => !DOCS.find((r) => r.docId === id)!.rel.startsWith('Legal/') || !closedNow;
     const items = ['Doc0 is signed', 'PPA term is 20 years', 'Doc1 is signed', 'PPA tariff is fixed'];
-    const s = setup((c) => { closedNow = false; return { items: itemsIn(c).map((it) => ({ id: it.tag, ...OK(c) })) }; }, { d1: DOCS }, {
-      shared: new Mem(), installId: 'pc', batch: 2,
-      docs: { records: () => DOCS, wanted: async (_d: string, ids: string[]) => DOCS.filter((r) => ids.includes(r.docId) && readable(r.docId)).map((r) => ({ docId: r.docId, name: r.name, read: () => new TextEncoder().encode(r.name) })),
-        away: (_d: string, ids: string[]) => ids, shut: (_d: string, ids: string[]) => new Map(ids.filter((id) => !readable(id)).map((id) => [id, 'Legal'])) },
-      checklist: () => ({ broad: items.map((text, i) => ({ id: `c${i + 1}`, text })), product: [], sector: [] }),
-      pick: (c: Call) => ({ read: listed(c).filter((r) => /PPA|Doc0|Doc1/.test(r.path)).map((r) => r.id) }),
-      pickFor: (c: Call) => { const { things, rows } = askedEach(c); return { read: Object.fromEntries(things.map((t) => [t.tag, rows.filter((r) => r.path.includes(t.what.startsWith('PPA') ? 'PPA' : `/${t.what.split(' ')[0]}.`)).map((r) => r.id)])) }; },
-    } as never);
+    const s = setup(
+      (c) => {
+        closedNow = false;
+        return { items: itemsIn(c).map((it) => ({ id: it.tag, ...OK(c) })) };
+      },
+      { d1: DOCS },
+      {
+        shared: new Mem(),
+        installId: 'pc',
+        batch: 2,
+        docs: {
+          records: () => DOCS,
+          wanted: async (_d: string, ids: string[]) =>
+            DOCS.filter((r) => ids.includes(r.docId) && readable(r.docId)).map((r) => ({
+              docId: r.docId,
+              name: r.name,
+              read: () => new TextEncoder().encode(r.name),
+            })),
+          away: (_d: string, ids: string[]) => ids,
+          shut: (_d: string, ids: string[]) => new Map(ids.filter((id) => !readable(id)).map((id) => [id, 'Legal'])),
+        },
+        checklist: () => ({ broad: items.map((text, i) => ({ id: `c${i + 1}`, text })), product: [], sector: [] }),
+        pick: (c: Call) => ({
+          read: listed(c)
+            .filter((r) => /PPA|Doc0|Doc1/.test(r.path))
+            .map((r) => r.id),
+        }),
+        pickFor: (c: Call) => {
+          const { things, rows } = askedEach(c);
+          return {
+            read: Object.fromEntries(
+              things.map((t) => [
+                t.tag,
+                rows
+                  .filter((r) => r.path.includes(t.what.startsWith('PPA') ? 'PPA' : `/${t.what.split(' ')[0]}.`))
+                  .map((r) => r.id),
+              ]),
+            ),
+          };
+        },
+      } as never,
+    );
     await deal(s.repo); val(await s.ai.firstPass('d1'));
     // the first batch found the folder closed and held its PPA item; it opened while that batch was read, so the next one is not held
     expect(val(await s.ai.checklist('d1')).map((r) => [r.id, r.result])).toEqual([['c1', 'satisfied'], ['c2', 'unsettled'], ['c3', 'satisfied'], ['c4', 'satisfied']]);
@@ -142,14 +178,43 @@ describe('a check while a folder may not be opened by this person', () => {
     const fold = (id: string) => DOCS.find((r) => r.docId === id)!.rel.split('/')[0];
     const readable = (id: string) => fold(id) === 'Open' || (fold(id) === 'A' && aOpen);
     const items = ['Doc0 is signed', 'Bear term', 'Apple term', 'Doc1 is signed', 'Apple tariff', 'Doc2 is signed'];
-    const s = setup((c) => { aOpen = true; return { items: itemsIn(c).map((it) => ({ id: it.tag, ...OK(c) })) }; }, { d1: DOCS }, {
-      shared: new Mem(), installId: 'pc', batch: 3,
-      docs: { records: () => DOCS, wanted: async (_d: string, ids: string[]) => DOCS.filter((r) => ids.includes(r.docId) && readable(r.docId)).map((r) => ({ docId: r.docId, name: r.name, read: () => new TextEncoder().encode(r.name) })),
-        away: (_d: string, ids: string[]) => ids, shut: (_d: string, ids: string[]) => new Map(ids.filter((id) => !readable(id)).map((id) => [id, fold(id)])) },
-      checklist: () => ({ broad: items.map((text, i) => ({ id: `c${i + 1}`, text })), product: [], sector: [] }),
-      pick: (c: Call) => ({ read: listed(c).filter((r) => /Apple|Bear|Doc0|Doc1|Doc2/.test(r.path)).map((r) => r.id) }),
-      pickFor: (c: Call) => { const { things, rows } = askedEach(c); return { read: Object.fromEntries(things.map((t) => [t.tag, rows.filter((r) => r.path.includes(t.what.split(' ')[0])).map((r) => r.id)])) }; },
-    } as never);
+    const s = setup(
+      (c) => {
+        aOpen = true;
+        return { items: itemsIn(c).map((it) => ({ id: it.tag, ...OK(c) })) };
+      },
+      { d1: DOCS },
+      {
+        shared: new Mem(),
+        installId: 'pc',
+        batch: 3,
+        docs: {
+          records: () => DOCS,
+          wanted: async (_d: string, ids: string[]) =>
+            DOCS.filter((r) => ids.includes(r.docId) && readable(r.docId)).map((r) => ({
+              docId: r.docId,
+              name: r.name,
+              read: () => new TextEncoder().encode(r.name),
+            })),
+          away: (_d: string, ids: string[]) => ids,
+          shut: (_d: string, ids: string[]) => new Map(ids.filter((id) => !readable(id)).map((id) => [id, fold(id)])),
+        },
+        checklist: () => ({ broad: items.map((text, i) => ({ id: `c${i + 1}`, text })), product: [], sector: [] }),
+        pick: (c: Call) => ({
+          read: listed(c)
+            .filter((r) => /Apple|Bear|Doc0|Doc1|Doc2/.test(r.path))
+            .map((r) => r.id),
+        }),
+        pickFor: (c: Call) => {
+          const { things, rows } = askedEach(c);
+          return {
+            read: Object.fromEntries(
+              things.map((t) => [t.tag, rows.filter((r) => r.path.includes(t.what.split(' ')[0])).map((r) => r.id)]),
+            ),
+          };
+        },
+      } as never,
+    );
     await deal(s.repo); val(await s.ai.firstPass('d1'));
     // the first batch was chosen while both were closed; A opened while it was read, so the second batch holds back only the Bear item's kind
     expect(await results(s)).toEqual([['c1', 'satisfied'], ['c2', 'unsettled', 'The folder B could not be opened on this PC.'], ['c3', 'unsettled', 'The folder A could not be opened on this PC.'], ['c4', 'satisfied'], ['c5', 'satisfied'], ['c6', 'satisfied']]);
@@ -161,14 +226,43 @@ describe('a check while a folder may not be opened by this person', () => {
     const fold = (id: string) => DOCS.find((r) => r.docId === id)!.rel.split('/')[0];
     const readable = (id: string) => fold(id) === 'Open' || (fold(id) === 'A' && aOpen);
     const items = ['Doc0 is signed', 'Bear term', 'Apple term', 'Doc1 is signed', 'Apple tariff', 'Doc2 is signed'];
-    const s = setup((c) => { aOpen = true; return { items: itemsIn(c).map((it) => ({ id: it.tag, ...OK(c) })) }; }, { d1: DOCS }, {
-      shared: new Mem(), installId: 'pc', batch: 3,
-      docs: { records: () => DOCS, wanted: async (_d: string, ids: string[]) => DOCS.filter((r) => ids.includes(r.docId) && readable(r.docId)).map((r) => ({ docId: r.docId, name: r.name, read: () => new TextEncoder().encode(r.name) })),
-        away: (_d: string, ids: string[]) => ids, shut: (_d: string, ids: string[]) => new Map(ids.filter((id) => !readable(id)).map((id) => [id, fold(id)])) },
-      checklist: () => ({ broad: items.map((text, i) => ({ id: `c${i + 1}`, text })), product: [], sector: [] }),
-      pick: (c: Call) => ({ read: listed(c).filter((r) => /Bear|Doc0|Doc1|Doc2/.test(r.path)).map((r) => r.id) }),
-      pickFor: (c: Call) => { const { things, rows } = askedEach(c); return { read: Object.fromEntries(things.map((t) => [t.tag, rows.filter((r) => r.path.includes(t.what.split(' ')[0])).map((r) => r.id)])) }; },
-    } as never);
+    const s = setup(
+      (c) => {
+        aOpen = true;
+        return { items: itemsIn(c).map((it) => ({ id: it.tag, ...OK(c) })) };
+      },
+      { d1: DOCS },
+      {
+        shared: new Mem(),
+        installId: 'pc',
+        batch: 3,
+        docs: {
+          records: () => DOCS,
+          wanted: async (_d: string, ids: string[]) =>
+            DOCS.filter((r) => ids.includes(r.docId) && readable(r.docId)).map((r) => ({
+              docId: r.docId,
+              name: r.name,
+              read: () => new TextEncoder().encode(r.name),
+            })),
+          away: (_d: string, ids: string[]) => ids,
+          shut: (_d: string, ids: string[]) => new Map(ids.filter((id) => !readable(id)).map((id) => [id, fold(id)])),
+        },
+        checklist: () => ({ broad: items.map((text, i) => ({ id: `c${i + 1}`, text })), product: [], sector: [] }),
+        pick: (c: Call) => ({
+          read: listed(c)
+            .filter((r) => /Bear|Doc0|Doc1|Doc2/.test(r.path))
+            .map((r) => r.id),
+        }),
+        pickFor: (c: Call) => {
+          const { things, rows } = askedEach(c);
+          return {
+            read: Object.fromEntries(
+              things.map((t) => [t.tag, rows.filter((r) => r.path.includes(t.what.split(' ')[0])).map((r) => r.id)]),
+            ),
+          };
+        },
+      } as never,
+    );
     await deal(s.repo); val(await s.ai.firstPass('d1'));
     expect(await results(s)).toEqual([['c1', 'satisfied'], ['c2', 'unsettled', 'The folder B could not be opened on this PC.'], ['c3', 'unsettled', 'The folder A could not be opened on this PC.'], ['c4', 'satisfied'], ['c5', 'satisfied'], ['c6', 'satisfied']]);
   });
