@@ -54,6 +54,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Search uses the usual separator spacing after an ellipsized single-word counterparty (#790).
 - The New Deal form has Name and Counterparty; Structure, Sector, and Technology pick lists; and Folders. × closes it, and there is no Cancel. **Create** stays unavailable until there is a name.
 - Before a new deal is made, a duplicate check asks "Is this Project X?" when the folders' files, or the name and counterparty, match a team deal; nothing is refused.
+- The folders hold a deal's data room when every document of the deal has a file among them with the same name (in any case) and size, and the smallest of those files is identical by content. Files in a precedents folder, and files attached in the app, are not counted. (#1018)
 - Each deal has a Deleted list for findings and questions, showing who deleted each and when, with **Restore**. A deleted record reached by a link says so and offers **Restore**; a question being typed on a deleted finding's page stays there, with **Log Question** off (#340). A deleted question's number is never reused. An imported issues list can be removed from the Deleted list. **Remove** asks first, naming the findings it deletes, the marks it takes off, and the findings it keeps; the removal applies only to that list as approved, so any change to the deal's findings or marks since refuses it and asks again (#410).
 - Notices stack, up to three at the top of the page, for 8 seconds each (paused on hover or focus), each with its own **Undo**, and only on the PC that acted.
 - Unseen changes that another PC made to a deal deleted elsewhere are kept on that PC as "Project X (recovered)", with a notice that stays until closed and says who deleted the original; keeping or deleting the copy is that person's call. Details still open are in GitHub Issues.
@@ -159,6 +160,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Each list in the master checklist is its own shared record. Bringing a list in adds its items to every deal that uses it and is not marked Closed. A deal's items are append-only; swapping a list asks first when items would be turned off.
 - The Wording heading checkbox selects or clears every available suggestion, and each row keeps its own checkbox (#377).
 - A rewording accepted when a list was brought in is offered again the next time.
+- **Choose Columns** preselects a column only when its heading is a known name; otherwise the person picks it (#1018).
 - In an open checklist import, a review that needs the model waits for a pending review request. The Duplicates line
   and footer show the latest retry failure, and a partial check keeps its pairs and checked removals (#378).
 - **Add All Unresolved to Q&A…** keeps a chosen link with its exact question and point, and writes it only if both are unchanged at commit (#88).
@@ -174,6 +176,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A deal page's ask box is the conversation composer in place: it is one line at rest and pushes the page down when used (option A).
 - **Past Conversations** in every composer opens a searchable list, set to This Deal or All Deals.
 - A typed "Log a question" that can't be saved goes back at the head of its box, ahead of anything typed while it was saving, with a blank line between; sending the box then logs that question alone and leaves the rest in the box. One the app keeps to retry stays with **Retry** instead (#955).
+- Typed text goes to the chat agent, except the typed commands: "open", "go to", "show", "take me to", "switch to", or "jump to" a deal by its name (in any case, with or without "Project"), "new deal", "add all unresolved to Q&A", and "log a question". (#1018)
 - There is no Conversations tab.
 - Conversations are kept per person in the shared folder and follow the person between PCs. In the app, each person sees only their own; the files are readable by anyone with access to the folder, and no encryption is planned.
 - Answers cite sources sentence by sentence with a dotted underline, without numbered markers (#636). While a finding is being edited, each citation shows as a tag of at most 30 characters after its sentence (#636). An answer can become a finding, a question, or a response.
@@ -212,10 +215,12 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A folder can be removed from a deal after a confirmation, with Undo, and restored later; new checks stop reading it, and existing citations still open.
 - Punchlist reads linked data-room files in place. An empty folder is never taken as a deal folder. Each PC finds a deal's folders by itself where it can; otherwise it asks once, with **Locate…**.
 - A document's id is the SHA-256 hash of its bytes, so identical copies are one document.
+- The chat agent opens a document only by its tag, its whole path, or its whole file name (in any case); anything else is "Not found" (#1018).
 - Indexing (building each PC's word index of the data room) asks no model and uploads nothing, and it resumes by itself once the data room is available again.
 - A deal's folders are checked for changes every 5 minutes.
 - LibreOffice, bundled with the app, is the only document converter; a converted document that has tracked changes shows them as markup, and one with none is converted as it is.
 - For tracked changes and blacklines, a Word file's own tracked changes are fact, and the clean draft is the source of truth for the deal's terms. A blackline is the model's reading: it never settles an item or closes a finding by itself. A control-file switch selects pipeline A (the default) or pipeline B. What a blackline was compared against is determined from its cover and name, never guessed (docs/other-project-documents-design.md).
+- A blackline whose clean draft neither its cover nor its name finds stands alone and is read on its own; a file that only shares a word of its name never makes it unclear (#1018).
 - A deleted or replaced document leaves the deal under the rules in architecture.md; nothing linked to it is deleted (#413).
 - A folder that this person may not open doesn't stop indexing, and a check that couldn't read it says "Not complete".
 - The app never deletes documents. Drafts of one agreement form a family: the newest is read first, and reading mode shows a draft's date and lists its family's drafts, any two of which can be compared. Versions in one folder count only with an explicit mark such as v3 or Rev A.
@@ -280,6 +285,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - The model service sits behind one connector interface, chosen by `models.service`.
 - Intelligence sign-in is by API key or single sign-on, each turned on or off in the control file. Sign-in comes first; with nobody signed in, the app is read-only and keeps everything typed.
 - North, custom model gateways, Azure OpenAI, Amazon Bedrock and Google Vertex AI offer single sign-on.
+- A cloud service's saved sign-in holds while its service, address and sign-in fields stay the same; changing a model ID keeps everyone signed in (#1018).
 - Live tests run through the Claude connector on Haiku 5.5 by default (with model routing only to test the full document pipeline), and only when asked for (`npm run e2e:live`, or `npm run ai:check` for one service).
 
 ## Testing and packaging

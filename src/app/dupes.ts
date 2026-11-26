@@ -6,7 +6,7 @@ import { cleanName, sameName, withProject } from './commands/deals';
 /**
  * Is a new deal one the team already has? Two deals may share a name, and are told apart by their counterparty and
  * the day each was made, so a name alone never counts. What does count, the data room first:
- *   - the data room: the document service found most of the new folders' files in the deal's documents (`room`);
+ *   - the data room: every document of the deal's data room is among the new folders' files (`room`);
  *   - the name and the counterparty both: the same name, and the same counterparty, given on both.
  * A folder another deal also reads does not count by itself: a shared folder (precedents, say) can serve many deals, and
  * when it is that deal's data room, the data room check finds it. The likeliest deal comes back, with what was found,
