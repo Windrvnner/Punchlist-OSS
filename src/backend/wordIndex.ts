@@ -26,14 +26,34 @@ export const TITLE_WORDS = 40;
 export interface DocWords { counts: Map<string, number>; length: number; title: string[] }
 /** Count the words of a document. `first` is its first page, when the text has pages; otherwise the text's own start is the title. */
 export function countWords(text: string, first = text): DocWords {
-  const counts = new Map<string, number>(); let length = 0;
-  for (const w of indexWords(text)) { counts.set(w, (counts.get(w) ?? 0) + 1); length++; }
-  const title: string[] = [];
-  for (const w of indexWords(first)) {
-    if (title.length >= TITLE_WORDS) break;
-    if (!title.includes(w)) title.push(w);
+  const tally = new WordTally();
+  tally.add(text, first);
+  return tally.words();
+}
+
+/**
+ * The words of a text counted a piece at a time, as `countWords` counts a whole text: the pieces' first words make the
+ * title, unless `first` gives the text it is taken from.
+ */
+export class WordTally {
+  private readonly counts = new Map<string, number>();
+  private length = 0;
+  private readonly title: string[] = [];
+
+  add(text: string, first = text): void {
+    for (const w of indexWords(text)) {
+      this.counts.set(w, (this.counts.get(w) ?? 0) + 1);
+      this.length++;
+    }
+    for (const w of this.title.length < TITLE_WORDS ? indexWords(first) : []) {
+      if (this.title.length >= TITLE_WORDS) break;
+      if (!this.title.includes(w)) this.title.push(w);
+    }
   }
-  return { counts, length, title };
+
+  words(): DocWords {
+    return { counts: this.counts, length: this.length, title: this.title };
+  }
 }
 
 /**
@@ -47,6 +67,8 @@ interface Line { d: string; n: number; t: string; w: string }
 export interface WordIndex {
   /** whether this PC has read the words of this document */
   has(dealId: string, docId: string): boolean;
+  /** whether this PC's index file for the deal, of the current version, exists */
+  built(dealId: string): boolean;
   /** keep a document's words; said again for a document already kept, it replaces them */
   add(dealId: string, docId: string, words: DocWords): void;
   /**
@@ -126,6 +148,7 @@ export function wordIndex(local: Folder): WordIndex {
   };
   return {
     has: (dealId, docId) => of(dealId).num.has(docId),
+    built: (dealId) => local.list().includes(file(dealId)),
     add(dealId, docId, words) {
       const l: Line = { d: docId, n: words.length, t: words.title.join(' '), w: [...words.counts].map(([w, n]) => `${w}:${n}`).join(' ') };
       local.append(file(dealId), `${JSON.stringify(l)}\n`); put(of(dealId), l);

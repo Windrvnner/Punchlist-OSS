@@ -226,6 +226,13 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A document's id is the SHA-256 hash of its bytes, so identical copies are one document.
 - The chat agent opens a document only by its tag, its whole path, or its whole file name (in any case); anything else is "Not found" (#1018).
 - Indexing (building each PC's word index of the data room) asks no model and uploads nothing, and it resumes by itself once the data room is available again.
+- A spreadsheet is read for its words whatever its size, after every other file; a .csv is read a piece at a time.
+  One that cannot be read is named in the indexing log on every run and never recorded as having no text; it is read
+  again by every later run and every 5-minute check of the folders (#427).
+- Every cell of a spreadsheet is content, numbers and dates included, in its words and in the index (#1023).
+- A successful read of a deal-folder document's words replaces a recorded empty word list for every PC (#1023).
+- A deal whose word index file of the current version is missing has its folders read again at the next check, once
+  (#1023).
 - A deal's folders are checked for changes every 5 minutes.
 - LibreOffice, bundled with the app, is the only document converter; a converted document that has tracked changes shows them as markup, and one with none is converted as it is.
 - For tracked changes and blacklines, a Word file's own tracked changes are fact, and the clean draft is the source of truth for the deal's terms. A blackline is the model's reading: it never settles an item or closes a finding by itself. A control-file switch selects pipeline A (the default) or pipeline B. What a blackline was compared against is determined from its cover and name, never guessed (docs/other-project-documents-design.md).
