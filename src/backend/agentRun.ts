@@ -46,7 +46,17 @@ export class AgentRun {
   /** the number of the next tag */
   private nextTag = 1;
 
-  constructor(readonly kit: AgentKit, readonly question: AgentQuestion, readonly progress: Run) {
+  /**
+   * `pages`: how many a search gives at a time, documents (`width`) and findings or questions (`searchPage`), as the
+   * agent's limits set them; `chars`: the most characters a page of findings or questions may hold (agent.ts
+   * `pageChars`)
+   */
+  constructor(
+    readonly kit: AgentKit,
+    readonly question: AgentQuestion,
+    readonly progress: Run,
+    readonly pages: { width: number; searchPage: number; chars: number },
+  ) {
     if (kit.talk) this.keepTags(question.thread?.tags ?? []);
   }
 
@@ -105,13 +115,6 @@ export class AgentRun {
     return this.opened.filter((s) => !this.quiet.has(s));
   }
 
-  /** the documents attached to the main session now, by deal: the search helper need not open them again */
-  given(): Record<string, string[]> {
-    const out: Record<string, string[]> = {};
-    for (const x of this.whole) (out[x.dealId] ??= []).push(x.rec.docId);
-    return out;
-  }
-
   /** a new step, shown as being worked on */
   step(s: Omit<ResearchStep, 'done' | 'result'>): ResearchStep {
     const made: ResearchStep = { ...s, result: '', done: false };
@@ -153,19 +156,22 @@ export class AgentRun {
     return `${attached}${capped}${notFound}`;
   }
 
-  /** a document named by its path or file name: the whole path or name first, then the end of a path */
+  /** a document named by its whole path or its whole file name, in any case; anything else is not found */
   private byPath(said: string, recs: DealDoc[]): Sent | undefined {
     const low = said.toLowerCase();
-    const found = recs.find((x) => this.kit.where(x.rec).toLowerCase() === low || x.rec.name.toLowerCase() === low)
-      ?? recs.find((x) => this.kit.where(x.rec).toLowerCase().endsWith(low));
+    const found = recs.find((x) => this.kit.where(x.rec).toLowerCase() === low || x.rec.name.toLowerCase() === low);
     return found ? this.tagOf(found.dealId, found.rec) : undefined;
   }
 
   /** these documents with each blackline's clean draft put just before it, each once */
   private withCleanDrafts(picked: Sent[]): Sent[] {
-    if (!this.kit.withClean) return picked;
-    const paired = picked.flatMap((s) =>
-      this.kit.withClean!(s.dealId, [s.rec]).map((rec) => (rec === s.rec ? s : this.tagOf(s.dealId, rec))));
+    if (!this.kit.cleanDrafts) return picked;
+    const deals = new Set(picked.map((s) => s.dealId));
+    const cleans = new Map([...deals].map((dealId) => [dealId, this.kit.cleanDrafts!(dealId)]));
+    const paired = picked.flatMap((s) => {
+      const clean = cleans.get(s.dealId)?.get(s.rec.docId);
+      return clean ? [this.tagOf(s.dealId, clean), s] : [s];
+    });
     return paired.filter((s, i, all) => all.indexOf(s) === i);
   }
 }

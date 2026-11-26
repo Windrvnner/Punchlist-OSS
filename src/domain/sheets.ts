@@ -6,6 +6,8 @@
 import { CsvCells } from './csvCells';
 import { findHeaderRow, suggestMapping } from './importExport';
 import type { SheetPreview } from '../ports';
+import { fail, ok } from './result';
+import { decodeText, encodingOf } from './textEncoding';
 
 export interface Sheet { name: string; grid: string[][] }
 
@@ -166,3 +168,55 @@ export function writtenAsMeant(before: Sheet[], after: Sheet[], sheet: string, s
 
 /** a path or file name as Windows compares it: case and slash direction don't matter, nor a separator at the end */
 export const windowsPath = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLocaleLowerCase('en-US');
+
+/** the characters Windows-1252 puts at 0x80–0x9F; the rest of its range is the same as Unicode */
+const CP1252 = '€\u0081‚ƒ„…†‡ˆ‰Š‹Œ\u008DŽ\u008F\u0090‘’“”•–—˜™š›œ\u009DžŸ';
+
+/** `text` as UTF-16 code units, two bytes each, big- or little-endian */
+function utf16Bytes(text: string, bigEndian: boolean): number[] {
+  return [...Array(text.length).keys()].flatMap((i) => {
+    const code = text.charCodeAt(i);
+    return bigEndian ? [code >> 8, code & 255] : [code & 255, code >> 8];
+  });
+}
+
+/** `text` in the encoding `like` is in, byte-order mark included; throws when a character has no place in it */
+export function encodeLike(text: string, like: Uint8Array): Uint8Array {
+  switch (encodingOf(like)) {
+    case 'utf-8-bom': return new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(text)]);
+    case 'utf-8': return new TextEncoder().encode(text);
+    case 'utf-16le-bom': return new Uint8Array([0xff, 0xfe, ...utf16Bytes(text, false)]);
+    case 'utf-16be-bom': return new Uint8Array([0xfe, 0xff, ...utf16Bytes(text, true)]);
+    case 'utf-16le': return new Uint8Array(utf16Bytes(text, false));
+    case 'utf-16be': return new Uint8Array(utf16Bytes(text, true));
+    case 'windows-1252-bom': return new Uint8Array([0xef, 0xbb, 0xbf, ...cp1252(text)]);
+    default: return new Uint8Array(cp1252(text));
+  }
+}
+
+/** `text` as Windows-1252 bytes */
+function cp1252(text: string): number[] {
+  return [...text].map((ch) => {
+    const code = ch.codePointAt(0)!;
+    const high = CP1252.indexOf(ch);
+    if (high >= 0) return 0x80 + high;
+    if (code < 0x80 || (code >= 0xa0 && code <= 0xff)) return code;
+    throw new Error(`“${ch}” can’t be written in this CSV log’s encoding (Windows-1252)`);
+  });
+}
+
+/** a workbook is a ZIP (.xlsx, .xlsm, .xlsb, .ods) or an OLE container (.xls), whatever it is called */
+export function isWorkbook(b: Uint8Array): boolean {
+  const zip = b[0] === 0x50 && b[1] === 0x4b;
+  return zip || (b[0] === 0xd0 && b[1] === 0xcf && b[2] === 0x11 && b[3] === 0xe0);
+}
+
+/** A .csv read as text: raw strings, no number or date guessing. One sheet. */
+export function readCsv(bytes: Uint8Array, opts?: { sheet?: string; headerRow?: number }) {
+  if (isWorkbook(bytes)) {
+    const message = 'That file is a workbook saved with a .csv name. Rename it to .xlsx and try again';
+    return fail({ kind: 'invalid' as const, message });
+  }
+  const table = tableFrom([{ name: 'Sheet1', grid: parseCsv(decodeText(bytes)) }], opts);
+  return table ? ok(table) : fail({ kind: 'invalid' as const, message: 'The file has no rows' });
+}

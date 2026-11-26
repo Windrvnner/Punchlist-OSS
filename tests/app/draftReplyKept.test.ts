@@ -14,7 +14,8 @@ import { RequestDraft, ApplyDraft, AcceptDraft, RecoverDrafts, DiscardDraft, Res
 import { ResolveConflict, ReopenConflict } from '../../src/app/commands/conflicts';
 import { ImportQuestions, RevertImport } from '../../src/app/commands/importQuestions';
 import { registry } from '../../src/app/commands/undo';
-import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
+import { csvCodec } from '../../src/adapters/spreadsheet';
+import { readCsv } from '../../src/domain/sheets';
 import { prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { MemoryLocal } from '../../src/adapters/local';
 import { draftAll } from '../../src/app/drafting';

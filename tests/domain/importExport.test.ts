@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { parseDate, prepareImport, suggestMapping, questionsSheet, findingsSheet, importCounts } from '../../src/domain/importExport';
-import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
+import { parseDate, prepareImport, suggestMapping, questionsSheet, findingsSheet } from '../../src/domain/importExport';
+import { csvCodec } from '../../src/adapters/spreadsheet';
+import { readCsv } from '../../src/domain/sheets';
 import { Question } from '../../src/domain/model';
 
 describe('parseDate', () => {
@@ -139,15 +140,12 @@ describe('prepareImport', () => {
     const m = suggestMapping(['Number', 'Question', 'Response', 'Submitted by', 'Priority', 'Received']);
     const p = prepareImport([[' 3 ', '  Indented question', 'Yes.\n', ' Lender A ', ' High ', ' 2026-11-02 '], ['4', '   ', '', '', '', '']], m);
     expect(p.skipped).toBe(0); expect(p.badDates).toBe(0); expect(p.unknownValues).toBe(0);
-    expect(p.rows[0]).toMatchObject({ n: 3, text: '  Indented question', response: 'Yes.\n', askedBy: 'Lender A', priority: 'High', received: '2026-11-02' });   // a name is an identity: the spaces around it go
+    // a name is stored as the cell gives it
+    expect(p.rows[0]).toMatchObject({
+      n: 3, text: '  Indented question', response: 'Yes.\n', askedBy: ' Lender A ',
+      priority: 'High', received: '2026-11-02',
+    });
     expect(p.rows[1]).toMatchObject({ n: 4, text: '   ' });
-  });
-  it('counts new and matching rows for the preview', () => {
-    const at = '2026-11-09T10:00:00.000Z';
-    const existing = [Question.parse({ id: 'q_01HZZZZZZZZZZZZZZZZZZZZZZZ', dealId: 'd_01HZZZZZZZZZZZZZZZZZZZZZZZ', rev: 1, createdAt: at, updatedAt: at, n: 2, text: 'x' })];
-    const rows = prepareImport([['2', 'a'], ['3', 'b'], ['3', 'c']], { n: 0, text: 1, askedBy: null, received: null, workstream: null, priority: null, response: null, respondedBy: null, responded: null, status: null }).rows;
-    expect(importCounts(rows, existing, 'merge')).toEqual({ add: 1, match: 2 });
-    expect(importCounts(rows, existing, 'append')).toEqual({ add: 3, match: 0 });
   });
 });
 

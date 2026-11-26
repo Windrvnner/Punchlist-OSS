@@ -1,7 +1,7 @@
 /**
  * Import a prepared table into a deal's Q&A log as one transaction: every row
- * lands or none does. Merge matches each row to a question like an XLOOKUP: the same number, exact text and sender,
- * else the exact text and sender alone; it brings back a deleted question a row matches, and takes only the
+ * lands or none does. Merge matches each row to a question like an XLOOKUP (`importMatches`): the same number, text and
+ * sender, else the text and sender alone; it brings back a deleted question a row matches, and takes only the
  * non-empty incoming fields; a row that matches nothing, unless the person accepted a suggestion for it, is a new
  * question. Append always adds.
  * Status comes only from a mapped Status column. Undo restores each touched question to exactly what it
@@ -13,7 +13,7 @@ import { define, type Upsert, type AuditDraft } from '../command';
 import { Question, Finding, Tombstone, DealId, QuestionId, FindingId, QuestionStatus, isRealDate } from '../../domain/model';
 import { setResponse, setQuestionStatus, checkQuestion } from '../../domain/transitions';
 import { numbering } from './questions';
-import { matchExactly, withAccepted, AcceptedMatch } from './importMatching';
+import { matchQuestions, withAccepted, AcceptedMatch } from '../../domain/qaMatch';
 import { sameText, sameWords, type ImportRow } from '../../domain/importExport';
 import { ok, fail, notFound, rejected } from '../../domain/result';
 import { dealQuestions, nextQuestionNumber } from '../state';
@@ -28,6 +28,29 @@ import type { State } from '../state';
 const IDENTITIES = new Set(['askedBy', 'respondedBy', 'workstream']);
 const Ymd = z.string().refine((v) => v === '' || isRealDate(v));
 export const ImportRowSchema = z.object({ line: z.number().int().positive().optional(), n: z.number().int().positive().nullable(), text: z.string().min(1), askedBy: z.string(), received: Ymd, workstream: z.string(), priority: z.enum(['', 'High', 'Medium', 'Low']), response: z.string(), respondedBy: z.string(), responded: Ymd, status: z.union([QuestionStatus, z.literal('')]) });
+
+/** a deal's deleted questions, newest deletion first: their tombstones, and each question as it was, by id */
+function deletedQuestions(state: State, dealId: string) {
+  const buried = Object.values(state.tombstones)
+    .filter((t) => t.kind === 'question' && t.dealId === dealId && !state.questions[t.id])
+    .sort((a, b) => b.at.localeCompare(a.at));
+  const gone = new Map(buried.map((t) => [t.id, Question.parse({ ...(t.snapshot as object) })]));
+  return { buried, gone };
+}
+
+/**
+ * Which question each row is, by row index, for the import and its preview alike. Merge looks each row up
+ * (`matchQuestions`) among the live questions, then the deleted ones, and adds the suggestions the person accepted;
+ * Append matches nothing.
+ */
+export function importMatches(
+  state: State, dealId: string, mode: 'merge' | 'append', rows: ImportRow[], accepted: AcceptedMatch[],
+): Map<number, string> {
+  if (mode !== 'merge') return new Map();
+  const pools = [dealQuestions(state, dealId), [...deletedQuestions(state, dealId).gone.values()]];
+  const known = new Set(pools.flat().map((q) => q.id));
+  return withAccepted(matchQuestions(rows, pools), rows, accepted, known);
+}
 
 export const ImportQuestions = define({
   name: 'ImportQuestions',
@@ -56,17 +79,10 @@ export const ImportQuestions = define({
     const fileNumbers = new Set(input.rows.map((r) => r.n).filter((n): n is number => n != null));
     const nextFree = () => { let n = maxN + 1; while (fileNumbers.has(n)) n++; return n; };
     // a deleted question a row matches is brought back rather than copied
-    const buried = Object.values(state.tombstones).filter((t) => t.kind === 'question' && t.dealId === d.id && !state.questions[t.id]).sort((a, b) => b.at.localeCompare(a.at));
-    const gone = new Map(buried.map((t) => [t.id, Question.parse({ ...(t.snapshot as object) })]));
+    const { buried, gone } = deletedQuestions(state, d.id);
     // a deleted question's number is never handed to another question, so it can always be restored under it
     const deadNumbers = new Set([...gone.values()].map((q) => q.n));
-    // Merge works like an XLOOKUP on the question as written: a row is the log's question with the same number and
-    // the exact same text; failing that, the one with the exact same text alone. A row that matches neither is a new
-    // question. A live question is taken before a deleted one.
-    const pools = [[...originals.values()], [...gone.values()]];
-    const known = new Set(pools.flat().map((q) => q.id));
-    const exact = input.mode === 'merge' ? matchExactly(input.rows, pools) : new Map<number, string>();
-    const matchOf = withAccepted(exact, input.rows, input.mode === 'merge' ? input.accepted : [], known);
+    const matchOf = importMatches(state, d.id, input.mode, input.rows, input.accepted);
     // A new question's id is made from the deal, the file's own number, the party and the wording, so the same list imported
     // on two PCs before they meet makes the same records, and the change files hold one of each. The id is fixed at
     // creation: an edit or renumbering later never changes it. The k-th row of the file with the same four makes its own

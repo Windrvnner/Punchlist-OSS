@@ -7,7 +7,7 @@
  */
 import fs from 'node:fs';
 import { CsvCells } from '../domain/csvCells';
-import { encodingOf } from '../adapters/spreadsheet';
+import { encodingOf } from '../domain/textEncoding';
 
 const PIECE = 1 << 20;
 

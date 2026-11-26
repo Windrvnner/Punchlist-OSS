@@ -47,7 +47,7 @@ export function coverOf(first: string): string | null {
 const namedAt = (cover: string, name: string) => { const c = ` ${base(cover)} `; const n = ` ${base(name)} `; return n.trim() ? c.lastIndexOf(n) : -1; };
 /** whether a cover names another file after `name`, found at `at`: then `name` is the original, not the newer draft */
 const namedLater = (cover: string, name: string, at: number) => /\s(?:docx?|pdf|rtf)\s/.test(` ${base(cover)} `.slice(at + ` ${base(name)}`.length).replace(/^\s*(?:docx?|pdf|rtf)\s/, ' '));
-/** a name's first word, as a file that could be its clean draft would share it */
+/** a name's first word: both sides of "A vs B" share it when they are two drafts of one document */
 const head = (folded: string) => folded.split(' ').find((w) => /\p{L}{2}/u.test(w));
 
 /** what blacklines need of a document: its id, name, place in the data room, when first seen, and its cover page if it has one */
@@ -65,7 +65,8 @@ export const isBlackline = (d: { name: string; cover?: string }) => PDF.test(d.n
 
 /**
  * Each blackline among these documents, by id, with its clean draft's id; null when which one is not clear; false when
- * the data room has no file that could be it (a standalone blackline). Documents that are not blacklines are left out:
+ * neither its cover nor its name finds one (a standalone blackline, read on its own). Documents that are not blacklines
+ * are left out:
  * what is in the map is a blackline.
  */
 export function cleanDrafts(docs: BlacklineDoc[]): Map<string, string | null | false> {
@@ -96,11 +97,8 @@ export function cleanDrafts(docs: BlacklineDoc[]): Map<string, string | null | f
       if (here !== null) { out.set(b.docId, here ?? null); found = true; break; }
       const fam = fams.filter((f) => base(f.name) === want); if (fam.length) { out.set(b.docId, fam.length === 1 ? fam[0].drafts[0].docId : null); found = true; break; }
     }
-    if (found) continue;
-    const want = stripped(b.name);
-    // 4 it stands alone only when nothing in the data room could be its clean draft: any file that shares its name's first
-    // word ("SPA (execution version).docx" beside "SPA blackline.pdf") makes it unclear, so it is not read
-    const w = head(want); out.set(b.docId, w && clean.some((d) => ` ${bn(d)} `.includes(` ${w} `)) ? null : false);
+    // 4 no clean draft by cover or name: it stands alone, read on its own, whatever else shares a word of its name
+    if (!found) out.set(b.docId, false);
   }
   // a weaker word: a blackline only when the file of its name without that word is in its folder; otherwise an ordinary document
   for (const b of maybe.filter((d) => !otherProject(d))) { const here = one(clean.filter((d) => d !== b && dir(d) === dir(b) && bn(d) === stripped(b.name, MAYBE))); if (here) out.set(b.docId, here); }

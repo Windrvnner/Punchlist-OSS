@@ -114,11 +114,35 @@ export async function teamFolders(synced: string[], env: NodeJS.ProcessEnv = pro
   return out;
 }
 
+/**
+ * The settings in a file, or none when the file is missing (#1118). A file that is there but cannot be read as an
+ * object of settings throws, so saving never replaces settings it could not read.
+ */
+function readSettings(file: string): Record<string, unknown> {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    throw new Error('The settings file can’t be read right now, so it was left as it is');
+  }
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    // left null: refused below like any other content that is not settings
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('The settings file isn’t valid settings, so it was left as it is');
+  }
+  return parsed as Record<string, unknown>;
+}
+
 /** Keep the shared folder a person connected in this PC's settings.json, leaving its other settings as they are. */
 export function saveSharedFolder(localPath: string, folder: string) {
   const file = path.join(localPath, 'settings.json');
   const temporary = file + '.tmp';
-  let now: Record<string, unknown> = {}; try { now = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* a new file */ }
+  const now = readSettings(file);
   fs.mkdirSync(localPath, { recursive: true });
   // Force the working file to disk before it replaces the settings (#217).
   fs.writeFileSync(temporary, JSON.stringify({ ...now, sharedFolder: folder }, null, 2), { flush: true });

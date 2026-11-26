@@ -7,10 +7,13 @@
  */
 import type { Question } from './model';
 import type { ReadTable, SheetEdit } from './sheets';
-import { prepareImport, IMPORT_FIELDS, type Mapping, type ImportField, type ImportRow } from './importExport';
+import { prepareImport, IMPORT_FIELDS, sameText, type Mapping, type ImportField, type ImportRow } from './importExport';
+import { matchQuestions } from './qaMatch';
 
 /** every field the app keeps up to date in the log, where the log has a column for it */
-const FIELDS: ImportField[] = ['n', 'text', 'askedBy', 'received', 'workstream', 'priority', 'status', 'response', 'respondedBy', 'responded'];
+export const FIELDS: ImportField[] = [
+  'n', 'text', 'askedBy', 'received', 'workstream', 'priority', 'status', 'response', 'respondedBy', 'responded',
+];
 const STATUS_LABEL: Record<Question['status'], string> = { open: 'Open', answered: 'Answered', closed: 'Closed' };
 /** a date field's step says so, so a workbook gets a real date in the column's own format */
 const dated = (k: ImportField) => (k === 'received' || k === 'responded' ? { date: true as const } : {});
@@ -41,69 +44,25 @@ export interface LogWrite {
   taken: Record<string, Record<string, string>>;
 }
 
-/**
- * A text as a log file holds it: the file keeps a line break as one "\n" and cannot hold control characters, so a writer
- * stores each as a space or leaves it out (xlsx leaves it out). This is how the file stores text, not a repair; every
- * other difference is a real edit.
- */
-const asLogHolds = (text: string, controls: string) =>
-  text.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, controls);
-const sameInLog = (a: string, b: string) => a === b || asLogHolds(a, ' ') === asLogHolds(b, ' ') || asLogHolds(a, '') === asLogHolds(b, '');
 /** a log's question number as it is written ("Q4", "4.", "#004", "A-4"): what comes before the number, the number, and what after */
 const numberParts = (v: string) => { const m = /^\s*(\D*?)0*(\d+)\s*([.)]?)\s*$/.exec(v); return m ? { pre: m[1], n: +m[2], post: m[3] } : null; };
 /**
- * Which row of the log stands for each question: the row with the same sender and exact text, the one with the
- * question's own number first; each row stands for one question. By question id, the row's index in `table.rows`.
- * A row or question naming no sender does not conflict with one that does, but the same sender is always tried
- * first. The sender the app last wrote for a question (`sent`) still counts after a person corrects it in the app,
- * after its own.
+ * Which row of the log stands for each question, by question id: the row's index in `table.rows`. The import's own
+ * lookup (`matchQuestions`, #1080), with each row's number as the log writes it ("Q4", "4.", "#004"). After a
+ * question's own sender, the sender the app last wrote for it (`sent`) still counts, so a party a person corrects in
+ * the app keeps its row.
  */
 export function matchRows(table: Pick<ReadTable, 'rows'>, mapping: Mapping, questions: Question[], sent: ReadonlyMap<string, Readonly<Record<string, string>>> = new Map()): Map<string, number> {
   const cell = (r: string[], k: ImportField) => (mapping[k] == null ? '' : String(r[mapping[k]!] ?? ''));
-  const taken = new Set<number>(); const rowOf = new Map<string, number>();
-  // a name is as written, spaces around it aside; each row's and question's is worked out once
-  const rowSender = table.rows.map((r) => cell(r, 'askedBy').trim());
-  const rowNumber = table.rows.map((r) => numberParts(cell(r, 'n'))?.n);
-  const senderOf = new Map(questions.map((q) => [q.id, q.askedBy.trim()]));
-  const lastSent = new Map(questions.map((q) => [q.id, (sent.get(q.id)?.askedBy ?? '').trim()]));
-  // rows by exact text, then by sender, in the log's order, so a log of thousands of rows is matched in a moment
-  // a text as the log file holds it (a line break as "\n", control characters as a space or gone) is the text it
-  // was written as
-  const byText = new Map<string, number[]>();
-  const byTextAndSender = new Map<string, Map<string, number[]>>();
-  const push = <K>(map: Map<K, number[]>, key: K, i: number) => {
-    const list = map.get(key);
-    if (list) list.push(i);
-    else map.set(key, [i]);
-  };
-  const formsOf = (text: string) => [...new Set([text, asLogHolds(text, ' '), asLogHolds(text, '')])];
-  table.rows.forEach((r, i) => {
-    const text = cell(r, 'text'); if (!text.trim()) return;
-    for (const form of formsOf(text)) {
-      push(byText, form, i);
-      if (!byTextAndSender.has(form)) byTextAndSender.set(form, new Map());
-      push(byTextAndSender.get(form)!, rowSender[i], i);
-    }
+  // a row with no question in it (a heading's spacer, a blank line) stands for none; `at` keeps each row's place
+  const at = table.rows.flatMap((r, i) => (cell(r, 'text').trim() ? [i] : []));
+  const rows = at.map((i) => {
+    const r = table.rows[i];
+    return { n: numberParts(cell(r, 'n'))?.n ?? null, text: cell(r, 'text'), askedBy: cell(r, 'askedBy') };
   });
-  /** the rows holding the question's text in any form, under that sender (any sender when null), in the log's order */
-  const rowsOf = (q: Question, sender: string | null) => {
-    const forms = formsOf(q.text);
-    const listOf = (form: string) => (sender === null ? byText.get(form) : byTextAndSender.get(form)?.get(sender));
-    const lists = forms.map((form) => listOf(form) ?? []);
-    return forms.length === 1 ? lists[0] : lists.flat().sort((a, b) => a - b);
-  };
-  // a question's own sender first, then the sender it was last written with, then rows (or a question) naming no one
-  const tiers: ((q: Question) => number[])[] = [
-    (q) => rowsOf(q, senderOf.get(q.id)!),
-    (q) => (lastSent.get(q.id) ? rowsOf(q, lastSent.get(q.id)!) : []),
-    (q) => rowsOf(q, senderOf.get(q.id) ? '' : null),
-  ];
-  for (const candidates of tiers) for (const withNumber of [true, false]) for (const q of questions) {
-    if (rowOf.has(q.id)) continue;
-    const i = candidates(q).find((row) => !taken.has(row) && (!withNumber || rowNumber[row] === q.n));
-    if (i !== undefined) { taken.add(i); rowOf.set(q.id, i); }
-  }
-  return rowOf;
+  const lastSent = (q: Question) => sent.get(q.id)?.askedBy ?? '';
+  const matched = matchQuestions(rows, [questions], [(q) => q.askedBy, lastSent]);
+  return new Map([...matched].map(([idx, id]) => [id, at[idx]]));
 }
 
 /**
@@ -141,10 +100,12 @@ export function logWrite(table: Pick<ReadTable, 'rows' | 'lines' | 'cols' | 'las
   // ("11/12/2026", "Outstanding", "H") that says what the app holds is not taken for a change
   const read = new Map(prepareImport(table.rows, mapping, table.rows.map((_, i) => i)).rows.map((r) => [r.line!, r] as const));
   // a value as the import reads it against the app's: a status or priority in the app's terms, whatever case it is written in
-  const same = (k: ImportField, a: string, b: string) => (k === 'status' || k === 'priority' ? a.toLowerCase() === b.toLowerCase() : sameInLog(a, b));
+  const same = (k: ImportField, a: string, b: string) => (k === 'status' || k === 'priority'
+    ? a.toLowerCase() === b.toLowerCase()
+    : sameText(a, b));
   const sameAs = (k: ImportField, i: number, v: string) => { const r = read.get(i) as ImportRow | undefined; const was = r ? String((r as unknown as Record<string, unknown>)[k] ?? '') : cell(table.rows[i], k); if (k === 'n') return numberParts(cell(table.rows[i], 'n'))?.n === Number(v);
     if ((k === 'received' || k === 'responded') && !was && cell(table.rows[i], k).trim()) return true;   // a date the import could not settle (11/02 either way) is left as the log writes it
-    return same(k, was, v) || sameInLog(cell(table.rows[i], k), v); };
+    return same(k, was, v) || sameText(cell(table.rows[i], k), v); };
   // a log cell's value as the import reads it ("11/12/2026" as 2026-11-12, "Outstanding" as open), else as written
   const readAs = (k: ImportField, i: number) => { const r = read.get(i) as ImportRow | undefined; return r ? String((r as unknown as Record<string, unknown>)[k] ?? '') : ''; };
   for (const q of questions) {
@@ -157,9 +118,14 @@ export function logWrite(table: Pick<ReadTable, 'rows' | 'lines' | 'cols' | 'las
       if (!v.trim() && before[k] === undefined) continue;
       if (sameAs(k, i, v)) { now[k] = has; continue; }                                 // the log says it already, its own way: kept as the log writes it
       // the cell still holds what the app last put there, as written or as the import reads it
-      const ours = before[k] !== undefined && (sameInLog(has, before[k]) || (!!readAs(k, i) && same(k, readAs(k, i), before[k])));
+      const ours = before[k] !== undefined
+        && (sameText(has, before[k]) || (!!readAs(k, i) && same(k, readAs(k, i), before[k])));
       // someone changed it in the log; where the app still holds what it last sent, only the log changed: the app takes it
-      if (has.trim() && !ours && before[k] !== undefined && (sameInLog(v, before[k]) || same(k, v, before[k]))) { (out.taken[q.id] ??= {})[k] = has; now[k] = has; continue; }
+      if (has.trim() && !ours && before[k] !== undefined && (sameText(v, before[k]) || same(k, v, before[k]))) {
+        (out.taken[q.id] ??= {})[k] = has;
+        now[k] = has;
+        continue;
+      }
       if (has.trim() && !ours) { theirs = true; (out.keptFields[q.id] ??= []).push(k); (out.keptText[q.id] ??= {})[k] = has; if (before[k] !== undefined) now[k] = before[k]; continue; }   // someone else's: never overwritten
       // a blank Priority stays blank: the app's High on a question that came in with none is its default, not a value anyone gave
       if (k === 'priority' && !has.trim() && v === 'High' && before[k] === undefined) continue;
@@ -198,5 +164,7 @@ export function readLogCells(q: Question, cells: Record<string, string>, today?:
 /** whether a question's field already says `value` (in the app's terms, as readLogCells gives it); the words exactly as written */
 export function holds(q: Question, k: string, value: string): boolean {
   const app = String((q as unknown as Record<string, unknown>)[k] ?? '');
-  return k === 'status' || k === 'priority' || k === 'received' || k === 'responded' ? app.toLowerCase() === value.trim().toLowerCase() : sameInLog(app, value);
+  return k === 'status' || k === 'priority' || k === 'received' || k === 'responded'
+    ? app.toLowerCase() === value.trim().toLowerCase()
+    : sameText(app, value);
 }

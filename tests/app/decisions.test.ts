@@ -3,7 +3,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { Store } from '../../src/app/store';
 import { memRepo } from '../adapters/memRepo';
 import { MemoryLocal } from '../../src/adapters/local';
-import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
+import { csvCodec } from '../../src/adapters/spreadsheet';
+import { readCsv } from '../../src/domain/sheets';
 import { mockAi, mockDocuments, mockSession, mockFirstPass, type MockOptions } from '../../src/adapters/mocks';
 import { CreateDeal, EditDeal, DeleteDeal, withProject, dealNameRoom } from '../../src/app/commands/deals';
 import { navIntent } from '../../src/app/conversations';
@@ -119,6 +120,20 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
     }
     expect(navIntent(m.store, 'Open Unknown-Deal Q&A')).toBe(false);
     expect(navIntent(m.store, 'What is in Harbor-Refinance Q&A?')).toBe(false);
+  });
+
+  it('a typed deal name opens the deal of that exact name, in any case, with or without "Project"', async () => {
+    const m = make();
+    const fund = await deal(m, 'Fund IV');
+    const plus = await deal(m, 'C++');
+    await deal(m, '(Kestrel)');
+    for (const [name, id] of [['fund iv', fund], ['Project Fund IV', fund], ['C++', plus]]) {
+      expect(navIntent(m.store, `Open ${name} Q&A`)).toBe(true);
+      expect(location.hash).toBe(`#${pageHash('qa', id)}`);
+    }
+    // the name without its punctuation is not the name
+    expect(navIntent(m.store, 'Open Kestrel Q&A')).toBe(false);
+    expect(navIntent(m.store, 'Open C Q&A')).toBe(false);
   });
 
   it('Undo brings back a capitalized "Project"; an accent or hidden character is not the word', async () => {

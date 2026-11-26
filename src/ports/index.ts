@@ -252,7 +252,8 @@ export interface AiService {
 /**
  * One step the chat agent took: a search of the documents, findings or Q&A, or documents given to it whole. `text` says
  * what it did, in the past tense ("Searched documents for “lock-up”", "Read Credit agreement.pdf"); `result` says what
- * came of it in a few words ("214 listed · 5 opened · 3 passages", "p. 41"); `found` are the passages a search
+ * came of it in a few words ("214 listed · 5 opened · 3 passages": for documents, every one that answers to a word
+ * of the search; "p. 41"); `found` are the passages a search
  * returned, each with where it is. `done` is false only for the step being taken now.
  */
 /**
@@ -401,8 +402,8 @@ export interface DocumentService {
 export interface FolderPlace { dealId: string; folder: string; local: string }
 /** `tops` holds every folder to locate: those missing and those that read as empty (`empty`), which are there with nothing in them */
 export interface FolderSearch { placed: number; missing: number; tops: { top: string; folders: { dealId: string; folder: string }[] }[]; empty?: { dealId: string; folder: string }[] }
-/** Of the new folders' `files` (less those other deals also hold), `matched` by name and size to one of the deal's documents; of `printed` fingerprinted, `same` were identical. */
-export interface RoomMatch { dealId: string; files: number; matched: number; printed: number; same: number }
+/** a deal holding the same data room: `matched` of the new folders' `files` (precedents folders not counted) */
+export interface RoomMatch { dealId: string; files: number; matched: number }
 export interface DocumentRef { doc: string; docId: string }
 /** One point of an issues list, as `issuesList` reads it. `same`: the finding (`finding`, by id) or the earlier point (`point`, its place in the list) it repeats. */
 export interface IssuePoint { n: string; text: string; title: string; workstream: string; same?: { finding: string } | { point: number } }
