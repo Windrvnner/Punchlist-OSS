@@ -12,7 +12,8 @@ import { setup, type Call, val } from '../backend/reviewKit';
 import { ITEMS } from '../fixtures/pastedList';
 import { deal, make } from './importKit';
 
-const tags = /^([bcdfghjkmnpqrstvwxz]{3}): \[(?:gap|finding)\] (.+)$/gm;
+/** each point of a phrase call, by its record id (#1162), and its words */
+const tags = /^((?:i|f)_[0-9A-Za-z]+): \[(?:gap|finding)\] (.+)$/gm;
 const questionFor = (what: string) => `Please provide the evidence for this checklist point: ${what}`;
 const reply = (call: Call) => [...call.prompt.matchAll(tags)].map(([, id, what]) => ({ id, text: questionFor(what) }));
 
