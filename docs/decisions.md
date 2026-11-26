@@ -278,7 +278,9 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Retryable model failures and empty replies are retried quietly, up to twice by default after 2 and 4 seconds.
   An unreachable service follows its own recovery path. Keep everything the person typed.
 - Every AI feature adapts to a reply that is cut off or a request that is too long, at limits the control file sets (#451 and #452 are still to do).
-- A model reply may hold up to 32,000 tokens (`limits.outputTokens`): a temporary hold until real reply sizes are measured (#1079).
+- A model reply may hold up to 32,000 tokens (`limits.outputTokens`): a temporary hold until real reply sizes are
+  measured (#1079). Each call asks for no more than its model allows: North and Claude take it from their model lists,
+  and an OpenAI-compatible model that refuses with what it allows is asked again at that and kept at it (#1079).
 - For deal document analysis, send PDFs whole so the model can read the pages directly. Use extracted
   word counts to rank and select documents. Checklist import currently reads the PDF's text. Sending the original
   PDF for checklist import is planned (#118). If a service refuses a PDF as too large, the planned fallback is
