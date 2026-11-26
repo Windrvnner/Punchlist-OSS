@@ -266,10 +266,11 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Attachments are kept in the shared folder under their document's id. A file attached on Home is kept with the person's conversations.
 - A deal's recovered copy keeps the deal's attached files, and files attached and not yet sent follow their conversation to the copy (#117).
 - A message goes with all of its attached files or not at all: a file this PC can no longer send is named, its chip is marked, and nothing is sent (#671).
-- A place or an id a shared record gives a document is used only if the file it makes stays inside the folder it
-  belongs to (the attachments folder, a deal's folder on this PC, a folder being compared, or the work folder). One
-  that leads out of it is a file that is not there: it is not read, opened, written, deleted or counted as a match
-  (#1156).
+- A place, a folder name inside a folder, or an id that a shared record gives a document is used only if the file it
+  makes stays inside its folder: the attachments folder, the deal folder as this PC has it (the deal's folder, or
+  where it was located here, which is the root and is not checked further), a folder being compared, or the work
+  folder. One that leads out of it is a file that is not there: it is not read, opened, listed, written, deleted or
+  counted as a match (#1156).
 
 ## AI and models
 

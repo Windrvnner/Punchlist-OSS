@@ -305,7 +305,12 @@ export function nodeDocuments(o: DocumentsOptions) {
    */
   const openedHere = (dealId: string, folder: string, top: string, mine: string[]) => {
     const others = new Set([...(both(dealId).shuts.get(folder) ?? new Map()).entries()].filter(([pc]) => pc !== o.installId).flatMap(([, x]) => x.shut));
-    return [...others].filter((r) => !within(mine, r) && isDir(path.join(top, ...r.split('/')))).sort();
+    // a folder named by another PC that leads out of the deal folder is not looked at (#1156)
+    const here = (r: string) => {
+      const at = insideRoot(top, r);
+      return at !== null && isDir(at);
+    };
+    return [...others].filter((r) => !within(mine, r) && here(r)).sort();
   };
   const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
   const placeKey = (folder: string, rel: string) => `${folder}\u0000${rel}`;

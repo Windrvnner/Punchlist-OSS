@@ -1638,6 +1638,25 @@ describe('a place named by a record stays inside the folder it is in (#1156)', (
     const x = pc(root, 'office', undefined, { folders: [old] });
     expect(val(await x.docs.findFolders(['d1']))).toMatchObject({ placed: 0 });
   });
+  const logOf = (root: string, name: string) => (
+    fs.readFileSync(path.join(root, 'shared', `docs-${name}-d1.jsonl`), 'utf8')
+  );
+  it('says no document left a place that leads out of its folder, though this PC saw it there', async () => {
+    const root = tmp(); const vdr = path.join(root, 'vdr'); const bytes = pdf('outside');
+    put(vdr, 'a.pdf', pdf('inside')); put(root, 'outside.pdf', bytes);
+    keepLines(root, [olderLine(vdr, bytes, '../outside.pdf', ['outside'], 1)]);   // this PC's own line: it saw it there
+    expect(await opens(pc(root, 'office').docs, bytes)).toBe(false);
+    expect(logOf(root, 'office')).not.toContain('"left"');
+  });
+  it('does not look in a shut folder another PC names that is outside the deal folder', async () => {
+    const root = tmp(); const vdr = path.join(root, 'vdr'); put(vdr, 'a.pdf', pdf('inside'));
+    fs.mkdirSync(path.join(root, 'sibling'));
+    const shut = { v: 1, pc: 'home', at: '2026-11-01T00:00:00.000Z', docId: '', read: vdr, shut: ['../sibling'] };
+    fs.mkdirSync(path.join(root, 'shared'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'shared', 'docs-home-d1.jsonl'), `${JSON.stringify(shut)}\n`);
+    await indexAll(pc(root, 'office'), vdr);
+    expect(logOf(root, 'office')).not.toContain('"opened"');
+  });
   it('opens a copy kept inside its folder, and never one placed outside it', async () => {
     const root = tmp(); const bytes = pdf('outside'); put(root, 'shared/outside.pdf', bytes);
     const lines = (rel: string) => [
