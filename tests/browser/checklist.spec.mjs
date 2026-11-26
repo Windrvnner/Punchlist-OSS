@@ -393,7 +393,7 @@ for (const [index, size] of SIZES.entries()) {
   const seen = await foot();
   say('a failed link check keeps the count and both Retry lines in the footer',
     seen.rows > 0 && /^\d+ questions?$/.test(seen.count) && /could not be drafted/.test(seen.out ?? '')
-      && /^· \d+ unchecked\. Retry$/.test(seen.unchecked ?? '')
+      && /^· \d+ not checked\. Retry$/.test(seen.unchecked ?? '')
       && seen.retries === 2 && seen.go && seen.countLines === 1 && seen.fits && seen.linkRetry === 'none',
     JSON.stringify(seen));
   await page.evaluate(() => { window.__fail = {}; });
@@ -403,6 +403,73 @@ for (const [index, size] of SIZES.entries()) {
   say('Retry checks the open questions and takes its line away, leaving the other',
     after.unchecked === null && /could not be drafted/.test(after.out ?? '') && after.footHeight === seen.footHeight,
     JSON.stringify(after));
+  await ctx.close();
+}
+
+{ // at deal scale the footer's lines wrap onto a second line as a whole: no text and no Retry is cut, and Add stays
+  // in place; a long failure wraps too (#1120)
+  const { ctx, page, id } = await checklist('light', SIZES[1]);
+  await page.evaluate(async (d) => {
+    for (let k = 0; k < 10; k++) {
+      const text = `Please provide the executed agreement number ${k + 1}.`;
+      await store.dispatch(store.commandNamed('CreateQuestion'), { dealId: d, text }, { quiet: true });
+    }
+    const ai = store.services.ai;
+    const read = ai.checklist.bind(ai);
+    const phrase = ai.phrase.bind(ai);
+    ai.checklist = async (deal) => {
+      const r = await read(deal);
+      if (!r.ok) return r;
+      const gap = r.value.find((row) => row.result === 'gap');
+      const copy = (k) => ({ ...gap, id: `${gap.id}x${k}`, text: `${gap.text} ${k + 1}` });
+      const more = Array.from({ length: 160 }, (_, k) => copy(k));
+      return { ok: true, value: [...r.value, ...more] };
+    };
+    ai.phrase = async (i) => {
+      const r = await phrase(i);
+      return r.ok ? { ok: true, value: r.value.map((text, k) => (k < 12 ? null : text)) } : r;
+    };
+    const pairs = Array.from({ length: 10 }, (_, k) => ({ a: 20 + k, b: k, inAgainst: true, why: 'same' }));
+    const at = Array.from({ length: 150 }, (_, k) => k + 10);
+    ai.sameMeaning = async () => ({ ok: true, value: { pairs, missed: { kind: 'failed', at } } });
+  }, id);
+  await page.click('#ck-pmore'); await page.click('#ck-add-unresolved');
+  await page.waitForSelector('#au-list .lrow', { timeout: 15000 });
+  const linkBoxes = page.locator('#au-list .lrow:has-text("Link to") input');
+  for (let k = 0; k < await linkBoxes.count(); k++) await linkBoxes.nth(k).click();
+  const footer = () => page.evaluate(() => {
+    const box = (e) => e.getBoundingClientRect();
+    const foot = document.querySelector('.lnkdlg .xfoot');
+    const inside = (e) => !!e && box(e).width > 0 && box(e).left >= box(foot).left - 0.5
+      && box(e).right <= box(foot).right + 0.5 && box(e).bottom <= box(foot).bottom + 0.5;
+    const reachable = (e) => inside(e)
+      && document.elementFromPoint(box(e).left + box(e).width / 2, box(e).top + box(e).height / 2) === e;
+    const count = document.getElementById('au-count');
+    return {
+      count: count.textContent, unchecked: document.getElementById('au-unchecked')?.textContent,
+      out: document.getElementById('au-out')?.textContent,
+      retries: ['au-retry-links', 'au-retry-out'].map((b) => reachable(document.getElementById(b))),
+      go: inside(document.querySelector('#au-go, #au-retry')),
+      fits: foot.scrollWidth <= foot.clientWidth,
+      countLines: Math.round(box(count).height / parseFloat(getComputedStyle(count).lineHeight)),
+    };
+  });
+  const big = await footer();
+  say('at deal scale both Retry links stay whole and reachable, nothing overflows, and Add stays in the footer',
+    /^\d{3} questions · 10 linked$/.test(big.count) && big.unchecked === '· 150 not checked. Retry'
+      && big.out === '· 12 points could not be drafted. Retry' && big.retries.every(Boolean) && big.go && big.fits,
+    JSON.stringify(big));
+  await page.keyboard.press('Escape'); await page.waitForSelector('.lnkdlg', { state: 'detached' });
+  const long = 'The AI could not phrase these points because the service kept refusing the request as too long,'
+    + ' so nothing was added; try again once the service is back';
+  await page.evaluate((message) => {
+    store.services.ai.phrase = async () => ({ ok: false, error: { kind: 'failed', message } });
+  }, long);
+  await page.click('#ck-pmore'); await page.click('#ck-add-unresolved');
+  await page.waitForSelector('#au-count.err', { timeout: 10000 });
+  const failed = await footer();
+  say('a long failure in the footer wraps inside it beside its Retry',
+    failed.count === long && failed.countLines > 1 && failed.fits && failed.go, JSON.stringify(failed));
   await ctx.close();
 }
 
