@@ -70,7 +70,7 @@ import { catchUp, pageNumber, search, type What } from './agentSearch';
 import { FolderMemory, FolderReader } from './agentFolder';
 import { KeptConversation, type Turn } from './agentTalk';
 import { inlineTools } from './agentPrompts';
-import { questionsForHandles } from './qaRow';
+import { questionsForIds } from './qaRow';
 
 export type { AgentKit, AgentOptions, AgentQuestion, Cited, Sent, ToolMode } from './agentKit';
 
@@ -297,9 +297,10 @@ class Answering {
   /** the main session's answer, with the citations that can be stood behind; on the last turn, its notes if no text */
   private async answered(reply: Record<string, unknown>, last: boolean): Promise<Result<Answered>> {
     const { kit, question, run } = this;
-    // the questions it was shown by handle are named by their numbers now before the answer is shown or kept (#1105)
-    const numbers = await run.questionNumbers();
-    const text = questionsForHandles(strings(reply.text).join('\n\n') || (last ? run.notes : ''), numbers);
+    // the questions it names by id are named by their numbers now before the answer is shown or kept (#1105)
+    const said = strings(reply.text).join('\n\n') || (last ? run.notes : '');
+    const numbers = await run.questionNumbers([said, draftedQuestion(reply.offer) ?? '']);
+    const text = questionsForIds(said, numbers);
     if (!text) return fail({ kind: 'failed', message: UNREAD_REPLY });
     const fitted = kit.fit(text, reply.sources as Cited[], run.opened, question.withDeal);
     this.showCitedPlaces(fitted.sources);
@@ -320,11 +321,17 @@ class Answering {
   }
 }
 
-/** the offer as the model gave it, with a drafted question's handles put back as `numbers` (#1105) */
-function offerOf(offer: unknown, numbers: readonly (number | undefined)[]): unknown {
-  const drafted = (offer as { question?: unknown } | null)?.question;
-  if (typeof drafted !== 'string') return offer;
-  return { ...(offer as object), question: questionsForHandles(drafted, numbers) };
+/** the question an offer drafts for the log, if it drafts one */
+function draftedQuestion(offer: unknown): string | undefined {
+  const drafted = (offer as { question?: unknown } | null | undefined)?.question;
+  return typeof drafted === 'string' ? drafted : undefined;
+}
+
+/** the offer as the model gave it, with the questions a drafted question names by id put back as `numbers` (#1105) */
+function offerOf(offer: unknown, numbers: ReadonlyMap<string, number>): unknown {
+  const drafted = draftedQuestion(offer);
+  if (drafted === undefined) return offer;
+  return { ...(offer as object), question: questionsForIds(drafted, numbers) };
 }
 
 /** what the person is told when an answer failed */

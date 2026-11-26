@@ -6,7 +6,7 @@
 import { int, strings } from './lenient';
 import { pageOf, rankRecords, type Page } from './recordSearch';
 import { batchesOf } from './agentFolder';
-import { handleOf, qaRow, qaText } from './qaRow';
+import { qaRow, qaText } from './qaRow';
 import type { AgentRun } from './agentRun';
 import { foundAt, withPlaces } from './agentRun';
 import type { Cited, DealDoc } from './agentKit';
@@ -144,11 +144,8 @@ async function searchQuestions(run: AgentRun, asked: Asked, report: Report): Pro
   const deals = run.question.deals;
   const { all, missed } = await gather(run, async (dealId) => byNumber(await run.kit.questions(dealId)));
   const ranked = rankRecords(all, asked.words, qaText);
-  // pages are cut with a handle as long as any a row can have, so that only the rows shown are given one (#1105)
-  const widest = handleOf(all.length);
-  const measured = (x: (typeof all)[number]) => qaRow(x, widest, x.deal);
-  const row = (x: (typeof all)[number]) => qaRow(x, run.handleOf(x), x.deal);
-  const shown = pageOf(ranked, asked.page, run.pages.searchPage, run.pages.chars, measured);
+  const row = (x: (typeof all)[number]) => qaRow(x, x.deal);
+  const shown = pageOf(ranked, asked.page, run.pages.searchPage, run.pages.chars, row);
   const listing = ranked.length
     ? listed('Q&A', 'qa', asked, shown, row)
     : noneFound('Q&A', 'no question answers to these words', missed.length, deals.length);
