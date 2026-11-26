@@ -280,7 +280,7 @@ The reference titles below are from Cohere's North documentation.
 - **Limits:** North accepts an optional `max_tokens`. The **Chat** reference gives no default or maximum.
   The app sends `limits.outputTokens` or the model's own `max_tokens` from `/v2/models` when that is smaller.
   A reply ending with `finish_reason: MAX_TOKENS` is treated as cut off. When North is busy (429 or 503), the app
-  waits as North asks, for up to four tries. North's My files has a 100 MB total limit. See **Supported files**.
+  waits as North asks, for up to three tries. North's My files has a 100 MB total limit. See **Supported files**.
   The app's separate `limits.storedFiles` limit counts files, so large files may reach North's limit first.
 - **Control file:** Set the following values.
 
