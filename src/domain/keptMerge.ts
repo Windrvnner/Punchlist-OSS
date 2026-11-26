@@ -11,11 +11,15 @@
  * - A row they added that the log lacks goes at the end of the log, as an update adds questions.
  * - Nothing is ever taken out of the log: a row they removed stays, as does a row only the log has.
  *
- * Rows are lined up by their question's words and, among rows that read alike, by their other cells; a row whose words
- * they changed by where it is among the rows lined up around it and its other cells (lineUp). Columns are lined up by their headings; one added since the version they edited counts as empty there. Pure: the tables are as the
+ * Rows are lined up by the one Q&A row lookup (lineUp, docs/decisions.md): the same number, text as the file holds it
+ * and sender, else the same text and sender. Where the lookup can't tell rows apart, the person places their edit
+ * (KeptAsk); a row it places nowhere is never written into. Columns are lined up by their headings; one added since the
+ * version they edited counts as empty there. Pure: the tables are as the
  * import reads them (tableFrom), and steps count rows and columns from 0 on the log's sheet.
  */
 import type { SheetEdit } from './sheets';
+import { formKeys, matchQuestions, type MatchRow } from './qaMatch';
+import { numberParts } from './logWrite';
 
 export type KeptTable = { columns: string[]; cols: number[]; rows: string[][]; lines: number[]; lastRow: number };
 export interface KeptMerge {
@@ -61,63 +65,59 @@ type Pairs = { a: number; b: number }[];
  */
 const agree = (x: string[], y: string[], pairs: Pairs, worked: (col: number) => boolean = () => false) => { let same = 0, differ = 0; for (const p of pairs) { const u = (x[p.a] ?? '').trim(), v = (y[p.b] ?? '').trim(); if (u && v && !worked(p.b)) { if (u === v) same++; else differ++; } } return { same, differ }; };
 
+
+/** a row that asks a question: a heading or a blank line stands for none, as the log update reads it (logWrite.ts) */
+const hasQuestion = (r: string[], text: number) => (r[text] ?? '').trim() !== '';
+
+/** the columns of a table the lookup reads: the question's, and the number's and Submitted by's where it has them */
+type LookupCols = { text: number; n?: number; by?: number };
+/** a row as the lookup reads it: its number as the log update reads it ("Q4", "4."), its question and its sender */
+const lookupRow = (r: string[], c: LookupCols): MatchRow => ({
+  n: c.n === undefined ? null : numberParts(r[c.n] ?? '')?.n ?? null,
+  text: r[c.text] ?? '',
+  askedBy: c.by === undefined ? '' : r[c.by] ?? '',
+});
 /**
- * Which row of `x` stands for each row of `base` (-1: none). A row with the same words: the only one, when only one row of
- * each reads so; otherwise (a question asked by several parties, say) the one that agrees with it in the most other cells
- * (number, Submitted by) more than it differs, never one under another number, and none when two agree as well. Then, for a row whose words were changed, the row at its place
- * between the rows lined up above and below it, when as many rows lie between those on both sides and both carry the same
- * question number (none without a number column), as long as that row's words are new (not another row's of `base`), it is not
- * taken, and it agrees with it in another cell (its number, say) more than it differs. In doubt, none: a row not lined up
- * is never written into.
+ * The columns of two tables the lookup reads: a number or Submitted by column only where both have it (`-1`: one
+ * lacks it), so a row is never told from another by a column one side doesn't have.
  */
-function lineUp(base: string[][], bt: number, x: string[][], xt: number, pairs: Pairs, worked: (row: number, col: number) => boolean, num?: { a: number; b: number }, who?: { a: number; b: number }, byPlace = true): number[] {
-  /**
-   * another party's row, whatever the cells all parties share say: Submitted by not the same, a blank one against a filled one
-   * included (a row given a submitter since may be another party's; their edits to it are then counted, not written)
-   */
-  const by = (r: string[], c: number) => (r[c] ?? '').trim();
-  const other = (r: string[], y: string[]) => !!who && by(r, who.a) !== by(y, who.b);
-  /** a cell that tells the row apart, filled in both and the same: its number, or who submitted it */
-  const known = (r: string[], y: string[]) => (!!num && !!by(r, num.a) && by(r, num.a) === by(y, num.b)) || (!!who && !!by(r, who.a) && by(r, who.a) === by(y, who.b));
-  const at = new Map<string, number[]>(); x.forEach((r, i) => { const w = words(r[xt]); if (w) { const l = at.get(w); if (l) l.push(i); else at.set(w, [i]); } });
-  const many = new Map<string, number>(); for (const r of base) { const w = words(r[bt]); if (w) many.set(w, (many.get(w) ?? 0) + 1); }
-  const taken = new Uint8Array(x.length); const out = new Array<number>(base.length).fill(-1);
-  base.forEach((r, i) => {
-    const w = words(r[bt]); const l = at.get(w)?.filter((j) => !taken[j] && !other(r, x[j])); if (!l?.length) return;
-    let pick = -1; const no = num ? (r[num.a] ?? '').trim() : '';
-    // never one under another question number, nor one that differs from it more than it agrees: the row it stands for may
-    // have been taken out, and the one left another party's (a duplicate asked since, say)
-    if (l.length === 1 && many.get(w) === 1 && (at.get(w)?.length ?? 0) === 1) {   // (another party's row never gets this far)
-      const xn = num ? (x[l[0]][num.b] ?? '').trim() : ''; const g = agree(r, x[l[0]], pairs, (c) => worked(l[0], c));
-      if (no && xn ? no === xn : g.differ === 0 || g.same > g.differ) pick = l[0];   // the same number settles it
-    } else {
-      // never one under another number; and in the log (not their version, made from this one), among rows that read alike,
-      // only one that a number or Submitted by shows is the same row, where it has either: the other cells all parties share
-      // (Workstream, Status) can't tell another party's from it
-      // In the log, a row whose number is another's (filled on one side only, too) or that differs in any cell is not taken
-      // either: which of the rows that read alike it is goes to the person (KeptAsk)
-      const xno = (j: number) => (num ? (x[j][num.b] ?? '').trim() : '');
-      const scored = l.filter((j) => (byPlace ? !no || !xno(j) || xno(j) === no : xno(j) === no) && (byPlace || !(num || who) || known(r, x[j])))
-        .map((j) => { const g = agree(r, x[j], pairs, (c) => worked(j, c)); return { j, s: g.same, d: g.differ }; }).filter((p) => p.s > p.d && (byPlace || p.d === 0)).sort((p, q) => q.s - p.s);
-      if (scored.length && (scored.length === 1 || scored[1].s < scored[0].s)) pick = scored[0].j;
-    }
-    if (pick >= 0) { taken[pick] = 1; out[i] = pick; }
-  });
-  // By place: only between two rows lined up by their words with as many rows between them on both sides, so a row put in
-  // or taken out near it never shifts one onto another (a new row put in just above a reworded one)
-  const fixedAt = out.map((j, i) => (j >= 0 ? i : -1)).filter((i) => i >= 0); let k = 0;
-  base.forEach((r, i) => {
-    if (out[i] >= 0) return;
-    while (k < fixedAt.length && fixedAt[k] < i) k++;
-    const p = k > 0 ? fixedAt[k - 1] : -1, n = k < fixedAt.length ? fixedAt[k] : base.length;
-    const xp = p >= 0 ? out[p] : -1, xn = n < base.length ? out[n] : x.length;
-    if (xn - xp !== n - p) return;
-    const j = xp + (i - p); if (!byPlace || !num || j < 0 || j >= x.length || taken[j] || many.has(words(x[j][xt]))) return;
-    // and only when both carry the same question number: other cells alike (Submitted by, Status) can't tell a new row from it
-    const no = (r[num.a] ?? '').trim(); if (!no || no !== (x[j][num.b] ?? '').trim() || other(r, x[j])) return;
-    const g = agree(r, x[j], pairs, (c) => worked(j, c)); if (g.same === 0 || g.same <= g.differ) return;
-    taken[j] = 1; out[i] = j;
-  });
+function lookupCols(text: [number, number], n: [number, number], by: [number, number]): [LookupCols, LookupCols] {
+  const both = (c: [number, number], side: 0 | 1) => (c[0] >= 0 && c[1] >= 0 ? c[side] : undefined);
+  const side = (s: 0 | 1) => ({ text: text[s], n: both(n, s), by: both(by, s) });
+  return [side(0), side(1)];
+}
+/**
+ * Rows another row of the list has the same number, text (as the file holds it) and sender as: the lookup can't tell
+ * them apart.
+ */
+function lookalikes(rows: MatchRow[]): boolean[] {
+  const keysOf = (row: MatchRow) => formKeys(row.text)
+    .map((form) => `${form}\u0000${row.askedBy.trim()}\u0000${row.n ?? ''}`);
+  const count = new Map<string, number>();
+  for (const row of rows) for (const key of keysOf(row)) count.set(key, (count.get(key) ?? 0) + 1);
+  return rows.map((row) => keysOf(row).some((key) => (count.get(key) ?? 0) > 1));
+}
+
+/**
+ * Which row of `x` stands for each row of `base` (-1: none), by the one Q&A row lookup (`matchQuestions`,
+ * docs/decisions.md): the same number, text and sender, else the same text and sender; a row naming no sender matches
+ * any, the same sender first. `onlyBase` and `onlyX` narrow the rows looked at. A row the lookup can't tell from
+ * another of its table (the same number, text and sender) is lined up with none: where its row is unclear, the person
+ * places it (KeptAsk, #1111). A row not lined up is never written into.
+ */
+function lineUp(base: string[][], bc: LookupCols, x: string[][], xc: LookupCols,
+  onlyBase: (i: number) => boolean = () => true, onlyX: (j: number) => boolean = () => true): number[] {
+  const at = base.flatMap((r, i) => (hasQuestion(r, bc.text) && onlyBase(i) ? [i] : []));
+  const xAt = x.flatMap((r, j) => (hasQuestion(r, xc.text) && onlyX(j) ? [j] : []));
+  const rows = at.map((i) => lookupRow(base[i], bc));
+  const xRows = xAt.map((j) => lookupRow(x[j], xc));
+  const alike = lookalikes(rows);
+  const xAlike = lookalikes(xRows);
+  const out = new Array<number>(base.length).fill(-1);
+  for (const [k, id] of matchQuestions(xRows, [rows.map((row, b) => ({ ...row, id: String(b) }))])) {
+    const b = Number(id);
+    if (!alike[b] && !xAlike[k]) out[at[b]] = xAt[k];
+  }
   return out;
 }
 
@@ -144,7 +144,6 @@ export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text
   const head = (k: string) => k.slice(0, k.lastIndexOf('#')); const many = (ks: string[], h: string) => ks.filter((k) => head(k) === h).length;
   const sure = (k: string) => { const h = head(k), n = many(kk, h); return n === many(kl, h) && (n === many(kb, h) || (n === 1 && !many(kb, h))); };
   const both = kk.map((k, c) => ({ k: c, b: kb.indexOf(k), l: kl.indexOf(k) })).filter((c) => c.l >= 0 && (c.k === kt || sure(kk[c.k])));
-  const others = both.filter((c) => c.b >= 0 && c.k !== kt);                          // what rows are lined up by: the version they edited has them
   const goes = new Set(both.map((c) => c.k));
   const keptWorked = (j: number, c: number) => !!formula(kept.lines[j] - 1, kept.cols[c]), logWorked = (j: number, c: number) => fixed(log.lines[j] - 1, log.cols[c]);
   /**
@@ -164,9 +163,10 @@ export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text
   });
   const nkey = number ? kl[log.columns.indexOf(number)] : undefined; const nb = nkey ? kb.indexOf(nkey) : -1, nkk = nkey ? kk.indexOf(nkey) : -1, nll = nkey ? kl.indexOf(nkey) : -1;
   const bkey = by ? kl[log.columns.indexOf(by)] : undefined; const bb = bkey ? kb.indexOf(bkey) : -1, bkk = bkey ? kk.indexOf(bkey) : -1, bll = bkey ? kl.indexOf(bkey) : -1;
-  const ks = lineUp(base.rows, bt, kept.rows, kt, others.map((c) => ({ a: c.b, b: c.k })), keptWorked, nb >= 0 && nkk >= 0 ? { a: nb, b: nkk } : undefined, bb >= 0 && bkk >= 0 ? { a: bb, b: bkk } : undefined);
-  // by place only on their side: a row they reworded is theirs to change; one the log changed in its place may be another question
-  const ls = lineUp(base.rows, bt, log.rows, lt, others.map((c) => ({ a: c.b, b: c.l })), logWorked, nb >= 0 && nll >= 0 ? { a: nb, b: nll } : undefined, bb >= 0 && bll >= 0 ? { a: bb, b: bll } : undefined, false);
+  const [baseForKept, keptCols] = lookupCols([bt, kt], [nb, nkk], [bb, bkk]);
+  const ks = lineUp(base.rows, baseForKept, kept.rows, keptCols);
+  const [baseForLog, logCols] = lookupCols([bt, lt], [nb, nll], [bb, bll]);
+  const ls = lineUp(base.rows, baseForLog, log.rows, logCols);
   const clash = new Set<number>(); const used = new Uint8Array(kept.rows.length); const written = new Map<string, string>();   // the cells written, by "row,col"
   // Rows of the version they edited that read alike (a question asked twice): where nothing tells which is which, the
   // person says where their edit goes (`asks`, made into KeptAsk below)
