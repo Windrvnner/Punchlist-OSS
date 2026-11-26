@@ -55,3 +55,10 @@ export function decodeText(bytes: Uint8Array): string {
   const markLength = !encoding.endsWith('-bom') ? 0 : encoding.startsWith('utf-16') ? 2 : 3;
   return new TextDecoder(encoding.replace('-bom', '')).decode(bytes.subarray(markLength));
 }
+
+/** a text file's bytes as UTF-8: unchanged when they are UTF-8 already, otherwise decoded as decodeText reads them */
+export function utf8Bytes(bytes: Uint8Array): Uint8Array {
+  const encoding = encodingOf(bytes);
+  if (encoding === 'utf-8' || encoding === 'utf-8-bom') return bytes;
+  return new TextEncoder().encode(decodeText(bytes));
+}

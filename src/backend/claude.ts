@@ -17,7 +17,7 @@ import type { ModelService } from './service';
 import type { SignInToken } from './signInToken';
 import type { Converter } from './convert';
 import { SERVICE, control } from '../control';
-import { decodeText, encodingOf, TEXT_FILE } from '../domain/textEncoding';
+import { encodingOf, TEXT_FILE, utf8Bytes } from '../domain/textEncoding';
 import { cutOff, limitsOf, saysTooLong, tooLong } from './limits';
 import { retryDroppedRequest } from './requestRetry';
 
@@ -138,9 +138,9 @@ async function sheetText(convert: Converter, file: { name: string; bytes: Uint8A
  * program reads it: UTF-16, with or without a mark, or Windows-1252
  */
 function plainTextBytes(file: { name: string; bytes: Uint8Array }): Uint8Array {
+  if (TEXT_FILE.test(file.name)) return utf8Bytes(file.bytes);
   const encoding = encodingOf(file.bytes);
   if (encoding === 'utf-8' || encoding === 'utf-8-bom') return file.bytes;
-  if (TEXT_FILE.test(file.name)) return new TextEncoder().encode(decodeText(file.bytes));
   throw new Error(`${SERVICE} cannot read ${file.name}: only PDFs, text and spreadsheets`);
 }
 
