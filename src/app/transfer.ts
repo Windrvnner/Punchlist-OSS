@@ -13,10 +13,8 @@ import {
 } from './state';
 import type { Question, Finding } from '../domain/model';
 import { questionsSheet, findingsSheet, safeFileName, fitCells, suggestMapping, sameWords, type Mapping, type ImportRow } from '../domain/importExport';
-import { ImportQuestions } from './commands/importQuestions';
-import {
-  matchExactly, suggestMatches, withAccepted, type AcceptedMatch, type Suggestion,
-} from './commands/importMatching';
+import { ImportQuestions, importMatches } from './commands/importQuestions';
+import { suggestMatches, type AcceptedMatch, type Suggestion } from '../domain/qaMatch';
 import { ok, fail, type Result } from '../domain/result';
 
 const MIME = { xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', csv: 'text/csv' } as const;
@@ -211,11 +209,12 @@ export function previewImport(
   return ok({ created, updated, restored, changes, suggestions });
 }
 
-/** Where each row that matched no question could slot in, leaving out what the person already accepted. */
+/**
+ * Where each row that matched no question could slot in, leaving out what the person already accepted. The rows are
+ * matched exactly as the import matches them, deleted questions included.
+ */
 function suggestionsFor(s: State, dealId: string, rows: ImportRow[], accepted: AcceptedMatch[]): Suggestion[] {
-  const live = dealQuestions(s, dealId);
-  const matched = withAccepted(matchExactly(rows, [live]), rows, accepted, new Set(live.map((q) => q.id)));
-  return suggestMatches(rows, live, matched);
+  return suggestMatches(rows, dealQuestions(s, dealId), importMatches(s, dealId, 'merge', rows, accepted));
 }
 
 /**

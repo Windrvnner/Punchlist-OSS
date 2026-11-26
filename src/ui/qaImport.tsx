@@ -8,7 +8,7 @@ import { Modal, DialogHead } from './dialogs';
 import { FileInput, PickFileRow } from './fileDrop';
 import { proposeLayout, previewImport, type ImportLocation, type ImportTable } from '../app/transfer';
 import type { ImportField } from '../domain/importExport';
-import type { AcceptedMatch } from '../app/commands/importMatching';
+import type { AcceptedMatch } from '../domain/qaMatch';
 import {
   clearQaImport, keepQaImport, keptQaImport, loadQaImport, prepareQaImport, qaImportPartyCount,
   replaceQaImport, submitQaImport, summarizeQaImport, type ImportMode, type QaChoices,

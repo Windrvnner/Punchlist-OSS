@@ -15,7 +15,7 @@ import type { ImportMode, QaPreviewRow } from '../app/qaImport';
 import { logChoice } from '../app/qaLog';
 import { SERVICE, AI_LABEL } from '../control';
 import type { ImportTable, ImportChange } from '../app/transfer';
-import type { Suggestion } from '../app/commands/importMatching';
+import type { Suggestion } from '../domain/qaMatch';
 import type { Store } from '../app/store';
 import type { Busy, ImportPlan, QaImportActions, QaImportState } from './qaImport';
 

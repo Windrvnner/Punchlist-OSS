@@ -4,7 +4,7 @@ import {
   importCounts, parseDate, prepareImport, type ImportRow, type Mapping, type Prepared,
 } from '../domain/importExport';
 import { ImportQuestions } from './commands/importQuestions';
-import type { AcceptedMatch } from './commands/importMatching';
+import type { AcceptedMatch } from '../domain/qaMatch';
 import { dropImport, finishKeptSubmission, importKey, keepImport, keptImport } from './keptImports';
 import { unappliedColumnsWarning, unappliedImportColumns } from './qaImportColumns';
 import { keepImportedLog, logTakenBy } from './qaLog';
