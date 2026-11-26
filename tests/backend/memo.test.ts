@@ -168,7 +168,9 @@ describe('the deal memo’s ratings and summary', () => {
     const s = setup(by({}));
     s.svc.inputLimit = () => LIMIT;
     await deal(s.repo);
-    for (let k = 0; k < 80; k++) await finding(s.repo, `f_01HZX3K9Q4V7M2B5N8C1D6${String(k).padStart(4, '0')}`, `Finding ${k}`);
+    for (let k = 0; k < 80; k++) {
+      await finding(s.repo, `f_01HZX3K9Q4V7M2B5N8C1D6${String(k).padStart(4, '0')}`, `Finding ${k}`);
+    }
     val(await s.ai.memo!('d1'));
     expect(s.rates.length).toBeGreaterThan(2);
     for (const call of s.rates) expect(tokensOf(call.prompt)).toBeLessThanOrEqual(LIMIT);
@@ -243,7 +245,8 @@ describe('the memo asks name findings only by the ids they were shown (#1162)', 
   });
 
   it('takes nothing from a cut-off reply whose whole entries name an unknown id, and asks the part again', async () => {
-    const cutOff = '{"ratings": [{"id": "f_1", "rating": "High"}, {"id": "f_7", "rating": "Low"}, {"id": "f_2", "rating": "Low"}, {"id": "f_';
+    const whole = ['f_1', 'f_7', 'f_2'].map((id) => `{"id": "${id}", "rating": "High"}`).join(', ');
+    const cutOff = `{"ratings": [${whole}, {"id": "f_`;
     const s = setup((_c, n) => (n === 1 ? cutOff : by({ f_1: 'Low', f_2: 'Low' })(_c)));
     await two(s);
     expect(val(await s.ai.memo!('d1')).ratings).toEqual({ f_1: 'Low', f_2: 'Low' });

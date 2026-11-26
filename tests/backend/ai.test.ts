@@ -852,7 +852,7 @@ describe('a kept conversation', () => {
     expect(other.thread).toMatchObject({ id: 'conv_2', model: 'standard' }); expect(s.svc.removed).toEqual([gone.thread!.transcript]);
   });
 
-  it('a thread kept without its opened documents is no thread: a new conversation starts from the history (#1162)', async () => {
+  it('a thread kept without its opened documents is no thread: a new one starts from the history (#1162)', async () => {
     const s = setup(reader, undefined, { talks: true, turn: twoTurns });
     const one = val(await s.ai.answer(ask('What is the lock-up?')));
     const { opened: _opened, ...older } = one.thread!;

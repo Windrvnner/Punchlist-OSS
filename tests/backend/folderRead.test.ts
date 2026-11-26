@@ -261,7 +261,7 @@ function setupWithout(recs: DocRecord[], missing: Set<string>) {
   return s;
 }
 
-it('counts a document\'s listing by the handle it is listed by, deal id included when a run spans deals (#1162)', () => {
+it('counts a document\'s listing by the handle it is listed by, deal id included across deals (#1162)', () => {
   const docId = `doc_${'a'.repeat(24)}`;
   expect(listingChars(`d1/${docId}`) - listingChars(docId)).toBe('d1/'.length);
   expect(listingChars(docId)).toBeGreaterThan(docId.length);

@@ -134,7 +134,11 @@ describe('conversations', () => {
         [convKey(scope)]: [kept('1', 'me', 'first question'), kept('2', 'ai', 'The answer cites D1', oldThread)],
       });
       const given: { thread?: unknown; history?: { text: string }[] }[] = [];
-      const ai: Partial<AiService> = { answer: async (i) => { given.push(i); return ok({ text: 'ok', sources: [] }); } };
+      const answer: AiService['answer'] = async (i) => {
+        given.push(i);
+        return ok({ text: 'ok', sources: [] });
+      };
+      const ai: Partial<AiService> = { answer };
       const { store } = make({ kv, local, ai });
       await store.boot();
       await store.loadDeal(dealId);

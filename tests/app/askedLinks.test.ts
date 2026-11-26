@@ -116,7 +116,8 @@ it('checks a short point whose every word a long question names: no minimum word
   expect(got.map((c) => c.confidence)).toEqual([100]);
 });
 
-const point = (what: string): Unresolved => ({ key: 'i:' + what, kind: 'gap', itemId: 'i_a', what, need: '', workstream: '' });
+const point = (what: string): Unresolved => (
+  { key: 'i:' + what, kind: 'gap', itemId: 'i_a', what, need: '', workstream: '' });
 const question = (n: number, text: string) => ({ id: 'q' + n, n, text }) as never;
 
 it('checks a question exactly at the cutoff and not one a percent below it', () => {

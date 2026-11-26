@@ -2412,13 +2412,17 @@ export function nodeAi(o: AiOptions) {
           if (!fs.length) break;
           // a deal with many findings is rated a part at a time, as the checks are: parts that fit the output limit, halved
           // after a cut-off, keeping the ratings that came whole (parts.ts). One left unrated is asked again by the next model.
-          const size = Math.min(rateRoom, partSize({ cap: MEMO_RATE_BATCH, out: control.limits.ratingReplyTokens, outLimit: outLimit(model), in: tokensEach(fs.map(rateLine)), inLimit: inLimit(model) }));
+          const fit = partSize({
+            cap: MEMO_RATE_BATCH, out: control.limits.ratingReplyTokens, outLimit: outLimit(model),
+            in: tokensEach(fs.map(rateLine)), inLimit: inLimit(model),
+          });
+          const size = Math.min(rateRoom, fit);
           const done = await inParts(fs, size, async (part) => {
             let reply: { ratings?: unknown } | null; let cut = false;
             try { reply = await ask(model, part); } catch (e) { if (!isCutOff(e)) throw e; cut = true; reply = (e as { partial?: { ratings?: unknown } | null }).partial ?? null; }
             const rows = listOf(reply?.ratings).map((x) => x as { id?: unknown; rating?: unknown }); const got = new Map<number, Rating>();
-            // a whole entry of a cut reply naming an id the part did not show fails the reply, as a whole reply's does: the
-            // findings are asked again by the next pass, none kept from it (#1162)
+            // a whole entry of a cut reply naming an id the part did not show fails the reply, as a whole
+            // reply's does: the findings are asked again by the next pass, none kept from it (#1162)
             if (cut && unknownIds(rows.slice(0, -1).map((x) => x.id), part.map((f) => f.id)).length) return { got };
             for (const x of cut ? rows.slice(0, -1) : rows) {
               const r = RATINGS.find((k) => k.toLowerCase() === String(x.rating ?? '').trim().toLowerCase());
@@ -3440,7 +3444,7 @@ export function nodeAi(o: AiOptions) {
      */
     const filler = chatAgent(agentKit, agentOpts);
     let filling = true;
-    /** an item as a plain line of the fill message: no number, as nothing in the reply is mapped back to a line (#1162) */
+    /** an item as a plain line of the fill message: no number, as no reply is mapped back to a line (#1162) */
     const fillLine = (it: ChecklistItem) => {
       const need = needOf.get(it.id);
       const tried = (trailOf.get(it.id) ?? []).filter((t) => !t.n).map((t) => `"${t.q}"`);
@@ -3661,7 +3665,9 @@ export function nodeAi(o: AiOptions) {
    * the targets named in its whole entries, as the last entry may be cut short, and the rest are asked again; a
    * target a cut reply does not name is not known to be unaffected.
    */
-  async function askAffected(part: DocRecord[], these: Target[], model: string): Promise<PartReply<DocRecord[] | null>> {
+  async function askAffected(
+    part: DocRecord[], these: Target[], model: string,
+  ): Promise<PartReply<DocRecord[] | null>> {
     const ids = these.map((t) => t.id);
     const docIds = part.map((r) => r.docId);
     const unusable = (text: string) => !namesOnlyShown(text, [...ids, ...docIds])
@@ -4325,12 +4331,20 @@ export function nodeAi(o: AiOptions) {
           const nearTo = (f: Raised) => { const q = words(`${f.title} ${f.body.join(' ')}`, dealId); return x.fresh.map((r) => ({ r, n: score(r, q, dealId) })).sort((a, b) => b.n - a.n); };
           // what the model gave no answer on (all of it, when it could not say) goes by shared words
           const byWords = x.list.filter((it) => hit.unsaid.has(it.id) && x.why(it) === 'word');
-          revisit = [...revisit, ...[...hit.items].map((id) => settledItems.find((it) => it.id === id)!), ...byWords].filter((it, i, all) => all.indexOf(it) === i);
+          const seenItems = [...hit.items].map((id) => settledItems.find((it) => it.id === id)!);
+          revisit = [...revisit, ...seenItems, ...byWords].filter((it, i, all) => all.indexOf(it) === i);
           // each finding with the arrivals named beside it. Where the model named the finding and no arrival, the arrivals that words cannot place
           // (a scan has none) come first, then the nearest in words; where it could not say at all, the nearest in words
           const blind = x.fresh.filter((r) => !r.words?.length && !r.summary);
-          const named = [...hit.findings].map(([id, by]) => { const f = [...open, ...x.closed].find((y) => y.id === id)!; return { f, also: (by.length ? by : [...blind, ...nearTo(f).map((y) => y.r).filter((r) => !blind.includes(r))]).slice(0, 3) }; });
-          const nearer = open.filter((f) => hit.unsaid.has(f.id) && !hit.findings.has(f.id) && nearTo(f).some((y) => y.n > 0))
+          const everyFinding = [...open, ...x.closed];
+          const nameless = (f: Raised) => [...blind, ...nearTo(f).map((y) => y.r).filter((r) => !blind.includes(r))];
+          const asNamed = ([id, by]: [string, DocRecord[]]) => {
+            const f = everyFinding.find((y) => y.id === id)!;
+            return { f, also: (by.length ? by : nameless(f)).slice(0, 3) };
+          };
+          const named = [...hit.findings].map(asNamed);
+          const unsaid = open.filter((f) => hit.unsaid.has(f.id) && !hit.findings.has(f.id));
+          const nearer = unsaid.filter((f) => nearTo(f).some((y) => y.n > 0))
             .map((f) => ({ f, also: nearTo(f).slice(0, 3).map((y) => y.r) }));
           look = [...named, ...nearer];
         }

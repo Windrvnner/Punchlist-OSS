@@ -10,7 +10,9 @@ vi.mock('../../src/control', async (original) => {
   return { ...actual, control: { ...actual.control, limits } };
 });
 
-const point = { key: 'i:a', kind: 'gap' as const, itemId: 'i_a', what: 'Insurance advisor report (final)', need: '', workstream: '' };
+const point = {
+  key: 'i:a', kind: 'gap' as const, itemId: 'i_a', what: 'Insurance advisor report (final)', need: '', workstream: '',
+};
 const pool = [{ id: 'q1', n: 1, text: 'Please send the insurance advisor report.' }] as never[];   // names 75 percent
 
 it('uses the control value when no cutoff is given', () => {
