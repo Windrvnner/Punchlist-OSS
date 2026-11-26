@@ -39,7 +39,7 @@ import { families, roomPath, ATTACHED } from './families';
 import { coverOf } from './blacklines';
 import { appendOwn, dealFiles, healOwn, wholeLines } from './ownFile';
 import { randomUUID } from 'node:crypto';
-import { sampleOf, matchesIn, likely, confirm, sharedDocs, apart, type RoomMatch } from './sameRoom';
+import { countedFiles, sameRoomAs, type RoomMatch } from './sameRoom';
 
 /**
  * What is kept about a document. `pages` is set for everything shown as pages, and `via` names the converter that made
@@ -895,23 +895,25 @@ export function nodeDocuments(o: DocumentsOptions) {
       return ok(fam.drafts.map((d) => { const r = at.get(d.docId)!; return { doc: r.name, docId: d.docId, date: d.date, folder: path.posix.dirname(roomPath(r).replace(/\\/g, '/')) }; }));
     }),
     /**
-     * Is the data room in these folders one a deal already has? A fixed sample of their files is matched against each
-     * of `dealIds`' documents by name and size, and a deal most of the sample matches is confirmed by fingerprinting a few
-     * small files (sameRoom.ts). Documents three or more deals hold, such as a shared precedents folder, are left out of both
-     * sides. Only confirmed deals come back, best first. Nothing is recorded and no model is asked.
+     * Is the data room in these folders one a deal already has? Each of `dealIds` whose every data-room document
+     * matches one of the folders' files by name and size, with the smallest match identical by content (sameRoom.ts).
+     * Files in a precedents folder, on either side, and documents only attached in the app are not counted. Only those
+     * deals come back, best first. Nothing is recorded and no model is asked.
      */
     sameRoom: safe(async (paths: string[], dealIds: string[]): Promise<Result<RoomMatch[]>> => {
-      const all = dealIds.map((dealId) => ({ dealId, recs: [...records(dealId).values()].filter(onDeal(dealId)) })).filter((d) => d.recs.length);
-      if (!all.length) return ok([]);
-      const shared = sharedDocs(all); const common = new Set(shared.map((r) => r.docId));
-      const deals = all.map((d) => ({ dealId: d.dealId, recs: d.recs.filter((r) => !common.has(r.docId)) })).filter((d) => d.recs.length);
-      // the folders' files, each with the folder it came from, as the New deal form listed them when they were added
-      const files = paths.filter(isDir).flatMap((p) => listing(p).map((f) => ({ ...f, rel: `${p}/${f.rel}`, root: p })));
-      const kept = apart(files, shared); const sample = sampleOf(kept); if (!sample.length || !deals.length) return ok([]);
+      // the folders' files as the New deal form listed them, each with its path from the folder's own name
+      const withRoom = (p: string) => listing(p).map((f) => ({ ...f, room: roomPath({ folder: p, rel: f.rel }) }));
+      const listed = paths.filter(isDir).flatMap(withRoom);
+      const files = countedFiles(listed);
+      if (!files.length) return ok([]);
       const out: RoomMatch[] = [];
-      // a likely deal, judged by the sample, is counted over every kept file (by name and size, nothing read) and fingerprinted
-      for (const d of likely(sample, deals)) { const m = confirm(d.dealId, kept.length, matchesIn(kept, d.recs), (f) => hashOf(f.abs, f)); if (m) out.push(m); }
-      saveHashes(true); return ok(out);
+      for (const dealId of dealIds) {
+        const recs = [...records(dealId).values()].filter(onDeal(dealId));
+        const match = sameRoomAs(dealId, files, recs, (f) => hashOf(f.abs, f));
+        if (match) out.push(match);
+      }
+      saveHashes(true);
+      return ok(out.sort((a, b) => b.matched - a.matched));
     }),
     places: safe(async (dealId, docId) => {
       const r = records(dealId).get(docId); if (!r) return ok([]);

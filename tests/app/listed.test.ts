@@ -12,7 +12,9 @@ const f = (n: number, patch: Partial<Finding> = {}): Finding => ({
     updatedWhy: '', ...patch,
 } as unknown as Finding);
 const state = (list: Finding[]): State => ({ ...initialState(), findings: Object.fromEntries(list.map((x) => [x.id, x])) });
-const FF = (patch: Partial<State['ui']['findingFilter']> = {}) => ({ status: 'all' as const, workstream: '', text: '', reviewed: '' as const, ...patch });
+const FF = (patch: Partial<State['ui']['findingFilter']> = {}) => ({
+  status: 'all' as const, workstream: '', reviewed: '' as const, ...patch,
+});
 
 describe('the reason on a marked finding names the questions it came from by the numbers they have now', () => {
   it('follows a question that is renumbered, leaves out one that has been deleted, and falls back to the words as first written', () => {
@@ -34,7 +36,7 @@ describe('the Findings list and the queue beside an open finding use one order a
     // Finding 2 is marked and open, so it leads; Finding 4 is marked but closed, so it stays where its date puts it
     expect(listedFindings(s, D).map((x) => x.title)).toEqual(['Finding 2', 'Finding 4', 'Finding 3', 'Finding 1']);
   });
-  it('filters by status, by "to update", by workstream, by review and by text, and never hides a finding with two versions', () => {
+  it('filters by status, "to update", workstream and review, and never hides a finding in two versions', () => {
     const a = f(1), b = f(2, { updated: true }), c = f(3, { status: 'closed', workstream: 'Tax', reviewed: { by: 'A', at: '2026-11-05T00:00:00.000Z' } as any });
     const s = state([a, b, c]);
     const shown = (ff: ReturnType<typeof FF>) => listedFindings(s, D).filter((x) => findingListed(s, x, ff)).map((x) => x.title);
@@ -45,7 +47,8 @@ describe('the Findings list and the queue beside an open finding use one order a
     expect(shown(FF({ workstream: 'Tax' }))).toEqual(['Finding 3']);
     expect(shown(FF({ reviewed: 'yes' }))).toEqual(['Finding 3']);
     expect(shown(FF({ reviewed: 'no' }))).toEqual(['Finding 2', 'Finding 1']);
-    expect(shown(FF({ text: 'finding 1' }))).toEqual(['Finding 1']);
+    // the filter menu holds Workstream and Reviewed, and no word filter (#1068)
+    expect(Object.keys(initialState().ui.findingFilter).sort()).toEqual(['reviewed', 'status', 'workstream']);
     const clash = { ...s, conflicts: { [a.id]: { id: a.id, dealId: D, kind: 'finding', versions: [] } } } as unknown as State;
     expect(listedFindings(clash, D).filter((x) => findingListed(clash, x, FF({ status: 'closed' }))).map((x) => x.title)).toEqual(['Finding 1', 'Finding 3']);
   });

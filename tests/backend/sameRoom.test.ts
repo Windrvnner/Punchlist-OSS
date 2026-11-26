@@ -5,7 +5,7 @@ import { nodeDocuments, docIdFor, hashBytes, type DocRecord } from '../../src/ba
 import { nodeFolder } from '../../src/backend/nodeFolder';
 import { StoreKeeper } from '../../src/backend/storeKeeper';
 import { StandInService } from '../../src/backend/service';
-import { plainName, sampleOf, matchesIn, likely, confirm, sharedDocs, apart, SAMPLE } from '../../src/backend/sameRoom';
+import { matchesIn, sameRoomAs, countedFiles } from '../../src/backend/sameRoom';
 
 const made: string[] = []; afterAll(() => { for (const d of made) fs.rmSync(d, { recursive: true, force: true }); });
 const tmp = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'dil-same-')); made.push(d); return d; };
@@ -13,58 +13,59 @@ const put = (root: string, rel: string, data: string) => { const p = path.join(r
 const rec = (name: string, size: number, hash = `h-${name}`): DocRecord => ({ docId: docIdFor(hash), hash, name, folder: 'F', rel: name, size });
 
 describe('matching a data room by its files', () => {
-  it('compares names without case, spacing, punctuation or a copy number', () => {
-    expect(plainName('01 Legal/Credit Agreement (1).pdf')).toBe(plainName('credit_agreement.pdf'));
-    expect(plainName('Model - Copy.xlsx')).toBe(plainName('Model.xlsx'));
-    expect(plainName('Credit Agreement.pdf')).not.toBe(plainName('Credit Agreement.docx'));
+  const files = (n: number, tag: string, root = 'VDR') =>
+    Array.from({ length: n }, (_, i) => ({ room: `${root}/${tag} ${i}.pdf`, size: 1000 + i }));
+  const nameOf = (f: { room: string }) => f.room.split('/').pop()!;
+  const recsOf = (list: { room: string; size: number }[]) => list.map((f) => rec(nameOf(f), f.size));
+  const sameHash = (f: { room: string }) => `h-${nameOf(f)}`;
+
+  it('matches a file by its exact name, in any case, and its exact size; each document to one file at most', () => {
+    const found = [{ room: 'X/a.pdf', size: 1000 }, { room: 'Y/A.PDF', size: 1000 }, { room: 'X/b.pdf', size: 1001 },
+      { room: 'X/c (1).pdf', size: 5 }];
+    const m = matchesIn(found, [rec('a.pdf', 1000), rec('b.pdf', 1000), rec('c.pdf', 5)]);
+    expect(m.map((x) => x.file.room)).toEqual(['X/a.pdf']);
   });
-  it('takes the same fixed sample, spread over the whole room, whatever order the files come in', () => {
-    const files = Array.from({ length: 5000 }, (_, i) => ({ rel: `f/${String(i).padStart(5, '0')}.pdf`, size: i }));
-    const a = sampleOf(files), b = sampleOf([...files].reverse());
-    expect(a).toHaveLength(SAMPLE); expect(a).toEqual(b);
-    expect(a[0].rel).toBe('f/00000.pdf'); expect(a[SAMPLE - 1].size).toBeGreaterThan(4900);
+  it('a deal holds the room when every one of its documents matches a file and the smallest match is identical', () => {
+    const room = files(10, 'Doc');
+    expect(sameRoomAs('d', room, recsOf(room), sameHash)).toEqual({ dealId: 'd', files: 10, matched: 10 });
+    // files the deal has no document for do not matter; a document with no file does
+    expect(sameRoomAs('d', room, recsOf(room.slice(0, 9)), sameHash)).toEqual({ dealId: 'd', files: 10, matched: 9 });
+    expect(sameRoomAs('d', room, recsOf([...room, ...files(1, 'Gone')]), sameHash)).toBeNull();
+    // the same names and sizes with other contents, or nothing that could be read: nothing is claimed
+    expect(sameRoomAs('d', room, recsOf(room), () => 'other')).toBeNull();
+    expect(sameRoomAs('d', room, recsOf(room), () => null)).toBeNull();
+    const read: string[] = [];
+    sameRoomAs('d', room, recsOf(room), (f) => {
+      read.push(f.room);
+      return sameHash(f);
+    });
+    expect(read).toEqual(['VDR/Doc 0.pdf']);   // one file read: the smallest match
   });
-  it('matches sizes within 2%, and each document to one file at most', () => {
-    const m = matchesIn([{ rel: 'a.pdf', size: 1000 }, { rel: 'A.pdf', size: 1000 }, { rel: 'b.pdf', size: 1100 }], [rec('a.pdf', 1015), rec('b.pdf', 1000)]);
-    expect(m.map((x) => x.file.rel)).toEqual(['a.pdf']);
+  it('finds a data room that three or more deals already hold', () => {
+    const room = files(2000, 'Doc');
+    const dealIds = ['d_1', 'd_2', 'd_3', 'd_4'];
+    expect(dealIds.map((dealId) => sameRoomAs(dealId, room, recsOf(room), sameHash)?.dealId)).toEqual(dealIds);
   });
-  it('a deal is likely only when most of the sample, and at least three files, match', () => {
-    const sample = Array.from({ length: 10 }, (_, i) => ({ rel: `d${i}.pdf`, size: 100 + i }));
-    const recs = (n: number) => sample.slice(0, n).map((f) => rec(f.rel, f.size));
-    expect(likely(sample, [{ dealId: 'd_half', recs: recs(5) }, { dealId: 'd_most', recs: recs(7) }, { dealId: 'd_all', recs: recs(10) }]).map((d) => d.dealId)).toEqual(['d_all', 'd_most']);
-    expect(likely(sample.slice(0, 2), [{ dealId: 'd_two', recs: recs(2) }]).map((d) => d.dealId)).toEqual(['d_two']);   // a room of two files, both there
+  it('leaves out files attached in the app, which are in no data-room folder, in a 2,000-file room', () => {
+    const room = files(2000, 'Doc');
+    const attached = { ...rec('notes.docx', 50), folder: '@attachments', rel: 'd/pc1/x.docx' };
+    expect(sameRoomAs('d', room, [...recsOf(room), attached], sameHash))
+      .toEqual({ dealId: 'd', files: 2000, matched: 2000 });
+    // a document attached and also in a deal folder is still counted
+    const alsoFiled = { ...attached, copies: [{ folder: 'F', rel: 'notes.docx', name: 'notes.docx' }] };
+    expect(sameRoomAs('d', room, [...recsOf(room), alsoFiled], sameHash)).toBeNull();
   });
-  it('each new folder must match on its own: a folder one deal shares does not carry another data room', () => {
-    const room = (root: string, n: number, tag: string) => Array.from({ length: n }, (_, i) => ({ rel: `${root}/${tag} ${i}.pdf`, size: 1000 + i, root }));
-    const roomA = room('A', 20, 'Lamna'), prec = room('P', 100, 'Precedent'), roomB = room('B', 40, 'Datum');
-    const dealA = { dealId: 'd_a', recs: [...roomA, ...prec].map((f) => rec(f.rel, f.size)) };
-    expect(likely([...roomB, ...prec], [dealA])).toEqual([]);                                    // 100 of 140 match, but none of Datum's, a quarter or more of them
-    expect(likely([...roomA, ...prec], [dealA]).map((d) => d.dealId)).toEqual(['d_a']);           // the same two folders again
-    expect(likely([...room('B', 2, 'Datum'), ...prec], [dealA]).map((d) => d.dealId)).toEqual(['d_a']);   // two files are too few to judge a folder by
-    expect(likely([...room('B', 30, 'Datum'), ...prec], [dealA]).map((d) => d.dealId)).toEqual(['d_a']);  // under a quarter of the sample: not judged on its own, so asked about
-  });
-  it('a deal’s data room added again with a small folder of the team’s own is still found', () => {
-    const room = (root: string, n: number, tag: string) => Array.from({ length: n }, (_, i) => ({ rel: `${root}/${tag} ${i}.pdf`, size: 1000 + i, root }));
-    const roomA = room('A', 60, 'Lamna'), prec = room('P', 100, 'Precedent');
-    const dealA = { dealId: 'd_a', recs: [...roomA, ...prec].map((f) => rec(f.rel, f.size)) };
-    expect(likely([...roomA, ...room('W', 15, 'Our working file')], [dealA]).map((d) => d.dealId)).toEqual(['d_a']);   // 15 of 75: a fifth
-  });
-  it('documents three or more deals hold are left out of both sides', () => {
-    const prec = Array.from({ length: 100 }, (_, i) => rec(`Precedent ${i}.pdf`, 500 + i));
-    const deals = Array.from({ length: 30 }, (_, k) => ({ dealId: `d_${k}`, recs: [...prec, ...Array.from({ length: 10 }, (_, i) => rec(`Deal ${k} doc ${i}.pdf`, 900 + i))] }));
-    expect(sharedDocs(deals).map((r) => r.name).sort()).toEqual(prec.map((r) => r.name).sort());
-    const files = [...prec.map((r) => ({ rel: `X/${r.name}`, size: r.size })), { rel: 'X/Own.pdf', size: 1 }];
-    expect(apart(files, sharedDocs(deals)).map((f) => f.rel)).toEqual(['X/Own.pdf']);
-  });
-  it('confirms by fingerprinting the smallest exact-size matches, and needs most of them identical', () => {
-    const files = [{ rel: 'a', size: 30 }, { rel: 'b', size: 10 }, { rel: 'c', size: 20 }, { rel: 'd', size: 1000 }];
-    const matched = files.map((file) => ({ file, rec: rec(file.rel, file.size === 1000 ? 1010 : file.size) }));
-    const printed: string[] = [];
-    const hit = confirm('d_x', 4, matched, (f) => { printed.push(f.rel); return `h-${f.rel}`; });
-    expect(printed).toEqual(['b', 'c', 'a']);                                                  // smallest first; the 2%-off file is never fingerprinted
-    expect(hit).toEqual({ dealId: 'd_x', files: 4, matched: 4, printed: 3, same: 3 });
-    expect(confirm('d_x', 4, matched, (f) => (f.rel === 'b' ? 'h-b' : 'other'))).toBeNull();   // one of three identical: not the same room
-    expect(confirm('d_x', 4, matched, () => null)).toBeNull();                                  // nothing could be read: nothing is claimed
+  it('leaves out files in a precedents folder on both sides, however many deals read them', () => {
+    const prec = files(100, 'Form', 'VDR/12. Precedents');
+    const own = files(8, 'Own');
+    const precRecs = prec.map((f) => ({ ...rec(nameOf(f), f.size), rel: `Precedents/${nameOf(f)}` }));
+    const dealRecs = [...recsOf(own), ...precRecs];
+    expect(countedFiles([...prec, ...own]).map((f) => f.room)).toEqual(own.map((f) => f.room));
+    expect(sameRoomAs('d', countedFiles([...prec, ...files(8, 'New')]), dealRecs, sameHash)).toBeNull();
+    // the deal's precedents are not counted either: a deal of precedents alone holds no room
+    expect(sameRoomAs('d', prec, precRecs, sameHash)).toBeNull();
+    const again = sameRoomAs('d', countedFiles([...prec, ...own]), dealRecs, sameHash);
+    expect(again).toEqual({ dealId: 'd', files: 8, matched: 8 });
   });
 });
 
@@ -79,20 +80,32 @@ describe('sameRoom on real folders', () => {
   }
   const index = async (docs: ReturnType<typeof setup>['docs'], vdr: string) => { await docs.index('d_one', [{ path: vdr, label: 'VDR', files: 40, size: '', indexed: 0, reviewed: 0 }]); await docs.settled('d_one'); };
 
-  it('finds the deal whose data room a second export holds, renamed folders and copy numbers and all', async () => {
+  it('finds the deal whose data room a second export holds, in renamed folders', async () => {
     const { root, vdr, docs } = setup(); await index(docs, vdr);
     const again = path.join(root, 'export 2');
-    for (let i = 0; i < 40; i++) put(again, `Folder ${i % 3}/document ${i} (1).csv`, `contents of document ${i}`);
+    for (let i = 0; i < 40; i++) put(again, `Folder ${i % 3}/Document ${i}.csv`, `contents of document ${i}`);
     put(again, 'New/Late arrival.csv', 'not in the first deal');
     const r = await docs.sameRoom!([again], ['d_one', 'd_none']);
-    expect(r.ok && r.value).toEqual([{ dealId: 'd_one', files: 41, matched: 40, printed: 5, same: 5 }]);
-    expect(hashBytes(fs.readFileSync(path.join(again, 'Folder 0/document 0 (1).csv')))).toBe(hashBytes(fs.readFileSync(path.join(vdr, '00 Section/Document 0.csv'))));
+    expect(r.ok && r.value).toEqual([{ dealId: 'd_one', files: 41, matched: 40 }]);
+    const bytesHash = (file: string) => hashBytes(fs.readFileSync(file));
+    const first = bytesHash(path.join(vdr, '00 Section/Document 0.csv'));
+    expect(bytesHash(path.join(again, 'Folder 0/Document 0.csv'))).toBe(first);
+  });
+  it('finds every one of four deals that already hold the same data room', async () => {
+    const { vdr, docs } = setup();
+    const dealIds = ['d_1', 'd_2', 'd_3', 'd_4'];
+    for (const dealId of dealIds) {
+      await docs.index(dealId, [{ path: vdr, label: 'VDR', files: 40, size: '', indexed: 0, reviewed: 0 }]);
+      await docs.settled(dealId);
+    }
+    const r = await docs.sameRoom!([vdr], dealIds);
+    expect(r.ok && r.value).toEqual(dealIds.map((dealId) => ({ dealId, files: 40, matched: 40 })));
   });
   it('finds the deal when its data room is added again with a small folder of the team’s own', async () => {
     const { root, vdr, docs } = setup(); await index(docs, vdr);
     const work = path.join(root, 'Our working files'); for (let i = 0; i < 10; i++) put(work, `Draft ${i}.csv`, `draft ${i}`);
     const r = await docs.sameRoom!([vdr, work], ['d_one']);
-    expect(r.ok && r.value).toEqual([{ dealId: 'd_one', files: 50, matched: 40, printed: 5, same: 5 }]);
+    expect(r.ok && r.value).toEqual([{ dealId: 'd_one', files: 50, matched: 40 }]);
   });
   it('says nothing for another data room, or one whose files share names and sizes but not contents', async () => {
     const { root, vdr, docs } = setup(); await index(docs, vdr);
@@ -117,7 +130,7 @@ describe('sameRoom on real folders', () => {
     r = await docs.sameRoom!([fresh], ids); expect(r.ok && r.value).toEqual([]);
     // deal 7's own room again, with the precedents: deal 7, counted on its own files
     r = await docs.sameRoom!([path.join(root, 'room 7'), prec], ids);
-    expect(r.ok && r.value).toEqual([{ dealId: 'd_7', files: 8, matched: 8, printed: 5, same: 5 }]);
+    expect(r.ok && r.value).toEqual([{ dealId: 'd_7', files: 8, matched: 8 }]);
     void vdr;
   }, 60_000);
 });

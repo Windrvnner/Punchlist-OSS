@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { expect, it } from 'vitest';
 import { checklistView } from '../../src/app/checklistView';
+import { memoItems } from '../../src/app/memo';
 import {
   checklistListCounts, checklistStandingCounts, checkLeftCount, findingCounts, indexingTotals, questionCounts,
   uncheckedChecklistCount,
@@ -69,6 +70,17 @@ it('counts the same standings as the Checklist when a check predates additions a
   const { counts } = checklistView(state, dealId);
   expect(counts).toEqual({ all: 2160, finding: 117, gone: 1, person: 1, gap: 1, open: 21, satisfied: 2016, off: 3 });
   expect(checklistStandingCounts(state, dealId)).toEqual({ ...counts, toResolve: 119, settled: 2017, offOpen: 1 });
+});
+
+it('gives the deal memo the same checklist counts as Overview, new and turned-off items included (#1064)', () => {
+  const state = checklistDeal();
+  const items = memoItems(state, dealId)!;
+  const kinds = (kind: string) => items.filter((item) => item.kind === kind).length;
+  expect(items).toHaveLength(2160);
+  expect([kinds('satisfied') + kinds('person'), kinds('finding'), kinds('gap'), kinds('open'), kinds('off')])
+    .toEqual([2017, 118, 1, 21, 3]);   // flagged: 117 open and 1 whose finding was deleted, as on Overview
+  delete state.checklists[dealId];
+  expect(memoItems(state, dealId)).toBeNull();   // rows not read: no counts, not only the turned-off items
 });
 
 it('keeps the reported standings until the checklist rows arrive, including after a failed read', () => {

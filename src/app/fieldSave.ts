@@ -44,7 +44,6 @@ export type FieldInput = {
   partialNow(): boolean;
   locked(): boolean;
   focused(): boolean;
-  stopTimer(): boolean;
   markPartial(): void;
   replaceText(value: string): void;
   adoptBase(value: string): void;
@@ -52,7 +51,10 @@ export type FieldInput = {
   show(view: FieldSaveView): void;
 };
 
-/** One field's save state. The input owns focus, native date parts, and when its debounce or lifecycle event fires. */
+/**
+ * One field's save state, and when typing saves: after a pause, or when the field is left. The input owns focus,
+ * native date parts and input-method composition, and reports its events.
+ */
 export class FieldSave {
   view: FieldSaveView;
   base: string;
@@ -67,6 +69,7 @@ export class FieldSave {
   private saving = 0;
   private waits = false;
   private resending = false;
+  private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     record: FieldValue, private keep: string | undefined, draft: FieldDraft | undefined, private input: FieldInput,
@@ -130,14 +133,36 @@ export class FieldSave {
     if (!this.view.external) this.show({ status: 'refused', reason });
   }
 
-  typed(text: string): boolean {
+  /** Stops the wait for a pause in typing. Returns whether a save was waiting. */
+  stopTimer(): boolean {
+    if (this.timer === null) return false;
+    clearTimeout(this.timer);
+    this.timer = null;
+    return true;
+  }
+
+  /** Typing saves after a pause of `debounceMs`, unless it is provisional or waits for a choice. */
+  typed(text: string, commit: FieldCommit, debounceMs: number) {
     this.show({ status: 'idle' });
-    this.input.stopTimer();
-    if (this.input.partial()) return false;
+    this.stopTimer();
+    if (this.input.partial()) return;
     this.retryDraft = undefined;
     if (this.keep !== undefined && (unsavedFields.has(this.keep) || this.view.external)) this.keepText(text);
     else if (this.input.locked() && text !== this.seen.value) this.keepText(text);
-    return !this.view.external && !this.composing();
+    if (this.view.external || this.composing()) return;
+    this.timer = setTimeout(() => void this.save(this.input.text(), commit), debounceMs);
+  }
+
+  /** Blur saves now, except text not saved on entry and left untouched, which waits for Retry. */
+  blur(commit: FieldCommit, unchangedSinceFocus: boolean) {
+    if (unchangedSinceFocus) this.stopTimer();
+    else void this.save(this.input.text(), commit);
+  }
+
+  /** The page hides: the text is kept, and a save waiting for a pause goes now. */
+  leave(commit: FieldCommit) {
+    this.keepCurrent();
+    if (this.timer !== null) void this.save(this.input.text(), commit);
   }
 
   receive(record: FieldValue) {
@@ -184,7 +209,7 @@ export class FieldSave {
   }
 
   private keepExternal() {
-    this.input.stopTimer();
+    this.stopTimer();
     this.show(this.saving ? { external: true } : { external: true, status: 'idle' });
     this.keepText(this.input.text());
   }
@@ -198,7 +223,7 @@ export class FieldSave {
 
   async save(text: string, commit: FieldCommit, chosen = false): Promise<FieldSaveOutcome | undefined> {
     if (this.composing()) return undefined;
-    this.input.stopTimer();
+    this.stopTimer();
     if (!this.shouldSend(text, chosen)) return undefined;
     if (text === this.retryDraft) this.retryDraft = undefined;
     this.show({ status: 'saving', external: false });
@@ -308,7 +333,7 @@ export class FieldSave {
       }
       return;
     }
-    this.input.stopTimer();
+    this.stopTimer();
     this.show({ external: true });
     this.keepText(text);
   }
@@ -323,7 +348,7 @@ export class FieldSave {
   }
 
   takeTheirs(value: string, commit: FieldCommit) {
-    this.input.stopTimer();
+    this.stopTimer();
     this.forgetText();
     this.takeBase(value);
     this.input.replaceText(value);
@@ -352,7 +377,7 @@ export class FieldSave {
   unmount(commit: FieldCommit) {
     this.keepCurrent();
     const text = this.input.text();
-    if (this.input.stopTimer() && text !== this.seen.value && !this.input.partial() && !this.composing()
+    if (this.stopTimer() && text !== this.seen.value && !this.input.partial() && !this.composing()
       && !this.view.external && !this.input.locked() && this.base === this.seen.value) {
       void commit(text, this.base);
     }
