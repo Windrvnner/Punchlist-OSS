@@ -324,7 +324,7 @@ export function DeleteDealDialog() {
     if (!r.ok) { store.ui({ deleteDeal: { ...dd, error: r.error.message } }); return; }
     close();
     // a twin's longer label gives way at its end, so "deleted" stays in view; a name of its own reads as before
-    store.toast(`${label} deleted`, undefined, { glyph: 'done' }, undefined, label === d.name ? undefined : label);
+    store.toast(`${label} deleted`, 'done', undefined, false, undefined, label === d.name ? undefined : label);
     location.hash = 'deals';
   };
   if (dd.sure) return (

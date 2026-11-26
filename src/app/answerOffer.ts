@@ -57,7 +57,7 @@ export type RunOffer = Exclude<AnswerOffer, { kind: 'question' }>;
 export function runOffer(store: Store, offer: RunOffer, navigate: (hash: string) => void) {
   const readOnly = store.readOnly();
   if (readOnly) {
-    store.toast(readOnly);
+    store.toast(readOnly, 'warn');
     return;
   }
   if (offer.kind === 'newDeal') {
@@ -65,7 +65,7 @@ export function runOffer(store: Store, offer: RunOffer, navigate: (hash: string)
     return;
   }
   if (!store.get().deals[offer.dealId]) {
-    store.toast('That deal has been deleted');
+    store.toast('That deal has been deleted', 'warn');
     return;
   }
   if (offer.kind === 'page') navigate(pageHash(offer.page, offer.dealId));

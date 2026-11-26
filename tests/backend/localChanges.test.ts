@@ -92,7 +92,7 @@ describe('compact pending ownership (#503)', () => {
   });
 
   for (const owner of ['office', 'previous']) for (const copied of ['none', 'partial', 'whole']) {
-    it(`reads ${owner}'s legacy payload with ${copied} local bytes without replaying it`, () => {
+    it(`refuses ${owner}'s legacy payload with ${copied} local bytes without replaying it (#1119)`, () => {
       const local = new Mem();
       const name = `pending-changes-${owner}.json`;
       const ownFile = `changes-${owner}-${dealId}-0001.jsonl`;
@@ -100,16 +100,10 @@ describe('compact pending ownership (#503)', () => {
       const legacy = JSON.stringify([{ file: ownFile, text: line + '\n' }]);
       local.write(name, legacy);
       if (copied !== 'none') local.write(ownFile, copied === 'whole' ? line + '\n' : line.slice(0, 30));
-      const changes = new LocalChanges(local, 'office');
+      const before = local.read(ownFile);
+      expect(() => new LocalChanges(local, 'office')).toThrow('Pending change ownership could not be read');
       expect(local.read(name)).toBe(legacy);
-      expect(changes.seq).toBe(owner === 'office' ? 7 : 0);
-      const shared = new Mem();
-      changes.heal(shared, ownFile, true);
-      expect(shared.read(ownFile)).toBeNull();
-      shared.write(ownFile, line + '\n');
-      expect(changes.confirm(shared.read(ownFile)!.slice(0, -1))).toBe(true);
-      expect(local.read(ownFile)).toBe(line + '\n');
-      expect(local.read(name)).toBe('[]');
+      expect(local.read(ownFile)).toBe(before);
     });
   }
 

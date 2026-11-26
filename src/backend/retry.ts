@@ -4,7 +4,8 @@
  * the model service (ai.ts: `complete` and `converse`), so drafting, checks, imports, search, the memo and chat all get it.
  *
  * What is asked again: a call that failed for a reason sending it again can cure (a server error, a reply that could not
- * be read off the wire, a refusal), and a reply with nothing in it. Up to `limits.aiRetries` times, waiting
+ * be read off the wire, a refusal), a reply with nothing in it, and a reply its caller cannot use, such as one naming a
+ * question id it was not shown (#1105). Up to `limits.aiRetries` times, waiting
  * `timings.aiRetryWait` before the first and twice as long before each next one.
  *
  * What is not, because it has a path of its own: a service that cannot be reached (`code: 'unreachable'`: each connector
@@ -35,15 +36,17 @@ export function curable(e: unknown): boolean {
 }
 
 /**
- * The retry policy. `go` makes one try. `empty` says whether a reply has nothing in it; after the last try an empty
- * reply is returned as it is, for the caller to treat as it always has.
+ * The retry policy. `go` makes one try. `empty` says whether a reply has nothing in it, or nothing its caller can use;
+ * after the last try such a reply is returned as it is, for the caller to treat as it always has.
  */
 export function retrier(o: RetryOptions = {}) {
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   /** how many times a failed call is asked again: the same for every call */
   const retries = () => o.retries ?? control.limits.aiRetries;
   /** `tried`: tries this call has already had elsewhere */
-  async function retried<T>(go: () => Promise<T>, empty: (reply: T) => boolean = () => false, tried = 0): Promise<T> {
+  async function retried<T>(
+    go: () => Promise<T>, empty: (reply: T) => boolean | Promise<boolean> = () => false, tried = 0,
+  ): Promise<T> {
     const wait = o.waitMs ?? control.timings.aiRetryWait;
     const tries = Math.max(1, 1 + retries() - tried);
     // its try elsewhere failed: this one is its retry, and waits as one
@@ -51,7 +54,7 @@ export function retrier(o: RetryOptions = {}) {
     for (let i = 0; ; i++) {
       try {
         const reply = await go();
-        if (!empty(reply) || i + 1 >= tries) return reply;
+        if (!(await empty(reply)) || i + 1 >= tries) return reply;
       } catch (e) {
         if (!curable(e)) throw e;
         if (i + 1 >= tries) throw e;

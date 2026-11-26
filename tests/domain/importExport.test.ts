@@ -165,5 +165,10 @@ describe('control characters in a cell', () => {
     const [row] = prepareImport(rows, suggestMapping(columns)).rows;
     expect(row).toMatchObject({ n: 12, text: 'Q\u0007text', received: '2026-09-30', status: 'open', priority: 'High' });
   });
-});
 
+  it('names an unreadable date as the cell holds it, spaces included', () => {
+    const m = suggestMapping(['Question', 'Received']);
+    const p = prepareImport([['Datum', ' Feb 31, 2026 ']], m);
+    expect(p.unread).toEqual(['Row 2 Received:  Feb 31, 2026 ']);
+  });
+});

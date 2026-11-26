@@ -170,7 +170,10 @@ function noteWithCopies(t: Tombstone, versions: Version[] | undefined): ShownNot
 }
 
 /** the AI service's calls that go to the model service (the others only read what is recorded) */
-const MODEL_CALLS = new Set<PropertyKey>(['answer', 'draft', 'reassess', 'dealBrief', 'gaps', 'addresses', 'merge', 'layout', 'reword', 'sameMeaning', 'issuesList', 'phrase', 'checkAll', 'responses']);
+const MODEL_CALLS = new Set<PropertyKey>([
+  'answer', 'draft', 'reassess', 'dealBrief', 'gaps', 'addresses', 'suggestQuestion', 'merge', 'layout', 'reword',
+  'sameMeaning', 'issuesList', 'phrase', 'checkAll', 'responses', 'readList', 'memo',
+]);
 
 /**
  * The app's own replies to a person's request (a draft's text) are never dropped. One that cannot be written, because
@@ -200,10 +203,17 @@ export const REPLY_RETRY_FIRST = 5_000, REPLY_RETRY_MAX = 60_000;
  */
 export const REPLY_TRIES = 5;
 
+const CHECK_UNFINISHED = 'The check did not finish. Findings already marked stay marked';
 /** the notices kept on this PC until they are closed (Store.toast, 'kept') */
 const KEPT_NOTICES = 'kept-notices';
 type ToastLinger = boolean | 'stays' | 'kept';
-type ToastStyle = { sticky?: ToastLinger; glyph?: State['ui']['toasts'][number]['glyph'] };
+type ToastGlyph = NonNullable<State['ui']['toasts'][number]['glyph']>;
+type KeptNotice = { text: string; glyph: ToastGlyph };
+
+const isKeptNotice = (x: unknown): x is KeptNotice => {
+  const notice = x as Partial<KeptNotice> | null;
+  return typeof notice?.text === 'string' && (notice.glyph === 'done' || notice.glyph === 'warn');
+};
 
 export class Store {
   private state: State;
@@ -287,13 +297,14 @@ export class Store {
   }
   /**
    * `sticky`: the notice stays until the person closes it or, unless it `'stays'`, until the next change is made. A `'kept'`
-   * notice stays too, and is kept on this PC until it is closed, so it is back after the app is started again.
+   * notice stays too, and is kept on this PC with its glyph until it is closed, so it is back after the app is started
+   * again. The glyph is what the caller says happened: 'done' for completed work, 'warn' for a failure or refusal
+   * (#1114).
    */
-  toast(text: string, action?: State['ui']['toasts'][number]['action'], style: ToastLinger | ToastStyle = false,
-    more?: string, cut?: string) {
-    const { sticky = false, glyph } = typeof style === 'object' ? style : { sticky: style };
+  toast(text: string, glyph: ToastGlyph, action?: State['ui']['toasts'][number]['action'],
+    sticky: ToastLinger = false, more?: string, cut?: string) {
     const id = ++this.toastSeq;
-    if (sticky === 'kept') { const kept = this.keptNotices(); if (!kept.includes(text)) this.services.local.write(KEPT_NOTICES, [...kept, text]); }
+    if (sticky === 'kept') this.keepNotice({ text, glyph });
     const list = [...this.state.ui.toasts.filter((t) => !t.sticky || t.text !== text), {
       id, text, action, sticky: !!sticky, more, cut, glyph,
       ...(sticky === 'stays' || sticky === 'kept' ? { stays: true } : {}),
@@ -307,10 +318,17 @@ export class Store {
   }
   dismissToast(id: number) {
     const t = this.state.ui.toasts.find((x) => x.id === id);
-    if (t?.kept) this.services.local.write(KEPT_NOTICES, this.keptNotices().filter((x) => x !== t.text));
+    if (t?.kept) this.services.local.write(KEPT_NOTICES, this.keptNotices().filter((x) => x.text !== t.text));
     clearTimeout(this.toastTimers.get(id)); this.toastTimers.delete(id); this.ui((ui) => ({ toasts: ui.toasts.filter((t) => t.id !== id) }));
   }
-  private keptNotices(): string[] { const v = this.services.local.read(KEPT_NOTICES); return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []; }
+  private keptNotices(): KeptNotice[] {
+    const stored = this.services.local.read(KEPT_NOTICES);
+    return Array.isArray(stored) ? stored.filter(isKeptNotice) : [];
+  }
+  private keepNotice(notice: KeptNotice) {
+    const kept = this.keptNotices();
+    if (!kept.some((x) => x.text === notice.text)) this.services.local.write(KEPT_NOTICES, [...kept, notice]);
+  }
   /** The pointer or keyboard focus is on the toasts: stop the clock so an Undo cannot vanish while someone is reaching for it. */
   holdToasts() { this.toastsHeld = true; for (const t of this.toastTimers.values()) clearTimeout(t); this.toastTimers.clear(); }
   releaseToasts() { if (!this.toastsHeld) return; this.toastsHeld = false; for (const t of this.state.ui.toasts) if (!t.sticky) this.armToast(t.id); }
@@ -326,7 +344,10 @@ export class Store {
     // read-only while nobody is signed in to Intelligence: no new change is made. The screens show what cannot be used as
     // off; this is the one place that holds for all of them. The app's own record keeping goes on (SIGNED_OUT_OK).
     const ro = this.readOnly();
-    if (ro && !opts.system && !SIGNED_OUT_OK.has(command.name)) { if (!opts.quiet) this.toast(ro); return fail({ kind: 'rejected', message: ro }); }
+    if (ro && !opts.system && !SIGNED_OUT_OK.has(command.name)) {
+      if (!opts.quiet) this.toast(ro, 'warn');
+      return fail({ kind: 'rejected', message: ro });
+    }
     const parsed = command.input.safeParse(rawInput);
     if (!parsed.success) {
       const fields: Record<string, string> = {};
@@ -344,7 +365,7 @@ export class Store {
       await Promise.all(numbered.map((d) => this.loadDeal(d, { gaps: false })));
       if (numbered.some((d) => this.state.dealLoad[d] !== 'loaded')) {
         const message = 'The deal’s questions could not be loaded, so no number can be given yet. Try again in a moment.';
-        if (!opts.quiet) this.toast(message);
+        if (!opts.quiet) this.toast(message, 'warn');
         return fail({ kind: 'rejected', message });
       }
     }
@@ -403,9 +424,15 @@ export class Store {
     const plan = planned.value;
     // nothing longer than an export cell holds is saved: the one place the limit is checked (domain/importExport.ts)
     const long = plan.upserts.map((u) => overLimit(u.kind, u.record as Record<string, unknown>)).find(Boolean);
-    if (long) { if (!opts.quiet) this.toast(TOO_LONG); return fail({ kind: 'invalid', message: TOO_LONG, fields: { [long]: TOO_LONG } }); }
+    if (long) {
+      if (!opts.quiet) this.toast(TOO_LONG, 'warn');
+      return fail({ kind: 'invalid', message: TOO_LONG, fields: { [long]: TOO_LONG } });
+    }
     const blocked = this.blockedBy(plan);
-    if (blocked) { if (!opts.quiet) this.toast(blocked); return fail({ kind: 'rejected', message: blocked }); }
+    if (blocked) {
+      if (!opts.quiet) this.toast(blocked, 'warn');
+      return fail({ kind: 'rejected', message: blocked });
+    }
     if (!plan.upserts.length && !plan.removes?.length) {
       return this.finishUnchanged(command, input, plan, opId, opts, at, previousRev);
     }
@@ -448,7 +475,8 @@ export class Store {
     if (removed.size) this.ui((ui) => ({ toasts: ui.toasts.map((t) => { const o = t.action?.opId ? this.state.ops[t.action.opId] : undefined; return o && ([...o.targets, ...Object.keys(o.resultRevs ?? {})].some((id) => removed.has(id)) || removed.has((o.input as { dealId?: string } | undefined)?.dealId ?? '')) ? { ...t, action: undefined } : t; }) }));   // a deal deleted takes the Undos of everything done on it
     if (plan.message && (!opts.quiet || plan.alwaysSay)) {
       const action = plan.inverse ? { label: 'Undo', opId } : undefined;
-      this.toast(plan.message, action, { glyph: plan.messageGlyph }, undefined, plan.messageCut);
+      // a command's message is completed work
+      this.toast(plan.message, 'done', action, false, undefined, plan.messageCut);
     }
     if (plan.effect) this.startEffect(plan.effect, opId);
     if (plan.dealId && plan.indexFolders?.length) indexCommittedFolders(this, plan.dealId, plan.indexFolders);
@@ -457,7 +485,7 @@ export class Store {
   }
 
   private refusePlan(error: Failure, opts: DispatchOptions) {
-    if (!opts.quiet && !opts.quietRefusal?.(error)) this.toast(error.message);
+    if (!opts.quiet && !opts.quietRefusal?.(error)) this.toast(error.message, 'warn');
     return fail(error);
   }
 
@@ -597,8 +625,15 @@ export class Store {
     const kept = keepsWork(cmd.name, follow.input);
     // a draft whose model call failed is planned again on a conflict too, so other PCs see it failed, but is not kept
     const r = KEPT_REPLIES.has(cmd.name) ? await this.tryReply(cmd, follow.input, { keep: kept }).catch(() => fail({ kind: 'failed' as const, message: 'That didn’t finish. Reload to see what was saved.' })) : await this.dispatch(cmd, follow.input as any, { quiet: true, system: true });
-    if (!r.ok && r.error.kind === 'failed') this.toast(kept ? 'Draft not saved ·' : `${r.error.message}`, kept ? this.retryNow : this.retryOf(follow));   // a kept reply is tried again on its own; a failed model call keeps its Retry
-    else if (r.ok) { const op = this.state.ops[r.value.opId]; const msg = this.lastMessage.get(r.value.opId); if (msg && op?.inverse) this.toast(msg, { label: 'Undo', opId: r.value.opId }); }
+    // a kept reply is tried again on its own; a failed model call keeps its Retry
+    if (!r.ok && r.error.kind === 'failed') {
+      const text = kept ? 'Draft not saved ·' : `${r.error.message}`;
+      this.toast(text, 'warn', kept ? this.retryNow : this.retryOf(follow));
+    } else if (r.ok) {
+      const op = this.state.ops[r.value.opId];
+      const msg = this.lastMessage.get(r.value.opId);
+      if (msg && op?.inverse) this.toast(msg, 'done', { label: 'Undo', opId: r.value.opId });
+    }
     if (kept && !r.ok && NOT_YET.has(r.error.kind)) { this.waitReply(opId, cmd, follow.input, r.error.kind); return true; }
     if (kept && !r.ok && r.error.kind === 'rejected') { await this.holdReply(opId, cmd, follow.input, r.error.kind); this.sayHeld(opId, follow.input, r.error.message); return true; }   // said once held, so the notice counts it
     return false;
@@ -760,7 +795,7 @@ export class Store {
         const all = new Map([...(still ? shown!.drafts : []), ...group]);
         if (still) { shown!.drafts = all; this.sayHeldCount(versions); continue; }
         const held = this.stillHeld(all); if (!held.size) continue;
-        this.heldShown.set(versions, { id: this.toast(this.heldText(versions, held)), drafts: held });
+        this.heldShown.set(versions, { id: this.toast(this.heldText(versions, held), 'warn'), drafts: held });
       }
     }, HELD_GATHER);
     (this.heldTimer as any).unref?.();
@@ -968,12 +1003,14 @@ export class Store {
     const op = opId ? this.state.ops[opId] : undefined;
     if (!op) {                                                                          // no journal entry: nothing was written
       const message = 'That didn’t work. Nothing was changed.';
-      if (!opts.quiet) this.toast(message);
+      if (!opts.quiet) this.toast(message, 'warn');
       return fail({ kind: 'failed', message });
     }
     if (op.state === 'pending') await this.recordCrashedWrite(op, e, opts.keep);
     const ids = [...new Set([...targets, ...op.targets])];
-    if (!opts.quiet) this.toast('That didn’t finish ·', { label: 'Reload', run: () => void this.reloadTargets(ids) });
+    if (!opts.quiet) {
+      this.toast('That didn’t finish ·', 'warn', { label: 'Reload', run: () => void this.reloadTargets(ids) });
+    }
     return fail({ kind: 'failed', message: 'That didn’t finish. Reload to see what was saved.' });
   }
 
@@ -1092,17 +1129,30 @@ export class Store {
     if (err.kind === 'unreachable') this.netDown();
     // only a field's own save leaves a field marked "Not saved"; anything else is said plainly, short enough to show whole
     // a waiting draft saves itself once there is room: the notice says only the cause, with Retry now (decisions: one name per thing)
-    if (err.kind === 'storageFull' && opts.keep) { this.toast('Draft not saved: storage is full ·', this.retryNow, true); return; }
-    if (err.kind === 'storageFull') { this.toast(FIELD_SAVES.has(command.name) ? 'Not saved: storage is full. Free some space, then retry the fields marked Not saved.' : `${commandLabel(command.name, input)}: not saved, storage is full. Free some space, then try again.`, undefined, true); return; }
+    if (err.kind === 'storageFull' && opts.keep) {
+      this.toast('Draft not saved: storage is full ·', 'warn', this.retryNow, true);
+      return;
+    }
+    if (err.kind === 'storageFull') {
+      const text = FIELD_SAVES.has(command.name)
+        ? 'Not saved: storage is full. Free some space, then retry the fields marked Not saved.'
+        : `${commandLabel(command.name, input)}: not saved, storage is full. Free some space, then try again.`;
+      this.toast(text, 'warn', undefined, true);
+      return;
+    }
     if (opts.quiet) return;
-    if (opts.noRetry) { this.toast(err.kind === 'conflict' ? 'Changed elsewhere — not saved' : `Couldn’t save: ${err.message}`); return; }
+    if (opts.noRetry) {
+      const text = err.kind === 'conflict' ? 'Changed elsewhere — not saved' : `Couldn’t save: ${err.message}`;
+      this.toast(text, 'warn');
+      return;
+    }
     const label = err.kind === 'conflict' ? 'Reload' : 'Retry';
     // A durable action retries its own entry; one refused by the journal has no entry yet.
     const run = err.kind === 'conflict'
       ? () => void this.reloadTargets(command.targets(this.state, input))
       : () => {
         // signed out, nothing can run: the change is kept and its notice comes back, to be retried after sign-in
-        if (keepUntilSignedIn(this, text, { label, run })) return;   // it stays until used or dismissed
+        if (keepUntilSignedIn(this, text, 'warn', { label, run })) return;   // it stays until used or dismissed
         if (this.state.ops[opId]) {
           void this.retryOp(opId);
           return;
@@ -1112,13 +1162,16 @@ export class Store {
         // since would be written over without a word. It is refused instead, as the interrupted-actions bar refuses it.
         // Nothing is settled: the journal keeps the action, and the next start offers it with Discard. If the journal
         // refused it (no entry), there is nothing to keep it in, and the person is told to make the change again.
-        if (this.movedSince(baseRevs)) { this.toast(`${CHANGED_SINCE}; make the change again`); return; }
+        if (this.movedSince(baseRevs)) {
+          this.toast(`${CHANGED_SINCE}; make the change again`, 'warn');
+          return;
+        }
         this.rerun.add(opId);
         void this.dispatch(command, input, { idempotencyKey: opts.idempotencyKey })
           .finally(() => this.rerun.delete(opId));
       };
     const text = err.kind === 'conflict' ? 'Changed elsewhere — not saved ·' : `Couldn’t save ·`;
-    this.toast(text, { label, run });
+    this.toast(text, 'warn', { label, run });
   }
 
   private appendAudit(entries: AuditEntry[]) {
@@ -1146,7 +1199,7 @@ export class Store {
     if (!command) return;
     const readOnly = this.readOnly();
     if (readOnly) {
-      this.toast(readOnly);
+      this.toast(readOnly, 'warn');
       return fail({ kind: 'rejected', message: readOnly });
     }
     this.rerun.add(opId);
@@ -1155,7 +1208,7 @@ export class Store {
         await this.loadDeal(operation.dealId, { gaps: false });
         if (this.state.dealLoad[operation.dealId] !== 'loaded') {
           const message = 'The deal could not be loaded. Retry when it is available.';
-          this.toast(message);
+          this.toast(message, 'warn');
           return fail({ kind: 'unreachable', message });
         }
       }
@@ -1197,7 +1250,7 @@ export class Store {
     }
     if (FIELD_SAVES.has(command.name)) await this.settleField(command.name, input);
     if (plan.effect) this.startEffect(plan.effect, opId);
-    if (plan.message && !opts.quiet) this.toast(plan.message);
+    if (plan.message && !opts.quiet) this.toast(plan.message, 'done');
     return ok({ opId, unchanged: true });
   }
 
@@ -1238,7 +1291,7 @@ export class Store {
     if (opts.opId) {
       const loaded = await this.readJournalOperation(opId);
       if (!loaded.ok) {
-        this.toast(loaded.error.message);
+        this.toast(loaded.error.message, 'warn');
         return loaded;
       }
       const operation = loaded.value?.operation;
@@ -1261,11 +1314,11 @@ export class Store {
       const bases = operation.baseRevs ?? {};
       if (!(await this.reloadTargets(Object.keys(bases)))) {
         const message = 'The saved records could not be loaded. Nothing was written.';
-        this.toast(message);
+        this.toast(message, 'warn');
         return fail({ kind: 'unreachable', message });
       }
       if (Object.entries(bases).some(([id, rev]) => this.revOf(id) !== rev)) {
-        this.toast(`${CHANGED_SINCE}; Discard it, then make the change again`);
+        this.toast(`${CHANGED_SINCE}; Discard it, then make the change again`, 'warn');
         return fail({ kind: 'rejected', message: 'Changed since' });
       }
       revision = loaded.value!.revision;
@@ -1313,10 +1366,10 @@ export class Store {
     this.rerun.add(opId);
     try {
       const discarded = await this.discardRetained(opId);
-      if (discarded && !discarded.ok) this.toast(`Couldn’t discard · ${discarded.error.message}`);
+      if (discarded && !discarded.ok) this.toast(`Couldn’t discard · ${discarded.error.message}`, 'warn');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.toast(`Couldn’t discard · ${message}`);
+      this.toast(`Couldn’t discard · ${message}`, 'warn');
     } finally {
       this.rerun.delete(opId);
     }
@@ -1328,7 +1381,13 @@ export class Store {
   private unreadable = 0;
   /** records last written by a newer build of the app: shown here, not changed (see CURRENT_SCHEMA) */
   private newer = new Set<string>();
-  private reportUnreadable() { if (!this.unreadable) return; const n = this.unreadable; this.unreadable = 0; this.toast(`${n} stored record${n === 1 ? '' : 's'} could not be read and ${n === 1 ? 'is' : 'are'} not shown`, undefined, true); }
+  private reportUnreadable() {
+    if (!this.unreadable) return;
+    const n = this.unreadable;
+    this.unreadable = 0;
+    const [record, verb] = n === 1 ? ['', 'is'] : ['s', 'are'];
+    this.toast(`${n} stored record${record} could not be read and ${verb} not shown`, 'warn', undefined, true);
+  }
   private parse(kind: RecordKind, env: { rev: number; envelope: { data: unknown } }): any | null {
     const schema = schemaOfKind(kind);
     if (!schema) return null;
@@ -1418,7 +1477,8 @@ export class Store {
       }
       if (fixes.length) await this.services.repo.transaction({ writes: fixes });
       this.set({ ...this.state, ops: recovered, boot: { stage: 'ready' } });
-      for (const text of this.keptNotices()) this.toast(text, undefined, 'kept');   // closed only by the person
+      // closed only by the person
+      for (const { text, glyph } of this.keptNotices()) this.toast(text, glyph, undefined, 'kept');
       for (const id of held) this.recheck(id);
       this.resumeReplies(Object.values(recovered));
       this.reportUnreadable();
@@ -1640,7 +1700,11 @@ export class Store {
     // what the check could not reach, or that it did not finish, stays on the page until a later check clears it: a notice that fades is not a record
     const ran = this.services.clock.now(); const u = r.ok ? r.value.unchecked : undefined; const left = u && (u.items || u.findings) ? { items: u.items ?? 0, findings: u.findings ?? 0, at: ran, changed: false } : null;
     this.set({ ...this.state, checks: { ...this.state.checks, [dealId]: r.ok ? { at: r.value.at ?? now.at, offerDeep: r.value.offerDeep ? r.value.sample : null, left, failedAt: null } : { at: now.at, offerDeep: now.offerDeep, left: now.left ?? null, failedAt: r.error.kind === 'failed' || r.error.kind === 'unreachable' ? ran : now.failedAt ?? null } } });   // cut off by a dropped connection: the line says it did not finish
-    if (!r.ok) { if (r.error.kind === 'unreachable') this.netDown(); else this.toast(r.error.kind === 'rejected' ? r.error.message : 'The check did not finish. Findings already marked stay marked'); return; }
+    if (!r.ok) {
+      if (r.error.kind === 'unreachable') this.netDown();
+      else this.toast(r.error.kind === 'rejected' ? r.error.message : CHECK_UNFINISHED, 'warn');
+      return;
+    }
     const v = r.value; const bits = [v.toReassess ? `${v.toReassess} to update` : 'nothing to update', ...(v.newFindings ? [`${v.newFindings} new ${v.newFindings === 1 ? 'finding' : 'findings'}`] : [])];
     const out = [v.unchecked?.items ? `${v.unchecked.items} checklist ${v.unchecked.items === 1 ? 'item' : 'items'}` : '', v.unchecked?.findings ? `${v.unchecked.findings} ${v.unchecked.findings === 1 ? 'finding' : 'findings'}` : ''].filter(Boolean);
     // Not complete because a folder in the data room could not be opened, and no PC has read it. One line, as every
@@ -1651,8 +1715,18 @@ export class Store {
       const after = out.length ? `${out.join(' and ')} could not be checked: ${bits.join(', ')}` : bits.join(', ');
       // a name too wide for the line is the part shortened, so the line still says what happened to it, whatever its letters
       const own = f[0].split('/').pop()!;
-      this.toast(`Not complete · ${f.length > 1 ? `${f.length} folders` : own} could not be opened`, undefined, false, `Not complete: the folder${f.length > 1 ? 's' : ''} ${named} could not be opened. ${after[0].toUpperCase()}${after.slice(1)}`, f.length > 1 ? undefined : own);
-    } else this.toast(out.length ? `Checked, except ${out.join(' and ')} that could not be checked: ${bits.join(', ')}` : `Checklist and findings checked: ${bits.join(', ')}`);
+      const folders = f.length > 1 ? `${f.length} folders` : own;
+      const these = `the folder${f.length > 1 ? 's' : ''} ${named}`;
+      const whole = `Not complete: ${these} could not be opened. ${after[0].toUpperCase()}${after.slice(1)}`;
+      this.toast(`Not complete · ${folders} could not be opened`, 'warn', undefined, false, whole,
+        f.length > 1 ? undefined : own);
+    } else {
+      const bitsText = bits.join(', ');
+      const text = out.length
+        ? `Checked, except ${out.join(' and ')} that could not be checked: ${bitsText}`
+        : `Checklist and findings checked: ${bitsText}`;
+      this.toast(text, out.length ? 'warn' : 'done');
+    }
     void this.refreshGaps(dealId);
   }
   /** request operation ids whose effect is still running in this session */
@@ -1724,9 +1798,23 @@ export class Store {
     const r = await this.conversations.save(key, messages);
     if (r.ok) { this.keepFailed = false; return; }
     const retry = { label: 'Retry', run: () => void this.keep(key, this.state.threads[key] ?? messages) };
-    if (!this.services.conversations) { this.toast('Conversation not saved — browser storage is full.', retry, true); return; }
-    if (r.error.kind === 'failed') { this.toast(`Conversation not saved — ${r.error.message === 'The disk is full' ? 'the disk is full' : 'this PC’s copy can’t be written'}. Your message is still here to copy or retry.`, retry, true); return; }
-    if (!this.keepFailed) this.toast(r.error.kind === 'storageFull' ? 'Conversation not saved for your other PCs — the disk is full. It is kept on this PC.' : 'Conversation not saved for your other PCs — the Punchlist folder can’t be reached. It is kept on this PC and saved when the folder is back.', undefined, true);
+    if (!this.services.conversations) {
+      this.toast('Conversation not saved — browser storage is full.', 'warn', retry, true);
+      return;
+    }
+    if (r.error.kind === 'failed') {
+      const why = r.error.message === 'The disk is full' ? 'the disk is full' : 'this PC’s copy can’t be written';
+      const text = `Conversation not saved — ${why}. Your message is still here to copy or retry.`;
+      this.toast(text, 'warn', retry, true);
+      return;
+    }
+    if (!this.keepFailed) {
+      const where = r.error.kind === 'storageFull'
+        ? 'Conversation not saved for your other PCs — the disk is full. It is kept on this PC.'
+        : 'Conversation not saved for your other PCs — the Punchlist folder can’t be reached. '
+          + 'It is kept on this PC and saved when the folder is back.';
+      this.toast(where, 'warn', undefined, true);
+    }
     this.keepFailed = true;
   }
   private keepFailed = false;
@@ -1814,7 +1902,8 @@ export class Store {
     if (!r || n !== this.syncSeq || !r.ok) return;
     const note = r.value.self.note; const had = this.state.sync?.self.note;
     this.set({ ...this.state, sync: r.value });
-    if (note && note !== had) this.toast(note, undefined, true);          // said once, and it stays until the person dismisses it: nothing more can be saved here
+    // said once, and it stays until the person dismisses it: nothing more can be saved here
+    if (note && note !== had) this.toast(note, 'warn', undefined, true);
     if (r.value.unseen?.length) void keepUnseen(this, r.value.unseen);   // a deal deleted elsewhere with changes here it had not seen
   }
   /**
@@ -1920,7 +2009,11 @@ export class Store {
   }
   private netUp() {
     if (this.probe) { clearInterval(this.probe); this.probe = null; }
-    if (this.state.net.down) { this.set({ ...this.state, net: { ...this.state.net, down: false } }); this.toast('Connected again'); if (typeof window !== 'undefined') window.dispatchEvent(new Event(CONNECTED)); }
+    if (this.state.net.down) {
+      this.set({ ...this.state, net: { ...this.state.net, down: false } });
+      this.toast('Connected again', 'done');
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event(CONNECTED));
+    }
     for (const [req, w] of [...this.stoppedReplies]) if (w.last === 'unreachable') this.retryKeptReply(req);   // replies that ran out of tries while the folder was away get theirs again
     if (this.waitingReplies.size) void this.tryWaiting(true);   // replies waiting for the folder are written at once
   }

@@ -8,6 +8,7 @@ import type { Source } from '../domain/model';
 import type { DocRecord } from './documents';
 import type { AgentKit, AgentQuestion, DealDoc, Run, Sent } from './agentKit';
 import { oneLine } from './agentPrompts';
+import { questionIdsIn } from './qaRow';
 
 /** a document's key across deals, as a folder read keeps what it has read */
 export const dealDocKey = (doc: { dealId: string; rec: DocRecord }) => `${doc.dealId}|${doc.rec.docId}`;
@@ -97,6 +98,22 @@ export class AgentRun {
     this.touched.add(sent);
     this.quiet.delete(sent);
     return sent;
+  }
+
+  /**
+   * The number each question named in `texts` has now in the run's deals, by its record id, so that a question
+   * renumbered since the model was shown it is named by its new number; a question no longer there has none (#1105)
+   */
+  async questionNumbers(texts: string[]): Promise<Map<string, number>> {
+    const numbers = new Map<string, number>();
+    const named = questionIdsIn(texts.join('\n'));
+    if (!named.length) return numbers;
+    for (const dealId of this.question.deals) {
+      for (const record of (await this.kit.questions(dealId)) ?? []) {
+        if (named.includes(record.id) && record.n !== undefined) numbers.set(record.id, record.n);
+      }
+    }
+    return numbers;
   }
 
   /** a document tagged for a model that was not given it after all: it loses its tag and is not counted */

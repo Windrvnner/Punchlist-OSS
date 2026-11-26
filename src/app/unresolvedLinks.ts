@@ -1,5 +1,4 @@
 import type { Question } from '../domain/model';
-import { addresser } from '../domain/suggest';
 import type { Unresolved } from './state';
 
 export type UnresolvedLink = { point: Unresolved; q: Question };
@@ -25,25 +24,16 @@ export function canLinkUnresolved(q: Question, conflicted: boolean): boolean {
     && !q.linkedItem && !q.linkedFinding && !conflicted;
 }
 
-/** Reserve the exact approved links before offering guesses for the remaining points. */
+/** The exact approved links a person chose (#88), each question for one point only. No other link is offered. */
 export function suggestUnresolvedLinks(points: Unresolved[], pool: Question[], approved?: ApprovedLinks) {
-  const kept = new Map<string, Question>();
-  const taken = new Set<string>();
-  if (approved?.size) {
-    const available = new Map(pool.map((q) => [q.id, q]));
-    for (const point of points) {
-      const choice = approved.get(point.key);
-      const q = choice && available.get(choice.questionId);
-      if (!q || taken.has(q.id) || !isApprovedLink({ point, q }, choice)) continue;
-      kept.set(point.key, q);
-      taken.add(q.id);
-    }
-  }
-  const likely = addresser(pool.filter((q) => !taken.has(q.id)));
   const links: { point: string; q: Question }[] = [];
+  if (!approved?.size) return links;
+  const available = new Map(pool.map((q) => [q.id, q]));
+  const taken = new Set<string>();
   for (const point of points) {
-    const q = kept.get(point.key) ?? likely(`${point.what} ${point.need}`).find((guess) => !taken.has(guess.id));
-    if (!q) continue;
+    const choice = approved.get(point.key);
+    const q = choice && available.get(choice.questionId);
+    if (!q || taken.has(q.id) || !isApprovedLink({ point, q }, choice)) continue;
     taken.add(q.id);
     links.push({ point: point.key, q });
   }
