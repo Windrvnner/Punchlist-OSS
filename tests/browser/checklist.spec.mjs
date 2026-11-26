@@ -243,18 +243,137 @@ for (const size of SIZES) { // #2: Add all unresolved to Q&A: from ⋯, a previe
   await page.click('#ck-pmore'); const menu = await page.evaluate(() => [...document.querySelectorAll('#ck-menu .mi')].map((m) => [m.textContent, getComputedStyle(m).fontWeight]).join('|'));
   await page.click('#ck-add-unresolved'); await page.waitForSelector('#au-list .lrow', { timeout: 10000 });
   const pre = await page.evaluate(() => { const d = document.querySelector('.lnkdlg').getBoundingClientRect(); return { groups: [...document.querySelectorAll('#au-list .lgrp')].map((g) => g.textContent), rows: [...document.querySelectorAll('#au-list .lrow')].map((r) => [r.querySelector('input').checked, r.querySelector('.lfor').textContent]), go: document.getElementById('au-go').textContent, count: document.getElementById('au-count').textContent, inside: d.top >= 0 && d.bottom <= innerHeight + 1 }; });
+  await page.click('#au-list .lrow:has-text("Link to") input');
+  const linked = await page.evaluate(() => ({
+    go: document.getElementById('au-go').textContent,
+    count: document.getElementById('au-count').textContent,
+  }));
+  // checking that point's new question again unchecks the link, so a point is never asked twice;
+  // then the link is chosen again
+  await page.click('#au-list .lrow:not(:has-text("Link to")):has(input:not(:checked)) input');
+  const back = await page.evaluate(() => {
+    const boxes = [...document.querySelectorAll('#au-list .lrow input')];
+    const link = [...document.querySelectorAll('#au-list .lrow')].find((r) => r.textContent.includes('Link to'));
+    return boxes.filter((i) => i.checked).length + '/' + link.querySelector('input').checked;
+  });
+  await page.click('#au-list .lrow:has-text("Link to") input');
   await page.click('#au-go'); await page.waitForFunction(() => !document.querySelector('.lnkdlg'), null, { timeout: 5000 });
   const qs = await page.evaluate((d) => Object.values(store.get().questions).filter((q) => q.dealId === d).sort((a, b) => a.n - b.n).map((q) => [q.n, !!q.linkedItem, !!q.linkedFinding]), id);
   const toast = await page.evaluate(() => [...document.querySelectorAll('.toast')].map((t) => t.textContent).join('|'));
   await page.click('.toast button:has-text("Undo"), .toast .tundo').catch(() => {}); await page.waitForFunction((d) => Object.values(store.get().questions).filter((q) => q.dealId === d).length === 1, id, { timeout: 5000 }).catch(() => {});
   const undone = await page.evaluate((d) => Object.values(store.get().questions).filter((q) => q.dealId === d).map((q) => !!q.linkedItem), id);
   say(`#2 Add all unresolved: preview, one change, one Undo (${size[0]})`, menu === 'Add All Unresolved to Q&A…,400'
-    && pre.groups.join() === 'New Questions 5' && pre.rows.length === 5
-    && pre.rows.every(([on]) => on)
-    && pre.rows.filter(([, f]) => f.startsWith('Finding · ')).length === 3 && pre.go === 'Add 5 questions' && pre.count === '5 questions' && pre.inside
-    && qs.length === 6 && JSON.stringify(qs[0]) === '[1,false,false]' && qs.slice(1).filter(([, i, f]) => i || f).length === 5 && /5 questions added.*Undo/.test(toast)
-    && undone.join() === 'false' && !page.errors.length, JSON.stringify({ menu, pre, qs, toast, undone, errors: page.errors }));
+    && pre.groups.join() === 'New Questions 5,Already Asked? 1' && pre.rows.length === 6
+    && pre.rows.slice(0, 5).every(([on]) => on) && !pre.rows[5][0]
+    && pre.rows.filter(([, f]) => f.startsWith('Finding · ')).length === 3
+    && pre.rows[5][1] === 'Link to Gap · Insurance advisor report (final)'
+    && pre.go === 'Add 5 questions' && pre.count === '5 questions' && pre.inside
+    && back === '5/false' && linked.go === 'Add 4 questions' && linked.count === '4 questions · 1 linked'
+    && qs.length === 5 && JSON.stringify(qs[0]) === '[1,true,false]'
+    && qs.slice(1).filter(([, i, f]) => i || f).length === 4 && /4 questions added · 1 linked.*Undo/.test(toast)
+    && undone.join() === 'false' && !page.errors.length,
+    JSON.stringify({ menu, pre, linked, back, qs, toast, undone, errors: page.errors }));
   await ctx.close();
+}
+
+const certificate = 'Certificate renewal lender compliance';
+const alphaTitle = `${certificate} Alpha`;
+const betaTitle = `${certificate} Beta`;
+const openUnresolved = async (page) => {
+  await page.click('#ck-pmore');
+  await page.click('#ck-add-unresolved');
+  await page.waitForSelector('#au-list .lrow input', { timeout: 10000 });
+};
+
+async function certificateSetup(page, dealId, partial) {
+  return page.evaluate(async ({ dealId, partial, alphaTitle, betaTitle, certificate }) => {
+    const run = (name, input) => store.dispatch(store.commandNamed(name), { dealId, ...input }, { quiet: true });
+    const ai = store.services.ai;
+    const rows = store.get().checklists[dealId];
+    ai.checklist = async () => ({ ok: true, value: rows.map((row) => ({ ...row, result: 'satisfied' })) });
+    for (const finding of Object.values(store.get().findings)) {
+      await run('SetFindingStatus', { findingId: finding.id, status: 'closed' });
+    }
+    await store.refreshChecklist(dealId);
+    ai.phrase = async ({ items }) => ({
+      ok: true,
+      value: items.map(({ what }) => partial && what === betaTitle ? null : `Please document ${what}.`),
+    });
+    // these cases are about retained links, not the check: the model confirms every candidate
+    ai.covers = async ({ checks }) => ({ ok: true, value: checks.map(() => true) });
+    for (const title of [betaTitle, alphaTitle]) await run('CreateFinding', { title, workstream: 'Legal' });
+    await run('CreateQuestion', { text: certificate });
+    const alpha = Object.values(store.get().findings).find((finding) => finding.title === alphaTitle).id;
+    const beta = Object.values(store.get().findings).find((finding) => finding.title === betaTitle).id;
+    return { alpha, beta };
+  }, { dealId, partial, alphaTitle, betaTitle, certificate });
+}
+
+async function unresolvedSnapshot(page) {
+  return page.evaluate(() => {
+    const dialog = document.querySelector('.lnkdlg').getBoundingClientRect();
+    const go = document.getElementById('au-go');
+    const box = go.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(go);
+    const text = range.getBoundingClientRect();
+    return {
+      rows: [...document.querySelectorAll('#au-list .lrow')].map((row) => ({
+        question: row.querySelector('b')?.textContent,
+        target: row.querySelector('.lfor').textContent,
+        checked: row.querySelector('input').checked,
+      })),
+      button: go.textContent,
+      inside: dialog.top >= 0 && dialog.bottom <= innerHeight + 1 && box.bottom <= dialog.bottom,
+      centered: Math.abs((box.top + box.bottom - text.top - text.bottom) / 2) <= 1,
+    };
+  });
+}
+
+async function retainedLinkCase(scheme, size, partial) {
+  const { ctx, page, id } = await checklist(scheme, size);
+  const targets = await certificateSetup(page, id, partial);
+  await openUnresolved(page);
+  await page.click(`#au-list .lrow:has-text("Link to Finding · ${alphaTitle}") input`);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.lnkdlg', { state: 'detached' });
+  await page.evaluate(([dealId, text]) => store.dispatch(
+    store.commandNamed('CreateQuestion'), { dealId, text }, { quiet: true },
+  ), [id, alphaTitle]);
+  await openUnresolved(page);
+  await page.waitForTimeout(500);
+  const preview = await unresolvedSnapshot(page);
+  if (process.env.SHOTS) {
+    const path = `${process.env.SHOTS}/kept-link-${scheme}-${size.join('x')}.png`;
+    await page.screenshot({ path });
+  }
+  await page.click('#au-go');
+  const closed = await page.waitForSelector('.lnkdlg', { state: 'detached', timeout: 5000 })
+    .then(() => true, () => false);
+  const written = await page.evaluate(({ alpha, beta }) => {
+    const questions = Object.values(store.get().questions);
+    return {
+      first: questions.find((q) => q.n === 1)?.linkedFinding,
+      alpha: questions.filter((q) => q.linkedFinding === alpha).length,
+      beta: questions.filter((q) => q.linkedFinding === beta).length,
+    };
+  }, targets);
+  const checkedLinks = preview.rows.filter((row) => row.question && row.checked);
+  const betaDraft = preview.rows.find((row) => !row.question && row.target.endsWith(betaTitle));
+  say(`#88 keeps the exact approved link ${scheme} ${size[0]} (partial=${partial})`,
+    checkedLinks.length === 1 && checkedLinks[0].question === 'Q1' && checkedLinks[0].target.endsWith(alphaTitle)
+    && preview.rows.find((row) => !row.question && row.target.endsWith(alphaTitle))?.checked === false
+    && (partial ? !betaDraft : betaDraft?.checked)
+    && preview.button === (partial ? 'Link 1 question' : 'Add 1 question')
+    && preview.inside && preview.centered && closed && written.first === targets.alpha && written.alpha === 1
+    && written.beta === (partial ? 0 : 1) && !page.errors.length,
+    JSON.stringify({ preview, closed, written, errors: page.errors }));
+  await ctx.close();
+}
+
+for (const [index, size] of SIZES.entries()) {
+  await retainedLinkCase('light', size, index === 1);
+  await retainedLinkCase('dark', size, index === 0);
 }
 
 { // a checklist that cannot be read is said so, never taken for an empty one; and one phrasing per deal however often the dialog is opened

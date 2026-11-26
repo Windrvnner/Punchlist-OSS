@@ -10,7 +10,7 @@ import type { ImportField } from '../domain/importExport';
 import { byName, NO_WORKSTREAM, workstreamChoices } from '../domain/order';
 import { capabilities, type Capabilities } from './capabilities';
 import { askBlock } from './asking';
-import { canLinkUnresolved, suggestUnresolvedLinks, type ApprovedLinks } from './unresolvedLinks';
+import { askedCandidates, canLinkUnresolved, type ApprovedLinks } from './unresolvedLinks';
 
 export type BootStage = 'session' | 'deals' | 'journal' | 'ready';
 
@@ -490,12 +490,16 @@ export function unresolvedTargets(s: UnresolvedState, dealId: string, qs = dealQ
   return [...points, ...unresolvedGaps(s, dealId, askedItems)];
 }
 
-/** An unresolved point gets at most one link, and each eligible question is offered once. */
+/**
+ * An unresolved point gets at most one offer, and each eligible question is offered once: `links` are the ones a person
+ * approved, and `candidates` are the questions that clear the cutoff, still to be checked by the model (#1218).
+ */
 export function unresolvedPoints(s: UnresolvedState, dealId: string, approved?: ApprovedLinks) {
   const questions = dealQuestions(s as State, dealId);
   const points = unresolvedTargets(s, dealId, questions);
   const pool = questions.filter((q) => canLinkUnresolved(q, !!s.conflicts[q.id]));
-  return { points, links: suggestUnresolvedLinks(points, pool, approved) };
+  const { kept, candidates } = askedCandidates(points, pool, approved);
+  return { points, links: kept, candidates };
 }
 
 /** A checklist item as a finding or a question names it: its id, its wording, and whether it is turned off. */
