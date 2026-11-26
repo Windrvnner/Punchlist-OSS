@@ -93,7 +93,8 @@ as often as it needs. Its only stops are the per-run rounds caps: about `limits.
 `limits.searchCalls` (15) calls per search run, both inputs in the control file; there is no per-deal cap, so
 the cost per deal is not otherwise bounded. An item that the agent still cannot settle stays a gap if nothing was
 found, and becomes "not settled" if the run stopped at a ceiling, saying so on hover. Questions in the chat already
-run on this loop. The extra calls per gap item are to be measured on the 2,400-item checklist before the defaults are set.
+run on this loop. The extra calls per gap item are to be measured on the 2,400-item checklist before the defaults
+are set.
 
 ## Cost on a 1,779-file data room and a 2,400-item checklist
 
