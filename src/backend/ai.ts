@@ -1373,7 +1373,7 @@ export function nodeAi(o: AiOptions) {
 
   /**
    * One JSON reply that `usable` accepts: one it rejects is sent back once with what is wrong, as `draft` does (#1058).
-   * The send-back is read as written, with no repair call; the caller decides what a reply still unusable means.
+   * The send-back is read as written, with no second reading; the caller decides what a reply still unusable means.
    */
   async function askSentBack<T extends Record<string, unknown>>(
     ask: Ask, keys: string[], usable: (reply: T | null) => boolean, wrong: string,

@@ -146,7 +146,7 @@ describe('the deal memo’s ratings and summary', () => {
     expect(!r.ok && r.error.kind).toBe('failed');
   });
 
-  it('fails the memo with the too-long-reply failure, and saves nothing, when the summary is cut off (#1065)', async () => {
+  it('fails the memo with the too-long-reply failure when the summary is cut off (#1065)', async () => {
     const cut = () => { throw Object.assign(new Error('cut off'), { code: 'cutoff' }); };
     const s = setup(by({ f_1: 'High' }), cut);
     await deal(s.repo);
