@@ -13,8 +13,8 @@ import {
 import type { Folder } from '../../src/backend/logRepository';
 import { nodeFolder } from '../../src/backend/nodeFolder';
 import { pdfText } from '../fixtures/pdfText';
-import { wordIndex } from '../../src/backend/wordIndex';
-import { tokens, fold } from '../../src/backend/words';
+import { countWords, wordIndex } from '../../src/backend/wordIndex';
+import { tokens, fold, topWords } from '../../src/backend/words';
 import { StoreKeeper, fromStoreName } from '../../src/backend/storeKeeper';
 import { StandInService } from '../../src/backend/service';
 import { nodeAi } from '../../src/backend/ai';
@@ -238,6 +238,27 @@ describe('documents on real folders', () => {
     expect(order.indexOf('C Agreement.pdf')).toBeLessThan(order.indexOf('B small.csv'));
     expect(order.indexOf('B small.csv')).toBeLessThan(order.indexOf('A large.csv'));
   });
+
+  it('a spreadsheet of a quarter of a million different words is counted as the same text read whole (#427)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    // each row a word of its own (four letters after a "z", so no two rows share one) and a note every row shares
+    const letters = (i: number) => [3, 2, 1, 0].map((p) => String.fromCharCode(97 + (Math.floor(i / 26 ** p) % 26)));
+    const rows = Array.from({ length: 250_000 }, (_, i) => [`z${letters(i).join('')}`, `ledger entry ${i}`]);
+    put(vdr, 'Names.csv', rows.map((row) => row.join(',')).join('\n'));
+    const a = pc(root, 'office', undefined, { index: true });
+    await indexAll(a, vdr);
+    const text = rows.flat().join('\n');
+    const expected = countWords(text);
+    expect(expected.counts.size).toBeGreaterThan(200_000);
+    const record = a.docs.records('d1').find((r) => r.name === 'Names.csv')!;
+    expect(record.words).toEqual(topWords(text));
+    const lines = fs.readFileSync(path.join(root, 'local-office', 'words-d1.jsonl'), 'utf8').trim().split('\n');
+    const line = lines.map((l) => JSON.parse(l)).find((l) => l.d === record.docId);
+    expect(line.n).toBe(expected.length);
+    expect(line.t).toBe(expected.title.join(' '));
+    expect(line.w).toBe([...expected.counts].map(([w, n]) => `${w}:${n}`).join(' '));
+  }, 60000);
 
   it('a scan has no words and is indexed all the same; a long document is counted from pages spread through it; a record from before words were kept gets them', async () => {
     const root = tmp(); const vdr = path.join(root, 'vdr'); const blank = new TextEncoder().encode(new TextDecoder().decode(pdf('', 2)).replace(/\(, page \d\) Tj/g, (m) => ' '.repeat(m.length)));
