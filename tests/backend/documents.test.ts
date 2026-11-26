@@ -293,7 +293,7 @@ describe('documents on real folders', () => {
     expect(kept.get(record.docId)).toBeGreaterThan(0);
   });
 
-  it('a successful read replaces the empty word list an earlier build recorded, also after a reindex (#1023)', async () => {
+  it('a successful read replaces an empty word list an earlier build recorded, also on reindex (#1023)', async () => {
     const root = tmp();
     const vdr = path.join(root, 'vdr');
     const RATES = 'Tenor,Margin\nSenior term loan,2.25\n';
@@ -301,9 +301,13 @@ describe('documents on real folders', () => {
     const docId = idOf(RATES);
     const a = pc(root, 'office', undefined, { index: true });
     await indexAll(a, vdr);
+    const oldLine = {
+      v: 1, pc: 'office', docId, hash: hashBytes(bytesOf(RATES)), name: 'Rates.csv', folder: vdr, rel: 'Rates.csv',
+      size: bytesOf(RATES).length, words: [],
+    };
     const sayEmpty = (at: string) => fs.appendFileSync(
       path.join(root, 'shared', 'docs-office-d1.jsonl'),
-      `${JSON.stringify({ v: 1, pc: 'office', at, docId, hash: hashBytes(bytesOf(RATES)), name: 'Rates.csv', folder: vdr, rel: 'Rates.csv', size: bytesOf(RATES).length, words: [] })}\n`,
+      `${JSON.stringify({ ...oldLine, at })}\n`,
     );
     const rates = (x: ReturnType<typeof pc>) => x.docs.records('d1').find((r) => r.name === 'Rates.csv')!;
     for (const [i, at] of ['2026-12-01T00:00:00.000Z', '2026-12-02T00:00:00.000Z'].entries()) {
@@ -316,7 +320,7 @@ describe('documents on real folders', () => {
     }
   });
 
-  it('an index file of an older version is not enough: the next freshen reads the folders again, once (#1023)', async () => {
+  it('an older version’s index file is not enough: the next freshen reads the folders once more (#1023)', async () => {
     const root = tmp();
     const vdr = path.join(root, 'vdr');
     put(vdr, 'Rates.csv', 'Tenor,Margin\nSenior term loan,2.25\n');
@@ -329,7 +333,8 @@ describe('documents on real folders', () => {
     await restarted.docs.settled('d1');
     expect(fs.existsSync(current)).toBe(true);
     const record = restarted.docs.records('d1').find((r) => r.name === 'Rates.csv')!;
-    const found = wordIndex(restarted.local).score('d1', new Set(['senior']), [{ docId: record.docId, named: new Set() }]);
+    const asked = [{ docId: record.docId, named: new Set<string>() }];
+    const found = wordIndex(restarted.local).score('d1', new Set(['senior']), asked);
     expect(found.get(record.docId)).toBeGreaterThan(0);
     expect(val(await restarted.docs.freshen!('d1'))).toBe('same');
   });
@@ -362,7 +367,8 @@ describe('documents on real folders', () => {
     // and the person is told which
     expect(p.log).toEqual(['Indexed 3 files', '1 file has no readable text and can be found by name only: Scan.pdf']);
     expect(by('Scan.pdf')).toMatchObject({ pages: 2, words: [] });
-    expect(by('Rates.csv').words).toEqual(topWords('Tenor,Margin\nSenior term loan,2.25\nSenior term loan,2.50\nJunior loan,6\n'));
+    const rates = 'Tenor,Margin\nSenior term loan,2.25\nSenior term loan,2.50\nJunior loan,6\n';
+    expect(by('Rates.csv').words).toEqual(topWords(rates));
     // a large spreadsheet is read like any other: its words are counted, however big it is
     put(vdr, 'Huge export.csv', 'ledger,entry\n'.repeat(2_100_000));
     await indexAll(a, vdr);
