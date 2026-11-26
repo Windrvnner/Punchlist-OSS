@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseDate, prepareImport, suggestMapping, questionsSheet, findingsSheet } from '../../src/domain/importExport';
-import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
+import { csvCodec } from '../../src/adapters/spreadsheet';
+import { readCsv } from '../../src/domain/sheets';
 import { Question } from '../../src/domain/model';
 
 describe('parseDate', () => {
