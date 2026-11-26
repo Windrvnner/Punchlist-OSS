@@ -108,5 +108,10 @@ export async function finding(repo: Repository, id: string, title: string, extra
 export async function question(repo: Repository, id: string, n: number, text: string, response: string, extra: object = {}) { val(await repo.transaction({ writes: [{ kind: 'question', id, data: { id, dealId: 'd1', n, text, response, ...extra }, expectedRev: null }], index: { dealId: 'd1', add: [{ kind: 'question', id }] } })); }
 /** what the checks file says, by item */
 export const checkLines = (shared: Mem) => [...shared.files].filter(([n]) => n.startsWith('checks-')).flatMap(([, t]) => t.trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)));
-/** the items a per-item pick was asked about, by tag */
-export const thingsIn = (c: Call) => [...c.prompt.split('Which of them should be read for each of these?')[1].matchAll(/^(I\d+): /gm)].map((m) => m[1]);
+/** the items a per-item pick was asked about, each by its id (#1162), and what it was asked with */
+export const thingsAsked = (c: Call) => {
+  const asked = c.prompt.split('Which of them should be read for each of these?')[1].split('\n\nFor each, choose')[0];
+  return [...asked.matchAll(/^(\S+): (.*)$/gm)].map((m) => ({ tag: m[1], what: m[2] }));
+};
+/** the ids of the items a per-item pick was asked about */
+export const thingsIn = (c: Call) => thingsAsked(c).map((t) => t.tag);

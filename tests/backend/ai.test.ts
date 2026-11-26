@@ -1706,14 +1706,17 @@ describe('the first pass', () => {
           sector: [],
         }),
         pick: (c) => ({ read: idsOf(c, FA, TS) }),
-        pickFor: (c) => ({ read: { I1: idsOf(c, PERMIT), I2: [], I9: idsOf(c, PERMIT) } }),
+        pickFor: (c) => ({ read: { x1: idsOf(c, PERMIT), s3: [] } }),
       },
     );
     await deal(s.repo);
     const r = val(await s.ai.firstPass('d1'));
     expect(s.pickCalls.length).toBe(1); expect(s.pickForCalls.length).toBe(1); expect(s.pickCalls[0].prompt).toContain('Which of them should be read for this?\nThe lock-up ratio is the same in the credit agreement and the term sheet\nEvery consent is in place and unconditional\nDecommissioning is provided for');
     // the items that need more are put to the fast model together, each with what it needs; it answers for each, from what has not been read yet
-    expect(s.pickForCalls[0].prompt).toContain('Which of them should be read for each of these?\nI1: Every consent is in place and unconditional Still needed: the permits themselves\nI2: Decommissioning is provided for Still needed: a decommissioning plan\n'); expect(s.pickForCalls[0].model).toBe('fast');
+    expect(s.pickForCalls[0].prompt).toContain('Which of them should be read for each of these?\n'
+      + 'x1: Every consent is in place and unconditional Still needed: the permits themselves\n'
+      + 's3: Decommissioning is provided for Still needed: a decommissioning plan\n');
+    expect(s.pickForCalls[0].model).toBe('fast');
     // ranked by the items and what they need, not by the words of the instruction around them
     expect(s.pickForCalls[0].prompt).not.toContain('Credit Agreement.pdf');
     expect(s.pickForCalls[0].prompt).toContain(`\n${PERMIT.docId}: vdr/05 Permits/ENV-2024-0043.pdf`);
@@ -1726,7 +1729,7 @@ describe('the first pass', () => {
       { rel: '09 Misc/DEC-77.pdf', pages: 3, summary: 'Decommissioning plan for the site.' });
     const DECOM = { id: 'x1', text: 'Decommissioning is provided for' };
     const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...(has(c, PLAN) ? OK(c) : { result: 'more', need: 'a decommissioning plan' }) })) }), { d1: [FA, TS, PLAN] }, { checklist: () => ({ broad: [DECOM], product: [], sector: [] }),
-      pick: (c) => ({ read: idsOf(c, FA) }), pickFor: () => ({ read: { I1: [] } }),
+      pick: (c) => ({ read: idsOf(c, FA) }), pickFor: () => ({ read: { x1: [] } }),
       // the agent's search finds the plan by its words, its helper reads it, and the agent's answer cites it
       fill: (c) => (isTurn(c)
         ? { text: 'DEC-77 is the decommissioning plan. [1]', sources: [{ doc: tag(c, PLAN), page: 1 }] }

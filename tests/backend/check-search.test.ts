@@ -17,6 +17,7 @@ import {
   OK,
   LISTED_ID,
   queriedIn,
+  thingsIn,
 } from './reviewKit';
 import type { DocRecord } from '../../src/backend/documents';
 
@@ -58,7 +59,7 @@ const answer = (c: Call) => ({
 const pickFound = (c: Call) => ({ read: listed(c).slice(0, 2).map((r) => r.id) });
 const pickForFound = (c: Call) => {
   const out: Record<string, string[]> = {};
-  for (const m of c.prompt.matchAll(/^(I\d+): .*\(its searches found ([\w, ]+)\)$/gm))
+  for (const m of c.prompt.matchAll(/^(\S+): .*\(its searches found ([\w, ]+)\)$/gm))
     out[m[1]] = m[2].split(', ').slice(0, 2);
   return { read: out };
 };
@@ -98,7 +99,7 @@ describe('checks on the search agent', () => {
             .filter((r) => /EPA|Litware/.test(r.path))
             .map((r) => r.id),
         }),
-        pickFor: () => ({ read: { I1: [] } }),
+        pickFor: (c) => ({ read: { [thingsIn(c as Call)[0]]: [] } }),
       },
     );
     await deal(s.repo); const r = val(await s.ai.firstPass('d1'));
@@ -130,7 +131,7 @@ describe('checks on the search agent', () => {
               .filter((r) => /EPA|Litware/.test(r.path))
               .map((r) => r.id),
           }),
-          pickFor: () => ({ read: { I1: [] } }),
+          pickFor: (c) => ({ read: { [thingsIn(c as Call)[0]]: [] } }),
         },
       );
       await deal(s.repo); const r = val(await s.ai.firstPass('d1'));
@@ -159,7 +160,7 @@ describe('checks on the search agent', () => {
               .filter((r) => /EPA|Litware/.test(r.path))
               .map((r) => r.id),
           }),
-          pickFor: () => ({ read: { I1: [] } }),
+          pickFor: (c) => ({ read: { [thingsIn(c as Call)[0]]: [] } }),
         },
       );
       await deal(s.repo); val(await s.ai.firstPass('d1'));
@@ -196,7 +197,7 @@ describe('checks on the search agent', () => {
   it('the search keeps to its calls per search run: with none left it asks no more, and the check ends', async () => {
     const s = setup(answer, { d1: room }, {
       checklist, searchCalls: 1, query: queries, pick: pickFound,
-      pickFor: (c) => ({ read: { I1: [listed(c as Call)[0].id] } }),
+      pickFor: (c) => ({ read: { [thingsIn(c as Call)[0]]: [listed(c as Call)[0].id] } }),
     });
     await deal(s.repo); const r = val(await s.ai.firstPass('d1'));
     // one call in each of the check's two search runs
@@ -219,7 +220,7 @@ describe('checks on the search agent', () => {
     // the second look's run has its own calls
     const tight = setup(answer, { d1: room }, {
       checklist, searchCalls: 3, query: flaky, pick: pickFound,
-      pickFor: (c) => ({ read: { I1: [listed(c as Call)[0].id] } }),
+      pickFor: (c) => ({ read: { [thingsIn(c as Call)[0]]: [listed(c as Call)[0].id] } }),
     });
     await deal(tight.repo); val(await tight.ai.firstPass('d1'));
     expect(tight.queryCalls.length).toBe(5); expect(tight.pickForCalls.length).toBe(0);
@@ -230,7 +231,7 @@ describe('checks on the search agent', () => {
     // in the first search and in the second look
     const s = setup(answer, { d1: room }, {
       checklist, searchCalls: 1, query: queries, pick: pickFound,
-      pickFor: (c) => ({ read: { I1: [listed(c as Call)[0].id] } }),
+      pickFor: (c) => ({ read: { [thingsIn(c as Call)[0]]: [listed(c as Call)[0].id] } }),
     });
     await deal(s.repo); val(await s.ai.firstPass('d1'));
     expect(s.queryCalls.length).toBe(2); expect(s.queryCalls[1].prompt).not.toContain('searched already');

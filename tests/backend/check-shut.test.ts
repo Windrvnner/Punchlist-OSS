@@ -3,7 +3,7 @@
 // wait, naming the folder; the rest of each batch is checked on documents chosen from what can be read, and asking which
 // items use it costs no model call. A folder that does not answer still holds back the whole batch.
 import { describe, it, expect } from 'vitest';
-import { setup, doc, val, deal, itemsIn, Mem, OK, listed, type Call } from './reviewKit';
+import { setup, doc, val, deal, itemsIn, Mem, OK, listed, thingsAsked, type Call } from './reviewKit';
 import type { AiDocs } from '../../src/backend/ai';
 import type { DocRecord } from '../../src/backend/documents';
 
@@ -16,7 +16,7 @@ const FOLDER = 'The folder Legal could not be opened on this PC.';
 /** what a pick was asked about, and the paths it was offered */
 const asked = (c: Call) => ({ what: c.prompt.split('Which of them should be read for this?\n')[1].split('\n\nChoose')[0], rows: listed(c) });
 /** what a pick for several items was asked about, one line for each, and the paths it was offered */
-const askedEach = (c: Call) => ({ things: [...c.prompt.matchAll(/^I(\d+): (.*)$/gm)].map((m) => ({ tag: `I${m[1]}`, what: m[2] })), rows: listed(c) });
+const askedEach = (c: Call) => ({ things: thingsAsked(c), rows: listed(c) });
 /**
  * A deal whose "Legal" documents cannot be read on this PC, and "Drive" ones are on a drive that dropped. `pick` says which
  * offered paths the fast model picks for a batch (its items' text, one per line), and `own` which it picks for one item when

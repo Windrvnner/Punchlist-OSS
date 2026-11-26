@@ -54,7 +54,7 @@ import { createHash } from 'node:crypto';
 import { ListRecord, Item, firmOf, orderItems, key } from '../domain/checklist';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ulid } from 'ulid';
-import { readJson, unfinished, list as listOf, strings, int, pageOf, word, tagNumber, isObject } from './lenient';
+import { readJson, unfinished, list as listOf, strings, int, pageOf, word, isObject } from './lenient';
 import type { LineRead } from '../domain/listRead';
 import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK } from './limits';
 import { UNREAD_REPLY, UNUSABLE_REPLY, UNREACHED, CUT_ON_IT, CUT_BEFORE_IT, UNUSABLE_ON_IT } from './limits';
@@ -1233,11 +1233,15 @@ export function nodeAi(o: AiOptions) {
     const ids = [...new Set(listOf(named))].filter((id): id is string => typeof id === 'string');
     return ids.map((id) => byId.get(id)).filter((r): r is DocRecord => !!r).slice(0, most);
   }
-  /** the fast model's pick from a listing of `list`; null when it could not be asked or its reply cannot be read */
-  async function askPick(list: DocRecord[], listed: string): Promise<{ read?: unknown } | null> {
+  /**
+   * The fast model's pick from a listing of `list`; null when it could not be asked or its reply cannot be read.
+   * `items`: the ids of the checklist items a pick for several items is keyed by.
+   */
+  async function askPick(list: DocRecord[], listed: string, items?: string[]): Promise<{ read?: unknown } | null> {
     const prompt = `${PICK_INTRO}\n${listed}`;
     const model = (await models()).fast;
-    const input: Ask = { kind: 'pick', split: true, model, system: JSON_ONLY, unusable: pickUnusable(list), prompt };
+    const unusable = pickUnusable(list, items);
+    const input: Ask = { kind: 'pick', split: true, model, system: JSON_ONLY, unusable, prompt };
     try {
       return await askJson<{ read?: unknown }>(input, ['read']);
     } catch (e) {
@@ -1245,11 +1249,15 @@ export function nodeAi(o: AiOptions) {
       return null;
     }
   }
-  /** a pick whose reply names a file by an id it was not shown is a failed reply, asked again (#1162) */
-  const pickUnusable = (list: DocRecord[]) => (text: string) => {
+  /**
+   * A pick whose reply names a file, or keys a checklist item of `items`, by an id it was not shown is a failed reply,
+   * asked again (#1162)
+   */
+  const pickUnusable = (list: DocRecord[], items?: string[]) => (text: string) => {
     const read = json<{ read?: unknown }>(text, 'read')?.read;
     const named = isObject(read) ? Object.values(read).flatMap(listOf) : listOf(read);
-    return unknownIds(named, list.map((r) => r.docId)).length > 0;
+    const keyed = items && isObject(read) ? unknownIds(Object.keys(read), items) : [];
+    return unknownIds(named, list.map((r) => r.docId)).length > 0 || keyed.length > 0;
   };
   /**
    * What to read for something, in two steps: the keyword ranking, then the fast model's pick from the top of it, each
@@ -1322,11 +1330,13 @@ export function nodeAi(o: AiOptions) {
       return found?.has(t.id) ? ` (its searches found ${at.length ? at.join(', ') : 'none of them'})` : '';
     };
     if (!list.length || each < 1 || !things.length) return out;
-    const asked = things.map((t, i) => `I${i + 1}: ${t.what.replace(/\n/g, ' ')}${hint(t)}`).join('\n');
+    // each item is shown by its permanent id, never a running number its words could be confused with (#1162)
+    const asked = things.map((t) => `${t.id}: ${t.what.replace(/\n/g, ' ')}${hint(t)}`).join('\n');
     const ask = `Which of them should be read for each of these?\n${asked}\n\nFor each, choose up to ${each}, the most `
       + 'useful first. If none of the files bears on one, choose none for it.\n'
-      + 'Reply as JSON: {"read": {"I1": ["an id", "another id"], "I2": []}}';
-    const reply = await askPick(list, `${pickListing(list, core, dealId)}\n\n${ask}`);
+      + `Reply as JSON: {"read": {"${things[0].id}": ["an id", "another id"]}}`;
+    const ids = things.map((t) => t.id);
+    const reply = await askPick(list, `${pickListing(list, core, dealId)}\n\n${ask}`, ids);
     if (!reply || !('read' in reply) || !reply.read || typeof reply.read !== 'object') return null;
     const picked = (v: unknown) => pickedFrom(list, v, each);
     // one list for all of them: each is given it
@@ -1335,9 +1345,7 @@ export function nodeAi(o: AiOptions) {
       return out;
     }
     for (const [k, v] of Object.entries(reply.read as Record<string, unknown>)) {
-      const n = tagNumber(k, 'I');
-      const t = n ? things[n - 1] : undefined;
-      if (t) out.set(t.id, picked(v));
+      if (out.has(k)) out.set(k, picked(v));
     }
     return out;
   }
