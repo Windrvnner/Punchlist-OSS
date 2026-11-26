@@ -3,6 +3,7 @@
 // point is on says "#N on issues list". A list the stand-in reads from a text file is checked end to end too.
 import { launchChrome } from './chrome.mjs';
 import { checkRemovalApproval } from './issueslistRemoval.mjs';
+import { checkPastedList } from './issueslistPaste.mjs';
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
 const results = []; const say = (id, ok, note = '') => { results.push([id, ok]); console.log(ok ? 'PASS' : 'FAIL', id, note); };
 const browser = await launchChrome();
@@ -46,7 +47,10 @@ async function listStatus(page) {
 }
 
 for (const [w, h, scheme] of [[1280, 736, 'dark'], [1024, 640, 'light']]) {
-  const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme }); const page = await ctx.newPage(); page.errors = [];
+  // clipboard access lets a paste be a real Ctrl+V
+  const permissions = ['clipboard-read', 'clipboard-write'];
+  const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme, permissions });
+  const page = await ctx.newPage(); page.errors = [];
   page.on('pageerror', (e) => page.errors.push(e.message));
   await page.goto(URL); await page.waitForSelector('#fr-new');
   await page.click('#fr-new'); await page.fill('#nd-name', 'Proseware'); await page.click('#nd-create'); await page.waitForSelector('.dtabs');
@@ -85,6 +89,7 @@ for (const [w, h, scheme] of [[1280, 736, 'dark'], [1024, 640, 'light']]) {
   // a file that is not a list: said so, nothing changed
   await page.click('#f-more'); await page.click('#f-import'); await page.waitForSelector('#il-drop');
   say(`start over asks first and clears the list (${w})`, restart.ask === 'Clear this import and start over?' && restart.go === 'Start Over' && !(await page.$('#il-raised')), JSON.stringify(restart));
+  await checkPastedList(page, say, w);
   await page.setInputFiles('#il-file', { name: 'scan.pdf', mimeType: 'application/pdf', buffer: Buffer.from([0x25, 0x50, 0x44, 0x46, 0xff, 0xfe]) });
   await page.waitForSelector('#il-error');
   say(`a file that is not a list says so (${w})`, (await page.textContent('#il-error')).startsWith('Couldn’t read scan.pdf'), await page.textContent('#il-error'));
