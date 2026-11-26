@@ -4,7 +4,7 @@
  * pages of one size (#1102), at deal scale.
  */
 import { describe, it, expect } from 'vitest';
-import { rankRecords, pageOf } from '../../src/backend/recordSearch';
+import { rankRecords, pageOf, pageOfGroups } from '../../src/backend/recordSearch';
 import { tokens, fold } from '../../src/backend/words';
 
 /** a query's words as a search compares them */
@@ -53,5 +53,24 @@ describe('pageOf', () => {
   });
   it('counts no pages when nothing matched', () => {
     expect(pageOf([], 1, 25)).toEqual({ items: [], page: 1, pages: 0, total: 0 });
+  });
+});
+
+describe('pageOfGroups', () => {
+  it('never splits a group: one that does not fit starts the next page', () => {
+    const groups: (string | number)[][] = [[1], [2], [3], ['clean', 'blackline'], [4], [5]];
+    expect(pageOfGroups(groups, 1, 4)).toEqual({ items: [1, 2, 3], page: 1, pages: 2, total: 7 });
+    expect(pageOfGroups(groups, 2, 4)).toEqual({ items: ['clean', 'blackline', 4, 5], page: 2, pages: 2, total: 7 });
+  });
+  it('cuts a group larger than a page into pages that each begin with its first item, never over the size', () => {
+    const big = ['clean', ...Array.from({ length: 10 }, (_v, i) => `blackline ${i + 1}`)];
+    const pages = [1, 2, 3].map((k) => pageOfGroups([big, ['other']], k, 4).items);
+    expect(pages).toEqual([
+      ['clean', 'blackline 1', 'blackline 2', 'blackline 3'],
+      ['clean', 'blackline 4', 'blackline 5', 'blackline 6'],
+      ['clean', 'blackline 7', 'blackline 8', 'blackline 9'],
+    ]);
+    expect(pageOfGroups([big, ['other']], 4, 4).items).toEqual(['clean', 'blackline 10', 'other']);
+    expect(pages.every((items) => items.length <= 4)).toBe(true);
   });
 });

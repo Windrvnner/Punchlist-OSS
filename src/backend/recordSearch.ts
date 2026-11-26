@@ -29,19 +29,29 @@ export function rankRecords<T>(records: T[], q: Set<string>, text: (x: T) => str
 }
 
 /**
- * Page `page` (from 1) of a ranking of groups, `size` items a page, with no group split between pages: a group that
- * does not fit on the page under way starts the next one, and one larger than a page has a page of its own. A
- * blackline and its clean draft are one group, read together (#1102).
+ * Page `page` (from 1) of a ranking of groups, at most `size` items a page, with no group split between pages: a group
+ * that does not fit on the page under way starts the next one. A group larger than a page is cut into pages that each
+ * begin with its first item. A clean draft and its blacklines are one group, the clean draft first, so each blackline
+ * is read beside it (#1102).
  */
 export function pageOfGroups<T>(groups: T[][], page: number, size: number): Page<T> {
   const pages: T[][] = [];
-  for (const group of groups) {
+  for (const group of groups.flatMap((g) => cutToFit(g, size))) {
     const last = pages.at(-1);
     if (last && last.length + group.length <= size) last.push(...group);
     else pages.push([...group]);
   }
   const total = groups.reduce((sum, g) => sum + g.length, 0);
   return { items: pages[page - 1] ?? [], page, pages: pages.length, total };
+}
+
+/** a group as pieces of at most `size`, each beginning with the group's first item */
+function cutToFit<T>(group: T[], size: number): T[][] {
+  if (group.length <= size || size < 2) return [group];
+  const [first, ...rest] = group;
+  const pieces: T[][] = [];
+  for (let i = 0; i < rest.length; i += size - 1) pieces.push([first, ...rest.slice(i, i + size - 1)]);
+  return pieces;
 }
 
 /** page `page` (from 1) of a ranking, `size` a page; a page past the last has no items */
