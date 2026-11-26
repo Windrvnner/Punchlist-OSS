@@ -94,11 +94,10 @@ function readReply(prompt: string, name: string, issues = ISSUES[name] ?? []) {
   }));
   const earlier = [...prompt.matchAll(/^E(\d+): (.*)$/gm)].map((m) => ({ e: `E${m[1]}`, title: m[2] }));
   const fresh = issues.filter((t) => !earlier.some((e) => e.title === t));
-  const page = fresh;
   return {
     advisor: 'the advisor',
     dropped: earlier.filter((e) => !issues.includes(e.title)).map((e) => e.e),
-    issues: page
+    issues: fresh
       .map((t, i) => {
         const k = known.find((x) => x.title === t);
         return k

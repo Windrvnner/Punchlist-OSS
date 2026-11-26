@@ -11,7 +11,7 @@
  *   1. Sort: the fast model is shown the paths of the deal's documents not sorted yet, a part at a time, and says
  *      which are third-party reports and which it cannot tell from the path (`sorted`).
  *   2. Look: a document it could not tell is sent to the fast model, which reads its first pages and says (`looked`).
- *   3. Read: each report is read through by the standard model for the issues it raises, a page of issues at a time,
+ *   3. Read: each report is read through by the standard model for the issues it raises, in one call,
  *      and each issue becomes a finding, unless an open or deleted finding on the deal already covers it
  *      (matched by what it is about, unlike a checklist item's problem); one only a closed finding covers is
  *      raised again, naming the closed one, as a checklist item's is. A new draft of a report raises only its new
@@ -23,9 +23,9 @@
  * before it raised. A report is read once: a read that stops partway (the service out of reach, a reply that cannot
  * be used, an issue with no page that opens) is not written, and is done again at the next sweep, where what it raised
  * already is covered by the findings it wrote; after `TRIES` reads that could not finish, the last is kept as it
- * stands, or the document is left alone. Work is claimed first, and a read's claim is renewed with each call, as
- * describing is, so two PCs seldom pay for the same call; two that start on one report before either claim arrives can
- * both read it, and the second raises again only what it titles differently from the first.
+ * stands, or the document is left alone. Work is claimed first, so two PCs seldom pay for
+ * the same call; two that start on one report before either claim arrives can both read it, and the second
+ * raises again only what it titles differently from the first.
  */
 import type { DocRecord } from './documents';
 import { list as listOf, word } from './lenient';

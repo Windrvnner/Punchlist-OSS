@@ -605,7 +605,10 @@ export function nodeAi(o: AiOptions) {
    * checked against the file's text or matched to it. A reply that cannot be read is asked for again (`tried`); one cut
    * off at the length limit fails the read, as it does anywhere else.
    */
-  async function readIssuePoints(
+  /** a reply's text with its white space collapsed */
+const clean = (t: unknown) => String(t ?? '').replace(/\s+/g, ' ').trim();
+
+async function readIssuePoints(
     name: string, fileId: string, model: Ask['model'], tried: <T>(ask: () => Promise<T>) => Promise<T>,
   ): Promise<Result<{ n: string; text: string }[]>> {
     const prompt = [
@@ -620,9 +623,8 @@ export function nodeAi(o: AiOptions) {
       if (!reply || !Array.isArray(reply.points)) {
         return fail({ kind: 'failed', message: 'It could not be read as an issues list' });
       }
-      const clean = (t: unknown) => String(t ?? '').replace(/\s+/g, ' ').trim();
       const given = reply.points as { n?: unknown; text?: unknown }[];
-      return ok(given.map((p) => ({ n: clean(p?.n).replace(/^#/, ''), text: clean(p?.text) })).filter((p) => p.text));
+      return ok(given.map((p) => ({ n: clean(p?.n), text: clean(p?.text) })).filter((p) => p.text));
     } catch (e) { return failure(e, 'The file could not be read'); }
   }
   async function askJson<T = Record<string, unknown>>(input: Ask, keys: string[], shape?: string, fix = true): Promise<T | null> {
@@ -2123,7 +2125,7 @@ export function nodeAi(o: AiOptions) {
       let fileId: string | undefined;
       try { fileId = (await o.keeper.ensure(await o.docs.wanted(i.dealId, [i.doc.docId])))[i.doc.docId]; } catch (e) { return failure(e, 'The file could not be read'); }
       if (!fileId) return fail({ kind: 'failed', message: 'The file could not be read' });
-      const fast = (await models()).fast; const clean = (t: unknown) => String(t ?? '').replace(/\s+/g, ' ').trim();
+      const fast = (await models()).fast;
       const got = await readIssuePoints(i.doc.doc, fileId, fast, tried);
       if (!got.ok) return got;
       const read = got.value;

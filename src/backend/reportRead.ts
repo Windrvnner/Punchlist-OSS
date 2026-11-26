@@ -1,6 +1,6 @@
 /**
  * Step 3 of the third-party reports sweep (reports.ts): the standard model reads one report through for the issues it
- * raises, a page of issues at a time, and each issue becomes a finding, unless a finding on the deal already covers it.
+ * raises, in one call, and each issue becomes a finding, unless a finding on the deal already covers it.
  */
 import type { DocRecord } from './documents';
 import type { Cited } from './agent';
@@ -101,8 +101,8 @@ class ReportRead {
   advisor = '';
   /** findings of the earlier draft's issues this draft no longer raises */
   dropped = new Set<string>();
-  /** the pages each title was raised on: the same title on the same page is one issue given twice */
-  titles = new Map<string, Set<string>>();
+  /** how many issues of each title the report has given: another of the same title gets its own finding id */
+  titles = new Map<string, number>();
   /** issues given with no page that opens */
   unplaced = 0;
   /** pages that could not be added to a finding now: a later sweep adds them */
@@ -157,13 +157,9 @@ class ReportRead {
     const fitted = k.fit(strings(row.body).join('\n\u0000\n'), row.sources as Cited[], this.s.sent);
     // an issue stands on a page of the report a person can open, as any finding does
     if (!fitted.text || !fitted.sources.length) { this.unplaced++; return true; }
-    // the same title on the same page is a page given again; on another page it is another issue of that name
-    const same = title.toLowerCase().replace(/\s+/g, ' ');
-    const pages = this.titles.get(same) ?? new Set<string>();
-    if (pages.has(fitted.sources[0].loc)) return true;
-    pages.add(fitted.sources[0].loc);
-    this.titles.set(same, pages);
-    const id = k.idFor(this.rec.docId, title, pages.size);
+    const nth = (this.titles.get(title) ?? 0) + 1;
+    this.titles.set(title, nth);
+    const id = k.idFor(this.rec.docId, title, nth);
     const issue: Issue = {
       title,
       workstream: k.workstreamOf(row.workstream),
