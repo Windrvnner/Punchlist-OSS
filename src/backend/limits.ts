@@ -67,4 +67,15 @@ export function limitsOf(model?: { maxTokens?: number | null; contextLength?: nu
   const input = Math.min(control.limits.inputTokens, (positive(model?.contextLength) ?? Infinity) - output);
   return { output, input: Math.max(1, input) };
 }
+/**
+ * The reply limit a refusal says the model allows, when it is less than was sent: OpenAI-compatible servers refuse a
+ * `max_tokens` over the model's own with "This model supports at most N completion tokens" (#1079). Undefined for any
+ * other refusal.
+ */
+export function replyLimitIn(status: number | undefined, message: string, sent: number): number | undefined {
+  if (status !== 400) return undefined;
+  const said = /supports at most (\d[\d,]*) (?:completion|output) tokens/i.exec(message);
+  const allowed = said ? Number(said[1].replace(/,/g, '')) : undefined;
+  return allowed && allowed < sent ? allowed : undefined;
+}
 const positive = (n: number | null | undefined) => (typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : undefined);

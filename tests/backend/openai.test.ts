@@ -175,6 +175,22 @@ describe('the OpenAI-compatible connector', () => {
     });
   }
 
+  for (const which of APIS) {
+    it(`on ${which}, a model allowing fewer reply tokens is asked again at what it said (#1079)`, async () => {
+      const refusal = 'max_tokens is too large: 32000. This model supports at most 16384 completion tokens, '
+        + 'whereas you provided 32000.';
+      const api = fakeServer({ replies: [{ status: 400, error: { message: refusal } }, { text: 'a' }, { text: 'b' }] });
+      const s = svc(api, { api: which });
+      expect(await s.complete({ model: 'fast', prompt: 'q' })).toBe('a');
+      expect(await s.complete({ model: 'fast', prompt: 'q' })).toBe('b');
+      const asked = (n: number) => (api.sent[n].body as Record<string, unknown>);
+      const limit = which === 'chat' ? 'max_tokens' : 'max_output_tokens';
+      expect([0, 1, 2].map((n) => asked(n)[limit])).toEqual([32000, 16384, 16384]);
+      expect(s.outputLimit!('fast')).toBe(16384);
+      expect(s.outputLimit!('thorough')).toBe(32000);
+    });
+  }
+
   it('a refused sign-in token asks for a new one and the call goes on with it', async () => {
     const api = fakeServer(); let calls = 0;
     const inner = api.fetch; const fetch = (async (u: any, i?: any) => { const auth = new Headers(i?.headers).get('authorization'); if (auth === 'Bearer old' && calls++ === 0) return new Response('{"error":{"message":"expired"}}', { status: 401 }); return inner(u, i); }) as typeof globalThis.fetch;
