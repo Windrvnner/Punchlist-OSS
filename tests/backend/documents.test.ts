@@ -278,9 +278,11 @@ describe('documents on real folders', () => {
     const dir = tmp(); const file = put(dir, 'Tracked.docx', TRACKED); const profile = path.join(tmp(), 'lo');
     const marked = await libreOfficeConverter({ soffice, profile })(file, dir, 'marked.pdf');
     const text = (await pdfText(fs.readFileSync(marked))).join(' ');
-    for (const k of ['1.10x', '1.15x', 'DELETEDROW', 'INSERTEDROW', 'FOOTEROLD', 'FOOTERNEW']) expect(text).toContain(k);
+    const shown = ['1.10x', '1.15x', 'DELETEDROW', 'INSERTEDROW', 'FOOTEROLD', 'FOOTERNEW'];
+    for (const k of shown) expect(text).toContain(k);
     expect(text).not.toContain('COMMENTTEXT');
-    expect(fs.readdirSync(dir).sort()).toEqual(['Tracked.docx', 'marked.pdf']);                                                          // nothing is left behind
+    // nothing is left behind
+    expect(fs.readdirSync(dir).sort()).toEqual(['Tracked.docx', 'marked.pdf']);
   }, 120000);
 
   // a comparison tool's name, 240 characters: Windows takes up to 255 for one name, but older programs stop at 260 for the whole path
@@ -318,7 +320,8 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     const dir = tmp();
     const file = put(path.join(dir, 'a'.repeat(100), 'b'.repeat(100)), LONG, TRACKED);
     const lo = libreOfficeConverter({ soffice, profile: path.join(tmp(), 'lo') });
-    const text = (await pdfText(fs.readFileSync(await lo(file, dir, 'marked.pdf')))).join(' '); for (const k of ['INSERTEDROW', 'FOOTERNEW']) expect(text).toContain(k);
+    const text = (await pdfText(fs.readFileSync(await lo(file, dir, 'marked.pdf')))).join(' ');
+    for (const k of ['INSERTEDROW', 'FOOTERNEW']) expect(text).toContain(k);
     expect((await lo.changes!(file)).tracked).toBe(13);
   }, 120000);
 

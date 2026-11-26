@@ -48,7 +48,8 @@ function looksRight(file: string): boolean {
 /**
  * The lines of LibreOffice's own macro language that do the work. A run reads its job from a small file beside the macro:
  * the file to open, where to put the PDF (or "-" for none), where to write the list of
- * tracked changes (or "-" for none), and the document's own name, which its file-name fields are set to (`NameFields`). It opens the file out of sight; writes the list if asked; writes the PDF, which shows a
+ * tracked changes (or "-" for none), and the document's own name, which its file-name fields are set to
+ * (`NameFields`). It opens the file out of sight; writes the list if asked; writes the PDF, which shows a
  * document's tracked changes as markup (a document with none is unchanged); and reports "ok" and how many tracked
  * changes there were, in a second small file.
  *
@@ -61,7 +62,8 @@ Dim gType As String, gBy As String, gAt As String, gText As String
 Sub Run
   On Error GoTo Failed
   Dim ps As Object, sfa As Object, tin As Object, doc As Object, d As Object
-  Dim userUrl As String, src As String, out As String, list As String, shown As String, note As String, filter As String, had As Long
+  Dim userUrl As String, src As String, out As String, list As String, shown As String, note As String
+  Dim filter As String, had As Long
   ps = createUnoService("com.sun.star.util.PathSubstitution")
   userUrl = ps.getSubstituteVariableValue("$(user)")
   sfa = createUnoService("com.sun.star.ucb.SimpleFileAccess")
@@ -432,7 +434,9 @@ export function libreOfficeConverter(o: { soffice?: string; timeoutMs?: number; 
   /** one run of the macro; returns how many tracked changes there were (undefined for a file that is not text) */
   // LibreOffice is never given the file where it is: names from comparison tools can run past what Windows lets older
   // programs open (260 characters for the whole path), so it opens a copy under a short name in its own settings folder
-  async function job(file: string, out: string | null, list: string | null, shownAs = path.basename(file)): Promise<{ had?: number }> {
+  async function job(
+    file: string, out: string | null, list: string | null, shownAs = path.basename(file),
+  ): Promise<{ had?: number }> {
     if (!looksRight(file)) throw new Error('the file is not what its name says');
     await ready();
     const done = path.join(user, 'punchlist-done.txt'); fs.rmSync(done, { force: true });
@@ -441,7 +445,11 @@ export function libreOfficeConverter(o: { soffice?: string; timeoutMs?: number; 
     let copy = ''; for (let n = 1; !copy || fs.existsSync(copy); n++) copy = path.join(user, `punchlist-in${n > 1 ? `-${n}` : ''}${shortExt(file)}`);
     try {
       fs.copyFileSync(file, copy);
-      fs.writeFileSync(path.join(user, 'punchlist-job.txt'), [pathToFileURL(copy).href, out ? pathToFileURL(out).href : '-', list ? pathToFileURL(list).href : '-', shownAs.replace(/[\u0000-\u001f\u007f]+/g, ' '), 'end', ''].join('\n'));
+      const jobLines = [
+        pathToFileURL(copy).href, out ? pathToFileURL(out).href : '-', list ? pathToFileURL(list).href : '-',
+        shownAs.replace(/[\u0000-\u001f\u007f]+/g, ' '), 'end', '',
+      ];
+      fs.writeFileSync(path.join(user, 'punchlist-job.txt'), jobLines.join('\n'));
       await start('macro:///Standard.Punchlist.Run');
     } finally { try { fs.rmSync(copy, { force: true }); } catch { /* still held by a LibreOffice being stopped: cleared at the next run */ } }
     const note = fs.existsSync(done) ? fs.readFileSync(done, 'utf8').trim() : 'failed: nothing was reported';
