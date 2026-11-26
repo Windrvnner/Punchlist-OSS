@@ -78,6 +78,29 @@ it('the gap filler\'s own search stops at limits.searchCalls', async () => {
   expect(s.all.filter(isSearchRead).length).toBe(2);
 });
 
+it('each search the gap filler makes has its own limits.searchCalls, so more calls than that run in all', async () => {
+  const X1 = { id: 'x1', text: 'Water rights are secured' };
+  const WATER = doc(17, 'Water rights memo.pdf');
+  const isSearchRead = (c: Call) => !isTurn(c) && c.prompt.includes('what they say, with [n] markers');
+  const searches = 20;                       // more than limits.searchCalls (15) in all, one call each
+  let n = 0;
+  const turn = () => (++n <= searches
+    ? { tool: 'search', what: 'documents', query: `water rights ${n}` } : { text: 'Nothing.', sources: [] });
+  const reply = (c: Call) => (isTurn(c) ? turn() : isSearchRead(c) ? { text: 'Nothing here.', sources: [] }
+    : { items: itemsIn(c).map((it) => ({ id: it.tag, result: 'more', need: 'the water rights' })) });
+  const queries = (c: Call) => ({
+    queries: Object.fromEntries([...c.prompt.matchAll(/^(I\d+):/gm)].map((m) => [m[1], ['water rights']])),
+  });
+  const s = setup(reply, { d1: [FA, TS, WATER] }, {
+    checklist: () => ({ broad: [X1], product: [], sector: [] }),
+    pick: () => ({ read: [] }), pickFor: () => ({ read: {} }), query: queries, fill: reply,
+  });
+  await deal(s.repo);
+  val(await s.ai.firstPass('d1'));
+  // a search budget shared by the runs would refuse every read past the fifteenth, before the service is asked
+  expect(s.all.filter(isSearchRead).length).toBeGreaterThanOrEqual(searches);
+});
+
 it('a problem whose finding could not be saved is never handed to the agent, so it is never written over as satisfied', async () => {
   const X1 = { id: 'x1', text: 'Decommissioning is provided for' };
   const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...(has(c, PLAN) ? OK(c) : { result: 'finding', title: 'No decommissioning plan', workstream: 'Technical', body: ['None is provided. [1]'], next: '', sources: [{ doc: tag(c, FA), page: 2 }] }) })) }), { d1: [FA, TS, PLAN] }, {
