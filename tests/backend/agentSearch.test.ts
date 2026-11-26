@@ -108,7 +108,7 @@ describe('searching the Q&A log from the chat', () => {
     const got = result(s);
     expect(got.length).toBeLessThan(roomAt(8_000));
     expect(got).toContain(`Response to Q1: ${longText(0).trim()}`);
-    const counted = /and (\d+) more matched; search with more words/.exec(got);
+    const counted = /and (\d+) more matched, past what fits here/.exec(got);
     expect(Number(counted?.[1])).toBeGreaterThan(0);
     const listed = (got.match(/^Response to Q/gm) ?? []).length;
     expect(listed + Number(counted?.[1])).toBe(40);
@@ -135,7 +135,7 @@ describe('searching findings from the chat', () => {
     expect((await s.ai.answer(ask('What is outstanding?'))).ok).toBe(true);
     const got = result(s);
     expect(got.length).toBeLessThan(roomAt(8_000));
-    const counted = /and (\d+) more matched; search with more words/.exec(got);
+    const counted = /and (\d+) more matched, past what fits here/.exec(got);
     const listed = (got.match(/^Finding “/gm) ?? []).length;
     expect(listed).toBeGreaterThan(0);
     expect(listed + Number(counted?.[1])).toBe(40);
@@ -176,6 +176,6 @@ describe('what the searches of one reply hand back, together', () => {
     const results = last.slice(last.indexOf('What you have done so far'), last.lastIndexOf('This is turn'));
     // past the room, each turn adds only its count line
     expect(results.length).toBeLessThan(roomAt(8_000) + 25 * 200);
-    expect(last).toContain('Q&A: 40 matched, past what fits here: search with more words.');
+    expect(last).toContain('Q&A: 40 matched, past what fits here.');
   }, 60_000);
 });

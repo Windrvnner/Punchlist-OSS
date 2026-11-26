@@ -9,7 +9,7 @@ import type { AgentRun } from './agentRun';
 import { cites, dealDocKey, foundAt, sameDoc, withPlaces } from './agentRun';
 import { codeOf, type Cited, type DealDoc, type Run, type Sent } from './agentKit';
 import type { ResearchStep } from '../ports';
-import { batchAsk, noun, oneLine, quoted, shorten } from './agentPrompts';
+import { batchAsk, noun, oneLine, quoted } from './agentPrompts';
 
 /** batches of a folder review read at the same time */
 const AT_ONCE = 3;
@@ -319,7 +319,7 @@ class FolderPass {
     this.findings[reading.index] = {
       at: reading.at,
       tags: got.map((x) => x.tag).join(', '),
-      text: shorten(withPlaces(text, tags, sources), 1200),
+      text: withPlaces(text, tags, sources),
       places: [...new Set(sources.map((x, i) => `${tags[i]} ${x.loc}`))].join(', '),
       got,
     };

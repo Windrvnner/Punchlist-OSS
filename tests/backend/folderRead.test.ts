@@ -145,6 +145,23 @@ describe('reading a whole folder from the chat', () => {
     expect(next).not.toContain('past what fits here');
   }, 30_000);
 
+  it('a batch that says more than 1,200 characters comes back whole (#480)', async () => {
+    const recs = Array.from({ length: 16 }, (_v, i) => doc(`Permits/Permit ${String(i + 1).padStart(2, '0')}.pdf`));
+    const said = (x: { path: string }, i: number) =>
+      `${x.path} expires in 2030; ${'its conditions cover noise, dust and water. '.repeat(3)}END${i} [${i + 1}]`;
+    const reads = (c: Call) => {
+      const l = listed(c);
+      const sources = l.map((x) => ({ doc: x.tag, page: 1, quote: 'expires in 2030' }));
+      return { text: l.map(said).join(' '), sources };
+    };
+    const first = (k: number) => (k === 1 ? { tool: 'folder', folder: 'permits', lookFor: 'expiry' } : null);
+    const s = setup(recs, (_c, k) => first(k) ?? { text: 'ok', sources: [] }, { reads });
+    expect((await s.ai.answer(ask('Review the permits folder'))).ok).toBe(true);
+    const next = s.turns[1].prompt;
+    for (const r of recs) expect(next).toContain(`${r.rel} expires in 2030`);
+    expect(next.match(/END7/g)?.length).toBe(2);
+  }, 30_000);
+
   it('folder reads on every one of 25 turns stay within the room, and the reply answers (#480)', async () => {
     const recs = Array.from({ length: 300 }, (_v, i) => doc(`Permits/Permit ${String(i + 1).padStart(3, '0')}.pdf`));
     const read = (k: number) => ({ tool: 'folder', folder: 'permits', lookFor: `expiry ${k}`, all: true });

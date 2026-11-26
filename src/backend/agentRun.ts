@@ -46,15 +46,12 @@ export class AgentRun {
   /** the number of the next tag */
   private nextTag = 1;
 
-  /**
-   * @param room the characters this reply's tool results may take together (agent.ts `roomOf`, from the model's input
-   * limit); with none given, no bound
-   */
+  /** @param room the characters this reply's tool results may take together (agent.ts `roomOf`) */
   constructor(
     readonly kit: AgentKit,
     readonly question: AgentQuestion,
     readonly progress: Run,
-    readonly room = Number.POSITIVE_INFINITY,
+    readonly room: number,
   ) {
     if (kit.talk) this.keepTags(question.thread?.tags ?? []);
   }

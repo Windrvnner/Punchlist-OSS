@@ -8,7 +8,7 @@ function runOver(names: string[]) {
   const kit = { records: () => recs, where: (rec: { name: string }) => rec.name } as unknown as AgentKit;
   const question = { deals: ['deal'] } as never;
   const progress = { steps: [] } as never;
-  return new AgentRun(kit, question, progress);
+  return new AgentRun(kit, question, progress, 10_000);
 }
 
 describe('the read tool finds a document by the name it has', () => {

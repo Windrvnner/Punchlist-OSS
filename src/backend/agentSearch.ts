@@ -221,8 +221,9 @@ function fitting(lines: string[], room: number): number {
 /** a heading with the first `listed` lines under it, and the rest counted; only the count when none fits */
 function fitted(heading: string, lines: string[], listed: number): string {
   const rest = lines.length - listed;
-  if (!listed) return `${heading}: ${rest} matched, past what fits here: search with more words.`;
-  const more = rest ? `\nand ${rest} more matched; search with more words.` : '';
+  // the best matches come first: those past what fits share as many of the query's words or fewer
+  if (!listed) return `${heading}: ${rest} matched, past what fits here.`;
+  const more = rest ? `\nand ${rest} more matched, past what fits here.` : '';
   return `${heading}:\n${lines.slice(0, listed).join('\n')}${more}`;
 }
 
