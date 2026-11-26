@@ -256,7 +256,13 @@ export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text
     // A row the log has with the same words that holds all it has (a row of the version they edited they left as it was,
     // their row saved again) needs nothing; otherwise, with several that may be it, it is added, never written into one
     // that may be another party's.
-    if (kk.every((_, c) => goes.has(c) || !(r[c] ?? '').trim()) && (byWords.get(words(r[kt])) ?? []).some((l) => lp.every((p) => !(r[p.a] ?? '').trim() || (r[p.a] ?? '').trim() === (written.get(`${log.lines[l] - 1},${log.cols[p.l]}`) ?? log.rows[l][p.b] ?? '').trim()))) return;   // as the log will be, with what is written above
+    // as the log will be, with what is written above
+    const holdsAsWritten = (l: number) => lp.every((p) => {
+      const will = written.get(`${log.lines[l] - 1},${log.cols[p.l]}`) ?? log.rows[l][p.b] ?? '';
+      return !(r[p.a] ?? '').trim() || (r[p.a] ?? '') === will;
+    });
+    const wholly = kk.every((_, c) => goes.has(c) || !(r[c] ?? '').trim());
+    if (wholly && (byWords.get(words(r[kt])) ?? []).some(holdsAsWritten)) return;
     const same = may.length === 1 ? may[0] : undefined;
     lost(j, undefined);
     // a formula they put in a row they added is never written: counted, unless the log's row holds one there too (saved again)
@@ -271,8 +277,9 @@ export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text
     for (const p of lp) {
       const row = log.lines[same] - 1, col = log.cols[p.l]; const v = r[p.a] ?? '', had = written.get(`${row},${col}`);
       if (!v.trim() || keptWorked(j, p.a)) continue;
-      if (had !== undefined) { if (v.trim() !== had.trim()) clash.add(same); continue; }   // they gave this cell already (cleared, it may be)
-      const now = log.rows[same][p.b] ?? ''; if (v.trim() === now.trim()) continue;
+      // they gave this cell already (cleared, it may be)
+      if (had !== undefined) { if (v !== had) clash.add(same); continue; }
+      const now = log.rows[same][p.b] ?? ''; if (v === now) continue;
       if (!now.trim() && !fixed(row, col)) { out.steps.push(cell(row, col, v)); out.cells++; written.set(`${row},${col}`, v); } else clash.add(same);
     }
   });

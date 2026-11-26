@@ -14,7 +14,7 @@ import { Question, Finding, Tombstone, DealId, QuestionId, FindingId, QuestionSt
 import { setResponse, setQuestionStatus, checkQuestion } from '../../domain/transitions';
 import { numbering } from './questions';
 import { matchQuestions, withAccepted, AcceptedMatch } from '../../domain/qaMatch';
-import { sameText, sameWords, type ImportRow } from '../../domain/importExport';
+import { sameText, type ImportRow } from '../../domain/importExport';
 import { ok, fail, notFound, rejected } from '../../domain/result';
 import { dealQuestions, nextQuestionNumber } from '../state';
 import { derivedId } from '../../domain/derivedId';
@@ -24,8 +24,6 @@ import { commandLabel } from '../commandLabels';
 import type { Operation } from '../../domain/model';
 import type { State } from '../state';
 
-/** fields that name someone or something rather than say something: spaces around them are not part of the name */
-const IDENTITIES = new Set(['askedBy', 'respondedBy', 'workstream']);
 const Ymd = z.string().refine((v) => v === '' || isRealDate(v));
 export const ImportRowSchema = z.object({ line: z.number().int().positive().optional(), n: z.number().int().positive().nullable(), text: z.string().min(1), askedBy: z.string(), received: Ymd, workstream: z.string(), priority: z.enum(['', 'High', 'Medium', 'Low']), response: z.string(), respondedBy: z.string(), responded: Ymd, status: z.union([QuestionStatus, z.literal('')]) });
 
@@ -112,12 +110,14 @@ export const ImportQuestions = define({
       if (existing) {
         if (existing.n === row.n) took.add(row.n);                       // a later new row with this number is kept under it too
         q = { ...existing };
-        // a cell of only spaces is as good as empty here: it never overwrites what the log holds. A name or workstream is an
-        // identity: one the log holds with spaces around it (typed so in the app) is the same one, and is left as it is.
-        const same = (k: string, a: string, b: string) => (IDENTITIES.has(k) ? a.trim() === b.trim() : sameText(a, b));
+        // a cell of only spaces is as good as empty here: it never overwrites what the log holds. Any other value is
+        // compared character for character, as the file holds it (decision: the log's edit wins, exactly as written).
         // A Submitted by that names no one (only a period, say) matched as naming no one, so it leaves the party as it is.
         const given = (k: string, v: string) => (k === 'askedBy' ? key(v) !== '' : v.trim() !== '');
-        for (const k of ['text', 'askedBy', 'received', 'workstream', 'priority', 'respondedBy', 'responded'] as const) if (given(k, row[k]) && !same(k, row[k], (q as any)[k])) (q as any)[k] = row[k];
+        const fields = ['text', 'askedBy', 'received', 'workstream', 'priority', 'respondedBy', 'responded'] as const;
+        for (const k of fields) {
+          if (given(k, row[k]) && !sameText(row[k], (q as any)[k])) (q as any)[k] = row[k];
+        }
       } else {
         // the file's own number when no question holds it, live or deleted, or when an earlier row of this file took it (both are kept under it,
         // marked so a person renumbers one); otherwise the next free number
@@ -144,8 +144,7 @@ export const ImportQuestions = define({
       if (row.response.trim() && !sameText(row.response, q.response)) {         // only spaces is no response, as when typed in the app
         const linked = linkedOf(q);
         // the response was written by whoever the file says responded, not by the person running the import (who is in the history entry); a row that names nobody claims no author.
-        // The same words with other spaces or line breaks are still the words the response came with: its origin and sources stay.
-        const prov = q.provenance && sameWords(row.response, q.response) ? q.provenance : { origin: 'human' as const, sources: [], actor: row.respondedBy, at: ctx.at };
+        const prov = { origin: 'human' as const, sources: [], actor: row.respondedBy, at: ctx.at };
         const r = setResponse(q, row.response, prov, linked, c);
         if (!r.ok) return r;
         q = { ...r.value.question.record, text: q.text };

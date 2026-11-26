@@ -133,6 +133,11 @@ it.each(['response edit', 'merge import'])('keeps quoted brackets after a whites
   }
   const saved = store.get().questions[second.questionId];
   expect(saved.response).toBe(response);
+  // typed in the app, the same words keep their origin; a file's response is the file's own
+  if (path !== 'response edit') {
+    expect(saved.provenance).toMatchObject({ origin: 'human' });
+    return;
+  }
   expect(saved.provenance).toEqual(previous.provenance);
   await checkReuse(world, savedResponse.replace('Annex [1]', extraLines));
 });

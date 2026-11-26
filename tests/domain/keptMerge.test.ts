@@ -424,4 +424,12 @@ describe('an edit kept aside, merged into the log', () => {
     const m = mergeKept(t(base), t(kept), t(base.map((r) => [...r])), 'Question', undefined, undefined, 'No.');
     expect(m.steps.filter((s) => s.kind === 'cell' && s.row === 3)).toEqual([{ kind: 'cell', row: 3, col: 2, value: '' }]); expect(m).toMatchObject({ added: 1, clashes: [] });
   });
+
+  it('a row they added that the log holds with a space more or less in a cell is not taken as the same row', () => {
+    const rows = () => [['No.', 'Question', 'Response'], ['1', 'Question one', ''], ['2', 'Question two', '']];
+    const kept = [...rows(), ['', 'Brand new question', 'sroe answer ']];
+    const log = [...rows(), ['', 'Brand new question', 'sroe answer']];
+    const m = mergeKept(table(rows()), table(kept), table(log), 'Question', undefined, undefined, 'No.');
+    expect(m.cells + m.added + m.clashes.length + m.left + m.ask.length).toBeGreaterThan(0);
+  });
 });
