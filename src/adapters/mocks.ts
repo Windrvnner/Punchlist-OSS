@@ -388,7 +388,8 @@ export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => 
   // point's words, so a pair that only just clears the cutoff (80 to 99 percent) is refused, as a model may
   // refuse it. The real one judges whether answering the question settles the point.
   covers: (i) => gate(opts, 'covers', () => i.checks.map(({ point, question }) => {
-    const own = new Set(indexWords(point)); const named = new Set(indexWords(question));
+    const own = new Set(indexWords(point));
+    const named = new Set(indexWords(question));
     return own.size > 0 && [...own].every((w) => named.has(w));
   })),
   // Stand-in for the model proposing the open questions an answer addresses (#1120): those whose text is listed in

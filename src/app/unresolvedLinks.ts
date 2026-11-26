@@ -1,6 +1,6 @@
 import type { Question } from '../domain/model';
 import { control } from '../control';
-import { askedMatcher, reaches } from '../domain/askedMatch';
+import { askedMatcher, reaches, type Share } from '../domain/askedMatch';
 import type { AiService } from '../ports';
 import type { Unresolved } from './state';
 
@@ -28,7 +28,7 @@ export function canLinkUnresolved(q: Question, conflicted: boolean): boolean {
 }
 
 /** An open question that names enough of a point's words for the model to be asked whether it covers the point. */
-export type AskedCandidate = { point: Unresolved; q: Question; confidence: number };
+export type AskedCandidate = { point: Unresolved; q: Question; confidence: number; share: Share };
 
 /**
  * What a point says, to the keyword match and to the model alike: its wording and what it needs (a finding needs
@@ -52,7 +52,10 @@ function keepApproved(points: Unresolved[], pool: Question[], approved?: Approve
   return kept;
 }
 
-/** A question is a candidate for one point only: the one that names most of its words (the earlier on a tie). */
+/** Whether one share of words is larger than another, by cross-multiplying: no rounding or float decides it. */
+const larger = (a: Share, b: Share) => a.shared * b.total > b.shared * a.total;
+
+/** A question is a candidate for one point only: the point whose share it names is larger (the earlier on a tie). */
 function strongestPerQuestion(points: Unresolved[], pool: Question[], cutoff: number) {
   const match = askedMatcher(pool);
   const best = new Map<string, AskedCandidate>();
@@ -60,8 +63,9 @@ function strongestPerQuestion(points: Unresolved[], pool: Question[], cutoff: nu
     const found = match(pointText(point));
     if (!found || !reaches(found, cutoff)) continue;
     const rival = best.get(found.q.id);
-    if (!rival || found.confidence > rival.confidence) {
-      best.set(found.q.id, { point, q: found.q, confidence: found.confidence });
+    if (!rival || larger(found, rival.share)) {
+      const share = { shared: found.shared, total: found.total };
+      best.set(found.q.id, { point, q: found.q, confidence: found.confidence, share });
     }
   }
   return [...best.values()];

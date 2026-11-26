@@ -135,6 +135,17 @@ it('checks a question once, for the point that names most of its words', () => {
   expect(reversed.map((c) => [c.point.what, c.confidence])).toEqual([[INSURANCE, 100]]);
 });
 
+it('compares exact shares, not whole percents: 7 of 9 words beats 27 of 35 though both read 77', () => {
+  const named = Array.from({ length: 35 }, (_, k) => `k${k}`);
+  const pool = [question(1, named.join(' '))];
+  const smaller = point([...named.slice(0, 27), ...Array.from({ length: 8 }, (_, k) => `y${k}`)].join(' '));
+  const larger = point([...named.slice(0, 7), 'z0', 'z1'].join(' '));
+  const got = askedCandidates([smaller, larger], pool, undefined, 50).candidates;
+  expect(got.map((c) => [c.point.key, c.confidence])).toEqual([[larger.key, 77]]);
+  const reversed = askedCandidates([larger, smaller], pool, undefined, 50).candidates;
+  expect(reversed.map((c) => [c.point.key, c.confidence])).toEqual([[larger.key, 77]]);
+});
+
 it('keeps a link the person approved and does not offer its question for another point', () => {
   const pool = [question(1, ASKS_INSURANCE)];
   const approved = new Map([['i:' + INSURANCE, linkApproval({ point: point(INSURANCE), q: pool[0] })]]);

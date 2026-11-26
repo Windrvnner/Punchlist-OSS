@@ -170,8 +170,9 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
   such as DSCR, EPC, and O&M count; its filler words are left out and plurals are folded): a point's confidence is the
   share of its words (its wording and what it needs) that the open question naming most of them names, reached when
   shared x 100 is at least `limits.askedCutoff` x the point's words (default 80; whole percent from 0, which checks
-  every point's best question, to 100, only a question naming every word); ties go to the lower question number. A
-  point of one or two words fully named is checked like any other: there is no minimum word count. Second, only then,
+  every point that shares a word with a question, to 100, only a point whose words a question names all of); ties go
+  to the lower question number. A question is a candidate for one point only, the one with the larger share. A point
+  of one or two words fully named is checked like any other: there is no minimum word count. Second, only then,
   the model is asked for all such pairs, in calls sized to its limits, whether the question already asks for what the
   point lacks. A pair it does not confirm, or a service that cannot check, makes no offer and the point is asked as a
   new question. A person ticks each offer; nothing is linked automatically. A link a person approved is kept (#88).

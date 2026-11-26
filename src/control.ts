@@ -308,7 +308,8 @@ const SPEC = {
       "Percent of an unresolved point's words (as the search index keeps them) that an open question must name " +
         "before the model is asked whether it already asks for the point (Add All Unresolved's Already Asked?). " +
         'Below it no call is made and ' +
-        'nothing is offered; at 0 the best question for every point is checked, at 100 only one naming every word.',
+        'nothing is offered; at 0 every point that shares a word with a question is checked, ' +
+        'at 100 only a point whose words a question names all of.',
       0,
       100,
     ),

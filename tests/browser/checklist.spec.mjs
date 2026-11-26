@@ -243,9 +243,19 @@ for (const size of SIZES) { // #2: Add all unresolved to Q&A: from ⋯, a previe
   await page.click('#ck-pmore'); const menu = await page.evaluate(() => [...document.querySelectorAll('#ck-menu .mi')].map((m) => [m.textContent, getComputedStyle(m).fontWeight]).join('|'));
   await page.click('#ck-add-unresolved'); await page.waitForSelector('#au-list .lrow', { timeout: 10000 });
   const pre = await page.evaluate(() => { const d = document.querySelector('.lnkdlg').getBoundingClientRect(); return { groups: [...document.querySelectorAll('#au-list .lgrp')].map((g) => g.textContent), rows: [...document.querySelectorAll('#au-list .lrow')].map((r) => [r.querySelector('input').checked, r.querySelector('.lfor').textContent]), go: document.getElementById('au-go').textContent, count: document.getElementById('au-count').textContent, inside: d.top >= 0 && d.bottom <= innerHeight + 1 }; });
-  await page.click('#au-list .lrow:has-text("Link to") input'); const linked = await page.evaluate(() => ({ go: document.getElementById('au-go').textContent, count: document.getElementById('au-count').textContent }));
-  // checking that point's new question again unchecks the link, so a point is never asked twice; then the link is chosen again
-  await page.click('#au-list .lrow:not(:has-text("Link to")):has(input:not(:checked)) input'); const back = await page.evaluate(() => [...document.querySelectorAll('#au-list .lrow input')].filter((i) => i.checked).length + '/' + [...document.querySelectorAll('#au-list .lrow')].find((r) => r.textContent.includes('Link to')).querySelector('input').checked);
+  await page.click('#au-list .lrow:has-text("Link to") input');
+  const linked = await page.evaluate(() => ({
+    go: document.getElementById('au-go').textContent,
+    count: document.getElementById('au-count').textContent,
+  }));
+  // checking that point's new question again unchecks the link, so a point is never asked twice;
+  // then the link is chosen again
+  await page.click('#au-list .lrow:not(:has-text("Link to")):has(input:not(:checked)) input');
+  const back = await page.evaluate(() => {
+    const boxes = [...document.querySelectorAll('#au-list .lrow input')];
+    const link = [...document.querySelectorAll('#au-list .lrow')].find((r) => r.textContent.includes('Link to'));
+    return boxes.filter((i) => i.checked).length + '/' + link.querySelector('input').checked;
+  });
   await page.click('#au-list .lrow:has-text("Link to") input');
   await page.click('#au-go'); await page.waitForFunction(() => !document.querySelector('.lnkdlg'), null, { timeout: 5000 });
   const qs = await page.evaluate((d) => Object.values(store.get().questions).filter((q) => q.dealId === d).sort((a, b) => a.n - b.n).map((q) => [q.n, !!q.linkedItem, !!q.linkedFinding]), id);
@@ -255,9 +265,14 @@ for (const size of SIZES) { // #2: Add all unresolved to Q&A: from ⋯, a previe
   say(`#2 Add all unresolved: preview, one change, one Undo (${size[0]})`, menu === 'Add All Unresolved to Q&A…,400'
     && pre.groups.join() === 'New Questions 5,Already Asked? 1' && pre.rows.length === 6
     && pre.rows.slice(0, 5).every(([on]) => on) && !pre.rows[5][0]
-    && pre.rows.filter(([, f]) => f.startsWith('Finding · ')).length === 3 && pre.rows[5][1] === 'Link to Gap · Insurance advisor report (final)' && pre.go === 'Add 5 questions' && pre.count === '5 questions' && pre.inside
-    && back === '5/false' && linked.go === 'Add 4 questions' && linked.count === '4 questions · 1 linked' && qs.length === 5 && JSON.stringify(qs[0]) === '[1,true,false]' && qs.slice(1).filter(([, i, f]) => i || f).length === 4 && /4 questions added · 1 linked.*Undo/.test(toast)
-    && undone.join() === 'false' && !page.errors.length, JSON.stringify({ menu, pre, linked, back, qs, toast, undone, errors: page.errors }));
+    && pre.rows.filter(([, f]) => f.startsWith('Finding · ')).length === 3
+    && pre.rows[5][1] === 'Link to Gap · Insurance advisor report (final)'
+    && pre.go === 'Add 5 questions' && pre.count === '5 questions' && pre.inside
+    && back === '5/false' && linked.go === 'Add 4 questions' && linked.count === '4 questions · 1 linked'
+    && qs.length === 5 && JSON.stringify(qs[0]) === '[1,true,false]'
+    && qs.slice(1).filter(([, i, f]) => i || f).length === 4 && /4 questions added · 1 linked.*Undo/.test(toast)
+    && undone.join() === 'false' && !page.errors.length,
+    JSON.stringify({ menu, pre, linked, back, qs, toast, undone, errors: page.errors }));
   await ctx.close();
 }
 
