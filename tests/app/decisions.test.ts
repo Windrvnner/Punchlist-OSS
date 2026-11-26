@@ -159,7 +159,7 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
     expect(Object.values(m.store.get().deals).filter((d) => d.name === 'Project Wingtip')).toHaveLength(3);
   });
 
-  it('keeps names in one form, and the name as shown deletes the deal; none over 120', async () => {
+  it('keeps names as typed, and the name as shown deletes the deal; none over 120', async () => {
     const m = make();
     expect((await m.store.dispatch(CreateDeal, { name: 'Proseware  Wind', folders: [] })).ok).toBe(true);
     const named = (name: string) => Object.values(m.store.get().deals).filter((d) => d.name === name);
