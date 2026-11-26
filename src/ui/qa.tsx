@@ -398,11 +398,11 @@ function MoreMenu({ dealId, hasQuestions }: { dealId: string; hasQuestions: bool
             onMouseEnter={(e) => showTip(e.currentTarget as HTMLElement, logPath(log))}
             onMouseLeave={(e) => hideTip(e.currentTarget as HTMLElement)}
             onClick={() => {
-            setOpen(false);
-            void chooseLogFolder(store, dealId).then((r) => {
-              if (!r.ok) store.toast(r.error.message, 'warn');
-            });
-          }}><Icon name="folder" size={16} /></button>}</div>}
+              setOpen(false);
+              void chooseLogFolder(store, dealId).then((r) => {
+                if (!r.ok) store.toast(r.error.message, 'warn');
+              });
+            }}><Icon name="folder" size={16} /></button>}</div>}
         <button type="button" class="mi" role="menuitem" id="qa-export" disabled={!hasQuestions}
           onClick={() => openDialog('exportQa')}>Export Q&A Log…</button>
         {/* the seldom used ways back, apart from Import so neither is pressed for the other */}

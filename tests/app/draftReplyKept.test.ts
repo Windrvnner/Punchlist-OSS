@@ -634,7 +634,8 @@ describe('held drafts are said once, by count', () => {
       w.repo.peer.edit('question', q.id, { ...base, status: 'closed', updatedAt: clock.now() }, { ...PCS[0], at: clock.now() });
     }
     await (w.store as any).reloadTargets(picked.map((q) => q.id));
-    const said: string[] = []; const toast = (w.store.toast as (...args: unknown[]) => number).bind(w.store);
+    const said: string[] = [];
+    const toast = (w.store.toast as (...args: unknown[]) => number).bind(w.store);
     (w.store as any).toast = (text: string, ...rest: any[]) => { said.push(text); return toast(text, ...rest); };
     back(); await w.store.probeOnce();
     await until(() => picked.every((q) => w.store.hasKeptReply(q.draft!.opId!)), 20_000);

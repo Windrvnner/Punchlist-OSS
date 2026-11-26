@@ -314,7 +314,11 @@ function failedReply(store: Store, key: string, messageId: string) {
 }
 
 export async function retry(store: Store, scope: Scope, messageId: string) {
-  const ro = store.readOnly(); if (ro) { store.toast(ro, 'warn'); return; }
+  const ro = store.readOnly();
+  if (ro) {
+    store.toast(ro, 'warn');
+    return;
+  }
   const key = convKey(scope);
   const before = failedReply(store, key, messageId);
   if (!before) return;

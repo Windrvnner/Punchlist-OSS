@@ -426,7 +426,10 @@ export class Store {
       return fail({ kind: 'invalid', message: TOO_LONG, fields: { [long]: TOO_LONG } });
     }
     const blocked = this.blockedBy(plan);
-    if (blocked) { if (!opts.quiet) this.toast(blocked, 'warn'); return fail({ kind: 'rejected', message: blocked }); }
+    if (blocked) {
+      if (!opts.quiet) this.toast(blocked, 'warn');
+      return fail({ kind: 'rejected', message: blocked });
+    }
     if (!plan.upserts.length && !plan.removes?.length) {
       return this.finishUnchanged(command, input, plan, opId, opts, at, previousRev);
     }
@@ -623,8 +626,7 @@ export class Store {
     if (!r.ok && r.error.kind === 'failed') {
       const text = kept ? 'Draft not saved ·' : `${r.error.message}`;
       this.toast(text, 'warn', kept ? this.retryNow : this.retryOf(follow));
-    }
-    else if (r.ok) {
+    } else if (r.ok) {
       const op = this.state.ops[r.value.opId];
       const msg = this.lastMessage.get(r.value.opId);
       if (msg && op?.inverse) this.toast(msg, 'done', { label: 'Undo', opId: r.value.opId });
@@ -1157,7 +1159,10 @@ export class Store {
         // since would be written over without a word. It is refused instead, as the interrupted-actions bar refuses it.
         // Nothing is settled: the journal keeps the action, and the next start offers it with Discard. If the journal
         // refused it (no entry), there is nothing to keep it in, and the person is told to make the change again.
-        if (this.movedSince(baseRevs)) { this.toast(`${CHANGED_SINCE}; make the change again`, 'warn'); return; }
+        if (this.movedSince(baseRevs)) {
+          this.toast(`${CHANGED_SINCE}; make the change again`, 'warn');
+          return;
+        }
         this.rerun.add(opId);
         void this.dispatch(command, input, { idempotencyKey: opts.idempotencyKey })
           .finally(() => this.rerun.delete(opId));

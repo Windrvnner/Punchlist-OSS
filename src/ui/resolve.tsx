@@ -159,7 +159,10 @@ export function ResolveDialog({ dealId, questionId }: { dealId: string; question
       merged: merged.text, fields, seen: seen.current,
     });
     setBusy(false);
-    if (!r.ok) { store.toast(r.error.message, 'warn'); return; }
+    if (!r.ok) {
+      store.toast(r.error.message, 'warn');
+      return;
+    }
     const did = pick === 'log' ? 'the log’s version taken' : pick === 'merged' ? 'merged response used' : 'the app’s version kept';
     store.toast(`Q${q.n}: ${did}`, 'done', { label: 'Undo', opId: r.value.opId });
     // on to the next, with the focus on its first version, so 1, 2 and 3 go on working from the keyboard
