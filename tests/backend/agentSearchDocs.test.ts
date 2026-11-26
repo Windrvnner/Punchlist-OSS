@@ -95,7 +95,7 @@ describe('searching documents from the chat, a page at a time', () => {
     expect((await s.ai.answer(ask('Hello'))).ok).toBe(true);
     expect(names(s.reads[s.reads.length - 1])).toEqual(RANKED.slice(0, 4));
     const left = RANKED.slice(4, 8).map((name) => `vdr/${name}`).join('; ');
-    expect(s.turns[1].prompt).toContain(`Not opened, too long to read with the others: ${left}. Read them by name`);
+    expect(s.turns[1].prompt).toContain(`with the others): ${left}. Read them by name`);
   }, 60_000);
 
   it('can be asked for the last page first: it holds the last 7', async () => {

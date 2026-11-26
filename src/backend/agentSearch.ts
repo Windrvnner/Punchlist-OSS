@@ -102,19 +102,20 @@ async function searchDocuments(run: AgentRun, asked: Asked, query: string, repor
 
 /** page `page` of the documents' ranking: one call's batch of it, cut as a folder read's batches are */
 function documentPage(run: AgentRun, ranking: DealDoc[], page: number): Page<DealDoc> {
-  const batches = batchesOf(ranking, run.kit.withClean, run.pages.width);
+  const batches = batchesOf(ranking, run.kit.cleanDrafts, run.pages.width);
   return { items: batches[page - 1]?.recs ?? [], page, pages: batches.length, total: ranking.length };
 }
 
 /**
- * The documents of a page the helper did not open, because the service took them as too long to read with the rest
- * (ai.ts `read`): named, so that the main session can read them (#1102)
+ * The documents of a page the helper did not open, because they could not be opened on this PC or the service took
+ * them as too long to read with the rest (ai.ts `read`): named, so that the main session can read them (#1102)
  */
 function notOpened(run: AgentRun, page: DealDoc[], sent: DealDoc[]): string {
   const left = page.filter((d) => !sent.some((s) => s.dealId === d.dealId && s.rec.docId === d.rec.docId));
   if (!left.length) return '';
   const paths = left.map((d) => run.kit.where(d.rec)).join('; ');
-  return `\nNot opened, too long to read with the others: ${paths}. Read them by name to see them.`;
+  const why = 'could not be opened on this PC, or too long to read with the others';
+  return `\nNot opened (${why}): ${paths}. Read them by name to see them.`;
 }
 
 /** the deal's findings ranked by the query's words, a page of them, each whole */
@@ -122,9 +123,9 @@ async function searchFindings(run: AgentRun, asked: Asked, report: Report): Prom
   const deals = run.question.deals;
   const { all, missed } = await gather(run, (dealId) => run.kit.findings(dealId));
   const ranked = rankRecords(all, asked.words, (f) => `${f.title} ${f.body.join(' ')}`);
-  const shown = pageOf(ranked, asked.page, run.pages.searchPage);
   const line = (f: (typeof all)[number]) =>
     `Finding “${f.title}” (${f.status}${f.deal ? `, ${f.deal}` : ''}): ${oneLine(f.body.join(' '))}`;
+  const shown = pageOf(ranked, asked.page, run.pages.searchPage, run.pages.chars, line);
   const listing = ranked.length
     ? listed('Findings', 'findings', asked, shown, line)
     : noneFound('Findings', 'none answers to these words', missed.length, deals.length);
@@ -143,9 +144,10 @@ async function searchQuestions(run: AgentRun, asked: Asked, report: Report): Pro
   const deals = run.question.deals;
   const { all, missed } = await gather(run, async (dealId) => byNumber(await run.kit.questions(dealId)));
   const ranked = rankRecords(all, asked.words, qaText);
-  const shown = pageOf(ranked, asked.page, run.pages.searchPage);
+  const row = (x: (typeof all)[number]) => qaRow(x, x.deal);
+  const shown = pageOf(ranked, asked.page, run.pages.searchPage, run.pages.chars, row);
   const listing = ranked.length
-    ? listed('Q&A', 'qa', asked, shown, (x) => qaRow(x, x.deal))
+    ? listed('Q&A', 'qa', asked, shown, row)
     : noneFound('Q&A', 'no question answers to these words', missed.length, deals.length);
   report.out.push(listing + await unread(run, 'Questions', missed));
   for (const x of shown.items) {

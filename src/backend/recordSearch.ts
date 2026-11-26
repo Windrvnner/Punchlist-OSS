@@ -1,7 +1,7 @@
 /**
  * The chat's search of the records the app holds (findings and the Q&A log): ranked by the same BM25 keyword scoring
  * as documents (wordIndex.ts `bm25`), with each record's words counted as the index counts a document's, and any
- * ranking cut into pages of one size (#1102).
+ * ranking cut into pages of at most one size (#1102) that fit a folder read's text bound (#1091).
  */
 import { bm25, countWords } from './wordIndex';
 
@@ -28,8 +28,30 @@ export function rankRecords<T>(records: T[], q: Set<string>, text: (x: T) => str
   return scored.sort((a, b) => b.score - a.score).map((r) => r.x);
 }
 
-/** page `page` (from 1) of a ranking, `size` a page; a page past the last has no items */
-export function pageOf<T>(ranked: T[], page: number, size: number): Page<T> {
-  const items = ranked.slice((page - 1) * size, page * size);
-  return { items, page, pages: Math.ceil(ranked.length / size), total: ranked.length };
+/**
+ * page `page` (from 1) of a ranking: at most `size` records, and only as many of them as fit in `chars` characters of
+ * their `line`s, as a folder read lists what fits (agentFolder.ts `FOLDER_TEXT`, #1091); the rest go on the next pages.
+ * A record longer than that has a page of its own, whole. A page past the last has no items.
+ */
+export function pageOf<T>(ranked: T[], page: number, size: number, chars: number, line: (x: T) => string): Page<T> {
+  const pages = cutPages(ranked, size, chars, line);
+  return { items: pages[page - 1] ?? [], page, pages: pages.length, total: ranked.length };
+}
+
+/** a ranking cut into pages in its order: a page ends at `size` records or before the record that would pass `chars` */
+function cutPages<T>(ranked: T[], size: number, chars: number, line: (x: T) => string): T[][] {
+  const pages: T[][] = [];
+  let used = 0;
+  for (const x of ranked) {
+    const length = line(x).length + 1;
+    const current = pages.at(-1);
+    if (current && current.length < size && used + length <= chars) {
+      current.push(x);
+      used += length;
+    } else {
+      pages.push([x]);
+      used = length;
+    }
+  }
+  return pages;
 }

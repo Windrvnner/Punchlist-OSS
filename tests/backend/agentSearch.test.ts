@@ -111,6 +111,22 @@ describe('searching the Q&A log from the chat, a page at a time', () => {
     expect(first + second).not.toContain('Provide permit');
   }, 60_000);
 
+  it('a page holds fewer rows, each whole, when 25 would outgrow what the conversation holds', async () => {
+    // 4,000 tokens of 3 characters each: about nine of these rows a page
+    const s = setup(calls(qa(), qa(2)), { compactAt: 4_000 });
+    await questions(s.repo, 40);
+    expect((await s.ai.answer(ask('What is outstanding?'))).ok).toBe(true);
+    const first = result(s, 2);
+    const shown = (first.match(/^Question: /gm) ?? []).length;
+    expect(shown).toBeGreaterThan(1);
+    expect(shown).toBeLessThan(25);
+    for (let i = 0; i < shown; i++) expect(first).toContain(longText(i).trim());
+    expect(first.length).toBeLessThan(12_000 + 500);
+    const pages = Number(/Page 1 of (\d+)\./.exec(first)?.[1]);
+    expect(pages).toBeGreaterThan(2);
+    expect(result(s, 3)).toContain(longText(shown).trim());                // page 2 starts where page 1 stopped
+  }, 60_000);
+
   it('a Q&A result is the full row, found by any of its fields', async () => {
     const extra = { askedBy: 'Lender counsel', received: '2026-10-01', workstream: 'Legal', priority: 'High',
       respondedBy: 'Sponsor', responded: '2026-11-02' };

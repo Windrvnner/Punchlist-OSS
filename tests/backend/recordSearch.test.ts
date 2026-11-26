@@ -46,13 +46,25 @@ describe('rankRecords', () => {
 
 describe('pageOf', () => {
   const forty = Array.from({ length: 40 }, (_v, i) => i);
+  const short = (x: number) => `row ${x}`;
   it('gives 25, then the last 15, then none', () => {
-    expect(pageOf(forty, 1, 25)).toEqual({ items: forty.slice(0, 25), page: 1, pages: 2, total: 40 });
-    expect(pageOf(forty, 2, 25)).toEqual({ items: forty.slice(25), page: 2, pages: 2, total: 40 });
-    expect(pageOf(forty, 3, 25)).toEqual({ items: [], page: 3, pages: 2, total: 40 });
+    expect(pageOf(forty, 1, 25, 24_000, short)).toEqual({ items: forty.slice(0, 25), page: 1, pages: 2, total: 40 });
+    expect(pageOf(forty, 2, 25, 24_000, short)).toEqual({ items: forty.slice(25), page: 2, pages: 2, total: 40 });
+    expect(pageOf(forty, 3, 25, 24_000, short)).toEqual({ items: [], page: 3, pages: 2, total: 40 });
   });
   it('counts no pages when nothing matched', () => {
-    expect(pageOf([], 1, 25)).toEqual({ items: [], page: 1, pages: 0, total: 0 });
+    expect(pageOf([], 1, 25, 24_000, short)).toEqual({ items: [], page: 1, pages: 0, total: 0 });
+  });
+  it('lists only the rows that fit in the text bound, and the rest on the next pages, each row whole', () => {
+    const long = (x: number) => `row ${x} ${'response '.repeat(1_000)}`;                   // about 9,000 characters
+    const first = pageOf(forty, 1, 25, 24_000, long);
+    expect(first.items).toEqual([0, 1]);
+    expect(first.pages).toBe(20);
+    expect(pageOf(forty, 20, 25, 24_000, long).items).toEqual([38, 39]);
+  });
+  it('gives a row longer than the bound a page of its own, whole', () => {
+    const rows = [0, 1, 2];
+    const line = (x: number) => (x === 1 ? 'x'.repeat(30_000) : `row ${x}`);
+    expect([1, 2, 3].map((n) => pageOf(rows, n, 25, 24_000, line).items)).toEqual([[0], [1], [2]]);
   });
 });
-

@@ -62,7 +62,7 @@ import type { Source } from '../domain/model';
 import type { DocRecord } from './documents';
 import { strings, list as listOf, int } from './lenient';
 import { TOO_LONG_ASK, TOO_LONG_REPLY, UNREAD_REPLY } from './limits';
-import { SERVICE } from '../control';
+import { control, SERVICE } from '../control';
 import { codeOf, type AgentKit, type AgentOptions, type AgentQuestion } from './agentKit';
 import type { Cited, Run, Sent } from './agentKit';
 import { AgentRun } from './agentRun';
@@ -84,6 +84,12 @@ type Answered = {
 type Limits = {
   turns: number; width: number; folderDocs: number; searchPage: number; compactAt: (model: string) => number;
 };
+
+/**
+ * the most characters a page of findings or questions may hold: what the kept conversation holds before it is
+ * compacted, so that one page never outgrows what one call may send (recordSearch.ts `pageOf`, #1091)
+ */
+const pageChars = (limits: Limits, model: string) => limits.compactAt(model) * control.limits.charsPerToken;
 
 const SEARCHES: readonly What[] = ['documents', 'findings', 'qa', 'all'];
 const REPLY_SHAPE = '{"tool": …} or {"text": "…", "sources": […]}';
@@ -147,7 +153,8 @@ class Answering {
     private readonly limits: Limits,
     folderMemory: FolderMemory,
   ) {
-    this.run = new AgentRun(kit, question, progress, { width: limits.width, searchPage: limits.searchPage });
+    const { width, searchPage } = limits;
+    this.run = new AgentRun(kit, question, progress, { width, searchPage, chars: pageChars(limits, question.model) });
     this.folders = new FolderReader(this.run, folderMemory, limits);
     this.conversation = new KeptConversation(this.run, limits.compactAt, limits.width);
   }
