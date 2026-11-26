@@ -302,3 +302,55 @@ describe('the Punchlist folder', () => {
     expect((await p.keeper.use('relative')).ok).toBe(false);
   });
 });
+
+describe('saveSharedFolder with a settings file that cannot be read (#1118)', () => {
+  const settingsIn = (root: string, text?: string) => {
+    const local = path.join(root, 'local');
+    fs.mkdirSync(local);
+    const file = path.join(local, 'settings.json');
+    if (text !== undefined) fs.writeFileSync(file, text);
+    return { local, file };
+  };
+
+  it.each(['{not json', '[]', '"x"', 'null'])('leaves settings holding %s untouched and throws', (text) => {
+    const { local, file } = settingsIn(tmp(), text);
+    expect(() => saveSharedFolder(local, '/team/Punchlist')).toThrow(/settings/i);
+    expect(fs.readFileSync(file, 'utf8')).toBe(text);
+    expect(fs.existsSync(file + '.tmp')).toBe(false);
+  });
+
+  it('leaves a settings file that is locked (EBUSY) untouched and throws', () => {
+    const { local, file } = settingsIn(tmp(), '{"indexAtOnce":true}');
+    const read = vi.spyOn(fs, 'readFileSync').mockImplementation(() => {
+      throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+    });
+    try {
+      expect(() => saveSharedFolder(local, '/team/Punchlist')).toThrow(/settings/i);
+    } finally {
+      read.mockRestore();
+    }
+    expect(fs.readFileSync(file, 'utf8')).toBe('{"indexAtOnce":true}');
+  });
+
+  it('writes a missing settings file new', () => {
+    const local = path.join(tmp(), 'local');
+    saveSharedFolder(local, '/team/Punchlist');
+    const written = JSON.parse(fs.readFileSync(path.join(local, 'settings.json'), 'utf8'));
+    expect(written).toEqual({ sharedFolder: '/team/Punchlist' });
+  });
+
+  it('keeps the other settings of a valid file', () => {
+    const { local, file } = settingsIn(tmp(), '{"indexAtOnce":true}');
+    saveSharedFolder(local, '/team/Punchlist');
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ indexAtOnce: true, sharedFolder: '/team/Punchlist' });
+  });
+
+  it('fails the change of folder with the reason, keeping the file, when settings cannot be read', async () => {
+    const root = tmp();
+    const { file } = settingsIn(root, '{not json');
+    const p = pc(root);
+    const result = await p.keeper.use(path.join(root, 'Punchlist'));
+    expect(result.ok).toBe(false);
+    expect(fs.readFileSync(file, 'utf8')).toBe('{not json');
+  });
+});
