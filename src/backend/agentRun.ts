@@ -48,7 +48,8 @@ export class AgentRun {
 
   /**
    * `pages`: how many a search gives at a time, documents (`width`) and findings or questions (`searchPage`), as the
-   * agent's limits set them; `chars`: the most characters a page of findings or questions may hold (agent.ts `pageChars`)
+   * agent's limits set them; `chars`: the most characters a page of findings or questions may hold (agent.ts
+   * `pageChars`)
    */
   constructor(
     readonly kit: AgentKit,
