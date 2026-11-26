@@ -12,7 +12,8 @@ import { RequestDraft, ApplyDraft, RecoverDrafts, DiscardDraft, AcceptDraft, Res
 import { CreateFinding, SetFindingStatus, ReviewFinding, DeleteFinding, RestoreFinding, RestoreFindingSnapshot, Reassess, ApplyReassessment } from '../../src/app/commands/findings';
 import { ImportQuestions, RevertImport } from '../../src/app/commands/importQuestions';
 import { registry } from '../../src/app/commands/undo';
-import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
+import { csvCodec } from '../../src/adapters/spreadsheet';
+import { readCsv } from '../../src/domain/sheets';
 import { MemoryLocal } from '../../src/adapters/local';
 import { prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { dealQuestions, dealFindings } from '../../src/app/state';

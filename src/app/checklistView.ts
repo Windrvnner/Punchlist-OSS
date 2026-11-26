@@ -29,7 +29,7 @@ interface ListHeading {
 }
 
 /** An item in several layers belongs under the first applicable layer, starting with the general list. */
-function listName(item: Item | undefined) {
+export function listName(item: Item | undefined) {
   const sources = [...(item?.from ?? [])];
   const from = sources.sort((a, b) => layerOrder.indexOf(a.layer) - layerOrder.indexOf(b.layer))[0];
   if (!from) return 'Other';

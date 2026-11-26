@@ -263,7 +263,7 @@ export const Finding = Record.extend({
    * with no markers at all (an answer saved as a finding) is shown as supported by all its sources.
    */
   ownWords: z.boolean().optional(),
-  /** the model wrote the title (a finding made from an issues list's point): shown marked as AI until a person rewrites it */
+  /** the title is the point's own words (a finding made from an issues list's point), until a person rewrites it */
   aiTitle: z.boolean().optional(),
   /** the model chose the workstream (the same import): bookkeeping between two PCs' imports until a person changes it */
   aiWorkstream: z.boolean().optional(),
