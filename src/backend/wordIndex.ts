@@ -2,10 +2,10 @@
  * Each PC's own index of every word in a deal's documents. Nothing of it goes to
  * the shared folder: each PC reads the words of the files in its own copy of the data room.
  *
- * What is kept for a document: how often it uses each word (filler words and bare numbers left out, plurals folded,
- * no word order), how many words it has, and its title: the first 40 words of its first page. Kept in this PC's local
- * folder as one line per document in words-<deal id>.jsonl, written once when the document is read and never changed;
- * a later line for the same document replaces an earlier one.
+ * What is kept for a document: how often it uses each word of any length (filler words left out, numbers
+ * kept, plurals folded, no word order), how many words it has, and its title: the first 40 words of its first page.
+ * Kept in this PC's local folder as one line per document in words2-<deal id>.jsonl, written once when the document is
+ * read and never changed; a later line for the same document replaces an earlier one.
  *
  * How a document answers to some words: each word counts by how rare it is in the deal (BM25's idf),
  * times 10 when it is in the document's name or folder path, 4 when it is in the title, and BM25's term weight for
@@ -25,7 +25,7 @@ export const WEIGHT = { name: 10, title: 4 } as const;
 export const TITLE_WORDS = 40;
 
 /** a word as the index keeps it, or null for one it leaves out */
-const keep = (w: string) => (w.length < 2 || /^\d+$/.test(w) || FILLER.has(w) ? null : fold(w));
+const keep = (w: string) => (FILLER.has(w) ? null : fold(w));
 
 /** what the index keeps of one document's text */
 export interface DocWords { counts: Map<string, number>; length: number; title: string[] }
@@ -61,7 +61,8 @@ export interface WordIndex {
 
 export function wordIndex(local: Folder): WordIndex {
   const deals = new Map<string, DealIndex>();
-  const file = (dealId: string) => `words-${dealId}.jsonl`;
+  // the name carries the index's version: an index built under older rules is not read, so each document is read again
+  const file = (dealId: string) => `words2-${dealId}.jsonl`;
   const put = (ix: DealIndex, l: Line) => {
     const was = ix.num.get(l.d);
     if (was !== undefined) { ix.alive[was] = false; ix.words[was] = ''; ix.total -= ix.length[was]; ix.live--; }      // a document read again: its old words go
@@ -94,7 +95,8 @@ export function wordIndex(local: Folder): WordIndex {
       for (const w of q) { const m = usesOf(ix, w); uses.set(w, m); idf.set(w, Math.log(1 + (n - m.size + 0.5) / (m.size + 0.5))); }
       const out = new Map<string, number>();
       for (const d of docs) {
-        const k = namedOnly ? undefined : ix.num.get(d.docId); let s = 0;
+        const k = namedOnly ? undefined : ix.num.get(d.docId);
+        const terms: number[] = [];
         for (const w of q) {
           let m = d.named.has(w) ? WEIGHT.name : 0;
           if (k !== undefined) {
@@ -102,9 +104,11 @@ export function wordIndex(local: Folder): WordIndex {
             const tf = uses.get(w)?.get(k) ?? 0;
             if (tf) m += (tf * (K1 + 1)) / (tf + K1 * (1 - B + (B * ix.length[k]) / avg));
           }
-          s += m * (idf.get(w) ?? 0);
+          terms.push(m * (idf.get(w) ?? 0));
         }
-        out.set(d.docId, s);
+        // added smallest first, so two documents with the same evidence score the same whatever order the words
+        // were asked in: a tie is decided by the ranking's own tie-break, never by rounding
+        out.set(d.docId, terms.sort((x, y) => x - y).reduce((sum, t) => sum + t, 0));
       }
       return out;
     },

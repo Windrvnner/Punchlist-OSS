@@ -514,18 +514,23 @@ export function nodeAi(o: AiOptions) {
   let offered: Awaited<ReturnType<ModelService['models']>> | null = null;
   const models = async () => (offered ??= await o.service.models());
   // ── the words a search compares ─────────────────────────────────────────────────────────────────────────────────────
-  const kept = (t: string) => tokens(t).filter((w) => w.length >= 2 && !STOP.has(w)).map(fold);
+  const kept = (t: string) => tokens(t).filter((w) => !STOP.has(w)).map(fold);
   /** a short name as a search compares it: "O&M" and "PPAs" as "om" and "ppa" */
   const shortKey = (k: string) => fold(tokens(k).join(''));
   /** each deal's short names, as the fast model saw them in its file paths (see `coreOf`), read from its latest core line by `lines` */
   const shorts = new Map<string, { from: unknown; map: Map<string, string[]> }>();
   /**
-   * The words of a text as they are compared: split wherever a name is split, plurals folded, common words and single
-   * letters left out, and, with `dealId`, every short name the deal's files use given its long form as well.
+   * The words of a text as they are compared: split wherever a name is split, plurals folded, common words left
+   * out, and, with `dealId`, every short name the deal's files use given its long form as well.
    */
   const words = (t: string, dealId?: string): Set<string> => {
-    const long = dealId ? shorts.get(dealId)?.map : undefined; const out = new Set<string>();
-    for (const w of tokens(t)) { if (w.length < 2 || STOP.has(w)) continue; out.add(fold(w)); for (const x of long?.get(fold(w)) ?? []) out.add(x); }
+    const long = dealId ? shorts.get(dealId)?.map : undefined;
+    const out = new Set<string>();
+    for (const w of tokens(t)) {
+      if (STOP.has(w)) continue;
+      out.add(fold(w));
+      for (const x of long?.get(fold(w)) ?? []) out.add(x);
+    }
     return out;
   };
 
@@ -564,7 +569,7 @@ export function nodeAi(o: AiOptions) {
     return retried(async () => {
       if (b && (b.left-- <= 0 || (b.deal && b.deal.left-- <= 0))) throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
       let reply = ''; try { reply = await o.service.complete(input); return reply; } finally { count(kind, input, String(reply ?? '')); }
-    }, (r) => !String(r ?? '').trim(), input.model);
+    }, (r) => !String(r ?? '').trim());
   };
   /**
    * Ask, and read the reply. A reply that cannot be read even loosely is sent back once to the model that wrote it, with
@@ -600,15 +605,45 @@ export function nodeAi(o: AiOptions) {
   const SAME_BATCH = 3000;
   /** parts of the duplicate check asked at once */
   const SAME_AT_ONCE = 4;
-  /** points of an issues list read from the file in one call: each comes back in full, so a long list takes a few calls */
-  const ISSUES_PAGE = 80;
   /** points titled and compared with the findings in one call: a list of deal size (a few hundred points) is one call */
   const ISSUES_BATCH = 400;
-  /** calls that read a list at most: 100 pages is 8,000 points, far past any deal's. A list still going then is not brought in at all */
-  const ISSUES_READS = 100;
-  /** tries at reading one page of a list before the read fails: a page that fails its check is asked for again */
-  const ISSUES_TRIES = 3;
   const MEMO_RATE_BATCH = 40;   // open findings rated in one call for the deal memo
+  /** a reply's text with its white space collapsed */
+  const clean = (t: unknown) => String(t ?? '').replace(/\s+/g, ' ').trim();
+
+  /**
+   * An issues list's points, read from its file in one call, as every other document is read: the model gives each
+   * point with the words the list gives it and the number or reference the list gives it (#1026). The reply is
+   * not paged, checked against the file's text or matched to it. A reply that cannot be read is asked for again
+   * (`tried`); one cut off at the length limit fails the read, as it does anywhere else.
+   */
+  async function readIssuePoints(
+    name: string, fileId: string, model: Ask['model'], tried: <T>(ask: () => Promise<T>) => Promise<T>,
+  ): Promise<Result<{ n: string; text: string }[]>> {
+    const prompt = [
+      `${name} is an issues list: the points one party raises on a deal's documents. List every point of it, in order.`,
+      'For each: "n": its number or reference as the list writes it ("" when it has none); "text": the point, in the',
+      'list\'s own words exactly as written. Never reword, shorten or merge. Leave out headings, introductions',
+      'and notes that raise no point.',
+      'Reply as JSON: {"points": [{"n": "1", "text": "…"}]}',
+    ].join('\n');
+    const ask: Ask = { kind: 'issuesList', split: true, model, system: JSON_ONLY, files: [fileId], prompt };
+    try {
+      // a reply that is not an object with its points is asked for again (`tried`), as every other read is
+      const reply = await tried(async () => {
+        const got = await askJson<{ points?: unknown }>(ask, ['points']);
+        if (!got || !Array.isArray(got.points)) throw Object.assign(new Error(UNREAD_REPLY), { code: 'unread' });
+        return got.points as { n?: unknown; text?: unknown }[];
+      });
+      // the list's own words, number and point alike, are the reply's as given, inner spacing and line breaks
+      // included: only their edges are trimmed, as the import command trims them too (#1026)
+      const edges = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+      return ok(reply.map((p) => ({ n: edges(p?.n), text: edges(p?.text) })).filter((p) => p.text));
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'unread') return fail({ kind: 'failed', message: UNREAD_REPLY });
+      return failure(e, 'The file could not be read');
+    }
+  }
   async function askJson<T = Record<string, unknown>>(input: Ask, keys: string[], shape?: string, fix = true): Promise<T | null> {
     const raw = await whole(input, keys); const got = json<T>(raw, ...keys); if (got || !fix || !String(raw ?? '').trim()) return got;
     let fixed: string;
@@ -656,7 +691,8 @@ export function nodeAi(o: AiOptions) {
       if (b && (b.left-- <= 0 || (b.deal && b.deal.left-- <= 0))) throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
       let reply = ''; try { const r = await o.service.converse!(input); reply = r.text || JSON.stringify(r.calls ?? ''); return r; } finally { count(kind, input, String(reply ?? '')); }
     };
-    return input.results?.length || input.conversation ? once() : retried(once, (r) => !String(r.text ?? '').trim() && !r.calls?.length, input.model, tried);
+    if (input.results?.length || input.conversation) return once();
+    return retried(once, (r) => !String(r.text ?? '').trim() && !r.calls?.length, tried);
   };
   /** models that refused a way of calling tools in this run of the app, and the way they stepped down to */
   const stepped = new Map<string, ToolMode>();
@@ -1031,8 +1067,17 @@ export function nodeAi(o: AiOptions) {
   type Trail = { q: string; n: number }[];
   const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
   /** words a model gives in place of a search when it has none ("None", "not applicable", "TBD"); a search of only these, or of nothing the index keeps, is no search */
-  // folded as the index folds words (`kept`), so each entry matches the form a reply's words take
-  const NO_SEARCH = new Set(['additional', 'applicable', 'applies', 'apply', 'available', 'cannot', 'cant', 'empty', 'extra', 'find', 'found', 'further', 'given', 'idea', 'keyword', 'keywords', 'missing', 'more', 'na', 'nan', 'necessary', 'need', 'needed', 'needs', 'neither', 'never', 'nil', 'no', 'non', 'none', 'nor', 'not', 'nothing', 'null', 'other', 'others', 'pass', 'pending', 'placeholder', 'provided', 'queries', 'query', 'relevant', 'require', 'required', 'requires', 'result', 'results', 'search', 'searched', 'searches', 'searching', 'skip', 'skipped', 'specific', 'sure', 'tba', 'tbc', 'tbd', 'term', 'terms', 'unable', 'unclear', 'undefined', 'unknown', 'unsure', 'word', 'words'].map(fold));
+  // folded as the index folds words (`kept`), so each entry matches the form a reply's words take; "n" and "a" are the
+  // words of "N/A" and "n.a.", which `kept` keeps whatever their length
+  const NO_SEARCH = new Set([
+    'additional', 'a', 'applicable', 'applies', 'apply', 'available', 'cannot', 'cant', 'empty', 'extra', 'find',
+    'found', 'further', 'given', 'idea', 'keyword', 'keywords', 'missing', 'more', 'n', 'na', 'nan', 'necessary',
+    'need', 'needed', 'needs', 'neither', 'never', 'nil', 'no', 'non', 'none', 'nor', 'not', 'nothing', 'null',
+    'other', 'others', 'pass', 'pending', 'placeholder', 'provided', 'queries', 'query', 'relevant', 'require',
+    'required', 'requires', 'result', 'results', 'search', 'searched', 'searches', 'searching', 'skip', 'skipped',
+    'specific', 'sure', 'tba', 'tbc', 'tbd', 'term', 'terms', 'unable', 'unclear', 'undefined', 'unknown', 'unsure',
+    'word', 'words'
+  ].map(fold));
   const isSearch = (x: string) => kept(x).some((w) => !NO_SEARCH.has(w));
   const SEARCHES = 3;                                                            // searches the fast model may give one item at a time
   const FOUND = 12;                                                              // documents one item's searches put at the head of the pick list
@@ -1239,7 +1284,7 @@ export function nodeAi(o: AiOptions) {
       toolMode: (model: string) => stepped.get(model) ?? o.toolCalls ?? control.models.toolCalls,
       // a refusal that could also be a passing error (a 500 on a turn of tool results) holds for the run only when it comes twice with no tool results taken between
       steppedDown: (model: string, to: ToolMode, sure = true) => { const k = `${model}\n${to}`; if (sure || doubted.has(k)) stepped.set(model, to); else doubted.add(k); },
-      retriesFor: retried.retriesFor,
+      retries: retried.retries,
       ...(o.service.upload ? { keepTranscript: (text: string) => o.service.upload!({ name: `conversation-${Date.now().toString(36)}.txt`, bytes: new TextEncoder().encode(text) }) } : {}),
       ...(o.service.remove ? { drop: (fileId: string) => o.service.remove!(fileId) } : {}),
     } : {}),
@@ -1879,7 +1924,9 @@ export function nodeAi(o: AiOptions) {
         const got = new Map<number, { text: string; why: string; also?: string[] }>(); let last = 0; let inOrder = true;
         for (const x of kept) {
           // an item split in two comes as "texts"; one reworded as "text"
-          const n = int(x?.n); const texts = (Array.isArray(x?.texts) ? strings(x.texts) : typeof x?.text === 'string' ? [x.text] : []).map((t) => t.replace(/\s+/g, ' ').trim().slice(0, 500)).filter(Boolean).slice(0, 6);
+          const n = int(x?.n);
+          const given = Array.isArray(x?.texts) ? strings(x.texts) : typeof x?.text === 'string' ? [x.text] : [];
+          const texts = given.map((t) => fitText(t.replace(/\s+/g, ' ').trim())).filter(Boolean);
           if (n === null || n < 1 || n > part.length) continue; if (n <= last) inOrder = false; last = Math.max(last, n);
           if (!texts.length || (texts.length === 1 && texts[0] === part[n - 1].trim()) || got.has(n - 1)) continue;
           got.set(n - 1, { text: texts[0], why: (strings(x.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 120), ...(texts.length > 1 ? { also: texts.slice(1) } : {}) });
@@ -1977,7 +2024,11 @@ export function nodeAi(o: AiOptions) {
         if (part.length === 1 && items.filter((x) => x.text).length === 1) for (const x of items) if (x.text) x.m = 0;
         const got = new Map<number, string>();
         let last = -1;
-        for (const x of items) { if (x.m === undefined || !x.text) continue; last = x.m; if (!twice.has(x.m)) got.set(x.m, x.text.slice(0, 2000)); }
+        for (const x of items) {
+          if (x.m === undefined || !x.text) continue;
+          last = x.m;
+          if (!twice.has(x.m)) got.set(x.m, fitText(x.text));
+        }
         if (cut) got.delete(last);      // the last entry of a cut reply may be cut short
         if (got.size) { answered++; streak = 0; }
         else { empty++; streak++; why = cut ? `${SERVICE}’s reply was cut off, so nothing was added` : reply && Array.isArray(reply.items) ? `${SERVICE} left a point without a question, so nothing was added` : `${SERVICE}’s reply could not be read, so nothing was added`; }
@@ -2104,72 +2155,25 @@ export function nodeAi(o: AiOptions) {
       return ok({ pairs: out, ...(items ? { missed: { kind, at: lost.sort((a, b) => a - b) } } : {}) });
     },
     async issuesList(i) {
-      // Two steps. The list is read from its file, a page of points at a time, each point in its own words: a long list's
-      // words run past what one reply can hold. Then the points are titled and compared with the deal's findings and each
-      // other, with no file: the whole list in one call, as the checklist's duplicate check is asked, in
-      // parts only for a list longer than ISSUES_BATCH. A reply that cannot be read is asked for again for half as many
-      // points. Nothing is half done: a point that cannot be read or sorted fails the whole, to be asked again.
+      // Two steps. The list is read from its file in one call, each point in the list's own words. Then the points
+      // are sorted into workstreams and compared with the deal's findings and each other, with no file: the whole
+      // list in one call, as the checklist's duplicate check is asked, in parts only for a list longer than
+      // ISSUES_BATCH. A reply that cannot be read is asked for again for half as many points. Nothing is half
+      // done: a point that cannot be read or sorted fails the whole, to be asked again.
       // a call that fails (a timeout, a server error) is asked again twice by every call's own retry (retry.ts), which
       // also covers that case, so it is not asked again here too; only a reply that cannot be read is (`unread`), twice
       const tried = async <T>(ask: () => Promise<T>): Promise<T> => { for (let k = 0; ; k++) { try { return await ask(); } catch (e) { if ((e as { code?: string })?.code !== 'unread' || k >= 2) throw e; } } };
       let fileId: string | undefined;
       try { fileId = (await o.keeper.ensure(await o.docs.wanted(i.dealId, [i.doc.docId])))[i.doc.docId]; } catch (e) { return failure(e, 'The file could not be read'); }
       if (!fileId) return fail({ kind: 'failed', message: 'The file could not be read' });
-      const fast = (await models()).fast; const clean = (t: unknown) => String(t ?? '').replace(/\s+/g, ' ').trim();
-      const read: { n: string; text: string }[] = [];
-      const unreadSays = 'It could not be read to its end, so nothing was imported';
-      const unread = () => fail<never>({ kind: 'failed', message: unreadSays });
-      try {
-        // The list is read to its end or not at all. Each page is then checked against the file in a call of
-        // its own: the model is shown the points read for that stretch (number and full words) and asked which of the list's
-        // points in it are missing, which lines are not points of their own (one given twice), and which differ from the
-        // list's words in any way, so a figure misread mid-point is caught. This holds for any
-        // numbering ("4.2(a)", letters, or none) and costs one call a page. A page that fails the check, or a
-        // reply that cannot be read, is asked for again, at half the size after a failed check; after ISSUES_TRIES tries at
-        // the same place the read fails and nothing is brought in. A page that comes back empty, or short saying nothing
-        // follows, is checked to the end of the list, so a model that stops early is caught, and a stray "more" on the last page costs
-        // only one more read. Only the check says a line is a point given twice, so the list's own repeats are kept
-        //. A reply cut off is asked for again at half the size, and the size stays.
-        let whole = false, size = ISSUES_PAGE, page = size, tries = 0;
-        const opening = (t: string) => JSON.stringify(t.split(' ').slice(0, 8).join(' '));
-        const point = (p: { n: string; text: string }) => `${p.n ? `numbered ${JSON.stringify(p.n)}, ` : ''}beginning ${opening(p.text)}`;
-        // where the next page starts, in the list's own terms too: a count alone is easy to lose
-        const after = () => { const p = read[read.length - 1]; return `. That last point${p.n ? ` is numbered ${JSON.stringify(p.n)} and` : ''} begins ${opening(p.text)}`; };
-        // [], "none", ["none"] and "" all say there is nothing; a reply with no answer at all does not
-        const nothing = (v: unknown): boolean => (typeof v === 'string' && /^(none)?$/i.test(v.trim())) || (Array.isArray(v) && v.every((x) => typeof x === 'string' && nothing(x)));
-        const checked = async (got: { n: string; text: string }[], toEnd: boolean): Promise<boolean> => {
-          const prev = read[read.length - 1];
-          const stretch = `${prev ? `after the point ${point(prev)}` : 'from its first point'}, ${toEnd || !got.length ? 'to the end of the list' : `up to the point ${point(got[got.length - 1])}`}`;
-          let reply: { missing?: unknown; extra?: unknown; wrong?: unknown } | null = null;
-          // each line gives the point's words in full, so words cut short, taken from another point, or changed show
-          const line = (p: { n: string; text: string }) => `${p.n ? `numbered ${JSON.stringify(p.n)}: ` : ''}${JSON.stringify(p.text)}`;
-          try { reply = await tried(() => askJson({ kind: 'issuesList', split: true, model: fast, system: JSON_ONLY, files: [fileId!], prompt: `In ${i.doc.doc}, these were read as its points ${stretch}:\n${got.map((p, k) => `${k + 1}. ${line(p)}`).join('\n') || '(none)'}\n\nCompare them with the list itself, over that stretch only. "missing": the number (or opening words) of each point of the list in that stretch that is not above; "extra": the line number above of each line that is not a point of its own in the list (a point given twice, or not a point); "wrong": the line number above of each line whose words differ from that point's words in the list in any way (a word or figure changed, added or left out, the words cut short, or another point's words), apart from line breaks. Give [] for each when there is nothing.\nReply as JSON: {"missing": [], "extra": [], "wrong": []}` }, ['missing', 'extra', 'wrong'])); }
-          catch (e) { if ((e as { code?: string })?.code !== 'cutoff') throw e; }
-          return !!reply && nothing(reply.missing) && [reply.extra, reply.wrong].every((v) => v === undefined || nothing(v));
-        };
-        for (let calls = 0; calls < ISSUES_READS; calls++) {
-          const asking = page; let cutoff = false;
-          let reply: { points?: unknown; more?: unknown } | null = null;
-          try { reply = await tried(() => askJson({ kind: 'issuesList', split: true, model: fast, system: JSON_ONLY, files: [fileId], prompt: `${i.doc.doc} is an issues list: the points one party raises on a deal's documents. List its points in order${read.length ? `, from the one after point ${read.length} (counting the first as 1)${after()}` : ''}, at most ${page}.\nFor each: "n": its number or reference as the list writes it ("" when it has none); "text": the point in its own words exactly as written, joined into one paragraph when it runs over several lines. Leave out headings, introductions and notes that raise no point.\n"more": true when the list has points after the last one you give.\nReply as JSON: {"points": [{"n": "1", "text": "…"}], "more": false}` }, ['points'])); }
-          catch (e) { if ((e as { code?: string })?.code !== 'cutoff') throw e; cutoff = true; }
-          if (cutoff) { if (asking > 10) { page = size = Math.ceil(asking / 2); continue; } return fail({ kind: 'failed', message: 'It could not be read as an issues list' }); }
-          if (!reply || !Array.isArray(reply.points)) { if (++tries >= ISSUES_TRIES) return fail({ kind: 'failed', message: 'It could not be read as an issues list' }); continue; }
-          const got = (reply.points as { n?: unknown; text?: unknown }[]).map((p) => ({ n: clean(p?.n).replace(/^#/, ''), text: clean(p?.text) })).filter((p) => p.text);
-          // a full page that says nothing follows is read on from, as the model may have left "more" out; the next page then ends it
-          const toEnd = !got.length || (got.length < asking && !(reply.more === true || /^(true|yes)$/i.test(String(reply.more ?? '').trim())));
-          if (!(await checked(got, toEnd))) { if (++tries >= ISSUES_TRIES) return unread(); page = Math.max(10, Math.ceil(asking / 2)); continue; }
-          // past the check: the next page is the full size again
-          tries = 0; page = size; read.push(...got);
-          if (toEnd) { whole = true; break; }
-        }
-        if (!whole) return read.length ? fail({ kind: 'failed', message: `It is too long to read: more than ${read.length.toLocaleString('en-US')} points` }) : unread();
-      } catch (e) { return failure(e, 'The file could not be read'); }
+      const fast = (await models()).fast;
+      const got = await readIssuePoints(i.doc.doc, fileId, fast, tried);
+      if (!got.ok) return got;
+      const read = got.value;
       if (!read.length) return fail({ kind: 'failed', message: 'No points were found in it' });
       // a point the list numbers nothing is known by its place
       const points = read.map((p, k) => ({ ...p, n: p.n || String(k + 1) }));
-      const fs = i.findings.map((f) => `${f.title.replace(/\s+/g, ' ')}${f.text ? `: ${clean(f.text.replace(/\s*\[\d+\]/g, '')).slice(0, 240)}` : ''}`);
-      // the findings whose text the fullest form cuts short: a join named to one of them is confirmed too, at any level
-      const cutShort = new Set(i.findings.flatMap((f, k) => (f.text && clean(f.text.replace(/\s*\[\d+\]/g, '')).length > 240 ? [k] : [])));
+      const fs = i.findings.map((f) => `${f.title.replace(/\s+/g, ' ')}${f.text ? `: ${clean(f.text.replace(/\s*\[\d+\]/g, ''))}` : ''}`);
       const ws = new Map(i.workstreams.map((w) => [w.toLowerCase(), w]));
       const sorted = new Map<number, { title: string; workstream: string; same?: { finding: string } | { point: number } }>();
       // A part's call holds its own points, every point before them (an earlier point it may repeat) and the findings, so
@@ -2185,7 +2189,20 @@ export function nodeAi(o: AiOptions) {
       const promptOf = (mine: number[], level: number, share?: Share) => {
         const upto = mine[mine.length - 1] + 1; const own = new Set(mine);
         const shown = level >= 3 ? titles.slice(share![0], share![1]).map((t, k) => `F${share![0] + k + 1}: ${t}`) : (level >= 2 ? titles : fs).map((t, k) => `F${k + 1}: ${t}`);
-        return `These are the findings already raised on a deal${level >= 3 ? `, F${share![0] + 1} to F${share![1]} of ${titles.length}, by their titles` : level >= 2 ? ', by their titles' : ''}:\n${shown.join('\n') || '(none)'}\n\nThese are points of an issues list brought in${level >= 1 && upto > mine.length ? ', those not asked about here by their opening words' : ''}:\n${range(0, upto).map((k) => `P${k + 1}: ${level === 0 || own.has(k) ? points[k].text : opening(points[k].text)}`).join('\n')}\n\nFor each of ${mine.length === upto ? 'the points' : `points ${mine.map((k) => `P${k + 1}`).join(', ')}`}: "title": a short title for it as a finding, a plain phrase of under twelve words; "workstream": one of ${i.workstreams.join(', ')}; "same": the finding (F3) or the earlier point (P2) that raises the same issue, so that settling one settles the other, or "" when none does. Be strict: only when you are sure. Two points on the same clause that ask for different things are not the same.\nReply as JSON: {"points": [{"p": 1, "title": "…", "workstream": "Legal", "same": ""}]}`;
+        const findingsHead = `These are the findings already raised on a deal${level >= 3
+          ? `, F${share![0] + 1} to F${share![1]} of ${titles.length}, by their titles`
+          : level >= 2 ? ', by their titles' : ''}`;
+        const pointsHead = `These are points of an issues list brought in${level >= 1 && upto > mine.length
+          ? ', those not asked about here by their opening words' : ''}`;
+        const pointLines = range(0, upto)
+          .map((k) => `P${k + 1}: ${level === 0 || own.has(k) ? points[k].text : opening(points[k].text)}`);
+        const asked = mine.length === upto ? 'the points' : `points ${mine.map((k) => `P${k + 1}`).join(', ')}`;
+        return `${findingsHead}:\n${shown.join('\n') || '(none)'}\n\n${pointsHead}:\n${pointLines.join('\n')}\n\n`
+          + `For each of ${asked}: "workstream": one of ${i.workstreams.join(', ')}; `
+          + '"same": the finding (F3) or the earlier point (P2) that raises the same issue, so that settling one '
+          + 'settles the other, or "" when none does. Be strict: only when you are sure. Two points on the same clause '
+          + 'that ask for different things are not the same.\n'
+          + 'Reply as JSON: {"points": [{"p": 1, "workstream": "Legal", "same": ""}]}';
       };
       // the points whose "same" came from a call that showed either side shorter than it is: each is confirmed below
       const loose = new Set<number>();
@@ -2213,17 +2230,22 @@ export function nodeAi(o: AiOptions) {
           if ((e as { code?: string })?.code !== 'cutoff') throw e;
         }
         const missing = new Set(mine);
-        if (reply && Array.isArray(reply.points)) for (const r of reply.points as { p?: unknown; title?: unknown; workstream?: unknown; same?: unknown }[]) {
-          const k = (int(r?.p) ?? 0) - 1; const title = clean(r?.title).slice(0, 300); const workstream = ws.get(clean(r?.workstream).toLowerCase()) ?? '';   // none of the firm's: left blank for a person, as a new finding's is (decisions)
-          if (!own.has(k) || !title) continue;
+        type Sorted = { p?: unknown; workstream?: unknown; same?: unknown };
+        if (reply && Array.isArray(reply.points)) for (const r of reply.points as Sorted[]) {
+          const k = (int(r?.p) ?? 0) - 1;
+          // none of the firm's: left blank for a person, as a new finding's is (decisions)
+          const workstream = ws.get(clean(r?.workstream).toLowerCase()) ?? '';
+          if (!own.has(k)) continue;
+          // the finding's title is the point's own text, never a model's wording (#1026)
+          const title = points[k].text;
           const m = /^([FP])\s*(\d+)$/i.exec(clean(r?.same)); const at = m ? +m[2] - 1 : -1;
           const shown = (f: number) => !share || (f >= share[0] && f < share[1]);         // a share's call can name only the findings it was shown
           const same = !m ? undefined : m[1].toUpperCase() === 'F' ? (i.findings[at] && shown(at) ? { finding: i.findings[at].id } : undefined) : at >= 0 && at < k ? { point: at } : undefined;
           // a point asked about with several shares keeps its first title, and the first thing any share says it repeats
           const had = sorted.get(k);
           if (!had) sorted.set(k, { title, workstream, ...(same ? { same } : {}) }); else if (!had.same && same) had.same = same;
-          // confirmed below whenever either side was shown shorter than it is: a point or finding by opening words or title, or a finding's text cut short
-          if (same && (level >= 1 || ('finding' in same && cutShort.has(at))) && sorted.get(k)!.same === same) loose.add(k);
+          // confirmed below whenever either side was shown shorter than it is: a point or finding by opening words or title
+          if (same && level >= 1 && sorted.get(k)!.same === same) loose.add(k);
           missing.delete(k);
         }
         if (!missing.size) return true;
@@ -2238,7 +2260,7 @@ export function nodeAi(o: AiOptions) {
         await Promise.all(Array.from({ length: Math.min(SAME_AT_ONCE, parts.length) }, async () => { while (whole && next < parts.length) { try { whole = (await ask(parts[next++], 3)) && whole; } catch (e) { whole = false; throw e; } } }));
         if (!whole) return fail({ kind: 'failed', message: UNREAD_REPLY });
       } catch (e) { return failure(e, UNREAD_REPLY); }
-      // A "same" named from opening words, titles or a finding's text cut short may be the wrong one: two points can open
+      // A "same" named from opening words or titles may be the wrong one: two points can open
       // alike and ask opposite things, as can a revised point and the finding its first version made. Each is confirmed in a call that shows both in full, a part at a time (parts.ts); one not confirmed, or
       // cut off even alone, is not joined, and its point becomes a finding of its own. A call that fails fails the import.
       const full = (f: { title: string; text?: string }) => `${f.title.replace(/\s+/g, ' ')}${f.text ? `: ${clean(f.text.replace(/\s*\[\d+\]/g, ''))}` : ''}`;

@@ -184,11 +184,10 @@ export class KeptConversation {
       this.forget();
       return this.ask(turn, tried);
     }
-    if (!fresh && curable(error) && tried < (kit.retriesFor?.(question.model) ?? 0)) {
+    if (!fresh && curable(error) && tried < (kit.retries?.() ?? 0)) {
       // a passing failure inside the conversation (decisions: Retries): the service may already hold the failed turn,
       // so it is asked again as a new conversation, in full, as when the service has lost one; that one is retried as
-      // any call is, counting the tries made here, and only while the retry policy has retries for this model (none
-      // when set to 0, or while it is failing every call)
+      // any call is, counting the tries made here, and only while the retry policy has retries (none when set to 0)
       this.forget();
       return this.ask(turn, tried + 1);
     }

@@ -101,6 +101,31 @@ describe('EditField', () => {
     editor.host.remove();
   });
 
+  // #997: pins the current behavior. A held candidate stays Not saved while composing goes on without a
+  // compositionstart; typing that is not composing saves it after the usual pause.
+  it('keeps a held field held when composing input arrives without compositionstart', async () => {
+    const editor = mount('Borrowing entity', false);
+    const field = editor.el();
+    await act(() => {
+      field.focus();
+      field.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      compositionInput(field, 'しはらい', true);
+      field.blur();
+    });
+    await act(() => {
+      field.focus();
+      compositionInput(field, 'しはらいび', true);
+    });
+    await editor.settle();
+    expect(editor.commits).toHaveLength(0);
+    expect(editor.host.querySelector('button.fail')?.textContent).toBe('Not saved · Retry');
+    await act(() => compositionInput(field, '支払日', false));
+    await editor.settle();
+    expect(editor.commits.map(({ v }) => v)).toEqual(['支払日']);
+    await act(() => render(null, editor.host));
+    editor.host.remove();
+  });
+
   it('offers a choice if a peer edits during composition and only saves the confirmed choice', async () => {
     const editor = mount('Borrowing entity', false);
     const field = editor.el();

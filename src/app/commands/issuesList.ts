@@ -10,7 +10,6 @@ import type { State } from '../state';
 import { Finding, DealId, FindingId, ListPoint, Tombstone } from '../../domain/model';
 import { checkFinding } from '../../domain/transitions';
 import { ok, fail, notFound, rejected } from '../../domain/result';
-import { TITLE_MAX } from './findings';
 import { derivedId } from '../../domain/derivedId';
 import { key as wording, sha256Hex } from '../../domain/checklist';
 import { issuesListDestinations } from '../issuesListJoins';
@@ -18,7 +17,16 @@ import { issuesListDestinations } from '../issuesListJoins';
 /** what a finding's history says when an import marks it: its page leaves it out of the last change, as the mark itself says it */
 export const LISTED = 'Issues list imported';
 const plural = (n: number, w: string) => `${n.toLocaleString('en-US')} ${w}${n === 1 ? '' : 's'}`;
-const Point = z.object({ n: z.string().min(1), text: z.string().trim().min(1), title: z.string().trim().min(1).max(TITLE_MAX), workstream: z.string(), join: FindingId.optional(), after: z.number().int().nonnegative().optional(), /** the person checked it: its own finding, whatever it repeats */ own: z.boolean().optional() });
+const Point = z.object({
+  n: z.string().min(1),
+  text: z.string().trim().min(1),
+  title: z.string().trim().min(1),
+  workstream: z.string(),
+  join: FindingId.optional(),
+  after: z.number().int().nonnegative().optional(),
+  /** the person checked it: its own finding, whatever it repeats */
+  own: z.boolean().optional(),
+});
 /**
  * a mark is the same mark when it names the same point of the same list in the same words: a list may number two points
  * alike. The list is its file's id, not its name: a revised list saved under the same name is another list.
