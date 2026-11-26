@@ -94,7 +94,7 @@ export function northService(o: NorthOptions): ModelService & { chat(input: Para
       if (r.ok) { try { return (await r.json()) as T; } catch (e) { if (e instanceof SyntaxError) throw e; throw unreachable((e as Error).message); } }   // a reply that stalls past the timeout, or drops
       const e = await failure(r);
       if (e.status === 401) { o.token.refused(token); continue; }        // signed out or expired: wait for a sign-in, then again
-      if (e.retryable && ++busy < (o.busyTries ?? 4)) { await sleep(Math.min(e.retryAfterMs ?? 1000 * 2 ** busy, 60_000)); continue; }
+      if (e.retryable && ++busy < (o.busyTries ?? 3)) { await sleep(Math.min(e.retryAfterMs ?? 1000 * 2 ** busy, 60_000)); continue; }
       if (e.retryable) throw Object.assign(e, { code: 'unreachable' });
       if (saysTooLong(e.status, e.message, method === 'POST' && path === '/v1/files')) throw Object.assign(tooLong(e.message, e.status), { northCode: e.northCode });   // see limits.ts
       throw e;

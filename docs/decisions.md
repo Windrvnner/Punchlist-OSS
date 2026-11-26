@@ -277,6 +277,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - An unreadable reply is repaired or sent back once; a thin reply is sent back with what is wrong.
 - Retryable model failures and empty replies are retried quietly, up to twice by default after 2 and 4 seconds.
   An unreachable service follows its own recovery path. Keep everything the person typed.
+- A connector retries a busy or failing service up to twice, honoring Retry-After, before it reports the service unreachable (#1110).
 - Every AI feature adapts to a reply that is cut off or a request that is too long, at limits the control file sets (#451 and #452 are still to do).
 - For deal document analysis, send PDFs whole so the model can read the pages directly. Use extracted
   word counts to rank and select documents. Checklist import currently reads the PDF's text. Sending the original
