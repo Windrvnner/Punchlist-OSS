@@ -252,6 +252,10 @@ describe('documents on real folders', () => {
     expect(q.log.join(' ')).toContain('could not be read');
     // and it is named again on every run, not only the first
     expect((await indexAll(a, vdr)).log.join(' ')).toContain('could not be read');
+    // and read again once the file changes, its words then recorded
+    put(vdr, 'Broken.xlsx', MODEL);
+    await indexAll(a, vdr);
+    expect(by('Broken.xlsx').words).toEqual(['line', 'cover', 'debt']);
     const long = await pdfLook(pdf('long report', 100), 10); expect(long.pages).toBe(100); expect(long.text.split('\n').map((l) => +l.split('page ')[1])).toEqual([1, 11, 21, 31, 41, 51, 61, 71, 81, 91]);
     expect((await pdfLook(pdf('short report', 4), 10)).text.split('\n').length).toBe(4);
     // a document another copy of the app recorded before words were kept: indexing here adds them, once
