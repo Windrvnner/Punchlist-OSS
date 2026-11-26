@@ -75,11 +75,25 @@ describe('conversations', () => {
 
   it('carries on the model service’s conversation: the last answer’s goes with the next question, and the new one is kept, also across a restart', async () => {
     const local = new MemoryLocal(); const kv = disk(); const given: unknown[] = []; let n = 0;
-    const ai: Partial<AiService> = { answer: async (i) => { given.push(i.thread); n++; return ok({ text: `Answer ${n}`, sources: [], thread: { id: 'conv_1', model: i.model, tokens: 100 * n, tags: [{ tag: 'D1', dealId: 'd', docId: 'x' }] } }); } };
+    const ai: Partial<AiService> = { answer: async (i) => { given.push(i.thread); n++; return ok({ text: `Answer ${n}`, sources: [], thread: { id: 'conv_1', model: i.model, tokens: 100 * n, opened: [{ dealId: 'd', docId: 'x' }] } }); } };
     const { store } = make({ kv, local, ai }); const dealId = await deal(store); const scope: Scope = { kind: 'deal', dealId };
     await ask(store, scope, 'first'); await ask(store, scope, 'second');
     expect(given[0]).toBeUndefined(); expect(given[1]).toMatchObject({ id: 'conv_1', tokens: 100 });
     const again = make({ kv, local }); await again.store.boot(); expect(again.store.get().threads[convKey(scope)][3].thread).toMatchObject({ id: 'conv_1', tokens: 200 });
+  });
+
+  it('a conversation saved when documents were shown by tag still loads, carried on as a new one (#1162)', async () => {
+    const local = new MemoryLocal(); const kv = disk(); const given: unknown[] = [];
+    const ai: Partial<AiService> = { answer: async (i) => { given.push(i.thread); return ok({ text: 'Answer', sources: [] }); } };
+    const { store } = make({ kv, local, ai }); const dealId = await deal(store); const scope: Scope = { kind: 'deal', dealId };
+    await ask(store, scope, 'first');
+    const saved = local.read('threads') as Record<string, Record<string, unknown>[]>;
+    const old = { id: 'conv_1', model: 'thorough', tokens: 100, tags: [{ tag: 'D1', dealId, docId: 'x' }] };
+    local.write('threads', { [convKey(scope)]: saved[convKey(scope)].map((m) => (m.role === 'ai' ? { ...m, thread: old } : m)) });
+    const again = make({ kv, local, ai }); await again.store.boot();
+    expect(again.store.get().threads[convKey(scope)].map((m) => m.text)).toEqual(['first', 'Answer']);
+    await ask(again.store, scope, 'second');
+    expect(given[1]).toBeUndefined();
   });
 
   it('asks, shows pending, then the answer; the thread is saved locally and survives a restart', async () => {

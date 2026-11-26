@@ -281,12 +281,12 @@ export interface AiService {
  */
 /**
  * The conversation the model service keeps for a chat (decisions: Long conversations), kept with each answer so
- * that the next question carries it on, on whichever PC asks it. `tags` are the documents the model was shown in it, by
- * the tag it cites them by, so that a later answer numbers on from them. `transcript` is the file in the service's store
+ * that the next question carries it on, on whichever PC asks it. `opened` are the documents the model was shown in it,
+ * which a later answer may cite by their ids (#1162). `transcript` is the file in the service's store
  * that holds the conversation as it was when it was last compacted. `call` is the tool call the answer was given by, when
  * the model called tools natively: the next question answers it first.
  */
-export interface ModelThread { id: string; model: string; tokens: number; tags: { tag: string; dealId: string; docId: string }[]; transcript?: string; call?: string }
+export interface ModelThread { id: string; model: string; tokens: number; opened: { dealId: string; docId: string }[]; transcript?: string; call?: string }
 export interface ResearchStep { /** 'stop': the person stopped the answer */ kind: 'search' | 'read' | 'stop'; text: string; result: string; done: boolean; found?: { where: string; quote: string }[] }
 /** What the chat agent did for one answer: its steps, in order, how long it took in all (milliseconds), and how many of the deal's (or deals') documents a model was given (`read.docs` of `read.of`). */
 export interface Research { steps: ResearchStep[]; ms: number; read?: { docs: number; of: number } }
