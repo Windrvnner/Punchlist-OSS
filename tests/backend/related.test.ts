@@ -108,6 +108,13 @@ describe('complete families: what the design promises', () => {
     expect(f.of.get('Projects/Amendment No. 1 to EPC Contract.pdf')).toHaveLength(2); expect(f.alone.has('Projects/Amendment No. 1 to EPC Contract.pdf')).toBe(false);
     expect(f.alone.has('Projects/Relecloud/EPC/Schedule 1 - Scope.pdf')).toBe(true);
   });
+  it('sibling folders "Wind Farm 1" and "Wind Farm 2" keep their own series, numbers now being words (#1147)', () => {
+    const months = ['Jan', 'Feb', 'Mar'];
+    const paths = [1, 2].flatMap((n) => months.map((m) => `Ops/Wind Farm ${n}/Monthly Report ${m} 2025.pdf`));
+    const newest = read(paths).series.map((s) => `${s[0]}|${s.length}`).sort();
+    const each = [1, 2].map((n) => `Ops/Wind Farm ${n}/Monthly Report Mar 2025.pdf|3`);
+    expect(newest).toEqual(each);
+  });
   it('undated monthly records of several assets stay apart; a running number after the record\'s word is a period', () => {
     expect(read([1, 2, 3].map((n) => `Rep/Monthly Report - Solar ${n}.pdf`)).series).toEqual([]);
     expect(read([1, 2, 3].map((n) => `Rep/Wind Farm ${n} Monthly Reports/Report.pdf`)).series).toEqual([]);

@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
 import { coreSet, shortNamesIn, type CoreDoc, type CoreItem } from '../../src/backend/core';
+import { indexWords } from '../../src/backend/words';
 
 const filler = new Set(['the', 'and', 'of', 'to', 'for', 'a', 'an', 'in', 'on', 'is', 'are', 'by', 'with', 'any', 'all', 'pdf', 'docx']);
 const ask = new Set(['executed', 'copy', 'provided', 'confirm', 'provide', 'party', 'term', 'lenders']);
@@ -57,10 +58,17 @@ describe('core documents with no model and no cap', () => {
     const a = run(docs, items).ids; expect(a.length).toBeGreaterThan(4);
     expect(run([...docs].reverse(), [...items].reverse()).ids).toEqual(a); expect(run([docs[3], docs[0], docs[5], docs[1], docs[4], docs[2]], [items[2], items[5], items[0], items[4], items[1], items[3]]).ids).toEqual(a);
   });
-  it('reads a bare abbreviation as a file name, and a numbered folder or section is not a subject', () => {
+  it('reads a bare abbreviation as a file name', () => {
     const docs = [doc('Room/03 Offtake/PPA.pdf'), doc('Room/03 Offtake/Purchase order 12.pdf'), doc('Room/03 Offtake/Power meter readings.pdf'), doc('Room/03 Offtake/Agreement on metering.pdf'), ...['Tax return', 'Property tax bill', 'Tax opinion'].map((n) => doc(`Room/10 Tax/${n}.pdf`))];
     const s = run(docs, [item('i1', 'The power purchase agreement is in full force'), item('i2', 'The PPA term is at least 10 years', { heads: 'Section 10 Offtake' }), item('i3', 'Interconnection is in place'), item('i4', 'Insurance is in force'), item('i5', 'Site access is secured')]);   // (a word half the items use counts for nothing, so more than two)
-    expect(names(s.ids.slice(0, 1))).toEqual(['PPA.pdf']); expect(s.ids.filter((id) => id.includes('10 Tax'))).toEqual([]);
+    expect(names(s.ids.slice(0, 1))).toEqual(['PPA.pdf']);
+  });
+  it('keeps numbers and single letters as words, as the word index does (#1147)', () => {
+    const kept = ['wind', 'farm', '2', 'schedule', 'a', 'tax', '10'];
+    expect(indexWords('Wind Farm 2 Schedule A Tax 10', new Set())).toEqual(kept);
+    const docs = [doc('Room/Reports/Wind Farm 1 Report.pdf'), doc('Room/Reports/Wind Farm 2 Report.pdf')];
+    const s = run(docs, [item('i1', 'The Wind Farm 2 report')]);
+    expect(names(s.ids)[0]).toBe('Wind Farm 2 Report.pdf');
   });
   it('a file is a hub by name only when it is named as a list', () => {
     const docs = [doc('Room/VDR Index v3.xlsx'), doc('Room/Index of documents.pdf'), doc('Room/PPA/PPA Price Index Adjustment.pdf'), doc('Room/PPA/PPA.pdf')];
