@@ -5,7 +5,7 @@
 // for an item whose first one had not synced yet. At deal scale: 2,000 checklist items and 300 documents.
 import { describe, it, expect } from 'vitest';
 import { view, docsHash, findingIdFor } from '../../src/backend/rounds';
-import { setup, doc, val, deal, finding, Mem, itemsIn, OK, checkLines, type Call } from './reviewKit';
+import { setup, doc, val, deal, finding, Mem, itemsIn, OK, checkLines, type Call, nth } from './reviewKit';
 import { dealList } from './dealList';
 import { paths } from './fixtures/relecloudRoom';
 
@@ -46,7 +46,7 @@ function leftFirst(shared: Mem, items: Item[], docList: string[], settled: objec
 function bondFinding(c: Call) {
   const finding = {
     result: 'finding', title: 'No decommissioning bond', workstream: 'Legal',
-    body: ['None is posted. [1]'], next: 'Ask.', sources: [{ doc: 'D1', page: 1 }],
+    body: ['None is posted. [1]'], next: 'Ask.', sources: [{ doc: nth(c, 1), page: 1 }],
   };
   return {
     items: itemsIn(c).map((it) => {

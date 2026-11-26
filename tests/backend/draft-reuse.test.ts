@@ -3,7 +3,7 @@
 // this one and, where an earlier response suits, the draft uses it and names it ("As answered to Lender B (Q12)"),
 // alongside the documents. Tested at the scale of a real log: 2,500 questions from many parties.
 import { describe, it, expect } from 'vitest';
-import { setup, doc, val, deal, qid, type Call } from './reviewKit';
+import { setup, doc, val, deal, qid, type Call, nth } from './reviewKit';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import type { Repository } from '../../src/ports';
 import type { Provenance } from '../../src/domain/model';
@@ -106,7 +106,7 @@ describe('a draft reuses an answer already given to another party', () => {
   it('among 2,500 questions, the one asked before in other words is found and the draft uses it, named as asked', async () => {
     const own = 'The lock-up ratio is 1.20x from financial close, and the credit agreement prevails. [1]';
     const text = `${own} As answered to Lender B (${ID12}).`;
-    const s = drafting({ status: 'found', text, sources: [{ doc: 'D1', page: 14 }], reused: [ID12] }, [FA]);
+    const s = drafting({ status: 'found', text, sources: [{ doc: FA.docId, page: 14 }], reused: [ID12] }, [FA]);
     await deal(s.repo); await questions(s.repo, [Q12, ...log()]);
     const t0 = performance.now(); const r = val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW })); const ms = performance.now() - t0;
     const c = s.calls.find(isDraft)!;
@@ -121,7 +121,7 @@ describe('a draft reuses an answer already given to another party', () => {
 
   it('an earlier response the model uses is quoted word for word and named, ahead of what the documents add; '
     + 'one never shown fails the draft', async () => {
-    const page14 = [{ doc: 'D1', page: 14 }];
+    const page14 = [{ doc: FA.docId, page: 14 }];
     const neverShown = { status: 'found', text: 'The ratio is 1.20x. [1]', sources: page14, reused: [ID12, qid(9)] };
     const s = drafting(neverShown, [FA]);
     await deal(s.repo); await questions(s.repo, [Q12, ...log(300)]);
@@ -148,14 +148,14 @@ describe('a draft reuses an answer already given to another party', () => {
       // a credit in other words is dropped too
       expect(drafted.text).toBe(`${AS_ANSWERED_12}\n\nThe credit agreement sets 1.35x. [1]`);
     }
-    const plain = setup((c) => (isDraft(c) ? { status: 'found', text: 'The ratio is 1.20x. [1]', sources: [{ doc: 'D1', page: 14 }] } : {}), { d1: [FA] });
+    const plain = setup((c) => (isDraft(c) ? { status: 'found', text: 'The ratio is 1.20x. [1]', sources: [{ doc: nth(c, 1), page: 14 }] } : {}), { d1: [FA] });
     await deal(plain.repo); await questions(plain.repo, [Q12]); expect(val(await plain.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW })).text).toBe('The ratio is 1.20x. [1]');
   });
 
   it('a draft whose text names a question it was not shown is asked again (#1105)', async () => {
     let drafts = 0;
     const said = () => (++drafts > 1 ? 'The ratio is 1.20x. [1]' : `The ratio is 1.20x, as answered in ${qid(9)}. [1]`);
-    const s = setup((c) => (isDraft(c) ? { status: 'found', text: said(), sources: [{ doc: 'D1', page: 14 }] } : {}), {
+    const s = setup((c) => (isDraft(c) ? { status: 'found', text: said(), sources: [{ doc: nth(c, 1), page: 14 }] } : {}), {
       d1: [FA],
     });
     await deal(s.repo); await questions(s.repo, [Q12]);
@@ -170,7 +170,7 @@ describe('a draft reuses an answer already given to another party', () => {
     'a draft with %s still naming an unshown question id when its tries run out fails (#1105)',
     async (_label, library) => {
       const text = `The ratio is 1.20x, as answered in ${qid(9)}. [1]`;
-      const sources = library.length ? [{ doc: 'D1', page: 14 }] : [];
+      const sources = library.length ? [{ doc: FA.docId, page: 14 }] : [];
       for (const thorough of ['thorough', 'standard']) {
         const s = drafting({ status: 'found', text, sources, reused: [ID12] }, library);
         s.svc.offered = { ...s.svc.offered, thorough };
@@ -245,7 +245,7 @@ describe('a draft reuses an answer already given to another party', () => {
   // #286: question numbers are never shown to the model, so a calendar quarter is never taken for a credit
   describe('a calendar quarter in a draft', () => {
     const Q3 = { ...Q12, n: 3 };
-    const sources = [{ doc: 'D1', page: 14 }, { doc: 'D1', page: 16 }];
+    const sources = [{ doc: FA.docId, page: 14 }, { doc: FA.docId, page: 16 }];
     const draftWith = async (text: string, reused: string[] = []) => {
       const s = setup((c) => (isDraft(c) ? { status: 'found', text, sources, reused } : {}), { d1: [FA] });
       await deal(s.repo); await questions(s.repo, [Q3, ...log(2377)]);

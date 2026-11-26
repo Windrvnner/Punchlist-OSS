@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { setup, doc, val, deal, itemsIn, Mem, type Call, OK } from './reviewKit';
+import { setup, doc, val, deal, itemsIn, Mem, type Call, OK, nth } from './reviewKit';
 import { fromStoreName } from '../../src/backend/storeKeeper';
 import { itemId } from '../../src/domain/checklist';
 import type { Repository } from '../../src/ports';
@@ -9,7 +9,7 @@ const FA = doc(1, 'Credit Agreement.pdf', { words: ['facility', 'agreement', 'lo
 const TS = doc(2, 'Term sheet.pdf', { pages: 12, words: ['term', 'sheet', 'lock', 'ratio'] });
 const IM = doc(3, 'Information memorandum.pdf', { words: ['project', 'capacity', 'sponsor'] });
 const LIST = () => ({ broad: [{ id: 'c1', text: 'The credit agreement is in the data room' }, { id: 'c2', text: 'The lock-up ratio in the credit agreement matches the term sheet' }, { id: 'c3', text: 'A decommissioning bond is in place' }, { id: 'c4', text: 'The sponsor is named in the credit agreement' }], product: [], sector: [] });
-const tag = (c: Call, name: string) => `D${c.files.findIndex((f) => fromStoreName(f.name)!.name === name) + 1}`;
+const tag = (c: Call, name: string) => nth(c, c.files.findIndex((f) => fromStoreName(f.name)!.name === name) + 1);
 // c1 is satisfied, c2 comes to a finding, c3 finds nothing that settles it, c4 gets no usable answer
 const script = (c: Call) => ({ items: itemsIn(c).flatMap((it) => (it.text.includes('data room') ? [{ id: it.tag, ...OK(c) }]
   : it.text.includes('lock-up') ? [{ id: it.tag, result: 'finding', title: 'Lock-up ratio differs between the credit agreement and the term sheet', workstream: 'Legal', body: ['The draft sets it at 1.25x. [1]', 'The term sheet has 1.30x. [2]'], next: '', sources: [{ doc: tag(c, FA.name), page: 14 }, { doc: tag(c, TS.name), page: 3 }] }]
@@ -81,7 +81,7 @@ describe('the checklist as it stands', () => {
       const n = (seen[it.text] = (seen[it.text] ?? 0) + 1);
       if (it.text.includes('data room')) return { id: it.tag, result: 'ok', where: [{ doc: tag(c, FA.name), page: 2, quote: 'This Credit Agreement is dated March 3.' }, { doc: tag(c, TS.name), page: '7' }] };
       if (it.text.includes('sponsor')) return n === 1 ? { id: it.tag, result: 'ok' } : { id: it.tag, result: 'ok', where: { document: tag(c, FA.name), page: 'p. 9', quote: 'Proseware Energy Holdings (the "Sponsor")' } };
-      return n === 1 ? { id: it.tag, result: 'ok', where: [{ doc: tag(c, TS.name), page: 99 }] } : n === 2 ? { id: it.tag, result: 'ok', where: [{ doc: 'D9', page: 1 }] } : { id: it.tag, result: 'ok' };
+      return n === 1 ? { id: it.tag, result: 'ok', where: [{ doc: tag(c, TS.name), page: 99 }] } : n === 2 ? { id: it.tag, result: 'ok', where: [{ doc: tag(c, TS.name), cell: 'A1' }] } : { id: it.tag, result: 'ok' };
     }) }), { d1: [FA, TS, IM] }, { shared: new Mem(), installId: 'pc', checklist: one }); await deal(s.repo);
     const p = val(await s.ai.firstPass('d1'));
     expect(p.unsettled).toEqual(['c3']); expect(p.gaps).toEqual([]);

@@ -53,7 +53,7 @@ function setupIn(room: DocRecord[], tools: Record<string, unknown>[], refuseOver
   return { ai, turns, reads, picks };
 }
 /** the documents a read was given, in the order it lists them */
-const names = (c: Call) => [...c.prompt.matchAll(/^D\d+: (?:.*\/)?(.+?\.pdf)/gm)].map((m) => m[1]);
+const names = (c: Call) => [...c.prompt.matchAll(/^(?:\w+\/)?doc_[0-9a-f]{24}: (?:.*\/)?(.+?\.pdf)/gm)].map((m) => m[1]);
 const docs = (page?: number) =>
   ({ tool: 'search', what: 'documents', query: 'turbine warranty', ...(page ? { page } : {}) });
 const ask = (message: string) => ({ dealId: 'd1', message, history: [], model: 'standard' });
