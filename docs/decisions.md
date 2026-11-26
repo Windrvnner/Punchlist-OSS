@@ -383,3 +383,4 @@ These decisions are built and wait to be confirmed:
 - The recovered copy of a deal deleted elsewhere is built, including who sees it, what it holds, and its notice's wording (#220).
 - Periodic records whose names differ only by a period are a series and take one place in the core set, their newest member's; every document stays searchable (docs/core-families-design.md).
 - An issues list or an advisor report is read page after page to its end, however long it is; a page that only repeats rows or points already given fails the read, so a model that repeats itself cannot read on for ever (#1026).
+- A document's word index keeps its numbers, and a Word or PowerPoint file is indexed from everything its PDF shows: body, headers, footers, footnotes, endnotes and speaker notes.

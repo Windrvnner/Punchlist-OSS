@@ -48,15 +48,24 @@ export interface OfficeText { text: string; first: string; tracked: number }
 /** Read the text of a .docx or .pptx file. Throws when the file cannot be read (damaged, or locked with a password, which makes it no zip). */
 export function officeText(bytes: Uint8Array, name: string): OfficeText {
   if (/\.ppt[xm]$/i.test(name)) {
-    const parts = unzip(bytes, (n) => /^ppt\/slides\/slide\d+\.xml$/.test(n));
-    const slides = [...parts].sort((a, b) => +a[0].replace(/\D/g, '') - +b[0].replace(/\D/g, '')).map(([, x]) => textOf(x.toString('utf8'), 'a:t', 'a:p'));
-    return { text: slides.join('\n'), first: slides[0] ?? '', tracked: 0 };
+    const parts = unzip(bytes, (n) => /^ppt\/(?:slides\/slide|notesSlides\/notesSlide)\d+\.xml$/.test(n));
+    const read = (kind: string) => [...parts]
+      .filter(([n]) => n.includes(`/${kind}`))
+      .sort((a, b) => +a[0].replace(/\D/g, '') - +b[0].replace(/\D/g, ''))
+      .map(([, x]) => textOf(x.toString('utf8'), 'a:t', 'a:p'));
+    const slides = read('slide'); const notes = read('notesSlide');   // the speaker notes are text of the file too
+    return { text: [...slides, ...notes].join('\n'), first: slides[0] ?? '', tracked: 0 };
   }
-  const doc = unzip(bytes, (n) => n === 'word/document.xml').get('word/document.xml'); if (!doc) throw new Error('not a Word document');
+  const wanted = /^word\/(?:header\d*|footer\d*|footnotes|endnotes)\.xml$/;
+  const parts = unzip(bytes, (n) => n === 'word/document.xml' || wanted.test(n));
+  const doc = parts.get('word/document.xml'); if (!doc) throw new Error('not a Word document');
   const xml = doc.toString('utf8');
   // text moved away keeps its words in w:t at the old place: as accepted, only the new place has them
-  const text = textOf(xml.replace(/<w:moveFrom\b[^>]*>[\s\S]*?<\/w:moveFrom>/g, ''), 'w:t', 'w:p');
+  const words = (part: string) => textOf(part.replace(/<w:moveFrom\b[^>]*>[\s\S]*?<\/w:moveFrom>/g, ''), 'w:t', 'w:p');
+  const text = words(xml);
+  // headers, footers, footnotes and endnotes (what the PDF shows) follow the body; the title stays the body's start
+  const others = [...parts].filter(([n]) => n !== 'word/document.xml').map(([, x]) => words(x.toString('utf8')));
   // each tracked change is one element: an insertion, a deletion, a move (from and to), a change of format, or a table cell added or taken out. Counted so, Word's count matches LibreOffice's
   const tracked = (xml.match(/<w:(?:ins|del|moveFrom|moveTo|rPrChange|pPrChange|tblPrChange|trPrChange|tcPrChange|sectPrChange|cellIns|cellDel)[\s>]/g) ?? []).length;
-  return { text, first: text, tracked };
+  return { text: [text, ...others].join('\n'), first: text, tracked };
 }
