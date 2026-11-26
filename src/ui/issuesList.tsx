@@ -55,7 +55,8 @@ export function IssuesListDialog({ dealId }: { dealId: string }) {
 
 function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: boolean }) {
   const store = useStore(); const s = useAppState();
-  const KEY = importKey.issues(dealId); const [left] = useState(() => (afresh ? null : keptIssuesList(KEY)));
+  const KEY = importKey.issues(dealId);
+  const [left] = useState(() => (afresh ? null : keptIssuesList(KEY)));
   const [list, setList] = useState<ReadIssuesList | null>(left?.list ?? null);
   const [kept, setKept] = useState<Set<number>>(left?.kept ?? new Set());   // points the person keeps as their own finding
   const [busy, setBusy] = useState<'' | 'reading' | 'importing'>('');
@@ -115,11 +116,11 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
     if (busy) return;
     setBusy('importing'); setError(''); setRestart(false); setSwapping(false);
     holding.current = true;
-    const r = await submitIssuesList(store, KEY, { dealId, list, points: input }, () => nowKept.current);
+    const result = await submitIssuesList(store, KEY, { dealId, list, points: input }, () => nowKept.current);
     setBusy('');
     holding.current = false;
-    if (!r.ok) {
-      setError(`Couldn’t import: ${r.error.message}`);
+    if (!result.ok) {
+      setError(`Couldn’t import: ${result.error.message}`);
       return;
     }
     store.ui({ dialog: null });

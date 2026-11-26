@@ -56,14 +56,19 @@ it('lets the kept list go while the import runs and keeps it again when the impo
     const key = importKey.issues(dealId);
     const list = readList();
     const kept = new Set([5]);
-    const now = () => ({ list, kept });
     const { input } = reviewIssuesList(app.store.get(), dealId, list, kept);
-    keepImport(key, now());
-    const restore = failRecoveryWrite(app, (tx) => tx.writes.some((write) => write.kind === 'finding'), 'Disk full');
+    keepImport(key, { list, kept });
+    // the import keeps the state as it is when it fails, not as Import found it
+    let atFailure = kept;
+    const now = () => ({ list, kept: atFailure });
+    const restore = failRecoveryWrite(app, (tx) => {
+      atFailure = new Set([5, 9]);
+      return tx.writes.some((write) => write.kind === 'finding');
+    }, 'Disk full');
     const refused = await submitIssuesList(app.store, key, { dealId, list, points: input }, now);
     restore();
     expect(refused.ok).toBe(false);
-    expect(keptIssuesList(key)).toEqual({ list, kept });
+    expect(keptIssuesList(key)).toEqual({ list, kept: new Set([5, 9]) });
     const held = holdRecoveryWrite(app, (tx) => tx.writes.some((write) => write.kind === 'finding'));
     const sending = submitIssuesList(app.store, key, { dealId, list, points: input }, now);
     await held.entered;
