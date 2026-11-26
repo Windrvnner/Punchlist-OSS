@@ -156,24 +156,48 @@ describe('searching the Q&A log from the chat, a page at a time', () => {
     expect((await s.ai.answer(ask('What is outstanding?'))).ok).toBe(true);
     const got = result(s, 2);
     const details = 'asked by Lender counsel · received 2026-10-01 · workstream Legal · priority High';
-    expect(got).toContain(`Q1 · Answered · ${details}`);
+    expect(got).toContain(`R1 · Answered · ${details}`);
     expect(got).toContain('Question: Confirm the lock-up ratio (0)');
-    expect(got).toContain(`Response to Q1 from Sponsor, 2026-11-02: ${longText(0).trim()}`);
+    expect(got).toContain(`Response to R1 from Sponsor, 2026-11-02: ${longText(0).trim()}`);
     expect(got).toContain('Page 1 of 1.');
   }, 60_000);
 
   it('a row with who responded and when, but no response yet, still shows them', () => {
     const asked = { n: 7, status: 'open' as const, text: 'Send the permit' };
-    const row = qaRow({ ...asked, respondedBy: 'Sponsor', responded: '2026-11-03' });
-    expect(row.split('\n')[2]).toBe('Response to Q7 from Sponsor, 2026-11-03: none yet');
-    expect(qaRow({ n: 8, status: 'open', text: 'Send the lease' }).split('\n')[2]).toBe('Response to Q8: none yet');
+    const row = qaRow({ ...asked, respondedBy: 'Sponsor', responded: '2026-11-03' }, 'R1');
+    expect(row.split('\n')[2]).toBe('Response to R1 from Sponsor, 2026-11-03: none yet');
+    const unanswered = qaRow({ n: 8, status: 'open', text: 'Send the lease' }, 'R2');
+    expect(unanswered.split('\n')[2]).toBe('Response to R2: none yet');
   });
 
   it('an AI draft in a Q&A row is labeled as one', async () => {
     const s = setup(calls(qa()));
     await questions(s.repo, 40, 'd1', { provenance: { origin: 'ai', sources: [] } });
     expect((await s.ai.answer(ask('What is outstanding?'))).ok).toBe(true);
-    expect(result(s, 2)).toContain('Response to Q1 (drafted by AI from the data room, not received from anyone): ');
+    expect(result(s, 2)).toContain('Response to R1 (drafted by AI from the data room, not received from anyone): ');
+  }, 60_000);
+
+  it('names each question by a neutral handle the run keeps, and shows the person its number (#1105)', async () => {
+    const asked = /(R\d+) · Answered\nQuestion: How did revenue move\?/g;
+    const handlesIn = (prompt: string) => [...prompt.matchAll(asked)].map((m) => m[1]);
+    const say = (handle: string) => `${handle} says revenue fell, and so does the response to ${handle}.`;
+    const searches = calls(qa(), { tool: 'search', what: 'all', query: 'revenue' });
+    const answering = setup((c, n) => (n === 3 ? { text: say(handlesIn(c.prompt)[0]), sources: [] } : searches(c, n)));
+    await questions(answering.repo, 40);
+    const fell = { id: 'q_d1_2', dealId: 'd1', n: 3, status: 'answered', text: 'How did revenue move? lock-up ratio',
+      response: 'Revenue fell in Q3 2026.' };
+    const update = { kind: 'question' as const, id: 'q_d1_2', data: fell, expectedRev: 1 };
+    expect((await answering.repo.transaction({ writes: [update] })).ok).toBe(true);
+    const answered = await answering.ai.answer(ask('What is outstanding?'));
+    expect(answered.ok && answered.value.text).toBe('Q3 says revenue fell, and so does the response to Q3.');
+    const last = answering.turns[2].prompt;
+    expect(last).toContain('Revenue fell in Q3 2026.');
+    expect(last).not.toMatch(/^Q\d+ · |Response to Q\d/m);
+    // the same question, found by two searches, keeps one handle
+    expect(handlesIn(last).length).toBeGreaterThan(1);
+    expect(new Set(handlesIn(last)).size).toBe(1);
+    const steps = answered.ok ? answered.value.research!.steps : [];
+    expect(steps.some((step) => step.found?.some((x) => x.where === 'Q3 · response received'))).toBe(true);
   }, 60_000);
 
   it('a page past the last says how many pages there are', async () => {
