@@ -22,15 +22,20 @@ export function encodingOf(bytes: Uint8Array): Encoding {
   return isUtf8(bytes) ? 'utf-8' : 'windows-1252';
 }
 
+/** what is said of a file whose bytes are not valid in the encoding its byte-order mark names */
+export function invalidTextMessage(label: string): string {
+  const name = label.toUpperCase();
+  return `The file starts with a ${name} byte-order mark but is not valid ${name}`;
+}
+
 /** the file's text, without its byte-order mark; throws when the bytes are not valid in the encoding the mark names */
 export function decodeText(bytes: Uint8Array): string {
   const encoding = encodingOf(bytes);
   const markLength = !encoding.endsWith('-bom') ? 0 : encoding.startsWith('utf-16') ? 2 : 3;
   const label = encoding.replace('-bom', '');
-  const name = label.toUpperCase();
   try {
     return new TextDecoder(label, { fatal: true }).decode(bytes.subarray(markLength));
   } catch {
-    throw new Error(`The file starts with a ${name} byte-order mark but is not valid ${name}`);
+    throw new Error(invalidTextMessage(label));
   }
 }
