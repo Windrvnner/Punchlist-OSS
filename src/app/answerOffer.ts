@@ -4,6 +4,7 @@
  * deals and the conversation, and nothing runs until a person presses the button.
  */
 import { bareDealName, sameName } from './commands/deals';
+import { isMine } from './commands/members';
 import type { Scope } from './conversations';
 import { DEAL_PAGES, pageHash, type Landing, type State } from './state';
 import type { Store } from './store';
@@ -18,20 +19,25 @@ export interface RawOffer { action?: unknown; deal?: unknown; page?: unknown; qu
 
 /** a deal name as navigation compares it: without "Project", in any case */
 const navigationName = (name: string) => sameName(bareDealName(name.trim(), 'navigation')).toLowerCase();
-/** The deal a name names: that exact name, in any case, without "Project", spaces between words aside (#500, #1018). */
+/**
+ * The deal a name names: that exact name, in any case, without "Project", spaces between words aside (#500, #1018).
+ * Two deals of that name leave none, as the name alone can't say which (#1054).
+ */
 function dealByName<T extends { name: string }>(deals: T[], named: string): T | undefined {
   const exact = navigationName(named);
   if (!exact) return;
-  return deals.find((deal) => navigationName(deal.name) === exact);
+  const matches = deals.filter((deal) => navigationName(deal.name) === exact);
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 const isPage = (page: unknown): page is Landing => DEAL_PAGES.some(([id]) => id === page);
 const nonBlank = (text: unknown): text is string => typeof text === 'string' && !!text.trim();
 
-/** The page the model offers: the deal it names, or else the conversation's own deal. */
+/** The page the model offers: the one of the person's own deals it names, or else the conversation's own deal. */
 function pageOffer(state: State, scope: Scope, raw: RawOffer): Offer | undefined {
   if (!isPage(raw.page)) return undefined;
-  const named = typeof raw.deal === 'string' ? dealByName(Object.values(state.deals), raw.deal) : undefined;
+  const own = Object.values(state.deals).filter((deal) => isMine(state, deal.id));
+  const named = typeof raw.deal === 'string' ? dealByName(own, raw.deal) : undefined;
   const dealId = named?.id ?? (raw.deal === undefined && scope.kind !== 'all' ? scope.dealId : undefined);
   return dealId && state.deals[dealId] ? { kind: 'page', dealId, page: raw.page } : undefined;
 }

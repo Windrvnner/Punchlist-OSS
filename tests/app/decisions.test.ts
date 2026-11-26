@@ -6,6 +6,7 @@ import { MemoryLocal } from '../../src/adapters/local';
 import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
 import { mockAi, mockDocuments, mockSession, mockFirstPass, type MockOptions } from '../../src/adapters/mocks';
 import { CreateDeal, EditDeal, DeleteDeal, withProject, dealNameRoom } from '../../src/app/commands/deals';
+import { SetDealMember } from '../../src/app/commands/members';
 import { checkedOffer } from '../../src/app/answerOffer';
 import { nameDir } from '../../src/ui/hooks';
 import { CreateQuestion, DeleteQuestion, RestoreQuestion, EditQuestionField, SetResponse, SetQuestionStatus } from '../../src/app/commands/questions';
@@ -23,6 +24,7 @@ import { prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { toParagraphs, withoutMarkers, splitCited } from '../../src/domain/cite';
 
 const COMMANDS = [RestoreQuestionSnapshot, SetQuestionStatus, ApplyReassessment, CreateDeal, EditDeal, CreateQuestion, DeleteQuestion, RestoreQuestion, EditQuestionField, SetResponse, CreateFinding, EditFinding, ReviewFinding, DeleteFinding, RestoreFinding, RestoreFindingSnapshot, ImportQuestions, RevertImport, RecoverDrafts];
+COMMANDS.push(SetDealMember);   // the offered-page test takes a deal off the person's list
 for (const c of COMMANDS) registry.set(c.name, c);
 let t = 0; const clock = { now: () => new Date(Date.UTC(2026, 10, 9, 16, 0, 0, t++)).toISOString() };
 let seq = 0; const ids = { next: (p: string) => `${p}_01HYYYYYYYYYYYYYYYV${String(seq++).padStart(7, '0')}` };
@@ -103,6 +105,7 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
     const accented = await deal(m, 'Énergie-Refinance');
     const suffix = await deal(m, 'Harbor Overview');
     const base = await deal(m, 'Harbor');
+    const possessive = await deal(m, "Harbor's");
     const article = await deal(m, 'The');
     const offered = (name: string) =>
       checkedOffer(m.store.get(), { kind: 'all' }, { action: 'open page', deal: name, page: 'qa' });
@@ -113,6 +116,7 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
       ['E\u0301nergie-Refinance\n', accented],
       ['Harbor Overview', suffix],
       ['Harbor', base],
+      ["Harbor's", possessive],   // each name opens its own deal: nothing is stripped from it (#1115)
       ['The', article],
     ]) expect(offered(name)).toEqual({ kind: 'page', dealId: id, page: 'qa' });
     expect(offered('Unknown-Deal')).toBeUndefined();
@@ -132,6 +136,21 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
     // the name without its punctuation is not the name
     expect(offered('Kestrel')).toBeUndefined();
     expect(offered('C')).toBeUndefined();
+  });
+
+  it('an offered page names one of the person\'s own deals, or none (#1054)', async () => {
+    const m = make();
+    await deal(m, 'Lumen');
+    for (const counterparty of ['Wingtip', 'Halyard']) {
+      await m.store.dispatch(CreateDeal, { name: 'Southridge', counterparty, folders: [] });
+    }
+    const left = await deal(m, 'Quarry');
+    await m.store.dispatch(SetDealMember, { dealId: left, on: false });
+    const offered = (name: string) =>
+      checkedOffer(m.store.get(), { kind: 'all' }, { action: 'open page', deal: name, page: 'qa' });
+    expect(offered('Lumen')).toMatchObject({ kind: 'page' });
+    expect(offered('Southridge')).toBeUndefined();   // two deals of that name: the name alone can't say which
+    expect(offered('Quarry')).toBeUndefined();       // a team deal not in the person's list
   });
 
   it('Undo brings back a capitalized "Project"; an accent or hidden character is not the word', async () => {
