@@ -33,6 +33,12 @@ The look is defined in these files: `src/styles.css` (tokens, the shell, and con
   (03). On Q&A, an open question's panel takes its place. Once open, it is the same composer as Home's (04) and a
   conversation's (06), with a 22px radius, 14px padding all around, 15px text on one line until more is typed, and 32px
   buttons and send.
+- **Slash commands:** "/" at the start of an empty composer opens a glass panel as wide as the box, 8px from it: under
+  a Home or deal page's ask box, over a conversation's composer. Each row shows its `/command` in 14px monospace over a
+  one-line 13px `--ink-2` description; the row the arrows reached (`.hi`) has the `--card-hover` fill, the first at
+  open. The focus stays in the box: arrows move, Enter picks, Escape closes. **Log Question** puts a `.chip.att` chip
+  at the head of the box, with × to take it off. An action the AI offers is one `.btn sm` button 10px under the
+  answer's actions.
 - **Side pane:** The open item on Checklist sits in a glass pane beside the list, with its top on the list's top line and its bottom on the sidebar's bottom line (08). The open question on Q&A takes a glass panel across the top (09).
 - **Reading mode:** A demo PDF without a preview shows “Page preview unavailable.” in
   `--paper-ink` below the title. The paper still shows its page number, and the reading controls stay in place (#443).

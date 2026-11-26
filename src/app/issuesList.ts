@@ -1,7 +1,9 @@
-import { WORKSTREAMS } from '../domain/model';
+import { WORKSTREAMS, type ListPoint } from '../domain/model';
 import { fail, ok, rejected, type Result } from '../domain/result';
 import type { DocumentRef, IssuePoint } from '../ports';
+import { ImportIssuesList } from './commands/issuesList';
 import { issuesListReviewPlan } from './issuesListJoins';
+import { dropImport, keepImport, keptImport } from './keptImports';
 import { dealFindings, type State } from './state';
 import type { Store } from './store';
 
@@ -45,4 +47,56 @@ export function reviewIssuesList(state: State, dealId: string, list: ReadIssuesL
     ...(kept.has(index) ? { own: true } : references[index]),
   }));
   return { shown, goes, raised, fresh, input };
+}
+
+/** The issues list as it was left: the list as the model read it, and the points checked to keep separate */
+export type IssuesListKept = {
+  list: ReadIssuesList;
+  kept: Set<number>;
+};
+
+function isKeptPoint(point: IssuePoint | undefined) {
+  return !!point && typeof point.n === 'string' && typeof point.text === 'string' && typeof point.title === 'string'
+    && typeof point.workstream === 'string';
+}
+
+/** What was kept, if it is still a whole issues list import; a damaged entry opens the import fresh. */
+export function keptIssuesList(key: string): IssuesListKept | null {
+  const kept = keptImport(key) as IssuesListKept | undefined;
+  const doc = kept?.list?.doc;
+  const readable = !!doc && typeof doc.docId === 'string' && typeof doc.doc === 'string'
+    && Array.isArray(kept.list.points) && kept.kept instanceof Set && kept.list.points.every(isKeptPoint);
+  return readable ? kept : null;
+}
+
+/** What Import sends for the list: the points as reviewed (reviewIssuesList's input). */
+export interface IssuesListSubmission {
+  dealId: string;
+  list: ReadIssuesList;
+  points: ReturnType<typeof reviewIssuesList>['input'];
+}
+
+/**
+ * Imports the list. The kept list is let go first, so a reload while it runs never offers it again; a failure keeps
+ * it again as it is then (`now`), not as Import found it.
+ */
+export async function submitIssuesList(
+  store: Store, key: string, { dealId, list, points }: IssuesListSubmission, now: () => IssuesListKept | null,
+) {
+  dropImport(key);
+  const input = { dealId, doc: list.doc.docId, list: list.doc.doc, points };
+  const idempotencyKey = `issues-${dealId}-${list.doc.docId}`;
+  const result = await store.dispatch(ImportIssuesList, input, { idempotencyKey });
+  const keptNow = result.ok ? null : now();
+  if (keptNow) keepImport(key, keptNow);
+  return result;
+}
+
+/** A finding's points by list, as each list's file is its own list: two saved under one name get a heading each. */
+export function pointsByList(marks: ListPoint[]): { title: string; points: ListPoint[] }[] {
+  const docs = [...new Set(marks.map((mark) => mark.doc))];
+  return docs.map((doc) => {
+    const points = marks.filter((mark) => mark.doc === doc);
+    return { title: issuesListTitle(points[0].list), points };
+  });
 }

@@ -13,7 +13,8 @@ import { CreateFinding, EditFinding, SetFindingStatus, ReviewFinding, DeleteFind
 import { reassess } from '../../src/app/findings';
 import { ImportQuestions, RevertImport } from '../../src/app/commands/importQuestions';
 import { registry } from '../../src/app/commands/undo';
-import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
+import { csvCodec } from '../../src/adapters/spreadsheet';
+import { readCsv } from '../../src/domain/sheets';
 import { prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { MemoryLocal } from '../../src/adapters/local';
 import { ok } from '../../src/domain/result';

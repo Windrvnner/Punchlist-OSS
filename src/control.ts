@@ -298,6 +298,13 @@ const SPEC = {
     searchCalls: count(15, 'About how many calls one search run makes before it returns what it found.', 1, 50),
     checkSearchCalls: count(1000, "Most calls the checks' search for documents makes on one PC for one deal, counted afresh each time this PC takes up a check or a new share of one, each quiet retry counted as a call; past it, documents are picked as they were before searches.", 0, 100_000),
     sameFolder: count(70, "Percent of what is recorded in a deal folder that a PC must find unchanged in its copy before what it does not find there (deleted, or a new version saved over it) leaves the deal for every PC. Below it, the PC takes away only what it had seen itself, so a PC with part of a folder takes nothing from the others.", 51, 100),
+    searchPage: count(
+      25,
+      'Findings or questions one search of them gives the chat at a time; the chat asks for the next page. ' +
+        'Documents come limits.docsPerCall a page.',
+      5,
+      200,
+    ),
     folderDocs: count(200, 'A folder the chat is asked to read is always read whole, a batch of limits.docsPerCall at a time; one with more documents than this is started only once the person says so.', 8, 5000),
   },
   timings: {

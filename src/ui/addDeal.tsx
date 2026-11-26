@@ -6,6 +6,7 @@ import { Icon } from './icons';
 import { SetDealMember } from '../app/commands/members';
 import { dealTwin, dealLabel } from '../app/state';
 import { dealRows } from '../app/dealView';
+import { openNewDeal } from '../app/dealFolders';
 
 /**
  * Add deal: every deal in the shared folder, to add to your own list, and New deal beside
@@ -19,7 +20,7 @@ export function AddDealDialog() {
   const rows = dealRows(s, 'add', q);
   const addToMine = (dealId: string) =>
     store.dispatch(SetDealMember, { dealId, on: true }, { idempotencyKey: `add-${dealId}` });
-  const newDeal = () => store.ui({ addDeal: false, newDeal: { name: '', folders: [], error: '', busy: false } });
+  const newDeal = () => openNewDeal(store, { addDeal: false });
   return (
     <Modal onClose={close} label="Add deal" blur className="sdlg adddlg">
       <div class="shead"><h2>Add Deal</h2><button type="button" class="x" aria-label="Close" title="Close (Esc)"

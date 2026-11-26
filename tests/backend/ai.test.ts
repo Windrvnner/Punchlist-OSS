@@ -27,6 +27,8 @@ type Call = { model: string; system?: string; prompt: string; files: { id: strin
 /** the tag (D1, D2 …) a prompt gave a document */
 const tag = (c: Call, d: DocRecord) => new RegExp(`^(D\\d+): (?:.*/)?${d.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'm').exec(c.prompt)?.[1] ?? 'D?';
 const sentNames = (c: Call) => c.files.map((f) => fromStoreName(f.name)!.name).sort();
+/** the documents a read lists, by path, in the order it gives them */
+const readOrder = (c: Call) => [...c.prompt.matchAll(/^D\d+: (.+?)(?: \(\d+ pages\))?$/gm)].map((m) => m[1]);
 let t = 0; const clock = () => new Date(Date.UTC(2026, 10, 10, 9, 0, 0, t++)).toISOString();
 
 /** the synonyms library in these tests: with no checklist its groups stand in for items, so these documents are core (core.ts) */
@@ -97,28 +99,32 @@ describe('answers', () => {
       '  Some changes are in parts of the file this list does not reach.',
     ].join('\n'));
   });
-  it('lists the newest draft of a document first, its earlier drafts straight after it and marked as such', async () => {
+  it('reads the newest draft of a document first, its earlier drafts straight after it', async () => {
     const at = (n: number, rel: string, seen: string) => doc(n, rel.split('/').pop()!, { rel, seen });
     const OLD = at(41, 'Drafts/2026-03-01/EPC contract.pdf', '2026-03-02T00:00:00.000Z'), NEW = at(42, 'Drafts/2026-04-15/EPC contract.pdf', '2026-04-16T00:00:00.000Z'), MID = at(43, 'Drafts/03-20-2026/EPC contract.pdf', '2026-03-21T00:00:00.000Z');
     const OTHER_DOC = doc(44, 'EPC guarantee.pdf');
-    const s = setup(() => ({ text: 'ok', sources: [] }), { d1: [OLD, OTHER_DOC, MID, NEW] }, { width: 4, library: [], pick: () => ({ read: [1] }) });
+    const s = setup(() => ({ text: 'ok', sources: [] }), { d1: [OLD, OTHER_DOC, MID, NEW] }, { width: 4, library: [] });
     val(await s.ai.answer(ask('What does the EPC contract say about delay damages?')));
-    expect(s.pickCalls[0].prompt).toContain(['1: vdr/Drafts/2026-04-15/EPC contract.pdf', '2: vdr/Drafts/03-20-2026/EPC contract.pdf (an earlier draft; the newest is vdr/Drafts/2026-04-15/EPC contract.pdf)',
-      '3: vdr/Drafts/2026-03-01/EPC contract.pdf (an earlier draft; the newest is vdr/Drafts/2026-04-15/EPC contract.pdf)', '4: vdr/EPC guarantee.pdf'].join('\n'));   // 03-20-2026 is March 20
+    // 03-20-2026 is March 20
+    expect(readOrder(s.calls[0])).toEqual(['vdr/Drafts/2026-04-15/EPC contract.pdf',
+      'vdr/Drafts/03-20-2026/EPC contract.pdf', 'vdr/Drafts/2026-03-01/EPC contract.pdf', 'vdr/EPC guarantee.pdf']);
   });
-  it('marks earlier drafts in every deal when a question spans several, though their rankings run side by side', async () => {
+  it('keeps each deal\'s earlier drafts after its newest when a question spans several, the deals taken in turn',
+    async () => {
     const at = (n: number, rel: string) => doc(n, rel.split('/').pop()!, { rel });
     const recs = { d1: [at(61, 'Drafts/2026-03-01/EPC contract.pdf'), at(62, 'Drafts/2026-04-15/EPC contract.pdf')], d2: [at(63, 'Drafts/2026-05-01/O&M contract.pdf'), at(64, 'Drafts/2026-06-01/O&M contract.pdf')] };
-    const s = setup(() => ({ text: 'ok', sources: [] }), recs, { width: 4, library: [], pick: () => ({ read: [1] }) });
+    const s = setup(() => ({ text: 'ok', sources: [] }), recs, { width: 2, library: [] });
     await deal(s.repo, 'd1'); await deal(s.repo, 'd2', 'Project Wingtip'); val(await s.ai.answer({ message: 'What does each contract say about delay damages?', history: [], model: 'standard' }));
-    expect(s.pickCalls.length).toBe(2);
-    for (const c of s.pickCalls) expect(c.prompt).toMatch(/2: vdr\/Drafts\/2026-0[35]-01\/.* \(an earlier draft; the newest is vdr\/Drafts\/2026-0[46]-/);
+    // a page of two: each deal's newest draft, not one deal's two drafts
+    expect(readOrder(s.calls[0]))
+      .toEqual(['vdr/Drafts/2026-04-15/EPC contract.pdf', 'vdr/Drafts/2026-06-01/O&M contract.pdf']);
   });
   it('what the fast model said of a document adds only its own matches: a described document does not outrank an equal one not yet described', async () => {
     const ix = makeIndex(new Mem()); const A = doc(65, 'Annex A.pdf'), B = doc(66, 'Annex B.pdf', { summary: 'An annex to the agreement.' });
     for (const d of [A, B]) ix.add('d1', d.docId, countWords('Curtailment compensation is paid monthly.', 'Payment terms'));
-    const s = setup(() => ({ text: 'ok', sources: [] }), { d1: [B, A] }, { wordIndex: ix, width: 2, library: [], pick: () => ({ read: [1] }) });
-    val(await s.ai.answer(ask('Is curtailment compensated?'))); expect(numbersOf(s.pickCalls[0], A, B)).toEqual([1, 2]);   // equal scores: by path
+    const s = setup(() => ({ text: 'ok', sources: [] }), { d1: [B, A] }, { wordIndex: ix, width: 1, library: [] });
+    val(await s.ai.answer(ask('Is curtailment compensated?')));
+    expect(readOrder(s.calls[0])).toEqual(['vdr/Annex A.pdf']);   // equal scores: by path, so A has the page of one
   });
   it("reads a blackline with its clean draft, says which is which, and marks what is cited from the blackline as the model's reading", async () => {
     const BL = doc(71, 'Credit Agreement (blackline).pdf', { pages: 30 });
@@ -168,18 +174,18 @@ describe('answers', () => {
     ix.add('d1', C.docId, countWords('Insurance schedule.', 'Insurance schedule'));
     const s = setup(() => ({ text: 'ok', sources: [] }), { d1: [C, A, B] }, { wordIndex: ix, width: 3, library: [] });
     val(await s.ai.answer(ask('Is curtailment compensated?')));
-    // B is named for it (and not yet read by this PC), A says it in its body, C does not say it at all: without the fast model's pick, only B and A are read
-    expect(sentNames(s.calls[0])).toEqual(['Annex 4.pdf', 'Curtailment letter.pdf']);
-    // and the fast model is shown them in that order
-    const p = setup(() => ({ text: 'ok', sources: [] }), { d1: [C, A, B] }, { wordIndex: ix, width: 3, library: [], pick: () => ({ read: [1] }) });
-    val(await p.ai.answer(ask('Is curtailment compensated?'))); expect(numbersOf(p.pickCalls[0], B, A, C)).toEqual([1, 2, 3]);
+    // B is named for it (and not yet read by this PC), A says it in its body, C does not say it at all: only B and A
+    // are read, in that order
+    expect(readOrder(s.calls[0])).toEqual(['vdr/Curtailment letter.pdf', 'vdr/Annex 4.pdf']);
   });
-  it('reads the core documents first, with the model the person chose, and keeps only the citations it can stand behind', async () => {
+  it('reads what answers to the question\'s words, with the model the person chose, and keeps only the citations it ' +
+    'can stand behind', async () => {
     const s = setup((c) => ({ text: 'The draft sets the lock-up at 1.25x. [1] An unknown file says otherwise. [2] So does a page that is not there. [3] The model uses 1.25x. [4] {Not a link|f_1}',
       sources: [{ doc: tag(c, FA), page: 14, quote: 'Lock-up Ratio means 1.25:1' }, { doc: 'D99', page: 1 }, { doc: tag(c, TS), page: 13 }, { doc: tag(c, MODEL), cell: 'Debt!B20' }] }));
     const r = val(await s.ai.answer(ask('What is the lock-up ratio?')));
     // the search helper reads on the fast model; the main session answers on the model the person chose, in one turn here
-    expect(s.calls.length).toBe(1); expect(s.calls[0].model).toBe('fast'); expect(sentNames(s.calls[0])).toEqual(['Credit Agreement.pdf', 'Information memorandum.pdf', 'Model v12.xlsx', 'Term sheet (signed).pdf']);   // the four core documents; not the side letter or the minutes
+    expect(s.calls.length).toBe(1); expect(s.calls[0].model).toBe('fast'); expect(sentNames(s.calls[0]))
+      .toEqual(['Credit Agreement.pdf', 'Model v12.xlsx', 'Term sheet (signed).pdf']);
     expect(s.turns.length).toBe(1); expect(s.turns[0].model).toBe('thorough'); expect(s.turns[0].files).toEqual([]);
     expect(r.text).toBe('The draft sets the lock-up at 1.25x. [1] An unknown file says otherwise. So does a page that is not there. The model uses 1.25x. [2] Not a link');
     expect(r.sources).toEqual([{ doc: 'Credit Agreement.pdf', loc: 'p. 14', docId: FA.docId, quote: 'Lock-up Ratio means 1.25:1' }, { doc: 'Model v12.xlsx', loc: 'Debt!B20', docId: MODEL.docId }]);
@@ -194,37 +200,88 @@ describe('answers', () => {
   it('which documents are core is worked out with no model, from names and folders, and again only when the documents or checklist change (core.ts)', async () => {
     const recs = { d1: [SIDE, MINUTES, MODEL, IM, TS, { ...FA, folder: 'C:\\Users\\adoe\\OneDrive\\Proseware\\VDR', rel: '01 Finance documents/Credit Agreement.pdf' }] };
     const s = setup(() => ({ text: 'ok', sources: [] }), recs, { width: 2 });
-    val(await s.ai.answer(ask('Anything to worry about?'))); val(await s.ai.answer(ask('And otherwise?')));
+    // a draft's reading shows the core set: nothing in the question points anywhere, so its pick falls back on them
+    const draft = (x: ReturnType<typeof setup>, text: string) =>
+      x.ai.draft({ dealId: 'd1', questionId: 'q_1', questionText: text });
+    await draft(s, 'Anything to worry about?');
+    await draft(s, 'And otherwise?');
     expect(s.coreCalls.length).toBe(0);                                                                                                                   // no model is asked which are core
     expect(sentNames(s.calls[0])).toEqual(['Credit Agreement.pdf', 'Information memorandum.pdf']);                                                    // a handful, here two; nothing in the question points anywhere, so the best core documents
     expect(s.calls[0].prompt).toContain('D1: VDR/01 Finance documents/Credit Agreement.pdf (40 pages)');                                              // each by its full path from the root of the data room
-    recs.d1.push(doc(9, 'Grid permit.pdf')); val(await s.ai.answer(ask('And now?'))); expect(s.coreCalls.length).toBe(0);
-    const none = setup(() => ({ text: 'ok', sources: [] }), undefined, { library: [] }); val(await none.ai.answer(ask('Anything?'))); expect(none.calls.length).toBe(0);   // no checklist and no library: no core, and nothing answers to the question, so no model is asked
+    recs.d1.push(doc(9, 'Grid permit.pdf'));
+    await draft(s, 'And now?');
+    expect(s.coreCalls.length).toBe(0);
+    const none = setup(() => ({ text: 'ok', sources: [] }), undefined, { library: [] });
+    await draft(none, 'Anything?');
+    // no checklist and no library: no core, and nothing answers to the question, so no model is asked
+    expect(none.calls.length).toBe(0);
   });
 
-  it('what to read is settled in two steps: a keyword ranking of the deal’s files, then the fast model’s pick from the top of it', async () => {
-    const s = setup((c, n) => (n === 1 ? { text: 'Not in these.', sources: [], need: ['what the board decided'] } : { text: 'The board approved the swap. [1]', sources: [{ doc: tag(c, MINUTES), page: 2 }] }), undefined,
+  it('a chat search reads a page of the keyword ranking as it is, with no pick: only what answers to the words',
+    async () => {
+    const s = setup(() => ({ text: 'x', sources: [] }), undefined, { pick: () => ({ read: [1] }) });
+    val(await s.ai.answer(ask('Was the hedging approved?', { attachments: [{ doc: FA.name, docId: FA.docId }] })));
+    expect(s.pickCalls).toEqual([]);
+    expect(readOrder(s.calls[0])).toEqual(['vdr/Board minutes March.pdf']);
+    // what was given goes to the main session whole
+    expect(sentNames(s.turns[0])).toEqual(['Credit Agreement.pdf']);
+    // nothing answers to the words and nothing is core: no document is read, and the main session is told so
+    const none = setup(() => ({ text: 'x', sources: [] }), { d1: [SIDE] }, { library: [] });
+    expect(val(await none.ai.answer(ask('What is the tax position?'))).text).toBe('x');
+    expect(none.calls.length).toBe(0);
+    expect(none.turns[0].prompt).toContain('Documents: none answers to these words.');
+    // a page is the handful: the rest of the ranking is the next page
+    const two = setup(() => ({ text: 'x', sources: [] }), undefined, { width: 2 });
+    val(await two.ai.answer(ask('lock-up and hedging')));
+    expect(readOrder(two.calls[0])).toHaveLength(2);
+    expect(two.turns[0].prompt).toContain('Page 1 of 2. Ask for page 2 of "documents" for more.');
+  });
+
+  it('what a draft reads is settled in two steps: a keyword ranking of the deal’s files, then the fast model’s pick ' +
+    'from the top of it', async () => {
+    const draft = (x: ReturnType<typeof setup>, text: string) =>
+      x.ai.draft({ dealId: 'd1', questionId: 'q_1', questionText: text });
+    const found = (c: Call) =>
+      ({ status: 'found', text: 'The board approved the swap. [1]', sources: [{ doc: tag(c, MINUTES), page: 2 }] });
+    const s = setup((c, n) => (n === 1 ? { status: 'none', need: ['what the board decided'] } : found(c)), undefined,
       { pick: (c, n) => ({ read: n === 1 ? [...numbersOf(c, TS, SIDE), 99, 0, numbersOf(c, TS)[0]] : numbersOf(c, MINUTES) }) });
-    const r = val(await s.ai.answer(ask('Was the hedging approved?', { attachments: [{ doc: FA.name, docId: FA.docId }] })));
+    const r = val(await draft(s, 'Was the hedging approved?'));
     expect(s.pickCalls.map((c) => c.model)).toEqual(['fast', 'fast']); expect(s.pickCalls[0].files).toEqual([]);
-    // ranked: the one file whose record answers to the question's words, then core documents by importance, then the rest; what the question already has is left out
-    expect(s.pickCalls[0].prompt).toContain('1: vdr/Board minutes March.pdf — Board minutes approving the hedging strategy.\n2*: vdr/Information memorandum.pdf — Overview of the project.\n3*: vdr/Model v12.xlsx — Base case model.\n4*: vdr/Term sheet (signed).pdf — Signed term sheet.\n5: vdr/Side letter.pdf — Side letter on step-in rights.\n\n');
-    expect(s.pickCalls[0].prompt).toContain('Which of them should be read for this?\nWas the hedging approved?'); expect(s.pickCalls[0].prompt).toContain('Choose up to 8,');     // the search helper's handful of eight
+    // ranked: the one file whose record answers to the question's words, then core documents by importance, then the
+    // rest
+    expect(s.pickCalls[0].prompt).toContain(
+      '1: vdr/Board minutes March.pdf — Board minutes approving the hedging strategy.\n2*: vdr/Credit Agreement.pdf');
+    // the handful of eight
+    expect(s.pickCalls[0].prompt).toContain('Which of them should be read for this?\nWas the hedging approved?');
+    expect(s.pickCalls[0].prompt).toContain('Choose up to 8,');
     expect(s.calls[0].files.map((f) => fromStoreName(f.name)!.name)).toEqual(['Term sheet (signed).pdf', 'Side letter.pdf']);                  // the pick in its order; a number not in the list, or given twice, counts for nothing
-    expect(sentNames(s.turns[0])).toEqual(['Credit Agreement.pdf']);                                                                                // what was given goes to the main session whole, and the helper leaves it out
     expect(s.pickCalls[1].prompt).toContain('Still needed: what the board decided'); expect(s.pickCalls[1].prompt).not.toContain('Side letter.pdf');
-    expect(s.pickCalls[1].prompt).toContain('1: vdr/Board minutes March.pdf');                                                                         // ranked by the question and what is still needed, not by the words around them                    // the second pick is from what has not been read
+    // the second pick is from what has not been read
+    expect(s.pickCalls[1].prompt).toContain('1: vdr/Board minutes March.pdf');
     expect(sentNames(s.calls[1])).toContain('Board minutes March.pdf'); expect(r.sources.map((x) => x.doc)).toEqual(['Board minutes March.pdf']);
     expect(s.trace).toEqual([{ dealId: 'd1', reason: 'what the board decided', docs: [MINUTES.docId] }]);
-    // nothing bears on it: no document is read, and the main session is told the search found nothing
-    const none = setup(() => ({ text: 'x', sources: [] }), undefined, { pick: () => ({ read: [] }) }); expect(val(await none.ai.answer(ask('What is the tax position?'))).text).toBe('x'); expect(none.calls.length).toBe(0); expect(none.turns[0].prompt).toContain('Documents: none answers to these words.');
+    // nothing bears on it: no document is read
+    const none = setup(() => ({ status: 'none' }), undefined, { pick: () => ({ read: [] }) });
+    expect(val(await draft(none, 'What is the tax position?')).status).toBe('none');
+    expect(none.calls.length).toBe(0);
     // more than the handful is cut to it
-    const many = setup(() => ({ text: 'x', sources: [] }), undefined, { width: 2, pick: (c) => ({ read: numbersOf(c, MODEL, IM, FA, TS) }) }); val(await many.ai.answer(ask('Anything?'))); expect(many.calls[0].files.map((f) => fromStoreName(f.name)!.name)).toEqual(['Model v12.xlsx', 'Information memorandum.pdf']);
+    const pickFour = (c: Call) => ({ read: numbersOf(c, MODEL, IM, FA, TS) });
+    const many = setup(() => ({ status: 'none' }), undefined, { width: 2, pick: pickFour });
+    val(await draft(many, 'Anything?'));
+    expect(many.calls[0].files.map((f) => fromStoreName(f.name)!.name))
+      .toEqual(['Model v12.xlsx', 'Information memorandum.pdf']);
     // only the top of the ranking is put to the model
-    const short = setup(() => ({ text: 'x', sources: [] }), undefined, { shortlist: 3, pick: () => ({ read: [1, 2, 3, 4] }) }); val(await short.ai.answer(ask('What does the side letter say about step-in?')));
+    const short = setup(() => ({ status: 'none' }), undefined, { shortlist: 3, pick: () => ({ read: [1, 2, 3, 4] }) });
+    val(await draft(short, 'What does the side letter say about step-in?'));
     expect(short.pickCalls[0].prompt).toContain('1: vdr/Side letter.pdf — Side letter on step-in rights.\n2*: vdr/Credit Agreement.pdf — Senior credit agreement between the borrower and the lenders.\n3*: vdr/Information memorandum.pdf — Overview of the project.\n\n'); expect(short.calls[0].files.length).toBe(3);
     // the service cannot be reached: that is the failure, not a reason to match by words
-    const down = setup(() => ({ text: 'x', sources: [] }), undefined, { pick: () => { const e: any = new Error('ECONNREFUSED'); e.code = 'unreachable'; throw e; } }); const d = await down.ai.answer(ask('lock-up')); expect(!d.ok && d.error.kind).toBe('unreachable'); expect(down.calls.length).toBe(0);
+    const refused = () => {
+      throw Object.assign(new Error('ECONNREFUSED'), { code: 'unreachable' });
+    };
+    const down = setup(() => ({ status: 'none' }), undefined, { pick: refused });
+    const d = await draft(down, 'lock-up');
+    expect(!d.ok && d.error.kind).toBe('unreachable');
+    expect(down.calls.length).toBe(0);
   });
 
   it('a clause number, a page for a spreadsheet, or a cell for a PDF is not a citation', async () => {
@@ -237,19 +294,34 @@ describe('answers', () => {
     expect(sentNames(s.calls[0])).toContain('Side letter.pdf'); expect(sentNames(s.calls[0])).not.toContain('Board minutes March.pdf');
   });
 
-  it('branches out once, for the reason the model gives, and records why', async () => {
-    const s = setup((c, n) => (n === 1 ? { text: 'Not in these.', sources: [], need: ['board minutes on hedging'] } : { text: 'The board approved the swap. [1]', sources: [{ doc: tag(c, MINUTES), page: 2 }], need: ['the side letter on step-in'] }));     // asking again gets nothing more: one branch-out a question
-    const r = val(await s.ai.answer(ask('Did the directors agree to it?')));                                   // nothing in the question points at a file, so it starts from the core documents
+  it('a draft branches out once, for the reason the model gives, and records why', async () => {
+    const draft = (x: ReturnType<typeof setup>, text: string) =>
+      x.ai.draft({ dealId: 'd1', questionId: 'q_1', questionText: text });
+    // asking again gets nothing more: one branch-out a question
+    const sources = (c: Call) => [{ doc: tag(c, MINUTES), page: 2 }];
+    const found = (c: Call) => ({
+      status: 'found', text: 'The board approved the swap. [1]', sources: sources(c),
+      need: ['the side letter on step-in'],
+    });
+    const s = setup((c, n) => (n === 1 ? { status: 'none', need: ['board minutes on hedging'] } : found(c)));
+    // nothing in the question points at a file, so it starts from the core documents
+    const r = val(await draft(s, 'Did the directors agree to it?'));
     expect(s.calls.length).toBe(2); expect(sentNames(s.calls[0])).not.toContain('Board minutes March.pdf'); expect(sentNames(s.calls[1])).toContain('Board minutes March.pdf'); expect(s.calls[0].prompt).toContain('"need"'); expect(s.calls[1].prompt).not.toContain('"need"');
     expect(r.sources).toEqual([{ doc: 'Board minutes March.pdf', loc: 'p. 2', docId: MINUTES.docId }]);
     expect(s.trace).toEqual([{ dealId: 'd1', reason: 'board minutes on hedging', docs: [MINUTES.docId] }]);
-    const none = setup(() => ({ text: 'Not in these.', sources: [], need: ['the insurance report'] })); expect(val(await none.ai.answer(ask('Is it insured?'))).text).toBe('Not in these.'); expect(none.calls.length).toBe(1);   // nothing answers to it: no second call
+    // nothing answers to it: no second call
+    const none = setup(() => ({ status: 'none', need: ['the insurance report'] }));
+    expect(val(await draft(none, 'Is it insured?')).status).toBe('none');
+    expect(none.calls.length).toBe(1);
   });
 
-  it('a call never holds more than the handful: not on the second round, and not with more attached than fits', async () => {
+  it('a call never holds more than the handful: not on a draft\'s second round, and not with more attached than fits',
+    async () => {
     // the second round: what is still needed takes up to half the call, and the first round's weakest documents give way
-    const s = setup((c, n) => (n === 1 ? { text: 'Not in these.', sources: [], need: ['board minutes on hedging'] } : { text: 'ok', sources: [] }), undefined, { width: 4 });
-    val(await s.ai.answer(ask('Did the directors agree to it?')));
+    const reply = (_c: Call, n: number) =>
+      (n === 1 ? { status: 'none', need: ['board minutes on hedging'] } : { status: 'none' });
+    const s = setup(reply, undefined, { width: 4 });
+    val(await s.ai.draft({ dealId: 'd1', questionId: 'q_1', questionText: 'Did the directors agree to it?' }));
     const first = s.calls[0].files.map((f) => fromStoreName(f.name)!.name); const second = s.calls[1].files.map((f) => fromStoreName(f.name)!.name);
     expect(first.length).toBe(4); expect(second).toEqual([...first.slice(0, 3), 'Board minutes March.pdf']);
     expect(s.calls[1].prompt).toMatch(/^D4: .*Board minutes March\.pdf/m);                                                       // tagged afresh for the new call
@@ -259,17 +331,14 @@ describe('answers', () => {
     expect(att.turns[0].files.map((f) => fromStoreName(f.name)!.name)).toEqual(['Side letter.pdf', 'Board minutes March.pdf']);
   });
 
-  it('the second round keeps to the handful across many deals, keeps what was attached, and cites the retagged documents right', async () => {
-    // ten deals, each with a minutes file only the second round looks for: the extras share half the call between them
-    const recs: Record<string, DocRecord[]> = {}; for (let k = 0; k < 10; k++) recs[`d${k}`] = [doc(100 + k * 2, `Credit agreement ${k}.pdf`, { keywords: ['lock-up'] }), doc(101 + k * 2, `Board minutes ${k}.pdf`, { keywords: ['hedging'] })];
-    const many = setup((c, n) => (n === 1 ? { text: 'Not in these.', sources: [], need: ['board minutes on hedging'] } : { text: 'ok', sources: [] }), recs, { searchCalls: 50 });   // ten deals, each picked for (and the stand-in's picks repaired) twice: past the usual 15 calls
-    for (const d of Object.keys(recs)) await deal(many.repo, d, `Project ${d}`);
-    val(await many.ai.answer({ message: 'What is the lock-up?', history: [], model: 'standard' }));
-    expect(many.calls[1].files.length).toBeLessThanOrEqual(8); expect(sentNames(many.calls[1]).filter((x) => x.startsWith('Board minutes')).length).toBe(4);
-    // an attachment stays with the main session whatever the helper reads, and a citation names the right document
-    const s = setup((c, n) => (n === 1 ? { text: 'Not in these.', sources: [], need: ['board minutes on hedging'] } : { text: 'Approved. [1] [2]', sources: [{ doc: tag(c, MINUTES), page: 2 }, { doc: tag(c, SIDE), page: 1 }] }), undefined, { width: 3 });
-    const r = val(await s.ai.answer(ask('Did the directors agree to it?', { attachments: [{ doc: SIDE.name, docId: SIDE.docId }] })));
-    expect(sentNames(s.turns[0])).toEqual(['Side letter.pdf']); expect(sentNames(s.calls[1])).toContain('Board minutes March.pdf'); expect(s.calls[1].files.length).toBe(3);
+  it('an attachment stays with the main session whatever a chat search reads, and a citation names the right document',
+    async () => {
+    const sources = (c: Call) => [{ doc: tag(c, MINUTES), page: 2 }, { doc: tag(c, SIDE), page: 1 }];
+    const s = setup((c) => ({ text: 'Approved. [1] [2]', sources: sources(c) }), undefined, { width: 3 });
+    const attachments = [{ doc: SIDE.name, docId: SIDE.docId }];
+    const r = val(await s.ai.answer(ask('Did the directors agree to the hedging?', { attachments })));
+    expect(sentNames(s.turns[0])).toEqual(['Side letter.pdf']);
+    expect(sentNames(s.calls[0])).toEqual(['Board minutes March.pdf']);
     expect(r.sources.map((x) => x.doc)).toEqual(['Board minutes March.pdf', 'Side letter.pdf']);
   });
 
@@ -321,7 +390,9 @@ describe('answers', () => {
     const many = Array.from({ length: 12 }, (_, i) => doc(20 + i, `Core document ${i + 1}.pdf`)); const v3 = doc(40, 'SPA v3 (clean).pdf', { pages: 90 }), v4 = doc(41, 'SPA v4 (redline).docx', { pages: 92, tracked: 212 });
     const s = setup((c) => ({ text: 'The lock-up moved from 1.10x to 1.15x. [1] [2]', sources: [{ doc: tag(c, v3), page: 12 }, { doc: tag(c, v4), page: 12 }] }), { d1: [...many, v3, v4] });
     const r = val(await s.ai.answer(ask('What changed between these two?', { attachments: [{ doc: v3.name, docId: v3.docId }, { doc: v4.name, docId: v4.docId }] })));
-    expect(sentNames(s.turns[0])).toEqual(['SPA v3 (clean).pdf', 'SPA v4 (redline).docx']); expect(sentNames(s.calls[0])).not.toContain('SPA v3 (clean).pdf');       // the two that were given go whole to the main session; the helper reads others
+    expect(sentNames(s.turns[0])).toEqual(['SPA v3 (clean).pdf', 'SPA v4 (redline).docx']);
+    // the two that were given go whole to the main session; the helper reads only what answers to the words
+    expect(s.calls.flatMap(sentNames)).not.toContain('SPA v3 (clean).pdf');
     expect(s.turns[0].prompt).toContain('D2 has 212 tracked changes'); expect(r.sources.map((x) => x.docId)).toEqual([v3.docId, v4.docId]);
   });
 
@@ -338,9 +409,10 @@ describe('answers', () => {
 
 describe('the chat agent', () => {
   it("stops a search run at the control file's number of calls, and the main session is told", async () => {
-    const s = setup(() => ({ text: 'ok', sources: [] }), undefined, { searchCalls: 1, pick: () => ({ read: [1] }) });
+    const s = setup(() => ({ text: 'ok', sources: [] }), undefined, { searchCalls: 0 });
     val(await s.ai.answer(ask('What is the lock-up ratio?')));
-    expect(s.coreCalls.length).toBe(0); expect(s.pickCalls.length).toBe(1); expect(s.calls.length).toBe(0);   // the pick was the one call (core documents take none): the read was refused
+    // the page's read was refused
+    expect([s.coreCalls.length, s.pickCalls.length, s.calls.length]).toEqual([0, 0, 0]);
     expect(s.turns[0].prompt).toContain('Documents: This search made as many calls as one search may.');
   });
   /** the search helper's reading: what the script says the documents it was given say, citing each of them on page 1 */
@@ -366,21 +438,27 @@ describe('the chat agent', () => {
     expect(searched.map((x) => x.result)).toEqual([one, one]);
   });
   it('searches, reads whole what it asks for, and answers citing only documents a model was given', async () => {
-    const s = setup(helper, undefined, { pick: (c) => ({ read: numbersOf(c, FA) }), turn: (c, n) => n === 1 ? { tool: 'search', what: 'documents', query: 'board minutes hedging', notes: 'FA p. 1 has the ratio' }
+    const search =
+      { tool: 'search', what: 'documents', query: 'board minutes hedging', notes: 'FA p. 1 has the ratio' };
+    const s = setup(helper, undefined, { turn: (c, n) => n === 1 ? search
       : n === 2 ? { tool: 'read', docs: [tag(c, FA), 'vdr/Board minutes March.pdf', 'nowhere.pdf'] }
       : { text: 'The ratio is 1.25x. [1] The board approved. [2] A side letter agrees. [3]', sources: [{ doc: tag(c, FA), page: 14 }, { doc: tag(c, MINUTES), page: 2 }, { doc: 'D99', page: 1 }] } });
     const r = val(await s.ai.answer({ ...ask('What is the lock-up, and did the board approve the swap?'), runId: 'r1' }));
     expect(s.turns.map((c) => c.model)).toEqual(['thorough', 'thorough', 'thorough']); expect(s.calls.map((c) => c.model)).toEqual(['fast', 'fast']);   // the person's model for the turns; the fast one reads for the helper
     expect(s.turns[0].prompt).toContain('You searched documents, findings and Q&A for “What is the lock-up, and did the board approve the swap?”');     // the question is searched for before the first turn
-    expect(s.turns[0].prompt).toMatch(/^D1: vdr\/Credit Agreement\.pdf \(40 pages\)$/m); expect(s.turns[0].prompt).toContain('Passages:\nD1 p. 1: “words 1”');
+    expect(s.turns[0].prompt).toMatch(/^D2: vdr\/Credit Agreement\.pdf \(40 pages\)$/m);
+    expect(s.turns[0].prompt).toContain('Passages:\nD1 p. 1: “words 1”');
     expect(s.turns[1].prompt).toContain('You searched documents for “board minutes hedging”'); expect(s.turns[1].prompt).toContain('Your notes so far: FA p. 1 has the ratio');
     expect(sentNames(s.turns[2])).toEqual(['Board minutes March.pdf', 'Credit Agreement.pdf']); expect(s.turns[2].prompt).toContain('Not found: nowhere.pdf.');
     expect(r.text).toBe('The ratio is 1.25x. [1] The board approved. [2] A side letter agrees.'); expect(r.sources.map((x) => [x.doc, x.loc])).toEqual([['Credit Agreement.pdf', 'p. 14'], ['Board minutes March.pdf', 'p. 2']]);
     expect(r.research!.steps.map((x) => [x.kind, x.text, x.result])).toEqual([
-      ['search', 'Searched documents, findings and Q&A for “What is the lock-up, and did the board approve the swap?”', '3 listed · 1 opened · 1 passage · 0 findings · no questions'],
+      ['search', 'Searched documents, findings and Q&A for “What is the lock-up, and did the board approve the swap?”',
+        '3 listed · 3 opened · 3 passages · 0 findings · no questions'],
       ['search', 'Searched documents for “board minutes hedging”', '1 listed · 1 opened · 1 passage'],
       ['read', 'Reviewed Credit Agreement.pdf', 'p. 14'], ['read', 'Reviewed Board minutes March.pdf', 'p. 2']]);
-    expect(r.research!.read).toEqual({ docs: 2, of: 6 }); expect(r.research!.steps[0].found).toEqual([{ where: 'Credit Agreement.pdf, p. 1', quote: '“words 1”' }]); expect(r.research!.steps.every((x) => x.done)).toBe(true);
+    expect(r.research!.read).toEqual({ docs: 3, of: 6 });
+    expect(r.research!.steps[0].found![1]).toEqual({ where: 'Credit Agreement.pdf, p. 1', quote: '“words 2”' });
+    expect(r.research!.steps.every((x) => x.done)).toBe(true);
     expect(val(await s.ai.research!('r1'))).toBeNull();                                                                                     // finished: nothing is being worked on by that name
   });
 
@@ -397,7 +475,8 @@ describe('the chat agent', () => {
     val(await s.repo.transaction({ writes: [{ kind: 'question', id: 'q_2', data: { id: 'q_2', dealId: 'd1', n: 2, text: 'Confirm the lock-up ratio', response: 'It will be conformed to 1.30x.', status: 'answered' }, expectedRev: null }], index: { dealId: 'd1', add: [{ kind: 'question', id: 'q_2' }] } }));
     const r = val(await s.ai.answer(ask('What about the lock-up ratio?')));
     expect(s.turns[0].prompt).toContain('Finding “Lock-up ratio differs from the term sheet” (open): The draft has 1.25x.'); expect(s.turns[0].prompt).not.toContain('Insurance gap'); expect(s.turns[0].prompt).not.toContain('f_1');
-    expect(s.turns[1].prompt).toContain('Q2 (answered): Confirm the lock-up ratio\nResponse to Q2: It will be conformed to 1.30x.');
+    expect(s.turns[1].prompt)
+      .toContain('Q2 · Answered\nQuestion: Confirm the lock-up ratio\nResponse to Q2: It will be conformed to 1.30x.');
     expect(r.research!.steps[1]).toMatchObject({ text: 'Searched Q&A for “lock-up ratio”', result: 'Q2', found: [{ where: 'Q2 · response received', quote: 'It will be conformed to 1.30x.' }] });
     expect(s.calls.length).toBe(1);                                                                                                        // only the first search's documents were read by a model
   });
@@ -606,13 +685,30 @@ describe('a kept conversation', () => {
     expect(told).toContain('The catch-up on the open findings:\nLock-up first.');
   });
 
+  const modes = ['inline', 'hybrid', 'native'] as const;
+  it.each(modes)('%s: an offer the answer makes is passed on as given (#1054)', async (toolCalls) => {
+    const offer = { action: 'open page', deal: 'Kestrel', page: 'qa' };
+    const offering = () => ({ text: 'Opening it.', sources: [], offer });
+    const s = setup(reader, undefined, { talks: true, turn: offering, toolCalls });
+    const seen = spied(s);
+    const r = val(await s.ai.answer(ask('Take me to the Kestrel Q&A')));
+    expect(r.text).toBe('Opening it.'); expect(r.offer).toEqual(offer);
+    if (toolCalls === 'inline') expect(seen[0].system).toContain('"offer": {"action": "new deal" | "open page"');
+    else expect(seen[0].tools!.find((t) => t.name === 'answer')!.parameters.properties).toHaveProperty('offer');
+    const plain = () => ({ text: 'It is 1.25x.', sources: [] });
+    const none = setup(reader, undefined, { talks: true, turn: plain, toolCalls });
+    expect(val(await none.ai.answer(ask('What is the lock-up?')))).not.toHaveProperty('offer');
+  });
+
   it('native: a result goes back as its call\'s result, and the next question answers the last call first; a model that refuses tool results steps down to hybrid in the same conversation', async () => {
     const s = setup(reader, undefined, { talks: true, turn: twoTurns, toolCalls: 'native' }); const seen = spied(s);
     const one = val(await s.ai.answer(ask('What is the lock-up?')));
     expect(seen[0].tools!.map((t) => t.name)).toEqual(['search', 'read', 'folder', 'brief', 'answer']);
     expect(seen[0].system).toMatch(/^You are researching .*call one tool: search, read, folder, brief or answer\./s);
     expect(seen[0].results).toBeUndefined();
-    expect(seen[1].results).toHaveLength(1); expect(seen[1].results![0].text).toMatch(/^You searched documents for “ratio”\./); expect(seen[1].prompt).toMatch(/^This is turn 2 of at most/);
+    expect(seen[1].results).toHaveLength(1);
+    expect(seen[1].results![0].text).toMatch(/^You searched documents for “ratio”\./);
+    expect(seen[1].prompt).toMatch(/This is turn 2 of at most \d+\.$/);
     expect(one.text).toBe('It is 1.25x.'); expect(one.thread!.call).toMatch(/^call_/);
     val(await s.ai.answer(ask('And the margin?', { history: said(['What is the lock-up?']), thread: one.thread })));
     expect(seen[2].results).toEqual([{ id: one.thread!.call, text: 'The answer was shown to the person.' }]); expect(seen[2].prompt).toContain('Question: And the margin?');
@@ -1070,9 +1166,11 @@ describe('what a document is', () => {
     expect(s.svc.uploads).toBe(4);                                                                                                         // the side letter and the minutes were never sent anywhere
     // asked again, nothing is described twice; and the listing now shows the description
     val(await s.ai.answer(ask('And the margin?'))); await s.ai.described('d1'); expect(s.describeCalls.length).toBe(4);   // describing a document does not change which are core
+    // a draft's pick lists them
+    await s.ai.draft({ dealId: 'd1', questionId: 'q_1', questionText: 'And the margin?' });
     expect(s.pickCalls.at(-1)!.prompt).toContain('vdr/Credit Agreement.pdf — This is Credit Agreement.pdf.'); expect(s.pickCalls.at(-1)!.prompt).toContain('vdr/Side letter.pdf — words: step-in, lender');
     // a document outside the core is described the first time a call reads it
-    const t = setup(() => ({ text: 'ok', sources: [] }), BARE(), { describes: true, pick: (c) => ({ read: numbersOf(c, SIDE) }) });
+    const t = setup(() => ({ text: 'ok', sources: [] }), BARE(), { describes: true });
     val(await t.ai.answer(ask('Who has step-in rights?'))); await t.ai.described('d1');
     expect(t.describeCalls.map((c) => sentNames(c)[0]).sort()).toEqual(['Credit Agreement.pdf', 'Information memorandum.pdf', 'Model v12.xlsx', 'Side letter.pdf', 'Term sheet (signed).pdf']); expect(t.recs.d1.find((r) => r.name === 'Side letter.pdf')!.summary).toBe('This is Side letter.pdf.');
     // without somewhere to keep a description, none is asked for
@@ -1086,15 +1184,31 @@ describe('what a document is', () => {
   });
 
   it('a description is read loosely and capped; when the service cannot be reached, nothing is kept and the next read asks again', async () => {
-    const s = setup(() => ({ text: 'ok', sources: [] }), { d1: [bare(FA, 'lender'), bare(SIDE, 'step-in')] }, { describes: true, pick: (c) => ({ read: numbersOf(c, FA, SIDE) }),
+    const bareTwo = { d1: [bare(FA, 'lender'), bare(SIDE, 'step-in')] };
+    const s = setup(() => ({ text: 'ok', sources: [] }), bareTwo, { describes: true,
       describe: () => ({ summary: ' A senior credit agreement. ', keywords: ['lock-up', ' covenant ', 7, '', ...Array.from({ length: 40 }, (_, i) => `k${i}`)], type: 'Credit agreement' }) });
     val(await s.ai.answer(ask('Lender step-in?'))); await s.ai.described('d1');
     const fa = s.recs.d1.find((r) => r.name === FA.name)!; expect(fa.summary).toBe('A senior credit agreement.'); expect(fa.keywords!.slice(0, 3)).toEqual(['lock-up', 'covenant', 'k0']); expect(fa.keywords!.length).toBe(30);
     expect(s.describeCalls[0].prompt).toContain('Include the other words people use for the same things');
     // the service down while describing: nothing is kept, no try is counted against the document, the answer is not held up, and the next read asks again
-    let down = true; const u = setup(() => ({ text: 'ok', sources: [] }), { d1: [bare(FA, 'lender')] }, { describes: true, describe: () => { if (down) throw Object.assign(new Error('offline'), { code: 'unreachable' }); return { summary: 'Back.', keywords: [] }; } });
-    val(await u.ai.answer(ask('Lender?'))); await u.ai.described('d1'); expect(u.recs.d1[0].summary).toBeUndefined(); expect(u.recs.d1[0].undescribed).toBeUndefined(); expect(u.describeCalls.length).toBe(2);                 // once when it was chosen as core, once when the answer read it
-    down = false; val(await u.ai.answer(ask('Lender?'))); await u.ai.described('d1'); expect(u.recs.d1[0].summary).toBe('Back.'); expect(u.describeCalls.length).toBe(3);
+    let down = true;
+    const describe = () => {
+      if (down) throw Object.assign(new Error('offline'), { code: 'unreachable' });
+      return { summary: 'Back.', keywords: [] };
+    };
+    const u = setup(() => ({ text: 'ok', sources: [] }), { d1: [bare(FA, 'lender')] }, { describes: true, describe });
+    val(await u.ai.answer(ask('Lender?')));
+    await u.ai.described('d1');
+    expect(u.recs.d1[0].summary).toBeUndefined();
+    expect(u.recs.d1[0].undescribed).toBeUndefined();
+    // asked when it was chosen as core, and again when the answer read it unless that ask was still under way
+    const asked = u.describeCalls.length;
+    expect(asked).toBeGreaterThan(0);
+    down = false;
+    val(await u.ai.answer(ask('Lender?')));
+    await u.ai.described('d1');
+    expect(u.recs.d1[0].summary).toBe('Back.');
+    expect(u.describeCalls.length).toBe(asked + 1);
   });
 
   it('a document the model cannot describe is tried three times, each after a longer rest, and then left alone for good, on every PC', async () => {
@@ -1121,17 +1235,26 @@ describe('what a document is', () => {
   });
 
   it('every call is counted by what it was for and which model took it, and each run reports its own', async () => {
-    const s = setup((_c, n) => (n === 1 ? 'not json at all' : { text: 'ok', sources: [] }), BARE(), { describes: true, fix: () => ({ text: 'ok', sources: [] }) });   // the stand-in cannot say what to read, and its first answer cannot be read: each is sent back once
+    // the search helper's first answer cannot be read: it is sent back once
+    const fix = () => ({ text: 'ok', sources: [] });
+    const reply = (_c: Call, n: number) => (n === 1 ? 'not json at all' : { text: 'ok', sources: [] });
+    const s = setup(reply, BARE(), { describes: true, fix });
     val(await s.ai.answer(ask('What is the lock-up ratio?'))); await s.ai.described('d1');
     const line = (e: UsageEntry) => e.calls.map((l) => `${l.kind}/${l.model} ×${l.calls} docs ${l.docs}`).sort();
     const run = (name: string, nth = 0) => s.usage.filter((e) => e.run === name)[nth];
     expect(s.usage.map((e) => [e.run, e.dealId]).sort()).toEqual([['answer', 'd1'], ['describe', 'd1']]); expect(run('answer').at).toMatch(/^2026-11-10T/);
     // the search helper reads the documents on the fast model; the main session's turn, on the person's model, has none
-    expect(line(run('answer'))).toEqual(['answer/thorough ×1 docs 0', 'fix/fast ×2 docs 0', 'pick/fast ×1 docs 0', 'search/fast ×1 docs 4']); expect(line(run('describe'))).toEqual(['describe/fast ×4 docs 4']);
+    expect(line(run('answer')))
+      .toEqual(['answer/thorough ×1 docs 0', 'fix/fast ×1 docs 0', 'search/fast ×1 docs 2']);
+    expect(line(run('describe'))).toEqual(['describe/fast ×4 docs 4']);
     const search = run('answer').calls.find((l) => l.kind === 'search')!; expect(search.sent).toBe(s.calls[0].prompt.length); expect(search.received).toBe('not json at all'.length);
     const turn = run('answer').calls.find((l) => l.kind === 'answer')!; expect(turn.sent).toBe(s.turns[0].prompt.length);
-    val(await s.ai.answer(ask('And the margin?'))); expect(line(run('answer', 1))).toEqual(['answer/thorough ×1 docs 0', 'fix/fast ×1 docs 0', 'pick/fast ×1 docs 0', 'search/fast ×1 docs 4']);                // the same run, again
-    expect(s.ai.usage().map((l) => `${l.kind}/${l.model} ×${l.calls}`).sort()).toEqual(['answer/thorough ×2', 'describe/fast ×4', 'fix/fast ×3', 'pick/fast ×2', 'search/fast ×2']);   // and the whole, since the app started
+    // the same run, again
+    val(await s.ai.answer(ask('And the margin?')));
+    expect(line(run('answer', 1))).toEqual(['answer/thorough ×1 docs 0', 'search/fast ×1 docs 1']);
+    // and the whole, since the app started
+    expect(s.ai.usage().map((l) => `${l.kind}/${l.model} ×${l.calls}`).sort())
+      .toEqual(['answer/thorough ×2', 'describe/fast ×4', 'fix/fast ×1', 'search/fast ×2']);
     val(await s.ai.gaps('d1')); expect(s.usage.length).toBe(3);                                                                              // a run that asks no model reports nothing
   });
 });
@@ -1254,12 +1377,16 @@ describe('the first pass', () => {
   });
 
   it('what a check leaves as a gap goes to the chat agent\'s own search, a few items at a time; the documents its answer cites are read against them, and settle them', async () => {
-    const PLAN = doc(16, 'DEC-77.pdf', { rel: '09 Misc/DEC-77.pdf', pages: 3 });
+    const PLAN = doc(16, 'DEC-77.pdf',
+      { rel: '09 Misc/DEC-77.pdf', pages: 3, summary: 'Decommissioning plan for the site.' });
     const DECOM = { id: 'x1', text: 'Decommissioning is provided for' };
     const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...(has(c, PLAN) ? OK(c) : { result: 'more', need: 'a decommissioning plan' }) })) }), { d1: [FA, TS, PLAN] }, { checklist: () => ({ broad: [DECOM], product: [], sector: [] }),
       pick: (c) => ({ read: numbersOf(c, FA) }), pickFor: () => ({ read: { I1: [] } }),
-      // the agent's search helper picks the plan, reads it, and the agent's answer cites it
-      fill: (c) => (isPickAsk(c) ? { read: numbersOf(c, PLAN) } : isTurn(c) ? { text: 'DEC-77 is the decommissioning plan. [1]', sources: [{ doc: tag(c, PLAN), page: 1 }] } : { text: 'It is the decommissioning plan. [1]', sources: [{ doc: tag(c, PLAN), page: 1, quote: 'Decommissioning plan' }] }) }); await deal(s.repo);
+      // the agent's search finds the plan by its words, its helper reads it, and the agent's answer cites it
+      fill: (c) => (isTurn(c)
+        ? { text: 'DEC-77 is the decommissioning plan. [1]', sources: [{ doc: tag(c, PLAN), page: 1 }] }
+        : { text: 'It is the plan. [1]', sources: [{ doc: tag(c, PLAN), page: 1, quote: 'The plan' }] }) });
+    await deal(s.repo);
     const r = val(await s.ai.firstPass('d1'));
     const turn = s.fillCalls.find((c) => isTurn(c))!; expect(turn.model).toBe('standard');                                             // the check's model runs the agent
     expect(turn.prompt).toContain('1. Decommissioning is provided for Still needed: a decommissioning plan');                         // with what the check said it still needs
@@ -1279,8 +1406,10 @@ describe('the first pass', () => {
     expect(turns[0].prompt).toContain('(searched already, finding nothing: "decommissioning plan"');                                 // the check's searches go with them, so they are not made again
     const g1 = val(await s.ai.checklist('d1')).find((x) => x.id === 'g1')!; expect(g1.result).toBe('gap'); expect(g1.searched?.[0]).toEqual({ q: 'decommissioning plan', n: 0 });
     // the agent's allowance, as large as the check's own searches: past it, no more is handed over, and every item is still written
-    const spent = setup(gapAll, { d1: [FA, TS] }, { ...opts, checkSearchCalls: 2 }); await deal(spent.repo);
-    expect(val(await spent.ai.firstPass('d1')).gaps.length).toBe(6); expect(spent.fillCalls.length).toBeLessThanOrEqual(2); expect(spent.fillCalls.filter((c) => isTurn(c)).length).toBeLessThanOrEqual(1);
+    const spent = setup(gapAll, { d1: [FA, TS] }, { ...opts, checkSearchCalls: 1 }); await deal(spent.repo);
+    expect(val(await spent.ai.firstPass('d1')).gaps.length).toBe(6);
+    expect(spent.fillCalls.length).toBeLessThanOrEqual(1);
+    expect(spent.fillCalls.filter((c) => isTurn(c)).length).toBeLessThanOrEqual(1);
     // a run whose reply cannot be used: no more items are handed over in that check
     const broke = setup(gapAll, { d1: [FA, TS] }, { ...opts, fill: (c: Call) => (isTurn(c) ? 'I cannot help with that.' : { text: '', sources: [] }) }); await deal(broke.repo);
     expect(val(await broke.ai.firstPass('d1')).gaps.length).toBe(6); expect(new Set(broke.fillCalls.filter((c) => isTurn(c)).map((c) => c.prompt.split('\n\n')[0])).size).toBe(1);
@@ -1322,7 +1451,9 @@ describe('the first pass', () => {
     const s = setup(() => 'Here you go: text = It is 1.25x [1], source D1 page 14', undefined, { fix: () => good });
     expect(val(await s.ai.answer(ask('What is the lock-up ratio?', { model: 'fast' }))).sources).toEqual([{ doc: 'Credit Agreement.pdf', loc: 'p. 14', docId: FA.docId }]);
     expect(s.calls.length).toBe(1); expect(fixesOf(s, 'text').map((c) => [c.model, c.files.length])).toEqual([['fast', 0], ['fast', 0]]);                     // the search helper's reading and the main session's turn: each by the same model, with no documents: a small call
-    expect(fixesOf(s, 'text')[1].prompt).toContain('in this shape: {"tool": …} or {"text": "…", "sources": […]}'); expect(fixesOf(s, 'text')[1].prompt).toContain('Here you go: text = It is 1.25x [1], source D1 page 14');
+    const shape = '{"tool": …} or {"text": "…", "sources": […], "offer": {…}}';
+    expect(fixesOf(s, 'text')[1].prompt).toContain(`in this shape: ${shape}`);
+    expect(fixesOf(s, 'text')[1].prompt).toContain('Here you go: text = It is 1.25x [1], source D1 page 14');
     // it is not asked to fix a reply that could be read, however loosely it was written
     const loose = setup(() => "```json\n{'text': 'It is 1.25x. [1]', 'sources': [{'doc': '[d1]', 'page': 'p. 14',},],}\n```"); expect(val(await loose.ai.answer(ask('What is the lock-up ratio?'))).sources.length).toBe(1); expect(fixesOf(loose, 'text').length).toBe(0);
     // the fix fails too: for a person's own choice of model that is the failure; for the backend's it is one failed run of two
@@ -1337,7 +1468,7 @@ describe('the first pass', () => {
   it('replies are read for what they say, not how neatly: loose citations, lists, ids and words are understood, and the rules on what counts still hold', async () => {
     // a document by tag in any form, by name or by path; a page as words; one source not in a list; a sheet and cell apart
     const s = setup((c) => `Sure!\n{"text": ["It is 1.25x. [1]", "The term sheet agrees. [2] The model too. [3] And the memorandum. [4] Not this. [5] Nor this. [6]"], "sources": [{"document": "${tag(c, FA).toLowerCase()}", "page": "p. 14"}, {"doc": "Term sheet (signed).pdf", "page": "3-4"}, {"doc": "[${tag(c, MODEL)}]", "sheet": "Debt", "cell": "B20"}, {"doc": "vdr/Information memorandum.pdf", "page": "7"}, {"doc": "${tag(c, FA)}", "page": "clause 14.2"}, {"doc": "${tag(c, TS)}", "page": 99}], "need": "nothing more"}`);
-    const r = val(await s.ai.answer(ask('What is the lock-up ratio?')));
+    const r = val(await s.ai.answer(ask('What is the lock-up ratio, and the capacity?')));
     expect(r.sources.map((x) => [x.doc, x.loc])).toEqual([['Credit Agreement.pdf', 'p. 14'], ['Term sheet (signed).pdf', 'p. 3'], ['Model v12.xlsx', 'Debt!B20'], ['Information memorandum.pdf', 'p. 7']]);
     expect(r.text).toBe('It is 1.25x. [1]\n\nThe term sheet agrees. [2] The model too. [3] And the memorandum. [4] Not this. Nor this.');                     // a clause number is still not a page, and a page the document does not have is still not a citation
     // a first pass sent as a bare list, ids as numbers or in words, results in capitals, the body as one string, and the reply cut off in its last item

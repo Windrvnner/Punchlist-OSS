@@ -2,7 +2,8 @@
 import { Store } from '../../src/app/store';
 import { memRepo, disk } from '../adapters/memRepo';
 import { MemoryLocal } from '../../src/adapters/local';
-import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
+import { csvCodec } from '../../src/adapters/spreadsheet';
+import { readCsv } from '../../src/domain/sheets';
 import { mockAi, mockDocuments, mockSession } from '../../src/adapters/mocks';
 import { CreateDeal } from '../../src/app/commands/deals';
 import { CreateQuestion, SetResponse, DeleteQuestion, RestoreQuestion, EditQuestionField, SetQuestionStatus }

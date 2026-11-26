@@ -138,7 +138,30 @@ export interface AiService {
    */
   /** `dealIds`: asked across deals, only these (the person's own deals); every deal in the shared folder when left out */
   /** `thread`: the conversation the model service keeps for this chat, from the last answer; the answer gives back the one to keep next */
-  answer(input: { dealId?: string; dealIds?: string[]; /** asked on Home: where the person's own attached files are kept (ownFilesId) */ files?: string; findingId?: string; questionId?: string; message: string; history: { role: 'me' | 'ai'; text: string }[]; model: string; attachments?: DocumentRef[]; runId?: string; thread?: ModelThread; /** the conversation, as the window names it: a folder read carries on within it */ conversation?: string }): Promise<Result<{ text: string; sources: Source[]; read?: { docs: number; of: number }; research?: Research; thread?: ModelThread }>>;
+  answer(input: {
+    dealId?: string;
+    dealIds?: string[];
+    /** asked on Home: where the person's own attached files are kept (ownFilesId) */
+    files?: string;
+    findingId?: string;
+    questionId?: string;
+    message: string;
+    history: { role: 'me' | 'ai'; text: string }[];
+    model: string;
+    attachments?: DocumentRef[];
+    runId?: string;
+    thread?: ModelThread;
+    /** the conversation, as the window names it: a folder read carries on within it */
+    conversation?: string;
+  }): Promise<Result<{
+    text: string;
+    sources: Source[];
+    read?: { docs: number; of: number };
+    research?: Research;
+    thread?: ModelThread;
+    /** an action the model proposes, unchecked (app/answerOffer.ts) */
+    offer?: unknown;
+  }>>;
   /**
    * Optional. The steps an answer still being worked on has taken so far (the `runId` it was asked with), for the
    * "Researching" view; null when no answer by that name is being worked on. Read-only and cheap: no model call.
@@ -252,7 +275,8 @@ export interface AiService {
 /**
  * One step the chat agent took: a search of the documents, findings or Q&A, or documents given to it whole. `text` says
  * what it did, in the past tense ("Searched documents for “lock-up”", "Read Credit agreement.pdf"); `result` says what
- * came of it in a few words ("214 listed · 5 opened · 3 passages", "p. 41"); `found` are the passages a search
+ * came of it in a few words ("214 listed · 5 opened · 3 passages": for documents, every one that answers to a word
+ * of the search; "p. 41"); `found` are the passages a search
  * returned, each with where it is. `done` is false only for the step being taken now.
  */
 /**
@@ -443,7 +467,30 @@ export interface ChecklistDraftMaps {
 }
 
 /** One message of a conversation, as it is kept. An answer still waiting (`pending`) is never kept in the synced folder; the window's local store keeps it, so another window shows it waiting. */
-export interface KeptMessage { id: string; role: 'me' | 'ai'; text: string; sources?: Source[]; state: 'done' | 'pending' | 'failed'; at: string; attached?: { doc: string; docId: string }[]; /** what the chat agent did for this answer */ research?: Research; /** the model service's conversation as this answer left it */ thread?: ModelThread }
+export interface KeptMessage {
+  id: string;
+  role: 'me' | 'ai';
+  text: string;
+  sources?: Source[];
+  state: 'done' | 'pending' | 'failed';
+  at: string;
+  attached?: { doc: string; docId: string }[];
+  /** what the chat agent did for this answer */
+  research?: Research;
+  /** the model service's conversation as this answer left it */
+  thread?: ModelThread;
+  /** the action offered under it */
+  offer?: AnswerOffer;
+}
+/**
+ * An action offered as a button under an answer (#1054), once the app has checked what the model proposed
+ * (app/answerOffer.ts). `page` is one of a deal's pages, as `Landing` names them.
+ */
+export type AnswerOffer =
+  | { kind: 'newDeal' }
+  | { kind: 'page'; dealId: string; page: 'overview' | 'findings' | 'checklist' | 'qa' }
+  | { kind: 'unresolved'; dealId: string }
+  | { kind: 'question'; text: string };
 /**
  * A person's conversations, kept where every PC they use can read them, so a conversation started at the office carries on
  * at home. The desktop backend keeps them in the synced folder (`conversationLog.ts`). Optional: without it,
