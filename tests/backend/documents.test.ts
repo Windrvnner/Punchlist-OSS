@@ -85,6 +85,31 @@ describe('documents on real folders', () => {
     // a second run on the same PC reads nothing again: the index already has every document
     const before = a.converted.length; await indexAll(a, vdr); expect(a.converted.length).toBe(before);
   });
+  it('saves the most-used words again when it rebuilds this PC\'s index, so words saved under older rules go (#1147)', async () => {
+    const { root, vdr } = room();
+    // this PC recorded the agreement under older rules, with no numbers among its words, and has no index of it now
+    const stale = {
+      v: 1, pc: 'office', at: '2026-11-01T00:00:00.000Z', docId: idOf(FA), hash: hashBytes(FA),
+      name: 'Credit Agreement.pdf', folder: vdr, rel: '01 Legal/Credit Agreement.pdf', size: FA.length, pages: 3,
+      words: ['agreement', 'credit'],
+    };
+    // and a spreadsheet that the converter cannot read today: its saved words are not replaced by none
+    const BUDGET = new TextEncoder().encode('PK\u0003\u0004 stands in for Budget.xlsx');
+    put(vdr, 'Budget.xlsx', BUDGET);
+    const budget = {
+      ...stale, docId: idOf(BUDGET), hash: hashBytes(BUDGET), name: 'Budget.xlsx', rel: 'Budget.xlsx',
+      size: BUDGET.length, pages: undefined, words: ['budget', 'revenue'],
+    };
+    fs.mkdirSync(path.join(root, 'shared'));
+    const log = [stale, budget].map((l) => `${JSON.stringify(l)}\n`).join('');
+    fs.writeFileSync(path.join(root, 'shared', 'docs-office-d1.jsonl'), log);
+    const a = pc(root, 'office', undefined, { index: true });
+    expect(a.docs.records('d1').find((r) => r.docId === idOf(FA))?.words).toEqual(['agreement', 'credit']);
+    await indexAll(a, vdr);
+    const reread = pc(root, 'office', undefined, { index: true }).docs.records('d1');
+    expect(reread.find((r) => r.docId === idOf(FA))?.words).toEqual(['agreement', 'credit', '1', '2', '3']);
+    expect(reread.find((r) => r.docId === idOf(BUDGET))?.words).toEqual(['budget', 'revenue']);
+  });
   it('a folder taken off the deal stops feeding checks and questions, and its documents still open', async () => {
     const { root, vdr } = room(); const extra = path.join(root, 'extra'); put(extra, 'Side Letter.pdf', pdf('side letter'));
     let now: string[] | null = [vdr, extra]; const a = pc(root, 'office', undefined, { folders: [vdr, extra], foldersNow: () => now });

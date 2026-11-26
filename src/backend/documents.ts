@@ -301,6 +301,13 @@ export function nodeDocuments(o: DocumentsOptions) {
   };
   const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
   const placeKey = (folder: string, rel: string) => `${folder}\u0000${rel}`;
+  /**
+   * Whether a document's most-used words, read again, are to be saved: when none were saved, or when this PC's index is
+   * rebuilt and the words now differ from those saved under older rules (#1147). An empty list never replaces saved
+   * words, since text that gave words before gives some still: none means the read failed (`sheetWords`).
+   */
+  const wordsChanged = (saved: string[] | undefined, now: string[] | undefined) =>
+    now !== undefined && (saved === undefined || (now.length > 0 && !sameList(saved, now)));
   const seers = (sg: { places: Places } | undefined) => { const by = new Set<string>(); for (const p of sg?.places.values() ?? []) for (const pc of p.by) by.add(pc); return by; };
   function apply(docs: Map<string, DocRecord>, sight: Sight, l: DocLine) {
     const d = docs.get(l.docId) ?? ({ docId: l.docId, hash: '', name: '', folder: '', rel: '', size: 0 } as DocRecord);
@@ -591,7 +598,7 @@ export function nodeDocuments(o: DocumentsOptions) {
             workMs += Date.now() - t0;
             if (asPages) {
               // said once per place: a copy of a file already known is a second place for the same document, not a new one, and is not said again each run
-              if (!had || had.pages !== pages || had.size !== bytesRead || (had.words === undefined && words !== undefined) || (had.cover === undefined && cover !== undefined) || !seenHereAt(dealId, docId, folder.path, f.rel)) { told.add(folder.path); say(dealId, { docId, hash, name, folder: folder.path, rel: f.rel, size: bytesRead, ...(pages !== undefined ? { pages } : {}), ...(via !== undefined ? { via } : {}), ...(tracked !== undefined ? { tracked } : {}), ...(words !== undefined ? { words } : {}), ...(cover !== undefined ? { cover } : {}) }); }
+              if (!had || had.pages !== pages || had.size !== bytesRead || wordsChanged(had.words, words) || (had.cover === undefined && cover !== undefined) || !seenHereAt(dealId, docId, folder.path, f.rel)) { told.add(folder.path); say(dealId, { docId, hash, name, folder: folder.path, rel: f.rel, size: bytesRead, ...(pages !== undefined ? { pages } : {}), ...(via !== undefined ? { via } : {}), ...(tracked !== undefined ? { tracked } : {}), ...(words !== undefined ? { words } : {}), ...(cover !== undefined ? { cover } : {}) }); }
               indexed++; if (words !== undefined && !words.length) skipped.wordless.push(f.rel);
             }
           }
