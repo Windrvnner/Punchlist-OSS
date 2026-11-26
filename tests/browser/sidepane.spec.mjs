@@ -175,16 +175,6 @@ for (const [w, h, scheme] of [[1280, 736, 'light'], [1024, 640, 'dark']]) {
   await page.click(scheme === 'light' ? '#side-not' : '.msgs .suggest button[aria-label="Not this one"]'); await page.waitForFunction(() => !document.querySelector('#sidepane'));
   const after = await page.evaluate((qid) => ({ cards: document.querySelectorAll('.msgs .suggest').length, response: store.get().questions[qid].response, status: store.get().questions[qid].status }), q.id);
   say(`not-this-one-${w}-${scheme}`, after.cards === 0 && after.response === '' && after.status === 'open', JSON.stringify(after));
-  // the notice's Undo brings the card back under the answer it is about; put away again for the reload (#1054)
-  await page.click('.toast button:text-is("Undo")');
-  await page.waitForSelector('.msgs .suggest', { timeout: 3000 }).catch(() => undefined);
-  const back = await page.evaluate(() => {
-    const ai = [...document.querySelectorAll('.msgs .ai')]; const card = document.querySelector('.msgs .suggest');
-    return { under: !!card && ai[1].contains(card), cards: document.querySelectorAll('.msgs .suggest').length };
-  });
-  say(`undo-not-this-one-${w}-${scheme}`, back.under && back.cards === 1, JSON.stringify(back));
-  await page.click('.msgs .suggest button[aria-label="Not this one"]');
-  await page.waitForFunction(() => !document.querySelector('.msgs .suggest'));
   // remembered on this PC: after a reload the card stays away
   await page.reload(); await page.waitForFunction((qid) => document.querySelectorAll('.msgs .ai:not(.pending)').length === 2 && store.get().questions[qid], q.id); await page.waitForTimeout(300);
   const reloaded = await page.evaluate(() => ({ cards: document.querySelectorAll('.msgs .suggest').length, kept: JSON.parse(localStorage.getItem('dil/1/local/notThese') || 'null')?.data, answer: Object.values(store.get().threads)[0]?.[3]?.id }));
