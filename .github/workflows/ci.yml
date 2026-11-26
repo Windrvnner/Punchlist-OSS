@@ -98,7 +98,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: browser-logs-${{ matrix.shard }}
-          path: out/browser/*.log
+          # with the new images of any screen that no longer looks as approved (tests/browser/approved.spec.mjs)
+          path: |
+            out/browser/*.log
+            out/browser/approved/
           if-no-files-found: ignore
 
   # the built desktop app end to end on temporary folders, on a virtual display
