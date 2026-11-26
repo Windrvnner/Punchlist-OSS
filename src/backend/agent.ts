@@ -278,6 +278,7 @@ class Answering {
     const { question, run } = this;
     const transcript = this.conversation.transcript;
     const shown = run.shown();
+    // the turn's steps are numbered only to list them; nothing is mapped back by number (#1162)
     const doneSoFar = run.done.map((x, i) => `${i + 1}. ${x}`).join('\n\n');
     return [
       question.about ? `${question.about}\n` : '',
