@@ -175,11 +175,23 @@ function addedByLog(base: KeptTable, kept: KeptTable, log: KeptTable, c: MergeCo
   return lineUp(kept.rows, keptCols, log.rows, logCols, unused, (l) => !askedBefore(l));
 }
 /**
- * A row of theirs with no question (a heading) that holds every cell as one of the version they edited does
- * (`asWas(i)`): the lookup places no such row, and it is not a row they added, so it is not added again (#1111).
+ * Their rows with no question (a heading) that hold every cell as one of the version they edited does (`asWas(j, i)`),
+ * each row of that version standing for one of theirs: the lookup places no such row, and it is not a row they added,
+ * so it is not added again. A copy they added has no row left to stand for it, so it is added (#1111).
  */
-function unchangedHeading(row: string[], kt: number, base: string[][], bt: number, asWas: (i: number) => boolean) {
-  return !hasQuestion(row, kt) && base.some((r, i) => !hasQuestion(r, bt) && asWas(i));
+function unchangedHeadings(kept: string[][], kt: number, base: string[][], bt: number,
+  asWas: (j: number, i: number) => boolean): Set<number> {
+  const heading = (r: string[], text: number) => !hasQuestion(r, text) && r.some((v) => v.trim());
+  const free = base.flatMap((r, i) => (heading(r, bt) ? [i] : []));
+  const out = new Set<number>();
+  for (const [j, r] of kept.entries()) {
+    if (!heading(r, kt)) continue;
+    const at = free.findIndex((i) => asWas(j, i));
+    if (at < 0) continue;
+    free.splice(at, 1);
+    out.add(j);
+  }
+  return out;
 }
 
 /** a cell step with a value as it was read: a plain number as a number, a date (as a date cell reads, YYYY-MM-DD) as a date, anything else as its text (the update makes a row of its own an ask places with it too) */
@@ -327,8 +339,9 @@ export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text
     const holds = (l: number) => lp.every((p) => !(r[p.a] ?? '').trim() || (r[p.a] ?? '').trim() === now(l, p).trim());
     return (byWords.get(r[kt] ?? '') ?? []).some(holds);
   };
+  const headingsAsWere = unchangedHeadings(kept.rows, kt, base.rows, bt, asWas);
   kept.rows.forEach((r, j) => {
-    if (used[j] || !r.some((v) => v.trim()) || unchangedHeading(r, kt, base.rows, bt, (i) => asWas(j, i))) return;
+    if (used[j] || !r.some((v) => v.trim()) || headingsAsWere.has(j)) return;
     const mine = bkk >= 0 ? (r[bkk] ?? '').trim() : ''; const theirsBy = (l: number) => (bll >= 0 ? (log.rows[l][bll] ?? '').trim() : '');
     if (heldAlready(r)) return;
     const same = savedAgain.out[j] >= 0 ? savedAgain.out[j] : undefined;
