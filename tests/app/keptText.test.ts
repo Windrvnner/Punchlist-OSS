@@ -159,3 +159,17 @@ describe('drafts kept across a restart', () => {
     expect(restarted.keptDrafts('composer', restarted.isText).get('project-aster')).toBe(text);
   });
 });
+
+it('drops the retired refused-commands map at start and keeps the log-question maps (#1054)', async () => {
+  local.write(KEPT_TEXT_KEY, {
+    'refused-commands': [['deal:d_1', ['Log a question: Is the permit list final?']]],
+    'refused-questions': [['deal:d_1', ['Is the permit list final?']]],
+  });
+  const k = await load();
+  const refused = await import('../../src/app/refusedCommands');
+  refused.initializeRefusedCommands();
+  k.saveKeptDrafts();
+  const saved = local.read(KEPT_TEXT_KEY) as Record<string, unknown>;
+  expect(saved['refused-commands']).toBeUndefined();
+  expect(saved['refused-questions']).toEqual([['deal:d_1', ['Is the permit list final?']]]);
+});

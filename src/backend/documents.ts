@@ -32,7 +32,7 @@ import { BUSY_WAITS } from './nodeFolder';
 import type { StoreKeeper, WantedDoc } from './storeKeeper';
 import { pdfLook, pdfPages, shortExt, type Converter, type ConvertInfo, type ChangeList } from './convert';
 import { parseCsv, sheetPart, type Sheet } from '../domain/sheets';
-import { decodeText } from '../adapters/spreadsheet';
+import { decodeText } from '../domain/textEncoding';
 import { topWords } from './words';
 import { countWords, type WordIndex } from './wordIndex';
 import { officeText, DIRECT } from './officeText';
