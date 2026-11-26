@@ -95,9 +95,10 @@ describe('a first pass whose PCs have all gone, with documents added since', () 
     expect(new Set(asked('standard')).size).toBe(asked('standard').length);
     expect(asked('standard').length).toBe(items.length - settled.length);
     expect(asked('fast').length).toBeLessThanOrEqual(10);
-    // one question, in parts that show each settled item once
+    // one question, in parts that show every settled item, each once
     const shownItems = s.affectCalls.flatMap((c) => affectsShown(c).items);
     expect(new Set(shownItems).size).toBe(shownItems.length);
+    expect([...shownItems].sort()).toEqual(items.map((it) => it.id).sort());
     // and the watcher starts nothing more
     await s.ai.settled();
     expect(roundsIn(shared).size).toBe(2);

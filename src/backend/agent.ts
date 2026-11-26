@@ -234,7 +234,8 @@ class Answering {
     const { kit, question } = this;
     const docLine = (s: Sent) => {
       const pages = s.rec.pages ? ` (${s.rec.pages} pages)` : '';
-      return `${this.run.idOf(s)}: ${kit.where(s.rec)}${pages}${question.withDeal ? ` [deal ${s.dealId}]` : ''}`;
+      // the id names the deal too when the conversation may span deals (#1162)
+      return `${this.run.idOf(s)}: ${kit.where(s.rec)}${pages}`;
     };
     const ending = this.stopped
       ? ' The person stopped the research: answer now from what you have, with no tool, and say what was not looked at.'

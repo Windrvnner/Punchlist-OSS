@@ -287,7 +287,8 @@ const SPEC = {
     compactShare: count(80, 'Percent of limits.inputTokens at which a long conversation is compacted, when that comes before limits.compactAt.', 30, 95),
     partShare: count(60, 'Percent of limits.outputTokens, and of limits.inputTokens, that a batch of items is sized to fill. The rest is margin: what an item takes is only estimated, and the prompt\'s own words and documents also count.', 20, 95),
     checkReplyTokens: count(250, 'About how many tokens the standard model\'s reply on one checklist item takes (a place and its quote, or a finding written up), to size a check\'s batches.', 10, 5_000),
-    glanceReplyTokens: count(20, 'The same for the fast model\'s quick look at one item.', 5, 1_000),
+    glanceReplyTokens: count(20, 'The same for the fast model\'s quick look at one item, and for each finding or '
+      + 'item it names when new documents arrive, to size those parts.', 5, 1_000),
     rewordReplyTokens: count(80, 'The same for one item\'s new wording on import.', 10, 2_000),
     readLineTokens: count(40, 'The same for what one line of a list brought in is (a heading, an item and its words, or not an item).', 5, 1_000),
     phraseReplyTokens: count(80, 'The same for one question to the counterparty drafted by Add all unresolved.', 10, 2_000),

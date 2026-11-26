@@ -72,8 +72,8 @@ import {
 import { docFamilies } from './related';
 import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
-import { AI_DRAFTED, namesOnlyShown, questionIdsIn, questionsForIds, responseHeader } from './qaRow';
-import { citesUnsent, docHandle, docsUnusable, sentAs, unknownIds, unknownInPairs } from './recordIds';
+import { AI_DRAFTED, questionIdsIn, questionsForIds, responseHeader } from './qaRow';
+import { citesUnsent, docHandle, docsUnusable, namesOnlyShown, sentAs, unknownIds, unknownInPairs } from './recordIds';
 import type { DealDoc, Looked, Unusable } from './agentKit';
 import {
   RATINGS, riskGroups, keyRisksOf, unratedFindings, type Grouped, type Rating, type RiskGroup,
@@ -3175,8 +3175,9 @@ export function nodeAi(o: AiOptions) {
         let using = rest.slice(0, r.docs); const todo = pending;
         const replyEach = model === m.fast ? control.limits.glanceReplyTokens : control.limits.checkReplyTokens;
         const inEach = tokensEach(todo.map(checkLine));
-        const outs = { out: replyEach, outLimit: outLimit(model) };
-        const size = Math.min(r.items, partSize({ cap: todo.length, ...outs, in: inEach, inLimit: inLimit(model) }));
+        const replyRoom = { out: replyEach, outLimit: outLimit(model) };
+        const size = Math.min(r.items,
+          partSize({ cap: todo.length, ...replyRoom, in: inEach, inLimit: inLimit(model) }));
         const done = await inParts(todo, size, async (part) => {
           for (;;) {
             try {

@@ -9,7 +9,7 @@ import type { AgentRun } from './agentRun';
 import { cites, dealDocKey, foundAt, sameDoc, withPlaces } from './agentRun';
 import { codeOf, type AgentKit, type Cited, type DealDoc, type Run, type Sent } from './agentKit';
 import type { ResearchStep } from '../ports';
-import type { DocRecord } from './documents';
+import { docIdFor, type DocRecord } from './documents';
 import { batchAsk, noun, oneLine, quoted, shorten } from './agentPrompts';
 import { docsUnusable } from './recordIds';
 
@@ -22,8 +22,11 @@ const AT_ONCE = 3;
 const FOLDER_TEXT = 24_000;
 /** the fields a batch's reply is read for */
 const BATCH_KEYS = ['text', 'sources'];
-/** about how many characters listing one document to cite adds to the main session's prompt */
-const LISTING_CHARS = 60;
+/**
+ * about how many characters listing one document to cite adds to the main session's prompt: its path and pages, and
+ * the docId it is listed by (#1162)
+ */
+const LISTING_CHARS = 60 + docIdFor('0'.repeat(24)).length;
 /** how many conversations the agent keeps folder reads and asks for */
 const KEPT = 30;
 
