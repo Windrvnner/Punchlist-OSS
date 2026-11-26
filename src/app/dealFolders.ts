@@ -1,7 +1,8 @@
 import type { Deal, Folder } from '../domain/model';
 import {
-  AddFolders, FOLDER_LABEL_MAX, folderInside, foldersWithRemoved, overlap, pathKey, RestoreFolder,
+  AddFolders, FOLDER_LABEL_MAX, folderInside, foldersWithRemoved, overlap, RestoreFolder,
 } from './commands/deals';
+import { windowsPath } from '../domain/sheets';
 import { liveFolders } from './indexing';
 import type { NewDealDraftSession } from './newDealDraft';
 import type { State, UiState } from './state';
@@ -24,7 +25,7 @@ export function guessLabel(path: string) {
 }
 
 export function folderListed(folders: readonly Pick<Folder, 'path'>[], path: string) {
-  return folders.some((folder) => pathKey(folder.path) === pathKey(path));
+  return folders.some((folder) => windowsPath(folder.path) === windowsPath(path));
 }
 
 /** Restoring a folder must leave the folders already waiting to be added usable. */
@@ -78,16 +79,16 @@ export async function readDealFolder(
   if (!path) return;
   const folders = () => [...(store.get().ui.newDeal?.folders ?? form.folders), ...(existing?.folders ?? [])];
   if (folderListed(folders(), path) || draft.isReading(path)) {
-    store.toast('That folder is already on the list');
+    store.toast('That folder is already on the list', 'warn');
     return;
   }
   const over = folders().find((folder) => foldersOverlap(path, folder.path));
   if (over) {
     store.toast(folderInside(path, over.path) ? `That folder is inside ${over.label || over.path}, already on the list`
-      : `${over.label || over.path}, already on the list, is inside that folder`);
+      : `${over.label || over.path}, already on the list, is inside that folder`, 'warn');
     return;
   }
-  const removed = existing?.removed.find((folder) => pathKey(folder.path) === pathKey(path));
+  const removed = existing?.removed.find((folder) => windowsPath(folder.path) === windowsPath(path));
   if (existing && removed) return restoreDealFolder(store, existing.id, removed);
 
   draft.started(path);
@@ -125,7 +126,7 @@ export function chosenDealFolder(store: Store, files: File[], folders: DealForm[
   const real = store.services.fs.pathFor?.(first);
   const root = real ? real.replace(/[\\/][^\\/]*$/, '') : (first.webkitRelativePath || first.name).split('/')[0];
   if (folderListed(folders, root)) {
-    store.toast('That folder is already on the list');
+    store.toast('That folder is already on the list', 'warn');
     return;
   }
   const bytes = files.reduce((total, file) => total + file.size, 0);

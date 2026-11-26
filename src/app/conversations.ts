@@ -10,7 +10,8 @@ import type { Store } from './store';
 import { dealQuestions, type State, type Message } from './state';
 import { docKey, ownFilesId, type Question, type Source } from '../domain/model';
 import { CreateQuestion, UseAsResponse } from './commands/questions';
-import { findQuestions, mayAddress } from '../domain/suggest';
+import { findQuestions } from '../domain/suggest';
+import { proposeQuestion, suggestedFor } from './suggestedQuestion';
 import { withoutMarkers } from '../domain/cite';
 import type { Research } from '../ports';
 import { TITLE_MAX } from './commands/findings';
@@ -173,7 +174,7 @@ async function logTypedQuestion(store: Store, dealId: string, question: string, 
     idempotencyKey: 'ask-addq-' + dealId, noRetry: true,
   });
   if (result.ok) return;
-  if (result.error.kind === 'invalid') store.toast(result.error.message);
+  if (result.error.kind === 'invalid') store.toast(result.error.message, 'warn');
   if (keptForRetry(store, before, dealId, question)) return;
   setComposerText(key, boxWithRefused(key, question, composerText(key)));
   view.textChanged?.();
@@ -224,7 +225,12 @@ async function sendLogQuestion(store: Store, dealId: string, key: string, view: 
 
 export async function ask(store: Store, scope: Scope, text: string) {
   text = text.trim(); if (!text) return;
-  const ro = store.readOnly(); if (ro) { store.toast(ro); return; }   // read-only while nobody is signed in: nothing new is asked
+  // read-only while nobody is signed in: nothing new is asked
+  const ro = store.readOnly();
+  if (ro) {
+    store.toast(ro, 'warn');
+    return;
+  }
   const key = convKey(scope);
   const atts = store.get().ui.attachments.filter((a) => a.conv === key && a.state === 'done' && a.doc && a.docId);
   if (atts.length) store.ui((ui) => ({ attachments: ui.attachments.filter((a) => !atts.includes(a)) }));
@@ -250,7 +256,11 @@ function failedReply(store: Store, key: string, messageId: string) {
 }
 
 export async function retry(store: Store, scope: Scope, messageId: string) {
-  const ro = store.readOnly(); if (ro) { store.toast(ro); return; }
+  const ro = store.readOnly();
+  if (ro) {
+    store.toast(ro, 'warn');
+    return;
+  }
   const key = convKey(scope);
   const before = failedReply(store, key, messageId);
   if (!before) return;
@@ -295,6 +305,25 @@ async function answer(store: Store, scope: Scope, messageId: string, text: strin
   const list = store.get().threads[key] ?? [];
   if (!list.some((m) => m.id === messageId && m.state === 'pending')) return;
   store.setThread(key, list.map((m) => (m.id !== messageId ? m : answered(store, scope, m, r))));
+  if (r.ok) await proposeFor(store, scope, messageId);
+}
+
+/** Once an answer on a deal's or a finding's conversation finishes, the model proposes an open question (#1120). */
+async function proposeFor(store: Store, scope: Scope, messageId: string) {
+  if (scope.kind !== 'deal' && scope.kind !== 'finding') return;
+  const list = store.get().threads[convKey(scope)] ?? [];
+  const answer = list.find((m) => m.id === messageId);
+  if (answer) await proposeQuestion(store, scope.dealId, messageId, answerText(answer), answeredTexts(list));
+}
+
+/** The texts of a conversation's answers as they leave it, which a suggested question's response may already be. */
+const answeredTexts = (list: Message[]) => new Set(list.map((m) => answerText(m)));
+
+/** The open question each answer may address, on a deal's or a finding's conversation (a question's is its own). */
+export function suggestions(s: State, scope: Scope): Map<string, string[]> {
+  if (scope.kind !== 'deal' && scope.kind !== 'finding') return new Map();
+  const list = s.threads[convKey(scope)] ?? [];
+  return suggestedFor(s, scope.dealId, list, answeredTexts(list));
 }
 
 type Replied = Awaited<ReturnType<Store['services']['ai']['answer']>>;
@@ -369,28 +398,6 @@ export async function askVerdict(store: Store, dealId: string, questionId: strin
   set('asking');
   const r = await ai.addresses({ dealId, question: q.text, answer: answerText(m) });
   set(r.ok ? r.value : 'failed');
-}
-
-/**
- * The open question each answer may address, for the card under it: answer message id to question id.
- * One question per answer, and each question under one answer only, the newest that may address it. On a deal's or a
- * finding's conversation; on a question's, the answer is already about that question. A question whose response is
- * already an answer of this conversation is not suggested again. One a person said "not this one" to is not shown, nor
- * offered under an earlier answer instead.
- */
-export function suggestions(s: State, scope: Scope): Map<string, string> {
-  const out = new Map<string, string>(); if (scope.kind !== 'deal' && scope.kind !== 'finding') return out;
-  const list = s.threads[convKey(scope)] ?? []; const texts = new Map(list.map((m) => [m.id, answerText(m)]));
-  const used = new Set(texts.values());
-  const open = dealQuestions(s, scope.dealId).filter((q) => q.status === 'open' && !used.has(q.response));
-  const offered = new Set<string>();
-  for (let i = list.length - 1; i >= 0; i--) {
-    const m = list[i]; if (m.role !== 'ai' || m.state !== 'done') continue;
-    const q = mayAddress(texts.get(m.id)!, open.filter((x) => !offered.has(x.id)))[0];
-    if (!q) continue;
-    offered.add(q.id); if (!s.ui.notThese.includes(`${m.id}|${q.id}`)) out.set(m.id, q.id);
-  }
-  return out;
 }
 
 /** `from` says what cited it; `ask` is the question that led to the answer, when an answer cited it; `dealId` only on answers across deals. */

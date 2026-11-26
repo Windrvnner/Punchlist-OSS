@@ -21,7 +21,7 @@ await page.click('#hask'); await page.keyboard.type('Which consents are outstand
 // a change with its Undo on offer when the sign-in lapses
 const undoOp = await page.evaluate(async (d) => { const r = await store.dispatch(store.commandNamed('CreateQuestion'), { dealId: d, text: 'Undo me later' }, { quiet: true }); return r.value.opId; }, id);
 await page.evaluate(() => { window.__signin.signedIn = false; }); await page.waitForSelector('#signin-bar', { timeout: 6000 });
-await page.evaluate((opId) => store.toast('Question added', { label: 'Undo', opId }), undoOp);   // its notice, as the app posts it, still showing
+await page.evaluate((opId) => store.toast('Question added', 'done', { label: 'Undo', opId }), undoOp);   // its notice, as the app posts it, still showing
 await page.click('.toast:has-text("Question added") .tundo'); await page.mouse.move(5, 700); await page.waitForTimeout(9000);   // past the 8 seconds a notice stays
 say('undo-pressed-signed-out-stays-on-offer', !!(await page.$('.toast:has-text("Question added") .tundo')) && await page.evaluate(() => Object.values(store.get().questions).some((q) => q.text === 'Undo me later')));
 say('the-bar-says-read-only-with-sign-in', await page.evaluate(() => { const b = document.querySelector('#signin-bar'); return /Read-only/.test(b.textContent) && /Not signed in to Intelligence/.test(b.textContent) && !!b.querySelector('#signin-bar-go'); }));

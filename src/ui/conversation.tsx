@@ -58,7 +58,7 @@ function useDocOpener(store: Store, scope: Scope) {
   const opener = useRef<HTMLElement | null>(null);
   const openDoc = (src: Source, ask?: string) => {
     if (src.dealId && !isOwnFiles(src.dealId) && !store.get().deals[src.dealId]) {
-      store.toast('That deal has been deleted, so its documents can’t be opened');
+      store.toast('That deal has been deleted, so its documents can’t be opened', 'warn');
       return;
     }
     if (!isReading(store.get().ui)) {

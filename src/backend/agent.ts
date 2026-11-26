@@ -70,6 +70,7 @@ import { catchUp, pageNumber, search, type What } from './agentSearch';
 import { FolderMemory, FolderReader } from './agentFolder';
 import { KeptConversation, type Turn } from './agentTalk';
 import { inlineTools } from './agentPrompts';
+import { questionIdsIn, questionsForIds } from './qaRow';
 
 export type { AgentKit, AgentOptions, AgentQuestion, Cited, Sent, ToolMode } from './agentKit';
 
@@ -203,14 +204,17 @@ class Answering {
     if (this.stopped && !run.steps.some((x) => x.text === 'Stopped')) {
       run.steps.push({ kind: 'stop', text: 'Stopped', result: 'answered from what was found', done: true });
     }
-    const { files, listing, got } = await kit.send(run.whole);
+    const { files, listing, got } = await kit.send(run.whole, question.model);
     // a document that cannot be opened on this PC was not read
     if (got.length < run.whole.length) run.whole = got;
     const turn = this.turnOf(turnNumber, last, files, listing);
     const reply = kit.talk
       ? await this.conversation.ask(turn)
       : await kit.askJson(
-        { kind: 'answer', model: question.model, system: turn.system, prompt: turn.full(true), files },
+        {
+          kind: 'answer', model: question.model, system: turn.system, prompt: turn.full(true), files,
+          unusable: turn.unusable,
+        },
         turn.keys,
         turn.shape,
       );
@@ -242,7 +246,19 @@ class Answering {
       system: `${inlineTools(this.limits.width)}\n\n${kit.rules}`,
       keys: ['tool', 'text'],
       shape: REPLY_SHAPE,
+      unusable: (text) => this.namesUnknownQuestion(text),
     };
+  }
+
+  /**
+   * Whether a reply names a question id that is in none of the run's deals: a failed reply, asked again (#1105). The
+   * questions shown in earlier answers of a kept conversation are not kept, so any question in the deals may be named.
+   */
+  private async namesUnknownQuestion(text: string): Promise<boolean> {
+    const named = questionIdsIn(text);
+    if (!named.length) return false;
+    const numbers = await this.run.questionNumbers([text]);
+    return named.some((id) => !numbers.has(id));
   }
 
   /** the turn's whole prompt; `history`: with the conversation's last messages and its transcript */
@@ -294,16 +310,19 @@ class Answering {
   }
 
   /** the main session's answer, with the citations that can be stood behind; on the last turn, its notes if no text */
-  private answered(reply: Record<string, unknown>, last: boolean): Result<Answered> {
+  private async answered(reply: Record<string, unknown>, last: boolean): Promise<Result<Answered>> {
     const { kit, question, run } = this;
-    const text = strings(reply.text).join('\n\n') || (last ? run.notes : '');
+    // the questions it names by id are named by their numbers now before the answer is shown or kept (#1105)
+    const said = strings(reply.text).join('\n\n') || (last ? run.notes : '');
+    const numbers = await run.questionNumbers([said, draftedQuestion(reply.offer) ?? '']);
+    const text = questionsForIds(said, numbers);
     if (!text) return fail({ kind: 'failed', message: UNREAD_REPLY });
     const fitted = kit.fit(text, reply.sources as Cited[], run.opened, question.withDeal);
     this.showCitedPlaces(fitted.sources);
     const read = { docs: run.touched.size, of: question.deals.reduce((sum, d) => sum + kit.records(d).length, 0) };
     const thread = this.conversation.thread();
     const research = { steps: run.steps.map((s) => ({ ...s })), ms: kit.now() - run.progress.t0, read };
-    const offer = reply.offer === undefined ? {} : { offer: reply.offer };
+    const offer = reply.offer === undefined ? {} : { offer: offerOf(reply.offer, numbers) };
     return ok({ ...fitted, read, research, ...(thread ? { thread } : {}), ...offer });
   }
 
@@ -315,6 +334,19 @@ class Answering {
       if (places.length) step.result = [...new Set(places)].join(', ');
     }
   }
+}
+
+/** the question an offer drafts for the log, if it drafts one */
+function draftedQuestion(offer: unknown): string | undefined {
+  const drafted = (offer as { question?: unknown } | null | undefined)?.question;
+  return typeof drafted === 'string' ? drafted : undefined;
+}
+
+/** the offer as the model gave it, with the questions a drafted question names by id put back as `numbers` (#1105) */
+function offerOf(offer: unknown, numbers: ReadonlyMap<string, number>): unknown {
+  const drafted = draftedQuestion(offer);
+  if (drafted === undefined) return offer;
+  return { ...(offer as object), question: questionsForIds(drafted, numbers) };
 }
 
 /** what the person is told when an answer failed */

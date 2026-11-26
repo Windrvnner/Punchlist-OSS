@@ -44,14 +44,15 @@ function draftStore(repo: Repository, ai: AiService) {
 async function mixedDraft(earlierResponse = savedResponse) {
   const backend = setup((call) => {
     if (!call.prompt.includes('Draft a response to this question')) return {};
-    // the earlier response that was drafted by AI (question 2's accepted draft); the model sees only R numbers (#286)
-    const reusedDraft = /^Response to R(\d+) \(drafted by AI/m.exec(call.prompt);
-    if (reusedDraft) return { status: 'found', text: '', sources: [], reused: [`R${reusedDraft[1]}`] };
+    // the earlier response that was drafted by AI (question 2's accepted draft); the model sees only question ids
+    // (#286, #1105)
+    const reusedDraft = /^Response to (q_\w+) \(drafted by AI/m.exec(call.prompt);
+    if (reusedDraft) return { status: 'found', text: '', sources: [], reused: [reusedDraft[1]] };
     return {
       status: 'found',
       text: `${documentText} [1]`,
       sources: [{ doc: 'D1', page: 14 }],
-      reused: ['R1'],
+      reused: [/^Response to (q_\w+)/m.exec(call.prompt)![1]],
     };
   }, { [dealId]: [agreement] });
   const store = draftStore(backend.repo, backend.ai);
@@ -105,7 +106,8 @@ async function checkReuse(world: Awaited<ReturnType<typeof mixedDraft>>, expecte
   expect(repeatedDraft?.text.match(/\[1\]/g)).toHaveLength(2);
   expect(repeatedDraft?.sources).toEqual([]);
   const lastPrompt = backend.calls.filter((call) => call.prompt.includes('Draft a response to this question')).at(-1);
-  const reuseLine = lastPrompt?.prompt.split('\n').find((line) => line.startsWith('Response to R') && line.includes('drafted by AI'));
+  const reusedDraft = (line: string) => line.startsWith('Response to q_') && line.includes('drafted by AI');
+  const reuseLine = lastPrompt?.prompt.split('\n').find(reusedDraft);
   expect(reuseLine).toContain(`${expected.replace(/\s+/g, ' ')} ${documentText}”`);
 }
 
