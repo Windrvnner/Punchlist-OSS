@@ -26,7 +26,7 @@ import { findingHistory, reassess, type FindingHistoryEvent } from '../app/findi
 import type { Deal, Finding, Source } from '../domain/model';
 import { localYmd, CHECK_REASON } from '../domain/model';
 import { splitCited } from '../domain/cite';
-import { SERVICE, AI_LABEL } from '../control';
+import { SERVICE } from '../control';
 import { keptDrafts, hasTexts } from '../app/keptText';
 import { useSaveOut } from './saveOut';
 import {
@@ -188,7 +188,7 @@ function FindingListRow({ finding: f, questions, conflictVersions, showStatus }:
     <span class={`stripe ${open ? 'High' : ''}`} title={status} />
     <span class="ft">
       {f.updated && (open ? <i class="upd" aria-hidden="true" /> : <i class="upd" title="May need reopening" />)}
-      {f.aiTitle && <AiTitle />}{f.title}
+      {f.title}
       {f.reviewed && <i class="rvd" title={`Reviewed by ${f.reviewed.by}`}><Icon name="checkfill" size={13} /></i>}
     </span>
     <span class="fm" title={!open && f.note ? f.note : undefined}>
@@ -425,7 +425,7 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
            doing nothing leaves it closed */}
         {f.updated && f.status === 'closed' && !note && <p class="fnotice" id="f-maybe" role="status"><span><i class="dot" aria-hidden="true" />{markText(f, s.questions)}</span><button type="button" class="btn sm" id="f-reopen" onClick={() => setNote(noteDrafts.get(findingId)?.status === 'open' ? noteDrafts.get(findingId)! : { status: 'open', text: '' })}>Reopen</button></p>}
         {editing ? <EditFindingCard key={f.id} f={f} onDone={() => { setEditing(false); requestAnimationFrame(() => document.getElementById('f-edit')?.focus()); }} /> : <>
-        <p class="qtxt" role="heading" aria-level={1}>{f.aiTitle && <AiTitle />}{f.title}</p>
+        <p class="qtxt" role="heading" aria-level={1}>{f.title}</p>
         {/* the note for closing or reopening opens under the title, so the title stays where it was */}
         {note && <div class="fnote" data-holds-work onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setNoteState(null); requestAnimationFrame(() => document.getElementById('f-status')?.focus()); } }}><div class="lbl">{note.status === 'open' ? 'Reopen' : 'Mark closed'}</div><textarea maxLength={TEXT_MAX} id="fnote-text" rows={2} placeholder="Note (optional)" aria-label="Note" ref={(el) => { if (el && !el.dataset.f) { el.dataset.f = '1'; el.focus(); } }} value={note.text} onInput={(e) => setNote({ ...note, text: (e.currentTarget as HTMLTextAreaElement).value })} /><div class="cacts"><button type="button" class="btn sm pri" id="fnote-save" onClick={() => void commit(note.status, note.text)}>Save</button><button type="button" class="btn sm" onClick={() => setNote(null)}>Cancel</button></div></div>}
         {/* up to four documents, its sources as chips above the detail, as under an answer */}
@@ -450,4 +450,3 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
 }
 
 /** the mark before a title the model wrote: the words beneath it are counsel's own */
-const AiTitle = () => <b class="aim" title={`Title written by ${AI_LABEL}`}>{AI_LABEL}</b>;

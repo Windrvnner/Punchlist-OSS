@@ -67,13 +67,14 @@ describe('reading an issues list', () => {
     expect(s.calls.filter(isSort).length).toBe(1);
     expect(s.calls.filter(isSort)[0].files).toEqual([]);
     expect(out.points.length).toBe(164);
-    expect(out.points[0]).toEqual({ n: '1', text: POINTS[0], title: 'Point 1 title', workstream: 'Legal', same: { finding: 'f0' } });
+    expect(out.points[0]).toEqual({ n: '1', text: POINTS[0], title: POINTS[0], workstream: 'Legal', same: { finding: 'f0' } });
     expect(out.points[1].workstream).toBe('Financial');
     expect(out.points[2].workstream).toBe('Legal');   // the workstream as the app names it, whatever the case
     expect(out.points.filter((p) => p.same && 'finding' in p.same).length).toBe(23);
     expect(out.points[60].same).toEqual({ point: 25 });
     expect(out.points[141].same).toEqual({ point: 112 });
-    expect(s.calls.filter(isSort)[0].prompt).toContain('F1: Finding 0 on the credit agreement: What finding 0 says.');   // citation markers left out
+    expect(s.calls.filter(isSort)[0].prompt).toContain('F1: Finding 0 on the credit agreement: What finding 0 says.');
+    expect(s.calls.filter(isSort)[0].prompt).not.toContain('"title"');   // no model title: the point's own words are the title   // citation markers left out
   });
   it('asks for each point in the list\'s own words, never reworded', async () => {
     const { reads } = await read(stand(plain(3)));
@@ -142,7 +143,7 @@ describe('reading an issues list', () => {
       const r = await s.ai.issuesList!({ dealId: 'd1', doc, findings: F, workstreams: ['Legal', 'Financial'] });
       expect(r.ok ? r.value.points.length : r.error.message).toBe(L.length);
       expect(biggest).toBeLessThanOrEqual(180_000);
-      expect(r.ok && r.value.points.every((p, k) => p.text === L[k].text && p.title === `Point ${k + 1} title`)).toBe(true);   // every point titled, in its own words
+      expect(r.ok && r.value.points.every((p, k) => p.text === L[k].text && p.title === L[k].text)).toBe(true);   // every point titled with its own words
     }
   }, 120_000);
   it('a long list against 5,000 findings is compared with the findings a share at a time, each call within the budget', async () => {
@@ -152,7 +153,7 @@ describe('reading an issues list', () => {
     const s = setup((c: Call) => { const t = tokensOf(c.prompt); biggest = Math.max(biggest, t); sent += t; if (t > 180_000) throw tooLong('prompt is too long'); return base(c); }, { d1: rec }, { shared: new Mem(), installId: 'pc' });
     const r = await s.ai.issuesList!({ dealId: 'd1', doc, findings: F, workstreams: ['Legal', 'Financial'] });
     expect(r.ok ? r.value.points.length : r.error.message).toBe(1200);
-    expect(r.ok && r.value.points.every((p, k) => p.text === L[k].text && p.title === `Point ${k + 1} title`)).toBe(true);
+    expect(r.ok && r.value.points.every((p, k) => p.text === L[k].text && p.title === L[k].text)).toBe(true);
     expect(biggest).toBeLessThanOrEqual(108_000);                                       // the budget: 60% of the 180,000 input limit
     expect(s.calls.filter(isSort).length).toBeLessThan(30); expect(sent).toBeLessThan(3_000_000);   // not one call per point (15 calls, 1.8M tokens)
   }, 120_000);

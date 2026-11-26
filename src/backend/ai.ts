@@ -2121,7 +2121,7 @@ async function readIssuePoints(
     },
     async issuesList(i) {
       // Two steps. The list is read from its file in one call, each point in the list's own words. Then the points are
-      // titled and compared with the deal's findings and each other, with no file: the whole list in one call, as the
+      // sorted into workstreams and compared with the deal's findings and each other, with no file: the whole list in one call, as the
       // checklist's duplicate check is asked, in parts only for a list longer than ISSUES_BATCH. A reply that cannot be
       // read is asked for again for half as many points. Nothing is half done: a point that cannot be read or sorted
       // fails the whole, to be asked again.
@@ -2156,7 +2156,7 @@ async function readIssuePoints(
       const promptOf = (mine: number[], level: number, share?: Share) => {
         const upto = mine[mine.length - 1] + 1; const own = new Set(mine);
         const shown = level >= 3 ? titles.slice(share![0], share![1]).map((t, k) => `F${share![0] + k + 1}: ${t}`) : (level >= 2 ? titles : fs).map((t, k) => `F${k + 1}: ${t}`);
-        return `These are the findings already raised on a deal${level >= 3 ? `, F${share![0] + 1} to F${share![1]} of ${titles.length}, by their titles` : level >= 2 ? ', by their titles' : ''}:\n${shown.join('\n') || '(none)'}\n\nThese are points of an issues list brought in${level >= 1 && upto > mine.length ? ', those not asked about here by their opening words' : ''}:\n${range(0, upto).map((k) => `P${k + 1}: ${level === 0 || own.has(k) ? points[k].text : opening(points[k].text)}`).join('\n')}\n\nFor each of ${mine.length === upto ? 'the points' : `points ${mine.map((k) => `P${k + 1}`).join(', ')}`}: "title": a short title for it as a finding, a plain phrase of under twelve words; "workstream": one of ${i.workstreams.join(', ')}; "same": the finding (F3) or the earlier point (P2) that raises the same issue, so that settling one settles the other, or "" when none does. Be strict: only when you are sure. Two points on the same clause that ask for different things are not the same.\nReply as JSON: {"points": [{"p": 1, "title": "…", "workstream": "Legal", "same": ""}]}`;
+        return `These are the findings already raised on a deal${level >= 3 ? `, F${share![0] + 1} to F${share![1]} of ${titles.length}, by their titles` : level >= 2 ? ', by their titles' : ''}:\n${shown.join('\n') || '(none)'}\n\nThese are points of an issues list brought in${level >= 1 && upto > mine.length ? ', those not asked about here by their opening words' : ''}:\n${range(0, upto).map((k) => `P${k + 1}: ${level === 0 || own.has(k) ? points[k].text : opening(points[k].text)}`).join('\n')}\n\nFor each of ${mine.length === upto ? 'the points' : `points ${mine.map((k) => `P${k + 1}`).join(', ')}`}: "workstream": one of ${i.workstreams.join(', ')}; "same": the finding (F3) or the earlier point (P2) that raises the same issue, so that settling one settles the other, or "" when none does. Be strict: only when you are sure. Two points on the same clause that ask for different things are not the same.\nReply as JSON: {"points": [{"p": 1, "workstream": "Legal", "same": ""}]}`;
       };
       // the points whose "same" came from a call that showed either side shorter than it is: each is confirmed below
       const loose = new Set<number>();
@@ -2184,9 +2184,11 @@ async function readIssuePoints(
           if ((e as { code?: string })?.code !== 'cutoff') throw e;
         }
         const missing = new Set(mine);
-        if (reply && Array.isArray(reply.points)) for (const r of reply.points as { p?: unknown; title?: unknown; workstream?: unknown; same?: unknown }[]) {
-          const k = (int(r?.p) ?? 0) - 1; const title = clean(r?.title).slice(0, 300); const workstream = ws.get(clean(r?.workstream).toLowerCase()) ?? '';   // none of the firm's: left blank for a person, as a new finding's is (decisions)
-          if (!own.has(k) || !title) continue;
+        if (reply && Array.isArray(reply.points)) for (const r of reply.points as { p?: unknown; workstream?: unknown; same?: unknown }[]) {
+          const k = (int(r?.p) ?? 0) - 1; const workstream = ws.get(clean(r?.workstream).toLowerCase()) ?? '';   // none of the firm's: left blank for a person, as a new finding's is (decisions)
+          if (!own.has(k)) continue;
+          // the finding's title is the point's own text, never a model's wording (#1026)
+          const title = points[k].text;
           const m = /^([FP])\s*(\d+)$/i.exec(clean(r?.same)); const at = m ? +m[2] - 1 : -1;
           const shown = (f: number) => !share || (f >= share[0] && f < share[1]);         // a share's call can name only the findings it was shown
           const same = !m ? undefined : m[1].toUpperCase() === 'F' ? (i.findings[at] && shown(at) ? { finding: i.findings[at].id } : undefined) : at >= 0 && at < k ? { point: at } : undefined;
