@@ -73,7 +73,7 @@ import { docFamilies } from './related';
 import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
 import { AI_DRAFTED, namesOnlyShown, questionsForIds, responseHeader } from './qaRow';
-import type { DealDoc, Looked } from './agentKit';
+import type { DealDoc, Looked, Unusable } from './agentKit';
 import {
   RATINGS, riskGroups, keyRisksOf, unratedFindings, type Grouped, type Rating, type RiskGroup,
 } from '../domain/memo';
@@ -551,7 +551,8 @@ export function nodeAi(o: AiOptions) {
     finally { if (tally.size) { try { o.usage?.({ run, ...(dealId ? { dealId } : {}), at: clock(), calls: [...tally.values()].map((l) => ({ ...l })) }); } catch { /* the log is not worth failing a run for */ } } }
   }
   /** a call: what it is for (`kind`, for the usage log), and with `split`, a caller that asks about less when a reply is cut off rather than for a shorter reply */
-  type Ask = Parameters<ModelService['complete']>[0] & { kind: string; split?: boolean };
+  // `unusable`: a reply its caller cannot use however it reads, asked again as an empty one is (#1105)
+  type Ask = Parameters<ModelService['complete']>[0] & { kind: string; split?: boolean; unusable?: Unusable };
   /** the most tokens one reply from this model may hold, and one call to it may send, as the service says (limits.ts) */
   const outLimit = (model: string) => o.service.outputLimit?.(model) ?? control.limits.outputTokens;
   const inLimit = (model: string) => o.service.inputLimit?.(model) ?? control.limits.inputTokens;
@@ -567,13 +568,15 @@ export function nodeAi(o: AiOptions) {
   const budget = new AsyncLocalStorage<{ left: number; deal?: { left: number } }>();
   /** every call to the model is asked again quietly when it fails or comes back empty (src/backend/retry.ts) */
   const retried = retrier(o.retry);
-  const complete = async ({ kind, split: _split, ...input }: Ask): Promise<string> => {
+  /** a reply that failed: nothing in it, or what its caller cannot use (#1105); asked again (retry.ts) */
+  const failedReply = async (text: string, unusable?: Unusable) => !text.trim() || (!!unusable && await unusable(text));
+  const complete = async ({ kind, split: _split, unusable, ...input }: Ask): Promise<string> => {
     const b = kind === 'describe' ? undefined : budget.getStore();
     // each try is counted in the usage log and against a search's calls, since each is paid for; a search out of calls is not asked again
     return retried(async () => {
       if (b && (b.left-- <= 0 || (b.deal && b.deal.left-- <= 0))) throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
       let reply = ''; try { reply = await o.service.complete(input); return reply; } finally { count(kind, input, String(reply ?? '')); }
-    }, (r) => !String(r ?? '').trim());
+    }, (r) => failedReply(String(r ?? ''), unusable));
   };
   /**
    * Ask, and read the reply. A reply that cannot be read even loosely is sent back once to the model that wrote it, with
@@ -649,7 +652,10 @@ export function nodeAi(o: AiOptions) {
     }
   }
   async function askJson<T = Record<string, unknown>>(input: Ask, keys: string[], shape?: string, fix = true): Promise<T | null> {
-    const raw = await whole(input, keys); const got = json<T>(raw, ...keys); if (got || !fix || !String(raw ?? '').trim()) return got;
+    const raw = await whole(input, keys);
+    // one its caller still cannot use when its tries ran out is a failed reply (#1105)
+    if (input.unusable && await input.unusable(raw)) return null;
+    const got = json<T>(raw, ...keys); if (got || !fix || !String(raw ?? '').trim()) return got;
     let fixed: string;
     try { fixed = await complete({ kind: 'fix', model: input.model, system: JSON_ONLY, prompt: `The reply below was meant to be one JSON object${shape ? ` in this shape: ${shape}` : ` with these fields: ${keys.join(', ')}`}. It cannot be read as written. Send it again as valid JSON, changing nothing else. If it is not an answer at all, reply {}.\n\n${raw}` }); }
     catch (e) { if (isCutOff(e)) throw cutReply(e, keys); if (unreachable(e)) throw e; return null; }
@@ -684,19 +690,30 @@ export function nodeAi(o: AiOptions) {
    */
   /** `tried`: tries a turn already had in the conversation it failed in, before the chat asked it again as a new one (agent.ts) */
   type Talk = Ask & ConverseInput & { tried?: number };
+  /** a turn's reply as text: its text, or the tool calls it made */
+  const conversedText = (r: Conversed) => r.text || JSON.stringify(r.calls ?? '');
   // Only a turn that begins a conversation is asked again, and as a new one: in a kept conversation the failed or empty turn
   // may already be part of it (North keeps it), and asking there again would send the turn, and its documents, twice, or an
   // empty turn some services refuse. Not a turn that answers tool calls either: its failure is how a model says it does not
   // take tool results (talkJson steps down to sending them in the message).
-  const converse = async ({ kind, tried, ...input }: Talk) => {
+  const converse = async ({ kind, tried, unusable, ...input }: Talk) => {
     // a turn the checks' gap filling makes counts against its calls (`fill`); the chat runs outside any budget, so is not counted
     const b = budget.getStore();
     const once = async () => {
       if (b && (b.left-- <= 0 || (b.deal && b.deal.left-- <= 0))) throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
-      let reply = ''; try { const r = await o.service.converse!(input); reply = r.text || JSON.stringify(r.calls ?? ''); return r; } finally { count(kind, input, String(reply ?? '')); }
+      let reply = '';
+      try {
+        const r = await o.service.converse!(input);
+        reply = conversedText(r);
+        return r;
+      } finally {
+        count(kind, input, String(reply ?? ''));
+      }
     };
     if (input.results?.length || input.conversation) return once();
-    return retried(once, (r) => !String(r.text ?? '').trim() && !r.calls?.length, tried);
+    const failed = async (r: Conversed) => (!String(r.text ?? '').trim() && !r.calls?.length)
+      || (!!unusable && await unusable(conversedText(r)));
+    return retried(once, failed, tried);
   };
   /** models that refused a way of calling tools in this run of the app, and the way they stepped down to */
   const stepped = new Map<string, ToolMode>();
@@ -722,6 +739,8 @@ export function nodeAi(o: AiOptions) {
       if (shorter) throw cutReply(cutOff('The reply stopped before its end', r.text), keys);
     }
     if (input.results?.length) doubted.delete(`${input.model}\nhybrid`);   // the model took tool results: an earlier passing 500 is forgotten
+    // a turn its caller still cannot use fails as an empty one in a conversation does, to be asked again (#1105)
+    if (input.unusable && await input.unusable(conversedText(r))) throw new Error('The reply could not be used.');
     const got = replyOf(r, keys);
     // an empty turn inside a conversation: failed, not answered. The chat asks it again as a new conversation (agent.ts;
     // decisions: Retries), since only a turn that begins one is asked again here
@@ -3230,7 +3249,10 @@ export function nodeAi(o: AiOptions) {
     const prompt = `${intro}\n${responseLines(group)}\n\nThese are open findings on the deal:\n${open}\n\n${question}\n`
       + 'Reply as JSON: {"affected": ["F2 <id>", "F5 <id>"]}';
     const model = (await models()).fast;
-    const input: Ask = { kind: 'affects', split: true, model, system: JSON_ONLY, prompt };
+    // a reply naming a question id it was not shown is a failed reply, asked again (#1105)
+    const shown = group.map((q) => q.id);
+    const unusable = (text: string) => !namesOnlyShown(text, shown);
+    const input: Ask = { kind: 'affects', split: true, model, system: JSON_ONLY, prompt, unusable };
     return askJson<{ affected?: unknown }>(input, ['affected']);
   }
   async function hear(dealId: string): Promise<Result<{ heard: string[]; marked: string[] }>> {
