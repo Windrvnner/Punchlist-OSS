@@ -58,7 +58,7 @@ import { readJson, unfinished, list as listOf, strings, int, pageOf, word, tagNu
 import type { LineRead } from '../domain/listRead';
 import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK } from './limits';
 import { UNREAD_REPLY, UNUSABLE_REPLY, UNREACHED, CUT_ON_IT, CUT_BEFORE_IT, UNUSABLE_ON_IT } from './limits';
-import { inParts, partSize } from './parts';
+import { inParts, partSize, type PartReply, type PartsDone } from './parts';
 import { tokens, fold } from './words';
 import type { WordIndex } from './wordIndex';
 import { families, roomPath } from './families';
@@ -683,6 +683,52 @@ export function nodeAi(o: AiOptions) {
     if (kinds.length > 1) return kinds;
     const half = Math.ceil(part.length / 2);
     return part.length > 1 ? [part.slice(0, half), part.slice(half)] : [];
+  };
+  /**
+   * One `phrase` run: its points, what came back for them so far (`out`: a question, null for Retry, or not yet), the
+   * deal's kept questions and points that failed alone, the lists still to ask, and why the last reply brought nothing
+   */
+  type PhraseRun = {
+    points: PhrasePoint[]; had: Map<string, string>; failed: Set<string>;
+    out: (string | null | undefined)[]; queue: number[][]; why: string;
+  };
+  /** a `phrase` run: points kept from a failed run are not asked; points that failed alone before are asked last */
+  const phraseRunFor = (dealId: string, points: PhrasePoint[]): PhraseRun => {
+    const had = phraseKept.get(dealId) ?? new Map<string, string>();
+    phraseKept.set(dealId, had);
+    const failed = phraseFailed.get(dealId) ?? new Set<string>();
+    phraseFailed.set(dealId, failed);
+    const out = points.map((x) => had.get(phraseKey(x)));
+    const todo = range(0, points.length).filter((k) => out[k] === undefined);
+    const was = (k: number) => failed.has(phraseKey(points[k]));
+    const queue = [todo.filter((k) => !was(k)), todo.filter(was)].filter((l) => l.length);
+    return { points, had, failed, out, queue, why: '' };
+  };
+  /**
+   * One part of a `phrase` run asked, for inParts: a cut reply is handed to it (parts.ts); what a whole reply leaves
+   * goes on the run's lists (phraseAgain), and a single point that brought nothing is offered for Retry (null)
+   */
+  const askPhrasePart = async (run: PhraseRun, model: string, part: number[]): Promise<PartReply<string>> => {
+    const reply = await askPhrase(model, part.map((k) => run.points[k]));
+    run.why = reply.why || run.why;
+    const alone = part.length === 1 && !reply.got.size;
+    if (alone) run.failed.add(phraseKey(run.points[part[0]]));      // asked last by a later run
+    if (reply.cut) return { got: reply.got, cut: range(0, part.length).filter((m) => !reply.got.has(m)) };
+    if (alone) run.out[part[0]] = null;
+    run.queue.push(...phraseAgain(run.points, part, reply.got));
+    return { got: reply.got };
+  };
+  /** what one list of a `phrase` run brought back (inParts), kept in the run */
+  const keepPhrased = (run: PhraseRun, list: number[], done: PartsDone<string>) => {
+    for (const [at, text] of done.got) {
+      const key = phraseKey(run.points[list[at]]);
+      run.out[list[at]] = text;
+      run.had.set(key, text);
+      run.failed.delete(key);
+    }
+    for (const at of done.left) run.out[list[at]] = null;      // cut off even alone (parts.ts): offered for Retry
+    // not asked, as three points in a row were cut off alone (parts.ts): asked again as a list of their own
+    if (done.unasked.length) run.queue.push(done.unasked.map((at) => list[at]));
   };
   /**
    * items asked about in one call of the duplicate check: a list of deal size is asked about whole, in one call (2,400
