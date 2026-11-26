@@ -302,6 +302,20 @@ describe('documents on real folders', () => {
     const shown = a.docs.fileFor((page as { url: string }).url.replace('punchlist-doc://', ''))!; expect(await pdfPages(fs.readFileSync(shown))).toBe(3);
   }, 60000);
 
+  it.skipIf(!hasOffice)(
+    'a damaged workbook read through LibreOffice gets no word list and is named as not read (#427)',
+    async () => {
+      const root = tmp();
+      const vdr = path.join(root, 'vdr');
+      put(vdr, 'Broken.xlsx', 'PK\u0003\u0004 a workbook cut short');
+      const a = pc(root, 'office', new StandInService(), { convert: libreOfficeConverter({ soffice }) });
+      const p = await indexAll(a, vdr);
+      expect(p.log).toContain('1 file could not be read: Broken.xlsx');
+      expect(a.docs.records('d1').find((r) => r.name === 'Broken.xlsx')?.words).toBeUndefined();
+    },
+    60000,
+  );
+
   // A Word file with every kind of tracked change: a word replaced, a paragraph break deleted, text moved, a table row deleted and
   // one inserted, a whole paragraph deleted, formatting changed, a change in the footer, and a comment.
   const TRACKED = new Uint8Array(fs.readFileSync(path.join(__dirname, 'fixtures', 'Tracked.docx')));
