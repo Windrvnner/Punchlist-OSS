@@ -4,7 +4,7 @@
 // list against 126 findings, 23 points repeating a finding and 4 repeating an earlier point, and a 400-point list.
 import { describe, it, expect } from 'vitest';
 import { setup, val, Mem, type Call } from './reviewKit';
-import { tokensOf, tooLong } from '../../src/backend/limits';
+import { tokensOf, tooLong, UNREAD_REPLY } from '../../src/backend/limits';
 
 type P = { n: string; text: string };
 const isRead = (c: Call) => c.prompt.includes('is an issues list');
@@ -86,6 +86,19 @@ describe('reading an issues list', () => {
     expect(reads[0].prompt).toContain('exactly as written. Never reword, shorten or merge');
     expect(reads[0].prompt).not.toContain('your own words');
   });
+  it('asks again, twice, for a reply that cannot be read, then succeeds or fails the import', async () => {
+    const unreadable = (until: number) => {
+      let tries = 0;
+      const answers = stand(LIST);
+      return (c: Call) => (isRead(c) && ++tries <= until ? 'Here are the points, in prose.' : answers(c));
+    };
+    const twice = await read(unreadable(2));
+    expect(twice.reads.length).toBe(3);
+    expect(twice.n).toBe(164);
+    const never = await read(unreadable(9));
+    expect(never.reads.length).toBe(3);
+    expect(never.r.ok).toBe(false);
+  });
   it('reads a 400-point list in one call, whatever its length, with no paging and no check', async () => {
     const { n, reads, s } = await read(stand(plain(400)));
     expect(n).toBe(400);
@@ -98,7 +111,7 @@ describe('reading an issues list', () => {
     expect(reads.length).toBe(1);
   });
   it('fails, importing nothing, when the reply is not a list or has no points', async () => {
-    expect((await read(stand(LIST, { edit: () => 'no list here' }))).n).toBe('It could not be read as an issues list');
+    expect((await read(stand(LIST, { edit: () => 'no list here' }))).n).toBe(UNREAD_REPLY);
     expect((await read(stand([]))).n).toBe('No points were found in it');
   });
   it('keeps the points of a list whose own points repeat, numbered or not', async () => {

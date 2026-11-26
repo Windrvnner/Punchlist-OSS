@@ -81,7 +81,7 @@ describe('documents on real folders', () => {
       expect(s.get(fa.docId)).toBeGreaterThan(0);
       expect(x.docs.records('d1').filter((r) => r.name === 'Model v12.xlsx' || r.name === 'Notes.docx').every((r) => ix.has('d1', r.docId))).toBe(true);
     }
-    expect(fs.readdirSync(path.join(root, 'shared')).filter((f) => f.startsWith('words-'))).toEqual([]);
+    expect(fs.readdirSync(path.join(root, 'shared')).filter((f) => /^words\d*-/.test(f))).toEqual([]);
     // a second run on the same PC reads nothing again: the index already has every document
     const before = a.converted.length; await indexAll(a, vdr); expect(a.converted.length).toBe(before);
   });
