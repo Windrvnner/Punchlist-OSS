@@ -1,5 +1,6 @@
 // @vitest-environment node
-// The checklist import as kept on this PC: what can be shown again, and what a paste or a list writes over (#381, #951).
+// The checklist import as kept on this PC: what can be shown again, and what a paste or a list writes over
+// (#381, #951).
 import { beforeEach, describe, expect, it } from 'vitest';
 import { MemoryKeptImports } from '../../src/adapters/keptImports';
 import {

@@ -85,7 +85,8 @@ export async function submitIssuesList(
 ) {
   dropImport(key);
   const input = { dealId, doc: list.doc.docId, list: list.doc.doc, points };
-  const result = await store.dispatch(ImportIssuesList, input, { idempotencyKey: `issues-${dealId}-${list.doc.docId}` });
+  const idempotencyKey = `issues-${dealId}-${list.doc.docId}`;
+  const result = await store.dispatch(ImportIssuesList, input, { idempotencyKey });
   const keptNow = result.ok ? null : now();
   if (keptNow) keepImport(key, keptNow);
   return result;

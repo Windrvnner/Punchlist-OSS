@@ -38,7 +38,8 @@ it('reads back a kept list and its marks, and opens fresh past a damaged one', a
   const damaged = [
     { list, kept: [3, 7] },
     { list: { ...list, doc: { doc: 'Lender list.pdf' } }, kept: new Set() },
-    { list: { ...list, points: [...list.points, { n: 41, text: 'x', title: 'x', workstream: 'Legal' }] }, kept: new Set() },
+    { list: { ...list, points: [...list.points, { n: 41, text: 'x', title: 'x', workstream: 'Legal' }] },
+      kept: new Set() },
     { list: { ...list, points: 'none' }, kept: new Set() },
   ];
   for (const entry of damaged) {

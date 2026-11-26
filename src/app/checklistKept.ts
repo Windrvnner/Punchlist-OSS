@@ -27,8 +27,8 @@ export interface ChecklistChoices {
 
 /**
  * The checklist import as it was left: the list as given (a table, a document's or a paste's lines, and the
- * paste box), the model's reading, the review, and every choice and check mark. A paste typed but not yet sent is kept on its
- * own.
+ * paste box), the model's reading, the review, and every choice and check mark. A paste typed but not yet sent is
+ * kept on its own.
  */
 export interface ChecklistKept {
   paste?: string;
