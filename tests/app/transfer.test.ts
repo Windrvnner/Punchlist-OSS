@@ -109,7 +109,7 @@ describe('export and import through the ports', () => {
     const back = await readImportFile(store, fileOf('log.csv', saved[0].bytes)); if (!back.ok) throw new Error(back.error.message);
     const p = prepareImport(back.value.rows, back.value.mapping);
     expect(p.rows[0]).toMatchObject({
-      askedBy: 'Lender A ', respondedBy: ' Sponsor', workstream: 'Legal', response: '  Yes, as written.\n',
+      askedBy: 'Lender A ', respondedBy: ' Sponsor', workstream: 'Legal ', response: '  Yes, as written.\n',
     });
     expect(previewImport(store, dealId, 'merge', p.rows)).toEqual(NOTHING_TO_CHANGE);
     await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: p.rows });
@@ -119,7 +119,7 @@ describe('export and import through the ports', () => {
     await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: prepareImport(t.value.rows, suggestMapping(t.value.columns)).rows });
     const added = dealQuestions(store.get(), dealId).filter((q) => q.text !== 'One');
     expect(added.map((q) => q.askedBy)).toEqual(['Lender A ', 'Lender A']);
-    expect(new Set(added.map((q) => q.workstream))).toEqual(new Set(['Tax']));
+    expect(added.map((q) => q.workstream)).toEqual([' Tax', 'Tax']);   // kept as the file writes it
   });
 
   it('nothing longer than one Excel cell is ever saved, so the Q&A log exports whole and comes back unchanged', async () => {

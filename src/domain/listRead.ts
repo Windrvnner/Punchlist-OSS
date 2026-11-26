@@ -72,10 +72,10 @@ function holds(line: string, part: string): boolean {
 }
 
 /**
- * The words a reading stands for, exactly as the source writes them (`own`, the line as `written` gives it): for a table
- * row ("a | b") the whole cell the reading names, taken from the row's own cells (tab-separated) so that a line break in
- * the cell stays; otherwise the whole line without its edge spaces, numbering and bullets included. The model's own
- * wording is only checked against the line (#1061).
+ * The words a reading stands for, exactly as the source writes them (`own`, the line as `written` gives it): for a
+ * table row ("a | b") the whole cell the reading names, taken from the row's own cells (tab-separated) so that a line
+ * break in the cell stays; otherwise the whole line without its edge spaces, numbering and bullets included. The
+ * model's own wording is only checked against the line (#1061).
  */
 function asWritten(line: string, part: string, own = line): string {
   const cells = line.split(' | ');
