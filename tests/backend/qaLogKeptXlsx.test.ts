@@ -113,7 +113,7 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
   for (const [name, change] of [
     ['the log took out the row they answered, and another with no submitter asks it', (rows: string[][]) => { rows[1500] = ['Finance', 'High', '', q(700), 'Open', '']; return { base: rows, lroe: rows.filter((_, i) => i !== 700) }; }],
     ['the app reworded the row they answered, and a row with no submitter asks the old words', (rows: string[][]) => ({ base: rows, lroe: [...rows.map((r, i) => (i === 700 ? [...r.slice(0, 3), 'Question 700, as the app now words it', ...r.slice(4)] : r)), ['Finance', 'High', '', q(700), 'Open', '']] })],
-  ] as const) it(`with no number column, a row with no submitter takes Lender A's answer only in its place: ${name}`,
+  ] as const) it(`with no number column, Lender A's answer is asked about, or goes to a row with no submitter: ${name}`,
     async () => {
     const H = ['Workstream', 'Priority', 'Submitted by', 'Question', 'Status', 'Response'];
     const { base: b, lroe: l } = change([H, ...Array.from({ length: N }, (_, k) => ['Finance', 'High', 'Lender A', q(k + 1), 'Open', ''])]);
