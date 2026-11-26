@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const importFrom = /\bfrom\s+['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+const importFrom = /\bfrom\s+['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)|\bimport\s+['"]([^'"]+)['"]/g;
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -16,7 +16,7 @@ function sourceFiles(dir: string): string[] {
 function adapterImports(layer: string) {
   return sourceFiles(path.join('src', layer)).flatMap((file) => {
     const source = readFileSync(file, 'utf8');
-    const targets = [...source.matchAll(importFrom)].map((match) => match[1] ?? match[2]);
+    const targets = [...source.matchAll(importFrom)].map((match) => match[1] ?? match[2] ?? match[3]);
     const fromAdapters = targets.filter((target) => {
       const resolved = path.posix.join(path.posix.dirname(file.split(path.sep).join('/')), target);
       return target.startsWith('.') && resolved.startsWith('src/adapters/');

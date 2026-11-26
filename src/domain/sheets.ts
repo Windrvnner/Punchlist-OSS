@@ -215,6 +215,7 @@ function encodingOf(bytes: Uint8Array): Encoding {
   return isUtf8(bytes) ? 'utf-8' : 'windows-1252';
 }
 
+/** CSV bytes as text, in the encoding they were written in, without the byte-order mark */
 export function decodeText(bytes: Uint8Array): string {
   const encoding = encodingOf(bytes);
   const markLength = encoding.startsWith('utf-16') ? 2 : 3;
