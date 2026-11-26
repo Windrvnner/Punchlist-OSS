@@ -36,7 +36,16 @@ export function suggestMapping(columns: string[]): Mapping {
   };
 }
 
-const MON: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+const MONTHS = [
+  'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november',
+  'december',
+];
+/** a month written as a word: its full name or first three letters (and "sept"), as Excel takes it; no other */
+const monthOf = (word: string): number | undefined => {
+  const w = word.toLowerCase();
+  const i = MONTHS.findIndex((m) => m === w || m.slice(0, 3) === w || (m === 'september' && w === 'sept'));
+  return i < 0 ? undefined : i + 1;
+};
 const ymd = (y: number, m: number, d: number) => { const s = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`; return isRealDate(s) ? s : null; };
 
 /** a two-digit year as Excel reads one typed in a cell: 00–29 are 2000–2029, 30–99 are 1930–1999 */
@@ -68,8 +77,14 @@ export function dateReadings(v: unknown): string[] {
   if ((m = /^(\d{4})([\/.])(\d{1,2})\2(\d{1,2})$/.exec(s))) return one(ymd(+m[1], +m[3], +m[4]));   // year first: 2026/11/02
   if ((m = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4}|\d{2})$/.exec(s))) { const a = +m[1], b = +m[2], y = fullYear(m[3]); if (a > 12 && b <= 12) return one(ymd(y, b, a)); if (a <= 12 && b <= 12 && a !== b) return [ymd(y, a, b)!, ymd(y, b, a)!]; return one(ymd(y, a, b)); }
   const day = String.raw`(\d{1,2})(?:st|nd|rd|th)?`; const sep = String.raw`[\s,\-]+`;
-  if ((m = new RegExp(`^([A-Za-z]{3,9})\\.?${sep}${day}${sep}(\\d{4}|\\d{2})$`, 'i').exec(s))) { const mo = MON[m[1].slice(0, 3).toLowerCase()]; return one(mo ? ymd(fullYear(m[3]), mo, +m[2]) : null); }
-  if ((m = new RegExp(`^${day}${sep}([A-Za-z]{3,9})\\.?${sep}(\\d{4}|\\d{2})$`, 'i').exec(s))) { const mo = MON[m[2].slice(0, 3).toLowerCase()]; return one(mo ? ymd(fullYear(m[3]), mo, +m[1]) : null); }
+  if ((m = new RegExp(`^([A-Za-z]{3,9})\\.?${sep}${day}${sep}(\\d{4}|\\d{2})$`, 'i').exec(s))) {
+    const mo = monthOf(m[1]);
+    return one(mo ? ymd(fullYear(m[3]), mo, +m[2]) : null);
+  }
+  if ((m = new RegExp(`^${day}${sep}([A-Za-z]{3,9})\\.?${sep}(\\d{4}|\\d{2})$`, 'i').exec(s))) {
+    const mo = monthOf(m[2]);
+    return one(mo ? ymd(fullYear(m[3]), mo, +m[1]) : null);
+  }
   return [];
 }
 
@@ -94,8 +109,12 @@ const STATUS: Record<string, QuestionStatus> = { open: 'open', outstanding: 'ope
  */
 export function prepareImport(table: string[][], mapping: Mapping, lines?: number[], o: { today?: string } = {}): Prepared {
   const today = o.today ?? localYmd(new Date().toISOString());
-  // control characters (NUL, BEL, ESC and the like) are never content; tabs and line breaks are
-  const get = (r: string[], k: ImportField) => (mapping[k] == null ? '' : String(r[mapping[k]!] ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ''));
+  const get = (r: string[], k: ImportField) => (mapping[k] == null ? '' : String(r[mapping[k]!] ?? ''));
+  // a value read as a number, date, priority, status or workstream is read without control characters; text is
+  // kept whole
+  const read = (r: string[], k: ImportField) => (
+    get(r, k).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+  );
   const out: Prepared = { rows: [], skipped: 0, badDates: 0, unknownValues: 0, unread: [] };
   const nameOf = (k: ImportField) => IMPORT_FIELDS.find(([f]) => f === k)?.[1] ?? k;
   type DateCell = { raw: string; readings: string[]; done: (d: string) => void; bad: () => void };
@@ -103,9 +122,26 @@ export function prepareImport(table: string[][], mapping: Mapping, lines?: numbe
   for (const [at, r] of table.entries()) {
     const text = get(r, 'text'); if (!text) { out.skipped++; continue; }
     const line = lines?.[at] ?? at + 2; const unread = (k: ImportField, v: string) => out.unread.push(`Row ${line} ${nameOf(k)}: ${v.trim()}`);
-    const date = (k: 'received' | 'responded') => { const raw = get(r, k); const c = { raw, readings: dateReadings(raw), done: (d: string) => { row[k] = d; }, bad: () => { out.badDates++; unread(k, raw); } }; cells[k].push(c); return c; };
-    const pr = get(r, 'priority').trim(); const st = get(r, 'status').trim(); const nRaw = get(r, 'n').trim().replace(/^q/i, ''); const n = /^\d{1,9}$/.test(nRaw) && +nRaw > 0 ? +nRaw : null;   // the app numbers past Q999999, so a 7-digit number it exported reads back
-    const wsRaw = get(r, 'workstream').trim(); const ws = WORKSTREAMS.find((w) => w.toLowerCase() === wsRaw.toLowerCase()) ?? wsRaw;   // the app's spelling where it is one of ours; otherwise kept as written
+    const date = (k: 'received' | 'responded') => {
+      const raw = read(r, k);
+      const c = {
+        raw,
+        readings: dateReadings(raw),
+        done: (d: string) => { row[k] = d; },
+        bad: () => { out.badDates++; unread(k, raw); },
+      };
+      cells[k].push(c);
+      return c;
+    };
+    const pr = read(r, 'priority').trim();
+    const st = read(r, 'status').trim();
+    const nRaw = read(r, 'n').trim().replace(/^q/i, '');
+    // the app numbers past Q999999, so a 7-digit number it exported reads back
+    const n = /^\d{1,9}$/.test(nRaw) && +nRaw > 0 ? +nRaw : null;
+    const wsGiven = get(r, 'workstream').trim();
+    const wsRaw = read(r, 'workstream').trim();
+    // the app's spelling where it is one of ours; otherwise kept as written
+    const ws = WORKSTREAMS.find((w) => w.toLowerCase() === wsRaw.toLowerCase()) ?? wsGiven;
     if (pr && !PRIORITY[pr.toLowerCase()]) { out.unknownValues++; unread('priority', pr); }
     if (st && !STATUS[st.toLowerCase()]) { out.unknownValues++; unread('status', st); }
     const row: ImportRow = { n, text, askedBy: get(r, 'askedBy').trim(), received: '', workstream: ws, priority: PRIORITY[pr.toLowerCase()] ?? '', response: get(r, 'response'), respondedBy: get(r, 'respondedBy').trim(), responded: '', status: STATUS[st.toLowerCase()] ?? '', line };
@@ -138,17 +174,21 @@ export function prepareImport(table: string[][], mapping: Mapping, lines?: numbe
   return out;
 }
 
-/** Two texts that differ at most in how their line breaks are stored (CR LF, CR or LF): a spreadsheet does not keep that difference, so an import does not count it as a change. */
-export const sameText = (a: string, b: string) => a === b || a.replace(/\r\n?/g, '\n') === b.replace(/\r\n?/g, '\n');
+/**
+ * A text as a spreadsheet file holds it: the file keeps a line break as one "\n" and cannot hold control characters,
+ * so a writer stores each as a space or leaves it out (xlsx leaves it out). Both forms, in that order. This is how the
+ * file stores text, not a repair; every other difference is a real edit (docs/decisions.md).
+ */
+export const fileForms = (text: string) => [' ', ''].map((control) => text.replace(/\r\n?/g, '\n')
+  .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, control));
+/** Two texts that are the same as a file holds them (`fileForms`): an import does not count that as a change. */
+export const sameText = (a: string, b: string) => {
+  if (a === b) return true;
+  const [x, y] = [fileForms(a), fileForms(b)];
+  return x[0] === y[0] || x[1] === y[1];
+};
 /** Two texts with the same words, differing at most in their spaces and line breaks. */
 export const sameWords = (a: string, b: string) => a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
-
-/** How many rows would be new and how many match an existing number, for the preview. */
-export function importCounts(rows: ImportRow[], existing: Question[], mode: 'merge' | 'append') {
-  const have = new Set(existing.map((q) => q.n)); let add = 0, match = 0; const seen = new Set<number>();
-  for (const r of rows) { if (mode === 'merge' && r.n != null && (have.has(r.n) || seen.has(r.n))) match++; else { add++; if (r.n != null) seen.add(r.n); } }
-  return { add, match };
-}
 
 const longDate = (iso: string) => (iso ? localYmd(iso) : ''); // the local calendar date, written YYYY-MM-DD so it round-trips and sorts in a spreadsheet
 const STATUS_LABEL: Record<QuestionStatus, string> = { open: 'Open', answered: 'Answered', closed: 'Closed' };

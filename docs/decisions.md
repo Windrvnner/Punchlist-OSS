@@ -46,7 +46,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Documents on Overview shows each folder's "N of M read", one Core documents row, and up to two deals, shown as "Also in Project X", that hold most of this deal's documents.
 - The Findings page has **New Finding** as its one button and a ⋯ menu with **Import…**, **Export…**, and **Deleted…**; its filter menu holds Workstream and Reviewed. The list doesn't mark who raised a finding. It is grouped by workstream (A to Z, with "No workstream" last), and open findings marked "May be out of date" come first in each group.
 - Finding and question pages use the slim rail (the sidebar folded to icons) and the queue strip.
-- "Project " is added in front of a deal name that lacks it. A name that starts with that word in any capitalization, followed by anything other than a letter, accent, or digit, has the word rewritten as "Project" and the rest kept as typed; misspellings are not corrected. Deals may share a name; they are told apart by counterparty, then by creation date, in the sidebar, Add Deal, search, and the confirmations and notices that name a deal, as "Project Kestrel (Wingtip)" (#27).
+- "Project " is added in front of a deal name that lacks it. A name that starts with that word in any capitalization, followed by anything other than a letter, accent, or digit, has the word rewritten as "Project" and the rest kept as typed; misspellings are not corrected. A deal's name keeps its spaces as typed; only the spaces at its ends go, and matching a name (a duplicate, the name typed to delete a deal) ignores how many spaces lie between words. Deals may share a name; they are told apart by counterparty, then by creation date, in the sidebar, Add Deal, search, and the confirmations and notices that name a deal, as "Project Kestrel (Wingtip)" (#27).
 - Search and the sidebar keep the distinguishing words in shortened counterparty labels (#492).
   An ellipsis marks a shortened suffix after those words (#791).
   Search keeps the meaningful name after “Project” and the full question number or page range (#495).
@@ -54,6 +54,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Search uses the usual separator spacing after an ellipsized single-word counterparty (#790).
 - The New Deal form has Name and Counterparty; Structure, Sector, and Technology pick lists; and Folders. × closes it, and there is no Cancel. **Create** stays unavailable until there is a name.
 - Before a new deal is made, a duplicate check asks "Is this Project X?" when the folders' files, or the name and counterparty, match a team deal; nothing is refused.
+- The folders hold a deal's data room when every document of the deal has a file among them with the same name (in any case) and size, and the smallest of those files is identical by content. Files in a precedents folder, and files attached in the app, are not counted. (#1018)
 - Each deal has a Deleted list for findings and questions, showing who deleted each and when, with **Restore**. A deleted record reached by a link says so and offers **Restore**; a question being typed on a deleted finding's page stays there, with **Log Question** off (#340). A deleted question's number is never reused. An imported issues list can be removed from the Deleted list. **Remove** asks first, naming the findings it deletes, the marks it takes off, and the findings it keeps; the removal applies only to that list as approved, so any change to the deal's findings or marks since refuses it and asks again (#410).
 - Notices stack, up to three at the top of the page, for 8 seconds each (paused on hover or focus), each with its own **Undo**, and only on the PC that acted.
 - Unseen changes that another PC made to a deal deleted elsewhere are kept on that PC as "Project X (recovered)", with a notice that stays until closed and says who deleted the original; keeping or deleting the copy is that person's call. Details still open are in GitHub Issues.
@@ -98,13 +99,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A responder column is read as the response's author.
 - On import, real date cells are read as dates and plain numbers are not. An ambiguous date is settled by the row's other date, its neighbors, and the rule that no date is in the future; otherwise it is left blank and listed.
 - Marking imported questions that have a response as Answered is optional and off by default.
-- Merge matches a row by wording first, then by number; a row that matches a deleted question brings it back. A row that names who submitted it never matches another party's question. "Will overwrite" is shown field by field first.
-- Merge never matches a row to a question that names a different identifier: anything with a digit, a Roman numeral or code in capitals, a single capital letter, or a letter or numeral in parentheses or after a word such as class, tranche, part or clause (Class A and B, Tranche II and IV, clause 4(a) and 4(b)). A row matched by number alone names exactly the question's identifiers, in the same capitals (the SPA and the spa are two questions there); any other row is a question of its own. Otherwise spacing, capitals and punctuation alone never make identifiers differ (#125, #127, #128).
-- In a number, an I, l or O before a single digit, or an I or l before a point and a digit, is a letter (Facility I1 is l1 but not 11, Class I.1 is not 1.1); an I, l or O elsewhere in a number reads as 1 or 0 (I00, 2O24, O.5). The word I is not an identifier (#127, #128).
-- Spacing around the points of a reference after a word such as class or clause never changes its identifier
-  (clause 4.b, clause 4. b; class. b, class b). A lone a, i or l right after the word and a point may start a sentence
-  ("each item. I understand"), so it names an identifier only where the other wording names it too; two different
-  ones are two references (#778).
+- Merge, its preview, and Update Q&A Log find each row's question with one lookup, like an XLOOKUP: the question with the same number, exact text and sender (Submitted by), else the one with the exact text and sender; a row or question naming no sender matches any sender, the same sender first; a row that matches neither is a new question. Text is compared as the file holds it (below). Update Q&A Log also finds a question's row by the sender it last wrote there. The preview's counts come only from the import's own plan (#1080). Nothing is matched by similar words, but the preview suggests, for such a row, a question with the same words apart from capitals, spacing and punctuation; it is used only once the person accepts it. A row that matches a deleted question brings it back. "Will overwrite" is shown field by field first.
 - The same list imported on two PCs makes one set of questions, with ids derived from the deal, number, party, and wording.
 - Two questions with the same number are both kept and marked; a person renumbers one. Undo, Restore, and a kept
   version's Restore bring a deleted question back under its own number, even when another question holds it (#13, #116).
@@ -115,7 +110,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - An import can make a spreadsheet the deal's log ("Make this the deal's Q&A log", checked for a file with two or more parties). If there is no log, the first update creates one in the app's layout, in a folder a person picks. A later party's file only adds and updates questions and is never written to.
 - Updates add no columns and never write to a formula cell. To reply to one party, use Export filtered by Submitted By.
 - **Update Q&A Log** brings every column up to date and first saves the old version to the folder's archive; it never deletes anything else. A log open elsewhere is retried every 30 seconds for 20 minutes; the notice names who has it open only when the lock file does.
-- An edit made in the log wins over the app's value, exactly as written: a cell is compared character for character, so a "?" stays a "?". Only the file's own storage (line breaks kept as one "\n", control characters stored as a space) is allowed for. Matching a row to a question only picks the row and never changes text. Where both changed, the question is in two versions.
+- An edit made in the log wins over the app's value, exactly as written: a cell is compared character for character, so a "?" stays a "?". Only the file's own storage (line breaks kept as one "\n", control characters stored as a space or left out) is allowed for. Matching a row to a question only picks the row and never changes text. Where both changed, the question is in two versions.
 - An edit saved to the log just before an update moved the log is merged in. Where its row is unclear, the person places it, and what can't be merged stays in the archive. "Not fully merged" comes first in the notice, which stays until dismissed.
 
 ## Findings
@@ -134,7 +129,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Title, workstream, and detail stay editable; a finding has no next step. The fast model fills in the
   workstream from the firm's list only, or leaves it blank.
 - The workstreams are Technical, Legal, Commercial, Financial, Structure, Insurance, Tax, Regulatory & permits, Real estate, HR & benefits, IT & cyber, Antitrust & FDI, Compliance, and Environmental & social. A firm can set its own in `firm.workstreams`, and a record keeps a workstream that was taken off the list.
-- An issues list (PDF, Word, or email) imports into Findings. Each point joins an existing finding it repeats, or becomes a new finding with an AI title and counsel's words; points are compared with open and closed findings and shown under **Already Raised** (each with **Keep separate**) and **New Findings** before **Import**.
+- An issues list (PDF, Word, or email) imports into Findings. Each point joins an existing finding it repeats, or becomes a new finding titled with the point's own words; points are compared with open and closed findings and shown under **Already Raised** (each with **Keep separate**) and **New Findings** before **Import**.
 - A finding's page shows the checklist item that raised it, the questions asked about the finding or its item, and **Ask the Counterparty** while the finding is open and its item is turned on. The question is linked to both and takes the finding's workstream (#2).
 - A file attached on a finding goes with the next message only, and joins the finding's sources through **Add to Sources**.
 - Every source of a finding is within reach, listed by document with its places. A hover lists up to four documents; a longer list opens under the detail (flow A).
@@ -165,6 +160,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Each list in the master checklist is its own shared record. Bringing a list in adds its items to every deal that uses it and is not marked Closed. A deal's items are append-only; swapping a list asks first when items would be turned off.
 - The Wording heading checkbox selects or clears every available suggestion, and each row keeps its own checkbox (#377).
 - A rewording accepted when a list was brought in is offered again the next time.
+- **Choose Columns** preselects a column only when its heading is a known name; otherwise the person picks it (#1018).
 - In an open checklist import, a review that needs the model waits for a pending review request. The Duplicates line
   and footer show the latest retry failure, and a partial check keeps its pairs and checked removals (#378).
 - **Add All Unresolved to Q&A…** keeps a chosen link with its exact question and point, and writes it only if both are unchanged at commit (#88).
@@ -220,10 +216,12 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A folder can be removed from a deal after a confirmation, with Undo, and restored later; new checks stop reading it, and existing citations still open.
 - Punchlist reads linked data-room files in place. An empty folder is never taken as a deal folder. Each PC finds a deal's folders by itself where it can; otherwise it asks once, with **Locate…**.
 - A document's id is the SHA-256 hash of its bytes, so identical copies are one document.
+- The chat agent opens a document only by its tag, its whole path, or its whole file name (in any case); anything else is "Not found" (#1018).
 - Indexing (building each PC's word index of the data room) asks no model and uploads nothing, and it resumes by itself once the data room is available again.
 - A deal's folders are checked for changes every 5 minutes.
-- LibreOffice, bundled with the app, is the only document converter; converted documents have every tracked change accepted.
+- LibreOffice, bundled with the app, is the only document converter; a converted document that has tracked changes shows them as markup, and one with none is converted as it is.
 - For tracked changes and blacklines, a Word file's own tracked changes are fact, and the clean draft is the source of truth for the deal's terms. A blackline is the model's reading: it never settles an item or closes a finding by itself. A control-file switch selects pipeline A (the default) or pipeline B. What a blackline was compared against is determined from its cover and name, never guessed (docs/other-project-documents-design.md).
+- A blackline whose clean draft neither its cover nor its name finds stands alone and is read on its own; a file that only shares a word of its name never makes it unclear (#1018).
 - A deleted or replaced document leaves the deal under the rules in architecture.md; nothing linked to it is deleted (#413).
 - A folder that this person may not open doesn't stop indexing, and a check that couldn't read it says "Not complete".
 - The app never deletes documents. Drafts of one agreement form a family: the newest is read first, and reading mode shows a draft's date and lists its family's drafts, any two of which can be compared. Versions in one folder count only with an explicit mark such as v3 or Rev A.
@@ -288,6 +286,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - The model service sits behind one connector interface, chosen by `models.service`.
 - Intelligence sign-in is by API key or single sign-on, each turned on or off in the control file. Sign-in comes first; with nobody signed in, the app is read-only and keeps everything typed.
 - North, custom model gateways, Azure OpenAI, Amazon Bedrock and Google Vertex AI offer single sign-on.
+- A cloud service's saved sign-in holds while its service, address and sign-in fields stay the same; changing a model ID keeps everyone signed in (#1018).
 - Live tests run through the Claude connector on Haiku 5.5 by default (with model routing only to test the full document pipeline), and only when asked for (`npm run e2e:live`, or `npm run ai:check` for one service).
 
 ## Testing and packaging
@@ -382,3 +381,4 @@ These decisions are built and wait to be confirmed:
 - Once two PCs' imports of one list have synced, the second PC's Undo of its import is refused.
 - The recovered copy of a deal deleted elsewhere is built, including who sees it, what it holds, and its notice's wording (#220).
 - Periodic records whose names differ only by a period are a series and take one place in the core set, their newest member's; every document stays searchable (docs/core-families-design.md).
+- An issues list or an advisor report is read like the app's other documents: the model reads the whole file once and returns each issues-list point in the list's own words, never reworded, and each advisor-report issue with its place in the file. There is no paging and no stop rule (#1026).

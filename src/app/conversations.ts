@@ -7,13 +7,12 @@
 import { isMine } from './commands/members';
 import { checkedOffer } from './answerOffer';
 import type { Store } from './store';
-import { dealHash, pageHash, dealQuestions, type State, type Message } from './state';
+import { dealQuestions, type State, type Message } from './state';
 import { docKey, ownFilesId, type Question, type Source } from '../domain/model';
 import { CreateQuestion, UseAsResponse } from './commands/questions';
 import { findQuestions, mayAddress } from '../domain/suggest';
 import { withoutMarkers } from '../domain/cite';
 import type { Research } from '../ports';
-import { bareDealName, cleanName } from './commands/deals';
 import { TITLE_MAX } from './commands/findings';
 import { chipsSendable, dealCopied, filesSendable } from './attachments';
 import { isText, keptDrafts } from './keptText';

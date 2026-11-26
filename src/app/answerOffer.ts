@@ -3,7 +3,7 @@
  * Unresolved preview, or logging a question it drafted. The model only proposes; code checks the proposal against the
  * deals and the conversation, and nothing runs until a person presses the button.
  */
-import { bareDealName, cleanName } from './commands/deals';
+import { bareDealName, sameName } from './commands/deals';
 import type { Scope } from './conversations';
 import { DEAL_PAGES, pageHash, type Landing, type State } from './state';
 import type { Store } from './store';
@@ -16,11 +16,13 @@ export type Offer = AnswerOffer;
 /** The answer tool's `offer`, as the model gave it: nothing in it is trusted until `checkedOffer`. */
 export interface RawOffer { action?: unknown; deal?: unknown; page?: unknown; question?: unknown }
 
-/** A loaded deal by its name, with or without "Project" in front and ignoring case, as search finds it (#500). */
-export function dealNamed(state: State, name: string) {
-  const key = bareDealName(cleanName(name).trim(), 'navigation').toLowerCase();
-  if (!key) return undefined;
-  return Object.values(state.deals).find((deal) => bareDealName(deal.name, 'navigation').toLowerCase() === key);
+/** a deal name as navigation compares it: without "Project", in any case */
+const navigationName = (name: string) => sameName(bareDealName(name.trim(), 'navigation')).toLowerCase();
+/** The deal a name names: that exact name, in any case, without "Project", spaces between words aside (#500, #1018). */
+function dealByName<T extends { name: string }>(deals: T[], named: string): T | undefined {
+  const exact = navigationName(named);
+  if (!exact) return;
+  return deals.find((deal) => navigationName(deal.name) === exact);
 }
 
 const isPage = (page: unknown): page is Landing => DEAL_PAGES.some(([id]) => id === page);
@@ -29,7 +31,7 @@ const nonBlank = (text: unknown): text is string => typeof text === 'string' && 
 /** The page the model offers: the deal it names, or else the conversation's own deal. */
 function pageOffer(state: State, scope: Scope, raw: RawOffer): Offer | undefined {
   if (!isPage(raw.page)) return undefined;
-  const named = typeof raw.deal === 'string' ? dealNamed(state, raw.deal) : undefined;
+  const named = typeof raw.deal === 'string' ? dealByName(Object.values(state.deals), raw.deal) : undefined;
   const dealId = named?.id ?? (raw.deal === undefined && scope.kind !== 'all' ? scope.dealId : undefined);
   return dealId && state.deals[dealId] ? { kind: 'page', dealId, page: raw.page } : undefined;
 }

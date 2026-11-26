@@ -155,11 +155,13 @@ describe('data integrity follow-ups', () => {
     expect(r.ok).toBe(false); expect((r as any).error.message).toMatch(/^Row 5:/);
   });
 
-  it('an import keeps the other side’s own workstream, uses our spelling where it is one of ours, and drops control characters', async () => {
+  it('an import keeps the other side’s workstream, uses our spelling where it is ours, keeps controls', async () => {
     const { prepareImport, suggestMapping } = await import('../../src/domain/importExport');
     const tb = readCsv(new TextEncoder().encode('Question,Workstream\nOne,LEGAL\nTwo,Offtake & marketing\n"Thr\u0000ee\u0007",tax\n')); if (!tb.ok) throw new Error('csv');
     const p = prepareImport(tb.value.rows, suggestMapping(tb.value.columns));
-    expect(p.rows.map((r) => [r.text, r.workstream])).toEqual([['One', 'Legal'], ['Two', 'Offtake & marketing'], ['Three', 'Tax']]);
+    expect(p.rows.map((r) => [r.text, r.workstream])).toEqual([
+      ['One', 'Legal'], ['Two', 'Offtake & marketing'], ['Thr\u0000ee\u0007', 'Tax'],
+    ]);
   });
 
   it('an export fits Excel: a cell over 32,767 characters is cut with a visible note, and file names keep letters of any language', async () => {

@@ -10,7 +10,7 @@ const deals = () => {
   list.push(deal(1, 'Project Lucerne', 'Northwind Partners', ['\\\\fs\\deals\\lucerne\\VDR'], 2), deal(2, 'Project Lucerne', 'Litware Capital', [], 9));
   return Object.fromEntries(list.map((d) => [d.id, d]));
 };
-const room = (dealId: string, matched = 188) => ({ dealId, files: 200, matched, printed: 5, same: 5 });
+const room = (dealId: string, matched = 188) => ({ dealId, files: 200, matched });
 
 describe('a likely duplicate deal', () => {
   it('never takes a shared name alone, or a shared folder, for a duplicate', () => {
