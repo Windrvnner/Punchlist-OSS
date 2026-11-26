@@ -4,12 +4,15 @@ import {
   applyImportColumnPicks, pickImportColumn, restoreImportColumnPicks, unappliedColumnsWarning, unappliedImportColumns,
   type QaImportTable,
 } from './qaImportColumns';
-import { readImportBytes, type ImportLocation, type ImportTable } from './transfer';
+import { proposeLayout, readImportBytes, type ImportLocation, type ImportTable } from './transfer';
+import { SERVICE } from '../control';
 
 export interface QaImportLayoutView {
   table: QaImportTable | null;
   mapping: Mapping | null;
   reading: boolean;
+  /** the model is proposing the layout */
+  asking: boolean;
   wantedSheet?: string;
   error: string;
   unapplied: ImportField[];
@@ -32,6 +35,30 @@ export class QaImportLayout {
 
   cancel() {
     this.request++;
+    if (this.current.asking) this.show({ ...this.current, asking: false });
+  }
+
+  /** A manual heading edit takes over from an outstanding proposal only (#380): a sheet read in flight still lands. */
+  cancelAsk() {
+    if (this.current.asking) this.cancel();
+  }
+
+  /**
+   * The model proposes the sheet, the heading row and the columns; the app checks the proposal against the file and
+   * shows it. Anything the person does meanwhile overtakes it. Returns the error the dialog shows ('' clears it), or
+   * undefined to leave it as it is.
+   */
+  async ask(asked: ImportTable): Promise<string | undefined> {
+    const mine = ++this.request;
+    this.show({ ...this.current, asking: true });
+    const proposal = await proposeLayout(this.store, asked);
+    if (this.request !== mine) return undefined;
+    if (proposal.ok) {
+      this.propose(proposal.value);
+      return '';
+    }
+    this.show({ ...this.current, asking: false });
+    return asked.mapping.text != null ? `${SERVICE} had no better proposal` : undefined;
   }
 
   replace(table: ImportTable | null, mapping = table?.mapping ?? null) {
@@ -54,14 +81,14 @@ export class QaImportLayout {
     if (!table || !mapping) return;
     const picked = pickImportColumn(table, field, column);
     const view = layoutView(picked, { ...mapping, [field]: column });
-    this.show({ ...view, reading, wantedSheet });
+    this.show({ ...view, reading, wantedSheet, asking: this.current.asking });
   }
 
   async reread(where: ImportLocation, accept?: (table: ImportTable) => void) {
     const before = this.current.table;
     if (!before) return;
     const mine = ++this.request;
-    this.show({ ...this.current, reading: true, wantedSheet: where.sheet, error: '' });
+    this.show({ ...this.current, reading: true, asking: false, wantedSheet: where.sheet, error: '' });
     const read = await readImportBytes(this.store, before.name, before.bytes, where);
     if (this.request !== mine) return;
     if (!read.ok) {
@@ -92,7 +119,7 @@ export class QaImportLayout {
 function layoutView(table: QaImportTable | null, mapping: Mapping | null): QaImportLayoutView {
   const unapplied = unappliedImportColumns(table);
   const warning = unappliedColumnsWarning(unapplied);
-  return { table, mapping, reading: false, error: '', unapplied, warning };
+  return { table, mapping, reading: false, asking: false, error: '', unapplied, warning };
 }
 
 /** Recover the old layout's source positions from the same saved bytes, without altering its accepted preview. */
