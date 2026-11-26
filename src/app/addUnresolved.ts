@@ -12,7 +12,8 @@ import {
 
 type DraftedPoint = Unresolved & { text: string };
 type SelectedUnresolved = { points: DraftedPoint[]; links: UnresolvedLink[] };
-export type UnresolvedPreview = SelectedUnresolved & { out: Unresolved[] };
+/** `unlinked`: the notice when the open questions could not be checked for some or all points (#1120) */
+export type UnresolvedPreview = SelectedUnresolved & { out: Unresolved[]; unlinked?: string };
 type Changed = { kind: 'changed'; count: number; keys: ReadonlySet<string>; invalidLinks: ReadonlySet<string> };
 export const UNREAD_CHECKLIST = 'Couldn’t load the checklist';
 
@@ -62,7 +63,8 @@ async function phrasePoints(store: Store, dealId: string, points: Unresolved[]):
 
 /**
  * The model's proposals (#1120): for each point without a kept link, the open questions it says already ask for it, by
- * point key. A failed call, or a point the call missed, has none, and nothing is linked unless a person checks it.
+ * point key. A failed call, or a point the call missed, has none and is named in the notice (`unlinked`); nothing is
+ * linked unless a person checks it.
  */
 async function proposedLinks(
   store: Store, points: Unresolved[], pool: Question[], kept: ReadonlyMap<string, Question>,
@@ -72,17 +74,24 @@ async function proposedLinks(
   const keptIds = new Set([...kept.values()].map((q) => q.id));
   const asked = points.filter((point) => !kept.has(point.key));
   const open = pool.filter((q) => !keptIds.has(q.id));
-  if (!ai.sameMeaning || !asked.length || !open.length) return proposed;
+  if (!ai.sameMeaning || !asked.length || !open.length) return { proposed };
   const items = asked.map((point) => `${point.what} ${point.need}`);
   const result = await ai.sameMeaning({ items, against: open.map((q) => q.text), kind: 'questions' });
-  if (!result.ok) return proposed;
+  if (!result.ok) return { proposed, unlinked: 'Couldn’t check the open questions, so no links are suggested' };
   for (const pair of result.value.pairs) {
     const point = asked[pair.a];
     const q = open[pair.b];
     if (!pair.inAgainst || !point || !q) continue;
     proposed.set(point.key, [...(proposed.get(point.key) ?? []), q.id]);
   }
-  return proposed;
+  return { proposed, ...missedNotice(result.value.missed?.at.length ?? 0) };
+}
+
+/** The notice for points the open questions could not be checked for (#1120); none when every point was checked. */
+function missedNotice(count: number) {
+  if (!count) return {};
+  const points = `${count.toLocaleString('en-US')} point${count === 1 ? '' : 's'}`;
+  return { unlinked: `Couldn’t check the open questions for ${points}` };
 }
 
 function drafts(points: Unresolved[], text: (string | null)[]) {
@@ -110,7 +119,7 @@ export async function prepareUnresolved(
   progress?.count(points.length);
   if (!points.length) return ok({ points: [], links: [], out: [] });
   const kept = keptLinks(points, pool, approved);
-  const [result, proposed] = await Promise.all([
+  const [result, { proposed, unlinked }] = await Promise.all([
     phrasePoints(store, dealId, points), proposedLinks(store, points, pool, kept),
   ]);
   if (progress?.signal.aborted) return;
@@ -118,7 +127,7 @@ export async function prepareUnresolved(
   const links = suggestUnresolvedLinks(points, pool, kept, proposed);
   const byKey = new Map(points.map((p) => [p.key, p]));
   const suggested = links.map((link) => ({ point: byKey.get(link.point)!, q: link.q }));
-  return ok({ ...drafts(points, result.value), links: suggested });
+  return ok({ ...drafts(points, result.value), links: suggested, ...(unlinked ? { unlinked } : {}) });
 }
 
 /** Retry only the failed points, applying the replies to the preview as it stands when they return. */

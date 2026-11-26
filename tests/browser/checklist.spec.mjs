@@ -359,6 +359,25 @@ for (const [index, size] of SIZES.entries()) {
   await retainedLinkCase('dark', size, index === 0);
 }
 
+{ // open questions that cannot be checked for links: the rows still draft, with no link, and the footer says so (#1120)
+  const { ctx, page, id } = await checklist('light', SIZES[1]);
+  const open = { dealId: id, text: 'Please provide the executed interconnection agreement.' };
+  await page.evaluate((q) => store.dispatch(store.commandNamed('CreateQuestion'), q, { quiet: true }), open);
+  await page.evaluate(() => { window.__fail = { sameMeaning: true }; });
+  await page.click('#ck-pmore'); await page.click('#ck-add-unresolved');
+  await page.waitForSelector('#au-list .lrow', { timeout: 10000 });
+  const seen = await page.evaluate(() => ({
+    rows: document.querySelectorAll('#au-list .lrow').length,
+    links: [...document.querySelectorAll('#au-list .lrow')].filter((r) => r.textContent.includes('Link to')).length,
+    foot: document.getElementById('au-count').textContent, alert: document.getElementById('au-count').getAttribute('role'),
+    go: !document.getElementById('au-go').disabled,
+  }));
+  const notice = 'Couldn’t check the open questions, so no links are suggested';
+  say('a failed link check drafts every row with no link and says so in the footer',
+    seen.rows > 0 && seen.links === 0 && seen.foot === notice && seen.alert === 'alert' && seen.go, JSON.stringify(seen));
+  await ctx.close();
+}
+
 { // a checklist that cannot be read is said so, never taken for an empty one; and one phrasing per deal however often the dialog is opened
   const { ctx, page, id } = await checklist('light', SIZES[1]);
   await page.evaluate(() => { const ai = store.services.ai; const was = ai.phrase.bind(ai); window.__phrased = 0; ai.phrase = (i) => { window.__phrased++; return new Promise((r) => setTimeout(() => r(was(i)), 1500)); }; const read = ai.checklist.bind(ai); ai.checklist = (d) => (window.__ckFail ? Promise.resolve({ ok: false, error: { kind: 'failed', message: 'checklist failed' } }) : read(d)); });

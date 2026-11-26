@@ -73,6 +73,8 @@ export function AddUnresolvedDialog({ dealId }: { dealId: string }) {
       if (result.ok) {
         setReady(result.value);
         syncChoices(result.value);
+        // the rows open even when the open questions could not be checked for links; the footer says so (#1120)
+        if (result.value.unlinked) setError(result.value.unlinked);
       } else setError(result.error.message);
     });
     return () => wait.abort();

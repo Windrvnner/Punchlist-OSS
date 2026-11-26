@@ -50,6 +50,7 @@ it('proposes the links the model pairs with an open question, and nothing else',
     against: ['Please provide the lender file 1', 'Please provide the lender file 2'],
   }]);
   expect(ready.points).toHaveLength(3);
+  expect(ready.unlinked).toBeUndefined();
 });
 
 it('keeps a link a person approved and does not propose its question for another point', async () => {
@@ -82,6 +83,7 @@ it('at 150 points and 2,000 open questions every point is drafted, linked only w
   expect(ready.points).toHaveLength(150);
   expect(ready.links).toHaveLength(100);
   expect(new Set(ready.links.map((link) => link.q.id)).size).toBe(100);
+  expect(ready.unlinked).toBe('Couldn’t check the open questions for 50 points');
 });
 
 it('a failed call leaves every point drafted with no link', async () => {
@@ -89,4 +91,5 @@ it('a failed call leaves every point drafted with no link', async () => {
   const ready = await preview(env);
   expect(ready.links).toEqual([]);
   expect(ready.points).toHaveLength(3);
+  expect(ready.unlinked).toBe('Couldn’t check the open questions, so no links are suggested');
 });
