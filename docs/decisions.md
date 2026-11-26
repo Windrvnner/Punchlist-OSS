@@ -172,9 +172,9 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
   shared x 100 is at least `limits.askedCutoff` x the point's words (default 80; whole percent from 0, which checks
   every point's best question, to 100, only a question naming every word); ties go to the lower question number. A
   point of one or two words fully named is checked like any other: there is no minimum word count. Second, only then,
-  the model is asked for all such pairs, in calls sized to its limits, whether the question already asks for what the point lacks. A pair it
-  does not confirm, or a service that cannot check, makes no offer and the point is asked as a new question. A person
-  ticks each offer; nothing is linked automatically.
+  the model is asked for all such pairs, in calls sized to its limits, whether the question already asks for what the
+  point lacks. A pair it does not confirm, or a service that cannot check, makes no offer and the point is asked as a
+  new question. A person ticks each offer; nothing is linked automatically. A link a person approved is kept (#88).
 - **Add All Unresolved to Q&A…** sizes its calls to the model's limits and retries quietly; whatever still fails is offered for Retry.
 - Names of structures, sectors, and technologies stay at about 24 characters or fewer.
 
