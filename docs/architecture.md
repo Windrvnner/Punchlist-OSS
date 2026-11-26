@@ -118,7 +118,7 @@ with a record's current versions in `changeLogHeads.ts` and the folding of draft
   names the versions it was based on. Two current versions that differ are a clash, which is kept for a person to
   resolve; the app never picks one. A question's draft is written by the app, so it folds into a person's change rather
   than clashing with it (`DraftFold` in `src/backend/changeLogDrafts.ts`). Any field that two PCs can write differently
-  for the same content (a timestamp, who made the change, or a title the model wrote) must be listed as a bookkeeping
+  for the same content (a timestamp, who made the change, or the model's workstream choice) must be listed as a bookkeeping
   field in `src/domain/versions.ts`. Otherwise, records with derived IDs clash when they should not.
 - **Clashes stay local to one record.** A line built on a version that hasn't arrived yet is held back until that version arrives, without pausing the rest of the deal. A held line more than a day old is let go and shown as a choice (`letGoStuck`).
 - **Nothing is thrown away.** Every version that is not kept becomes a deletion entry under **Deleted** (`src/app/commands/keptVersions.ts`). When a deal is deleted on one PC, another PC keeps any changes the deleting PC hadn't seen, as a recovered copy (`src/domain/recovered.ts`).
@@ -140,7 +140,7 @@ The code is in `src/backend/documents.ts`, `convert.ts`, `officeText.ts`, `wordI
   `docs-<install>-<deal>.jsonl` files. Files attached directly to a deal can be copied into the shared folder under
   `attachments/`. Files attached from Home are kept with that person's conversations.
 - **A document's ID is derived from the SHA-256 hash of its bytes** (`docIdFor`), so every PC gets the same ID, and a citation opens the document by its content or not at all.
-- **Everything with pages becomes a PDF**, so the page cited is the page shown. LibreOffice does the conversion without a window, with its own profile, and accepts tracked changes. Spreadsheets stay in their own format and are cited by sheet and cell.
+- **Everything with pages becomes a PDF**, so the page cited is the page shown. LibreOffice does the conversion without a window, with its own profile, and shows tracked changes as markup. Spreadsheets stay in their own format and are cited by sheet and cell.
 - **Indexing asks no model and uploads nothing.** Supported files that can be read are fingerprinted and page-counted. Their words go into this PC's own word index (`wordIndex.ts`), which ranks by name and path, title, and BM25 on the body text. Text in Word and PowerPoint files is read straight from the file.
 - **Folders are checked again** every `timings.folderCheck` without opening any files (`freshen` in `src/app/folderWatch.ts`). A folder that has changed is indexed again once its listing stops changing.
 - **A document leaves a deal only when a PC sees that it has gone** (`spot` in `documents.ts`):
@@ -210,9 +210,9 @@ A deal's checklist is made up of its own item records, linked to the findings an
   where available. `src/app/qaImport.ts` submits the prepared rows through `ImportQuestions`. That workflow resumes retained
   submissions by their journal correlation and finishes the saved log choice.
 - **The master checklist** is brought in pasted or from a file, read whole by the model in one call, and tied out so that every line is accounted for (`src/app/listRead.ts`, `src/domain/listRead.ts`). Its items go to every deal that uses the list and is not marked Closed, with one **Undo** for all of them.
-- **An issues list** is attached and read through `src/app/issuesList.ts`. The model reads and checks each page against the
-  file and proposes titles and matches (`issuesList` in `src/backend/ai.ts`). The preview and import command resolve the
-  same matches through `src/app/issuesListJoins.ts`.
+- **An issues list** is attached and read through `src/app/issuesList.ts`. The model reads the file once, then proposes
+  titles and matches (`issuesList` in `src/backend/ai.ts`). The preview and import command resolve the same matches
+  through `src/app/issuesListJoins.ts`.
 - **An import in progress** (the file, the model's reading, the choices, and the check marks) is kept on each PC,
   part by part, through the `KeptImports` port. Both shells use the IndexedDB adapter. `src/app/keptImports.ts` keeps
   the parts and coordinates Q&A submission checkpoints. A submission reaches the store before its operation starts

@@ -17,7 +17,7 @@ const NOTE = /^(page \d+ of \d+|note:|draft\b|confidential\b)/i;
 /** the stand-in's reading of a table: its heading row, an item for each row with an item cell, its columns named */
 export function mockTableReading(lines: string[]): ListReply {
   const split = (l: string) => l.split(' | ').map((c) => c.trim());
-  const cols = suggestChecklistColumns(split(lines[0]), lines.slice(1).map(split));
+  const cols = suggestChecklistColumns(split(lines[0]));
   const column = (c: number | null | undefined) => (c == null ? undefined : c + 1);
   const read: LineRead[] = [];
   lines.forEach((raw, k) => {

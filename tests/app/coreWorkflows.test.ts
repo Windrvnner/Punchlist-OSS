@@ -65,7 +65,7 @@ async function findScannedDeal(store: Store) {
   store.ui({ newDeal: incoming });
   const path = '/Due diligence/Southridge/Lender data room';
   const scan = vi.fn(async () => ok({ files: 540, size: '2.4 GB' }));
-  const room = { dealId, files: 540, matched: 478, printed: 8, same: 8 };
+  const room = { dealId, files: 540, matched: 478 };
   const sameRoom = vi.fn(async () => ok([room]));
   store.services.docs.scanFolder = scan;
   store.services.docs.sameRoom = sameRoom;

@@ -126,11 +126,15 @@ export class AgentRun {
     const picked: Sent[] = [];
     const missing: string[] = [];
     for (const name of named) {
-      const said = name.trim().replace(/^["'`[]+|["'`\]]+$/g, '');
-      const tag = /^d\s*(\d+)$/i.exec(said);
-      const sent = tag ? this.opened.find((x) => x.tag === `D${+tag[1]}`) : this.byPath(said, recs);
+      // a name is tried as the model wrote it first, so a document whose own name starts or ends with a bracket or
+      // quote is found; only when nothing matches is the model's wrapping quote or bracket taken off
+      const said = name.trim();
+      const unwrapped = said.replace(/^["'`[]+|["'`\]]+$/g, '');
+      const tag = /^d\s*(\d+)$/i.exec(unwrapped);
+      const sent = tag ? this.opened.find((x) => x.tag === `D${+tag[1]}`)
+        : this.byPath(said, recs) ?? this.byPath(unwrapped, recs);
       if (sent && !picked.includes(sent)) picked.push(sent);
-      else if (!sent) missing.push(said);
+      else if (!sent) missing.push(unwrapped);
     }
     const paired = this.withCleanDrafts(picked);
     this.whole = paired.slice(0, width);
@@ -149,11 +153,10 @@ export class AgentRun {
     return `${attached}${capped}${notFound}`;
   }
 
-  /** a document named by its path or file name: the whole path or name first, then the end of a path */
+  /** a document named by its whole path or its whole file name, in any case; anything else is not found */
   private byPath(said: string, recs: DealDoc[]): Sent | undefined {
     const low = said.toLowerCase();
-    const found = recs.find((x) => this.kit.where(x.rec).toLowerCase() === low || x.rec.name.toLowerCase() === low)
-      ?? recs.find((x) => this.kit.where(x.rec).toLowerCase().endsWith(low));
+    const found = recs.find((x) => this.kit.where(x.rec).toLowerCase() === low || x.rec.name.toLowerCase() === low);
     return found ? this.tagOf(found.dealId, found.rec) : undefined;
   }
 
