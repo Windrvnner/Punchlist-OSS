@@ -650,6 +650,54 @@ export function nodeAi(o: AiOptions) {
   const SAME_BATCH = 3000;
   /** parts of the duplicate check asked at once */
   const SAME_AT_ONCE = 4;
+  type SameInput = Parameters<NonNullable<AiService['sameMeaning']>>[0];
+  /**
+   * How many of a deal's open questions one call may show beside all its points (#1120): every call shows every point,
+   * and the questions fill the rest of the share of the input limit a part is sized to (parts.ts `partSize`).
+   */
+  const questionPartSize = async (i: SameInput) => {
+    const limit = inLimit((await models()).fast);
+    const pointTokens = tokensEach(i.items) * i.items.length;
+    const forQuestions = limit - (pointTokens * 100) / control.limits.partShare;
+    return partSize({
+      cap: i.against.length, out: 1, outLimit: Infinity, in: tokensEach(i.against), inLimit: forQuestions,
+    });
+  };
+  /**
+   * A Q&A log too long to show with the points in one call is asked about a part of its questions at a time, each part
+   * with every point (#1120). Pairs map back to the whole log; a part not answered lists every point as missed, so each
+   * point ends with its pairs or a missed entry. The run fails only when no part answered.
+   */
+  const sameInQuestionParts = async (i: SameInput, size: number) => {
+    const pairs: { a: number; b: number; inAgainst: boolean; why: string }[] = [];
+    const seen = new Set<string>();
+    const lost = new Set<number>();
+    let kind: 'unreachable' | 'failed' | undefined;
+    let failed: Result<never> | undefined;
+    let answered = false;
+    for (let from = 0; from < i.against.length; from += size) {
+      const r = await service.sameMeaning!({ ...i, against: i.against.slice(from, from + size) });
+      if (!r.ok) {
+        failed ??= r;
+        kind ??= r.error.kind === 'unreachable' ? 'unreachable' : 'failed';
+        for (let a = 0; a < i.items.length; a++) lost.add(a);
+        continue;
+      }
+      answered = true;
+      for (const a of r.value.missed?.at ?? []) lost.add(a);
+      kind ??= r.value.missed?.kind;
+      for (const pair of r.value.pairs) {
+        const whole = pair.inAgainst ? { ...pair, b: pair.b + from } : pair;
+        const key = `${whole.a}:${whole.b}:${whole.inAgainst}`;
+        if (!seen.has(key)) pairs.push(whole);
+        seen.add(key);
+      }
+    }
+    if (failed && !answered) return failed;
+    pairs.sort((p, q) => p.a - q.a || Number(p.inAgainst) - Number(q.inAgainst) || p.b - q.b);
+    const missed = lost.size ? { missed: { kind: kind ?? 'failed', at: [...lost].sort((a, b) => a - b) } } : {};
+    return ok({ pairs, ...missed });
+  };
   /** points titled and compared with the findings in one call: a list of deal size (a few hundred points) is one call */
   const ISSUES_BATCH = 400;
   const MEMO_RATE_BATCH = 40;   // open findings rated in one call for the deal memo
@@ -2153,6 +2201,15 @@ export function nodeAi(o: AiOptions) {
       return ok(out as (string | null)[]);
     },
     async sameMeaning(i) {
+      if (i.kind === 'questions') {
+        let size: number;
+        try {
+          size = await questionPartSize(i);
+        } catch (e) {
+          return failure(e, UNREACHED);
+        }
+        if (size < i.against.length) return sameInQuestionParts(i, size);
+      }
       // The whole list and the general list go to the model in one call, which says which items ask for the same thing as
       // another. Only a list longer than SAME_BATCH is asked about in parts, each shown the items after it and the general
       // list (a pair with an earlier item was asked about in that item's part). A reply that cannot be read, as one too

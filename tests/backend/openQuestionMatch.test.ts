@@ -42,6 +42,44 @@ describe('unresolved points against open questions', () => {
   });
 });
 
+describe('a Q&A log too long to show with the points in one call', () => {
+  const shownQuestions = (c: Call) => lines(c).filter((l) => l.includes('[question]')).map((l) => l.split('] ')[1]);
+  const shownPoints = (c: Call) => lines(c).filter((l) => l.includes('[point]'));
+
+  it('splits the open questions into parts sized to the input limit, each shown every point', async () => {
+    // the model pairs point 3 with question 1,700 and point 7 with question 20, in whichever part shows them
+    const want: [number, number][] = [[3, 1700], [7, 20]];
+    const s = setup((c) => {
+      if (!isMatch(c)) return {};
+      const qs = shownQuestions(c);
+      const pairs = want.filter(([, q]) => qs.includes(questions(2000)[q - 1]))
+        .map(([p, q]) => ({ a: p, b: 150 + qs.indexOf(questions(2000)[q - 1]) + 1, why: 'same' }));
+      return { pairs };
+    }, {}, opts);
+    s.svc.inputLimit = () => 20000;
+    const out = val(await s.ai.sameMeaning!({ items: points(150), against: questions(2000), kind: 'questions' }));
+    const asked = s.calls.filter(isMatch);
+    expect(asked.length).toBeGreaterThan(1);
+    for (const c of asked) expect(shownPoints(c)).toHaveLength(150);
+    expect(asked.flatMap(shownQuestions)).toEqual(questions(2000));
+    expect(out.pairs.map((p) => [p.a, p.b, p.inAgainst])).toEqual([[2, 1699, true], [6, 19, true]]);
+    expect(out.missed).toBeUndefined();
+  });
+
+  it('a part that could not be asked lists every point as missed, and keeps what the other parts found', async () => {
+    const s = setup((c) => {
+      if (!isMatch(c)) return {};
+      const down = Object.assign(new Error('down'), { code: 'ECONNRESET' });
+      if (shownQuestions(c).includes(questions(2000)[1499])) throw down;
+      return { pairs: shownQuestions(c).includes(questions(2000)[0]) ? [{ a: 1, b: 151, why: 'same' }] : [] };
+    }, {}, opts);
+    s.svc.inputLimit = () => 20000;
+    const out = val(await s.ai.sameMeaning!({ items: points(150), against: questions(2000), kind: 'questions' }));
+    expect(out.pairs.map((p) => [p.a, p.b])).toEqual([[0, 0]]);
+    expect(out.missed?.at).toEqual(Array.from({ length: 150 }, (_, k) => k));
+  });
+});
+
 describe('the open question an answer addresses', () => {
   const isSuggest = (c: Call) => c.prompt.includes('Which one of these open questions does the answer address');
   const handles = (c: Call) => [...c.prompt.matchAll(/^(A\d+): /gm)].map((m) => m[1]);
