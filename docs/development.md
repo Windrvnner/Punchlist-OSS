@@ -94,14 +94,14 @@ there.
 On Linux, the browser suites' layout checks expect Inter in place of Segoe UI: install the `fonts-inter` package and
 copy `tests/browser/fonts.conf` to `/etc/fonts/conf.d/56-prefer-inter.conf`, as CI does.
 
-The `approved` suite compares five main screens (Home, Findings, Q&A, a finding, and Settings), in dark and light at
-1280x736 and 1024x640, with the images in `tests/browser/approved/`. A pull request that changes one of those screens
-on purpose replaces its images in the same pull request. A screen passes only when every pixel matches. The images
-come from CI, because text edges render slightly differently on other machines, so the suite fails on any other machine
-until `PUNCHLIST_APPROVE=1 node tests/browser/approved.spec.mjs` writes that machine's own images (for local runs only;
-don't commit them). A failed CI run uploads the new images in its `browser-logs` artifact, under `approved/`, with a
-`.diff.png` that marks the changed pixels in red. When the CI runner's Chrome changes how it draws text, every screen
-fails at once: commit the images that run uploads.
+The `approved` suite compares four main screens (Home, Findings, Q&A, and Settings), in dark and light at
+1280x736 and 1024x640, with the images in `tests/browser/approved/`. A finding's page joins once #610 is fixed. These are test images, apart from the design references in `docs/design/`. A pull request that changes
+one of those screens on purpose replaces its images in the same pull request. A screen passes only when every pixel
+matches, once the screen has stopped moving. The images come from CI, because text edges render slightly differently
+on other machines. Elsewhere, `PUNCHLIST_APPROVE=1 node tests/browser/approved.spec.mjs` first writes that machine's
+own images to `out/browser/approved-local/`, which later local runs compare with. A failed CI run uploads the new
+images in its `browser-logs` artifact, under `approved/`, with a `.diff.png` that marks the changed pixels in red.
+When the CI runner's Chrome changes how it draws text, every screen fails at once: commit the images that run uploads.
 
 Run one `npm run check:all` at a time on a shared runner. CPU contention can push the checklist Retry test past
 Vitest's five-second timeout and the document-family test past its one-second limit per large room. On Linux

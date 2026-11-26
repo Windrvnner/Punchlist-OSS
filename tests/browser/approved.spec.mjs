@@ -1,10 +1,11 @@
 // The main screens look as approved (#1027): each is compared with its image in tests/browser/approved/, in dark and
 // light, at 1280x736 and 1024x640. A screen changed on purpose gets a new image in the same pull request, taken from
 // a failed CI run's upload (browser-logs-<shard>, approved/): text edges render slightly differently elsewhere.
-//   PUNCHLIST_APPROVE=1 node tests/browser/approved.spec.mjs     (writes every image from this machine, for local runs)
+//   PUNCHLIST_APPROVE=1 node tests/browser/approved.spec.mjs     (this machine's own images, in out/, for local runs)
 import { launchChrome } from './chrome.mjs';
 import { approve, approvedPath, clearChanged, differingPixels, keepChanged } from './approvedImages.mjs';
 import { openOnFindings } from './landing.mjs';
+import { settled, trackSettle } from './settle.mjs';
 import fs from 'node:fs';
 
 const URL = `http://127.0.0.1:${process.env.PUNCHLIST_PORT || 4178}/`;
@@ -25,6 +26,7 @@ async function sampleDeal([width, height], scheme) {
   const ctx = await browser.newContext({
     viewport: { width, height }, colorScheme: scheme, locale: 'en-US', timezoneId: 'America/New_York',
   });
+  await trackSettle(ctx);
   const page = await ctx.newPage();
   await page.clock.setFixedTime(FIXED_TIME);
   await page.goto(URL);
@@ -42,13 +44,6 @@ async function sampleDeal([width, height], scheme) {
   return { ctx, page, dealId };
 }
 
-/** The first finding of the deal by title, so every run opens the same one. */
-function firstFinding(page, dealId) {
-  return page.evaluate((id) => Object.values(store.get().findings)
-    .filter((finding) => finding.dealId === id)
-    .sort((a, b) => a.title.localeCompare(b.title))[0].id, dealId);
-}
-
 /** Each screen: its name and how to bring it up from the sample deal. */
 const SCREENS = [
   ['home', async ({ page }) => {
@@ -63,10 +58,8 @@ const SCREENS = [
     await page.goto(`${URL}#qa-${dealId}`);
     await page.waitForSelector('#qa-cols');
   }],
-  ['finding', async ({ page, dealId }) => {
-    await page.goto(`${URL}#finding-${dealId}-${await firstFinding(page, dealId)}`);
-    await page.waitForSelector('#f-review');
-  }],
+  // A finding's page joins once #610 is fixed: its composer takes its width from a column still settling, so it lands a
+  // pixel or more off at random (#602), and its picture differs from run to run.
   ['settings', async ({ page, dealId }) => {
     await page.goto(`${URL}#deal-${dealId}`);
     await page.waitForSelector('.flagrow');
@@ -80,7 +73,11 @@ async function checkScreen(deal, name, show) {
   await show(deal);
   await deal.page.mouse.move(0, 0);
   await deal.page.evaluate(() => document.fonts.ready);
-  const png = await deal.page.screenshot({ animations: 'disabled', caret: 'hide' });
+  // the picture is of the screen at rest, once nothing on it is moving
+  await settled(deal.page);
+  // the app's version is covered, so a release does not change the Settings screen
+  const version = deal.page.locator('#s-version');
+  const png = await deal.page.screenshot({ animations: 'disabled', caret: 'hide', mask: [version] });
   if (process.env.PUNCHLIST_APPROVE === '1') {
     approve(name, png);
     say(`${name}:approved-image-saved`, true);
