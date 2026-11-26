@@ -54,7 +54,7 @@ describe('the document service on real folders', () => {
     // with the real document service behind it, the first pass sees the document as gone: the finding that cites it is marked, and the item it satisfied is looked at again
     const svc = new StandInService((c) =>
       c.prompt.includes('Check each of these')
-        ? JSON.stringify({ items: [{ id: 'I1', result: 'ok', where: [{ doc: nth(c, 1), page: 1 }] }] })
+        ? JSON.stringify({ items: [{ id: 'k1', result: 'ok', where: [{ doc: nth(c, 1), page: 1 }] }] })
         : c.prompt.includes('core documents')
           ? '{"core": []}'
           : 'I cannot say',

@@ -26,7 +26,9 @@ async function setUp(o: { timing?: Parameters<typeof nodeAi>[0]['timing'] } = {}
 /** a first-pass round the office started, one item to a block, with the office in it */
 const ROUND: RoundDef = { id: 'r_00000000000000000000000000_office', kind: 'first', by: 'office', label: 'PC A', docs: docsHash(['doc_1']), docList: ['doc_1'], core: { key: 'c', ids: [] }, block: 1, pieces: LIST.map((it) => ({ key: `item:${it.id}`, text: it.text, reason: 'new', stage: 'check' as const })) };
 const officeLines = (more = '') => line({ plan: ROUND }) + line({ member: { round: ROUND.id, pc: 'office', label: 'PC A', epoch: 1, ok: true } }) + more;
-const checked = (svc: StandInService) => [...new Set(svc.calls.flatMap((c) => itemsIn(c as any).flatMap((it) => LIST.filter((x) => it.text.startsWith(x.text)).map((x) => x.id))))].sort();
+/** the items this PC asked the model about, in any call (#1162: a pick names them by id, not by the check's words) */
+const checked = (svc: StandInService) =>
+  LIST.filter((x) => svc.calls.some((c) => c.prompt.includes(x.text))).map((x) => x.id).sort();
 
 describe('a round another PC started', () => {
   it('this PC joins it, says who started it, and works only its own share while the other PC is live', async () => {

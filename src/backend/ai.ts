@@ -362,11 +362,13 @@ function checkPrompt(listing: string, items: ChecklistItem[], quick: boolean, re
     + 'or they only report what other documents say (a report that says the permits are in place is not the permits). '
     + 'Add "need": a few words describing the documents that would settle it.';
   const okShape = quick ? '' : ', "where": [{"doc": "its id", "page": 12, "quote": "…"}]';
-  const shape = `Reply as JSON: {"items": [{"id": "I1", "result": "ok"${okShape}}, `
-    + '{"id": "I2", "result": "finding", "title": "…", "workstream": "…", "body": ["…"], "sources": [...]}, '
-    + '{"id": "I3", "result": "more", "need": "…"}]}';
-  const asked = items.map((it, i) => `I${i + 1}: ${it.text}`).join('\n');
-  return `Documents:\n${listing}\n\nCheck each of these checklist items against the documents:\n${asked}\n\n`
+  const shape = `Reply as JSON: {"items": [{"id": "its id", "result": "ok"${okShape}}, `
+    + '{"id": "its id", "result": "finding", "title": "…", "workstream": "…", "body": ["…"], "sources": [...]}, '
+    + '{"id": "its id", "result": "more", "need": "…"}]}';
+  // each item is shown by its permanent id, never a running number its words could be confused with (#1162)
+  const asked = items.map((it) => `${it.id}: ${it.text}`).join('\n');
+  return `Documents:\n${listing}\n\nCheck each of these checklist items, each with its id, against the documents:\n`
+    + `${asked}\n\n`
     + `Give each item one "result":\n"ok" when the documents satisfy it.${where}\n${finding}\n${more}\n${shape}`
     + secondLook(items, redo);
 }
@@ -374,10 +376,10 @@ function checkPrompt(listing: string, items: ChecklistItem[], quick: boolean, re
 /** a second look names each item whose first reply could not be used, with why and what was sent */
 function secondLook(items: ChecklistItem[], redo?: Redo) {
   if (!redo) return '';
-  const fixes = items.map((it, i) => {
+  const fixes = items.map((it) => {
     const r = redo.get(it.id);
     if (!r) return '';
-    return `I${i + 1}: ${r.why}${r.said !== undefined ? ` You sent: ${JSON.stringify(r.said)}` : ''}`;
+    return `${it.id}: ${r.why}${r.said !== undefined ? ` You sent: ${JSON.stringify(r.said)}` : ''}`;
   }).filter(Boolean).join('\n');
   return `\n\nThis is a second look. Your first replies on these items could not be used. Put each right:\n${fixes}`;
 }
@@ -1957,6 +1959,23 @@ export function nodeAi(o: AiOptions) {
     const text = typeof it?.text === 'string' ? it.text.trim() : '';
     return { id, text };
   }
+  /** the rows of a check reply: a list of items, or the same keyed by item id: {"i_…": {…}} */
+  const checkRows = (items: unknown): Record<string, unknown>[] => (Array.isArray(items) ? items
+    : Object.entries(items as Record<string, unknown>)
+      .map(([id, v]) => (v && typeof v === 'object' ? { id, ...(v as object) } : { id, result: v })));
+  /**
+   * A check reply its caller cannot use (retry.ts): it cites a document it was not given, or names an item, in its
+   * words or as a row's id, by an id it was not shown (#1162)
+   */
+  const checkUnusable = (sent: Sent[], items: ChecklistItem[]) => {
+    const ids = items.map((it) => it.id);
+    const docs = docsUnusable(sent, false, ['items'], where, ids);
+    return (text: string) => {
+      const said = readJson(text, ['items'])?.items;
+      const rows = isObject(said) || Array.isArray(said) ? checkRows(said) : [];
+      return docs(text) || unknownIds(rows.map((r) => r?.id), ids).length > 0;
+    };
+  };
   /**
    * Ask one model about some checklist items against some documents. Null when its reply cannot be read at all. Throws
    * when the service fails. With `redo`, the items are ones whose first replies could not be used: each is sent back with
@@ -1973,23 +1992,23 @@ export function nodeAi(o: AiOptions) {
     // a reply cut off at the length limit keeps the items that came back whole: the caller asks about the rest in smaller parts
     let reply: { items?: unknown } | null; let cut = false;
     try {
-      // a reply naming a document it was not given is asked again (#1162)
+      // a reply naming a document it was not given, or an item it was not shown, is asked again (#1162)
       const asked: Ask = { kind: quick ? 'glance' : 'check', split: true, model, system: RULES, files,
-        prompt: checkPrompt(listing, items, quick, redo), unusable: docsUnusable(sent, false, ['items'], where) };
+        prompt: checkPrompt(listing, items, quick, redo), unusable: checkUnusable(sent, items) };
       reply = await askJson<{ items?: unknown }>(asked, ['items'], undefined, fix && !redo);
     }
     catch (e) { if (!isCutOff(e)) throw e; cut = true; reply = (e as { partial?: { items?: unknown } | null }).partial ?? null; }
     if (cut && !reply) return Object.assign(new Map<string, Seen>(), { cut: items });
     if (!reply || !reply.items || typeof reply.items !== 'object') return null;
-    // a list of items, or the same keyed by item: {"I1": {…}}
-    const all = (Array.isArray(reply.items) ? reply.items : Object.entries(reply.items as Record<string, unknown>).map(([id, v]) => (v && typeof v === 'object' ? { id, ...(v as object) } : { id, result: v }))) as Record<string, unknown>[];
+    const all = checkRows(reply.items);
     const rows = cut ? all.slice(0, -1) : all;                                     // the last item before a cut may itself be cut short
     // a whole item before the cut that cites a document it was not given makes the reply unusable, as it does a whole
     // reply: the items are asked again, never kept without that citation (#1162)
     if (cut && citesUnsent(rows, sent, false, where)) return null;
     const out: Map<string, Seen> & { cut?: ChecklistItem[] } = new Map<string, Seen>();
     for (const r of rows) {
-      const n = r && typeof r === 'object' ? tagNumber(r.id, 'I') : null; const it = n ? items[n - 1] : undefined; if (!it || out.has(it.id)) continue;
+      const it = items.find((x) => x.id === r?.id);
+      if (!it || out.has(it.id)) continue;
       const result = word(r.result);
       if (result === 'ok') {
         const where = fit('', r.where as Cited[], sent, false).sources;

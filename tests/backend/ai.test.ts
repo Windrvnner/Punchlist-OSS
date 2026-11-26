@@ -13,7 +13,7 @@ import type { Folder } from '../../src/backend/logRepository';
 import { signedOut } from '../../src/backend/signInToken';
 import { SERVICE, control } from '../../src/control';
 import { tokensOf } from '../../src/backend/limits';
-import { qid, LISTED_ID, listedIds, listed } from './reviewKit';
+import { qid, LISTED_ID, listedIds, listed, itemsIn } from './reviewKit';
 
 class Mem implements Folder { files = new Map<string, string>(); list() { return [...this.files.keys()]; } size(n: string) { return this.files.get(n)?.length ?? -1; } read(n: string) { return this.files.get(n) ?? null; } append(n: string, t: string) { this.files.set(n, (this.files.get(n) ?? '') + t); } write(n: string, t: string) { this.files.set(n, t); } }
 import { wordIndex as makeIndex, countWords, type WordIndex } from '../../src/backend/wordIndex';
@@ -1188,8 +1188,6 @@ const LIST: Checklist = {
   product: [{ id: 'p1', text: 'Derivatives have been signed off by the directors' }, { id: 'p2', text: ' the lock-up ratio is the same in the  credit agreement and the term sheet ' }, { id: 'b2', text: 'Same id as an earlier item' }, { id: '', text: 'No id' }, { id: 'p3', text: ' ' }],
   sector: [{ id: 's1', text: 'The interconnection permit is in place' }, { id: 's2', text: 'The debt sizing in the model follows the term sheet' }, { id: 's3', text: 'Decommissioning is provided for' }],
 };
-/** the checklist items a first-pass call was given (the list ends where the instructions begin) */
-const itemsIn = (c: Call) => c.prompt.includes('write up to 3 short searches') ? [] : [...c.prompt.split('\n\nGive each item one')[0].matchAll(/^(I\d+): (.*)$/gm)].map((m) => ({ tag: m[1], text: m[2] }));
 /** A satisfied result that says where, as a real reply must: the first document in the call that has pages, at page 1 (a cell of the first, with only spreadsheets). The fast model's quick look is not asked for a place and gives none. */
 const OK = (c: Call): { result: string; where?: object[] } => {
   if (!c.prompt.includes('Add "where"')) return { result: 'ok' };
@@ -1571,12 +1569,17 @@ describe('the first pass', () => {
     expect(sentNames(s.calls[2])).toEqual(sentNames(s.calls[0])); expect(sentNames(s.calls[3])).toEqual(['Board minutes March.pdf']);
     // the second turn is not a blind rerun: each item goes back with what was wrong with it and what was sent
     expect(s.calls[1].prompt).toContain(
-      'This is a second look. Your first replies on these items could not be used. Put each right:\nI1: As a finding '
+      'This is a second look. Your first replies on these items could not be used. Put each right:\ns2: As a finding '
         + 'it needs at least one citation naming a document you were given, by its id, and a page that document has '
         + '(or a sheet and cell for a spreadsheet), and none of yours do. You sent: '
-        + '{"id":"I7","result":"finding","title":"Debt sizing"',
+        + '{"id":"s2","result":"finding","title":"Debt sizing"',
     );
-    expect(s.calls[1].prompt).toContain('\nI2: It was missing from your reply.'); expect(sentNames(s.calls[1])).toEqual(sentNames(s.calls[0])); expect(s.calls[2].prompt).not.toContain('second look'); expect(s.trace).toEqual([{ dealId: 'd1', reason: 'Derivatives have been signed off by the directors: board minutes on hedging', docs: [MINUTES.docId] }]);   // a minor document is read when an item needs it
+    expect(s.calls[1].prompt).toContain('\ns3: It was missing from your reply.');
+    expect(sentNames(s.calls[1])).toEqual(sentNames(s.calls[0]));
+    expect(s.calls[2].prompt).not.toContain('second look');
+    // a minor document is read when an item needs it
+    const minutes = 'Derivatives have been signed off by the directors: board minutes on hedging';
+    expect(s.trace).toEqual([{ dealId: 'd1', reason: minutes, docs: [MINUTES.docId] }]);
     expect(s.calls[0].prompt).toContain(`one of ${WORKSTREAMS.join(' | ')}, or "" when unsure`); expect(s.calls[0].prompt).toContain('HR & benefits');   // the firm's list, from the control file
     // what it leaves
     const stored = await storedFindings(s.repo);
@@ -1830,16 +1833,17 @@ describe('the first pass', () => {
     const r = val(await s.ai.answer(ask('What is the lock-up ratio, and the capacity?')));
     expect(r.sources.map((x) => [x.doc, x.loc])).toEqual([['Credit Agreement.pdf', 'p. 14'], ['Term sheet (signed).pdf', 'p. 3'], ['Model v12.xlsx', 'Debt!B20'], ['Information memorandum.pdf', 'p. 7']]);
     expect(r.text).toBe('It is 1.25x. [1]\n\nThe term sheet agrees. [2] The model too. [3] And the memorandum. [4] Not this. Nor this.');                     // a clause number is still not a page, and a page the document does not have is still not a citation
-    // a first pass sent as a bare list, ids as numbers or in words, results in capitals, the body as one string, and the reply cut off in its last item
+    // a first pass sent as a bare list, each item by its id (#1162), results in capitals, the body as one string,
+    // and the reply cut off in its last item
     const f = setup(
       (c, n) =>
         n > 1
-          ? '[{"id": "I1", "result": "fin'
-          : `[{"id": 1, "result": "OK", "where": {"document": "${tag(c, FA)}", "page": "p. 14", "quote": "1.25x"}}, `
-            + '{"id": "Item 2", "result": " Finding ", "title": "Capacity differs", "workstream": "Commercial", '
+          ? '[{"id": "b4", "result": "fin'
+          : `[{"id": "b1", "result": "OK", "where": {"document": "${tag(c, FA)}", "page": "p. 14", "quote": "1.25x"}}, `
+            + '{"id": "b2", "result": " Finding ", "title": "Capacity differs", "workstream": "Commercial", '
             + '"body": "The memorandum says 100 MW. [1] The model uses 90. [2]", "next": "Ask.", '
             + `"sources": [{"doc": "${tag(c, IM)}", "page": "2"}, {"doc": "${tag(c, MODEL)}", "cell": "Debt!B2"}]}, `
-            + '{"id": "I3", "result": "More", "need": ["a permit", "its conditions"]}, {"id": "I4", "result": "fin',
+            + '{"id": "b3", "result": "More", "need": ["a permit", "its conditions"]}, {"id": "b4", "result": "fin',
       undefined,
       { checklist: () => ({ broad: LIST.broad, product: [], sector: [] }) },
     );
@@ -1850,7 +1854,7 @@ describe('the first pass', () => {
     // what could be read was kept; only the cut item went round again, alone (parts.ts), and cut off even alone it is not asked again
     expect(f.calls.map((c) => [c.model, itemsIn(c).length])).toEqual([['standard', 4], ['standard', 1]]); expect(fixesOf(f, 'items').length).toBe(0);
     // items keyed by id
-    const k = setup((c) => ({ items: { I1: OK(c), I2: OK(c) } }), undefined, {
+    const k = setup((c) => ({ items: { b1: OK(c), b2: OK(c) } }), undefined, {
       checklist: () => ({ broad: LIST.broad.slice(0, 2), product: [], sector: [] }),
       pick: (c) => ({ read: idsOf(c, TS, FA) }),
     });
