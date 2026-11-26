@@ -9,11 +9,12 @@ import {
   canLinkUnresolved, isApprovedLink, keptLinks, linkApproval, suggestUnresolvedLinks, unresolvedPointFingerprint,
   type ApprovedLinks, type UnresolvedLink,
 } from './unresolvedLinks';
+import { checkLinks, type LinkCheck } from './unresolvedMatch';
 
 type DraftedPoint = Unresolved & { text: string };
 type SelectedUnresolved = { points: DraftedPoint[]; links: UnresolvedLink[] };
-/** `unlinked`: the notice when the open questions could not be checked for some or all points (#1120) */
-export type UnresolvedPreview = SelectedUnresolved & { out: Unresolved[]; unlinked?: string };
+/** `unchecked`: the points the open questions could not be checked for yet, offered for Retry (#1120) */
+export type UnresolvedPreview = SelectedUnresolved & { out: Unresolved[]; unchecked: Unresolved[] };
 type Changed = { kind: 'changed'; count: number; keys: ReadonlySet<string>; invalidLinks: ReadonlySet<string> };
 export const UNREAD_CHECKLIST = 'Couldn’t load the checklist';
 
@@ -61,38 +62,15 @@ async function phrasePoints(store: Store, dealId: string, points: Unresolved[]):
   return ok(points.map((p) => phrasing.text.get(phraseKey(p)) ?? null));
 }
 
-/**
- * The model's proposals (#1120): for each point without a kept link, the open questions it says already ask for it, by
- * point key. A failed call, or a point the call missed, has none and is named in the notice (`unlinked`); nothing is
- * linked unless a person checks it.
- */
-async function proposedLinks(
-  store: Store, points: Unresolved[], pool: Question[], kept: ReadonlyMap<string, Question>,
-) {
-  const proposed = new Map<string, string[]>();
-  const ai = store.services.ai;
-  const keptIds = new Set([...kept.values()].map((q) => q.id));
-  const asked = points.filter((point) => !kept.has(point.key));
-  const open = pool.filter((q) => !keptIds.has(q.id));
-  if (!ai.sameMeaning || !asked.length || !open.length) return { proposed };
-  const items = asked.map((point) => `${point.what} ${point.need}`);
-  const result = await ai.sameMeaning({ items, against: open.map((q) => q.text), kind: 'questions' });
-  if (!result.ok) return { proposed, unlinked: 'Couldn’t check the open questions, so no links are suggested' };
-  for (const pair of result.value.pairs) {
-    const point = asked[pair.a];
-    const q = open[pair.b];
-    if (!pair.inAgainst || !point || !q) continue;
-    proposed.set(point.key, [...(proposed.get(point.key) ?? []), q.id]);
-  }
-  return { proposed, ...missedNotice(result.value.missed?.at.length ?? 0) };
+/** The links the preview offers: the kept ones, then the model's proposals (#1120), with their points. */
+function previewLinks(points: Unresolved[], pool: Question[], kept: ReadonlyMap<string, Question>, check: LinkCheck) {
+  const byKey = new Map(points.map((p) => [p.key, p]));
+  const links = suggestUnresolvedLinks(points, pool, kept, check.proposed);
+  return links.map((link) => ({ point: byKey.get(link.point)!, q: link.q }));
 }
 
-/** The notice for points the open questions could not be checked for (#1120); none when every point was checked. */
-function missedNotice(count: number) {
-  if (!count) return {};
-  const points = `${count.toLocaleString('en-US')} point${count === 1 ? '' : 's'}`;
-  return { unlinked: `Couldn’t check the open questions for ${points}` };
-}
+/** The points the open questions were not checked for yet (#1120), offered for Retry. */
+const uncheckedOf = (points: Unresolved[], check: LinkCheck) => points.filter((p) => check.unchecked.has(p.key));
 
 function drafts(points: Unresolved[], text: (string | null)[]) {
   const drafted: DraftedPoint[] = [];
@@ -117,17 +95,36 @@ export async function prepareUnresolved(
   if (!Array.isArray(state.checklists[dealId])) return fail({ kind: 'failed', message: UNREAD_CHECKLIST });
   const { points, pool } = unresolvedPoints(state, dealId);
   progress?.count(points.length);
-  if (!points.length) return ok({ points: [], links: [], out: [] });
+  if (!points.length) return ok({ points: [], links: [], out: [], unchecked: [] });
   const kept = keptLinks(points, pool, approved);
-  const [result, { proposed, unlinked }] = await Promise.all([
-    phrasePoints(store, dealId, points), proposedLinks(store, points, pool, kept),
+  const [result, check] = await Promise.all([
+    phrasePoints(store, dealId, points), checkLinks(store, dealId, points, pool),
   ]);
   if (progress?.signal.aborted) return;
   if (!result.ok) return result;
-  const links = suggestUnresolvedLinks(points, pool, kept, proposed);
-  const byKey = new Map(points.map((p) => [p.key, p]));
-  const suggested = links.map((link) => ({ point: byKey.get(link.point)!, q: link.q }));
-  return ok({ ...drafts(points, result.value), links: suggested, ...(unlinked ? { unlinked } : {}) });
+  const links = previewLinks(points, pool, kept, check);
+  return ok({ ...drafts(points, result.value), links, unchecked: uncheckedOf(points, check) });
+}
+
+/**
+ * Check the open questions again for the points not checked yet (#1120), then offer the links on the preview as it
+ * stands when the reply returns, for its points only.
+ */
+export async function retryUnresolvedLinks(store: Store, dealId: string, approved?: ApprovedLinks) {
+  const { points, pool } = unresolvedPoints(store.get(), dealId);
+  const kept = keptLinks(points, pool, approved);
+  const check = await checkLinks(store, dealId, points, pool);
+  const links = previewLinks(points, pool, kept, check);
+  const unchecked = uncheckedOf(points, check);
+  return (preview: UnresolvedPreview | null): UnresolvedPreview | null => {
+    if (!preview) return preview;
+    const shown = new Set([...preview.points, ...preview.out].map((point) => point.key));
+    return {
+      ...preview,
+      links: links.filter((link) => shown.has(link.point.key)),
+      unchecked: unchecked.filter((point) => shown.has(point.key)),
+    };
+  };
 }
 
 /** Retry only the failed points, applying the replies to the preview as it stands when they return. */
@@ -164,6 +161,7 @@ export function narrowUnresolved(
     points: preview.points.filter((point) => keys.has(point.key)),
     links: preview.links.filter((link) => keys.has(link.point.key) && !invalidLinks.has(link.point.key)),
     out: preview.out.filter((point) => keys.has(point.key)),
+    unchecked: preview.unchecked.filter((point) => keys.has(point.key)),
   };
 }
 

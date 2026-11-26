@@ -2,7 +2,7 @@
 // Add All Unresolved proposes a link from a point to an open question only where the model says the question already
 // asks for it (#1120). Code keeps the pool, one question per point, and a person's approved link (#88).
 import { expect, it } from 'vitest';
-import { prepareUnresolved } from '../../src/app/addUnresolved';
+import { prepareUnresolved, retryUnresolvedLinks } from '../../src/app/addUnresolved';
 import { ImportQuestions } from '../../src/app/commands/importQuestions';
 import { linkApproval } from '../../src/app/unresolvedLinks';
 import { itemId } from '../../src/domain/checklist';
@@ -50,10 +50,10 @@ it('proposes the links the model pairs with an open question, and nothing else',
     against: ['Please provide the lender file 1', 'Please provide the lender file 2'],
   }]);
   expect(ready.points).toHaveLength(3);
-  expect(ready.unlinked).toBeUndefined();
+  expect(ready.unchecked).toEqual([]);
 });
 
-it('keeps a link a person approved and does not propose its question for another point', async () => {
+it('keeps an approved link, never proposes its question for another point, and asks the model once', async () => {
   const asked: Asked[] = [];
   const env = await fixture(3, 2, async (input) => {
     asked.push(input);
@@ -64,32 +64,59 @@ it('keeps a link a person approved and does not propose its question for another
   const third = first.points[2];
   const approved = new Map([[third.key, linkApproval({ point: third, q: first.links[0].q })]]);
   const again = await preview(env, approved);
-  // file 1 stays with the point it was approved for; the model is shown only the other question, for the other points
-  expect(linksOf(again)).toEqual([
-    ['Permit 1 is in place', 'Please provide the lender file 2'],
-    ['Permit 3 is in place', 'Please provide the lender file 1'],
-  ]);
-  expect(asked.at(-1)!.items).toEqual([1, 2].map((n) => `Permit ${n} is in place The signed permit ${n}`));
-  expect(asked.at(-1)!.against).toEqual(['Please provide the lender file 2']);
+  // file 1 stays with the point it was approved for, and the model is not asked again: nothing it read has changed
+  expect(linksOf(again)).toEqual([['Permit 3 is in place', 'Please provide the lender file 1']]);
+  expect(asked).toHaveLength(1);
 });
 
 it('at 150 points and 2,000 open questions every point is drafted, linked only where the model answered', async () => {
+  const asked: Asked[] = [];
   const env = await fixture(150, 2000, async (input) => {
+    asked.push(input);
     expect(input.against).toHaveLength(2000);
-    const pairs = input.items.slice(0, 100).map((_, a) => ({ a, b: a, inAgainst: true, why: 'same' }));
-    return ok({ pairs, missed: { kind: 'failed' as const, at: Array.from({ length: 50 }, (_, n) => 100 + n) } });
+    const at = input.only ?? input.items.map((_, n) => n);
+    const answered = input.only ? at : at.slice(0, 100);
+    const pairs = answered.map((a) => ({ a, b: a, inAgainst: true, why: 'same' }));
+    return ok({ pairs, ...(input.only ? {} : { missed: { kind: 'failed' as const, at: at.slice(100) } }) });
   });
   const ready = await preview(env);
   expect(ready.points).toHaveLength(150);
   expect(ready.links).toHaveLength(100);
   expect(new Set(ready.links.map((link) => link.q.id)).size).toBe(100);
-  expect(ready.unlinked).toBe('Couldn’t check the open questions for 50 points');
+  expect(ready.unchecked.map((point) => point.what)).toEqual(ready.points.slice(100).map((point) => point.what));
+  // Retry asks about just the points not checked, and adds their links to the preview
+  const update = await retryUnresolvedLinks(env.store, env.dealId);
+  const after = update(ready)!;
+  expect(asked.at(-1)!.only).toEqual(Array.from({ length: 50 }, (_, n) => 100 + n));
+  expect(after.links).toHaveLength(150);
+  expect(after.unchecked).toEqual([]);
+  expect(after.points).toBe(ready.points);
 });
 
-it('a failed call leaves every point drafted with no link', async () => {
-  const env = await fixture(3, 2, async () => fail({ kind: 'unreachable', message: 'down' }));
+it('a failed call leaves every point drafted with no link, unchecked, and opening again asks again', async () => {
+  let calls = 0;
+  const env = await fixture(3, 2, async () => {
+    calls++;
+    return fail({ kind: 'unreachable', message: 'down' });
+  });
   const ready = await preview(env);
   expect(ready.links).toEqual([]);
   expect(ready.points).toHaveLength(3);
-  expect(ready.unlinked).toBe('Couldn’t check the open questions, so no links are suggested');
+  expect(ready.unchecked).toHaveLength(3);
+  await preview(env);
+  expect(calls).toBe(2);
+});
+
+it('two openings at once share one call, and a new open question asks again', async () => {
+  let calls = 0;
+  const env = await fixture(3, 2, async () => {
+    calls++;
+    return ok({ pairs: [] });
+  });
+  await Promise.all([preview(env), preview(env)]);
+  expect(calls).toBe(1);
+  const rows = rowsFrom('Number,Question\n3,Please provide the lender file 3\n');
+  val(await env.store.dispatch(ImportQuestions, { dealId: env.dealId, mode: 'append', rows }));
+  await preview(env);
+  expect(calls).toBe(2);
 });

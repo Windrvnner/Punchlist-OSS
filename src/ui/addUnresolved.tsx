@@ -16,7 +16,7 @@ import {
   pruneUnresolvedChoices, unresolvedChoices,
 } from '../app/addUnresolvedChoices';
 import {
-  narrowUnresolved, prepareUnresolved, retryUnresolved, selectUnresolved, submitUnresolved,
+  narrowUnresolved, prepareUnresolved, retryUnresolved, retryUnresolvedLinks, selectUnresolved, submitUnresolved,
   UNREAD_CHECKLIST as unread, type UnresolvedPreview,
 } from '../app/addUnresolved';
 
@@ -30,6 +30,19 @@ type UnresolvedRowsProps = {
   checkLink: (link: UnresolvedPreview['links'][number], on: boolean) => void;
 };
 const label = (point: Unresolved) => `${point.kind === 'finding' ? 'Finding' : 'Gap'} · ${point.what}`;
+
+/**
+ * The points the open questions could not be checked for yet (#1120), in their own place in the footer beside the
+ * count and the points not drafted, with Retry for just those.
+ */
+function UncheckedLine({ count, after, checking, busy, onRetry }: {
+  count: number; after: boolean; checking: boolean; busy: boolean; onRetry: () => void;
+}) {
+  const points = `${count.toLocaleString('en-US')} point${count === 1 ? '' : 's'}`;
+  return <span id="au-unchecked">{after ? '· ' : ''}{checking ? 'Checking open questions…' : <>
+    {points} not checked against open questions. <button type="button" class="tundo" id="au-retry-links"
+      disabled={busy} onClick={onRetry}>Retry</button></>}</span>;
+}
 
 function UnresolvedRows({ preview, draftPoints, linkedPoints, checkPoint, checkLink }: UnresolvedRowsProps) {
   return <>
@@ -73,8 +86,6 @@ export function AddUnresolvedDialog({ dealId }: { dealId: string }) {
       if (result.ok) {
         setReady(result.value);
         syncChoices(result.value);
-        // the rows open even when the open questions could not be checked for links; the footer says so (#1120)
-        if (result.value.unlinked) setError(result.value.unlinked);
       } else setError(result.error.message);
     });
     return () => wait.abort();
@@ -86,6 +97,14 @@ export function AddUnresolvedDialog({ dealId }: { dealId: string }) {
     const update = await retryUnresolved(store, dealId, ready.out);
     setRedo(false);
     if (update) setReady(update);
+  };
+  const [relink, setRelink] = useState(false);
+  const retryLinks = async () => {
+    if (!ready || relink || busy) return;
+    setRelink(true);
+    const update = await retryUnresolvedLinks(store, dealId, choices.linked);
+    setRelink(false);
+    setReady(update);
   };
   const selected = selectUnresolved(ready, choices.off, choices.linked);
   const { points: kept, links, draftPoints, linkedPoints } = selected;
@@ -128,6 +147,8 @@ export function AddUnresolvedDialog({ dealId }: { dealId: string }) {
       </div>
       {/* an unreadable checklist leaves only Retry, in the line above: no footer with a button that can do nothing */}
       {!(!ready && error === unread) && <div class="xfoot"><span id="au-count" class={error ? 'err' : ''} role={error ? 'alert' : undefined}>{(!ready && error === unread ? '' : error) || (!ready ? (count ? `Phrasing ${plural(count)}` : '') : [kept.length && plural(kept.length), links.length && `${links.length.toLocaleString('en-US')} linked`].filter(Boolean).join(' · '))}</span>
+        {ready && !error && ready.unchecked.length > 0 && <UncheckedLine count={ready.unchecked.length}
+          after={kept.length + links.length > 0} checking={relink} busy={busy} onRetry={() => void retryLinks()} />}
         {/* points with no question, beside the count, where it stays in view however long the list */}
         {ready && !error && ready.out.length > 0 && <span id="au-out">{kept.length || links.length ? '· ' : ''}{redo ? `Drafting ${ready.out.length.toLocaleString('en-US')} more…` : <>{ready.out.length.toLocaleString('en-US')} point{ready.out.length === 1 ? '' : 's'} could not be drafted. <button type="button" class="tundo" id="au-retry-out" disabled={busy} onClick={() => void retryOut()}>Retry</button></>}</span>}<span class="grow" />
         {error && !ready && error !== unread ? <button class="btn sm pri" type="button" id="au-retry" onClick={() => setTries(tries + 1)}>Retry</button>
