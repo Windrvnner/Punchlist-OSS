@@ -23,6 +23,14 @@ describe('a likely duplicate deal', () => {
     expect(t?.deal.counterparty).toBe('Northwind Partners'); expect(t).toMatchObject({ named: true });
     expect(t?.room).toBeUndefined();
   });
+  it('takes a name typed in a different Unicode form or with a hidden character for the same name', () => {
+    const cafe = deal(3, 'Project Café', 'Fabrikam');
+    const list = { deals: { ...deals(), [cafe.id]: cafe } };
+    const typed = likelyTwin(list, { name: 'Project Cafe\u0301', counterparty: 'Fabrikam' });
+    expect(typed?.deal.name).toBe('Project Café');
+    const hidden = likelyTwin(list, { name: 'Project Caf\u200Bé', counterparty: 'Fabrikam' });
+    expect(hidden?.deal.name).toBe('Project Café');
+  });
   it('puts the data room first, and the closest data room among several', () => {
     const d = deals(); const ids = Object.keys(d);
     const t = likelyTwin({ deals: d }, { name: 'Lucerne', counterparty: 'Northwind Partners' }, [room(ids[5], 150), room(ids[7], 190)]);
