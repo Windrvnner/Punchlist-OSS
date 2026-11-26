@@ -391,7 +391,7 @@ export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => 
   // `__addressed` on the window (screens and tests), else none. The real one is a model's judgment.
   suggestQuestion: (i) => gate(opts, 'suggestQuestion', () => {
     const listed = (globalThis as { __addressed?: string[] }).__addressed ?? [];
-    return i.questions.flatMap((q, at) => (listed.includes(q) ? [at] : []));
+    return i.questions.filter((q) => listed.includes(q.text)).map((q) => q.id);
   }),
   // Stand-in for the model's merged response: the first version's sentences, then each of the second's that says something
   // the first does not (fewer than half its telling words already said), so no fact is said twice. The real one rewrites.

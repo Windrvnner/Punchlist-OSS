@@ -72,7 +72,7 @@ import {
 import { docFamilies } from './related';
 import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
-import { AI_DRAFTED, namesOnlyShown, questionsForIds, responseHeader } from './qaRow';
+import { AI_DRAFTED, namesOnlyShown, questionIdsIn, questionsForIds, responseHeader } from './qaRow';
 import type { DealDoc, Looked, Unusable } from './agentKit';
 import {
   RATINGS, riskGroups, keyRisksOf, unratedFindings, type Grouped, type Rating, type RiskGroup,
@@ -390,24 +390,26 @@ const JSON_ONLY = 'Reply with one JSON object and nothing else.';
 /** the words the two answer judgements share: whether an answer addresses a question, and which one (#1120) */
 const answerFromDocs = (answer: string) => `This answer was written from the deal's documents:\n${answer}`;
 const GIVES_WHAT_ASKED = 'does it give what the question asks for?';
-/** the prompt naming open questions A1…An, never by their numbers, for the answer to be matched to one (#1120) */
-function suggestPrompt(answer: string, questions: string[]) {
-  const listed = questions.map((q, k) => `A${k + 1}: ${q.replace(/\s+/g, ' ')}`).join('\n');
+/** the prompt showing open questions by their permanent ids, never their numbers, to match an answer to one (#1120) */
+function suggestPrompt(answer: string, questions: { id: string; text: string }[]) {
+  const listed = questions.map((q) => `${q.id}: ${q.text.replace(/\s+/g, ' ')}`).join('\n');
   return [
-    `These open questions were asked on a project-finance deal:\n${listed}\n`,
+    `These open questions were asked on a project-finance deal, each with its id:\n${listed}\n`,
     `${answerFromDocs(answer)}\n`,
     `Which one of these open questions does the answer address: for which ${GIVES_WHAT_ASKED} Name the one it`
-      + ' addresses most fully, or "none" if it addresses none of them.',
-    'Reply as JSON: {"question": "A2" | "none"}',
+      + ' addresses most fully by its id, or "none" if it addresses none of them.',
+    'Reply as JSON: {"question": "<an id above>" | "none"}',
   ].join('\n');
 }
-/** whether a reply says that no question is addressed */
-const isNoHandle = (named: unknown) => typeof named === 'string' && named.trim().toLowerCase() === 'none';
-/** the place, from 0, of the handle a reply names among `count` shown; null for "none" or a handle not shown */
-function handleAt(named: unknown, count: number): number | null {
-  const n = typeof named === 'string' ? /^A(\d+)$/.exec(named.trim())?.[1] : undefined;
-  return n && +n >= 1 && +n <= count ? +n - 1 : null;
-}
+/** the id a reply names among the ids shown, or null for "none" (the reply was checked by `namesOneShown`) */
+const namedId = (text: string, shown: readonly string[]) =>
+  questionIdsIn(text).find((id) => shown.includes(id)) ?? null;
+/**
+ * Whether a reply to the open-question match can be used: it names an id that was shown and none that was not, or says
+ * "none". Any other reply is a failed one, asked again (#1105).
+ */
+const namesOneShown = (text: string, shown: readonly string[]) =>
+  namesOnlyShown(text, shown) && (namedId(text, shown) !== null || /\bnone\b/i.test(text));
 /** the rules for a draft from earlier responses alone, when no document bears on the question */
 const PRIOR_RULES = 'Answer only from the earlier responses you are given: choose those that answer the question as it is asked. Reply with one JSON object and nothing else. Cite no documents: give "sources": [].';
 /**
@@ -2276,31 +2278,31 @@ export function nodeAi(o: AiOptions) {
       return ok({ verdict, why: (strings(reply!.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 200) });
     },
     /**
-     * Which open question an answer addresses (#1120): the standard model reads the answer and the questions, under
-     * neutral handles, in one call where they fit, else in parts (`inParts`). Every question any part names is kept.
+     * Which open questions an answer addresses (#1120): the standard model reads the answer and the questions, each by
+     * its permanent id, in one call where they fit, else in parts (`inParts`). Every question any part names is kept,
+     * as its id. A reply naming an id it was not shown is a failed reply and is asked again (#1105).
      */
     async suggestQuestion(i) {
       try {
         const model = (await models()).standard;
-        // the reply is one handle however many questions are shown, so only the input limit sizes a part
+        const lines = i.questions.map((q) => `${q.id}: ${q.text}`);
+        // the reply is one id however many questions are shown, so only the input limit sizes a part
         const size = partSize({
-          cap: i.questions.length, out: 1, outLimit: Infinity, in: tokensEach(i.questions), inLimit: inLimit(model),
+          cap: i.questions.length, out: 1, outLimit: Infinity, in: tokensEach(lines), inLimit: inLimit(model),
         });
         const done = await inParts(i.questions, size, async (part) => {
+          const ids = part.map((q) => q.id);
           const prompt = suggestPrompt(i.answer, part);
-          const ask = { kind: 'suggestQuestion', model, system: JSON_ONLY, prompt } as const;
-          const usable = (r: { question?: unknown } | null) =>
-            isNoHandle(r?.question) || handleAt(r?.question, part.length) !== null;
-          // a handle not shown is sent back once; still wrong, the reply failed (decisions: AI and models; #1105)
-          const wrong = 'the reply must name one of the handles shown, or "none"';
-          const reply = await askSentBack(ask, ['question'], usable, wrong);
-          if (!usable(reply)) throw new Error(UNREAD_REPLY);
-          const at = handleAt(reply?.question, part.length);
-          return { got: new Map(at === null ? [] : [[0, at]]) };
+          const unusable = (text: string) => !namesOneShown(text, ids);
+          const reply = await askJson<{ question?: unknown }>(
+            { kind: 'suggestQuestion', model, system: JSON_ONLY, prompt, unusable }, ['question'],
+          );
+          if (!reply) throw new Error(UNREAD_REPLY);
+          const named = namedId(String(reply.question ?? ''), ids);
+          return { got: new Map(named === null ? [] : [[0, named]]) };
         });
-        // each entry is keyed by its part's first place, and holds the named place within the part
-        const named = [...done.got].map(([start, at]) => start + at).sort((a, b) => a - b);
-        // what the parts that were asked named is kept even when a later part could not be asked
+        // what the parts that were asked named is kept even when a later part could not be asked; parts are in order
+        const named = [...done.got].sort(([a], [b]) => a - b).map(([, id]) => id);
         if (named.length || done.stopped === undefined) return ok(named);
         return failure(done.stopped, UNREACHED);
       } catch (e) { return failure(e, UNREACHED); }
