@@ -67,6 +67,8 @@ interface Line { d: string; n: number; t: string; w: string }
 export interface WordIndex {
   /** whether this PC has read the words of this document */
   has(dealId: string, docId: string): boolean;
+  /** whether this PC's index file for the deal, of the current version, exists */
+  built(dealId: string): boolean;
   /** keep a document's words; said again for a document already kept, it replaces them */
   add(dealId: string, docId: string, words: DocWords): void;
   /**
@@ -145,6 +147,7 @@ export function wordIndex(local: Folder): WordIndex {
   };
   return {
     has: (dealId, docId) => of(dealId).num.has(docId),
+    built: (dealId) => local.list().includes(file(dealId)),
     add(dealId, docId, words) {
       const l: Line = { d: docId, n: words.length, t: words.title.join(' '), w: [...words.counts].map(([w, n]) => `${w}:${n}`).join(' ') };
       local.append(file(dealId), `${JSON.stringify(l)}\n`); put(of(dealId), l);

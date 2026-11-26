@@ -471,6 +471,12 @@ export function nodeDocuments(o: DocumentsOptions) {
     if (!o.convert?.sheets) throw new Error('no converter');
     return o.convert.sheets(at, asShown);
   }
+  /**
+   * Whether a read gives a document words its record lacks: it had none yet, or only the empty list an earlier build
+   * kept for a file it could not read (#1023). A successful read replaces that record for every PC.
+   */
+  const gainsWords = (had: string[] | undefined, read: string[] | undefined) =>
+    read !== undefined && (had === undefined || (!had.length && read.length > 0));
   /** one sheet of a spreadsheet: its name, and each of its cells handed over as it is read */
   interface SheetSource { name: string; each(onCell: (cell: string) => void): Promise<void> }
   const gridCells = (sheet: Sheet): SheetSource => ({
@@ -501,13 +507,10 @@ export function nodeDocuments(o: DocumentsOptions) {
         tally.add(text);
         countInto(used, text);
       };
-      const takeCell = (cell: string) => {
-        if (/\p{L}/u.test(cell)) take(cell);        // a cell with no letters is a number or a date
-      };
       const sheets = await readSheets(at);
       // a name nobody gave a sheet says nothing
       for (const sheet of sheets) if (!/^Sheet\d+$/.test(sheet.name)) take(sheet.name);
-      for (const sheet of sheets) await sheet.each(takeCell);
+      for (const sheet of sheets) await sheet.each(take);        // numbers and dates are content too (#1023)
       // sheet names come first, so they make its title
       if (dealId && docId) o.index?.add(dealId, docId, tally.words());
       return mostUsed(used);
@@ -706,7 +709,7 @@ export function nodeDocuments(o: DocumentsOptions) {
             workMs += Date.now() - t0;
             if (asPages) {
               // said once per place: a copy of a file already known is a second place for the same document, not a new one, and is not said again each run
-              if (!had || had.pages !== pages || had.size !== bytesRead || (had.words === undefined && words !== undefined) || (had.cover === undefined && cover !== undefined) || !seenHereAt(dealId, docId, folder.path, f.rel)) { told.add(folder.path); say(dealId, { docId, hash, name, folder: folder.path, rel: f.rel, size: bytesRead, ...(pages !== undefined ? { pages } : {}), ...(via !== undefined ? { via } : {}), ...(tracked !== undefined ? { tracked } : {}), ...(words !== undefined ? { words } : {}), ...(cover !== undefined ? { cover } : {}) }); }
+              if (!had || had.pages !== pages || had.size !== bytesRead || gainsWords(had.words, words) || (had.cover === undefined && cover !== undefined) || !seenHereAt(dealId, docId, folder.path, f.rel)) { told.add(folder.path); say(dealId, { docId, hash, name, folder: folder.path, rel: f.rel, size: bytesRead, ...(pages !== undefined ? { pages } : {}), ...(via !== undefined ? { via } : {}), ...(tracked !== undefined ? { tracked } : {}), ...(words !== undefined ? { words } : {}), ...(cover !== undefined ? { cover } : {}) }); }
               indexed++; if (words !== undefined && !words.length) skipped.wordless.push(f.rel);
             }
           }
@@ -837,6 +840,11 @@ export function nodeDocuments(o: DocumentsOptions) {
     } catch { /* A refused note can wait for the next look; other folders may need indexing now. */ }
   }
   /**
+   * Whether this PC's word index has been started for the deal under the current version. Without it (an index file of
+   * an older version, or none) an unchanged folder is read again, which writes it (#1023).
+   */
+  const indexBuilt = (dealId: string) => !o.index || o.index.built(dealId);
+  /**
    * Has anything changed in the folders this PC has indexed for a deal since a run last read them? Each folder is
    * listed (names, sizes and dates; nothing is opened) and the listing compared with the last run's. A folder that changed,
    * or whose last run did not finish, is indexed again, and the run decides what is new, changed or gone, as it always does.
@@ -857,7 +865,7 @@ export function nodeDocuments(o: DocumentsOptions) {
       // when the folders this PC may not open are not the ones it last said (it lost access to one, or one was renamed)
       const mine = closed.map((d) => path.relative(at, d).split(path.sep).join('/')); const had = both(dealId).shuts.get(p)?.get(o.installId);
       const opened = openedHere(dealId, p, at, mine); const vouched = had?.opened ?? [];
-      if (f.finished && printed[dealId]?.[p] === listingPrint(files) && sameList([...mine].sort(), [...(had?.shut ?? [])].sort()) && sameList(opened, [...vouched].sort())) {
+      if (f.finished && indexBuilt(dealId) && printed[dealId]?.[p] === listingPrint(files) && sameList([...mine].sort(), [...(had?.shut ?? [])].sort()) && sameList(opened, [...vouched].sort())) {
         noteUnchangedRead(dealId, p, mine, opened);
         continue;
       }
