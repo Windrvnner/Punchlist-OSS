@@ -353,6 +353,49 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
     const e = await u.ai.phrase!({ dealId: 'd', items: points(250) });
     expect(e.ok).toBe(false); expect(u.calls.filter(isPhrase).length).toBe(3);      // asked twice more, quietly (Retries), then the run fails
   });
+  describe('sized to the model\'s limits, with the shared quiet retry (#1109)', () => {
+    const stage = (reply: (c: Call, k: number) => unknown) => {
+      let k = 0;
+      return setup((c) => (isPhrase(c) ? reply(c, k++) : {}), {}, { shared: new Mem(), installId: 'pc' });
+    };
+    const want = (n: number) => points(n).map((p, k) => `Q for [${p.kind}] Point ${k + 1}`);
+    it('a point never phrased among 2,000 is offered for Retry, and every other point is phrased', async () => {
+      const s = stage((c) => ({ items: answer(c).items.filter((x) => !x.text.endsWith(' Point 777')) }));
+      const out = val(await s.ai.phrase!({ dealId: 'd', items: points(2000) }));
+      expect(out).toEqual(want(2000).map((q, k) => (k === 776 ? null : q)));
+      // Retry asks for that point alone, and it fails again, saying why
+      const before = s.calls.filter(isPhrase).length;
+      const again = await s.ai.phrase!({ dealId: 'd', items: [points(2000)[776]] });
+      const asked = s.calls.filter(isPhrase).slice(before).map(lines);
+      expect(asked).toEqual([['[gap] Point 777 — needed: The signed copy 777']]);
+      expect(again.ok).toBe(false);
+    });
+    it('30 empty replies in a row, then good ones, still phrase every point', async () => {
+      const s = stage((c, k) => (k < 30 ? { items: [] } : answer(c)));
+      expect(val(await s.ai.phrase!({ dealId: 'd', items: points(2000) }))).toEqual(want(2000));
+    });
+    it('a part whose every reply is empty is halved down to single points: at most 2 x 64 - 1 asks', async () => {
+      const s = stage(() => ({ items: [] }));
+      const r = await s.ai.phrase!({ dealId: 'd', items: points(64) });
+      const asked = s.calls.filter(isPhrase).map((c) => lines(c).length);
+      expect(asked[0]).toBe(64);
+      expect(asked.length).toBeLessThanOrEqual(127);
+      expect(asked.filter((n) => n === 1).length).toBe(64);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error.message).toBe(`${SERVICE} left a point without a question, so nothing was added`);
+    });
+    it('a service that cannot be reached fails the run, and what came back is kept for asking again', async () => {
+      const down = () => { throw Object.assign(new Error('offline'), { code: 'unreachable' }); };
+      let up = false;
+      const s = stage((c, k) => (up || k === 0 ? answer(c) : down()));
+      expect((await s.ai.phrase!({ dealId: 'd', items: points(240) })).ok).toBe(false);
+      expect(s.calls.filter(isPhrase).length).toBe(2);
+      up = true;
+      expect(val(await s.ai.phrase!({ dealId: 'd', items: points(240) }))).toEqual(want(240));
+      const again = s.calls.filter(isPhrase).slice(2).flatMap(lines).map((l) => Number(/Point (\d+)/.exec(l)![1]));
+      expect(again.sort((a, b) => a - b)).toEqual(range(121, 241));
+    });
+  });
 });
 
 describe('the duplicate check on a list of deal size', () => {
