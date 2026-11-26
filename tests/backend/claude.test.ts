@@ -39,9 +39,25 @@ describe('what each model allows (#1079)', () => {
     const api = fakeApi({ limits: { 'claude-haiku-5-5': { max_tokens: 4_096, max_input_tokens: 200_000 } } });
     const s = svc(api);
     await s.models();
-    expect([s.outputLimit!('fast'), s.inputLimit!('fast')]).toEqual([4_096, 180_000]);
     await s.complete({ model: 'fast', prompt: 'q' });
     expect(api.sent[0].max_tokens).toBe(4_096);
+    expect([s.outputLimit!('fast'), s.inputLimit!('fast')]).toEqual([4_096, 180_000]);
+  });
+  it('calls made together all wait for the model\'s lookup', async () => {
+    const api = fakeApi({ limits: { 'claude-haiku-5-5': { max_tokens: 4_096, max_input_tokens: 200_000 } } });
+    const s = svc(api);
+    await s.models();
+    await Promise.all([1, 2, 3].map(() => s.complete({ model: 'fast', prompt: 'q' })));
+    expect(api.sent.map((b) => b.max_tokens)).toEqual([4_096, 4_096, 4_096]);
+  });
+  it('a lookup that fails is asked again at the next call', async () => {
+    const limits = { 'claude-haiku-5-5': { max_tokens: 4_096, max_input_tokens: 200_000 } };
+    const api = fakeApi({ limits, limitsDown: 1 });
+    const s = svc(api);
+    await s.models();
+    await s.complete({ model: 'fast', prompt: 'q' });
+    await s.complete({ model: 'fast', prompt: 'q' });
+    expect(api.sent.map((b) => b.max_tokens)).toEqual([32_000, 4_096]);
   });
   it('a model allowing more than the control file still gets the control file\'s limit', async () => {
     const api = fakeApi({ limits: { 'claude-haiku-5-5': { max_tokens: 128_000, max_input_tokens: 1_000_000 } } });

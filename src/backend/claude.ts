@@ -164,7 +164,13 @@ export function claudeService(o: ClaudeOptions): ModelService & { use: ClaudeUse
     }
   }
   const send = (input: Anthropic.MessageCreateParamsNonStreaming) =>
-    o.transport ? o.transport.messages(input) : call((client) => client.messages.create(input));
+    o.transport ? o.transport.messages(input) : sendToApi(input);
+  /** a call on the Anthropic API: it waits for its model's lookup, then asks for what the model allows (#1079) */
+  async function sendToApi(input: Anthropic.MessageCreateParamsNonStreaming): Promise<Anthropic.Message> {
+    const lookup = lookupFor(input.model);
+    if (lookup) await lookup;
+    return call((client) => client.messages.create({ ...input, max_tokens: limits(input.model).output }));
+  }
   const documents = (files?: string[]) => o.transport?.parts(files)
     ?? (files ?? []).map((id) => ({
       type: 'document', source: { type: 'file', file_id: id }, ...(names.has(id) ? { title: names.get(id) } : {}),
@@ -181,8 +187,7 @@ export function claudeService(o: ClaudeOptions): ModelService & { use: ClaudeUse
   // room for a reply, and for a request (control: limits.outputTokens, limits.inputTokens); a reply cut off at the one throws with
   // `code: 'cutoff'`, a request refused as longer than the other with `code: 'toolong'`, so the backend asks about less (limits.ts)
   // what each model allows, as the Models API reports it (`max_tokens`, `max_input_tokens`), within the control file's
-  // values: asked when the models on offer are (`models`, which the app asks before any call, as North does); a model
-  // not asked about, or not reported, gets the control file's (#1079)
+  // values, as North takes it from its model list; a model not reported (404) gets the control file's (#1079)
   const sized = new Map<string, ReturnType<typeof limitsOf>>();
   const limits = (model: string) => sized.get(model) ?? limitsOf();
   const failed = (e: unknown, upload = false): never => {
@@ -193,32 +198,35 @@ export function claudeService(o: ClaudeOptions): ModelService & { use: ClaudeUse
     if (e instanceof Anthropic.APIError) throw Object.assign(new Error(`${SERVICE} said ${e.status ?? ''}: ${e.message}`), { status: e.status });
     throw e;
   };
-  // models whose limits were not asked when the models on offer were, because nobody was signed in yet: asked at
-  // their first call instead, so that the start screen never waits for a sign-in
-  const unsized = new Set<string>();
-  /**
-   * asks the Models API once what this model allows; a model it does not know (404) keeps the control file's, and any
-   * other failure is left for the call itself to meet, and asked again next time
-   */
-  async function sizeModel(model: string): Promise<void> {
-    if (o.transport || sized.has(model)) return;
-    if (typeof o.key !== 'string' && 'signedIn' in o.key && !(o.key as TokenHolder).signedIn()) {
-      unsized.add(model);
-      return;
-    }
-    unsized.delete(model);
+  // each model's lookup, asked or being asked: a call waits for its model's, so that calls made together all wait
+  const lookups = new Map<string, Promise<void>>();
+  // models to ask about at their next call: nobody was signed in when the models on offer were asked, or the lookup
+  // failed (not a 404), so that a passing failure is not kept until a restart
+  const askAgain = new Set<string>();
+  /** starts this model's lookup, unless one is already asked or being asked */
+  function sizeModel(model: string): Promise<void> {
+    const known = lookups.get(model);
+    if (known) return known;
+    askAgain.delete(model);
+    const lookup = askSize(model);
+    lookups.set(model, lookup);
+    return lookup;
+  }
+  /** asks the Models API what this model allows; never throws, since the call itself meets any failure */
+  async function askSize(model: string): Promise<void> {
     try {
       const info = await call((c) => c.models.retrieve(model));
       sized.set(model, limitsOf({ maxTokens: info.max_tokens, contextLength: info.max_input_tokens }));
     } catch (e) {
-      if (e instanceof Anthropic.NotFoundError) sized.set(model, limitsOf());
+      if (e instanceof Anthropic.NotFoundError) return;
+      lookups.delete(model);
+      askAgain.add(model);
     }
   }
-  /** the most tokens a reply of this model may hold, asking the Models API first if it could not be asked before */
-  async function replyLimit(model: string): Promise<number> {
-    if (unsized.has(model)) await sizeModel(model);
-    return limits(model).output;
-  }
+  /** whether a lookup can start now without waiting for someone to sign in (which would ask them to) */
+  const canAsk = () => typeof o.key === 'string' || !('signedIn' in o.key) || (o.key as TokenHolder).signedIn();
+  /** the lookup a call of this model waits for, if any: one under way, or one to ask again */
+  const lookupFor = (model: string) => lookups.get(model) ?? (askAgain.has(model) ? sizeModel(model) : undefined);
   return {
     use,
     // listing one model needs the key and runs nothing
@@ -233,7 +241,12 @@ export function claudeService(o: ClaudeOptions): ModelService & { use: ClaudeUse
     async whoami() { if (!o.who) throw new Error('the Anthropic API does not say who is signed in'); return { name: o.who }; },
     async models() {
       const ids = o.routing ? [tiers.fast, tiers.standard, tiers.thorough] : [tiers.fast];
-      await Promise.all(ids.map(sizeModel));
+      // asked without waiting, so that the start screen never waits on the lookup
+      for (const id of new Set(ids)) {
+        if (o.transport) continue;
+        if (canAsk()) void sizeModel(id);
+        else askAgain.add(id);
+      }
       const models = [...new Set(ids)].map((id) => ({ id, name: NAMES[id] ?? id }));
       return o.routing ? { models, default: tiers.standard, ...tiers } : { models, default: tiers.fast, fast: tiers.fast, standard: tiers.fast, thorough: tiers.fast };
     },
@@ -241,11 +254,10 @@ export function claudeService(o: ClaudeOptions): ModelService & { use: ClaudeUse
       if (o.maxCalls !== undefined && use.calls >= o.maxCalls) throw Object.assign(new Error(`stopped at the limit of ${o.maxCalls} calls`), { code: 'maxcalls' });   // a guard on spend, never asked again
       const model = pick(input.model); use.calls++; use.byModel[model] = (use.byModel[model] ?? 0) + 1;
       const docs = documents(input.files);
-      const maxTokens = await replyLimit(model);
       let r: Anthropic.Message;
       try {
         r = await send({
-          model, max_tokens: maxTokens, ...(input.system ? { system: input.system } : {}),
+          model, max_tokens: limits(model).output, ...(input.system ? { system: input.system } : {}),
           messages: [{ role: 'user', content: [...docs, { type: 'text', text: input.prompt }] }],
         });
       } catch (e) { return failed(e); }
@@ -254,7 +266,9 @@ export function claudeService(o: ClaudeOptions): ModelService & { use: ClaudeUse
       use.log.push({ ask: input.prompt.split('\n').find((l) => /\?|Reply as JSON/.test(l))?.slice(0, 160) ?? input.prompt.slice(0, 160), files: (input.files ?? []).map((id) => names.get(id) ?? id), reply: text.slice(0, 1500) });
       if (use.log.length > 200) use.log.shift();
       if (r.stop_reason === 'refusal') throw new Error(`${SERVICE} declined to answer this`);
-      if (r.stop_reason === 'max_tokens') throw cutOff(`${SERVICE}'s reply was cut off at ${maxTokens} tokens`, text);
+      if (r.stop_reason === 'max_tokens') {
+        throw cutOff(`${SERVICE}'s reply was cut off at ${limits(model).output} tokens`, text);
+      }
       return text;
     },
     // The Anthropic API keeps no conversation, so this connector keeps each one itself, in memory, and resends it with
@@ -267,7 +281,6 @@ export function claudeService(o: ClaudeOptions): ModelService & { use: ClaudeUse
       if (!c || !id) { id = `talk_${++talkN}_${Date.now().toString(36)}`; c = { system: input.system, messages: [] }; talks.set(id, c); }
       const model = pick(input.model); use.calls++; use.byModel[model] = (use.byModel[model] ?? 0) + 1;
       const docs = documents(input.files);
-      const maxTokens = await replyLimit(model);
       // every tool the model called on the turn before is answered first, as the API requires: with its result, or pointing to
       // the message, where the chat sends results that way (hybrid)
       const before = c.messages.at(-1); const pending = before && Array.isArray(before.content) ? before.content.flatMap((b) => (b.type === 'tool_use' ? [b.id] : [])) : [];
@@ -277,7 +290,7 @@ export function claudeService(o: ClaudeOptions): ModelService & { use: ClaudeUse
       let r: Anthropic.Message;
       try {
         r = await send({
-          model, max_tokens: maxTokens, ...(o.transport ? {} : { cache_control: { type: 'ephemeral' } }),
+          model, max_tokens: limits(model).output, ...(o.transport ? {} : { cache_control: { type: 'ephemeral' } }),
           ...(c.system ? { system: c.system } : {}), messages,
           ...(tools ? { tools, tool_choice: { type: 'any' } } : {}),
         });
@@ -286,7 +299,9 @@ export function claudeService(o: ClaudeOptions): ModelService & { use: ClaudeUse
       use.input += r.usage.input_tokens + read + wrote; use.output += r.usage.output_tokens;
       const text = r.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('');
       if (r.stop_reason === 'refusal') throw new Error(`${SERVICE} declined to answer this`);
-      if (r.stop_reason === 'max_tokens') throw cutOff(`${SERVICE}'s reply was cut off at ${maxTokens} tokens`, text);
+      if (r.stop_reason === 'max_tokens') {
+        throw cutOff(`${SERVICE}'s reply was cut off at ${limits(model).output} tokens`, text);
+      }
       const calls = r.content.flatMap((b) => (b.type === 'tool_use' ? [{ id: b.id, name: b.name, args: (b.input && typeof b.input === 'object' ? b.input : {}) as Record<string, unknown> }] : []));
       const kept: Anthropic.ContentBlockParam[] = [...(text ? [{ type: 'text' as const, text }] : []), ...calls.map((x): Anthropic.ToolUseBlockParam => ({ type: 'tool_use', id: x.id, name: x.name, input: x.args }))];
       c.messages = [...messages, { role: 'assistant', content: kept.length ? kept : '(no reply)' }];   // kept only once the turn is whole; an empty turn is refused by the API
