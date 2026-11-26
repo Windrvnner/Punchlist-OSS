@@ -15,6 +15,11 @@ export type UnresolvedPreview = SelectedUnresolved & { out: Unresolved[] };
 type Changed = { kind: 'changed'; count: number; keys: ReadonlySet<string>; invalidLinks: ReadonlySet<string> };
 export const UNREAD_CHECKLIST = 'Couldn’t load the checklist';
 
+/** The preview, for a deal: from the Checklist menu, the slash command, or the model's offer (#2, #1054). */
+export function openAddUnresolved(store: Store, dealId: string) {
+  store.ui({ dialog: { kind: 'addUnresolved', dealId } });
+}
+
 type Phrase = NonNullable<AiService['phrase']>;
 type PointInput = Parameters<Phrase>[0]['items'][number];
 type Phrasing = { text: Map<string, string>; run?: ReturnType<Phrase> };

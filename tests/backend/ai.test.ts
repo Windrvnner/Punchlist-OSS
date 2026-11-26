@@ -606,6 +606,21 @@ describe('a kept conversation', () => {
     expect(told).toContain('The catch-up on the open findings:\nLock-up first.');
   });
 
+  const modes = ['inline', 'hybrid', 'native'] as const;
+  it.each(modes)('%s: an offer the answer makes is passed on as given (#1054)', async (toolCalls) => {
+    const offer = { action: 'open page', deal: 'Kestrel', page: 'qa' };
+    const offering = () => ({ text: 'Opening it.', sources: [], offer });
+    const s = setup(reader, undefined, { talks: true, turn: offering, toolCalls });
+    const seen = spied(s);
+    const r = val(await s.ai.answer(ask('Take me to the Kestrel Q&A')));
+    expect(r.text).toBe('Opening it.'); expect(r.offer).toEqual(offer);
+    if (toolCalls === 'inline') expect(seen[0].system).toContain('"offer": {"action": "new deal" | "open page"');
+    else expect(seen[0].tools!.find((t) => t.name === 'answer')!.parameters.properties).toHaveProperty('offer');
+    const plain = () => ({ text: 'It is 1.25x.', sources: [] });
+    const none = setup(reader, undefined, { talks: true, turn: plain, toolCalls });
+    expect(val(await none.ai.answer(ask('What is the lock-up?')))).not.toHaveProperty('offer');
+  });
+
   it('native: a result goes back as its call\'s result, and the next question answers the last call first; a model that refuses tool results steps down to hybrid in the same conversation', async () => {
     const s = setup(reader, undefined, { talks: true, turn: twoTurns, toolCalls: 'native' }); const seen = spied(s);
     const one = val(await s.ai.answer(ask('What is the lock-up?')));
@@ -1322,7 +1337,9 @@ describe('the first pass', () => {
     const s = setup(() => 'Here you go: text = It is 1.25x [1], source D1 page 14', undefined, { fix: () => good });
     expect(val(await s.ai.answer(ask('What is the lock-up ratio?', { model: 'fast' }))).sources).toEqual([{ doc: 'Credit Agreement.pdf', loc: 'p. 14', docId: FA.docId }]);
     expect(s.calls.length).toBe(1); expect(fixesOf(s, 'text').map((c) => [c.model, c.files.length])).toEqual([['fast', 0], ['fast', 0]]);                     // the search helper's reading and the main session's turn: each by the same model, with no documents: a small call
-    expect(fixesOf(s, 'text')[1].prompt).toContain('in this shape: {"tool": …} or {"text": "…", "sources": […]}'); expect(fixesOf(s, 'text')[1].prompt).toContain('Here you go: text = It is 1.25x [1], source D1 page 14');
+    const shape = '{"tool": …} or {"text": "…", "sources": […], "offer": {…}}';
+    expect(fixesOf(s, 'text')[1].prompt).toContain(`in this shape: ${shape}`);
+    expect(fixesOf(s, 'text')[1].prompt).toContain('Here you go: text = It is 1.25x [1], source D1 page 14');
     // it is not asked to fix a reply that could be read, however loosely it was written
     const loose = setup(() => "```json\n{'text': 'It is 1.25x. [1]', 'sources': [{'doc': '[d1]', 'page': 'p. 14',},],}\n```"); expect(val(await loose.ai.answer(ask('What is the lock-up ratio?'))).sources.length).toBe(1); expect(fixesOf(loose, 'text').length).toBe(0);
     // the fix fails too: for a person's own choice of model that is the failure; for the backend's it is one failed run of two

@@ -6,7 +6,8 @@ import { MemoryLocal } from '../../src/adapters/local';
 import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
 import { mockAi, mockDocuments, mockSession, mockFirstPass, type MockOptions } from '../../src/adapters/mocks';
 import { CreateDeal, EditDeal, DeleteDeal, withProject, dealNameRoom } from '../../src/app/commands/deals';
-import { navIntent } from '../../src/app/conversations';
+import { SetDealMember } from '../../src/app/commands/members';
+import { checkedOffer } from '../../src/app/answerOffer';
 import { nameDir } from '../../src/ui/hooks';
 import { CreateQuestion, DeleteQuestion, RestoreQuestion, EditQuestionField, SetResponse, SetQuestionStatus } from '../../src/app/commands/questions';
 import { CreateFinding, EditFinding, ReviewFinding, DeleteFinding, RestoreFinding, RestoreFindingSnapshot, ApplyReassessment } from '../../src/app/commands/findings';
@@ -23,6 +24,7 @@ import { prepareImport, suggestMapping } from '../../src/domain/importExport';
 import { toParagraphs, withoutMarkers, splitCited } from '../../src/domain/cite';
 
 const COMMANDS = [RestoreQuestionSnapshot, SetQuestionStatus, ApplyReassessment, CreateDeal, EditDeal, CreateQuestion, DeleteQuestion, RestoreQuestion, EditQuestionField, SetResponse, CreateFinding, EditFinding, ReviewFinding, DeleteFinding, RestoreFinding, RestoreFindingSnapshot, ImportQuestions, RevertImport, RecoverDrafts];
+COMMANDS.push(SetDealMember);   // the offered-page test takes a deal off the person's list
 for (const c of COMMANDS) registry.set(c.name, c);
 let t = 0; const clock = { now: () => new Date(Date.UTC(2026, 10, 9, 16, 0, 0, t++)).toISOString() };
 let seq = 0; const ids = { next: (p: string) => `${p}_01HYYYYYYYYYYYYYYYV${String(seq++).padStart(7, '0')}` };
@@ -86,53 +88,50 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
     expect(full.ok).toBe(true);
   });
 
-  it('a "Project-…" or "Project: …" name is found by "go to" and runs the way its words do', async () => {
-    const m = make();
-    const a = await deal(m, 'Project-Lucerne Solar');
-    expect(navIntent(m.store, 'go to Lucerne Solar findings')).toBe(true);
-    expect(location.hash).toBe(`#${pageHash('findings', a)}`);
+  it('a name after "Project: " reads in its own direction', () => {
     expect(nameDir('Project: \u05e9\u05de\u05e9')).toBe('rtl');             // Hebrew after "Project: "
     expect(nameDir('Projector \u05e9\u05de\u05e9')).toBe('auto');           // another word that starts with the letters
     expect(nameDir('Project Lucerne \u05e9\u05de\u05e9')).toBe('auto');     // a Hebrew word later on doesn't decide it
   });
 
-  it('routes explicit navigation for Unicode and hyphenated deal names (#500)', async () => {
+  it('an offered page opens the deal of exactly that name, nothing folded or stripped (#1054, #1115)', async () => {
     const m = make();
     const hyphenated = await deal(m, 'Harbor-Refinance');
     const spaced = await deal(m, 'Harbor Refinance');
-    const accented = await deal(m, 'Énergie-Refinance');
-    const suffix = await deal(m, 'Harbor Overview');
     const base = await deal(m, 'Harbor');
-    await deal(m, "Harbor's");
+    const possessive = await deal(m, "Harbor's");
     const article = await deal(m, 'The');
+    const fund = await deal(m, 'Fund IV');
+    await deal(m, '(Kestrel)');
+    const offered = (name: string) =>
+      checkedOffer(m.store.get(), { kind: 'all' }, { action: 'open page', deal: name, page: 'qa' });
     for (const [name, id] of [
-      ['Harbor-Refinance', hyphenated],
+      ['Project Harbor-Refinance', hyphenated],
       ['Project Harbor Refinance', spaced],
-      ['Project: Énergie-Refinance', accented],
-      ['E\u0301nergie-Refinance\n', accented],
-      ['Harbor Overview', suffix],
-      ['Harbor’s', base],
-      ['The', article],
-    ]) {
-      expect(navIntent(m.store, `Open ${name} Q&A`)).toBe(true);
-      expect(location.hash).toBe(`#${pageHash('qa', id)}`);
+      ['Project Harbor', base],
+      ["Project Harbor's", possessive],
+      ['Project The', article],
+      ['Project Fund IV', fund],
+    ]) expect(offered(name)).toEqual({ kind: 'page', dealId: id, page: 'qa' });
+    const notNames = ['Harbor', 'project harbor', 'Project  Harbor', 'Project Harbor\n', 'Project Kestrel', 'Unknown'];
+    for (const name of notNames) {
+      expect(offered(name)).toBeUndefined();
     }
-    expect(navIntent(m.store, 'Open Unknown-Deal Q&A')).toBe(false);
-    expect(navIntent(m.store, 'What is in Harbor-Refinance Q&A?')).toBe(false);
   });
 
-  it('a typed deal name opens the deal of that exact name, in any case, with or without "Project"', async () => {
+  it('an offered page names one of the person\'s own deals, or none (#1054)', async () => {
     const m = make();
-    const fund = await deal(m, 'Fund IV');
-    const plus = await deal(m, 'C++');
-    await deal(m, '(Kestrel)');
-    for (const [name, id] of [['fund iv', fund], ['Project Fund IV', fund], ['C++', plus]]) {
-      expect(navIntent(m.store, `Open ${name} Q&A`)).toBe(true);
-      expect(location.hash).toBe(`#${pageHash('qa', id)}`);
+    await deal(m, 'Lumen');
+    for (const counterparty of ['Wingtip', 'Halyard']) {
+      await m.store.dispatch(CreateDeal, { name: 'Southridge', counterparty, folders: [] });
     }
-    // the name without its punctuation is not the name
-    expect(navIntent(m.store, 'Open Kestrel Q&A')).toBe(false);
-    expect(navIntent(m.store, 'Open C Q&A')).toBe(false);
+    const left = await deal(m, 'Quarry');
+    await m.store.dispatch(SetDealMember, { dealId: left, on: false });
+    const offered = (name: string) =>
+      checkedOffer(m.store.get(), { kind: 'all' }, { action: 'open page', deal: name, page: 'qa' });
+    expect(offered('Project Lumen')).toMatchObject({ kind: 'page' });
+    expect(offered('Project Southridge')).toBeUndefined();   // two deals of that name: the name alone can't say which
+    expect(offered('Project Quarry')).toBeUndefined();       // a team deal not in the person's list
   });
 
   it('Undo brings back a capitalized "Project"; an accent or hidden character is not the word', async () => {
