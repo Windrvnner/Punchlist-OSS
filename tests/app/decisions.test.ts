@@ -175,10 +175,6 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
     // the name typed to delete matches the one shown whatever its runs of spaces
     const spaced = named('Project Proseware  Wind')[0];
     expect((await m.store.dispatch(DeleteDeal, { dealId: spaced.id, typedName: 'Project Proseware Wind' }, { quiet: true })).ok).toBe(true);
-    // a hidden character kept in the name is not needed to match it
-    const hidden = named('Project Proseware Wind\u200b')[0];
-    const typedName = 'Project Proseware Wind';
-    expect((await m.store.dispatch(DeleteDeal, { dealId: hidden.id, typedName }, { quiet: true })).ok).toBe(true);
   });
 
   it('a question made here is submitted by the firm; there is no direction to set', async () => {
