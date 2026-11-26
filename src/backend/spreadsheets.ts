@@ -6,8 +6,7 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { pdfLines, type Converter } from './convert';
 import type { SpreadsheetCodec } from '../ports';
 import { ok, fail } from '../domain/result';
-import { exportDocument, tableFrom } from '../domain/sheets';
-import { isWorkbook, readCsv, decodeText, encodeLike } from '../adapters/spreadsheet';
+import { decodeText, encodeLike, exportDocument, isWorkbook, readCsv, tableFrom } from '../domain/sheets';
 import type { SheetEdit } from '../domain/sheets';
 import { editCsv } from '../domain/csvEdit';
 import { editXlsx } from './xlsxEdit';

@@ -10,8 +10,9 @@ import path from 'node:path';
 import type { Converter } from './convert';
 import type { QaLogFiles } from '../ports';
 import { ok, fail } from '../domain/result';
-import { parseCsv, writtenAsMeant, withSteps, tableFrom, type Sheet, type SheetEdit } from '../domain/sheets';
-import { decodeText } from '../adapters/spreadsheet';
+import {
+  decodeText, parseCsv, writtenAsMeant, withSteps, tableFrom, type Sheet, type SheetEdit,
+} from '../domain/sheets';
 import { editLog, libreOfficeSheets } from './spreadsheets';
 import { csvSafe } from '../domain/csvEdit';
 import { saveLog, createLog, sha256, restoreAside, keptEdits, settleKept, type KeptEdit } from './qaLogFolder';

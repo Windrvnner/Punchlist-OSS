@@ -5,6 +5,7 @@
  */
 import { findHeaderRow, suggestMapping } from './importExport';
 import type { SheetPreview } from '../ports';
+import { fail, ok } from './result';
 
 export interface Sheet { name: string; grid: string[][] }
 
@@ -150,3 +151,107 @@ export function writtenAsMeant(before: Sheet[], after: Sheet[], sheet: string, s
 
 /** a path or file name as Windows compares it: case and slash direction don't matter, nor a separator at the end */
 export const windowsPath = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLocaleLowerCase('en-US');
+
+type Encoding = 'utf-8-bom' | 'utf-16le-bom' | 'utf-16be-bom' | 'utf-16le' | 'utf-16be' | 'utf-8' | 'windows-1252'
+  | 'windows-1252-bom';
+
+/** Whether the bytes are valid UTF-8 */
+function isUtf8(bytes: Uint8Array): boolean {
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** UTF-16 without a byte-order mark, recognized by its zero bytes in the first 4,096 bytes */
+function unmarkedUtf16(bytes: Uint8Array): Encoding | null {
+  const n = Math.min(bytes.length, 4096);
+  let evenZero = 0;
+  let oddZero = 0;
+  for (let i = 0; i < n; i++) {
+    if (bytes[i] !== 0) continue;
+    if (i % 2) oddZero++;
+    else evenZero++;
+  }
+  if (n >= 4 && oddZero > n / 8 && evenZero < n / 64) return 'utf-16le';
+  if (n >= 4 && evenZero > n / 8 && oddZero < n / 64) return 'utf-16be';
+  return null;
+}
+
+/**
+ * CSV files carry no reliable label for their encoding. Read, in order: a byte-order mark (UTF-8, UTF-16 either way);
+ * UTF-16 without a mark, recognized by its zero bytes; valid UTF-8; and otherwise Windows-1252, which is what Excel on
+ * Windows writes for "CSV" and in which every byte is a character. Text is never silently decoded as the wrong thing.
+ */
+function encodingOf(bytes: Uint8Array): Encoding {
+  // a UTF-8 mark in front of Windows-1252 text, as some tools write it
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return isUtf8(bytes.subarray(3)) ? 'utf-8-bom' : 'windows-1252-bom';
+  }
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return 'utf-16le-bom';
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return 'utf-16be-bom';
+  const utf16 = unmarkedUtf16(bytes);
+  if (utf16) return utf16;
+  return isUtf8(bytes) ? 'utf-8' : 'windows-1252';
+}
+
+export function decodeText(bytes: Uint8Array): string {
+  const encoding = encodingOf(bytes);
+  const markLength = encoding.startsWith('utf-16') ? 2 : 3;
+  const bom = encoding.endsWith('-bom') ? markLength : 0;
+  return new TextDecoder(encoding.replace('-bom', '')).decode(bytes.subarray(bom));
+}
+
+/** the characters Windows-1252 puts at 0x80–0x9F; the rest of its range is the same as Unicode */
+const CP1252 = '€\u0081‚ƒ„…†‡ˆ‰Š‹Œ\u008DŽ\u008F\u0090‘’“”•–—˜™š›œ\u009DžŸ';
+
+/** `text` as UTF-16 code units, two bytes each, big- or little-endian */
+function utf16Bytes(text: string, bigEndian: boolean): number[] {
+  return [...Array(text.length).keys()].flatMap((i) => {
+    const code = text.charCodeAt(i);
+    return bigEndian ? [code >> 8, code & 255] : [code & 255, code >> 8];
+  });
+}
+
+/** `text` in the encoding `like` is in, byte-order mark included; throws when a character has no place in it */
+export function encodeLike(text: string, like: Uint8Array): Uint8Array {
+  switch (encodingOf(like)) {
+    case 'utf-8-bom': return new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(text)]);
+    case 'utf-8': return new TextEncoder().encode(text);
+    case 'utf-16le-bom': return new Uint8Array([0xff, 0xfe, ...utf16Bytes(text, false)]);
+    case 'utf-16be-bom': return new Uint8Array([0xfe, 0xff, ...utf16Bytes(text, true)]);
+    case 'utf-16le': return new Uint8Array(utf16Bytes(text, false));
+    case 'utf-16be': return new Uint8Array(utf16Bytes(text, true));
+    case 'windows-1252-bom': return new Uint8Array([0xef, 0xbb, 0xbf, ...cp1252(text)]);
+    default: return new Uint8Array(cp1252(text));
+  }
+}
+
+/** `text` as Windows-1252 bytes */
+function cp1252(text: string): number[] {
+  return [...text].map((ch) => {
+    const code = ch.codePointAt(0)!;
+    const high = CP1252.indexOf(ch);
+    if (high >= 0) return 0x80 + high;
+    if (code < 0x80 || (code >= 0xa0 && code <= 0xff)) return code;
+    throw new Error(`“${ch}” can’t be written in this CSV log’s encoding (Windows-1252)`);
+  });
+}
+
+/** a workbook is a ZIP (.xlsx, .xlsm, .xlsb, .ods) or an OLE container (.xls), whatever it is called */
+export function isWorkbook(b: Uint8Array): boolean {
+  const zip = b[0] === 0x50 && b[1] === 0x4b;
+  return zip || (b[0] === 0xd0 && b[1] === 0xcf && b[2] === 0x11 && b[3] === 0xe0);
+}
+
+/** A .csv read as text: raw strings, no number or date guessing. One sheet. */
+export function readCsv(bytes: Uint8Array, opts?: { sheet?: string; headerRow?: number }) {
+  if (isWorkbook(bytes)) {
+    const message = 'That file is a workbook saved with a .csv name. Rename it to .xlsx and try again';
+    return fail({ kind: 'invalid' as const, message });
+  }
+  const table = tableFrom([{ name: 'Sheet1', grid: parseCsv(decodeText(bytes)) }], opts);
+  return table ? ok(table) : fail({ kind: 'invalid' as const, message: 'The file has no rows' });
+}
