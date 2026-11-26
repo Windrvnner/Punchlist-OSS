@@ -257,7 +257,7 @@ describe('importing an issues list', () => {
     expect(store.get().findings[had[0]].onLists!.map((m) => m.text)).toEqual(['First section, point one.', 'Second section, point one.']);
     expect(dealFindings(store.get(), dealId).find((f) => f.title === 'C')!.workstream).toBe('');
   });
-  it('stores a point and the list name exactly as given, edge spaces included, and refuses a point of only spaces', async () => {
+  it('stores a point and list name as given, edge spaces included, and refuses a point of only spaces', async () => {
     const { store, dealId } = await dealWith(0);
     const text = '  Indented point, as counsel wrote it.\n';
     const list = ` ${LIST} `;

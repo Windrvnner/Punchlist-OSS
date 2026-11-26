@@ -49,7 +49,9 @@ function pointId(state: { findings: Record<string, unknown>; tombstones: Record<
 export const ImportIssuesList = define({
   name: 'ImportIssuesList',
   // the list: `doc`, its file's id (as the documents service gives it, from the file's bytes), and `list`, its file's name
-  input: z.object({ dealId: DealId, doc: z.string().min(1), list: Given, points: z.array(Point).min(1, 'Nothing to import') }),
+  input: z.object({
+    dealId: DealId, doc: z.string().min(1), list: Given, points: z.array(Point).min(1, 'Nothing to import'),
+  }),
   targets: (_s, i) => [...new Set(i.points.flatMap((p) => (p.join ? [p.join] : [])))],
   plan(state, input, ctx) {
     const d = state.deals[input.dealId];

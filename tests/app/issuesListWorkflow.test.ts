@@ -126,7 +126,7 @@ it('stops before the model call when a file selection changes during attachment'
   expect(read).not.toHaveBeenCalled();
 });
 
-it('keeps an attached name with surrounding spaces as given, a list of its own, and the import agrees with the preview', async () => {
+it('keeps an attached name with surrounding spaces as given, and the import agrees with the preview', async () => {
   const { store, dealId, byTitle } = await seedDeal();
   const prior = byTitle.get(POINTS[8].title)!;
   const proposed = byTitle.get(POINTS[0].title)!;
@@ -143,7 +143,8 @@ it('keeps an attached name with surrounding spaces as given, a list of its own, 
   const list = val((await readIssuesList(store, dealId, { ...FILE, name: revised.doc }))!);
   const review = reviewIssuesList(store.get(), dealId, list, new Set());
   // no earlier mark is on a list of this name, so only the model's proposals join
-  expect(review.goes.map((target) => typeof target === 'number' ? target : target?.id)).toEqual([proposed, undefined, 1]);
+  const goes = review.goes.map((target) => (typeof target === 'number' ? target : target?.id));
+  expect(goes).toEqual([proposed, undefined, 1]);
   val(await store.dispatch(ImportIssuesList, { dealId, doc: revised.docId, list: revised.doc, points: review.input }));
 
   const marks = dealFindings(store.get(), dealId).flatMap((finding) => (finding.onLists ?? [])

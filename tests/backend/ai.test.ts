@@ -1484,8 +1484,13 @@ describe('the first pass', () => {
   it('a quote the model gives for a place cited twice is stored exactly as given, edge spaces included', async () => {
     const quote = '  Lock-up Ratio means 1.25:1\n';
     const one = { broad: [{ id: 'x1', text: 'The lock-up ratio is agreed' }], product: [], sector: [] };
-    const finding = (c: Call) => ({ result: 'finding', title: 'The lock-up ratio is open', workstream: 'Legal', body: ['It is set at 1.25x. [1] And again. [2]'], next: '', sources: [{ doc: tag(c, FA), page: 14 }, { doc: tag(c, FA), page: 14, quote }] });
-    const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...finding(c) })) }), undefined, { checklist: () => one });
+    const sources = (c: Call) => [{ doc: tag(c, FA), page: 14 }, { doc: tag(c, FA), page: 14, quote }];
+    const body = ['It is set at 1.25x. [1] And again. [2]'];
+    const finding = (c: Call) => ({
+      result: 'finding', title: 'The lock-up ratio is open', workstream: 'Legal', body, next: '', sources: sources(c),
+    });
+    const answer = (c: Call) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...finding(c) })) });
+    const s = setup(answer, undefined, { checklist: () => one });
     await deal(s.repo);
     val(await s.ai.firstPass('d1'));
     expect((await storedFindings(s.repo))[0].sources.map((x) => x.quote)).toEqual([quote]);
