@@ -1,8 +1,9 @@
 /**
- * The text of a Word (.docx, .docm) or PowerPoint (.pptx, .pptm) file, read straight from the file with no converter
- *. Such a file is a zip of XML parts: Word's text is in word/document.xml, PowerPoint's
- * in one part per slide. This is for indexing only: what a document is found by. Its pages are made by the converter
- * when it is first sent to the model service or opened, so that the cited page and the page shown are the same page.
+ * The text of a Word (.docx, .docm) or PowerPoint (.pptx, .pptm) file, read straight from the file with no converter.
+ * Such a file is a zip of XML parts: Word's text is in word/document.xml and its header, footer, footnote and endnote
+ * parts, PowerPoint's in one part per slide. This is for indexing only: what a document is found by. Its pages are
+ * made by the converter when it is first sent to the model service or opened, so that the cited page and the page
+ * shown are the same page.
  *
  * Word's tracked changes are read as accepted: inserted text counts, deleted text does not. Its pages show them as
  * markup, deleted words included, so a word found only in deleted text is shown on a page but is not in this index.
@@ -49,14 +50,9 @@ export interface OfficeText { text: string; first: string; tracked: number }
 /** Read the text of a .docx or .pptx file. Throws when the file cannot be read (damaged, or locked with a password, which makes it no zip). */
 export function officeText(bytes: Uint8Array, name: string): OfficeText {
   if (/\.ppt[xm]$/i.test(name)) {
-    const parts = unzip(bytes, (n) => /^ppt\/(?:slides\/slide|notesSlides\/notesSlide)\d+\.xml$/.test(n));
-    const read = (kind: string) => [...parts]
-      .filter(([n]) => n.includes(`/${kind}`))
-      .sort((a, b) => +a[0].replace(/\D/g, '') - +b[0].replace(/\D/g, ''))
-      .map(([, x]) => textOf(x.toString('utf8'), 'a:t', 'a:p'));
-    const slides = read('slide');
-    const notes = read('notesSlide');   // the speaker notes are text of the file too
-    return { text: [...slides, ...notes].join('\n'), first: slides[0] ?? '', tracked: 0 };
+    const parts = unzip(bytes, (n) => /^ppt\/slides\/slide\d+\.xml$/.test(n));
+    const slides = [...parts].sort((a, b) => +a[0].replace(/\D/g, '') - +b[0].replace(/\D/g, '')).map(([, x]) => textOf(x.toString('utf8'), 'a:t', 'a:p'));
+    return { text: slides.join('\n'), first: slides[0] ?? '', tracked: 0 };
   }
   const wanted = /^word\/(?:header\d*|footer\d*|footnotes|endnotes)\.xml$/;
   const parts = unzip(bytes, (n) => n === 'word/document.xml' || wanted.test(n));
@@ -66,7 +62,8 @@ export function officeText(bytes: Uint8Array, name: string): OfficeText {
   // text moved away keeps its words in w:t at the old place: as accepted, only the new place has them
   const words = (part: string) => textOf(part.replace(/<w:moveFrom\b[^>]*>[\s\S]*?<\/w:moveFrom>/g, ''), 'w:t', 'w:p');
   const text = words(xml);
-  // headers, footers, footnotes and endnotes (what the PDF shows) follow the body; the title stays the body's start
+  // headers, footers, footnotes and endnotes (what the PDF shows) follow the body, in the zip's order (the order does
+  // not change what the index finds); the title stays the body's start
   const others = [...parts].filter(([n]) => n !== 'word/document.xml').map(([, x]) => words(x.toString('utf8')));
   // each tracked change is one element: an insertion, a deletion, a move (from and to), a change of format, or a table cell added or taken out. Counted so, Word's count matches LibreOffice's
   const tracked = (xml.match(/<w:(?:ins|del|moveFrom|moveTo|rPrChange|pPrChange|tblPrChange|trPrChange|tcPrChange|sectPrChange|cellIns|cellDel)[\s>]/g) ?? []).length;

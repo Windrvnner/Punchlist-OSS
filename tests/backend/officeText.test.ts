@@ -66,7 +66,7 @@ describe('Word and PowerPoint text read straight from the file', () => {
     expect(() => officeText(fixture('Deck.pptx'), 'Deck.docx')).toThrow('not a Word document');
     expect(['a.docx', 'a.DOCM', 'a.pptx', 'a.pptm'].every((n) => DIRECT.test(n))).toBe(true); expect(['a.doc', 'a.ppt', 'a.rtf', 'a.pdf'].some((n) => DIRECT.test(n))).toBe(false);
   });
-  it('reads a Word file\'s header, footnotes and endnotes and a deck\'s speaker notes, after the body (#1025)', () => {
+  it('reads Word headers, footnotes and endnotes after the body; no speaker notes, as the PDF has none (#1025)', () => {
     const docx = officeText(zipOf({
       'word/document.xml': word('Body BODYTEXT'),
       'word/header1.xml': word('HEADERONLY'),
@@ -81,7 +81,7 @@ describe('Word and PowerPoint text read straight from the file', () => {
       'ppt/slides/slide2.xml': slide('SLIDETWO'),
       'ppt/notesSlides/notesSlide1.xml': slide('NOTESONLY'),
     }), 'Deck.pptx');
-    expect(lines(pptx.text)).toEqual(['SLIDEONE', 'SLIDETWO', 'NOTESONLY']);
+    expect(lines(pptx.text)).toEqual(['SLIDEONE', 'SLIDETWO']);
     expect(pptx.first).toBe('SLIDEONE\n');
   });
 });
