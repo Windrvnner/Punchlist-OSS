@@ -10,8 +10,9 @@ import { CreateFinding, SetFindingStatus, ReviewFinding, DeleteFinding, RestoreF
 import { registry } from '../../src/app/commands/undo';
 import { csvCodec } from '../../src/adapters/spreadsheet';
 import {
-  ask, retry, convKey, conversationDocs, docIndex, suggestions, useAnswer, answerText, askVerdict, type Scope,
+  ask, retry, convKey, conversationDocs, docIndex, useAnswer, answerText, askVerdict, type Scope,
 } from '../../src/app/conversations';
+import { suggestions } from '../../src/app/suggestedQuestion';
 import { MAX_ATTACHED, attachFiles, addToSources } from '../../src/app/attachments';
 import { dealFindings } from '../../src/app/state';
 import type { AiService, DocumentService, LocalStore } from '../../src/ports';
