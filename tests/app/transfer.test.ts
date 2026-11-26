@@ -115,7 +115,7 @@ describe('export and import through the ports', () => {
     const back = await readImportFile(store, fileOf('log.csv', saved[0].bytes)); if (!back.ok) throw new Error(back.error.message);
     const p = prepareImport(back.value.rows, back.value.mapping);
     expect(p.rows[0]).toMatchObject({
-      askedBy: 'Lender A ', respondedBy: ' Sponsor', workstream: 'Legal ', response: '  Yes, as written.\n',
+      askedBy: 'Lender A ', respondedBy: ' Sponsor', workstream: 'Legal', response: '  Yes, as written.\n',
     });
     expect(previewImport(store, dealId, 'merge', p.rows)).toEqual(NOTHING_TO_CHANGE);
     await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: p.rows });
