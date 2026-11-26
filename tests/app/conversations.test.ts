@@ -42,7 +42,7 @@ async function deal(store: Store, name = 'Datum') { await store.boot(); await st
 const OPERATING = 'Confirm the operating assumption in the base case, and whether the technical advisor and the'
   + ' information memorandum agree.';
 const proposing = (text: string): Partial<AiService> => ({
-  suggestQuestion: async ({ questions }) => ok(questions.includes(text) ? [questions.indexOf(text)] : []),
+  suggestQuestion: async ({ questions }) => ok(questions.filter((q) => q.text === text).map((q) => q.id)),
 });
 
 describe('conversations', () => {

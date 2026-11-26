@@ -12,6 +12,9 @@ import { val } from '../backend/reviewKit';
 import { deal, make } from './importKit';
 
 type Suggest = NonNullable<AiService['suggestQuestion']>;
+/** the ids of the offered questions with these texts, as a stand-in model names them */
+const named = (questions: { id: string; text: string }[], ...texts: string[]) =>
+  questions.filter((q) => texts.includes(q.text)).map((q) => q.id);
 const OPERATING = 'Confirm the operating assumption in the base case and where the technical advisor sets it.';
 const INSURANCE = 'Provide the insurance certificates for the construction period.';
 /** the operating answer shares many words with the operating question */
@@ -30,20 +33,23 @@ async function fixture(suggest: Suggest) {
   return { store, dealId, scope, byText, answers };
 }
 
-it('suggests the question the model named, given the open questions by their text alone', async () => {
+it('suggests the question the model named, given the open questions by id and text only', async () => {
   const asked: Parameters<Suggest>[0][] = [];
   const env = await fixture(async (input) => {
     asked.push(input);
-    return ok([1]);
+    return ok(named(input.questions, OPERATING));
   });
   await ask(env.store, env.scope, 'What does the base case assume?');
   const [answer] = env.answers();
   expect([...suggestions(env.store.get(), env.scope)]).toEqual([[answer.id, [env.byText(OPERATING).id]]]);
-  expect(asked).toEqual([{ dealId: env.dealId, answer: ANSWER, questions: [INSURANCE, OPERATING] }]);
+  expect(asked).toEqual([{
+    dealId: env.dealId, answer: ANSWER,
+    questions: [INSURANCE, OPERATING].map((text) => ({ id: env.byText(text).id, text })),
+  }]);
 });
 
 it('no proposal, a place out of range, or a failed call gives no card, however many words they share', async () => {
-  for (const reply of [ok([]), ok([5]), fail({ kind: 'failed' as const, message: 'no' })]) {
+  for (const reply of [ok([]), ok(['q_not_offered']), fail({ kind: 'failed' as const, message: 'no' })]) {
     const env = await fixture(async () => reply);
     await ask(env.store, env.scope, 'What does the base case assume?');
     expect(suggestions(env.store.get(), env.scope).size).toBe(0);
@@ -53,7 +59,7 @@ it('no proposal, a place out of range, or a failed call gives no card, however m
 });
 
 it('offers each question under the newest answer that proposed it, and never one already answered here', async () => {
-  const env = await fixture(async ({ questions }) => ok([questions.indexOf(OPERATING)]));
+  const env = await fixture(async ({ questions }) => ok(named(questions, OPERATING)));
   await ask(env.store, env.scope, 'What does the base case assume?');
   await ask(env.store, env.scope, 'And who sets it?');
   const [first, second] = env.answers();
@@ -70,7 +76,7 @@ it('offers each question under the newest answer that proposed it, and never one
 it('a question answered by this conversation is not offered to the model again', async () => {
   const asked: string[][] = [];
   const env = await fixture(async ({ questions }) => {
-    asked.push(questions);
+    asked.push(questions.map((q) => q.text));
     return ok([]);
   });
   // the response is word for word the answer the conversation is about to give
@@ -87,7 +93,7 @@ it('a question edited to another meaning while the call is pending, or after it,
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const env = await fixture(async (input) => {
       if (when === 'pending') await gate;
-      return ok([input.questions.indexOf(OPERATING)]);
+      return ok(named(input.questions, OPERATING));
     });
     const q = env.byText(OPERATING);
     const edit = () => env.store.dispatch(EditQuestionField, {
@@ -117,7 +123,7 @@ it('a question closed or deleted while the call is pending, or after it, is not 
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const env = await fixture(async (input) => {
       await gate;
-      return ok([input.questions.indexOf(OPERATING)]);
+      return ok(named(input.questions, OPERATING));
     });
     const q = env.byText(OPERATING);
     const asking = ask(env.store, env.scope, 'What does the base case assume?');
@@ -133,7 +139,7 @@ it('a question closed or deleted while the call is pending, or after it, is not 
 });
 
 it('edited back to the same text, the proposal holds again; a dismissal stays by answer and question', async () => {
-  const env = await fixture(async (input) => ok([input.questions.indexOf(OPERATING)]));
+  const env = await fixture(async (input) => ok(named(input.questions, OPERATING)));
   await ask(env.store, env.scope, 'What does the base case assume?');
   const [answer] = env.answers();
   const q = env.byText(OPERATING);
@@ -152,7 +158,7 @@ it('edited back to the same text, the proposal holds again; a dismissal stays by
 });
 
 it('every question the model named is suggested under the answer, each with its own freshness', async () => {
-  const env = await fixture(async () => ok([0, 1]));
+  const env = await fixture(async ({ questions }) => ok(questions.map((q) => q.id)));
   await ask(env.store, env.scope, 'What does the base case assume?');
   const [answer] = env.answers();
   const both = [env.byText(INSURANCE).id, env.byText(OPERATING).id];
@@ -162,4 +168,19 @@ it('every question the model named is suggested under the answer, each with its 
     dealId: env.dealId, questionId: both[0], field: 'text', value: 'When does the EPC guarantee expire?',
   }));
   expect(suggestions(env.store.get(), env.scope).get(answer.id)).toEqual([both[1]]);
+});
+
+let unofferedId = '';
+it('an id the model names that was not offered is not suggested, though that question is open', async () => {
+  const env = await fixture(async ({ questions }) => ok([...named(questions, OPERATING), unofferedId]));
+  val(await env.store.dispatch(CreateQuestion, { dealId: env.dealId, text: 'Which permits are open?' }));
+  const q = Object.values(env.store.get().questions).find((x) => x.text === 'Which permits are open?')!;
+  unofferedId = q.id;
+  // its response is word for word the answer about to be given, so it is not offered to the model again
+  val(await env.store.dispatch(SetResponse, { dealId: env.dealId, questionId: q.id, response: ANSWER }));
+  await ask(env.store, env.scope, 'What does the base case assume?');
+  const [answer] = env.answers();
+  expect(suggestions(env.store.get(), env.scope).get(answer.id)).toEqual([env.byText(OPERATING).id]);
+  // the id that was not offered is never kept
+  expect(env.store.get().ui.proposed[answer.id].map((p) => p.id)).toEqual([env.byText(OPERATING).id]);
 });
