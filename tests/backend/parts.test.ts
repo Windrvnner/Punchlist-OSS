@@ -121,10 +121,10 @@ describe('a refusal that says the request is too long', () => {
 describe('the limits of a model the service describes', () => {
   it('are the control file\'s unless the model allows less, and a reply never takes more than half of a small context', async () => {
     const { limitsOf } = await import('../../src/backend/limits');
-    expect(limitsOf()).toEqual({ output: 16000, input: 180000 });
+    expect(limitsOf()).toEqual({ output: 32000, input: 180000 });
     expect(limitsOf({ maxTokens: 4000, contextLength: 128000 })).toEqual({ output: 4000, input: 124000 });
     expect(limitsOf({ contextLength: 8192 })).toEqual({ output: 4096, input: 4096 });
-    expect(limitsOf({ maxTokens: null, contextLength: null })).toEqual({ output: 16000, input: 180000 });
+    expect(limitsOf({ maxTokens: null, contextLength: null })).toEqual({ output: 32000, input: 180000 });
   });
 });
 

@@ -128,6 +128,14 @@ describe('the deal memo’s content', () => {
     expect(m.glance).toEqual([{ workstream: 'Legal', High: 1, Medium: 0, Low: 0, open: 0 }, { workstream: 'Technical', High: 0, Medium: 0, Low: 1, open: 0 }, { workstream: 'Tax', High: 0, Medium: 0, Low: 0, open: 1 }]);
   });
 
+  it('counts turned-off checklist items as Overview does (#1064)', () => {
+    const checklist = [
+      { text: 'a', list: 'General', kind: 'satisfied' as const }, { text: 'b', list: 'General', kind: 'off' as const },
+    ];
+    expect(memoContent(input({ checklist })).counts).toContain(
+      'Of 2 checklist items, 1 is settled, 0 flagged and 0 gaps; 1 turned off.');
+  });
+
   it('counts the checklist and the Q&A in one line, with nothing listed at the back', () => {
     const checklist = [
       { text: 'a', list: 'General', kind: 'satisfied' as const }, { text: 'b', list: 'General', kind: 'gap' as const, need: 'Signed copy' },

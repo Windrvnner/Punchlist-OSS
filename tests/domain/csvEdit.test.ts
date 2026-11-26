@@ -1,7 +1,8 @@
 // Writing into a CSV log: only the lines written into change, in the file's own quoting, line endings and encoding.
 import { describe, it, expect } from 'vitest';
 import { editCsv, csvSafe } from '../../src/domain/csvEdit';
-import { decodeText, encodeLike } from '../../src/adapters/spreadsheet';
+import { encodeLike } from '../../src/domain/sheets';
+import { decodeText } from '../../src/domain/textEncoding';
 
 const LOG = 'No.,Question,Response\r\n1,"What is the DSCR, minimum?",1.20x\r\n2,Who is the EPC contractor?,\r\n';
 

@@ -46,6 +46,14 @@ say('Undo Import takes the import back, leaving the 3 changed since', (await cou
 say('its notice names them and offers no Undo', toast === 'Import undone, except 3 changed since: Q1004, Q1017, Q1350' && !(await page.$('#toast .tundo')), toast);
 await page.click('#qa-cols'); await page.waitForSelector('#qa-unimport');
 say('nothing more is offered', await page.$eval('#qa-unimport', (b) => b.disabled));
+// refused (nothing left to undo): the message, closed by the × alone, with no Close button of its own (#1069)
+await page.keyboard.press('Escape');
+await page.evaluate((d) => store.ui({ dialog: { kind: 'undoImport', dealId: d } }), id);
+await page.waitForSelector('#ui-what');
+const refused = await page.$$eval('.dlg button', (bs) => bs.map((b) => b.getAttribute('aria-label') || b.textContent));
+say('a refused undo closes by the × alone', JSON.stringify(refused) === '["Close"]' && !(await page.$('#ui-keep')),
+  JSON.stringify(refused));
+await page.keyboard.press('Escape'); await page.waitForSelector('#ui-what', { state: 'detached' });
 say('no page errors', !errors.length, errors.join(' | '));
 await ctx.close();
 
