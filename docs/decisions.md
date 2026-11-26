@@ -218,7 +218,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A folder can be removed from a deal after a confirmation, with Undo, and restored later; new checks stop reading it, and existing citations still open.
 - Punchlist reads linked data-room files in place. An empty folder is never taken as a deal folder. Each PC finds a deal's folders by itself where it can; otherwise it asks once, with **Locate…**.
 - A document's id is the SHA-256 hash of its bytes, so identical copies are one document.
-- The chat agent opens a document only by its tag, its whole path, or its whole file name (in any case); anything else is "Not found" (#1018).
+- The chat agent opens a document only by its id, its whole path, or its whole file name (in any case); anything else is "Not found" (#1018, #1162).
 - Indexing (building each PC's word index of the data room) asks no model and uploads nothing, and it resumes by itself once the data room is available again.
 - A deal's folders are checked for changes every 5 minutes.
 - LibreOffice, bundled with the app, is the only document converter; a converted document that has tracked changes shows them as markup, and one with none is converted as it is.
@@ -268,8 +268,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 
 ## AI and models
 
-- A model is used only for work that needs language understanding. Parsing, matching, numbering, dates and periods, sorting, counting, and formatting are done in code, including the selecting, matching, formatting, and checking around an AI feature's model call; a model sees questions and earlier responses by their permanent ids, never their numbers or other identifiers its prose could be confused with (#286, #1105).
-- A model reply naming a question id it was not shown is a failed reply and is asked again (#1105).
+- A model is used only for work that needs language understanding. Parsing, matching, numbering, dates and periods, sorting, counting, and formatting are done in code, including the selecting, matching, formatting, and checking around an AI feature's model call; a model sees questions, earlier responses, documents, findings and checklist items by their permanent ids, never their numbers, labels or other identifiers its prose could be confused with (#286, #1105, #1162).
+- A model reply naming an id it was not shown is a failed reply and is asked again (#1105, #1162).
 - There are three tiers, Fast, Standard, and Thorough, named only by tier. The control file sets each tier's model and which ones people can pick. For automated checks, Thorough is a fallback
   after Standard fails twice.
 - To manage cost, use the fast model for initial sorting and Standard for confirmation. Batch work to fit the
