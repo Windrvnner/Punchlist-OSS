@@ -12,7 +12,7 @@ import { CreateQuestion, UseAsResponse } from './commands/questions';
 import { findQuestions, mayAddress } from '../domain/suggest';
 import { withoutMarkers } from '../domain/cite';
 import type { Research } from '../ports';
-import { bareDealName, cleanName, sameName } from './commands/deals';
+import { bareDealName, sameName } from './commands/deals';
 import { TITLE_MAX } from './commands/findings';
 import { chipsSendable, dealCopied, filesSendable } from './attachments';
 import { isText, keptDrafts } from './keptText';
@@ -121,17 +121,21 @@ export function pastConversationList(store: Store, { dealId, allDeals, search }:
 let seq = 0;
 const mid = () => `m${Date.now().toString(36)}${(seq++).toString(36)}`;
 
+/** a deal name as typed navigation compares it: without "Project", in any case */
+const navigationName = (name: string) => sameName(bareDealName(name.trim(), 'navigation')).toLowerCase();
+/** The deal a typed name names: that exact name, in any case, without "Project", spaces between words aside. */
+function dealByName<T extends { name: string }>(deals: T[], typed: string): T | undefined {
+  const exact = navigationName(typed);
+  if (!exact) return;
+  return deals.find((deal) => navigationName(deal.name) === exact);
+}
+
 // #500: only the explicit verb and page suffix are syntax; a deal name can contain punctuation or Unicode.
 function typedDealDestination(store: Store, text: string) {
   const command = /^(?:take me to|go to|open|show me|show|switch to|jump to)\s+(.+)$/is.exec(text);
   if (!command) return;
   const target = sameName(command[1]);
-  const lookup = (name: string) => {
-    const key = sameName(bareDealName(name.trim(), 'navigation')).toLowerCase();
-    if (!key) return;
-    return Object.values(store.get().deals).find((candidate) =>
-      sameName(bareDealName(candidate.name, 'navigation')).toLowerCase() === key);
-  };
+  const lookup = (name: string) => dealByName(Object.values(store.get().deals), name);
   const possessive = (name: string) => lookup(name.replace(/['’]s$/i, '')) ?? lookup(name);
   const named = (name: string) => {
     const withoutArticle = name.replace(/^the\s+/i, '');
@@ -277,22 +281,6 @@ export async function sendTyped(store: Store, scope: Scope, view: SendView) {
   void ask(store, scope, text);
 }
 
-/** "Does this answer any of our open questions?", "would that address an open question": a person asking in words */
-export const asksOpenQuestions = (text: string) => /\b(answer|address|respond|cover|settle|resolve)\w*\b.*\bopen questions?\b|\bopen questions?\b.*\b(answer|address|cover|settle|resolve)\w*\b/i.test(text);
-/** the app's own reply to that, at `i`: it stands for no answer of its own, so nothing is suggested under it */
-const isCheck = (list: Message[], i: number) => list[i].role === 'ai' && list[i - 1]?.role === 'me' && asksOpenQuestions(list[i - 1].text);
-/**
- * The reply to a person asking whether the answer above addresses any open question. No model is asked: the answer is
- * checked as every answer is (suggestions), and the card under it shows again if a person had put it away.
- */
-function checkOpenQuestions(store: Store, scope: Scope & { dealId: string }, prior: Message[]): string {
-  let j = prior.length - 1; while (j >= 0 && (prior[j].role !== 'ai' || prior[j].state !== 'done' || isCheck(prior, j))) j--;
-  if (j < 0) return 'There is no answer in this conversation yet to check against the open questions.';
-  const id = prior[j].id; store.bringBack(id);
-  const q = store.get().questions[suggestions(store.get(), scope).get(id) ?? ''];
-  return q ? `The answer above may address Q${q.n}: “${q.text}” It is named under that answer, to check and use as the response if it does.` : 'None of the open questions looks to be addressed by the answer above.';
-}
-
 export async function ask(store: Store, scope: Scope, text: string) {
   text = text.trim(); if (!text) return;
   const ro = store.readOnly(); if (ro) { store.toast(ro); return; }   // read-only while nobody is signed in: nothing new is asked
@@ -302,7 +290,6 @@ export async function ask(store: Store, scope: Scope, text: string) {
   const prior = store.get().threads[key] ?? [];
   const sent = atts.map((a) => ({ doc: a.doc!, docId: a.docId! }));
   const me: Message = { id: mid(), role: 'me', text, state: 'done', at: store.services.clock.now(), ...(sent.length ? { attached: sent } : {}) };
-  if ((scope.kind === 'deal' || scope.kind === 'finding') && asksOpenQuestions(text)) { store.setThread(key, [...prior, me, { id: mid(), role: 'ai', text: checkOpenQuestions(store, scope, prior), state: 'done', at: me.at }]); return; }
   const pending: Message = { id: mid(), role: 'ai', text: '', state: 'pending', at: me.at };
   store.setThread(key, [...prior, me, pending]);
   await answer(store, scope, pending.id, text, prior, sent);
@@ -440,7 +427,7 @@ export function suggestions(s: State, scope: Scope): Map<string, string> {
   const used = new Set(texts.values());
   const open = dealQuestions(s, scope.dealId).filter((q) => q.status === 'open' && !used.has(q.response.trim())); const offered = new Set<string>();
   for (let i = list.length - 1; i >= 0; i--) {
-    const m = list[i]; if (m.role !== 'ai' || m.state !== 'done' || isCheck(list, i)) continue;
+    const m = list[i]; if (m.role !== 'ai' || m.state !== 'done') continue;
     const q = mayAddress(texts.get(m.id)!, open.filter((x) => !offered.has(x.id)))[0];
     if (!q) continue;
     offered.add(q.id); if (!s.ui.notThese.includes(`${m.id}|${q.id}`)) out.set(m.id, q.id);

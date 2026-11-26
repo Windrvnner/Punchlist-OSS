@@ -179,11 +179,6 @@ for (const [w, h, scheme] of [[1280, 736, 'light'], [1024, 640, 'dark']]) {
   await page.reload(); await page.waitForFunction((qid) => document.querySelectorAll('.msgs .ai:not(.pending)').length === 2 && store.get().questions[qid], q.id); await page.waitForTimeout(300);
   const reloaded = await page.evaluate(() => ({ cards: document.querySelectorAll('.msgs .suggest').length, kept: JSON.parse(localStorage.getItem('dil/1/local/notThese') || 'null')?.data, answer: Object.values(store.get().threads)[0]?.[3]?.id }));
   say(`not-this-one-after-reload-${w}-${scheme}`, reloaded.cards === 0 && reloaded.kept?.length === 1 && reloaded.kept[0] === `${reloaded.answer}|${q.id}`, JSON.stringify(reloaded));
-  // asking in words brings the card back under the answer it is about, and the reply names the question
-  await page.fill('#pask', 'Does this answer any of our open questions?'); await page.press('#pask', 'Enter');
-  await page.waitForFunction(() => document.querySelectorAll('.msgs .ai:not(.pending):not(.failed)').length === 3, null, { timeout: 8000 });
-  const words = await page.evaluate(() => { const ai = [...document.querySelectorAll('.msgs .ai')]; const c = document.querySelector('.msgs .suggest'); return { reply: ai[2].querySelector('p')?.textContent, under: !!c && ai[1].contains(c), cards: document.querySelectorAll('.msgs .suggest').length }; });
-  say(`asked-in-words-${w}-${scheme}`, new RegExp('^The answer above may address Q' + q.n + ': “Confirm the operating').test(words.reply) && words.under && words.cards === 1, JSON.stringify(words));
   say(`no-page-errors-suggest-${w}-${scheme}`, page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close();
 }
