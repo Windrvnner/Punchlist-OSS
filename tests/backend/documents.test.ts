@@ -117,12 +117,13 @@ describe('documents on real folders', () => {
       words: ['agreement', 'credit', '1', '2', '3'], seen: expect.any(String),
     });
     expect([by('Energy Yield Report.pdf').pages, by('Notes.docx').pages, by('Model v12.xlsx').pages]).toEqual([2, undefined, undefined]);   // a spreadsheet has cells, not pages; a Word file has none until it is first converted
-    expect(by('Notes.docx').words).toEqual(['notes', 'three', 'two']); expect(a.converted).toEqual([]);                                     // its words were read straight from the file
+    expect(by('Notes.docx').words).toEqual(['note', 'three', 'two']);
+    expect(a.converted).toEqual([]);   // its words were read straight from the file
     // a Word file's words come from the PDF made of it; a spreadsheet's from its sheet names and the text in its cells, not its numbers
     // numbers are words too (#1147): the model's row numbers, used once each, come before "debt" in the alphabet
     const rowNumbers = Array.from({ length: 40 }, (_, i) => String(i + 1)).sort().slice(0, 28);
     expect(by('Energy Yield Report.pdf').words).toEqual(['energy', 'yield', '1', '2']);
-    expect(by('Notes.docx').words).toEqual(['notes', 'three', 'two']);
+    expect(by('Notes.docx').words).toEqual(['note', 'three', 'two']);
     expect(by('Model v12.xlsx').words).toEqual(['line', 'cover', ...rowNumbers]);
     expect(a.svc.uploads).toBe(0); expect(a.svc.calls.length).toBe(0); expect(val(await a.docs.cached())).toEqual([]);
     expect(a.converted).toEqual([]); expect(a.work()).toEqual([]);                                                                  // nothing converted, and nothing kept
@@ -273,7 +274,9 @@ describe('documents on real folders', () => {
     const root = tmp(); const vdr = path.join(root, 'vdr'); put(vdr, 'Notes.docx', NOTES);
     const a = pc(root, 'office', new StandInService(), { convert: libreOfficeConverter({ soffice }) });
     const p = await indexAll(a, vdr);
-    expect(p.log).toEqual(['Indexed 1 file']); expect(a.docs.records('d1')[0].pages).toBeUndefined(); expect(a.docs.records('d1')[0].words).toEqual(['notes', 'three', 'two']);
+    expect(p.log).toEqual(['Indexed 1 file']);
+    expect(a.docs.records('d1')[0].pages).toBeUndefined();
+    expect(a.docs.records('d1')[0].words).toEqual(['note', 'three', 'two']);
     const page = val(await a.docs.page('d1', { doc: 'Notes.docx', docId: idOf(NOTES) }, 'p. 2')); expect(page.kind === 'pdf' && page.page).toBe(2);
     expect(a.docs.records('d1')[0]).toMatchObject({ name: 'Notes.docx', pages: 3, via: 'libreoffice' });                                    // converted when first opened, and its pages counted then
     const shown = a.docs.fileFor((page as { url: string }).url.replace('punchlist-doc://', ''))!; expect(await pdfPages(fs.readFileSync(shown))).toBe(3);

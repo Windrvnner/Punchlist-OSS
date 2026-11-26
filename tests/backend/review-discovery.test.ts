@@ -45,7 +45,9 @@ describe('discovery: file names', () => {
     const de = 'Der Darlehensnehmer verpflichtet sich, die Finanzkennzahlen einzuhalten. Die Kündigung des Stromabnahmevertrags durch den Abnehmer ist nur aus wichtigem Grund möglich. Die Sicherheiten werden zugunsten der Darlehensgeber bestellt und die Ausschüttungssperre gilt bis zur Erfüllung der Bedingungen. '.repeat(20);
     const ru = 'Настоящий кредитный договор заключён между заёмщиком и кредиторами. Заёмщик обязуется соблюдать финансовые ковенанты. '.repeat(20);
     expect(topWords(ru)).toEqual(expect.arrayContaining(['заёмщик', 'кредитный', 'договор']));         // Cyrillic is text, not a scan
-    expect(topWords(es)).toEqual(expect.arrayContaining(['concesión', 'terminación', 'términos'])); expect(topWords(es)).not.toContain('concesi');   // an accent does not cut a word in two
+    // an accent does not cut a word in two; a plural is folded as the index folds it (#1147)
+    expect(topWords(es)).toEqual(expect.arrayContaining(['concesión', 'terminación', 'término']));
+    expect(topWords(es)).not.toContain('concesi');
     expect(topWords(de)).toEqual(expect.arrayContaining(['ausschüttungssperre']));
     // a name is split wherever it is split, and a short name with an ampersand is one word
     expect(tokens('Power-Purchase-Agreement_executed (v2).pdf')).toEqual(['power', 'purchase', 'agreement', 'executed', 'v2', 'pdf']); expect(tokens('PowerPurchaseAgreement')).toEqual(['power', 'purchase', 'agreement']);
