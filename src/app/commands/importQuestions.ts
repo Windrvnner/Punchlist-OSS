@@ -1,8 +1,9 @@
 /**
  * Import a prepared table into a deal's Q&A log as one transaction: every row
  * lands or none does. Merge matches each row to a question like an XLOOKUP: the same number, exact text and sender,
- * else the exact text and sender alone, never by similar words; it brings back a deleted question a row matches, and takes only the
- * non-empty incoming fields; a row that matches nothing is a new question. Append always adds.
+ * else the exact text and sender alone; it brings back a deleted question a row matches, and takes only the
+ * non-empty incoming fields; a row that matches nothing, unless the person accepted a suggestion for it, is a new
+ * question. Append always adds.
  * Status comes only from a mapped Status column. Undo restores each touched question to exactly what it
  * was before the batch — once, however many rows named it — and removes the
  * ones the batch created.
@@ -30,7 +31,15 @@ export const ImportRowSchema = z.object({ line: z.number().int().positive().opti
 
 export const ImportQuestions = define({
   name: 'ImportQuestions',
-  input: z.object({ dealId: DealId, mode: z.enum(['merge', 'append']), rows: z.array(ImportRowSchema).min(1, 'Nothing to import'), /** the person checked "Mark questions that have a response as Answered" */ answerResponded: z.boolean().default(false), /** suggestions the person accepted, for rows that matched nothing */ accepted: z.array(AcceptedMatch).default([]) }),
+  input: z.object({
+    dealId: DealId,
+    mode: z.enum(['merge', 'append']),
+    rows: z.array(ImportRowSchema).min(1, 'Nothing to import'),
+    /** the person checked "Mark questions that have a response as Answered" */
+    answerResponded: z.boolean().default(false),
+    /** suggestions the person accepted, for rows that matched nothing */
+    accepted: z.array(AcceptedMatch).default([]),
+  }),
   targets: (s, i) => [...dealQuestions(s, i.dealId).map((q) => q.id), ...Object.values(s.tombstones).filter((t) => t.kind === 'question' && t.dealId === i.dealId).map((t) => t.id), numbering(i.dealId)],
   plan(state, input, ctx) {
     const d = state.deals[input.dealId];
@@ -51,9 +60,9 @@ export const ImportQuestions = define({
     const gone = new Map(buried.map((t) => [t.id, Question.parse({ ...(t.snapshot as object) })]));
     // a deleted question's number is never handed to another question, so it can always be restored under it
     const deadNumbers = new Set([...gone.values()].map((q) => q.n));
-    // Merge works like an XLOOKUP on the question as written: a row is the log's question with the same number and the
-    // exact same text; failing that, the one with the exact same text alone. A row that matches neither is a new question.
-    // No fuzzy matching: nothing is matched by similar words. A live question is taken before a deleted one.
+    // Merge works like an XLOOKUP on the question as written: a row is the log's question with the same number and
+    // the exact same text; failing that, the one with the exact same text alone. A row that matches neither is a new
+    // question. A live question is taken before a deleted one.
     const pools = [[...originals.values()], [...gone.values()]];
     const known = new Set(pools.flat().map((q) => q.id));
     const exact = input.mode === 'merge' ? matchExactly(input.rows, pools) : new Map<number, string>();

@@ -1,6 +1,5 @@
 // Work a person typed must never be thrown away. One check per reported lost-work item,
 // each named by its issue number.
-import { immapReady } from './importReady.mjs';
 import { launchChrome } from './chrome.mjs';
 import { openRename } from './dealMenu.mjs';
 import { openOnFindings } from './landing.mjs';
@@ -354,7 +353,7 @@ async function dealOnFindings(page, name = 'Proseware') {
   for (let i = 1; i <= 2000; i++) lines.push(`${i},"Question ${i}: provide the schedule of lease obligations, part ${i}",Lender ${'ABCD'[i % 4]},2026-11-${String((i % 28) + 1).padStart(2, '0')},${['Legal', 'Commercial', 'Financial', 'Technical'][i % 4]},`);
   const file = { name: 'log-2000.csv', mimeType: 'text/csv', buffer: Buffer.from(lines.join('\n')) };
   const openImport = async () => { await page.click('#qa-cols'); await page.click('#qa-import'); await page.waitForSelector('.imdlg'); };
-  await openImport(); await page.setInputFiles('#im-file', file); await immapReady(page);
+  await openImport(); await page.setInputFiles('#im-file', file); await page.waitForSelector('.immap');
   // the person changes the mapping by hand, and picks Append
   await page.selectOption('[data-immap="workstream"]', ''); await page.selectOption('[data-immap="askedBy"]', ''); await page.click('[data-immode="append"]');
   const state = () => page.evaluate(() => ({ map: Object.fromEntries([...document.querySelectorAll('.immap select')].map((s) => [s.dataset.immap, s.value])), mode: document.querySelector('[data-immode].on')?.dataset.immode, file: document.querySelector('.imfile')?.textContent }));
@@ -364,9 +363,9 @@ async function dealOnFindings(page, name = 'Proseware') {
   await page.mouse.click(8, 400); await page.waitForTimeout(200); r.outside = !!(await page.$('#im-go'));
   // Escape closes at once, asking nothing, and the import comes back as it was left
   await page.keyboard.press('Escape'); r.escCloses = await page.waitForSelector('.imdlg', { state: 'detached', timeout: 2000 }).then(() => true, () => false);
-  await openImport(); await immapReady(page); r.afterEsc = JSON.stringify(await state()) === JSON.stringify(before);
+  await openImport(); await page.waitForSelector('.immap'); r.afterEsc = JSON.stringify(await state()) === JSON.stringify(before);
   await page.click('.imdlg .shead .x'); await page.waitForSelector('.imdlg', { state: 'detached' });
-  await openImport(); await immapReady(page); r.afterX = JSON.stringify(await state()) === JSON.stringify(before);
+  await openImport(); await page.waitForSelector('.immap'); r.afterX = JSON.stringify(await state()) === JSON.stringify(before);
   say('closing the Q&A import keeps it: Escape and the × close at once, and opening it again shows the mapping as left', r.outside && r.escCloses && r.afterEsc && r.afterX && /2,000 rows/.test(before.file), JSON.stringify({ r, before }));
   // a reload straight after a change, with no pause, keeps that change too
   await page.selectOption('[data-immap="priority"]', '1'); const changed = await state();
@@ -394,13 +393,13 @@ async function dealOnFindings(page, name = 'Proseware') {
   await page.keyboard.press('Escape'); await page.reload(); await page.waitForSelector('#qa-add'); await openImport(); await page.waitForTimeout(300); r.clearAfterReload = !!(await page.$('#im-drop'));
   say('Start over clears the import, for good', r.cleared && r.clearOnOpen && r.clearAfterReload, JSON.stringify(r));
   // an import that goes through lets go of what was kept: opening Import again starts afresh, and nothing is imported twice
-  await page.setInputFiles('#im-file', file); await immapReady(page); await page.click('#im-go'); await page.waitForSelector('.imdlg', { state: 'detached', timeout: 30000 });
+  await page.setInputFiles('#im-file', file); await page.waitForSelector('.immap'); await page.click('#im-go'); await page.waitForSelector('.imdlg', { state: 'detached', timeout: 30000 });
   const n = await page.evaluate((d) => Object.values(store.get().questions).filter((q) => q.dealId === d).length, id);
   await openImport(); await page.waitForTimeout(300); r.freshAfterImport = !!(await page.$('#im-drop'));
   await page.keyboard.press('Escape'); await page.reload(); await page.waitForSelector('#qa-add'); await openImport(); await page.waitForTimeout(300); r.freshAfterReload = !!(await page.$('#im-drop'));
   say('an import done is not kept', n === 2000 && r.freshAfterImport && r.freshAfterReload, JSON.stringify({ n, r }));
   // each deal keeps its own import
-  await page.setInputFiles('#im-file', file); await immapReady(page); await page.keyboard.press('Escape'); await page.waitForSelector('.imdlg', { state: 'detached' });
+  await page.setInputFiles('#im-file', file); await page.waitForSelector('.immap'); await page.keyboard.press('Escape'); await page.waitForSelector('.imdlg', { state: 'detached' });
   await page.evaluate(() => store.ui({ newDeal: { name: '', folders: [], error: '', busy: false } })); await page.fill('#nd-name', 'Other'); await page.click('#nd-create'); await page.waitForSelector('#nd-create', { state: 'detached' });
   const other = await page.evaluate((d) => Object.values(store.get().deals).find((x) => x.id !== d).id, id);
   await page.goto(URL + '#qa-' + other); await page.waitForSelector('#qa-add'); await openImport(); await page.waitForTimeout(300); r.otherFresh = !!(await page.$('#im-drop'));
@@ -460,12 +459,12 @@ async function dealOnFindings(page, name = 'Proseware') {
   say('a failed import keeps its check marks, which cannot change while it runs', whileImporting && kept, JSON.stringify({ whileImporting, kept }));
   // the Q&A import too: its columns and mode cannot change while it runs, and a failure keeps them as they were
   await page.keyboard.press('Escape'); await page.goto(URL + '#qa-' + id); await page.waitForSelector('#qa-add'); await page.click('#qa-cols'); await page.click('#qa-import'); await page.waitForSelector('#im-drop');
-  await page.setInputFiles('#im-file', { name: 'log.csv', mimeType: 'text/csv', buffer: Buffer.from('Number,Question,Workstream\n1,What is the lock-up test?,Legal\n2,Who signs the waiver?,Legal') }); await immapReady(page);
+  await page.setInputFiles('#im-file', { name: 'log.csv', mimeType: 'text/csv', buffer: Buffer.from('Number,Question,Workstream\n1,What is the lock-up test?,Legal\n2,Who signs the waiver?,Legal') }); await page.waitForSelector('.immap');
   await page.selectOption('[data-immap="workstream"]', ''); await page.click('[data-immode="append"]');
   await page.evaluate(() => { const was = store.dispatch.bind(store); store.dispatch = async (c, ...a) => { if (c === store.commandNamed('ImportQuestions')) { await new Promise((r) => setTimeout(r, 800)); return { ok: false, error: { kind: 'failed', message: 'the folder could not be written' } }; } return was(c, ...a); }; });
   await page.click('#im-go'); const locked = await page.evaluate(() => document.querySelector('[data-immap="workstream"]').disabled && document.querySelector('[data-immode="merge"]').disabled);
   await page.waitForFunction(() => /Couldn’t import/.test(document.querySelector('#im-line').textContent));
-  await page.reload(); await page.waitForSelector('#qa-add'); await page.click('#qa-cols'); await page.click('#qa-import'); await immapReady(page);
+  await page.reload(); await page.waitForSelector('#qa-add'); await page.click('#qa-cols'); await page.click('#qa-import'); await page.waitForSelector('.immap');
   const qaKept = await page.evaluate(() => ({ ws: document.querySelector('[data-immap="workstream"]').value, mode: document.querySelector('[data-immode].on')?.dataset.immode }));
   say('a failed Q&A import keeps its columns and mode, which cannot change while it runs', locked && qaKept.ws === '' && qaKept.mode === 'append', JSON.stringify({ locked, qaKept }));
   say('no page errors', !page.errors.length, JSON.stringify(page.errors));

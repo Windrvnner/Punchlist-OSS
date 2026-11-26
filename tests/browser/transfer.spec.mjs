@@ -1,4 +1,3 @@
-import { immapReady } from './importReady.mjs';
 import { launchChrome } from './chrome.mjs';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { openOnFindings } from './landing.mjs';
@@ -84,7 +83,7 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
 
   // ---- import the exported file back: nothing differs ------------------------------
   await page.click('#qa-cols'); await page.click('#qa-import'); await page.waitForSelector('.imdlg');
-  await page.setInputFiles('#im-file', out); await immapReady(page);
+  await page.setInputFiles('#im-file', out); await page.waitForSelector('.immap');
   const map = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('.immap select')].map((s) => [s.dataset.immap, s.options[s.selectedIndex].textContent])));
   say('import-mapping-suggested', map.n === '#' && map.text === 'Question' && map.askedBy === 'Submitted by' && map.received === 'Received' && map.workstream === 'Workstream' && map.response === 'Response' && map.responded === 'Date', JSON.stringify(map));
   say('import-counts-roundtrip', /Import 1 question · 0 new · 0 existing will change/.test(await page.textContent('#im-line')), await page.textContent('#im-line'));
@@ -92,9 +91,12 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
   say('import-roundtrip-noop', /Nothing in the file differs/.test(await page.textContent('#toast')) && !(await page.$('#toast .tundo')), await page.textContent('#toast'));
 
   // ---- import a real file: merge, new rows, status only from the Status column, a bad date, Undo ----
-  const csv = file('log.csv', '﻿Number,Question,Submitted by,Received,Response,Status,Priority\n1,"What is the DSCR covenant?\nAnd the lock-up level?",Lender A,11/02/2026,Updated response,,High\n,New with a response,Lender C,"Feb 31, 2026",Has a response,,urgent\n7,Closed on arrival,Lender C,2026-11-03,,Closed,Low\n,,,,,,\n');
+  const csv = file('log.csv', '\ufeffNumber,Question,Submitted by,Received,Response,Status,Priority\n'
+    + '1,"What is the DSCR covenant?\nAnd the lock-up level?",Lender A,11/02/2026,Updated response,,High\n'
+    + ',New with a response,Lender C,"Feb 31, 2026",Has a response,,urgent\n'
+    + '7,Closed on arrival,Lender C,2026-11-03,,Closed,Low\n,,,,,,\n');
   await page.click('#qa-cols'); await page.click('#qa-import'); await page.waitForSelector('.imdlg');
-  await page.setInputFiles('#im-file', csv); await immapReady(page);
+  await page.setInputFiles('#im-file', csv); await page.waitForSelector('.immap');
   const step2 = await page.evaluate(() => ({ file: document.querySelector('.imfile').textContent, line: document.getElementById('im-line').textContent, head: [...document.querySelectorAll('.imprev:not(.imchg) th')].map((x) => x.textContent), first: [...document.querySelectorAll('.imprev:not(.imchg) tbody tr:first-child td')].map((x) => x.textContent), second: [...document.querySelectorAll('.imprev:not(.imchg) tbody tr:nth-child(2) td')].map((x) => x.textContent), rows: document.querySelectorAll('.imprev:not(.imchg) tbody tr').length, changes: [...document.querySelectorAll('#im-changes tbody tr')].map((r) => [...r.children].map((c) => c.textContent)) }));
   say('import-preview', /log\.csv · 3 rows/.test(step2.file) && step2.rows === 3 && step2.first[2] === 'Nov 2' && step2.second[2] === '—' && /Import 3 questions · 2 new · 1 existing will change · 1 date not read · 1 value not recognized/.test(step2.line), JSON.stringify(step2));
   // which they are, on hover and to a screen reader
@@ -102,7 +104,9 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
   say('import-names-what-it-did-not-read', which.tip === 'Row 3 Priority: urgent · Row 3 Received: Feb 31, 2026' && which.sr === which.tip, JSON.stringify(which));
   await page.mouse.move(5, 5);
   // before anything is written: which question a merge overwrites, field by field, now and after
-  say('import-shows-what-it-overwrites', step2.changes.length >= 2 && step2.changes.every((c) => c[0] === '1') && !step2.changes.some((c) => c[1] === 'Question') && step2.changes.some((c) => c[1] === 'Response' && c[3] === 'Updated response'), JSON.stringify(step2.changes));
+  say('import-shows-what-it-overwrites', step2.changes.length >= 2 && step2.changes.every((c) => c[0] === '1')
+    && !step2.changes.some((c) => c[1] === 'Question')
+    && step2.changes.some((c) => c[1] === 'Response' && c[3] === 'Updated response'), JSON.stringify(step2.changes));
   await page.click('[data-immode="append"]');
   say('import-append-counts', /Import 3 questions · 3 new · 1 date/.test(await page.textContent('#im-line')) && !(await page.$('#im-changes')), await page.textContent('#im-line'));
   await page.click('[data-immode="merge"]');
@@ -112,8 +116,12 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
   const beforeImport = await qs(page, dealId);
   await page.click('#im-go'); await page.waitForFunction(() => !document.querySelector('.imdlg'));
   const after = await qs(page, dealId); const t2 = await page.textContent('#toast');
-  say('import-applied', after.length === 4 && after[0].text === 'What is the DSCR covenant?\nAnd the lock-up level?' && after[0].response === 'Updated response' && after[0].received === '2026-11-02' && after[0].status === 'open'
-    && after[2].n === 3 && after[2].response === 'Has a response' && after[2].status === 'open' && after[2].received === '' && after[3].n === 7 && after[3].status === 'closed' && /Imported · 2 new · 1 updated/.test(t2), JSON.stringify({ after, t2 }));
+  const updated = after[0].text === 'What is the DSCR covenant?\nAnd the lock-up level?'
+    && after[0].response === 'Updated response' && after[0].received === '2026-11-02' && after[0].status === 'open';
+  const added = after[2].n === 3 && after[2].response === 'Has a response' && after[2].status === 'open'
+    && after[2].received === '' && after[3].n === 7 && after[3].status === 'closed';
+  say('import-applied', after.length === 4 && updated && added && /Imported · 2 new · 1 updated/.test(t2),
+    JSON.stringify({ after, t2 }));
   await page.click('#toast .tundo'); await page.waitForFunction((n) => Object.values(store.get().questions).length === n, beforeImport.length);
   say('import-undo', JSON.stringify(await qs(page, dealId)) === JSON.stringify(beforeImport), JSON.stringify(await qs(page, dealId)));
   await page.reload(); await page.waitForSelector('.md .li');
@@ -123,12 +131,12 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
   await page.click('#qa-cols'); await page.click('#qa-import'); await page.waitForSelector('.imdlg');
   await page.setInputFiles('#im-file', file('broken.xlsx', Buffer.from([1, 2, 3, 4, 5]))); await page.waitForSelector('#im-error');
   say('import-unreadable-file', /Could not read broken\.xlsx/.test(await page.textContent('#im-error')) && !(await page.$('.immap')), await page.textContent('#im-error'));
-  await page.setInputFiles('#im-file', file('rule.csv', 'Number,Question,Status\n20,Fine,Open\n21,Answered without a response,Answered\n')); await immapReady(page);
+  await page.setInputFiles('#im-file', file('rule.csv', 'Number,Question,Status\n20,Fine,Open\n21,Answered without a response,Answered\n')); await page.waitForSelector('.immap');
   // a row that breaks a rule is reported before anything is imported, and Import stays off
   await page.waitForFunction(() => /Can’t import this file/.test(document.getElementById('im-line').textContent));
   say('import-rule-failure-atomic', /Row 3/.test(await page.textContent('#im-line')) && (await page.isDisabled('#im-go')) && !!(await page.$('.imdlg')) && (await qs(page, dealId)).length === beforeImport.length, await page.textContent('#im-line'));
   // storage full: the whole import is refused, the dialog stays, and it works once there is room
-  await page.click('#im-back'); await page.setInputFiles('#im-file', csv); await immapReady(page);
+  await page.click('#im-back'); await page.setInputFiles('#im-file', csv); await page.waitForSelector('.immap');
   await page.evaluate(() => { let i = 0; for (const size of [262144, 16384, 512]) { for (;;) { try { localStorage.setItem('qaQuotaFixture' + (i++), 'x'.repeat(size)); } catch { break; } } } });
   // what the change files hold: an import refused for want of room writes nothing to them
   const stored = () => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('dil/2/shared/')).reduce((n, k) => n + localStorage.getItem(k).length, 0)); const storedBefore = await stored();
@@ -142,7 +150,7 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
   // a second tab sees the import
   const page2 = await ctx.newPage(); await page2.goto(URL + '#qa-' + dealId); await page2.waitForSelector('.md .li'); await page2.click('.seg button:has-text("All")');
   const before2 = await page2.evaluate(() => document.querySelectorAll('.md .li').length);
-  await page.click('#qa-cols'); await page.click('#qa-import'); await page.setInputFiles('#im-file', file('more.csv', 'Question\nFrom the other tab\n')); await immapReady(page); await page.click('#im-go'); await page.waitForFunction(() => !document.querySelector('.imdlg'));
+  await page.click('#qa-cols'); await page.click('#qa-import'); await page.setInputFiles('#im-file', file('more.csv', 'Question\nFrom the other tab\n')); await page.waitForSelector('.immap'); await page.click('#im-go'); await page.waitForFunction(() => !document.querySelector('.imdlg'));
   await page2.waitForFunction((n) => document.querySelectorAll('.md .li').length === n + 1, before2, { timeout: 5000 }).catch(() => {});
   say('import-seen-in-second-tab', (await page2.evaluate(() => document.querySelectorAll('.md .li').length)) === before2 + 1);
   say('no-page-errors-1', page.errors.length === 0 && true, JSON.stringify(page.errors));
@@ -163,7 +171,7 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
     await page.click('#qa-cols');
     await page.click('#qa-import');
     await page.setInputFiles('#im-file', csv);
-    await immapReady(page);
+    await page.waitForSelector('.immap');
   }
   await openCsv(page, before);
   await page.click('#im-go');
@@ -225,39 +233,71 @@ const focusId = (page) => page.evaluate(() => document.activeElement?.id || docu
   const dealId = await newDeal(page, 'Could match');
   await page.goto(`${URL}#qa-${dealId}`);
   const questions = portfolioQuestions().slice(0, 2_000);
-  const csvOf = (rows) => file('could-match.csv', ['Number,Question,Response', ...rows.map((q, i) => `${i + 1},"${q.replaceAll('"', '""')}",${'Answer ' + (i + 1)}`)].join('\n'));
-  const open = async (target, path) => { await target.click('#qa-cols'); await target.click('#qa-import'); await target.setInputFiles('#im-file', path); await immapReady(target); };
+  const csvRow = (q, i) => `${i + 1},"${q.replaceAll('"', '""')}",Answer ${i + 1}`;
+  const csvOf = (rows) => file('could-match.csv', ['Number,Question,Response', ...rows.map(csvRow)].join('\n'));
+  const open = async (target, path) => {
+    await target.click('#qa-cols');
+    await target.click('#qa-import');
+    await target.setInputFiles('#im-file', path);
+    await target.waitForSelector('.immap');
+  };
   await open(page, csvOf(questions));
   await page.click('#im-go'); await page.waitForSelector('.imdlg', { state: 'detached' });
   const storageState = await ctx.storageState(); await ctx.close();
   const SHOWN = 8;
   const reworded = questions.map((q, i) => (i < SHOWN ? q.toLowerCase().replace(/[?.]+$/, '') : q));
   const shots = path.join(tmp, 'could-match'); fs.mkdirSync(shots, { recursive: true });
-  for (const [scheme, width, height] of [['dark', 1280, 736], ['light', 1280, 736], ['dark', 1024, 640], ['light', 1024, 640]]) {
+  const shapes = [['dark', 1280, 736], ['light', 1280, 736], ['dark', 1024, 640], ['light', 1024, 640]];
+  for (const [scheme, width, height] of shapes) {
     const label = `${scheme}-${width}x${height}`;
     const context = await browser.newContext({ colorScheme: scheme, viewport: { width, height }, storageState });
     try {
-      const review = await context.newPage(); review.errors = []; review.on('pageerror', (e) => review.errors.push(e.message));
+      const review = await context.newPage();
+      review.errors = [];
+      review.on('pageerror', (e) => review.errors.push(e.message));
       await review.goto(`${URL}#qa-${dealId}`); await open(review, csvOf(reworded));
       await review.waitForSelector('#im-suggest');
-      const found = await review.evaluate(() => ({ rows: document.querySelectorAll('#im-suggest tbody tr').length, line: document.getElementById('im-line').textContent, buttons: document.querySelectorAll('#im-suggest [data-accept]').length }));
-      say(`could-match-lists-each-row-${label}`, found.rows === SHOWN && found.buttons === SHOWN && new RegExp(`${SHOWN} new`).test(found.line), JSON.stringify(found));
+      const found = await review.evaluate(() => ({
+        rows: document.querySelectorAll('#im-suggest tbody tr').length,
+        line: document.getElementById('im-line').textContent,
+        buttons: document.querySelectorAll('#im-suggest [data-accept]').length,
+      }));
+      const listsEach = found.rows === SHOWN && found.buttons === SHOWN && new RegExp(`${SHOWN} new`).test(found.line);
+      say(`could-match-lists-each-row-${label}`, listsEach, JSON.stringify(found));
       await review.locator('#im-suggest').scrollIntoViewIfNeeded();
       await review.screenshot({ path: path.join(shots, `${label}.png`) });
-      const geometry = await review.evaluate(() => { const pane = document.getElementById('im-suggest'); const frame = pane.getBoundingClientRect(); const dlg = document.querySelector('.imdlg').getBoundingClientRect(); return { inside: frame.left >= dlg.left && frame.right <= dlg.right, overflowX: pane.scrollWidth > pane.clientWidth + 1, goInView: document.getElementById('im-go').getBoundingClientRect().bottom <= window.innerHeight }; });
+      const geometry = await review.evaluate(() => {
+        const pane = document.getElementById('im-suggest');
+        const frame = pane.getBoundingClientRect();
+        const dlg = document.querySelector('.imdlg').getBoundingClientRect();
+        return {
+          inside: frame.left >= dlg.left && frame.right <= dlg.right,
+          overflowX: pane.scrollWidth > pane.clientWidth + 1,
+          goInView: document.getElementById('im-go').getBoundingClientRect().bottom <= window.innerHeight,
+        };
+      });
       say(`could-match-fits-${label}`, geometry.inside && geometry.goInView, JSON.stringify(geometry));
       await review.click('#im-suggest [data-accept]');
-      const after = await review.evaluate(() => ({ rows: document.querySelectorAll('#im-suggest tbody tr').length, line: document.getElementById('im-line').textContent }));
-      say(`could-match-accept-${label}`, after.rows === SHOWN - 1 && new RegExp(`${SHOWN - 1} new · 1 existing will change`).test(after.line), JSON.stringify(after));
+      const after = await review.evaluate(() => ({
+        rows: document.querySelectorAll('#im-suggest tbody tr').length,
+        line: document.getElementById('im-line').textContent,
+      }));
+      const oneAccepted = after.rows === SHOWN - 1
+        && new RegExp(`${SHOWN - 1} new · 1 existing will change`).test(after.line);
+      say(`could-match-accept-${label}`, oneAccepted, JSON.stringify(after));
       if (label === 'dark-1280x736') {
-        await review.click('.imdlg .xfoot, .imdlg'); await review.keyboard.press('Escape'); await review.waitForTimeout(300);
+        await review.click('.imdlg .xfoot, .imdlg');
+        await review.keyboard.press('Escape');
+        await review.waitForTimeout(300);
         if (await review.$('.imdlg')) await review.click('#im-close, [aria-label=Close]').catch(() => {});
-        await review.click('#qa-cols'); await review.click('#qa-import'); await immapReady(review);
+        await review.click('#qa-cols'); await review.click('#qa-import'); await review.waitForSelector('.immap');
         const kept = await review.evaluate(() => document.querySelectorAll('#im-suggest tbody tr').length);
         say('could-match-accepted-is-kept-when-reopened', kept === SHOWN - 1, String(kept));
         await review.click('#im-go'); await review.waitForSelector('.imdlg', { state: 'detached' });
         const saved = await qs(review, dealId);
-        say('could-match-import-adds-only-the-unaccepted', saved.length === 2_000 + SHOWN - 1 && saved[0].text === reworded[0], JSON.stringify({ n: saved.length, first: saved[0].text }));
+        const addsOnlyUnaccepted = saved.length === 2_000 + SHOWN - 1 && saved[0].text === reworded[0];
+        say('could-match-import-adds-only-the-unaccepted', addsOnlyUnaccepted,
+          JSON.stringify({ n: saved.length, first: saved[0].text }));
       }
       say(`could-match-no-page-errors-${label}`, review.errors.length === 0, JSON.stringify(review.errors));
     } finally { await context.close(); }
@@ -425,7 +465,6 @@ for (const [width, height] of [[1280, 736], [1024, 640]]) {
     await page.click('#qa-cols');
     await page.click('#qa-import');
     await page.setInputFiles('#im-file', mergeFile);
-    await immapReady(page);
     await page.waitForSelector('#im-changes tbody td');
     await page.focus('#im-answered');
     // Bring the comparison above the sticky footer before scrolling inside it.

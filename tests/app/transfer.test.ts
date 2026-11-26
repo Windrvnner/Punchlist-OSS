@@ -30,6 +30,10 @@ function make(kv = disk()) {
 }
 const fileOf = (name: string, bytes: Uint8Array) => ({ name, size: bytes.length, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer });
 
+const NOTHING_TO_CHANGE = {
+  ok: true, value: { created: 0, updated: 0, restored: 0, changes: [], suggestions: [] },
+};
+
 describe('export and import through the ports', () => {
   it('exports the chosen questions, names the file safely, and the file imports back unchanged', async () => {
     const { store, saved } = make(); await store.boot();
@@ -70,7 +74,7 @@ describe('export and import through the ports', () => {
     await exportQuestions(store, dealId, { status: 'all', workstream: '', askedBy: [before.askedBy] });
     const back = await readImportFile(store, fileOf('log.csv', saved[0].bytes)); if (!back.ok) throw new Error(back.error.message);
     const p = prepareImport(back.value.rows, back.value.mapping);
-    expect(previewImport(store, dealId, 'merge', p.rows)).toEqual({ ok: true, value: { created: 0, updated: 0, restored: 0, changes: [], suggestions: [] } });
+    expect(previewImport(store, dealId, 'merge', p.rows)).toEqual(NOTHING_TO_CHANGE);
     expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: p.rows })).ok).toBe(true);
     expect(store.get().questions[q1.id]).toEqual(before);
   });
@@ -104,7 +108,7 @@ describe('export and import through the ports', () => {
     const back = await readImportFile(store, fileOf('log.csv', saved[0].bytes)); if (!back.ok) throw new Error(back.error.message);
     const p = prepareImport(back.value.rows, back.value.mapping);
     expect(p.rows[0]).toMatchObject({ askedBy: 'Lender A', respondedBy: 'Sponsor', workstream: 'Legal', response: '  Yes, as written.\n' });
-    expect(previewImport(store, dealId, 'merge', p.rows)).toEqual({ ok: true, value: { created: 0, updated: 0, restored: 0, changes: [], suggestions: [] } });
+    expect(previewImport(store, dealId, 'merge', p.rows)).toEqual(NOTHING_TO_CHANGE);
     await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: p.rows });
     expect(JSON.stringify(store.get().questions)).toBe(before);                 // the round trip changes nothing
     // a file that has the name with and without a space after it gives one submitter
@@ -130,7 +134,7 @@ describe('export and import through the ports', () => {
     const p = prepareImport(back.value.rows, back.value.mapping);
     expect(p.rows[0].response.endsWith('[cut: longer than Excel allows in one cell]')).toBe(false);
     // its line breaks are stored as CR LF in the app and come back as LF: that is no change to the response
-    expect(previewImport(store, dealId, 'merge', p.rows)).toEqual({ ok: true, value: { created: 0, updated: 0, restored: 0, changes: [], suggestions: [] } });
+    expect(previewImport(store, dealId, 'merge', p.rows)).toEqual(NOTHING_TO_CHANGE);
   });
 
   it('reports a canceled save, an empty selection and a failed save without claiming an export', async () => {

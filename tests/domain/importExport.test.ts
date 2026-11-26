@@ -45,16 +45,14 @@ describe('the stand-in\'s CSV reader and writer', () => {
 });
 
 describe('suggestMapping', () => {
-  it('matches the app\'s own heading names only, ignoring case, spaces and punctuation; any other wording is left to the proposal', () => {
-    for (const h of ['Responded by', 'RESPONDED BY', 'Responded-by']) {
+  it('picks up a column that names who responded, however it is headed, and never takes it for the response itself', () => {
+    for (const h of ['Responded by', 'Responder', 'Respondent', 'Answered by', 'Replied by', 'Response by', 'Response from', 'Responding party', 'Respondent firm', 'RESPONDED BY', 'Responded-by']) {
       const m = suggestMapping(['#', 'Question', 'Response', h, 'Date']);
       expect([h, m.response, m.respondedBy]).toEqual([h, 2, 3]);
       const p = prepareImport([['1', 'What is the lock-up?', '1.30x', 'Northwind Sponsor LP', '2026-11-02']], m);
       expect(p.rows[0]).toMatchObject({ response: '1.30x', respondedBy: 'Northwind Sponsor LP', responded: '2026-11-02' });
     }
     expect(suggestMapping(['#', 'Question', 'Response']).respondedBy).toBeNull();          // no such column: nobody is named
-    const other = suggestMapping(['Ref', 'Query', 'Answer', 'Responder', 'Date received', 'Category']);
-    expect(Object.values(other).every((column) => column === null)).toBe(true);            // similar words are not guessed at
   });
 });
 

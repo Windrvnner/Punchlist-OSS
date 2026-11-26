@@ -54,8 +54,9 @@ const numberParts = (v: string) => { const m = /^\s*(\D*?)0*(\d+)\s*([.)]?)\s*$/
 /**
  * Which row of the log stands for each question: the row with the same sender and exact text, the one with the
  * question's own number first; each row stands for one question. By question id, the row's index in `table.rows`.
- * A row or question naming no sender does not conflict with one that does, but the same sender is always tried first. The
- * sender the app last wrote for a question (`sent`) still counts after a person corrects it in the app, after its own.
+ * A row or question naming no sender does not conflict with one that does, but the same sender is always tried
+ * first. The sender the app last wrote for a question (`sent`) still counts after a person corrects it in the app,
+ * after its own.
  */
 export function matchRows(table: Pick<ReadTable, 'rows'>, mapping: Mapping, questions: Question[], sent: ReadonlyMap<string, Readonly<Record<string, string>>> = new Map()): Map<string, number> {
   const cell = (r: string[], k: ImportField) => (mapping[k] == null ? '' : String(r[mapping[k]!] ?? ''));
@@ -66,10 +67,15 @@ export function matchRows(table: Pick<ReadTable, 'rows'>, mapping: Mapping, ques
   const senderOf = new Map(questions.map((q) => [q.id, q.askedBy.trim()]));
   const lastSent = new Map(questions.map((q) => [q.id, (sent.get(q.id)?.askedBy ?? '').trim()]));
   // rows by exact text, then by sender, in the log's order, so a log of thousands of rows is matched in a moment
-  // a text as the log file holds it (a line break as "\n", control characters as a space or gone) is the text it was written as
+  // a text as the log file holds it (a line break as "\n", control characters as a space or gone) is the text it
+  // was written as
   const byText = new Map<string, number[]>();
   const byTextAndSender = new Map<string, Map<string, number[]>>();
-  const push = <K>(map: Map<K, number[]>, key: K, i: number) => { const list = map.get(key); if (list) list.push(i); else map.set(key, [i]); };
+  const push = <K>(map: Map<K, number[]>, key: K, i: number) => {
+    const list = map.get(key);
+    if (list) list.push(i);
+    else map.set(key, [i]);
+  };
   const formsOf = (text: string) => [...new Set([text, asLogHolds(text, ' '), asLogHolds(text, '')])];
   table.rows.forEach((r, i) => {
     const text = cell(r, 'text'); if (!text.trim()) return;
@@ -82,7 +88,8 @@ export function matchRows(table: Pick<ReadTable, 'rows'>, mapping: Mapping, ques
   /** the rows holding the question's text in any form, under that sender (any sender when null), in the log's order */
   const rowsOf = (q: Question, sender: string | null) => {
     const forms = formsOf(q.text);
-    const lists = forms.map((form) => (sender === null ? byText.get(form) : byTextAndSender.get(form)?.get(sender)) ?? []);
+    const listOf = (form: string) => (sender === null ? byText.get(form) : byTextAndSender.get(form)?.get(sender));
+    const lists = forms.map((form) => listOf(form) ?? []);
     return forms.length === 1 ? lists[0] : lists.flat().sort((a, b) => a - b);
   };
   // a question's own sender first, then the sender it was last written with, then rows (or a question) naming no one

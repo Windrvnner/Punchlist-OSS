@@ -19,7 +19,8 @@ describe('matchRows', () => {
   });
   it('never by number alone, nor by similar words: another wording is no row of the question', () => {
     const rows = [['4', 'What is the DSCR in the base case?'], ['5', 'who is the EPC contractor?']];
-    expect(matchRows({ rows }, mapping, [q('a', 4, 'What is the DSCR for the base case?'), q('b', 5, 'Who is the EPC contractor?')])).toEqual(new Map());
+    const asked = [q('a', 4, 'What is the DSCR for the base case?'), q('b', 5, 'Who is the EPC contractor?')];
+    expect(matchRows({ rows }, mapping, asked)).toEqual(new Map());
   });
   it('of two rows that read the same, a question takes its own party\'s, so a log sorted by party never gets one party\'s response in another\'s row', () => {
     const rows = [['1', 'Provide the model.', 'Lender B'], ['2', 'Provide the model.', ' Lender A ']];
@@ -44,9 +45,11 @@ describe('matchRows', () => {
 describe('a question as its log file holds it', () => {
   it('is the row whose text has a line break as "\\n" and no control character: how the file stores it', () => {
     const rows = [['1', 'Provide the model.\nAnd the lock-up level?']];
-    expect(matchRows({ rows }, mapping, [q('a', 1, 'Provide the model.\r\nAnd the lock-up level?')])).toEqual(new Map([['a', 0]]));
-    expect(matchRows({ rows: [['1', 'Provide Q3forecast']] }, mapping, [q('a', 1, 'Provide Q3\u0000forecast')])).toEqual(new Map([['a', 0]]));
-    expect(matchRows({ rows: [['1', 'Provide Q3 forecast']] }, mapping, [q('a', 1, 'Provide Q3\u0000forecast')])).toEqual(new Map([['a', 0]]));
+    const multiline = [q('a', 1, 'Provide the model.\r\nAnd the lock-up level?')];
+    expect(matchRows({ rows }, mapping, multiline)).toEqual(new Map([['a', 0]]));
+    const withControl = [q('a', 1, 'Provide Q3\u0000forecast')];
+    expect(matchRows({ rows: [['1', 'Provide Q3forecast']] }, mapping, withControl)).toEqual(new Map([['a', 0]]));
+    expect(matchRows({ rows: [['1', 'Provide Q3 forecast']] }, mapping, withControl)).toEqual(new Map([['a', 0]]));
   });
 });
 

@@ -52,7 +52,9 @@ export function QaImportForm({ store, dealId, qa, plan, actions }: {
       <ModeRow mode={mode} importing={importing} onPick={qa.setMode} />
       {mapping.response != null && <AnsweredRow answered={qa.answered} importing={importing} onPick={qa.setAnswered} />}
       {mode === 'merge' && !!plan.preview?.changes.length && <ChangesRow changes={plan.preview.changes} />}
-      {mode === 'merge' && !!plan.preview?.suggestions.length && <SuggestionsRow qa={qa} suggestions={plan.preview.suggestions} />}
+      {mode === 'merge' && !!plan.preview?.suggestions.length && (
+        <SuggestionsRow qa={qa} suggestions={plan.preview.suggestions} />
+      )}
       {qa.restart
         ? <LeaveFoot id="im-restart-ask" ask="Clear this import and start over?" go="Start Over"
           keep={() => qa.setRestart(false)} leave={actions.startOver} />
@@ -236,7 +238,9 @@ function AnsweredRow({ answered, importing, onPick }: {
  * a row left alone is added as a new question.
  */
 function SuggestionsRow({ qa, suggestions }: { qa: ReadQa; suggestions: Suggestion[] }) {
-  const accept = (s: Suggestion) => qa.setAccepted([...qa.accepted, { line: s.line, text: s.text, questionId: s.questionId }]);
+  const accept = (s: Suggestion) => {
+    qa.setAccepted([...qa.accepted, { line: s.line, text: s.text, questionId: s.questionId }]);
+  };
   return (
     <div class="srow top"><div class="k">Could Match</div><div class="imprev imsug" id="im-suggest"><table>
       <thead><tr><th>Row</th><th>In the file</th><th>Could be</th><th /></tr></thead>

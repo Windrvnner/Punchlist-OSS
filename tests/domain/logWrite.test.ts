@@ -7,13 +7,24 @@ import { writtenAsMeant } from '../../src/domain/sheets';
 
 const q = (n: number, text: string, more: Partial<Question> = {}) => ({ id: `q${n}`, n, text, askedBy: 'Lender A', received: '', workstream: '', priority: '', response: '', respondedBy: '', ...more }) as Question;
 // a log with a title in row 1, headings in row 3 and an empty column B; columns A, C, D, E of the sheet are read
-const columns = ['No.', 'Question', 'Response', 'Responded by'];
-const table = { columns, cols: [0, 2, 3, 4], lines: [4, 5, 6], lastRow: 6, rows: [['Q1', 'What is the minimum DSCR covenant?', '1.20x', 'Sponsor'], ['Q2', 'Who is the EPC contractor?', '', ''], ['Q3', 'What insurances are in place?', 'See the advisor report', 'Sponsor']] };
+const columns = ['No.', 'Question', 'Sponsor response', 'Responded by'];
+const table = {
+  columns, cols: [0, 2, 3, 4], lines: [4, 5, 6], lastRow: 6,
+  rows: [
+    ['Q1', 'What is the minimum DSCR covenant?', '1.20x', 'Sponsor'],
+    ['Q2', 'Who is the EPC contractor?', '', ''],
+    ['Q3', 'What insurances are in place?', 'See the advisor report', 'Sponsor'],
+  ],
+};
 const map = suggestMapping(columns);
 
 describe('writing back into a Q&A log', () => {
   it('adds an answer the log does not have, in its own row and columns, and leaves filled answers alone', () => {
-    const w = logWrite(table, map, [q(1, 'What is the minimum DSCR covenant?', { response: '1.25x' }), q(2, 'Who is the EPC contractor?', { response: 'Fabrikam', respondedBy: 'Sponsor' }), q(3, 'What insurances are in place?', { response: 'See the advisor report' })]);
+    const w = logWrite(table, map, [
+      q(1, 'What is the minimum DSCR covenant?', { response: '1.25x' }),
+      q(2, 'Who is the EPC contractor?', { response: 'Fabrikam', respondedBy: 'Sponsor' }),
+      q(3, 'What insurances are in place?', { response: 'See the advisor report' }),
+    ]);
     expect(w.steps).toEqual([
       { kind: 'cell', row: 4, col: 3, value: 'Fabrikam' },
       { kind: 'cell', row: 4, col: 4, value: 'Sponsor' },
@@ -29,12 +40,13 @@ describe('writing back into a Q&A log', () => {
     ]);
     expect(w.added).toBe(2);
   });
-  it('finds a question by its exact words, so a renumbered log still lines up; a reworded one is a row of its own', () => {
+  it('finds a question by its exact words, so a renumbered log lines up; a reworded one gets a row', () => {
     const w = logWrite(table, map, [
       q(7, 'Who is the EPC contractor?', { response: 'Fabrikam' }),
       q(3, 'What insurances are in place now?'),
     ]);
-    expect(w.steps.filter((s) => s.kind === 'cell' && s.row === 4)).toEqual([{ kind: 'cell', row: 4, col: 3, value: 'Fabrikam' }]);
+    const row4 = w.steps.filter((s) => s.kind === 'cell' && s.row === 4);
+    expect(row4).toEqual([{ kind: 'cell', row: 4, col: 3, value: 'Fabrikam' }]);
     expect(w.added).toBe(1);
   });
   it('writes nothing when the app has nothing the log lacks', () => {
@@ -125,10 +137,12 @@ describe('matching and keeping, in awkward logs', () => {
     expect(w.steps).toEqual([{ kind: 'cell', row: 1, col: 2, value: 'None' }]);
   });
   it('takes a question reworded only in case for another: it gets a row of its own', () => {
-    expect(logWrite(T([['7', 'Who is the EPC contractor?', '']]), m3, [q(2, 'Who is the EPC Contractor?', { response: 'Fabrikam' })]).added).toBe(1);
+    const asked = [q(2, 'Who is the EPC Contractor?', { response: 'Fabrikam' })];
+    expect(logWrite(T([['7', 'Who is the EPC contractor?', '']]), m3, asked).added).toBe(1);
   });
   for (const n of ['4.', 'Q 4', 'Q-4', '#4', '004']) it(`reads "${n}" as question 4`, () => {
-    expect(logWrite(T([[n, 'What is the loan tenor?', '']]), m3, [q(4, 'What is the loan tenor?', { response: '18 years' })]).added).toBe(0);
+    const tenor = [q(4, 'What is the loan tenor?', { response: '18 years' })];
+    expect(logWrite(T([[n, 'What is the loan tenor?', '']]), m3, tenor).added).toBe(0);
   });
   for (const [style, want] of [['1.', '2.'], ['A-1', 'A-2'], ['#1', '#2'], ['Q 1', 'Q 2']]) it(`numbers a new row "${want}" in a log that numbers "${style}"`, () => {
     expect(logWrite(T([[style, 'DSCR?', '']]), m3, [q(1, 'DSCR?'), q(2, 'EPC?')]).steps).toContainEqual({ kind: 'cell', row: 2, col: 0, value: want });
@@ -138,7 +152,7 @@ describe('matching and keeping, in awkward logs', () => {
 // The log kept up to date as an IB Q&A log is: every column it has, nothing made up, someone's edits kept
 
 describe('a log that writes its cells its own way', () => {
-  const cols = ['No.', 'Question', 'Priority', 'Received', 'Status', 'Response'];
+  const cols = ['No.', 'Question', 'Priority', 'Date received', 'Status', 'Response'];
   const m = suggestMapping(cols);
   const log = { columns: cols, cols: cols.map((_, i) => i), rows: [['1', 'What is the minimum DSCR covenant?', '', '11/12/2026', 'Outstanding', '']], lines: [2], lastRow: 2 };
   it('leaves a blank Priority blank: the High a question with none came in with is the app\'s default, not a value anyone gave', () => {

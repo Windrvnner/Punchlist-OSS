@@ -103,8 +103,7 @@ export async function loadQaImport(store: Store, dealId: string, file: File) {
   if (taken) return fail({ kind: 'rejected', message: taken });
   const read = await readImportFile(store, file);
   if (!read.ok) return fail({ ...read.error, message: `Could not read ${file.name}: ${read.error.message}` });
-  // any field the app's own heading names did not find goes to the model's proposal, which the person then confirms
-  const askForLayout = Object.values(read.value.mapping).some((column) => column == null) && store.get().can.layout;
+  const askForLayout = read.value.mapping.text == null && store.get().can.layout;
   return ok({ table: read.value, path, askForLayout });
 }
 
