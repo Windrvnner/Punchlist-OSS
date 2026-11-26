@@ -448,11 +448,11 @@ describe('reading a list in, whole, in one call', () => {
     expect(ends).toEqual([{ n: 1, k: 'section' }, { n: 3, k: 'item' }, { n: 4, k: 'left' }, { n: 2004, k: 'item' }]);
   });
   it('drops a line under two kinds, a blank line and a line past the list, and keeps a table\'s columns', async () => {
-    const cells = { item: 2, section: '1', subsection: 'x', heading: 3 };
+    const cells = { item: 2, section: '1', subsection: 'x', heading: 3, subheading: '1' };
     const s = replying({ item: ['1-4', '3000'], left: ['4'], cells });
     const out = val(await s.ai.readList!({ lines: list.slice(0, 5) }));
     expect(out.lines.map((r) => r.n)).toEqual([1, 3]);
-    expect(out.cells).toEqual({ item: 2, section: 1, heading: 3 });
+    expect(out.cells).toEqual({ item: 2, section: 1, heading: 3, subheading: 1 });
   });
   it('takes a range written with an en dash, and no section or subsection column that is the item column', async () => {
     const s = replying({ item: ['3–5'], cells: { item: 2, section: 2, subsection: 2, heading: 2 } });

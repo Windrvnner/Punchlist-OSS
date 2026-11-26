@@ -1,11 +1,11 @@
 /**
  * A list read whole by the model, tied out line by line. The input, pasted text, a document or a table, is a list of
  * lines. The model reads it in one call and says what kind each line is, and for a table which columns hold the
- * item, section, subsection and a heading row's heading; it never gives the words. Every item and heading is worded as
- * its line in the file. The app accounts for every line: an item (or the rest of the item above it), a heading, a
- * table's own heading row, a blank, or a line left out. A line the model did not name, or a table row whose named
- * cell is blank, is unplaced: it is asked about again and, if still unplaced, left out. Nothing in the input is
- * dropped: a line left out is listed, and a person can bring it in where it sits.
+ * item, section and subsection, and the headings of section and subsection rows; it never gives the words. Every item
+ * and heading is worded as its line in the file. The app accounts for every line: an item (or the rest of the item
+ * above it), a heading, a table's own heading row, a blank, or a line left out. A line the model did not name, or a
+ * table row whose named cell is blank, is unplaced: it is asked about again and, if still unplaced, left out. Nothing
+ * in the input is dropped: a line left out is listed, and a person can bring it in where it sits.
  */
 import { key, type ListItem } from './checklist';
 
@@ -17,8 +17,13 @@ export interface LineRead {
   k: 'section' | 'subsection' | 'item' | 'more' | 'columns' | 'left';
 }
 
-/** for a table, the columns (from 1) that hold each row's item, section and subsection, and a heading row's heading */
-export interface ListCells { item: number; section?: number; subsection?: number; heading?: number }
+/**
+ * For a table, the columns (from 1) that hold each row's item, section and subsection, and the heading of a row read
+ * as a section (`heading`) or a subsection (`subheading`).
+ */
+export interface ListCells {
+  item: number; section?: number; subsection?: number; heading?: number; subheading?: number;
+}
 
 /** the model's reading of a whole list, as the service sends it: each named line's kind, and a table's columns */
 export interface ListReply { lines: LineRead[]; cells?: ListCells }
@@ -62,12 +67,12 @@ function cellAt(line: string, column: number | undefined): string {
 
 /**
  * The words a line's item or heading stands for, exactly as the file has them: a text line whole (its edge spaces
- * aside), a table row the cell the model's columns name: the item column for an item, the heading column for a heading
- * row. '' when there are none.
+ * aside), a table row the cell the model's columns name: the item column for an item, the heading or subheading
+ * column for a section or subsection row. '' when there are none.
  */
 function wordsOf(line: string, k: LineRead['k'], cells: ListCells | undefined): string {
   if (rowCells(line).length === 1) return line.trim();     // edge spaces are layout
-  const column = k === 'item' ? cells?.item : cells?.heading;
+  const column = k === 'item' ? cells?.item : k === 'section' ? cells?.heading : cells?.subheading;
   const cell = cellAt(line, column);
   return key(cell) ? cell : '';
 }
@@ -83,7 +88,7 @@ export function unplaced(lines: string[], reading: ListReading): number[] {
 
 /**
  * The first reading, with the lines it left unplaced taken from a second reading of the whole list: what the first
- * placed is kept. The first reading's columns stand; a list the first read with none takes the second's.
+ * placed is kept. Each column the first reading named stands; one it did not name is taken from the second.
  */
 export function fillUnplaced(lines: string[], first: ListReading, second: ListReading): ListReading {
   const reads = new Map(first.reads);
@@ -91,8 +96,8 @@ export function fillUnplaced(lines: string[], first: ListReading, second: ListRe
     const again = second.reads.get(n);
     if (again) reads.set(n, again);
   }
-  const cells = first.cells ?? second.cells;
-  return { reads, ...(cells ? { cells } : {}) };
+  if (!first.cells && !second.cells) return { reads };
+  return { reads, cells: { ...second.cells, ...first.cells } as ListCells };
 }
 
 /** a reading is usable when its kind is known and an item or heading has words in its line */

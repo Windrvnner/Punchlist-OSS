@@ -24,9 +24,9 @@ export function listReadPrompt(lines: string[]): string {
     '- "left": anything else (a title, a note, a page number or footer, a date).',
     'For a table, "cells" gives the column numbers, counted from 1: "item", the column that holds each row\'s item;',
     '"section" and "subsection", columns of their own that hold a row\'s section and subsection, when the table has',
-    'them; "heading", the column that holds a heading row\'s heading.',
+    'them; "heading" and "subheading", the columns that hold the heading of a section row and of a subsection row.',
     'Reply as JSON: {"section": ["3"], "subsection": [], "item": ["4-39", "41"], "more": ["12"], "columns": ["1"],',
-    '"left": ["2", "40"], "cells": {"item": 3, "section": 1, "subsection": 2, "heading": 1}}',
+    '"left": ["2", "40"], "cells": {"item": 3, "section": 1, "subsection": 2, "heading": 1, "subheading": 2}}',
   ].join('\n');
 }
 
@@ -58,8 +58,9 @@ function columnsOf(value: unknown): ListCells | undefined {
   const section = own(value.section);
   const subsection = own(value.subsection);
   const heading = column(value.heading);
+  const subheading = column(value.subheading);
   const named = { ...(section ? { section } : {}), ...(subsection ? { subsection } : {}) };
-  return { item, ...named, ...(heading ? { heading } : {}) };
+  return { item, ...named, ...(heading ? { heading } : {}), ...(subheading ? { subheading } : {}) };
 }
 
 /**

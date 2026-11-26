@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  tieOut, unplaced, tableLines, textLines, type LineRead, type ListCells, type ListReading, type TiedOut,
+  fillUnplaced, tieOut, unplaced, tableLines, textLines, type LineRead, type ListCells, type ListReading, type TiedOut,
 } from '../../src/domain/listRead';
 
 const reading = (rs: LineRead[], cells?: ListCells): ListReading =>
@@ -84,6 +84,25 @@ describe('a list read whole by the model, tied out line by line', () => {
       ['Permits', 'Air permit']]);
     // with no heading column named, a heading row has no words to take and is left out
     expect(unplaced(lines, reading(read, { item: 2 }))).toEqual([2, 4]);
+  });
+
+  it('takes section and subsection rows from the heading and subheading columns the model names', () => {
+    const lines = tableLines(['Section', 'Subsection', 'Item'], [['A. Site', '', ''], ['', 'A.1 Real estate', ''],
+      ['', '', 'Title report'], ['', 'A.2 Access', ''], ['', '', 'Road agreement']]);
+    const read = kinds([[1, 'columns'], [2, 'section'], [3, 'subsection'], [4, 'item'], [5, 'subsection'],
+      [6, 'item']]);
+    const t = tieOut(lines, reading(read, { item: 3, heading: 1, subheading: 2 }));
+    expect(t.items.map((i) => [i.section, i.subsection, i.text])).toEqual([
+      ['A. Site', 'A.1 Real estate', 'Title report'], ['A. Site', 'A.2 Access', 'Road agreement']]);
+  });
+
+  it('fills the lines a first reading left unplaced, taking a column it did not name from the second', () => {
+    const lines = tableLines(['No', 'Description'], [['A', 'Site'], ['1', 'Title report']]);
+    const first = reading(kinds([[1, 'columns'], [3, 'item']]), { item: 2 });
+    const filled = fillUnplaced(lines, first, reading(kinds([[1, 'left'], [2, 'section']]), { item: 1, heading: 2 }));
+    expect(filled.cells).toEqual({ item: 2, heading: 2 });
+    expect(tieOut(lines, filled).items).toEqual([{ section: 'Site', text: 'Title report', lines: [3] }]);
+    expect(unplaced(lines, filled)).toEqual([]);
   });
 
   it('leaves out a table row whose item cell is blank or past the row, or a heading row with a blank heading', () => {
