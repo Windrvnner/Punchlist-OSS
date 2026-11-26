@@ -70,14 +70,12 @@ it('retries only the missing question and keeps the selected link, unchecked poi
   const existingText = `Can you confirm the following: ${rows[1].text}?`;
   val(await store.dispatch(CreateQuestion, { dealId, text: existingText }));
   const existing = Object.values(store.get().questions)[0];
-  const { preview: drafted } = await previewOf(env);
-  expect(drafted.out.map((p) => p.itemId)).toEqual([rows[4].id]);
+  const { preview } = await previewOf(env);
+  expect(preview.out.map((p) => p.itemId)).toEqual([rows[4].id]);
   expect(requested.filter((texts) => texts.includes(missing)).length).toBeGreaterThan(1);
-  // no question is matched to a point by similar words: the link is one a person approved
-  expect(drafted.links).toEqual([]);
-  const selection = { point: drafted.points.find((p) => p.itemId === rows[1].id)!, q: existing };
-  const preview = { ...drafted, links: [selection] };
+  expect(preview.links.map(({ point, q }) => [point.itemId, q.id])).toEqual([[rows[1].id, existing.id]]);
   const off = new Set([preview.points[2].key]);
+  const selection = preview.links[0];
   const linked = new Map([[selection.point.key, linkApproval(selection)]]);
   const old = selectUnresolved(preview, off, linked);
   expect(await retryUnresolved(store, dealId, preview.out)).toBeUndefined();

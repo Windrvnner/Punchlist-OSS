@@ -383,6 +383,14 @@ export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => 
       : share >= 1 / 3 ? { verdict: 'partly' as const, why: 'It gives some of what the question asks for, not all of it.' }
       : { verdict: 'no' as const, why: 'It does not give what the question asks for.' };
   }),
+  // Stand-in for the model's check of an Already Asked? pair: a question covers a point when it names every one of the
+  // point's words, so a pair that only just clears the cutoff (80 to 99 percent) is refused, as a model may
+  // refuse it. The real one judges whether answering the question settles the point.
+  covers: (i) => gate(opts, 'covers', () => i.checks.map(({ point, question }) => {
+    const own = new Set(indexWords(point));
+    const named = new Set(indexWords(question));
+    return own.size > 0 && [...own].every((w) => named.has(w));
+  })),
   // Stand-in for the model proposing the open questions an answer addresses (#1120): those whose text is listed in
   // `__addressed` on the window (screens and tests), else none. The real one is a model's judgment.
   suggestQuestion: (i) => gate(opts, 'suggestQuestion', () => {
