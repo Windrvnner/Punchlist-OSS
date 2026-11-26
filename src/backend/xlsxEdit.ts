@@ -15,16 +15,18 @@ const unescapeXml = (text: string) =>
     .replace(/&gt;/g, '>')
     .replace(/&amp;/g, '&');
 const escapeXml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-/** characters XML 1.0 cannot carry */
-const NOT_XML = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g;
+/** characters XML 1.0 cannot carry, as the inside of a character class */
+const NOT_XML = '\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\ufffe\\uffff';
+/** an underscore that would start a code ("_x0041_") with the typed text, or a character written as a code, after it */
+const CODE_LOOKING = new RegExp(`_(?=x[0-9A-Fa-f]{4}(?:_|[${NOT_XML}]))|[${NOT_XML}]`, 'g');
 /** a character as Excel's own code for it: "_x000B_" (#1149) */
 const excelCode = (char: string) => `_x${char.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}_`;
 /**
- * text as a cell holds it: "_x0041_", which Excel would read as the character it codes, is escaped so it reads back as
- * typed, and each character XML 1.0 cannot carry is written as its own code, which reads back as the character (#1149)
+ * text as a cell holds it, in one pass over the typed text so that a code's closing underscore can never start the
+ * next one: a character XML 1.0 cannot carry is written as its own code, and an underscore that would turn typed text
+ * (or the code written after it) into a code is written as "_x005F_", so every cell reads back as typed (#1149)
  */
-const cellText = (text: string) =>
-  escapeXml(text.replace(/_x([0-9A-Fa-f]{4})_/g, '_x005F_x$1_').replace(NOT_XML, excelCode));
+const cellText = (text: string) => escapeXml(text.replace(CODE_LOOKING, (m) => (m === '_' ? '_x005F_' : excelCode(m))));
 /** a row's start tag for a new row: nothing that hides it (a filter, a collapsed group) or fixes its height */
 const shownRow = (open: string) =>
   open.replace(/\s(?:hidden|outlineLevel|collapsed|ht|customHeight|thickBot|thickTop)="[^"]*"/g, '');

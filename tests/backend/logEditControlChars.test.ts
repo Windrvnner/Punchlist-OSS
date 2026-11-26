@@ -57,6 +57,23 @@ describe.skipIf(!has)('a response with a control character, saved through the lo
     expect(r.sheetXml).not.toContain('_x0009_');
     expect(r.sheetXml).toContain('_xFFFF_c _x005F_x000b_');
   }, 60_000);
+  it.each([
+    ['a literal code followed by the start of another', '_x000B_x000B_'],
+    ['an unfinished code followed by a control character', '_x0041\u000b'],
+    ['a literal escape code', 'a _x005F_ b'],
+    ['a literal lower-case code', '_x000b_'],
+    ['U+FFFE and U+FFFF', 'p\ufffeq\uffffr'],
+    ['a tab and a line feed', 'a\tb\nc'],
+  ])('reads back as typed: %s', async (_name, value) => {
+    const r = await saveResponse(value);
+    expect(r.saved).toMatchObject({ ok: true, value: { status: 'written' } });
+    expect(r.cell).toBe(value);
+  }, 60_000);
+  it('stores a carriage return and a CRLF as a line feed, with no code', async () => {
+    const r = await saveResponse('a\rb\r\nc');
+    expect(r.cell).toBe('a\nb\nc');
+    expect(r.sheetXml).not.toContain('_x000D_');
+  }, 60_000);
   it('leaves plain text as it is', async () => {
     const r = await saveResponse('Fabrikam & Co <ok>');
     expect(r.saved).toMatchObject({ ok: true, value: { status: 'written' } });
