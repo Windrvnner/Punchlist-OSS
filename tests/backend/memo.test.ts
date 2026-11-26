@@ -24,7 +24,8 @@ function setup(rate: (c: Call, n: number) => unknown, sum: (c: Call, n: number) 
   const docs: AiDocs = { records: () => [], wanted: async () => [] };
   const keeper = new StoreKeeper(svc, new Mem(), { recheckMs: 0, clock });
   // retries without the waits
-  const ai = nodeAi({ service: svc, docs, keeper, repo, shared, installId: pc, clock, retry: { sleep: async () => {} } });
+  const retry = { sleep: async () => {} };
+  const ai = nodeAi({ service: svc, docs, keeper, repo, shared, installId: pc, clock, retry });
   return { ai, rates, sums, groups, repo, shared };
 }
 const val = <T,>(r: { ok: boolean; value?: T }) => { expect(r.ok).toBe(true); return r.value as T; };
