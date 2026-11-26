@@ -2483,6 +2483,7 @@ export function nodeAi(o: AiOptions) {
       let fast: string; try { fast = (await models()).fast; } catch (e) { return failure(e, UNREACHED); }
       const done = await inParts(i.items, partSize({ cap: CHECKLIST_BATCH, out: control.limits.rewordReplyTokens, outLimit: outLimit(fast), in: tokensEach(i.items), inLimit: inLimit(fast) }), async (part) => {
         let reply: { items?: unknown } | null; let cut = false;
+        // the items come as texts with no record ids, so they are numbered per prompt (#1162)
         try { reply = await askJson({ kind: 'reword', split: true, model: fast, system: JSON_ONLY, prompt: `These are items of a due diligence checklist for project-finance deals. Each will be checked against a deal's documents, so each should say plainly one thing that must be true.\n${part.map((t, n) => `${n + 1}: ${t.replace(/\s+/g, ' ')}`).join('\n')}\n\nPropose new wording only for an item that is unclear (shorthand, an abbreviation a reader may not know, a bare noun) or that joins two conditions (with "and", ";" or "/"). Keep its meaning exactly: add nothing, drop nothing, keep every figure. Write each item as one plain sentence saying what must be true. An item that joins two conditions becomes two or more items in "texts", one condition each; add "(if applicable)" only to one that may not apply to every deal, such as "Wetlands delineation complete (if applicable)" for a site that may have no wetlands, never to every item. Leave out every item that reads well already. "why": a few words on what was unclear.\nReply as JSON: {"items": [{"n": 3, "text": "…", "why": "…"}, {"n": 5, "texts": ["…", "…"], "why": "…"}]}` }, ['items']); }
         catch (e) { if (!isCutOff(e)) throw e; cut = true; reply = (e as { partial?: { items?: unknown } | null }).partial ?? null; }
         if (!cut && (!reply || !Array.isArray(reply.items))) {
@@ -2591,6 +2592,7 @@ export function nodeAi(o: AiOptions) {
         if (stop) { missed[stop] += part.mine.length; lost.push(...part.mine); return; }     // a half begun after another part's service error
         const { mine } = part; const shown = [...mine, ...part.rest];
         let reply: { pairs?: unknown } | null = null; let cut = false;
+        // the items come as texts with no record ids, so they are numbered per prompt (#1162)
         try { reply = await askJson({ kind: 'sameMeaning', split: true, model: (await models()).fast, system: JSON_ONLY, prompt: `These are items of a due diligence checklist for project-finance deals. Items 1 to ${mine.length} are being brought in; the others are already listed.\n${shown.map((g, k) => `${k + 1}: ${text(g)}`).join('\n')}\n\nWhich of items 1 to ${mine.length} ask for exactly the same thing as another item, so that checking one settles the other? Be strict: only pairs you are sure of, each named once. Two items on the same subject that ask for different things are not a pair (an executed agreement and its terms are different things). "why": a few words on what both ask for.\nReply as JSON: {"pairs": [{"a": 2, "b": 9, "why": "…"}]}` }, ['pairs']); }
         // An error from the service would most likely come again, and a service that does not answer may take the
         // connector's whole wait each time: no more parts are begun, and those not begun are counted as missed with it
@@ -2748,6 +2750,7 @@ export function nodeAi(o: AiOptions) {
       if (pairs.length) {
         const done = await inParts(pairs, partSize({ cap: ISSUES_BATCH, out: 8, outLimit: outLimit(fast), in: tokensEach(pairs.map((p) => `${p.a} ${p.b}`)), inLimit: inLimit(fast) }), async (part) => {
           const reply = await tried(async () => {
+            // a pair is not a saved record, so the pairs are numbered per prompt (#1162)
             const r = await askJson<{ same?: unknown }>({ kind: 'issuesList', split: true, model: fast, system: JSON_ONLY, prompt: `Each pair below is a point of an issues list brought in on a deal (A), and a finding already raised on the deal or an earlier point of the same list (B), each in full.\n\n${part.map((p, n) => `Pair ${n + 1}\nA: ${p.a}\nB: ${p.b}`).join('\n\n')}\n\nWhich pairs raise the same issue, so that settling one settles the other? Be strict: only when you are sure. Two points on the same clause that ask for different things are not the same.\nReply as JSON: {"same": [1, 3]}` }, ['same']);
             if (!r || !Array.isArray(r.same)) throw Object.assign(new Error(UNREAD_REPLY), { code: 'unread' });
             return r;
@@ -3300,6 +3303,7 @@ export function nodeAi(o: AiOptions) {
       for (let k = 0; k < open.length; k += GAPS_AT_ONCE) {
         const part = open.slice(k, k + GAPS_AT_ONCE); let docs: DocRecord[] = [];
         if (filling) {
+          // the items are numbered in the chat message only to list them; nothing is mapped back by number (#1162)
           const listed = part.map(({ it }, i) => { const need = needOf.get(it.id); const tried = (trailOf.get(it.id) ?? []).filter((t) => !t.n).map((t) => `"${t.q}"`); return `${i + 1}. ${it.text.replace(/\s+/g, ' ')}${need ? ` Still needed: ${need}` : ''}${tried.length ? ` (searched already, finding nothing: ${tried.join(', ')})` : ''}`; }).join('\n');
           const message = 'These items of the due diligence checklist were not settled by the documents first chosen '
             + `for them:\n${listed}\n\n`
