@@ -223,7 +223,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
   One that cannot be read is named in the indexing log on every run and never recorded as having no text; it is read
   again by every later run and every 5-minute check of the folders (#427).
 - Every cell of a spreadsheet is content, numbers and dates included, in its words and in the index (#1023).
-- A successful read of a document's words replaces a recorded empty word list for every PC (#1023).
+- A successful read of a deal-folder document's words replaces a recorded empty word list for every PC (#1023).
 - A deal whose word index file of the current version is missing has its folders read again at the next check, once
   (#1023).
 - A PDF, or a document converted to one, any page of whose text cannot be read keeps its pages and is listed without

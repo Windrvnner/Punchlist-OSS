@@ -740,7 +740,8 @@ export function nodeDocuments(o: DocumentsOptions) {
               // listed with its pages and without words; its folder keeps no listing, so it is read again (#1056)
               if (textUnread) noteUnread(skipped.unread, unreadAt, folder.path, f.rel);
             } else if (!paged(name) && (words === undefined || unindexed)) {
-              words = await sheetWords(src, dealId, docId) ?? words;
+              // a failed read leaves no words, whatever the record held: it is named, never counted as no text (#1023)
+              words = await sheetWords(src, dealId, docId);
               if (words === undefined) noteUnread(skipped.unread, unreadAt, folder.path, f.rel);
             }
             workMs += Date.now() - t0;
