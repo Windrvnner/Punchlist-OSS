@@ -5,7 +5,8 @@
 import type { DocRecord } from './documents';
 import type { Cited } from './agent';
 import type { Source } from '../domain/model';
-import { list as listOf, strings, tagNumber } from './lenient';
+import { list as listOf, readJson, isObject, strings, tagNumber } from './lenient';
+import { unknownIds } from './recordIds';
 import {
   type ReportKit, type ReadLine, type ReadIssue, type Known, type Issue, type SentDoc,
   isCut, yes,
@@ -35,15 +36,16 @@ function issuesAsk(k: ReportKit, id: string) {
   return `${what}\n${how}`;
 }
 
-/** the deal's findings, so an issue one already covers is named rather than raised again */
+/** the deal's findings, so an issue one already covers is named rather than raised again: each by its id (#1162) */
 function knownAsk(id: string, known: Known[]) {
   if (!known.length) return '';
   const mark = (f: Known) => (f.deleted ? ' (deleted)' : f.closed ? ' (closed)' : '');
-  const listed = known.map((f, i) => `F${i + 1}: ${f.title}${mark(f)}`).join('\n');
+  const listed = known.map((f) => `${f.id}: ${f.title}${mark(f)}`).join('\n');
   const rule = sentences(
-    'An issue an open finding, or one marked (deleted), already covers is given as {"covered": "F3"}',
+    'An issue an open finding, or one marked (deleted), already covers is given as {"covered": "<finding id>"}',
     `with its "sources", the page of ${id} where it is raised, and nothing else.`,
-    'An issue only a finding marked (closed) covers is written up in full like any other, with "earlier": "F3".',
+    'An issue only a finding marked (closed) covers is written up in full like any other,',
+    'with "earlier": "<finding id>".',
   );
   return `\n\nThese findings are already on the deal:\n${listed}\n${rule}`;
 }
@@ -72,7 +74,7 @@ function replyAsk(id: string, before: ReadIssue[] | undefined) {
     `If ${id} is not in fact a report by an outside advisor, reply {"report": false}.`,
   );
   const order = 'Give every issue, in the order the report raises them.';
-  const issues = `[${full}, {"covered": "F2", ${source(30)}}${still}]`;
+  const issues = `[${full}, {"covered": "<finding id>", ${source(30)}}${still}]`;
   const droppedPart = dropped ? `, ${dropped.replace(/, $/, '')}` : '';
   const shape = `Reply as JSON: {"advisor": "…", "issues": ${issues}${droppedPart}}`;
   return `\n${advisor}\n${order}\n${shape}`;
@@ -133,7 +135,7 @@ class ReportRead {
     const was = this.before?.issues[(tagNumber(row.still, 'E') ?? 0) - 1];
     const stillAt = was?.finding ?? was?.covered;
     if (stillAt) { await this.cite(stillAt, this.placed(row)); return true; }
-    const covering = known[(tagNumber(row.covered, 'F') ?? 0) - 1];
+    const covering = known.find((f) => f.id === row.covered);
     const title = titleOf(row);
     // one only a closed finding covers is raised again, so it must come written out: as covered only, it has no page
     if (covering?.closed && !covering.deleted && !title) { this.unplaced++; return true; }
@@ -167,8 +169,8 @@ class ReportRead {
       body: k.fitParas(fitted.text.split(/\s*\u0000\s*/).filter(Boolean)),
       sources: fitted.sources,
     };
-    // a closed finding on the same issue is named: a wrong number falls back to the one given as covering it
-    const was = known[(tagNumber(row.earlier, 'F') ?? 0) - 1] ?? covering;
+    // a closed finding on the same issue is named, by its id: with none named, the one given as covering it
+    const was = known.find((f) => f.id === row.earlier) ?? covering;
     if (was?.closed && !was.deleted) issue.earlier = was.id;
     if (!(await k.raise(id, issue))) return false;
     this.issues.push({ title, finding: id });
@@ -208,13 +210,26 @@ class ReportRead {
   }
 }
 
+/**
+ * A reply whose "covered" or "earlier" is not exactly the id of a finding it was shown, asked again (#1162); none
+ * given, or "", is not an id
+ */
+export const knownUnusable = (known: Known[], keys: string[]) => (text: string) => {
+  const ids = known.map((f) => f.id);
+  const rows = listOf(readJson(text, keys)?.issues).filter(isObject);
+  const named = rows.flatMap((row) => [row.covered, row.earlier]).filter((v) => v !== undefined && v !== '');
+  return unknownIds(named, ids).length > 0;
+};
+
 /** the report's issues from the model in one call; a reply cut off at the length limit comes back with `cut` */
 async function ask(r: ReportRead, known: Known[]) {
   const k = r.k;
   const prompt = readAsk(r, known);
   const keys = ['issues', 'report'];
-  // a reply citing a document other than the report is asked again (#1162)
-  const unusable = k.unusable(r.s.sent, keys);
+  // a reply citing a document other than the report, or naming a finding it was not shown, is asked again (#1162)
+  const cites = k.unusable(r.s.sent, keys, known.map((f) => f.id));
+  const named = knownUnusable(known, keys);
+  const unusable = async (text: string) => (await cites(text)) || named(text);
   const input = { kind: 'report', split: true, model: k.models.standard, system: k.system, files: r.s.files, prompt,
     unusable };
   try {
