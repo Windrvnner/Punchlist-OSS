@@ -711,8 +711,13 @@ export function nodeAi(o: AiOptions) {
    * deal's kept questions and points that failed alone, the lists still to ask, and why the last reply brought nothing
    */
   type PhraseRun = {
-    points: PhrasePoint[]; had: Map<string, string>; failed: Set<string>;
-    out: (string | null | undefined)[]; queue: number[][]; leftOut: number[]; why: string;
+    points: PhrasePoint[];
+    had: Map<string, string>;
+    failed: Set<string>;
+    out: (string | null | undefined)[];
+    queue: number[][];
+    leftOut: number[];
+    why: string;
   };
   /** a `phrase` run: points kept from a failed run are not asked; points that failed alone before are asked last */
   const phraseRunFor = (dealId: string, points: PhrasePoint[]): PhraseRun => {
@@ -2254,7 +2259,7 @@ export function nodeAi(o: AiOptions) {
     },
     async phrase(i) {
       // One question for the counterparty per point, in parts sized to the fast model's limits (parts.ts; decisions:
-      // Add All Unresolved sizes its calls to the model's limits; #1109), each call asked again only by the shared
+      // docs/decisions.md line 167; #1109), each call asked again only by the shared
       // quiet retry (`complete`). A reply cut off is dealt with as everywhere else (parts.ts): the points that came
       // back whole are kept, and a point cut off even alone is offered for Retry (null). What a whole reply leaves is
       // asked again (askPhrasePart), down to single points; a single point that brings nothing is offered for Retry.

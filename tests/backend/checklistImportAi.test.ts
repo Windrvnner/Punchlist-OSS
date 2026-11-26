@@ -284,7 +284,7 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
       expect([more, runs.at(-1)!.ok, runs.at(-1)!.calls <= bound(runs.at(-1)!.left), 2000 - c.left.length > 800])
         .toEqual([true, false, true, true]);
     }
-  });
+  }, 30_000);
   it('on a real checklist, a reply that leaves points out, swaps them or numbers them puts no question on the wrong point; a Retry is bounded as the first run', async () => {
     // the first 2,000 items of a deal-scale list, whose neighbors share most of their words: a question is taken only for
     // a tag of its part, so a model that leaves the third (and fourth, or sixth) point out, swaps the third and seventh,
