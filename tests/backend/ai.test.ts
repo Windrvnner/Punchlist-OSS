@@ -7,6 +7,11 @@ import { memRepo, refuse, quota, type MemRepo } from '../adapters/memRepo';
 import type { Repository } from '../../src/ports';
 import { Finding, WORKSTREAMS } from '../../src/domain/model';
 import { memoContent } from '../../src/domain/memo';
+import { memoDocument } from '../../src/domain/memoDoc';
+import { libreOfficeConverter } from '../../src/backend/convert';
+import { libreOfficeSheets } from '../../src/backend/spreadsheets';
+import { hasOffice, soffice } from './officePrerequisites';
+import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
 import { scaleMemoInput } from '../fixtures/memoScale';
 import type { DocRecord } from '../../src/backend/documents';
 import type { Folder } from '../../src/backend/logRepository';
@@ -1134,6 +1139,23 @@ describe('deal memo model replies', () => {
     expect(standIn.calls.filter(memoWrite).map(({ model }) => model)).toEqual(['standard', 'standard', 'thorough']);
     expect(memo.risks![0].body).toEqual(longest);
   });
+
+  it.skipIf(!hasOffice)('never keeps a write-up with characters the memo file cannot hold, so the export works (#806)',
+    async () => {
+      const unwritable = [`${creditWords} \uffff [1]`, `${termWords} \u0001 [2]`];
+      const standIn = await setupMemoReplies([distributionRisk], (call) => citedRiskReply(call, unwritable));
+      const memo = val(await standIn.ai.memo!('d1'));
+      expect(standIn.calls.filter(memoWrite).map(({ model }) => model)).toEqual(['standard', 'standard', 'thorough']);
+      expect(memo.risks![0]).toEqual(distributionRisk);
+      const content = memoContent({
+        ...scaleMemoInput, deal: memoDeal, findings: memoFindings,
+        groups: memo.risks, ratings: memo.ratings, summary: memo.summary,
+      });
+      const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-memo-ai-lo-'));
+      const exported = await libreOfficeSheets(libreOfficeConverter({ soffice, profile })).document!(
+        memoDocument(content, 'AI'));
+      expect(exported.ok).toBe(true);
+    }, 120_000);
 
   it('sends a long deal memo key risk write-up back to shorten and uses the shorter reply (#806)', async () => {
     const short = [`${creditWords} [1]`];

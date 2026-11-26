@@ -424,12 +424,14 @@ function memoRiskParagraphs(value: unknown): string[] {
     .map((paragraph) => paragraph.trim()).filter(Boolean);
 }
 
+/** Characters the memo file cannot carry; the document builder would drop or choke on them (#659, #806). */
+const UNWRITABLE_TEXT = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/;
+const hasUnwritableText = (paragraphs: string[]) => UNWRITABLE_TEXT.test(paragraphs.join(' '));
+
 /** Whether a write-up is within two paragraphs and the word target. Only a retry hangs on this (#806). */
 function memoRiskFits(paragraphs: string[], ids: Set<string>): boolean {
   if (!paragraphs.length || paragraphs.length > 2) return false;
-  // Control characters discarded by the document builder can hide unbroken text (#659).
-  const invalidText = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/;
-  if (invalidText.test(paragraphs.join(' '))) return false;
+  if (hasUnwritableText(paragraphs)) return false;
   const prose = paragraphs.map((paragraph) => withoutMemoMarks(unid(paragraph, ids), ' ')).join(' ');
   const words = prose.match(/\S+/g) ?? [];
   return words.length > 0 && words.length <= MEMO_RISK_WORDS;
@@ -444,10 +446,13 @@ function readCorrection(
   return `${prompt}\n\nYou replied:\n${previous}\n\n${wrong}`;
 }
 
-/** A write-up is kept as the model gave it, however long, unless it is empty or gives advice (#806). */
+/**
+ * A write-up is kept as the model gave it, however long, unless it is empty, gives advice, or has characters the
+ * memo file cannot carry (never altered: the findings' own words stand instead) (#806).
+ */
 function memoRiskKept(reply: Record<string, unknown>, advises: (text: string) => boolean): boolean {
   const paragraphs = memoRiskParagraphs(reply.paragraphs);
-  return paragraphs.length > 0 && !paragraphs.some(advises);
+  return paragraphs.length > 0 && !hasUnwritableText(paragraphs) && !paragraphs.some(advises);
 }
 
 /** Send unusable write-ups through the document reader's retry policy (#659). */
@@ -456,7 +461,7 @@ function memoRiskReadOptions(escalate: string, advises: (text: string) => boolea
     const paragraphs = memoRiskParagraphs(reply.paragraphs);
     return memoRiskFits(paragraphs, ids) && !paragraphs.some(advises);
   };
-  const wrong = 'it is empty, gives advice or a judgment, or is longer than '
+  const wrong = 'it is empty, has characters a document cannot hold, gives advice or a judgment, or is longer than '
     + `two paragraphs and ${MEMO_RISK_WORDS} words: shorten it to fit`;
   return { escalate, usable, wrong, retrySharedModel: true };
 }
@@ -1466,7 +1471,7 @@ export function nodeAi(o: AiOptions) {
       escalate: tiers.thorough,
       usable(reply: Record<string, unknown>) {
         const paragraphs = parasOf(reply);
-        return paragraphs.length > 0 && !paragraphs.some(advises);
+        return paragraphs.length > 0 && !hasUnwritableText(paragraphs) && !paragraphs.some(advises);
       },
       wrong: 'it is empty, or it gives advice or a judgment: write it again with facts only',
     };
