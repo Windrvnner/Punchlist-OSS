@@ -2291,7 +2291,7 @@ export function nodeAi(o: AiOptions) {
           const ask = { kind: 'suggestQuestion', model, system: JSON_ONLY, prompt } as const;
           const usable = (r: { question?: unknown } | null) =>
             isNoHandle(r?.question) || handleAt(r?.question, part.length) !== null;
-          // a handle that was not shown is sent back once; still wrong, the reply failed (decisions: AI and models; #1105)
+          // a handle not shown is sent back once; still wrong, the reply failed (decisions: AI and models; #1105)
           const wrong = 'the reply must name one of the handles shown, or "none"';
           const reply = await askSentBack(ask, ['question'], usable, wrong);
           if (!usable(reply)) throw new Error(UNREAD_REPLY);
