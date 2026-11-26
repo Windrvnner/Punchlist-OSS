@@ -5,7 +5,7 @@
 import type { DocRecord } from './documents';
 import type { Cited } from './agent';
 import type { Source } from '../domain/model';
-import { list as listOf, strings, tagNumber } from './lenient';
+import { list as listOf, prose, strings, tagNumber } from './lenient';
 import {
   type ReportKit, type ReadLine, type ReadIssue, type Known, type Issue, type SentDoc,
   isCut, yes,
@@ -154,7 +154,7 @@ class ReportRead {
   /** a new issue: a finding of its own */
   async raise(row: Record<string, unknown>, title: string, known: Known[], covering?: Known): Promise<boolean> {
     const k = this.k;
-    const fitted = k.fit(strings(row.body).join('\n\u0000\n'), row.sources as Cited[], this.s.sent);
+    const fitted = k.fit(prose(row.body).join('\n\u0000\n'), row.sources as Cited[], this.s.sent);
     // an issue stands on a page of the report a person can open, as any finding does
     if (!fitted.text || !fitted.sources.length) { this.unplaced++; return true; }
     const nth = (this.titles.get(title) ?? 0) + 1;

@@ -338,7 +338,7 @@ export const responseToReplace = (question?: Question) => question?.response.tri
 /** Read the question itself so undoing the response brings the check back. */
 export function answerWasUsed(question: Question, answer: Message) {
   const response = responseToReplace(question);
-  return response !== null && response.trim() === answerText(answer).trim();
+  return response !== null && response === answerText(answer);
 }
 
 /** A person makes an answer the response, with its sources and only once however often it is pressed. */
@@ -380,9 +380,10 @@ export async function askVerdict(store: Store, dealId: string, questionId: strin
  */
 export function suggestions(s: State, scope: Scope): Map<string, string> {
   const out = new Map<string, string>(); if (scope.kind !== 'deal' && scope.kind !== 'finding') return out;
-  const list = s.threads[convKey(scope)] ?? []; const texts = new Map(list.map((m) => [m.id, answerText(m).trim()]));
+  const list = s.threads[convKey(scope)] ?? []; const texts = new Map(list.map((m) => [m.id, answerText(m)]));
   const used = new Set(texts.values());
-  const open = dealQuestions(s, scope.dealId).filter((q) => q.status === 'open' && !used.has(q.response.trim())); const offered = new Set<string>();
+  const open = dealQuestions(s, scope.dealId).filter((q) => q.status === 'open' && !used.has(q.response));
+  const offered = new Set<string>();
   for (let i = list.length - 1; i >= 0; i--) {
     const m = list[i]; if (m.role !== 'ai' || m.state !== 'done') continue;
     const q = mayAddress(texts.get(m.id)!, open.filter((x) => !offered.has(x.id)))[0];

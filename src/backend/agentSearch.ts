@@ -3,7 +3,7 @@
  * a page of documents read by the search helper on the fast model, and the deal's findings and Q&A log, the records
  * the app holds, with no model call.
  */
-import { int, strings } from './lenient';
+import { int, prose } from './lenient';
 import { pageOf, rankRecords, type Page } from './recordSearch';
 import { batchesOf } from './agentFolder';
 import { qaRow, qaText } from './qaRow';
@@ -84,7 +84,7 @@ async function searchDocuments(run: AgentRun, asked: Asked, query: string, repor
     return;
   }
   const { reply, sent } = looked.value;
-  const { text, sources } = kit.fit(strings(reply.text).join(' '), reply.sources as Cited[], sent, true);
+  const { text, sources } = kit.fit(prose(reply.text).join(' '), reply.sources as Cited[], sent, true);
   // what the helper opened was read by a model: it may be cited
   for (const s of sent) run.tagOf(s.dealId, s.rec);
   const tags = run.tagsOf(sources);

@@ -54,7 +54,9 @@ import { createHash } from 'node:crypto';
 import { ListRecord, Item, firmOf, orderItems, key } from '../domain/checklist';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ulid } from 'ulid';
-import { readJson, unfinished, list as listOf, strings, int, pageOf, word, tagNumber, isObject } from './lenient';
+import {
+  readJson, unfinished, list as listOf, strings, prose, int, pageOf, word, tagNumber, isObject,
+} from './lenient';
 import type { LineRead } from '../domain/listRead';
 import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK } from './limits';
 import { UNREAD_REPLY, UNUSABLE_REPLY, UNREACHED, CUT_ON_IT, CUT_BEFORE_IT, UNUSABLE_ON_IT } from './limits';
@@ -408,7 +410,7 @@ export function unid(text: string, ids: Set<string>): string {
 /** Ignore malformed entries individually so a usable group beside one still stands (#658). */
 function memoGroupRows(value: unknown, ids: Set<string>): RiskGroup[] {
   return listOf(value).filter(isObject).map((row) => ({
-    title: unid(strings(row.title)[0] ?? '', ids),
+    title: unid(prose(row.title)[0] ?? '', ids),
     findings: strings(row.findings),
   })).filter((group) => group.findings.length);
 }
@@ -422,7 +424,7 @@ const MEMO_RISK_SHAPE = '{"paragraphs": ["one paragraph per string, with [n] mar
 
 /** Count paragraph breaks inside strings, including the separator used to fit citations across paragraphs (#659). */
 function memoRiskParagraphs(value: unknown): string[] {
-  return strings(value).flatMap((paragraph) => paragraph.split(/\r?\n[^\S\r\n]*\r?\n|\u0000/))
+  return prose(value).flatMap((paragraph) => paragraph.split(/\r?\n[^\S\r\n]*\r?\n|\u0000/))
     .filter((paragraph) => paragraph.trim());
 }
 
@@ -1422,7 +1424,7 @@ export function nodeAi(o: AiOptions) {
         return failure(e, 'The documents could not be read');
       }
       if (!reply) return fail({ kind: 'failed', message: UNREAD_REPLY });
-      const need = strings(reply.need);
+      const need = prose(reply.need);
       if (round > 1 || !need.length || page) return ok({ reply, sent });
       // The second round stays within `width` documents too, however many deals are asked about. Priority: what the
       // question must have (attachments, a finding's own documents) is kept; what the model still needs takes up to
@@ -1670,9 +1672,9 @@ export function nodeAi(o: AiOptions) {
         if (!quick && where.length && where.every((x) => x.reading || x.precedent)) { out.set(it.id, { kind: 'none', need: `a document of this deal that shows it, not only a blackline or another project's document: ${it.text}` }); continue; }
         out.set(it.id, quick || where.length ? { kind: 'ok', where } : { kind: 'weak', why: 'As "ok" it needs "where": at least one place that shows it, naming a document you were given, by its D number, and a page that document has (or a sheet and cell for a spreadsheet).', said: r, reason: 'It was found satisfied, but no page that shows it could be pointed to.' });
       }
-      else if (result === 'more') out.set(it.id, { kind: 'none', need: strings(r.need).join('; ') || it.text });
+      else if (result === 'more') out.set(it.id, { kind: 'none', need: prose(r.need).join('; ') || it.text });
       else if (result === 'finding') {
-        const title = typeof r.title === 'string' ? r.title : ''; const paras = strings(r.body);
+        const title = typeof r.title === 'string' ? r.title : ''; const paras = prose(r.body);
         const fitted = fit(paras.join('\n\u0000\n'), r.sources as Cited[], sent, false, true);
         // another project's document, or a blackline not shown to be against this deal's own draft, never raises a
         // finding by itself
@@ -1785,7 +1787,11 @@ export function nodeAi(o: AiOptions) {
       const prior = earlier.length ? `\nResponses already given on this deal to questions that read like it:\n${earlier.map((q, k) => `R${k + 1}${q.by ? `, submitted by ${q.by}` : ''}: “${one(q.text)}”\nResponse to R${k + 1}${q.ai ? ' (drafted by AI from the data room, not received from anyone)' : ''}: “${one(q.response)}”`).join('\n')}\nIf one of them answers this question as it is asked, name it in "reused": it is put in the draft word for word, credited to whoever asked it. Earlier responses are named only by their R numbers. Do not repeat or restate one in "text": write there only what the documents add, with [n] markers, or nothing. Use none that answers a different question, however alike the words.` : '';
       const ask = `Draft a response to this question from the documents: ${i.questionText}${prior}\nIf ${earlier.length ? 'neither the documents nor those responses answer' : 'the documents do not answer'} it, say so with "status": "none" and nothing else.\nThe response must be under ${MODEL_TEXT_MAX.toLocaleString('en-US')} characters (it goes into one Excel cell); if it would be longer, cut it down to what matters.`;
       const shape = `{"status": "found" | "none", "text": "the response, with [n] markers", "sources": [...]${earlier.length ? ', "reused": ["R1"]' : ''}}`;
-      const again = { escalate: m.thorough, usable: (reply: Record<string, unknown>) => strings(reply.text).join('\n\n').length <= MODEL_TEXT_MAX, wrong: `"text" is longer than ${MODEL_TEXT_MAX.toLocaleString('en-US')} characters: cut it down to fit` };
+      const again = {
+        escalate: m.thorough,
+        usable: (reply: Record<string, unknown>) => prose(reply.text).join('\n\n').length <= MODEL_TEXT_MAX,
+        wrong: `"text" is longer than ${MODEL_TEXT_MAX.toLocaleString('en-US')} characters: cut it down to fit`,
+      };
       let r = await read('draft', [i.dealId], m.standard, ask, i.questionText, {}, shape, again);
       if (r.ok && !r.value.sent.length && earlier.length) {
         // no document bears on it, but earlier responses may: they are asked about on their own
@@ -1798,7 +1804,7 @@ export function nodeAi(o: AiOptions) {
         } catch (e) { return failure(e, `${SERVICE} did not answer`); }
       }
       if (!r.ok) return r;
-      const out = fit(strings(r.value.reply.text).join('\n\n'), r.value.reply.sources as Cited[], r.value.sent, false);
+      const out = fit(prose(r.value.reply.text).join('\n\n'), r.value.reply.sources as Cited[], r.value.sent, false);
       const reused = listOf(r.value.reply.reused).map((x) => tagNumber(x, 'R')).filter((n): n is number => n !== null && n >= 1 && n <= earlier.length).map((n) => earlier[n - 1]).filter((q, k, all) => all.indexOf(q) === k);
       if (word(r.value.reply.status) !== 'found') return ok({ status: 'none', text: '', sources: [] });
       // the earlier responses the model chose go in word for word, each credited: nothing is added to another party's answer, or turned round.
@@ -1823,7 +1829,7 @@ export function nodeAi(o: AiOptions) {
     async reassess(i) {
       const f = await record<{ title: string; body: string[]; sources: Source[] }>('finding', i.findingId); if (!f) return fail({ kind: 'notFound', message: 'No such finding' });
       let m: Awaited<ReturnType<typeof models>>; try { m = await models(); } catch (e) { return failure(e, `${SERVICE} did not answer`); }
-      const parasOf = (reply: Record<string, unknown>) => strings(reply.body)
+      const parasOf = (reply: Record<string, unknown>) => prose(reply.body)
         .flatMap((p) => p.split(/\n\s*\n/)).filter((p) => p.trim());
       const r = await read('reassess', [i.dealId], m.standard, `Reassess this finding against the documents as they stand now.\nTitle: ${f.title}\nAs written: ${f.body.join(' ')}${await responsesOn(i.dealId, i.findingId)}`, `${f.title} ${f.body.join(' ')}`, { [i.dealId]: f.sources.map((s) => s.docId).filter((x): x is string => !!x) }, '{"body": ["one paragraph per string, with [n] markers"], "sources": [...]}', { escalate: m.thorough, usable: (reply) => parasOf(reply).length > 0, wrong: '"body" has no paragraphs in it' });
       if (!r.ok) return r;
@@ -1843,7 +1849,7 @@ export function nodeAi(o: AiOptions) {
       if (!open.length) return ok({ paragraphs: [] });
       const key = open.map((f) => `${f.id}:${f.rev}`).join('|'); const had = briefs.get(dealId); if (had?.key === key) return ok({ paragraphs: had.paragraphs });       // nothing changed: not asked again
       const ids = new Set(open.map((f) => f.id));
-      const parasOf = (reply: { paragraphs?: unknown } | null) => strings(reply?.paragraphs)
+      const parasOf = (reply: { paragraphs?: unknown } | null) => prose(reply?.paragraphs)
         .flatMap((p) => p.split(/\n\s*\n/)).filter((p) => p.trim()).slice(0, 2)
         // a link to a finding that is not there becomes plain words
         .map((p) =>
@@ -1975,7 +1981,7 @@ export function nodeAi(o: AiOptions) {
       let reply: { text?: unknown } | null;
       try { reply = await askJson({ kind: 'merge', model: (await models()).fast, system: JSON_ONLY, prompt: `This question was asked on a project-finance deal:\n${i.question}\n\nTwo people answered it differently.\nFirst version:\n${i.app}\n\nSecond version:\n${i.log}\n\nWrite one answer that reconciles them: every fact from both, each said once, in plain sentences, as a lender's counsel would write it. Where the two disagree, keep the more specific statement (a date, a figure, a document reference) and leave the other out. Do not put the two versions one after the other, do not mention that there were two versions, and add no notes, brackets, placeholders or anything for a person to confirm.\nReply as JSON: {"text": "…"}` }, ['text']); }
       catch (e) { return failure(e, UNREACHED); }
-      const text = strings(reply?.text)[0] ?? '';
+      const text = prose(reply?.text)[0] ?? '';
       // a draft that asks a person to fill something in is not a reconciled answer
       if (!text || /\[[^\]]*(confirm|tbc|tbd|check)[^\]]*\]/i.test(text)) {
         return fail({ kind: 'failed', message: UNUSABLE_REPLY });
@@ -1998,7 +2004,7 @@ export function nodeAi(o: AiOptions) {
         for (const x of kept) {
           // an item split in two comes as "texts"; one reworded as "text"
           const n = int(x?.n);
-          const given = Array.isArray(x?.texts) ? strings(x.texts) : typeof x?.text === 'string' ? [x.text] : [];
+          const given = Array.isArray(x?.texts) ? prose(x.texts) : typeof x?.text === 'string' ? [x.text] : [];
           const texts = given.map((t) => fitText(t)).filter((t) => t.trim());
           if (n === null || n < 1 || n > part.length) continue; if (n <= last) inOrder = false; last = Math.max(last, n);
           const unchanged = texts.length === 1 && texts[0].trim() === part[n - 1].trim();

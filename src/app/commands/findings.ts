@@ -67,7 +67,7 @@ export const EditFinding = define({
     if (!f) return fail(notFound('Finding not found', input.findingId));
     // a title may not grow past the limit, but one already longer (written before the limit, or by the model) can still be edited
     if (input.title.length > TITLE_MAX && input.title.length > f.title.length) return fail(invalid(`Keep the title under ${TITLE_MAX} characters`, { title: `Keep the title under ${TITLE_MAX} characters` }));
-    let body = input.body.map((b) => b.trim()).filter(Boolean);
+    let body = input.body.filter((b) => b.trim());
     let title = input.title;
     let workstream = input.workstream;
     if (input.base) {
@@ -76,7 +76,7 @@ export const EditFinding = define({
       const b = input.base; const same = (x: unknown, y: unknown) => JSON.stringify(x) === JSON.stringify(y); const clashes: string[] = [];
       const merge = <T,>(name: string, mine: T, was: T, now: T): T => { if (same(mine, was)) return now; if (!same(now, was) && !same(now, mine)) clashes.push(name); return mine; };
       title = merge('title', title, b.title, f.title); workstream = merge('workstream', workstream, b.workstream, f.workstream);
-      body = merge('detail', body, b.body.map((x) => x.trim()).filter(Boolean), f.body);
+      body = merge('detail', body, b.body.filter((x) => x.trim()), f.body);
       if (clashes.length) return fail(rejected(`The ${clashes.join(' and ')} changed elsewhere while you were editing. Cancel to see the latest, then make your change again`));
     }
     const changed = [

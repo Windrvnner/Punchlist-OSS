@@ -60,7 +60,7 @@ import { ok, fail, type Result } from '../domain/result';
 import type { ModelThread, Research } from '../ports';
 import type { Source } from '../domain/model';
 import type { DocRecord } from './documents';
-import { strings, list as listOf, int } from './lenient';
+import { strings, prose, list as listOf, int } from './lenient';
 import { TOO_LONG_ASK, TOO_LONG_REPLY, UNREAD_REPLY } from './limits';
 import { control, SERVICE } from '../control';
 import { codeOf, type AgentKit, type AgentOptions, type AgentQuestion } from './agentKit';
@@ -296,7 +296,7 @@ class Answering {
   /** the main session's answer, with the citations that can be stood behind; on the last turn, its notes if no text */
   private answered(reply: Record<string, unknown>, last: boolean): Result<Answered> {
     const { kit, question, run } = this;
-    const text = strings(reply.text).join('\n\n') || (last ? run.notes : '');
+    const text = prose(reply.text).join('\n\n') || (last ? run.notes : '');
     if (!text) return fail({ kind: 'failed', message: UNREAD_REPLY });
     const fitted = kit.fit(text, reply.sources as Cited[], run.opened, question.withDeal);
     this.showCitedPlaces(fitted.sources);

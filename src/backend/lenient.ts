@@ -75,8 +75,12 @@ export function unfinished(reply: string): boolean {
 
 /** a list, whatever was sent: a list as it is, one thing as a list of one, nothing as an empty list */
 export const list = (x: unknown): unknown[] => (Array.isArray(x) ? x : x === undefined || x === null ? [] : [x]);
-/** the strings in a list that hold more than white space, as given; one string counts as a list of one */
+/** the non-empty strings in a list, trimmed (handles, terms, search words); one string counts as a list of one */
 export const strings = (x: unknown): string[] => (
+  list(x).filter((s): s is string => typeof s === 'string' && !!s.trim()).map((s) => s.trim())
+);
+/** the strings of a reply that say something, as given (edge spaces and tabs kept): text that is stored or shown */
+export const prose = (x: unknown): string[] => (
   list(x).filter((s): s is string => typeof s === 'string' && !!s.trim())
 );
 /** a whole number given as a number or as its digits ("3", " 12 ", "3*"); null for anything else */
