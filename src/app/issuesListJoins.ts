@@ -85,7 +85,7 @@ export function issuesListReviewPlan(
   findings: Iterable<Finding>, list: DocumentRef, points: readonly IssuePoint[], kept: ReadonlySet<number>,
 ) {
   const index = findingIndex(findings);
-  // Keep the attached name for choosing the explicit join (#409), then predict the command with it as given.
+  // The attached name, as given, picks the explicit join; the command then sees the same name (#409).
   const references = points.map((point, position) => proposedReference(index, list, point, position));
   const choices = points.map(({ n, text }, position) => ({
     n, text, own: kept.has(position), ...references[position],
