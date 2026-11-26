@@ -14,7 +14,6 @@ import {
   parseCsv, writtenAsMeant, withSteps, tableFrom, type Sheet, type SheetEdit,
 } from '../domain/sheets';
 import { editLog, libreOfficeSheets } from './spreadsheets';
-import { csvSafe } from '../domain/csvEdit';
 import { decodeText } from '../domain/textEncoding';
 import { saveLog, createLog, sha256, restoreAside, keptEdits, settleKept, type KeptEdit } from './qaLogFolder';
 import { fixedCells } from './xlsxEdit';
@@ -128,7 +127,7 @@ export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogF
       try {
         const ext = path.extname(req.file); const base = path.join(work, `base${ext}`); fs.copyFileSync(w.value, base);
         if (sha256(new Uint8Array(fs.readFileSync(base))) !== req.stamp) return ok({ status: 'later' as const });   // someone saved it since it was read
-        const steps = /\.csv$/i.test(req.file) ? req.steps.map((s) => (s.kind === 'cell' && typeof s.value === 'string' ? { ...s, value: csvSafe(s.value) } : s)) : req.steps;
+        const { steps } = req;
         // a log whose own content refuses the steps (a formula, a totals row, a read-back that differs) is "rejected": it would
         // refuse them again at every update; a LibreOffice edit that fails may be a moment's trouble, so it is "failed"
         let bytes: Uint8Array;
