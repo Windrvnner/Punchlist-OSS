@@ -5,7 +5,8 @@
 import type { Store } from './store';
 import { composerText, convKey, setComposerText, type Scope } from './conversations';
 import { setLogQuestion } from './refusedCommands';
-import { openNewDeal } from './answerOffer';
+import { openNewDeal } from './dealFolders';
+import { openAddUnresolved } from './addUnresolved';
 
 export type SlashCommandId = 'unresolved' | 'logQuestion' | 'newDeal';
 export interface SlashCommand { id: SlashCommandId; name: string }
@@ -40,5 +41,5 @@ export function runSlashCommand(store: Store, scope: Scope, id: SlashCommandId) 
   if (composerText(key).startsWith('/')) setComposerText(key, '');
   if (id === 'newDeal') openNewDeal(store);
   else if (id === 'logQuestion') setLogQuestion(key, true);
-  else if (scope.kind === 'deal') store.ui({ dialog: { kind: 'addUnresolved', dealId: scope.dealId } });
+  else if (scope.kind === 'deal') openAddUnresolved(store, scope.dealId);
 }

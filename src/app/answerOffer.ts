@@ -7,6 +7,8 @@ import { bareDealName, cleanName } from './commands/deals';
 import type { Scope } from './conversations';
 import { DEAL_PAGES, pageHash, type Landing, type State } from './state';
 import type { Store } from './store';
+import { openNewDeal } from './dealFolders';
+import { openAddUnresolved } from './addUnresolved';
 import type { AnswerOffer } from '../ports';
 
 export type Offer = AnswerOffer;
@@ -19,11 +21,6 @@ export function dealNamed(state: State, name: string) {
   const key = bareDealName(cleanName(name).trim(), 'navigation').toLowerCase();
   if (!key) return undefined;
   return Object.values(state.deals).find((deal) => bareDealName(deal.name, 'navigation').toLowerCase() === key);
-}
-
-/** The New Deal form, empty, as the sidebar's + opens it. */
-export function openNewDeal(store: Store) {
-  store.ui({ newDeal: { name: '', folders: [], error: '', busy: false } });
 }
 
 const isPage = (page: unknown): page is Landing => DEAL_PAGES.some(([id]) => id === page);
@@ -72,5 +69,5 @@ export function runOffer(store: Store, offer: Offer, navigate: (hash: string) =>
     return;
   }
   if (offer.kind === 'page') navigate(pageHash(offer.page, offer.dealId));
-  else store.ui({ dialog: { kind: 'addUnresolved', dealId: offer.dealId } });
+  else openAddUnresolved(store, offer.dealId);
 }
