@@ -460,7 +460,7 @@ async function bulkWording(page) {
   });
   rows[7] += '; the access indemnity is signed';
   rows.push(rows[0]);   // offered for removal, with no wording suggestion
-  const f = path.join(dir, 'Wording.csv'); fs.writeFileSync(f, '\uFEFF' + ['Item', ...rows].join('\n'));
+  const f = path.join(dir, 'Wording.csv'); fs.writeFileSync(f, ['Item', ...rows].join('\n'));
   await openChecklistImport(page);
   await page.setInputFiles('#cl-file', f); await page.waitForSelector('#cl-next'); await page.click('[data-layer=broad]');
   await page.evaluate(() => { window.__fail = { reword: true }; }); await page.click('#cl-next'); await page.waitForSelector('#cl-go');
