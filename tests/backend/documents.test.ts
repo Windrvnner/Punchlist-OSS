@@ -243,7 +243,8 @@ describe('documents on real folders', () => {
     const root = tmp(); const vdr = path.join(root, 'vdr'); const blank = new TextEncoder().encode(new TextDecoder().decode(pdf('', 2)).replace(/\(, page \d\) Tj/g, (m) => ' '.repeat(m.length)));
     put(vdr, 'Scan.pdf', blank); put(vdr, 'Credit Agreement.pdf', FA); put(vdr, 'Rates.csv', 'Tenor,Margin\nSenior term loan,2.25\nSenior term loan,2.50\nJunior loan,6\n');
     const a = pc(root, 'office'); const p = await indexAll(a, vdr); const by = (n: string) => a.docs.records('d1').find((r) => r.name === n)!;
-    expect(p.log).toEqual(['Indexed 3 files', '1 file has no readable text and can be found by name only: Scan.pdf']); expect(by('Scan.pdf')).toMatchObject({ pages: 2, words: [] });   // and the person is told which expect(by('Rates.csv').words).toEqual(['loan', 'senior', 'term', 'junior', 'margin', 'tenor']);
+    expect(p.log).toEqual(['Indexed 3 files', '1 file has no readable text and can be found by name only: Scan.pdf']); expect(by('Scan.pdf')).toMatchObject({ pages: 2, words: [] });   // and the person is told which
+    expect(by('Rates.csv').words).toEqual(['loan', 'senior', 'term', 'junior', 'margin', 'tenor']);
     // a large spreadsheet is read like any other: its words are counted, however big it is
     put(vdr, 'Huge export.csv', 'ledger,entry\n'.repeat(2_100_000));
     await indexAll(a, vdr);
@@ -266,7 +267,7 @@ describe('documents on real folders', () => {
     fs.appendFileSync(file, JSON.stringify({ v: 1, pc: 'older', at: '2026-11-01T00:00:00.000Z', docId: idOf(OLD), hash: hashBytes(OLD), name: 'Grid.pdf', folder: vdr, rel: 'Grid.pdf', size: OLD.length, pages: 2 }) + '\n');
     expect(by('Grid.pdf').words).toBeUndefined(); await indexAll(a, vdr); expect(by('Grid.pdf')).toMatchObject({ pages: 2, words: ['agreement', 'interconnection'] });
     const mine = () => fs.readFileSync(path.join(root, 'shared', 'docs-office-d1.jsonl'), 'utf8').trim().split('\n').length; const n = mine(); await indexAll(a, vdr); expect(mine()).toBe(n);
-  });
+  }, 60000);   // the large spreadsheet above is read in full
 
   it('a file that cannot be turned into pages is reported and is not indexed; the rest are', async () => {
     const { root, vdr } = room(); put(vdr, '01 Legal/Locked.docx', 'protected'); put(vdr, '01 Legal/Broken.pdf', 'not a pdf at all');
