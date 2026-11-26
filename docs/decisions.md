@@ -220,6 +220,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A document's id is the SHA-256 hash of its bytes, so identical copies are one document.
 - Indexing (building each PC's word index of the data room) asks no model and uploads nothing, and it resumes by itself once the data room is available again.
 - A spreadsheet is read for its words a piece at a time, whatever its size, after every other file and smallest first. One that cannot be read is listed by name on every run and read again when it changes or on the next start, never recorded as having no text (#1023, #427).
+- A PDF, or a document converted to one, any page of whose text cannot be read keeps its pages and is listed without words, named as not read on every run and read again on the next; it is never recorded with no words or with only some pages' words (#1056).
 - A deal's folders are checked for changes every 5 minutes.
 - LibreOffice, bundled with the app, is the only document converter; converted documents have every tracked change accepted.
 - For tracked changes and blacklines, a Word file's own tracked changes are fact, and the clean draft is the source of truth for the deal's terms. A blackline is the model's reading: it never settles an item or closes a finding by itself. A control-file switch selects pipeline A (the default) or pipeline B. What a blackline was compared against is determined from its cover and name, never guessed (docs/other-project-documents-design.md).
