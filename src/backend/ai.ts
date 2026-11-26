@@ -563,15 +563,18 @@ export function nodeAi(o: AiOptions) {
   const tokensEach = (texts: readonly string[]) => (texts.length ? Math.ceil(texts.reduce((n, t) => n + tokensOf(t), 0) / texts.length) + 4 : 0);
   /** calls a search may still make (control.limits.searchCalls), each try counted */
   const budget = new AsyncLocalStorage<{ left: number }>();
+  /** counts one call against a search's calls; refuses it when they are spent (a search in a budget only) */
+  const spend = (b: { left: number } | undefined) => {
+    if (!b || b.left-- > 0) return;
+    throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
+  };
   /** every call to the model is asked again quietly when it fails or comes back empty (src/backend/retry.ts) */
   const retried = retrier(o.retry);
   const complete = async ({ kind, split: _split, ...input }: Ask): Promise<string> => {
     const b = kind === 'describe' ? undefined : budget.getStore();
     // each try is counted in the usage log and against a search's calls, since each is paid for; a search out of calls is not asked again
     return retried(async () => {
-      if (b && b.left-- <= 0) {
-        throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
-      }
+      spend(b);
       let reply = ''; try { reply = await o.service.complete(input); return reply; } finally { count(kind, input, String(reply ?? '')); }
     }, (r) => !String(r ?? '').trim());
   };
@@ -692,9 +695,7 @@ export function nodeAi(o: AiOptions) {
     // the gap filler's turns are limited by limits.chatTurns; a turn inside a search budget still counts against it
     const b = budget.getStore();
     const once = async () => {
-      if (b && b.left-- <= 0) {
-        throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
-      }
+      spend(b);
       let reply = ''; try { const r = await o.service.converse!(input); reply = r.text || JSON.stringify(r.calls ?? ''); return r; } finally { count(kind, input, String(reply ?? '')); }
     };
     if (input.results?.length || input.conversation) return once();
