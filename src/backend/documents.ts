@@ -692,7 +692,7 @@ export function nodeDocuments(o: DocumentsOptions) {
         try { await readPages(dealId, docId, name, src, had?.via, r); } catch { r.stuck = true; r.unpageable = true; }
       }
     } else if (!paged(name) && unread) {
-      // a failed read leaves no words, whatever the record held: the caller names it, never counts it as no text (#1023)
+      // a failed read leaves no words, whatever the record held: it is named, not counted as no text (#1023)
       r.words = await sheetWords(src, dealId, docId);
     }
     return r;
