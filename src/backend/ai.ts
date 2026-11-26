@@ -436,12 +436,12 @@ function memoRiskFits(paragraphs: string[], ids: Set<string>): boolean {
 }
 
 function readCorrection(
-  prompt: string, reply: Record<string, unknown> | null, again: { wrong: string; maxEcho?: number },
+  prompt: string, reply: Record<string, unknown> | null, again: { wrong: string },
 ): string {
   if (!reply) return prompt;
   const previous = JSON.stringify(reply);
-  const echo = previous.length <= (again.maxEcho ?? Infinity) ? `\n\nYou replied:\n${previous}` : '';
-  return `${prompt}${echo}\n\nThat cannot be used: ${again.wrong}. Send the whole reply again, put right.`;
+  const wrong = `That cannot be used: ${again.wrong}. Send the whole reply again, put right.`;
+  return `${prompt}\n\nYou replied:\n${previous}\n\n${wrong}`;
 }
 
 /** A write-up is kept as the model gave it, however long, unless it is empty or gives advice (#806). */
