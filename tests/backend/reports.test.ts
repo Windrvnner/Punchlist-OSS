@@ -286,7 +286,8 @@ describe('third-party reports at deal scale', () => {
       next: '',
       sources: [{ doc: 'D1', page: 4 }],
     };
-    const answer = ({ kind }: { kind: string }) => (kind === 'report' ? { advisor: ' Counsel\t', issues: [issue] } : undefined);
+    const reply = { advisor: ' Counsel\t', issues: [issue] };
+    const answer = ({ kind }: { kind: string }) => (kind === 'report' ? reply : undefined);
     const log: ReportLine[] = [];
     const { k, findings } = kit(docs, { log, answer });
     await sweep(k);
