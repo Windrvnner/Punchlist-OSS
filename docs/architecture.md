@@ -103,8 +103,8 @@ not shown), or for a failure that resending can fix (that is, not unreachable, c
 Every call gets these retries, however many calls before it failed. A reply still unusable when its tries run out,
 or a JSON repair of one that names such an id, is a failed reply and is never used: a draft or a reassessment then
 goes on to its next try where it has one (once more, then once to the thorough model) and fails after the last; a
-check of which responses a change affects fails. A chat turn inside a kept conversation is not retried there: an unusable one fails
-and the chat asks it again in a new conversation, as it does an empty one.
+check of which responses a change affects fails. A chat turn inside a kept conversation is not retried there: an
+unusable one fails and the chat asks it again in a new conversation, as it does an empty one.
 
 **Desktop shell.** The desktop app is an Electron app. The main process (`src/desktop/main.ts`) assembles the backend and serves it to a single window across a bridge. The window runs the same Store and UI as the browser demo.
 

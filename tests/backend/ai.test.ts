@@ -943,7 +943,10 @@ describe('drafts, reassessments, the brief, the import layout and whether an ans
       const once = setup((c, n) => (n === 1 ? bad : good(c))); await deal(once.repo); await finding(once.repo, 'f_1', 'Lock-up differs', { sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }] });
       expect(val(await once.ai.reassess({ dealId: 'd1', findingId: 'f_1' })).body).toEqual(['Still 1.25x. [1]']); expect(once.calls.map((c) => c.model)).toEqual(['standard', 'standard']);   // one failure: the standard model again, not a dearer one
       // what could be read is sent back with what is wrong with it; what could not be read at all is simply asked again
-      if (typeof bad === 'object' && 'body' in bad) expect(once.calls[1].prompt).toBe(`${once.calls[0].prompt}\n\nYou replied:\n{"body":[]}\n\nThat cannot be used: "body" has no paragraphs in it. Send the whole reply again, put right.`); else expect(once.calls[1].prompt).toBe(once.calls[0].prompt);
+      const putRight = 'That cannot be used: "body" has no paragraphs in it. Send the whole reply again, put right.';
+      const correction = `${once.calls[0].prompt}\n\nYou replied:\n{"body":[]}\n\n${putRight}`;
+      if (typeof bad === 'object' && 'body' in bad) expect(once.calls[1].prompt).toBe(correction);
+      else expect(once.calls[1].prompt).toBe(once.calls[0].prompt);
       const twice = setup((c, n) => (n <= 2 ? bad : good(c))); await deal(twice.repo); await finding(twice.repo, 'f_1', 'Lock-up differs', { sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }] });
       expect(val(await twice.ai.reassess({ dealId: 'd1', findingId: 'f_1' })).body).toEqual(['Still 1.25x. [1]']); expect(twice.calls.map((c) => c.model)).toEqual(['standard', 'standard', 'thorough']); expect(twice.calls[2].prompt).toBe(twice.calls[0].prompt);
     }
