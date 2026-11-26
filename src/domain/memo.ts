@@ -23,8 +23,22 @@ export function unratedFindings<T extends { id: string }>(
   return open.filter((finding) => !ratings[finding.id]);
 }
 
+/** The checklist's line on page one, turned-off items counted as Overview counts them (#1064); empty with no checklist */
+function checklistCounts(items: MemoItem[]): string {
+  if (!items.length) return '';
+  const k = (kind: MemoItem['kind']) => items.filter((x) => x.kind === kind).length;
+  const num = (count: number) => count.toLocaleString('en-US');
+  const settled = k('satisfied') + k('person');
+  const open = k('open') ? `; ${num(k('open'))} not settled` : '';
+  const off = k('off') ? `; ${num(k('off'))} turned off` : '';
+  return `Of ${n(items.length, 'checklist item')}, ${num(settled)} ${settled === 1 ? 'is' : 'are'} settled, `
+    + `${num(k('finding'))} flagged and ${n(k('gap'), 'gap')}${open}${off}.`;
+}
+
 /** One checklist item as the memo needs it: the list it comes from, how it stands (as the Overview counts it), and what a gap needs. */
-export interface MemoItem { text: string; list: string; kind: 'finding' | 'gap' | 'open' | 'person' | 'satisfied'; need?: string }
+export interface MemoItem {
+  text: string; list: string; kind: 'finding' | 'gap' | 'open' | 'person' | 'satisfied' | 'off'; need?: string;
+}
 
 export interface MemoInput {
   deal: Deal; firm: string;
@@ -192,10 +206,9 @@ export function memoContent(i: MemoInput): Memo {
   const oldestQ = openQs.filter((q) => q.received).sort((a, b) => (a.received < b.received ? -1 : 1))[0];
   const age = oldestQ ? days(oldestQ.received, i.today) : null;
 
-  const k = (kind: MemoItem['kind']) => items.filter((x) => x.kind === kind).length;
   const counts = [
     findingCounts(open, grouped, i.ratings),
-    items.length ? `Of ${n(items.length, 'checklist item')}, ${(k('satisfied') + k('person')).toLocaleString('en-US')} ${k('satisfied') + k('person') === 1 ? 'is' : 'are'} settled, ${k('finding').toLocaleString('en-US')} flagged and ${n(k('gap'), 'gap')}${k('open') ? `; ${k('open').toLocaleString('en-US')} not settled` : ''}.` : '',
+    checklistCounts(items),
     `${n(openQs.length, 'question')} to the counterparty ${openQs.length === 1 ? 'is' : 'are'} open${oldestQ && age !== null && age >= 0 ? `; the oldest, Q${oldestQ.n}, was received ${n(age, 'day')} ago` : ''}.`,
   ].filter(Boolean).join(' ');
 
