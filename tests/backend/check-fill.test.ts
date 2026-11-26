@@ -139,3 +139,23 @@ it('each document search the gap filler makes has a search\'s own calls, as a ch
   expect(turns.filter((c) => c.prompt.includes('as many calls as one search may'))).toEqual([]);
   expect(s.all.filter(isSearchRead).length).toBeGreaterThan(15);
 }, 120_000);
+
+it('the items handed to the chat agent are listed as plain lines, never as numbers (#1162)', async () => {
+  const items = [{ id: 'x1', text: 'Decommissioning is provided for' }, { id: 'x2', text: 'Water rights are secured' }];
+  const s = setup(
+    (c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, result: 'more', need: 'a plan' })) }),
+    { d1: [FA, TS] },
+    {
+      checklist: () => ({ broad: items, product: [], sector: [] }),
+      pick: () => ({ read: [] }),
+      pickFor: () => ({ read: {} }),
+      fill: () => ({ text: 'Nothing settles them.', sources: [] }),
+    },
+  );
+  await deal(s.repo);
+  val(await s.ai.firstPass('d1'));
+  const listing = s.fillCalls[0].prompt.split('\n\n')[0];
+  expect(listing).toContain('Decommissioning is provided for');
+  expect(listing).toContain('Water rights are secured');
+  expect(listing).not.toMatch(/^\d+\. /m);
+});

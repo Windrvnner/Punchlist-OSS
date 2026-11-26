@@ -3435,13 +3435,20 @@ export function nodeAi(o: AiOptions) {
      */
     const filler = chatAgent(agentKit, agentOpts);
     let filling = true;
+    /** an item as a plain line of the fill message: no number, as nothing in the reply is mapped back to a line (#1162) */
+    const fillLine = (it: ChecklistItem) => {
+      const need = needOf.get(it.id);
+      const tried = (trailOf.get(it.id) ?? []).filter((t) => !t.n).map((t) => `"${t.q}"`);
+      const needed = need ? ` Still needed: ${need}` : '';
+      const searched = tried.length ? ` (searched already, finding nothing: ${tried.join(', ')})` : '';
+      return `- ${it.text.replace(/\s+/g, ' ')}${needed}${searched}`;
+    };
     const fill = async () => {
       const open = [...held.values()]; held.clear(); const byId = new Map(o.docs.records(dealId).map((r) => [r.docId, r]));
       for (let k = 0; k < open.length; k += GAPS_AT_ONCE) {
         const part = open.slice(k, k + GAPS_AT_ONCE); let docs: DocRecord[] = [];
         if (filling) {
-          // the items are numbered in the chat message only to list them; nothing is mapped back by number (#1162)
-          const listed = part.map(({ it }, i) => { const need = needOf.get(it.id); const tried = (trailOf.get(it.id) ?? []).filter((t) => !t.n).map((t) => `"${t.q}"`); return `${i + 1}. ${it.text.replace(/\s+/g, ' ')}${need ? ` Still needed: ${need}` : ''}${tried.length ? ` (searched already, finding nothing: ${tried.join(', ')})` : ''}`; }).join('\n');
+          const listed = part.map(({ it }) => fillLine(it)).join('\n');
           const message = 'These items of the due diligence checklist were not settled by the documents first chosen '
             + `for them:\n${listed}\n\n`
             + 'Find the documents in the data room that settle each item: those that show it is met, or that show a '
