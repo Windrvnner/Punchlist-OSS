@@ -15,6 +15,8 @@ interface Options {
   replies?: Reply[];
   answer?: (seen: SeenTurn) => Reply;
   noTools?: boolean;
+  /** what the Models API says each model allows, by id; a model not named here is not found (404) */
+  limits?: Record<string, { max_tokens: number | null; max_input_tokens: number | null }>;
 }
 
 type Message = Anthropic.MessageParam;
@@ -133,6 +135,13 @@ export function fakeApi(script: Reply[] | Options = []) {
       const model = { type: 'model', id, display_name: 'Claude Haiku 5.5', created_at: CREATED_AT };
       return json({ data: [model], has_more: false, first_id: id, last_id: id });
     }
+    const asked = /^\/v1\/models\/(.+)$/.exec(path);
+    const limits = asked && options.limits?.[decodeURIComponent(asked[1])];
+    if (asked && limits) {
+      const id = decodeURIComponent(asked[1]);
+      return json({ type: 'model', id, display_name: id, created_at: CREATED_AT, ...limits });
+    }
+    if (asked) return json(error('not_found_error', path), 404);
     return fileResponse(request, path, files, () => `file_${++nextFile}`);
   };
   return { fetch, files, sent };

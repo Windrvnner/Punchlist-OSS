@@ -34,6 +34,40 @@ describe('the models on offer', () => {
   });
 });
 
+describe('what each model allows (#1079)', () => {
+  it('sends no more reply tokens than the Models API says the model allows', async () => {
+    const api = fakeApi({ limits: { 'claude-haiku-5-5': { max_tokens: 4_096, max_input_tokens: 200_000 } } });
+    const s = svc(api);
+    await s.models();
+    expect([s.outputLimit!('fast'), s.inputLimit!('fast')]).toEqual([4_096, 180_000]);
+    await s.complete({ model: 'fast', prompt: 'q' });
+    expect(api.sent[0].max_tokens).toBe(4_096);
+  });
+  it('a model allowing more than the control file still gets the control file\'s limit', async () => {
+    const api = fakeApi({ limits: { 'claude-haiku-5-5': { max_tokens: 128_000, max_input_tokens: 1_000_000 } } });
+    const s = svc(api);
+    await s.models();
+    await s.complete({ model: 'fast', prompt: 'q' });
+    expect(api.sent[0].max_tokens).toBe(32_000);
+  });
+  it('signed in after the models were listed, a model is asked about at its first call', async () => {
+    const api = fakeApi({ limits: { 'claude-haiku-5-5': { max_tokens: 4_096, max_input_tokens: 200_000 } } });
+    const holder = tokenHolder({ waitMs: 2000 });
+    const s = claudeService({ key: holder, fetch: api.fetch, maxRetries: 0 });
+    await s.models();
+    holder.set('good-key');
+    await s.complete({ model: 'fast', prompt: 'q' });
+    expect(api.sent[0].max_tokens).toBe(4_096);
+  });
+  it('a model the Models API does not report gets the control file\'s limit, and the call goes on', async () => {
+    const api = fakeApi();
+    const s = svc(api);
+    await s.models();
+    expect(await s.complete({ model: 'fast', prompt: 'q' })).toBe('ok');
+    expect(api.sent[0].max_tokens).toBe(32_000);
+  });
+});
+
 describe('signing in with an API key', () => {
   it('waits for a key, sends it, and after a refused key waits for the next one', async () => {
     const keys: (string | null)[] = []; const inner = fakeApi();
