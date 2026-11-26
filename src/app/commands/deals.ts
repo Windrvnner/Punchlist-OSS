@@ -71,7 +71,11 @@ export const CreateDeal = define({
   targets: () => [],
   plan(state, input, ctx) {
     const seen = new Set<string>();
-    for (const f of input.folders) { if (seen.has(windowsPath(f.path))) return fail(rejected(`${f.path} is listed twice`)); seen.add(windowsPath(f.path)); }
+    for (const f of input.folders) {
+      const key = windowsPath(f.path);
+      if (seen.has(key)) return fail(rejected(`${f.path} is listed twice`));
+      seen.add(key);
+    }
     const id = ctx.ids.next('d');
     const name = withProject(cleanName(input.name));
     if (name.length > DEAL_NAME_MAX) return fail(rejected(`Keep the name under ${DEAL_NAME_MAX} characters`));
@@ -128,7 +132,11 @@ export const AddFolders = define({
     const d = state.deals[input.dealId];
     if (!d) return fail(notFound('Deal not found', input.dealId));
     const have = new Set(d.folders.map((f) => windowsPath(f.path)));
-    for (const f of input.folders) { if (have.has(windowsPath(f.path))) return fail(rejected(`${f.label || f.path} is already on this deal`)); have.add(windowsPath(f.path)); }
+    for (const f of input.folders) {
+      const key = windowsPath(f.path);
+      if (have.has(key)) return fail(rejected(`${f.label || f.path} is already on this deal`));
+      have.add(key);
+    }
     // a folder inside one on the deal, or holding one, would have its documents read twice (the dialog says so first;
     // this holds when a folder was put back while another inside it waited to be added)
     for (const [i, f] of input.folders.entries()) { const o = overlap([...d.folders, ...input.folders.slice(0, i).map((x) => Folder.parse(x))], f); if (o) return fail(rejected(o)); }
@@ -203,8 +211,12 @@ export const RemoveFolder = define({
  */
 export function foldersWithRemoved(d: Pick<Deal, 'folders' | 'removed'>): { f: Folder; gone?: Deal['removed'][number] }[] {
   const rows: { f: Folder; gone?: Deal['removed'][number] }[] = d.folders.map((f) => ({ f }));
-  const on = new Set(d.folders.map((f) => windowsPath(f.path)));       // one on the deal again (from another PC, say) is listed once, as on it
-  for (const r of [...d.removed].sort((a, b) => a.at - b.at)) if (!on.has(windowsPath(r.path))) rows.splice(Math.min(r.at, rows.length), 0, { f: r, gone: r });
+  // one on the deal again (from another PC, say) is listed once, as on it
+  const on = new Set(d.folders.map((f) => windowsPath(f.path)));
+  for (const r of [...d.removed].sort((a, b) => a.at - b.at)) {
+    if (on.has(windowsPath(r.path))) continue;
+    rows.splice(Math.min(r.at, rows.length), 0, { f: r, gone: r });
+  }
   return rows;
 }
 
@@ -216,14 +228,18 @@ export const RestoreFolder = define({
   plan(state, input, ctx) {
     const d = state.deals[input.dealId];
     if (!d) return fail(notFound('Deal not found', input.dealId));
-    if (d.folders.some((f) => windowsPath(f.path) === windowsPath(input.folder.path))) return fail(rejected(`${input.folder.label || input.folder.path} is already on this deal`));
+    const folderKey = windowsPath(input.folder.path);
+    if (d.folders.some((f) => windowsPath(f.path) === folderKey)) {
+      return fail(rejected(`${input.folder.label || input.folder.path} is already on this deal`));
+    }
     // a folder added since, inside this one or around it, would have its documents read twice: it says which
     const o = overlap(d.folders, input.folder); if (o) return fail(rejected(o));
     const folders = [...d.folders]; folders.splice(liveAt(d, input.at, input.folder.path, folders.length), 0, input.folder);
     // Only the unread files remain when an unfinished folder is put back.
     const unfinished = input.folder.indexed < input.folder.files;
     const stage = unfinished ? 'indexing' : d.stage;
-    const deal: Deal = { ...d, folders, stage, removed: d.removed.filter((r) => windowsPath(r.path) !== windowsPath(input.folder.path)), updatedAt: ctx.at };
+    const removed = d.removed.filter((r) => windowsPath(r.path) !== folderKey);
+    const deal: Deal = { ...d, folders, stage, removed, updatedAt: ctx.at };
     return ok({
       dealId: d.id, upserts: [{ kind: 'deal', record: deal, expectedRev: d.rev }],
       audit: [{ kind: 'edited', recordId: d.id, dealId: d.id, field: 'folders', to: [input.folder.path] }],

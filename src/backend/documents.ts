@@ -360,9 +360,11 @@ export function nodeDocuments(o: DocumentsOptions) {
    * the deal stops feeding checks and questions; its documents stay known, so findings already made still open them.
    */
   const onDeal = (dealId: string) => {
-    const now = o.foldersNow?.(dealId); if (!now) return () => true;
+    const now = o.foldersNow?.(dealId);
+    if (!now) return () => true;
     const have = new Set(now.map(windowsPath));
-    return (d: DocRecord) => [d, ...(d.copies ?? [])].some((p) => p.folder === ATTACHED || have.has(windowsPath(p.folder)));
+    const kept = (p: { folder: string }) => p.folder === ATTACHED || have.has(windowsPath(p.folder));
+    return (d: DocRecord) => [d, ...(d.copies ?? [])].some(kept);
   };
   const known = (dealId: string, docId: string): DocRecord | undefined => { const d = all(dealId).get(docId); return d?.name ? d : undefined; };
   function say(dealId: string, line: Omit<DocLine, 'v' | 'pc' | 'at'>) {
@@ -1031,9 +1033,12 @@ export function nodeDocuments(o: DocumentsOptions) {
      * Read from what the PCs said alone: nothing is listed.
      */
     unread: (dealId: string): string[] => {
-      const now = o.foldersNow?.(dealId); const on = now ? new Set(now.map(windowsPath)) : null;
+      const now = o.foldersNow?.(dealId);
+      const on = now ? new Set(now.map(windowsPath)) : null;
       const places = [...records(dealId).values()].flatMap((d) => [d, ...(d.copies ?? [])]); const out = new Set<string>();
-      const { shuts, reads } = both(dealId); const deals = [...shuts.keys()].filter((f) => !on || on.has(windowsPath(f)));   // taken off the deal: left out
+      const { shuts, reads } = both(dealId);
+      // a folder taken off the deal is left out
+      const deals = [...shuts.keys()].filter((f) => !on || on.has(windowsPath(f)));
       const cutoff = new Date(Date.parse(clock()) - control.timings.folderIdle).toISOString();
       for (const folder of deals) {
         // only PCs in use count: one no longer used never looks again, so it could never take back a folder that was since renamed or removed

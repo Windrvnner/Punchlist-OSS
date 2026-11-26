@@ -96,8 +96,10 @@ describe('documents on real folders', () => {
     now = null; expect(a.docs.records('d1').map((r) => r.name)).toContain('Side Letter.pdf');   // a deal that cannot be read hides nothing
   });
   it('a deal folder written with / or a trailing separator in another case still keeps its documents', async () => {
-    const { root, vdr } = room(); const a = pc(root, 'office');
-    val(await a.docs.index('d1', [folder(vdr)])); await a.docs.settled('d1');
+    const { root, vdr } = room();
+    const a = pc(root, 'office');
+    val(await a.docs.index('d1', [folder(vdr)]));
+    await a.docs.settled('d1');
     const written = vdr.replace(/\//g, '\\').toUpperCase() + '\\';
     const b = pc(root, 'office', undefined, { foldersNow: () => [written] });
     expect(b.docs.records('d1').map((r) => r.name)).toContain('Credit Agreement.pdf');
