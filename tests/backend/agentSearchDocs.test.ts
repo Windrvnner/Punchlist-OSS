@@ -8,6 +8,7 @@ import { nodeAi } from '../../src/backend/ai';
 import { StandInService } from '../../src/backend/service';
 import { StoreKeeper } from '../../src/backend/storeKeeper';
 import { memRepo, Mem } from '../adapters/memRepo';
+import { tooLong } from '../../src/backend/limits';
 import type { DocRecord } from '../../src/backend/documents';
 
 type Call = { model: string; system?: string; prompt: string };
@@ -28,14 +29,16 @@ const isPick = (c: Call) => c.prompt.includes('Which of them should be read');
 const isRead = (c: Call) => c.prompt.startsWith('Documents:\n');
 const answer = { text: 'ok', sources: [] };
 
-const setup = (...tools: Record<string, unknown>[]) => setupIn(ROOM, ...tools);
+const setup = (...tools: Record<string, unknown>[]) => setupIn(ROOM, tools);
 
-function setupIn(room: DocRecord[], ...tools: Record<string, unknown>[]) {
+/** `refuseOver`: a read of more documents than this is refused as too long, as a service refuses one */
+function setupIn(room: DocRecord[], tools: Record<string, unknown>[], refuseOver = Infinity) {
   const turns: Call[] = []; const reads: Call[] = []; const picks: Call[] = [];
   const svc = new StandInService(async (c) => {
     const call = c as Call;
     if (isTurn(call)) { turns.push(call); return JSON.stringify(tools[turns.length - 1] ?? answer); }
     if (isPick(call)) picks.push(call);
+    if (isRead(call) && names(call).length > refuseOver) throw tooLong('too long', 400);
     if (isRead(call)) reads.push(call);
     return JSON.stringify({ text: '', sources: [] });
   });
@@ -78,13 +81,21 @@ describe('searching documents from the chat, a page at a time', () => {
   }, 60_000);
 
   it('never splits a blackline from its clean draft across pages: the pair starts the next page', async () => {
-    const s = setupIn(roomWith('08'), docs(), docs(2));
+    const s = setupIn(roomWith('08'), [docs(), docs(2)]);
     expect((await s.ai.answer(ask('Hello'))).ok).toBe(true);
     const [first, second] = s.reads.slice(-2).map(names);
     const warranty = (x: string) => `Turbine warranty ${x}.pdf`;
     expect(first).toEqual(['01', '02', '03', '04', '05', '06', '07'].map(warranty));
     expect(second).toEqual(['08', '08 (blackline)', '09', '10', '11', '12', '13', '14'].map(warranty));
     expect(s.turns[1].prompt).toContain('Page 1 of 4. Ask for page 2 for more.');
+  }, 60_000);
+
+  it('names the documents of a page the service took as too long to read together, so none is lost', async () => {
+    const s = setupIn(ROOM, [docs()], 4);
+    expect((await s.ai.answer(ask('Hello'))).ok).toBe(true);
+    expect(names(s.reads[s.reads.length - 1])).toEqual(RANKED.slice(0, 4));
+    const left = RANKED.slice(4, 8).map((name) => `vdr/${name}`).join('; ');
+    expect(s.turns[1].prompt).toContain(`Not opened, too long to read with the others: ${left}. Read them by name`);
   }, 60_000);
 
   it('can be asked for the last page first: it holds the last 7', async () => {

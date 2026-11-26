@@ -4,11 +4,12 @@
  * the app holds, with no model call.
  */
 import { int, strings } from './lenient';
-import { pageOf, pageOfGroups, rankRecords, type Page } from './recordSearch';
+import { pageOf, rankRecords, type Page } from './recordSearch';
+import { batchesOf } from './agentFolder';
 import { qaRow, qaText } from './qaRow';
 import type { AgentRun } from './agentRun';
 import { foundAt, withPlaces } from './agentRun';
-import type { Cited } from './agentKit';
+import type { Cited, DealDoc } from './agentKit';
 import { findAsk, noun, oneLine, quoted, shorten } from './agentPrompts';
 
 /** what each kind of search is called in its step and in what the main session is told */
@@ -65,7 +66,7 @@ function queryWords(run: AgentRun, query: string): Set<string> {
 async function searchDocuments(run: AgentRun, asked: Asked, query: string, report: Report): Promise<void> {
   const { kit, question } = run;
   const ranking = await kit.ranking(question.deals, query);
-  const shown = pageOfGroups(ranking, asked.page, run.pages.width);
+  const shown = documentPage(run, ranking, asked.page);
   if (!shown.items.length) {
     const none = 'Documents: none answers to these words.';
     report.out.push(ranking.length ? noPage('Documents', 'documents', asked, shown) : none);
@@ -93,9 +94,27 @@ async function searchDocuments(run: AgentRun, asked: Asked, query: string, repor
   const says = text ? ` It says: ${withPlaces(text, tags, sources)}` : ' They say nothing about it.';
   const passages = lines.length ? `\nPassages:\n${lines.join('\n')}` : '';
   const page = pageLine('documents', asked, shown);
-  report.out.push(`Documents: the helper opened ${opens.join(', ')}.${says}${passages}\n${page}`);
+  const unread = notOpened(run, shown.items, sent);
+  report.out.push(`Documents: the helper opened ${opens.join(', ')}.${says}${passages}${unread}\n${page}`);
   const passageCount = `${sources.length} ${noun(sources.length, 'passage')}`;
   report.said.push(`${shown.total} listed · ${sent.length} opened · ${passageCount}`);
+}
+
+/** page `page` of the documents' ranking: one call's batch of it, cut as a folder read's batches are */
+function documentPage(run: AgentRun, ranking: DealDoc[], page: number): Page<DealDoc> {
+  const batches = batchesOf(ranking, run.kit.withClean, run.pages.width);
+  return { items: batches[page - 1]?.recs ?? [], page, pages: batches.length, total: ranking.length };
+}
+
+/**
+ * The documents of a page the helper did not open, because the service took them as too long to read with the rest
+ * (ai.ts `read`): named, so that the main session can read them (#1102)
+ */
+function notOpened(run: AgentRun, page: DealDoc[], sent: DealDoc[]): string {
+  const left = page.filter((d) => !sent.some((s) => s.dealId === d.dealId && s.rec.docId === d.rec.docId));
+  if (!left.length) return '';
+  const paths = left.map((d) => run.kit.where(d.rec)).join('; ');
+  return `\nNot opened, too long to read with the others: ${paths}. Read them by name to see them.`;
 }
 
 /** the deal's findings ranked by the query's words, a page of them, each whole */

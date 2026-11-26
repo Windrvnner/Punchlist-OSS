@@ -956,25 +956,11 @@ export function nodeAi(o: AiOptions) {
   const mainIn = (sent: Sent[], x: Source) => { const sec = new Map<string, Set<string>>(); const of = (d: string) => sec.get(d) ?? (sec.set(d, kindsOf(d).secondary), sec.get(d)!); return sent.some((s) => s.rec.docId === x.docId && (!x.dealId || x.dealId === s.dealId) && !of(s.dealId).has(x.docId)); };
   /** whether a source is never a main one: another project's document, or a blackline not shown to be against this deal's own draft */
   const secondary = (dealId: string, docId: string) => kindsOf(dealId).secondary.has(docId);
-  /** a deal's blackline pairs and records, and the clean draft a document is the blackline of, if any */
-  function draftsOf(dealId: string): { size: number; of: (r: DocRecord) => DocRecord | undefined } {
-    const pairs = cleanOf(dealId);
-    const all = new Map(o.docs.records(dealId).map((r) => [r.docId, r]));
-    const of = (r: DocRecord) => {
-      const clean = pairs.get(r.docId);
-      return clean ? all.get(clean) : undefined;
-    };
-    return { size: pairs.size, of };
-  }
   /** these documents, each blackline's clean draft put just before it when it is not there already */
   function withClean(dealId: string, recs: DocRecord[]): DocRecord[] {
-    const drafts = draftsOf(dealId); if (!drafts.size) return recs;
-    const out: DocRecord[] = [];
-    for (const r of recs) {
-      const clean = drafts.of(r);
-      if (clean && !recs.includes(clean) && !out.includes(clean)) out.push(clean);
-      out.push(r);
-    }
+    const pairs = cleanOf(dealId); if (!pairs.size) return recs;
+    const all = new Map(o.docs.records(dealId).map((r) => [r.docId, r])); const out: DocRecord[] = [];
+    for (const r of recs) { const c = pairs.get(r.docId); const clean = c ? all.get(c) : undefined; if (clean && !recs.includes(clean) && !out.includes(clean)) out.push(clean); out.push(r); }
     return out;
   }
   /** `hits`: only the documents that answer to the words at all, so a search sorts its hits, not the whole data room */
@@ -1014,31 +1000,14 @@ export function nodeAi(o: AiOptions) {
     return listOf(reply.read).map(int).filter((n): n is number => n !== null && n >= 1 && n <= list.length).map((n) => list[n - 1]).filter((r, i, all) => all.indexOf(r) === i).slice(0, room);
   }
   /**
-   * The chat's document search as fixed pages (#1102): the keyword ranking as `top` gives it with no room set, the
-   * documents that answer to the most words first and then the core documents, each blackline's clean draft beside it,
-   * across deals in turn as `folderList` takes them.
+   * The chat's document search as fixed pages (#1102): the keyword ranking as `top` gives it with no room set, only the
+   * documents that answer to a word of the query, best first, across deals in turn as `folderList` takes them. A page
+   * of it is cut as a folder read's batches are (agentFolder.ts `batchesOf`).
    */
-  async function searchRanking(deals: string[], query: string): Promise<DealDoc[][]> {
-    const per = await Promise.all(deals.map(async (dealId) => {
-      const groups = besideClean(dealId, top(dealId, query, new Set(), Infinity, await coreOf(dealId), true));
-      return groups.map((group) => group.map((rec) => ({ dealId, rec })));
-    }));
+  async function searchRanking(deals: string[], query: string): Promise<DealDoc[]> {
+    const per = await Promise.all(deals.map(async (dealId) =>
+      top(dealId, query, new Set(), Infinity, await coreOf(dealId), false).map((rec) => ({ dealId, rec }))));
     return interleave(per);
-  }
-  /**
-   * A ranking as groups read together: each clean draft with the blacklines of it that the ranking holds, the clean
-   * draft first, at the place of whichever of them ranks highest; any other document on its own; each document once.
-   */
-  function besideClean(dealId: string, recs: DocRecord[]): DocRecord[][] {
-    const drafts = draftsOf(dealId);
-    const groups = new Map<string, DocRecord[]>();
-    for (const r of recs) {
-      const clean = drafts.of(r) ?? r;
-      const group = groups.get(clean.docId) ?? [clean];
-      if (!group.includes(r)) group.push(r);
-      groups.set(clean.docId, group);
-    }
-    return [...groups.values()];
   }
   /** one page of the chat's document search, read by the helper under a search's budget of calls (`spend`) */
   function readSearchPage(spend: { left: number; deal?: { left: number } }, deals: string[], model: string, ask: string,
