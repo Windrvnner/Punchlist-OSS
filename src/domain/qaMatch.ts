@@ -29,41 +29,61 @@ export type MatchRow = Pick<ImportRow, 'n' | 'text' | 'askedBy'>;
 export type SenderOf = (q: Question) => string;
 const OWN_SENDER: SenderOf[] = [(q) => q.askedBy];
 
+const formKeys = (text: string) => fileForms(text).map((form, which) => `${which}:${form}`);
+/** one pass of the lookup: a sender tier (-1: a row or question naming no one) and whether the number must match */
+type Pass = { tier: number; sameNumber: boolean };
+/** a place in an index: a text form, a sender, and the number when the pass needs it */
+const placeKey = (form: string, name: string, n: number | null) => `${form}\u0000${name}\u0000${n ?? ''}`;
+
 /**
- * each question's place in the pools, by each form its text takes in a file (`fileForms`, keyed by which form it is, as
- * `sameText` compares them), so thousands of rows match quickly
+ * The senders a question is filed under in a pass: its name in the tier (a later tier's blank name says nothing, so
+ * none), or in the last tier "any", and "blank" too for a question naming no one.
  */
-function indexByText(questions: Question[]): Map<string, number[]> {
+function questionNames(q: Question, senders: SenderOf[], tier: number): string[] {
+  if (tier < 0) return sender(q.askedBy) ? ['any'] : ['any', 'blank'];
+  const name = sender(senders[tier](q));
+  return tier > 0 && !name ? [] : [`=${name}`];
+}
+/** the sender a row looks under in a pass: its own name; in the last tier, a blank question, or any for a blank row */
+const rowName = (row: MatchRow, tier: number) => {
+  const name = sender(row.askedBy);
+  if (tier < 0) return name ? 'blank' : 'any';
+  return `=${name}`;
+};
+
+/**
+ * Each question's place in the pools for one pass, by text form (keyed by which form it is, as `sameText` compares
+ * them), sender and number, so that the first question not yet taken is the row's: thousands of rows match quickly.
+ */
+function indexForPass(questions: Question[], senders: SenderOf[], pass: Pass): Map<string, number[]> {
   const index = new Map<string, number[]>();
   for (const [at, q] of questions.entries()) {
-    for (const key of formKeys(q.text)) {
-      const list = index.get(key);
-      if (list) list.push(at);
-      else index.set(key, [at]);
+    for (const form of formKeys(q.text)) {
+      for (const name of questionNames(q, senders, pass.tier)) {
+        const key = placeKey(form, name, pass.sameNumber ? q.n : null);
+        const list = index.get(key);
+        if (list) list.push(at);
+        else index.set(key, [at]);
+      }
     }
   }
   return index;
 }
-const formKeys = (text: string) => fileForms(text).map((form, which) => `${which}:${form}`);
 
-/** the places of the questions whose text is the row's as the file holds it, in pool order; worked out once per text */
-function candidatesOf(index: Map<string, number[]>, cache: Map<string, number[]>, text: string): number[] {
-  const known = cache.get(text);
-  if (known) return known;
-  const places = [...new Set(formKeys(text).flatMap((key) => index.get(key) ?? []))].sort((x, y) => x - y);
-  cache.set(text, places);
-  return places;
-}
-
-/**
- * Whether a question fits a row in a sender tier: the same name in tier `tier` (the first tier's blank name is a name
- * too; a later tier's blank name says nothing), or, in the last tier (`tier` = -1), a side naming no one.
- */
-function fitsSender(q: Question, row: MatchRow, senders: SenderOf[], tier: number): boolean {
-  const rowName = sender(row.askedBy);
-  if (tier < 0) return !sender(q.askedBy) || !rowName;
-  const name = sender(senders[tier](q));
-  return (tier === 0 || name !== '') && name === rowName;
+/** the questions a row may be in a pass, in pool order, and how many at the front are already taken */
+type Candidates = { places: number[]; next: number };
+/** a row's candidates in a pass: worked out once for all rows that look the same up */
+function candidatesFor(index: Map<string, number[]>, cache: Map<string, Candidates>, row: MatchRow, pass: Pass) {
+  const name = rowName(row, pass.tier);
+  const keys = formKeys(row.text).map((form) => placeKey(form, name, pass.sameNumber ? row.n : null));
+  const cacheKey = keys.join('\u0001');
+  let found = cache.get(cacheKey);
+  if (!found) {
+    const places = [...new Set(keys.flatMap((key) => index.get(key) ?? []))].sort((x, y) => x - y);
+    found = { places, next: 0 };
+    cache.set(cacheKey, found);
+  }
+  return found;
 }
 
 /**
@@ -85,17 +105,17 @@ export function matchQuestions(
   rows: MatchRow[], pools: Question[][], senders: SenderOf[] = OWN_SENDER,
 ): Map<number, string> {
   const questions = pools.flat();
-  const index = indexByText(questions);
-  const cache = new Map<string, number[]>();
   const matched = new Map<number, string>();
   const taken = new Set<string>();
-  for (const { tier, sameNumber } of passesFor(senders)) {
+  for (const pass of passesFor(senders)) {
+    const index = indexForPass(questions, senders, pass);
+    const cache = new Map<string, Candidates>();
     for (const [idx, row] of rows.entries()) {
-      if (matched.has(idx) || (sameNumber && row.n == null)) continue;
-      const fits = (q: Question) => !taken.has(q.id) && (!sameNumber || q.n === row.n)
-        && fitsSender(q, row, senders, tier);
-      const hit = candidatesOf(index, cache, row.text).map((at) => questions[at]).find(fits);
-      if (!hit) continue;
+      if (matched.has(idx) || (pass.sameNumber && row.n == null)) continue;
+      const found = candidatesFor(index, cache, row, pass);
+      while (found.next < found.places.length && taken.has(questions[found.places[found.next]].id)) found.next++;
+      if (found.next === found.places.length) continue;
+      const hit = questions[found.places[found.next]];
       matched.set(idx, hit.id);
       taken.add(hit.id);
     }
