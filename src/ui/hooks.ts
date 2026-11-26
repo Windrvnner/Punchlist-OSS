@@ -3,6 +3,7 @@ import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact
 import type { Store } from '../app/store';
 import type { State } from '../app/state';
 import { PROJECT_WORD } from '../app/commands/deals';
+import { isRealDate } from '../domain/model';
 
 export const StoreContext = createContext<Store | null>(null);
 
@@ -82,8 +83,11 @@ export const fmtDate = (ymd: string) => {
   const d = new Date(ymd + 'T12:00:00');
   return isNaN(+d) ? '' : formatLocalDate(d, d.getFullYear() !== new Date().getFullYear());
 };
-/** a question's date as shown: a real date formatted, text typed in a date field as written (#1022) */
-export const shownDate = (value: string) => fmtDate(value) || value;
+/**
+ * a question's date as shown: a real date formatted, anything else typed in a date field as written, since fmtDate
+ * would read "2026" as Jan 1 and roll "2026-02-30" into March (#1022)
+ */
+export const shownDate = (value: string) => (isRealDate(value) ? fmtDate(value) : value);
 export { fmtDateTime } from '../domain/dateTime';
 export const whenText = (iso: string) => {
   const d = new Date(iso); const h = (Date.now() - +d) / 36e5;

@@ -58,4 +58,10 @@ describe('a date written into an .xlsx log', () => {
     const r = await write(book([`<row r="2">${t('A2', '1')}${t('B2', 'DSCR?')}<c r="C2" s="1"/></row>`], { in1904: true }), [{ kind: 'cell', row: 1, col: 2, value: '2026-11-12', date: true }]);
     expect(cellOf(r.xml, 'C2')).toBe(`<c r="C2" s="1"><v>${46338 - 1462}</v></c>`); expect(r.wrong).toBeNull();
   }, 60_000);
+  it('stays text when the value is not a real calendar date (#1022)', async () => {
+    const steps: SheetEdit[] = [{ kind: 'cell', row: 1, col: 2, value: '2026-02-30', date: true }];
+    const r = await write(book([`<row r="2">${t('A2', '1')}${t('B2', 'DSCR?')}<c r="C2" s="1"/></row>`]), steps);
+    const text = '<is><t xml:space="preserve">2026-02-30</t></is>';
+    expect(cellOf(r.xml, 'C2')).toBe(`<c r="C2" s="1" t="inlineStr">${text}</c>`);
+  }, 60_000);
 });

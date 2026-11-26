@@ -5,6 +5,7 @@
  * debounce. Shows pending / not-saved / updated-elsewhere beside the field.
  */
 import { TEXT_MAX } from '../domain/importExport';
+import { isRealDate } from '../domain/model';
 import { limitClass, limitTitle } from './limit';
 import {
   type FieldDraft, type FieldValue, type ReadField, restoreFieldDraft, showFieldDraft, takeHandedText,
@@ -114,14 +115,17 @@ export function EditField({
   );
 }
 
-/** a date input while edited or holding a date; text typed in a log stays a text field at rest, as written */
+/**
+ * a date input while edited or holding a real date; text typed in a log stays a text field, focused too, so it is
+ * shown and edited as written (a date input would show it blank) (#1022)
+ */
 function dateEditable(focused: boolean, half: boolean, draft: string): boolean {
-  const typedTextAtRest = !focused && !half && !!draft && !/^\d{4}-\d{2}-\d{2}$/.test(draft);
-  return (focused || half || !!draft) && !typedTextAtRest;
+  const typedText = !!draft && !isRealDate(draft);
+  return (focused || half || !!draft) && !typedText;
 }
 
 function dateAtRest(type: 'date' | 'text', focused: boolean, half: boolean, value: string): string {
-  return type === 'date' && !focused && !half && /^\d{4}-\d{2}-\d{2}$/.test(value) ? fmtDate(value) : '';
+  return type === 'date' && !focused && !half && isRealDate(value) ? fmtDate(value) : '';
 }
 
 function dateLabel(text: string, className: string | undefined) {

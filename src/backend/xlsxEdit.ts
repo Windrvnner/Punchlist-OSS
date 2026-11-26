@@ -5,6 +5,7 @@
  * saves the whole workbook again, is kept for the formats this cannot open (.xls, .ods).
  */
 import type { SheetEdit } from '../domain/sheets';
+import { isRealDate } from '../domain/model';
 import { readZip, partText, setPart, writeZip, type ZipPackage } from './zipParts';
 
 const unescapeXml = (text: string) =>
@@ -247,8 +248,9 @@ function cellXml(
   const ownStyle = attr(old ?? '', 's');
   let style = ownStyle ?? attr(above ?? '', 's');
   // a date goes in as a date: in the cell's own date format, else, for a cell with no look of its own, in a date format
-  // the column uses; otherwise as its text, so a cell styled some other way keeps its look
-  const isYmd = step.date && typeof step.value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(step.value);
+  // the column uses; otherwise as its text, so a cell styled some other way keeps its look. Only a real date is a
+  // date: text typed in a date column, "2026-02-30" too, is written back as text (#1022)
+  const isYmd = step.date && typeof step.value === 'string' && isRealDate(step.value);
   const ymd = isYmd ? (step.value as string) : '';
   if (ymd && !dates.isDate(style) && ownStyle === undefined) {
     const columnStyle = context.columnDate(step.col);

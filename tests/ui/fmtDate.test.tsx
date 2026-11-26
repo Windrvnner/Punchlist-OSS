@@ -75,4 +75,8 @@ describe('shownDate (#1022)', () => {
     expect(shownDate('Nov-ish')).toBe('Nov-ish');
     expect(shownDate('')).toBe('');
   });
+
+  it('shows text that is not a real date as written, never rolled into one', () => {
+    for (const typed of ['2026', '2026-11', '2026-02-30', '11/02/2026']) expect(shownDate(typed), typed).toBe(typed);
+  });
 });
