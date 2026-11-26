@@ -6,6 +6,7 @@ import { nodeAi, type AiDocs } from '../../src/backend/ai';
 import { StandInService } from '../../src/backend/service';
 import { StoreKeeper } from '../../src/backend/storeKeeper';
 import type { Folder } from '../../src/backend/logRepository';
+import { TOO_LONG_REPLY } from '../../src/backend/limits';
 import { memoContent, type Rating } from '../../src/domain/memo';
 import { memoDocument } from '../../src/domain/memoDoc';
 import { memRepo, type MemRepo } from '../adapters/memRepo';
@@ -135,6 +136,15 @@ describe('the deal memo’s ratings and summary', () => {
     const r = await s.ai.memo!('d1');
     expect(!r.ok && r.error).toEqual({ kind: 'failed', message: 'The summary could not be written' });
     expect(s.sums.length).toBeGreaterThan(1);   // retried before it fails
+  });
+
+  it('fails the memo with the too-long-reply failure, and saves nothing, when the summary is cut off (#1065)', async () => {
+    const cut = () => { throw Object.assign(new Error('cut off'), { code: 'cutoff' }); };
+    const s = setup(by({ f_1: 'High' }), cut);
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'One');
+    const r = await s.ai.memo!('d1');
+    expect(!r.ok && r.error).toEqual({ kind: 'failed', message: TOO_LONG_REPLY });
   });
 
   it('rates a deal with many findings a part at a time', async () => {
