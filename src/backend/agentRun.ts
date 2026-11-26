@@ -8,7 +8,7 @@ import type { Source } from '../domain/model';
 import type { DocRecord } from './documents';
 import type { AgentKit, AgentQuestion, DealDoc, Run, Sent } from './agentKit';
 import { oneLine } from './agentPrompts';
-import { handleOf, questionsForHandles } from './qaRow';
+import { handleOf } from './qaRow';
 
 /** a document's key across deals, as a folder read keeps what it has read */
 export const dealDocKey = (doc: { dealId: string; rec: DocRecord }) => `${doc.dealId}|${doc.rec.docId}`;
@@ -48,8 +48,8 @@ export class AgentRun {
   private nextTag = 1;
   /** each question a search showed the main session, by record id: the place of its handle (#1105) */
   private readonly handles = new Map<string, number>();
-  /** the questions' numbers, in the order of their handles: what each handle is put back as */
-  private readonly handled: (number | undefined)[] = [];
+  /** the place the next new question handle takes */
+  private nextHandle = 0;
 
   /**
    * `pages`: how many a search gives at a time, documents (`width`) and findings or questions (`searchPage`), as the
@@ -98,21 +98,17 @@ export class AgentRun {
    * number on from them (#1105)
    */
   private keepHandles(kept: QuestionHandle[]): void {
-    for (const { handle, id, n } of kept) {
+    for (const { handle, id } of kept) {
       const number = /^R(\d+)$/.exec(handle);
       if (!number) continue;
-      const at = +number[1] - 1;
-      this.handles.set(id, at);
-      this.handled[at] = n;
+      this.handles.set(id, +number[1] - 1);
+      this.nextHandle = Math.max(this.nextHandle, +number[1]);
     }
   }
 
   /** every question shown by handle in this conversation, to be kept with it */
   keptHandles(): QuestionHandle[] {
-    return [...this.handles].map(([id, at]) => {
-      const n = this.handled[at];
-      return { handle: handleOf(at), id, ...(n === undefined ? {} : { n }) };
-    });
+    return [...this.handles].map(([id, at]) => ({ handle: handleOf(at), id }));
   }
 
   /** a document a model is given in this run: its tag, a new one if it has none yet */
@@ -128,20 +124,29 @@ export class AgentRun {
   }
 
   /** the handle a question is shown by: the one it was first given in this conversation, or the next free one */
-  handleOf(question: { id: string; n?: number }): string {
+  handleOf(question: { id: string }): string {
     let at = this.handles.get(question.id);
     if (at === undefined) {
-      at = this.handled.length;
+      at = this.nextHandle++;
       this.handles.set(question.id, at);
     }
-    // its number as it is now, should it have been renumbered since the handle was given
-    this.handled[at] = question.n;
     return handleOf(at);
   }
 
-  /** the main session's text with each question handle it was shown put back as the question's number */
-  withQuestionNumbers(text: string): string {
-    return questionsForHandles(text, this.handled);
+  /**
+   * The questions' numbers as they are now in the run's deals, in the order of their handles, so that a question
+   * renumbered since it was shown is named by its new number; a question no longer there has none (#1105)
+   */
+  async questionNumbers(): Promise<(number | undefined)[]> {
+    const numbers: (number | undefined)[] = [];
+    if (!this.handles.size) return numbers;
+    for (const dealId of this.question.deals) {
+      for (const record of (await this.kit.questions(dealId)) ?? []) {
+        const at = this.handles.get(record.id);
+        if (at !== undefined) numbers[at] = record.n;
+      }
+    }
+    return numbers;
   }
 
   /** a document tagged for a model that was not given it after all: it loses its tag and is not counted */

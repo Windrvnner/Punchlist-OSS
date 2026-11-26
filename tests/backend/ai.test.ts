@@ -631,9 +631,11 @@ describe('a kept conversation', () => {
     expect(two.thread!.tags.slice(0, one.thread!.tags.length)).toEqual(one.thread!.tags); expect(two.thread!.tokens).toBeGreaterThan(one.thread!.tokens);
   });
 
+  /** the handle the Q&A row of the question that starts with `text` is shown by in a prompt (#1105) */
+  const handleIn = (prompt: string, text: string) =>
+    new RegExp(`(R\\d+) · Answered\nQuestion: ${text}`).exec(prompt)?.[1];
+
   it('a question keeps its handle on later turns of a conversation; a new one takes the next (#1105)', async () => {
-    const handleIn = (prompt: string, text: string) =>
-      new RegExp(`(R\\d+) · Answered\nQuestion: ${text}`).exec(prompt)?.[1];
     let revenue = '';
     const turn = (c: Call) => {
       revenue ||= handleIn(c.prompt, 'How did revenue move') ?? '';
@@ -648,14 +650,33 @@ describe('a kept conversation', () => {
     val(await question(s.repo, 'q_3', fell));
     const one = val(await s.ai.answer(ask('How did revenue move?')));
     expect(one.text).toBe('The response to Q3 says revenue fell.');
-    expect(one.thread!.questions).toEqual([{ handle: revenue, id: 'q_3', n: 3 }]);
+    expect(one.thread!.questions).toEqual([{ handle: revenue, id: 'q_3' }]);
     const reset = { n: 7, status: 'answered', text: 'Was the tariff reset?', response: 'R1.2 billion.' };
     val(await question(s.repo, 'q_7', reset));
     const later = { history: said(['How did revenue move?']), thread: one.thread };
     const two = val(await s.ai.answer(ask('Was the tariff reset?', later)));
     expect(two.text).toBe('The response to Q7 says the tariff is R1.2 billion; the response to Q3 still stands.');
-    const kept = [{ handle: revenue, id: 'q_3', n: 3 }, { handle: 'R2', id: 'q_7', n: 7 }];
-    expect(two.thread!.questions).toEqual(kept);
+    expect(two.thread!.questions).toEqual([{ handle: revenue, id: 'q_3' }, { handle: 'R2', id: 'q_7' }]);
+  });
+
+  it('a question renumbered between turns is named by its new number (#1105)', async () => {
+    let revenue = '';
+    const turn = (c: Call) => {
+      revenue ||= handleIn(c.prompt, 'How did revenue move') ?? '';
+      return { text: `Response ${revenue} still stands.`, sources: [] };
+    };
+    const s = setup(reader, undefined, { talks: true, turn });
+    await deal(s.repo);
+    const asked = { id: 'q_3', dealId: 'd1', status: 'answered', text: 'How did revenue move?' };
+    const fell = { ...asked, n: 3, response: 'It fell.' };
+    val(await question(s.repo, 'q_3', fell));
+    const one = val(await s.ai.answer(ask('How did revenue move?')));
+    expect(one.text).toBe('The response to Q3 still stands.');
+    const renumbered = { kind: 'question' as const, id: 'q_3', data: { ...fell, n: 4 }, expectedRev: 1 };
+    val(await s.repo.transaction({ writes: [renumbered] }));
+    const later = { history: said(['How did revenue move?']), thread: one.thread };
+    const two = val(await s.ai.answer(ask('Was the tariff reset?', later)));
+    expect(two.text).toBe('The response to Q4 still stands.');
   });
 
   it('a full conversation is compacted: the conversation so far goes in a transcript file, attached to a new one, and the last transcript is deleted', async () => {

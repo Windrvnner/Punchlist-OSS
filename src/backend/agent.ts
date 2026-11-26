@@ -70,6 +70,7 @@ import { catchUp, pageNumber, search, type What } from './agentSearch';
 import { FolderMemory, FolderReader } from './agentFolder';
 import { KeptConversation, type Turn } from './agentTalk';
 import { inlineTools } from './agentPrompts';
+import { questionsForHandles } from './qaRow';
 
 export type { AgentKit, AgentOptions, AgentQuestion, Cited, Sent, ToolMode } from './agentKit';
 
@@ -294,25 +295,19 @@ class Answering {
   }
 
   /** the main session's answer, with the citations that can be stood behind; on the last turn, its notes if no text */
-  private answered(reply: Record<string, unknown>, last: boolean): Result<Answered> {
+  private async answered(reply: Record<string, unknown>, last: boolean): Promise<Result<Answered>> {
     const { kit, question, run } = this;
-    // the questions it was shown by handle are named by their numbers before the answer is shown or kept (#1105)
-    const text = run.withQuestionNumbers(strings(reply.text).join('\n\n') || (last ? run.notes : ''));
+    // the questions it was shown by handle are named by their numbers now before the answer is shown or kept (#1105)
+    const numbers = await run.questionNumbers();
+    const text = questionsForHandles(strings(reply.text).join('\n\n') || (last ? run.notes : ''), numbers);
     if (!text) return fail({ kind: 'failed', message: UNREAD_REPLY });
     const fitted = kit.fit(text, reply.sources as Cited[], run.opened, question.withDeal);
     this.showCitedPlaces(fitted.sources);
     const read = { docs: run.touched.size, of: question.deals.reduce((sum, d) => sum + kit.records(d).length, 0) };
     const thread = this.conversation.thread();
     const research = { steps: run.steps.map((s) => ({ ...s })), ms: kit.now() - run.progress.t0, read };
-    const offer = reply.offer === undefined ? {} : { offer: this.offerOf(reply.offer) };
+    const offer = reply.offer === undefined ? {} : { offer: offerOf(reply.offer, numbers) };
     return ok({ ...fitted, read, research, ...(thread ? { thread } : {}), ...offer });
-  }
-
-  /** the offer as the model gave it, with a drafted question's handles put back as numbers (#1105) */
-  private offerOf(offer: unknown): unknown {
-    const drafted = (offer as { question?: unknown } | null)?.question;
-    if (typeof drafted !== 'string') return offer;
-    return { ...(offer as object), question: this.run.withQuestionNumbers(drafted) };
   }
 
   /** an attached document's step shows the places the answer cites in it */
@@ -323,6 +318,13 @@ class Answering {
       if (places.length) step.result = [...new Set(places)].join(', ');
     }
   }
+}
+
+/** the offer as the model gave it, with a drafted question's handles put back as `numbers` (#1105) */
+function offerOf(offer: unknown, numbers: readonly (number | undefined)[]): unknown {
+  const drafted = (offer as { question?: unknown } | null)?.question;
+  if (typeof drafted !== 'string') return offer;
+  return { ...(offer as object), question: questionsForHandles(drafted, numbers) };
 }
 
 /** what the person is told when an answer failed */

@@ -279,6 +279,8 @@ export interface AiService {
  * of the search; "p. 41"); `found` are the passages a search
  * returned, each with where it is. `done` is false only for the step being taken now.
  */
+/** a question a kept conversation showed the model, by its handle (R1, …), and the question's record id (#1105) */
+export interface QuestionHandle { handle: string; id: string }
 /**
  * The conversation the model service keeps for a chat (decisions: Long conversations), kept with each answer so
  * that the next question carries it on, on whichever PC asks it. `tags` are the documents the model was shown in it, by
@@ -286,8 +288,6 @@ export interface AiService {
  * that holds the conversation as it was when it was last compacted. `call` is the tool call the answer was given by, when
  * the model called tools natively: the next question answers it first.
  */
-/** a question a kept conversation showed the model, by its handle (R1, …), with its number then (#1105) */
-export interface QuestionHandle { handle: string; id: string; n?: number }
 export interface ModelThread {
   id: string; model: string; tokens: number; tags: { tag: string; dealId: string; docId: string }[];
   transcript?: string; call?: string;

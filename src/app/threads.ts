@@ -63,7 +63,7 @@ const Thread = z.object({
   id: z.string().min(1), model: z.string(), tokens: z.number(),
   tags: z.array(z.object({ tag: z.string(), dealId: z.string(), docId: z.string() })),
   transcript: z.string().optional(), call: z.string().optional(),
-  questions: z.array(z.object({ handle: z.string(), id: z.string(), n: z.number().optional() })).optional(),
+  questions: z.array(z.object({ handle: z.string(), id: z.string() })).optional(),
 });
 /** the action offered under an answer (#1054), as it is kept with the answer */
 const Offer = z.discriminatedUnion('kind', [
