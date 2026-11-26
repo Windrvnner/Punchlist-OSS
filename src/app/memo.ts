@@ -6,7 +6,9 @@
  * is made and written. Nothing is changed by it.
  */
 import type { Store } from './store';
-import { dealFindings, dealQuestions, itemStanding, FIRM, type State } from './state';
+import { dealFindings, dealQuestions, FIRM, type State } from './state';
+import { checklistRows } from './checklistView';
+import type { ChecklistRow } from '../ports';
 import { memoContent, type MemoItem, type Rating } from '../domain/memo';
 import { memoDocument } from '../domain/memoDoc';
 import { safeFileName } from '../domain/importExport';
@@ -15,15 +17,28 @@ import { AI_LABEL, SERVICE, control } from '../control';
 import { ok, fail, type Failure, type Result } from '../domain/result';
 
 const RANK: Record<string, number> = { broad: 0, product: 1, sector: 2, technology: 3, deal: 4 };
-/** The checklist as the memo counts it: each row under the list it comes from (the first of its lists, general first, as the Checklist page groups it), standing as the Overview counts it. */
+/**
+ * The checklist as the memo counts it: each row under the list it comes from (the first of its lists, general first, as
+ * the Checklist page groups it), standing as Overview counts it through the shared `checklistRows`: items added since
+ * the last check are not settled yet, and turned-off items count as off (#1064).
+ */
 export function memoItems(s: State, dealId: string): MemoItem[] | null {
-  const rows = s.checklists[dealId]; if (!Array.isArray(rows) || !rows.length) return null;
-  return rows.map((r) => {
-    const it = s.items[r.id]; const from = it ? [...it.from].sort((a, b) => RANK[a.layer] - RANK[b.layer])[0] : undefined;
-    const list = !from ? 'Other' : from.layer === 'broad' ? 'General' : from.layer === 'deal' ? 'Added on this deal' : from.value;
-    const st = itemStanding(s, dealId, r);
-    return { text: r.text, list, kind: st.kind === 'gone' ? 'finding' : st.kind, ...(r.need ? { need: r.need } : {}) };   // a deleted finding's item still counts as to resolve, as on the Overview
-  });
+  if (!Array.isArray(s.checklists[dealId])) return null;
+  const { active, offRows, kinds } = checklistRows(s, dealId);
+  if (!active.length && !offRows.length) return null;
+  // a deleted finding's item still counts as to resolve, as on the Overview
+  const kindOf = (id: string) => { const kind = kinds.get(id)!; return kind === 'gone' ? 'finding' : kind; };
+  const item = (r: ChecklistRow, kind: MemoItem['kind']): MemoItem =>
+    ({ text: r.text, list: listOf(s, r.id), kind, ...(r.need ? { need: r.need } : {}) });
+  return [...active.map((r) => item(r, kindOf(r.id))), ...offRows.map((r) => item(r, 'off'))];
+}
+
+/** The list an item comes from: the first of its lists, general first, as the Checklist page groups it */
+function listOf(s: State, id: string): string {
+  const it = s.items[id];
+  const from = it ? [...it.from].sort((a, b) => RANK[a.layer] - RANK[b.layer])[0] : undefined;
+  if (!from) return 'Other';
+  return from.layer === 'broad' ? 'General' : from.layer === 'deal' ? 'Added on this deal' : from.value;
 }
 
 const WORD = { label: 'Word document', ext: 'docx' };
