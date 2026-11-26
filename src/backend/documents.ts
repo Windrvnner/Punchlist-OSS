@@ -598,7 +598,17 @@ export function nodeDocuments(o: DocumentsOptions) {
             workMs += Date.now() - t0;
             if (asPages) {
               // said once per place: a copy of a file already known is a second place for the same document, not a new one, and is not said again each run
-              if (!had || had.pages !== pages || had.size !== bytesRead || wordsChanged(had.words, words) || (had.cover === undefined && cover !== undefined) || !seenHereAt(dealId, docId, folder.path, f.rel)) { told.add(folder.path); say(dealId, { docId, hash, name, folder: folder.path, rel: f.rel, size: bytesRead, ...(pages !== undefined ? { pages } : {}), ...(via !== undefined ? { via } : {}), ...(tracked !== undefined ? { tracked } : {}), ...(words !== undefined ? { words } : {}), ...(cover !== undefined ? { cover } : {}) }); }
+              const changed = !had || had.pages !== pages || had.size !== bytesRead || wordsChanged(had.words, words)
+                || (had.cover === undefined && cover !== undefined) || !seenHereAt(dealId, docId, folder.path, f.rel);
+              if (changed) {
+                told.add(folder.path);
+                say(dealId, {
+                  docId, hash, name, folder: folder.path, rel: f.rel, size: bytesRead,
+                  ...(pages !== undefined ? { pages } : {}), ...(via !== undefined ? { via } : {}),
+                  ...(tracked !== undefined ? { tracked } : {}), ...(words !== undefined ? { words } : {}),
+                  ...(cover !== undefined ? { cover } : {}),
+                });
+              }
               indexed++; if (words !== undefined && !words.length) skipped.wordless.push(f.rel);
             }
           }

@@ -76,7 +76,8 @@ const olderLine = (vdr: string, bytes: Uint8Array, rel: string, words: string[],
 /** the shared log of the PC called office, holding only these lines */
 const keepLines = (root: string, lines: object[]) => {
   fs.mkdirSync(path.join(root, 'shared'), { recursive: true });
-  fs.writeFileSync(path.join(root, 'shared', 'docs-office-d1.jsonl'), lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
+  const text = lines.map((l) => `${JSON.stringify(l)}\n`).join('');
+  fs.writeFileSync(path.join(root, 'shared', 'docs-office-d1.jsonl'), text);
 };
 const indexAll = async (x: ReturnType<typeof pc>, vdr: string, deal = 'd1') => { val(await x.docs.index(deal, [folder(vdr)])); await x.docs.settled(deal); return val(await x.docs.poll(deal)); };
 
@@ -95,7 +96,7 @@ describe('documents on real folders', () => {
     // a second run on the same PC reads nothing again: the index already has every document
     const before = a.converted.length; await indexAll(a, vdr); expect(a.converted.length).toBe(before);
   });
-  it('saves the most-used words again when it rebuilds this PC\'s index, so words saved under older rules go (#1147)', async () => {
+  it('saves most-used words again when it rebuilds its index, replacing words from older rules (#1147)', async () => {
     const { root, vdr } = room();
     // this PC recorded the agreement under older rules, with no numbers among its words, and has no index of it now
     const stale = olderLine(vdr, FA, '01 Legal/Credit Agreement.pdf', ['agreement', 'credit'], 3);
@@ -110,7 +111,7 @@ describe('documents on real folders', () => {
     expect(reread.find((r) => r.docId === idOf(FA))?.words).toEqual(['agreement', 'credit', '1', '2', '3']);
     expect(reread.find((r) => r.docId === idOf(BUDGET))?.words).toEqual(['budget', 'revenue']);
   });
-  it('reads again a PDF, a Word file and a spreadsheet indexed under older rules, and saves their words (#1147)', async () => {
+  it('reads again a PDF, a Word file and a sheet indexed under older rules and saves their words (#1147)', async () => {
     const { root, vdr } = room();
     const older: [Uint8Array, string, string[], number?][] = [
       [FA, '01 Legal/Credit Agreement.pdf', ['agreement', 'credit'], 3],
