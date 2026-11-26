@@ -207,6 +207,13 @@ A deal's checklist is made up of its own item records, linked to the findings an
   **Undo**. The fast model phrases a question for each gap or open finding that has no linked question. It works in
   parts sized by `inParts` and asks again, one at a time, about any points that failed. Points still without a question
   are counted and offered with **Retry**.
+  Open questions that may already ask a point are offered under **Already Asked?** (#1218). Code scores each point's
+  best open question as the percent of the point's telling words it names (`askedMatcher`, `src/domain/suggest.ts`),
+  and only a question at or above `limits.askedCutoff` (default 80) is a candidate (`askedCandidates`,
+  `src/app/unresolvedLinks.ts`; a question is a candidate for one point). The optional port `covers` asks the
+  standard model about all the candidates at once, in parts like the other batched calls, naming each pair by a neutral
+  tag; code takes an answer only for an offered tag, once, as true or false (`confirmedLinks`). No candidate means no
+  call. Links a person approved (#88) are kept without asking.
 
 ## Q&A log, imports, and the memo
 

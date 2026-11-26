@@ -165,6 +165,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - In an open checklist import, a review that needs the model waits for a pending review request. The Duplicates line
   and footer show the latest retry failure, and a partial check keeps its pairs and checked removals (#378).
 - **Add All Unresolved to Q&A…** keeps a chosen link with its exact question and point, and writes it only if both are unchanged at commit (#88).
+- **Add All Unresolved to Q&A…** offers an open question under **Already Asked?** for a gap or open finding only when keyword matching finds it: the question names at least the control file's `limits.askedCutoff` percent (default 80) of the point's telling words. Only then is the model asked, once for all such pairs and only about each point's best question, whether it already asks for what the point lacks; a pair it does not confirm, or a service that cannot check, makes no offer and the point is asked as a new question. A person ticks each offer; nothing is linked automatically (#1218).
 - **Add All Unresolved to Q&A…** sizes its calls to the model's limits and retries quietly; whatever still fails is offered for Retry.
 - Names of structures, sectors, and technologies stay at about 24 characters or fewer.
 
