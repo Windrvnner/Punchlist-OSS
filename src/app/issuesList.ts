@@ -84,7 +84,8 @@ export function keptIssuesPaste(key: string): string {
 
 /**
  * Keeps the paste box as typed, so closing or a reload loses none of it (#1021). Nothing is written for an empty box
- * unless one was kept; opened past a kept import it could not show (`fresh`), that one is left until something is typed.
+ * unless one was kept; opened past a kept import it could not show (`fresh`), that one is left until something is
+ * typed.
  */
 export function keepIssuesPaste(key: string, paste: string, fresh: boolean) {
   if (paste.trim() || (!fresh && keptIssuesPaste(key))) keepImport(key, { paste });
