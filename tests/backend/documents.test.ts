@@ -13,8 +13,8 @@ import {
 import type { Folder } from '../../src/backend/logRepository';
 import { nodeFolder } from '../../src/backend/nodeFolder';
 import { pdfText } from '../fixtures/pdfText';
-import { wordIndex } from '../../src/backend/wordIndex';
-import { tokens, fold } from '../../src/backend/words';
+import { countWords, wordIndex } from '../../src/backend/wordIndex';
+import { tokens, fold, topWords } from '../../src/backend/words';
 import { StoreKeeper, fromStoreName } from '../../src/backend/storeKeeper';
 import { StandInService } from '../../src/backend/service';
 import { nodeAi } from '../../src/backend/ai';
@@ -228,13 +228,61 @@ describe('documents on real folders', () => {
     const end = val(await pc(root, 'A').docs.poll('d1')); expect(end.done).toBe(true); expect(end.stopped).toBeUndefined(); expect(end.folders).toMatchObject([{ path: vdr, files: 2, indexed: 2 }]);
   });
 
+  it('spreadsheets are read after every other file, smallest first, so a large one holds up none (#427)', async () => {
+    const root = tmp(); const vdr = path.join(root, 'vdr');
+    put(vdr, 'A large.csv', 'ledger,entry\n'.repeat(1000));
+    put(vdr, 'B small.csv', 'ledger,entry\n');
+    put(vdr, 'C Agreement.pdf', FA);
+    const a = pc(root, 'office'); expect((await indexAll(a, vdr)).log).toEqual(['Indexed 3 files']);
+    const order = a.docs.records('d1').map((r) => r.name);
+    expect(order.indexOf('C Agreement.pdf')).toBeLessThan(order.indexOf('B small.csv'));
+    expect(order.indexOf('B small.csv')).toBeLessThan(order.indexOf('A large.csv'));
+  });
+
+  it('a spreadsheet of 250,000 different words is counted as the same text read whole (#427)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    // each row a word of its own (four letters after a "z", so no two rows share one) and a note every row shares
+    const letters = (i: number) => [3, 2, 1, 0].map((p) => String.fromCharCode(97 + (Math.floor(i / 26 ** p) % 26)));
+    const rows = Array.from({ length: 250_000 }, (_, i) => [`z${letters(i).join('')}`, `ledger entry ${i}`]);
+    put(vdr, 'Names.csv', rows.map((row) => row.join(',')).join('\n'));
+    const a = pc(root, 'office', undefined, { index: true });
+    await indexAll(a, vdr);
+    const text = rows.flat().join('\n');
+    const expected = countWords(text);
+    expect(expected.counts.size).toBeGreaterThan(200_000);
+    const record = a.docs.records('d1').find((r) => r.name === 'Names.csv')!;
+    expect(record.words).toEqual(topWords(text));
+    const lines = fs.readFileSync(path.join(root, 'local-office', 'words2-d1.jsonl'), 'utf8').trim().split('\n');
+    const line = lines.map((l) => JSON.parse(l)).find((l) => l.d === record.docId);
+    expect(line.n).toBe(expected.length);
+    expect(line.t).toBe(expected.title.join(' '));
+    expect(line.w).toBe([...expected.counts].map(([w, n]) => `${w}:${n}`).join(' '));
+  }, 60000);
+
   it('a scan has no words and is indexed all the same; a long document is counted from pages spread through it; a record from before words were kept gets them', async () => {
     const root = tmp(); const vdr = path.join(root, 'vdr'); const blank = new TextEncoder().encode(new TextDecoder().decode(pdf('', 2)).replace(/\(, page \d\) Tj/g, (m) => ' '.repeat(m.length)));
     put(vdr, 'Scan.pdf', blank); put(vdr, 'Credit Agreement.pdf', FA); put(vdr, 'Rates.csv', 'Tenor,Margin\nSenior term loan,2.25\nSenior term loan,2.50\nJunior loan,6\n');
     const a = pc(root, 'office'); const p = await indexAll(a, vdr); const by = (n: string) => a.docs.records('d1').find((r) => r.name === n)!;
-    expect(p.log).toEqual(['Indexed 3 files', '1 file has no readable text and can be found by name only: Scan.pdf']); expect(by('Scan.pdf')).toMatchObject({ pages: 2, words: [] });   // and the person is told which expect(by('Rates.csv').words).toEqual(['loan', 'senior', 'term', 'junior', 'margin', 'tenor']);
-    // a spreadsheet too large to open quickly is indexed and found by its path, with no words
-    put(vdr, 'Huge export.csv', 'ledger,entry\n'.repeat(2_100_000)); await indexAll(a, vdr); expect(by('Huge export.csv')).toMatchObject({ size: 27_300_000, words: [] });
+    // and the person is told which
+    expect(p.log).toEqual(['Indexed 3 files', '1 file has no readable text and can be found by name only: Scan.pdf']);
+    expect(by('Scan.pdf')).toMatchObject({ pages: 2, words: [] });
+    expect(by('Rates.csv').words).toEqual(['loan', 'senior', 'term', 'junior', 'margin', 'tenor']);
+    // a large spreadsheet is read like any other: its words are counted, however big it is
+    put(vdr, 'Huge export.csv', 'ledger,entry\n'.repeat(2_100_000));
+    await indexAll(a, vdr);
+    expect(by('Huge export.csv')).toMatchObject({ size: 27_300_000, words: ['entry', 'ledger'] });
+    // a workbook that cannot be read now is not recorded as having no text: it is left unread, to be read again
+    put(vdr, 'Broken.xlsx', 'not a workbook');
+    const q = await indexAll(a, vdr);
+    expect(by('Broken.xlsx')?.words).toBeUndefined();
+    expect(q.log.join(' ')).toContain('could not be read');
+    // and it is named again on every run, not only the first
+    expect((await indexAll(a, vdr)).log.join(' ')).toContain('could not be read');
+    // and read again once the file changes, its words then recorded
+    put(vdr, 'Broken.xlsx', MODEL);
+    await indexAll(a, vdr);
+    expect(by('Broken.xlsx').words).toEqual(['line', 'cover', 'debt']);
     const long = await pdfLook(pdf('long report', 100), 10); expect(long.pages).toBe(100); expect(long.text.split('\n').map((l) => +l.split('page ')[1])).toEqual([1, 11, 21, 31, 41, 51, 61, 71, 81, 91]);
     expect((await pdfLook(pdf('short report', 4), 10)).text.split('\n').length).toBe(4);
     // a document another copy of the app recorded before words were kept: indexing here adds them, once
@@ -242,7 +290,7 @@ describe('documents on real folders', () => {
     fs.appendFileSync(file, JSON.stringify({ v: 1, pc: 'older', at: '2026-11-01T00:00:00.000Z', docId: idOf(OLD), hash: hashBytes(OLD), name: 'Grid.pdf', folder: vdr, rel: 'Grid.pdf', size: OLD.length, pages: 2 }) + '\n');
     expect(by('Grid.pdf').words).toBeUndefined(); await indexAll(a, vdr); expect(by('Grid.pdf')).toMatchObject({ pages: 2, words: ['agreement', 'interconnection'] });
     const mine = () => fs.readFileSync(path.join(root, 'shared', 'docs-office-d1.jsonl'), 'utf8').trim().split('\n').length; const n = mine(); await indexAll(a, vdr); expect(mine()).toBe(n);
-  });
+  }, 60000);   // the large spreadsheet above is read in full
 
   it('a file that cannot be turned into pages is reported and is not indexed; the rest are', async () => {
     const { root, vdr } = room(); put(vdr, '01 Legal/Locked.docx', 'protected'); put(vdr, '01 Legal/Broken.pdf', 'not a pdf at all');
@@ -251,8 +299,18 @@ describe('documents on real folders', () => {
     expect(p.folders).toMatchObject([{ files: 7, indexed: 7, reviewed: 0 }]);                                                  // every file was dealt with, so there is nothing to resume
     expect(a.docs.records('d1').map((r) => r.name)).not.toContain('Locked.docx'); expect(a.docs.records('d1').length).toBe(5); expect(a.work()).toEqual([]);
     // with no converter on this PC, a Word file is one of those; PDFs and spreadsheets are not
-    const b = pc(tmp(), 'bare', new StandInService(), { convert: null, folders: [vdr] }); const q = await indexAll(b, vdr);
-    expect(q.log[1]).toBe('2 files could not be turned into pages and were not indexed: 01 Legal/Broken.pdf, 01 Legal/Locked.docx'); expect(b.docs.records('d1').map((r) => r.name).sort()).toEqual(['Credit Agreement.pdf', 'Energy Yield Report.pdf', 'Model v12.xlsx', 'Notes.docx', 'Shareholders Agreement.pdf']);   // a Word file is indexed from its text with no converter; only showing it needs one
+    const b = pc(tmp(), 'bare', new StandInService(), { convert: null, folders: [vdr] });
+    const q = await indexAll(b, vdr);
+    const notPaged = '2 files could not be turned into pages and were not indexed: ';
+    const lost = '01 Legal/Broken.pdf, 01 Legal/Locked.docx';
+    expect(q.log).toContain(notPaged + lost);
+    expect(q.log).toContain('1 file could not be read: 03 Financial/Model v12.xlsx');
+    // no converter, so the workbook's words cannot be read: it is listed by name and read again later;
+    // a Word file is indexed from its text with no converter, and only showing it needs one
+    const names = [
+      'Credit Agreement.pdf', 'Energy Yield Report.pdf', 'Model v12.xlsx', 'Notes.docx', 'Shareholders Agreement.pdf',
+    ];
+    expect(b.docs.records('d1').map((r) => r.name).sort()).toEqual(names);
   });
 
   it.skipIf(!hasOffice)(
@@ -266,6 +324,20 @@ describe('documents on real folders', () => {
     expect(a.docs.records('d1')[0]).toMatchObject({ name: 'Notes.docx', pages: 3, via: 'libreoffice' });                                    // converted when first opened, and its pages counted then
     const shown = a.docs.fileFor((page as { url: string }).url.replace('punchlist-doc://', ''))!; expect(await pdfPages(fs.readFileSync(shown))).toBe(3);
   }, 60000);
+
+  it.skipIf(!hasOffice)(
+    'a damaged workbook read through LibreOffice gets no word list and is named as not read (#427)',
+    async () => {
+      const root = tmp();
+      const vdr = path.join(root, 'vdr');
+      put(vdr, 'Broken.xlsx', 'PK\u0003\u0004 a workbook cut short');
+      const a = pc(root, 'office', new StandInService(), { convert: libreOfficeConverter({ soffice }) });
+      const p = await indexAll(a, vdr);
+      expect(p.log).toContain('1 file could not be read: Broken.xlsx');
+      expect(a.docs.records('d1').find((r) => r.name === 'Broken.xlsx')?.words).toBeUndefined();
+    },
+    60000,
+  );
 
   // A Word file with every kind of tracked change: a word replaced, a paragraph break deleted, text moved, a table row deleted and
   // one inserted, a whole paragraph deleted, formatting changed, a change in the footer, and a comment.
@@ -735,6 +807,30 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     expect(sheetPart(MODEL_SHEETS, 'p. 3').rows[0].cells).toEqual(['Cover']);
     const { root, vdr } = room(); const a = pc(root, 'office'); await indexAll(a, vdr);
     expect(val(await a.docs.page('d1', { doc: 'Model v12.xlsx', docId: idOf(MODEL) }, 'Debt!B20'))).toEqual(v);
+  });
+
+  it('an attached spreadsheet that cannot be read is named, and read again on the next run (#427)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Credit Agreement.pdf', FA);
+    // a converter that cannot read any spreadsheet until `down` is set back
+    let down = true;
+    const flaky = () => {
+      const { convert } = standInConverter();
+      const read = convert.sheets!;
+      const sheets = (file: string) => (down ? Promise.reject(new Error('down')) : read(file));
+      return Object.assign(convert, { sheets });
+    };
+    const a = pc(root, 'office', undefined, { convert: flaky() });
+    const r = val(await a.docs.attach('d1', { name: 'Budget.xlsx', bytes: MODEL }));
+    const budget = (x: ReturnType<typeof pc>) => x.docs.records('d1').find((d) => d.docId === r.docId)!;
+    expect(budget(a).words).toBeUndefined();
+    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Budget.xlsx');
+    // named while it fails, and read again on the next run, without a restart
+    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Budget.xlsx');
+    down = false;
+    expect((await indexAll(a, vdr)).log.join(' ')).not.toContain('could not be read');
+    expect(budget(a).words).toEqual(['line', 'cover', 'debt']);
   });
 
   it('a file attached in the app is kept in the shared folder under this copy’s own name, loaded into the store, and opens on another PC', async () => {

@@ -3,6 +3,7 @@
  * (.xlsx, .xlsm, .xls, .xlsb, .ods) into one CSV per sheet, values as the file shows them; a .csv is read as it is.
  * Everything here is pure: which sheet and heading row an import uses, and the workbook an export is written as.
  */
+import { CsvCells } from './csvCells';
 import { findHeaderRow, suggestMapping } from './importExport';
 import type { SheetPreview } from '../ports';
 import { fail, ok } from './result';
@@ -31,21 +32,18 @@ export function cellsAsShown(plain: Sheet[], shown: Sheet[]): Sheet[] {
 /** CSV as written by Excel and LibreOffice: commas, fields in double quotes when they hold a comma, quote or line break, "" for a quote. */
 export function parseCsv(text: string, bare?: (field: string) => string): string[][] {
   // `bare` rewrites a field written without quotes; LibreOffice quotes every text cell, so a bare field is a number or a date
-  const rows: string[][] = []; let row: string[] = []; let field = ''; let quoted = false; let wasQuoted = false;
-  const end = () => { row.push(bare && !wasQuoted ? bare(field) : field); field = ''; wasQuoted = false; };
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (quoted) {
-      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
-      else if (c === '"') quoted = false;
-      else field += c;
-    } else if (c === '"') { quoted = true; wasQuoted = true; }
-    else if (c === ',') end();
-    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; end(); rows.push(row); row = []; }
-    else field += c;
-  }
-  if (field || row.length) { end(); rows.push(row); }
-  return rows.map((r) => r.map((x) => x.replace(/\r\n?/g, '\n')));
+  const rows: string[][] = [];
+  let row: string[] = [];
+  const cells = new CsvCells(
+    (cell, quoted) => row.push(bare && !quoted ? bare(cell) : cell),
+    () => {
+      rows.push(row);
+      row = [];
+    },
+  );
+  cells.push(text);
+  cells.end();
+  return rows;
 }
 
 /** a sheet's used rows, and the sheet row number of the first of them (rows above are blank) */

@@ -12,7 +12,16 @@ export function wordsIn(text: string): string[] {
 }
 /** the `n` most used of them, most used first; words used equally often in the order of the alphabet, so the list never depends on chance */
 export function topWords(text: string, n = 30): string[] {
-  const count = new Map<string, number>(); for (const w of wordsIn(text)) count.set(w, (count.get(w) ?? 0) + 1);
+  const count = new Map<string, number>();
+  countInto(count, text);
+  return mostUsed(count, n);
+}
+/** add the words of some text to a running count: a text counted a piece at a time gives the list of the whole */
+export function countInto(count: Map<string, number>, text: string): void {
+  for (const w of wordsIn(text)) count.set(w, (count.get(w) ?? 0) + 1);
+}
+/** the `n` most used words of a count, most used first, equally used ones in the order of the alphabet */
+export function mostUsed(count: Map<string, number>, n = 30): string[] {
   return [...count].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, n).map(([w]) => w);
 }
 
