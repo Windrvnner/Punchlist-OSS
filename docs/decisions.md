@@ -99,7 +99,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A responder column is read as the response's author.
 - On import, real date cells are read as dates and plain numbers are not. An ambiguous date is settled by the row's other date, its neighbors, and the rule that no date is in the future; otherwise it is left blank and listed.
 - Marking imported questions that have a response as Answered is optional and off by default.
-- Merge looks each row up like an XLOOKUP: the question with the same number, exact text and sender (Submitted by), else the one with the exact text and sender; a row or question naming no sender matches any sender, the same sender first; a row that matches neither is a new question. Nothing is matched by similar words, but the preview suggests, for such a row, a question with the same words apart from capitals, spacing and punctuation; it is used only once the person accepts it. A row that matches a deleted question brings it back. "Will overwrite" is shown field by field first.
+- Merge, its preview, and Update Q&A Log find each row's question with one lookup, like an XLOOKUP: the question with the same number, exact text and sender (Submitted by), else the one with the exact text and sender; a row or question naming no sender matches any sender, the same sender first; a row that matches neither is a new question. Text is compared as the file holds it (below). Update Q&A Log also finds a question's row by the sender it last wrote there. The preview's counts come only from the import's own plan (#1080). Nothing is matched by similar words, but the preview suggests, for such a row, a question with the same words apart from capitals, spacing and punctuation; it is used only once the person accepts it. A row that matches a deleted question brings it back. "Will overwrite" is shown field by field first.
 - The same list imported on two PCs makes one set of questions, with ids derived from the deal, number, party, and wording.
 - Two questions with the same number are both kept and marked; a person renumbers one. Undo, Restore, and a kept
   version's Restore bring a deleted question back under its own number, even when another question holds it (#13, #116).
@@ -110,7 +110,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - An import can make a spreadsheet the deal's log ("Make this the deal's Q&A log", checked for a file with two or more parties). If there is no log, the first update creates one in the app's layout, in a folder a person picks. A later party's file only adds and updates questions and is never written to.
 - Updates add no columns and never write to a formula cell. To reply to one party, use Export filtered by Submitted By.
 - **Update Q&A Log** brings every column up to date and first saves the old version to the folder's archive; it never deletes anything else. A log open elsewhere is retried every 30 seconds for 20 minutes; the notice names who has it open only when the lock file does.
-- An edit made in the log wins over the app's value, exactly as written: a cell is compared character for character, so a "?" stays a "?". Only the file's own storage (line breaks kept as one "\n", control characters stored as a space) is allowed for. Matching a row to a question only picks the row and never changes text. Where both changed, the question is in two versions.
+- An edit made in the log wins over the app's value, exactly as written: a cell is compared character for character, so a "?" stays a "?". Only the file's own storage (line breaks kept as one "\n", control characters stored as a space or left out) is allowed for. Matching a row to a question only picks the row and never changes text. Where both changed, the question is in two versions.
 - An edit saved to the log just before an update moved the log is merged in. Where its row is unclear, the person places it, and what can't be merged stays in the archive. "Not fully merged" comes first in the notice, which stays until dismissed.
 
 ## Findings
@@ -185,6 +185,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Chat is an agent with search, read, folder, and brief tools. The brief tool catches up on a deal with the deal brief, two AI paragraphs on its open findings (#1017). A folder read always covers the whole folder; reading more than `limits.folderDocs` documents asks first, and **Stop** answers from what was found.
 - While chat works, it shows "Researching" with the full trace; once it has answered, it shows "Researched · N steps · N of M documents searched · time", never "read" (option D).
 - Tool calls run inline by default; the hybrid and native modes are set by `models.toolCalls`.
+- The chat's search gives its results a page at a time, ranked by one keyword scoring (BM25): documents `limits.docsPerCall` a page from the ranking, findings and Q&A `limits.searchPage` a page, or fewer when that many would hold more than half of what the kept conversation holds before it is compacted, each record whole and each Q&A row in full. The model asks for any page (#1102, #1091).
 - A question asked across deals reaches only the person's own deals.
 - A chat is one conversation on the model service; past its limit, it is compacted into an uploaded transcript.
 - Each PC keeps its own word index of the data room; nothing is added to the shared folder.
@@ -196,6 +197,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 ## Deal memo
 
 - The deal memo is a templated memo of Findings, Checklist, and Q&A: a one-page summary, the memo itself from page two, and an appendix.
+- The memo's first-page checklist counts match Overview's, with turned-off items as "N turned off" (#1064).
 - Risk at a glance ranks workstreams by weighted risk (High 9, Medium 3, Low 1), in at most 12 rows.
 - Key risks lists every High risk, then the oldest Medium risks up to `memo.keyRisks`, A to Z within each severity.
 - The memo keeps usable risk groups when other entries in the model's reply are malformed.
@@ -253,6 +255,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - The connection status card shows only when something is wrong. The avatar's dot is the accent color or red, and OneDrive being unavailable for 15 minutes produces one notice.
 - A copied install is detected and stops writing. A build never changes a record written by a newer version.
 - A damaged undo journal (each PC's record of its actions, used for Undo and to recover interrupted work) is set aside, and its complete entries are still offered.
+- **Discard** on an interrupted action asks first in the confirm dialog, naming the action (#1055).
 - A deal's analysis is split between the PCs that have the deal open, in rounds (a round is one shared run of checks on the deal, split into pieces of work) that any PC can take over. A requested check that an abandoned round doesn't cover writes that round off.
 - Two rounds of one kind open at once become the one with the lower id. A batch still running in the other counts
   for the kept round, unless a later check has begun (#795).
@@ -278,6 +281,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Retryable model failures and empty replies are retried quietly, up to twice by default after 2 and 4 seconds.
   An unreachable service follows its own recovery path. Keep everything the person typed.
 - Every AI feature adapts to a reply that is cut off or a request that is too long, at limits the control file sets (#451 and #452 are still to do).
+- A model reply may hold up to 32,000 tokens (`limits.outputTokens`): a temporary hold until real reply sizes are
+  measured (#1079).
 - For deal document analysis, send PDFs whole so the model can read the pages directly. Use extracted
   word counts to rank and select documents. Checklist import currently reads the PDF's text. Sending the original
   PDF for checklist import is planned (#118). If a service refuses a PDF as too large, the planned fallback is
@@ -317,6 +322,13 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Say how an ambiguous instruction is being read. Ask about a product decision before it is built.
 - Each thing lives in one place: decisions here; bugs and Build list items (with their designs) as GitHub issues; review notes on pull requests; how the app works in the docs; the detailed contract in code comments and tests; and history in git. There are no Markdown review files or running logs.
 - The README covers what the app is and does, screenshots of the real app, and how to install and use it; developer setup is in docs/development.md.
+- A UI module names what it loads with a plain string and reads `import.meta` only as `import.meta.env`; the UI
+  dependency check refuses any other import path, even one naming a UI module (#848).
+- A field's input-method composition (active, held after a blur mid-candidate, and the wait after compositionend for a
+  blur that Chromium fires after it) is screen state in `src/ui`, like focus; when a typed field saves is decided in
+  `src/app` (#953, #997).
+- A held field that receives composing input without a compositionstart stays held: its text shows Not saved until
+  typing that is not composing in the focused field, Retry, or Take Theirs (#997).
 
 ## Deal screen
 
@@ -381,3 +393,7 @@ These decisions are built and wait to be confirmed:
 - The recovered copy of a deal deleted elsewhere is built, including who sees it, what it holds, and its notice's wording (#220).
 - Periodic records whose names differ only by a period are a series and take one place in the core set, their newest member's; every document stays searchable (docs/core-families-design.md).
 - An issues list or an advisor report is read like the app's other documents: the model reads the whole file once and returns each issues-list point in the list's own words, never reworded, and each advisor-report issue with its place in the file. There is no paging and no stop rule (#1026).
+- A document's word index and a search no longer drop a word or number for its length, and a Word file is indexed from
+  its body and all its header, footer, footnote and endnote parts (#1025).
+- A plain-text list (.txt, .text, .md) is read as a CSV file is: UTF-8, UTF-16 or Windows-1252, with or without a
+  byte-order mark (#382).

@@ -192,3 +192,19 @@ describe('a row that matches nothing exactly', () => {
     expect(preview.ok && preview.value.suggestions).toEqual([]);
   });
 });
+
+describe('a merge keeps the sender, responder and workstream cells as the file gives them', () => {
+  const csv = 'No.,Question,Response,Submitted by,Responded by,Workstream\n'
+    + '1,Who is the lender?, Yes ," Legal Counsel ","  Seller ", Tax diligence \n';
+  it('stores each name and the workstream with its spaces, and a second import matches the question', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    expect((await importCsv(store, dealId, csv)).ok).toBe(true);
+    const [first] = dealQuestions(store.get(), dealId);
+    expect(first).toMatchObject({
+      askedBy: ' Legal Counsel ', respondedBy: '  Seller ', workstream: ' Tax diligence ',
+    });
+    expect((await importCsv(store, dealId, csv)).ok).toBe(true);
+    const after = dealQuestions(store.get(), dealId);
+    expect(after.map((q) => q.id)).toEqual([first!.id]);
+  });
+});

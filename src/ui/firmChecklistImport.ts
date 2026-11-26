@@ -18,7 +18,8 @@ import type { ListReading } from '../domain/listRead';
 import type { ChecklistMapping } from '../domain/checklistImport';
 import type { ListItem } from '../domain/checklist';
 import { NOT_DONE, broughtInSays, toggled } from './firmChecklistReview';
-import type { ChecklistChoices, ChecklistKept, Keeper } from './firmChecklistKept';
+import type { Keeper } from './firmChecklistKept';
+import type { ChecklistChoices, ChecklistKept } from '../app/checklistKept';
 
 export type Busy = '' | 'reading' | 'asking' | 'reviewing' | 'importing';
 

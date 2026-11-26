@@ -6,10 +6,12 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { pdfLines, type Converter } from './convert';
 import type { SpreadsheetCodec } from '../ports';
 import { ok, fail } from '../domain/result';
-import { cellsAsShown, exportDocument, tableFrom } from '../domain/sheets';
-import { isWorkbook, readCsv, decodeText, encodeLike } from '../adapters/spreadsheet';
+import {
+  cellsAsShown, encodeLike, exportDocument, isWorkbook, readCsv, tableFrom,
+} from '../domain/sheets';
 import type { SheetEdit } from '../domain/sheets';
 import { editCsv } from '../domain/csvEdit';
+import { decodeText } from '../domain/textEncoding';
 import { editXlsx } from './xlsxEdit';
 
 export function libreOfficeSheets(convert: Converter): SpreadsheetCodec {

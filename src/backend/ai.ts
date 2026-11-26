@@ -73,6 +73,8 @@ import {
 import { docFamilies } from './related';
 import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
+import { responseHeader } from './qaRow';
+import type { DealDoc, Looked } from './agentKit';
 import {
   RATINGS, riskGroups, keyRisksOf, unratedFindings, type Grouped, type Rating, type RiskGroup,
 } from '../domain/memo';
@@ -152,6 +154,8 @@ export interface AiOptions {
   checkSearchCalls?: number;
   /** a folder of more documents than this is read by the chat agent only once the person agrees (default: control.limits.folderDocs) */
   folderDocs?: number;
+  /** findings or questions one search of them gives the chat agent a page (default: control.limits.searchPage) */
+  searchPage?: number;
   /** how blacklines are read (default: control.blackline.pipeline): A, the model cannot see strike-through and colors; B, it can */
   blackline?: 'A' | 'B';
   /** about how many turns the chat agent takes before it answers with what it has (default: control.limits.chatTurns) */
@@ -515,18 +519,23 @@ export function nodeAi(o: AiOptions) {
   let offered: Awaited<ReturnType<ModelService['models']>> | null = null;
   const models = async () => (offered ??= await o.service.models());
   // ── the words a search compares ─────────────────────────────────────────────────────────────────────────────────────
-  const kept = (t: string) => tokens(t).filter((w) => w.length >= 2 && !STOP.has(w)).map(fold);
+  const kept = (t: string) => tokens(t).filter((w) => !STOP.has(w)).map(fold);
   /** a short name as a search compares it: "O&M" and "PPAs" as "om" and "ppa" */
   const shortKey = (k: string) => fold(tokens(k).join(''));
   /** each deal's short names, as the fast model saw them in its file paths (see `coreOf`), read from its latest core line by `lines` */
   const shorts = new Map<string, { from: unknown; map: Map<string, string[]> }>();
   /**
-   * The words of a text as they are compared: split wherever a name is split, plurals folded, common words and single
-   * letters left out, and, with `dealId`, every short name the deal's files use given its long form as well.
+   * The words of a text as they are compared: split wherever a name is split, plurals folded, common words left
+   * out, and, with `dealId`, every short name the deal's files use given its long form as well.
    */
   const words = (t: string, dealId?: string): Set<string> => {
-    const long = dealId ? shorts.get(dealId)?.map : undefined; const out = new Set<string>();
-    for (const w of tokens(t)) { if (w.length < 2 || STOP.has(w)) continue; out.add(fold(w)); for (const x of long?.get(fold(w)) ?? []) out.add(x); }
+    const long = dealId ? shorts.get(dealId)?.map : undefined;
+    const out = new Set<string>();
+    for (const w of tokens(t)) {
+      if (STOP.has(w)) continue;
+      out.add(fold(w));
+      for (const x of long?.get(fold(w)) ?? []) out.add(x);
+    }
     return out;
   };
 
@@ -565,7 +574,7 @@ export function nodeAi(o: AiOptions) {
     return retried(async () => {
       if (b && (b.left-- <= 0 || (b.deal && b.deal.left-- <= 0))) throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
       let reply = ''; try { reply = await o.service.complete(input); return reply; } finally { count(kind, input, String(reply ?? '')); }
-    }, (r) => !String(r ?? '').trim(), input.model);
+    }, (r) => !String(r ?? '').trim());
   };
   /**
    * Ask, and read the reply. A reply that cannot be read even loosely is sent back once to the model that wrote it, with
@@ -625,16 +634,20 @@ export function nodeAi(o: AiOptions) {
     ].join('\n');
     const ask: Ask = { kind: 'issuesList', split: true, model, system: JSON_ONLY, files: [fileId], prompt };
     try {
-      const reply = await tried(() => askJson<{ points?: unknown }>(ask, ['points']));
-      if (!reply || !Array.isArray(reply.points)) {
-        return fail({ kind: 'failed', message: 'It could not be read as an issues list' });
-      }
-      const given = reply.points as { n?: unknown; text?: unknown }[];
-      // the point's words are the reply's as given, inner spacing and line breaks included: only its edges are
-      // trimmed, as the import command trims them too (#1026)
-      const texts = given.map((p) => ({ n: clean(p?.n), text: typeof p?.text === 'string' ? p.text.trim() : '' }));
-      return ok(texts.filter((p) => p.text));
-    } catch (e) { return failure(e, 'The file could not be read'); }
+      // a reply that is not an object with its points is asked for again (`tried`), as every other read is
+      const reply = await tried(async () => {
+        const got = await askJson<{ points?: unknown }>(ask, ['points']);
+        if (!got || !Array.isArray(got.points)) throw Object.assign(new Error(UNREAD_REPLY), { code: 'unread' });
+        return got.points as { n?: unknown; text?: unknown }[];
+      });
+      // the list's own words, number and point alike, are the reply's as given, inner spacing and line breaks
+      // included: only their edges are trimmed, as the import command trims them too (#1026)
+      const edges = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+      return ok(reply.map((p) => ({ n: edges(p?.n), text: edges(p?.text) })).filter((p) => p.text));
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'unread') return fail({ kind: 'failed', message: UNREAD_REPLY });
+      return failure(e, 'The file could not be read');
+    }
   }
   async function askJson<T = Record<string, unknown>>(input: Ask, keys: string[], shape?: string, fix = true): Promise<T | null> {
     const raw = await whole(input, keys); const got = json<T>(raw, ...keys); if (got || !fix || !String(raw ?? '').trim()) return got;
@@ -683,7 +696,8 @@ export function nodeAi(o: AiOptions) {
       if (b && (b.left-- <= 0 || (b.deal && b.deal.left-- <= 0))) throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
       let reply = ''; try { const r = await o.service.converse!(input); reply = r.text || JSON.stringify(r.calls ?? ''); return r; } finally { count(kind, input, String(reply ?? '')); }
     };
-    return input.results?.length || input.conversation ? once() : retried(once, (r) => !String(r.text ?? '').trim() && !r.calls?.length, input.model, tried);
+    if (input.results?.length || input.conversation) return once();
+    return retried(once, (r) => !String(r.text ?? '').trim() && !r.calls?.length, tried);
   };
   /** models that refused a way of calling tools in this run of the app, and the way they stepped down to */
   const stepped = new Map<string, ToolMode>();
@@ -943,11 +957,29 @@ export function nodeAi(o: AiOptions) {
   const mainIn = (sent: Sent[], x: Source) => { const sec = new Map<string, Set<string>>(); const of = (d: string) => sec.get(d) ?? (sec.set(d, kindsOf(d).secondary), sec.get(d)!); return sent.some((s) => s.rec.docId === x.docId && (!x.dealId || x.dealId === s.dealId) && !of(s.dealId).has(x.docId)); };
   /** whether a source is never a main one: another project's document, or a blackline not shown to be against this deal's own draft */
   const secondary = (dealId: string, docId: string) => kindsOf(dealId).secondary.has(docId);
+  /**
+   * each blackline of a deal, by id, with its clean draft's record, worked out once for a whole list: pairing each of
+   * many documents on its own would look the deal's blacklines up again for every one of them
+   */
+  function cleanDraftsOf(dealId: string): Map<string, DocRecord> {
+    const all = new Map(o.docs.records(dealId).map((r) => [r.docId, r]));
+    const out = new Map<string, DocRecord>();
+    for (const [id, c] of cleanOf(dealId)) {
+      const clean = c ? all.get(c) : undefined;
+      if (clean) out.set(id, clean);
+    }
+    return out;
+  }
   /** these documents, each blackline's clean draft put just before it when it is not there already */
   function withClean(dealId: string, recs: DocRecord[]): DocRecord[] {
-    const pairs = cleanOf(dealId); if (!pairs.size) return recs;
-    const all = new Map(o.docs.records(dealId).map((r) => [r.docId, r])); const out: DocRecord[] = [];
-    for (const r of recs) { const c = pairs.get(r.docId); const clean = c ? all.get(c) : undefined; if (clean && !recs.includes(clean) && !out.includes(clean)) out.push(clean); out.push(r); }
+    const cleans = cleanDraftsOf(dealId);
+    if (!cleans.size) return recs;
+    const out: DocRecord[] = [];
+    for (const r of recs) {
+      const clean = cleans.get(r.docId);
+      if (clean && !recs.includes(clean) && !out.includes(clean)) out.push(clean);
+      out.push(r);
+    }
     return out;
   }
   /** `hits`: only the documents that answer to the words at all, so a search sorts its hits, not the whole data room */
@@ -985,6 +1017,22 @@ export function nodeAi(o: AiOptions) {
     catch (e) { if (unreachable(e)) throw e; return null; }
     if (!reply || !('read' in reply)) return null;
     return listOf(reply.read).map(int).filter((n): n is number => n !== null && n >= 1 && n <= list.length).map((n) => list[n - 1]).filter((r, i, all) => all.indexOf(r) === i).slice(0, room);
+  }
+  /**
+   * The chat's document search as fixed pages (#1102): the keyword ranking as `top` gives it with no room set, only the
+   * documents that answer to a word of the query, best first, across deals in turn as `folderList` takes them. A page
+   * of it is cut as a folder read's batches are (agentFolder.ts `batchesOf`).
+   */
+  async function searchRanking(deals: string[], query: string): Promise<DealDoc[]> {
+    const per = await Promise.all(deals.map(async (dealId) =>
+      top(dealId, query, new Set(), Infinity, await coreOf(dealId), false).map((rec) => ({ dealId, rec }))));
+    return interleave(per);
+  }
+  /** one page of the chat's document search, read by the helper under a search's budget of calls (`spend`) */
+  function readSearchPage(spend: { left: number; deal?: { left: number } }, deals: string[], model: string, ask: string,
+    docs: DealDoc[]): Promise<Looked> {
+    const shape = '{"text": "what they say, with [n] markers", "sources": [...]}';
+    return budget.run(spend, () => read('search', deals, model, ask, '', {}, shape, undefined, docs));
   }
   /**
    * The documents in a folder a person named, in the order to read them for something, across the deals asked
@@ -1058,8 +1106,17 @@ export function nodeAi(o: AiOptions) {
   type Trail = { q: string; n: number }[];
   const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
   /** words a model gives in place of a search when it has none ("None", "not applicable", "TBD"); a search of only these, or of nothing the index keeps, is no search */
-  // folded as the index folds words (`kept`), so each entry matches the form a reply's words take
-  const NO_SEARCH = new Set(['additional', 'applicable', 'applies', 'apply', 'available', 'cannot', 'cant', 'empty', 'extra', 'find', 'found', 'further', 'given', 'idea', 'keyword', 'keywords', 'missing', 'more', 'na', 'nan', 'necessary', 'need', 'needed', 'needs', 'neither', 'never', 'nil', 'no', 'non', 'none', 'nor', 'not', 'nothing', 'null', 'other', 'others', 'pass', 'pending', 'placeholder', 'provided', 'queries', 'query', 'relevant', 'require', 'required', 'requires', 'result', 'results', 'search', 'searched', 'searches', 'searching', 'skip', 'skipped', 'specific', 'sure', 'tba', 'tbc', 'tbd', 'term', 'terms', 'unable', 'unclear', 'undefined', 'unknown', 'unsure', 'word', 'words'].map(fold));
+  // folded as the index folds words (`kept`), so each entry matches the form a reply's words take; "n" and "a" are the
+  // words of "N/A" and "n.a.", which `kept` keeps whatever their length
+  const NO_SEARCH = new Set([
+    'additional', 'a', 'applicable', 'applies', 'apply', 'available', 'cannot', 'cant', 'empty', 'extra', 'find',
+    'found', 'further', 'given', 'idea', 'keyword', 'keywords', 'missing', 'more', 'n', 'na', 'nan', 'necessary',
+    'need', 'needed', 'needs', 'neither', 'never', 'nil', 'no', 'non', 'none', 'nor', 'not', 'nothing', 'null',
+    'other', 'others', 'pass', 'pending', 'placeholder', 'provided', 'queries', 'query', 'relevant', 'require',
+    'required', 'requires', 'result', 'results', 'search', 'searched', 'searches', 'searching', 'skip', 'skipped',
+    'specific', 'sure', 'tba', 'tbc', 'tbd', 'term', 'terms', 'unable', 'unclear', 'undefined', 'unknown', 'unsure',
+    'word', 'words'
+  ].map(fold));
   const isSearch = (x: string) => kept(x).some((w) => !NO_SEARCH.has(w));
   const SEARCHES = 3;                                                            // searches the fast model may give one item at a time
   const FOUND = 12;                                                              // documents one item's searches put at the head of the pick list
@@ -1257,7 +1314,8 @@ export function nodeAi(o: AiOptions) {
   const live = async <T>(kind: 'finding' | 'question', dealId: string): Promise<T[] | null> => { const r = await o.repo.list(kind, dealId); return r.ok ? r.value.map((l) => l.envelope.data as T) : null; };
   /** what the chat agent is made of: the main session's turns, with search (the helper below reads on the fast model) and read; the checks reuse it to fill their gaps (`fill`) */
   const agentKit: AgentKit = {
-    models, records: (d) => o.docs.records(d), words, send, fit, where, withClean, rules: RULES, now: () => Date.now(),
+    models, records: (d) => o.docs.records(d), words, send, fit, where, cleanDrafts: cleanDraftsOf, rules: RULES,
+    now: () => Date.now(),
     askJson: (input, keys, shape) => askJson(input, keys, shape),
     folder: (deals, said, what) => folderList(deals, said, what),
     // a chat is one conversation on a service that keeps them (decisions: Long conversations); its transcript, at a compaction, is a file of its own, which the store's upkeep never touches (storeKeeper.ts)
@@ -1266,12 +1324,13 @@ export function nodeAi(o: AiOptions) {
       toolMode: (model: string) => stepped.get(model) ?? o.toolCalls ?? control.models.toolCalls,
       // a refusal that could also be a passing error (a 500 on a turn of tool results) holds for the run only when it comes twice with no tool results taken between
       steppedDown: (model: string, to: ToolMode, sure = true) => { const k = `${model}\n${to}`; if (sure || doubted.has(k)) stepped.set(model, to); else doubted.add(k); },
-      retriesFor: retried.retriesFor,
+      retries: retried.retries,
       ...(o.service.upload ? { keepTranscript: (text: string) => o.service.upload!({ name: `conversation-${Date.now().toString(36)}.txt`, bytes: new TextEncoder().encode(text) }) } : {}),
       ...(o.service.remove ? { drop: (fileId: string) => o.service.remove!(fileId) } : {}),
     } : {}),
-    look: (deals, model, ask, lookFor, skip) => budget.run({ left: o.searchCalls ?? control.limits.searchCalls }, () => read('search', deals, model, ask, lookFor, {}, '{"text": "what they say, with [n] markers", "sources": [...]}', undefined, skip)),
-    listed: (deals, query) => deals.reduce((n, d) => n + [...scores(d, o.docs.records(d), words(query, d)).values()].filter((x) => x > 0).length, 0),
+    ranking: searchRanking,
+    readPage: (deals, model, ask, docs) =>
+      readSearchPage({ left: o.searchCalls ?? control.limits.searchCalls }, deals, model, ask, docs),
     findings: async (d) => (await live<{ title?: string; body?: string[]; status?: string }>('finding', d))?.map((f) => ({ title: String(f.title ?? ''), body: strings(f.body), status: String(f.status ?? 'open') })) ?? null,
     questions: (d) => live('question', d),
     dealName: async (d) => { const r = await o.repo.get('deal', d); return String((r.ok && (r.value?.envelope.data as { name?: string } | undefined)?.name) || 'another deal'); },
@@ -1282,7 +1341,12 @@ export function nodeAi(o: AiOptions) {
     },
   };
   // a kept conversation is compacted by 80% of what one call to its model may send at most, leaving room for the turn's own question and documents
-  const agentOpts = { turns: o.turns ?? control.limits.chatTurns, width, compactAt: (model: string) => Math.min(o.compactAt ?? control.limits.compactAt, Math.floor((inLimit(model) * control.limits.compactShare) / 100)), folderDocs: o.folderDocs ?? control.limits.folderDocs };
+  const compactAt = (model: string) =>
+    Math.min(o.compactAt ?? control.limits.compactAt, Math.floor((inLimit(model) * control.limits.compactShare) / 100));
+  const agentOpts = {
+    turns: o.turns ?? control.limits.chatTurns, width, compactAt,
+    folderDocs: o.folderDocs ?? control.limits.folderDocs, searchPage: o.searchPage ?? control.limits.searchPage,
+  };
   /** the chat agent */
   const agent = chatAgent(agentKit, agentOpts);
 
@@ -1301,23 +1365,31 @@ export function nodeAi(o: AiOptions) {
   }
 
   /**
+   * What a read sends first: a page of the chat's document search as it is, with no pick and no second round
+   * (#1102); or else, for a draft or a reassessment, one deal's documents, what it must have and then the pick.
+   */
+  async function firstRead(deals: string[], lookFor: string, must: Record<string, string[]>,
+    core: Record<string, string[]>, page?: DealDoc[]): Promise<{ dealId: string; recs: DocRecord[] }[]> {
+    if (page) return page.map((x) => ({ dealId: x.dealId, recs: [x.rec] }));
+    const dealId = deals[0];
+    return [{ dealId, recs: await start(dealId, lookFor, must[dealId] ?? [], width, core[dealId]) }];
+  }
+  /**
    * One question, read from documents, in up to two rounds: the second only if the model says what is missing and
    * something answers to it. With `again`, a reply that cannot be used is sent back to the same model with what is
    * wrong with it (`wrong`), to be put right; and only if that fails too, the question goes once to the `escalate` model.
    */
-  async function read(kind: string, deals: string[], model: string, ask: string, lookFor: string, must: Record<string, string[]>, shape: string, again?: { escalate: string; usable: (reply: Record<string, unknown>) => boolean; wrong: string }, skip: Record<string, string[]> = {}): Promise<Result<{ reply: Record<string, unknown>; sent: Sent[] }>> {
+  async function read(
+    kind: string, deals: string[], model: string, ask: string, lookFor: string, must: Record<string, string[]>,
+    shape: string, again?: { escalate: string; usable: (reply: Record<string, unknown>) => boolean; wrong: string },
+    page?: DealDoc[],
+  ): Promise<Result<{ reply: Record<string, unknown>; sent: Sent[] }>> {
     const keys = [...shape.matchAll(/"([a-z]+)":/g)].map((m) => m[1]).concat('need');                // the fields this question asks for
     const sent: Sent[] = []; const add = (dealId: string, recs: DocRecord[]) => { for (const rec of withClean(dealId, recs)) if (!sent.some((s) => s.rec.docId === rec.docId && s.dealId === dealId)) sent.push({ tag: `D${sent.length + 1}`, dealId, rec }); };
-    const share = Math.max(1, Math.floor(width / deals.length)); const core: Record<string, string[]> = {};
+    const core: Record<string, string[]> = {};
     await Promise.all(deals.map(async (d) => { core[d] = await coreOf(d); }));
-    try {
-      if (deals.length === 1) add(deals[0], await start(deals[0], lookFor, must[deals[0]] ?? [], width, core[deals[0]], skip[deals[0]]));
-      else {                                                 // across deals: a share of the handful from each deal that has something to say
-        const per = await Promise.all(deals.map(async (d) => ({ d, picked: o.docs.records(d).length ? await pick(d, lookFor, new Set(skip[d]), share, core[d]) : [] })));
-        const all = per.flatMap(({ d, picked }) => (picked ? picked.map((rec, i) => ({ d, rec, n: 1000 - i })) : ((list) => { const s = scores(d, list, words(lookFor, d)); return list.map((rec) => ({ d, rec, n: s.get(rec.docId) ?? 0 })); })(top(d, lookFor, new Set(skip[d]), share, core[d], false)))).sort((a, b) => b.n - a.n).slice(0, width);
-        for (const x of all) add(x.d, [x.rec]);
-      }
-    } catch (e) { return failure(e, 'The documents could not be read'); }
+    try { for (const x of await firstRead(deals, lookFor, must, core, page)) add(x.dealId, x.recs); }
+    catch (e) { return failure(e, 'The documents could not be read'); }
     if (!sent.length) return ok({ reply: {}, sent });
     let using = model;
     let pool: Sent[] | undefined;
@@ -1351,12 +1423,14 @@ export function nodeAi(o: AiOptions) {
       }
       if (!reply) return fail({ kind: 'failed', message: UNREAD_REPLY });
       const need = strings(reply.need);
-      if (round > 1 || !need.length) return ok({ reply, sent });
+      if (round > 1 || !need.length || page) return ok({ reply, sent });
       // The second round stays within `width` documents too, however many deals are asked about. Priority: what the
       // question must have (attachments, a finding's own documents) is kept; what the model still needs takes up to
       // half the call in all, shared between deals in turn, best first; the first round's other documents fill the
       // rest, strongest (earliest chosen) first.
-      const have = new Set([...sent.map((s) => s.rec.docId), ...Object.values(skip).flat()]); const half = Math.ceil(width / 2); const room = Math.max(1, Math.ceil(half / deals.length));
+      const have = new Set(sent.map((s) => s.rec.docId));
+      const half = Math.ceil(width / 2);
+      const room = Math.max(1, Math.ceil(half / deals.length));
       const extras: { d: string; recs: DocRecord[] }[] = [];
       try { for (const d of deals) { const extra = (await pick(d, `${lookFor}\nWhat has been read does not settle it. Still needed: ${need.join('; ')}`, have, room, core[d], `${lookFor} ${need.join(' ')}`)) ?? top(d, need.join(' '), have, room, core[d], false); if (extra.length) extras.push({ d, recs: extra }); } }
       catch (e) { return failure(e, 'The documents could not be read'); }
@@ -1906,7 +1980,9 @@ export function nodeAi(o: AiOptions) {
         const got = new Map<number, { text: string; why: string; also?: string[] }>(); let last = 0; let inOrder = true;
         for (const x of kept) {
           // an item split in two comes as "texts"; one reworded as "text"
-          const n = int(x?.n); const texts = (Array.isArray(x?.texts) ? strings(x.texts) : typeof x?.text === 'string' ? [x.text] : []).map((t) => t.replace(/\s+/g, ' ').trim().slice(0, 500)).filter(Boolean).slice(0, 6);
+          const n = int(x?.n);
+          const given = Array.isArray(x?.texts) ? strings(x.texts) : typeof x?.text === 'string' ? [x.text] : [];
+          const texts = given.map((t) => fitText(t.replace(/\s+/g, ' ').trim())).filter(Boolean);
           if (n === null || n < 1 || n > part.length) continue; if (n <= last) inOrder = false; last = Math.max(last, n);
           if (!texts.length || (texts.length === 1 && texts[0] === part[n - 1].trim()) || got.has(n - 1)) continue;
           got.set(n - 1, { text: texts[0], why: (strings(x.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 120), ...(texts.length > 1 ? { also: texts.slice(1) } : {}) });
@@ -1985,7 +2061,11 @@ export function nodeAi(o: AiOptions) {
         if (part.length === 1 && items.filter((x) => x.text).length === 1) for (const x of items) if (x.text) x.m = 0;
         const got = new Map<number, string>();
         let last = -1;
-        for (const x of items) { if (x.m === undefined || !x.text) continue; last = x.m; if (!twice.has(x.m)) got.set(x.m, x.text.slice(0, 2000)); }
+        for (const x of items) {
+          if (x.m === undefined || !x.text) continue;
+          last = x.m;
+          if (!twice.has(x.m)) got.set(x.m, fitText(x.text));
+        }
         if (cut) got.delete(last);      // the last entry of a cut reply may be cut short
         if (got.size) { answered++; streak = 0; }
         else { empty++; streak++; why = cut ? `${SERVICE}’s reply was cut off, so nothing was added` : reply && Array.isArray(reply.items) ? `${SERVICE} left a point without a question, so nothing was added` : `${SERVICE}’s reply could not be read, so nothing was added`; }
@@ -2130,9 +2210,7 @@ export function nodeAi(o: AiOptions) {
       if (!read.length) return fail({ kind: 'failed', message: 'No points were found in it' });
       // a point the list numbers nothing is known by its place
       const points = read.map((p, k) => ({ ...p, n: p.n || String(k + 1) }));
-      const fs = i.findings.map((f) => `${f.title.replace(/\s+/g, ' ')}${f.text ? `: ${clean(f.text.replace(/\s*\[\d+\]/g, '')).slice(0, 240)}` : ''}`);
-      // the findings whose text the fullest form cuts short: a join named to one of them is confirmed too, at any level
-      const cutShort = new Set(i.findings.flatMap((f, k) => (f.text && clean(f.text.replace(/\s*\[\d+\]/g, '')).length > 240 ? [k] : [])));
+      const fs = i.findings.map((f) => `${f.title.replace(/\s+/g, ' ')}${f.text ? `: ${clean(f.text.replace(/\s*\[\d+\]/g, ''))}` : ''}`);
       const ws = new Map(i.workstreams.map((w) => [w.toLowerCase(), w]));
       const sorted = new Map<number, { title: string; workstream: string; same?: { finding: string } | { point: number } }>();
       // A part's call holds its own points, every point before them (an earlier point it may repeat) and the findings, so
@@ -2203,8 +2281,8 @@ export function nodeAi(o: AiOptions) {
           // a point asked about with several shares keeps its first title, and the first thing any share says it repeats
           const had = sorted.get(k);
           if (!had) sorted.set(k, { title, workstream, ...(same ? { same } : {}) }); else if (!had.same && same) had.same = same;
-          // confirmed below whenever either side was shown shorter than it is: a point or finding by opening words or title, or a finding's text cut short
-          if (same && (level >= 1 || ('finding' in same && cutShort.has(at))) && sorted.get(k)!.same === same) loose.add(k);
+          // confirmed below whenever either side was shown shorter than it is: a point or finding by opening words or title
+          if (same && level >= 1 && sorted.get(k)!.same === same) loose.add(k);
           missing.delete(k);
         }
         if (!missing.size) return true;
@@ -2219,7 +2297,7 @@ export function nodeAi(o: AiOptions) {
         await Promise.all(Array.from({ length: Math.min(SAME_AT_ONCE, parts.length) }, async () => { while (whole && next < parts.length) { try { whole = (await ask(parts[next++], 3)) && whole; } catch (e) { whole = false; throw e; } } }));
         if (!whole) return fail({ kind: 'failed', message: UNREAD_REPLY });
       } catch (e) { return failure(e, UNREAD_REPLY); }
-      // A "same" named from opening words, titles or a finding's text cut short may be the wrong one: two points can open
+      // A "same" named from opening words or titles may be the wrong one: two points can open
       // alike and ask opposite things, as can a revised point and the finding its first version made. Each is confirmed in a call that shows both in full, a part at a time (parts.ts); one not confirmed, or
       // cut off even alone, is not joined, and its point becomes a finding of its own. A call that fails fails the import.
       const full = (f: { title: string; text?: string }) => `${f.title.replace(/\s+/g, ' ')}${f.text ? `: ${clean(f.text.replace(/\s*\[\d+\]/g, ''))}` : ''}`;
@@ -2253,7 +2331,10 @@ export function nodeAi(o: AiOptions) {
 
   type Asked = { id: string; n?: number; text?: string; response?: string; respondedBy?: string; responded?: string; linkedFinding?: string; provenance?: { origin?: string } };
   const saidOf = (q: Asked) => createHash('sha256').update(String(q.response ?? '').replace(/\s+/g, ' ').trim()).digest('hex').slice(0, 16);
-  const responseLines = (qs: Asked[]) => qs.map((q) => `Q${q.n}: ${String(q.text ?? '').replace(/\s+/g, ' ').trim()}\nResponse to Q${q.n}${q.provenance?.origin === 'ai' ? ' (drafted by AI from the data room, not received from anyone)' : q.respondedBy ? ` from ${q.respondedBy}` : ''}${q.responded ? `, ${q.responded}` : ''}: ${q.response!.replace(/\s+/g, ' ').trim()}`).join('\n');
+  const responseLines = (qs: Asked[]) => qs.map((q) => {
+    const asked = `Q${q.n}: ${String(q.text ?? '').replace(/\s+/g, ' ').trim()}`;
+    return `${asked}\n${responseHeader(q)}: ${q.response!.replace(/\s+/g, ' ').trim()}`;
+  }).join('\n');
   /** a deal's questions that have a response, by number */
   // (called only for a deal already read: after its findings were listed, or for a finding read by id, which reads its deal)
   async function answered(dealId: string): Promise<Asked[]> {
@@ -2759,7 +2840,10 @@ export function nodeAi(o: AiOptions) {
      * handed over again.
      */
     const filled = { left: o.checkSearchCalls ?? L.checkSearchCalls };
-    const filler = chatAgent({ ...agentKit, look: (deals, model, ask, lookFor, skip) => budget.run({ left: o.searchCalls ?? L.searchCalls, deal: filled }, () => read('search', deals, model, ask, lookFor, {}, '{"text": "what they say, with [n] markers", "sources": [...]}', undefined, skip)) }, agentOpts);
+    // each document search has its own `limits.searchCalls`, as a chat's does, and all of them count against `filled`
+    const readPage: AgentKit['readPage'] = (deals, model, ask, docs) =>
+      readSearchPage({ left: o.searchCalls ?? L.searchCalls, deal: filled }, deals, model, ask, docs);
+    const filler = chatAgent({ ...agentKit, readPage }, agentOpts);
     let filling = true;
     const fill = async () => {
       const open = [...held.values()]; held.clear(); const byId = new Map(o.docs.records(dealId).map((r) => [r.docId, r]));

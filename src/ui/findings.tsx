@@ -6,7 +6,7 @@ import { limitClass, limitTitle } from './limit';
 import { checkingSays, watchCheck } from '../app/checking';
 import { showTip, hideTip } from './tip';
 import { ReadOnlyContext } from './editField';
-import { useAppState, useStore, fmtDate, whenText , useDismiss, useMinuteTick } from './hooks';
+import { useAppState, useStore, fmtDate, whenText, whenInSentence, useDismiss, useMinuteTick } from './hooks';
 import { afterDeletingFinding } from './nav';
 import { Icon } from './icons';
 import { ChoiceCheck } from './moreMenu';
@@ -14,7 +14,7 @@ import { Ref } from './ref';
 import { byDocument, fewDocuments } from '../app/citations';
 import { DocName } from './docName';
 import { FindingsHead } from './findingsHead';
-import { workstreamChoices } from '../domain/order';
+import { NO_WORKSTREAM, workstreamChoices } from '../domain/order';
 import { versionsWord, type State } from '../app/state';
 import { checkLeftCount, uncheckedChecklistCount } from '../app/dealCounts';
 import { findingsView } from '../app/findingsView';
@@ -80,7 +80,7 @@ export function Brief({ paragraphs, deal, onFinding, marked }: { paragraphs: str
 }
 
 /** when a closed finding was closed, as its row says it: "Closed yesterday", "Closed 3 days ago", "Closed Nov 14" */
-const closedText = (at: string) => { const w = whenText(at); return `Closed ${/^[A-Z][a-z]{2} \d/.test(w) ? w : w[0].toLowerCase() + w.slice(1)}`; };
+const closedText = (at: string) => `Closed ${whenInSentence(at)}`;
 
 /**
  * The Findings ⋯ menu, matching Q&A's: Import…, Export…, then the seldom used Deleted… apart from them
@@ -282,6 +282,8 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
     onDone();
   };
   const wsOptions = workstreamChoices([f.workstream]);   // a name of its own (from an import) takes its place A to Z
+  // a finding the model left with no workstream keeps "No workstream" on offer, last (#1062)
+  const noWorkstream = !base.current.workstream;
   const save = () => {
     if (busy) return;
     remember({});   // the kept draft holds what is sent, so the save can tell what is typed after it (#771)
@@ -292,11 +294,21 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
     <div class="card addf fedit" data-holds-work onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onDone(); } }}>
       <div class="lbl">Title</div>
       <input class="in" id="fe-title" aria-label="Title" maxLength={Math.max(TITLE_MAX, f.title.length)} value={title} ref={(el) => { if (el && !el.dataset.f) { el.dataset.f = '1'; el.focus(); } }} onInput={(e) => setTitle((e.currentTarget as HTMLInputElement).value)} />
-      <select class={`field ${ws ? '' : 'unset'}`} id="fe-ws" aria-label="Workstream" value={ws} onChange={(e) => setWs((e.currentTarget as HTMLSelectElement).value)}>{wsOptions.map((w) => <option key={w} value={w}>{w}</option>)}</select>
+      <select class={`field ${ws ? '' : 'unset'}`} id="fe-ws" aria-label="Workstream" value={ws}
+        onChange={(e) => setWs((e.currentTarget as HTMLSelectElement).value)}>
+        {wsOptions.map((w) => <option key={w} value={w}>{w}</option>)}
+        {noWorkstream && <option value="">{NO_WORKSTREAM}</option>}
+      </select>
       {/* #636: each citation is a tag after the sentence it supports; the tooltip says so, the screen does not */}
       <div class="lbl" title={CITE_TIP}>Detail</div>
       <CitedEditor id="fe-body" label="Detail" text={body} sources={f.sources} onText={setBody} />
-      <div class="cacts">{error && <p class="emptyline err" id="fe-err" role="alert">{error}</p>}<button type="button" class="btn sm pri" id="fe-save" disabled={busy || !title.trim() || !ws} onClick={() => void save()}>Save</button><button type="button" class="btn sm" id="fe-cancel" onClick={cancel}>Cancel</button></div>
+      <div class="cacts">
+        {error && <p class="emptyline err" id="fe-err" role="alert">{error}</p>}
+        {/* a workstream is always set or, where none was, may stay blank (#1062) */}
+        <button type="button" class="btn sm pri" id="fe-save" disabled={busy || !title.trim()}
+          onClick={() => void save()}>Save</button>
+        <button type="button" class="btn sm" id="fe-cancel" onClick={cancel}>Cancel</button>
+      </div>
     </div>
   );
 }
@@ -394,7 +406,8 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
   const marked = new Set(f.body.flatMap((b) => splitCited(b, f.sources.length).flatMap((p) => p.refs)));
   const docs = byDocument(f.sources);
   const listed = !fewDocuments(f.sources);
-  const raised = f.origin !== 'ai' && f.raisedBy ? `Raised by ${f.raisedBy} · ${fmtDate(localYmd(f.raisedAt))}` : `identified ${whenText(f.raisedAt).toLowerCase()}`;
+  const raisedBy = `Raised by ${f.raisedBy} · ${fmtDate(localYmd(f.raisedAt))}`;
+  const raised = f.origin !== 'ai' && f.raisedBy ? raisedBy : `identified ${whenInSentence(f.raisedAt)}`;
   const commit = async (status: 'open' | 'closed', text: string) => { const r = await store.dispatch(SetFindingStatus, { dealId, findingId, status, note: text.trim() || undefined }, { idempotencyKey: 'fst-' + f.id }); if (r.ok) setNote(null); };
   const del = async () => {
     const result = await store.dispatch(DeleteFinding, { dealId, findingId }, { idempotencyKey: 'fdel-' + f.id });
@@ -403,7 +416,9 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
   };
   return (
       <div class="opening">
-        <div class="lbl fmeta"><span>{f.workstream}{dot(f)}{raised}{f.reviewed ? ` · reviewed by ${f.reviewed.by}, ${fmtDate(localYmd(f.reviewed.at))}` : ''}{last ? ` · ${lastText} · ${whenText(last.at).toLowerCase()}` : ''}<OnListMark f={f} /></span>
+        <div class="lbl fmeta"><span>{f.workstream}{dot(f)}{raised}
+          {f.reviewed ? ` · reviewed by ${f.reviewed.by}, ${fmtDate(localYmd(f.reviewed.at))}` : ''}
+          {last ? ` · ${lastText} · ${whenInSentence(last.at)}` : ''}<OnListMark f={f} /></span>
           <span class="fctl">
             {/* each control keeps its place and its width whatever the finding's state, so the hand finds it without looking */}
             <button type="button" class={`btn sm rev ${f.reviewed ? 'on' : ''}`} id="f-review" aria-pressed={!!f.reviewed} onClick={() => void store.dispatch(ReviewFinding, { dealId, findingId, reviewed: !f.reviewed }, { idempotencyKey: 'frev-' + f.id })}><Icon name={f.reviewed ? 'check' : 'checkbox'} size={14} /> Reviewed</button>

@@ -13,14 +13,11 @@ import {
 } from './state';
 import type { Question, Finding } from '../domain/model';
 import { questionsSheet, findingsSheet, safeFileName, fitCells, suggestMapping, sameWords, type Mapping, type ImportRow } from '../domain/importExport';
-import { ImportQuestions } from './commands/importQuestions';
-import {
-  matchExactly, suggestMatches, withAccepted, type AcceptedMatch, type Suggestion,
-} from './commands/importMatching';
+import { ImportQuestions, importMatches } from './commands/importQuestions';
+import { suggestMatches, type AcceptedMatch, type Suggestion } from '../domain/qaMatch';
 import { ok, fail, type Result } from '../domain/result';
 
 const MIME = { xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', csv: 'text/csv' } as const;
-export const MAX_IMPORT_BYTES = 20 * 1024 * 1024;
 
 export interface QaExportFilter { status: 'open' | 'answered' | 'closed' | 'all'; workstream: string; askedBy: string[] }
 
@@ -145,9 +142,11 @@ export async function readImportBytes(
 }
 
 /** Read a chosen file into a table of strings with a suggested column mapping. Nothing is changed. */
-export async function readImportFile(store: Store, file: { name: string; size: number; arrayBuffer(): Promise<ArrayBuffer> }): Promise<Result<ImportTable>> {
+export async function readImportFile(
+  store: Store,
+  file: { name: string; arrayBuffer(): Promise<ArrayBuffer> },
+): Promise<Result<ImportTable>> {
   if (!/\.(xlsx|xlsm|xls|xlsb|ods|csv)$/i.test(file.name)) return fail({ kind: 'invalid', message: 'Choose a spreadsheet: .xlsx, .xls, .ods or .csv' });
-  if (file.size > MAX_IMPORT_BYTES) return fail({ kind: 'invalid', message: 'That file is larger than 20 MB' });
   let bytes: Uint8Array;
   try { bytes = new Uint8Array(await file.arrayBuffer()); } catch { return fail({ kind: 'failed', message: 'The file could not be opened' }); }
   const t = await readImportBytes(store, file.name, bytes);
@@ -211,11 +210,12 @@ export function previewImport(
   return ok({ created, updated, restored, changes, suggestions });
 }
 
-/** Where each row that matched no question could slot in, leaving out what the person already accepted. */
+/**
+ * Where each row that matched no question could slot in, leaving out what the person already accepted. The rows are
+ * matched exactly as the import matches them, deleted questions included.
+ */
 function suggestionsFor(s: State, dealId: string, rows: ImportRow[], accepted: AcceptedMatch[]): Suggestion[] {
-  const live = dealQuestions(s, dealId);
-  const matched = withAccepted(matchExactly(rows, [live]), rows, accepted, new Set(live.map((q) => q.id)));
-  return suggestMatches(rows, live, matched);
+  return suggestMatches(rows, dealQuestions(s, dealId), importMatches(s, dealId, 'merge', rows, accepted));
 }
 
 /**
