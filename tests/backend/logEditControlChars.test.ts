@@ -51,6 +51,12 @@ describe.skipIf(!has)('a response with a control character, saved through the lo
     const r = await saveResponse('a\u000bb\u0001c\ufffed _x000B_ plain');
     expect(r.sheetXml).toContain('a_x000B_b_x0001_c_xFFFE_d _x005F_x000B_ plain');
   }, 60_000);
+  it('leaves a tab as it is, writes U+FFFF as a code, and escapes a lower-case literal code', async () => {
+    const r = await saveResponse('a\tb\uffffc _x000b_');
+    expect(r.cell).toBe('a\tb\uffffc _x000b_');
+    expect(r.sheetXml).not.toContain('_x0009_');
+    expect(r.sheetXml).toContain('_xFFFF_c _x005F_x000b_');
+  }, 60_000);
   it('leaves plain text as it is', async () => {
     const r = await saveResponse('Fabrikam & Co <ok>');
     expect(r.saved).toMatchObject({ ok: true, value: { status: 'written' } });
