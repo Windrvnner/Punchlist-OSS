@@ -205,10 +205,11 @@ describe('the deal memo’s content', () => {
 
   it('keeps a group title and a workstream as given, white space included', () => {
     const a = finding('A', { workstream: ' Legal' });
-    const groups = [{ title: ' Two  spaces\t', findings: [a.id] }];
+    const groups = [{ title: ' Two  spaces\t', findings: [a.id], body: [' A written paragraph.\t', ' ', 'Another.'] }];
     const m = memoContent(input({ findings: [a], ratings: { [a.id]: 'High' }, groups }));
     expect(m.risks[0].title).toBe(' Two  spaces\t');
     expect(m.risks[0].workstream).toBe(' Legal');
+    expect(m.risks[0].paras.map((para) => para.map((part) => part.text).join(''))).toEqual([' A written paragraph.\t', 'Another.']);
     expect(m.glance.map((row) => row.workstream)).toContain(' Legal');
   });
 });

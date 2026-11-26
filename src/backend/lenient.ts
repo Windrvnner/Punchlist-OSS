@@ -102,3 +102,5 @@ export function tagNumber(x: unknown, letter: string): number | null {
   const said = x.trim(); const tagged = new RegExp(`^\\W*(?:${letter}|doc(?:ument)?|item)\\s*#?\\s*(\\d{1,6})(?!\\d)`, 'i').exec(said) ?? /^\W*#?(\d{1,6})\W*$/.exec(said);   // a number with its letter, or a number and nothing else
   return tagged ? +tagged[1] : null;
 }
+/** what joins a reply's paragraphs for `fit` and splits them again afterwards: no white space of the model's is lost */
+export const PARAGRAPH_SEAM = '\n\u0000\n';

@@ -1152,6 +1152,13 @@ describe('deal memo model replies', () => {
     ]);
     expect(content.refs.slice(0, 2)).toEqual(['Credit Agreement, p. 14', 'Term sheet (signed), p. 3']);
   });
+
+  it('keeps the edge spaces and tabs of the paragraphs a key risk write-up comes back with', async () => {
+    const edged = [` ${creditWords} [1]`, `\t${termWords} [2]`];
+    const standIn = await setupMemoReplies([distributionRisk], (call) => citedRiskReply(call, edged));
+    const memo = val(await standIn.ai.memo!('d1'));
+    expect(memo.risks![0].body).toEqual(edged);
+  });
 });
 
 describe('what a document is', () => {
@@ -1876,5 +1883,43 @@ describe('documents and runners together, on a real folder', () => {
     await ai.described('d1'); expect(svc.calls.filter((c) => c.prompt.startsWith('Describe')).length).toBe(2);                                          // two documents read, two descriptions, once each
     expect(svc.calls.filter(isCoreAsk).length).toBe(0);                                                                        // and no model is asked which are core
     fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('text the model writes is kept as given, edge spaces and tabs included', () => {
+  it('a reassessment keeps its paragraphs as written', async () => {
+    const written = [' The draft still has 1.25x. [1]', '\tThe term sheet has 1.30x. [2]'];
+    const s = setup((c) => ({ body: written, sources: [{ doc: tag(c, FA), page: 14 }, { doc: tag(c, TS), page: 3 }] }));
+    await deal(s.repo);
+    const sources = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }, { doc: TS.name, loc: 'p. 3', docId: TS.docId }];
+    await finding(s.repo, 'f_1', 'Lock-up differs', { sources });
+    expect(val(await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' })).body).toEqual(written);
+  });
+
+  it('the catch-up brief keeps its paragraphs as written', async () => {
+    const briefOrSearch = (c: Call) => (c.prompt.includes('These are the open findings on a deal')
+      ? { paragraphs: [' The lock-up mismatch matters most.', '\tNothing else is open.'] }
+      : { text: 'Done.', sources: [] });
+    const catchUp = (_c: Call, n: number) => (n === 1 ? { tool: 'brief' } : { text: 'Done.', sources: [] });
+    const s = setup(briefOrSearch, { d1: [FA] }, { turn: catchUp });
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'Lock-up ratio differs from the term sheet');
+    val(await s.ai.answer(ask('Catch me up on the deal')));
+    expect(s.turns[1].prompt).toContain('The catch-up on the open findings:\n The lock-up mismatch matters most.\n\tNothing else is open.');
+  });
+
+  it('a merged answer keeps its edges', async () => {
+    const s = setup((c) => (c.prompt.includes('Two people answered it differently') ? { text: ' One answer.\t' } : {}));
+    const merged = val(await s.ai.merge!({ dealId: 'd1', question: 'Q?', app: 'A', log: 'B' }));
+    expect(merged).toEqual({ text: ' One answer.\t' });
+  });
+
+  it('a finding raised in a check keeps its title as written', async () => {
+    const edged = (c: Call) => ({ ...LOCKUP(c), title: ' Lock-up ratio differs\t' });
+    const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...edged(c) })) }),
+      { d1: [FA, TS] }, { checklist: () => ({ broad: [LIST.broad[0]], product: [], sector: [] }), pick: (c) => ({ read: numbersOf(c, FA, TS) }) });
+    await deal(s.repo);
+    const r = val(await s.ai.firstPass('d1'));
+    expect((await findingData(s.repo, r.written[0])).title).toBe(' Lock-up ratio differs\t');
   });
 });

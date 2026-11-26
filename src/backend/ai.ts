@@ -55,7 +55,7 @@ import { ListRecord, Item, firmOf, orderItems, key } from '../domain/checklist';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ulid } from 'ulid';
 import {
-  readJson, unfinished, list as listOf, strings, prose, int, pageOf, word, tagNumber, isObject,
+  readJson, unfinished, list as listOf, strings, prose, PARAGRAPH_SEAM, int, pageOf, word, tagNumber, isObject,
 } from './lenient';
 import type { LineRead } from '../domain/listRead';
 import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK } from './limits';
@@ -1278,7 +1278,7 @@ export function nodeAi(o: AiOptions) {
       placed.set(key, sources.length + 1); renumber.set(i + 1, sources.length + 1);
       sources.push({ doc: s.rec.name, loc, docId: s.rec.docId, ...(typeof c.quote === 'string' && c.quote ? { quote: c.quote } : {}), ...(withDeal ? { dealId: s.dealId } : {}), ...(blacklines(s.dealId).has(s.rec.docId) ? { reading: true } : precedents(s.dealId).has(s.rec.docId) ? { precedent: true } : {}) } as Source);   // a blackline's page is the model's reading of it; another project's document is tagged so
     });
-    const out = String(text ?? '').replace(/\s*\[(\d+)\]/g, (_m, n) => (renumber.has(+n) ? ` [${renumber.get(+n)}]` : '')).replace(/\{([^{}|]+)\|[^{}]*\}/g, '$1').replace(/ \[(\d+)\](?: ?\[\1\])+/g, once ? ' [$1]' : '$&').trim();
+    const out = String(text ?? '').replace(/\s*\[(\d+)\]/g, (_m, n) => (renumber.has(+n) ? ` [${renumber.get(+n)}]` : '')).replace(/\{([^{}|]+)\|[^{}]*\}/g, '$1').replace(/ \[(\d+)\](?: ?\[\1\])+/g, once ? ' [$1]' : '$&');
     return { text: out, sources };
   }
   const dealIds = async (): Promise<string[]> => { const r = await o.repo.list('deal', '_'); return r.ok ? r.value.map((l) => l.id) : []; };
@@ -1675,7 +1675,7 @@ export function nodeAi(o: AiOptions) {
       else if (result === 'more') out.set(it.id, { kind: 'none', need: prose(r.need).join('; ') || it.text });
       else if (result === 'finding') {
         const title = typeof r.title === 'string' ? r.title : ''; const paras = prose(r.body);
-        const fitted = fit(paras.join('\n\u0000\n'), r.sources as Cited[], sent, false, true);
+        const fitted = fit(paras.join(PARAGRAPH_SEAM), r.sources as Cited[], sent, false, true);
         // another project's document, or a blackline not shown to be against this deal's own draft, never raises a
         // finding by itself
         if (fitted.sources.length && !fitted.sources.some((x) => mainIn(sent, x))) { out.set(it.id, { kind: 'none', need: `a document of this deal that shows it, not only another project's document or a blackline against one: ${it.text}` }); continue; }
@@ -1687,7 +1687,7 @@ export function nodeAi(o: AiOptions) {
           !paras.length && 'it has no body',
           !fitted.sources.length && needsCitation,
         ].filter(Boolean);
-        const body = fitParas(fitted.text.split(/\s*\u0000\s*/).filter(Boolean));
+        const body = fitParas(fitted.text.split(PARAGRAPH_SEAM).filter((p) => p.trim()));
         const workstream = workstreamOf(r.workstream);
         const raised: Seen = { kind: 'finding', title, workstream, body, sources: fitted.sources };
         const unsupported = 'A finding was raised on it that could not be supported from a place in the documents.';
@@ -1836,10 +1836,10 @@ export function nodeAi(o: AiOptions) {
       if (!r.value.sent.length) return fail({ kind: 'failed', message: 'None of this finding’s documents are indexed, so there is nothing to reassess it against' });
       const paras = parasOf(r.value.reply);
       if (!paras.length) return fail({ kind: 'failed', message: UNREAD_REPLY });
-      const out = fit(paras.join('\n\u0000\n'), r.value.reply.sources as Cited[], r.value.sent, false, true);   // a finding: a place cited twice is one source, as when it was raised
+      const out = fit(paras.join(PARAGRAPH_SEAM), r.value.reply.sources as Cited[], r.value.sent, false, true);   // a finding: a place cited twice is one source, as when it was raised
       // a finding stays as written unless one of this deal's own documents bears it out
       if (!out.sources.some((x) => mainIn(r.value.sent, x))) return fail({ kind: 'failed', message: out.sources.length ? 'Only another project’s documents or a blackline against one bear on it, so it stays as written' : 'No page of the deal’s documents bears it out, so it stays as written' });
-      return ok({ body: out.text.split(/\s*\u0000\s*/).filter(Boolean), sources: out.sources });
+      return ok({ body: out.text.split(PARAGRAPH_SEAM).filter((p) => p.trim()), sources: out.sources });
     },
     async dealBrief(dealId) {
       const all = await o.repo.list('finding', dealId);
@@ -1940,8 +1940,8 @@ export function nodeAi(o: AiOptions) {
         if (!r.ok) { if (r.error.kind === 'unreachable') throw Object.assign(new Error(r.error.message), { code: 'unreachable' }); return g; }
         if (!options.usable(r.value.reply) || !r.value.sent.length) return g;
         const paras = memoRiskParagraphs(r.value.reply.paragraphs).map((p) => unid(p, ids)).filter((p) => p.trim());
-        const out = fit(paras.join('\n\u0000\n'), r.value.reply.sources as Cited[], r.value.sent, false, true);
-        return { ...g, body: out.text.split(/\s*\u0000\s*/).filter(Boolean), sources: out.sources };
+        const out = fit(paras.join(PARAGRAPH_SEAM), r.value.reply.sources as Cited[], r.value.sent, false, true);
+        return { ...g, body: out.text.split(PARAGRAPH_SEAM).filter((p) => p.trim()), sources: out.sources };
       };
       const written = new Map<(typeof key)[number], RiskGroup>();
       try { for (let k = 0; k < key.length; k += 3) await Promise.all(key.slice(k, k + 3).map(async (g) => { written.set(g, await writeUp(g)); })); }   // three at a time
