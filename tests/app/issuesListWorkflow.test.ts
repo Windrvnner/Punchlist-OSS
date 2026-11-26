@@ -167,7 +167,7 @@ it('reads a pasted list as a text file holding exactly the pasted words', async 
   });
 });
 
-it('hands a pasted list over untouched: tabs, CRLF and edge spaces stay as typed', async () => {
+it('attaches a pasted list byte for byte: tabs, CRLF and edge spaces stay as typed', async () => {
   const { store, dealId } = await seedDeal();
   const attach = vi.fn<DocumentService['attach']>(async () => ok(DOC));
   store.services.docs.attach = attach;
