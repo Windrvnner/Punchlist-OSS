@@ -11,7 +11,8 @@ import { scaleMemoInput } from '../fixtures/memoScale';
 import type { DocRecord } from '../../src/backend/documents';
 import type { Folder } from '../../src/backend/logRepository';
 import { signedOut } from '../../src/backend/signInToken';
-import { SERVICE } from '../../src/control';
+import { SERVICE, control } from '../../src/control';
+import { tokensOf } from '../../src/backend/limits';
 
 class Mem implements Folder { files = new Map<string, string>(); list() { return [...this.files.keys()]; } size(n: string) { return this.files.get(n)?.length ?? -1; } read(n: string) { return this.files.get(n) ?? null; } append(n: string, t: string) { this.files.set(n, (this.files.get(n) ?? '') + t); } write(n: string, t: string) { this.files.set(n, t); } }
 import { wordIndex as makeIndex, countWords, type WordIndex } from '../../src/backend/wordIndex';
@@ -96,6 +97,40 @@ describe('answers', () => {
         + '(delete "1.15x" by sroe on 2026-10-01; insert "1.20x" by sroe on 2026-10-01)',
       '  Some changes are in parts of the file this list does not reach.',
     ].join('\n'));
+  });
+  /** a draft with 200 tracked changes, about 100 characters a line in the prompt (#1092) */
+  const manyChanges = () => {
+    const D = doc(52, 'SPA markup.docx', { tracked: 200 });
+    const passages = Array.from({ length: 200 }, (_, k) => ({
+      before: `Clause ${k + 1}: the ratio is 1.15x.`, after: `Clause ${k + 1}: the ratio is 1.20x.`,
+      changes: [{ kind: 'insert' as const, by: 'sroe', at: '2026-10-01T10:00:00', text: '1.20x' }],
+    }));
+    const changes: AiDocs['changes'] = async () => ({ ok: true, value: { tracked: 200, complete: true, passages } });
+    return { D, changes };
+  };
+  const wasLines = (prompt: string) => prompt.split('\n').filter((l) => l.startsWith('  - was: '));
+  it("sends every tracked change of a heavily marked-up draft that fits the model's input (#1092)", async () => {
+    const { D, changes } = manyChanges();
+    const s = setup(() => ({ text: 'ok', sources: [] }), { d1: [D] }, { changes, library: [] });
+    val(await s.ai.answer(ask('What ratio does the SPA markup set?')));
+    const listed = wasLines(s.calls[0].prompt);
+    expect(listed.length).toBe(200);
+    expect(listed.join('').length).toBeGreaterThan(15_000);
+    expect(s.calls[0].prompt).not.toContain('more changed passage');
+  });
+  it('lists tracked changes up to the share of the input limit a part may fill, and counts the rest', async () => {
+    const { D, changes } = manyChanges();
+    const s = setup(() => ({ text: 'ok', sources: [] }), { d1: [D] }, { changes, library: [] });
+    const lineTokens = tokensOf(wasLines('  - was: "Clause 100: the ratio is 1.15x." / now: '
+      + '"Clause 100: the ratio is 1.20x." (insert "1.20x" by sroe on 2026-10-01)')[0]);
+    s.svc.inputLimit = () => Math.ceil((100 * lineTokens * 100) / control.limits.partShare);   // room for about 100
+    val(await s.ai.answer(ask('What ratio does the SPA markup set?')));
+    const listed = wasLines(s.calls[0].prompt);
+    const budget = Math.floor((s.svc.inputLimit('thorough') * control.limits.partShare) / 100);
+    expect(listed.reduce((n, l) => n + tokensOf(l), 0)).toBeLessThanOrEqual(budget);
+    expect(listed.length).toBeGreaterThanOrEqual(95);
+    expect(listed.length).toBeLessThan(200);
+    expect(s.calls[0].prompt).toContain(`  - and ${200 - listed.length} more changed passages, not listed here.`);
   });
   it('lists the newest draft of a document first, its earlier drafts straight after it and marked as such', async () => {
     const at = (n: number, rel: string, seen: string) => doc(n, rel.split('/').pop()!, { rel, seen });
