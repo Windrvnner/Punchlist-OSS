@@ -96,7 +96,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
   last accepted table until another sheet or heading row is read (#380).
 - **Undo Last Import…** in the Q&A page's ⋯ menu takes back this PC's last import after a confirmation, with no Undo after it, and leaves alone questions changed since the import.
 - A responder column is read as the response's author.
-- Q&A logs and checklists are Excel files (.xlsx, .xlsm, .xls, .xlsb) and .csv, read as Excel reads it. No other spreadsheet format is read for them. A log in .xlsb is read but not yet updated (#94, #1021).
+- A Q&A log is a .xlsx, .xlsm, .xls, .xlsb or .csv file; a .xlsb log is read but not yet updated (#94). A checklist is one of those, or a .docx, .docm, .doc, .odt, .rtf, .pdf, .txt, .text or .md file. Neither takes .ods (#1021).
 - On import, real date cells are read as dates and plain numbers are not. An ambiguous date is settled by the row's other date, its neighbors, and the rule that no date is in the future; otherwise it is left blank and listed.
 - Marking imported questions that have a response as Answered is optional and off by default.
 - Merge looks each row up like an XLOOKUP: the question with the same number, exact text and sender (Submitted by), else the one with the exact text and sender; a row or question naming no sender matches any sender, the same sender first; a row that matches neither is a new question. Nothing is matched by similar words, but the preview suggests, for such a row, a question with the same words apart from capitals, spacing and punctuation; it is used only once the person accepts it. A row that matches a deleted question brings it back. "Will overwrite" is shown field by field first.
