@@ -1758,7 +1758,9 @@ describe('when something changes', () => {
   });
 
   it('a response mark adds its questions to an earlier one from responses, and leaves a mark set for another reason as it is', async () => {
-    const src = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }]; const opts = { hears: () => ({ affected: ['F1 Q12'] }), verify: (c: any) => ({ stands: c.model === 'never', why: 'the response settles it' }) };
+    const src = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }];
+    const verify = (c: any) => ({ stands: c.model === 'never', why: 'the response settles it' });
+    const opts = { hears: () => ({ affected: ['F1 R1'] }), verify };
     const data = async (s: any) => (val(await s.repo.get('finding', 'f_1')) as any).envelope.data as { updated?: boolean; updatedWhy?: string; updatedOn?: { questions: string[] } };
     // marked by a response to a question linked to it: the backend's mark adds Q12 to it
     const a = setup(() => ({}), undefined, opts); await deal(a.repo); await finding(a.repo, 'f_1', 'Lock-up differs', { sources: src, updated: true, updatedWhy: 'Response received on Q3', updatedOn: { questions: ['q_3'] } });
@@ -1772,7 +1774,10 @@ describe('when something changes', () => {
 
   it('a mark that cannot be written leaves the work undone: the response is set against the finding again next time, and the finding is marked then', async () => {
     const src = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }];
-    const s = setup(() => ({}), undefined, { hears: () => ({ affected: ['F1 Q12'] }), verify: (c: any) => ({ stands: false, why: 'the response settles it' }) }); await deal(s.repo); await finding(s.repo, 'f_1', 'Lock-up differs', { sources: src });
+    const verify = () => ({ stands: false, why: 'the response settles it' });
+    const s = setup(() => ({}), undefined, { hears: () => ({ affected: ['F1 R1'] }), verify });
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'Lock-up differs', { sources: src });
     val(await question(s.repo, 'q_12', { n: 12, text: 'Which ratio?', response: '1.25x.' }));
     const back = refuse(s.repo.shared, (t) => t.includes('"kind":"finding"'), quota);  // the shared folder takes no finding changes just now
     const first = await s.ai.responses('d1'); expect(first.ok).toBe(false);
@@ -1802,7 +1807,12 @@ describe('when something changes', () => {
     expect(doubt.verifyCalls[0].prompt).toContain('Response to R1: The agreed ratio is 1.25x.');
     expect(val(await doubt.ai.responses('d1')).heard).toEqual([]);                                                                              // the standard model answered: that was a look
     // neither model gives a usable answer on the finding: that was not a look, and the next call tries again
-    let ok = false; const mute = setup(() => ({}), undefined, { hears: () => ({ affected: ['F1 Q12'] }), verify: () => (ok ? { stands: false, why: 'settled' } : 'no idea') }); await deal(mute.repo); await finding(mute.repo, 'f_1', 'Lock-up differs', { sources: src }); val(await question(mute.repo, 'q_12', q12));
+    let ok = false;
+    const unsure = () => (ok ? { stands: false, why: 'settled' } : 'no idea');
+    const mute = setup(() => ({}), undefined, { hears: () => ({ affected: ['F1 R1'] }), verify: unsure });
+    await deal(mute.repo);
+    await finding(mute.repo, 'f_1', 'Lock-up differs', { sources: src });
+    val(await question(mute.repo, 'q_12', q12));
     expect(val(await mute.ai.responses('d1'))).toEqual({ heard: ['q_12'], marked: [] }); ok = true; expect(val(await mute.ai.responses('d1'))).toEqual({ heard: ['q_12'], marked: ['f_1'] }); expect(mute.hearCalls.length).toBe(2);
     expect(val(await mute.ai.responses('d1')).heard).toEqual([]);
     // a reply that cannot be read, or a service that cannot be reached: nothing is recorded, and the next call asks again
