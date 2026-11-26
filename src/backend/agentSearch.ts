@@ -3,7 +3,7 @@
  * a page of documents read by the search helper on the fast model, and the deal's findings and Q&A log, the records
  * the app holds, with no model call.
  */
-import { int, prose } from './lenient';
+import { int, strings } from './lenient';
 import { pageOf, rankRecords, type Page } from './recordSearch';
 import { batchesOf } from './agentFolder';
 import { qaRow, qaText } from './qaRow';
@@ -84,7 +84,7 @@ async function searchDocuments(run: AgentRun, asked: Asked, query: string, repor
     return;
   }
   const { reply, sent } = looked.value;
-  const { text, sources } = kit.fit(prose(reply.text).join(' '), reply.sources as Cited[], sent, true);
+  const { text, sources } = kit.fit(strings(reply.text).join(' '), reply.sources as Cited[], sent, true);
   // what the helper opened was read by a model: it may be cited
   for (const s of sent) run.tagOf(s.dealId, s.rec);
   const tags = run.tagsOf(sources);
@@ -152,7 +152,7 @@ async function searchQuestions(run: AgentRun, asked: Asked, report: Report): Pro
   report.out.push(listing + await unread(run, 'Questions', missed));
   for (const x of shown.items) {
     const where = `Q${x.n}${x.response?.trim() ? ' · response received' : ''}`;
-    report.found.push({ where, quote: shorten(oneLine(x.response?.trim() ? x.response : x.text || ''), 160) });
+    report.found.push({ where, quote: shorten(oneLine(x.response?.trim() || x.text || ''), 160) });
   }
   const got = shown.items;
   const more = got.length > 4 ? ` and ${got.length - 4} more` : '';

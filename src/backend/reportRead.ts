@@ -5,7 +5,7 @@
 import type { DocRecord } from './documents';
 import type { Cited } from './agent';
 import type { Source } from '../domain/model';
-import { list as listOf, prose, strings, tagNumber, PARAGRAPH_SEAM } from './lenient';
+import { list as listOf, strings, tagNumber } from './lenient';
 import {
   type ReportKit, type ReadLine, type ReadIssue, type Known, type Issue, type SentDoc,
   isCut, yes,
@@ -93,7 +93,7 @@ function isOwn(k: ReportKit, doc: string, f: Known) {
   return false;
 }
 
-const titleOf = (row: Record<string, unknown>) => (typeof row.title === 'string' && row.title.trim() ? row.title : '');
+const titleOf = (row: Record<string, unknown>) => (typeof row.title === 'string' ? row.title.trim() : '');
 
 /** One read of one report, in one call: what it has found. */
 class ReportRead {
@@ -154,7 +154,7 @@ class ReportRead {
   /** a new issue: a finding of its own */
   async raise(row: Record<string, unknown>, title: string, known: Known[], covering?: Known): Promise<boolean> {
     const k = this.k;
-    const fitted = k.fit(prose(row.body).join(PARAGRAPH_SEAM), row.sources as Cited[], this.s.sent);
+    const fitted = k.fit(strings(row.body).join('\n\u0000\n'), row.sources as Cited[], this.s.sent);
     // an issue stands on a page of the report a person can open, as any finding does
     if (!fitted.text || !fitted.sources.length) { this.unplaced++; return true; }
     const nth = (this.titles.get(title) ?? 0) + 1;
@@ -163,7 +163,7 @@ class ReportRead {
     const issue: Issue = {
       title,
       workstream: k.workstreamOf(row.workstream),
-      body: k.fitParas(fitted.text.split(PARAGRAPH_SEAM).filter((p) => p.trim())),
+      body: k.fitParas(fitted.text.split(/\s*\u0000\s*/).filter(Boolean)),
       sources: fitted.sources,
     };
     // a closed finding on the same issue is named: a wrong number falls back to the one given as covering it
@@ -184,8 +184,8 @@ class ReportRead {
 
   /** what the reply says beside its issues: who wrote the report, and which of the earlier draft's it drops */
   heard(reply: Record<string, unknown>) {
-    const advisor = typeof reply.advisor === 'string' ? reply.advisor : '';
-    if (advisor.trim() && !this.advisor) this.advisor = advisor.slice(0, 120);
+    const advisor = typeof reply.advisor === 'string' ? reply.advisor.trim() : '';
+    if (advisor && !this.advisor) this.advisor = advisor.slice(0, 120);
     for (const e of strings(reply.dropped)) {
       const f = this.before?.issues[(tagNumber(e, 'E') ?? 0) - 1]?.finding;
       if (f) this.dropped.add(f);

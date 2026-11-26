@@ -317,7 +317,9 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 [CLAUDE.md](../CLAUDE.md) covers how to work on the app: commits, checks, mock-ups, readable code, and asking before design decisions. Beyond it, these rules apply:
 
 - The file is the source of truth. The app never changes, repairs, normalizes or reinterprets content handed to it; what it shows matches what the file's native app shows.
-- Text a file holds or the model writes is stored, shown and written back with its edge spaces, tabs and inner spacing as given: a model's title, summary, paragraphs and rewording, a left-out line, a firm, a log's name and a file's name are never trimmed. A value a file gives is compared with the app's character for character (a name, a workstream, a response, a cell of a kept edit), so a space at an end is a change and a response that differs only in spacing is the file's own; only a value typed in the app, a lookup key and a structural token are trimmed (#1215).
+- Text a file holds or the model writes is stored, shown and written back as given, edge spaces and tabs included: a model's title, summary, paragraphs, rewording and merged answer, a left-out line, a firm, a log's name and a file's name (#1215).
+- A value a file gives is compared with the app's character for character: a name, a workstream, a response, a cell of a kept edit. A file response that differs only in spacing is the file's own, so it loses an earlier draft's origin and sources, while a response typed in the app keeps them (#1215).
+- Only a value typed in the app, a lookup key, a structural token and the one-line text sent in a prompt are trimmed or collapsed (#1215).
 - Keep friction low, with as few controls and steps as possible.
 - The attribution check allows a `Co-authored-by` trailer naming exactly the repository's own coding-agent identity (set in `scripts/aiAttribution.mjs`) and refuses every other AI co-author trailer (#877).
 - Never guess identities. Never cite finding codes.
