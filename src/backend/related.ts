@@ -10,9 +10,9 @@
  * document stays searchable, so a document left out of a family costs little, while one placed under the wrong agreement
  * or folded into a series misleads. The word lists come from the control file (lists.relationWords and the rest).
  */
-import { tokens, fold } from './words';
+import { tokens, fold, indexWords } from './words';
 import { folderDate, MARK, versionOf } from './families';
-import { compile, groupsIn, words, type Library } from './core';
+import { compile, groupsIn, type Library } from './core';
 import { isBlackline } from './blacklines';
 
 export interface FamilyDoc { docId: string; /** its path from the data room's own folder, name last */ path: string }
@@ -80,6 +80,13 @@ interface Doc {
   /** it can be an agreement others belong to; `parents`: the agreements it belongs to, by index */
   agreement: boolean; parents: number[];
 }
+
+/**
+ * A name's words as families compare them: the word index's split (#1147) without bare numbers, because a name's own
+ * number is compared joined to the word before it ("parcel#2", `keyOf`) and is never a shared word on its own
+ * (docs/core-families-design.md, "Which fits").
+ */
+const words = (text: string, filler: Set<string>) => indexWords(text, filler).filter((w) => !/^\d+$/.test(w));
 
 /** reads names with the control file's word lists and the library */
 function reader(input: FamilyInput) {
