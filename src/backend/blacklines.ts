@@ -11,6 +11,7 @@
  * room at all, it stands alone: it is read by itself, still as the model's reading. Nothing here asks a model.
  */
 import { families, roomPath, inPrecedents, versionOf } from './families';
+import { indexWords } from './words';
 
 const PDF = /\.pdf$/i;
 /** "A vs B": two drafts' names with vs (or versus) between them, as people name a comparison */
@@ -48,7 +49,7 @@ const namedAt = (cover: string, name: string) => { const c = ` ${base(cover)} `;
 /** whether a cover names another file after `name`, found at `at`: then `name` is the original, not the newer draft */
 const namedLater = (cover: string, name: string, at: number) => /\s(?:docx?|pdf|rtf)\s/.test(` ${base(cover)} `.slice(at + ` ${base(name)}`.length).replace(/^\s*(?:docx?|pdf|rtf)\s/, ' '));
 /** a name's first word: both sides of "A vs B" share it when they are two drafts of one document */
-const head = (folded: string) => folded.split(' ').find((w) => /\p{L}{2}/u.test(w));
+const head = (folded: string) => indexWords(folded)[0];   // as the search index splits words (#1220)
 
 /** what blacklines need of a document: its id, name, place in the data room, when first seen, and its cover page if it has one */
 export interface BlacklineDoc { docId: string; name: string; folder: string; rel: string; seen?: string; cover?: string; /** the other places the same file is in */ copies?: { folder: string; rel: string; name?: string }[] }

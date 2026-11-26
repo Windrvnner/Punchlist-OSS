@@ -18,6 +18,11 @@ describe('blacklines', () => {
     ]);
     expect(Object.fromEntries(m)).toEqual({ fac: 'fa', epc: 'e', valrl: 'val' });
   });
+  it('compares the first words of "A vs B" as the search index splits them, so a number or a letter tells two names apart (#1220)', () => {
+    const m = cleanDrafts([doc('vs', 'Legal/2024 Budget vs 2025 Budget.pdf'), doc('a', 'Legal/2024 Budget.docx'),
+      doc('ab', 'Legal/A1 Lease vs B1 Lease.pdf'), doc('l', 'Legal/A1 Lease.docx')]);
+    expect(Object.fromEntries(m)).toEqual({});
+  });
   it('takes "A vs B" of two drafts of one name as a blackline, with A, the newer, as its clean draft', () => {
     const m = cleanDrafts([
       doc('vs', 'Legal/Credit Agreement v4 vs Credit Agreement v3.pdf'), doc('v4', 'Legal/Credit Agreement v4.docx'),

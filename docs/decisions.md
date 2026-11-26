@@ -401,7 +401,8 @@ These decisions are built and wait to be confirmed:
   its body and all its header, footer, footnote and endnote parts (#1025).
 - The core set and a document's most-used words split text as the word index does and drop no word, letter or number
   for its length (#1147).
-- The suggested open question and the browser demo's stand-ins compare the words the search index keeps (one split,
-  the control file's filler left out) and drop no word, letter or number for its length (#1220).
+- The suggested open question, the browser demo's stand-ins and the first-word compare of a "A vs B" blackline name use
+  the words the search index keeps (one split, the control file's filler left out) and drop no word, letter or number
+  for its length (#1220).
 - A plain-text list (.txt, .text, .md) is read as a CSV file is: UTF-8, UTF-16 or Windows-1252, with or without a
   byte-order mark (#382).
