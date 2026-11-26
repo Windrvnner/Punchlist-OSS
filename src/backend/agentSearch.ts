@@ -45,7 +45,7 @@ export async function search(run: AgentRun, what: What, query: string, page = 1)
   const step = run.step({ kind: 'search', text: `Searched ${LABEL[what]} for ${quoted(query)}${onPage}` });
   const report: Report = { out: [], said: [], found: [] };
   const asked: Asked = { what, page, words: queryWords(run, query) };
-  if (what === 'documents' || what === 'all') await searchDocuments(run, query, report);
+  if (what === 'documents' || what === 'all') await searchDocuments(run, asked, query, report);
   if (what === 'findings' || what === 'all') await searchFindings(run, asked, report);
   if (what === 'qa' || what === 'all') await searchQuestions(run, asked, report);
   const found = report.found.length ? { found: report.found } : {};
@@ -60,12 +60,18 @@ function queryWords(run: AgentRun, query: string): Set<string> {
   return out;
 }
 
-/** the documents, through the search helper: what it opened, what it says and the passages it cites */
-async function searchDocuments(run: AgentRun, query: string, report: Report): Promise<void> {
+/** a page of the documents' keyword ranking, read by the search helper: what it says and the passages it cites */
+async function searchDocuments(run: AgentRun, asked: Asked, query: string, report: Report): Promise<void> {
   const { kit, question } = run;
-  const fast = (await kit.models()).fast;
+  const ranking = await kit.ranking(question.deals, query);
+  const shown = pageOf(ranking, asked.page, run.pages.width);
+  if (!shown.items.length) {
+    report.out.push(ranking.length ? noPage('Documents', 'documents', asked, shown) : 'Documents: none answers to these words.');
+    report.said.push(`${ranking.length} listed · none opened`);
+    return;
+  }
   const ask = findAsk('these documents', query, question.message);
-  const looked = await kit.look(question.deals, fast, ask, query, run.given());
+  const looked = await kit.readPage(question.deals, (await kit.models()).fast, ask, shown.items);
   if (!looked.ok) {
     if (looked.error.kind === 'unreachable') {
       throw Object.assign(new Error(looked.error.message), { code: 'unreachable' });
@@ -82,14 +88,12 @@ async function searchDocuments(run: AgentRun, query: string, report: Report): Pr
   const lines = sources.map((s, i) => `${tags[i]} ${s.loc}${s.quote ? `: “${oneLine(s.quote)}”` : ''}`);
   for (const s of sources) report.found.push(foundAt(s));
   const opens = sent.map((s) => run.tagOf(s.dealId, s.rec).tag);
-  if (!sent.length) report.out.push('Documents: none answers to these words.');
-  else {
-    const says = text ? ` It says: ${withPlaces(text, tags, sources)}` : ' They say nothing about it.';
-    const passages = lines.length ? `\nPassages:\n${lines.join('\n')}` : '';
-    report.out.push(`Documents: the helper opened ${opens.join(', ')}.${says}${passages}`);
-  }
-  const listed = kit.listed(question.deals, query);
-  report.said.push(`${listed} listed · ${sent.length} opened · ${sources.length} ${noun(sources.length, 'passage')}`);
+  const says = text ? ` It says: ${withPlaces(text, tags, sources)}` : ' They say nothing about it.';
+  const passages = lines.length ? `\nPassages:\n${lines.join('\n')}` : '';
+  const page = pageLine('documents', asked, shown);
+  report.out.push(`Documents: the helper opened ${opens.join(', ')}.${says}${passages}\n${page}`);
+  const passageCount = `${sources.length} ${noun(sources.length, 'passage')}`;
+  report.said.push(`${ranking.length} listed · ${sent.length} opened · ${passageCount}`);
 }
 
 /** the deal's findings ranked by the query's words, a page of them, each whole */
@@ -147,10 +151,22 @@ const pagesThere = (pages: number) => (pages === 1 ? 'there is 1 page' : `there 
  * says how many there are. Searching everything names the kind the next page is asked for by.
  */
 function listed<T>(heading: string, kind: What, asked: Asked, shown: Page<T>, line: (x: T) => string): string {
-  const of = asked.what === 'all' ? ` of "${kind}"` : '';
-  if (!shown.items.length) return `${heading}: no page ${shown.page}${of}: ${pagesThere(shown.pages)}.`;
-  const next = shown.page < shown.pages ? ` Ask for page ${shown.page + 1}${of} for more.` : '';
-  return `${heading}:\n${shown.items.map(line).join('\n')}\nPage ${shown.page} of ${shown.pages}.${next}`;
+  if (!shown.items.length) return noPage(heading, kind, asked, shown);
+  return `${heading}:\n${shown.items.map(line).join('\n')}\n${pageLine(kind, asked, shown)}`;
+}
+
+/** how a search of everything names a kind, so that the next page is asked for by it */
+const kindOf = (kind: What, asked: Asked) => (asked.what === 'all' ? ` of "${kind}"` : '');
+
+/** which page this is of how many, and the next page to ask for while there is one */
+function pageLine<T>(kind: What, asked: Asked, shown: Page<T>): string {
+  const next = shown.page < shown.pages ? ` Ask for page ${shown.page + 1}${kindOf(kind, asked)} for more.` : '';
+  return `Page ${shown.page} of ${shown.pages}.${next}`;
+}
+
+/** a page past the last: how many pages there are */
+function noPage<T>(heading: string, kind: What, asked: Asked, shown: Page<T>): string {
+  return `${heading}: no page ${shown.page}${kindOf(kind, asked)}: ${pagesThere(shown.pages)}.`;
 }
 
 /**

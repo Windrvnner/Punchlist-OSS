@@ -52,12 +52,12 @@ export interface AgentKit {
    */
   folder(deals: string[], said: string, what: string): Promise<FolderFound>;
   /**
-   * the search helper's reading: the keyword ranking, the fast model's pick, and the documents read on the service;
-   * `skip` are documents per deal it leaves out
+   * the chat's document search as fixed pages: every document of these deals that answers to a word of the query, best
+   * first by the keyword ranking, each blackline's clean draft just before it, the deals taken in turn
    */
-  look(deals: string[], model: string, ask: string, lookFor: string, skip: Record<string, string[]>): Promise<Looked>;
-  /** how many of the deals' documents answer to any word of a query: what "listed" counts */
-  listed(deals: string[], query: string): number;
+  ranking(deals: string[], query: string): Promise<DealDoc[]>;
+  /** the search helper's reading of one page of that ranking, on the service, as it is: no pick, one round */
+  readPage(deals: string[], model: string, ask: string, docs: DealDoc[]): Promise<Looked>;
   /** the words of a text as a search compares them; with `dealId`, the deal's short names given their long form too */
   words(text: string, dealId?: string): Set<string>;
   /** put documents in the store and list them for a prompt; `got` are those really there */

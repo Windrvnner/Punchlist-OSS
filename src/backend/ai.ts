@@ -73,6 +73,7 @@ import { docFamilies } from './related';
 import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
 import { responseHeader } from './qaRow';
+import type { DealDoc, Looked } from './agentKit';
 import {
   RATINGS, riskGroups, keyRisksOf, unratedFindings, type Grouped, type Rating, type RiskGroup,
 } from '../domain/memo';
@@ -990,6 +991,47 @@ export function nodeAi(o: AiOptions) {
     return listOf(reply.read).map(int).filter((n): n is number => n !== null && n >= 1 && n <= list.length).map((n) => list[n - 1]).filter((r, i, all) => all.indexOf(r) === i).slice(0, room);
   }
   /**
+   * The chat's document search as fixed pages (#1102): the keyword ranking as `top` gives it with no room set, the
+   * documents that answer to the most words first and then the core documents, each blackline's clean draft beside it,
+   * across deals in turn as `folderList` takes them.
+   */
+  async function searchRanking(deals: string[], query: string): Promise<DealDoc[]> {
+    const per = await Promise.all(deals.map(async (dealId) => {
+      const order = besideClean(dealId, top(dealId, query, new Set(), Infinity, await coreOf(dealId), true));
+      return order.map((rec) => ({ dealId, rec }));
+    }));
+    return interleave(per);
+  }
+  /**
+   * A ranking with each blackline and its clean draft side by side, the clean draft first, at the place of whichever
+   * of the two ranks higher; each document once. The two are read together, so a page never splits them.
+   */
+  function besideClean(dealId: string, recs: DocRecord[]): DocRecord[] {
+    const pairs = cleanOf(dealId);
+    const all = new Map(o.docs.records(dealId).map((r) => [r.docId, r]));
+    const cleanOfRec = (r: DocRecord) => { const c = pairs.get(r.docId); return c ? all.get(c) : undefined; };
+    const blacklinesOf = new Map<string, DocRecord[]>();
+    for (const r of recs) {
+      const clean = cleanOfRec(r);
+      if (clean) blacklinesOf.set(clean.docId, [...(blacklinesOf.get(clean.docId) ?? []), r]);
+    }
+    const out = new Map<string, DocRecord>();
+    const put = (r: DocRecord) => { if (!out.has(r.docId)) out.set(r.docId, r); };
+    for (const r of recs) {
+      const clean = cleanOfRec(r) ?? r;
+      put(clean);
+      for (const b of blacklinesOf.get(clean.docId) ?? []) put(b);
+      put(r);
+    }
+    return [...out.values()];
+  }
+  /** one page of the chat's document search, read by the helper under a search's budget of calls (`spend`) */
+  function readSearchPage(spend: { left: number; deal?: { left: number } }, deals: string[], model: string, ask: string,
+    docs: DealDoc[]): Promise<Looked> {
+    const shape = '{"text": "what they say, with [n] markers", "sources": [...]}';
+    return budget.run(spend, () => read('search', deals, model, ask, '', {}, shape, undefined, docs));
+  }
+  /**
    * The documents in a folder a person named, in the order to read them for something, across the deals asked
    * about, ranked by code alone: by how many of the words a file answers to; then the deal's core documents, the more
    * important first; then by path; each document's earlier drafts straight after it. No model is asked (#286). A
@@ -1273,8 +1315,9 @@ export function nodeAi(o: AiOptions) {
       ...(o.service.upload ? { keepTranscript: (text: string) => o.service.upload!({ name: `conversation-${Date.now().toString(36)}.txt`, bytes: new TextEncoder().encode(text) }) } : {}),
       ...(o.service.remove ? { drop: (fileId: string) => o.service.remove!(fileId) } : {}),
     } : {}),
-    look: (deals, model, ask, lookFor, skip) => budget.run({ left: o.searchCalls ?? control.limits.searchCalls }, () => read('search', deals, model, ask, lookFor, {}, '{"text": "what they say, with [n] markers", "sources": [...]}', undefined, skip)),
-    listed: (deals, query) => deals.reduce((n, d) => n + [...scores(d, o.docs.records(d), words(query, d)).values()].filter((x) => x > 0).length, 0),
+    ranking: searchRanking,
+    readPage: (deals, model, ask, docs) =>
+      readSearchPage({ left: o.searchCalls ?? control.limits.searchCalls }, deals, model, ask, docs),
     findings: async (d) => (await live<{ title?: string; body?: string[]; status?: string }>('finding', d))?.map((f) => ({ title: String(f.title ?? ''), body: strings(f.body), status: String(f.status ?? 'open') })) ?? null,
     questions: (d) => live('question', d),
     dealName: async (d) => { const r = await o.repo.get('deal', d); return String((r.ok && (r.value?.envelope.data as { name?: string } | undefined)?.name) || 'another deal'); },
@@ -1313,17 +1356,22 @@ export function nodeAi(o: AiOptions) {
    * something answers to it. With `again`, a reply that cannot be used is sent back to the same model with what is
    * wrong with it (`wrong`), to be put right; and only if that fails too, the question goes once to the `escalate` model.
    */
-  async function read(kind: string, deals: string[], model: string, ask: string, lookFor: string, must: Record<string, string[]>, shape: string, again?: { escalate: string; usable: (reply: Record<string, unknown>) => boolean; wrong: string }, skip: Record<string, string[]> = {}): Promise<Result<{ reply: Record<string, unknown>; sent: Sent[] }>> {
+  async function read(
+    kind: string, deals: string[], model: string, ask: string, lookFor: string, must: Record<string, string[]>,
+    shape: string, again?: { escalate: string; usable: (reply: Record<string, unknown>) => boolean; wrong: string },
+    page?: DealDoc[],
+  ): Promise<Result<{ reply: Record<string, unknown>; sent: Sent[] }>> {
     const keys = [...shape.matchAll(/"([a-z]+)":/g)].map((m) => m[1]).concat('need');                // the fields this question asks for
     const sent: Sent[] = []; const add = (dealId: string, recs: DocRecord[]) => { for (const rec of withClean(dealId, recs)) if (!sent.some((s) => s.rec.docId === rec.docId && s.dealId === dealId)) sent.push({ tag: `D${sent.length + 1}`, dealId, rec }); };
-    const share = Math.max(1, Math.floor(width / deals.length)); const core: Record<string, string[]> = {};
+    const core: Record<string, string[]> = {};
     await Promise.all(deals.map(async (d) => { core[d] = await coreOf(d); }));
     try {
-      if (deals.length === 1) add(deals[0], await start(deals[0], lookFor, must[deals[0]] ?? [], width, core[deals[0]], skip[deals[0]]));
-      else {                                                 // across deals: a share of the handful from each deal that has something to say
-        const per = await Promise.all(deals.map(async (d) => ({ d, picked: o.docs.records(d).length ? await pick(d, lookFor, new Set(skip[d]), share, core[d]) : [] })));
-        const all = per.flatMap(({ d, picked }) => (picked ? picked.map((rec, i) => ({ d, rec, n: 1000 - i })) : ((list) => { const s = scores(d, list, words(lookFor, d)); return list.map((rec) => ({ d, rec, n: s.get(rec.docId) ?? 0 })); })(top(d, lookFor, new Set(skip[d]), share, core[d], false)))).sort((a, b) => b.n - a.n).slice(0, width);
-        for (const x of all) add(x.d, [x.rec]);
+      // a page of the chat's document search is read as it is: no pick, and no second round (#1102)
+      if (page) {
+        for (const x of page) add(x.dealId, [x.rec]);
+      } else {
+        // a draft or a reassessment: one deal's documents, what it must have and then the pick (`start`)
+        add(deals[0], await start(deals[0], lookFor, must[deals[0]] ?? [], width, core[deals[0]]));
       }
     } catch (e) { return failure(e, 'The documents could not be read'); }
     if (!sent.length) return ok({ reply: {}, sent });
@@ -1359,12 +1407,14 @@ export function nodeAi(o: AiOptions) {
       }
       if (!reply) return fail({ kind: 'failed', message: UNREAD_REPLY });
       const need = strings(reply.need);
-      if (round > 1 || !need.length) return ok({ reply, sent });
+      if (round > 1 || !need.length || page) return ok({ reply, sent });
       // The second round stays within `width` documents too, however many deals are asked about. Priority: what the
       // question must have (attachments, a finding's own documents) is kept; what the model still needs takes up to
       // half the call in all, shared between deals in turn, best first; the first round's other documents fill the
       // rest, strongest (earliest chosen) first.
-      const have = new Set([...sent.map((s) => s.rec.docId), ...Object.values(skip).flat()]); const half = Math.ceil(width / 2); const room = Math.max(1, Math.ceil(half / deals.length));
+      const have = new Set(sent.map((s) => s.rec.docId));
+      const half = Math.ceil(width / 2);
+      const room = Math.max(1, Math.ceil(half / deals.length));
       const extras: { d: string; recs: DocRecord[] }[] = [];
       try { for (const d of deals) { const extra = (await pick(d, `${lookFor}\nWhat has been read does not settle it. Still needed: ${need.join('; ')}`, have, room, core[d], `${lookFor} ${need.join(' ')}`)) ?? top(d, need.join(' '), have, room, core[d], false); if (extra.length) extras.push({ d, recs: extra }); } }
       catch (e) { return failure(e, 'The documents could not be read'); }
@@ -2789,7 +2839,10 @@ export function nodeAi(o: AiOptions) {
      * handed over again.
      */
     const filled = { left: o.checkSearchCalls ?? L.checkSearchCalls };
-    const filler = chatAgent({ ...agentKit, look: (deals, model, ask, lookFor, skip) => budget.run({ left: o.searchCalls ?? L.searchCalls, deal: filled }, () => read('search', deals, model, ask, lookFor, {}, '{"text": "what they say, with [n] markers", "sources": [...]}', undefined, skip)) }, agentOpts);
+    const fillSpend = { left: o.searchCalls ?? L.searchCalls, deal: filled };
+    const readPage: AgentKit['readPage'] = (deals, model, ask, docs) =>
+      readSearchPage(fillSpend, deals, model, ask, docs);
+    const filler = chatAgent({ ...agentKit, readPage }, agentOpts);
     let filling = true;
     const fill = async () => {
       const open = [...held.values()]; held.clear(); const byId = new Map(o.docs.records(dealId).map((r) => [r.docId, r]));

@@ -114,13 +114,6 @@ export class AgentRun {
     return this.opened.filter((s) => !this.quiet.has(s));
   }
 
-  /** the documents attached to the main session now, by deal: the search helper need not open them again */
-  given(): Record<string, string[]> {
-    const out: Record<string, string[]> = {};
-    for (const x of this.whole) (out[x.dealId] ??= []).push(x.rec.docId);
-    return out;
-  }
-
   /** a new step, shown as being worked on */
   step(s: Omit<ResearchStep, 'done' | 'result'>): ResearchStep {
     const made: ResearchStep = { ...s, result: '', done: false };
