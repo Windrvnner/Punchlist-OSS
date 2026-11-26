@@ -1,6 +1,6 @@
 // Writing into a CSV log: only the lines written into change, in the file's own quoting, line endings and encoding.
 import { describe, it, expect } from 'vitest';
-import { editCsv, csvSafe } from '../../src/domain/csvEdit';
+import { editCsv } from '../../src/domain/csvEdit';
 import { encodeLike } from '../../src/domain/sheets';
 import { decodeText } from '../../src/domain/textEncoding';
 
@@ -47,8 +47,11 @@ describe('a CSV log, awkwardly written', () => {
   it('keeps the quoting of the other fields of a line it writes', () => {
     expect(editCsv('No.,Question,Response\r\n"1","DSCR?",\r\n', [{ kind: 'cell', row: 1, col: 2, value: 'x' }])).toBe('No.,Question,Response\r\n"1","DSCR?",x\r\n');
   });
-  it('writes text Excel would run as a formula with a space in front; a plain number stays', () => {
-    expect(['-5% vs plan', '=HYPERLINK("x")', '@sum', '+ see note', '-5%', '1.20'].map(csvSafe)).toEqual([' -5% vs plan', ' =HYPERLINK("x")', ' @sum', ' + see note', '-5%', '1.20']);
+  it('writes text Excel would run as a formula exactly as given (#1107)', () => {
+    const given = ['-5% vs plan', '=HYPERLINK("x")', '@sum', '+ see note', '-5%'];
+    const steps = given.map((value, i) => ({ kind: 'cell' as const, row: i + 1, col: 2, value }));
+    const out = editCsv('No.,Question,Response\r\n1,Q1,\r\n2,Q2,\r\n3,Q3,\r\n4,Q4,\r\n5,Q5,\r\n', steps);
+    expect(out).toBe('No.,Question,Response\r\n1,Q1,-5% vs plan\r\n2,Q2,"=HYPERLINK(""x"")"\r\n3,Q3,@sum\r\n4,Q4,+ see note\r\n5,Q5,-5%\r\n');
   });
   it('keeps the accents of a Windows-1252 file with a UTF-8 mark in front', () => {
     const before = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode('No.,Question,Response\r\n1,Caf'), 0xe9, ...new TextEncoder().encode('?,\r\n')]);

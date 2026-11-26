@@ -8,6 +8,9 @@ import { editLog } from '../../src/backend/spreadsheets';
 import { nodeQaLogs } from '../../src/backend/qaLogs';
 import { readZip, partText, setPart, writeZip } from '../../src/backend/zipParts';
 import { sha256 } from '../../src/backend/qaLogFolder';
+import { logWrite } from '../../src/domain/logWrite';
+import { suggestMapping } from '../../src/domain/importExport';
+import type { Question } from '../../src/domain/model';
 import { hasMetricFont, hasOffice as has, soffice } from './officePrerequisites';
 
 const lo = libreOfficeConverter({ soffice, profile: fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-edit-test-lo-')) });
@@ -376,6 +379,22 @@ describe.skipIf(!has)('updating a log where it is', () => {
     expect(log.grid[4]).toEqual(['2', 'Who is the EPC contractor?', 'Fabrikam', 'Open']);
     // a save from what was read before someone else's save writes nothing
     expect(await logs.save({ ...at, sheet: 'Lender Q&A', steps, stamp: t.value.stamp })).toEqual({ ok: true, value: { status: 'later' } });
+  }, 60_000);
+  // #1107: a CSV cell is written exactly as given, so what the next update reads back is not a change
+  it('writes a CSV log\'s cells exactly as given and reads them back as unchanged', async () => {
+    const folder = tmp(); const file = 'Lender A Q&A.csv'; const logs = nodeQaLogs({ convert: lo, now: () => new Date(2026, 10, 15, 16, 12) });
+    const given = ['- Agreed', '=x', '@sum', '+ see note', '-5%'];
+    fs.writeFileSync(path.join(folder, file), `No.,Question,Response\r\n${given.map((_, i) => `${i + 1},Question ${i + 1},`).join('\r\n')}\r\n`);
+    const at = { folder, file }; const opts = { sheet: 'Sheet1', headerRow: 1 };
+    const map = suggestMapping(['No.', 'Question', 'Response']);
+    const questions = given.map((response, i) => ({ id: `q${i + 1}`, n: i + 1, text: `Question ${i + 1}`, askedBy: 'Lender A', response }) as unknown as Question);
+    const first = await logs.read(at, opts); if (!first.ok) throw new Error(first.error.message);
+    const plan = logWrite(first.value, map, questions);
+    expect(await logs.save({ ...at, sheet: 'Sheet1', steps: plan.steps, stamp: first.value.stamp })).toMatchObject({ ok: true, value: { status: 'written' } });
+    expect(fs.readFileSync(path.join(folder, file), 'utf8')).toBe(`No.,Question,Response\r\n${given.map((v, i) => `${i + 1},Question ${i + 1},${v}`).join('\r\n')}\r\n`);
+    const second = await logs.read(at, opts); if (!second.ok) throw new Error(second.error.message);
+    expect(second.value.rows.map((r) => r[2])).toEqual(given);
+    expect(logWrite(second.value, map, questions, new Map(Object.entries(plan.sent)))).toMatchObject({ steps: [], updated: 0, answered: 0, kept: [] });
   }, 60_000);
   it('says so when the log is not where it was', async () => {
     const { folder, logs } = setup();
