@@ -311,6 +311,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Say how an ambiguous instruction is being read. Ask about a product decision before it is built.
 - Each thing lives in one place: decisions here; bugs and Build list items (with their designs) as GitHub issues; review notes on pull requests; how the app works in the docs; the detailed contract in code comments and tests; and history in git. There are no Markdown review files or running logs.
 - The README covers what the app is and does, screenshots of the real app, and how to install and use it; developer setup is in docs/development.md.
+- A UI module names what it loads with a plain string and reads `import.meta` only as `import.meta.env`; the UI dependency check refuses any other import path, even one naming a UI module (#848).
 
 ## Deal screen
 
