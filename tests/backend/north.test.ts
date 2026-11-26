@@ -203,8 +203,9 @@ describe('failures', () => {
   });
   it('busy for too long counts as unreachable, so the check carries on later', async () => {
     const { north, svc } = await setUp();
-    for (let i = 0; i < 4; i++) north.faults.push({ path: '/v1/chat', status: 503 });
+    for (const status of [429, 503, 429, 503]) north.faults.push({ path: '/v1/chat', status });
     await expect(svc.complete({ model: 'fast', prompt: 'q' })).rejects.toMatchObject({ code: 'unreachable' });
+    expect(north.seen.filter((s) => s.path === '/v1/chat')).toHaveLength(3);   // one try and two retries (#1110)
   });
   it('an expired token pauses the call; after a new sign-in it carries on', async () => {
     const live = jwt({ sub: 'u1', exp: Math.floor(Date.now() / 1000) + 3600 });

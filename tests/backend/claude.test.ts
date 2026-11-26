@@ -384,4 +384,17 @@ describe('request retries', () => {
     await expect(service.complete(question)).resolves.toBe('ok');
     expect(attempts).toBe(2);
   });
+
+  it('retries a busy service twice by default, then reports it unreachable (#1110)', async () => {
+    let attempts = 0;
+    const service = claudeService({
+      key: 'test',
+      fetch: async () => {
+        attempts++;
+        return new Response(null, { status: 429, headers: { 'retry-after-ms': '1' } });
+      },
+    });
+    await expect(service.complete(question)).rejects.toMatchObject({ code: 'unreachable' });
+    expect(attempts).toBe(3);
+  });
 });
