@@ -387,12 +387,11 @@ export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => 
       : share >= 1 / 3 ? { verdict: 'partly' as const, why: 'It gives some of what the question asks for, not all of it.' }
       : { verdict: 'no' as const, why: 'It does not give what the question asks for.' };
   }),
-  // Stand-in for the model proposing the open question an answer addresses (#1120): the first of the questions whose
-  // text is listed in `__addressed` on the window (screens and tests), else none. The real one is a model's judgment.
+  // Stand-in for the model proposing the open questions an answer addresses (#1120): those whose text is listed in
+  // `__addressed` on the window (screens and tests), else none. The real one is a model's judgment.
   suggestQuestion: (i) => gate(opts, 'suggestQuestion', () => {
     const listed = (globalThis as { __addressed?: string[] }).__addressed ?? [];
-    const at = i.questions.findIndex((q) => listed.includes(q));
-    return at >= 0 ? at : null;
+    return i.questions.flatMap((q, at) => (listed.includes(q) ? [at] : []));
   }),
   // Stand-in for the model's merged response: the first version's sentences, then each of the second's that says something
   // the first does not (fewer than half its telling words already said), so no fact is said twice. The real one rewrites.

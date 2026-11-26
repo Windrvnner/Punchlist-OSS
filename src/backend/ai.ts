@@ -2153,8 +2153,7 @@ export function nodeAi(o: AiOptions) {
     },
     /**
      * Which open question an answer addresses (#1120): the standard model reads the answer and the questions, under
-     * neutral handles, in one call where they fit, else in parts (`inParts`). The earliest question any part names is
-     * the proposal.
+     * neutral handles, in one call where they fit, else in parts (`inParts`). Every question any part names is kept.
      */
     async suggestQuestion(i) {
       try {
@@ -2172,9 +2171,10 @@ export function nodeAi(o: AiOptions) {
           return { got: new Map(at === null ? [] : [[0, at]]) };
         });
         // each entry is keyed by its part's first place, and holds the named place within the part
-        const named = [...done.got].map(([start, at]) => start + at);
-        if (named.length) return ok(Math.min(...named));
-        return done.stopped === undefined ? ok(null) : failure(done.stopped, UNREACHED);
+        const named = [...done.got].map(([start, at]) => start + at).sort((a, b) => a - b);
+        // what the parts that were asked named is kept even when a later part could not be asked
+        if (named.length || done.stopped === undefined) return ok(named);
+        return failure(done.stopped, UNREACHED);
       } catch (e) { return failure(e, UNREACHED); }
     },
     async merge(i) {
