@@ -27,7 +27,7 @@ import { inlineDocuments } from './inlineDocuments';
 import type { Converter } from './convert';
 import { storable } from './claude';
 import { SERVICE } from '../control';
-import { cutOff as cutOffError, limitsOf, replyLimitIn, saysTooLong, tooLong } from './limits';
+import { cutOff as cutOffError, limitsOf, saysTooLong, tooLong } from './limits';
 import { retryDroppedRequest } from './requestRetry';
 
 export interface OpenAiOptions {
@@ -76,9 +76,6 @@ export function openAiService(o: OpenAiOptions): ModelService {
   const base = o.base.replace(/\/+$/, ''); const go = o.fetch ?? fetch; const timeout = o.timeoutMs ?? 10 * 60_000;
   // room for a reply, and for a request (control: limits.outputTokens, limits.inputTokens): see claude.ts
   const { output: MAX_TOKENS, input: MAX_INPUT } = limitsOf();
-  // a model that refused MAX_TOKENS as more than it allows, with what it said it allows (#1079)
-  const held = new Map<string, number>();
-  const replyLimit = (model: string) => held.get(model) ?? MAX_TOKENS;
   const tier = (m: string) => (m === 'fast' || m === 'standard' || m === 'thorough' ? o.models[m] : m);
   const inline = o.route === 'azure' ? inlineDocuments(o.convert) : undefined;
   const maxRetries = o.maxRetries ?? 2;
@@ -151,24 +148,7 @@ export function openAiService(o: OpenAiOptions): ModelService {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
   }).then((r) => parseReply<T>(r));
   const declined = () => new Error(`${SERVICE} declined to answer this`);
-  // see claude.ts
-  const cutOff = (model: string, text?: string) =>
-    cutOffError(`${SERVICE}'s reply was cut off at ${replyLimit(model)} tokens`, text);
-  /**
-   * one call with the model's reply limit; refused as more than the model allows, asked once more at what the server
-   * said it allows, which is kept for that model (#1079)
-   */
-  async function withReplyLimit<T>(model: string, ask: (max: number) => Promise<T>): Promise<T> {
-    try {
-      return await ask(replyLimit(model));
-    } catch (e) {
-      const x = e as { status?: number; message?: string };
-      const allowed = replyLimitIn(x.status, x.message ?? '', replyLimit(model));
-      if (allowed === undefined) throw e;
-      held.set(model, allowed);
-      return ask(allowed);
-    }
-  }
+  const cutOff = (text?: string) => cutOffError(`${SERVICE}'s reply was cut off at ${MAX_TOKENS} tokens`, text);   // see claude.ts
   // a message's documents and question, as each API writes them
   const inputParts = (files: string[] | undefined, text: string) => {
     const documents = inline?.parts(files, (file) => file.type === 'application/pdf'
@@ -195,15 +175,10 @@ export function openAiService(o: OpenAiOptions): ModelService {
 
   /** one call to the Responses API: its id, the reply's text, the tools it called and the tokens the conversation now holds */
   async function respond(payload: Record<string, unknown>): Promise<{ id: string; text: string; calls: Called[]; tokens?: number }> {
-    const model = String(payload.model);
-    const r = await withReplyLimit(model,
-      (max) => post<Responded>('/responses', { ...payload, max_output_tokens: max }));
+    const r = await post<Responded>('/responses', { ...payload, max_output_tokens: MAX_TOKENS });
     if (r.status === 'failed') throw new Error(`${SERVICE} did not finish the reply${r.error?.message ? `: ${r.error.message}` : ''}`);
     const out = r.output ?? []; const parts = out.flatMap((i) => (i.type === 'message' ? i.content ?? [] : []));
-    if (r.status === 'incomplete') {
-      if (r.incomplete_details?.reason === 'content_filter') throw declined();
-      throw cutOff(model, parts.map((c) => (c.type === 'output_text' ? c.text ?? '' : '')).join(''));
-    }
+    if (r.status === 'incomplete') throw r.incomplete_details?.reason === 'content_filter' ? declined() : cutOff(parts.map((c) => (c.type === 'output_text' ? c.text ?? '' : '')).join(''));
     if (parts.some((c) => c.type === 'refusal')) throw declined();
     const calls = out.flatMap((i) => (i.type === 'function_call' && i.call_id ? [{ id: i.call_id, name: i.name ?? '', args: argsOf(i.arguments) }] : []));
     const u = r.usage; const tokens = typeof u?.input_tokens === 'number' ? u.input_tokens + (u.output_tokens ?? 0) : undefined;
@@ -211,17 +186,10 @@ export function openAiService(o: OpenAiOptions): ModelService {
   }
   /** one call to chat completions: the reply's text, the tools it called, the message to keep and the tokens it holds */
   async function chat(payload: Record<string, unknown>): Promise<{ text: string; calls: Called[]; message: ChatMessage; tokens?: number }> {
-    type Chatted = {
-      choices?: { message?: ChatMessage & { refusal?: string | null }; finish_reason?: string }[];
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
-    };
-    const model = String(payload.model);
-    const r = await withReplyLimit(model, (max) => post<Chatted>('/chat/completions', { ...payload, max_tokens: max }));
+    const r = await post<{ choices?: { message?: ChatMessage & { refusal?: string | null }; finish_reason?: string }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } }>('/chat/completions', { ...payload, max_tokens: MAX_TOKENS });
     const c = r.choices?.[0]; if (!c) throw new Error(`${SERVICE} sent no answer`);
     if (c.message?.refusal || c.finish_reason === 'content_filter') throw declined();
-    if (c.finish_reason === 'length') {
-      throw cutOff(model, typeof c.message?.content === 'string' ? c.message.content : '');
-    }
+    if (c.finish_reason === 'length') throw cutOff(typeof c.message?.content === 'string' ? c.message.content : '');
     const calls = (c.message?.tool_calls ?? []).map((x) => ({ id: x.id, name: x.function?.name ?? '', args: argsOf(x.function?.arguments) }));
     const text = typeof c.message?.content === 'string' ? c.message.content : '';
     const u = r.usage; const tokens = typeof u?.prompt_tokens === 'number' ? u.prompt_tokens + (u.completion_tokens ?? 0) : undefined;
@@ -236,7 +204,7 @@ export function openAiService(o: OpenAiOptions): ModelService {
         throw Object.assign(new Error(`${SERVICE} said ${r.status}`), { status: r.status });
       }
     },
-    outputLimit: (m: string) => replyLimit(tier(m)),
+    outputLimit: () => MAX_TOKENS,
     inputLimit: () => MAX_INPUT,
     async whoami() { if (!o.who) throw new Error('this server does not say who is signed in'); return { name: o.who }; },
     async models() {

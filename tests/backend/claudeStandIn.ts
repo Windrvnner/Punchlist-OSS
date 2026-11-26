@@ -15,10 +15,6 @@ interface Options {
   replies?: Reply[];
   answer?: (seen: SeenTurn) => Reply;
   noTools?: boolean;
-  /** what the Models API says each model allows, by id; a model not named here is not found (404) */
-  limits?: Record<string, { max_tokens: number | null; max_input_tokens: number | null }>;
-  /** how many lookups of a model's limits fail (500) before the Models API answers */
-  limitsDown?: number;
 }
 
 type Message = Anthropic.MessageParam;
@@ -115,17 +111,6 @@ async function fileResponse(
   return json(error('not_found_error', path), 404);
 }
 
-/** one model as the Models API describes it: what it allows, a failure while `limitsDown` lasts, or not found */
-function modelResponse(id: string, options: Options): Response {
-  if ((options.limitsDown ?? 0) > 0) {
-    options.limitsDown! -= 1;
-    return json(error('api_error', 'down'), 500);
-  }
-  const limits = options.limits?.[id];
-  if (!limits) return json(error('not_found_error', id), 404);
-  return json({ type: 'model', id, display_name: id, created_at: CREATED_AT, ...limits });
-}
-
 /** A file store and the portion of the Messages and Models APIs used by the connector. */
 export function fakeApi(script: Reply[] | Options = []) {
   const options = Array.isArray(script) ? { replies: script } : script;
@@ -148,8 +133,6 @@ export function fakeApi(script: Reply[] | Options = []) {
       const model = { type: 'model', id, display_name: 'Claude Haiku 5.5', created_at: CREATED_AT };
       return json({ data: [model], has_more: false, first_id: id, last_id: id });
     }
-    const asked = /^\/v1\/models\/(.+)$/.exec(path);
-    if (asked) return modelResponse(decodeURIComponent(asked[1]), options);
     return fileResponse(request, path, files, () => `file_${++nextFile}`);
   };
   return { fetch, files, sent };
