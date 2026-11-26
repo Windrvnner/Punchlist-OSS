@@ -1,18 +1,26 @@
 /**
  * The words a document uses most, for finding it by a search of words. No model is involved: the text is counted on
- * this PC, and the same file always gives the same list. Words every sentence has are left out, and so are numbers.
+ * this PC, and the same file always gives the same list. Words every sentence has are left out; numbers and words of
+ * any length are kept, split as the word index splits them (#1147).
  */
 import { control } from '../control';
 
-const COMMON = new Set(control.lists.indexFiller.map((w) => w.toLowerCase()));   // the control file's list, matched against words in lower case
+/** the control file's filler words, in lower case: the words every sentence has */
+const INDEX_FILLER = new Set(control.lists.indexFiller.map((w) => w.toLowerCase()));
 
-/** every word of some text that could be searched for: lower case, three letters or more in any alphabet, not a common word (the list is English), not a number */
-export function wordsIn(text: string): string[] {
-  return (text.toLowerCase().match(/\p{L}[\p{L}'’-]*\p{L}/gu) ?? []).map((w) => w.replace(/[’']s$/, '').replace(/[’']/g, '')).filter((w) => w.length >= 3 && !COMMON.has(w));
+/**
+ * A text's words as the word index keeps them, in order: split by `tokens`, filler words left out, a plural and its
+ * singular one word. No word, letter or number is left out for its length (#1025, #1147).
+ */
+export function indexWords(text: string, filler = INDEX_FILLER): string[] {
+  return tokens(text).filter((w) => !filler.has(w)).map(fold);
 }
-/** the `n` most used of them, most used first; words used equally often in the order of the alphabet, so the list never depends on chance */
+/**
+ * The `n` most used of them, plurals folded, most used first; words used equally often in the order of the
+ * alphabet, so the list never depends on chance.
+ */
 export function topWords(text: string, n = 30): string[] {
-  const count = new Map<string, number>(); for (const w of wordsIn(text)) count.set(w, (count.get(w) ?? 0) + 1);
+  const count = new Map<string, number>(); for (const w of indexWords(text)) count.set(w, (count.get(w) ?? 0) + 1);
   return [...count].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, n).map(([w]) => w);
 }
 

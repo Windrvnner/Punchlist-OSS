@@ -59,7 +59,7 @@ import type { LineRead } from '../domain/listRead';
 import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK } from './limits';
 import { UNREAD_REPLY, UNUSABLE_REPLY, UNREACHED, CUT_ON_IT, CUT_BEFORE_IT, UNUSABLE_ON_IT } from './limits';
 import { inParts, partSize } from './parts';
-import { tokens, fold } from './words';
+import { tokens, fold, indexWords } from './words';
 import type { WordIndex } from './wordIndex';
 import { families, roomPath } from './families';
 import { foldersOf, matchFolders, inside } from './folderList';
@@ -524,16 +524,15 @@ export function nodeAi(o: AiOptions) {
   /** each deal's short names, as the fast model saw them in its file paths (see `coreOf`), read from its latest core line by `lines` */
   const shorts = new Map<string, { from: unknown; map: Map<string, string[]> }>();
   /**
-   * The words of a text as they are compared: split wherever a name is split, plurals folded, common words left
-   * out, and, with `dealId`, every short name the deal's files use given its long form as well.
+   * The words of a text as they are compared: the word index's split (`indexWords`), with the search's filler words
+   * left out, and, with `dealId`, every short name the deal's files use given its long form as well.
    */
   const words = (t: string, dealId?: string): Set<string> => {
     const long = dealId ? shorts.get(dealId)?.map : undefined;
     const out = new Set<string>();
-    for (const w of tokens(t)) {
-      if (STOP.has(w)) continue;
-      out.add(fold(w));
-      for (const x of long?.get(fold(w)) ?? []) out.add(x);
+    for (const w of indexWords(t, STOP)) {
+      out.add(w);
+      for (const x of long?.get(w) ?? []) out.add(x);
     }
     return out;
   };

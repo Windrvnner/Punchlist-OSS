@@ -6,7 +6,7 @@ import { PassThrough } from 'node:stream';
 import { spawnSync } from 'node:child_process';
 import { sheetPart, type Sheet } from '../../src/domain/sheets';
 import { nodeDocuments, docIdFor, hashBytes } from '../../src/backend/documents';
-import { roomPath } from '../../src/backend/families';
+import { roomPath, ATTACHED } from '../../src/backend/families';
 import {
   holdFolder, libreOfficeConverter, shortExt, pdfPages, pdfLook, readChangeList, type Converter,
 } from '../../src/backend/convert';
@@ -46,6 +46,12 @@ const NOTES = new Uint8Array(fs.readFileSync(path.join(__dirname, 'fixtures', 'N
 /** a financial model: what the converter gives for it (a cover and a debt sheet), and stand-in bytes for the file */
 const MODEL_SHEETS: Sheet[] = [{ name: 'Cover', grid: [['Cover']] }, { name: 'Debt', grid: Array.from({ length: 40 }, (_, r) => ['Line ' + (r + 1), String(r + 1), String((r + 1) * 1.5)]) }];
 const MODEL = new TextEncoder().encode('PK\u0003\u0004 stands in for Model v12.xlsx');
+/**
+ * The model's most-used words: "line" in every row, then its numbers (#1147), "5" from every half figure such as "1.5";
+ * numbers used equally often come in the order of the alphabet. "cover" and "debt", used twice, fall outside the 30.
+ */
+const MODEL_WORDS = ['line', '5', '1', '10', '12', '13', '15', '16', '18', '19', '21', '22', '24', '25', '27', '28',
+  '3', '30', '31', '33', '34', '36', '37', '39', '4', '40', '6', '7', '9', '11'];
 
 /** a data room with five documents, two system files that are not documents, and an empty one */
 function room() {
@@ -68,6 +74,17 @@ function pc(root: string, name: string, svc = new StandInService(), o: { limit?:
 }
 const folder = (p: string) => ({ path: p, label: 'Data room', files: 0, size: '', indexed: 0, reviewed: 0 });
 const val = <T,>(r: { ok: boolean; value?: T }) => { expect(r.ok).toBe(true); return r.value as T; };
+/** a line this PC saved about a document under older rules, with the words they gave */
+const olderLine = (vdr: string, bytes: Uint8Array, rel: string, words: string[], pages?: number) => ({
+  v: 1, pc: 'office', at: '2026-11-01T00:00:00.000Z', docId: idOf(bytes), hash: hashBytes(bytes),
+  name: path.basename(rel), folder: vdr, rel, size: bytes.length, ...(pages !== undefined ? { pages } : {}), words,
+});
+/** the shared log of the PC called office, holding only these lines */
+const keepLines = (root: string, lines: object[]) => {
+  fs.mkdirSync(path.join(root, 'shared'), { recursive: true });
+  const text = lines.map((l) => `${JSON.stringify(l)}\n`).join('');
+  fs.writeFileSync(path.join(root, 'shared', 'docs-office-d1.jsonl'), text);
+};
 const indexAll = async (x: ReturnType<typeof pc>, vdr: string, deal = 'd1') => { val(await x.docs.index(deal, [folder(vdr)])); await x.docs.settled(deal); return val(await x.docs.poll(deal)); };
 
 describe('documents on real folders', () => {
@@ -84,6 +101,74 @@ describe('documents on real folders', () => {
     expect(fs.readdirSync(path.join(root, 'shared')).filter((f) => /^words\d*-/.test(f))).toEqual([]);
     // a second run on the same PC reads nothing again: the index already has every document
     const before = a.converted.length; await indexAll(a, vdr); expect(a.converted.length).toBe(before);
+  });
+  it('saves most-used words again when it rebuilds its index, replacing words from older rules (#1147)', async () => {
+    const { root, vdr } = room();
+    // this PC recorded the agreement under older rules, with no numbers among its words, and has no index of it now
+    const stale = olderLine(vdr, FA, '01 Legal/Credit Agreement.pdf', ['agreement', 'credit'], 3);
+    // and a spreadsheet that the converter cannot read today: its saved words are not replaced by none
+    const BUDGET = new TextEncoder().encode('PK\u0003\u0004 stands in for Budget.xlsx');
+    put(vdr, 'Budget.xlsx', BUDGET);
+    keepLines(root, [stale, olderLine(vdr, BUDGET, 'Budget.xlsx', ['budget', 'revenue'])]);
+    const a = pc(root, 'office', undefined, { index: true });
+    expect(a.docs.records('d1').find((r) => r.docId === idOf(FA))?.words).toEqual(['agreement', 'credit']);
+    await indexAll(a, vdr);
+    const reread = pc(root, 'office', undefined, { index: true }).docs.records('d1');
+    expect(reread.find((r) => r.docId === idOf(FA))?.words).toEqual(['agreement', 'credit', '1', '2', '3']);
+    expect(reread.find((r) => r.docId === idOf(BUDGET))?.words).toEqual(['budget', 'revenue']);
+  });
+  it('reads again a PDF, a Word file and a sheet indexed under older rules and saves their words (#1147)', async () => {
+    const { root, vdr } = room();
+    const older: [Uint8Array, string, string[], number?][] = [
+      [FA, '01 Legal/Credit Agreement.pdf', ['agreement', 'credit'], 3],
+      [NOTES, '03 Financial/Notes.docx', ['notes', 'three', 'two']],
+      [MODEL, '03 Financial/Model v12.xlsx', ['line', 'cover', 'debt']],
+    ];
+    keepLines(root, older.map(([bytes, rel, words, pages]) => olderLine(vdr, bytes, rel, words, pages)));
+    // this PC's index of them, as the version before kept it
+    const indexed = older.map(([bytes]) => JSON.stringify({ d: idOf(bytes), n: 1, t: '', w: 'agreement:1' }));
+    fs.mkdirSync(path.join(root, 'local-office'));
+    fs.writeFileSync(path.join(root, 'local-office', 'words2-d1.jsonl'), `${indexed.join('\n')}\n`);
+    await indexAll(pc(root, 'office', undefined, { index: true }), vdr);
+    const reread = pc(root, 'office', undefined, { index: true }).docs.records('d1');
+    const wordsOf = (bytes: Uint8Array) => reread.find((r) => r.docId === idOf(bytes))?.words;
+    expect(wordsOf(FA)).toEqual(['agreement', 'credit', '1', '2', '3']);
+    expect(wordsOf(NOTES)).toEqual(['note', 'three', 'two']);
+    expect(wordsOf(MODEL)).toEqual(MODEL_WORDS);
+  });
+  it('reads again a PDF and a sheet attached in the app that its index under older rules held (#1147)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Grid.pdf', pdf('grid'));   // the sheet is attached only, in no folder
+    const TERMS = pdf('term sheet', 2);
+    const attached: [Uint8Array, string, string[], number?][] = [
+      [TERMS, `d1/office/${idOf(TERMS)}.pdf`, ['sheet', 'term'], 2],
+      [MODEL, `d1/office/${idOf(MODEL)}.xlsx`, ['line', 'cover', 'debt']],
+    ];
+    for (const [bytes, rel] of attached) put(path.join(root, 'shared', 'attachments'), rel, bytes);
+    keepLines(root, attached.map(([bytes, rel, words, pages]) => olderLine(ATTACHED, bytes, rel, words, pages)));
+    const indexed = attached.map(([bytes]) => JSON.stringify({ d: idOf(bytes), n: 1, t: '', w: 'sheet:1' }));
+    fs.mkdirSync(path.join(root, 'local-office'));
+    fs.writeFileSync(path.join(root, 'local-office', 'words2-d1.jsonl'), `${indexed.join('\n')}\n`);
+    await indexAll(pc(root, 'office', undefined, { index: true }), vdr);
+    const ix = wordIndex(nodeFolder(path.join(root, 'local-office')));
+    expect(attached.map(([bytes]) => ix.has('d1', idOf(bytes)))).toEqual([true, true]);
+    const reread = pc(root, 'office', undefined, { index: true }).docs.records('d1');
+    const wordsOf = (bytes: Uint8Array) => reread.find((r) => r.docId === idOf(bytes))?.words;
+    expect(wordsOf(TERMS)).toEqual(['sheet', 'term', '1', '2']);
+    expect(wordsOf(MODEL)).toEqual(MODEL_WORDS);
+  });
+  it('keeps the numbers in a spreadsheet\'s cells in its words and this PC\'s index (#1147)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Rates.csv', 'Maturity,2027\nMargin,1.25\n');
+    const a = pc(root, 'office', undefined, { index: true });
+    await indexAll(a, vdr);
+    const rates = a.docs.records('d1').find((r) => r.name === 'Rates.csv')!;
+    expect(rates.words).toContain('2027');
+    const ix = wordIndex(a.local);
+    const score = ix.score('d1', new Set(['2027']), [{ docId: rates.docId, named: new Set<string>() }]);
+    expect(score.get(rates.docId)).toBeGreaterThan(0);
   });
   it('a folder taken off the deal stops feeding checks and questions, and its documents still open', async () => {
     const { root, vdr } = room(); const extra = path.join(root, 'extra'); put(extra, 'Side Letter.pdf', pdf('side letter'));
@@ -111,11 +196,18 @@ describe('documents on real folders', () => {
     expect(p.log).toEqual(['Indexed 5 files']); expect(a.done).toEqual(['d1']);
     const recs = a.docs.records('d1'); const by = (n: string) => a.docs.records('d1').find((r) => r.name === n)!;
     expect(recs.map((r) => r.name).sort()).toEqual(['Credit Agreement.pdf', 'Energy Yield Report.pdf', 'Model v12.xlsx', 'Notes.docx', 'Shareholders Agreement.pdf']);
-    expect(by('Credit Agreement.pdf')).toEqual({ docId: idOf(FA), hash: hashBytes(FA), name: 'Credit Agreement.pdf', folder: vdr, rel: '01 Legal/Credit Agreement.pdf', size: FA.length, pages: 3, words: ['agreement', 'credit'], seen: expect.any(String) });
+    expect(by('Credit Agreement.pdf')).toEqual({
+      docId: idOf(FA), hash: hashBytes(FA), name: 'Credit Agreement.pdf', folder: vdr,
+      rel: '01 Legal/Credit Agreement.pdf', size: FA.length, pages: 3,
+      words: ['agreement', 'credit', '1', '2', '3'], seen: expect.any(String),
+    });
     expect([by('Energy Yield Report.pdf').pages, by('Notes.docx').pages, by('Model v12.xlsx').pages]).toEqual([2, undefined, undefined]);   // a spreadsheet has cells, not pages; a Word file has none until it is first converted
-    expect(by('Notes.docx').words).toEqual(['notes', 'three', 'two']); expect(a.converted).toEqual([]);                                     // its words were read straight from the file
-    // a Word file's words come from the PDF made of it; a spreadsheet's from its sheet names and the text in its cells, not its numbers
-    expect([by('Energy Yield Report.pdf').words, by('Notes.docx').words, by('Model v12.xlsx').words]).toEqual([['energy', 'yield'], ['notes', 'three', 'two'], ['line', 'cover', 'debt']]);
+    expect(by('Notes.docx').words).toEqual(['note', 'three', 'two']);
+    expect(a.converted).toEqual([]);   // its words were read straight from the file
+    // a Word file's words come from the PDF made of it; a spreadsheet's from its sheet names and its cells (#1147)
+    expect(by('Energy Yield Report.pdf').words).toEqual(['energy', 'yield', '1', '2']);
+    expect(by('Notes.docx').words).toEqual(['note', 'three', 'two']);
+    expect(by('Model v12.xlsx').words).toEqual(MODEL_WORDS);
     expect(a.svc.uploads).toBe(0); expect(a.svc.calls.length).toBe(0); expect(val(await a.docs.cached())).toEqual([]);
     expect(a.converted).toEqual([]); expect(a.work()).toEqual([]);                                                                  // nothing converted, and nothing kept
     // again: nothing is recorded or converted twice
@@ -128,7 +220,9 @@ describe('documents on real folders', () => {
     const bad = await a.docs.index('d1', [folder(path.join(root, 'nowhere'))]); expect(!bad.ok && bad.error.kind).toBe('notFound');
     // what the model later says a document is, is kept once
     a.docs.describe('d1', idOf(FA), { summary: 'The senior credit agreement.', keywords: ['loan', 'facility'] }); a.docs.describe('d1', idOf(FA), { summary: 'Something else.', keywords: [] }); a.docs.describe('d1', 'doc_000000000000000000000000', { summary: 'No such document.', keywords: [] });
-    expect(by('Credit Agreement.pdf')).toMatchObject({ summary: 'The senior credit agreement.', keywords: ['loan', 'facility'], words: ['agreement', 'credit'] }); expect(lines()).toBe(before + 2);                                    // the Word file's pages, and the summary
+    const described = { summary: 'The senior credit agreement.', keywords: ['loan', 'facility'] };
+    expect(by('Credit Agreement.pdf')).toMatchObject({ ...described, words: ['agreement', 'credit', '1', '2', '3'] });
+    expect(lines()).toBe(before + 2);   // the Word file's pages, and the summary
     // a failed try to describe a document is counted where every PC sees it, and forgotten once it has a summary
     a.docs.undescribed('d1', idOf(EYR)); a.docs.undescribed('d1', idOf(EYR)); a.docs.undescribed('d1', idOf(FA)); a.docs.undescribed('d1', 'doc_000000000000000000000000');
     expect(by('Energy Yield Report.pdf').undescribed).toMatchObject({ tries: 2 }); expect(by('Credit Agreement.pdf').undescribed).toBeUndefined(); expect(lines()).toBe(before + 4);
@@ -240,7 +334,9 @@ describe('documents on real folders', () => {
     // a document another copy of the app recorded before words were kept: indexing here adds them, once
     const OLD = pdf('interconnection agreement', 2); put(vdr, 'Grid.pdf', OLD); const file = path.join(root, 'shared', 'docs-older-d1.jsonl');
     fs.appendFileSync(file, JSON.stringify({ v: 1, pc: 'older', at: '2026-11-01T00:00:00.000Z', docId: idOf(OLD), hash: hashBytes(OLD), name: 'Grid.pdf', folder: vdr, rel: 'Grid.pdf', size: OLD.length, pages: 2 }) + '\n');
-    expect(by('Grid.pdf').words).toBeUndefined(); await indexAll(a, vdr); expect(by('Grid.pdf')).toMatchObject({ pages: 2, words: ['agreement', 'interconnection'] });
+    expect(by('Grid.pdf').words).toBeUndefined();
+    await indexAll(a, vdr);
+    expect(by('Grid.pdf')).toMatchObject({ pages: 2, words: ['agreement', 'interconnection', '1', '2'] });
     const mine = () => fs.readFileSync(path.join(root, 'shared', 'docs-office-d1.jsonl'), 'utf8').trim().split('\n').length; const n = mine(); await indexAll(a, vdr); expect(mine()).toBe(n);
   });
 
@@ -261,7 +357,9 @@ describe('documents on real folders', () => {
     const root = tmp(); const vdr = path.join(root, 'vdr'); put(vdr, 'Notes.docx', NOTES);
     const a = pc(root, 'office', new StandInService(), { convert: libreOfficeConverter({ soffice }) });
     const p = await indexAll(a, vdr);
-    expect(p.log).toEqual(['Indexed 1 file']); expect(a.docs.records('d1')[0].pages).toBeUndefined(); expect(a.docs.records('d1')[0].words).toEqual(['notes', 'three', 'two']);
+    expect(p.log).toEqual(['Indexed 1 file']);
+    expect(a.docs.records('d1')[0].pages).toBeUndefined();
+    expect(a.docs.records('d1')[0].words).toEqual(['note', 'three', 'two']);
     const page = val(await a.docs.page('d1', { doc: 'Notes.docx', docId: idOf(NOTES) }, 'p. 2')); expect(page.kind === 'pdf' && page.page).toBe(2);
     expect(a.docs.records('d1')[0]).toMatchObject({ name: 'Notes.docx', pages: 3, via: 'libreoffice' });                                    // converted when first opened, and its pages counted then
     const shown = a.docs.fileFor((page as { url: string }).url.replace('punchlist-doc://', ''))!; expect(await pdfPages(fs.readFileSync(shown))).toBe(3);
@@ -461,12 +559,18 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     // a folder that reads as empty is taken as unreadable: nothing goes
     const hidden = path.join(root, 'vdr-hidden'); fs.renameSync(vdr, hidden); fs.mkdirSync(vdr); await indexAll(a, vdr); expect(names(a).length).toBe(4); fs.rmdirSync(vdr); fs.renameSync(hidden, vdr);
     // the report is put back: it is a document of the deal again, with what was known of it
-    put(vdr, '02 Technical/Energy Yield Report.pdf', EYR); await indexAll(a, vdr); expect(names(a)).toContain('Energy Yield Report.pdf'); expect(a.docs.records('d1').find((r) => r.docId === idOf(EYR))).toMatchObject({ pages: 2, words: ['energy', 'yield'] });
+    put(vdr, '02 Technical/Energy Yield Report.pdf', EYR);
+    await indexAll(a, vdr);
+    expect(names(a)).toContain('Energy Yield Report.pdf');
+    const yieldReport = a.docs.records('d1').find((r) => r.docId === idOf(EYR));
+    expect(yieldReport).toMatchObject({ pages: 2, words: ['energy', 'yield', '1', '2'] });
   });
 
   it('a second PC reads what the first recorded, converts nothing again, and keeps the first summary if both wrote one', async () => {
     const { root, vdr } = room(); const a = pc(root, 'office'), b = pc(root, 'home'); await indexAll(a, vdr); a.docs.describe('d1', idOf(FA), { summary: 'office says: Credit Agreement.pdf', keywords: ['facility'] });
-    expect(b.docs.records('d1').find((r) => r.name === 'Credit Agreement.pdf')).toMatchObject({ summary: 'office says: Credit Agreement.pdf', words: ['agreement', 'credit'] });
+    const readThere = b.docs.records('d1').find((r) => r.name === 'Credit Agreement.pdf');
+    const creditWords = ['agreement', 'credit', '1', '2', '3'];
+    expect(readThere).toMatchObject({ summary: 'office says: Credit Agreement.pdf', words: creditWords });
     await indexAll(b, vdr);
     const homeLines = () => fs.readFileSync(path.join(root, 'shared', 'docs-home-d1.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((l) => l.read === undefined);   // and one line saying it read the folder
     expect(b.converted).toEqual([]); expect(homeLines().length).toBe(5); expect(homeLines().every((l) => l.rel && !l.summary)).toBe(true);          // it says only that it sees the same five files; nothing is worked out again
@@ -677,7 +781,10 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     // moved and renamed
     fs.mkdirSync(path.join(vdr, '09 Superseded')); fs.renameSync(path.join(vdr, '01 Legal/Credit Agreement.pdf'), path.join(vdr, '09 Superseded/CA (signed).pdf'));
     expect(fileOf(val(await a.docs.page('d1', ref, 'p. 2')))).toBe(path.join(vdr, '09 Superseded/CA (signed).pdf'));
-    expect(a.docs.records('d1').find((r) => r.docId === id)).toMatchObject({ rel: '09 Superseded/CA (signed).pdf', name: 'CA (signed).pdf', pages: 3, words: ['agreement', 'credit'], summary: 'office says: Credit Agreement.pdf' });
+    expect(a.docs.records('d1').find((r) => r.docId === id)).toMatchObject({
+      rel: '09 Superseded/CA (signed).pdf', name: 'CA (signed).pdf', pages: 3,
+      words: ['agreement', 'credit', '1', '2', '3'], summary: 'office says: Credit Agreement.pdf',
+    });
     // a new draft saved over it is a different document: the citation does not quietly show it
     fs.writeFileSync(path.join(vdr, '09 Superseded/CA (signed).pdf'), pdf('credit agreement, amended', 4));
     const gone = await a.docs.page('d1', ref, 'p. 2'); expect(!gone.ok && gone.error).toEqual({ kind: 'notFound', message: 'Credit Agreement.pdf could not be found in the deal’s folders' });
