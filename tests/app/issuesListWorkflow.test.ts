@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { CreateDeal } from '../../src/app/commands/deals';
 import { DeleteFinding, SetFindingStatus } from '../../src/app/commands/findings';
 import { ImportIssuesList } from '../../src/app/commands/issuesList';
-import { readIssuesList, reviewIssuesList } from '../../src/app/issuesList';
+import { readIssuesList, readPastedIssuesList, reviewIssuesList } from '../../src/app/issuesList';
 import { dealFindings } from '../../src/app/state';
 import { WORKSTREAMS } from '../../src/domain/model';
 import { ok } from '../../src/domain/result';
@@ -153,4 +153,16 @@ it('preserves the explicit model join for an attached name with surrounding spac
     )));
     expect(marked.map(({ id }) => id)).toEqual([expected[index]]);
   }
+});
+
+it('reads a pasted list as a text file holding exactly the pasted words', async () => {
+  const { store, dealId } = await seedDeal();
+  const attach = vi.fn<DocumentService['attach']>(async () => ok(DOC));
+  store.services.docs.attach = attach;
+  store.services.ai.issuesList = vi.fn(proposedIssues);
+  const text = '1. Change of control\n2. Fees letter';
+  val((await readPastedIssuesList(store, dealId, text))!);
+  expect(attach).toHaveBeenCalledExactlyOnceWith(dealId, {
+    name: 'Pasted issues list.txt', bytes: new TextEncoder().encode(text),
+  });
 });

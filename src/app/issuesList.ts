@@ -32,6 +32,13 @@ export async function readIssuesList(
   return read.ok ? ok({ doc, points: read.value.points }) : read;
 }
 
+/** A list pasted as text, read as a text file of its own (the way a file chosen is): the file's words are the paste. */
+export function readPastedIssuesList(store: Store, dealId: string, text: string, stillCurrent = () => true) {
+  const bytes = new TextEncoder().encode(text);
+  const file = { name: 'Pasted issues list.txt', arrayBuffer: async () => bytes.buffer as ArrayBuffer };
+  return readIssuesList(store, dealId, file, stillCurrent);
+}
+
 /** The preview uses ImportIssuesList's join rules, with the model's matches treated as proposals. */
 export function reviewIssuesList(state: State, dealId: string, list: ReadIssuesList, kept: ReadonlySet<number>) {
   const { doc, points } = list;
