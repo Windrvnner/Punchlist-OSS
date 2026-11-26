@@ -72,3 +72,40 @@ describe('a party corrected in the app, beside a question still under the old na
     expect(matchRows({ rows }, withParty, [q('a', 1, 'Provide the model.', 'Lender A'), q('b', 2, 'Provide the model.', 'Lendr A')], sent)).toEqual(new Map([['b', 0], ['a', 1]]));
   });
 });
+
+describe('the same lookup as the import (#1080)', () => {
+  it('keeps each question\'s own row in a log numbered its own way ("7.", "3."): no two responses swap', () => {
+    const rows = [['7.', 'Same words'], ['3.', 'Same words']];
+    const asked = [q('a', 3, 'Same words'), q('b', 7, 'Same words')];
+    expect(matchRows({ rows }, mapping, asked)).toEqual(new Map([['b', 0], ['a', 1]]));
+  });
+  it('gives a question its sender\'s row before a row naming no one under its number', () => {
+    const withParty = { ...mapping, askedBy: 2 } as Mapping;
+    const rows = [['9', 'X', 'Lender A'], ['5', 'X', '']];
+    expect(matchRows({ rows }, withParty, [q('q5', 5, 'X', 'Lender A')])).toEqual(new Map([['q5', 0]]));
+  });
+  it('keeps a renumbered question\'s row from a question naming no one that took its old number', () => {
+    const withParty = { ...mapping, askedBy: 2 } as Mapping;
+    const rows = [['3', 'Provide the model.', 'Lender A']];
+    const asked = [q('qx', 12, 'Provide the model.', 'Lender A'), q('qy', 3, 'Provide the model.')];
+    expect(matchRows({ rows }, withParty, asked)).toEqual(new Map([['qx', 0]]));
+  });
+  it('keeps a renumbered question\'s row, under the sender the app last wrote, from one with the old sender', () => {
+    const withParty = { ...mapping, askedBy: 2 } as Mapping;
+    const asked = [q('a', 5, 'X', 'Lender A'), q('b', 9, 'X', 'Lendr A')];
+    const sent = new Map([['a', { askedBy: 'Lendr A' }]]);
+    expect(matchRows({ rows: [['5', 'X', 'Lendr A']] }, withParty, asked, sent)).toEqual(new Map([['a', 0]]));
+  });
+  it('matches 2,000 rows by their place in the table, blank rows and headings between them shifting nothing', () => {
+    const rows: string[][] = [];
+    const qs: Question[] = [];
+    for (let k = 0; k < 2000; k++) {
+      if (k % 100 === 0) rows.push(['', k % 200 ? '' : 'Section heading'], ['', '   ']);
+      rows.push([String(k + 1), `Question ${k % 50}`]);
+      qs.push(q(`q${k}`, k + 1, `Question ${k % 50}`));
+    }
+    const m = matchRows({ rows }, mapping, qs);
+    expect(m.size).toBe(2000);
+    for (const x of qs) expect(rows[m.get(x.id)!][0]).toBe(String(x.n));
+  });
+});
