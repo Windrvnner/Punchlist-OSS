@@ -797,8 +797,33 @@ describe('drafts, reassessments, the brief, the import layout and whether an ans
     expect(s.calls.map((c) => c.model)).toEqual(['standard']); expect(s.calls[0].files).toEqual([]);   // no documents go with it
     expect(s.calls[0].prompt).toContain(i.question); expect(s.calls[0].prompt).toContain(i.answer);
     const long = setup(() => ({ verdict: 'no', why: 'x'.repeat(500) })); expect(val(await long.ai.addresses!(i)).why).toHaveLength(200);
-    const odd = await setup(() => ({ verdict: 'maybe', why: 'Hard to say.' })).ai.addresses!(i);
-    expect(!odd.ok && odd.error.message).toBe('The AI’s reply could not be read');
+    const odd = setup(() => ({ verdict: 'maybe', why: 'Hard to say.' }));
+    const oddResult = await odd.ai.addresses!(i);
+    expect(!oddResult.ok && oddResult.error.message).toBe('The AI’s reply could not be read');
+    expect(odd.calls).toHaveLength(2);   // sent back once, then given up (#1058)
+  });
+
+  it('sends a Check verdict that is not yes, partly or no back once, saying what is wrong (#1058)', async () => {
+    const good = { verdict: 'yes', why: 'It gives it.' };
+    const s = setup((_c, n) => (n === 1 ? { verdict: 'maybe', why: 'Hard to say.' } : good));
+    const i = { dealId: 'd1', question: 'What is the lock-up ratio?', answer: 'It is 1.25x.' };
+    expect(val(await s.ai.addresses!(i))).toEqual({ verdict: 'yes', why: 'It gives it.' });
+    expect(s.calls).toHaveLength(2);
+    expect(s.calls[1].prompt).toContain('That cannot be used: "verdict" is not "yes", "partly" or "no"');
+  });
+
+  it('sends an empty or placeholder Merge Both Versions reply back once, saying what is wrong (#1058)', async () => {
+    const i = { dealId: 'd1', question: 'When is COD?', app: 'COD is in March.', log: 'COD is March 3.' };
+    for (const bad of [{ text: '' }, { text: 'COD is [confirm date].' }]) {
+      const s = setup((_c, n) => (n === 1 ? bad : { text: 'COD is March 3.' }));
+      expect(val(await s.ai.merge!(i))).toEqual({ text: 'COD is March 3.' });
+      expect(s.calls).toHaveLength(2);
+      expect(s.calls[1].prompt).toContain('That cannot be used:');
+    }
+    const never = setup(() => ({ text: '' }));
+    const r = await never.ai.merge!(i);
+    expect(!r.ok && r.error.message).toBe('The AI’s reply could not be used');
+    expect(never.calls).toHaveLength(2);
   });
 });
 

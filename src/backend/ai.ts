@@ -436,6 +436,18 @@ function memoRiskFits(paragraphs: string[], ids: Set<string>): boolean {
   return words.length > 0 && words.length <= MEMO_RISK_WORDS;
 }
 
+/** A Check verdict, or null when the reply gives none of the three. */
+function verdictOf(reply: { verdict?: unknown } | null): 'yes' | 'partly' | 'no' | null {
+  const verdict = word(reply?.verdict);
+  return verdict === 'yes' || verdict === 'partly' || verdict === 'no' ? verdict : null;
+}
+
+/** A reconciled answer, or '' when the reply is empty or asks a person to fill something in. */
+function mergedText(reply: { text?: unknown } | null): string {
+  const text = (strings(reply?.text)[0] ?? '').trim();
+  return /\[[^\]]*(confirm|tbc|tbd|check)[^\]]*\]/i.test(text) ? '' : text;
+}
+
 function readCorrection(
   prompt: string, reply: Record<string, unknown> | null, again: { wrong: string; maxEcho?: number },
 ): string {
@@ -1830,26 +1842,59 @@ export function nodeAi(o: AiOptions) {
       try { const { latest, done } = await outcomes(dealId); return ok(gapsOf(latest, done)); }
       catch { return fail({ kind: 'failed', message: 'The checklist results could not be read' }); }
     },
-    /** Whether an answer addresses a question: the standard model judges from the two texts, with no documents. */
+    /**
+     * Whether an answer addresses a question: the standard model judges from the two texts, with no documents.
+     * A verdict that is not one of the three is sent back once with what is wrong (decisions: AI and models; #1058).
+     */
     async addresses(i) {
+      const prompt = [
+        `This question was asked on a project-finance deal:\n${i.question}\n\n`,
+        `This answer was written from the deal's documents:\n${i.answer}\n\n`,
+        'Does the answer address the question: does it give what the question asks for? ',
+        'Say "yes" if it does, "partly" if it gives some of it, "no" if it does not. ',
+        'Add "why": one short sentence, under twenty words, saying what it gives or leaves out.\n',
+        'Reply as JSON: {"verdict": "yes" | "partly" | "no", "why": "…"}',
+      ].join('');
+      const keys = ['verdict', 'why'];
+      const wrong = '"verdict" is not "yes", "partly" or "no"';
       let reply: { verdict?: unknown; why?: unknown } | null;
-      try { reply = await askJson({ kind: 'addresses', model: (await models()).standard, system: JSON_ONLY, prompt: `This question was asked on a project-finance deal:\n${i.question}\n\nThis answer was written from the deal's documents:\n${i.answer}\n\nDoes the answer address the question: does it give what the question asks for? Say "yes" if it does, "partly" if it gives some of it, "no" if it does not. Add "why": one short sentence, under twenty words, saying what it gives or leaves out.\nReply as JSON: {"verdict": "yes" | "partly" | "no", "why": "…"}` }, ['verdict', 'why']); }
-      catch (e) { return failure(e, UNREACHED); }
-      const verdict = word(reply?.verdict);
-      if (verdict !== 'yes' && verdict !== 'partly' && verdict !== 'no') {
-        return fail({ kind: 'failed', message: UNREAD_REPLY });
-      }
-      return ok({ verdict, why: (strings(reply!.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 200) });     // one short line on the card, however much it wrote
+      try {
+        const model = (await models()).standard;
+        reply = await askJson({ kind: 'addresses', model, system: JSON_ONLY, prompt }, keys);
+        if (!verdictOf(reply)) {
+          const again = readCorrection(prompt, reply, { wrong });
+          reply = await askJson({ kind: 'addresses', model, system: JSON_ONLY, prompt: again }, keys, undefined, false);
+        }
+      } catch (e) { return failure(e, UNREACHED); }
+      const verdict = verdictOf(reply);
+      if (!verdict) return fail({ kind: 'failed', message: UNREAD_REPLY });
+      // one short line on the card, however much it wrote
+      return ok({ verdict, why: (strings(reply!.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 200) });
     },
+    /** One answer from two versions. An empty reply, or one with a note to confirm, is sent back once (#1058). */
     async merge(i) {
+      const prompt = [
+        `This question was asked on a project-finance deal:\n${i.question}\n\n`,
+        `Two people answered it differently.\nFirst version:\n${i.app}\n\nSecond version:\n${i.log}\n\n`,
+        'Write one answer that reconciles them: every fact from both, each said once, in plain sentences, ',
+        "as a lender's counsel would write it. Where the two disagree, keep the more specific statement ",
+        '(a date, a figure, a document reference) and leave the other out. ',
+        'Do not put the two versions one after the other, do not mention that there were two versions, ',
+        'and add no notes, brackets, placeholders or anything for a person to confirm.\n',
+        'Reply as JSON: {"text": "…"}',
+      ].join('');
+      const wrong = '"text" is empty or holds a bracketed note for a person to confirm';
       let reply: { text?: unknown } | null;
-      try { reply = await askJson({ kind: 'merge', model: (await models()).fast, system: JSON_ONLY, prompt: `This question was asked on a project-finance deal:\n${i.question}\n\nTwo people answered it differently.\nFirst version:\n${i.app}\n\nSecond version:\n${i.log}\n\nWrite one answer that reconciles them: every fact from both, each said once, in plain sentences, as a lender's counsel would write it. Where the two disagree, keep the more specific statement (a date, a figure, a document reference) and leave the other out. Do not put the two versions one after the other, do not mention that there were two versions, and add no notes, brackets, placeholders or anything for a person to confirm.\nReply as JSON: {"text": "…"}` }, ['text']); }
-      catch (e) { return failure(e, UNREACHED); }
-      const text = (strings(reply?.text)[0] ?? '').trim();
-      // a draft that asks a person to fill something in is not a reconciled answer
-      if (!text || /\[[^\]]*(confirm|tbc|tbd|check)[^\]]*\]/i.test(text)) {
-        return fail({ kind: 'failed', message: UNUSABLE_REPLY });
-      }
+      try {
+        const model = (await models()).fast;
+        reply = await askJson({ kind: 'merge', model, system: JSON_ONLY, prompt }, ['text']);
+        if (!mergedText(reply)) {
+          const again = readCorrection(prompt, reply, { wrong });
+          reply = await askJson({ kind: 'merge', model, system: JSON_ONLY, prompt: again }, ['text'], undefined, false);
+        }
+      } catch (e) { return failure(e, UNREACHED); }
+      const text = mergedText(reply);
+      if (!text) return fail({ kind: 'failed', message: UNUSABLE_REPLY });
       return ok({ text });
     },
     async reword(i) {
