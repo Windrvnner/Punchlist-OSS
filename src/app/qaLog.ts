@@ -286,7 +286,6 @@ async function writeQaLog(store: Store, dealId: string, place?: PlaceKept): Prom
   const steps = [...(kept?.steps ?? []), ...picked, ...w.steps, ...own];
   // nothing to write (a log just made holds everything) leaves the file alone; what it holds of ours is still recorded
   let archive = '';
-  let newFile: string | undefined;                                                // the workbook a .csv log's update was written as
   if (steps.length) {
     const save = (s: typeof steps, stamp: string) => files.save({ folder: log.folder, file: log.file, sheet: log.sheet, steps: s, stamp });
     let r = await save(steps, table.value.stamp);
@@ -301,7 +300,6 @@ async function writeQaLog(store: Store, dealId: string, place?: PlaceKept): Prom
     if (!r.ok) return r;
     if (r.value.status === 'later') return ok({ status: 'later', ...(r.value.by ? { by: r.value.by } : {}) });
     archive = r.value.archive;
-    newFile = r.value.file;
   }
   // a row where they and the log each changed a cell is reported as kept as in the file: the log's value stayed
   const asked = new Set<number>(); const clash: number[] = [];                    // clash rows with a question in the app, and their numbers
@@ -355,9 +353,7 @@ async function writeQaLog(store: Store, dealId: string, place?: PlaceKept): Prom
   }
   // the cells the update left as the log has them are in two versions until a person chooses (Resolve); this update's
   // reading replaces the last one's, so a cell settled in the file since is no longer listed
-  const last = { archive, at: store.services.clock.now(), by: store.get().user?.name ?? '', sent: now, kept: keptText, changed };
-  const rec = await store.dispatch(
-    RecordQaLogExport, { dealId, name: log.name, last, ...(newFile ? { file: newFile } : {}) }, { quiet: true });
+  const rec = await store.dispatch(RecordQaLogExport, { dealId, name: log.name, last: { archive, at: store.services.clock.now(), by: store.get().user?.name ?? '', sent: now, kept: keptText, changed } }, { quiet: true });
   const unmerged = await settle();
   if (!rec.ok) return unmerged ? { ...rec, unmerged } : rec;                       // filed all the same, so still said
   const versions = dealQuestions(store.get(), dealId).filter((q) => keptText[q.id]).map((q) => q.n);

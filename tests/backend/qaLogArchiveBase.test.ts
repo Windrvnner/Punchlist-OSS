@@ -6,24 +6,20 @@ import path from 'node:path';
 import { saveLog, sha256 } from '../../src/backend/qaLogFolder';
 import { trackPaths } from './openedPaths';
 import { nodeQaLogs } from '../../src/backend/qaLogs';
-import { libreOfficeConverter } from '../../src/backend/convert';
-import { xlsxOf } from './miniXlsx';
-import { hasOffice as has, soffice } from './officePrerequisites';
 
 const at = new Date(2026, 10, 15, 16, 12);
 const scope = 'Environmental permits and commercial approval conditions for project financing ';
 const stem = scope.repeat(3).slice(0, 228).trimEnd().padEnd(228, 'A');
-const file = `${stem}.xlsx`;
-const foreign = `${stem}環.xlsx`;
+const file = `${stem}.csv`;
+const foreign = `${stem}環.csv`;
 const draft = 'No amendment recorded in the working draft';
 const final = 'Signed amendment filed in the final document set';
 const currentAnswer = 'The updated filing confirms compliance';
 const keptAnswer = 'The updated filing remains outstanding';
 const addedAnswer = 'The executed amendment is in the interconnection records';
 const folders: string[] = [];
-const lo = libreOfficeConverter({ soffice, profile: fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-base-test-lo-')) });
 
-function logBytes(answer: (index: number) => string): Uint8Array {
+function logBytes(answer: (index: number) => string): Buffer {
   const facilities = ['battery installation', 'wind installation', 'solar array', 'interconnector'];
   const topics = ['interconnection agreement', 'discharge permit', 'completion bond', 'access easement',
     'energy purchase agreement', 'equipment warranty', 'habitat assessment', 'insurance policy',
@@ -36,9 +32,9 @@ function logBytes(answer: (index: number) => string): Uint8Array {
     const location = facilities[index % facilities.length];
     const topic = topics[Math.floor(index / 4) % topics.length];
     const request = requests[Math.floor(index / 40) % requests.length];
-    return [String(index + 1), `${request} ${topic} for phase ${phase} of the ${location}?`, answer(index)];
+    return `${index + 1},${request} ${topic} for phase ${phase} of the ${location}?,${answer(index)}`;
   });
-  return xlsxOf([['No.', 'Question', 'Response'], ...rows]);
+  return Buffer.from(['No.,Question,Response', ...rows, ''].join('\r\n'));
 }
 
 function saveWithArchiveCollision(folder: string, foreignHoldsEdit: boolean) {
@@ -69,8 +65,8 @@ function saveWithArchiveCollision(folder: string, foreignHoldsEdit: boolean) {
   expect(() => saveLog({ folder, file, bytes: base, was: sha256(base), at })).toThrow('Archive copy is unavailable');
   vi.restoreAllMocks();
 
-  const expectedBase = path.join(folder, '01. Archive', `${stem} 2026-11-15 1612.xlsx`);
-  const competingBase = path.join(folder, '01. Archive', `${stem} 2026-11-15 1612 (2).xlsx`);
+  const expectedBase = path.join(folder, '01. Archive', `${stem} 2026-11-15 1612.csv`);
+  const competingBase = path.join(folder, '01. Archive', `${stem} 2026-11-15 1612 (2).csv`);
   expect(sha256(fs.readFileSync(expectedBase))).toBe(sha256(base));
   expect(sha256(fs.readFileSync(competingBase))).toBe(sha256(foreignBase));
   const stat = fs.statSync;
@@ -93,7 +89,7 @@ const cases = [
   'unchanged', 'changed before read', 'changed during copy', 'removed during copy', 'copied by another log',
 ];
 
-it.skipIf(!has).each(cases)('uses a verified base (%s)', async (change) => {
+it.each(cases)('uses a verified base (%s)', async (change) => {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-log-base-'));
   folders.push(folder);
   const foreignHoldsEdit = change === 'copied by another log';
@@ -108,7 +104,7 @@ it.skipIf(!has).each(cases)('uses a verified base (%s)', async (change) => {
       copy(from, to, mode);
     });
   }
-  const logs = nodeQaLogs({ convert: lo });
+  const logs = nodeQaLogs({});
   const opts = { sheet: 'Sheet1', headerRow: 1 };
   const read = await logs.read({ folder, file }, { ...opts, kept: { n: 0, text: 1 } });
   if (!read.ok || !read.value.kept) throw new Error('The kept log was not read');

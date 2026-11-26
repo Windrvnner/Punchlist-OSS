@@ -68,12 +68,11 @@ export const SetQaLogFolder = define({
 /** An update saved: what the log holds of the app's, so the next one knows which cells are still the app's. No Undo: the file is written. */
 export const RecordQaLogExport = define({
   name: 'RecordQaLogExport',
-  // `file`: the log's new file, when the update wrote its copy as a new workbook (a .csv log is never written to)
-  input: z.object({ dealId: DealId, name: z.string().min(1), last: QaLog.shape.last.unwrap(), file: z.string().min(1).optional() }),
+  input: z.object({ dealId: DealId, name: z.string().min(1), last: QaLog.shape.last.unwrap() }),
   targets: (_s, i) => [i.dealId],
   plan(state, input, ctx) {
     const d = state.deals[input.dealId]; if (!d) return fail(notFound('Deal not found', input.dealId));
-    const logs = d.qaLogs.map((l) => (l.name === input.name ? { ...l, last: input.last, ...(input.file ? { file: input.file } : {}) } : l));
+    const logs = d.qaLogs.map((l) => (l.name === input.name ? { ...l, last: input.last } : l));
     return ok({ dealId: d.id, upserts: [{ kind: 'deal', record: withLogs(d, logs, ctx.at), expectedRev: d.rev }], audit: [] });
   },
 });

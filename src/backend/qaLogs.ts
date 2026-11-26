@@ -10,9 +10,10 @@ import path from 'node:path';
 import type { Converter } from './convert';
 import type { QaLogFiles } from '../ports';
 import { ok, fail } from '../domain/result';
-import { parseCsv, writtenAsMeant, withSteps, tableFrom, exportDocument, type Sheet, type SheetEdit } from '../domain/sheets';
+import { parseCsv, writtenAsMeant, withSteps, tableFrom, type Sheet, type SheetEdit } from '../domain/sheets';
 import { decodeText } from '../adapters/spreadsheet';
 import { editLog, libreOfficeSheets } from './spreadsheets';
+import { csvSafe } from '../domain/csvEdit';
 import { saveLog, createLog, sha256, restoreAside, keptEdits, settleKept, type KeptEdit } from './qaLogFolder';
 import { fixedCells } from './xlsxEdit';
 import { mergeKept, type KeptAsk } from '../domain/keptMerge';
@@ -107,24 +108,6 @@ export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogF
     finally { try { fs.rmSync(work, { recursive: true, force: true }); } catch { /* left in the temp folder */ } }
     return { columns: table.columns, cols: table.cols, rows: table.rows, lines: table.lines, lastRow: table.lastRow, kept: { files: out(), steps, clashes: [...clashes].sort((a, b) => a - b), ask } };
   };
-  /**
-   * The app never writes a CSV: a .csv log stays exactly as it is, and the log with the update made is written as a new
-   * .xlsx beside it (its name comes back as `file`, the log from then on). Cells stay text as the CSV has them, and
-   * nothing is saved unless the new workbook reads back as meant. A line break is written as Excel holds one.
-   */
-  async function saveAsWorkbook(req: { folder: string; file: string; sheet: string; steps: SheetEdit[] }, base: string, work: string) {
-    if (!conv.workbook) return fail({ kind: 'failed' as const, message: 'The log was not saved: a workbook can’t be made here' });
-    const lines = (all: Sheet[]) => all.map((s) => ({ ...s, grid: s.grid.map((r) => r.map((c) => c.replace(/\r\n?/g, '\n'))) }));
-    const before = lines(await sheets(base));
-    const made = withSteps(before, req.sheet, req.steps)?.find((s) => s.name === req.sheet);
-    if (!made) return fail({ kind: 'rejected' as const, message: `The log was not saved: there is no sheet named ${req.sheet}` });
-    const bytes = await conv.workbook(exportDocument(req.sheet, made.grid));
-    const out = path.join(work, 'out.xlsx'); fs.writeFileSync(out, bytes);
-    const wrong = writtenAsMeant(before, await sheets(out), req.sheet, req.steps);
-    if (wrong) return fail({ kind: 'rejected' as const, message: `The log was not saved: in the new version ${wrong}` });
-    const stem = req.file.slice(0, req.file.length - path.extname(req.file).length);
-    return ok({ status: 'written' as const, archive: '', file: createLog(req.folder, `${stem}.xlsx`, bytes) });
-  }
   return {
     async read(at, opts) {
       const w = where(at.folder, at.file); if (!w.ok) return w;
@@ -143,8 +126,7 @@ export function nodeQaLogs(o: { convert?: Converter; now?: () => Date }): QaLogF
       try {
         const ext = path.extname(req.file); const base = path.join(work, `base${ext}`); fs.copyFileSync(w.value, base);
         if (sha256(new Uint8Array(fs.readFileSync(base))) !== req.stamp) return ok({ status: 'later' as const });   // someone saved it since it was read
-        if (/\.csv$/i.test(req.file)) return await saveAsWorkbook(req, base, work);
-        const steps = req.steps;
+        const steps = /\.csv$/i.test(req.file) ? req.steps.map((s) => (s.kind === 'cell' && typeof s.value === 'string' ? { ...s, value: csvSafe(s.value) } : s)) : req.steps;
         // a log whose own content refuses the steps (a formula, a totals row, a read-back that differs) is "rejected": it would
         // refuse them again at every update; a LibreOffice edit that fails may be a moment's trouble, so it is "failed"
         let bytes: Uint8Array;
