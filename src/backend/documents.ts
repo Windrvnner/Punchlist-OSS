@@ -520,8 +520,8 @@ export function nodeDocuments(o: DocumentsOptions) {
   }
 
   /**
-   * The spreadsheets attached in the app whose words are not yet in the record are read here, on every run, as a deal
-   * folder's are (#427). Each one that still cannot be read is named in the result and read again on the next run.
+   * The spreadsheets attached in the app whose words could not be read take the path a deal folder's take (#427): each
+   * run reads them again, unless the same file already failed since the app started, and names the ones still unread.
    */
   async function readAttachedSheets(dealId: string): Promise<string[]> {
     const unreadNames: string[] = [];
@@ -529,6 +529,7 @@ export function nodeDocuments(o: DocumentsOptions) {
       const place = [d, ...(d.copies ?? [])].find((p) => p.folder === ATTACHED);
       if (!place || paged(d.name) || d.words !== undefined) continue;
       const at = path.join(attachments, place.rel);
+      // a failed read is read again on every run, never skipped (#427)
       const words = await sheetWords(at, dealId, d.docId);
       if (words === undefined) {
         unreadNames.push(place.name);
@@ -659,12 +660,13 @@ export function nodeDocuments(o: DocumentsOptions) {
               catch { stuck = true; unpagedHere.set(f.abs, { size: f.size, mtimeMs: f.mtimeMs }); }
               if (stuck && pages === undefined) { asPages = false; unpaged++; skipped.unpaged.push(f.rel); }      // pages it already had stay; only its words are missing
             } else if (!paged(name) && (words === undefined || unindexed)) {
-              // a spreadsheet that cannot be read is listed without words, not as having none, and is read again
-              // on every run, as an attached one is (#427)
-              words = await sheetWords(src, dealId, docId) ?? words;
+              // a spreadsheet that cannot be read is listed without words, not as having none (#427): it is read
+              // again when it changes or on the next start
+              if (!failed) words = await sheetWords(src, dealId, docId) ?? words;
               if (words === undefined) {
                 unread++;
                 skipped.unread.push(f.rel);
+                unpagedHere.set(f.abs, { size: f.size, mtimeMs: f.mtimeMs });
               }
             }
             workMs += Date.now() - t0;

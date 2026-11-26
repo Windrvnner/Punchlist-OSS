@@ -833,26 +833,6 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     expect(budget(a).words).toEqual(['line', 'cover', 'debt']);
   });
 
-  it('a deal-folder spreadsheet that failed to read is read again on the next run, without a restart (#427)', async () => {
-    const root = tmp();
-    const vdr = path.join(root, 'vdr');
-    // a converter that cannot read any spreadsheet until `down` is set back
-    let down = true;
-    const { convert } = standInConverter();
-    const read = convert.sheets!;
-    const flaky = Object.assign(convert, { sheets: (file: string) => (down ? Promise.reject(new Error('down')) : read(file)) });
-    put(vdr, 'Budget.xlsx', MODEL);
-    const a = pc(root, 'office', undefined, { convert: flaky });
-    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Budget.xlsx');
-    const budget = () => a.docs.records('d1').find((d) => d.name === 'Budget.xlsx')!;
-    expect(budget().words).toBeUndefined();
-    // still down: named again, the same file, the same app session
-    expect((await indexAll(a, vdr)).log.join(' ')).toContain('could not be read');
-    down = false;
-    expect((await indexAll(a, vdr)).log.join(' ')).not.toContain('Budget.xlsx');
-    expect(budget().words).toEqual(['line', 'cover', 'debt']);
-  });
-
   it('a file attached in the app is kept in the shared folder under this copy’s own name, loaded into the store, and opens on another PC', async () => {
     const { root } = room(); const svc = new StandInService(); const a = pc(root, 'office', svc), b = pc(root, 'home', svc);
     const bytes = pdf('term sheet', 2); const r = val(await a.docs.attach('d1', { name: 'Term sheet: v3.pdf', bytes }));
