@@ -63,7 +63,7 @@ export function FindingsHead({ view, adding, onNew, children }: {
   const { filter: FF, many, showStatus: choice, workstreams: wsl } = view;
   const set = (patch: Partial<typeof FF>) => store.ui({ findingFilter: { ...FF, ...patch } });
   const statuses = findingsStatusLabels(view);
-  const hasExtraFilters = [FF.workstream, FF.text, FF.reviewed].some(Boolean);
+  const hasExtraFilters = [FF.workstream, FF.reviewed].some(Boolean);
   const more = many || hasExtraFilters;
   const { row, mode } = useFindingsHeadMode(choice, statuses, more);
   const icons = mode % 2 === 1;
@@ -83,7 +83,7 @@ export function FindingsHead({ view, adding, onNew, children }: {
         <button type="button" class={`btn sm ico ${hidden ? 'on' : ''}`} id="f-filter"
           aria-haspopup="menu" aria-expanded={menu} title={filterLabel} aria-label={filterLabel}
           onClick={() => setMenu(!menu)}><Icon name="filter" size={14} /></button>
-        {/* statuses alone are a menu of choices; with the sections and the text filter it is a group of controls */}
+        {/* statuses alone are a menu of choices; with Workstream and Reviewed it is a group of controls */}
         {menu && <div class="colmenu fmenu"
           {...(more ? { role: 'group', 'aria-label': 'Filter', 'data-menu': true } : { role: 'menu' })}>
           {folded && statuses.map(([k, l]) => <StatusChoice key={k} status={k} label={l} on={FF.status === k}
@@ -93,11 +93,6 @@ export function FindingsHead({ view, adding, onNew, children }: {
             }} />)}
           {folded && more && <div class="msep" />}
           {more && <>
-            {/* the words first, in the menu search field Past conversations has, above a long list of workstreams */}
-            <span class="psearch"><Icon name="search" size={14} />
-              <input placeholder="Filter" aria-label="Filter findings" value={FF.text}
-                onInput={(e) => set({ text: (e.currentTarget as HTMLInputElement).value })} /></span>
-            <div class="msep" />
             <MenuChoice title="Workstream" name="f-ws" options={workstreamOptions(wsl)} value={FF.workstream}
               onPick={(workstream) => set({ workstream })} long pinLast={wsl.at(-1) === NO_WORKSTREAM} />
             <div class="msep" />
