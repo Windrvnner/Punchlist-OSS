@@ -23,6 +23,17 @@ export const namesOnlyShown = (text: string, shown: readonly string[]): boolean 
 export const unknownIds = (values: readonly unknown[], shown: readonly string[]): unknown[] =>
   values.filter((value) => typeof value !== 'string' || !shown.includes(value));
 
+/**
+ * The sides of a reply's id pairs (`"<id> <id>"`, or the first id alone) that are not exactly shown: the first against
+ * `firsts`, each after it against `rests`; a value that is not text is unknown whole (#1162)
+ */
+export const unknownInPairs = (values: readonly unknown[], firsts: readonly string[], rests: readonly string[]) =>
+  values.flatMap((value) => {
+    if (typeof value !== 'string') return [value];
+    const [first, ...rest] = value.split(' ');
+    return [...unknownIds([first], firsts), ...unknownIds(rest, rests)];
+  });
+
 /** a document a prompt shows, of one deal */
 type ShownDoc = { dealId: string; rec: DocRecord };
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  citedDocs, citesUnsent, docHandle, docsUnusable, namesOnlyShown, recordIdsIn, sentAs, unknownIds,
+  citedDocs, citesUnsent, docHandle, docsUnusable, namesOnlyShown, recordIdsIn, sentAs, unknownIds, unknownInPairs,
 } from '../../src/backend/recordIds';
 
 const ULID = '01HZX3K9Q4V7M2B5N8C1D6E0FG';
@@ -42,6 +42,21 @@ describe('unknownIds', () => {
     expect(unknownIds(['f_X', finding], [finding])).toEqual(['f_X']);
     expect(unknownIds([`DOC_${HEX}`, doc], [doc])).toEqual([`DOC_${HEX}`]);
     expect(unknownIds([` ${doc}`, 5, undefined], [doc])).toEqual([` ${doc}`, 5, undefined]);
+  });
+});
+
+describe('unknownInPairs (#1162)', () => {
+  const firsts = [finding, item];
+  const rests = [doc];
+
+  it('takes pairs, and a first id alone, each side exactly one shown to it', () => {
+    expect(unknownInPairs([`${finding} ${doc}`, `${item} ${doc}`, finding], firsts, rests)).toEqual([]);
+  });
+
+  it('returns each side not shown on its own side, and any value that is not text', () => {
+    const swapped = `${doc} ${finding}`;
+    expect(unknownInPairs([swapped, 'F2 N3', `${finding}  ${doc}`, 7], firsts, rests))
+      .toEqual([doc, finding, 'F2', 'N3', '', 7]);
   });
 });
 
