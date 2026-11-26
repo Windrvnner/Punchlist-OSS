@@ -1306,9 +1306,9 @@ describe('deal memo model replies', () => {
   });
 
   it('keeps the last deal memo key risk write-up as given when every reply is over the limit (#806)', async () => {
-    const longest = overlong[1].paragraphs;
+    const longest = overlong[0].paragraphs;   // three paragraphs: none is cut when it is kept
     const standIn = await setupMemoReplies([distributionRisk], (call, attempt) =>
-      citedRiskReply(call, attempt < 3 ? overlong[0].paragraphs : longest));
+      citedRiskReply(call, attempt < 3 ? overlong[1].paragraphs : longest));
     const memo = val(await standIn.ai.memo!('d1'));
     expect(standIn.calls.filter(memoWrite).map(({ model }) => model)).toEqual(['standard', 'standard', 'thorough']);
     expect(memo.risks![0].body).toEqual(longest);
