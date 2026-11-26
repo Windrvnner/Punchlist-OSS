@@ -304,8 +304,15 @@ class Answering {
     const read = { docs: run.touched.size, of: question.deals.reduce((sum, d) => sum + kit.records(d).length, 0) };
     const thread = this.conversation.thread();
     const research = { steps: run.steps.map((s) => ({ ...s })), ms: kit.now() - run.progress.t0, read };
-    const offer = reply.offer === undefined ? {} : { offer: reply.offer };
+    const offer = reply.offer === undefined ? {} : { offer: this.offerOf(reply.offer) };
     return ok({ ...fitted, read, research, ...(thread ? { thread } : {}), ...offer });
+  }
+
+  /** the offer as the model gave it, with a drafted question's handles put back as numbers (#1105) */
+  private offerOf(offer: unknown): unknown {
+    const drafted = (offer as { question?: unknown } | null)?.question;
+    if (typeof drafted !== 'string') return offer;
+    return { ...(offer as object), question: this.run.withQuestionNumbers(drafted) };
   }
 
   /** an attached document's step shows the places the answer cites in it */

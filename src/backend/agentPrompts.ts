@@ -18,7 +18,8 @@ export const noun = (count: number, one: string, many = `${one}s`) => (count ===
 const ROLE = 'You are researching a question about a project-finance deal from its data room, its findings and its Q&A '
   + 'log. You work in turns.';
 const CITE_RULE = 'Cite only documents listed under "Documents opened so far", by their tag. A finding or a response '
-  + 'from the Q&A log is not a document: say what it is in words and give it no marker.';
+  + 'from the Q&A log is not a document: say what it is in words and give it no marker. Name a question of the Q&A log '
+  + 'only as "response R<k>", with the R number its row is shown by.';
 const SEARCH_HELP = 'A helper searches the documents by their words, file names and folder paths, reads a page of '
   + 'the best matches, and returns passages with document and page. "findings" and "qa" search the deal\'s findings '
   + 'and its questions and responses. Search in other words, or for a document by the name it is likely to have, when '

@@ -16,7 +16,7 @@ const DETAILS = [['askedBy', 'asked by'], ['received', 'received'], ['workstream
 const cell = (q: QaRecord, k: (typeof FIELDS)[number]) => cellValue(q as Question, k).replace(/\s+/g, ' ').trim();
 
 /** what a response drafted by AI is marked with, so that it is never taken for one received */
-const AI_DRAFTED = ' (drafted by AI from the data room, not received from anyone)';
+export const AI_DRAFTED = ' (drafted by AI from the data room, not received from anyone)';
 
 /**
  * The neutral handle a model is shown for the `k`th question (from 0) of a prompt, never its number, which the model's
@@ -24,19 +24,21 @@ const AI_DRAFTED = ' (drafted by AI from the data room, not received from anyone
  */
 export const handleOf = (k: number): string => `R${k + 1}`;
 
-/** "R1", "response R1", "the response to R1" in a model's text, with whatever "the" or "response" came before it */
-const HANDLE = /\b(?:([Tt]he) )?(?:([Rr]esponse) (?:to )?)?R(\d+)\b/g;
+/**
+ * "response R1" or "the response R1" in a model's text: the one form the prompts ask for. A bare R1 is never taken for
+ * a handle, nor one with a decimal after it, since amounts in rand read "R1.2 billion" (#1105).
+ */
+const HANDLE = /\b(?:([Tt]he) )?([Rr]esponse) R(\d+)\b(?![.,]\d)/g;
 
 /**
- * A model's text with each handle it was shown put back as its question's number (#1105): "response R1" reads "the
- * response to Q12" and a bare "R1" reads "Q12". `handles` are the questions' numbers, in the order `handleOf` numbers
- * them; a handle the model was not shown is left as it is.
+ * A model's text with each handle it was shown, named as "response R1", put back as "the response to Q12" (#1105).
+ * `handles` are the questions' numbers, in the order `handleOf` numbers them; a handle the model was not shown, and
+ * any other text, is left as it is.
  */
 export function questionsForHandles(text: string, handles: readonly (number | undefined)[]): string {
-  return text.replace(HANDLE, (whole, the: string | undefined, response: string | undefined, k: string) => {
+  return text.replace(HANDLE, (whole, the: string | undefined, response: string, k: string) => {
     const n = handles[Number(k) - 1];
     if (n === undefined) return whole;
-    if (!response) return `${the ? `${the} ` : ''}Q${n}`;
     const article = the ?? (response === 'Response' ? 'The' : 'the');
     return `${article} response to Q${n}`;
   });

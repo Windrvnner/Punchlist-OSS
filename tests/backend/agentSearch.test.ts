@@ -180,16 +180,24 @@ describe('searching the Q&A log from the chat, a page at a time', () => {
   it('names each question by a neutral handle the run keeps, and shows the person its number (#1105)', async () => {
     const asked = /(R\d+) · Answered\nQuestion: How did revenue move\?/g;
     const handlesIn = (prompt: string) => [...prompt.matchAll(asked)].map((m) => m[1]);
-    const say = (handle: string) => `${handle} says revenue fell, and so does the response to ${handle}.`;
+    // amounts in rand ("R1.2 billion") are the model's words, never a handle; nor is a handle not named as a response
+    const say = (handle: string) => `Response ${handle} says R1.2 billion and R50 million; ${handle} is a label.`;
+    const offer = (handle: string) =>
+      ({ action: 'log question', question: `Does response ${handle} cover R1.2 billion?` });
     const searches = calls(qa(), { tool: 'search', what: 'all', query: 'revenue' });
-    const answering = setup((c, n) => (n === 3 ? { text: say(handlesIn(c.prompt)[0]), sources: [] } : searches(c, n)));
+    const answer = (handle: string) => ({ text: say(handle), sources: [], offer: offer(handle) });
+    const answering = setup((c, n) => (n === 3 ? answer(handlesIn(c.prompt)[0]) : searches(c, n)));
     await questions(answering.repo, 40);
     const fell = { id: 'q_d1_2', dealId: 'd1', n: 3, status: 'answered', text: 'How did revenue move? lock-up ratio',
       response: 'Revenue fell in Q3 2026.' };
     const update = { kind: 'question' as const, id: 'q_d1_2', data: fell, expectedRev: 1 };
     expect((await answering.repo.transaction({ writes: [update] })).ok).toBe(true);
     const answered = await answering.ai.answer(ask('What is outstanding?'));
-    expect(answered.ok && answered.value.text).toBe('Q3 says revenue fell, and so does the response to Q3.');
+    const handle = handlesIn(answering.turns[2].prompt)[0];
+    const shown = `The response to Q3 says R1.2 billion and R50 million; ${handle} is a label.`;
+    expect(answered.ok && answered.value.text).toBe(shown);
+    const drafted = { action: 'log question', question: 'Does the response to Q3 cover R1.2 billion?' };
+    expect(answered.ok && answered.value.offer).toEqual(drafted);
     const last = answering.turns[2].prompt;
     expect(last).toContain('Revenue fell in Q3 2026.');
     expect(last).not.toMatch(/^Q\d+ · |Response to Q\d/m);

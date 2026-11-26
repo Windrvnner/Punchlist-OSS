@@ -1666,14 +1666,17 @@ describe('when something changes', () => {
 
   it('a reassessment shows the model each question by a neutral handle, never its number (#1105)', async () => {
     const sources = (c: Call) => [{ doc: tag(c, FA), page: 14 }];
-    const reply = (c: Call) => ({ body: ['Revenue fell, per response R1. [1]'], sources: sources(c) });
+    // amounts in rand ("R1.2 billion") are the documents' own words, never a handle
+    const said = 'Revenue fell, per response R1; the tariff is R1.2 billion and capex R50 million. [1]';
+    const reply = (c: Call) => ({ body: [said], sources: sources(c) });
     const s = setup(reply);
     await deal(s.repo);
     await finding(s.repo, 'f_1', 'Revenue below plan', { sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }] });
     const fell = { n: 3, text: 'How did revenue move?', response: 'Revenue fell in Q3 2026.', linkedFinding: 'f_1' };
     val(await question(s.repo, 'q_3', fell));
     const reassessed = val(await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' }));
-    expect(reassessed.body).toEqual(['Revenue fell, per the response to Q3. [1]']);
+    const kept = 'Revenue fell, per the response to Q3; the tariff is R1.2 billion and capex R50 million. [1]';
+    expect(reassessed.body).toEqual([kept]);
     const prompt = s.calls[0].prompt;
     expect(prompt).toContain('R1: How did revenue move?\nResponse to R1: Revenue fell in Q3 2026.');
     expect(prompt).not.toMatch(/Q3:|Response to Q3/);
