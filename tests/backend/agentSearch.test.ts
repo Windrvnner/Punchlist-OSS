@@ -127,7 +127,7 @@ describe('searching the Q&A log from the chat, a page at a time', () => {
     expect(result(s, 3)).toContain(longText(shown).trim());                // page 2 starts where page 1 stopped
   }, 60_000);
 
-  it('a search of everything holds its findings page and its Q&A page together within what the conversation holds', async () => {
+  it('a search of everything keeps its findings and Q&A pages together within what the conversation holds', async () => {
     const s = setup(calls({ tool: 'search', what: 'all', query: 'lock-up ratio' }), { compactAt: 4_000 });
     await questions(s.repo, 40);
     await findings(s.repo, 40);
