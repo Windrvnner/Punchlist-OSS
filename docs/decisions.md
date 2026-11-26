@@ -185,6 +185,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Chat is an agent with search, read, folder, and brief tools. The brief tool catches up on a deal with the deal brief, two AI paragraphs on its open findings (#1017). A folder read always covers the whole folder; reading more than `limits.folderDocs` documents asks first, and **Stop** answers from what was found.
 - While chat works, it shows "Researching" with the full trace; once it has answered, it shows "Researched · N steps · N of M documents searched · time", never "read" (option D).
 - Tool calls run inline by default; the hybrid and native modes are set by `models.toolCalls`.
+- The chat's search gives its results a page at a time, ranked by one keyword scoring (BM25): documents `limits.docsPerCall` a page from the ranking, findings and Q&A `limits.searchPage` a page, each record whole and each Q&A row in full. The model asks for any page (#1102).
 - A question asked across deals reaches only the person's own deals.
 - A chat is one conversation on the model service; past its limit, it is compacted into an uploaded transcript.
 - One run of the chat agent (a chat answer, or the checks' gap search) takes up to `limits.chatTurns` (25) turns, and one search run, in chat or the checks, up to `limits.searchCalls` (15) calls; a chat itself has no length limit (#1066).

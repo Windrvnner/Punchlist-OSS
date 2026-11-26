@@ -1,10 +1,11 @@
 /**
  * The chat agent (decisions page, Conversations). A conversation's answer is worked out in turns by the
  * model the person chose (the main session), which has four tools:
- *   - search: what (documents, findings, Q&A or all) and a query. For documents, a search helper on the fast model runs
- *     the keyword search (folder paths and file names included), picks a few, reads them on the model service and
- *     returns passages with document and page. Findings and Q&A are records the app holds, searched by their words
- *     with no model call: the matching records go back as they are (agentSearch.ts).
+ *   - search: what (documents, findings, Q&A or all), a query and a page. Every kind is ranked by the same keyword
+ *     scoring and comes a page at a time. A document page is the next `width` documents of the keyword ranking
+ *     (folder paths and file names included), which a search helper on the fast model reads on the model service,
+ *     returning passages with document and page. Findings and Q&A are records the app holds, `searchPage` a page,
+ *     each whole, with no model call (agentSearch.ts).
  *   - read: documents named by tag or path, at most eight in one call, attached to the main session's next turn.
  *   - folder: a folder named as the person says it, and what to look for. The documents in it are put in the
  *     order to read them (ai.ts: a keyword and core-document ranking, then the fast model's order of its top), and the
