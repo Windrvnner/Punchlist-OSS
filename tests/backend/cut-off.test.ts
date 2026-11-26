@@ -6,7 +6,7 @@
 // back whole is kept, and the rest is asked again in smaller parts. Tested at deal scale.
 import { SERVICE } from '../../src/control';
 import { describe, it, expect } from 'vitest';
-import { setup, doc, deal, finding, itemsIn, OK, Mem, val, type Call } from './reviewKit';
+import { setup, doc, deal, finding, itemsIn, OK, Mem, val, type Call, nth } from './reviewKit';
 import { cutOff, tooLong, TOO_LONG_REPLY } from '../../src/backend/limits';
 
 const FA = doc(1, 'Credit Agreement.pdf', { words: ['facility', 'agreement', 'borrower', 'lender', 'margin'] });
@@ -29,7 +29,7 @@ const isCheck = (p: string) => p.includes('Check each of these checklist items')
 describe.each(['flagged', 'silent'] as Mode[])('a reply cut off at the length limit (%s)', (mode) => {
   it('the check keeps what came back whole and asks about the rest in smaller parts: all 240 items settle, findings whole', async () => {
     const shared = new Mem();
-    const s = setup((c: Call) => ({ items: itemsIn(c).map((it) => (/point \d*7 /.test(it.text) ? { id: it.tag, result: 'finding', title: `Margin differs (${it.text})`, workstream: 'Legal', body: [LONG], next: 'Ask which applies.', sources: [{ doc: 'D1', page: 3 }, { doc: 'D1', page: 7 }] } : { id: it.tag, ...OK(c) })) }), room(), { shared, installId: 'pc', checklist: () => ({ broad: items(240), product: [], sector: [] }) });
+    const s = setup((c: Call) => ({ items: itemsIn(c).map((it) => (/point \d*7 /.test(it.text) ? { id: it.tag, result: 'finding', title: `Margin differs (${it.text})`, workstream: 'Legal', body: [LONG], next: 'Ask which applies.', sources: [{ doc: nth(c, 1), page: 3 }, { doc: nth(c, 1), page: 7 }] } : { id: it.tag, ...OK(c) })) }), room(), { shared, installId: 'pc', checklist: () => ({ broad: items(240), product: [], sector: [] }) });
     await deal(s.repo); const cut = capped(s, 1500, mode, isCheck);       // about six items' replies fit
     const r = val(await s.ai.firstPass('d1')); const p = val(await s.ai.progress('d1'));
     expect(cut.n).toBeGreaterThan(0); expect(r.unsettled).toEqual([]);
@@ -41,7 +41,7 @@ describe.each(['flagged', 'silent'] as Mode[])('a reply cut off at the length li
 
   it('an item whose reply is cut off even alone is left unsettled, saying so, and nothing is guessed for it', async () => {
     const shared = new Mem();
-    const s = setup((c: Call) => ({ items: itemsIn(c).map((it) => (/point 3 /.test(it.text) ? { id: it.tag, result: 'finding', title: 'Margin differs', workstream: 'Legal', body: [LONG.repeat(30)], next: 'Ask.', sources: [{ doc: 'D1', page: 3 }, { doc: 'D1', page: 7 }] } : { id: it.tag, ...OK(c) })) }), room(), { shared, installId: 'pc', checklist: () => ({ broad: items(25), product: [], sector: [] }) });
+    const s = setup((c: Call) => ({ items: itemsIn(c).map((it) => (/point 3 /.test(it.text) ? { id: it.tag, result: 'finding', title: 'Margin differs', workstream: 'Legal', body: [LONG.repeat(30)], next: 'Ask.', sources: [{ doc: nth(c, 1), page: 3 }, { doc: nth(c, 1), page: 7 }] } : { id: it.tag, ...OK(c) })) }), room(), { shared, installId: 'pc', checklist: () => ({ broad: items(25), product: [], sector: [] }) });
     await deal(s.repo); capped(s, 1500, mode, isCheck);
     const r = val(await s.ai.firstPass('d1')); const rows = val(await s.ai.checklist!('d1'));
     expect(r.unsettled).toEqual(['c3']);
@@ -52,7 +52,7 @@ describe.each(['flagged', 'silent'] as Mode[])('a reply cut off at the length li
 
   it('one item cut off even alone does not leave the rest of the check asked one item per call', async () => {
     const shared = new Mem();
-    const s = setup((c: Call) => ({ items: itemsIn(c).map((it) => (/point 3 /.test(it.text) ? { id: it.tag, result: 'finding', title: 'Margin differs', workstream: 'Legal', body: [LONG.repeat(300)], next: 'Ask.', sources: [{ doc: 'D1', page: 3 }, { doc: 'D1', page: 7 }] } : { id: it.tag, ...OK(c) })) }), room(), { shared, installId: 'pc', checklist: () => ({ broad: items(400), product: [], sector: [] }) });
+    const s = setup((c: Call) => ({ items: itemsIn(c).map((it) => (/point 3 /.test(it.text) ? { id: it.tag, result: 'finding', title: 'Margin differs', workstream: 'Legal', body: [LONG.repeat(300)], next: 'Ask.', sources: [{ doc: nth(c, 1), page: 3 }, { doc: nth(c, 1), page: 7 }] } : { id: it.tag, ...OK(c) })) }), room(), { shared, installId: 'pc', checklist: () => ({ broad: items(400), product: [], sector: [] }) });
     await deal(s.repo); capped(s, 20000, mode, isCheck);                // 20 items' replies fit; item 3's alone does not
     const r = val(await s.ai.firstPass('d1'));
     expect(r.unsettled).toEqual(['c3']);
@@ -62,7 +62,7 @@ describe.each(['flagged', 'silent'] as Mode[])('a reply cut off at the length li
 
   it('three long items in a row stop asking only for the moment: the items after them are asked again, never marked cut off', async () => {
     const shared = new Mem();
-    const s = setup((c: Call) => ({ items: itemsIn(c).map((it) => (/point [345] /.test(it.text) ? { id: it.tag, result: 'finding', title: 'Margin differs', workstream: 'Legal', body: [LONG.repeat(300)], next: 'Ask.', sources: [{ doc: 'D1', page: 3 }, { doc: 'D1', page: 7 }] } : { id: it.tag, ...OK(c) })) }), room(), { shared, installId: 'pc', checklist: () => ({ broad: items(200), product: [], sector: [] }) });
+    const s = setup((c: Call) => ({ items: itemsIn(c).map((it) => (/point [345] /.test(it.text) ? { id: it.tag, result: 'finding', title: 'Margin differs', workstream: 'Legal', body: [LONG.repeat(300)], next: 'Ask.', sources: [{ doc: nth(c, 1), page: 3 }, { doc: nth(c, 1), page: 7 }] } : { id: it.tag, ...OK(c) })) }), room(), { shared, installId: 'pc', checklist: () => ({ broad: items(200), product: [], sector: [] }) });
     await deal(s.repo); capped(s, 20000, mode, isCheck);
     const r = val(await s.ai.firstPass('d1'));
     expect(r.unsettled).toEqual(['c3', 'c4', 'c5']);
@@ -91,7 +91,7 @@ describe.each(['flagged', 'silent'] as Mode[])('a reply cut off at the length li
   it.each([['18|19|20|22'], ['18|19|20|21|22|23'], ['18|19|20|21|22|24|25']])('long items %s: a long item early in the handful after a pause does not send the handful to the thorough model', async (which) => {
     const shared = new Mem(); const long = new RegExp(`point (${which}) `);
     // the thorough model's replies cannot be read: an ordinary item sent to it would end not settled
-    const s = setup((c: Call) => (c.model === 'thorough' ? 'not JSON' : { items: itemsIn(c).map((it) => (long.test(it.text) ? { id: it.tag, result: 'finding', title: 'Margin differs', workstream: 'Legal', body: [LONG.repeat(300)], next: 'Ask.', sources: [{ doc: 'D1', page: 3 }, { doc: 'D1', page: 7 }] } : { id: it.tag, ...OK(c) })) }), room(), { shared, installId: 'pc', checklist: () => ({ broad: items(400), product: [], sector: [] }) });
+    const s = setup((c: Call) => (c.model === 'thorough' ? 'not JSON' : { items: itemsIn(c).map((it) => (long.test(it.text) ? { id: it.tag, result: 'finding', title: 'Margin differs', workstream: 'Legal', body: [LONG.repeat(300)], next: 'Ask.', sources: [{ doc: nth(c, 1), page: 3 }, { doc: nth(c, 1), page: 7 }] } : { id: it.tag, ...OK(c) })) }), room(), { shared, installId: 'pc', checklist: () => ({ broad: items(400), product: [], sector: [] }) });
     await deal(s.repo); capped(s, 20000, mode, isCheck);
     const r = val(await s.ai.firstPass('d1'));
     expect([...r.unsettled].sort()).toEqual(which.split('|').map((n) => `c${n}`).sort());
@@ -99,7 +99,7 @@ describe.each(['flagged', 'silent'] as Mode[])('a reply cut off at the length li
 
   it.each([6, 8])('%i long items in a row leave only themselves not settled, not the ordinary items after them', async (run) => {
     const shared = new Mem(); const long = new Set(Array.from({ length: run }, (_, k) => `c${101 + k}`));
-    const s = setup((c: Call) => ({ items: itemsIn(c).map((it) => (long.has(/point (\d+) /.exec(it.text) ? `c${/point (\d+) /.exec(it.text)![1]}` : '') ? { id: it.tag, result: 'finding', title: 'Margin differs', workstream: 'Legal', body: [LONG.repeat(300)], next: 'Ask.', sources: [{ doc: 'D1', page: 3 }, { doc: 'D1', page: 7 }] } : { id: it.tag, ...OK(c) })) }), room(), { shared, installId: 'pc', checklist: () => ({ broad: items(400), product: [], sector: [] }) });
+    const s = setup((c: Call) => ({ items: itemsIn(c).map((it) => (long.has(/point (\d+) /.exec(it.text) ? `c${/point (\d+) /.exec(it.text)![1]}` : '') ? { id: it.tag, result: 'finding', title: 'Margin differs', workstream: 'Legal', body: [LONG.repeat(300)], next: 'Ask.', sources: [{ doc: nth(c, 1), page: 3 }, { doc: nth(c, 1), page: 7 }] } : { id: it.tag, ...OK(c) })) }), room(), { shared, installId: 'pc', checklist: () => ({ broad: items(400), product: [], sector: [] }) });
     await deal(s.repo); capped(s, 20000, mode, isCheck);
     const r = val(await s.ai.firstPass('d1'));
     expect([...r.unsettled].sort()).toEqual([...long].sort());
@@ -124,11 +124,11 @@ describe.each(['flagged', 'silent'] as Mode[])('a reply cut off at the length li
 
   it('a chat answer cut off is asked for once more, shorter; cut off again, it fails saying the reply was too long, and no cut text is shown', async () => {
     const short = 'The credit agreement sets 2.25%; the term sheet 2.00%. [1] [2]';
-    const s = setup((c: Call) => ({ text: c.prompt.includes('about half as long') ? short : `${LONG} ${LONG} ${LONG}`, sources: [{ doc: 'D1', page: 3 }, { doc: 'D2', page: 1 }] }), room(), { library: [] });
+    const s = setup((c: Call) => ({ text: c.prompt.includes('about half as long') ? short : `${LONG} ${LONG} ${LONG}`, sources: [{ doc: nth(c, 1), page: 3 }, { doc: nth(c, 2), page: 1 }] }), room(), { library: [] });
     await deal(s.repo); capped(s, 300, mode, (p) => !p.includes('It cannot be read as written'));
     const a = val(await s.ai.answer({ dealId: 'd1', message: 'What margin applies under the credit agreement?', history: [], model: 'standard' }));
     expect((a as { text: string }).text).toContain('2.25%; the term sheet 2.00%');
-    const t = setup(() => ({ text: `${LONG} ${LONG} ${LONG}`, sources: [{ doc: 'D1', page: 3 }] }), room(), { library: [] });
+    const t = setup((c: Call) => ({ text: `${LONG} ${LONG} ${LONG}`, sources: [{ doc: nth(c, 1), page: 3 }] }), room(), { library: [] });
     await deal(t.repo); capped(t, 300, mode);
     const b = await t.ai.answer({ dealId: 'd1', message: 'What margin applies under the credit agreement?', history: [], model: 'standard' });
     expect(!b.ok && b.error).toEqual({ kind: 'failed', message: TOO_LONG_REPLY });
@@ -136,7 +136,7 @@ describe.each(['flagged', 'silent'] as Mode[])('a reply cut off at the length li
 
   it('a draft cut off is asked for once more, shorter, and never comes back as "the documents do not answer it"', async () => {
     const isDraft = (p: string) => p.includes('Draft a response to this question');
-    const s = setup((c: Call) => (isDraft(c.prompt) ? { status: 'found', text: c.prompt.includes('about half as long') ? 'The margin is 2.25%. [1]' : `${LONG} ${LONG}`, sources: [{ doc: 'D1', page: 3 }], reused: [] } : {}), room(), { library: [] });
+    const s = setup((c: Call) => (isDraft(c.prompt) ? { status: 'found', text: c.prompt.includes('about half as long') ? 'The margin is 2.25%. [1]' : `${LONG} ${LONG}`, sources: [{ doc: nth(c, 1), page: 3 }], reused: [] } : {}), room(), { library: [] });
     await deal(s.repo); capped(s, 200, mode, isDraft);
     const r = val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: 'Which margin applies under the credit agreement and the term sheet?' }));
     expect(r).toMatchObject({ status: 'found', text: 'The margin is 2.25%. [1]' });
@@ -164,7 +164,7 @@ describe('limits the service sets', () => {
   });
 
   it('a request refused as too long is asked again with the likeliest half of the documents', async () => {
-    const s = setup((c: Call) => ({ text: 'The margin is 2.25%. [1]', sources: [{ doc: 'D1', page: 3 }] }), room(), { library: [] });
+    const s = setup((c: Call) => ({ text: 'The margin is 2.25%. [1]', sources: [{ doc: nth(c, 1), page: 3 }] }), room(), { library: [] });
     await deal(s.repo); const orig = s.svc.complete.bind(s.svc);
     s.svc.complete = async (input) => { if ((input.files?.length ?? 0) > 1) throw tooLong('too long', 400); return orig(input); };
     const a = val(await s.ai.answer({ dealId: 'd1', message: 'What margin applies under the credit agreement and the term sheet?', history: [], model: 'standard' }));
@@ -185,7 +185,7 @@ describe('limits the service sets', () => {
 describe('faults found in the first build', () => {
   it('a whole reply with a stray quote (36" for inches) is read as whole, not as cut off', async () => {
     const isDraft = (p: string) => p.includes('Draft a response to this question');
-    const s = setup((c: Call) => (isDraft(c.prompt) ? '{"status": "found", "text": "The pipeline is 36" in diameter. [1]", "sources": [{"doc": "D1", "page": 3}], "reused": []}' : {}), room(), { library: [] });
+    const s = setup((c: Call) => (isDraft(c.prompt) ? `{"status": "found", "text": "The pipeline is 36" in diameter. [1]", "sources": [{"doc": "${nth(c, 1)}", "page": 3}], "reused": []}` : {}), room(), { library: [] });
     await deal(s.repo);
     const r = val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: 'What is the diameter of the pipeline under the credit agreement?' }));
     expect(r).toMatchObject({ status: 'found' }); expect(s.calls.filter((c) => isDraft(c.prompt)).length).toBe(1);
@@ -239,7 +239,7 @@ describe('faults found in the first build', () => {
   });
 
   it('an answer whose likeliest document is too long on its own is given from the others', async () => {
-    const s = setup(() => ({ text: 'The margin is as stated. [1]', sources: [{ doc: 'D2', page: 1 }] }), { d1: [FA, TS, doc(3, 'Facility side letter.pdf', { words: ['facility', 'agreement', 'margin', 'lender'] })] }, { library: [] });
+    const s = setup((c: Call) => ({ text: 'The margin is as stated. [1]', sources: [{ doc: nth(c, 2), page: 1 }] }), { d1: [FA, TS, doc(3, 'Facility side letter.pdf', { words: ['facility', 'agreement', 'margin', 'lender'] })] }, { library: [] });
     await deal(s.repo); const orig = s.svc.complete.bind(s.svc); let first = ''; let refused = 0;      // whichever document is ranked first is the long one
     s.svc.complete = async (input) => { if (input.prompt.startsWith('Documents:')) { first ||= input.files![0]; if (input.files!.includes(first)) { refused++; throw tooLong('too long', 400); } } return orig(input); };
     const a = val(await s.ai.answer({ dealId: 'd1', message: 'What margin applies under the credit agreement and the term sheet?', history: [], model: 'standard' })) as { text: string; sources: { doc: string }[] };
@@ -249,7 +249,7 @@ describe('faults found in the first build', () => {
   });
 
   it('a kept chat conversation refused as too long carries on in a new one, compacted, and answers', async () => {
-    const s = setup(() => ({ text: 'The margin is 2.25%. [1]', sources: [{ doc: 'D1', page: 3 }] }), room(), { library: [] });
+    const s = setup((c: Call) => ({ text: 'The margin is 2.25%. [1]', sources: [{ doc: nth(c, 1), page: 3 }] }), room(), { library: [] });
     await deal(s.repo);
     const first = val(await s.ai.answer({ dealId: 'd1', message: 'What margin applies under the credit agreement?', history: [], model: 'standard' })) as { thread?: import('../../src/ports').ModelThread };
     expect(first.thread?.id).toBeTruthy();

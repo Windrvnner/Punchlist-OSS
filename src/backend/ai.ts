@@ -574,8 +574,12 @@ export function nodeAi(o: AiOptions) {
   const budget = new AsyncLocalStorage<{ left: number; deal?: { left: number } }>();
   /** every call to the model is asked again quietly when it fails or comes back empty (src/backend/retry.ts) */
   const retried = retrier(o.retry);
-  /** a reply that failed: nothing in it, or what its caller cannot use (#1105); asked again (retry.ts) */
-  const failedReply = async (text: string, unusable?: Unusable) => !text.trim() || (!!unusable && await unusable(text));
+  /**
+   * a reply that failed: nothing in it, or what its caller cannot use (#1105); asked again (retry.ts). One that stops
+   * before its end is left to the cut-off handling (`whole`), since its last citation may itself be cut short (#1162)
+   */
+  const failedReply = async (text: string, unusable?: Unusable) =>
+    !text.trim() || (!!unusable && !unfinished(text) && await unusable(text));
   const complete = async ({ kind, split: _split, unusable, ...input }: Ask): Promise<string> => {
     const b = kind === 'describe' ? undefined : budget.getStore();
     // each try is counted in the usage log and against a search's calls, since each is paid for; a search out of calls is not asked again
