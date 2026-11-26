@@ -9,7 +9,7 @@ import type { Store } from './store';
 import { dealHash, pageHash, dealQuestions, type State, type Message } from './state';
 import { docKey, ownFilesId, type Question, type Source } from '../domain/model';
 import { CreateQuestion, UseAsResponse } from './commands/questions';
-import { findQuestions, mayAddress } from '../domain/suggest';
+import { findQuestions } from '../domain/suggest';
 import { withoutMarkers } from '../domain/cite';
 import type { Research } from '../ports';
 import { bareDealName, sameName } from './commands/deals';
@@ -354,6 +354,30 @@ async function answer(store: Store, scope: Scope, messageId: string, text: strin
   const list = store.get().threads[key] ?? [];
   if (!list.some((m) => m.id === messageId && m.state === 'pending')) return;
   store.setThread(key, list.map((m) => m.id !== messageId ? m : r.ok ? { ...m, text: r.value.text, sources: r.value.sources, ...(r.value.research ? { research: r.value.research } : {}), ...(r.value.thread ? { thread: r.value.thread } : {}), state: 'done' as const } : { ...m, state: 'failed' as const }));
+  if (r.ok) await proposeQuestion(store, scope, messageId);
+}
+
+/**
+ * Once an answer on a deal's or a finding's conversation finishes, the model proposes the open question it may address,
+ * if any, kept for this session for the card under it (`suggestions`, #1120). A failed call proposes none.
+ */
+async function proposeQuestion(store: Store, scope: Scope, messageId: string) {
+  const ai = store.services.ai;
+  if (!ai.suggestQuestion || (scope.kind !== 'deal' && scope.kind !== 'finding')) return;
+  const list = store.get().threads[convKey(scope)] ?? [];
+  const answered = list.find((m) => m.id === messageId);
+  const open = openToSuggest(store.get(), scope.dealId, list);
+  if (!answered || !open.length) return;
+  const questions = open.map((q) => q.text);
+  const r = await ai.suggestQuestion({ dealId: scope.dealId, answer: answerText(answered), questions });
+  const q = r.ok && r.value !== null ? open[r.value] : undefined;
+  if (q) store.ui((ui) => ({ proposed: { ...ui.proposed, [messageId]: q.id } }));
+}
+
+/** The open questions a card may suggest: those whose response is not already an answer of this conversation. */
+function openToSuggest(s: State, dealId: string, list: Message[]) {
+  const used = new Set(list.map((m) => answerText(m).trim()));
+  return dealQuestions(s, dealId).filter((q) => q.status === 'open' && !used.has(q.response.trim()));
 }
 
 /** An answer's text as it leaves the conversation, as a response or a question: finding links as words, no [n] markers. */
@@ -423,14 +447,16 @@ export async function askVerdict(store: Store, dealId: string, questionId: strin
  */
 export function suggestions(s: State, scope: Scope): Map<string, string> {
   const out = new Map<string, string>(); if (scope.kind !== 'deal' && scope.kind !== 'finding') return out;
-  const list = s.threads[convKey(scope)] ?? []; const texts = new Map(list.map((m) => [m.id, answerText(m).trim()]));
-  const used = new Set(texts.values());
-  const open = dealQuestions(s, scope.dealId).filter((q) => q.status === 'open' && !used.has(q.response.trim())); const offered = new Set<string>();
+  const list = s.threads[convKey(scope)] ?? [];
+  const open = new Set(openToSuggest(s, scope.dealId, list).map((q) => q.id));
+  const offered = new Set<string>();
   for (let i = list.length - 1; i >= 0; i--) {
     const m = list[i]; if (m.role !== 'ai' || m.state !== 'done') continue;
-    const q = mayAddress(texts.get(m.id)!, open.filter((x) => !offered.has(x.id)))[0];
-    if (!q) continue;
-    offered.add(q.id); if (!s.ui.notThese.includes(`${m.id}|${q.id}`)) out.set(m.id, q.id);
+    // the question the model proposed when this answer finished (#1120)
+    const id = s.ui.proposed[m.id];
+    if (!id || !open.has(id) || offered.has(id)) continue;
+    offered.add(id);
+    if (!s.ui.notThese.includes(`${m.id}|${id}`)) out.set(m.id, id);
   }
   return out;
 }

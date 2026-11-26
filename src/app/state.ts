@@ -90,6 +90,9 @@ export interface UiState {
   notThese: string[];
   /** what the model said, when a person asked, about whether an answer addresses the question suggested under it, as `answer message id|question id`; for this session only */
   verdicts: Record<string, 'asking' | 'failed' | { verdict: 'yes' | 'partly' | 'no'; why: string }>;
+  /** the open question the model proposed, once an answer finished, as one it may address: answer message id to
+   * question id; for this session only (#1120) */
+  proposed: Record<string, string>;
   /** the steps of answers still being worked on, by the pending message's id, as the backend last said them; for this session only */
   researching: Record<string, Research>;
   queueSearch: string;
@@ -223,6 +226,7 @@ export const initialState = (can = capabilities()): State => ({
     side: null,
     notThese: [],
     verdicts: {},
+    proposed: {},
     researching: {},
     queueSearch: '',
     attachments: [],
