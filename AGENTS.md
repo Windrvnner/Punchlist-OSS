@@ -23,7 +23,9 @@ Start with these documents:
 
 ## Commands
 
-These commands need Node.js 22, Google Chrome at `/usr/bin/google-chrome`, and LibreOffice at `/usr/bin/soffice`. Tests that need LibreOffice are skipped when it is missing, except under `npm run check:all`, which checks LibreOffice first and fails without it.
+These commands need Node.js 22, Google Chrome at `/usr/bin/google-chrome`, and LibreOffice at `/usr/bin/soffice`.
+Tests that need LibreOffice are skipped when it is missing, except under `npm run check:all`, which checks LibreOffice
+first and fails without it. `check:all` also needs LibreOffice Impress and Calibri or Carlito (docs/development.md).
 
 ```sh
 npm ci                                       # install dependencies and the pre-commit hook
@@ -53,8 +55,8 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   and services only through `src/ports`, so that every workflow can run without a window. The UI never imports the
   backend, adapters, desktop, or shell. Formatting a value for display, and screen-only state such as focus, an open
   menu, or scroll position, stay in `src/ui`. New or changed UI code that breaks this is a review blocker.
-  `npm run check` fails on forbidden UI imports, service or repository access, and browser storage
-  (`scripts/check-pane-of-glass.mjs`).
+  `npm run check` fails on forbidden UI imports, service or repository access, browser storage, cookies, the Cache
+  API, and network calls (`scripts/check-pane-of-glass.mjs`).
 - **Readable code.** Every change must be easy for a person to review on GitHub. New or changed code that breaks the rules below is a review blocker, just like lost work or a crash. Code that a pull request did not touch never is.
   - Put one statement on each line, and keep lines to 120 characters at most, comments included.
   - Keep new functions to about 60 lines and files to about 500. Don't grow a function that is already past that limit; add a named helper instead.
@@ -62,7 +64,9 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   - Put a new special case in its own named helper, with a comment that names its decision or issue, rather than adding another branch to a long function.
   - Copy nothing (share the code instead), and leave no dead code (remove it). Comment anything that isn't self-explanatory.
   - Lines that a change touches follow these rules. Untouched code is left alone, and the formatter stays off. Older code is brought up to these rules in separate, behavior-neutral cleanup pull requests.
-  - `npm run check` lists changed lines over 120 characters and new functions that are too complex, compared with the branch's merge base with `main` (`scripts/check-readability.mjs`). It does not fail on them.
+  - `npm run check` lists changed lines over 120 characters, too-complex functions the branch changed anywhere, new
+    functions over 60 lines, and files over 500 lines the branch made longer, compared with the branch's merge base
+    with `main` (`scripts/check-readability.mjs`). It does not fail on them.
 - **Code before a model.** Use a model only when the task needs language understanding: reading free text, judging
   meaning, drafting. Parsing, matching, numbering, dates and periods (a question number "Q1" versus a quarter "Q1
   2026"), sorting, counting, and formatting are done in code, with tests at deal scale. Never ask a model to decide
@@ -77,9 +81,20 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   Use plain code before a model call. Build nothing beyond what an issue or a decision in docs/decisions.md asks
   for: no speculative edge cases, options, or fallbacks. Example: matching imported rows to existing questions is a
   lookup on number plus text, then on text alone; every row left over is unmatched.
+  Each score, threshold, fallback, or text normalization needs the decision that asks for it, and `npm run check`
+  lists the added lines that name a guess (`scripts/check-readability.mjs`). It does not fail on them.
+- **Requirements trace to a recorded decision.** Build only what traces to a decision in docs/decisions.md. An issue
+  or acceptance criterion is not a requirement on its own, whoever wrote it: a guess, or machinery beyond the simplest
+  version of the stated need, is built only when a recorded decision asks for it. The app has a narrow scope: build
+  only for the inputs it actually receives (Excel Q&A logs and checklists as provided, and the documents in the deal
+  folder), never for inputs it might receive.
 - **Send deal PDFs whole for AI analysis.** Send the original file so the model can read the pages directly.
   Word counts may be used to rank and pick documents. See docs/decisions.md for the planned handling of PDFs that
   the model service refuses as too large (#119) and the current checklist import behavior.
+- **Never assume a limit that isn't real.** The model reads whole files, so no arbitrary cap (pages, documents, sizes,
+  words, counts) limits what it reads: its input limit and the existing batching decide, and a cap needs a service
+  refusal or a decision behind it. Unless a decision says so, nothing is marked unreadable or dropped from a check or
+  search that the model can read, and a failed read is retried, never saved as "no text".
 
 ## Commits and pull requests
 
@@ -97,6 +112,8 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   decided, or said something (names, "the owner wants", "the maintainer asked", quotes of the user, or notes that
   carry a person and a date) and carry no AI attribution trailers. Product terms and data fields such as `owner` are
   fine. State decisions plainly ("Decision: X"). Attribution blocks a merge, like lost work.
+  `scripts/check-attribution.mjs` refuses a role credited with a decision ("the owner wants") and any email address
+  other than an example or no-reply one, in tracked files and the branch's commit messages.
 - Clean contributions: everything written to GitHub (issues, comments, pull requests, reviews, commit messages,
   docs, and code comments) follows ordinary open-source hygiene. It carries no personal information, no internal or
   private links, no references to non-public systems or services, and no text copied from third-party documentation.
@@ -126,7 +143,9 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
 
 ## Product rules
 
-- Lost work comes first. Anything that can lose what a person typed or chose is fixed before anything else.
+- Lost work comes first. Anything that can lose what a person typed or chose is fixed before anything else. So is
+  anything the app silently drops, skips, caps, truncates, alters, or marks unreadable in what it reads, and any
+  failed read saved as "no text".
 - Only a person changes a record's state; the app and the model propose. Big actions, including deletes, ask first in the app's own confirmation dialog and keep their **Undo**. Deleting a deal asks twice and has no **Undo**.
 - Screens carry no explainer or helper text; explanations go in tooltips. Use en-US throughout.
 - The look follows Perplexity, Harvey, and Apple, in glass: no generic AI look and no thin full-height lines down a left edge. Match the existing screens and never regress them.
@@ -135,6 +154,8 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
 ## How decisions are made
 
 - Read the README and `docs/decisions.md` before changing anything. Check `docs/decisions.md`, `docs/architecture.md`, and the code before proposing anything, and say what already exists. Follow a settled decision and say where it was decided. Still ask first about a major design decision, even when it looks settled.
+- Nothing is reported, merged, or called done unless it is verified in the code and, where it runs, by running it.
+  A finding that is unverified or inferred is verified, or fixed, before it is reported.
 - Check claims before making them. File a bug only once it is reproduced on the current build. Close a UI bug whose element no longer exists as not planned, with the label `no longer applies`.
 
 ## Documentation and decisions
