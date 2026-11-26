@@ -43,7 +43,7 @@ describe.skipIf(!KEY)('two PCs sharing a first pass on Claude (live)', () => {
       expect(ra.find((r) => r.id === 'b1')!.result).toBe('finding'); expect(ra.find((r) => r.id === 'b3')!.result).toBe('gap');
     } finally {
       for (const [w, s] of [['office', svcA], ['laptop', svcB]] as const) console.log(`live split, ${w}: ${s.use.calls} calls, ${s.use.input} tokens in, ${s.use.output} out, by model ${JSON.stringify(s.use.byModel)}`);
-      void itemsIn; p.close();
+      void itemsIn; await p.close();
       for (const s of [svcA, svcB]) for (const id of [...s.use.uploaded]) await s.remove(id);   // leave nothing in the account's file store
     }
   }, 300000);
