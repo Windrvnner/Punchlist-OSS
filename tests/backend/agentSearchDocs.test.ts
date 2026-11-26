@@ -51,7 +51,8 @@ const names = (c: Call) => [...c.prompt.matchAll(/^D\d+: (?:.*\/)?(.+?\.pdf)/gm)
 const docs = (page?: number) =>
   ({ tool: 'search', what: 'documents', query: 'turbine warranty', ...(page ? { page } : {}) });
 const ask = (message: string) => ({ dealId: 'd1', message, history: [], model: 'standard' });
-const RANKED = ['01', '02', '03', '04', '05', '05 (blackline)', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15',
+const RANKED = ['01', '02', '03', '04', '05', '05 (blackline)', '06', '07', '08', '09', '10', '11', '12', '13', '14',
+  '15',
   ...Array.from({ length: 15 }, (_v, i) => two(i + 16))].map((x) => `Turbine warranty ${x}.pdf`);
 
 describe('searching documents from the chat, a page at a time', () => {

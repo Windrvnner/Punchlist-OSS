@@ -146,7 +146,8 @@ describe('other', () => {
     const start = (installId = 'office') => setup(() => ({ text: 'x', sources: [] }), recs, { repo, shared, installId, pick: () => ({ read: [1] }) });
     const starred = (c: { prompt: string }) => (c.prompt.match(/^\d+\*: .*$/gm) ?? []).map((l) => l.replace(/^\d+\*: /, ''));
     // a draft's pick lists the ranking, core documents starred
-    const draft = (x: ReturnType<typeof start>) => x.ai.draft({ dealId: 'd0', questionId: 'q_1', questionText: 'Is there a lock-up?' });
+    const draft = (x: ReturnType<typeof start>) =>
+      x.ai.draft({ dealId: 'd0', questionId: 'q_1', questionText: 'Is there a lock-up?' });
     const a = start(); val(await draft(a));
     const b = start(); val(await draft(b));   // the app is started again
     const home = start('home'); val(await draft(home));
