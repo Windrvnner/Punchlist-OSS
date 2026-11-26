@@ -28,7 +28,8 @@ describe('the preview of a merge', () => {
     ];
     const rows = rowsFrom(csvOf(second));
     const preview = previewImport(store, dealId, 'merge', rows);
-    expect(preview.ok && [preview.value.created, preview.value.updated, preview.value.restored]).toEqual([400, 1500, 100]);
+    const counts = preview.ok && [preview.value.created, preview.value.updated, preview.value.restored];
+    expect(counts).toEqual([400, 1500, 100]);
     expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows })).ok).toBe(true);
     const after = dealQuestions(store.get(), dealId);
     expect(after).toHaveLength(1900 + 100 + 400);

@@ -98,7 +98,9 @@ export function logWrite(table: Pick<ReadTable, 'rows' | 'lines' | 'cols' | 'las
   // ("11/12/2026", "Outstanding", "H") that says what the app holds is not taken for a change
   const read = new Map(prepareImport(table.rows, mapping, table.rows.map((_, i) => i)).rows.map((r) => [r.line!, r] as const));
   // a value as the import reads it against the app's: a status or priority in the app's terms, whatever case it is written in
-  const same = (k: ImportField, a: string, b: string) => (k === 'status' || k === 'priority' ? a.toLowerCase() === b.toLowerCase() : sameText(a, b));
+  const same = (k: ImportField, a: string, b: string) => (k === 'status' || k === 'priority'
+    ? a.toLowerCase() === b.toLowerCase()
+    : sameText(a, b));
   const sameAs = (k: ImportField, i: number, v: string) => { const r = read.get(i) as ImportRow | undefined; const was = r ? String((r as unknown as Record<string, unknown>)[k] ?? '') : cell(table.rows[i], k); if (k === 'n') return numberParts(cell(table.rows[i], 'n'))?.n === Number(v);
     if ((k === 'received' || k === 'responded') && !was && cell(table.rows[i], k).trim()) return true;   // a date the import could not settle (11/02 either way) is left as the log writes it
     return same(k, was, v) || sameText(cell(table.rows[i], k), v); };
@@ -114,9 +116,14 @@ export function logWrite(table: Pick<ReadTable, 'rows' | 'lines' | 'cols' | 'las
       if (!v.trim() && before[k] === undefined) continue;
       if (sameAs(k, i, v)) { now[k] = has; continue; }                                 // the log says it already, its own way: kept as the log writes it
       // the cell still holds what the app last put there, as written or as the import reads it
-      const ours = before[k] !== undefined && (sameText(has, before[k]) || (!!readAs(k, i) && same(k, readAs(k, i), before[k])));
+      const ours = before[k] !== undefined
+        && (sameText(has, before[k]) || (!!readAs(k, i) && same(k, readAs(k, i), before[k])));
       // someone changed it in the log; where the app still holds what it last sent, only the log changed: the app takes it
-      if (has.trim() && !ours && before[k] !== undefined && (sameText(v, before[k]) || same(k, v, before[k]))) { (out.taken[q.id] ??= {})[k] = has; now[k] = has; continue; }
+      if (has.trim() && !ours && before[k] !== undefined && (sameText(v, before[k]) || same(k, v, before[k]))) {
+        (out.taken[q.id] ??= {})[k] = has;
+        now[k] = has;
+        continue;
+      }
       if (has.trim() && !ours) { theirs = true; (out.keptFields[q.id] ??= []).push(k); (out.keptText[q.id] ??= {})[k] = has; if (before[k] !== undefined) now[k] = before[k]; continue; }   // someone else's: never overwritten
       // a blank Priority stays blank: the app's High on a question that came in with none is its default, not a value anyone gave
       if (k === 'priority' && !has.trim() && v === 'High' && before[k] === undefined) continue;
@@ -155,5 +162,7 @@ export function readLogCells(q: Question, cells: Record<string, string>, today?:
 /** whether a question's field already says `value` (in the app's terms, as readLogCells gives it); the words exactly as written */
 export function holds(q: Question, k: string, value: string): boolean {
   const app = String((q as unknown as Record<string, unknown>)[k] ?? '');
-  return k === 'status' || k === 'priority' || k === 'received' || k === 'responded' ? app.toLowerCase() === value.trim().toLowerCase() : sameText(app, value);
+  return k === 'status' || k === 'priority' || k === 'received' || k === 'responded'
+    ? app.toLowerCase() === value.trim().toLowerCase()
+    : sameText(app, value);
 }

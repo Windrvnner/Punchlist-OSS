@@ -175,13 +175,13 @@ export function prepareImport(table: string[][], mapping: Mapping, lines?: numbe
 }
 
 /**
- * A text as a spreadsheet file holds it: the file keeps a line break as one "\n" and cannot hold control characters, so
- * a writer stores each as a space or leaves it out (xlsx leaves it out). Both forms, in that order. This is how the file
- * stores text, not a repair; every other difference is a real edit (docs/decisions.md).
+ * A text as a spreadsheet file holds it: the file keeps a line break as one "\n" and cannot hold control characters,
+ * so a writer stores each as a space or leaves it out (xlsx leaves it out). Both forms, in that order. This is how the
+ * file stores text, not a repair; every other difference is a real edit (docs/decisions.md).
  */
 export const fileForms = (text: string) => [' ', ''].map((control) => text.replace(/\r\n?/g, '\n')
   .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, control));
-/** Two texts that are the same as a file holds them (`fileForms`): an import does not count that difference as a change. */
+/** Two texts that are the same as a file holds them (`fileForms`): an import does not count that as a change. */
 export const sameText = (a: string, b: string) => {
   if (a === b) return true;
   const [x, y] = [fileForms(a), fileForms(b)];
