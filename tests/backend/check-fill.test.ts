@@ -1,6 +1,6 @@
 // @vitest-environment node
 // Filling gaps through the chat agent (docs/core-documents-design.md, part 4): the agent only ever adds to what a check
-// found, and every call it makes counts against an allowance of its own, so it never takes the check's own searches.
+// found, and a run of it stops at the agent's own turn limit.
 import { it, expect } from 'vitest';
 import { setup, doc, val, deal, itemsIn, OK, isPickAsk, type Call } from './reviewKit';
 import type { DocRecord } from '../../src/backend/documents';
@@ -30,17 +30,18 @@ it('an item the documents the agent cites leave open, cited for another item of 
   expect(row('x3')).toMatchObject({ result: 'gap', need: 'the water rights' });                            // its need as the check found it
 });
 
-it('every call the agent makes counts against its own allowance, so a busy agent stops and the check\'s own searches are untouched', async () => {
+it('a busy agent stops at its turns per run, and the check\'s own searches are untouched', async () => {
   const items = Array.from({ length: 60 }, (_x, i) => ({ id: `g${i + 1}`, text: `Gap item ${i + 1} on decommissioning` }));
   // an agent that reads the whole folder on every turn it has
   const turn = (c: Call) => { const n = +(/This is turn (\d+) of/.exec(c.prompt)?.[1] ?? 99); return n < 25 ? { tool: 'folder', folder: 'vdr', lookFor: `decommissioning ${n}` } : { text: 'Nothing settles them.', sources: [] }; };
   const gapAll = (c: Call) => (isTurn(c) ? turn(c) : { items: itemsIn(c).map((it) => ({ id: it.tag, result: 'more', need: 'a decommissioning plan' })) });
-  const opts = { checklist: () => ({ broad: items, product: [], sector: [] }), checkSearchCalls: 100, pick: () => ({ read: [] }), pickFor: () => ({ read: {} }), query: (c: Call) => ({ queries: Object.fromEntries([...c.prompt.matchAll(/^(I\d+):/gm)].map((m) => [m[1], ['decommissioning plan']])) }) };
+  const opts = { checklist: () => ({ broad: items, product: [], sector: [] }), pick: () => ({ read: [] }), pickFor: () => ({ read: {} }), query: (c: Call) => ({ queries: Object.fromEntries([...c.prompt.matchAll(/^(I\d+):/gm)].map((m) => [m[1], ['decommissioning plan']])) }) };
   const quiet = setup(gapAll, { d1: [FA, TS] }, opts); await deal(quiet.repo); val(await quiet.ai.firstPass('d1'));
-  const busy = setup(gapAll, { d1: [FA, TS] }, { ...opts, fill: (c: Call) => (isPickAsk(c) ? { read: [] } : isTurn(c) ? turn(c) : { text: '', sources: [] }) }); await deal(busy.repo);
+  const busy = setup(gapAll, { d1: [FA, TS] }, { ...opts, turns: 3, fill: (c: Call) => (isPickAsk(c) ? { read: [] } : isTurn(c) ? turn(c) : { text: '', sources: [] }) }); await deal(busy.repo);
   const r = val(await busy.ai.firstPass('d1'));
-  // every call of the agent: its later turns carry only what is new, so the stand-in counts them among the check's calls
-  expect(busy.fillCalls.length + busy.calls.filter((c) => isTurn(c)).length).toBeLessThanOrEqual(100 + 3);   // its allowance, and the few calls already under way when it ran out
+  // no run of the agent takes a turn past the third, though it would go on to its twenty-fifth
+  const turnNumbers = [...busy.fillCalls, ...busy.calls].filter((c) => isTurn(c)).map((c) => +(/This is turn (\d+) of/.exec(c.prompt)?.[1] ?? 1));
+  expect(turnNumbers.length).toBeGreaterThan(0); expect(Math.max(...turnNumbers)).toBeLessThanOrEqual(3);
   expect(busy.queryCalls.length).toBe(quiet.queryCalls.length);                                           // the check searched as much as it would have without it
   expect(r.gaps.length).toBe(60); expect(val(await busy.ai.checklist('d1')).filter((x) => x.result === 'gap' && x.searched?.length).length).toBe(60);
 }, 120_000);

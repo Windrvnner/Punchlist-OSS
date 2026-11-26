@@ -1405,11 +1405,6 @@ describe('the first pass', () => {
     const turns = s.fillCalls.filter((c) => isTurn(c)); expect(turns.length).toBe(2); expect(turns[0].prompt).toContain('4. Gap item 4'); expect(turns[0].prompt).not.toContain('Gap item 5'); expect(turns[1].prompt).toContain('2. Gap item 6');
     expect(turns[0].prompt).toContain('(searched already, finding nothing: "decommissioning plan"');                                 // the check's searches go with them, so they are not made again
     const g1 = val(await s.ai.checklist('d1')).find((x) => x.id === 'g1')!; expect(g1.result).toBe('gap'); expect(g1.searched?.[0]).toEqual({ q: 'decommissioning plan', n: 0 });
-    // the agent's allowance, as large as the check's own searches: past it, no more is handed over, and every item is still written
-    const spent = setup(gapAll, { d1: [FA, TS] }, { ...opts, checkSearchCalls: 1 }); await deal(spent.repo);
-    expect(val(await spent.ai.firstPass('d1')).gaps.length).toBe(6);
-    expect(spent.fillCalls.length).toBeLessThanOrEqual(1);
-    expect(spent.fillCalls.filter((c) => isTurn(c)).length).toBeLessThanOrEqual(1);
     // a run whose reply cannot be used: no more items are handed over in that check
     const broke = setup(gapAll, { d1: [FA, TS] }, { ...opts, fill: (c: Call) => (isTurn(c) ? 'I cannot help with that.' : { text: '', sources: [] }) }); await deal(broke.repo);
     expect(val(await broke.ai.firstPass('d1')).gaps.length).toBe(6); expect(new Set(broke.fillCalls.filter((c) => isTurn(c)).map((c) => c.prompt.split('\n\n')[0])).size).toBe(1);
