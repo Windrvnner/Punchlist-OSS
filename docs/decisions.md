@@ -176,6 +176,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Home asks “What would you like to know?” and shows example questions in its composer (#654).
 - No conversation shows sample questions above its composer.
 - Each question asked from an ask box starts a new conversation; follow-ups continue it.
+- A typed "New deal" command opens the New Deal form only when it is the whole text; anything longer is asked as a question (#1054).
 - Every chat shows AI text the same way: a finding's or question's text at the answer's size, with its sources as the answer's chips above it. The send button is a paper airplane pointing to the top right. Screen text says "AI", never "the model".
 - A deal page's ask box is the conversation composer in place: it is one line at rest and pushes the page down when used (option A).
 - **Past Conversations** in every composer opens a searchable list, set to This Deal or All Deals.

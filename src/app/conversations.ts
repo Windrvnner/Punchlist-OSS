@@ -151,12 +151,15 @@ function destinationHash(store: Store, text: string) {
     : dealHash(store.get().prefs, deal.id);
 }
 
-/** "Go to Proseware findings", "open Trey Q&A", or "new deal", resolved against loaded deals. */
+/**
+ * "Go to Proseware findings", "open Trey Q&A", or "new deal", resolved against loaded deals. "New deal" is a command
+ * only as the whole text, so a question that starts with those words is asked (#1054).
+ */
 export function navIntent(
   store: Store, text: string, navigate = navigateWindow, handled?: () => void,
 ): boolean {
   const typed = text.trim();
-  if (/^(new|create|add|start) (a )?(new )?deal\b/i.test(typed)) {
+  if (/^(new|create|add|start) (a )?(new )?deal\s*[.!]?$/i.test(typed)) {
     handled?.();
     store.ui({ newDeal: { name: '', folders: [], error: '', busy: false } });
     return true;

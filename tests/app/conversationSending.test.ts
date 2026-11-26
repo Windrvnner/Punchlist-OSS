@@ -111,6 +111,27 @@ it('runs navigation, unresolved, and logging before falling through to a model a
   expect(convKey(composerScope(scope, true).scope)).not.toBe(key);
 });
 
+it('asks a question that starts with "New deal"; only the whole command opens the New Deal form (#1054)', async () => {
+  const { store, scope, navigate, asked } = await start();
+  const launch = composerScope(scope, true);
+  const key = convKey(launch.scope);
+  const send = (text: string) => {
+    setComposerText(key, text);
+    return sendTyped(store, launch.scope, { launchSlot: launch.launchSlot, navigate });
+  };
+  const question = 'New deal terms in the amendment: what changed from the term sheet?';
+  await send(question);
+  await vi.waitFor(() => expect(asked).toHaveBeenCalledTimes(1));
+  expect(store.get().ui.newDeal).toBeNull();
+  expect(store.get().threads[key][0].text).toBe(question);
+  for (const command of ['New deal', 'Create a new deal.', 'start a deal!']) {
+    store.ui({ newDeal: null });
+    await send(command);
+    expect(store.get().ui.newDeal).toMatchObject({ name: '', folders: [] });
+  }
+  expect(asked).toHaveBeenCalledTimes(1);
+});
+
 it('waits for pending attachments, checks new files, and sends the latest text only once', async () => {
   let release!: () => void;
   const hold = new Promise<void>((resolve) => { release = resolve; });
