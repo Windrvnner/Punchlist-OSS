@@ -1118,8 +1118,17 @@ export function nodeAi(o: AiOptions) {
   type Trail = { q: string; n: number }[];
   const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
   /** words a model gives in place of a search when it has none ("None", "not applicable", "TBD"); a search of only these, or of nothing the index keeps, is no search */
-  // folded as the index folds words (`kept`), so each entry matches the form a reply's words take
-  const NO_SEARCH = new Set(['additional', 'applicable', 'applies', 'apply', 'available', 'cannot', 'cant', 'empty', 'extra', 'find', 'found', 'further', 'given', 'idea', 'keyword', 'keywords', 'missing', 'more', 'na', 'nan', 'necessary', 'need', 'needed', 'needs', 'neither', 'never', 'nil', 'no', 'non', 'none', 'nor', 'not', 'nothing', 'null', 'other', 'others', 'pass', 'pending', 'placeholder', 'provided', 'queries', 'query', 'relevant', 'require', 'required', 'requires', 'result', 'results', 'search', 'searched', 'searches', 'searching', 'skip', 'skipped', 'specific', 'sure', 'tba', 'tbc', 'tbd', 'term', 'terms', 'unable', 'unclear', 'undefined', 'unknown', 'unsure', 'word', 'words'].map(fold));
+  // folded as the index folds words (`kept`), so each entry matches the form a reply's words take; "n" and "a" are the
+  // words of "N/A" and "n.a.", which `kept` keeps whatever their length
+  const NO_SEARCH = new Set([
+    'additional', 'a', 'applicable', 'applies', 'apply', 'available', 'cannot', 'cant', 'empty', 'extra', 'find',
+    'found', 'further', 'given', 'idea', 'keyword', 'keywords', 'missing', 'more', 'n', 'na', 'nan', 'necessary',
+    'need', 'needed', 'needs', 'neither', 'never', 'nil', 'no', 'non', 'none', 'nor', 'not', 'nothing', 'null',
+    'other', 'others', 'pass', 'pending', 'placeholder', 'provided', 'queries', 'query', 'relevant', 'require',
+    'required', 'requires', 'result', 'results', 'search', 'searched', 'searches', 'searching', 'skip', 'skipped',
+    'specific', 'sure', 'tba', 'tbc', 'tbd', 'term', 'terms', 'unable', 'unclear', 'undefined', 'unknown', 'unsure',
+    'word', 'words'
+  ].map(fold));
   const isSearch = (x: string) => kept(x).some((w) => !NO_SEARCH.has(w));
   const SEARCHES = 3;                                                            // searches the fast model may give one item at a time
   const FOUND = 12;                                                              // documents one item's searches put at the head of the pick list
@@ -1982,7 +1991,9 @@ export function nodeAi(o: AiOptions) {
         const got = new Map<number, { text: string; why: string; also?: string[] }>(); let last = 0; let inOrder = true;
         for (const x of kept) {
           // an item split in two comes as "texts"; one reworded as "text"
-          const n = int(x?.n); const texts = (Array.isArray(x?.texts) ? strings(x.texts) : typeof x?.text === 'string' ? [x.text] : []).map((t) => t.replace(/\s+/g, ' ').trim().slice(0, 500)).filter(Boolean).slice(0, 6);
+          const n = int(x?.n);
+          const given = Array.isArray(x?.texts) ? strings(x.texts) : typeof x?.text === 'string' ? [x.text] : [];
+          const texts = given.map((t) => fitText(t.replace(/\s+/g, ' ').trim())).filter(Boolean);
           if (n === null || n < 1 || n > part.length) continue; if (n <= last) inOrder = false; last = Math.max(last, n);
           if (!texts.length || (texts.length === 1 && texts[0] === part[n - 1].trim()) || got.has(n - 1)) continue;
           got.set(n - 1, { text: texts[0], why: (strings(x.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 120), ...(texts.length > 1 ? { also: texts.slice(1) } : {}) });
@@ -2080,7 +2091,11 @@ export function nodeAi(o: AiOptions) {
         if (part.length === 1 && items.filter((x) => x.text).length === 1) for (const x of items) if (x.text) x.m = 0;
         const got = new Map<number, string>();
         let last = -1;
-        for (const x of items) { if (x.m === undefined || !x.text) continue; last = x.m; if (!twice.has(x.m)) got.set(x.m, x.text.slice(0, 2000)); }
+        for (const x of items) {
+          if (x.m === undefined || !x.text) continue;
+          last = x.m;
+          if (!twice.has(x.m)) got.set(x.m, fitText(x.text));
+        }
         if (cut) got.delete(last);      // the last entry of a cut reply may be cut short
         if (got.size) { answered++; streak = 0; }
         else { empty++; streak++; why = cut ? `${SERVICE}’s reply was cut off, so nothing was added` : reply && Array.isArray(reply.items) ? `${SERVICE} left a point without a question, so nothing was added` : `${SERVICE}’s reply could not be read, so nothing was added`; }
