@@ -184,9 +184,10 @@ describe('searching the Q&A log from the chat, a page at a time', () => {
 
   it('shows the model each question by its id, and the person its number (#1105)', async () => {
     const revenue = questionId(2);
-    // amounts in rand ("R1.2 billion") are the model's words, never a question; nor is an id not named as a response
-    const say = `Response ${revenue} says R1.2 billion and R50 million; ${revenue} is a label.`;
-    const offer = { action: 'log question', question: `Does response ${revenue} cover R1.2 billion?` };
+    // amounts in rand ("R1.2 billion") are the model's words, never a question; an id in any form is put back
+    const both = `the response to ${revenue} and ${revenue} agree`;
+    const say = `Response ${revenue} says R1.2 billion and R50 million; ${both}.`;
+    const offer = { action: 'log question', question: `Does response to ${revenue} cover R1.2 billion?` };
     const searches = calls(qa(), { tool: 'search', what: 'all', query: 'revenue' });
     const answering = setup((c, n) => (n === 3 ? { text: say, sources: [], offer } : searches(c, n)));
     await questions(answering.repo, 40);
@@ -195,7 +196,7 @@ describe('searching the Q&A log from the chat, a page at a time', () => {
     const update = { kind: 'question' as const, id: revenue, data: fell, expectedRev: 1 };
     expect((await answering.repo.transaction({ writes: [update] })).ok).toBe(true);
     const answered = await answering.ai.answer(ask('What is outstanding?'));
-    const shown = `The response to Q3 says R1.2 billion and R50 million; ${revenue} is a label.`;
+    const shown = 'The response to Q3 says R1.2 billion and R50 million; the response to Q3 and Q3 agree.';
     expect(answered.ok && answered.value.text).toBe(shown);
     const drafted = { action: 'log question', question: 'Does the response to Q3 cover R1.2 billion?' };
     expect(answered.ok && answered.value.offer).toEqual(drafted);

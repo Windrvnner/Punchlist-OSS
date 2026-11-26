@@ -23,10 +23,10 @@ export const AI_DRAFTED = ' (drafted by AI from the data room, not received from
 const QUESTION_ID = new RegExp(`\\bq_${ULID}\\b`, 'g');
 
 /**
- * "response q_…" or "the response q_…" in a model's text: the one form the prompts ask a model to name a question
- * by. A bare R1 is never one, so amounts in rand ("R1.2 billion") stay as written (#1105).
+ * A question's id in a model's text, with the words that name it as a response before it: "response q_…", "the
+ * response q_…" or "response to q_…" (#1105)
  */
-const NAMED = new RegExp(`\\b(?:([Tt]he) )?([Rr]esponse) (q_${ULID})\\b`, 'g');
+const NAMED = new RegExp(`\\b(?:([Tt]he) )?(?:([Rr]esponse) (?:to )?)?(q_${ULID})\\b`, 'g');
 
 /** the question ids a model's text names, each once */
 export const questionIdsIn = (text: string): string[] => [...new Set(text.match(QUESTION_ID) ?? [])];
@@ -36,13 +36,15 @@ export const namesOnlyShown = (text: string, shown: readonly string[]): boolean 
   questionIdsIn(text).every((id) => shown.includes(id));
 
 /**
- * A model's text with each question it names as "response q_…" put back as "the response to Q12", by the number
- * `numbers` gives that id now; an id with no number, and any other text, is left as it is (#1105).
+ * A model's text with each question id put back as its number now: "response q_…" (or "the response q_…", "response
+ * to q_…") as "the response to Q12", and a bare id as "Q12". `numbers` gives each id its number; an id with none, and
+ * any other text, is left as it is (#1105).
  */
 export function questionsForIds(text: string, numbers: ReadonlyMap<string, number>): string {
-  return text.replace(NAMED, (whole, the: string | undefined, response: string, id: string) => {
+  return text.replace(NAMED, (whole, the: string | undefined, response: string | undefined, id: string) => {
     const n = numbers.get(id);
     if (n === undefined) return whole;
+    if (!response) return `${the ? `${the} ` : ''}Q${n}`;
     const article = the ?? (response === 'Response' ? 'The' : 'the');
     return `${article} response to Q${n}`;
   });
