@@ -8,6 +8,7 @@ import { ulid } from 'ulid';
 import type { AiService, DocumentService, FileSystem, Session, Clock, Ids, Repository, ChecklistRow, Research, ResearchStep, CheckState, IssuePoint } from '../ports';
 import { CHECK_REASON, type Deal, type Folder, type RecordKind } from '../domain/model';
 import { ok, fail, type Result } from '../domain/result';
+import { fold, indexWords } from '../backend/words';
 import { key } from '../domain/checklist';
 import type { LineRead } from '../domain/listRead';
 import { suggestChecklistColumns, type ChecklistMapping } from '../domain/checklistImport';
@@ -46,14 +47,10 @@ const COMMON = new Set([
   'under', 'upon', 'used', 'uses', 'using', 'very', 'want', 'were', 'what', 'when', 'where', 'whether', 'which',
   'while', 'will', 'with', 'within', 'would', 'your', 'document', 'documents', 'project', 'question', 'answer',
   'response', 'closest', 'support', 'data', 'room', 'matter', 'finding', 'findings',
-]);
+].map(fold));   // folded, as indexWords gives its words (#1220)
+/** the words a question or answer is compared by: the search index's, minus this list (#1220) */
 function tellingWords(text: string): Set<string> {
-  const out = new Set<string>();
-  for (const word of text.toLowerCase().match(/[a-z][a-z-]{3,}/g) ?? []) {
-    const one = word.length > 4 && word.endsWith('s') && !word.endsWith('ss') ? word.slice(0, -1) : word;
-    if (!COMMON.has(word) && !COMMON.has(one)) out.add(one);
-  }
-  return out;
+  return new Set(indexWords(text).filter((word) => !COMMON.has(word)));
 }
 
 async function gate<T>(opts: MockOptions, name: string, fn: () => T | Promise<T>): Promise<Result<T>> {
@@ -359,8 +356,8 @@ export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => 
     // The best match, not the first: a finding must share a telling word with the question (words any diligence
     // question uses do not count) and must beat every other finding. Otherwise nothing is found, and nothing is
     // made up: the mock never claims a source it was not given.
-    const GENERIC = new Set(['signed', 'agreement', 'agreements', 'report', 'reports', 'adviser', 'advisor', 'ratio', 'executed', 'please', 'confirm', 'provide', 'sponsor', 'project', 'document', 'documents', 'information', 'memorandum', 'draft', 'final', 'between', 'under', 'which', 'there', 'their', 'about', 'should', 'would', 'could', 'where', 'figure', 'level', 'terms', 'sheet', 'facility', 'technical', 'question', 'response', 'details', 'provided', 'whether']);
-    const words = (t: string) => new Set((t.toLowerCase().match(/[a-z][a-z-]{3,}/g) ?? []).filter((w) => !GENERIC.has(w)));
+    const GENERIC = new Set(['signed', 'agreement', 'agreements', 'report', 'reports', 'adviser', 'advisor', 'ratio', 'executed', 'please', 'confirm', 'provide', 'sponsor', 'project', 'document', 'documents', 'information', 'memorandum', 'draft', 'final', 'between', 'under', 'which', 'there', 'their', 'about', 'should', 'would', 'could', 'where', 'figure', 'level', 'terms', 'sheet', 'facility', 'technical', 'question', 'response', 'details', 'provided', 'whether'].map(fold));   // folded, as indexWords gives its words (#1220)
+    const words = (t: string) => new Set(indexWords(t).filter((w) => !GENERIC.has(w)));   // the index's words (#1220)
     const asked = words(i.questionText);
     const scored = (await storedFindings(repo, i.dealId)).filter((f) => f.status === 'open' && (f.sources || []).length)
       .map((f) => ({ f, n: [...words(`${f.title} ${(f.body || []).join(' ')}`)].filter((w) => asked.has(w)).length })).sort((a, b) => b.n - a.n);

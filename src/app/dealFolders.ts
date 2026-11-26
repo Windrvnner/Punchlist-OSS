@@ -14,7 +14,8 @@ type FolderName = Pick<Folder, 'path' | 'label'>;
 /** A folder's own name, the last part of its path, whole. */
 export function folderName(path: string) {
   const parts = path.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean);
-  return (parts.at(-1) || path).trim();
+  const last = parts.at(-1) ?? '';
+  return last.trim() ? last : path;
 }
 
 /** A folder starts with its own name as its label, which is editable; a name too long for a label is never cut, so it starts with none. */

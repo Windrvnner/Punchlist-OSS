@@ -548,14 +548,25 @@ export async function pdfLines(bytes: Uint8Array): Promise<string> {
 /**
  * How many pages a PDF has, and the text of a spread of them: every page of a short document, and `sample` pages spaced
  * evenly through a long one, which is enough to count its words by and keeps indexing quick. A page with no text layer
- * (a scan) gives no text. `first` is the first page's text, for a document's title. Throws when the PDF cannot be opened (corrupt, or locked with a password).
+ * (a scan) gives no text. `first` is the first page's text, for a document's title. Throws when the PDF cannot be
+ * opened (corrupt, or locked with a password). `text` is undefined when a page's text could not be read: a failed
+ * read is not "no text", and no part of the text stands in for the whole (#1056).
  */
-export async function pdfLook(bytes: Uint8Array, sample = 40): Promise<{ pages: number; text: string; first: string }> {
+export async function pdfLook(
+  bytes: Uint8Array, sample = 40,
+): Promise<{ pages: number; text: string | undefined; first: string }> {
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), useSystemFonts: false, isEvalSupported: false, verbosity: 0 }).promise;
   try {
     const n = doc.numPages; const which = n <= sample ? Array.from({ length: n }, (_, i) => i + 1) : Array.from({ length: sample }, (_, i) => 1 + Math.floor((i * n) / sample)); const text: string[] = [];
-    for (const i of which) { try { text.push((await (await doc.getPage(i)).getTextContent()).items.map((x) => ('str' in x ? x.str : '')).join(' ')); } catch { /* a page that cannot be read gives no words */ } }
+    for (const i of which) {
+      try {
+        const content = await (await doc.getPage(i)).getTextContent();
+        text.push(content.items.map((x) => ('str' in x ? x.str : '')).join(' '));
+      } catch {
+        return { pages: n, text: undefined, first: '' };
+      }
+    }
     return { pages: n, text: text.join('\n'), first: which[0] === 1 ? (text[0] ?? '') : '' };
   } finally { await doc.destroy(); }
 }

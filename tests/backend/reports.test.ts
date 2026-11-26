@@ -287,6 +287,27 @@ describe('third-party reports at deal scale', () => {
     expect(ask).not.toContain(SCOPE);
   });
 
+  it('keeps the issue title, body and advisor as the model wrote them, spacing and all (#1215)', async () => {
+    const docs = room().filter((d) => d.name === 'Legal Due Diligence Report.pdf');
+    const issue = (prompt: string) => ({
+      title: ' Edge title\t',
+      workstream: 'Legal',
+      body: [' First paragraph.\t', ' Second paragraph. '],
+      next: '',
+      sources: [{ doc: reportId(prompt), page: 4 }],
+    });
+    const reply = (prompt: string) => ({ advisor: ' Counsel\t', issues: [issue(prompt)] });
+    const answer = ({ kind, prompt }: { kind: string; prompt: string }) =>
+      (kind === 'report' ? reply(prompt) : undefined);
+    const log: ReportLine[] = [];
+    const { k, findings } = kit(docs, { log, answer });
+    await sweep(k);
+    const raised = [...findings.values()].filter((x) => x.issue).map((x) => x.issue!);
+    expect(raised.map((x) => x.title)).toEqual([' Edge title\t']);
+    expect(raised[0].body).toEqual([' First paragraph.\t', ' Second paragraph. ']);
+    expect(stateOf(log).read.values().next().value!.advisor).toBe(' Counsel\t');
+  });
+
   it('a second sweep with nothing new asks nothing, and a second PC raises nothing again', async () => {
     const docs = room();
     const first = kit(docs);

@@ -252,7 +252,8 @@ export const RestoreQuestion = define({
 export const UseAsResponse = define({
   name: 'UseAsResponse',
   input: z.object({
-    dealId: DealId, questionId: QuestionId, text: z.string().trim().min(1), sources: z.array(Source).default([]),
+    dealId: DealId, questionId: QuestionId, sources: z.array(Source).default([]),
+    text: z.string().refine((v) => v.trim() !== '', 'Nothing written'),   // kept as given, edge spaces included
     over: z.string().optional(),
   }),
   targets: (s, i) => { const q = s.questions[i.questionId]; return q?.linkedFinding ? [i.questionId, q.linkedFinding] : [i.questionId]; },

@@ -35,7 +35,9 @@ describe('rewording a checklist being brought in', () => {
   it('takes an item split in two as its first item and the rest, and asks for "(if applicable)" only where it fits', async () => {
     const s = setup((c) => (!isReword(c) ? {} : { items: [{ n: 1, texts: ['Wetlands delineation complete (if applicable).', '  Section 404 permit in hand (if applicable).'], why: 'two conditions' }, { n: 2, texts: [], why: 'empty' }] }), {}, { shared: new Mem(), installId: 'pc' });
     const out = val(await s.ai.reword!({ items: ['Wetlands delineation complete; any Section 404 permit in hand', 'Insurance in place'] }));
-    expect(out).toEqual([{ at: 0, text: 'Wetlands delineation complete (if applicable).', also: ['Section 404 permit in hand (if applicable).'], why: 'two conditions' }]);
+    const also = ['  Section 404 permit in hand (if applicable).'];
+    const text = 'Wetlands delineation complete (if applicable).';
+    expect(out).toEqual([{ at: 0, text, also, why: 'two conditions' }]);
     expect(s.calls.find(isReword)!.prompt).toContain('never to every item');
   });
   it('a reply that cannot be read fails the whole review, so nothing half-asked is shown', async () => {
@@ -55,6 +57,15 @@ describe('items that ask for the same thing', () => {
   });
 });
 
+describe('what the duplicate check and the question wording keep as written', () => {
+  it('keeps the reason a pair is given as written, with no cut', async () => {
+    const why = ` same\n  thing ${'long '.repeat(40)}\t`;
+    const s = setup((c) => (isSame(c) ? { pairs: [{ a: 1, b: 2, why }] } : {}), {}, { shared: new Mem(), installId: 'pc' });
+    const out = val(await s.ai.sameMeaning!({ items: items(2), against: [] }));
+    expect(out.pairs.map((p) => p.why)).toEqual([why]);
+  });
+});
+
 describe('questions for the counterparty on what is unresolved (#2)', () => {
   const isPhrase = (c: Call) => c.prompt.includes('Write one question for the counterparty');
   // each point is asked by its record id (#1162): "i_…: [gap] …"
@@ -66,6 +77,11 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
   const points = (n: number) => Array.from({ length: n }, (_, i) => ({
     kind: kindOf(i), id: recordId(kindOf(i), i), what: `Point ${i + 1}`, need: i % 5 ? `The signed copy ${i + 1}` : '',
   }));
+  it('keeps a question as the model wrote it, spacing and all', async () => {
+    const reply = (c: Call) => (isPhrase(c) ? { items: ids(c).map((id) => ({ id, text: ' Please send\n the copy.\t' })) } : {});
+    const s = setup(reply, {}, { shared: new Mem(), installId: 'pc' });
+    expect(val(await s.ai.phrase!({ dealId: 'd', items: points(2) }))).toEqual([' Please send\n the copy.\t', ' Please send\n the copy.\t']);
+  });
   it('asks in parts of 120 and gives each question back in the order of the points, whatever order the reply takes', async () => {
     const s = setup((c) => (isPhrase(c) ? { items: lines(c).map((l, n) => ({ id: ids(c)[n], text: `Q for ${l.split(' — ')[0]}` })).reverse() } : {}), {}, { shared: new Mem(), installId: 'pc' });
     const out = val(await s.ai.phrase!({ dealId: 'd', items: points(250) }));
@@ -573,6 +589,11 @@ describe('model-written text is kept whole up to one Excel cell (#1104)', () => 
     const text = 'Wetlands delineation complete. '.repeat(22).trim();
     const s = setup((c) => (isReword(c) ? { items: [{ n: 1, text, why: 'unclear' }] } : {}), {}, stand);
     expect(val(await s.ai.reword!({ items: ['Wetlands'] }))[0].text).toBe(text);
+  });
+  it('keeps the reason the model gives for a rewording as written, with no cut', async () => {
+    const why = ` clear\n  reason ${'long '.repeat(40)}\t`;
+    const s = setup((c) => (isReword(c) ? { items: [{ n: 1, text: 'Wetlands delineation is complete', why }] } : {}), {}, stand);
+    expect(val(await s.ai.reword!({ items: ['Wetlands'] }))[0].why).toBe(why);
   });
   it('keeps all eight parts of a split item', async () => {
     const texts = Array.from({ length: 8 }, (_, k) => `Condition ${k + 1} is met`);

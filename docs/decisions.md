@@ -226,6 +226,16 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A document's id is the SHA-256 hash of its bytes, so identical copies are one document.
 - The chat agent opens a document only by its id, its whole path, or its whole file name (in any case); anything else is "Not found" (#1018, #1162).
 - Indexing (building each PC's word index of the data room) asks no model and uploads nothing, and it resumes by itself once the data room is available again.
+- A spreadsheet is read for its words whatever its size, after every other file; a .csv is read a piece at a time.
+  One that cannot be read is named in the indexing log on every run and never recorded as having no text; it is read
+  again by every later run and every 5-minute check of the folders (#427).
+- Every cell of a spreadsheet is content, numbers and dates included, in its words and in the index (#1023).
+- A successful read of a deal-folder document's words replaces a recorded empty word list for every PC (#1023).
+- A deal whose word index file of the current version is missing has its folders read again at the next check, once
+  (#1023).
+- A PDF, or a document converted to one, any page of whose text cannot be read keeps its pages and is listed without
+  words, named as not read on every run and read again by the next run and the next check of the folders, also after a
+  restart; it is never recorded with no words or with only some pages' words (#1056).
 - A deal's folders are checked for changes every 5 minutes.
 - LibreOffice, bundled with the app, is the only document converter; a converted document that has tracked changes shows them as markup, and one with none is converted as it is.
 - For tracked changes and blacklines, a Word file's own tracked changes are fact, and the clean draft is the source of truth for the deal's terms. A blackline is the model's reading: it never settles an item or closes a finding by itself. A control-file switch selects pipeline A (the default) or pipeline B. What a blackline was compared against is determined from its cover and name, never guessed (docs/other-project-documents-design.md).
@@ -273,6 +283,11 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Attachments are kept in the shared folder under their document's id. A file attached on Home is kept with the person's conversations.
 - A deal's recovered copy keeps the deal's attached files, and files attached and not yet sent follow their conversation to the copy (#117).
 - A message goes with all of its attached files or not at all: a file this PC can no longer send is named, its chip is marked, and nothing is sent (#671).
+- A place, a folder name inside a folder, or an id that a shared record gives a document is used only if the file it
+  makes stays inside its folder: the attachments folder, the deal folder as this PC has it (the deal's folder, or
+  where it was located here, which is the root and is not checked further), a folder being compared, or the work
+  folder. One that leads out of it is a file that is not there: it is not read, opened, listed, written, deleted or
+  counted as a match (#1156).
 
 ## AI and models
 
@@ -327,6 +342,11 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 [CLAUDE.md](../CLAUDE.md) covers how to work on the app: commits, checks, mock-ups, readable code, and asking before design decisions. Beyond it, these rules apply:
 
 - The file is the source of truth. The app never changes, repairs, normalizes or reinterprets content handed to it; what it shows matches what the file's native app shows.
+- Text a file holds or the model writes is stored, shown and written back as given, edge spaces and tabs included (#1215).
+- That covers a model's answer, title, quote, reason, paragraphs, rewording, question wording and merged answer, a left-out line, a firm, a log's name and a file's name (#1215).
+- A value a file gives is compared with the app's character for character: a name, a workstream, a response, a cell of a kept edit (#1215).
+- A file response that differs from a drafted or quoted one only in spacing is stored as the file has it and keeps its origin and sources; other words make it a person's own, with none (#1215).
+- A paragraph typed into a finding's detail is trimmed; the model's paragraphs beside it stay as written. A title, name or response typed in the app is trimmed, as are a lookup key, a structural token and the one-line text sent in a prompt (#1215).
 - Keep friction low, with as few controls and steps as possible.
 - The attribution check allows a `Co-authored-by` trailer naming exactly the repository's own coding-agent identity (set in `scripts/aiAttribution.mjs`) and refuses every other AI co-author trailer (#877).
 - Never guess identities. Never cite finding codes.
@@ -408,5 +428,9 @@ These decisions are built and wait to be confirmed:
 - An issues list or an advisor report is read like the app's other documents: the model reads the whole file once and returns each issues-list point in the list's own words, never reworded, and each advisor-report issue with its place in the file. There is no paging and no stop rule (#1026).
 - A document's word index and a search no longer drop a word or number for its length, and a Word file is indexed from
   its body and all its header, footer, footnote and endnote parts (#1025).
+- The core set and a document's most-used words split text as the word index does and drop no word, letter or number
+  for its length (#1147).
+- The browser demo's word-comparing stand-ins use the words the search index keeps (one split, the control file's
+  filler left out) and drop no word, letter or number for its length (#1220).
 - A plain-text list (.txt, .text, .md) is read as a CSV file is: UTF-8, UTF-16 or Windows-1252, with or without a
   byte-order mark (#382).

@@ -81,7 +81,7 @@ describe('export and import through the ports', () => {
     expect(store.get().questions[q1.id]).toEqual(before);
   });
 
-  it('a response changed in the file only in its spaces or line breaks is shown as such, and keeps its origin and sources', async () => {
+  it('a response changed in the file only in its spaces is shown as such, and is the file’s own', async () => {
     const { store } = make(); await store.boot();
     await store.dispatch(CreateDeal, { name: 'Datum', folders: [] }); const dealId = Object.keys(store.get().deals)[0]; await store.loadDeal(dealId);
     await store.dispatch(CreateQuestion, { dealId, text: 'What is the lock-up?' }); const [q1] = dealQuestions(store.get(), dealId);
@@ -93,7 +93,9 @@ describe('export and import through the ports', () => {
     const rows = prepareImport(t.value.rows, suggestMapping(t.value.columns)).rows;
     expect(previewImport(store, dealId, 'merge', rows)).toMatchObject({ ok: true, value: { changes: [{ n: 1, field: 'Response', from: 'The lock-up is 1.10x.', to: 'The lock-up  is 1.10x.\n', spacing: true }] } });
     await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows });
-    expect(store.get().questions[q1.id]).toMatchObject({ response: 'The lock-up  is 1.10x.\n', provenance: was.provenance });
+    const kept = { response: 'The lock-up  is 1.10x.\n', provenance: { origin: 'ai', sources: was.provenance!.sources } };
+    expect(store.get().questions[q1.id]).toMatchObject(kept);
+    expect(was.provenance).toMatchObject({ origin: 'ai' });
     // other words are a new response, written by whoever the file says responded
     await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: prepareImport([['1', 'What is the lock-up?', 'The lock-up is 1.20x.']], suggestMapping(['Number', 'Question', 'Response'])).rows });
     expect(store.get().questions[q1.id].provenance).toMatchObject({ origin: 'human', sources: [] });
@@ -103,7 +105,10 @@ describe('export and import through the ports', () => {
     const { store, saved } = make(); await store.boot();
     await store.dispatch(CreateDeal, { name: 'Datum', folders: [] }); const dealId = Object.keys(store.get().deals)[0]; await store.loadDeal(dealId);
     await store.dispatch(CreateQuestion, { dealId, text: 'One' }); const [q1] = dealQuestions(store.get(), dealId);
-    for (const [field, value] of [['askedBy', 'Lender A '], ['respondedBy', ' Sponsor'], ['workstream', 'Legal ']] as const) await store.dispatch(EditQuestionField, { dealId, questionId: q1.id, field, value });
+    const fields = [['askedBy', 'Lender A '], ['respondedBy', ' Sponsor'], ['workstream', 'Legal']] as const;
+    for (const [field, value] of fields) {
+      await store.dispatch(EditQuestionField, { dealId, questionId: q1.id, field, value });
+    }
     await store.dispatch(SetResponse, { dealId, questionId: q1.id, response: '  Yes, as written.\n' });
     const before = JSON.stringify(store.get().questions);
     await exportQuestions(store, dealId, { status: 'all', workstream: '', askedBy: ['Lender A '] });
@@ -121,6 +126,45 @@ describe('export and import through the ports', () => {
     const added = dealQuestions(store.get(), dealId).filter((q) => q.text !== 'One');
     expect(added.map((q) => q.askedBy)).toEqual(['Lender A ', 'Lender A']);
     expect(new Set(added.map((q) => q.workstream))).toEqual(new Set(['Tax']));
+  });
+
+  async function oneQuestion() {
+    const { store } = make();
+    await store.boot();
+    await store.dispatch(CreateDeal, { name: 'Datum', folders: [] });
+    const dealId = Object.keys(store.get().deals)[0];
+    await store.loadDeal(dealId);
+    await store.dispatch(CreateQuestion, { dealId, text: 'One' });
+    const [first] = dealQuestions(store.get(), dealId);
+    return { store, dealId, first };
+  }
+  const fileRows = (csv: string) => {
+    const table = readCsv(new TextEncoder().encode(csv));
+    if (!table.ok) throw new Error('csv');
+    return prepareImport(table.value.rows, suggestMapping(table.value.columns)).rows;
+  };
+
+  it('a submitter the log holds with a trailing space is replaced by the file’s, which has none', async () => {
+    const { store, dealId, first } = await oneQuestion();
+    await store.dispatch(EditQuestionField, { dealId, questionId: first.id, field: 'askedBy', value: 'Lender A ' });
+    const rows = fileRows('Number,Question,Submitted by\n1,One,Lender A\n');
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows });
+    expect(store.get().questions[first.id].askedBy).toBe('Lender A');
+  });
+
+  it('a file response differing from an accepted draft only in spaces is stored as the file has it, origin kept', async () => {
+    const { store, dealId, first } = await oneQuestion();
+    await store.dispatch(RequestDraft, { dealId, questionId: first.id });
+    for (let i = 0; i < 100 && store.get().questions[first.id].draft?.status !== 'found'; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    await store.dispatch(AcceptDraft, { dealId, questionId: first.id });
+    const text = store.get().questions[first.id].response;
+    const rows = fileRows(`Number,Question,Response\n1,One,"${text}  "\n`);
+    await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows });
+    const kept = store.get().questions[first.id];
+    expect(kept.response).toBe(`${text}  `);
+    expect(kept.provenance).toMatchObject({ origin: 'ai' });
   });
 
   it('nothing longer than one Excel cell is ever saved, so the Q&A log exports whole and comes back unchanged', async () => {

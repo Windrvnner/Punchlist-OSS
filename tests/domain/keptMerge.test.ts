@@ -444,4 +444,25 @@ describe('an edit kept aside, merged into the log', () => {
     const m = mergeKept(t(base), t(kept), t(base.map((r) => [...r])), 'Question', undefined, undefined, 'No.');
     expect(m.steps.filter((s) => s.kind === 'cell' && s.row === 3)).toEqual([{ kind: 'cell', row: 3, col: 2, value: '' }]); expect(m).toMatchObject({ added: 1, clashes: [] });
   });
+
+  describe('a row they added, which the log holds already under the same number', () => {
+    const rows = () => [
+      ['No.', 'Question', 'Response', 'Notes'], ['1', 'Question one', '', ''], ['2', 'Question two', '', ''],
+    ];
+    const merged = (theirs: string, logs: string) => mergeKept(
+      table(rows()), table([...rows(), ['9', 'Brand new question', theirs, '']]),
+      table([...rows(), ['9', 'Brand new question', logs, '']]), 'Question', undefined, undefined, 'No.',
+    );
+    it('needs nothing when a cell is the same character for character', () => {
+      expect(merged('a', 'a')).toMatchObject({ steps: [], cells: 0, added: 0, clashes: [] });
+    });
+    it('is a clash when a cell differs by a space at an end, whichever way', () => {
+      expect(merged('a ', 'a')).toMatchObject({ steps: [], cells: 0, clashes: [2] });
+      expect(merged('a', 'a ')).toMatchObject({ steps: [], cells: 0, clashes: [2] });
+    });
+    it('brings their cell in, as they wrote it, where the log has none', () => {
+      const step = { kind: 'cell', row: 3, col: 2, value: ' a\t' };
+      expect(merged(' a\t', '')).toMatchObject({ steps: [step], cells: 1, clashes: [] });
+    });
+  });
 });

@@ -336,7 +336,7 @@ export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text
     if (!kk.every((_, c) => goes.has(c) || !(r[c] ?? '').trim())) return false;
     const now = (l: number, p: { b: number; l: number }) =>
       written.get(`${log.lines[l] - 1},${log.cols[p.l]}`) ?? log.rows[l][p.b] ?? '';
-    const holds = (l: number) => lp.every((p) => !(r[p.a] ?? '').trim() || (r[p.a] ?? '').trim() === now(l, p).trim());
+    const holds = (l: number) => lp.every((p) => !(r[p.a] ?? '').trim() || (r[p.a] ?? '') === now(l, p));
     return (byWords.get(r[kt] ?? '') ?? []).some(holds);
   };
   const headingsAsWere = unchangedHeadings(kept.rows, kt, base.rows, bt, asWas);
@@ -361,8 +361,9 @@ export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text
     for (const p of lp) {
       const row = log.lines[same] - 1, col = log.cols[p.l]; const v = r[p.a] ?? '', had = written.get(`${row},${col}`);
       if (!v.trim() || keptWorked(j, p.a)) continue;
-      if (had !== undefined) { if (v.trim() !== had.trim()) clash.add(same); continue; }   // they gave this cell already (cleared, it may be)
-      const now = log.rows[same][p.b] ?? ''; if (v.trim() === now.trim()) continue;
+      // they gave this cell already (cleared, it may be)
+      if (had !== undefined) { if (v !== had) clash.add(same); continue; }
+      const now = log.rows[same][p.b] ?? ''; if (v === now) continue;
       if (!now.trim() && !fixed(row, col)) { out.steps.push(cell(row, col, v)); out.cells++; written.set(`${row},${col}`, v); } else clash.add(same);
     }
   });

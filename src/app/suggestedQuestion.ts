@@ -38,7 +38,7 @@ export function stillAsks(s: State, proposal: { id: string; text: string }) {
 
 /** The open questions a card may suggest: those whose response is not already an answer of this conversation. */
 function openToSuggest(s: State, dealId: string, answered: ReadonlySet<string>) {
-  return dealQuestions(s, dealId).filter((q) => q.status === 'open' && !answered.has(q.response.trim()));
+  return dealQuestions(s, dealId).filter((q) => q.status === 'open' && !answered.has(q.response));
 }
 
 /**

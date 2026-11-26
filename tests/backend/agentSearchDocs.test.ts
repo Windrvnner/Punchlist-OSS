@@ -30,9 +30,15 @@ const isRead = (c: Call) => c.prompt.startsWith('Documents:\n');
 const answer = { text: 'ok', sources: [] };
 
 const setup = (...tools: Record<string, unknown>[]) => setupIn(ROOM, tools);
+const NO_HELP = { text: '', sources: [] };
 
 /** `refuseOver`: a read of more documents than this is refused as too long, as a service refuses one */
-function setupIn(room: DocRecord[], tools: Record<string, unknown>[], refuseOver = Infinity) {
+function setupIn(
+  room: DocRecord[],
+  tools: Record<string, unknown>[],
+  refuseOver = Infinity,
+  help: Record<string, unknown> = NO_HELP,
+) {
   const turns: Call[] = []; const reads: Call[] = []; const picks: Call[] = [];
   const svc = new StandInService(async (c) => {
     const call = c as Call;
@@ -40,7 +46,7 @@ function setupIn(room: DocRecord[], tools: Record<string, unknown>[], refuseOver
     if (isPick(call)) picks.push(call);
     if (isRead(call) && names(call).length > refuseOver) throw tooLong('too long', 400);
     if (isRead(call)) reads.push(call);
-    return JSON.stringify({ text: '', sources: [] });
+    return JSON.stringify(help);
   });
   (svc as { converse?: unknown }).converse = undefined;
   const keeper = new StoreKeeper(svc, new Mem(), { recheckMs: 0, clock });
@@ -118,5 +124,14 @@ describe('searching documents from the chat, a page at a time', () => {
     const s = setup(docs(9));
     expect((await s.ai.answer(ask('Hello'))).ok).toBe(true);
     expect(s.turns[1].prompt).toContain('Documents: no page 9: there are 4 pages.');
+  }, 60_000);
+});
+
+describe('what the search helper writes is kept as written', () => {
+  it('reaches the next turn with its leading and trailing spacing', async () => {
+    const s = setupIn(ROOM, [docs()], Infinity, { text: ' Helper words.\t', sources: [] });
+    expect((await s.ai.answer(ask('Hello'))).ok).toBe(true);
+    expect(s.turns[1].prompt).toContain('opened');
+    expect(s.turns[1].prompt).toContain(' Helper words.\t');
   }, 60_000);
 });

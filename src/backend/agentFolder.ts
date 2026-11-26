@@ -3,7 +3,7 @@
  * time on the fast model, a few batches at once, the most important first. The whole folder is read, never part of it
  *, and a large one only once the person has agreed.
  */
-import { strings } from './lenient';
+import { prose } from './lenient';
 import { folderKey } from './folderList';
 import type { AgentRun } from './agentRun';
 import { cites, dealDocKey, foundAt, sameDoc, withPlaces } from './agentRun';
@@ -297,7 +297,7 @@ class FolderPass {
     this.unopenNew(reading, got);
     this.readCount += got.length;
     for (const x of batch.recs) if (got.some((g) => sameDoc(g, x))) this.readNow.add(dealDocKey(x));
-    const { text, sources } = kit.fit(strings(reply.text).join(' '), reply.sources as Cited[], got, true);
+    const { text, sources } = kit.fit(prose(reply.text).join(' '), reply.sources as Cited[], got, true);
     const ids = this.run.idsOf(sources);
     // a document that said nothing on this is not listed to the model again; one cited is
     for (const s of got) {
