@@ -7,9 +7,12 @@ import { spawnSync } from 'node:child_process';
 import { sheetPart, type Sheet } from '../../src/domain/sheets';
 import { nodeDocuments, docIdFor, hashBytes } from '../../src/backend/documents';
 import { roomPath } from '../../src/backend/families';
-import { holdFolder, libreOfficeConverter, shortExt, pdfPages, pdfLook, pdfText, readChangeList, type Converter } from '../../src/backend/convert';
+import {
+  holdFolder, libreOfficeConverter, shortExt, pdfPages, pdfLook, readChangeList, type Converter,
+} from '../../src/backend/convert';
 import type { Folder } from '../../src/backend/logRepository';
 import { nodeFolder } from '../../src/backend/nodeFolder';
+import { pdfText } from '../fixtures/pdfText';
 import { wordIndex } from '../../src/backend/wordIndex';
 import { tokens, fold } from '../../src/backend/words';
 import { StoreKeeper, fromStoreName } from '../../src/backend/storeKeeper';

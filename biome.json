@@ -62,12 +62,14 @@
     },
     {
       "includes": [
-        "tests/**/*.test.ts"
+        "tests/**/*.test.ts",
+        "tests/**/*.test.tsx"
       ],
       "linter": {
         "rules": {
           "suspicious": {
             "noFocusedTests": "error",
+            "noSkippedTests": "error",
             "noExportsInTest": "off"
           }
         }

@@ -11,9 +11,10 @@ You need the following:
   executable path when Chrome is installed elsewhere.
 - LibreOffice at `/usr/bin/soffice`. `npm test` skips the tests that need it when it is missing; `npm run check:all`
   first converts a small workbook with it (`node scripts/office-check.mjs` runs that check alone) and stops if it
-  cannot, then runs those tests on it rather than skip them. Two tests still skip without their extra part:
-  - The presentation file-name field test also needs LibreOffice Impress.
-  - The spreadsheet column-width test also needs Calibri or Carlito.
+  cannot, then runs those tests on it rather than skip them. Two tests also need an extra part. `npm test` skips each
+  one without it; `npm run check:all` and CI run them and fail without it:
+  - The presentation file-name field test needs LibreOffice Impress.
+  - The spreadsheet column-width test needs Calibri or Carlito; without either, it fails on a column width.
 
 ## Setup
 
@@ -59,11 +60,13 @@ Store with stand-in ports. Run the test in Node without a window.
 npx vitest run tests/app/coreWorkflows.test.ts --environment node --no-file-parallelism
 ```
 
-The static checks scan tracked files for secrets and attribution, and commit messages for attribution.
+The static checks scan tracked files for secrets and attribution, and commit messages for attribution. Attribution
+includes a role credited with a decision and an email address other than an example or no-reply one.
+The readability script also lists added `src/` lines that name a guess (overlap, fuzzy, fallback, repair and the like).
 After readability hints, `scripts/check-pane-of-glass.mjs` checks UI imports, service and repository access,
-and browser storage. The committed `scripts/pane-of-glass-baseline.json` is `{}`, so any match fails. For Vite globs
-with literal patterns and direct literal options or no options, the guard reports the original call if either
-development or production imports a forbidden module.
+browser storage, cookies, the Cache API, and network calls. The committed `scripts/pane-of-glass-baseline.json` is
+`{}`, so any match fails. For Vite globs with literal patterns and direct literal options or no options, the guard
+reports the original call if either development or production imports a forbidden module.
 The guard compares the baseline with the branch point on `main` and refuses increases. On a branch with existing
 entries, use `node scripts/check-pane-of-glass.mjs --lower` and commit the lower baseline when removing an access.
 If the checkout lacks the history needed for comparison, the diagnostic gives the Git command to fetch it.

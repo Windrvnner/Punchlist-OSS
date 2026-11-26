@@ -1,10 +1,12 @@
 // Fails when a tracked text file or a commit message of this branch holds AI-tool attribution: a trailer, a header,
-// or a link to an AI chat session (aiAttribution.mjs lists them). Prints file names and commit ids only.
+// or a link to an AI chat session (aiAttribution.mjs lists them), or person attribution: a decision credited to a
+// person or an email address (personAttribution.mjs). Prints file names and commit ids only.
 // Commits are those the branch adds to main; with no main to compare with, or none added (on main itself), the
 // latest 200.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import { aiAttributionIn } from './aiAttribution.mjs';
+import { personAttributionIn } from './personAttribution.mjs';
 
 const options = { maxBuffer: 512 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] };
 const git = (...args) => execFileSync('git', args, options);
@@ -18,7 +20,8 @@ function fileProblems() {
   for (const file of git('ls-files', '-z').toString().split('\0').filter(Boolean)) {
     const content = fs.existsSync(file) ? fs.readFileSync(file) : null;
     if (!content || !isText(content)) continue;
-    const found = aiAttributionIn(content.toString('utf8'));
+    const text = content.toString('utf8');
+    const found = [...aiAttributionIn(text), ...personAttributionIn(text, file)];
     if (found.length) problems.push(`${file} holds ${found.join(', ')}`);
   }
   return problems;
@@ -42,13 +45,14 @@ function commitProblems() {
   const records = log.split('\x01').map((record) => record.replace(/^\n/, '')).filter(Boolean);
   return records.flatMap((record) => {
     const [sha, message] = record.split('\0');
-    const found = aiAttributionIn(message);
+    const found = [...aiAttributionIn(message), ...personAttributionIn(message)];
     return found.length ? [`commit ${sha.slice(0, 10)} holds ${found.join(', ')}`] : [];
   });
 }
 
 const problems = [...fileProblems(), ...commitProblems()];
 if (problems.length) {
-  console.error(`Refused: no AI-tool trailers, headers, or chat-session links.\n  ${problems.join('\n  ')}`);
+  const refused = 'Refused: no AI-tool trailers, headers, chat-session links, credit to a person, or email addresses.';
+  console.error(`${refused}\n  ${problems.join('\n  ')}`);
   process.exit(1);
 }
