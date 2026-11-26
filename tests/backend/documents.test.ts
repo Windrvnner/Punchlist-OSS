@@ -1724,7 +1724,7 @@ describe('a PDF whose page text cannot be read (#1056)', () => {
     expect(record('Guarantee.pdf')?.words).toContain('guarantee');
   }, 120_000);
 
-  it('a recovered PDF is read by the next freshen, also after a restart, not skipped as unchanged (#1056)', async () => {
+  it('a recovered PDF is read by the next freshen, also after a restart (#1056)', async () => {
     const root = tmp();
     const vdr = path.join(root, 'vdr');
     put(vdr, 'Credit Agreement.pdf', pdf('credit agreement', 2));

@@ -737,7 +737,7 @@ export function nodeDocuments(o: DocumentsOptions) {
                 } catch { stuck = true; unpagedHere.set(f.abs, { size: f.size, mtimeMs: f.mtimeMs }); }
               }
               if (stuck && pages === undefined) { asPages = false; unpaged++; skipped.unpaged.push(f.rel); }      // pages it already had stay; only its words are missing
-              // listed with its pages and without words; its folder keeps no listing, so the next look reads it again (#1056)
+              // listed with its pages and without words; its folder keeps no listing, so it is read again (#1056)
               if (textUnread) noteUnread(skipped.unread, unreadAt, folder.path, f.rel);
             } else if (!paged(name) && (words === undefined || unindexed)) {
               words = await sheetWords(src, dealId, docId) ?? words;
