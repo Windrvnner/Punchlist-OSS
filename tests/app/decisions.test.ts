@@ -371,7 +371,8 @@ describe('toasts', () => {
     const m = make(); await m.store.boot();
     vi.useFakeTimers();
     try {
-      m.store.toast('First', 'done', { label: 'Undo', run() {} }); m.store.toast('Second', 'done', { label: 'Undo', run() {} });
+      m.store.toast('First', 'done', { label: 'Undo', run() {} });
+      m.store.toast('Second', 'done', { label: 'Undo', run() {} });
       expect(m.store.get().ui.toasts.map((x) => x.text)).toEqual(['First', 'Second']);
       vi.advanceTimersByTime(Store.TOAST_MS - 100);
       m.store.holdToasts(); vi.advanceTimersByTime(60000);

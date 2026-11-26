@@ -283,7 +283,12 @@ export async function sendTyped(store: Store, scope: Scope, view: SendView) {
 
 export async function ask(store: Store, scope: Scope, text: string) {
   text = text.trim(); if (!text) return;
-  const ro = store.readOnly(); if (ro) { store.toast(ro, 'warn'); return; }   // read-only while nobody is signed in: nothing new is asked
+  // read-only while nobody is signed in: nothing new is asked
+  const ro = store.readOnly();
+  if (ro) {
+    store.toast(ro, 'warn');
+    return;
+  }
   const key = convKey(scope);
   const atts = store.get().ui.attachments.filter((a) => a.conv === key && a.state === 'done' && a.doc && a.docId);
   if (atts.length) store.ui((ui) => ({ attachments: ui.attachments.filter((a) => !atts.includes(a)) }));

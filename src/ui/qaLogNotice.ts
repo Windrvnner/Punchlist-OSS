@@ -19,7 +19,9 @@ function showUpdated(store: Store, dealId: string, outcome: Extract<QaLogUpdateO
   ].filter(Boolean).join(', ');
   const text = summary(filed(counts.unmerged), versions && `${count(versions)} in two versions`,
     clashed && `${count(clashed)} kept as in the file`, did);
-  if (action?.kind === 'resolve') store.toast(text, 'warn', { label: 'Resolve', run: () => openResolve(store, dealId) }, true);
+  if (action?.kind === 'resolve') {
+    store.toast(text, 'warn', { label: 'Resolve', run: () => openResolve(store, dealId) }, true);
+  }
   else if (action?.kind === 'show') {
     store.toast(text, 'warn', { label: 'Show', run: () => store.ui({ selectedQuestion: action.questionId }) }, true);
   } else if (counts.unmerged) store.toast(text, 'warn', undefined, true);
@@ -35,7 +37,8 @@ export function showQaLogUpdate(store: Store, dealId: string) {
           store.toast('Q&A log is being updated', 'done');
           break;
         case 'failed':
-          store.toast(summary(filed(outcome.unmerged), `Q&A log not updated: ${outcome.error.message}`), 'warn', undefined, !!outcome.unmerged);
+          store.toast(summary(filed(outcome.unmerged), `Q&A log not updated: ${outcome.error.message}`),
+            'warn', undefined, !!outcome.unmerged);
           break;
         case 'retrying': {
           const message = outcome.by ? `${outcome.by} has the Q&A log open · retrying`

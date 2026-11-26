@@ -52,13 +52,17 @@ export async function keepUnseen(store: Store, unseen: NonNullable<SyncState['un
       if (!r.ok) {
         // nothing is lost meanwhile: the deleted deal's records stay in the shared folder, and the copy is tried again
         // once, while it keeps trying by itself (the sync state may not change again to ask): no button, since nothing waits on the person
-        if (was === undefined) notices.set(u.dealId, store.toast(`Couldn’t keep your changes to ${u.name || 'a deleted deal'} yet · trying again`, 'warn', undefined, 'stays'));
+        if (was === undefined) {
+          const text = `Couldn’t keep your changes to ${u.name || 'a deleted deal'} yet · trying again`;
+          notices.set(u.dealId, store.toast(text, 'warn', undefined, 'stays'));
+        }
         const again = setTimeout(() => void store.refreshSync(), AGAIN_MS); (again as { unref?: () => void }).unref?.();
         continue;
       }
       await store.tookCopy(u.dealId, r.value.dealId, r.value.ids);
       const copy = store.get().deals[r.value.dealId];
-      store.toast(recoveredNotice(u, store.get().user?.name), 'warn', undefined, 'kept');   // back after a restart too, until it is closed
+      // back after a restart too, until it is closed
+      store.toast(recoveredNotice(u, store.get().user?.name), 'warn', undefined, 'kept');
       if (copy?.folders.length) void startIndexing(store, copy.id, copy.folders);
     } finally { mine.delete(u.dealId); }
   }

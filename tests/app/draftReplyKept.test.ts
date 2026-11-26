@@ -217,7 +217,15 @@ describe('at scale: 2,000 questions, three PCs', () => {
 
 // Edge cases: each reproduced, then fixed.
 describe('what waiting replies must not do', () => {
-  const toastLog = (s: Store) => { const log: string[] = []; const orig = s.toast.bind(s); (s as any).toast = (text: string, glyph: any, a?: any, sticky?: boolean) => { log.push(text); return orig(text, glyph, a, sticky); }; return log; };
+  const toastLog = (s: Store) => {
+    const log: string[] = [];
+    const orig = s.toast.bind(s);
+    (s as any).toast = (text: string, glyph: any, a?: any, sticky?: boolean) => {
+      log.push(text);
+      return orig(text, glyph, a, sticky);
+    };
+    return log;
+  };
 
   it('the folder out while the model service answers: the offline bar does not come and go, and "Connected again" is said once', async () => {
     const w = await world(); const q = w.qs()[10]; const log = toastLog(w.store);

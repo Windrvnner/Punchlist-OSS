@@ -99,7 +99,9 @@ export function CloseThisQuestion({ q, ro, settled }: { q: Question; ro: string 
   // the checklist is read again first: an item another PC has since found a gap or flagged is not closed, and the button goes
   const close = async () => {
     const outcome = await closeSettledQuestions(store, q.dealId, [q.id], 'close-settled-' + q.id);
-    if (outcome.kind === 'checklist-unavailable') store.toast(`Couldn’t load the checklist, so Q${q.n} was not closed`, 'warn');
+    if (outcome.kind === 'checklist-unavailable') {
+      store.toast(`Couldn’t load the checklist, so Q${q.n} was not closed`, 'warn');
+    }
     if (outcome.kind === 'changed') store.toast(`Q${q.n}’s item is no longer settled, so it was not closed`, 'warn');
   };
   // why it is off, on a read-only deal, is on the wrapper: a disabled button takes no pointer

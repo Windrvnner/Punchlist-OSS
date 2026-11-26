@@ -33,7 +33,9 @@ let seq = 0;
 export async function attachFiles(store: Store, ctx: AttachmentTarget, files: File[]) {
   // past the most one message can take, a file is not attached, and the person is told, rather than it being dropped when sent
   const room = Math.max(0, MAX_ATTACHED - store.get().ui.attachments.filter((a) => a.conv === ctx.conv).length);
-  if (files.length > room) store.toast(`${files.length - room} not attached: ${MAX_ATTACHED} files is the most for one message`, 'warn');
+  if (files.length > room) {
+    store.toast(`${files.length - room} not attached: ${MAX_ATTACHED} files is the most for one message`, 'warn');
+  }
   for (const file of files.slice(0, room)) {
     const id = `a${Date.now().toString(36)}${seq++}`;
     store.ui((ui) => ({ attachments: [...ui.attachments, { id, name: file.name, dealId: ctx.dealId, findingId: ctx.findingId, conv: ctx.conv, state: 'pending' }] }));
@@ -224,7 +226,8 @@ export async function filesSendable(store: Store, dealId: string, files: { doc: 
   if (names.length === 1) {
     store.toast(`Couldn’t find ${only} — attach it again`, 'warn', undefined, false, undefined, only);
   } else {
-    store.toast(`Couldn’t find ${names.length} files — attach them again`, 'warn', undefined, false, names.join(', '));
+    const text = `Couldn’t find ${names.length} files — attach them again`;
+    store.toast(text, 'warn', undefined, false, names.join(', '));
   }
   return false;
 }
