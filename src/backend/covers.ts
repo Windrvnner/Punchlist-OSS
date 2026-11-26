@@ -10,6 +10,20 @@ export type CoverPair = { point: string; question: string };
 /** a text on one line, as the prompt shows it */
 const oneLine = (text: string) => text.replace(/\s+/g, ' ');
 
+/**
+ * n tags of three consonants, different from each other, to name the pairs of one covers call: a pair has no record
+ * id of its own, so each is named by a tag drawn at random, so they do not run in order, and with no vowel, so none is
+ * a word
+ */
+export function tagsFor(n: number): string[] {
+  const consonants = 'bcdfghjkmnpqrstvwxz';
+  const seen = new Set<string>();
+  while (seen.size < n) {
+    seen.add(Array.from({ length: 3 }, () => consonants[Math.floor(Math.random() * consonants.length)]).join(''));
+  }
+  return [...seen];
+}
+
 /** The prompt for one part: each pair under its own tag. */
 export function coversPrompt(tags: string[], pairs: CoverPair[]): string {
   const shown = pairs.map((pair, k) => {

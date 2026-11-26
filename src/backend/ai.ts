@@ -54,7 +54,7 @@ import { createHash } from 'node:crypto';
 import { ListRecord, Item, firmOf, orderItems, key } from '../domain/checklist';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ulid } from 'ulid';
-import { coversPrompt, readCovers } from './covers';
+import { coversPrompt, readCovers, tagsFor } from './covers';
 import {
   readJson, unfinished, list as listOf, strings, prose, PARAGRAPH_SEAM, int, pageOf, word, isObject,
 } from './lenient';
