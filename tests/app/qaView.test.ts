@@ -211,13 +211,11 @@ it('uses Findings order and filters in the shared strip and keeps the selected f
   };
   state.findings = Object.fromEntries([covenant, tax, lease].map((finding) => [finding.id, finding]));
   const scope = { kind: 'finding' as const, dealId: DEAL, findingId: tax.id };
-  state.ui.findingFilter = { status: 'open', workstream: 'Legal', reviewed: '', text: '' };
+  state.ui.findingFilter = { status: 'open', workstream: 'Legal', reviewed: '' };
   const queue = queueView(state, scope);
   expect(queue.shown.map(({ id, num, done }) => [id, num, done])).toEqual([
     [lease.id, '', false], [covenant.id, '', false], [tax.id, '', true],
   ]);
-  state.ui.findingFilter.text = 'cure';
-  expect(queueView(state, scope).shown.map(({ id }) => id)).toEqual([covenant.id, tax.id]);
   state.ui.queueSearch = 'TAX EQUITY';
   expect(queueView(state, scope).shown.map(({ id }) => id)).toEqual([tax.id]);
   state.conflicts = Object.fromEntries([covenant, tax, lease].map((finding) => [

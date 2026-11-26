@@ -61,7 +61,11 @@ function Shell() {
       const route = routeFromHash(); const was = store.get().ui.route;
       const deal = (r: State['ui']['route']) => ('dealId' in r && r.dealId ? r.dealId : null);
       // list filters and the selected question belong to one deal: moving to another deal starts clean
-      const fresh = deal(route) !== deal(was) ? { findingFilter: { status: 'open' as const, workstream: '', text: '', reviewed: '' as const }, qaFilter: { status: 'open' as const, workstream: '', text: '' }, checklistFilter: 'all' as const, selectedQuestion: null, selectedChecklist: null } : {};
+      const fresh = deal(route) !== deal(was) ? {
+        findingFilter: { status: 'open' as const, workstream: '', reviewed: '' as const },
+        qaFilter: { status: 'open' as const, workstream: '', text: '' },
+        checklistFilter: 'all' as const, selectedQuestion: null, selectedChecklist: null,
+      } : {};
       store.ui({ route, doc: null, docAside: null, side: null, queueSearch: '', dialog: null,
         searchFocus: null, ...fresh, ...takeNavPatch() });
       // the link or button that was pressed is gone with the old page: focus goes to what opened the document being closed, else to the new page, not to nowhere
