@@ -249,7 +249,7 @@ class FolderPass {
     const { kit } = this.run;
     const reading = this.startBatch(index);
     try {
-      const { files, listing, got } = await kit.send(reading.sent, this.run.spansDeals);
+      const { files, listing, got } = await kit.send(reading.sent, this.fast, this.run.spansDeals);
       if (!got.length) return this.notRead(reading, 'they could not be opened on this PC', 'could not be opened');
       const prompt = this.ask(reading, listing);
       // a reply citing a document the batch was not given is asked again (#1162)

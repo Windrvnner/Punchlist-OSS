@@ -44,7 +44,12 @@ export function AccountRow() {
   }, [at]);
   // OneDrive out for 15 minutes: said once for each time it drops, as an ordinary notice
   const told = useRef<string | null>(null); const out = s.sync?.outOfTouchSince ?? null;
-  useEffect(() => { if (c.notice && told.current !== out) { told.current = out; store.toast(c.notice); } }, [c.notice, out]);
+  useEffect(() => {
+    if (c.notice && told.current !== out) {
+      told.current = out;
+      store.toast(c.notice, 'warn');
+    }
+  }, [c.notice, out]);
   return (
     <div class="me" ref={me} onMouseEnter={show} onMouseLeave={hide} onFocusIn={show} onFocusOut={hide}>
       <button type="button" class="merow" id="u-menu" aria-haspopup="dialog" aria-label={`${s.user?.name ?? ''} · Settings`.trim()} aria-describedby={c.wrong ? 'conncard' : undefined} onClick={() => store.ui({ settings: true })}>

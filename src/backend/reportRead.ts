@@ -237,7 +237,7 @@ const notReport = (reply: Record<string, unknown>) => 'report' in reply && !yes(
 export async function read(
   k: ReportKit, rec: DocRecord, before: ReadLine | undefined, last: boolean,
 ): Promise<ReadLine | 'not' | 'lost' | null> {
-  const s = await k.send(rec);
+  const s = await k.send(rec, k.models.standard);
   if (!s) return 'lost';                       // cannot be sent from this PC: left for one that can, not a try
   const r = new ReportRead(k, rec, s, before);
   const known = await k.findings();

@@ -89,7 +89,20 @@ export type Model = ReturnType<typeof model>;
 export const checks = (svc: StandInService) => svc.calls.filter((c) => itemsIn(c as any).length).map((c) => [c.model, itemsIn(c as any).map((it) => numOf(it.text))] as [string, number[]]);
 export const verifies = (svc: StandInService) => svc.calls.filter((c) => isVerifyAsk(c as any)).map((c) => [c.model, /Title: (.*)/.exec(c.prompt)?.[1] ?? ''] as [string, string]);
 
-export interface Pair { A: PcApp; B: PcApp; dealId: string; sync: { A: string; B: string }; net: ReturnType<typeof link>; svcA: Model; svcB: Model; list: { on: boolean; items: { id: string; text: string }[] }; touch: { A: boolean; B: boolean }; root: string; close(): void }
+export interface Pair {
+  A: PcApp;
+  B: PcApp;
+  dealId: string;
+  sync: { A: string; B: string };
+  net: ReturnType<typeof link>;
+  svcA: Model;
+  svcB: Model;
+  list: { on: boolean; items: { id: string; text: string }[] };
+  touch: { A: boolean; B: boolean };
+  root: string;
+  /** ends the work both PCs started, then the link; resolves before the case removes the folders */
+  close(): Promise<void>;
+}
 /**
  * Two PCs on one deal, each with its own copy of the data room, indexed; the checklist is held back while they index,
  * so no round starts until a test starts one.
@@ -133,7 +146,14 @@ export async function pair(o: { items?: number; list?: { id: string; text: strin
     svcA.set({ ...o.scriptA, hold: (c) => own?.(c) ?? (itemsIn(c as any).length && !met() ? until('the laptop to join the round', met, 30000) : undefined) });
   }
   svcA.calls.length = 0; svcB.calls.length = 0; list.on = true;
-  return { A, B, dealId, sync, net, svcA, svcB, list, touch, root, close() { net.stop(); A.backend.close(); B.backend.close(); } };
+  const close = async () => {
+    // The work the PCs started ends while their folders still exist:
+    // a pass that outlives its case would list a removed folder (#870).
+    await Promise.all([A.backend.close(), B.backend.close()]);
+    await Promise.all([A.backend.idle(), B.backend.idle()]);
+    net.stop();
+  };
+  return { A, B, dealId, sync, net, svcA, svcB, list, touch, root, close };
 }
 
 /** every check-log line on the deal, as a PC's sync folder has them */

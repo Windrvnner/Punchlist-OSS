@@ -13,25 +13,37 @@ function readAttempt(value: unknown, sidecar: string): Attempt {
   if (!entry || typeof entry.file !== 'string' || !/^changes-[A-Za-z0-9_-]+\.jsonl$/.test(entry.file)
     || typeof entry.text !== 'string') throw new OwnershipError(UNREADABLE);
   const line = JSON.parse(entry.text);
+  const identity = identityOf(entry.file, line, sidecar);
+  if (entry.text.includes('\n') || line.proof !== 1 || typeof line.sha256 !== 'string'
+    || !/^[a-f0-9]{64}$/.test(line.sha256)) {
+    throw new OwnershipError(UNREADABLE);
+  }
+  return attemptOf({ ...identity, sidecar, sha256: line.sha256 }, line.op);
+}
+
+/** The journal line about to be appended is identified by its own bytes, without its newline (#503). */
+function attemptOfLine(file: string, text: string, sidecar: string): Attempt {
+  if (!text.endsWith('\n') || text.slice(0, -1).includes('\n')) throw new OwnershipError(UNREADABLE);
+  const line = JSON.parse(text);
+  const identity = identityOf(file, line, sidecar);
+  return attemptOf({ ...identity, sidecar, sha256: sha256Hex(text.slice(0, -1)) }, line.op);
+}
+
+/** A line's PC and sequence must match its own file name and sidecar, or it was not written by this PC. */
+function identityOf(file: unknown, line: { pc?: unknown; seq?: unknown } | null, sidecar: string) {
+  if (typeof file !== 'string' || !/^changes-[A-Za-z0-9_-]+\.jsonl$/.test(file)) throw new OwnershipError(UNREADABLE);
   if (typeof line?.pc !== 'string' || !/^[A-Za-z0-9_-]+$/.test(line.pc)
-    || !Number.isSafeInteger(line.seq) || line.seq < 1
-    || !entry.file.startsWith(`changes-${line.pc}-`) || sidecar !== `pending-changes-${line.pc}.json`) {
+    || typeof line.seq !== 'number' || !Number.isSafeInteger(line.seq) || line.seq < 1
+    || !file.startsWith(`changes-${line.pc}-`) || sidecar !== `pending-changes-${line.pc}.json`) {
     throw new OwnershipError(UNREADABLE);
   }
-  const legacy = entry.text.endsWith('\n');
-  if (legacy ? entry.text.slice(0, -1).includes('\n') || 'proof' in line
-    : entry.text.includes('\n') || line.proof !== 1 || typeof line.sha256 !== 'string'
-      || !/^[a-f0-9]{64}$/.test(line.sha256)) {
-    throw new OwnershipError(UNREADABLE);
-  }
-  if (line.op !== undefined && line.op !== null && typeof line.op !== 'string') {
-    throw new OwnershipError(UNREADABLE);
-  }
-  return {
-    file: entry.file, sidecar, pc: line.pc, seq: line.seq,
-    sha256: legacy ? sha256Hex(entry.text.slice(0, -1)) : line.sha256,
-    operation: typeof line.op === 'string' ? line.op : null,
-  };
+  return { file, pc: line.pc, seq: line.seq };
+}
+
+/** The operation that wrote a line is optional; when present it must be text. */
+function attemptOf(identity: Omit<Attempt, 'operation'>, op: unknown): Attempt {
+  if (op !== undefined && op !== null && typeof op !== 'string') throw new OwnershipError(UNREADABLE);
+  return { ...identity, operation: typeof op === 'string' ? op : null };
 }
 
 export class LocalChanges {
@@ -146,7 +158,7 @@ export class LocalChanges {
   }
 
   append(file: string, text: string): void {
-    const attempt = readAttempt({ file, text }, this.sidecar);
+    const attempt = attemptOfLine(file, text, this.sidecar);
     const next = new Map(this.attempts);
     next.set(`${attempt.pc}:${attempt.seq}`, attempt);
     this.save(next, this.sidecar);

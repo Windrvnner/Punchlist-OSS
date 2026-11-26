@@ -131,7 +131,7 @@ async function sort(k: ReportKit, todo: DocRecord[]) {
 
 /** Step 2: the fast model reads the first pages of a document its path left unclear. Null when it cannot say. */
 async function look(k: ReportKit, rec: DocRecord): Promise<boolean | null> {
-  const s = await k.send(rec);
+  const s = await k.send(rec, k.models.fast);
   if (!s) return null;
   const question = SORT_ASK.replace('Which of them are', 'Is it one of the');
   const prompt = [

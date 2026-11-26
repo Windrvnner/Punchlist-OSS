@@ -118,7 +118,7 @@ function useExport(store: Store, write: () => Promise<Result<number | 'canceled'
     }
     if (written.value === 'canceled') return;
     store.ui({ dialog: null });
-    store.toast(`Exported ${plural(written.value, word)} to Excel`);
+    store.toast(`Exported ${plural(written.value, word)} to Excel`, 'done');
   };
   return { busy, error, close, run };
 }

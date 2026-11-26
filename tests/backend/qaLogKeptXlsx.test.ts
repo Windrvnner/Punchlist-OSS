@@ -109,11 +109,12 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     if (!r.ok) throw new Error(r.error.message);
     expect(r.value.kept).toMatchObject({ steps: [], clashes: [] }); expect(r.value.kept!.ask).toHaveLength(1);   // never written unasked: the person says where it goes
   }, 240_000);
-  // a blank Submitted by against a filled one is another party's row
+  // a row naming no sender matches any sender, the same sender first (docs/decisions.md)
   for (const [name, change] of [
     ['the log took out the row they answered, and another with no submitter asks it', (rows: string[][]) => { rows[1500] = ['Finance', 'High', '', q(700), 'Open', '']; return { base: rows, lroe: rows.filter((_, i) => i !== 700) }; }],
     ['the app reworded the row they answered, and a row with no submitter asks the old words', (rows: string[][]) => ({ base: rows, lroe: [...rows.map((r, i) => (i === 700 ? [...r.slice(0, 3), 'Question 700, as the app now words it', ...r.slice(4)] : r)), ['Finance', 'High', '', q(700), 'Open', '']] })],
-  ] as const) it(`with no number column, an answer for Lender A never goes into a row with no submitter: ${name}`, async () => {
+  ] as const) it(`with no number column, Lender A's answer is asked about, or goes to a row with no submitter: ${name}`,
+    async () => {
     const H = ['Workstream', 'Priority', 'Submitted by', 'Question', 'Status', 'Response'];
     const { base: b, lroe: l } = change([H, ...Array.from({ length: N }, (_, k) => ['Finance', 'High', 'Lender A', q(k + 1), 'Open', ''])]);
     const base = await workbook(exportDocument(SHEET, b)); const lroe = await workbook(exportDocument(SHEET, l));
@@ -125,9 +126,17 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     later();
     const r = await nodeQaLogs({ convert: lo }).read({ folder, file: FILE }, { sheet: SHEET, headerRow: 1, kept: { text: 3, by: 2 } });
     if (!r.ok) throw new Error(r.error.message);
-    expect(r.value.kept).toMatchObject({ steps: [], clashes: [] });
-    // the row taken out among two that ask it is asked about; the row the app reworded in place is filed, and said so
-    if (name.includes('took out')) expect(r.value.kept!.ask).toHaveLength(1); else expect(r.value.kept!.files).toMatchObject([{ left: true }]);
+    const kept = r.value.kept!;
+    expect(kept.clashes).toEqual([]);
+    // the row taken out among two that ask it is asked about: the one with no submitter is another row of the version
+    // they edited; where the app reworded the row they answered, the row with no submitter asking its words is it
+    if (name.includes('took out')) {
+      expect(kept.steps).toEqual([]);
+      expect(kept.ask).toHaveLength(1);
+    } else {
+      expect(kept.steps).toEqual([{ kind: 'cell', row: N + 1, col: 5, value: 'sroe: for Lender A only' }]);
+      expect(kept.files[0].left).toBeUndefined();
+    }
   }, 240_000);
   it('a change to one of two rows that read alike, with no number and no submitter, ' +
     'goes in the row the person picks', async () => {
@@ -206,8 +215,12 @@ describe.skipIf(!has)('an edit kept aside beside a workbook log', () => {
     later();
     const logs = nodeQaLogs({ convert: lo });
     const r = await logs.read({ folder, file }, { sheet: SHEET, headerRow: 1, kept: { text: 1, n: 0 } }); if (!r.ok) throw new Error(r.error.message);
-    expect(r.value.kept!.steps.map((s) => s.kind === 'cell' && [s.row, s.col])).toEqual([[7, 1], [7, 2]]);   // not D8
-    expect(r.value.kept!.clashes).toEqual([]);                                         // D8's new value is the formula's, not theirs
+    // a reworded row is not lined up by its place: the person places it, and its steps never take D8
+    const kept = r.value.kept!;
+    expect(kept.steps).toEqual([]);
+    const offered = kept.ask?.[0].rows.map((x) => x.steps.map((s) => s.kind === 'cell' && [s.row, s.col]));
+    expect(offered).toEqual([[[7, 1], [7, 2]]]);
+    expect(kept.clashes).toEqual([]);                                     // D8's new value is the formula's, not theirs
   }, 240_000);
   // a question they put in mid-way moves every formula below it down a row
   it('a question they put in above formula rows makes no formula row below it a clash', async () => {

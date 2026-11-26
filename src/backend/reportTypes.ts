@@ -100,8 +100,8 @@ export interface ReportKit {
   ask: (input: AskInput, keys: string[]) => Promise<Record<string, unknown> | null>;
   /** a reply naming an id it was not shown, or citing a document it was not given, as `ask` refuses it (#1162) */
   unusable: (sent: Sent[], keys: string[]) => Unusable;
-  /** put a document in the service's store; null when it cannot be sent from this PC */
-  send: (rec: DocRecord) => Promise<SentDoc | null>;
+  /** put a document in the service's store, listed for a prompt to `model`; null when it cannot be sent from this PC */
+  send: (rec: DocRecord, model: string) => Promise<SentDoc | null>;
   /** keep the citations that name the document sent and a page it has, and renumber the markers to match */
   fit: (text: string, cited: Cited[] | undefined, sent: Sent[]) => { text: string; sources: Source[] };
   workstreams: readonly string[];

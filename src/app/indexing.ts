@@ -4,7 +4,8 @@
  * record is written once, through a command, when indexing finishes. Stops when the deal disappears.
  */
 import type { Store } from './store';
-import { pathKey, RecordIndexingProgress } from './commands/deals';
+import { RecordIndexingProgress } from './commands/deals';
+import { windowsPath } from '../domain/sheets';
 import type { Deal, Folder } from '../domain/model';
 import type { DealProgress, FolderSearch } from '../ports';
 import type { State } from './state';
@@ -195,9 +196,9 @@ const stalled = (store: Store, dealId: string, on: boolean) => store.ui((ui) => 
 export function indexCommittedFolders(store: Store, dealId: string, paths: string[]) {
   const deal = store.get().deals[dealId];
   if (!deal) return;
-  const folders = new Map(deal.folders.map((folder) => [pathKey(folder.path), folder]));
+  const folders = new Map(deal.folders.map((folder) => [windowsPath(folder.path), folder]));
   const requested = paths.flatMap((path) => {
-    const folder = folders.get(pathKey(path));
+    const folder = folders.get(windowsPath(path));
     return folder ? [folder] : [];
   });
   if (requested.length) void startIndexing(store, dealId, requested);
@@ -214,7 +215,7 @@ export async function startIndexing(store: Store, dealId: string, folders: Folde
     // one notice a deal, however often it is pressed; "Retry now", since the app is already retrying by itself
     const notices = noticesOf.get(store) ?? new Map<string, number>(); noticesOf.set(store, notices);
     const was = notices.get(dealId); if (was !== undefined) store.dismissToast(was);
-    notices.set(dealId, store.toast('Couldn’t start indexing',
+    notices.set(dealId, store.toast('Couldn’t start indexing', 'warn',
       { label: 'Retry Now', run: () => void startIndexing(store, dealId, folders) }));
     void watchIndexing(store, dealId, { wanted: folders, why });         // and it is tried again without being asked, further apart each time
     return;

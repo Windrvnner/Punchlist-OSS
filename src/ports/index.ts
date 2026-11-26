@@ -179,9 +179,9 @@ export interface AiService {
   /** Checklist items with no document behind them. */
   gaps(dealId: string): Promise<Result<{ title: string }[]>>;
   /**
-   * Optional. The deal memo's model-written parts: a short summary of facts (may be empty), and a rating of each
-   * open finding, by id, against the control file's definitions. A rating holds until the finding's words change. An open
-   * finding the model could not rate is left out, and the memo lists it unrated.
+   * Optional. The deal memo's model-written parts: a short summary of facts (a memo without one fails), and a rating
+   * of each open finding, by id, against the control file's definitions. A rating holds until the finding's words
+   * change. An open finding the model could not rate is left out, and the memo lists it unrated.
    */
   memo?(dealId: string): Promise<Result<{ summary: string[]; ratings: Record<string, import('../domain/memo').Rating>; /** the open findings grouped into risks, the key ones written up (domain/memo `RiskGroup`); absent from a service that does not group them */ risks?: import('../domain/memo').RiskGroup[] }>>;
   /**
@@ -190,6 +190,15 @@ export interface AiService {
    * and chooses the model. Only a verdict for the person to read, `why` in one short sentence: it changes nothing.
    */
   addresses?(input: { dealId: string; question: string; answer: string }): Promise<Result<{ verdict: 'yes' | 'partly' | 'no'; why: string }>>;
+  /**
+   * Optional. Which of a deal's open questions, if any, an answer from a conversation addresses: their ids, none
+   * when it addresses none. Asked once an answer finishes, for the suggested open question card (#1120). The backend
+   * shows the questions to the model by their ids, in calls sized to the model's input limit, and keeps what every call
+   * named. Only a proposal.
+   */
+  suggestQuestion?(input: {
+    dealId: string; answer: string; questions: { id: string; text: string }[];
+  }): Promise<Result<string[]>>;
   /**
    * Optional. One response that reconciles two versions of a question's response (the app's and the Q&A log's):
    * every fact from both, said once, as one answer. Where they disagree, the more specific (a date, a figure, a document
