@@ -170,7 +170,7 @@ function noteWithCopies(t: Tombstone, versions: Version[] | undefined): ShownNot
 }
 
 /** the AI service's calls that go to the model service (the others only read what is recorded) */
-const MODEL_CALLS = new Set<PropertyKey>(['answer', 'draft', 'reassess', 'dealBrief', 'gaps', 'addresses', 'merge', 'layout', 'reword', 'sameMeaning', 'issuesList', 'phrase', 'checkAll', 'responses']);
+const MODEL_CALLS = new Set<PropertyKey>(['answer', 'draft', 'reassess', 'dealBrief', 'gaps', 'addresses', 'covers', 'merge', 'layout', 'reword', 'sameMeaning', 'issuesList', 'phrase', 'checkAll', 'responses']);
 
 /**
  * The app's own replies to a person's request (a draft's text) are never dropped. One that cannot be written, because

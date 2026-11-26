@@ -1962,6 +1962,34 @@ export function nodeAi(o: AiOptions) {
       }
       return ok({ verdict, why: (strings(reply!.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 200) });     // one short line on the card, however much it wrote
     },
+    /**
+     * Whether open questions already ask for what unresolved points lack (#1218). The standard model judges each pair from
+     * its two texts, in parts sized from its limits. Pairs are named by tags of this part, and an answer is taken only for
+     * an offered tag, once, as true or false: code decides what the reply means, the model only proposes.
+     */
+    async covers(i) {
+      if (!i.checks.length) return ok([]);
+      let model: string; try { model = (await models()).standard; } catch (e) { return failure(e, UNREACHED); }
+      const line = (x: (typeof i.checks)[number]) => `${x.point.replace(/\s+/g, ' ')}\n${x.question.replace(/\s+/g, ' ')}`;
+      const size = partSize({ cap: CHECKLIST_BATCH, out: control.limits.glanceReplyTokens, outLimit: outLimit(model), in: tokensEach(i.checks.map(line)), inLimit: inLimit(model) });
+      const done = await inParts(i.checks, size, async (part) => {
+        const tags = tagsFor(part.length); const at = new Map(tags.map((t, m) => [t, m]));
+        const pairs = part.map((x, m) => `${tags[m]}:\nPoint: ${x.point.replace(/\s+/g, ' ')}\nQuestion: ${x.question.replace(/\s+/g, ' ')}`).join('\n\n');
+        const prompt = `Each pair below holds an unresolved point in the due diligence of a project-finance deal (a checklist item no document settles yet, or an open finding) and a question already asked of the counterparty. Say for each pair whether the question already asks for what the point lacks: whether the answer to it would settle the point. Say true only when it clearly would; a question on the same subject that asks for something else is false.\n\n${pairs}\n\nReply as JSON: {"items": [{"id": "${tags[0]}", "covers": true}]}`;
+        let reply: { items?: unknown } | null; let cut = false;
+        try { reply = await askJson({ kind: 'covers', split: true, model, system: JSON_ONLY, prompt }, ['items']); }
+        catch (e) { if (!isCutOff(e)) throw e; cut = true; reply = (e as { partial?: { items?: unknown } | null }).partial ?? null; }
+        if (!cut && (!reply || !Array.isArray(reply.items))) throw Object.assign(new Error(UNREAD_REPLY), { code: 'unread' });
+        const named = (listOf(reply?.items) as { id?: unknown; covers?: unknown }[]).map((x) => ({ m: typeof x?.id === 'string' ? at.get(x.id.trim().toLowerCase()) : undefined, covers: x?.covers }));
+        const kept = cut ? named.slice(0, -1) : named;          // the last entry of a cut reply may be cut short
+        const twice = new Set(kept.filter((x, j) => x.m !== undefined && kept.findIndex((y) => y.m === x.m) !== j).map((x) => x.m));
+        const got = new Map<number, boolean>();
+        for (const x of kept) if (x.m !== undefined && !twice.has(x.m) && typeof x.covers === 'boolean') got.set(x.m, x.covers);
+        return { got, ...(cut ? { cut: range(0, part.length).filter((k) => !got.has(k)) } : {}) };
+      });
+      if (done.stopped !== undefined && !done.got.size) return stoppedOn(done.stopped);
+      return ok(i.checks.map((_, k) => done.got.get(k) ?? null));
+    },
     async merge(i) {
       let reply: { text?: unknown } | null;
       try { reply = await askJson({ kind: 'merge', model: (await models()).fast, system: JSON_ONLY, prompt: `This question was asked on a project-finance deal:\n${i.question}\n\nTwo people answered it differently.\nFirst version:\n${i.app}\n\nSecond version:\n${i.log}\n\nWrite one answer that reconciles them: every fact from both, each said once, in plain sentences, as a lender's counsel would write it. Where the two disagree, keep the more specific statement (a date, a figure, a document reference) and leave the other out. Do not put the two versions one after the other, do not mention that there were two versions, and add no notes, brackets, placeholders or anything for a person to confirm.\nReply as JSON: {"text": "…"}` }, ['text']); }

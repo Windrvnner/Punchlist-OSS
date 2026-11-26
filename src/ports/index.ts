@@ -191,6 +191,14 @@ export interface AiService {
    */
   addresses?(input: { dealId: string; question: string; answer: string }): Promise<Result<{ verdict: 'yes' | 'partly' | 'no'; why: string }>>;
   /**
+   * Optional. For each pair, whether an open question already asks for what an unresolved point (a gap or an open
+   * finding) lacks, so that an answer to it would settle the point. Asked only for a pair whose keyword confidence
+   * reached `limits.askedCutoff` (#1218). The backend chooses the model and names each pair to it by a neutral tag, never
+   * by question number. Answers by place in `checks`: `null` for a pair it gave no usable answer on (no offer is made).
+   * A proposal for a person to accept: nothing is linked here.
+   */
+  covers?(input: { dealId: string; checks: { point: string; question: string }[] }): Promise<Result<(boolean | null)[]>>;
+  /**
    * Optional. One response that reconciles two versions of a question's response (the app's and the Q&A log's):
    * every fact from both, said once, as one answer. Where they disagree, the more specific (a date, a figure, a document
    * reference) stands. Never the two pasted together, and never a note, bracket or placeholder for a person to fill in. It
