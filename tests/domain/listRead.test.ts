@@ -192,6 +192,8 @@ describe('a list read whole by the model, tied out line by line', () => {
     expect(t.count.items).toBe(1900);
     expect(t.left).toEqual([]);
     expect(addsUp(t)).toBe(true);
-    expect(t.items[1899]).toMatchObject({ section: '100. Area 100', text: '   100.19  Item 19 of area 100 is in place' });
+    expect(t.items[1899]).toMatchObject({
+      section: '100. Area 100', text: '   100.19  Item 19 of area 100 is in place',
+    });
   });
 });

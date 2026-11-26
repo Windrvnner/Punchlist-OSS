@@ -87,9 +87,10 @@ describe('the stand-in reading the mock-up list', () => {
     const r = await readList(mockAi({ latency: [0, 0] }), lines); if (!r.ok) throw new Error(r.error.message);
     const t = tieOut(lines, r.value);
     // the app keeps every line exactly as the file has it, numbering and curly quotes included
-    const unnumbered = (text: string) => text.replace(/^(\d+(\.\d+)*[.)]?|[a-z]\))\s+/i, '');
-    expect(t.items.map((i) => unnumbered(i.text))).toEqual(ITEMS.map((i) => i.t));
-    expect(t.items.every((i) => lines.some((line) => line.trim() && i.text.startsWith(line.trim())))).toBe(true);
+    const unnumbered = (text: string) => text.replace(/^\s*(\d+(\.\d+)*[.)]?|[a-z]\))\s+/i, '');
+    // a wrapped item keeps the next line's own indentation after its space (#1215)
+    expect(t.items.map((i) => unnumbered(i.text).replace(/ {2,}/g, ' '))).toEqual(ITEMS.map((i) => i.t));
+    expect(t.items.every((i) => lines.some((line) => line.trim() && i.text.startsWith(line)))).toBe(true);
     expect(t.items.map((i) => unnumbered(i.section ?? ''))).toEqual(ITEMS.map((i) => i.s));
     expect(t.left.map((n) => lines[n - 1].trim())).toEqual(LEFT_OUT);
     const c = t.count; expect(c.items + c.more + c.headings + c.blank + c.left).toBe(lines.length);

@@ -13,38 +13,46 @@ export const LIST_KINDS: LineRead['k'][] = ['section', 'subsection', 'item', 'mo
 /** the lines `from` to `to` (0-based, `to` not included) of a list: the whole list unless it is asked in parts */
 export interface ListSpan { from: number; to: number }
 
-/** Every line of the span that is not blank, numbered from 1 in the whole list, and what to say of each. */
+/** a line's handle in the prompt: its number in the whole list, from 1, with an L and in square brackets (#1227) */
+const handleOf = (n: number): string => `L${n}`;
+
+/**
+ * Every line of the span that is not blank, behind its handle, and what to say of each. A handle is a tag no line's own
+ * text starts with, so a line that begins "1.2" or holds "Q1" is never taken for a number the model is to give back.
+ */
 export function listReadPrompt(lines: string[], span: ListSpan = { from: 0, to: lines.length }): string {
   const own = lines.slice(span.from, span.to);
-  const shown = own.flatMap((line, k) => (line.trim() ? [`${span.from + k + 1}: ${line.replace(/\s+$/, '')}`] : []))
-    .join('\n');
+  const tagged = (line: string, k: number) => `[${handleOf(span.from + k + 1)}] ${line.replace(/\s+$/, '')}`;
+  const shown = own.flatMap((line, k) => (line.trim() ? [tagged(line, k)] : [])).join('\n');
   return [
-    'A firm\'s due diligence checklist for project-finance deals was pasted or imported as the numbered lines below.',
+    'A firm\'s due diligence checklist for project-finance deals was pasted or imported as the lines below.',
+    'Each line starts with its handle in square brackets, such as [L12]; the handle is not part of the line.',
     'A table\'s row has its cells joined by " | ".',
     shown,
     '',
-    'Say what kind each line is, naming every line under exactly one kind, by its number or a range such as "4-39":',
+    'Say what kind each line is, naming every line under exactly one kind, by its handle (such as "L7") or by a range',
+    'of two handles joined by a hyphen (such as "L4-L39"):',
     '- "section" or "subsection": a heading that the items under it belong to;',
     '- "item": one thing to check;',
     '- "more": the rest of the item on the line above (a long item wrapped onto the next line);',
     '- "columns": a table\'s heading row;',
     '- "left": anything else (a title, a note, a page number or footer, a date).',
-    'For a table, "cells" gives the column numbers, counted from 1: "item", the column that holds each row\'s item;',
+    'For a table, "columns" gives the column numbers, counted from 1: "item", the column that holds each row\'s item;',
     '"section" and "subsection", columns of their own that hold a row\'s section and subsection, when the table has',
     'them; "heading" and "subheading", the columns that hold the heading of a section row and of a subsection row.',
-    'Reply as JSON: {"section": ["3"], "subsection": [], "item": ["4-39", "41"], "more": ["12"], "columns": ["1"],',
-    '"left": ["2", "40"], "cells": {"item": 3, "section": 1, "subsection": 2, "heading": 1, "subheading": 2}}',
+    'Reply as JSON: {"lines": {"section": ["L3"], "subsection": [], "item": ["L4-L39", "L41"], "more": ["L12"],',
+    '"columns": ["L1"], "left": ["L2", "L40"]}, "columns": {"item": 3, "section": 1, "subsection": 2, "heading": 1,',
+    '"subheading": 2}}',
   ].join('\n');
 }
 
-/** the line numbers an entry names: a number, or a range "a-b" or "a–b" (both ends in), within the list */
-function numbersIn(entry: unknown, span: ListSpan): number[] {
-  const range = typeof entry === 'string' ? /^\s*(\d+)\s*[-–]\s*(\d+)\s*$/.exec(entry) : null;
-  const [from, to] = range ? [Number(range[1]), Number(range[2])] : [int(entry), int(entry)];
-  if (from === null || to === null) return [];
-  const out: number[] = [];
-  for (let n = Math.max(span.from + 1, from); n <= Math.min(to, span.to); n++) out.push(n);
-  return out;
+/** the line indexes a handle, or a range of two handles, names by exact lookup among those shown; none otherwise */
+function indexesOf(entry: unknown, at: Map<string, number>): number[] {
+  if (typeof entry !== 'string') return [];
+  const ends = entry.split('-').map((h) => at.get(h));
+  if (ends.length > 2 || ends.some((e) => e === undefined)) return [];
+  const [from, to] = [ends[0]!, ends[ends.length - 1]!];
+  return from <= to ? Array.from({ length: to - from + 1 }, (_, k) => from + k) : [];
 }
 
 /** a column number from the reply, counted from 1 */
@@ -71,23 +79,26 @@ function columnsOf(value: unknown): ListCells | undefined {
 }
 
 /**
- * The reply as a reading: each line that is not blank and is named under exactly one kind. A line named under two
- * kinds is left without a reading, so the app asks about it again rather than choose one.
+ * The reply as a reading: each line that is not blank and is named under exactly one kind, by a handle the prompt
+ * gave. A line named under two kinds is left without a reading, so the app asks about it again rather than choose.
  */
 export function listReply(
   reply: Record<string, unknown>, lines: string[], span: ListSpan = { from: 0, to: lines.length },
 ): ListReply {
+  const at = new Map<string, number>();
+  for (let k = span.from; k < span.to; k++) at.set(handleOf(k + 1), k);
   const named = new Map<number, Set<LineRead['k']>>();
+  const kinds = isObject(reply.lines) ? reply.lines : {};
   for (const k of LIST_KINDS) {
-    for (const entry of list(reply[k])) {
-      for (const n of numbersIn(entry, span)) {
-        if (lines[n - 1].trim()) named.set(n, (named.get(n) ?? new Set()).add(k));
+    for (const entry of list(kinds[k])) {
+      for (const index of indexesOf(entry, at)) {
+        if (lines[index].trim()) named.set(index + 1, (named.get(index + 1) ?? new Set()).add(k));
       }
     }
   }
-  const read = [...named].filter(([, kinds]) => kinds.size === 1).sort((a, b) => a[0] - b[0]);
-  const cells = columnsOf(reply.cells);
-  return { lines: read.map(([n, kinds]) => ({ n, k: [...kinds][0] })), ...(cells ? { cells } : {}) };
+  const read = [...named].filter(([, found]) => found.size === 1).sort((a, b) => a[0] - b[0]);
+  const cells = columnsOf(reply.columns);
+  return { lines: read.map(([n, found]) => ({ n, k: [...found][0] })), ...(cells ? { cells } : {}) };
 }
 
 /**
@@ -103,6 +114,8 @@ export async function readListInParts(
 ): Promise<{ read?: ListReply; stopped?: unknown }> {
   const cellsFound: ListCells[] = [];
   const done = await inParts(lines.map((_, at) => at), lines.length, async (part) => {
+    // a half of blank lines holds nothing to read: no call for it
+    if (part.every((at) => !lines[at].trim())) return { got: new Map() };
     const reply = await ask({ from: part[0], to: part[part.length - 1] + 1 });
     if (!reply) throw Object.assign(new Error(UNREAD_REPLY), { code: 'unread' });
     if (reply.cells) cellsFound.push(reply.cells);

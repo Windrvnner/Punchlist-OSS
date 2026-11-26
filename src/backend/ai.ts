@@ -58,7 +58,7 @@ import { coversPrompt, readCovers } from './covers';
 import {
   readJson, unfinished, list as listOf, strings, prose, PARAGRAPH_SEAM, int, pageOf, word, tagNumber, isObject,
 } from './lenient';
-import { listReadPrompt, listReply, readListInParts, LIST_KINDS } from './listReadAi';
+import { listReadPrompt, listReply, readListInParts } from './listReadAi';
 import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK } from './limits';
 import { UNREAD_REPLY, UNUSABLE_REPLY, UNREACHED, CUT_ON_IT, CUT_BEFORE_IT, UNUSABLE_ON_IT } from './limits';
 import { inParts, partSize, type PartReply, type PartsDone } from './parts';
@@ -2406,7 +2406,7 @@ export function nodeAi(o: AiOptions) {
       return ok([...done.got].sort((a, b) => a[0] - b[0]).map(([at, r]) => ({ at, ...r })));
     },
     async readList(i) {
-      // What each line of a list is, read whole in one call (#1026): the standard model, or the thorough one when
+      // What each line of a list is, read whole in one call (#1227): the standard model, or the thorough one when
       // asked, names each line's kind by number and a table's columns (listReadAi.ts). A request the service refuses as
       // too long, or a reply cut off at the length limit (`split`: not asked for shorter), is asked again in halves
       // (parts.ts `inParts`); a read that still fails fails whole, so half a list is never shown as all of it.
@@ -2420,7 +2420,7 @@ export function nodeAi(o: AiOptions) {
         const done = await readListInParts(i.lines, async (span) => {
           const prompt = listReadPrompt(i.lines, span);
           const ask: Ask = { kind: 'readList', split: true, model, system: JSON_ONLY, prompt };
-          const reply = await askJson(ask, [...LIST_KINDS, 'cells']);
+          const reply = await askJson(ask, ['lines']);
           return reply ? listReply(reply, i.lines, span) : null;
         });
         return done.read ? ok(done.read) : stoppedOn(done.stopped);
