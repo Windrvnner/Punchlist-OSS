@@ -129,7 +129,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Title, workstream, and detail stay editable; a finding has no next step. The fast model fills in the
   workstream from the firm's list only, or leaves it blank.
 - The workstreams are Technical, Legal, Commercial, Financial, Structure, Insurance, Tax, Regulatory & permits, Real estate, HR & benefits, IT & cyber, Antitrust & FDI, Compliance, and Environmental & social. A firm can set its own in `firm.workstreams`, and a record keeps a workstream that was taken off the list.
-- An issues list (PDF, Word, or email) imports into Findings. Each point joins an existing finding it repeats, or becomes a new finding with an AI title and counsel's words; points are compared with open and closed findings and shown under **Already Raised** (each with **Keep separate**) and **New Findings** before **Import**.
+- An issues list (PDF, Word, or email) imports into Findings. Each point joins an existing finding it repeats, or becomes a new finding titled with the point's own words; points are compared with open and closed findings and shown under **Already Raised** (each with **Keep separate**) and **New Findings** before **Import**.
 - A finding's page shows the checklist item that raised it, the questions asked about the finding or its item, and **Ask the Counterparty** while the finding is open and its item is turned on. The question is linked to both and takes the finding's workstream (#2).
 - A file attached on a finding goes with the next message only, and joins the finding's sources through **Add to Sources**.
 - Every source of a finding is within reach, listed by document with its places. A hover lists up to four documents; a longer list opens under the detail (flow A).
@@ -380,3 +380,4 @@ These decisions are built and wait to be confirmed:
 - Once two PCs' imports of one list have synced, the second PC's Undo of its import is refused.
 - The recovered copy of a deal deleted elsewhere is built, including who sees it, what it holds, and its notice's wording (#220).
 - Periodic records whose names differ only by a period are a series and take one place in the core set, their newest member's; every document stays searchable (docs/core-families-design.md).
+- An issues list or an advisor report is read like the app's other documents: the model reads the whole file once and returns each issues-list point in the list's own words, never reworded, and each advisor-report issue with its place in the file. There is no paging and no stop rule (#1026).
