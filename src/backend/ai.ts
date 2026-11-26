@@ -1118,8 +1118,8 @@ export function nodeAi(o: AiOptions) {
         const id = ids[s.rec.docId]; if (!id) continue; files.push(id); got.push(s);
         const rec = o.docs.records(dealId).find((r) => r.docId === s.rec.docId) ?? s.rec;          // a Word file's pages are counted when it is first sent, just now
         lines.push(`${s.tag}: ${where(rec)}${rec.pages ? ` (${rec.pages} pages)` : ''}`);
-        // a draft's pages show its tracked changes as if agreed: say so, and send the changes themselves, read from the file, which are fact
-        if (rec.tracked) { lines.push(`  ${s.tag} has ${rec.tracked} tracked changes. Its pages show it with all of them accepted, so its wording is proposed, not agreed.`); lines.push(...await changesOf(dealId, s.tag, rec.docId)); }
+        // a draft's pages show its tracked changes as markup: say so, and send the changes themselves, read from the file, which are fact
+        if (rec.tracked) { lines.push(`  ${s.tag} has ${rec.tracked} tracked changes. Its pages show them as markup, so its wording is proposed, not agreed.`); lines.push(...await changesOf(dealId, s.tag, rec.docId)); }
         const k = kindsOf(dealId); if (k.pairs.has(rec.docId)) lines.push(blacklineLine(s, mine, k.pairs.get(rec.docId) ?? null, k.against.get(rec.docId)));
         // another project's document (docs/other-project-documents-design.md): read, never a main source
         else if (k.precedents.has(rec.docId)) lines.push(`  ${s.tag} is another project's document, not this deal's. Its terms are never this deal's: use it only to compare, and cite it only beside a document of this deal. By itself it never shows that a finding is put right or that its problem is back.`);

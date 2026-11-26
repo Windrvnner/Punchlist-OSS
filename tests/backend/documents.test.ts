@@ -273,16 +273,14 @@ describe('documents on real folders', () => {
   const KEPT = ['The lock-up ratio is 1.15x from financial close.', 'First half of a sentence joined to its second half.', 'MOVEDSENTENCE new place.', 'INSERTEDROW', 'Tranche C', 'Commented sentence.', 'Last line, unchanged.', 'FOOTERNEW'];
   const GONE = ['1.10x', 'MOVEDSENTENCE old place', 'DELETEDROW', '999', 'WHOLEPARAGRAPHGONE', 'FOOTEROLD', 'COMMENTTEXT'];
   it.skipIf(!hasOffice)(
-    'LibreOffice gives the clean text of a file with tracked changes: all that was inserted, nothing that was deleted, no comments',
+    'LibreOffice shows a file\'s tracked changes as markup, deleted words and all, and prints no comments',
     async () => {
     const dir = tmp(); const file = put(dir, 'Tracked.docx', TRACKED); const profile = path.join(tmp(), 'lo');
-    const clean = await libreOfficeConverter({ soffice, profile })(file, dir, 'clean.pdf');
-    const text = (await pdfText(fs.readFileSync(clean))).join(' ');
-    for (const k of KEPT) expect(text).toContain(k); for (const g of GONE) expect(text).not.toContain(g);
-    const marked = await libreOfficeConverter({ soffice, profile, markup: true })(file, dir, 'marked.pdf');
-    const both = (await pdfText(fs.readFileSync(marked))).join(' ');
-    for (const g of ['1.10x', '1.15x', 'DELETEDROW', 'INSERTEDROW', 'FOOTEROLD', 'FOOTERNEW']) expect(both).toContain(g);                  // asked for, the changes are shown
-    expect(fs.readdirSync(dir).sort()).toEqual(['Tracked.docx', 'clean.pdf', 'marked.pdf']);                                             // and nothing is left behind
+    const marked = await libreOfficeConverter({ soffice, profile })(file, dir, 'marked.pdf');
+    const text = (await pdfText(fs.readFileSync(marked))).join(' ');
+    for (const k of ['1.10x', '1.15x', 'DELETEDROW', 'INSERTEDROW', 'FOOTEROLD', 'FOOTERNEW']) expect(text).toContain(k);
+    expect(text).not.toContain('COMMENTTEXT');
+    expect(fs.readdirSync(dir).sort()).toEqual(['Tracked.docx', 'marked.pdf']);                                                          // nothing is left behind
   }, 120000);
 
   // a comparison tool's name, 240 characters: Windows takes up to 255 for one name, but older programs stop at 260 for the whole path
@@ -320,7 +318,7 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     const dir = tmp();
     const file = put(path.join(dir, 'a'.repeat(100), 'b'.repeat(100)), LONG, TRACKED);
     const lo = libreOfficeConverter({ soffice, profile: path.join(tmp(), 'lo') });
-    const text = (await pdfText(fs.readFileSync(await lo(file, dir, 'clean.pdf')))).join(' '); for (const k of KEPT) expect(text).toContain(k);
+    const text = (await pdfText(fs.readFileSync(await lo(file, dir, 'marked.pdf')))).join(' '); for (const k of ['INSERTEDROW', 'FOOTERNEW']) expect(text).toContain(k);
     expect((await lo.changes!(file)).tracked).toBe(13);
   }, 120000);
 
@@ -363,12 +361,12 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     'two LibreOffice conversions at once on one settings folder both finish, each with its own PDF',
     async () => {
     const dir = tmp(); const profile = path.join(tmp(), 'lo'); const one = put(dir, 'One.docx', TRACKED), two = put(dir, 'Two.docx', TRACKED);
-    const [clean, marked] = await Promise.all([
-      libreOfficeConverter({ soffice, profile })(one, dir, 'clean.pdf'),
-      libreOfficeConverter({ soffice, profile, markup: true })(two, dir, 'marked.pdf'),
+    const [first, second] = await Promise.all([
+      libreOfficeConverter({ soffice, profile })(one, dir, 'first.pdf'),
+      libreOfficeConverter({ soffice, profile })(two, dir, 'second.pdf'),
     ]);
     const words = async (f: string) => (await pdfText(fs.readFileSync(f))).join(' ');
-    expect(await words(clean)).not.toContain('1.10x'); expect(await words(marked)).toContain('1.10x');
+    expect(await words(first)).toContain('1.10x'); expect(await words(second)).toContain('1.10x');
   }, 120000);
 
   it.skipIf(!hasOffice)(
@@ -701,7 +699,7 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     const w = await b.docs.wanted('d1', [idOf(NOTES)]); await expect(b.keeper.ensure(w)).rejects.toThrow(/different converter \(stand-in\) than this PC has \(another\)/); expect(other.calls).toEqual([]);
     await indexAll(b, vdr); expect(b.docs.records('d1')[0]).toMatchObject({ pages: 3, via: 'stand-in' }); expect(other.calls).toEqual([]);        // and indexing there does not quietly redo it
     expect(val(await a.docs.page('d1', { doc: 'Notes.docx', docId: idOf(NOTES) }, 'p. 2'))).toMatchObject({ kind: 'pdf', page: 2 });
-    expect([libreOfficeConverter().id, libreOfficeConverter({ markup: true }).id]).toEqual(['libreoffice', 'libreoffice+markup']);
+    expect(libreOfficeConverter().id).toBe('libreoffice');
   });
 
   it("says a document's drafts, newest first, each with the date and folder it was read from", async () => {
