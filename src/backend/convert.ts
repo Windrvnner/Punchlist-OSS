@@ -14,47 +14,7 @@ import { spawn } from 'node:child_process';
 import { parseCsv, type Sheet, type SheetEdit } from '../domain/sheets';
 
 /** `id` names the converter and its setting. It is recorded with a document's page count, so that a PC with a different one does not show pages that may break elsewhere. */
-/** one sheet of a spreadsheet, exported as a CSV file (UTF-8, dates as YYYY-MM-DD) */
-export interface SheetFile { name: string; path: string }
-export type Converter = ((
-  file: string,
-  outDir: string,
-  outName: string,
-  info?: { tracked?: number },
-  /** the document's own name, when the file is kept under another (an attached file): what a file-name field prints */
-  shownAs?: string,
-) => Promise<string>) & {
-  id: string;
-  /**
-   * every sheet of a spreadsheet as text, in order; `asShown` gives values as the file shows them (1,234.50) rather
-   * than plain (1234.5; dates always month first); `formulas` gives a formula cell's formula ("=LEN(B2)") in place of
-   * its value
-   */
-  sheets?: (file: string, asShown?: boolean, formulas?: boolean) => Promise<Sheet[]>;
-  /** the same sheets as CSV files on disk, in order, while `visit` runs: read a piece at a time, never whole */
-  sheetFiles?: <T>(file: string, visit: (sheets: SheetFile[]) => Promise<T>) => Promise<T>;
-  /** an .xlsx made from an OpenDocument spreadsheet in one file (domain/sheets exportDocument) */
-  workbook?: (fods: string) => Promise<Uint8Array>;
-  /** a Word file and a PDF made from an OpenDocument text in one file (the deal memo, domain/memoDoc) */
-  document?: (fodt: string) => Promise<{ docx: Uint8Array; pdf: Uint8Array }>;
-  /**
-   * writes values into a copy of a spreadsheet, keeping everything else in it, and returns the copy's bytes (see
-   * `SheetEdit` in domain/sheets)
-   */
-  edit?: (file: string, sheet: string, steps: SheetEdit[]) => Promise<Uint8Array>;
-  /** a word-processing file's text (.docx, .doc, .odt, .rtf), one paragraph or list entry a line, numbering as shown */
-  text?: (file: string) => Promise<string>;
-  /** the tracked changes and comments in a file, for a converter that can list them */
-  changes?: (file: string) => Promise<{
-    passages: {
-      before: string;
-      after: string;
-      changes: { kind: 'insert' | 'delete' | 'format' | 'comment'; by: string; at: string; text: string }[];
-    }[];
-    tracked: number;
-    complete: boolean;
-  }>;
-};
+export type Converter = ((file: string, outDir: string, outName: string, info?: { tracked?: number }, /** the document's own name, when the file is kept under another (an attached file): what a file-name field in it prints */ shownAs?: string) => Promise<string>) & { id: string; /** every sheet of a spreadsheet as text, in order; `asShown` gives values as the file shows them (1,234.50) rather than plain (1234.5; dates always month first); `formulas` gives a formula cell's formula ("=LEN(B2)") in place of its value */ sheets?: (file: string, asShown?: boolean, formulas?: boolean) => Promise<Sheet[]>; /** an .xlsx made from an OpenDocument spreadsheet in one file (domain/sheets exportDocument) */ workbook?: (fods: string) => Promise<Uint8Array>; /** a Word file and a PDF made from an OpenDocument text in one file (the deal memo, domain/memoDoc) */ document?: (fodt: string) => Promise<{ docx: Uint8Array; pdf: Uint8Array }>; /** writes values into a copy of a spreadsheet, keeping everything else in it, and returns the copy's bytes (see `SheetEdit` in domain/sheets) */ edit?: (file: string, sheet: string, steps: SheetEdit[]) => Promise<Uint8Array>; /** a word-processing file's text (.docx, .doc, .odt, .rtf), one paragraph or list entry a line, numbering kept as the file shows it */ text?: (file: string) => Promise<string>; /** the tracked changes and comments in a file, for a converter that can list them */ changes?: (file: string) => Promise<{ passages: { before: string; after: string; changes: { kind: 'insert' | 'delete' | 'format' | 'comment'; by: string; at: string; text: string }[] }[]; tracked: number; complete: boolean }> };
 
 
 
@@ -518,33 +478,17 @@ export function libreOfficeConverter(o: { soffice?: string; timeoutMs?: number; 
   // A real date cell comes out unquoted and month first (11/02/2026, with its time if it has one); a text cell is always
   // quoted. The date cell is written YYYY-MM-DD so the import never doubts it; a date typed as text is left as typed.
   const isoDate = (v: string) => v.replace(/^(\d{2})\/(\d{2})\/(\d{4})(?=$| )/, '$3-$1-$2');
-  /** every sheet exported as a CSV file, in sheet order; the files are there while `visit` runs and removed after */
-  type Visit<T> = (sheets: SheetFile[]) => Promise<T>;
-  const exported = <T>(file: string, asShown: boolean, formulas: boolean, visit: Visit<T>) => one(async () => {
+  const sheets = (file: string, asShown = false, formulas = false) => one(async (): Promise<Sheet[]> => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-sheets-'));
     try {
-      const src = path.join(dir, `in${path.extname(file).toLowerCase()}`);
-      fs.copyFileSync(file, src);
-      const options = `44,34,76,1,,1033,true,true,${asShown},${formulas},false,-1`;
-      await start('--convert-to', `csv:Text - txt - csv (StarCalc):${options}`, '--outdir', path.join(dir, 'out'), src);
-      const out = path.join(dir, 'out');
-      const files = fs.existsSync(out) ? fs.readdirSync(out).filter((f) => f.endsWith('.csv')) : [];
+      const src = path.join(dir, `in${path.extname(file).toLowerCase()}`); fs.copyFileSync(file, src);
+      await start('--convert-to', `csv:Text - txt - csv (StarCalc):44,34,76,1,,1033,true,true,${asShown},${formulas},false,-1`, '--outdir', path.join(dir, 'out'), src);
+      const out = path.join(dir, 'out'); const files = fs.existsSync(out) ? fs.readdirSync(out).filter((f) => f.endsWith('.csv')) : [];
       if (!files.length) throw new Error('it could not be read as a spreadsheet');
-      // finer than milliseconds, so sheets written in one millisecond keep their order
-      const at = (f: string) => fs.statSync(path.join(out, f), { bigint: true }).mtimeNs;
-      const ordered = files.sort((a, b) => (at(a) < at(b) ? -1 : at(a) > at(b) ? 1 : 0));
-      const sheetName = (f: string) => f.replace(/^in-/, '').replace(/\.csv$/, '');
-      const named = ordered.map((f) => ({ name: sheetName(f), path: path.join(out, f) }));
-      return await visit(named);
+      const at = (f: string) => fs.statSync(path.join(out, f), { bigint: true }).mtimeNs;                // finer than milliseconds, so sheets written in one millisecond keep their order
+      return files.sort((a, b) => (at(a) < at(b) ? -1 : at(a) > at(b) ? 1 : 0)).map((f) => ({ name: f.replace(/^in-/, '').replace(/\.csv$/, ''), grid: parseCsv(fs.readFileSync(path.join(out, f), 'utf8').replace(/^\uFEFF/, ''), asShown ? undefined : isoDate) }));
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
-  const sheetFiles = <T>(file: string, visit: Visit<T>) => exported(file, false, false, visit);
-  const gridsOf = (asShown: boolean) => async (list: SheetFile[]) => list.map((sheet) => {
-    const text = fs.readFileSync(sheet.path, 'utf8').replace(/^\uFEFF/, '');
-    return { name: sheet.name, grid: parseCsv(text, asShown ? undefined : isoDate) };
-  });
-  const sheets = (file: string, asShown = false, formulas = false) =>
-    exported(file, asShown, formulas, gridsOf(asShown));
   const workbook = (fods: string) => one(async (): Promise<Uint8Array> => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-export-'));
     try {
@@ -587,7 +531,7 @@ export function libreOfficeConverter(o: { soffice?: string; timeoutMs?: number; 
       return { docx: new Uint8Array(fs.readFileSync(path.join(dir, 'memo.docx'))), pdf: new Uint8Array(fs.readFileSync(path.join(dir, 'memo.pdf'))) };
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
-  return Object.assign(convert, { id: 'libreoffice', changes, sheets, sheetFiles, workbook, edit, document, text });
+  return Object.assign(convert, { id: 'libreoffice', changes, sheets, workbook, edit, document, text });
 }
 
 /** A PDF's text, line by line as the file breaks its lines, pages one after another: a list brought in from a PDF. */
