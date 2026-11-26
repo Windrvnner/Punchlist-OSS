@@ -15,10 +15,11 @@ const room = subjects.filter((s) => !MISSING.some((m) => s.includes(m))).map((s,
 /** the standard model settles an item it is given its subject's document for, and asks for more otherwise */
 const reply = (c: Call) => ({ items: itemsIn(c).map((it) => { const has = room.some((d) => it.text.includes(d.name.slice(0, -4)) && c.prompt.includes(`/${d.name}`)); return { id: it.tag, ...(has ? OK(c) : { result: 'more', need: 'the agreement itself' }) }; }) });
 
-it('on the 2,400-item checklist every item a check leaves open goes to the chat agent once, four to a run', async () => {
+it('on the 2,400-item checklist every item a check leaves open goes to the chat agent once, four a run', async () => {
   // the agent's search helper finds nothing in a page it reads, as when nothing is there
   const fill = (c: Call) => (c.system?.includes('You work in turns') ? { text: 'Nothing in the data room settles them.', sources: [] } : c.prompt.includes('Which of them should be read for this?') ? { read: [] } : { text: '', sources: [] });
-  const s = setup(reply, { d1: room }, { checklist: () => ({ broad: items, product: [], sector: [] }), fill }); await deal(s.repo);
+  const s = setup(reply, { d1: room }, { checklist: () => ({ broad: items, product: [], sector: [] }), fill });
+  await deal(s.repo);
   const t = performance.now(); const r = val(await s.ai.firstPass('d1')); const ms = performance.now() - t;
   const turns = s.fillCalls.filter((c) => c.system?.includes('You work in turns'));
   const handed = turns.flatMap((c) => [...c.prompt.split('\n\n')[0].matchAll(/^\d+\. (.*?)(?: Still needed:.*)?$/gm)].map((m) => m[1]));

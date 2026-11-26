@@ -35,16 +35,48 @@ it('a busy agent stops at its turns per run, and the check\'s own searches are u
   // an agent that reads the whole folder on every turn it has
   const turn = (c: Call) => { const n = +(/This is turn (\d+) of/.exec(c.prompt)?.[1] ?? 99); return n < 25 ? { tool: 'folder', folder: 'vdr', lookFor: `decommissioning ${n}` } : { text: 'Nothing settles them.', sources: [] }; };
   const gapAll = (c: Call) => (isTurn(c) ? turn(c) : { items: itemsIn(c).map((it) => ({ id: it.tag, result: 'more', need: 'a decommissioning plan' })) });
-  const opts = { checklist: () => ({ broad: items, product: [], sector: [] }), pick: () => ({ read: [] }), pickFor: () => ({ read: {} }), query: (c: Call) => ({ queries: Object.fromEntries([...c.prompt.matchAll(/^(I\d+):/gm)].map((m) => [m[1], ['decommissioning plan']])) }) };
+  const opts = {
+    checklist: () => ({ broad: items, product: [], sector: [] }),
+    pick: () => ({ read: [] }), pickFor: () => ({ read: {} }),
+    query: (c: Call) => ({
+      queries: Object.fromEntries([...c.prompt.matchAll(/^(I\d+):/gm)].map((m) => [m[1], ['decommissioning plan']])),
+    }),
+  };
   const quiet = setup(gapAll, { d1: [FA, TS] }, opts); await deal(quiet.repo); val(await quiet.ai.firstPass('d1'));
-  const busy = setup(gapAll, { d1: [FA, TS] }, { ...opts, turns: 3, fill: (c: Call) => (isPickAsk(c) ? { read: [] } : isTurn(c) ? turn(c) : { text: '', sources: [] }) }); await deal(busy.repo);
+  const fill = (c: Call) => (isPickAsk(c) ? { read: [] } : isTurn(c) ? turn(c) : { text: '', sources: [] });
+  const busy = setup(gapAll, { d1: [FA, TS] }, { ...opts, turns: 3, fill });
+  await deal(busy.repo);
   const r = val(await busy.ai.firstPass('d1'));
   // no run of the agent takes a turn past the third, though it would go on to its twenty-fifth
-  const turnNumbers = [...busy.fillCalls, ...busy.calls].filter((c) => isTurn(c)).map((c) => +(/This is turn (\d+) of/.exec(c.prompt)?.[1] ?? 1));
+  const turnNumbers = [...busy.fillCalls, ...busy.calls].filter((c) => isTurn(c))
+    .map((c) => +(/This is turn (\d+) of/.exec(c.prompt)?.[1] ?? 1));
   expect(turnNumbers.length).toBeGreaterThan(0); expect(Math.max(...turnNumbers)).toBeLessThanOrEqual(3);
   expect(busy.queryCalls.length).toBe(quiet.queryCalls.length);                                           // the check searched as much as it would have without it
   expect(r.gaps.length).toBe(60); expect(val(await busy.ai.checklist('d1')).filter((x) => x.result === 'gap' && x.searched?.length).length).toBe(60);
 }, 120_000);
+
+it('the gap filler\'s own search stops at limits.searchCalls', async () => {
+  const X1 = { id: 'x1', text: 'Water rights are secured' };
+  const WATER = doc(17, 'Water rights memo.pdf');
+  const isSearchRead = (c: Call) => !isTurn(c) && c.prompt.includes('what they say, with [n] markers');
+  let n = 0;
+  const turn = () => (++n === 1
+    ? { tool: 'search', what: 'documents', query: 'water rights' } : { text: 'Nothing.', sources: [] });
+  // the helper's reply cannot be read, so each page read asks twice; with one call a search, the second is refused
+  const reply = (c: Call) => (isTurn(c) ? turn() : isSearchRead(c) ? 'not a reading'
+    : { items: itemsIn(c).map((it) => ({ id: it.tag, result: 'more', need: 'the water rights' })) });
+  const queries = (c: Call) => ({
+    queries: Object.fromEntries([...c.prompt.matchAll(/^(I\d+):/gm)].map((m) => [m[1], ['water rights']])),
+  });
+  const s = setup(reply, { d1: [FA, TS, WATER] }, {
+    checklist: () => ({ broad: [X1], product: [], sector: [] }),
+    pick: () => ({ read: [] }), pickFor: () => ({ read: {} }), query: queries, fill: reply, searchCalls: 1,
+  });
+  await deal(s.repo);
+  val(await s.ai.firstPass('d1'));
+  // two page reads, one call each, where an unlimited search makes four
+  expect(s.all.filter(isSearchRead).length).toBe(2);
+});
 
 it('a problem whose finding could not be saved is never handed to the agent, so it is never written over as satisfied', async () => {
   const X1 = { id: 'x1', text: 'Decommissioning is provided for' };

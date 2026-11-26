@@ -569,7 +569,9 @@ export function nodeAi(o: AiOptions) {
     const b = kind === 'describe' ? undefined : budget.getStore();
     // each try is counted in the usage log and against a search's calls, since each is paid for; a search out of calls is not asked again
     return retried(async () => {
-      if (b && b.left-- <= 0) throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
+      if (b && b.left-- <= 0) {
+        throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
+      }
       let reply = ''; try { reply = await o.service.complete(input); return reply; } finally { count(kind, input, String(reply ?? '')); }
     }, (r) => !String(r ?? '').trim());
   };
@@ -687,10 +689,12 @@ export function nodeAi(o: AiOptions) {
   // empty turn some services refuse. Not a turn that answers tool calls either: its failure is how a model says it does not
   // take tool results (talkJson steps down to sending them in the message).
   const converse = async ({ kind, tried, ...input }: Talk) => {
-    // a turn is not counted against a search's calls: the agent's own turn limit (limits.chatTurns) stops a run
+    // the gap filler's turns are limited by limits.chatTurns; a turn inside a search budget still counts against it
     const b = budget.getStore();
     const once = async () => {
-      if (b && b.left-- <= 0) throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
+      if (b && b.left-- <= 0) {
+        throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
+      }
       let reply = ''; try { const r = await o.service.converse!(input); reply = r.text || JSON.stringify(r.calls ?? ''); return r; } finally { count(kind, input, String(reply ?? '')); }
     };
     if (input.results?.length || input.conversation) return once();
@@ -1025,11 +1029,11 @@ export function nodeAi(o: AiOptions) {
       top(dealId, query, new Set(), Infinity, await coreOf(dealId), false).map((rec) => ({ dealId, rec }))));
     return interleave(per);
   }
-  /** one page of the chat's document search, read by the helper under a search's budget of calls (`spend`) */
-  function readSearchPage(spend: { left: number }, deals: string[], model: string, ask: string,
+  /** one page of the chat's document search, read by the helper under a search's budget of calls (`budget`) */
+  function readSearchPage(budgetOf: { left: number }, deals: string[], model: string, ask: string,
     docs: DealDoc[]): Promise<Looked> {
     const shape = '{"text": "what they say, with [n] markers", "sources": [...]}';
-    return budget.run(spend, () => read('search', deals, model, ask, '', {}, shape, undefined, docs));
+    return budget.run(budgetOf, () => read('search', deals, model, ask, '', {}, shape, undefined, docs));
   }
   /**
    * The documents in a folder a person named, in the order to read them for something, across the deals asked
@@ -1095,10 +1099,10 @@ export function nodeAi(o: AiOptions) {
    * runs on the word index with no model. Searches that find nothing are put once more in other words. What was searched
    * for, and how many documents answered, is the item's search trail, kept on its result and shown on a gap.
    *
-   * Calls are counted per search run (`searchCalls`). A
-   * search that cannot be made (the budget is spent, or the fast model's reply cannot be read) returns null, and the caller
-   * picks documents as it did before searches: a failed search is never taken to mean that nothing was found, so it never
-   * makes a gap by itself. Throws only when the service cannot be reached.
+   * Calls are counted per search run (`searchCalls`). A search that cannot be made (the budget is spent, or
+   * the fast model's reply cannot be read) returns null, and the caller picks documents as it did before searches:
+   * a failed search is never taken to mean that nothing was found, so it never makes a gap by itself.
+   * Throws only when the service cannot be reached.
    */
   type Trail = { q: string; n: number }[];
   const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
@@ -1117,7 +1121,9 @@ export function nodeAi(o: AiOptions) {
   const isSearch = (x: string) => kept(x).some((w) => !NO_SEARCH.has(w));
   const SEARCHES = 3;                                                            // searches the fast model may give one item at a time
   const FOUND = 12;                                                              // documents one item's searches put at the head of the pick list
-  async function searchFor(dealId: string, things: { id: string; what: string }[], not: Set<string>, core: string[]): Promise<{ found: Map<string, DocRecord[]>; trails: Map<string, Trail> } | null> {
+  async function searchFor(
+    dealId: string, things: { id: string; what: string }[], not: Set<string>, core: string[],
+  ): Promise<{ found: Map<string, DocRecord[]>; trails: Map<string, Trail> } | null> {
     if (!things.length) return { found: new Map(), trails: new Map() };
     const ask = async (them: typeof things, tried?: Map<string, Trail>): Promise<Map<string, string[]> | null> => {
       let reply: { queries?: unknown } | null;
@@ -2824,7 +2830,9 @@ export function nodeAi(o: AiOptions) {
     const found = async (group: ChecklistItem[], core: string[], skip: string[] = []): Promise<DocRecord[]> => {
       // `skip`: closed core documents, never offered (see `shutDocs`)
       const text = group.map((it) => it.text).join('\n'); const fresh = group.filter((it) => !searched(it)); const not = new Set(skip);
-      const s = fresh.length ? await searchFor(dealId, fresh.map((it) => ({ id: it.id, what: it.text })), not, core) : null; trailed(s?.trails);
+      const things = fresh.map((it) => ({ id: it.id, what: it.text }));
+      const s = fresh.length ? await searchFor(dealId, things, not, core) : null;
+      trailed(s?.trails);
       if (!s) return start(dealId, text, [], width, core, skip);
       return withClean(dealId, (await pick(dealId, text, not, width, core, text, interleave(group.map((it) => s.found.get(it.id) ?? [])))) ?? top(dealId, text, not, width, core, true));
     };
@@ -2868,7 +2876,15 @@ export function nodeAi(o: AiOptions) {
         const part = open.slice(k, k + GAPS_AT_ONCE); let docs: DocRecord[] = [];
         if (filling) {
           const listed = part.map(({ it }, i) => { const need = needOf.get(it.id); const tried = (trailOf.get(it.id) ?? []).filter((t) => !t.n).map((t) => `"${t.q}"`); return `${i + 1}. ${it.text.replace(/\s+/g, ' ')}${need ? ` Still needed: ${need}` : ''}${tried.length ? ` (searched already, finding nothing: ${tried.join(', ')})` : ''}`; }).join('\n');
-          const r = await filler.answer({ deals: [dealId], withDeal: false, model: m.standard, about: '', history: '', must: {}, message: `These items of the due diligence checklist were not settled by the documents first chosen for them:\n${listed}\n\nFind the documents in the data room that settle each item: those that show it is met, or that show a problem with it. Search in the words and names such documents would use, and read the likeliest. Answer by saying, item by item, what you found, citing the documents; say so for an item nothing in the data room settles.` });
+          const message = 'These items of the due diligence checklist were not settled by the documents first chosen '
+            + `for them:\n${listed}\n\n`
+            + 'Find the documents in the data room that settle each item: those that show it is met, or that show a '
+            + 'problem with it. Search in the words and names such documents would use, and read the likeliest. Answer '
+            + 'by saying, item by item, what you found, citing the documents; say so for an item nothing in the data '
+            + 'room settles.';
+          const r = await filler.answer({
+            deals: [dealId], withDeal: false, model: m.standard, about: '', history: '', must: {}, message,
+          });
           if (!r.ok && r.error.kind === 'unreachable') throw Object.assign(new Error(r.error.message), { code: 'unreachable' });
           if (!r.ok) filling = false;                                              // a model whose replies cannot be used is not asked on and on in this check
           // at most half a handful cited, so that each with its clean draft still fits in one: a cited blackline is never cut off its own clean draft
@@ -2924,7 +2940,8 @@ export function nodeAi(o: AiOptions) {
       const thing = (w: { it: ChecklistItem; need: string }) => ({ id: w.it.id, what: `${w.it.text} Still needed: ${w.need}`, rankBy: `${w.it.text} ${w.need}` });
       // searched for, all of them in one question: an item none of whose searches found a document is a gap, with its trail;
       // an item whose search could not be made, or that was searched for already on these documents, is picked for as before
-      const s = await searchFor(dealId, wanting.filter((w) => !searched(w.it)).map(thing), looked, open); trailed(s?.trails);
+      const s = await searchFor(dealId, wanting.filter((w) => !searched(w.it)).map(thing), looked, open);
+      trailed(s?.trails);
       const none = (id: string) => !!s && s.found.has(id) && !s.found.get(id)!.length;         // searched for, twice, and nothing answered
       for (let k = 0; k < wanting.length; k += SECOND_LOOKS) {
         const part = wanting.slice(k, k + SECOND_LOOKS); const things = part.map(thing);

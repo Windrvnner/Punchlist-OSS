@@ -293,9 +293,13 @@ const SPEC = {
     phraseReplyTokens: count(80, 'The same for one question to the counterparty drafted by Add all unresolved.', 10, 2_000),
     ratingReplyTokens: count(25, 'The same for one finding\'s risk rating in the memo.', 5, 500),
     charsPerToken: count(3, 'Characters taken as one token when the app counts the text it sends (English averages about four, so three counts on the high side).', 1, 8),
-    chatTurns: count(25, 'About how many turns one run of the chat agent, in a chat or in the checks\' gap search, takes before it answers with what it has.', 1, 100),
+    chatTurns: count(25,
+      'About how many turns one run of the chat agent, in a chat or in the checks\' gap search, '
+      + 'takes before it answers with what it has.', 1, 100),
     aiRetries: count(2, 'Times an AI call that failed, or gave an empty reply, is asked again quietly before the failure is shown. A service that cannot be reached is waited for instead.', 0, 5),
-    searchCalls: count(15, 'About how many calls one search run, in a chat or in the checks, makes before it returns what it found.', 1, 50),
+    searchCalls: count(15,
+      'About how many calls one search run, in a chat or in the checks, makes before it returns what it found.',
+      1, 50),
     sameFolder: count(70, "Percent of what is recorded in a deal folder that a PC must find unchanged in its copy before what it does not find there (deleted, or a new version saved over it) leaves the deal for every PC. Below it, the PC takes away only what it had seen itself, so a PC with part of a folder takes nothing from the others.", 51, 100),
     searchPage: count(
       25,

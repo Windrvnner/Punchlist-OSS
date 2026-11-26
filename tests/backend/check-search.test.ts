@@ -161,16 +161,21 @@ describe('checks on the search agent', () => {
     expect(now.length).toBe(4); expect(s.queryCalls.slice(before).filter((c) => c.prompt.includes('Interest rate swaps')).length).toBe(4);
   });
 
-  it('the search keeps to its calls per search run: with none left it asks no more, and the check still ends', async () => {
-    const s = setup(answer, { d1: room }, { checklist, searchCalls: 1, query: queries, pick: pickFound, pickFor: (c) => ({ read: { I1: [listed(c as Call)[0].n] } }) });
+  it('the search keeps to its calls per search run: with none left it asks no more, and the check ends', async () => {
+    const s = setup(answer, { d1: room }, {
+      checklist, searchCalls: 1, query: queries, pick: pickFound,
+      pickFor: (c) => ({ read: { I1: [listed(c as Call)[0].n] } }),
+    });
     await deal(s.repo); const r = val(await s.ai.firstPass('d1'));
-    expect(s.queryCalls.length).toBe(2); expect(s.pickForCalls.length).toBe(1);   // one call in each of the check's two search runs
+    // one call in each of the check's two search runs
+    expect(s.queryCalls.length).toBe(2);
+    expect(s.pickForCalls.length).toBe(1);
     expect(r.gaps.length + r.unsettled.length).toBeLessThanOrEqual(1);
     const none = setup(answer, { d1: room }, { checklist, searchCalls: 0, query: queries });
     await deal(none.repo); val(await none.ai.firstPass('d1')); expect(none.queryCalls).toEqual([]);
   });
 
-  it('a search that fails is asked again quietly, and each try counts against the run\'s calls, since each is paid for', async () => {
+  it('a search that fails is asked again quietly, and each try counts against the run\'s calls', async () => {
     // the fast model sends two empty replies, then searches: the first search is retried twice and answers
     const flaky = (c: Call, n: number) => (n <= 2 ? '' : queries(c));
     const s = setup(answer, { d1: room }, { checklist, query: flaky, pick: pickFound, pickFor: pickForFound });
@@ -178,15 +183,23 @@ describe('checks on the search agent', () => {
     expect(s.queryCalls.length).toBe(6);                                         // step one tried three times, then the three searches the first test makes after it
     expect(r.gaps).toEqual([{ title: 'A hedging strategy has been approved by the board' }]);
     expect(val(await s.ai.checklist('d1')).find((x) => x.id === 'h1')!.searched?.length).toBe(4);
-    // with three calls a run, the three tries of step one spend its run: it is picked for as before, and the second look's run has its own calls
-    const tight = setup(answer, { d1: room }, { checklist, searchCalls: 3, query: flaky, pick: pickFound, pickFor: (c) => ({ read: { I1: [listed(c as Call)[0].n] } }) });
+    // with three calls a run, the three tries of step one spend its run, which is picked for as before;
+    // the second look's run has its own calls
+    const tight = setup(answer, { d1: room }, {
+      checklist, searchCalls: 3, query: flaky, pick: pickFound,
+      pickFor: (c) => ({ read: { I1: [listed(c as Call)[0].n] } }),
+    });
     await deal(tight.repo); val(await tight.ai.firstPass('d1'));
     expect(tight.queryCalls.length).toBe(5); expect(tight.pickForCalls.length).toBe(0);
   });
 
   it('an item whose second search in other words cannot be made is picked for as before, not taken as a gap', async () => {
-    // one call a run: step one is made, and the hedging item's second search in other words is past the calls, in the first search and in the second look
-    const s = setup(answer, { d1: room }, { checklist, searchCalls: 1, query: queries, pick: pickFound, pickFor: (c) => ({ read: { I1: [listed(c as Call)[0].n] } }) });
+    // one call a run: step one is made, and the hedging item's second search in other words is past the calls,
+    // in the first search and in the second look
+    const s = setup(answer, { d1: room }, {
+      checklist, searchCalls: 1, query: queries, pick: pickFound,
+      pickFor: (c) => ({ read: { I1: [listed(c as Call)[0].n] } }),
+    });
     await deal(s.repo); val(await s.ai.firstPass('d1'));
     expect(s.queryCalls.length).toBe(2); expect(s.queryCalls[1].prompt).not.toContain('searched already');
     expect(s.pickForCalls.length).toBe(1); expect(s.pickForCalls[0].prompt).toContain('A hedging strategy');
