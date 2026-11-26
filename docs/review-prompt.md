@@ -42,8 +42,8 @@ verdict, and no criteria in your own words.
 >   lines that name a guess. If the diff does more, that is blocker 9 even when the issue asked for it.
 > - Same job, same way: find the existing code that already does the same kind of job as the change (an AI read of
 >   documents, an import, saving, retries, a dialog). Check that the change uses that approach and code, and that the
->   pull request description names the existing path it follows. A new or different approach, or no named path, is
->   blocker 10.
+>   pull request description names the existing path it follows. When such code exists, a new or different approach,
+>   or no named path, is blocker 10.
 >
 > A finding blocks the merge only when it is one of these:
 >
