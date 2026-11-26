@@ -54,6 +54,7 @@ import { createHash } from 'node:crypto';
 import { ListRecord, Item, firmOf, orderItems, key } from '../domain/checklist';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ulid } from 'ulid';
+import { coversPrompt, readCovers } from './covers';
 import {
   readJson, unfinished, list as listOf, strings, prose, PARAGRAPH_SEAM, int, pageOf, word, isObject,
 } from './lenient';
@@ -2515,6 +2516,37 @@ export function nodeAi(o: AiOptions) {
       if (!verdict) return fail({ kind: 'failed', message: UNREAD_REPLY });
       // one short line on the card, however much it wrote
       return ok({ verdict, why: prose(reply!.why)[0] ?? '' });
+    },
+    /**
+     * Whether open questions already ask for what unresolved points lack (#1218), in parts sized from the model's
+     * limits (covers.ts): the standard model judges each pair from its two texts, and code reads its reply.
+     */
+    async covers(i) {
+      if (!i.checks.length) return ok([]);
+      let model: string;
+      try { model = (await models()).standard; } catch (e) { return failure(e, UNREACHED); }
+      const texts = i.checks.map((x) => `${x.point} ${x.question}`);
+      const size = partSize({
+        cap: CHECKLIST_BATCH, out: control.limits.glanceReplyTokens, outLimit: outLimit(model),
+        in: tokensEach(texts), inLimit: inLimit(model),
+      });
+      const done = await inParts(i.checks, size, async (part) => {
+        const tags = tagsFor(part.length);
+        const prompt = coversPrompt(tags, part);
+        let reply: { items?: unknown } | null;
+        let cut = false;
+        try { reply = await askJson({ kind: 'covers', split: true, model, system: JSON_ONLY, prompt }, ['items']); }
+        catch (e) {
+          if (!isCutOff(e)) throw e;
+          cut = true;
+          reply = (e as { partial?: { items?: unknown } | null }).partial ?? null;
+        }
+        if (!cut && !Array.isArray(reply?.items)) throw Object.assign(new Error(UNREAD_REPLY), { code: 'unread' });
+        const got = readCovers(reply?.items, tags, cut);
+        return { got, ...(cut ? { cut: range(0, part.length).filter((k) => !got.has(k)) } : {}) };
+      });
+      if (done.stopped !== undefined && !done.got.size) return stoppedOn(done.stopped);
+      return ok(i.checks.map((_, k) => done.got.get(k) ?? null));
     },
     /**
      * Which open questions an answer addresses (#1120): the standard model reads the answer and the questions, each by

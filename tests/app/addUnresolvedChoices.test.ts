@@ -28,14 +28,14 @@ async function fixture(partial: boolean) {
   })));
   store.services.ai.phrase = async ({ items }) => ok(items.map(({ what }) =>
     partial && what !== alphaTitle ? null : `Please document this requirement: ${what}.`));
+  // these tests are about approved links, not the check: the model confirms every candidate
+  store.services.ai.covers = async ({ checks }) => ok(checks.map(() => true));
   val(await store.dispatch(CreateFinding, { dealId, title: betaTitle, workstream: 'Legal' }));
   val(await store.dispatch(CreateFinding, { dealId, title: alphaTitle, workstream: 'Legal' }));
   val(await store.dispatch(CreateQuestion, { dealId, text: base }));
   const initial = await previewOf(store, dealId);
-  // no question is matched to a point by similar words: the pair is one a person approved
-  expect(initial.links).toEqual([]);
-  const point = initial.points.find((p) => p.what === alphaTitle)!;
-  const link = { point, q: Object.values(store.get().questions).find((q) => q.text === base)! };
+  const link = initial.links.find((suggestion) => suggestion.point.what === alphaTitle)!;
+  expect(link.q.text).toBe(base);
   const approved = new Map([[link.point.key, linkApproval(link)]]);
   return { store, repo, dealId, link, approved };
 }
