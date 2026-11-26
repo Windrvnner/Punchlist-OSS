@@ -1,5 +1,6 @@
 /**
- * Typed "Log a question" commands whose save was refused while something new was typed in the same box (#955).
+ * **Log Question** drafts in the composer (#1054), and those whose save was refused while something new was typed in
+ * the same box (#955).
  * Each goes back at the head of its box, ahead of what was typed since, with a blank line between, so nothing typed is
  * written over. The commands are remembered per box, newest first as they stand in the box, so that sending the box
  * logs the head command alone and leaves the rest in the box. Kept across a restart, and moved with the box's text.
@@ -11,11 +12,34 @@ import type { Store } from './store';
 const isTexts = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((text) => typeof text === 'string');
 let held: Map<string, string[]> | undefined;
-const heldCommands = () => held ??= keptDrafts('refused-commands', isTexts);
+// Renamed from 'refused-commands' (#1054): those held typed "Log a question: …" text, which now stays in the box as
+// typed and is asked as a question, so nothing kept is lost.
+const heldCommands = () => held ??= keptDrafts('refused-questions', isTexts);
+const isOn = (value: unknown): value is true => value === true;
+let logging: Map<string, true> | undefined;
+const loggingBoxes = () => logging ??= keptDrafts('log-question', isOn);
 
-/** Load the map before recovery can move saved drafts to a copy. */
+/** Load the maps before recovery can move saved drafts to a copy. */
 export function initializeRefusedCommands() {
   heldCommands();
+  loggingBoxes();
+}
+
+/** Whether the box's text, after any refused question at its head, is a question to log (**Log Question**). */
+export const logQuestionOn = (key: string) => loggingBoxes().has(key);
+
+export function setLogQuestion(key: string, on: boolean) {
+  if (on) loggingBoxes().set(key, true);
+  else loggingBoxes().delete(key);
+}
+
+/** The box shows the **Log Question** chip while it is on, or while a refused question stands at its head. */
+export const showsLogQuestion = (key: string) => logQuestionOn(key) || heldCommands().has(key);
+
+/** Taking the chip off makes the whole box an ordinary question again, refused questions at its head included. */
+export function clearLogQuestion(key: string) {
+  setLogQuestion(key, false);
+  heldCommands().delete(key);
 }
 
 /**
@@ -26,6 +50,7 @@ export function boxWithRefused(key: string, command: string, typedSince: string)
   const since = typedSince.trim();
   if (!since || since === command) {
     heldCommands().delete(key);
+    setLogQuestion(key, true);
     return command;
   }
   heldCommands().set(key, [command, ...commandsAtHead(since, heldCommands().get(key) ?? [])]);
@@ -37,12 +62,12 @@ export function boxWithRefused(key: string, command: string, typedSince: string)
  * after it, and the rest, as it is now, left in the box; otherwise the whole box, as usual. Text after the command is
  * never joined to it, even when it was edited since, so a follow-up is not logged as part of the question.
  */
-export function takeFromBox(key: string, text: string): { send: string; rest: string } {
+export function takeFromBox(key: string, text: string): { send: string; rest: string; held: boolean } {
   const [head, ...others] = commandsAtHead(text, heldCommands().get(key) ?? []);
   heldCommands().delete(key);
-  if (!head) return { send: text, rest: '' };
+  if (!head) return { send: text, rest: '', held: false };
   if (others.length) heldCommands().set(key, others);
-  return { send: head, rest: text.slice(head.length).trim() };
+  return { send: head, rest: text.slice(head.length).trim(), held: true };
 }
 
 /** The remembered commands that still stand, unchanged and in order, at the head of the box, each followed by more. */
