@@ -1,12 +1,14 @@
 /**
  * Reading a list in with the model, every line accounted for, with accuracy over cost. The standard model reads the
  * whole list in one call; when its reading leaves lines unplaced (not named, or a table row whose named cell is blank),
- * the thorough model reads the whole list once more and its reading is taken. What is still unplaced is left out,
+ * the thorough model reads the whole list once more and fills those lines. What is still unplaced is left out,
  * where a person sees it and can bring it in (domain/listRead). The calls are retried as every AI call is
  * (backend/retry.ts).
  */
 import type { AiService } from '../ports';
-import { unplaced, textLines, tableLines, tieOut, readingOf, type ListReading, type TiedOut } from '../domain/listRead';
+import {
+  fillUnplaced, unplaced, textLines, tableLines, tieOut, readingOf, type ListReading, type TiedOut,
+} from '../domain/listRead';
 import { prepareChecklist, suggestChecklistColumns, type ChecklistMapping } from '../domain/checklistImport';
 import { keepImport } from './keptImports';
 import { readImportBytes, MAX_IMPORT_BYTES, type ImportTable } from './transfer';
@@ -22,7 +24,7 @@ export async function readList(ai: AiService, lines: string[]): Promise<Result<L
   if (!unplaced(lines, reading).length) return ok(reading);
   const again = await ai.readList({ lines, thorough: true });
   // a thorough reading that fails leaves the unplaced lines out, listed for the person, keeping the first reading
-  return ok(again.ok ? readingOf(again.value) : reading);
+  return ok(again.ok ? fillUnplaced(lines, reading, readingOf(again.value)) : reading);
 }
 
 /** The files a list can be brought in from: spreadsheets, documents and plain text. */

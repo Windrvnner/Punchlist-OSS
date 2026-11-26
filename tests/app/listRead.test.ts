@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { readList } from '../../src/app/listRead';
 import { tieOut, textLines, type LineRead, type ListReply } from '../../src/domain/listRead';
 import { mockAi } from '../../src/adapters/mocks';
-import { ok, fail } from '../../src/domain/result';
+import { ok, fail, type Result } from '../../src/domain/result';
 import type { AiService } from '../../src/ports';
 import { ITEMS, LEFT_OUT, pastedLines } from '../fixtures/pastedList';
 
@@ -21,28 +21,44 @@ function fake(answers: (ListReply | null)[]) {
   return { ai: { readList } as unknown as AiService, calls };
 }
 
+const unwrap = <T>(r: Result<T>): T => {
+  if (!r.ok) throw new Error(r.error.message);
+  return r.value;
+};
+const numbered = (count: number) => Array.from({ length: count }, (_, k) => `${k + 1}. Item ${k + 1} is in place`);
+
 describe('reading a list in, whole, every line accounted for', () => {
   it('asks once when every line is placed', async () => {
     const { ai, calls } = fake([reading(RIGHT)]);
-    const r = await readList(ai, LINES); expect(r.ok && r.value.reads.size).toBe(4); expect(calls).toHaveLength(1);
+    expect(unwrap(await readList(ai, LINES)).reads.size).toBe(4);
+    expect(calls).toHaveLength(1);
   });
-  it('reads the whole list again on the thorough model when lines are unplaced, and takes that reading', async () => {
-    const { ai, calls } = fake([reading(RIGHT.filter((x) => x.n !== 2 && x.n !== 3)), reading(RIGHT.filter((x) => x.n !== 2))]);
-    const r = await readList(ai, LINES); if (!r.ok) throw new Error(r.error.message);
+  it('reads the whole list again on the thorough model when lines are unplaced, and fills only those', async () => {
+    // the thorough reading places line 3, leaves line 2 out and reads line 1 otherwise: line 1 keeps the first reading
+    const thorough = reading([{ n: 1, k: 'left' }, { n: 3, k: 'item' }]);
+    const { ai, calls } = fake([reading(RIGHT.filter((x) => x.n !== 2 && x.n !== 3)), thorough]);
+    const t = tieOut(LINES, unwrap(await readList(ai, LINES)));
     expect(calls).toEqual([{ lines: 4, thorough: undefined }, { lines: 4, thorough: true }]);
-    const t = tieOut(LINES, r.value);
-    expect(t.items.map((i) => i.text)).toEqual(['1.2 Leases cover the array']); expect(t.left).toEqual([2, 4]);
+    expect(t.items.map((i) => [i.section, i.text])).toEqual([['1. Site', '1.2 Leases cover the array']]);
+    expect(t.left).toEqual([2, 4]);
+  });
+  it('keeps 1,999 lines the first reading placed when the thorough reading places fewer', async () => {
+    const lines = numbered(2000);
+    const first = reading(lines.slice(1).map((_, k) => ({ n: k + 2, k: 'item' })));
+    const read = unwrap(await readList(fake([first, reading([{ n: 1, k: 'item' }])]).ai, lines));
+    expect(tieOut(lines, read).count).toMatchObject({ items: 2000, left: 0 });
   });
   it('fails when the first reading fails, and keeps the first reading when the thorough one fails', async () => {
     expect((await readList(fake([null]).ai, LINES)).ok).toBe(false);
-    const r = await readList(fake([reading(RIGHT.slice(0, 3)), null]).ai, LINES);
-    expect(r.ok && [...r.value.reads.keys()]).toEqual([1, 2, 3]);
+    const read = unwrap(await readList(fake([reading(RIGHT.slice(0, 3)), null]).ai, LINES));
+    expect([...read.reads.keys()]).toEqual([1, 2, 3]);
   });
   it('reads a 2,000-line list in one call when every line is placed', async () => {
-    const lines = Array.from({ length: 2000 }, (_, k) => `${k + 1}. Item ${k + 1} is in place`);
+    const lines = numbered(2000);
     const { ai, calls } = fake([reading(lines.map((_, k) => ({ n: k + 1, k: 'item' })))]);
-    const r = await readList(ai, lines); if (!r.ok) throw new Error(r.error.message);
-    expect(calls).toEqual([{ lines: 2000, thorough: undefined }]); expect(tieOut(lines, r.value).count.items).toBe(2000);
+    const read = unwrap(await readList(ai, lines));
+    expect(calls).toEqual([{ lines: 2000, thorough: undefined }]);
+    expect(tieOut(lines, read).count.items).toBe(2000);
   });
 });
 
