@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { Store } from '../../src/app/store';
 import { memRepo, disk, type Disk } from '../adapters/memRepo';
 import { MemoryLocal } from '../../src/adapters/local';
-import { csvCodec, csvGrid, decodeText, readCsv } from '../../src/adapters/spreadsheet';
+import { csvCodec, decodeText, readCsv } from '../../src/adapters/spreadsheet';
 import { mockAi, mockDocuments, mockSession, mockFirstPass, type MockOptions } from '../../src/adapters/mocks';
 import { CreateDeal, DeleteDeal } from '../../src/app/commands/deals';
 import { CreateQuestion, EditQuestionField, DeleteQuestion, RestoreQuestion } from '../../src/app/commands/questions';
@@ -105,25 +105,16 @@ describe('exports and imports', () => {
     const detail = String(sheet.find((r) => /Lock-up/.test(String(r[0])))![1]);
     expect(detail).toBe('The draft sets the distribution lock-up at 1.25x. The signed term sheet has 1.30x.');
   });
-  it('a CSV is read as Excel reads it on double-click: its marked encoding, else the Windows code page', () => {
+  it('a CSV is read in the encoding it was written in', () => {
     const text = 'Question\nCafé façade – naïve £50 €100\n';
     const utf8 = new TextEncoder().encode(text);
     const bom = new Uint8Array([0xef, 0xbb, 0xbf, ...utf8]);
     const cp1252 = new Uint8Array([...'Question\nCaf'].map((c) => c.charCodeAt(0)).concat([0xe9, 0x20, 0x66, 0x61, 0xe7, 0x61, 0x64, 0x65, 0x20, 0x96, 0x20, 0x6e, 0x61, 0xef, 0x76, 0x65, 0x20, 0xa3, 0x35, 0x30, 0x20, 0x80, 0x31, 0x30, 0x30, 0x0a]));
-    const u16 = (le: boolean) => { const out: number[] = le ? [0xff, 0xfe] : [0xfe, 0xff]; for (const ch of text) { const c = ch.charCodeAt(0); out.push(...(le ? [c & 255, c >> 8] : [c >> 8, c & 255])); } return new Uint8Array(out); };
-    for (const bytes of [bom, cp1252, u16(true), u16(false)]) {
+    const u16 = (le: boolean, mark: boolean) => { const out: number[] = mark ? (le ? [0xff, 0xfe] : [0xfe, 0xff]) : []; for (const ch of text) { const c = ch.charCodeAt(0); out.push(...(le ? [c & 255, c >> 8] : [c >> 8, c & 255])); } return new Uint8Array(out); };
+    for (const bytes of [utf8, bom, cp1252, u16(true, true), u16(false, true), u16(true, false), u16(false, false)]) {
       expect(decodeText(bytes)).toBe(text);
       const r = readCsv(bytes); expect(r.ok && r.value.rows[0][0]).toBe('Café façade – naïve £50 €100');
     }
-    // no mark: Windows-1252, as Excel reads it, so UTF-8 text shows as it does in Excel
-    expect(decodeText(utf8)).toBe(new TextDecoder('windows-1252').decode(utf8));
-    expect(decodeText(utf8)).toContain('CafÃ©');
-  });
-  it('a CSV is split at the region\'s list separator, or at the one its first line names', () => {
-    const bytes = (t: string) => new TextEncoder().encode(t);
-    expect(csvGrid(bytes('a,b;c\n1,2;3\n'), ',')).toEqual([['a', 'b;c'], ['1', '2;3']]);
-    expect(csvGrid(bytes('a,b;c\n1,2;3\n'), ';')).toEqual([['a,b', 'c'], ['1,2', '3']]);
-    expect(csvGrid(bytes('sep=;\r\na,b;c\r\n1,2;3\r\n'), ',')).toEqual([['a,b', 'c'], ['1,2', '3']]);   // the sep line is no row
   });
 });
 

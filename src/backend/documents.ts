@@ -31,8 +31,8 @@ import type { Folder } from './logRepository';
 import { BUSY_WAITS } from './nodeFolder';
 import type { StoreKeeper, WantedDoc } from './storeKeeper';
 import { pdfLook, pdfPages, shortExt, type Converter, type ConvertInfo, type ChangeList } from './convert';
-import { sheetPart, type Sheet } from '../domain/sheets';
-import { csvGrid } from '../adapters/spreadsheet';
+import { parseCsv, sheetPart, type Sheet } from '../domain/sheets';
+import { decodeText } from '../adapters/spreadsheet';
 import { topWords } from './words';
 import { countWords, type WordIndex } from './wordIndex';
 import { officeText, DIRECT } from './officeText';
@@ -468,7 +468,7 @@ export function nodeDocuments(o: DocumentsOptions) {
   /** the words a spreadsheet uses most: its sheet names and the text in its cells, not its numbers. None for one too large to read quickly, or that cannot be read. */
   /** a spreadsheet's sheets: a .csv is text already; any other is read through LibreOffice */
   async function sheetsOf(at: string, asShown = false): Promise<Sheet[]> {
-    if (/\.csv$/i.test(at)) return [{ name: 'Sheet1', grid: csvGrid(fs.readFileSync(at)) }];
+    if (/\.csv$/i.test(at)) return [{ name: 'Sheet1', grid: parseCsv(decodeText(fs.readFileSync(at))) }];
     if (!o.convert?.sheets) throw new Error('no converter');
     return o.convert.sheets(at, asShown);
   }
