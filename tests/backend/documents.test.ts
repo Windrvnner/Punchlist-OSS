@@ -68,6 +68,16 @@ function pc(root: string, name: string, svc = new StandInService(), o: { limit?:
 }
 const folder = (p: string) => ({ path: p, label: 'Data room', files: 0, size: '', indexed: 0, reviewed: 0 });
 const val = <T,>(r: { ok: boolean; value?: T }) => { expect(r.ok).toBe(true); return r.value as T; };
+/** a line this PC saved about a document under older rules, with the words they gave */
+const olderLine = (vdr: string, bytes: Uint8Array, rel: string, words: string[], pages?: number) => ({
+  v: 1, pc: 'office', at: '2026-11-01T00:00:00.000Z', docId: idOf(bytes), hash: hashBytes(bytes),
+  name: path.basename(rel), folder: vdr, rel, size: bytes.length, ...(pages !== undefined ? { pages } : {}), words,
+});
+/** the shared log of the PC called office, holding only these lines */
+const keepLines = (root: string, lines: object[]) => {
+  fs.mkdirSync(path.join(root, 'shared'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'shared', 'docs-office-d1.jsonl'), lines.map((l) => `${JSON.stringify(l)}\n`).join(''));
+};
 const indexAll = async (x: ReturnType<typeof pc>, vdr: string, deal = 'd1') => { val(await x.docs.index(deal, [folder(vdr)])); await x.docs.settled(deal); return val(await x.docs.poll(deal)); };
 
 describe('documents on real folders', () => {
@@ -88,27 +98,37 @@ describe('documents on real folders', () => {
   it('saves the most-used words again when it rebuilds this PC\'s index, so words saved under older rules go (#1147)', async () => {
     const { root, vdr } = room();
     // this PC recorded the agreement under older rules, with no numbers among its words, and has no index of it now
-    const stale = {
-      v: 1, pc: 'office', at: '2026-11-01T00:00:00.000Z', docId: idOf(FA), hash: hashBytes(FA),
-      name: 'Credit Agreement.pdf', folder: vdr, rel: '01 Legal/Credit Agreement.pdf', size: FA.length, pages: 3,
-      words: ['agreement', 'credit'],
-    };
+    const stale = olderLine(vdr, FA, '01 Legal/Credit Agreement.pdf', ['agreement', 'credit'], 3);
     // and a spreadsheet that the converter cannot read today: its saved words are not replaced by none
     const BUDGET = new TextEncoder().encode('PK\u0003\u0004 stands in for Budget.xlsx');
     put(vdr, 'Budget.xlsx', BUDGET);
-    const budget = {
-      ...stale, docId: idOf(BUDGET), hash: hashBytes(BUDGET), name: 'Budget.xlsx', rel: 'Budget.xlsx',
-      size: BUDGET.length, pages: undefined, words: ['budget', 'revenue'],
-    };
-    fs.mkdirSync(path.join(root, 'shared'));
-    const log = [stale, budget].map((l) => `${JSON.stringify(l)}\n`).join('');
-    fs.writeFileSync(path.join(root, 'shared', 'docs-office-d1.jsonl'), log);
+    keepLines(root, [stale, olderLine(vdr, BUDGET, 'Budget.xlsx', ['budget', 'revenue'])]);
     const a = pc(root, 'office', undefined, { index: true });
     expect(a.docs.records('d1').find((r) => r.docId === idOf(FA))?.words).toEqual(['agreement', 'credit']);
     await indexAll(a, vdr);
     const reread = pc(root, 'office', undefined, { index: true }).docs.records('d1');
     expect(reread.find((r) => r.docId === idOf(FA))?.words).toEqual(['agreement', 'credit', '1', '2', '3']);
     expect(reread.find((r) => r.docId === idOf(BUDGET))?.words).toEqual(['budget', 'revenue']);
+  });
+  it('reads again a PDF, a Word file and a spreadsheet indexed under older rules, and saves their words (#1147)', async () => {
+    const { root, vdr } = room();
+    const older: [Uint8Array, string, string[], number?][] = [
+      [FA, '01 Legal/Credit Agreement.pdf', ['agreement', 'credit'], 3],
+      [NOTES, '03 Financial/Notes.docx', ['notes', 'three', 'two']],
+      [MODEL, '03 Financial/Model v12.xlsx', ['line', 'cover', 'debt']],
+    ];
+    keepLines(root, older.map(([bytes, rel, words, pages]) => olderLine(vdr, bytes, rel, words, pages)));
+    // this PC's index of them, as the version before kept it
+    const indexed = older.map(([bytes]) => JSON.stringify({ d: idOf(bytes), n: 1, t: '', w: 'agreement:1' }));
+    fs.mkdirSync(path.join(root, 'local-office'));
+    fs.writeFileSync(path.join(root, 'local-office', 'words2-d1.jsonl'), `${indexed.join('\n')}\n`);
+    await indexAll(pc(root, 'office', undefined, { index: true }), vdr);
+    const reread = pc(root, 'office', undefined, { index: true }).docs.records('d1');
+    const wordsOf = (bytes: Uint8Array) => reread.find((r) => r.docId === idOf(bytes))?.words;
+    const rowNumbers = Array.from({ length: 40 }, (_, i) => String(i + 1)).sort().slice(0, 28);
+    expect(wordsOf(FA)).toEqual(['agreement', 'credit', '1', '2', '3']);
+    expect(wordsOf(NOTES)).toEqual(['note', 'three', 'two']);
+    expect(wordsOf(MODEL)).toEqual(['line', 'cover', ...rowNumbers]);
   });
   it('a folder taken off the deal stops feeding checks and questions, and its documents still open', async () => {
     const { root, vdr } = room(); const extra = path.join(root, 'extra'); put(extra, 'Side Letter.pdf', pdf('side letter'));
