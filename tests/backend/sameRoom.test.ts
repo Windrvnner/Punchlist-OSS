@@ -46,6 +46,15 @@ describe('matching a data room by its files', () => {
     const dealIds = ['d_1', 'd_2', 'd_3', 'd_4'];
     expect(dealIds.map((dealId) => sameRoomAs(dealId, room, recsOf(room), sameHash)?.dealId)).toEqual(dealIds);
   });
+  it('leaves out files attached in the app, which are in no data-room folder, in a 2,000-file room', () => {
+    const room = files(2000, 'Doc');
+    const attached = { ...rec('notes.docx', 50), folder: '@attachments', rel: 'd/pc1/x.docx' };
+    expect(sameRoomAs('d', room, [...recsOf(room), attached], sameHash))
+      .toEqual({ dealId: 'd', files: 2000, matched: 2000 });
+    // a document attached and also in a deal folder is still counted
+    const alsoFiled = { ...attached, copies: [{ folder: 'F', rel: 'notes.docx', name: 'notes.docx' }] };
+    expect(sameRoomAs('d', room, [...recsOf(room), alsoFiled], sameHash)).toBeNull();
+  });
   it('leaves out files in a precedents folder on both sides, however many deals read them', () => {
     const prec = files(100, 'Form', 'VDR/12. Precedents');
     const own = files(8, 'Own');
@@ -53,7 +62,8 @@ describe('matching a data room by its files', () => {
     const dealRecs = [...recsOf(own), ...precRecs];
     expect(countedFiles([...prec, ...own]).map((f) => f.room)).toEqual(own.map((f) => f.room));
     expect(sameRoomAs('d', countedFiles([...prec, ...files(8, 'New')]), dealRecs, sameHash)).toBeNull();
-    expect(matchesIn(prec, dealRecs)).toEqual([]);   // the deal's precedents are not counted either
+    // the deal's precedents are not counted either: a deal of precedents alone holds no room
+    expect(sameRoomAs('d', prec, precRecs, sameHash)).toBeNull();
     const again = sameRoomAs('d', countedFiles([...prec, ...own]), dealRecs, sameHash);
     expect(again).toEqual({ dealId: 'd', files: 8, matched: 8 });
   });
