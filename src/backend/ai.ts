@@ -72,7 +72,7 @@ import {
 import { docFamilies } from './related';
 import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
-import { handleOf, questionsForHandles, responseHeader } from './qaRow';
+import { AI_DRAFTED, handleOf, questionsForHandles, responseHeader } from './qaRow';
 import type { DealDoc, Looked } from './agentKit';
 import {
   RATINGS, riskGroups, keyRisksOf, unratedFindings, type Grouped, type Rating, type RiskGroup,
@@ -1749,6 +1749,20 @@ export function nodeAi(o: AiOptions) {
       }));
   }
   const one = (t: string) => t.replace(/\s+/g, ' ').trim();
+  /** what a draft is told of earlier responses: each named only by its handle, never its question's number (#286) */
+  function priorResponses(earlier: Alike[]): string {
+    if (!earlier.length) return '';
+    const shown = earlier.map((q, k) => {
+      const by = q.by ? `, submitted by ${q.by}` : '';
+      const response = `Response to ${handleOf(k)}${q.ai ? AI_DRAFTED : ''}: “${one(q.response)}”`;
+      return `${handleOf(k)}${by}: “${one(q.text)}”\n${response}`;
+    });
+    const use = 'If one of them answers this question as it is asked, name it in "reused": it is put in the draft '
+      + 'word for word, credited to whoever asked it. Earlier responses are named only by their R numbers. Do not '
+      + 'repeat or restate one in "text": write there only what the documents add, with [n] markers, or nothing. '
+      + 'Use none that answers a different question, however alike the words.';
+    return `\nResponses already given on this deal to questions that read like it:\n${shown.join('\n')}\n${use}`;
+  }
   let briefs = new Map<string, { key: string; paragraphs: string[] }>();
   const service: AiService = {
     async answer(i) {
@@ -1775,7 +1789,7 @@ export function nodeAi(o: AiOptions) {
       if (!o.docs.records(i.dealId).length && !earlier.length) return ok({ status: 'none', text: '', sources: [] });
       let m: Awaited<ReturnType<typeof models>>; try { m = await models(); } catch (e) { return failure(e, `${SERVICE} did not answer`); }
       const asAnswered = (q: Alike) => `As answered ${q.by ? `to ${q.by} ` : ''}(Q${q.n})`;
-      const prior = earlier.length ? `\nResponses already given on this deal to questions that read like it:\n${earlier.map((q, k) => `R${k + 1}${q.by ? `, submitted by ${q.by}` : ''}: “${one(q.text)}”\nResponse to R${k + 1}${q.ai ? ' (drafted by AI from the data room, not received from anyone)' : ''}: “${one(q.response)}”`).join('\n')}\nIf one of them answers this question as it is asked, name it in "reused": it is put in the draft word for word, credited to whoever asked it. Earlier responses are named only by their R numbers. Do not repeat or restate one in "text": write there only what the documents add, with [n] markers, or nothing. Use none that answers a different question, however alike the words.` : '';
+      const prior = priorResponses(earlier);
       const ask = `Draft a response to this question from the documents: ${i.questionText}${prior}\nIf ${earlier.length ? 'neither the documents nor those responses answer' : 'the documents do not answer'} it, say so with "status": "none" and nothing else.\nThe response must be under ${MODEL_TEXT_MAX.toLocaleString('en-US')} characters (it goes into one Excel cell); if it would be longer, cut it down to what matters.`;
       const shape = `{"status": "found" | "none", "text": "the response, with [n] markers", "sources": [...]${earlier.length ? ', "reused": ["R1"]' : ''}}`;
       const again = { escalate: m.thorough, usable: (reply: Record<string, unknown>) => strings(reply.text).join('\n\n').length <= MODEL_TEXT_MAX, wrong: `"text" is longer than ${MODEL_TEXT_MAX.toLocaleString('en-US')} characters: cut it down to fit` };
