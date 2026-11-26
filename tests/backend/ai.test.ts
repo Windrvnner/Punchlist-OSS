@@ -225,6 +225,11 @@ describe('answers', () => {
     const r = val(await s.ai.answer(ask('When is delivery due under the supply contract?')));
     expect(r.sources.map((x) => x.loc)).toEqual(['p. 3']); expect(r.text).toBe('Delivery is due in June. [1] Or later.');
   });
+  it('keeps the answer the model wrote as written: its leading and trailing spacing stay', async () => {
+    const s = setup(() => ({ text: ' Edge answer.\t', sources: [] }), { d1: [FA] }, { library: [] });
+    const r = val(await s.ai.answer(ask('What is the lock-up?')));
+    expect(r.text).toBe(' Edge answer.\t');
+  });
   it("ranks documents by this PC's word index: a word deep in a document's body finds it, and its name still counts most", async () => {
     const ix = makeIndex(new Mem()); const A = doc(21, 'Annex 4.pdf'), B = doc(22, 'Curtailment letter.pdf'), C = doc(23, 'Schedule 7.pdf');
     ix.add('d1', A.docId, countWords(`${'General provisions. '.repeat(200)} Curtailment compensation is paid monthly.`, 'General provisions'));

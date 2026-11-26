@@ -60,7 +60,7 @@ import { ok, fail, type Result } from '../domain/result';
 import type { ModelThread, Research } from '../ports';
 import type { Source } from '../domain/model';
 import type { DocRecord } from './documents';
-import { strings, list as listOf, int } from './lenient';
+import { strings, prose, list as listOf, int } from './lenient';
 import { TOO_LONG_ASK, TOO_LONG_REPLY, UNREAD_REPLY } from './limits';
 import { control, SERVICE } from '../control';
 import { codeOf, type AgentKit, type AgentOptions, type AgentQuestion } from './agentKit';
@@ -313,7 +313,7 @@ class Answering {
   private async answered(reply: Record<string, unknown>, last: boolean): Promise<Result<Answered>> {
     const { kit, question, run } = this;
     // the questions it names by id are named by their numbers now before the answer is shown or kept (#1105)
-    const said = strings(reply.text).join('\n\n') || (last ? run.notes : '');
+    const said = prose(reply.text).join('\n\n') || (last ? run.notes : '');
     const numbers = await run.questionNumbers([said, draftedQuestion(reply.offer) ?? '']);
     const text = questionsForIds(said, numbers);
     if (!text) return fail({ kind: 'failed', message: UNREAD_REPLY });
