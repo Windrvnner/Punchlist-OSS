@@ -253,9 +253,3 @@ The following can't be tested here: OneDrive itself, the real model service, and
 - A component that throws an error while rendering is not caught.
 - When two people sign in to one PC, each runs their own copy of the app.
 - A damaged line holds back whatever was built on it, and this is shown in the connection card.
-- Text the model writes (never text a person's file holds) is cut to a length in `src/backend/ai.ts`: the one-line reason
-  on a verdict card (200 characters), the reason on a pair of duplicates and on a reworded item (120), a reworded item's
-  text (500, at most six of them), a finding title proposed from a list point (300), a reply read from a log (2,000), and
-  a document's keywords (30). A finding's text is sent to the model as its first 240 characters when it checks whether a
-  question is addressed. These are limits on what the model proposes; none of them applies to what is imported, stored or
-  exported.
