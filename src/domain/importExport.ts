@@ -36,10 +36,14 @@ export function suggestMapping(columns: string[]): Mapping {
   };
 }
 
-const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
-/** a month written as a word: its full name, or its first three letters (and "sept"), as Excel takes it; any other word is no month */
+const MONTHS = [
+  'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november',
+  'december',
+];
+/** a month written as a word: its full name or first three letters (and "sept"), as Excel takes it; no other */
 const monthOf = (word: string): number | undefined => {
-  const w = word.toLowerCase(); const i = MONTHS.findIndex((m) => m === w || m.slice(0, 3) === w || (m === 'september' && w === 'sept'));
+  const w = word.toLowerCase();
+  const i = MONTHS.findIndex((m) => m === w || m.slice(0, 3) === w || (m === 'september' && w === 'sept'));
   return i < 0 ? undefined : i + 1;
 };
 const ymd = (y: number, m: number, d: number) => { const s = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`; return isRealDate(s) ? s : null; };
@@ -73,8 +77,14 @@ export function dateReadings(v: unknown): string[] {
   if ((m = /^(\d{4})([\/.])(\d{1,2})\2(\d{1,2})$/.exec(s))) return one(ymd(+m[1], +m[3], +m[4]));   // year first: 2026/11/02
   if ((m = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4}|\d{2})$/.exec(s))) { const a = +m[1], b = +m[2], y = fullYear(m[3]); if (a > 12 && b <= 12) return one(ymd(y, b, a)); if (a <= 12 && b <= 12 && a !== b) return [ymd(y, a, b)!, ymd(y, b, a)!]; return one(ymd(y, a, b)); }
   const day = String.raw`(\d{1,2})(?:st|nd|rd|th)?`; const sep = String.raw`[\s,\-]+`;
-  if ((m = new RegExp(`^([A-Za-z]{3,9})\\.?${sep}${day}${sep}(\\d{4}|\\d{2})$`, 'i').exec(s))) { const mo = monthOf(m[1]); return one(mo ? ymd(fullYear(m[3]), mo, +m[2]) : null); }
-  if ((m = new RegExp(`^${day}${sep}([A-Za-z]{3,9})\\.?${sep}(\\d{4}|\\d{2})$`, 'i').exec(s))) { const mo = monthOf(m[2]); return one(mo ? ymd(fullYear(m[3]), mo, +m[1]) : null); }
+  if ((m = new RegExp(`^([A-Za-z]{3,9})\\.?${sep}${day}${sep}(\\d{4}|\\d{2})$`, 'i').exec(s))) {
+    const mo = monthOf(m[1]);
+    return one(mo ? ymd(fullYear(m[3]), mo, +m[2]) : null);
+  }
+  if ((m = new RegExp(`^${day}${sep}([A-Za-z]{3,9})\\.?${sep}(\\d{4}|\\d{2})$`, 'i').exec(s))) {
+    const mo = monthOf(m[2]);
+    return one(mo ? ymd(fullYear(m[3]), mo, +m[1]) : null);
+  }
   return [];
 }
 
@@ -100,8 +110,11 @@ const STATUS: Record<string, QuestionStatus> = { open: 'open', outstanding: 'ope
 export function prepareImport(table: string[][], mapping: Mapping, lines?: number[], o: { today?: string } = {}): Prepared {
   const today = o.today ?? localYmd(new Date().toISOString());
   const get = (r: string[], k: ImportField) => (mapping[k] == null ? '' : String(r[mapping[k]!] ?? ''));
-  // a value read as a number, date, priority, status or workstream is read without control characters; text is kept whole
-  const read = (r: string[], k: ImportField) => get(r, k).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
+  // a value read as a number, date, priority, status or workstream is read without control characters; text is
+  // kept whole
+  const read = (r: string[], k: ImportField) => (
+    get(r, k).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+  );
   const out: Prepared = { rows: [], skipped: 0, badDates: 0, unknownValues: 0, unread: [] };
   const nameOf = (k: ImportField) => IMPORT_FIELDS.find(([f]) => f === k)?.[1] ?? k;
   type DateCell = { raw: string; readings: string[]; done: (d: string) => void; bad: () => void };
@@ -109,9 +122,26 @@ export function prepareImport(table: string[][], mapping: Mapping, lines?: numbe
   for (const [at, r] of table.entries()) {
     const text = get(r, 'text'); if (!text) { out.skipped++; continue; }
     const line = lines?.[at] ?? at + 2; const unread = (k: ImportField, v: string) => out.unread.push(`Row ${line} ${nameOf(k)}: ${v.trim()}`);
-    const date = (k: 'received' | 'responded') => { const raw = read(r, k); const c = { raw, readings: dateReadings(raw), done: (d: string) => { row[k] = d; }, bad: () => { out.badDates++; unread(k, raw); } }; cells[k].push(c); return c; };
-    const pr = read(r, 'priority').trim(); const st = read(r, 'status').trim(); const nRaw = read(r, 'n').trim().replace(/^q/i, ''); const n = /^\d{1,9}$/.test(nRaw) && +nRaw > 0 ? +nRaw : null;   // the app numbers past Q999999, so a 7-digit number it exported reads back
-    const wsGiven = get(r, 'workstream').trim(); const wsRaw = read(r, 'workstream').trim(); const ws = WORKSTREAMS.find((w) => w.toLowerCase() === wsRaw.toLowerCase()) ?? wsGiven;   // the app's spelling where it is one of ours; otherwise kept as written
+    const date = (k: 'received' | 'responded') => {
+      const raw = read(r, k);
+      const c = {
+        raw,
+        readings: dateReadings(raw),
+        done: (d: string) => { row[k] = d; },
+        bad: () => { out.badDates++; unread(k, raw); },
+      };
+      cells[k].push(c);
+      return c;
+    };
+    const pr = read(r, 'priority').trim();
+    const st = read(r, 'status').trim();
+    const nRaw = read(r, 'n').trim().replace(/^q/i, '');
+    // the app numbers past Q999999, so a 7-digit number it exported reads back
+    const n = /^\d{1,9}$/.test(nRaw) && +nRaw > 0 ? +nRaw : null;
+    const wsGiven = get(r, 'workstream').trim();
+    const wsRaw = read(r, 'workstream').trim();
+    // the app's spelling where it is one of ours; otherwise kept as written
+    const ws = WORKSTREAMS.find((w) => w.toLowerCase() === wsRaw.toLowerCase()) ?? wsGiven;
     if (pr && !PRIORITY[pr.toLowerCase()]) { out.unknownValues++; unread('priority', pr); }
     if (st && !STATUS[st.toLowerCase()]) { out.unknownValues++; unread('status', st); }
     const row: ImportRow = { n, text, askedBy: get(r, 'askedBy').trim(), received: '', workstream: ws, priority: PRIORITY[pr.toLowerCase()] ?? '', response: get(r, 'response'), respondedBy: get(r, 'respondedBy').trim(), responded: '', status: STATUS[st.toLowerCase()] ?? '', line };
