@@ -178,7 +178,7 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
       const r = await s.ai.phrase!({ dealId: 'd', items: p }); return { r, calls: s.calls.filter(isPhrase).length, cuts };
     };
     const pad = (n: number, f: (i: number) => number) => points(n).map((x, i) => ({ ...x, what: f(i) ? `${x.what} ${'m'.repeat(f(i))}` : x.what }));
-    const want = (p: ReturnType<typeof points>) => p.map((x) => `Q for [${x.kind}] ${x.what}`.slice(0, 2000));      // a question is kept to 2,000 characters
+    const want = (p: ReturnType<typeof points>) => p.map((x) => `Q for [${x.kind}] ${x.what}`);
     // a run, then Retry for the points left, as the dialog does: how many runs it took, and the most calls in one
     const retried = async (f: (c: Call, k: number) => unknown, p: ReturnType<typeof points>) => {
       let k = 0; const s = setup((c) => (!isPhrase(c) ? {} : f(c, k++)), {}, { shared: new Mem(), installId: 'pc' });
@@ -453,5 +453,41 @@ describe('reading a list in, line by line', () => {
     const s = setup((c) => (isRead(c) ? 'not JSON at all' : {}), {}, { shared: new Mem(), installId: 'pc' });
     const r = await s.ai.readList!({ lines: list.slice(0, 5) });
     expect(r.ok).toBe(false);
+  });
+});
+
+describe('model-written text is kept whole up to one Excel cell (#1104)', () => {
+  const isPhrase = (c: Call) => c.prompt.includes('Write one question for the counterparty');
+  const tagOf = (c: { prompt: string }) => /^([bcdfghjkmnpqrstvwxz]{3}): /m.exec(c.prompt)![1];
+  const point = [{ kind: 'gap' as const, what: 'Point 1', need: 'The signed copy' }];
+  const stand = { shared: new Mem(), installId: 'pc' };
+  const phraseWith = (text: string) => setup(
+    (c) => (isPhrase(c) ? { items: [{ id: tagOf(c), text }] } : {}),
+    {},
+    stand,
+  );
+  const sentence = 'Please send the signed and dated copy. ';
+  const CUT_NOTE = '… [cut: longer than Excel allows in one cell]';
+  it('keeps a 2,500-character question whole', async () => {
+    const text = 'q'.repeat(2500);
+    expect(val(await phraseWith(text).ai.phrase!({ dealId: 'd', items: point }))).toEqual([text]);
+  });
+  it('cuts a 40,000-character question at a sentence and ends it with the visible note', async () => {
+    const text = sentence.repeat(1000);
+    const [question] = val(await phraseWith(text).ai.phrase!({ dealId: 'd', items: point }));
+    expect(question!.length).toBeLessThanOrEqual(32767);
+    expect(question!.endsWith(CUT_NOTE)).toBe(true);
+    expect(question!.startsWith(sentence)).toBe(true);
+  });
+  it('keeps a 700-character reworded item whole', async () => {
+    const text = 'Wetlands delineation complete. '.repeat(22).trim();
+    const s = setup((c) => (isReword(c) ? { items: [{ n: 1, text, why: 'unclear' }] } : {}), {}, stand);
+    expect(val(await s.ai.reword!({ items: ['Wetlands'] }))[0].text).toBe(text);
+  });
+  it('keeps all eight parts of a split item', async () => {
+    const texts = Array.from({ length: 8 }, (_, k) => `Condition ${k + 1} is met`);
+    const s = setup((c) => (isReword(c) ? { items: [{ n: 1, texts, why: 'many' }] } : {}), {}, stand);
+    const [row] = val(await s.ai.reword!({ items: ['A; B; C; D; E; F; G; H'] }));
+    expect([row.text, ...row.also!]).toEqual(texts);
   });
 });
