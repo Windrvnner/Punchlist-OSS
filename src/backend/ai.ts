@@ -72,7 +72,7 @@ import {
 import { docFamilies } from './related';
 import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
-import { AI_DRAFTED, handleOf, questionsForHandles, responseHeader } from './qaRow';
+import { AI_DRAFTED, namesOnlyShown, questionsForIds, responseHeader } from './qaRow';
 import type { DealDoc, Looked } from './agentKit';
 import {
   RATINGS, riskGroups, keyRisksOf, unratedFindings, type Grouped, type Rating, type RiskGroup,
@@ -1692,7 +1692,7 @@ export function nodeAi(o: AiOptions) {
   }
 
   /** a response already given on the deal, to a question that reads like the one being drafted for */
-  type Alike = { n: number; text: string; response: string; by: string; ai: boolean };
+  type Alike = { id: string; n: number; text: string; response: string; by: string; ai: boolean };
   type AlikeQuestion = Pick<Question, 'id'> & Partial<Pick<Question,
     'n' | 'text' | 'response' | 'askedBy' | 'status' | 'provenance'>>;
   const ALIKE = 5;                                                               // earlier responses one draft is shown at most
@@ -1741,6 +1741,7 @@ export function nodeAi(o: AiOptions) {
     return log.map((q, k) => { if (!given(q)) return { q, share: 0 }; let got = 0; for (const w of mine) if (sets[k].has(w)) got += weight(w); return { q, share: got / whole }; })
       .filter((x) => x.share >= ALIKE_SHARE).sort((a, b) => b.share - a.share || a.q.n! - b.q.n!).slice(0, ALIKE)
       .map(({ q }) => ({
+        id: q.id,
         n: q.n!,
         text: q.text!,
         response: priorResponse(q.response!, q.provenance),
@@ -1749,19 +1750,35 @@ export function nodeAi(o: AiOptions) {
       }));
   }
   const one = (t: string) => t.replace(/\s+/g, ' ').trim();
-  /** what a draft is told of earlier responses: each named only by its handle, never its question's number (#286) */
+  /** what a draft is told of earlier responses: each named only by its question's id, never its number (#286, #1105) */
   function priorResponses(earlier: Alike[]): string {
     if (!earlier.length) return '';
-    const shown = earlier.map((q, k) => {
+    const shown = earlier.map((q) => {
       const by = q.by ? `, submitted by ${q.by}` : '';
-      const response = `Response to ${handleOf(k)}${q.ai ? AI_DRAFTED : ''}: “${one(q.response)}”`;
-      return `${handleOf(k)}${by}: “${one(q.text)}”\n${response}`;
+      const response = `Response to ${q.id}${q.ai ? AI_DRAFTED : ''}: “${one(q.response)}”`;
+      return `${q.id}${by}: “${one(q.text)}”\n${response}`;
     });
     const use = 'If one of them answers this question as it is asked, name it in "reused": it is put in the draft '
-      + 'word for word, credited to whoever asked it. Earlier responses are named only by their R numbers. Do not '
+      + 'word for word, credited to whoever asked it. Earlier responses are named only by their ids. Do not '
       + 'repeat or restate one in "text": write there only what the documents add, with [n] markers, or nothing. '
       + 'Use none that answers a different question, however alike the words.';
     return `\nResponses already given on this deal to questions that read like it:\n${shown.join('\n')}\n${use}`;
+  }
+  /**
+   * A draft's reply that can be used: its text fits one Excel cell, and it names only earlier responses it was shown,
+   * in "reused" and in "text"; one that names another question id is a failed reply, sent back (#1105)
+   */
+  function draftCheck(earlier: Alike[], escalate: string) {
+    const ids = earlier.map((q) => q.id);
+    const reusedShown = (reply: Record<string, unknown>) =>
+      listOf(reply.reused).every((x) => ids.includes(String(x).trim()));
+    const shownOnly = (reply: Record<string, unknown>) =>
+      reusedShown(reply) && namesOnlyShown(strings(reply.text).join('\n\n'), ids);
+    const usable = (reply: Record<string, unknown>) =>
+      strings(reply.text).join('\n\n').length <= MODEL_TEXT_MAX && shownOnly(reply);
+    const wrong = `"text" must be under ${MODEL_TEXT_MAX.toLocaleString('en-US')} characters, and "text" and "reused" `
+      + 'may name only the earlier responses above, by their ids: put it right';
+    return { escalate, usable, wrong };
   }
   let briefs = new Map<string, { key: string; paragraphs: string[] }>();
   const service: AiService = {
@@ -1791,8 +1808,10 @@ export function nodeAi(o: AiOptions) {
       const asAnswered = (q: Alike) => `As answered ${q.by ? `to ${q.by} ` : ''}(Q${q.n})`;
       const prior = priorResponses(earlier);
       const ask = `Draft a response to this question from the documents: ${i.questionText}${prior}\nIf ${earlier.length ? 'neither the documents nor those responses answer' : 'the documents do not answer'} it, say so with "status": "none" and nothing else.\nThe response must be under ${MODEL_TEXT_MAX.toLocaleString('en-US')} characters (it goes into one Excel cell); if it would be longer, cut it down to what matters.`;
-      const shape = `{"status": "found" | "none", "text": "the response, with [n] markers", "sources": [...]${earlier.length ? ', "reused": ["R1"]' : ''}}`;
-      const again = { escalate: m.thorough, usable: (reply: Record<string, unknown>) => strings(reply.text).join('\n\n').length <= MODEL_TEXT_MAX, wrong: `"text" is longer than ${MODEL_TEXT_MAX.toLocaleString('en-US')} characters: cut it down to fit` };
+      const reusedShape = earlier.length ? ', "reused": ["the id of an earlier response it uses"]' : '';
+      const fields = '"status": "found" | "none", "text": "the response, with [n] markers", "sources": [...]';
+      const shape = `{${fields}${reusedShape}}`;
+      const again = draftCheck(earlier, m.thorough);
       let r = await read('draft', [i.dealId], m.standard, ask, i.questionText, {}, shape, again);
       if (r.ok && !r.value.sent.length && earlier.length) {
         // no document bears on it, but earlier responses may: they are asked about on their own
@@ -1806,17 +1825,21 @@ export function nodeAi(o: AiOptions) {
       }
       if (!r.ok) return r;
       const out = fit(strings(r.value.reply.text).join('\n\n'), r.value.reply.sources as Cited[], r.value.sent, false);
-      const reused = listOf(r.value.reply.reused).map((x) => tagNumber(x, 'R')).filter((n): n is number => n !== null && n >= 1 && n <= earlier.length).map((n) => earlier[n - 1]).filter((q, k, all) => all.indexOf(q) === k);
+      // in the order the model named them; a reply escalated past its retry may still name one never shown: not reused
+      const reused = [...new Set(listOf(r.value.reply.reused).map((x) => String(x).trim()))]
+        .map((id) => earlier.find((q) => q.id === id))
+        .filter((q): q is Alike => !!q);
       if (word(r.value.reply.status) !== 'found') return ok({ status: 'none', text: '', sources: [] });
       // the earlier responses the model chose go in word for word, each credited: nothing is added to another party's answer, or turned round.
       // What the documents add follows, as the model wrote it, with any credit of its own taken out, so a difference between the two stays in sight.
       const quoted = reused.map((q) => `${asAnswered(q)}: ${q.response}`);
-      // a sentence of the model's that names an earlier response by its R number is a credit in its own words: dropped, with
+      // a sentence of the model's that names an earlier response by its id is a credit in its own words: dropped, with
       // any source only it cited. The model never sees question numbers, so a quarter (Q3 2027) is never one (#286).
       // a draft rests only on this deal's own documents: another project's, or a blackline against one, never answers
       // by itself
       const none = { text: '', sources: [] as typeof out.sources };
-      const ownReply = out.sources.some((x) => mainIn(r.value.sent, x)) ? withoutDraftCredits(out, earlier.length) : none;
+      const credited = earlier.map((q) => q.id);
+      const ownReply = out.sources.some((x) => mainIn(r.value.sent, x)) ? withoutDraftCredits(out, credited) : none;
       const kept = ownReply.text;
       const own = kept.charAt(0).toUpperCase() + kept.slice(1);
       if (!quoted.length && !own) return ok({ status: 'none', text: '', sources: [] });             // a draft rests on a document it cites or on an earlier response it names
@@ -1836,15 +1859,19 @@ export function nodeAi(o: AiOptions) {
         + `Title: ${f.title}\nAs written: ${f.body.join(' ')}${responsesText(said)}`;
       const own = { [i.dealId]: f.sources.map((s) => s.docId).filter((x): x is string => !!x) };
       const shape = '{"body": ["one paragraph per string, with [n] markers"], "sources": [...]}';
-      const usable = (reply: Record<string, unknown>) => parasOf(reply).length > 0;
-      const again = { escalate: m.thorough, usable, wrong: '"body" has no paragraphs in it' };
+      // a reply that names a question id it was not shown is a failed reply, sent back (#1105)
+      const ids = said.map((q) => q.id);
+      const usable = (reply: Record<string, unknown>) =>
+        parasOf(reply).length > 0 && namesOnlyShown(parasOf(reply).join('\n'), ids);
+      const wrong = '"body" has no paragraphs in it, or names a question id that is not one of the responses above';
+      const again = { escalate: m.thorough, usable, wrong };
       const about = `${f.title} ${f.body.join(' ')}`;
       const r = await read('reassess', [i.dealId], m.standard, ask, about, own, shape, again);
       if (!r.ok) return r;
       if (!r.value.sent.length) return fail({ kind: 'failed', message: 'None of this finding’s documents are indexed, so there is nothing to reassess it against' });
-      // the responses it was shown by handle are named by their questions' numbers before the finding is kept (#1105)
-      const handles = said.map((q) => q.n);
-      const paras = parasOf(r.value.reply).map((p) => questionsForHandles(p, handles));
+      // the responses it was shown by id are named by their questions' numbers before the finding is kept (#1105)
+      const numbers = new Map(said.flatMap((q) => (q.n === undefined ? [] : [[q.id, q.n] as const])));
+      const paras = parasOf(r.value.reply).map((p) => questionsForIds(p, numbers));
       if (!paras.length) return fail({ kind: 'failed', message: UNREAD_REPLY });
       const out = fit(paras.join('\n\u0000\n'), r.value.reply.sources as Cited[], r.value.sent, false, true);   // a finding: a place cited twice is one source, as when it was raised
       // a finding stays as written unless one of this deal's own documents bears it out
@@ -2382,10 +2409,10 @@ export function nodeAi(o: AiOptions) {
 
   type Asked = { id: string; n?: number; text?: string; response?: string; respondedBy?: string; responded?: string; linkedFinding?: string; provenance?: { origin?: string } };
   const saidOf = (q: Asked) => createHash('sha256').update(String(q.response ?? '').replace(/\s+/g, ' ').trim()).digest('hex').slice(0, 16);
-  /** the questions with their responses, each labeled by its handle (R1, R2, … in order), not its number (#1105) */
-  const responseLines = (qs: Asked[]) => qs.map((q, k) => {
-    const asked = `${handleOf(k)}: ${String(q.text ?? '').replace(/\s+/g, ' ').trim()}`;
-    return `${asked}\n${responseHeader(q, handleOf(k))}: ${q.response!.replace(/\s+/g, ' ').trim()}`;
+  /** the questions with their responses, each labeled by its id, never its number (#1105) */
+  const responseLines = (qs: Asked[]) => qs.map((q) => {
+    const asked = `${q.id}: ${String(q.text ?? '').replace(/\s+/g, ' ').trim()}`;
+    return `${asked}\n${responseHeader(q)}: ${q.response!.replace(/\s+/g, ' ').trim()}`;
   }).join('\n');
   /** a deal's questions that have a response, by number */
   // (called only for a deal already read: after its findings were listed, or for a finding read by id, which reads its deal)
@@ -2405,15 +2432,16 @@ export function nodeAi(o: AiOptions) {
     const said = all.filter((q) => q.linkedFinding === findingId || (!q.linkedFinding && heard.has(q.id)) || also.some((a) => a.id === q.id));
     return said;
   }
-  /** those responses for the prompt (`respondedOn`), each named by its handle */
+  /** those responses for the prompt (`respondedOn`), each named by its question's id */
   async function responsesOn(dealId: string, findingId: string, also: Asked[] = []): Promise<string> {
     return responsesText(await respondedOn(dealId, findingId, also));
   }
-  /** responses for the prompt, each named by its handle, which code puts back as its number (`questionsForHandles`) */
+  /** responses for the prompt, each named by its question's id, which code puts back as its number (questionsForIds) */
   function responsesText(said: Asked[]): string {
     if (!said.length) return '';
     const heading = '\n\nResponses received on the questions asked about this finding:';
-    const named = 'A response is not a document: refer to it as "response R<k>" and give it no [n] marker.';
+    const named = 'A response is not a document: refer to it as "response <id>", with the id its question is shown '
+      + 'by, and give it no [n] marker.';
     return `${heading}\n${responseLines(said)}\nTake these into account. ${named}`;
   }
   const tagged = (dealId: string, docs: DocRecord[]): Sent[] => docs.map((rec, i) => ({ tag: `D${i + 1}`, dealId, rec }));
@@ -3191,7 +3219,7 @@ export function nodeAi(o: AiOptions) {
   const HEARD_AT_ONCE = 50;
   /**
    * The fast model's question on responses tied to no finding: which of the open findings `listed` each could change.
-   * Each question is named by its handle (R1, … in the order of `group`), never by its number (#1105).
+   * Each question is named by its id, never by its number (#1105).
    */
   async function askAffects(group: Asked[], listed: Raised[]): Promise<{ affected?: unknown } | null> {
     const intro = 'These responses have been received to questions asked on a project-finance deal. '
@@ -3200,7 +3228,7 @@ export function nodeAi(o: AiOptions) {
     const question = 'Which findings could a response change? Think of knock-on effects, not only of matching words. '
       + 'Pair each finding with the question whose response bears on it; if no finding is touched, give an empty list.';
     const prompt = `${intro}\n${responseLines(group)}\n\nThese are open findings on the deal:\n${open}\n\n${question}\n`
-      + 'Reply as JSON: {"affected": ["F2 R1", "F5 R3"]}';
+      + 'Reply as JSON: {"affected": ["F2 <id>", "F5 <id>"]}';
     const model = (await models()).fast;
     const input: Ask = { kind: 'affects', split: true, model, system: JSON_ONLY, prompt };
     return askJson<{ affected?: unknown }>(input, ['affected']);
@@ -3222,7 +3250,8 @@ export function nodeAi(o: AiOptions) {
         if (!reply || !('affected' in reply)) return fail({ kind: 'failed', message: 'The responses could not be looked at' });      // nothing is recorded, so they are looked at the next time
         for (const t of strings(reply.affected)) {
           const f = listed[+(/F\s*(\d+)/i.exec(t)?.[1] ?? 0) - 1]; if (!f) continue;
-          const named = [...t.matchAll(/\bR\s*(\d+)/gi)].map((m) => group[+m[1] - 1]).filter((q): q is Asked => !!q);
+          const tokens = t.split(/\W+/);
+          const named = group.filter((q) => tokens.includes(q.id));
           const qs = bearsOn.get(f.id) ?? []; for (const q of (named.length ? named : group).filter((y) => todo(y).includes(f))) if (!qs.includes(q)) qs.push(q); if (qs.length) bearsOn.set(f.id, qs);       // a finding named with no question we know: every response in the call is put beside it
         }
       }
