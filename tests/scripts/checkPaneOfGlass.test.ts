@@ -126,11 +126,13 @@ describe('UI dependency checks', () => {
       "export const fromModule = module.require('../backend/reader')",
       "export const created = createRequire('/app')('../backend/reader')",
       'export const parenthesized = (import.meta).env.MODE',
+      'const { require: load } = module',
     ];
     repo.write(file, lines.join('\n'));
     const result = repo.run();
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(`${file} import (lines 2, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16): 13 exceeds`);
+    const refused = '2, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 18';
+    expect(result.stderr).toContain(`${file} import (lines ${refused}): 14 exceeds`);
   });
 
   it('allows modules named with a plain string', () => {
@@ -142,6 +144,8 @@ describe('UI dependency checks', () => {
       'export const template = () => import(`./reader`)',
       "export const required = () => require('./reader')",
       'export const mode = import.meta.env.MODE',
+      'export const settings = { require: true, createRequire: false }',
+      'type require = string',
     ].join('\n'));
     expect(repo.run().status).toBe(0);
   });

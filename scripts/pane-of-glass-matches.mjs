@@ -77,6 +77,7 @@ function moduleChecks(file, record) {
   // The visitor reaches a node before its parts, so import.meta.env and require('…') are known by then.
   const envMeta = new Set();
   const calledRequire = new Set();
+  const namesOnly = new Set();
   const moduleSource = (node) => checkModule(node.source);
   return {
     ImportDeclaration: moduleSource,
@@ -91,9 +92,19 @@ function moduleChecks(file, record) {
       calledRequire.add(callee);
       checkLoaded(node, node.arguments[0]);
     },
+    // A key of an object literal, or a type, named require only names something; it loads nothing. A destructured
+    // key still counts: `const { require: load } = module` takes the loader.
+    ObjectExpression(node) {
+      for (const entry of node.properties) {
+        if (entry.type === 'Property' && !entry.computed && !entry.shorthand) namesOnly.add(entry.key);
+      }
+    },
+    TSTypeAliasDeclaration(node) {
+      namesOnly.add(node.id);
+    },
     // Any other use of require (an alias, require.call, module.require, createRequire) loads an unchecked path.
     usesRequire(node) {
-      if (requireNames.has(node.name) && !calledRequire.has(node)) record('import', node);
+      if (requireNames.has(node.name) && !calledRequire.has(node) && !namesOnly.has(node)) record('import', node);
     },
     MetaProperty(node) {
       if (node.meta.name === 'import' && !envMeta.has(node)) record('import', node);
