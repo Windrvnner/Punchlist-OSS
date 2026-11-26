@@ -1,6 +1,6 @@
 // An issues list pasted into the import dialog's paste box and sent with Next is read as a chosen file is, the way
-// a checklist is pasted. The paste is a real Ctrl+V from the system clipboard. Once a list is shown, a paste reads
-// nothing.
+// a checklist is pasted. The paste is a real Ctrl+V from the system clipboard. "change" shows the paste box again,
+// with the paste as it was typed.
 const LIST_TEXT = [
   'Comments',
   '1. Change of control definition omits the sponsor fund vehicles',
@@ -35,8 +35,8 @@ async function reopen(page) {
 
 /**
  * With the import dialog open and no list read, paste a list into the box, keep it over a close, send it with Next and
- * check its points; paste again and check nothing is read; then start over, leaving the dialog open with no list, as it
- * was found. The context needs clipboard access.
+ * check its points; go back with change, read a file, and go back again; then start over, leaving the dialog open with
+ * no list, as it was found. The context needs clipboard access.
  */
 export async function checkPastedList(page, say, w) {
   await countAttaches(page);
@@ -70,18 +70,26 @@ export async function checkPastedList(page, say, w) {
     && read.raised === 1 && read.fresh.join() === 'Fees letter is not yet agreed'
     && read.file === 'Pasted issues list.txt' && read.attaches === 1, JSON.stringify(read));
 
-  await page.focus('#il-go');
-  await pasteText(page, '1. Another point pasted over the list');
-  // a read would attach the paste at once and say "Reading the list"; give it time to start
-  await page.waitForTimeout(500);
-  const after = await page.evaluate(() => ({
-    count: document.querySelector('#il-count')?.textContent,
-    line: document.querySelector('#il-line')?.textContent,
-    attaches: window.__attaches,
-  }));
-  say(`once a list is shown, a paste starts no new read (${w})`, after.count === '2 points'
-    && after.line === '1 new finding' && after.attaches === 1, JSON.stringify(after));
+  // "change" goes back to the paste box with the paste as it was typed, as the checklist's does
+  await page.click('#il-change');
+  const back = await page.waitForSelector('#il-paste', { timeout: 5000 }).then(() => true, () => false);
+  const shownAgain = back ? await page.inputValue('#il-paste') : null;
+  say(`change shows the paste box with what was pasted (${w})`, shownAgain === LIST_TEXT, JSON.stringify(shownAgain));
+  if (!back) return;
+  // a file read in its place leaves the paste kept: change shows it again
+  await page.setInputFiles('#il-file', {
+    name: 'Lender counsel comments.txt', mimeType: 'text/plain', buffer: Buffer.from('1. Hedging policy is due'),
+  });
+  await page.waitForSelector('#il-count');
+  const fromFile = await page.textContent('.ilfile .fnw');
+  await page.click('#il-change');
+  await page.waitForSelector('#il-paste');
+  const afterFile = await page.inputValue('#il-paste');
+  say(`after a file is read, change still shows the paste (${w})`,
+    fromFile === 'Lender counsel comments' && afterFile === LIST_TEXT, JSON.stringify({ fromFile, afterFile }));
 
+  await page.click('#il-paste-next');
+  await page.waitForSelector('#il-restart');
   await page.click('#il-restart');
   await page.click('#il-restart-ask-go');
   await page.waitForSelector('#il-drop');
