@@ -9,21 +9,10 @@ const FA = doc(1, 'Credit Agreement.pdf', { words: ['facility', 'agreement'] });
 const N = 2000; const BUDGET_MS = 15_000;                                                                  // under a second here; the budget leaves room for a busy machine
 const items = Array.from({ length: N }, (_, i) => ({ id: `c${i + 1}`, text: `Checklist point ${i + 1} about the credit agreement` }));
 /** every item satisfied, except every 40th, which the first pass raises as a finding: Check again reads the other 1,950 items and the 50 open findings */
-const reply = (c: Call) => ({
-  items: itemsIn(c).map((it) => {
-    const k = +/point (\d+)/.exec(it.text)![1];
-    return k % 40
-      ? { id: it.tag, ...OK(c) }
-      : {
-          id: it.tag,
-          result: 'finding',
-          title: `Point ${k} differs from the term sheet`,
-          workstream: 'Legal',
-          body: ['It differs. [1]'],
-          sources: [{ doc: nth(c, 1), page: 2 }],
-        };
-  }),
-});
+const reply = (c: Call) => ({ items: itemsIn(c).map((it) => { const k = +/point (\d+)/.exec(it.text)![1];
+  return k % 40 ? { id: it.tag, ...OK(c) }
+    : { id: it.tag, result: 'finding', title: `Point ${k} differs from the term sheet`, workstream: 'Legal',
+      body: ['It differs. [1]'], sources: [{ doc: nth(c, 1), page: 2 }] }; }) });
 
 it(`Check again on ${N.toLocaleString('en-US')} items and their findings takes seconds, not minutes`, async () => {
   const s = setup(reply, { d1: [FA] }, { shared: new Mem(), installId: 'pc', checklist: () => ({ broad: items, product: [], sector: [] }) }); await deal(s.repo);

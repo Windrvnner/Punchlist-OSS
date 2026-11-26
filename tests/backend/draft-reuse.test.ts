@@ -148,23 +148,19 @@ describe('a draft reuses an answer already given to another party', () => {
       // a credit in other words is dropped too
       expect(drafted.text).toBe(`${AS_ANSWERED_12}\n\nThe credit agreement sets 1.35x. [1]`);
     }
-    const plain = setup(
-      (c) =>
-        isDraft(c) ? { status: 'found', text: 'The ratio is 1.20x. [1]', sources: [{ doc: nth(c, 1), page: 14 }] } : {},
-      { d1: [FA] },
-    );
+    const plain = setup((c) => (isDraft(c)
+      ? { status: 'found', text: 'The ratio is 1.20x. [1]', sources: [{ doc: nth(c, 1), page: 14 }] } : {}),
+      { d1: [FA] });
     await deal(plain.repo); await questions(plain.repo, [Q12]); expect(val(await plain.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW })).text).toBe('The ratio is 1.20x. [1]');
   });
 
   it('a draft whose text names a question it was not shown is asked again (#1105)', async () => {
     let drafts = 0;
     const said = () => (++drafts > 1 ? 'The ratio is 1.20x. [1]' : `The ratio is 1.20x, as answered in ${qid(9)}. [1]`);
-    const s = setup(
-      (c) => (isDraft(c) ? { status: 'found', text: said(), sources: [{ doc: nth(c, 1), page: 14 }] } : {}),
-      {
-        d1: [FA],
-      },
-    );
+    const s = setup((c) => (isDraft(c)
+      ? { status: 'found', text: said(), sources: [{ doc: nth(c, 1), page: 14 }] } : {}), {
+      d1: [FA],
+    });
     await deal(s.repo); await questions(s.repo, [Q12]);
     const r = val(await s.ai.draft({ dealId: 'd1', questionId: 'q_new', questionText: NEW }));
     expect(r.text).toBe('The ratio is 1.20x. [1]');

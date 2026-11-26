@@ -19,32 +19,12 @@ const PLAN = doc(16, 'DEC-77.pdf',
 it('an item the documents the agent cites leave open, cited for another item of its run, is written exactly as the check left it', async () => {
   const X1 = { id: 'x1', text: 'Decommissioning is provided for' }; const X2 = { id: 'x2', text: 'Insurance is in place' }; const X3 = { id: 'x3', text: 'Water rights are secured' };
   // x1 needs the plan; x2's reply could never be used, so it is not settled; x3 is a gap; against the plan, x2 and x3 would say they need something else
-  const s = setup(
-    (c) => ({
-      items: itemsIn(c).map((it) => ({
-        id: it.tag,
-        ...(it.text.startsWith('Decom')
-          ? has(c, PLAN)
-            ? OK(c)
-            : { result: 'more', need: 'a decommissioning plan' }
-          : has(c, PLAN)
-            ? { result: 'more', need: 'something else' }
-            : it.text.startsWith('Insurance')
-              ? { result: 'banana' }
-              : { result: 'more', need: 'the water rights' }),
-      })),
-    }),
-    { d1: [FA, TS, PLAN] },
-    {
-      checklist: () => ({ broad: [X1, X2, X3], product: [], sector: [] }),
-      pick: (c) => ({ read: idsOf(c, FA) }),
-      pickFor: () => ({ read: {} }),
-      fill: (c) =>
-        isTurn(c)
-          ? { text: 'DEC-77 is the plan. [1] Nothing on the others.', sources: [{ doc: tag(c, PLAN), page: 1 }] }
-          : { text: 'It is the plan. [1]', sources: [{ doc: tag(c, PLAN), page: 1, quote: 'The plan' }] },
-    },
-  );
+  const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...(it.text.startsWith('Decom') ? (has(c, PLAN) ? OK(c) : { result: 'more', need: 'a decommissioning plan' }) : has(c, PLAN) ? { result: 'more', need: 'something else' } : it.text.startsWith('Insurance') ? { result: 'banana' } : { result: 'more', need: 'the water rights' }) })) }), { d1: [FA, TS, PLAN] }, {
+    checklist: () => ({ broad: [X1, X2, X3], product: [], sector: [] }),
+    pick: (c) => ({ read: idsOf(c, FA) }), pickFor: () => ({ read: {} }),
+    fill: (c) => (isTurn(c)
+      ? { text: 'DEC-77 is the plan. [1] Nothing on the others.', sources: [{ doc: tag(c, PLAN), page: 1 }] }
+      : { text: 'It is the plan. [1]', sources: [{ doc: tag(c, PLAN), page: 1, quote: 'The plan' }] }) });
   await deal(s.repo); val(await s.ai.firstPass('d1'));
   expect(s.calls.some((c) => itemsIn(c).length === 3 && has(c, PLAN))).toBe(true);                       // the plan was read against all three
   const rows = val(await s.ai.checklist('d1')); const row = (id: string) => rows.find((x) => x.id === id)!;
