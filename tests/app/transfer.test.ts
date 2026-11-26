@@ -98,7 +98,7 @@ describe('export and import through the ports', () => {
     expect(store.get().questions[q1.id].provenance).toMatchObject({ origin: 'human', sources: [] });
   });
 
-  it('names and workstream are identities: "Lender A " and "Lender A" are one submitter, through an export and merge and within one file', async () => {
+  it('names and workstream are kept as written, through an export and merge and within one file', async () => {
     const { store, saved } = make(); await store.boot();
     await store.dispatch(CreateDeal, { name: 'Datum', folders: [] }); const dealId = Object.keys(store.get().deals)[0]; await store.loadDeal(dealId);
     await store.dispatch(CreateQuestion, { dealId, text: 'One' }); const [q1] = dealQuestions(store.get(), dealId);
@@ -108,7 +108,9 @@ describe('export and import through the ports', () => {
     await exportQuestions(store, dealId, { status: 'all', workstream: '', askedBy: ['Lender A '] });
     const back = await readImportFile(store, fileOf('log.csv', saved[0].bytes)); if (!back.ok) throw new Error(back.error.message);
     const p = prepareImport(back.value.rows, back.value.mapping);
-    expect(p.rows[0]).toMatchObject({ askedBy: 'Lender A', respondedBy: 'Sponsor', workstream: 'Legal', response: '  Yes, as written.\n' });
+    expect(p.rows[0]).toMatchObject({
+      askedBy: 'Lender A ', respondedBy: ' Sponsor', workstream: 'Legal', response: '  Yes, as written.\n',
+    });
     expect(previewImport(store, dealId, 'merge', p.rows)).toEqual(NOTHING_TO_CHANGE);
     await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: p.rows });
     expect(JSON.stringify(store.get().questions)).toBe(before);                 // the round trip changes nothing
@@ -116,7 +118,8 @@ describe('export and import through the ports', () => {
     const t = readCsv(new TextEncoder().encode('Question,Submitted by,Workstream\nTwo,"Lender A ", Tax\nThree,Lender A,Tax\n')); if (!t.ok) throw new Error('csv');
     await store.dispatch(ImportQuestions, { dealId, mode: 'append', rows: prepareImport(t.value.rows, suggestMapping(t.value.columns)).rows });
     const added = dealQuestions(store.get(), dealId).filter((q) => q.text !== 'One');
-    expect(new Set(added.map((q) => q.askedBy))).toEqual(new Set(['Lender A'])); expect(new Set(added.map((q) => q.workstream))).toEqual(new Set(['Tax']));
+    expect(added.map((q) => q.askedBy)).toEqual(['Lender A ', 'Lender A']);
+    expect(new Set(added.map((q) => q.workstream))).toEqual(new Set(['Tax']));
   });
 
   it('nothing longer than one Excel cell is ever saved, so the Q&A log exports whole and comes back unchanged', async () => {
