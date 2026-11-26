@@ -77,7 +77,6 @@ import {
 } from '../domain/memo';
 import { SERVICE, control } from '../control';
 import { view, openRounds, serves, factsOf, finishedAt, need, undone, blockOf, unitOf, owner, findingIdFor, docsHash, isItem, itemOf, findingOf, counts, Observer, type View, type RoundState, type RoundKind, type RoundDef, type Piece, type RLine, type PieceFacts } from './rounds';
-import { SHARE, SHARED_BY, FOLDER_PART } from './sameRoom';
 import { retrier, type RetryOptions } from './retry';
 
 /** One thing the first pass checks. `id` is the checklist's own and must stay the same from run to run. */
@@ -322,8 +321,13 @@ interface Heard { question: string; said: string; findings: string[]; against?: 
 interface FullCheck { mode: 'first' | 'quick' | 'deep'; items: number; findings: number; sample?: { size: number; overturned: number } }
 /** more than this share of a spot check overturned, and a check of everything by the standard model is offered */
 const OVERTURNED = 0.2;
-/** a deal shows another deal as holding its documents from this many of them (and `SHARE` of them, sameRoom.ts); worked out again after this long */
-const ALSO_LEAST = 10, ALSO_MS = 10 * 60_000, ALSO_MAX = 2;
+/**
+ * a deal shows another deal as holding its documents from `ALSO_LEAST` of them and `SHARE` of them, the `ALSO_MAX`
+ * best, worked out again after `ALSO_MS`; a document `SHARED_BY` other deals hold is shared, not counted
+ */
+const ALSO_LEAST = 10, SHARE = 0.6, SHARED_BY = 3, ALSO_MS = 10 * 60_000, ALSO_MAX = 2;
+/** a folder holding less than this part of this deal's documents is not judged on its own */
+const FOLDER_PART = 0.25;
 const ARRIVALS = 100;                                              // new documents put to the fast model in one question
 const UNSAVED = 'The finding it raised could not be saved.';
 const GAPS_AT_ONCE = 4;                                             // items handed to the chat agent in one of its runs when a check fills its gaps
@@ -1099,7 +1103,10 @@ export function nodeAi(o: AiOptions) {
     const clean = cleanId ? mine.find((x) => x.rec.docId === cleanId) : undefined; const rec = cleanId ? o.docs.records(s.dealId).find((r) => r.docId === cleanId) : undefined;
     // a standalone blackline: no clean draft is in the data room, so what it shows is never taken as the deal's terms
     const of = clean ? `its clean draft is ${clean.tag}. ${clean.tag} is what the deal's terms are` : rec ? `its clean draft is ${where(rec)}, which is not given here. The terms are what that clean draft says`
-      : cleanId === false ? 'no clean draft of it is in the data room. What it shows is not confirmed as the deal\'s terms: say so wherever you rely on it' : 'which clean draft it goes with is not clear. The terms are what a clean draft says';
+      : cleanId === false
+        ? 'no clean draft of it was found by its cover or name. '
+          + 'What it shows is not confirmed as the deal\'s terms: say so wherever you rely on it'
+        : 'which clean draft it goes with is not clear. The terms are what a clean draft says';
     const sees = (o.blackline ?? control.blackline.pipeline) === 'A' ? ' Its strike-through and colors may not come through to you, so deleted words can read as if they were kept: be careful which wording is the new one.' : ' Struck-through words are deleted and colored words are inserted.';
     // what it was compared against (docs/other-project-documents-design.md): only this deal's own earlier draft makes its changes the deal's
     const vs = against === 'own' ? '' : against === 'other' && cleanId === false
@@ -1192,7 +1199,7 @@ export function nodeAi(o: AiOptions) {
   /**
    * The other deals that hold most of this deal's documents: the same files, by content, in another deal's data room,
    * found as this deal's folders are indexed. Documents `SHARED_BY` or more other deals hold too, such as a precedents folder many
-   * deals read, are left out (the same rule as at Create, where the other deals are all of them): what is counted is this
+   * deals read, are left out: what is counted is this
    * deal's own (`of`). Another deal must hold at least `ALSO_LEAST` of them and `SHARE` of them, and `SHARE` of each of this
    * deal's folders large enough to judge (`ALSO_LEAST` documents and `FOLDER_PART` of them), so one folder shared with a
    * single deal does not make the two look alike, while a small folder of the team's own does not hide a copy. The `ALSO_MAX` best. Worked out again only when this deal's documents
