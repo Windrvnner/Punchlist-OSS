@@ -439,6 +439,18 @@ export function unid(text: string, ids: Set<string>): string {
   }
 }
 
+/** A memo reply naming a finding by any id but one it was shown, in its words or in `named`: asked again (#1162) */
+const memoUnusable = (shown: string[], named: (text: string) => unknown[]) => (text: string) =>
+  !namesOnlyShown(text, shown) || unknownIds(named(text), shown).length > 0;
+/** the ids a ratings reply rates */
+const ratedIds = (text: string) => listOf(json(text, 'ratings')?.ratings).filter(isObject).map((row) => row.id);
+/** the ids a grouping reply puts in its risks */
+const groupedIds = (text: string) =>
+  listOf(json(text, 'risks')?.risks).filter(isObject).flatMap((row) => listOf(row.findings));
+/** the ids a brief's links name: {a few words|its id} */
+const linkedIds = (text: string) => strings(json(text, 'paragraphs')?.paragraphs)
+  .flatMap((p) => [...p.matchAll(/\{[^{}|]+\|([^{}]*)\}/g)].map((m) => m[1]));
+
 /** Ignore malformed entries individually so a usable group beside one still stands (#658). */
 function memoGroupRows(value: unknown, ids: Set<string>): RiskGroup[] {
   return listOf(value).filter(isObject).map((row) => ({
@@ -2336,9 +2348,16 @@ export function nodeAi(o: AiOptions) {
       let paragraphs: string[];
       try {
         const m = await models(); const prompt = `These are the open findings on a deal:\n${open.map((f) => `${f.id} (${f.workstream}): ${f.title}. ${f.body.join(' ').replace(/\s*\[\d+\]/g, '')}`).join('\n')}\n\nWrite two short paragraphs for someone opening the deal: what matters most and why. To point at a finding, write {a few of your own words|its id}. Never write an id anywhere else.\nReply as JSON: {"paragraphs": ["…", "…"]}`;
-        const firstTry = await askJson<{ paragraphs?: unknown }>({ kind: 'brief', model: m.standard, system: JSON_ONLY, prompt }, ['paragraphs']); paragraphs = parasOf(firstTry);
-        if (!paragraphs.length) paragraphs = parasOf(await askJson({ kind: 'brief', model: m.standard, system: JSON_ONLY, prompt: firstTry ? `${prompt}\n\nYou replied:\n${JSON.stringify(firstTry)}\n\nThat cannot be used: "paragraphs" has no paragraphs in it. Send the whole reply again, put right.` : prompt }, ['paragraphs'], undefined, false));
-        if (!paragraphs.length) paragraphs = parasOf(await askJson({ kind: 'brief', model: m.thorough, system: JSON_ONLY, prompt }, ['paragraphs'], undefined, false));
+        // a link naming a finding by an id it was not shown is a failed reply, asked again (#1162)
+        const unusable = memoUnusable([...ids], linkedIds);
+        const brief = (model: string, text: string, fix = false) => askJson<{ paragraphs?: unknown }>(
+          { kind: 'brief', model, system: JSON_ONLY, prompt: text, unusable }, ['paragraphs'], undefined, fix);
+        const firstTry = await brief(m.standard, prompt, true);
+        paragraphs = parasOf(firstTry);
+        const putRight = `${prompt}\n\nYou replied:\n${JSON.stringify(firstTry)}\n\nThat cannot be used: `
+          + '"paragraphs" has no paragraphs in it. Send the whole reply again, put right.';
+        if (!paragraphs.length) paragraphs = parasOf(await brief(m.standard, firstTry ? putRight : prompt));
+        if (!paragraphs.length) paragraphs = parasOf(await brief(m.thorough, prompt));
       } catch (e) { return failure(e, 'The summary could not be written'); }
       if (!paragraphs.length) return fail({ kind: 'failed', message: UNREAD_REPLY });
       briefs.set(dealId, { key, paragraphs }); if (briefs.size > 100) briefs = new Map([...briefs].slice(-50));
@@ -2364,7 +2383,15 @@ export function nodeAi(o: AiOptions) {
       // with no open finding there is nothing to rate, but the memo still opens with what the deal is
       let m: Awaited<ReturnType<typeof models>>; try { m = await models(); } catch (e) { return failure(e, `${SERVICE} did not answer`); }
       try {
-        const ask = (model: string, fs: typeof open) => askJson<{ ratings?: unknown }>({ kind: 'memoRatings', split: true, model, system: JSON_ONLY, prompt: `Rate each of these open findings on a deal as High, Medium or Low risk, by these definitions and nothing else:\nHigh: ${d.high}.\nMedium: ${d.medium}.\nLow: ${d.low}.\n\n${fs.map((f) => `${f.id} (${f.workstream}): ${plain(f)}`).join('\n')}\n\nReply as JSON, with every finding above once: {"ratings": [{"id": "its id", "rating": "High" | "Medium" | "Low"}]}` }, ['ratings']);
+        // a rating of a finding by an id the part did not show is a failed reply, asked again (#1162)
+        const rateUnusable = (fs: typeof open) => memoUnusable(fs.map((f) => f.id), ratedIds);
+        const ratePrompt = (fs: typeof open) => 'Rate each of these open findings on a deal as High, Medium or Low '
+          + `risk, by these definitions and nothing else:\nHigh: ${d.high}.\nMedium: ${d.medium}.\nLow: ${d.low}.\n\n`
+          + `${fs.map((f) => `${f.id} (${f.workstream}): ${plain(f)}`).join('\n')}\n\n`
+          + 'Reply as JSON, with every finding above once: '
+          + '{"ratings": [{"id": "its id", "rating": "High" | "Medium" | "Low"}]}';
+        const ask = (model: string, fs: typeof open) => askJson<{ ratings?: unknown }>({ kind: 'memoRatings',
+          split: true, model, system: JSON_ONLY, unusable: rateUnusable(fs), prompt: ratePrompt(fs) }, ['ratings']);
         let rateRoom = Infinity;                                                   // the part size a cut-off has shown, carried to the next model's pass
         for (const model of [m.standard, m.standard, m.thorough]) {
           const fs = unratedFindings(open, ratings);
@@ -2376,7 +2403,12 @@ export function nodeAi(o: AiOptions) {
             let reply: { ratings?: unknown } | null; let cut = false;
             try { reply = await ask(model, part); } catch (e) { if (!isCutOff(e)) throw e; cut = true; reply = (e as { partial?: { ratings?: unknown } | null }).partial ?? null; }
             const rows = listOf(reply?.ratings).map((x) => x as { id?: unknown; rating?: unknown }); const got = new Map<number, Rating>();
-            for (const x of cut ? rows.slice(0, -1) : rows) { const id = String(x.id ?? '').trim(); const r = RATINGS.find((k) => k.toLowerCase() === String(x.rating ?? '').trim().toLowerCase()); const k = part.findIndex((f) => f.id === id); if (r && k >= 0 && !got.has(k)) got.set(k, r); }
+            for (const x of cut ? rows.slice(0, -1) : rows) {
+              const r = RATINGS.find((k) => k.toLowerCase() === String(x.rating ?? '').trim().toLowerCase());
+              // the finding by its id, exactly (#1162)
+              const k = part.findIndex((f) => f.id === x.id);
+              if (r && k >= 0 && !got.has(k)) got.set(k, r);
+            }
             return { got, ...(cut ? { cut: part.map((_, k) => k).filter((k) => !got.has(k)) } : {}) };
           });
           if (done.size < size) rateRoom = done.size;
@@ -2394,7 +2426,17 @@ export function nodeAi(o: AiOptions) {
       if (open.length > 1) {
         try {
           const rows = open.map((f) => `${f.id} (${f.workstream || 'no workstream'}, ${ratings[f.id] ?? 'unrated'}): ${f.title}`);
-          const reply = await askJson<{ risks?: unknown }>({ kind: 'memoGroups', model: m.standard, system: JSON_ONLY, prompt: `These are the open findings on a deal, each with its workstream and risk rating:\n${rows.join('\n')}\n\nGroup them into the deal's risks for a memo to a senior banker. A risk is one underlying problem for the deal; findings that are evidence of the same problem, or that bear on the same term, figure or approval, go together, even across workstreams. A finding unlike any other is a risk on its own. Put every finding in exactly one risk. Give each risk a short plain title of your own (at most 12 words) that says what the problem is, as a fact, with no judging words.\nReply as JSON: {"risks": [{"title": "…", "findings": ["id", "id"]}]}` }, ['risks']);
+          // a risk naming a finding by an id it was not shown is a failed reply, asked again (#1162)
+          const unusable = memoUnusable([...ids], groupedIds);
+          const prompt = 'These are the open findings on a deal, each with its workstream and risk rating:\n'
+            + `${rows.join('\n')}\n\nGroup them into the deal's risks for a memo to a senior banker. A risk is one `
+            + 'underlying problem for the deal; findings that are evidence of the same problem, or that bear on the '
+            + 'same term, figure or approval, go together, even across workstreams. A finding unlike any other is a '
+            + 'risk on its own. Put every finding in exactly one risk. Give each risk a short plain title of your own '
+            + '(at most 12 words) that says what the problem is, as a fact, with no judging words.\n'
+            + 'Reply as JSON: {"risks": [{"title": "…", "findings": ["id", "id"]}]}';
+          const input: Ask = { kind: 'memoGroups', model: m.standard, system: JSON_ONLY, unusable, prompt };
+          const reply = await askJson<{ risks?: unknown }>(input, ['risks']);
           groups = memoGroupRows(reply?.risks, ids);
         } catch (e) { if (unreachable(e)) return failure(e, `${SERVICE} did not answer`); groups = []; }
       }
