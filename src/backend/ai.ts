@@ -592,6 +592,98 @@ export function nodeAi(o: AiOptions) {
     while (seen.size < n) seen.add(Array.from({ length: 3 }, () => C[Math.floor(Math.random() * C.length)]).join(''));
     return [...seen];
   };
+  /** a point `phrase` is asked to put as a question (ports: AiService.phrase) */
+  type PhrasePoint = { kind: 'gap' | 'finding'; what: string; need: string };
+  /** a point's key, by which `phraseKept` and `phraseFailed` know it from one run to the next */
+  const phraseKey = (x: PhrasePoint) => JSON.stringify([x.kind, x.what, x.need]);
+  /** a point as one line of a `phrase` call: its kind, what is unresolved, and what would settle it */
+  const phraseLine = (x: PhrasePoint) =>
+    `[${x.kind}] ${x.what.replace(/\s+/g, ' ')}${x.need ? ` — needed: ${x.need.replace(/\s+/g, ' ')}` : ''}`;
+  /** what one `phrase` call asks, each point named by its tag */
+  const phrasePrompt = (points: PhrasePoint[], tags: string[]) => [
+    'These are unresolved points in the due diligence of a project-finance deal: checklist items no document'
+      + ' settles yet ("gap"), and open findings ("finding"). Each starts with its id.',
+    ...points.map((x, m) => `${tags[m]}: ${phraseLine(x)}`),
+    '',
+    'Write one question for the counterparty for each point, asking plainly for the document or confirmation that'
+      + ' would settle it. One or two sentences each, polite and specific, in the deal team\'s voice; keep every name'
+      + ' and figure; say nothing about how the point was found. Give every point a question, with that point\'s id.',
+    `Reply as JSON: {"items": [{"id": "${tags[0]}", "text": "…"}]}`,
+  ].join('\n');
+  /** why a `phrase` reply brought no question back, as the run's failure says it when no point gets one */
+  const phraseWhy = (cut: boolean, reply: { items?: unknown } | null) => {
+    if (cut) return `${SERVICE}’s reply was cut off, so nothing was added`;
+    if (reply && Array.isArray(reply.items)) return `${SERVICE} left a point without a question, so nothing was added`;
+    return `${SERVICE}’s reply could not be read, so nothing was added`;
+  };
+  /** the entries of a `phrase` reply: each one's place in the call, by its tag, and its text */
+  const phraseEntries = (reply: { items?: unknown } | null, tags: string[]) => {
+    const at = new Map(tags.map((t, m) => [t, m]));
+    return (listOf(reply?.items) as { id?: unknown; text?: unknown }[]).map((x) => ({
+      m: typeof x?.id === 'string' ? at.get(x.id.trim().toLowerCase()) : undefined,
+      text: typeof x?.text === 'string' ? x.text.replace(/\s+/g, ' ').trim() : '',
+    }));
+  };
+  /** the places a reply gives more than one question: such a question is not known to belong to either */
+  const givenTwice = (items: { m?: number }[]) =>
+    new Set(items.filter((x, j) => x.m !== undefined && items.findIndex((y) => y.m === x.m) !== j).map((x) => x.m));
+  /**
+   * The questions of a `phrase` reply, by place in the call: asked alone, a point's one question is its own; the last
+   * entry of a cut reply may be cut short, so it is left out
+   */
+  const phraseGot = (items: { m?: number; text: string }[], size: number, cut: boolean) => {
+    const twice = givenTwice(items);
+    const texts = items.filter((x) => x.text);
+    if (size === 1 && texts.length === 1) texts[0].m = 0;
+    const got = new Map<number, string>();
+    let last = -1;
+    for (const x of texts) {
+      if (x.m === undefined) continue;
+      last = x.m;
+      if (!twice.has(x.m)) got.set(x.m, fitText(x.text));
+    }
+    if (cut) got.delete(last);
+    return got;
+  };
+  /**
+   * One `phrase` call: the questions that came back whole, by place in `points`, whether the reply was cut off, and
+   * why, when none came back. Each point is named by a short tag of its own, not a running number, and a question is
+   * taken only for a tag of this call, so a reply that leaves a point out, or puts two in another order, cannot move a
+   * question onto another point. A reply cut off, whether the service says so or its JSON is left open, keeps what
+   * came before its last entry; a whole reply with a stray quote in it is read as whole. Any other error is thrown.
+   */
+  async function askPhrase(model: string, points: PhrasePoint[]) {
+    const tags = tagsFor(points.length);
+    const prompt = phrasePrompt(points, tags);
+    let raw = '';
+    let cut = false;
+    try {
+      raw = String(await complete({ kind: 'phrase', model, system: JSON_ONLY, prompt }) ?? '');
+    } catch (e) {
+      if (!isCutOff(e)) throw e;
+      cut = true;
+      raw = (e as { text?: string }).text ?? '';
+    }
+    const reply = json<{ items?: unknown }>(raw, 'items');
+    if (jsonEnd(raw, 'items') === 'open') cut = true;
+    const got = phraseGot(phraseEntries(reply, tags), points.length, cut);
+    return { got, cut, why: got.size ? '' : phraseWhy(cut, reply) };
+  }
+  /** some points of a `phrase` run, by kind (gaps, then findings), leaving out a kind with none */
+  const phraseByKind = (points: PhrasePoint[], part: number[]) =>
+    (['gap', 'finding'] as const).map((kind) => part.filter((k) => points[k].kind === kind)).filter((l) => l.length);
+  /**
+   * What a whole `phrase` reply leaves to ask again: the points it left out, as parts of their own kind; or, when it
+   * brought nothing, the part split, by kind when it holds both (so a model that fails every finding fails only parts
+   * of findings), otherwise in halves; nothing for a single point, which is offered for Retry
+   */
+  const phraseAgain = (points: PhrasePoint[], part: number[], got: Map<number, string>) => {
+    if (got.size) return phraseByKind(points, part.filter((_, m) => !got.has(m)));
+    const kinds = phraseByKind(points, part);
+    if (kinds.length > 1) return kinds;
+    const half = Math.ceil(part.length / 2);
+    return part.length > 1 ? [part.slice(0, half), part.slice(half)] : [];
+  };
   /**
    * items asked about in one call of the duplicate check: a list of deal size is asked about whole, in one call (2,400
    * items is about 50k tokens), as the model then compares each item with every other; asked in parts of 120 it found
