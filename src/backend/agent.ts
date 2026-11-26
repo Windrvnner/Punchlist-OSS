@@ -266,11 +266,12 @@ class Answering {
 
   /**
    * Whether a reply names in its words a document id the conversation has not opened, or cites a document it has not
-   * opened: a failed reply, asked again (#1162)
+   * opened: a failed reply, asked again (#1162). One it opened that is gone since counts as opened: `fit` drops its
+   * citation.
    */
   private namesUnopenedDoc(text: string): boolean {
     const { kit, run } = this;
-    return docsUnusable(run.opened, run.spansDeals, REPLY_KEYS, kit.where)(text);
+    return docsUnusable(run.opened, run.spansDeals, REPLY_KEYS, kit.where, undefined, run.gone)(text);
   }
 
   /** the turn's whole prompt; `history`: with the conversation's last messages and its transcript */

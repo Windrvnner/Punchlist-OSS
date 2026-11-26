@@ -65,11 +65,12 @@ export function sentAs<T extends ShownDoc>(doc: unknown, sent: readonly T[], whe
 
 /**
  * Whether a reply cites a document it was not given: a citation must name one by the id the prompt showed it by,
- * exactly, or by its whole name or path (#1162)
+ * exactly, or by its whole name or path (#1162). `gone`: the ids of documents it was shown that are no longer there,
+ * which it may still cite (the citation is then dropped, not the reply)
  */
 export function citesUnsent(reply: unknown, sent: readonly ShownDoc[], spansDeals: boolean,
-  where: (rec: DocRecord) => string): boolean {
-  const ids = sent.map((x) => docHandle(x, spansDeals));
+  where: (rec: DocRecord) => string, gone: readonly string[] = []): boolean {
+  const ids = [...sent.map((x) => docHandle(x, spansDeals)), ...gone];
   return citedDocs(reply).some((doc) =>
     typeof doc !== 'string' || (!ids.includes(doc) && !byName(doc, sent, where)));
 }
@@ -78,14 +79,19 @@ export function citesUnsent(reply: unknown, sent: readonly ShownDoc[], spansDeal
 const namesOnlySentDocs = (text: string, docIds: readonly string[]): boolean =>
   recordIdsIn(text).filter((id) => id.startsWith('doc_')).every((id) => docIds.includes(id));
 
+/** a document a conversation was shown that is no longer there: its deal and id (agentRun.ts `gone`) */
+type GoneDoc = { dealId: string; docId: string };
+
 /**
  * A reply its caller cannot use however it reads (retry.ts): its words name a document id it was not sent, or, with
  * `shown`, any other id but those; or a citation names a document it was not given (#1162). `keys`: the fields the
- * reply is read for.
+ * reply is read for. `gone`: documents it was shown before that are no longer there, which it may still name.
  */
 export const docsUnusable = (sent: readonly ShownDoc[], spansDeals: boolean, keys: string[],
-  where: (rec: DocRecord) => string, shown?: readonly string[]) => (text: string): boolean => {
-  const docIds = sent.map((x) => x.rec.docId);
-  const named = shown ? namesOnlyShown(text, [...shown, ...docIds]) : namesOnlySentDocs(text, docIds);
-  return !named || citesUnsent(readJson(text, keys), sent, spansDeals, where);
-};
+  where: (rec: DocRecord) => string, shown?: readonly string[], gone: readonly GoneDoc[] = []) =>
+  (text: string): boolean => {
+    const docIds = [...sent.map((x) => x.rec.docId), ...gone.map((g) => g.docId)];
+    const named = shown ? namesOnlyShown(text, [...shown, ...docIds]) : namesOnlySentDocs(text, docIds);
+    const goneIds = gone.map((g) => (spansDeals ? `${g.dealId}/${g.docId}` : g.docId));
+    return !named || citesUnsent(readJson(text, keys), sent, spansDeals, where, goneIds);
+  };
