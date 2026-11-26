@@ -57,7 +57,6 @@ import { ulid } from 'ulid';
 import {
   readJson, unfinished, list as listOf, strings, prose, PARAGRAPH_SEAM, int, pageOf, word, tagNumber, isObject,
 } from './lenient';
-import type { LineRead } from '../domain/listRead';
 import { listReadPrompt, listReply, readListInParts, LIST_KINDS } from './listReadAi';
 import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK } from './limits';
 import { UNREAD_REPLY, UNUSABLE_REPLY, UNREACHED, CUT_ON_IT, CUT_BEFORE_IT, UNUSABLE_ON_IT } from './limits';
