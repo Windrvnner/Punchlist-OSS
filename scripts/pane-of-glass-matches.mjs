@@ -115,7 +115,8 @@ function recorder(offsets) {
   return (kind, node) => (offsets[kind] ??= new Set()).add(node.start);
 }
 
-// The lines where a file loads a module `forbidden` refuses: the UI's own scan, for another layer's rule (#648).
+// The lines where a file loads a module `forbidden` refuses, by the UI's own scan, for another layer's rule (#648).
+// As for the UI, a load whose path is not a plain string, and import.meta other than .env, count too.
 export function importsIn(file, source, forbidden) {
   const offsets = {};
   const { readsEnv, usesRequire, ...modules } = moduleChecks(recorder(offsets), forbidden);

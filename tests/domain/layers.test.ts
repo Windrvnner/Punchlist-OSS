@@ -30,9 +30,11 @@ describe('layering', () => {
       "export * from '../adapters/c';",
       "type D = import('../adapters/d').D;",
       "const e = await import('../adapters/e');",
+      "const g = require('../adapters/g');",
+      "import h = require('../adapters/h');",
       "import { f } from '../domain/f';",
     ].join('\n');
-    const expected = [1, 2, 3, 4, 5].map((line) => `src/backend/x.ts:${line}`);
+    const expected = [1, 2, 3, 4, 5, 6, 7].map((line) => `src/backend/x.ts:${line}`);
     expect(adapterImports('src/backend/x.ts', source)).toEqual(expected);
   });
 
