@@ -35,8 +35,8 @@ const midSentence = (t: string) => (/^\p{Lu}{2}/u.test(t) ? t : t.charAt(0).toLo
 const findingLink = (f: { id: string; title?: string; }) => { const p = String(f.title ?? '').replace(/[{}|]/g, ' ').replace(/\s+/g, ' ').trim(); return `{${p ? midSentence(p) : 'finding'}|${f.id}}`; };
 
 /**
- * The stand-ins' rough reading of a text, in place of a model's: its words of four letters or more, a plain plural taken
- * as its singular, leaving out words any diligence text uses. Only the stand-ins below use it.
+ * The stand-ins' rough reading of a text, in place of a model's: its words of four letters or more, a plain plural
+ * taken as its singular, leaving out words any diligence text uses. Only the stand-ins below use it.
  */
 const COMMON = new Set([
   'about', 'also', 'been', 'being', 'between', 'both', 'cannot', 'come', 'comes', 'confirm', 'could', 'detail',

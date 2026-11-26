@@ -225,7 +225,10 @@ export interface AiService {
    */
   sameMeaning?(input: {
     items: string[]; against: string[]; only?: number[]; kind?: 'questions';
-  }): Promise<Result<{ pairs: { a: number; b: number; inAgainst: boolean; why: string }[]; missed?: { kind: 'unreachable' | 'failed'; at: number[] } }>>;
+  }): Promise<Result<{
+    pairs: { a: number; b: number; inAgainst: boolean; why: string }[];
+    missed?: { kind: 'unreachable' | 'failed'; at: number[] };
+  }>>;
   /**
    * Optional. The points of an issues list, read from a file a person attached to the deal (`doc`): a PDF, a Word
    * file or an email. Each point keeps its own number on the list (`n`, as the list writes it, or its place when the list

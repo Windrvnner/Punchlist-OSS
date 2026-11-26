@@ -65,7 +65,8 @@ it('keeps a link a person approved and does not propose its question for another
   const again = await preview(env, approved);
   // file 1 stays with the point it was approved for; the model is shown only the other question, for the other points
   expect(linksOf(again)).toEqual([
-    ['Permit 1 is in place', 'Please provide the lender file 2'], ['Permit 3 is in place', 'Please provide the lender file 1'],
+    ['Permit 1 is in place', 'Please provide the lender file 2'],
+    ['Permit 3 is in place', 'Please provide the lender file 1'],
   ]);
   expect(asked.at(-1)!.items).toEqual([1, 2].map((n) => `Permit ${n} is in place The signed permit ${n}`));
   expect(asked.at(-1)!.against).toEqual(['Please provide the lender file 2']);

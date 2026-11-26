@@ -2175,7 +2175,8 @@ export function nodeAi(o: AiOptions) {
         const prompt = samePrompt(i.kind, mine.length, shown.map((g) => ({ text: text(g), point: g < n })));
         try {
           const fast = (await models()).fast;
-          reply = await askJson({ kind: 'sameMeaning', split: true, model: fast, system: JSON_ONLY, prompt }, ['pairs']);
+          const call = { kind: 'sameMeaning', split: true, model: fast, system: JSON_ONLY, prompt };
+          reply = await askJson(call, ['pairs']);
         }
         // An error from the service would most likely come again, and a service that does not answer may take the
         // connector's whole wait each time: no more parts are begun, and those not begun are counted as missed with it

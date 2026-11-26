@@ -52,8 +52,8 @@ export function suggestUnresolvedLinks(
   const taken = new Set([...kept.values()].map((q) => q.id));
   const links: { point: string; q: Question }[] = [];
   for (const point of points) {
-    const guesses = (proposed.get(point.key) ?? []).map((id) => byId.get(id));
-    const q = kept.get(point.key) ?? guesses.find((guess) => guess && !taken.has(guess.id));
+    const proposals = (proposed.get(point.key) ?? []).map((id) => byId.get(id));
+    const q = kept.get(point.key) ?? proposals.find((proposal) => proposal && !taken.has(proposal.id));
     if (!q) continue;
     taken.add(q.id);
     links.push({ point: point.key, q });

@@ -28,7 +28,7 @@ async function fixture(suggest: Suggest) {
   return { store, dealId, scope, byText, answers };
 }
 
-it('suggests the question behind the handle the model named, given the open questions by their text alone', async () => {
+it('suggests the question the model named, given the open questions by their text alone', async () => {
   const asked: Parameters<Suggest>[0][] = [];
   const env = await fixture(async (input) => {
     asked.push(input);

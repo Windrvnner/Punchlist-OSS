@@ -7,7 +7,8 @@ import { setup, val, Mem, type Call } from './reviewKit';
 const lines = (c: Call) => c.prompt.split('\n').filter((l) => /^\d+: /.test(l));
 const isMatch = (c: Call) => c.prompt.includes('does an open question already ask for');
 const points = (n: number) => Array.from({ length: n }, (_, k) => `Point ${k + 1} needs its permit`);
-const questions = (n: number) => Array.from({ length: n }, (_, k) => `Please provide document ${k + 1} for the lenders`);
+const questions = (n: number) =>
+  Array.from({ length: n }, (_, k) => `Please provide document ${k + 1} for the lenders`);
 const opts = { shared: new Mem(), installId: 'pc' };
 
 describe('unresolved points against open questions', () => {
@@ -18,7 +19,8 @@ describe('unresolved points against open questions', () => {
     expect(asked).toHaveLength(1);
     expect(lines(asked[0])).toEqual([
       '1: [point] Point 1 needs its permit', '2: [point] Point 2 needs its permit',
-      '3: [question] Please provide document 1 for the lenders', '4: [question] Please provide document 2 for the lenders',
+      '3: [question] Please provide document 1 for the lenders',
+      '4: [question] Please provide document 2 for the lenders',
       '5: [question] Please provide document 3 for the lenders',
     ]);
     expect(asked[0].prompt).not.toContain('checklist');
