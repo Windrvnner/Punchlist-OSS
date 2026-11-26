@@ -14,7 +14,10 @@ const POINTS = Array.from({ length: 164 }, (_, k) => `Clause ${k + 1}.${k % 7} s
 const LIST: P[] = POINTS.map((text, k) => ({ n: String(k + 1), text }));
 const FINDINGS = Array.from({ length: 126 }, (_, k) => ({ id: `f${k}`, title: `Finding ${k} on the credit agreement`, text: `What finding ${k} says. [1]` }));
 /** point (0-based) → what it repeats: 23 findings and 4 earlier points */
-const SAME = new Map<number, string>([...Array.from({ length: 23 }, (_, k) => [k * 7, `F${k * 5 + 1}`] as [number, string]), [60, 'P26'], [79, 'P30'], [103, 'P62'], [141, 'P113']]);
+const SAME = new Map<number, string>([
+  ...Array.from({ length: 23 }, (_, k) => [k * 7, `f${k * 5}`] as [number, string]),
+  [60, 'P26'], [79, 'P30'], [103, 'P62'], [141, 'P113'],
+]);
 const doc = { doc: 'Issues List – Sponsor counsel (Nov 14).pdf', docId: 'doc_0123456789abcdef01234567' };
 const rec = [{ docId: doc.docId, name: doc.doc }] as never;
 /** the sorter: titles every point asked about, and says what it repeats */
@@ -23,7 +26,14 @@ function sorter(o: { cutSortOver?: number; skip?: number } = {}) {
     const named = /For each of points ([P\d, ]+):/.exec(c.prompt); const shown = [...c.prompt.matchAll(/^P(\d+): /gm)].map((m) => +m[1]);
     const asked = named ? named[1].split(', ').map((x) => +x.slice(1)) : shown;
     if (o.cutSortOver && asked.length > o.cutSortOver) throw Object.assign(new Error('cut off'), { code: 'cutoff' });
-    return { points: asked.filter((p) => p !== o.skip).map((p) => ({ p, title: `Point ${p} title`, workstream: p % 2 ? 'legal' : 'Financial', same: SAME.get(p - 1) ?? '' })) };
+    // a finding the call does not show (another share's) is not named (#1162)
+    const sameAs = (p: number) => {
+      const said = SAME.get(p - 1) ?? '';
+      return /^f\d/.test(said) && !c.prompt.includes(`\n${said}: `) ? '' : said;
+    };
+    const workstream = (p: number) => (p % 2 ? 'legal' : 'Financial');
+    const row = (p: number) => ({ p, title: `Point ${p} title`, workstream: workstream(p), same: sameAs(p) });
+    return { points: asked.filter((p) => p !== o.skip).map(row) };
   };
 }
 /**
@@ -78,7 +88,8 @@ describe('reading an issues list', () => {
     expect(out.points.filter((p) => p.same && 'finding' in p.same).length).toBe(23);
     expect(out.points[60].same).toEqual({ point: 25 });
     expect(out.points[141].same).toEqual({ point: 112 });
-    expect(s.calls.filter(isSort)[0].prompt).toContain('F1: Finding 0 on the credit agreement: What finding 0 says.');   // citation markers left out
+    // citation markers left out
+    expect(s.calls.filter(isSort)[0].prompt).toContain('f0: Finding 0 on the credit agreement: What finding 0 says.');
     expect(s.calls.filter(isSort)[0].prompt).not.toContain('"title"');   // the sorter is not asked for a title
   });
   it('asks for each point in the list\'s own words, never reworded', async () => {
@@ -181,7 +192,8 @@ describe('reading an issues list', () => {
     const F = Array.from({ length: 126 }, (_, k) => ({ id: `f${k}`, title: `Finding ${k}`, text: 'What it says.' }));
     // the sorter names a finding for point 900 and an earlier point for point 1000; the confirmation says only the first is the same
     const sort = (c: Call) => { const named = /For each of points ([P\d, ]+):/.exec(c.prompt); const asked = named ? named[1].split(', ').map((x) => +x.slice(1)) : [...c.prompt.matchAll(/^P(\d+): /gm)].map((m) => +m[1]);
-      return { points: asked.map((p) => ({ p, title: `T${p}`, workstream: 'Legal', same: p === 900 ? 'F3' : p === 1000 ? 'P2' : '' })) }; };
+      const same = (p: number) => (p === 900 ? 'f2' : p === 1000 ? 'P2' : '');
+      return { points: asked.map((p) => ({ p, title: `T${p}`, workstream: 'Legal', same: same(p) })) }; };
     let pairs = '';
     const confirm = (c: Call) => { pairs += c.prompt; return { same: [...c.prompt.matchAll(/^Pair (\d+)\nA: Point (\d+):/gm)].filter((m) => m[2] === '900').map((m) => +m[1]) }; };
     const { r } = await read(stand(L, { sort, confirm }));
@@ -202,7 +214,10 @@ describe('reading an issues list', () => {
     const F = Array.from({ length: 10 }, (_, k) => ({ id: `f${k}`, title: `Finding ${k}`, text: words(k, 'The lenders bear the cost.') }));
     const L = Array.from({ length: 20 }, (_, k) => ({ n: String(k + 1), text: k === 3 ? words(2, 'The borrower bears the cost.') : `Point ${k + 1} raises clause ${k} of the agreement here.` }));
     expect(F[2].text.length).toBeGreaterThan(400);
-    const sort = (c: Call) => { const shown = [...c.prompt.matchAll(/^P(\d+): /gm)].map((m) => +m[1]); return { points: shown.map((p) => ({ p, title: `T${p}`, workstream: 'Legal', same: p === 4 ? 'F3' : '' })) }; };
+    const sort = (c: Call) => {
+      const shown = [...c.prompt.matchAll(/^P(\d+): /gm)].map((m) => +m[1]);
+      return { points: shown.map((p) => ({ p, title: `T${p}`, workstream: 'Legal', same: p === 4 ? 'f2' : '' })) };
+    };
     const s = setup(stand(L, { sort }), { d1: rec }, { shared: new Mem(), installId: 'pc' });
     const r = await s.ai.issuesList!({ dealId: 'd1', doc, findings: F, workstreams: ['Legal', 'Financial'] });
     const sorts = s.calls.filter(isSort);
@@ -210,5 +225,56 @@ describe('reading an issues list', () => {
     expect(sorts[0].prompt).toContain(F[2].text);                                // the whole text, past character 240
     expect(s.calls.filter(isConfirm).length).toBe(0);                           // nothing was shown shortened
     expect(r.ok && r.value.points[3].same).toEqual({ finding: 'f2' });
+  });
+});
+
+describe('the issues list sorter names findings by their ids (#1162)', () => {
+  const ten = plain(10);
+  /** a sorter that says point 4 repeats `same`, which is what call `n` answers */
+  const repeats = (same: (n: number) => string) => {
+    let n = 0;
+    return (c: Call) => {
+      n++;
+      const shown = [...c.prompt.matchAll(/^P(\d+): /gm)].map((m) => +m[1]);
+      return { points: shown.map((p) => ({ p, workstream: 'Legal', same: p === 4 ? same(n) : '' })) };
+    };
+  };
+  const sortWith = async (sort: (c: Call) => unknown) => {
+    const s = setup(stand(ten, { sort }), { d1: rec }, { shared: new Mem(), installId: 'pc' });
+    return { s, r: await ask(s), sorts: s.calls.filter(isSort) };
+  };
+
+  it('lists each finding by its id and asks for the id of the finding a point repeats', async () => {
+    const { sorts } = await sortWith(repeats(() => ''));
+    expect(sorts[0].prompt).toContain('\nf0: Finding 0 on the credit agreement: What finding 0 says.\nf1: ');
+    expect(sorts[0].prompt).not.toMatch(/^F\d+: /m);
+    expect(sorts[0].prompt).toContain('"same": the id of the finding, or the earlier point (P2), that raises');
+  });
+
+  it('maps a finding named by its id back to that finding', async () => {
+    const { r, sorts } = await sortWith(repeats(() => 'f5'));
+    expect(sorts.length).toBe(1);
+    expect(val(r).points[3].same).toEqual({ finding: 'f5' });
+  });
+
+  it('asks again, with the same prompt, when a reply names a label or an id it was not shown', async () => {
+    const { r, sorts } = await sortWith(repeats((n) => ['F6', 'f5 ', 'f5'][n - 1]));
+    expect(sorts.length).toBe(3);
+    expect(sorts[2].prompt).toBe(sorts[0].prompt);
+    expect(val(r).points[3].same).toEqual({ finding: 'f5' });
+  });
+
+  it('sizes each share of 2,000 findings with their ids counted, so every call stays within the budget', async () => {
+    const LIMIT = 20_000;
+    const F = Array.from({ length: 2000 }, (_, k) => ({ id: `f_01HZX3K9Q4V7M2B5N8C1D6${String(k).padStart(4, '0')}`,
+      title: `F${k}`, text: '' }));
+    const s = setup(stand(ten, { sort: repeats(() => '') }), { d1: rec }, { shared: new Mem(), installId: 'pc' });
+    s.svc.inputLimit = () => LIMIT;
+    const r = await s.ai.issuesList!({ dealId: 'd1', doc, findings: F, workstreams: ['Legal'] });
+    const sorts = s.calls.filter(isSort);
+    expect(val(r).points.length).toBe(10);
+    expect(sorts.length).toBeGreaterThan(1);
+    expect(sorts[0].prompt).toMatch(/^These are the findings already raised on a deal, \d+ of 2000, by their titles:/);
+    for (const c of sorts) expect(tokensOf(c.prompt)).toBeLessThanOrEqual(LIMIT * 0.6);
   });
 });
