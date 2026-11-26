@@ -34,8 +34,8 @@ export type FolderFound = { folders: string[]; docs: DealDoc[]; near: string[] }
 /** what the search helper read: its reply and the documents it gave the model */
 export type Looked = Result<{ reply: Record<string, unknown>; sent: Sent[] }>;
 export type FindingRecord = { title: string; body: string[]; status: string };
-/** a question of the Q&A log as the store holds it (qaRow.ts), with its record id */
-export type QuestionRecord = QaRecord & { id: string };
+/** a question of the Q&A log as the store holds it (qaRow.ts) */
+export type QuestionRecord = QaRecord;
 
 /** what the agent needs of the AI runners (ai.ts), which make it */
 export interface AgentKit {

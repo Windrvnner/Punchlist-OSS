@@ -82,21 +82,6 @@ describe('conversations', () => {
     const again = make({ kv, local }); await again.store.boot(); expect(again.store.get().threads[convKey(scope)][3].thread).toMatchObject({ id: 'conv_1', tokens: 200 });
   });
 
-  it('keeps the question handles of the model service’s conversation across a restart (#1105)', async () => {
-    const local = new MemoryLocal();
-    const kv = disk();
-    const questions = [{ handle: 'R1', id: 'q_3' }, { handle: 'R2', id: 'q_7' }];
-    const thread = { id: 'conv_1', model: 'standard', tokens: 100, tags: [], questions };
-    const ai: Partial<AiService> = { answer: async () => ok({ text: 'Answer', sources: [], thread }) };
-    const { store } = make({ kv, local, ai });
-    const dealId = await deal(store);
-    const scope: Scope = { kind: 'deal', dealId };
-    await ask(store, scope, 'first');
-    const again = make({ kv, local });
-    await again.store.boot();
-    expect(again.store.get().threads[convKey(scope)][1].thread?.questions).toEqual(questions);
-  });
-
   it('asks, shows pending, then the answer; the thread is saved locally and survives a restart', async () => {
     const local = new MemoryLocal(); const kv = disk();
     const { store, repo } = make({ kv, local }); const dealId = await deal(store);

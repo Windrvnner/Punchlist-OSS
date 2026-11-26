@@ -59,12 +59,7 @@ export function merged(kept: Message[], here: Message[]): { list: Message[]; unk
 /** what the chat agent did for an answer, as it is kept with the answer */
 const Research = z.object({ steps: z.array(z.object({ kind: z.enum(['search', 'read', 'stop']), text: z.string(), result: z.string(), done: z.boolean(), found: z.array(z.object({ where: z.string(), quote: z.string() })).optional() })), ms: z.number(), read: z.object({ docs: z.number(), of: z.number() }).optional() });
 /** the model service's conversation an answer left, as it is kept with the answer */
-const Thread = z.object({
-  id: z.string().min(1), model: z.string(), tokens: z.number(),
-  tags: z.array(z.object({ tag: z.string(), dealId: z.string(), docId: z.string() })),
-  transcript: z.string().optional(), call: z.string().optional(),
-  questions: z.array(z.object({ handle: z.string(), id: z.string() })).optional(),
-});
+const Thread = z.object({ id: z.string().min(1), model: z.string(), tokens: z.number(), tags: z.array(z.object({ tag: z.string(), dealId: z.string(), docId: z.string() })), transcript: z.string().optional(), call: z.string().optional() });
 /** the action offered under an answer (#1054), as it is kept with the answer */
 const Offer = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('newDeal') }),

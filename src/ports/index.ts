@@ -279,8 +279,6 @@ export interface AiService {
  * of the search; "p. 41"); `found` are the passages a search
  * returned, each with where it is. `done` is false only for the step being taken now.
  */
-/** a question a kept conversation showed the model, by its handle (R1, …), and the question's record id (#1105) */
-export interface QuestionHandle { handle: string; id: string }
 /**
  * The conversation the model service keeps for a chat (decisions: Long conversations), kept with each answer so
  * that the next question carries it on, on whichever PC asks it. `tags` are the documents the model was shown in it, by
@@ -288,12 +286,7 @@ export interface QuestionHandle { handle: string; id: string }
  * that holds the conversation as it was when it was last compacted. `call` is the tool call the answer was given by, when
  * the model called tools natively: the next question answers it first.
  */
-export interface ModelThread {
-  id: string; model: string; tokens: number; tags: { tag: string; dealId: string; docId: string }[];
-  transcript?: string; call?: string;
-  /** the questions shown by handle in the conversation, so that each keeps its handle on later turns (#1105) */
-  questions?: QuestionHandle[];
-}
+export interface ModelThread { id: string; model: string; tokens: number; tags: { tag: string; dealId: string; docId: string }[]; transcript?: string; call?: string }
 export interface ResearchStep { /** 'stop': the person stopped the answer */ kind: 'search' | 'read' | 'stop'; text: string; result: string; done: boolean; found?: { where: string; quote: string }[] }
 /** What the chat agent did for one answer: its steps, in order, how long it took in all (milliseconds), and how many of the deal's (or deals') documents a model was given (`read.docs` of `read.of`). */
 export interface Research { steps: ResearchStep[]; ms: number; read?: { docs: number; of: number } }
