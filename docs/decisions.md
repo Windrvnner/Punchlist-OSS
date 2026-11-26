@@ -180,7 +180,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - There is no Conversations tab.
 - One run of the chat agent, whether for a chat answer or for the checks' gap search, takes up to `limits.chatTurns`
   (25) turns. One search run, in a chat or in the checks, makes up to `limits.searchCalls` (15) calls. Both are inputs
-  in the control file (`src/control.ts`). Nothing else counts calls, and a chat has no length limit (#1066).
+  in the control file (`src/control.ts`). A check has no further call allowance of its own (#1066).
 - Conversations are kept per person in the shared folder and follow the person between PCs. In the app, each person sees only their own; the files are readable by anyone with access to the folder, and no encryption is planned.
 - Answers cite sources sentence by sentence with a dotted underline, without numbered markers (#636). While a finding is being edited, each citation shows as a tag of at most 30 characters after its sentence (#636). An answer can become a finding, a question, or a response.
 - Cited phrases show the pointer cursor when they open a source. Hover-only citations keep the default cursor (#440).

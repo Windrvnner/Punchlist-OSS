@@ -1029,7 +1029,7 @@ export function nodeAi(o: AiOptions) {
       top(dealId, query, new Set(), Infinity, await coreOf(dealId), false).map((rec) => ({ dealId, rec }))));
     return interleave(per);
   }
-  /** one page of the chat's document search, read by the helper under a search's budget of calls (`budget`) */
+  /** one page of the chat's document search, read by the helper under a search's budget of calls (`budgetOf`) */
   function readSearchPage(budgetOf: { left: number }, deals: string[], model: string, ask: string,
     docs: DealDoc[]): Promise<Looked> {
     const shape = '{"text": "what they say, with [n] markers", "sources": [...]}';
