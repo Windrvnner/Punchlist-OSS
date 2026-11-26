@@ -42,6 +42,22 @@ let t = 0; export const clock = () => new Date(Date.UTC(2026, 10, 10, 9, 0, 0, t
 export const isCoreAsk = (c: { prompt: string }) => c.prompt.includes('Which are the core documents');
 export const isFixAsk = (c: { prompt: string }) => c.prompt.includes('It cannot be read as written');
 export const isAffectsAsk = (c: { prompt: string }) => c.prompt.includes('Which of them could the new documents change?');
+/** the ids an affects prompt lists in its block headed by `head`, in order (#1162) */
+const affectsBlock = (c: { prompt: string }, head: string) =>
+  (c.prompt.split('\n\n').find((b) => b.startsWith(head))?.split('\n').slice(1) ?? [])
+    .map((line) => line.slice(0, line.indexOf(': ')));
+/** the ids an affects prompt shows: its new documents, findings and settled checklist items (#1162) */
+export const affectsShown = (c: { prompt: string }) => ({
+  docs: affectsBlock(c, 'These documents have just arrived'),
+  findings: affectsBlock(c, "These are the deal's open findings"),
+  items: affectsBlock(c, 'These are the checklist items already settled'),
+});
+/** an affects reply whose pairs name the nth finding (F1), settled item (C7) or new document (N3) shown, by its id */
+export function affectedAs(c: { prompt: string }, ...pairs: string[]) {
+  const shown = affectsShown(c);
+  const lists: Record<string, string[]> = { F: shown.findings, C: shown.items, N: shown.docs };
+  return { affected: pairs.map((p) => p.replace(/\b([FCN])(\d+)\b/g, (_m, l: string, n: string) => lists[l][+n - 1])) };
+}
 export const isVerifyAsk = (c: { prompt: string }) => c.prompt.includes('does it still stand as written?') || c.prompt.includes('does it stay closed?');
 export const isPickAsk = (c: { prompt: string }) => c.prompt.includes('Which of them should be read for this?');
 export const isQueryAsk = (c: { prompt: string }) => c.prompt.includes('write up to 3 short searches');
