@@ -65,7 +65,7 @@ import { SERVICE } from '../control';
 import { codeOf, type AgentKit, type AgentOptions, type AgentQuestion } from './agentKit';
 import type { Cited, Run, Sent } from './agentKit';
 import { AgentRun } from './agentRun';
-import { catchUp, search, type What } from './agentSearch';
+import { catchUp, pageNumber, search, type What } from './agentSearch';
 import { FolderMemory, FolderReader } from './agentFolder';
 import { KeptConversation, type Turn } from './agentTalk';
 import { inlineTools } from './agentPrompts';
@@ -80,7 +80,9 @@ type Answered = {
   thread?: ModelThread;
 };
 /** the agent's limits, its options with their defaults */
-type Limits = { turns: number; width: number; folderDocs: number; compactAt: (model: string) => number };
+type Limits = {
+  turns: number; width: number; folderDocs: number; searchPage: number; compactAt: (model: string) => number;
+};
 
 const SEARCHES: readonly What[] = ['documents', 'findings', 'qa', 'all'];
 const REPLY_SHAPE = '{"tool": …} or {"text": "…", "sources": […]}';
@@ -90,6 +92,7 @@ export function chatAgent(kit: AgentKit, opts: AgentOptions = {}) {
     turns: Math.max(1, opts.turns ?? 25),
     width: Math.max(1, opts.width ?? 8),
     folderDocs: Math.max(1, opts.folderDocs ?? 200),
+    searchPage: Math.max(1, opts.searchPage ?? 25),
     compactAt: (model) => (typeof opts.compactAt === 'function' ? opts.compactAt(model) : opts.compactAt ?? 125_000),
   };
   /**
@@ -143,7 +146,7 @@ class Answering {
     private readonly limits: Limits,
     folderMemory: FolderMemory,
   ) {
-    this.run = new AgentRun(kit, question, progress);
+    this.run = new AgentRun(kit, question, progress, { width: limits.width, searchPage: limits.searchPage });
     this.folders = new FolderReader(this.run, folderMemory, limits);
     this.conversation = new KeptConversation(this.run, limits.compactAt, limits.width);
   }
@@ -259,7 +262,8 @@ class Answering {
       const asked = String(reply.what ?? '').trim().toLowerCase().replace(/[^a-z]/g, '');
       const what = SEARCHES.find((w) => w === asked) ?? 'documents';
       const query = strings(reply.query).join(' ');
-      return query ? search(this.run, what, query) : 'You asked for a search without a query: give "query".';
+      if (!query) return 'You asked for a search without a query: give "query".';
+      return search(this.run, what, query, pageNumber(reply.page));
     }
     if (tool === 'read') {
       const named = listOf(reply.docs).map((x) => (int(x) !== null ? `D${x}` : String(x)));

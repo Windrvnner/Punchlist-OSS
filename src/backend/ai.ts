@@ -72,6 +72,7 @@ import {
 import { docFamilies } from './related';
 import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
+import { responseHeader } from './qaRow';
 import {
   RATINGS, riskGroups, keyRisksOf, unratedFindings, type Grouped, type Rating, type RiskGroup,
 } from '../domain/memo';
@@ -151,6 +152,8 @@ export interface AiOptions {
   checkSearchCalls?: number;
   /** a folder of more documents than this is read by the chat agent only once the person agrees (default: control.limits.folderDocs) */
   folderDocs?: number;
+  /** findings or questions one search of them gives the chat agent a page (default: control.limits.searchPage) */
+  searchPage?: number;
   /** how blacklines are read (default: control.blackline.pipeline): A, the model cannot see strike-through and colors; B, it can */
   blackline?: 'A' | 'B';
   /** about how many turns the chat agent takes before it answers with what it has (default: control.limits.chatTurns) */
@@ -1282,7 +1285,12 @@ export function nodeAi(o: AiOptions) {
     },
   };
   // a kept conversation is compacted by 80% of what one call to its model may send at most, leaving room for the turn's own question and documents
-  const agentOpts = { turns: o.turns ?? control.limits.chatTurns, width, compactAt: (model: string) => Math.min(o.compactAt ?? control.limits.compactAt, Math.floor((inLimit(model) * control.limits.compactShare) / 100)), folderDocs: o.folderDocs ?? control.limits.folderDocs };
+  const compactAt = (model: string) =>
+    Math.min(o.compactAt ?? control.limits.compactAt, Math.floor((inLimit(model) * control.limits.compactShare) / 100));
+  const agentOpts = {
+    turns: o.turns ?? control.limits.chatTurns, width, compactAt,
+    folderDocs: o.folderDocs ?? control.limits.folderDocs, searchPage: o.searchPage ?? control.limits.searchPage,
+  };
   /** the chat agent */
   const agent = chatAgent(agentKit, agentOpts);
 
@@ -2272,7 +2280,10 @@ export function nodeAi(o: AiOptions) {
 
   type Asked = { id: string; n?: number; text?: string; response?: string; respondedBy?: string; responded?: string; linkedFinding?: string; provenance?: { origin?: string } };
   const saidOf = (q: Asked) => createHash('sha256').update(String(q.response ?? '').replace(/\s+/g, ' ').trim()).digest('hex').slice(0, 16);
-  const responseLines = (qs: Asked[]) => qs.map((q) => `Q${q.n}: ${String(q.text ?? '').replace(/\s+/g, ' ').trim()}\nResponse to Q${q.n}${q.provenance?.origin === 'ai' ? ' (drafted by AI from the data room, not received from anyone)' : q.respondedBy ? ` from ${q.respondedBy}` : ''}${q.responded ? `, ${q.responded}` : ''}: ${q.response!.replace(/\s+/g, ' ').trim()}`).join('\n');
+  const responseLines = (qs: Asked[]) => qs.map((q) => {
+    const asked = `Q${q.n}: ${String(q.text ?? '').replace(/\s+/g, ' ').trim()}`;
+    return `${asked}\n${responseHeader(q)}: ${q.response!.replace(/\s+/g, ' ').trim()}`;
+  }).join('\n');
   /** a deal's questions that have a response, by number */
   // (called only for a deal already read: after its findings were listed, or for a finding read by id, which reads its deal)
   async function answered(dealId: string): Promise<Asked[]> {

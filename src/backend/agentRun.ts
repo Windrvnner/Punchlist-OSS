@@ -46,7 +46,16 @@ export class AgentRun {
   /** the number of the next tag */
   private nextTag = 1;
 
-  constructor(readonly kit: AgentKit, readonly question: AgentQuestion, readonly progress: Run) {
+  /**
+   * `pages`: how many a search gives at a time, documents (`width`) and findings or questions (`searchPage`), as the
+   * agent's limits set them
+   */
+  constructor(
+    readonly kit: AgentKit,
+    readonly question: AgentQuestion,
+    readonly progress: Run,
+    readonly pages = { width: 8, searchPage: 25 },
+  ) {
     if (kit.talk) this.keepTags(question.thread?.tags ?? []);
   }
 
