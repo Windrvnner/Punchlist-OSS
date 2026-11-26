@@ -58,8 +58,7 @@ function RoomRow({ room, name }: { room: NonNullable<TwinFound['room']>; name: s
   const matched = room.matched.toLocaleString('en-US');
   const files = room.files.toLocaleString('en-US');
   const how = `${matched} of the new folders’ ${files} files match ${name}’s documents by name and size, `
-    + `and ${room.same} of the ${room.printed} compared by content are identical. `
-    + 'Files other deals also hold, such as precedents, are not counted';
+    + 'and the smallest match is identical by content. Files in a precedents folder are not counted';
   return (
     <div class="srow">
       <div class="k">Data Room</div>

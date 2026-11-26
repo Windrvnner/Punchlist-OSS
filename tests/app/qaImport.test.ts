@@ -123,7 +123,7 @@ it('finds the proposed layout, shares the prepared rows with the preview, and im
     expect(previewRows.map((row) => row.dates.received))
       .toEqual(['2026-09-30', '2026-10-01', '2026-10-15', '', '2026-10-15']);
     const dry = previewImport(app.store, dealId, choices.mode, prepared.rows, choices.answered);
-    const plan = summarizeQaImport(app.store.get(), dealId, importKey.qa(dealId), choices.mode, prepared, dry);
+    const plan = summarizeQaImport(importKey.qa(dealId), prepared, dry);
     expect(plan).toMatchObject({ total: 2_000, preview: { created: 2_000 } });
     const submitted = await submitQaImport(app.store, dealId, { table: layout.value, choices }, prepared.rows);
     expect(submitted).toEqual(ok(undefined));
@@ -194,7 +194,7 @@ it('reopens the kept choices after a committed Append loses its reply, without a
   }
 });
 
-it('previews a control-only question from the file and submits only the sanitized rows', async () => {
+it('previews a control-only question from the file and imports it exactly as given', async () => {
   await useKeptPort();
   const app = recoveryApp();
   try {
@@ -211,11 +211,11 @@ it('previews a control-only question from the file and submits only the sanitize
     const { prepared, previewRows } = prepareQaImport(table, choices.mapping);
     expect(previewRows).toHaveLength(2);
     expect(previewRows[0]).toMatchObject({ cells: shown, dates: { received: '2026-09-30' } });
-    expect(prepared.skipped).toBe(1);
-    expect(prepared.rows.map((row) => row.text)).toEqual([question]);
+    expect(prepared.skipped).toBe(0);
+    expect(prepared.rows.map((row) => row.text)).toEqual(['\u007f', question]);
     const submitted = await submitQaImport(app.store, dealId, { table, choices }, prepared.rows);
     expect(submitted).toEqual(ok(undefined));
-    expect(dealQuestions(app.store.get(), dealId).map((row) => row.text)).toEqual([question]);
+    expect(dealQuestions(app.store.get(), dealId).map((row) => row.text)).toEqual(['\u007f', question]);
   } finally {
     app.store.closing();
     await app.repo.close();

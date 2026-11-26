@@ -4,7 +4,8 @@
  * in one part per slide. This is for indexing only: what a document is found by. Its pages are made by the converter
  * when it is first sent to the model service or opened, so that the cited page and the page shown are the same page.
  *
- * Word's tracked changes are read as accepted, as its pages show them: inserted text counts, deleted text does not.
+ * Word's tracked changes are read as accepted: inserted text counts, deleted text does not. Its pages show them as
+ * markup, deleted words included, so a word found only in deleted text is shown on a page but is not in this index.
  */
 import { inflateRawSync } from 'node:zlib';
 

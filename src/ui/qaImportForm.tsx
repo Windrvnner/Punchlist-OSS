@@ -15,6 +15,7 @@ import type { ImportMode, QaPreviewRow } from '../app/qaImport';
 import { logChoice } from '../app/qaLog';
 import { SERVICE, AI_LABEL } from '../control';
 import type { ImportTable, ImportChange } from '../app/transfer';
+import type { Suggestion } from '../domain/qaMatch';
 import type { Store } from '../app/store';
 import type { Busy, ImportPlan, QaImportActions, QaImportState } from './qaImport';
 
@@ -51,6 +52,9 @@ export function QaImportForm({ store, dealId, qa, plan, actions }: {
       <ModeRow mode={mode} importing={importing} onPick={qa.setMode} />
       {mapping.response != null && <AnsweredRow answered={qa.answered} importing={importing} onPick={qa.setAnswered} />}
       {mode === 'merge' && !!plan.preview?.changes.length && <ChangesRow changes={plan.preview.changes} />}
+      {mode === 'merge' && !!plan.preview?.suggestions.length && (
+        <SuggestionsRow qa={qa} suggestions={plan.preview.suggestions} />
+      )}
       {qa.restart
         ? <LeaveFoot id="im-restart-ask" ask="Clear this import and start over?" go="Start Over"
           keep={() => qa.setRestart(false)} leave={actions.startOver} />
@@ -229,6 +233,29 @@ function AnsweredRow({ answered, importing, onPick }: {
   );
 }
 
+/**
+ * Rows that matched no question, with the one each could slot in as. Nothing is applied until the person accepts it;
+ * a row left alone is added as a new question.
+ */
+function SuggestionsRow({ qa, suggestions }: { qa: ReadQa; suggestions: Suggestion[] }) {
+  const accept = (s: Suggestion) => {
+    qa.setAccepted([...qa.accepted, { line: s.line, text: s.text, questionId: s.questionId }]);
+  };
+  return (
+    <div class="srow top"><div class="k">Could Match</div><div class="imprev imsug" id="im-suggest"><table>
+      <thead><tr><th>Row</th><th>In the file</th><th>Could be</th><th /></tr></thead>
+      <tbody>
+        {suggestions.map((s) => <tr key={s.line}>
+          <td>{s.line}</td>
+          <td title={s.text}>{s.text}</td>
+          <td title={s.questionText}>Q{s.n}: {s.questionText}</td>
+          <td><button class="btn sm" type="button" data-accept={s.line} onClick={() => accept(s)}>Accept</button></td>
+        </tr>)}
+      </tbody>
+    </table></div></div>
+  );
+}
+
 /** Every field a merge will overwrite, in the existing scrollable preview. */
 function ChangesRow({ changes }: { changes: ImportChange[] }) {
   return (
@@ -309,13 +336,11 @@ function footLine(qa: ReadQa, plan: ImportPlan) {
 
 /** "Import 2,000 questions · 1,950 new · 50 existing will change", then what was left out or not read */
 function importSummary(mode: ImportMode, plan: ImportPlan) {
-  const { preview, counts, total } = plan;
-  const created = preview ? preview.created : counts.add;
-  const updated = preview ? preview.updated : counts.match;
+  const { preview, total } = plan;
   return [
     `Import ${plural(total, 'question')}`,
-    `${num(created)} new`,
-    mode === 'merge' ? `${num(updated)} existing will change` : '',
+    preview ? `${num(preview.created)} new` : '',
+    preview && mode === 'merge' ? `${num(preview.updated)} existing will change` : '',
     preview?.restored ? `${num(preview.restored)} deleted brought back` : '',
     ...leftOutNotes(plan.prepared),
   ].filter(Boolean);

@@ -1,8 +1,9 @@
 /**
  * Import a prepared table into a deal's Q&A log as one transaction: every row
- * lands or none does. Merge matches each row to a question by its wording, then
- * its number, never another party's nor one naming another identifier (#125), brings back a
- * deleted question a row matches, and takes only the non-empty incoming fields; append always adds.
+ * lands or none does. Merge matches each row to a question like an XLOOKUP (`importMatches`): the same number, text and
+ * sender, else the text and sender alone; it brings back a deleted question a row matches, and takes only the
+ * non-empty incoming fields; a row that matches nothing, unless the person accepted a suggestion for it, is a new
+ * question. Append always adds.
  * Status comes only from a mapped Status column. Undo restores each touched question to exactly what it
  * was before the batch — once, however many rows named it — and removes the
  * ones the batch created.
@@ -12,15 +13,13 @@ import { define, type Upsert, type AuditDraft } from '../command';
 import { Question, Finding, Tombstone, DealId, QuestionId, FindingId, QuestionStatus, isRealDate } from '../../domain/model';
 import { setResponse, setQuestionStatus, checkQuestion } from '../../domain/transitions';
 import { numbering } from './questions';
+import { matchQuestions, withAccepted, AcceptedMatch } from '../../domain/qaMatch';
 import { sameText, sameWords, type ImportRow } from '../../domain/importExport';
-import { misreadKey, canMatchNumber, identifierSig, sameIdentifiers } from '../../domain/logWrite';
 import { ok, fail, notFound, rejected } from '../../domain/result';
 import { dealQuestions, nextQuestionNumber } from '../state';
 import { derivedId } from '../../domain/derivedId';
 import { key } from '../../domain/checklist';
 import { changedSince } from './undo';
-import { matchFitTier, type FitChoice, type FitSource } from './importFit';
-import { FitLists, fitSignature, type FitCandidate, type FitSignature } from './importFitLists';
 import { commandLabel } from '../commandLabels';
 import type { Operation } from '../../domain/model';
 import type { State } from '../state';
@@ -30,9 +29,40 @@ const IDENTITIES = new Set(['askedBy', 'respondedBy', 'workstream']);
 const Ymd = z.string().refine((v) => v === '' || isRealDate(v));
 export const ImportRowSchema = z.object({ line: z.number().int().positive().optional(), n: z.number().int().positive().nullable(), text: z.string().min(1), askedBy: z.string(), received: Ymd, workstream: z.string(), priority: z.enum(['', 'High', 'Medium', 'Low']), response: z.string(), respondedBy: z.string(), responded: Ymd, status: z.union([QuestionStatus, z.literal('')]) });
 
+/** a deal's deleted questions, newest deletion first: their tombstones, and each question as it was, by id */
+function deletedQuestions(state: State, dealId: string) {
+  const buried = Object.values(state.tombstones)
+    .filter((t) => t.kind === 'question' && t.dealId === dealId && !state.questions[t.id])
+    .sort((a, b) => b.at.localeCompare(a.at));
+  const gone = new Map(buried.map((t) => [t.id, Question.parse({ ...(t.snapshot as object) })]));
+  return { buried, gone };
+}
+
+/**
+ * Which question each row is, by row index, for the import and its preview alike. Merge looks each row up
+ * (`matchQuestions`) among the live questions, then the deleted ones, and adds the suggestions the person accepted;
+ * Append matches nothing.
+ */
+export function importMatches(
+  state: State, dealId: string, mode: 'merge' | 'append', rows: ImportRow[], accepted: AcceptedMatch[],
+): Map<number, string> {
+  if (mode !== 'merge') return new Map();
+  const pools = [dealQuestions(state, dealId), [...deletedQuestions(state, dealId).gone.values()]];
+  const known = new Set(pools.flat().map((q) => q.id));
+  return withAccepted(matchQuestions(rows, pools), rows, accepted, known);
+}
+
 export const ImportQuestions = define({
   name: 'ImportQuestions',
-  input: z.object({ dealId: DealId, mode: z.enum(['merge', 'append']), rows: z.array(ImportRowSchema).min(1, 'Nothing to import'), /** the person checked "Mark questions that have a response as Answered" */ answerResponded: z.boolean().default(false) }),
+  input: z.object({
+    dealId: DealId,
+    mode: z.enum(['merge', 'append']),
+    rows: z.array(ImportRowSchema).min(1, 'Nothing to import'),
+    /** the person checked "Mark questions that have a response as Answered" */
+    answerResponded: z.boolean().default(false),
+    /** suggestions the person accepted, for rows that matched nothing */
+    accepted: z.array(AcceptedMatch).default([]),
+  }),
   targets: (s, i) => [...dealQuestions(s, i.dealId).map((q) => q.id), ...Object.values(s.tombstones).filter((t) => t.kind === 'question' && t.dealId === i.dealId).map((t) => t.id), numbering(i.dealId)],
   plan(state, input, ctx) {
     const d = state.deals[input.dealId];
@@ -48,49 +78,11 @@ export const ImportQuestions = define({
     // a number the file itself gives is never handed to a row without one: a later row with that number would be read as a change to it, and the first question lost
     const fileNumbers = new Set(input.rows.map((r) => r.n).filter((n): n is number => n != null));
     const nextFree = () => { let n = maxN + 1; while (fileNumbers.has(n)) n++; return n; };
-    // Merge: which question each row is. By its wording first (the same words, or as a misreading could make them differ), so a
-    // list numbered its own way still lines up: of two questions that read the same, the one with the row's number. Then by
-    // number, but only a question held by that number alone whose meaningful words are mostly the row's: another party's own
-    // question 4 is not the log's question 4 (in doubt, the row is a question of its own). A deleted question is matched the
-    // same way, after the live ones, and is brought back rather than copied.
-    const buried = Object.values(state.tombstones).filter((t) => t.kind === 'question' && t.dealId === d.id && !state.questions[t.id]).sort((a, b) => b.at.localeCompare(a.at));
-    const gone = new Map(buried.map((t) => [t.id, Question.parse({ ...(t.snapshot as object) })]));
+    // a deleted question a row matches is brought back rather than copied
+    const { buried, gone } = deletedQuestions(state, d.id);
     // a deleted question's number is never handed to another question, so it can always be restored under it
     const deadNumbers = new Set([...gone.values()].map((q) => q.n));
-    const matchOf = new Map<number, string>(); const taken = new Set<string>();
-    // A row is matched on everything it gives: question, lender and the rest. The log holds every party's questions, each under Submitted by: a row that
-    // names a party is never another party's question, however alike their words or numbers, so one lender's list never takes
-    // over another's question and the response given to it. A row or question naming no one matches either way.
-    const sameParty = (row: ImportRow, q: Question) => { const r = partyOf(row), p = partyOf(q); return !r || !p || r === p; };
-    // how many of the other fields the row and the question both give, alike: who submitted it, its workstream, the day it
-    // was received and who responded. Of two questions that read the same, these tell which one the row is.
-    const alikeIn = (a: string, b: string) => { const k = key(a); return !!k && k === key(b); };
-    const fit = (row: ImportRow, q: Question) => +alikeIn(row.askedBy, q.askedBy) + +alikeIn(row.workstream, q.workstream) + +(!!row.received && row.received === q.received) + +alikeIn(row.respondedBy, q.respondedBy);
-    if (input.mode === 'merge') {
-      const identifiers = identifierMatcher(input.rows, [...originals.values(), ...gone.values()]);
-      const live = indexQuestions(originals.values(), identifiers.questions);
-      const dead = indexQuestions(gone.values(), identifiers.questions);
-      const keys = input.rows.map((row) => misreadKey(row.text));
-      const order = new Map([...originals.values(), ...gone.values()].map((q, i) => [q.id, i]));
-      // By wording, in passes from the surest: a row holding the question's own number first, deleted questions included (a
-      // row numbered as a deleted question brings that one back rather than taking a live one of the same words); then rows
-      // that agree with a question in more of the other fields before rows that agree in fewer, so an earlier, vaguer row
-      // never takes the question a later row names more fully. Live before deleted.
-      const take = (idx: number, q?: Question) => { if (q) { matchOf.set(idx, q.id); taken.add(q.id); } };
-      for (const pool of [live, dead]) for (const [idx, row] of input.rows.entries()) {
-        if (matchOf.has(idx) || row.n == null) continue;
-        const open = (q: Question) => !taken.has(q.id) && sameParty(row, q) && identifiers.matches(idx, q);
-        take(idx, bestFit(pool.byOwn.get(`${keys[idx]}\0${row.n}`), open, (q) => fit(row, q)));
-      }
-      matchByFit([live.byFit, dead.byFit], input.rows, keys, identifiers.rows, order, matchOf, taken);
-      for (const [idx, row] of input.rows.entries()) {
-        if (matchOf.has(idx) || row.n == null) continue;
-        const alike = (q: Question) => !taken.has(q.id) && sameParty(row, q) && canMatchNumber(q.text, row.text);
-        const holders = live.byN.get(row.n) ?? [];
-        const q = (holders.length === 1 ? holders.find(alike) : undefined) ?? (dead.byN.get(row.n) ?? []).find(alike);
-        if (q) { matchOf.set(idx, q.id); taken.add(q.id); }
-      }
-    }
+    const matchOf = importMatches(state, d.id, input.mode, input.rows, input.accepted);
     // A new question's id is made from the deal, the file's own number, the party and the wording, so the same list imported
     // on two PCs before they meet makes the same records, and the change files hold one of each. The id is fixed at
     // creation: an edit or renumbering later never changes it. The k-th row of the file with the same four makes its own
@@ -200,131 +192,6 @@ export const ImportQuestions = define({
     });
   },
 });
-
-/** Of the questions in `list` that are `open` to a row, the one it fits best, the first of equals; or none. */
-function bestFit(list: Question[] | undefined, open: (q: Question) => boolean, fitOf: (q: Question) => number) {
-  const mine = (list ?? []).filter(open);
-  return mine.length ? mine.reduce((best, q) => (fitOf(q) > fitOf(best) ? q : best)) : undefined;
-}
-
-/** Whether row `idx` and a question name the same identifiers, each worked out once (#125, #127, #128). */
-function identifierMatcher(rows: ImportRow[], questions: Question[]) {
-  const rowSigs = rows.map((row) => fitSignature(identifierSig(row.text)));
-  const questionSigs = new Map(questions.map((q) => [q.id, fitSignature(identifierSig(q.text))]));
-  return {
-    matches: (idx: number, q: Question) => sameIdentifiers(rowSigs[idx], questionSigs.get(q.id)!),
-    rows: rowSigs,
-    questions: questionSigs,
-  };
-}
-
-type FitBuckets = Map<string, FitCandidate[]>;
-
-/** A name that is only spaces or a period names no one. */
-function partyOf(row: ImportRow | Question): string {
-  return key(row.askedBy);
-}
-
-function othersOf(row: ImportRow | Question): string[] {
-  return [key(row.workstream), row.received, key(row.respondedBy)];
-}
-
-function fieldSignatures(row: ImportRow | Question, wording: string): [string, number][] {
-  const fields = othersOf(row);
-  const signatures: [string, number][] = [];
-  for (let mask = 0; mask < 8; mask++) {
-    const selected = fields.filter((_, i) => mask & (1 << i));
-    if (selected.some((value) => !value)) continue;
-    const values = fields.map((value, i) => mask & (1 << i) ? value : '');
-    signatures.push([`${wording}\0${values.join('\0')}\0${mask}`, selected.length]);
-  }
-  return signatures;
-}
-
-/** Look up live or deleted questions by number and wording, and by the other fields each question gives. */
-function indexQuestions(questions: Iterable<Question>, signatures: ReadonlyMap<string, FitSignature>) {
-  const byN = new Map<number, Question[]>();
-  const byOwn = new Map<string, Question[]>();
-  const byFit: FitBuckets = new Map();
-  const add = <Key, Value>(map: Map<Key, Value[]>, key: Key, value: Value) => {
-    const list = map.get(key);
-    if (list) list.push(value);
-    else map.set(key, [value]);
-  };
-  for (const question of questions) {
-    const wording = misreadKey(question.text);
-    add(byN, question.n, question);
-    add(byOwn, `${wording}\0${question.n}`, question);
-    const party = partyOf(question);
-    const candidate = { id: question.id, signature: signatures.get(question.id)! };
-    for (const [signature] of fieldSignatures(question, wording)) {
-      add(byFit, `a\0${signature}`, candidate);
-      add(byFit, `p\0${party}\0${signature}`, candidate);
-    }
-  }
-  return { byN, byOwn, byFit };
-}
-
-/** The candidate lists for each score, including the allowed fallback to an unnamed party. */
-function fitKeys(row: ImportRow, wording: string): string[][] {
-  const tiers: string[][] = [[], [], [], [], []];
-  const party = partyOf(row);
-  for (const [signature, score] of fieldSignatures(row, wording)) {
-    if (party) {
-      tiers[score + 1].push(`p\0${party}\0${signature}`);
-      tiers[score].push(`p\0\0${signature}`);
-    } else tiers[score].push(`a\0${signature}`);
-  }
-  return tiers;
-}
-
-/** The first question in log order and two available questions, if any, that prove a tie. */
-function chooseFrom(sources: FitSource[], order: ReadonlyMap<string, number>): FitChoice | undefined {
-  const candidates = new Set<string>();
-  let witness: FitChoice['witness'];
-  let first: string | undefined;
-  for (const source of sources) {
-    const { best, tie } = source();
-    if (!best) continue;
-    if (!first || order.get(best)! < order.get(first)!) first = best;
-    candidates.add(best);
-    if (tie && !witness) witness = { candidates: tie, source };
-  }
-  if (!first) return undefined;
-  const other = [...candidates].find((candidate) => candidate !== first);
-  if (!witness && other) witness = { candidates: [first, other] };
-  return { first, witness };
-}
-
-function matchByFit(
-  pools: FitBuckets[], rows: ImportRow[], wording: string[], signatures: FitSignature[],
-  order: ReadonlyMap<string, number>, matched: Map<number, string>, taken: Set<string>,
-): void {
-  const keys = rows.map((row, index) => fitKeys(row, wording[index]));
-  const take = (row: number, question: string) => {
-    matched.set(row, question);
-    taken.add(question);
-  };
-  for (const pool of pools) {
-    const lookups = new Map<string, FitLists>();
-    const sourcesFor = (row: number, tier: number): FitSource[] => keys[row][tier].flatMap((bucket) => {
-      const list = pool.get(bucket);
-      if (!list) return [];
-      let lookup = lookups.get(bucket);
-      if (!lookup) {
-        lookup = new FitLists(list, taken);
-        lookups.set(bucket, lookup);
-      }
-      const source = lookup.forRow(signatures[row]);
-      return source ? [source] : [];
-    });
-    // Earlier tiers already exhausted any higher-scoring options for the remaining rows.
-    for (let tier = 4; tier >= 0; tier--) {
-      const find = (row: number) => matched.has(row) ? undefined : chooseFrom(sourcesFor(row, tier), order);
-      matchFitTier(rows.length, find, take);
-    }
-  }
-}
 
 export const RevertImport = define({
   name: 'RevertImport',

@@ -13,7 +13,8 @@ import {
 } from './state';
 import type { Question, Finding } from '../domain/model';
 import { questionsSheet, findingsSheet, safeFileName, fitCells, suggestMapping, sameWords, type Mapping, type ImportRow } from '../domain/importExport';
-import { ImportQuestions } from './commands/importQuestions';
+import { ImportQuestions, importMatches } from './commands/importQuestions';
+import { suggestMatches, type AcceptedMatch, type Suggestion } from '../domain/qaMatch';
 import { ok, fail, type Result } from '../domain/result';
 
 const MIME = { xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', csv: 'text/csv' } as const;
@@ -162,7 +163,15 @@ export interface ImportChange {
   /** A change between values that match after whitespace is collapsed and trimmed. */
   spacing?: true;
 }
-export interface ImportPreview { created: number; updated: number; /** deleted questions a row matches, brought back */ restored: number; changes: ImportChange[] }
+export interface ImportPreview {
+  created: number;
+  updated: number;
+  /** deleted questions a row matches, brought back */
+  restored: number;
+  changes: ImportChange[];
+  /** rows that matched nothing, and the question each could be: shown, never applied unless accepted */
+  suggestions: Suggestion[];
+}
 const PREVIEW_FIELDS: [keyof Question, string][] = [['text', 'Question'], ['askedBy', 'Submitted by'], ['received', 'Received'], ['workstream', 'Workstream'], ['priority', 'Priority'], ['status', 'Status'], ['response', 'Response'], ['respondedBy', 'Responded by'], ['responded', 'Date']];
 
 /**
@@ -170,10 +179,18 @@ const PREVIEW_FIELDS: [keyof Question, string][] = [['text', 'Question'], ['aske
  * and for each existing question it touches, which fields change from what to what. Because this is the same
  * plan the import runs, the preview cannot disagree with the result.
  */
-export function previewImport(store: Store, dealId: string, mode: 'merge' | 'append', rows: ImportRow[], answerResponded = false): Result<ImportPreview> {
+export function previewImport(
+  store: Store, dealId: string, mode: 'merge' | 'append', rows: ImportRow[], answerResponded = false,
+  accepted: AcceptedMatch[] = [],
+): Result<ImportPreview> {
   const s = store.get();
-  if (!rows.length) return ok({ created: 0, updated: 0, restored: 0, changes: [] });
-  const planned = ImportQuestions.plan(s, { dealId, mode, rows, answerResponded }, { at: store.services.clock.now(), actor: s.user?.name ?? 'Unknown', firm: FIRM, opId: 'preview', ids: store.services.ids });
+  if (!rows.length) return ok({ created: 0, updated: 0, restored: 0, changes: [], suggestions: [] });
+  const input = { dealId, mode, rows, answerResponded, accepted };
+  const context = {
+    at: store.services.clock.now(), actor: s.user?.name ?? 'Unknown', firm: FIRM, opId: 'preview',
+    ids: store.services.ids,
+  };
+  const planned = ImportQuestions.plan(s, input, context);
   if (!planned.ok) return planned;
   let created = 0, updated = 0, restored = 0; const changes: ImportChange[] = [];
   for (const u of planned.value.upserts) {
@@ -188,7 +205,16 @@ export function previewImport(store: Store, dealId: string, mode: 'merge' | 'app
     }
   }
   changes.sort((a, b) => a.n - b.n);
-  return ok({ created, updated, restored, changes });
+  const suggestions = mode === 'merge' ? suggestionsFor(s, dealId, rows, accepted) : [];
+  return ok({ created, updated, restored, changes, suggestions });
+}
+
+/**
+ * Where each row that matched no question could slot in, leaving out what the person already accepted. The rows are
+ * matched exactly as the import matches them, deleted questions included.
+ */
+function suggestionsFor(s: State, dealId: string, rows: ImportRow[], accepted: AcceptedMatch[]): Suggestion[] {
+  return suggestMatches(rows, dealQuestions(s, dealId), importMatches(s, dealId, 'merge', rows, accepted));
 }
 
 /**

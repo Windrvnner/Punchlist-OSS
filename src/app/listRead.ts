@@ -68,7 +68,7 @@ export interface ChecklistText { name: string; lines: string[]; written?: string
 interface MappedChecklistTable { table: ImportTable; mapping: ChecklistMapping }
 
 function mappedTable(table: ImportTable): MappedChecklistTable {
-  return { table, mapping: suggestChecklistColumns(table.columns, table.rows) };
+  return { table, mapping: suggestChecklistColumns(table.columns) };
 }
 
 export async function loadChecklistSource(
