@@ -2141,15 +2141,24 @@ describe('documents and runners together, on a real folder', () => {
     const docs = nodeDocuments({ shared, local, sharedPath: path.join(root, 'shared'), installId: 'office', keeper, folders: async () => [vdr], onIndexed: (d) => { passes.push(ai.firstPass(d)); } });
     ai = nodeAi({ service: svc, docs: { records: docs.records, wanted: docs.wanted, describe: docs.describe, undescribed: docs.undescribed }, keeper, repo, shared, installId: 'office', checklist: () => ({ broad: [{ id: 'b1', text: 'The lock-up ratio is the same in the credit agreement and the term sheet' }], product: [], sector: [{ id: 's1', text: 'The model has been audited' }] }) });
     val(await docs.index('d1', [{ path: vdr, label: 'VDR', files: 0, size: '', indexed: 0, reviewed: 0 }])); await docs.settled('d1'); await Promise.all(passes);
-    expect(docs.records('d1').map((r) => [r.rel, r.pages, r.words, r.summary])).toEqual([['01 Finance/Credit Agreement.pdf', 20, ['facility'], 'This is Credit Agreement.pdf.'], ['01 Finance/Term sheet.pdf', 5, ['sheet', 'term'], 'This is Term sheet.pdf.'], ['09 Misc/Lunch menu.pdf', 1, ['menu'], undefined]]);   // indexing counted the words; only the two that were read were described
-    expect(svc.uploads).toBe(2);                                                                                                                // and only those two were ever sent
+    // indexing counted the words, page numbers included (#1147); only what was read was described: the menu is
+    // read too, as its page number answers to the "1." of the follow-up search, as it does in the word index
+    const pageNumbers = (n: number) => Array.from({ length: n }, (_, i) => String(i + 1)).sort();
+    expect(docs.records('d1').map((r) => [r.rel, r.pages, r.words, r.summary])).toEqual([
+      ['01 Finance/Credit Agreement.pdf', 20, ['facility', ...pageNumbers(20)], 'This is Credit Agreement.pdf.'],
+      ['01 Finance/Term sheet.pdf', 5, ['sheet', 'term', ...pageNumbers(5)], 'This is Term sheet.pdf.'],
+      ['09 Misc/Lunch menu.pdf', 1, ['1', 'menu'], 'This is Lunch menu.pdf.'],
+    ]);
+    expect(svc.uploads).toBe(3);   // and only those three were ever sent
     const found = val(await repo.list('finding', 'd1')).map((l) => l.envelope.data as { title: string; sources: { doc: string; docId: string; loc: string }[] }); expect(found.map((f) => f.title)).toEqual(['Lock-up differs']);
     const a = val(await ai.answer({ dealId: 'd1', message: 'What is the lock-up?', history: [], model: 'standard' })); expect(a.sources.length).toBe(1);
     for (const src of [...found[0].sources, ...a.sources]) expect(val(await docs.page('d1', { doc: src.doc, docId: src.docId }, src.loc))).toMatchObject({ kind: 'pdf', page: Number(src.loc.slice(3)) });
     expect(val(await ai.gaps('d1'))).toEqual([{ title: 'The model has been audited' }]);
     expect(fs.readdirSync(path.join(root, 'shared')).filter((n) => n.startsWith('checks-'))).toEqual(['checks-office-d1.jsonl']);                       // beside the deal's other shared files, and a second window on the same folder reads it
     expect(val(await nodeAi({ service: svc, docs: { records: docs.records, wanted: docs.wanted }, keeper, repo, shared, installId: 'home' }).gaps('d1'))).toEqual([{ title: 'The model has been audited' }]);
-    await ai.described('d1'); expect(svc.calls.filter((c) => c.prompt.startsWith('Describe')).length).toBe(2);                                          // two documents read, two descriptions, once each
+    await ai.described('d1');
+    // three documents read, three descriptions, once each
+    expect(svc.calls.filter((c) => c.prompt.startsWith('Describe')).length).toBe(3);
     expect(svc.calls.filter(isCoreAsk).length).toBe(0);                                                                        // and no model is asked which are core
     fs.rmSync(root, { recursive: true, force: true });
   });
