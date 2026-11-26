@@ -1,7 +1,7 @@
 import type { Deal } from '../domain/model';
 import type { RoomMatch } from '../ports';
 import type { DealKinds, State } from './state';
-import { cleanName, sameName, withProject } from './commands/deals';
+import { cleanName, withProject } from './commands/deals';
 
 /**
  * Is a new deal one the team already has? Two deals may share a name, and are told apart by their counterparty and
@@ -16,7 +16,7 @@ import { cleanName, sameName, withProject } from './commands/deals';
 export interface TwinFound { dealId: string; room?: RoomMatch; named: boolean }
 export interface Twin { deal: Deal; room?: RoomMatch; named: boolean }
 
-const key = (s: string) => sameName(s).toLocaleLowerCase('en-US');
+const key = (s: string) => cleanName(s).toLocaleLowerCase('en-US');
 
 export function likelyTwin(s: Pick<State, 'deals'>, want: { name: string; counterparty?: string }, room: RoomMatch[] = []): Twin | null {
   const name = key(withProject(cleanName(want.name))); const cp = key(want.counterparty ?? '');

@@ -12,7 +12,7 @@ import { CreateQuestion, UseAsResponse } from './commands/questions';
 import { findQuestions, mayAddress } from '../domain/suggest';
 import { withoutMarkers } from '../domain/cite';
 import type { Research } from '../ports';
-import { bareDealName, cleanName, sameName } from './commands/deals';
+import { bareDealName, cleanName } from './commands/deals';
 import { TITLE_MAX } from './commands/findings';
 import { chipsSendable, dealCopied, filesSendable } from './attachments';
 import { isText, keptDrafts } from './keptText';
@@ -125,12 +125,12 @@ const mid = () => `m${Date.now().toString(36)}${(seq++).toString(36)}`;
 function typedDealDestination(store: Store, text: string) {
   const command = /^(?:take me to|go to|open|show me|show|switch to|jump to)\s+(.+)$/is.exec(text);
   if (!command) return;
-  const target = sameName(command[1]);
+  const target = cleanName(command[1]);
   const lookup = (name: string) => {
-    const key = sameName(bareDealName(name.trim(), 'navigation')).toLowerCase();
+    const key = bareDealName(name.trim(), 'navigation').toLowerCase();
     if (!key) return;
     return Object.values(store.get().deals).find((candidate) =>
-      sameName(bareDealName(candidate.name, 'navigation')).toLowerCase() === key);
+      bareDealName(candidate.name, 'navigation').toLowerCase() === key);
   };
   const possessive = (name: string) => lookup(name.replace(/['’]s$/i, '')) ?? lookup(name);
   const named = (name: string) => {
