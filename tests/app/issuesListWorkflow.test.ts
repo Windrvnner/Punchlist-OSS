@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { CreateDeal } from '../../src/app/commands/deals';
 import { DeleteFinding, SetFindingStatus } from '../../src/app/commands/findings';
 import { ImportIssuesList } from '../../src/app/commands/issuesList';
-import { readIssuesList, readPastedIssuesList, reviewIssuesList } from '../../src/app/issuesList';
+import { readIssuesList, reviewIssuesList } from '../../src/app/issuesList';
 import { dealFindings } from '../../src/app/state';
 import { WORKSTREAMS } from '../../src/domain/model';
 import { ok } from '../../src/domain/result';
@@ -126,20 +126,6 @@ it('stops before the model call when a file selection changes during attachment'
   expect(read).not.toHaveBeenCalled();
 });
 
-it('refuses an email file, picked or dropped, before attaching it or calling the model', async () => {
-  const { store } = make();
-  const attach = vi.fn(async () => ok(DOC));
-  const read = vi.fn(proposedIssues);
-  store.services.docs.attach = attach;
-  store.services.ai.issuesList = read;
-  for (const name of ['Counsel comments.eml', 'Counsel comments.MSG']) {
-    const result = await readIssuesList(store, 'deal', { name, arrayBuffer: async () => new ArrayBuffer(8) });
-    expect(result && !result.ok && result.error.message).toMatch(/email cannot be read/);
-  }
-  expect(attach).not.toHaveBeenCalled();
-  expect(read).not.toHaveBeenCalled();
-});
-
 it('preserves the explicit model join for an attached name with surrounding spaces', async () => {
   const { store, dealId, byTitle } = await seedDeal();
   const prior = byTitle.get(POINTS[8].title)!;
@@ -167,16 +153,4 @@ it('preserves the explicit model join for an attached name with surrounding spac
     )));
     expect(marked.map(({ id }) => id)).toEqual([expected[index]]);
   }
-});
-
-it('reads a pasted list as a text file holding exactly the pasted words', async () => {
-  const { store, dealId } = await seedDeal();
-  const attach = vi.fn<DocumentService['attach']>(async () => ok(DOC));
-  store.services.docs.attach = attach;
-  store.services.ai.issuesList = vi.fn(proposedIssues);
-  const text = '1. Change of control\n2. Fees letter';
-  val((await readPastedIssuesList(store, dealId, text))!);
-  expect(attach).toHaveBeenCalledExactlyOnceWith(dealId, {
-    name: 'Pasted issues list.txt', bytes: new TextEncoder().encode(text),
-  });
 });

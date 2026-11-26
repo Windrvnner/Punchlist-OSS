@@ -8,7 +8,7 @@
  */
 import { Icon } from './icons';
 import { Modal } from './dialogs';
-import { FileDrop, PasteNext, PasteRow } from './fileDrop';
+import { FileDrop } from './fileDrop';
 import { ConflictView } from './conflict';
 import { LIST_ACCEPT } from '../app/listRead';
 import type { Layer } from '../domain/checklist';
@@ -63,7 +63,11 @@ export function pickStep(view: ImportView) {
         {dropZone(source)}
         {work.error && <p class="emptyline" id="cl-error" role="alert" style="margin-top:10px">{work.error}</p>}
       </div></div>
-      <PasteRow id="cl-paste" value={source.paste} onInput={source.setPaste} />
+      <div class="srow top cl-pasterow"><div class="k">Paste</div><div>
+        <textarea class="field cl-paste" id="cl-paste" aria-label="Paste a list" placeholder="Paste a list"
+          spellcheck={false} value={source.paste}
+          onInput={(e) => source.setPaste((e.currentTarget as HTMLTextAreaElement).value)} />
+      </div></div>
       {pickFooter(view)}
     </Modal>
   );
@@ -81,7 +85,10 @@ function pickFooter({ exit, source, work }: ImportView) {
   return (
     <div class="xfoot"><span id="cl-line">{line}</span><span class="grow" />
       <button class="btn sm" type="button" onClick={exit.back}>Back</button>
-      <PasteNext id="cl-paste-next" lines={typed} busy={!!work.busy} onNext={source.pasted} />
+      <span class="needs" title={typed ? undefined : 'Paste a list, or choose a file'}>
+        <button class="btn sm pri" type="button" id="cl-paste-next" disabled={!typed || !!work.busy}
+          onClick={source.pasted}>Next</button>
+      </span>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 /**
- * Import an issues list into a deal's Findings. The person chooses the list (a PDF, a Word file or pasted text); it is
+ * Import an issues list into a deal's Findings. The person chooses the list (a PDF, a Word file or an email); it is
  * attached to the deal as a chat attachment is, and the model reads its points and says which repeat a finding already
  * raised (open or closed) or an earlier point. Those are listed under "Already raised", each saying what it joins, unless
  * the person checks "Keep separate". Every other point is listed under "New findings", read only, with the title and
@@ -10,19 +10,16 @@ import { useAppState, useStore } from './hooks';
 import { Icon } from './icons';
 import { Modal, LeaveFoot } from './dialogs';
 import { num, plural } from './counts';
-import { FileInput, PasteNext, PasteRow, PickFileRow } from './fileDrop';
-import { pastedLineCount } from '../app/listRead';
+import { FileInput, PickFileRow } from './fileDrop';
 import { showTip, hideTip } from './tip';
-import {
-  issuesListTitle, readIssuesList, readPastedIssuesList, reviewIssuesList, type ReadIssuesList,
-} from '../app/issuesList';
+import { issuesListTitle, readIssuesList, reviewIssuesList, type ReadIssuesList } from '../app/issuesList';
 import { ImportIssuesList } from '../app/commands/issuesList';
 import type { Finding, ListPoint } from '../domain/model';
 import { keptImport, keepImport, dropImport, importKey } from '../app/keptImports';
 import { useKeptImportsReady, useFreshOnCrash } from './keptImports';
 
-/** the files a list comes as: a PDF, a Word file or pasted text */
-const ACCEPT = '.pdf,.docx';
+/** the files a list comes as: a PDF, a Word file or an email */
+const ACCEPT = '.pdf,.docx,.msg,.eml';
 
 /** "#3 on issues list", or "#3, #41 on issues list" for a finding more than one point is on */
 export const onListText = (marks: ListPoint[]) => `${marks.map((m) => `#${m.n}`).join(', ')} on issues list`;
@@ -72,7 +69,7 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
   const [busy, setBusy] = useState<'' | 'reading' | 'importing'>('');
   const [error, setError] = useState('');
   const [restart, setRestart] = useState(false); const [swapping, setSwapping] = useState(false);
-  const token = useRef(0);
+  const fileRef = useRef<HTMLInputElement>(null); const token = useRef(0);
   // The list as read and the check marks are kept on this PC as they change, so closing, a reload or a restart loses neither,
   // nor the model call that read the list: opening the import again picks it up where it was left. Another
   // list read in its place, "start over" (which asks first) or the import itself lets it go.
@@ -83,36 +80,37 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
   useLayoutEffect(keep, [list, kept]);
   const close = () => { if (busy === 'importing') return; setSwapping(false); token.current++; store.ui({ dialog: null }); };
   const startOver = () => { token.current++; dropImport(KEY); setRestart(false); setSwapping(false); setBusy(''); setError(''); setList(null); setKept(new Set()); };
-  // back to the file and the paste box, the paste as it was left, as the checklist's change; the list stays kept
-  const change = () => {
-    setSwapping(false);
-    setRestart(false);
-    setError('');
-    setList(null);
-  };
 
-  type Reader = (current: () => boolean) => ReturnType<typeof readIssuesList>;
-  const load = async (name: string, reader: Reader) => {
+  const load = async (file: File) => {
     if (busy === 'importing') return;
     const mine = ++token.current;
     setBusy('reading');
     setError('');
-    const read = await reader(() => token.current === mine);
+    const read = await readIssuesList(store, dealId, file, () => token.current === mine);
     if (!read || token.current !== mine) return;
     setBusy('');
     if (!read.ok) {
-      setError(`Couldn’t read ${name}: ${read.error.message}`);
+      setError(`Couldn’t read ${file.name}: ${read.error.message}`);
       return;
     }
     setList(read.value);
     setKept(new Set());
   };
-  const read = (file: File) => void load(file.name, (current) => readIssuesList(store, dealId, file, current));
-  const pasted = (text: string) => void load('the pasted list',
-    (current) => readPastedIssuesList(store, dealId, text, current));
+  const read = (file: File) => void load(file);
+  const pick = <FileInput id="il-file" accept={ACCEPT} inputRef={fileRef} onFile={read} />;
+  const browse = () => fileRef.current?.click();
 
-  if (!list) return <PickStep keyName={KEY} fresh={afresh} error={error} reading={busy === 'reading'} onFile={read}
-    onPaste={pasted} onClose={close} />;
+  if (!list) return (
+    <Modal onClose={close} label="Import an issues list" blur className="sdlg imdlg ilf">
+      <Head onClose={close} />
+      <PickFileRow dropId="il-drop" errorId="il-error" error={error} onFile={read}>
+        Drop the list here, or{' '}
+        <button type="button" class="linkb" id="il-browse" onClick={browse}>choose a file…</button>
+        {pick}
+      </PickFileRow>
+      {busy === 'reading' && <div class="xfoot"><span>Reading the list</span></div>}
+    </Modal>
+  );
 
   const { points } = list;
   const { shown, raised, fresh, input } = reviewIssuesList(s, dealId, list, kept);
@@ -129,13 +127,13 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
     if (!r.ok) { keepNow.current(); setError(`Couldn’t import: ${r.error.message}`); return; }
     store.ui({ dialog: null });
   };
+  const name = issuesListTitle(list.doc.doc);
   return (
     <Modal onClose={close} label="Import an issues list" blur className="sdlg imdlg ilf">
       <Head onClose={close} disabled={busy === 'importing'} />
       <div class="ilf-body" style={{ '--nw': nw }}>
-        <ListFileRow file={list.doc.doc} points={points.length} busy={!!busy}
-          onChange={() => (kept.size ? setSwapping(true) : change())}
-          onRestart={() => { setSwapping(false); setRestart(true); }} />
+        {/* the end of the name stays in sight when it is cut: lists from one counsel differ by their date */}
+        <div class="srow"><div class="k">File</div><div class="ilfile"><span class="fnw" title={list.doc.doc}><span class="fn">{name.slice(0, -9)}</span><span>{name.slice(-9)}</span></span><span class="c" id="il-count">{plural(points.length, 'point')}</span><button type="button" class="linkb" id="il-change" disabled={!!busy} onClick={() => { setRestart(false); if (kept.size) setSwapping(true); else fileRef.current?.click(); }}>change</button><button type="button" class="linkb" id="il-restart" disabled={!!busy} onClick={() => { setSwapping(false); setRestart(true); }}>start over</button>{pick}<span class="grow" /></div></div>
         {raised.length > 0 && <div class="srow top"><div class="k">Already Raised<span
           class="cnt">{num(raised.length)}</span></div><div id="il-raised">
           {raised.map((k) => { const p = points[k]; const [what, words] = was(k); return (
@@ -150,79 +148,11 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
         </div></div>}
       </div>
       {/* another list would drop the points checked on this one: asked first, as closing is */}
-      {swapping ? <LeaveFoot id="il-swap" ask="Choose another list?" go="Choose" keep={() => setSwapping(false)}
-        leave={change} />
+      {swapping ? <LeaveFoot id="il-swap" ask="Choose another list?" go="Choose" keep={() => setSwapping(false)} leave={() => { setSwapping(false); fileRef.current?.click(); }} />
         : restart ? <LeaveFoot id="il-restart-ask" ask="Clear this import and start over?" go="Start Over"
           keep={() => setRestart(false)} leave={startOver} />
         : <div class="xfoot"><span id="il-line" class={error ? 'err' : ''} role={error ? 'alert' : undefined}>{error || (busy === 'reading' ? 'Reading the list' : busy === 'importing' ? 'Importing' : plural(fresh.length, 'new finding'))}</span><span class="grow" /><button class="btn sm pri" type="button" id="il-go" disabled={!!busy} onClick={() => void run()}>Import</button></div>}
     </Modal>
-  );
-}
-
-/** a paste typed into the box and not yet read, as it was kept on this PC; nothing if what was kept is not text */
-const keptPaste = (key: string) => {
-  const paste = keptImport(key)?.paste;
-  return typeof paste === 'string' ? paste : '';
-};
-
-interface PickProps {
-  keyName: string;
-  /** opened past a kept import it could not show: the paste kept with it is not shown either */
-  fresh: boolean;
-  error: string;
-  reading: boolean;
-  onFile: (file: File) => void;
-  onPaste: (text: string) => void;
-  onClose: () => void;
-}
-
-/** Step 1: a file, or the list pasted into the box and sent with Next, as a checklist is pasted (firmChecklistSteps) */
-function PickStep({ keyName, fresh, error, reading, onFile, onPaste, onClose }: PickProps) {
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [paste, setPaste] = useState(() => (fresh ? '' : keptPaste(keyName)));
-  // what is typed in the box is kept on this PC as it changes, so closing, a reload or a restart loses none of it
-  useLayoutEffect(() => {
-    if (paste.trim() || (!fresh && keptPaste(keyName))) keepImport(keyName, { paste });
-  }, [keyName, fresh, paste]);
-  const lines = pastedLineCount(paste);
-  const line = reading ? 'Reading the list' : lines ? plural(lines, 'line') : '';
-  return (
-    <Modal onClose={onClose} label="Import an issues list" blur className="sdlg imdlg ilf">
-      <Head onClose={onClose} />
-      <PickFileRow dropId="il-drop" errorId="il-error" error={error} onFile={onFile}>
-        Drop a file here, or{' '}
-        <button type="button" class="linkb" id="il-browse" onClick={() => fileRef.current?.click()}>
-          choose a file…</button>
-        <FileInput id="il-file" accept={ACCEPT} inputRef={fileRef} onFile={onFile} />
-      </PickFileRow>
-      <PasteRow id="il-paste" value={paste} onInput={setPaste} />
-      <div class="xfoot"><span id="il-line">{line}</span><span class="grow" />
-        <PasteNext id="il-paste-next" lines={lines} busy={reading} onNext={() => onPaste(paste)} />
-      </div>
-    </Modal>
-  );
-}
-
-interface FileRowProps {
-  file: string;
-  points: number;
-  busy: boolean;
-  onChange: () => void;
-  onRestart: () => void;
-}
-
-/** The list's file, its points, change and start over. The end of the name stays in sight when it is cut: lists from
- * one counsel differ by their date. */
-function ListFileRow({ file, points, busy, onChange, onRestart }: FileRowProps) {
-  const name = issuesListTitle(file);
-  return (
-    <div class="srow"><div class="k">File</div><div class="ilfile">
-      <span class="fnw" title={file}><span class="fn">{name.slice(0, -9)}</span><span>{name.slice(-9)}</span></span>
-      <span class="c" id="il-count">{plural(points, 'point')}</span>
-      <button type="button" class="linkb" id="il-change" disabled={busy} onClick={onChange}>change</button>
-      <button type="button" class="linkb" id="il-restart" disabled={busy} onClick={onRestart}>start over</button>
-      <span class="grow" />
-    </div></div>
   );
 }
 
