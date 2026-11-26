@@ -14,6 +14,7 @@ import type { DocRecord } from '../../src/backend/documents';
 import { pageNumber } from '../../src/backend/agentSearch';
 import { inlineTools, toolSpecs } from '../../src/backend/agentPrompts';
 import { qaRow } from '../../src/backend/qaRow';
+import { qid } from './reviewKit';
 
 class Mem implements Folder {
   files = new Map<string, string>();
@@ -54,16 +55,19 @@ function setup(turn: (c: Call, n: number) => unknown, options: Partial<AiOptions
 type Repo = ReturnType<typeof setup>['repo'];
 type Fields = Record<string, unknown>;
 
+/** the id of the `i`th question (from 0) of a deal's 2,500, in the shape the app draws one */
+const questionId = (i: number, dealId = 'd1') => qid(`${dealId.slice(1)}${String(i).padStart(5, '0')}`);
+
 /** 2,500 questions, `matching` of them on the lock-up, each with a long response; `extra` sets fields on question 1 */
 async function questions(repo: Repo, matching: number, dealId = 'd1', extra: Fields = {}): Promise<void> {
+  const id = (i: number) => questionId(i, dealId);
   const data = (i: number) => {
     const on = i < matching;
     const text = on ? `Confirm the lock-up ratio (${i})` : `Provide permit ${i}`;
-    const base = { id: `q_${dealId}_${i}`, dealId, n: i + 1, text, status: 'answered' };
+    const base = { id: id(i), dealId, n: i + 1, text, status: 'answered' };
     return { ...base, response: on ? longText(i) : 'Provided.', ...(i === 0 ? extra : {}) };
   };
   const ids = Array.from({ length: 2_500 }, (_v, i) => i);
-  const id = (i: number) => `q_${dealId}_${i}`;
   const writes = ids.map((i) => ({ kind: 'question' as const, id: id(i), data: data(i), expectedRev: null }));
   const add = ids.map((i) => ({ kind: 'question' as const, id: id(i) }));
   expect((await repo.transaction({ writes, index: { dealId, add } })).ok).toBe(true);
@@ -156,54 +160,49 @@ describe('searching the Q&A log from the chat, a page at a time', () => {
     expect((await s.ai.answer(ask('What is outstanding?'))).ok).toBe(true);
     const got = result(s, 2);
     const details = 'asked by Lender counsel · received 2026-10-01 · workstream Legal · priority High';
-    expect(got).toContain(`R1 · Answered · ${details}`);
+    expect(got).toContain(`${questionId(0)} · Answered · ${details}`);
     expect(got).toContain('Question: Confirm the lock-up ratio (0)');
-    expect(got).toContain(`Response to R1 from Sponsor, 2026-11-02: ${longText(0).trim()}`);
+    expect(got).toContain(`Response to ${questionId(0)} from Sponsor, 2026-11-02: ${longText(0).trim()}`);
     expect(got).toContain('Page 1 of 1.');
   }, 60_000);
 
   it('a row with who responded and when, but no response yet, still shows them', () => {
-    const asked = { n: 7, status: 'open' as const, text: 'Send the permit' };
-    const row = qaRow({ ...asked, respondedBy: 'Sponsor', responded: '2026-11-03' }, 'R1');
-    expect(row.split('\n')[2]).toBe('Response to R1 from Sponsor, 2026-11-03: none yet');
-    const unanswered = qaRow({ n: 8, status: 'open', text: 'Send the lease' }, 'R2');
-    expect(unanswered.split('\n')[2]).toBe('Response to R2: none yet');
+    const asked = { id: qid(7), n: 7, status: 'open' as const, text: 'Send the permit' };
+    const row = qaRow({ ...asked, respondedBy: 'Sponsor', responded: '2026-11-03' });
+    expect(row.split('\n')[2]).toBe(`Response to ${qid(7)} from Sponsor, 2026-11-03: none yet`);
+    const unanswered = qaRow({ id: qid(8), n: 8, status: 'open', text: 'Send the lease' });
+    expect(unanswered.split('\n')[2]).toBe(`Response to ${qid(8)}: none yet`);
   });
 
   it('an AI draft in a Q&A row is labeled as one', async () => {
     const s = setup(calls(qa()));
     await questions(s.repo, 40, 'd1', { provenance: { origin: 'ai', sources: [] } });
     expect((await s.ai.answer(ask('What is outstanding?'))).ok).toBe(true);
-    expect(result(s, 2)).toContain('Response to R1 (drafted by AI from the data room, not received from anyone): ');
+    const drafted = ' (drafted by AI from the data room, not received from anyone): ';
+    expect(result(s, 2)).toContain(`Response to ${questionId(0)}${drafted}`);
   }, 60_000);
 
-  it('names each question by a neutral handle the run keeps, and shows the person its number (#1105)', async () => {
-    const asked = /(R\d+) · Answered\nQuestion: How did revenue move\?/g;
-    const handlesIn = (prompt: string) => [...prompt.matchAll(asked)].map((m) => m[1]);
-    // amounts in rand ("R1.2 billion") are the model's words, never a handle; nor is a handle not named as a response
-    const say = (handle: string) => `Response ${handle} says R1.2 billion and R50 million; ${handle} is a label.`;
-    const offer = (handle: string) =>
-      ({ action: 'log question', question: `Does response ${handle} cover R1.2 billion?` });
+  it('shows the model each question by its id, and the person its number (#1105)', async () => {
+    const revenue = questionId(2);
+    // amounts in rand ("R1.2 billion") are the model's words, never a question; nor is an id not named as a response
+    const say = `Response ${revenue} says R1.2 billion and R50 million; ${revenue} is a label.`;
+    const offer = { action: 'log question', question: `Does response ${revenue} cover R1.2 billion?` };
     const searches = calls(qa(), { tool: 'search', what: 'all', query: 'revenue' });
-    const answer = (handle: string) => ({ text: say(handle), sources: [], offer: offer(handle) });
-    const answering = setup((c, n) => (n === 3 ? answer(handlesIn(c.prompt)[0]) : searches(c, n)));
+    const answering = setup((c, n) => (n === 3 ? { text: say, sources: [], offer } : searches(c, n)));
     await questions(answering.repo, 40);
-    const fell = { id: 'q_d1_2', dealId: 'd1', n: 3, status: 'answered', text: 'How did revenue move? lock-up ratio',
+    const fell = { id: revenue, dealId: 'd1', n: 3, status: 'answered', text: 'How did revenue move? lock-up ratio',
       response: 'Revenue fell in Q3 2026.' };
-    const update = { kind: 'question' as const, id: 'q_d1_2', data: fell, expectedRev: 1 };
+    const update = { kind: 'question' as const, id: revenue, data: fell, expectedRev: 1 };
     expect((await answering.repo.transaction({ writes: [update] })).ok).toBe(true);
     const answered = await answering.ai.answer(ask('What is outstanding?'));
-    const handle = handlesIn(answering.turns[2].prompt)[0];
-    const shown = `The response to Q3 says R1.2 billion and R50 million; ${handle} is a label.`;
+    const shown = `The response to Q3 says R1.2 billion and R50 million; ${revenue} is a label.`;
     expect(answered.ok && answered.value.text).toBe(shown);
     const drafted = { action: 'log question', question: 'Does the response to Q3 cover R1.2 billion?' };
     expect(answered.ok && answered.value.offer).toEqual(drafted);
     const last = answering.turns[2].prompt;
-    expect(last).toContain('Revenue fell in Q3 2026.');
-    expect(last).not.toMatch(/^Q\d+ · |Response to Q\d/m);
-    // the same question, found by two searches, keeps one handle
-    expect(handlesIn(last).length).toBeGreaterThan(1);
-    expect(new Set(handlesIn(last)).size).toBe(1);
+    expect(last).toContain(`${revenue} · Answered\nQuestion: How did revenue move?`);
+    expect(last).toContain(`Response to ${revenue}: Revenue fell in Q3 2026.`);
+    expect(last).not.toMatch(/^[QR]\d+ · |Response to [QR]\d/m);
     const steps = answered.ok ? answered.value.research!.steps : [];
     expect(steps.some((step) => step.found?.some((x) => x.where === 'Q3 · response received'))).toBe(true);
   }, 60_000);
