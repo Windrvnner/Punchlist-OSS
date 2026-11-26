@@ -2,7 +2,7 @@
 // The suggested open question under a chat answer is the one the model proposed when the answer finished (#1120);
 // code picks the candidates and keeps one question per answer, the newest answer winning.
 import { expect, it } from 'vitest';
-import { CreateQuestion, SetResponse } from '../../src/app/commands/questions';
+import { CreateQuestion, EditQuestionField, SetResponse } from '../../src/app/commands/questions';
 import { ask, convKey, suggestions, type Scope } from '../../src/app/conversations';
 import { fail, ok } from '../../src/domain/result';
 import type { AiService } from '../../src/ports';
@@ -60,7 +60,7 @@ it('offers each question under the newest answer that proposed it, and never one
   env.store.ui({ notThese: [] });
   val(await env.store.dispatch(SetResponse, { dealId: env.dealId, questionId: operating.id, response: ANSWER }));
   expect(suggestions(env.store.get(), env.scope).size).toBe(0);
-  expect(env.store.get().ui.proposed[first.id]).toBe(operating.id);
+  expect(env.store.get().ui.proposed[first.id]).toEqual({ id: operating.id, text: OPERATING });
 });
 
 it('a question answered by this conversation is not offered to the model again', async () => {
@@ -74,4 +74,33 @@ it('a question answered by this conversation is not offered to the model again',
   val(await env.store.dispatch(SetResponse, { dealId: env.dealId, questionId: operating.id, response: ANSWER }));
   await ask(env.store, env.scope, 'What does the base case assume?');
   expect(asked).toEqual([[INSURANCE]]);
+});
+
+it('a question edited to another meaning while the call is pending, or after it, is not suggested', async () => {
+  const LOCKUP = 'Which lock-up ratio was agreed in the credit agreement draft?';
+  for (const when of ['pending', 'after'] as const) {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const env = await fixture(async (input) => {
+      if (when === 'pending') await gate;
+      return ok(input.questions.indexOf(OPERATING));
+    });
+    const q = env.byText(OPERATING);
+    const edit = () => env.store.dispatch(EditQuestionField, {
+      dealId: env.dealId, questionId: q.id, field: 'text', value: LOCKUP,
+    });
+    const asking = ask(env.store, env.scope, 'What does the base case assume?');
+    if (when === 'pending') {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      val(await edit());
+      release();
+    }
+    await asking;
+    if (when === 'after') {
+      expect(suggestions(env.store.get(), env.scope).size).toBe(1);
+      val(await edit());
+    }
+    expect(env.store.get().questions[q.id].text).toBe(LOCKUP);
+    expect(suggestions(env.store.get(), env.scope).size).toBe(0);
+  }
 });

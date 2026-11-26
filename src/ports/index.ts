@@ -243,15 +243,8 @@ export interface AiService {
    * one call where it can be, and in parts where it cannot (a very long list, or a reply too long for the service): when
    * some parts could not be asked and others were, the pairs found are kept and `missed` lists the items that were not
    * compared (`at`), and why. `only` asks about just those items again, so that no pair is left unasked.
-   * `kind: 'questions'`: `items` are a deal's unresolved points and `against` its open questions, and a pair is a point
-   * that a question already asks for (Add All Unresolved, #1120).
    */
-  sameMeaning?(input: {
-    items: string[]; against: string[]; only?: number[]; kind?: 'questions';
-  }): Promise<Result<{
-    pairs: { a: number; b: number; inAgainst: boolean; why: string }[];
-    missed?: { kind: 'unreachable' | 'failed'; at: number[] };
-  }>>;
+  sameMeaning?(input: { items: string[]; against: string[]; only?: number[] }): Promise<Result<{ pairs: { a: number; b: number; inAgainst: boolean; why: string }[]; missed?: { kind: 'unreachable' | 'failed'; at: number[] } }>>;
   /**
    * Optional. The points of an issues list, read from a file a person attached to the deal (`doc`): a PDF, a Word
    * file or an email. Each point keeps its own number on the list (`n`, as the list writes it, or its place when the list

@@ -17,9 +17,16 @@ export async function proposeQuestion(
   const open = openToSuggest(store.get(), dealId, answered);
   if (!ai.suggestQuestion || !open.length) return;
   const r = await ai.suggestQuestion({ dealId, answer, questions: open.map((q) => q.text) });
-  const q = r.ok && r.value !== null ? open[r.value] : undefined;
-  if (q) store.ui((ui) => ({ proposed: { ...ui.proposed, [messageId]: q.id } }));
+  const asked = r.ok && r.value !== null ? open[r.value] : undefined;
+  // the question may have been edited or closed while the model read it: the proposal is for its text as asked
+  const now = asked && store.get().questions[asked.id];
+  if (asked && now && stillAsks(now, asked.text)) {
+    store.ui((ui) => ({ proposed: { ...ui.proposed, [messageId]: { id: asked.id, text: asked.text } } }));
+  }
 }
+
+/** A proposal holds only while its question is open and still has the text it was proposed for. */
+const stillAsks = (q: { status: string; text: string }, text: string) => q.status === 'open' && q.text === text;
 
 /** The open questions a card may suggest: those whose response is not already an answer of this conversation. */
 function openToSuggest(s: State, dealId: string, answered: ReadonlySet<string>) {
@@ -40,8 +47,9 @@ export function suggestedFor(s: State, dealId: string, list: Message[], answered
     const m = list[i];
     if (m.role !== 'ai' || m.state !== 'done') continue;
     // the question the model proposed when this answer finished (#1120)
-    const id = s.ui.proposed[m.id];
-    if (!id || !open.has(id) || offered.has(id)) continue;
+    const proposal = s.ui.proposed[m.id];
+    const id = proposal?.id;
+    if (!proposal || !open.has(id) || offered.has(id) || !stillAsks(s.questions[id], proposal.text)) continue;
     offered.add(id);
     if (!s.ui.notThese.includes(`${m.id}|${id}`)) out.set(m.id, id);
   }

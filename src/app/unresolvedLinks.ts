@@ -24,37 +24,16 @@ export function canLinkUnresolved(q: Question, conflicted: boolean): boolean {
     && !q.linkedItem && !q.linkedFinding && !conflicted;
 }
 
-/** The exact approved links a person chose (#88), by point: each question kept for one point only. */
-export function keptLinks(points: Unresolved[], pool: Question[], approved?: ApprovedLinks) {
-  const kept = new Map<string, Question>();
-  if (!approved?.size) return kept;
+/** The exact approved links a person chose (#88), each question for one point only. No other link is offered. */
+export function suggestUnresolvedLinks(points: Unresolved[], pool: Question[], approved?: ApprovedLinks) {
+  const links: { point: string; q: Question }[] = [];
+  if (!approved?.size) return links;
   const available = new Map(pool.map((q) => [q.id, q]));
   const taken = new Set<string>();
   for (const point of points) {
     const choice = approved.get(point.key);
     const q = choice && available.get(choice.questionId);
     if (!q || taken.has(q.id) || !isApprovedLink({ point, q }, choice)) continue;
-    kept.set(point.key, q);
-    taken.add(q.id);
-  }
-  return kept;
-}
-
-/**
- * The kept links, then for each other point the first question the model proposed for it (#1120), each question
- * offered once. `proposed` lists question ids by point key.
- */
-export function suggestUnresolvedLinks(
-  points: Unresolved[], pool: Question[], kept: ReadonlyMap<string, Question>,
-  proposed: ReadonlyMap<string, readonly string[]>,
-) {
-  const byId = new Map(pool.map((q) => [q.id, q]));
-  const taken = new Set([...kept.values()].map((q) => q.id));
-  const links: { point: string; q: Question }[] = [];
-  for (const point of points) {
-    const proposals = (proposed.get(point.key) ?? []).map((id) => byId.get(id));
-    const q = kept.get(point.key) ?? proposals.find((proposal) => proposal && !taken.has(proposal.id));
-    if (!q) continue;
     taken.add(q.id);
     links.push({ point: point.key, q });
   }
