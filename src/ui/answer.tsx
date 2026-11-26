@@ -185,7 +185,7 @@ function AnswerActs({ scope, hasDeal, clean, openCard, askUse }: {
   const store = useStore();
   const copy = () => {
     void navigator.clipboard?.writeText(clean);
-    store.toast('Copied');
+    store.toast('Copied', 'done');
   };
   const canAdd = hasDeal && (scope.kind === 'deal' || scope.kind === 'finding');
   return (

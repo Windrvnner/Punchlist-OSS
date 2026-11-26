@@ -58,12 +58,14 @@ const apart = (a, b) => !a || !b || a.r <= b.l || b.r <= a.l || a.b <= b.t || b.
   await page.locator('.toast').first().locator('.tundo').click(); await page.waitForFunction(() => document.querySelectorAll('.toast').length <= 2);
   await page.waitForTimeout(400);
   // the pointer resting on a toast stops its clock
-  await page.evaluate(() => store.toast('Stay while I read you', { label: 'Undo', run() {} })); await page.hover('#toast'); await page.waitForTimeout(9200);
+  await page.evaluate(() => store.toast('Stay while I read you', 'done', { label: 'Undo', run() {} }))
+  await page.hover('#toast')
+  await page.waitForTimeout(9200);
   const held = await page.evaluate(() => [...document.querySelectorAll('.toast .ttext')].some((t) => t.textContent === 'Stay while I read you'));
   await page.mouse.move(640, 500); await toastsGone(page);
   say('toast-waits-while-hovered-then-goes', held);
   // reading bar
-  await page.click('.opening .ref .rb'); await page.waitForSelector('.docnav'); await page.evaluate(() => store.toast('Finding marked closed', { label: 'Undo', run() {} })); await page.waitForSelector('#toast');
+  await page.click('.opening .ref .rb'); await page.waitForSelector('.docnav'); await page.evaluate(() => store.toast('Finding marked closed', 'done', { label: 'Undo', run() {} })); await page.waitForSelector('#toast');
   const bar = await rect(page, '.docnav'), tr2 = await rect(page, '.toasts'), comp2 = await rect(page, '#pcomposer');
   say('toasts-clear-of-the-reading-bar', apart(tr2, bar) && apart(tr2, comp2), JSON.stringify({ tr2, bar }));
   await page.keyboard.press('Escape'); await page.waitForFunction(() => store.get().ui.doc == null);

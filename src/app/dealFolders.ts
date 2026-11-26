@@ -78,13 +78,13 @@ export async function readDealFolder(
   if (!path) return;
   const folders = () => [...(store.get().ui.newDeal?.folders ?? form.folders), ...(existing?.folders ?? [])];
   if (folderListed(folders(), path) || draft.isReading(path)) {
-    store.toast('That folder is already on the list');
+    store.toast('That folder is already on the list', 'warn');
     return;
   }
   const over = folders().find((folder) => foldersOverlap(path, folder.path));
   if (over) {
     store.toast(folderInside(path, over.path) ? `That folder is inside ${over.label || over.path}, already on the list`
-      : `${over.label || over.path}, already on the list, is inside that folder`);
+      : `${over.label || over.path}, already on the list, is inside that folder`, 'warn');
     return;
   }
   const removed = existing?.removed.find((folder) => windowsPath(folder.path) === windowsPath(path));
@@ -125,7 +125,7 @@ export function chosenDealFolder(store: Store, files: File[], folders: DealForm[
   const real = store.services.fs.pathFor?.(first);
   const root = real ? real.replace(/[\\/][^\\/]*$/, '') : (first.webkitRelativePath || first.name).split('/')[0];
   if (folderListed(folders, root)) {
-    store.toast('That folder is already on the list');
+    store.toast('That folder is already on the list', 'warn');
     return;
   }
   const bytes = files.reduce((total, file) => total + file.size, 0);
