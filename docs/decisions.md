@@ -311,8 +311,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Say how an ambiguous instruction is being read. Ask about a product decision before it is built.
 - Each thing lives in one place: decisions here; bugs and Build list items (with their designs) as GitHub issues; review notes on pull requests; how the app works in the docs; the detailed contract in code comments and tests; and history in git. There are no Markdown review files or running logs.
 - The README covers what the app is and does, screenshots of the real app, and how to install and use it; developer setup is in docs/development.md.
-- A field's input-method composition (active, held after a blur mid-candidate, and the wait for Chromium's compositionend before blur) is screen state in `src/ui`, like focus; when a typed field saves is decided in `src/app` (#953, #997).
-- A held field that receives composing input without a compositionstart stays held: its text shows Not saved until typing that is not composing, or Retry (#997).
+- A field's input-method composition (active, held after a blur mid-candidate, and the wait after compositionend for a blur that Chromium fires after it) is screen state in `src/ui`, like focus; when a typed field saves is decided in `src/app` (#953, #997).
+- A held field that receives composing input without a compositionstart stays held: its text shows Not saved until typing that is not composing in the focused field, Retry, or Take Theirs (#997).
 
 ## Deal screen
 

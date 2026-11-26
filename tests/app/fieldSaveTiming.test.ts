@@ -116,7 +116,7 @@ describe('leaving a field', () => {
     expect(sent).toEqual(['Provide the executed credit agreement.']);
   });
 
-  it('cancels the wait when composition starts or Escape takes the edit back', async () => {
+  it('stops a waiting save when asked, and says whether one was waiting', async () => {
     const { save, sent, type } = await field();
     type('Provide the executed credit agreement.');
     expect(save.stopTimer()).toBe(true);
