@@ -1034,6 +1034,35 @@ export function nodeAi(o: AiOptions) {
     for (const r of order) (sec.has(r.docId) && n++ >= SECONDARY_AHEAD ? after : ahead).push(r);
     return [...ahead, ...after];
   }
+  /** the ranking as a pick lists it: each file by its docId, a core document marked *, then its path (#1162) */
+  function pickListing(list: DocRecord[], core: string[], dealId: string): string {
+    const isCore = starred(core);
+    return list.map((r) => `${r.docId}${isCore.has(r.docId) ? ' *' : ''}: ${shown(r, 12, dealId)}`).join('\n');
+  }
+  /** the files a pick's reply names by docId, in its order, each once, `most` at most */
+  function pickedFrom(list: DocRecord[], named: unknown, most: number): DocRecord[] {
+    const byId = new Map(list.map((r) => [r.docId, r]));
+    const ids = [...new Set(listOf(named))].filter((id): id is string => typeof id === 'string');
+    return ids.map((id) => byId.get(id)).filter((r): r is DocRecord => !!r).slice(0, most);
+  }
+  /** the fast model's pick from a listing of `list`; null when it could not be asked or its reply cannot be read */
+  async function askPick(list: DocRecord[], listed: string): Promise<{ read?: unknown } | null> {
+    const prompt = `${PICK_INTRO}\n${listed}`;
+    const model = (await models()).fast;
+    const input: Ask = { kind: 'pick', split: true, model, system: JSON_ONLY, unusable: pickUnusable(list), prompt };
+    try {
+      return await askJson<{ read?: unknown }>(input, ['read']);
+    } catch (e) {
+      if (unreachable(e)) throw e;
+      return null;
+    }
+  }
+  /** a pick whose reply names a file by an id it was not shown is a failed reply, asked again (#1162) */
+  const pickUnusable = (list: DocRecord[]) => (text: string) => {
+    const read = json<{ read?: unknown }>(text, 'read')?.read;
+    const named = isObject(read) ? Object.values(read).flatMap(listOf) : listOf(read);
+    return unknownIds(named, list.map((r) => r.docId)).length > 0;
+  };
   /**
    * What to read for something, in two steps: the keyword ranking, then the fast model's pick from the top of it, each
    * file shown by its full path and summary with core documents marked. `room` at most, none if nothing bears on it.
@@ -1044,11 +1073,12 @@ export function nodeAi(o: AiOptions) {
   async function pick(dealId: string, what: string, not: Set<string>, room: number, core: string[], rankBy = what, found: DocRecord[] = []): Promise<DocRecord[] | null> {
     // what searches found heads the list, still with two at most of the sources that are never a main one ahead
     const list = aside(dealId, headed(found, ranked(dealId, rankBy, not, core), not)); if (!list.length || room < 1) return [];
-    const isCore = starred(core); let reply: { read?: unknown } | null;
-    try { reply = await askJson({ kind: 'pick', split: true, model: (await models()).fast, system: JSON_ONLY, prompt: `These are files from the data room of a project-finance deal, the likeliest first. Each is given by its full path from the root of the data room, with a short description where there is one, or else the words it uses most. The deal's core documents are marked *.\n${list.map((r, i) => `${i + 1}${isCore.has(r.docId) ? '*' : ''}: ${shown(r, 12, dealId)}`).join('\n')}\n\nWhich of them should be read for this?\n${what}\n\nChoose up to ${room}, the most useful first. Start from the core documents, and choose another only when this needs it. If none of them bears on it, choose none.\nReply as JSON: {"read": [12, 3]}` }, ['read']); }
-    catch (e) { if (unreachable(e)) throw e; return null; }
+    const ask = `Which of them should be read for this?\n${what}\n\nChoose up to ${room}, the most useful first. `
+      + 'Start from the core documents, and choose another only when this needs it. If none of them bears on it, '
+      + 'choose none.\nReply as JSON: {"read": ["an id", "another id"]}';
+    const reply = await askPick(list, `${pickListing(list, core, dealId)}\n\n${ask}`);
     if (!reply || !('read' in reply)) return null;
-    return listOf(reply.read).map(int).filter((n): n is number => n !== null && n >= 1 && n <= list.length).map((n) => list[n - 1]).filter((r, i, all) => all.indexOf(r) === i).slice(0, room);
+    return pickedFrom(list, reply.read, room);
   }
   /**
    * The chat's document search as fixed pages (#1102): the keyword ranking as `top` gives it with no room set, only the
@@ -1099,15 +1129,28 @@ export function nodeAi(o: AiOptions) {
    */
   async function pickFor(dealId: string, things: { id: string; what: string; rankBy: string }[], not: Set<string>, each: number, core: string[], found?: Map<string, DocRecord[]>): Promise<Map<string, DocRecord[]> | null> {
     const list = headed(found ? interleave(things.map((t) => found.get(t.id) ?? [])) : [], ranked(dealId, things.map((t) => t.rankBy).join(' '), not, core), not); const out = new Map<string, DocRecord[]>(things.map((t) => [t.id, []]));
-    const hint = (t: { id: string }) => { const at = (found?.get(t.id) ?? []).map((r) => list.indexOf(r) + 1).filter((n) => n > 0); return found?.has(t.id) ? ` (its searches found ${at.length ? at.join(', ') : 'none of them'})` : ''; };
+    const hint = (t: { id: string }) => {
+      const at = (found?.get(t.id) ?? []).filter((r) => list.includes(r)).map((r) => r.docId);
+      return found?.has(t.id) ? ` (its searches found ${at.length ? at.join(', ') : 'none of them'})` : '';
+    };
     if (!list.length || each < 1 || !things.length) return out;
-    const isCore = starred(core); let reply: { read?: unknown } | null;
-    try { reply = await askJson({ kind: 'pick', split: true, model: (await models()).fast, system: JSON_ONLY, prompt: `These are files from the data room of a project-finance deal, the likeliest first. Each is given by its full path from the root of the data room, with a short description where there is one, or else the words it uses most. The deal's core documents are marked *.\n${list.map((r, i) => `${i + 1}${isCore.has(r.docId) ? '*' : ''}: ${shown(r, 12, dealId)}`).join('\n')}\n\nWhich of them should be read for each of these?\n${things.map((t, i) => `I${i + 1}: ${t.what.replace(/\n/g, ' ')}${hint(t)}`).join('\n')}\n\nFor each, choose up to ${each}, the most useful first. If none of the files bears on one, choose none for it.\nReply as JSON: {"read": {"I1": [12, 3], "I2": []}}` }, ['read']); }
-    catch (e) { if (unreachable(e)) throw e; return null; }
+    const asked = things.map((t, i) => `I${i + 1}: ${t.what.replace(/\n/g, ' ')}${hint(t)}`).join('\n');
+    const ask = `Which of them should be read for each of these?\n${asked}\n\nFor each, choose up to ${each}, the most `
+      + 'useful first. If none of the files bears on one, choose none for it.\n'
+      + 'Reply as JSON: {"read": {"I1": ["an id", "another id"], "I2": []}}';
+    const reply = await askPick(list, `${pickListing(list, core, dealId)}\n\n${ask}`);
     if (!reply || !('read' in reply) || !reply.read || typeof reply.read !== 'object') return null;
-    const numbers = (v: unknown) => listOf(v).map(int).filter((n): n is number => n !== null && n >= 1 && n <= list.length).map((n) => list[n - 1]).filter((r, i, all) => all.indexOf(r) === i).slice(0, each);
-    if (Array.isArray(reply.read)) { for (const t of things) out.set(t.id, numbers(reply.read)); return out; }      // one list for all of them: each is given it
-    for (const [k, v] of Object.entries(reply.read as Record<string, unknown>)) { const n = tagNumber(k, 'I'); const t = n ? things[n - 1] : undefined; if (t) out.set(t.id, numbers(v)); }
+    const picked = (v: unknown) => pickedFrom(list, v, each);
+    // one list for all of them: each is given it
+    if (Array.isArray(reply.read)) {
+      for (const t of things) out.set(t.id, picked(reply.read));
+      return out;
+    }
+    for (const [k, v] of Object.entries(reply.read as Record<string, unknown>)) {
+      const n = tagNumber(k, 'I');
+      const t = n ? things[n - 1] : undefined;
+      if (t) out.set(t.id, picked(v));
+    }
     return out;
   }
   /**
