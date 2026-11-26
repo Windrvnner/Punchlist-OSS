@@ -79,6 +79,8 @@ type Answered = {
   read: { docs: number; of: number };
   research: Research;
   thread?: ModelThread;
+  /** the action the model offers under its answer, as it gave it: the app checks it (app/answerOffer.ts) */
+  offer?: unknown;
 };
 /** the agent's limits, its options with their defaults */
 type Limits = {
@@ -94,7 +96,7 @@ type Limits = {
 const pageChars = (limits: Limits, model: string) => (limits.compactAt(model) * control.limits.charsPerToken) / 2;
 
 const SEARCHES: readonly What[] = ['documents', 'findings', 'qa', 'all'];
-const REPLY_SHAPE = '{"tool": …} or {"text": "…", "sources": […]}';
+const REPLY_SHAPE = '{"tool": …} or {"text": "…", "sources": […], "offer": {…}}';
 
 export function chatAgent(kit: AgentKit, opts: AgentOptions = {}) {
   const limits: Limits = {
@@ -301,7 +303,8 @@ class Answering {
     const read = { docs: run.touched.size, of: question.deals.reduce((sum, d) => sum + kit.records(d).length, 0) };
     const thread = this.conversation.thread();
     const research = { steps: run.steps.map((s) => ({ ...s })), ms: kit.now() - run.progress.t0, read };
-    return ok({ ...fitted, read, research, ...(thread ? { thread } : {}) });
+    const offer = reply.offer === undefined ? {} : { offer: reply.offer };
+    return ok({ ...fitted, read, research, ...(thread ? { thread } : {}), ...offer });
   }
 
   /** an attached document's step shows the places the answer cites in it */
