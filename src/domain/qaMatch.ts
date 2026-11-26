@@ -25,11 +25,17 @@ const sender = (name: string) => name.trim();
 
 /** what the lookup reads of a row: its number (as its reader reads it), its question and who submitted it */
 export type MatchRow = Pick<ImportRow, 'n' | 'text' | 'askedBy'>;
+/**
+ * What the lookup reads of a question: its id, number, text and sender. A row of another table can stand in for one
+ * (a kept edit's rows, keptMerge.ts), with no number where its row has none.
+ */
+export type MatchQuestion = Pick<Question, 'id' | 'text' | 'askedBy'> & { n: number | null };
 /** a name a question is known by in one sender tier */
-export type SenderOf = (q: Question) => string;
-const OWN_SENDER: SenderOf[] = [(q) => q.askedBy];
+export type SenderOf<Q extends MatchQuestion = Question> = (q: Q) => string;
+const OWN_SENDER: SenderOf<MatchQuestion>[] = [(q) => q.askedBy];
 
-const formKeys = (text: string) => fileForms(text).map((form, which) => `${which}:${form}`);
+/** a text's forms as the file holds it (`fileForms`), keyed by which form each is: the same text shares a key */
+export const formKeys = (text: string) => fileForms(text).map((form, which) => `${which}:${form}`);
 /** one pass of the lookup: a sender tier (-1: a row or question naming no one) and whether the number must match */
 type Pass = { tier: number; sameNumber: boolean };
 /** a place in an index: a text form, a sender, and the number when the pass needs it */
@@ -39,7 +45,7 @@ const placeKey = (form: string, name: string, n: number | null) => `${form}\u000
  * The senders a question is filed under in a pass: its name in the tier (a later tier's blank name says nothing, so
  * none), or in the last tier "any", and "blank" too for a question naming no one.
  */
-function questionNames(q: Question, senders: SenderOf[], tier: number): string[] {
+function questionNames<Q extends MatchQuestion>(q: Q, senders: SenderOf<Q>[], tier: number): string[] {
   if (tier < 0) return sender(q.askedBy) ? ['any'] : ['any', 'blank'];
   const name = sender(senders[tier](q));
   return tier > 0 && !name ? [] : [`=${name}`];
@@ -55,7 +61,9 @@ const rowName = (row: MatchRow, tier: number) => {
  * Each question's place in the pools for one pass, by text form (keyed by which form it is, as `sameText` compares
  * them), sender and number, so that the first question not yet taken is the row's: thousands of rows match quickly.
  */
-function indexForPass(questions: Question[], senders: SenderOf[], pass: Pass): Map<string, number[]> {
+function indexForPass<Q extends MatchQuestion>(
+  questions: Q[], senders: SenderOf<Q>[], pass: Pass,
+): Map<string, number[]> {
   const index = new Map<string, number[]>();
   for (const [at, q] of questions.entries()) {
     for (const form of formKeys(q.text)) {
@@ -92,17 +100,18 @@ function candidatesFor(index: Map<string, number[]>, cache: Map<string, Candidat
  * one never takes a question from its own sender's row; within that, the number comes first, so a renumbered question
  * keeps its row (docs/decisions.md).
  */
-const passesFor = (senders: SenderOf[]) => [[...senders.keys()], [-1]]
+const passesFor = <Q extends MatchQuestion>(senders: SenderOf<Q>[]) => [[...senders.keys()], [-1]]
   .flatMap((tiers) => [true, false].flatMap((sameNumber) => tiers.map((tier) => ({ tier, sameNumber }))));
 
 /**
  * Which question each row is, by row index: the XLOOKUP of the merge (docs/decisions.md). Rows look up questions in
  * file order, in the order of `passesFor`; a question is taken by one row only. The sender tiers are `senders` (the
  * question's own sender by default). The text is the same when it is the same as the file holds it (`sameText`). The
- * pools are searched in order (live, then deleted). Used by the import, its preview and Update Q&A Log alike (#1080).
+ * pools are searched in order (live, then deleted). Used by the import, its preview and Update Q&A Log alike (#1080),
+ * and to line up a kept edit's rows (#1111).
  */
-export function matchQuestions(
-  rows: MatchRow[], pools: Question[][], senders: SenderOf[] = OWN_SENDER,
+export function matchQuestions<Q extends MatchQuestion>(
+  rows: MatchRow[], pools: Q[][], senders: SenderOf<Q>[] = OWN_SENDER,
 ): Map<number, string> {
   const questions = pools.flat();
   const matched = new Map<number, string>();
