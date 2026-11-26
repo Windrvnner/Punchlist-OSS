@@ -1,12 +1,16 @@
 // Readability hints for the code a branch changes (CLAUDE.md, "Readable code"). Lists the changed lines over
-// 120 characters and the new functions Biome finds too complex. It only reports: it never fails the check,
+// 120 characters, the functions Biome finds too complex that the branch changed anywhere, the new functions over
+// 60 lines, and the files over 500 lines that the branch made longer. It only reports: it never fails the check,
 // whatever goes wrong, and code the branch did not touch is never listed. It also lists the added lines in `src/`
 // that name a guess (CLAUDE.md, "Do the simplest thing"), so a reviewer asks what decision asks for each.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { functionSpans, functionStartingAt } from './function-spans.mjs';
 
 const MAX_LINE = 120;
+const MAX_FUNCTION_LINES = 60;
+const MAX_FILE_LINES = 500;
 const MAX_LISTED = 40; // a long list helps nobody; the first ones show where to look
 const COMPLEXITY_RULE = 'complexity/noExcessiveCognitiveComplexity';
 // Words that mark a guess: a threshold, a fallback, a similarity, a normalization or a repair of text.
@@ -135,8 +139,23 @@ function complexityDiagnostics(files) {
   return JSON.parse(report).diagnostics ?? [];
 }
 
-/** New functions that are too complex: those whose name line the branch added or changed. */
-function complexFunctions(changed) {
+/** Each changed file's functions, read once. */
+function spansOf(changed) {
+  const spans = new Map();
+  for (const file of changed.keys()) spans.set(file, functionSpans(file, readLines(file).join('\n')));
+  return spans;
+}
+
+/** Whether the branch changed a line anywhere in the function Biome reported at `line`, or that line itself. */
+function touched(changed, spans, file, line) {
+  const lines = changed.get(file);
+  const span = functionStartingAt(spans.get(file) ?? [], line) ?? { first: line, last: line };
+  for (let n = span.first; n <= span.last; n += 1) if (lines?.has(n)) return true;
+  return false;
+}
+
+/** Functions that are too complex and that the branch changed: their name line or any line inside them. */
+function complexFunctions(changed, spans) {
   const files = [...changed.keys()];
   if (files.length === 0) return [];
   let diagnostics;
@@ -148,8 +167,58 @@ function complexFunctions(changed) {
   return diagnostics
     .filter((d) => d.category === `lint/${COMPLEXITY_RULE}`)
     .map((d) => ({ file: d.location.path.replaceAll('\\', '/'), line: d.location.start.line, message: d.message }))
-    .filter((d) => changed.get(d.file)?.has(d.line))
+    .filter((d) => touched(changed, spans, d.file, d.line))
     .map((d) => `${d.file}:${d.line}  ${d.message}`);
+}
+
+/** New functions over the length limit: those whose first line the branch added or changed, but no test suite. */
+function longFunctions(changed, spans) {
+  const found = [];
+  for (const [file, lines] of changed) {
+    for (const { first, last, suite } of spans.get(file) ?? []) {
+      const length = last - first + 1;
+      if (suite || length <= MAX_FUNCTION_LINES || !lines.has(first)) continue;
+      found.push(`${file}:${first}  ${length} lines`);
+    }
+  }
+  return found;
+}
+
+/** Lines as an editor counts them: a final newline ends the last line rather than starting another. */
+function lineCount(text) {
+  if (text === '') return 0;
+  return text.split(/\r?\n/).length - (text.endsWith('\n') ? 1 : 0);
+}
+
+/** The number of lines `file` had at `base`; 0 for a file that is new since. */
+function lineCountAt(base, file) {
+  try {
+    return lineCount(git('show', `${base}:${file}`));
+  } catch {
+    return 0;
+  }
+}
+
+/** For each file the branch renamed, its name at `base`, so a renamed file is compared with itself. */
+function renamedFrom(base) {
+  const renames = new Map();
+  for (const line of git('diff', '-M', '--diff-filter=R', '--name-status', base).split('\n')) {
+    const [, before, after] = line.split('\t');
+    if (after) renames.set(after, before);
+  }
+  return renames;
+}
+
+/** Changed files over the length limit that the branch made longer. */
+function longFiles(changed, base) {
+  const renames = renamedFrom(base);
+  const found = [];
+  for (const file of changed.keys()) {
+    const count = lineCount(readLines(file).join('\n'));
+    const before = lineCountAt(base, renames.get(file) ?? file);
+    if (count > MAX_FILE_LINES && count > before) found.push(`${file}  ${count} lines`);
+  }
+  return found;
 }
 
 function list(title, items) {
@@ -166,7 +235,10 @@ function main() {
   const changed = changedLines(base);
   addUntracked(changed);
   list(`Readability: changed lines over ${MAX_LINE} characters`, longLines(changed));
-  list('Readability: new functions that are too complex', complexFunctions(changed));
+  const spans = spansOf(changed);
+  list('Readability: changed functions that are too complex', complexFunctions(changed, spans));
+  list(`Readability: new functions over ${MAX_FUNCTION_LINES} lines`, longFunctions(changed, spans));
+  list(`Readability: files over ${MAX_FILE_LINES} lines made longer`, longFiles(changed, base));
   list('Simplicity: added lines naming a guess, to match to a decision', guessLines(changed));
 }
 

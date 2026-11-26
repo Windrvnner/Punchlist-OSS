@@ -23,7 +23,9 @@ Start with these documents:
 
 ## Commands
 
-These commands need Node.js 22, Google Chrome at `/usr/bin/google-chrome`, and LibreOffice at `/usr/bin/soffice`. Tests that need LibreOffice are skipped when it is missing, except under `npm run check:all`, which checks LibreOffice first and fails without it.
+These commands need Node.js 22, Google Chrome at `/usr/bin/google-chrome`, and LibreOffice at `/usr/bin/soffice`.
+Tests that need LibreOffice are skipped when it is missing, except under `npm run check:all`, which checks LibreOffice
+first and fails without it. `check:all` also needs LibreOffice Impress and Calibri or Carlito (docs/development.md).
 
 ```sh
 npm ci                                       # install dependencies and the pre-commit hook
@@ -62,7 +64,9 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   - Put a new special case in its own named helper, with a comment that names its decision or issue, rather than adding another branch to a long function.
   - Copy nothing (share the code instead), and leave no dead code (remove it). Comment anything that isn't self-explanatory.
   - Lines that a change touches follow these rules. Untouched code is left alone, and the formatter stays off. Older code is brought up to these rules in separate, behavior-neutral cleanup pull requests.
-  - `npm run check` lists changed lines over 120 characters and new functions that are too complex, compared with the branch's merge base with `main` (`scripts/check-readability.mjs`). It does not fail on them.
+  - `npm run check` lists changed lines over 120 characters, too-complex functions the branch changed anywhere, new
+    functions over 60 lines, and files over 500 lines the branch made longer, compared with the branch's merge base
+    with `main` (`scripts/check-readability.mjs`). It does not fail on them.
 - **Code before a model.** Use a model only when the task needs language understanding: reading free text, judging
   meaning, drafting. Parsing, matching, numbering, dates and periods (a question number "Q1" versus a quarter "Q1
   2026"), sorting, counting, and formatting are done in code, with tests at deal scale. Never ask a model to decide
