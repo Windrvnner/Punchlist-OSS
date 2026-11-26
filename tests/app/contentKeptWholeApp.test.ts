@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { make, deal, rowsFrom } from './importKit';
 import { CreateQuestion, SetResponse, UseAsResponse } from '../../src/app/commands/questions';
-import { CreateFinding, EditFinding } from '../../src/app/commands/findings';
+import { CreateFinding, EditFinding, typedParagraphs } from '../../src/app/commands/findings';
 import { ImportQuestions } from '../../src/app/commands/importQuestions';
 import { previewImport } from '../../src/app/transfer';
 import { answerWasUsed } from '../../src/app/conversations';
@@ -19,6 +19,23 @@ describe('commands keep content as given', () => {
     const findingId = Object.keys(store.get().findings)[0];
     await store.dispatch(EditFinding, { dealId, findingId, title: 'Curtailment risk', workstream: 'Technical', body });
     expect(store.get().findings[findingId].body).toEqual(body);
+  });
+
+  it('a paragraph a person types is trimmed, and the model\'s paragraphs beside it stay as written', async () => {
+    const { store } = make();
+    const dealId = await deal(store);
+    const body = [' model paragraph\t', ' second model paragraph '];
+    await store.dispatch(CreateFinding, { dealId, title: 'Curtailment', workstream: 'Technical', body });
+    const findingId = Object.keys(store.get().findings)[0];
+    const typed = [' model paragraph\t', '  my own words\t  '];
+    const base = { title: 'Curtailment', workstream: 'Technical', body };
+    await store.dispatch(EditFinding, { dealId, findingId, title: 'Curtailment', workstream: 'Technical', body: typed, base });
+    expect(store.get().findings[findingId].body).toEqual([' model paragraph\t', 'my own words']);
+  });
+
+  it('a paragraph typed into a finding with no model text before it is trimmed, and a blank one is dropped', () => {
+    expect(typedParagraphs([' typed\t', '   ', 'more '], [])).toEqual(['typed', 'more']);
+    expect(typedParagraphs(['same', 'same'], [' same ', 'other'])).toEqual([' same ', 'same']);
   });
 
   it('a model answer used as a response is stored as the answer has it', async () => {
