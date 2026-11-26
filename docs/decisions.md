@@ -184,6 +184,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Tool calls run inline by default; the hybrid and native modes are set by `models.toolCalls`.
 - A question asked across deals reaches only the person's own deals.
 - A chat is one conversation on the model service; past its limit, it is compacted into an uploaded transcript.
+- One chat answer takes up to `limits.chatTurns` (25) turns of tool use, and one search run up to `limits.searchCalls` (15) calls; a chat itself has no length limit (#1066).
 - Each PC keeps its own word index of the data room; nothing is added to the shared folder.
 - Documents open in reading mode beside the conversation, with page keys and zoom.
 - Switching PDFs opens the cited page at the top and keeps the zoom (#447).
