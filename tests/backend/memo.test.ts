@@ -22,8 +22,9 @@ function setup(rate: (c: Call, n: number) => unknown, sum: (c: Call, n: number) 
   const rates: Call[] = []; const sums: Call[] = []; const groups: Call[] = [];
   const svc = new StandInService((c) => { const call = c as Call; const r = isRate(call) ? (rates.push(call), rate(call, rates.length)) : isGroup(call) ? (groups.push(call), group(call)) : (sums.push(call), sum(call, sums.length)); return typeof r === 'string' ? r : JSON.stringify(r); });
   const docs: AiDocs = { records: () => [], wanted: async () => [] };
-  const ai = nodeAi({ service: svc, docs, keeper: new StoreKeeper(svc, new Mem(), { recheckMs: 0, clock }), repo, shared, installId: pc, clock,
-    retry: { sleep: async () => {} } });   // retries without the waits
+  const keeper = new StoreKeeper(svc, new Mem(), { recheckMs: 0, clock });
+  // retries without the waits
+  const ai = nodeAi({ service: svc, docs, keeper, repo, shared, installId: pc, clock, retry: { sleep: async () => {} } });
   return { ai, rates, sums, groups, repo, shared };
 }
 const val = <T,>(r: { ok: boolean; value?: T }) => { expect(r.ok).toBe(true); return r.value as T; };
@@ -125,7 +126,7 @@ describe('the deal memo’s ratings and summary', () => {
     expect(never.sums.map((c) => c.model)).toEqual(['standard', 'standard', 'thorough']);
   });
 
-  it('fails the memo, rather than leaving its summary blank, when the summary call fails on every try (#1065)', async () => {
+  it('fails the memo, rather than leave its summary blank, when every summary call fails (#1065)', async () => {
     const serverError = () => { throw Object.assign(new Error('Internal server error'), { status: 500 }); };
     const s = setup(by({ f_1: 'High' }), serverError);
     await deal(s.repo);
