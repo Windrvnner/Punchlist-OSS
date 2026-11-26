@@ -6,14 +6,14 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/ho
 import { useAppState, useStore } from './hooks';
 import { Modal, DialogHead } from './dialogs';
 import { FileInput, PickFileRow } from './fileDrop';
-import { proposeLayout, previewImport, type ImportLocation, type ImportTable } from '../app/transfer';
+import { previewImport, type ImportLocation, type ImportTable } from '../app/transfer';
 import type { ImportField } from '../domain/importExport';
+import type { AcceptedMatch } from '../domain/qaMatch';
 import {
-  clearQaImport, keepQaImport, keptQaImport, loadQaImport, prepareQaImport, qaImportPartyCount,
+  clearQaImport, keepQaImport, keptQaImport, loadQaImport, prepareQaImport, qaImportMakesLog,
   replaceQaImport, submitQaImport, summarizeQaImport, type ImportMode, type QaChoices,
 } from '../app/qaImport';
 import { QaImportLayout, type QaImportLayoutView } from '../app/qaImportLayout';
-import { SERVICE } from '../control';
 import { importKey } from '../app/keptImports';
 import { useKeptImportsReady, useFreshOnCrash } from './keptImports';
 import { QaImportForm } from './qaImportForm';
@@ -67,49 +67,54 @@ function useQaImportState(store: Store, dealId: string, fresh: boolean) {
   const choices = kept?.choices;
   const [layout, setLayout] = useState<QaImportLayoutView>();
   const [reader] = useState(() => new QaImportLayout(store, kept?.table ?? null, choices?.mapping ?? null, setLayout));
-  const { table, mapping, reading, wantedSheet, error: readError, unapplied, warning } = layout ?? reader.view;
+  const { table, mapping, reading, asking, wantedSheet, error: readError, unapplied, warning } = layout ?? reader.view;
   useEffect(() => () => reader.cancel(), [reader]);
   // where the file is, which the desktop app knows: the deal's log is that file
   const [path, setPath] = useState<string | null>(choices?.path ?? null);
   const [mode, setMode] = useState<ImportMode>(choices?.mode ?? 'merge');
   const [answered, setAnswered] = useState(!!choices?.answered);
-  // the file becomes the deal's log only if this stays checked. It starts checked only for a
-  // consolidated log, one with two or more parties under Submitted by; one party's own list is not the deal's log
-  // Once the person checks or unchecks it (touched), the app leaves it as they set it.
+  // the suggestions the person accepted, by the file's line; none is applied until they accept it
+  const [accepted, setAccepted] = useState<AcceptedMatch[]>(choices?.accepted ?? []);
+  // the file becomes the deal's log only if this stays checked; the app sets it until the person does (touched)
   const [makeLog, setMakeLog] = useState(!!choices?.makeLog);
   const touched = useRef(!!choices?.touched);
-  const parties = qaImportPartyCount(table, mapping);
   useEffect(() => {
-    if (!touched.current) setMakeLog(parties >= 2);
-  }, [parties, table]);
+    setMakeLog((now) => qaImportMakesLog(table, mapping, { makeLog: now, touched: touched.current }));
+  }, [table, mapping]);
   const [busy, setBusy] = useState<Busy>('');
   const [error, setError] = useState('');
   const [restart, setRestart] = useState(false);   // "start over" asks first, in the footer
   const fileRef = useRef<HTMLInputElement>(null);
-  // each read, proposal and import takes the next number; one that finds a later number when it ends was overtaken
-  // (another file, another choice, the dialog closed) and changes nothing
+  // each file read takes the next number; one that finds a later number when it ends was overtaken (another file,
+  // another choice, the dialog closed) and changes nothing. The layout numbers its own sheet reads and proposals.
   const token = useRef(0);
   return {
-    key, table, mapping, reader, path, setPath, mode, setMode, answered, setAnswered,
-    makeLog, setMakeLog, touched, busy: reading ? 'reading' as const : busy, setBusy, wantedSheet,
+    key, table, mapping, reader, accepted, setAccepted, path, setPath, mode, setMode, answered, setAnswered,
+    makeLog, setMakeLog, touched, busy: layoutBusy(reading, asking) || busy, setBusy, wantedSheet,
     error: error || readError, setError, restart, setRestart, fileRef, token, unapplied, warning,
   };
 }
 export type QaImportState = ReturnType<typeof useQaImportState>;
 
+/** What the dialog shows while the app reads a sheet or the model proposes the layout */
+function layoutBusy(reading: boolean, asking: boolean): Busy {
+  if (reading) return 'reading';
+  return asking ? 'asking' : '';
+}
+
 /** What the import will do with the file as mapped: its rows, and what they add to and change in the deal */
 function useImportPlan(store: Store, dealId: string, qa: QaImportState) {
   const state = useAppState();
-  const { table, mapping, mode, answered } = qa;
+  const { table, mapping, mode, answered, accepted } = qa;
   const file = useMemo(() => (table && mapping ? prepareQaImport(table, mapping) : null), [table, mapping]);
   const prepared = file?.prepared ?? null;
   // The same plan the command would run, without committing it.
   const dry = useMemo(
-    () => (prepared?.rows.length ? previewImport(store, dealId, mode, prepared.rows, answered) : null),
-    [prepared, mode, answered, state.questions, state.tombstones],
+    () => (prepared?.rows.length ? previewImport(store, dealId, mode, prepared.rows, answered, accepted) : null),
+    [prepared, mode, answered, accepted, state.questions, state.tombstones],
   );
   return {
-    ...summarizeQaImport(state, dealId, qa.key, mode, prepared, dry),
+    ...summarizeQaImport(qa.key, prepared, dry),
     prepared,
     previewRows: file?.previewRows ?? [],
   };
@@ -122,13 +127,13 @@ export type ImportPlan = ReturnType<typeof useImportPlan>;
  * over", which asks first, or the import itself lets it go.
  */
 function useKeepAsItChanges(qa: QaImportState) {
-  const { key, table, mapping, path, mode, answered, makeLog, touched } = qa;
+  const { key, table, mapping, path, mode, answered, makeLog, touched, accepted } = qa;
   // Hand choices to the app before the next frame.
   useLayoutEffect(() => {
     if (table && mapping) {
-      keepQaImport(key, table, { mapping, path, mode, answered, makeLog, touched: touched.current });
+      keepQaImport(key, table, { mapping, path, mode, answered, makeLog, touched: touched.current, accepted });
     }
-  }, [table, mapping, path, mode, answered, makeLog]);
+  }, [table, mapping, path, mode, answered, makeLog, accepted]);
 }
 
 /** What the person can do in the dialog: read a file, ask the model, read the file again, import, start over, close */
@@ -153,6 +158,7 @@ function useQaImportActions(store: Store, dealId: string, qa: QaImportState, pla
     qa.setPath(null);
     qa.setMode('merge');
     qa.setAnswered(false);
+    qa.setAccepted([]);
     qa.setMakeLog(false);
     qa.touched.current = false;
   };
@@ -195,26 +201,17 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
     const { table, path, askForLayout } = read.value;
     reader.replace(table);
     qa.setPath(path);
+    qa.setAccepted([]);
     qa.touched.current = false;
-    if (askForLayout) void askAi(table, mine);
+    if (askForLayout) void askAi(table);
   };
 
-  // The model proposes the sheet, the heading row and the columns; the app checks the proposal against the file and
-  // shows it in the same controls. If there is no usable proposal the dialog stays as it was, for the person to set by
-  // hand. A read that asks goes on with its own number; the person's own ask takes the next one.
+  // The model's proposal shows in the same controls; without one the dialog stays as it was, to set by hand.
   const canAsk = store.get().can.layout;
-  const askAi = async (asked: ImportTable, mine = ++token.current) => {
+  const askAi = async (asked: ImportTable) => {
     if (!canAsk) return;
-    setBusy('asking');
-    const proposal = await proposeLayout(store, asked);
-    if (token.current !== mine) return;
-    setBusy('');
-    if (proposal.ok) {
-      setError('');
-      reader.propose(proposal.value);
-    } else if (asked.mapping.text != null) {
-      setError(`${SERVICE} had no better proposal`);
-    }
+    const shown = await reader.ask(asked);
+    if (shown !== undefined) setError(shown);
   };
 
   const reread = async (where: ImportLocation, accept?: (read: ImportTable) => void) => {
@@ -224,14 +221,7 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
     setError('');
     await reader.reread(where, accept);
   };
-  return { load, canAsk, askAi, reread, cancelProposal: () => cancelProposal(qa) };
-}
-
-/** A manual heading edit takes over from an outstanding layout proposal (#380). */
-function cancelProposal(qa: QaImportState) {
-  if (qa.busy !== 'asking') return;
-  qa.token.current++;
-  qa.setBusy('');
+  return { load, canAsk, askAi, reread, cancelProposal: () => reader.cancelAsk() };
 }
 
 /** Display the app's submission outcome and restore the original controls when requested. */
@@ -242,7 +232,7 @@ async function runImport(store: Store, dealId: string, qa: QaImportState, plan: 
   qa.setBusy('importing');
   qa.setError('');
   qa.setRestart(false);
-  const choices = { mapping, path, mode, answered, makeLog, touched: touched.current };
+  const choices = { mapping, path, mode, answered, makeLog, touched: touched.current, accepted: qa.accepted };
   try {
     const result = await submitQaImport(store, dealId, { table, choices }, plan.prepared?.rows ?? []);
     if (result.ok) store.ui({ dialog: null });
@@ -257,6 +247,7 @@ async function runImport(store: Store, dealId: string, qa: QaImportState, plan: 
 
 function restoreChoices(qa: QaImportState, table: ImportTable, choices: QaChoices) {
   qa.reader.replace(table, choices.mapping);
+  qa.setAccepted(choices.accepted ?? []);
   qa.setPath(choices.path);
   qa.setMode(choices.mode);
   qa.setAnswered(choices.answered);

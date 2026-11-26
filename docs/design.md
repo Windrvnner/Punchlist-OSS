@@ -33,6 +33,12 @@ The look is defined in these files: `src/styles.css` (tokens, the shell, and con
   (03). On Q&A, an open question's panel takes its place. Once open, it is the same composer as Home's (04) and a
   conversation's (06), with a 22px radius, 14px padding all around, 15px text on one line until more is typed, and 32px
   buttons and send.
+- **Slash commands:** "/" at the start of an empty composer opens a glass panel as wide as the box, 8px from it: under
+  a Home or deal page's ask box, over a conversation's composer. Each row shows its `/command` in 14px monospace over a
+  one-line 13px `--ink-2` description; the row the arrows reached (`.hi`) has the `--card-hover` fill, the first at
+  open. The focus stays in the box: arrows move, Enter picks, Escape closes. **Log Question** puts a `.chip.att` chip
+  at the head of the box, with × to take it off. An action the AI offers is one `.btn sm` button 10px under the
+  answer's actions.
 - **Side pane:** The open item on Checklist sits in a glass pane beside the list, with its top on the list's top line and its bottom on the sidebar's bottom line (08). The open question on Q&A takes a glass panel across the top (09).
 - **Reading mode:** A demo PDF without a preview shows “Page preview unavailable.” in
   `--paper-ink` below the title. The paper still shows its page number, and the reading controls stay in place (#443).
@@ -243,7 +249,9 @@ See reference screenshot 13.
 - **Layout:** Every notice is one base, `Notice` in `src/ui/notice.tsx`: the toasts, the offline notice, Read-only, and an interrupted action alike, differing only in words and glyph. Inside the capsule, 6px from every side, on one 24px line: a 16px glyph in `--ink-2` in a 24px slot (`check` for something done, `warn`, a triangle, for something that did not happen), the title 13px/600 `--ink`, then the detail 13px `--ink-2` (the words after " · ", which stays in the text for screen readers but is not shown), its first letter capitalized; then optional actions such as Undo, Open, Retry, Retry Now, or Sign In, as 24px capsules at least 60px wide (`--card` fill, 1px `--line` edge, 12px/500 `--ink`); then the ✕, 24px, `--ink-3`, when the notice can be dismissed. No color marks a notice. The detail gives way to an ellipsis before the title does; the whole text shows on hover. A deal named with its twin line, as "Project Kestrel (Wingtip)", gives way before the verb, after its notice's detail, which is drawn not at all rather than as a stub (it is still read aloud); the label gives way at whole words: its name first, down to "Project" and one more word, then its twin line; where no whole word fits, the name is cut at a letter and the twin line's first word stays.
 - **Material:** The capsule is popup glass, the same material as every menu (see Glass, radii, and shadows: new elements are Liquid Glass).
 - **Timing and closing:** Toasts stay 8 seconds, paused while the pointer or focus is on them. Ctrl Z does what the showing Undo does. ✕ closes a toast; on the offline, Read-only, and interrupted notices it only hides that notice until it shows again (the account row still says Read-only, and an interrupted action keeps its Retry and Discard).
-- **Standing notices:** Offline reads "**Not connected** Retrying" with Retry Now; while nobody is signed in to Intelligence, "**Read-only** Not signed in to Intelligence" with Sign In; an interrupted action, "**<action> interrupted** <where>" with Retry and Discard.
+- **Standing notices:** Offline reads "**Not connected** Retrying" with Retry Now; while nobody is signed in to
+  Intelligence, "**Read-only** Not signed in to Intelligence" with Sign In; an interrupted action, "**<action>
+  interrupted** <where>" with Retry and Discard, which asks first in the confirm dialog (#1055).
 - **Interrupted actions out of view:** The summary counts dismissed and overflowed actions. **Show** brings another
   group into view and focuses its first Retry. The summary stays while any interrupted action is out of view (#565).
 

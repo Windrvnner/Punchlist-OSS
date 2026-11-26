@@ -105,24 +105,55 @@ const answered = (page) => page.waitForSelector('.msgs .ai:not(.pending):not(.fa
   say('no-page-errors-1', page.errors.length === 0, JSON.stringify(page.errors));
   await ctx.close(); }
 
-// 7 home ask (all deals), navigation intents, add-question intent, failed answer + retry, navigate during a pending answer
+// 7 home ask (all deals), actions the model offers and slash commands (#1054), failed answer + retry, navigate during
+// a pending answer
 { const { ctx, page } = await fresh();
   const id = await indexedDeal(page, 'Trey');
-  await page.goto(URL + '#deals'); await page.waitForSelector('#homeask'); await page.fill('#hask', 'go to Trey Q&A'); await page.press('#hask', 'Enter'); await page.waitForFunction((i) => location.hash === '#qa-' + i, id);
-  await page.goto(URL + '#deals'); await page.waitForSelector('#homeask'); await page.fill('#hask', 'open Trey findings'); await page.press('#hask', 'Enter'); await page.waitForFunction((i) => location.hash === '#deal-' + i, id); await page.waitForSelector('.dtabs');   // the deal page, not the home page that was just left
-  // a page named after the deal opens that page whatever the deal opens on, and a curly apostrophe is read too
-  await page.evaluate(() => store.setPrefs({ landing: 'overview' }));
-  for (const [typed, want] of [['go to Trey findings', 'deal'], ['show me the Trey findings', 'deal'], ['open Trey’s findings', 'deal'], ["open Trey's checklist", 'checklist'], ['go to Trey', 'overview']]) {
-    await page.goto(URL + '#deals'); await page.waitForSelector('#homeask'); await page.fill('#hask', typed); await page.press('#hask', 'Enter');
-    await page.waitForFunction((h) => location.hash === h, `#${want}-${id}`, { timeout: 3000 }).catch(() => undefined);
-    const at = await page.evaluate(() => location.hash); if (at !== `#${want}-${id}`) say(`navigation-intent-${typed}`, false, at);
-  }
-  await page.evaluate(() => store.setPrefs({ landing: 'findings' })); await page.goto(URL + '#deal-' + id); await page.waitForSelector('.dtabs');
-  say('navigation-intents', true);
-  await page.fill('#hask', 'add a question: Please confirm the insurance program.');
-  await page.press('#hask', 'Enter');
+  // typed words never run a command: "go to Trey Q&A" is asked, and the page stays where it is
+  await page.goto(URL + '#deals'); await page.waitForSelector('#homeask');
+  await page.fill('#hask', 'go to Trey Q&A'); await page.press('#hask', 'Enter'); await answered(page);
+  say('typed-words-are-asked', /^#chat-/.test(await page.evaluate(() => location.hash)));
+  // an offered page opens only when its button is pressed
+  await page.fill('#pask', 'Take me to the Q&A'); await page.press('#pask', 'Enter');
+  await page.waitForFunction(() => document.querySelectorAll('.msgs .ai:not(.pending)').length === 2);
+  const offered = await page.evaluate(() =>
+    [...document.querySelectorAll('.msgs .offer button')].map((b) => b.textContent));
+  // asked on Home, no deal is named and the conversation has none: nothing is offered
+  say('offer-needs-a-deal', offered.length === 0, JSON.stringify(offered));
+  await page.goto(URL + '#deal-' + id); await page.waitForSelector('.dtabs');
+  await page.fill('#hask', 'Take me to the Q&A'); await page.press('#hask', 'Enter'); await answered(page);
+  const label = await page.textContent('.msgs .offer button');
+  const before = await page.evaluate(() => location.hash);
+  await page.click('.msgs .offer button'); await page.waitForFunction((i) => location.hash === '#qa-' + i, id);
+  say('offer-opens-page-when-pressed', label === 'Open Trey Q&A' && /^#chat-/.test(before), label);
+  // an offered question opens the question card with the model's draft; nothing is logged until Log Question
+  await page.goto(URL + '#deal-' + id); await page.waitForSelector('.dtabs');
+  await page.fill('#hask', 'Ask them for the permit list'); await page.press('#hask', 'Enter'); await answered(page);
+  const none = await page.evaluate(() => Object.keys(store.get().questions).length);
+  await page.click('.msgs .offer button'); await page.waitForSelector('#aq-text');
+  const drafted = await page.inputValue('#aq-text');
+  await page.click('#aq-log');
+  await page.waitForFunction(() => Object.values(store.get().questions).some((q) => /list of permits/.test(q.text)));
+  const permits = 'Please provide the list of permits held for the project.';
+  say('offer-question-card', none === 0 && drafted === permits, drafted);
+  // "/" in the ask box: the menu, in the top layer under the box; Enter picks Log Question, and Send logs the question
+  await page.goto(URL + '#deal-' + id); await page.waitForSelector('.dtabs');
+  await page.click('#hask'); await page.keyboard.type('/lo');
+  await page.waitForSelector('.slashmenu [role="option"]');
+  const menu = await page.evaluate(() => {
+    const m = document.querySelector('.slashmenu'); const box = document.querySelector('#dask').getBoundingClientRect();
+    const items = [...m.querySelectorAll('[role="option"] .sc')].map((o) => o.textContent);
+    return { items, top: m.matches(':popover-open'),
+      below: m.getBoundingClientRect().top >= box.bottom, focus: document.activeElement?.id };
+  });
+  await page.keyboard.press('Enter'); await page.waitForSelector('#log-question-chip');
+  await page.keyboard.type('Please confirm the insurance program.'); await page.keyboard.press('Enter');
   await page.waitForFunction(() => Object.values(store.get().questions).some((q) => /insurance program/.test(q.text)));
-  say('add-question-intent', (await page.evaluate(() => location.hash)) === '#deal-' + id);
+  const after = await page.evaluate(() => ({ hash: location.hash, chip: !!document.querySelector('#log-question-chip'),
+    box: document.querySelector('#hask').value }));
+  say('slash-log-question', JSON.stringify(menu.items) === '["/log-question"]' && menu.top && menu.below
+    && menu.focus === 'hask' && after.hash === '#deal-' + id && !after.chip && after.box === '',
+  JSON.stringify({ menu, after }));
   await page.goto(URL + '#deals'); await page.waitForSelector('#homeask'); await page.evaluate(() => { window.__fail = { answer: true }; });
   await page.fill('#hask', 'What is outstanding across my deals?'); await page.press('#hask', 'Enter'); await page.waitForSelector('.msgs .ai.failed', { timeout: 8000 });
   await page.evaluate(() => { window.__fail = {}; }); await page.click('.msgs .ai.failed button'); await answered(page);
@@ -133,7 +164,10 @@ const answered = (page) => page.waitForSelector('.msgs .ai:not(.pending):not(.fa
   await page.press('#pask', 'Enter');
   await page.waitForSelector('.msgs .ai.pending');
   await page.goto(URL + '#chat'); await page.waitForFunction((i) => store.get().threads['deal:' + i].every((m) => m.state === 'done'), id, { timeout: 8000 }).catch(() => undefined);
-  const all = await page.evaluate(() => Object.entries(store.get().threads).find(([k]) => k.startsWith('all:'))[1].length); const dealT = await page.evaluate((i) => store.get().threads['deal:' + i].map((m) => m.state), id);
+  // the Home conversation this answer was asked in, not the ones asked earlier in this check
+  const all = await page.evaluate(() => Object.entries(store.get().threads)
+    .find(([k, list]) => k.startsWith('all:') && list[0]?.text === 'What is outstanding across my deals?')[1].length);
+  const dealT = await page.evaluate((i) => store.get().threads['deal:' + i].map((m) => m.state), id);
   say('answer-lands-on-its-thread', all === 2 && dealT.join() === 'done,done', JSON.stringify({ all, dealT }));
   // the chat agent's research (option D): "Researched · N steps · N of M documents searched · time" opens the trace; each chip opens its page
   await page.goto(URL + '#chat-' + id); await page.waitForSelector('.msgs .ai:not(.pending) .rsch-pill');

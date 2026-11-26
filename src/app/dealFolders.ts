@@ -104,6 +104,11 @@ export async function readDealFolder(
   return true;
 }
 
+/** The New Deal form, empty: from the sidebar, Add Deal, the slash command, or the model's offer. */
+export function openNewDeal(store: Store, more: Partial<UiState> = {}) {
+  store.ui({ ...more, newDeal: { name: '', folders: [], error: '', busy: false } });
+}
+
 export function patchDealForm(store: Store, patch: Partial<DealForm>) {
   store.ui((ui) => ({ newDeal: ui.newDeal ? { ...ui.newDeal, ...patch } : null }));
 }

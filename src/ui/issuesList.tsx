@@ -12,11 +12,12 @@ import { Modal, LeaveFoot } from './dialogs';
 import { num, plural } from './counts';
 import { FileInput, PickFileRow } from './fileDrop';
 import { showTip, hideTip } from './tip';
-import { issuesListTitle, readIssuesList, reviewIssuesList, type ReadIssuesList } from '../app/issuesList';
-import { ImportIssuesList } from '../app/commands/issuesList';
-import { AI_LABEL } from '../control';
+import {
+  issuesListTitle, keptIssuesList, pointsByList, readIssuesList, reviewIssuesList, submitIssuesList,
+  type IssuesListKept, type ReadIssuesList,
+} from '../app/issuesList';
 import type { Finding, ListPoint } from '../domain/model';
-import { keptImport, keepImport, dropImport, importKey } from '../app/keptImports';
+import { keepImport, dropImport, importKey } from '../app/keptImports';
 import { useKeptImportsReady, useFreshOnCrash } from './keptImports';
 
 /** the files a list comes as: a PDF, a Word file or an email */
@@ -32,12 +33,9 @@ const oneLine = (t: string, most = 78) => (t.length <= most ? t : `${t.slice(0, 
  */
 export const onListTip = (marks: ListPoint[]) => {
   if (marks.length === 1) return `${issuesListTitle(marks[0].list)}\n#${marks[0].n} · ${marks[0].text}`;
-  // by list, as each list's file is its own list: two saved under one name show the name twice
-  const lists = [...new Set(marks.map((m) => m.doc))];
-  return lists.map((list) => {
-    const points = marks.filter((mark) => mark.doc === list);
-    return [issuesListTitle(points[0].list), ...points.map((mark) => `#${mark.n} · ${oneLine(mark.text)}`)].join('\n');
-  }).join('\n');
+  const lines = ({ title, points }: ReturnType<typeof pointsByList>[number]) =>
+    [title, ...points.map((mark) => `#${mark.n} · ${oneLine(mark.text)}`)];
+  return pointsByList(marks).flatMap(lines).join('\n');
 };
 
 /** The mark on a finding's page: its points, with the list and their words on hover or focus. Plain text, as the list row's. */
@@ -48,14 +46,6 @@ export function OnListMark({ f }: { f: Finding }) {
   return <> · <span class="ilh" id="f-onlists" tabIndex={0} aria-description={onListTip(f.onLists)} onMouseEnter={tip} onMouseLeave={off} onFocus={tip} onBlur={off}>{onListText(f.onLists)}</span></>;
 }
 
-/** the issues list as it was left: the list as the model read it, and the points checked to keep separate */
-interface ListKept { list: ReadIssuesList; kept: Set<number> }
-const isListKept = (v: unknown): v is ListKept => {
-  const k = v as ListKept | undefined;
-  return !!k?.list?.doc && typeof k.list.doc.docId === 'string' && typeof k.list.doc.doc === 'string' && Array.isArray(k.list.points) && k.kept instanceof Set
-    && k.list.points.every((p) => !!p && typeof p.n === 'string' && typeof p.text === 'string' && typeof p.title === 'string' && typeof p.workstream === 'string');
-};
-
 /** The issues list import picks up where it was left on this PC: it waits the moment it takes to read what was kept */
 export function IssuesListDialog({ dealId }: { dealId: string }) {
   const ready = useKeptImportsReady(); const fresh = useFreshOnCrash();
@@ -64,7 +54,8 @@ export function IssuesListDialog({ dealId }: { dealId: string }) {
 
 function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: boolean }) {
   const store = useStore(); const s = useAppState();
-  const KEY = importKey.issues(dealId); const [left] = useState(() => { const k = afresh ? null : keptImport(KEY); return isListKept(k) ? k : null; });
+  const KEY = importKey.issues(dealId);
+  const [left] = useState(() => (afresh ? null : keptIssuesList(KEY)));
   const [list, setList] = useState<ReadIssuesList | null>(left?.list ?? null);
   const [kept, setKept] = useState<Set<number>>(left?.kept ?? new Set());   // points the person keeps as their own finding
   const [busy, setBusy] = useState<'' | 'reading' | 'importing'>('');
@@ -76,7 +67,9 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
   // list read in its place, "start over" (which asks first) or the import itself lets it go.
   const holding = useRef(false);
   const keep = () => { if (list && !holding.current) keepImport(KEY, { list, kept }); };
-  const keepNow = useRef(keep); keepNow.current = keep;   // a failed import keeps the state as it is then, not as Import found it
+  // a failed import keeps the state as it is then, not as Import found it
+  const nowKept = useRef<IssuesListKept | null>(null);
+  nowKept.current = list && { list, kept };
   // biome-ignore lint/correctness/useExhaustiveDependencies: written as soon as what is kept changes, before the next frame
   useLayoutEffect(keep, [list, kept]);
   const close = () => { if (busy === 'importing') return; setSwapping(false); token.current++; store.ui({ dialog: null }); };
@@ -121,11 +114,14 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
   const run = async () => {
     if (busy) return;
     setBusy('importing'); setError(''); setRestart(false); setSwapping(false);
-    // let go of the kept list first, so a reload while it runs never offers it again; a failure keeps it again
-    holding.current = true; dropImport(KEY);
-    const r = await store.dispatch(ImportIssuesList, { dealId, doc: list.doc.docId, list: list.doc.doc, points: input }, { idempotencyKey: `issues-${dealId}-${list.doc.docId}` });
-    setBusy(''); holding.current = false;
-    if (!r.ok) { keepNow.current(); setError(`Couldn’t import: ${r.error.message}`); return; }
+    holding.current = true;
+    const result = await submitIssuesList(store, KEY, { dealId, list, points: input }, () => nowKept.current);
+    setBusy('');
+    holding.current = false;
+    if (!result.ok) {
+      setError(`Couldn’t import: ${result.error.message}`);
+      return;
+    }
     store.ui({ dialog: null });
   };
   const name = issuesListTitle(list.doc.doc);
@@ -142,10 +138,9 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
               <label class="keep"><input type="checkbox" aria-label={`Keep #${p.n} separate`} disabled={busy === 'importing'} checked={kept.has(k)} onChange={(e) => { const on = (e.currentTarget as HTMLInputElement).checked; setKept((x) => { const y = new Set(x); if (on) y.add(k); else y.delete(k); return y; }); }} />Keep separate</label></div>
           ); })}
         </div></div>}
-        {/* every finding Import will make, read only: its title and workstream are the model's */}
+        {/* every finding Import will make, read only: its title the point's own words, its workstream the model's */}
         {fresh.length > 0 && <div class="srow top"><div class="k">New Findings<span
-          class="cnt">{num(fresh.length)}</span><b class="aim"
-          title={`Titles written by ${AI_LABEL}`}>{AI_LABEL}</b></div><div id="il-new">
+          class="cnt">{num(fresh.length)}</span></div><div id="il-new">
           {fresh.map((k) => <div class="iln" key={k}><span class="n" title={`#${points[k].n}`}>#{points[k].n}</span><span class="t">{points[k].title}</span><span class="ws">{points[k].workstream}</span></div>)}
         </div></div>}
       </div>

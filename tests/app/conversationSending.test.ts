@@ -14,6 +14,8 @@ import {
   sendTyped, setComposerText, useAnswer, type Scope,
 } from '../../src/app/conversations';
 import { initializeKeptText, saveKeptDrafts } from '../../src/app/keptText';
+import { runSlashCommand, slashCommands } from '../../src/app/slashCommands';
+import { setLogQuestion, showsLogQuestion } from '../../src/app/refusedCommands';
 import { initialState, type Attachment, type Message } from '../../src/app/state';
 import { Store } from '../../src/app/store';
 import { Deal, Question } from '../../src/domain/model';
@@ -76,6 +78,7 @@ async function refusedWhileTyping(store: Store, scope: Scope, command: string, t
     await hold;
     return fail({ kind: 'storageFull', message: 'The disk is full' });
   });
+  setLogQuestion(key, true);
   setComposerText(key, command);
   const sending = sendTyped(store, scope, { navigate: vi.fn() });
   await vi.waitFor(() => expect(composerText(key)).toBe(''));
@@ -85,30 +88,52 @@ async function refusedWhileTyping(store: Store, scope: Scope, command: string, t
   refusing.mockRestore();
 }
 
-it('runs navigation, unresolved, and logging before falling through to a model answer', async () => {
+it('runs slash commands only when picked, and asks the model everything typed (#1054)', async () => {
   const { store, scope, dealId, navigate, asked } = await start();
   const launch = composerScope(scope, true);
   const key = convKey(launch.scope);
-  const send = (text: string) => {
-    setComposerText(key, text);
-    return sendTyped(store, launch.scope, { launchSlot: launch.launchSlot, navigate });
-  };
-  await send('Open Southridge’s Q&A');
-  expect(navigate).toHaveBeenCalledWith(`qa-${dealId}`);
-  await send('Create a new deal');
+  const names = (text: string, where: Scope = launch.scope) => slashCommands(where, text)?.map((c) => c.command);
+  expect(names('/')).toEqual(['/add-unresolved', '/log-question', '/new-deal']);
+  expect(names('/DEAL')).toEqual(['/new-deal']);
+  expect(names('/', { kind: 'all' })).toEqual(['/new-deal']);
+  expect(names('/new\nmore')).toBeUndefined();
+  expect(names('New deal')).toBeUndefined();
+  setComposerText(key, '/new');
+  runSlashCommand(store, launch.scope, 'newDeal');
   expect(store.get().ui.newDeal).toMatchObject({ name: '', folders: [] });
-  await send('Please add all the unresolved gaps and open findings to Q&A.');
-  expect(store.get().ui.dialog).toEqual({ kind: 'addUnresolved', dealId });
-  await send(`Log a question: ${instructions[4]}`);
-  expect(Object.values(store.get().questions).map((q) => q.text)).toEqual([instructions[4]]);
-  expect(asked).not.toHaveBeenCalled();
   expect(composerText(key)).toBe('');
+  runSlashCommand(store, launch.scope, 'unresolved');
+  expect(store.get().ui.dialog).toEqual({ kind: 'addUnresolved', dealId });
+  runSlashCommand(store, launch.scope, 'logQuestion');
+  setComposerText(key, instructions[4]);
+  await sendTyped(store, launch.scope, { launchSlot: launch.launchSlot, navigate });
+  expect(Object.values(store.get().questions).map((q) => q.text)).toEqual([instructions[4]]);
+  expect(showsLogQuestion(key, composerText(key))).toBe(false);
+  expect(asked).not.toHaveBeenCalled();
+  expect(navigate).not.toHaveBeenCalled();
 
-  await send(instructions[18]);
-  expect(navigate.mock.calls).toEqual([[`qa-${dealId}`], [scopeHash(launch.scope)]]);
-  expect(store.get().threads[key][0].text).toBe(instructions[18]);
-  expect(asked).toHaveBeenCalledTimes(1);
-  expect(convKey(composerScope(scope, true).scope)).not.toBe(key);
+  // The words the old typed commands matched are questions like any other.
+  const typed = ['New deal terms in the amendment: what changed?', 'Open Southridge’s Q&A',
+    'Please add all the unresolved gaps to Q&A.', `Log a question: ${instructions[5]}`,
+    'Does this answer any of our open questions?'];
+  for (const text of typed) {
+    const next = composerScope(scope, true);
+    setComposerText(convKey(next.scope), text);
+    await sendTyped(store, next.scope, { launchSlot: next.launchSlot, navigate });
+    expect(store.get().threads[convKey(next.scope)][0].text).toBe(text);
+  }
+  await vi.waitFor(() => expect(asked).toHaveBeenCalledTimes(typed.length));
+  expect(Object.values(store.get().questions)).toHaveLength(1);
+});
+
+it('asks the model "Add question marks to the summary" and logs nothing (#1112)', async () => {
+  const { store, scope, navigate, asked } = await start();
+  const key = convKey(scope);
+  setComposerText(key, 'Add question marks to the summary');
+  await sendTyped(store, scope, { navigate });
+  expect(asked).toHaveBeenCalledOnce();
+  expect(store.get().threads[key][0].text).toBe('Add question marks to the summary');
+  expect(Object.values(store.get().questions)).toHaveLength(0);
 });
 
 it('waits for pending attachments, checks new files, and sends the latest text only once', async () => {
@@ -153,16 +178,22 @@ it('waits for pending attachments, checks new files, and sends the latest text o
 it('clears a typed question before its save and brings it back when refused', async () => {
   const { store, scope, dealId, navigate, asked } = await start();
   const key = convKey(scope);
-  const submitted = `  Add a question: ${instructions[30]}  `;
+  const submitted = `  ${instructions[30]}  `;
   const original = store.dispatch.bind(store);
   const refuse = vi.spyOn(store, 'dispatch').mockResolvedValueOnce({
     ok: false, error: { kind: 'storageFull', message: 'The disk is full' },
   });
+  setLogQuestion(key, true);
   setComposerText(key, submitted);
   const refused = vi.fn();
   await sendTyped(store, scope, { navigate, refused });
   expect(refused).toHaveBeenCalledOnce();
   expect(composerText(key)).toBe(submitted.trim());
+  // It comes back as a question to log, and a restart keeps it so (#1054).
+  expect(showsLogQuestion(key, composerText(key))).toBe(true);
+  saveKeptDrafts();
+  const keptChips = (local.read(KEPT_TEXT_KEY) as { 'log-question'?: [string, unknown][] } | null)?.['log-question'];
+  expect(new Map(keptChips).get(key)).toBe(true);
   refuse.mockRestore();
 
   let release!: () => void;
@@ -182,6 +213,7 @@ it('clears a typed question before its save and brings it back when refused', as
   release();
   await sending;
   expect(composerText(key)).toBe(instructions[34]);
+  expect(showsLogQuestion(key, composerText(key))).toBe(false);
   expect(Object.values(store.get().questions)).toMatchObject([{ dealId, text: instructions[30] }]);
   expect(asked).not.toHaveBeenCalled();
 });
@@ -193,7 +225,7 @@ it.each([
 ])('settles a $outcome question save after newer input is $newer', async ({ outcome, newer }) => {
   const { store, scope, navigate } = await start();
   const key = convKey(scope);
-  const submitted = '  Log a question: Did the lender consent to the revised assignment provisions?  ';
+  const submitted = '  Did the lender consent to the revised assignment provisions?  ';
   const next = 'Do the assignment provisions affect the timetable for financial close?';
   const original = store.dispatch.bind(store);
   let release!: () => void;
@@ -204,6 +236,7 @@ it.each([
       : fail({ kind: 'storageFull', message: 'The disk is full' });
   });
   const refused = vi.fn();
+  setLogQuestion(key, true);
   setComposerText(key, submitted);
   const sending = sendTyped(store, scope, { navigate, refused });
   await vi.waitFor(() => expect(dispatch).toHaveBeenCalledOnce());
@@ -241,13 +274,15 @@ it('keeps every refused command and all typing on a deal with thousands of quest
     await new Promise<void>((resolve) => holds.push(resolve));
     return fail({ kind: 'storageFull', message: 'The disk is full' });
   };
-  const first = `Log a question: ${instructions[2001]}`;
-  const second = `Add a question: ${instructions[2002]}\n\n${instructions[2003]}`;
+  const first = instructions[2001];
+  const second = `${instructions[2002]}\n\n${instructions[2003]}`;
   const third = instructions[2004];
+  setLogQuestion(key, true);
   setComposerText(key, first);
   const sending = sendTyped(store, scope, { navigate });
   await vi.waitFor(() => expect(holds).toHaveLength(1));
   // A second command sent while the first is out is turned away at once and goes back in the box.
+  setLogQuestion(key, true);
   setComposerText(key, second);
   await sendTyped(store, scope, { navigate });
   expect(composerText(key)).toBe(second);
@@ -271,13 +306,13 @@ it('keeps every refused command and all typing on a deal with thousands of quest
 it('logs a refused command alone and asks the AI what was typed during its save', async () => {
   const { store, scope, navigate, asked } = await start();
   const key = convKey(scope);
-  const command = `Log a question: ${instructions[50]}`;
+  const command = instructions[50];
   const followUp = `${instructions[51]}\n\n${instructions[52]}`;
   await refusedWhileTyping(store, scope, command, followUp);
   // A restart keeps which part of the box is the refused command.
   saveKeptDrafts();
-  const kept = local.read(KEPT_TEXT_KEY) as { 'refused-commands'?: [string, unknown][] } | null;
-  expect(new Map(kept?.['refused-commands']).get(key)).toEqual([command]);
+  const kept = local.read(KEPT_TEXT_KEY) as { 'refused-questions'?: [string, unknown][] } | null;
+  expect(new Map(kept?.['refused-questions']).get(key)).toEqual([command]);
   await sendTyped(store, scope, { navigate });
   expect(Object.values(store.get().questions).map((question) => question.text)).toEqual([instructions[50]]);
   expect(composerText(key)).toBe(followUp);
@@ -290,12 +325,39 @@ it('logs a refused command alone and asks the AI what was typed during its save'
 it('logs a refused command alone after the text typed during its save was edited', async () => {
   const { store, scope, navigate } = await start();
   const key = convKey(scope);
-  const command = `Log a question: ${instructions[70]}`;
+  const command = instructions[70];
   await refusedWhileTyping(store, scope, command, 'Waht is the revenue?');
   setComposerText(key, `${command}\n\nWhat is the revenue?`);
   await sendTyped(store, scope, { navigate });
   expect(Object.values(store.get().questions).map((question) => question.text)).toEqual([instructions[70]]);
   expect(composerText(key)).toBe('What is the revenue?');
+});
+
+it('logs a refused question that is left alone in its box once the text after it is deleted (#955)', async () => {
+  const { store, scope, navigate, asked } = await start();
+  const key = convKey(scope);
+  const command = instructions[90];
+  await refusedWhileTyping(store, scope, command, 'What is the revenue?');
+  setComposerText(key, `${command}\n`);
+  expect(showsLogQuestion(key, composerText(key))).toBe(true);
+  await sendTyped(store, scope, { navigate });
+  expect(Object.values(store.get().questions).map((question) => question.text)).toEqual([command]);
+  expect(asked).not.toHaveBeenCalled();
+  expect(composerText(key)).toBe('');
+});
+
+it('asks the model, and drops the chip, once the refused question no longer heads the box (#1054)', async () => {
+  const { store, scope, navigate, asked } = await start();
+  const key = convKey(scope);
+  const command = instructions[80];
+  await refusedWhileTyping(store, scope, command, 'What is the revenue?');
+  expect(showsLogQuestion(key, composerText(key))).toBe(true);
+  setComposerText(key, 'What is the revenue?');
+  expect(showsLogQuestion(key, composerText(key))).toBe(false);
+  await sendTyped(store, scope, { navigate });
+  expect(Object.values(store.get().questions)).toHaveLength(0);
+  expect(asked).toHaveBeenCalledOnce();
+  expect(store.get().threads[key][0].text).toBe('What is the revenue?');
 });
 
 it('leaves a refused command to Retry, not the box, when the store keeps it as interrupted work', async () => {
@@ -315,7 +377,8 @@ it('leaves a refused command to Retry, not the box, when the store keeps it as i
     await hold;
     return fail({ kind: 'storageFull', message: 'The disk is full' });
   };
-  setComposerText(key, `Log a question: ${instructions[60]}`);
+  setLogQuestion(key, true);
+  setComposerText(key, instructions[60]);
   const sending = sendTyped(store, scope, { navigate });
   await vi.waitFor(() => expect(composerText(key)).toBe(''));
   setComposerText(key, followUp);
@@ -332,7 +395,7 @@ it('leaves a refused command to Retry, not the box, when the store keeps it as i
 it('does not repeat a refused command that was typed again during its save', async () => {
   const { store, scope, navigate } = await start();
   const key = convKey(scope);
-  const command = `Log a question: ${instructions[40]}`;
+  const command = instructions[40];
   await refusedWhileTyping(store, scope, command, `${command}  `);
   expect(composerText(key)).toBe(command);
 });
@@ -463,8 +526,9 @@ it('offers a typed question again after the app closes mid-save, and logs it onc
   }
   const scope: Scope = { kind: 'deal', dealId };
   const key = convKey(scope);
-  const typed = `Log a question: ${instructions[2010]}`;
+  const typed = instructions[2010];
   const hold = holdRecoveryWrite(app, (transaction) => operationWrite(transaction, 'CreateQuestion', 'succeeded'));
+  setLogQuestion(key, true);
   setComposerText(key, typed);
   const sending = sendTyped(app.store, scope, { navigate: vi.fn() });
   await hold.entered;

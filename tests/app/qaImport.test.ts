@@ -6,13 +6,14 @@ import {
   importKey, initializeKeptImports, keptImport, keptImportsReady,
 } from '../../src/app/keptImports';
 import {
-  keptQaImport, loadQaImport, prepareQaImport, submitQaImport, summarizeQaImport, type QaChoices,
+  keptQaImport, loadQaImport, prepareQaImport, qaImportMakesLog, submitQaImport, summarizeQaImport, type QaChoices,
 } from '../../src/app/qaImport';
 import { previewImport, proposeLayout, readImportBytes, type ImportTable } from '../../src/app/transfer';
 import { QaImportLayout } from '../../src/app/qaImportLayout';
 import { dealQuestions } from '../../src/app/state';
 import { ok } from '../../src/domain/result';
 import { tableFrom } from '../../src/domain/sheets';
+import { suggestMapping } from '../../src/domain/importExport';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { copyRecoveryDisk, holdRecoveryWrite, operationWrite, recoveryApp, recoveryDeal } from './recoveryKit';
 
@@ -123,7 +124,7 @@ it('finds the proposed layout, shares the prepared rows with the preview, and im
     expect(previewRows.map((row) => row.dates.received))
       .toEqual(['2026-09-30', '2026-10-01', '2026-10-15', '', '2026-10-15']);
     const dry = previewImport(app.store, dealId, choices.mode, prepared.rows, choices.answered);
-    const plan = summarizeQaImport(app.store.get(), dealId, importKey.qa(dealId), choices.mode, prepared, dry);
+    const plan = summarizeQaImport(importKey.qa(dealId), prepared, dry);
     expect(plan).toMatchObject({ total: 2_000, preview: { created: 2_000 } });
     const submitted = await submitQaImport(app.store, dealId, { table: layout.value, choices }, prepared.rows);
     expect(submitted).toEqual(ok(undefined));
@@ -194,7 +195,7 @@ it('reopens the kept choices after a committed Append loses its reply, without a
   }
 });
 
-it('previews a control-only question from the file and submits only the sanitized rows', async () => {
+it('previews a control-only question from the file and imports it exactly as given', async () => {
   await useKeptPort();
   const app = recoveryApp();
   try {
@@ -211,11 +212,11 @@ it('previews a control-only question from the file and submits only the sanitize
     const { prepared, previewRows } = prepareQaImport(table, choices.mapping);
     expect(previewRows).toHaveLength(2);
     expect(previewRows[0]).toMatchObject({ cells: shown, dates: { received: '2026-09-30' } });
-    expect(prepared.skipped).toBe(1);
-    expect(prepared.rows.map((row) => row.text)).toEqual([question]);
+    expect(prepared.skipped).toBe(0);
+    expect(prepared.rows.map((row) => row.text)).toEqual(['\u007f', question]);
     const submitted = await submitQaImport(app.store, dealId, { table, choices }, prepared.rows);
     expect(submitted).toEqual(ok(undefined));
-    expect(dealQuestions(app.store.get(), dealId).map((row) => row.text)).toEqual([question]);
+    expect(dealQuestions(app.store.get(), dealId).map((row) => row.text)).toEqual(['\u007f', question]);
   } finally {
     app.store.closing();
     await app.repo.close();
@@ -270,4 +271,25 @@ it('keeps a column chosen during a layout proposal and refuses an unapplied one 
     app.store.closing();
     await app.repo.close();
   }
+});
+
+/** A 2,000-row table whose Submitted by column (2) names the given parties in turn. */
+function partiesTable(parties: string[]) {
+  const questions = portfolioQuestions().slice(0, 2_000);
+  const grid = questions.map((text, at) => [String(at + 1), text, parties[at % parties.length]]);
+  const headings = ['Number', 'Question', 'Submitted by'];
+  const table = tableFrom([{ name: 'Sheet1', grid: [headings, ...grid] }])!;
+  return { table: table as unknown as ImportTable, mapping: { ...suggestMapping(headings), askedBy: 2 } };
+}
+
+it('makes a consolidated log the deal\'s Q&A log unless the person chose otherwise', () => {
+  const untouched = { makeLog: false, touched: false };
+  const two = partiesTable(['Lender A', ' lender a ', 'Sponsor']);
+  const one = partiesTable(['Lender A', ' LENDER A', 'lender a ']);
+  expect(qaImportMakesLog(two.table, two.mapping, untouched)).toBe(true);
+  expect(qaImportMakesLog(one.table, one.mapping, untouched)).toBe(false);
+  expect(qaImportMakesLog(two.table, { ...two.mapping, askedBy: null }, untouched)).toBe(false);
+  expect(qaImportMakesLog(null, null, untouched)).toBe(false);
+  expect(qaImportMakesLog(two.table, two.mapping, { makeLog: false, touched: true })).toBe(false);
+  expect(qaImportMakesLog(one.table, one.mapping, { makeLog: true, touched: true })).toBe(true);
 });

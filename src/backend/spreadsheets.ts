@@ -6,10 +6,12 @@ import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'
 import { pdfLines, type Converter } from './convert';
 import type { SpreadsheetCodec } from '../ports';
 import { ok, fail } from '../domain/result';
-import { exportDocument, tableFrom } from '../domain/sheets';
-import { isWorkbook, readCsv, decodeText, encodeLike } from '../adapters/spreadsheet';
+import {
+  cellsAsShown, encodeLike, exportDocument, isWorkbook, readCsv, tableFrom,
+} from '../domain/sheets';
 import type { SheetEdit } from '../domain/sheets';
 import { editCsv } from '../domain/csvEdit';
+import { decodeText } from '../domain/textEncoding';
 import { editXlsx } from './xlsxEdit';
 
 export function libreOfficeSheets(convert: Converter): SpreadsheetCodec {
@@ -20,7 +22,8 @@ export function libreOfficeSheets(convert: Converter): SpreadsheetCodec {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'punchlist-import-'));
       try {
         const file = path.join(dir, `import${path.extname(name).toLowerCase() || '.xlsx'}`); fs.writeFileSync(file, bytes);
-        const t = tableFrom(await convert.sheets(file), opts);                     // plain values: dates month first, the way the import reads them
+        // cells as the file shows them; a real date cell stays YYYY-MM-DD, which is how the import reads a date
+        const t = tableFrom(cellsAsShown(await convert.sheets(file), await convert.sheets(file, true)), opts);
         return t ? ok(t) : fail({ kind: 'invalid', message: 'The file has no rows' });
       } catch { return fail({ kind: 'invalid', message: 'That file could not be read as a spreadsheet' }); }
       finally { fs.rmSync(dir, { recursive: true, force: true }); }

@@ -106,7 +106,7 @@ it('opens the findings export on Open when the page shows Reassess and keeps the
     reviewed: { by: 'Reviewer', at: deal.updatedAt } };
   const unreviewed = { ...other, workstream: 'Technical', status: 'open' as const, reviewed: null };
   state.findings = { [reviewed.id]: reviewed, [unreviewed.id]: unreviewed };
-  state.ui.findingFilter = { status: 'reassess', workstream: 'Legal', text: 'due diligence', reviewed: 'yes' };
+  state.ui.findingFilter = { status: 'reassess', workstream: 'Legal', reviewed: 'yes' };
   const filter = findingFilterFromPage(state);
   expect(filter).toEqual({ status: 'open', workstream: 'Legal', reviewedOnly: true });
   expect(findingExportView(state, deal.id, filter)).toEqual({ workstreams: ['Legal', 'Technical'], total: 1 });

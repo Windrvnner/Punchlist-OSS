@@ -27,7 +27,7 @@ import { envKey, modelService } from './model';
 import { aiSignIn } from './signin';
 import { providerSignIn } from './providerSignIn';
 import { pickedFile, writePickedFile } from './pickedFile';
-import { isCloudProvider, assertControl, control } from '../control';
+import { signInBinding, assertControl, control } from '../control';
 import type { WATCHED } from '../shell/bridge';
 
 // The window's own files are served as app://punchlist/…, a secure origin of its own, rather than file://.
@@ -95,7 +95,7 @@ async function start() {
     sso: control.signIn.sso,
     apiKey: control.signIn.apiKey,
     browserSignIn: providerSignIn(),
-    binding: isCloudProvider(control.models.service) ? JSON.stringify(control[control.models.service]) : undefined,
+    binding: signInBinding(control),
     dir: placesFor(base).localPath, fallback: control.models.service === 'claude' ? envKey() : undefined, parent: () => win,
     probe: (token) => modelService({ token }).service,
   });

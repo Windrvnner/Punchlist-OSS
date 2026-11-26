@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { parseDate, prepareImport, suggestMapping, questionsSheet, findingsSheet, importCounts } from '../../src/domain/importExport';
-import { csvCodec, readCsv } from '../../src/adapters/spreadsheet';
+import { parseDate, prepareImport, suggestMapping, questionsSheet, findingsSheet } from '../../src/domain/importExport';
+import { csvCodec } from '../../src/adapters/spreadsheet';
+import { readCsv } from '../../src/domain/sheets';
 import { Question } from '../../src/domain/model';
 
 describe('parseDate', () => {
@@ -139,14 +140,30 @@ describe('prepareImport', () => {
     const m = suggestMapping(['Number', 'Question', 'Response', 'Submitted by', 'Priority', 'Received']);
     const p = prepareImport([[' 3 ', '  Indented question', 'Yes.\n', ' Lender A ', ' High ', ' 2026-11-02 '], ['4', '   ', '', '', '', '']], m);
     expect(p.skipped).toBe(0); expect(p.badDates).toBe(0); expect(p.unknownValues).toBe(0);
-    expect(p.rows[0]).toMatchObject({ n: 3, text: '  Indented question', response: 'Yes.\n', askedBy: 'Lender A', priority: 'High', received: '2026-11-02' });   // a name is an identity: the spaces around it go
+    // a name is stored as the cell gives it
+    expect(p.rows[0]).toMatchObject({
+      n: 3, text: '  Indented question', response: 'Yes.\n', askedBy: ' Lender A ',
+      priority: 'High', received: '2026-11-02',
+    });
     expect(p.rows[1]).toMatchObject({ n: 4, text: '   ' });
   });
-  it('counts new and matching rows for the preview', () => {
-    const at = '2026-11-09T10:00:00.000Z';
-    const existing = [Question.parse({ id: 'q_01HZZZZZZZZZZZZZZZZZZZZZZZ', dealId: 'd_01HZZZZZZZZZZZZZZZZZZZZZZZ', rev: 1, createdAt: at, updatedAt: at, n: 2, text: 'x' })];
-    const rows = prepareImport([['2', 'a'], ['3', 'b'], ['3', 'c']], { n: 0, text: 1, askedBy: null, received: null, workstream: null, priority: null, response: null, respondedBy: null, responded: null, status: null }).rows;
-    expect(importCounts(rows, existing, 'merge')).toEqual({ add: 1, match: 2 });
-    expect(importCounts(rows, existing, 'append')).toEqual({ add: 3, match: 0 });
+});
+
+describe('a month written as a word', () => {
+  it('is read only as its full name or its three-letter abbreviation, as Excel takes it', () => {
+    const named = ['Jun 3 2026', 'June 3, 2026', '3 Sept 2026', '3-Sep-2026'];
+    for (const text of named) expect(parseDate(text), text).not.toBeNull();
+    const notMonths = ['Junk 3 2026', 'Marching 3 2026', '3 Decimal 2026', 'Mayhem 3 2026'];
+    for (const text of notMonths) expect(parseDate(text), text).toBeNull();
   });
 });
+
+describe('control characters in a cell', () => {
+  it('stay in text and are ignored where the cell is read as a number, date, status or priority', () => {
+    const columns = ['Number', 'Question', 'Received', 'Status', 'Priority'];
+    const rows = [['12\u0000', 'Q\u0007text', '2026-09-30\u0000', 'Open\u0000', 'High\u0007']];
+    const [row] = prepareImport(rows, suggestMapping(columns)).rows;
+    expect(row).toMatchObject({ n: 12, text: 'Q\u0007text', received: '2026-09-30', status: 'open', priority: 'High' });
+  });
+});
+

@@ -19,10 +19,10 @@ const ROLE = 'You are researching a question about a project-finance deal from i
   + 'log. You work in turns.';
 const CITE_RULE = 'Cite only documents listed under "Documents opened so far", by their tag. A finding or a response '
   + 'from the Q&A log is not a document: say what it is in words and give it no marker.';
-const SEARCH_HELP = 'A helper searches the documents by their words, file names and folder paths, opens the likeliest, '
-  + 'and returns passages with document and page. "findings" and "qa" search the deal\'s findings and its questions '
-  + 'and responses. Search in other words, or for a document by the name it is likely to have, when a search finds '
-  + 'nothing useful.';
+const SEARCH_HELP = 'A helper searches the documents by their words, file names and folder paths, reads a page of '
+  + 'the best matches, and returns passages with document and page. "findings" and "qa" search the deal\'s findings '
+  + 'and its questions and responses. Search in other words, or for a document by the name it is likely to have, when '
+  + 'a search finds nothing useful. Results come a page at a time: give "page" for the next one.';
 const readHelp = (width: number) => `Have up to ${width} documents attached to your next turn, by tag or by path, so `
   + 'that you can look through them yourself. Do this when the passages a search returned are not enough to answer.';
 const FOLDER_WHEN = 'Have every document in a folder read, the most important first, when you are asked to read or '
@@ -30,6 +30,10 @@ const FOLDER_WHEN = 'Have every document in a folder read, the most important fi
 const FOLDER_NAMED = 'Name the folder as it is named in the data room, or as the question names it.';
 const BRIEF_HELP = 'Have the deal\'s open findings summed up in two short paragraphs: what matters most and why. '
   + 'Use it when you are asked to catch up on a deal or for an overview of where it stands.';
+const OFFER_HELP = 'When the person asks to start a new deal, to open a page of a deal, to add all unresolved items to '
+  + 'the Q&A log, or to log a question, answer briefly and offer that action: the app shows it as a button under your '
+  + 'answer, and nothing happens until the person presses it. For "log question", draft the question in "question". '
+  + 'For "open page", name the deal by its exact name, or leave it out for this conversation\'s deal.';
 const FOLDER_RESULT = 'You get what each batch of its documents says, with document and page. A large folder is read '
   + 'only once the person has agreed: you are told when to ask them, and then';
 
@@ -37,7 +41,7 @@ const FOLDER_RESULT = 'You get what each batch of its documents says, with docum
 export const inlineTools = (width: number) => [
   `${ROLE} Each turn, reply with one JSON object and nothing else, one of these:`,
   '{"tool": "search", "what": "documents" | "findings" | "qa" | "all", "query": "a few words to search for", '
-    + '"notes": "what you have learned so far, with document and page"}',
+    + '"page": 1, "notes": "what you have learned so far, with document and page"}',
   `  ${SEARCH_HELP}`,
   '{"tool": "read", "docs": ["D3", "D7"], "notes": "…"}',
   `  ${readHelp(width)}`,
@@ -46,8 +50,9 @@ export const inlineTools = (width: number) => [
   '{"tool": "brief", "notes": "…"}',
   `  ${BRIEF_HELP}`,
   '{"text": "the answer, with [n] markers", "sources": [{"doc": "D3", "page": 12, "quote": "a few words from that '
-    + 'page"}]}',
-  `  Your answer, once you have what you need. ${CITE_RULE}`,
+    + 'page"}], "offer": {"action": "new deal" | "open page" | "add unresolved" | "log question", "deal": "…", '
+    + '"page": "overview" | "findings" | "checklist" | "qa", "question": "…"}}',
+  `  Your answer, once you have what you need. ${CITE_RULE} "offer" is optional. ${OFFER_HELP}`,
   '"notes" carry what you have learned from one turn to the next: only your notes and the results listed below are '
     + 'kept.',
 ].join('\n');
@@ -75,6 +80,19 @@ const answerSource = {
   required: ['doc'],
 };
 
+/** the action the answer tool may offer as a button under the answer (#1054) */
+const answerOffer = {
+  type: 'object',
+  description: OFFER_HELP,
+  properties: {
+    action: { type: 'string', enum: ['new deal', 'open page', 'add unresolved', 'log question'] },
+    deal: text('For "open page": the deal\'s exact name.'),
+    page: { type: 'string', enum: ['overview', 'findings', 'checklist', 'qa'] },
+    question: text('For "log question": the question to log, as drafted for the counterparty.'),
+  },
+  required: ['action'],
+};
+
 /** the tools as the service's own function tools */
 export const toolSpecs = (width: number): ToolSpec[] => [
   {
@@ -85,6 +103,7 @@ export const toolSpecs = (width: number): ToolSpec[] => [
       properties: {
         what: { type: 'string', enum: ['documents', 'findings', 'qa', 'all'] },
         query: text('A few words to search for.'),
+        page: { type: 'integer', minimum: 1, description: 'Which page of the results: 1 if left out.' },
         notes,
       },
       required: ['what', 'query'],
@@ -126,6 +145,7 @@ export const toolSpecs = (width: number): ToolSpec[] => [
       properties: {
         text: text('The answer, with [n] markers.'),
         sources: { type: 'array', items: answerSource },
+        offer: answerOffer,
       },
       required: ['text', 'sources'],
     },

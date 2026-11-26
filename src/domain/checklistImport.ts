@@ -12,18 +12,15 @@ const SECTION_HEADINGS = ['section', 'area', 'category', 'workstream', 'topic', 
 const SUBSECTION_HEADINGS = ['subsection', 'subsections', 'subarea', 'subcategory', 'subtopic', 'subheading', 'subgroup'];
 
 /**
- * Which column holds the items, and which their section heading. A column is known by its heading; failing that, the
- * items are the column with the longest text on average, which is the one with the wording in it.
+ * Which column holds the items, and which their section and subsection headings: each is the first column whose
+ * heading is one of the known names, or none, for the person to choose. Nothing is guessed from the cells.
  */
-export function suggestChecklistColumns(columns: string[], rows: string[][]): ChecklistMapping {
-  const find = (names: string[]) => { const i = columns.findIndex((c) => names.includes(squash(c))); return i < 0 ? null : i; };
-  let item = find(ITEM_HEADINGS); const section = find(SECTION_HEADINGS); const subsection = find(SUBSECTION_HEADINGS);
-  if (item === null) {
-    let best = -1;
-    columns.forEach((_, i) => { if (i === section || i === subsection) return; const filled = rows.map((r) => String(r[i] ?? '').trim()).filter(Boolean); const avg = filled.length ? filled.reduce((n, t) => n + t.length, 0) / filled.length : 0; if (avg > best) { best = avg; item = i; } });
-    if (best <= 0) item = null;
-  }
-  return { item, section: section === item ? null : section, subsection: subsection === item ? null : subsection };
+export function suggestChecklistColumns(columns: string[]): ChecklistMapping {
+  const find = (names: string[]) => {
+    const at = columns.findIndex((column) => names.includes(squash(column)));
+    return at < 0 ? null : at;
+  };
+  return { item: find(ITEM_HEADINGS), section: find(SECTION_HEADINGS), subsection: find(SUBSECTION_HEADINGS) };
 }
 
 /**
