@@ -116,3 +116,33 @@ describe('a pick for several items names them by their ids (#1162)', () => {
     expect(results.get(permitId)).toBe('ok');
   });
 });
+
+describe('phrasing names each point by its record id (#1162)', () => {
+  const FINDING = 'f_01JD5Z6Q7W8X9Y0ZABCDEFGHJK';
+  const points = [
+    { kind: 'gap' as const, id: permitId, what: PERMIT, need: 'the permit' },
+    { kind: 'finding' as const, id: FINDING, what: 'Lock-up ratio differs', need: '' },
+  ];
+  const isPhrase = (c: Call) => c.prompt.includes('Write one question for the counterparty');
+  /** a phrase reply with a question for each point, under the given ids, the finding's first */
+  const questions = (ids: string[]) => ({ items: [{ id: ids[1], text: 'Q2' }, { id: ids[0], text: 'Q1' }] });
+  async function phrase(script: (n: number) => unknown) {
+    const s = setup((c, n) => (isPhrase(c) ? script(n) : {}), {}, { shared: new Mem(), installId: 'pc' });
+    const out = val(await s.ai.phrase!({ dealId: 'd1', items: points }));
+    return { calls: s.calls.filter(isPhrase), out };
+  }
+
+  it('tags a gap by its item id and a finding by its finding id, and keeps each question under its id', async () => {
+    const { calls, out } = await phrase(() => questions([permitId, FINDING]));
+    expect(calls[0].prompt).toContain(
+      `\n${permitId}: [gap] ${PERMIT} — needed: the permit\n${FINDING}: [finding] Lock-up ratio differs\n`);
+    expect(out).toEqual(['Q1', 'Q2']);
+  });
+
+  it('asks again, quietly, when a reply names a point by an id with one character changed', async () => {
+    const { calls, out } = await phrase((n) => questions(n === 1 ? [permitId, nearly(FINDING)] : [permitId, FINDING]));
+    expect(calls.length).toBe(2);
+    expect(calls[1].prompt).toBe(calls[0].prompt);
+    expect(out).toEqual(['Q1', 'Q2']);
+  });
+});

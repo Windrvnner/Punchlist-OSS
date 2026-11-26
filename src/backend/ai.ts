@@ -41,7 +41,7 @@ import { withoutDraftCredits } from './draftReply';
 import { MODEL_TEXT_MAX, fitText, fitParas } from '../domain/importExport';
 import { withoutMarkers } from '../domain/cite';
 import { ok, fail, type Failure, type Result } from '../domain/result';
-import type { AiService, Repository, CheckSummary, CheckState, DealProgress, ChecklistRow } from '../ports';
+import type { AiService, Repository, CheckSummary, CheckState, DealProgress, ChecklistRow, PhraseItem } from '../ports';
 import { WORKSTREAMS, CHECK_REASON, type Provenance, type Question, type Source } from '../domain/model';
 import type { ConverseInput, Conversed, ModelService } from './service';
 import type { ToolMode } from './agent';
@@ -643,32 +643,23 @@ export function nodeAi(o: AiOptions) {
   // points that failed alone, per deal, by their key: asking again (Retry) puts them last, after the points that were only
   // held up beside them, so those come back first; they are still split and asked alone like any other
   const phraseFailed = new Map<string, Set<string>>();
-  /**
-   * n tags of three consonants, different from each other, to name the points of one `phrase` call: drawn at random, so
-   * they do not run in order, and with no vowel, so none is a word
-   */
-  const tagsFor = (n: number): string[] => {
-    const C = 'bcdfghjkmnpqrstvwxz'; const seen = new Set<string>();
-    while (seen.size < n) seen.add(Array.from({ length: 3 }, () => C[Math.floor(Math.random() * C.length)]).join(''));
-    return [...seen];
-  };
-  /** a point `phrase` is asked to put as a question (ports: AiService.phrase) */
-  type PhrasePoint = { kind: 'gap' | 'finding'; what: string; need: string };
+  /** a point `phrase` is asked to put as a question, by its record id (ports: AiService.phrase) */
+  type PhrasePoint = PhraseItem;
   /** a point's key, by which `phraseKept` and `phraseFailed` know it from one run to the next */
   const phraseKey = (x: PhrasePoint) => JSON.stringify([x.kind, x.what, x.need]);
   /** a point as one line of a `phrase` call: its kind, what is unresolved, and what would settle it */
   const phraseLine = (x: PhrasePoint) =>
     `[${x.kind}] ${x.what.replace(/\s+/g, ' ')}${x.need ? ` — needed: ${x.need.replace(/\s+/g, ' ')}` : ''}`;
-  /** what one `phrase` call asks, each point named by its tag */
-  const phrasePrompt = (points: PhrasePoint[], tags: string[]) => [
+  /** what one `phrase` call asks, each point named by its record id, never a per-prompt label (#1162) */
+  const phrasePrompt = (points: PhrasePoint[]) => [
     'These are unresolved points in the due diligence of a project-finance deal: checklist items no document'
       + ' settles yet ("gap"), and open findings ("finding"). Each starts with its id.',
-    ...points.map((x, m) => `${tags[m]}: ${phraseLine(x)}`),
+    ...points.map((x) => `${x.id}: ${phraseLine(x)}`),
     '',
     'Write one question for the counterparty for each point, asking plainly for the document or confirmation that'
       + ' would settle it. One or two sentences each, polite and specific, in the deal team\'s voice; keep every name'
       + ' and figure; say nothing about how the point was found. Give every point a question, with that point\'s id.',
-    `Reply as JSON: {"items": [{"id": "${tags[0]}", "text": "…"}]}`,
+    `Reply as JSON: {"items": [{"id": "${points[0].id}", "text": "…"}]}`,
   ].join('\n');
   /** why a `phrase` reply brought no question back, as the run's failure says it when no point gets one */
   const phraseWhy = (cut: boolean, reply: { items?: unknown } | null) => {
@@ -676,11 +667,11 @@ export function nodeAi(o: AiOptions) {
     if (reply && Array.isArray(reply.items)) return `${SERVICE} left a point without a question, so nothing was added`;
     return `${SERVICE}’s reply could not be read, so nothing was added`;
   };
-  /** the entries of a `phrase` reply: each one's place in the call, by its tag, and its text */
-  const phraseEntries = (reply: { items?: unknown } | null, tags: string[]) => {
-    const at = new Map(tags.map((t, m) => [t, m]));
+  /** the entries of a `phrase` reply: each one's place in the call, by its id exactly (#1162), and its text */
+  const phraseEntries = (reply: { items?: unknown } | null, ids: string[]) => {
+    const at = new Map(ids.map((id, m) => [id, m]));
     return (listOf(reply?.items) as { id?: unknown; text?: unknown }[]).map((x) => ({
-      m: typeof x?.id === 'string' ? at.get(x.id.trim().toLowerCase()) : undefined,
+      m: typeof x?.id === 'string' ? at.get(x.id) : undefined,
       text: typeof x?.text === 'string' ? x.text.replace(/\s+/g, ' ').trim() : '',
     }));
   };
@@ -688,7 +679,16 @@ export function nodeAi(o: AiOptions) {
   const givenTwice = (items: { m?: number }[]) =>
     new Set(items.filter((x, j) => x.m !== undefined && items.findIndex((y) => y.m === x.m) !== j).map((x) => x.m));
   /**
-   * The questions of a `phrase` reply, by place in the call: only an entry with one of the call's tags is kept, even
+   * A `phrase` reply that names a point by an id it was not shown, in its words or as an entry's id, is asked again
+   * (#1162); an entry with no id is left to `phraseGot`, as before
+   */
+  const phraseUnusable = (ids: string[]) => (text: string) => {
+    const entries = listOf(readJson(text, ['items'])?.items) as { id?: unknown }[];
+    const named = entries.filter((x) => isObject(x) && x.id !== undefined).map((x) => x.id);
+    return !namesOnlyShown(text, ids) || unknownIds(named, ids).length > 0;
+  };
+  /**
+   * The questions of a `phrase` reply, by place in the call: only an entry with one of the call's ids is kept, even
    * for a point asked alone, so stray text is never taken for a question; the last entry of a cut reply may be cut
    * short, so it is left out
    */
@@ -706,18 +706,19 @@ export function nodeAi(o: AiOptions) {
   };
   /**
    * One `phrase` call: the questions that came back whole, by place in `points`, whether the reply was cut off, and
-   * why, when none came back. Each point is named by a short tag of its own, not a running number, and a question is
-   * taken only for a tag of this call, so a reply that leaves a point out, or puts two in another order, cannot move a
+   * why, when none came back. Each point is named by its record id, not a running number, and a question is
+   * taken only for an id of this call, so a reply that leaves a point out, or puts two in another order, cannot move a
    * question onto another point. A reply cut off, whether the service says so or its JSON is left open, keeps what
    * came before its last entry; a whole reply with a stray quote in it is read as whole. Any other error is thrown.
    */
   async function askPhrase(model: string, points: PhrasePoint[]) {
-    const tags = tagsFor(points.length);
-    const prompt = phrasePrompt(points, tags);
+    const ids = points.map((x) => x.id);
+    const prompt = phrasePrompt(points);
+    const unusable = phraseUnusable(ids);
     let raw = '';
     let cut = false;
     try {
-      raw = String(await complete({ kind: 'phrase', model, system: JSON_ONLY, prompt }) ?? '');
+      raw = String(await complete({ kind: 'phrase', model, system: JSON_ONLY, prompt, unusable }) ?? '');
     } catch (e) {
       if (!isCutOff(e)) throw e;
       cut = true;
@@ -725,7 +726,7 @@ export function nodeAi(o: AiOptions) {
     }
     const reply = json<{ items?: unknown }>(raw, 'items');
     if (jsonEnd(raw, 'items') === 'open') cut = true;
-    const got = phraseGot(phraseEntries(reply, tags), cut);
+    const got = phraseGot(phraseEntries(reply, ids), cut);
     return { got, cut, why: got.size ? '' : phraseWhy(cut, reply) };
   }
   /** some points of a `phrase` run, by kind (gaps, then findings), leaving out a kind with none */
