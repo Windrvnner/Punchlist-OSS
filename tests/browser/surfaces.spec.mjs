@@ -46,7 +46,10 @@ for (const scheme of ['light', 'dark']) {
   await page.click('#qa-cols'); await page.click('#qa-import'); await page.waitForSelector('.imdlg'); await page.waitForTimeout(400); await check('import-dialog', '.scrim .dlg'); await page.keyboard.press('Escape');
   await page.click('#u-menu'); await page.waitForSelector('#s-theme'); await page.waitForTimeout(400); await check('settings-dialog', '.scrim .dlg'); await page.keyboard.press('Escape');
   await page.keyboard.press('Control+k'); await page.waitForFunction(() => document.activeElement?.id === 'pal-in'); await page.keyboard.type('agree'); await page.waitForTimeout(400); await check('search-palette', '.palbox'); await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
-  await page.evaluate(() => store.toast('Imported · 4 new · 0 updated')); await page.waitForSelector('#toast'); await page.waitForTimeout(300); await check('toast', '#toast');
+  await page.evaluate(() => store.toast('Imported · 4 new · 0 updated', 'done'))
+  await page.waitForSelector('#toast')
+  await page.waitForTimeout(300)
+  await check('toast', '#toast');
   await page.evaluate(() => { window.__down = true; }); await page.evaluate(() => store.refreshGaps(Object.keys(store.get().deals)[0])); await page.waitForSelector('.netbar', { timeout: 5000 }); await check('offline-bar', '.netbar'); await page.evaluate(() => { window.__down = false; return store.probeOnce(); });
   // a deal conversation with a long thread: composer and model menu over text
   await page.goto(URL + '#chat-' + id); await page.waitForSelector('#pask');

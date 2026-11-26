@@ -218,7 +218,15 @@ describe('at scale: 2,000 questions, three PCs', () => {
 
 // Edge cases: each reproduced, then fixed.
 describe('what waiting replies must not do', () => {
-  const toastLog = (s: Store) => { const log: string[] = []; const orig = s.toast.bind(s); (s as any).toast = (text: string, a?: any, sticky?: boolean) => { log.push(text); return orig(text, a, sticky); }; return log; };
+  const toastLog = (s: Store) => {
+    const log: string[] = [];
+    const orig = s.toast.bind(s);
+    (s as any).toast = (text: string, glyph: any, a?: any, sticky?: boolean) => {
+      log.push(text);
+      return orig(text, glyph, a, sticky);
+    };
+    return log;
+  };
 
   it('the folder out while the model service answers: the offline bar does not come and go, and "Connected again" is said once', async () => {
     const w = await world(); const q = w.qs()[10]; const log = toastLog(w.store);
@@ -627,7 +635,8 @@ describe('held drafts are said once, by count', () => {
       w.repo.peer.edit('question', q.id, { ...base, status: 'closed', updatedAt: clock.now() }, { ...PCS[0], at: clock.now() });
     }
     await (w.store as any).reloadTargets(picked.map((q) => q.id));
-    const said: string[] = []; const toast = w.store.toast.bind(w.store);
+    const said: string[] = [];
+    const toast = (w.store.toast as (...args: unknown[]) => number).bind(w.store);
     (w.store as any).toast = (text: string, ...rest: any[]) => { said.push(text); return toast(text, ...rest); };
     back(); await w.store.probeOnce();
     await until(() => picked.every((q) => w.store.hasKeptReply(q.draft!.opId!)), 20_000);
@@ -661,7 +670,7 @@ describe('held drafts answered one after another', () => {
       w.repo.peer.edit('question', q.id, { ...base, status: 'closed', updatedAt: clock.now() }, { ...PCS[0], at: clock.now() });
     }
     await (w.store as any).reloadTargets(picked.map((q) => q.id));
-    w.store.toast('Q501 marked closed', { label: 'Undo', opId: 'op_01HZZZZZZZZZZZZZZZZ8888888' });
+    w.store.toast('Q501 marked closed', 'done', { label: 'Undo', opId: 'op_01HZZZZZZZZZZZZZZZZ8888888' });
     w.store.holdToasts();                                                           // the pointer rests on the notices: none times out meanwhile
     for (const open of gates) { open(); await pause(400); }
     await until(() => reqs.every((r) => w.store.hasKeptReply(r)), 10_000);
@@ -694,7 +703,7 @@ describe('the held notice counts only drafts still held, and changes in place', 
     const held = () => w.store.get().ui.toasts.filter((t) => t.text.includes('versions to choose between'));
     expect(held().map((t) => t.text)).toEqual(['Draft not saved: 3 questions have versions to choose between']);
     const id = held()[0].id;
-    w.store.toast('Q501 marked closed', { label: 'Undo', opId: 'op_01HZZZZZZZZZZZZZZZZ8888888' });
+    w.store.toast('Q501 marked closed', 'done', { label: 'Undo', opId: 'op_01HZZZZZZZZZZZZZZZZ8888888' });
     // in place: the same notice, still ahead of the Undo (choosing a version says so in a notice of its own, which may push the oldest out)
     const inPlace = () => { const ids = w.store.get().ui.toasts.map((t) => t.id); const undo = w.store.get().ui.toasts.findIndex((t) => t.text === 'Q501 marked closed'); return undo > 0 && ids.indexOf(id) === undo - 1; };
     // a version is chosen for the first, and its Retry saves the kept text: the notice counts two, in place

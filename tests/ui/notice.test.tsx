@@ -1,10 +1,5 @@
 import { expect, it } from 'vitest';
-import { glyphOf, letterCut, shorterForms } from '../../src/ui/notice';
-
-it('uses the action and notice title to pick the glyph (#565)', () => {
-  expect(glyphOf('Deleted finding · Notice of default not cured', 'Undo')).toBe('done');
-  expect(glyphOf("Couldn't save · disk full")).toBe('warn');
-});
+import { letterCut, shorterForms } from '../../src/ui/notice';
 
 it('shortens a twin-named deal by its name first, then its twin line, at whole words (#27)', () => {
   expect(shorterForms('Project Northwind Capital Holdings (Fabrikam Partners Fund)')).toEqual([

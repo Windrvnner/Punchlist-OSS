@@ -23,6 +23,17 @@ async function twoAnswers(page, id) {
   await page.fill('#pask', 'Which of these would hold up financial close?'); await page.press('#pask', 'Enter');
   await page.waitForFunction(() => document.querySelectorAll('.msgs .ai:not(.pending):not(.failed)').length === 2, null, { timeout: 8000 });
 }
+/** one more answer in the open conversation, the `n`th */
+async function answerAgain(page, n) {
+  await page.fill('#pask', 'Which operating assumption applies?'); await page.press('#pask', 'Enter');
+  const done = '.msgs .ai:not(.pending):not(.failed)';
+  await page.waitForFunction(([s, k]) => document.querySelectorAll(s).length === k, [done, n], { timeout: 8000 });
+}
+/** the question texts the stand-in model proposes under an answer (#1120) */
+const proposing = (page, texts) => page.evaluate((t) => { window.__addressed = t; }, texts);
+/** waits for the card under the `n`th answer: the proposal is asked for once the answer has finished */
+const cardUnder = (page, n) => page.waitForFunction(
+  (k) => document.querySelectorAll('.msgs .ai')[k - 1]?.querySelector('.suggest'), n);
 /** where the pane, the conversation and the composer are, and whether anything runs into anything else */
 const layout = (page) => page.evaluate(() => {
   const R = (e) => e.getBoundingClientRect(); const pane = R(document.querySelector('#sidepane')); const rail = R(document.querySelector('.rail'));
@@ -147,7 +158,9 @@ for (const [w, h, scheme] of [[1280, 736, 'light'], [1024, 640, 'dark']]) {
   const { ctx, page, id } = await freshDeal(w, h, scheme);
   const q = await addQ(page, id, Q4);
   await addQ(page, id, 'Provide the insurance certificates for the construction period.');
+  await proposing(page, [Q4]);
   await twoAnswers(page, id);
+  await cardUnder(page, 2);
   const card = await page.evaluate(() => { const R = (e) => e.getBoundingClientRect(); const all = [...document.querySelectorAll('.msgs .suggest')]; const c = all[0]; const ai = [...document.querySelectorAll('.msgs .ai')];
     const within = (b) => R(b).right <= R(c).right - 4 && R(b).left >= R(c).left;
     const inside = c && [...c.querySelectorAll('button')].every(within);
@@ -187,7 +200,12 @@ for (const [w, h, scheme] of [[1280, 736, 'light'], [1024, 640, 'dark']]) {
 // pane stays open after and shows the question with its new response, and Undo puts the check back
 { const { ctx, page, id } = await freshDeal();
   const q = await addQ(page, id, Q4, 'The base case follows the information memorandum.');
+  const OTHER = 'Which operating assumption does the technical advisor use, and does the base case follow it?';
+  const EXPLAIN = 'Explain the operating assumption the technical advisor and the information memorandum each use in'
+    + ' the base case.';
+  await proposing(page, [Q4, OTHER, EXPLAIN]);
   await twoAnswers(page, id);
+  await cardUnder(page, 2);
   await page.click('.msgs .suggest .sq'); await page.waitForSelector('#side-use');
   const now = await page.textContent('#side-now'); await page.click('#side-use'); await page.waitForSelector('#side-replace');
   const asked = await page.evaluate(() => ({ focus: document.activeElement?.id, text: document.querySelector('#sidepane .card.confirm p')?.textContent }));
@@ -203,12 +221,15 @@ for (const [w, h, scheme] of [[1280, 736, 'light'], [1024, 640, 'dark']]) {
   say('undo-puts-the-check-back-in-the-pane', undone.now === now && undone.response === now && !undone.used, JSON.stringify(undone));
   await page.click('#side-use'); await page.click('#side-replace'); await page.waitForSelector('#side-used');      // used again, for what follows
   await page.click('#side-close'); await page.waitForFunction(() => !document.querySelector('#sidepane'));
-  const other = await addQ(page, id, 'Which operating assumption does the technical advisor use, and does the base case follow it?');
+  // a question added after an answer is proposed under the next answer, once it finishes
+  const other = await addQ(page, id, OTHER);
+  await answerAgain(page, 3);
   await page.waitForSelector('.msgs .suggest'); await page.click('.msgs .suggest .btn.sm:not(.ask)');
   await page.waitForFunction((x) => store.get().questions[x].response.trim(), other.id);
   const card = await page.evaluate((x) => ({ response: store.get().questions[x].response, cards: document.querySelectorAll('.msgs .suggest').length }), other.id);
   say('use-from-the-card', /^The closest support in the data room/.test(card.response) && card.cards === 0, JSON.stringify(card));
-  await addQ(page, id, 'Explain the operating assumption the technical advisor and the information memorandum each use in the base case.');
+  await addQ(page, id, EXPLAIN);
+  await answerAgain(page, 4);
   await page.click('.msgs .suggest .sq'); await page.click('#side-page'); await page.waitForFunction(() => store.get().ui.route.name === 'qa');
   const qa = await page.evaluate(() => ({ sel: store.get().questions[store.get().ui.selectedQuestion]?.n, side: store.get().ui.side }));
   say('open-in-qa', qa.sel === 3 && qa.side === null, JSON.stringify(qa));

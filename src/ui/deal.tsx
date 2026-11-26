@@ -210,7 +210,10 @@ function DealName({ deal: d, renaming, open, done }: { deal: Deal; renaming: boo
     if (settled.current || !ref.current) return;   // the box already gone (the page left): what it held stays as it was kept
     if (moved && !mine) return;                     // waiting for Keep mine / Take theirs
     const v = ref.current.value.trim();
-    if (!v && enter) { store.toast('A deal needs a name'); return; }
+    if (!v && enter) {
+      store.toast('A deal needs a name', 'warn');
+      return;
+    }
     settled.current = true;
     if (!v || v === d.name) { letGo(); return; }
     // typed over `base`: if the name has changed elsewhere since, nothing is written and the person chooses (as a field does)
@@ -220,8 +223,14 @@ function DealName({ deal: d, renaming, open, done }: { deal: Deal; renaming: boo
     if (r.error.kind === 'conflict') { setMoved(true); return; }
     const ro = store.readOnly();
     // signed out: the name is kept and the box closes, giving the page back; "Rename not saved" opens it again
-    if (ro) { store.toast(ro); settled.current = true; done(); return; }
-    store.toast(r.error.message); ref.current?.focus();
+    if (ro) {
+      store.toast(ro, 'warn');
+      settled.current = true;
+      done();
+      return;
+    }
+    store.toast(r.error.message, 'warn');
+    ref.current?.focus();
   };
   const keyDown = (e: KeyboardEvent) => {
     if (e.key === 'Enter') {

@@ -19,11 +19,12 @@ function showUpdated(store: Store, dealId: string, outcome: Extract<QaLogUpdateO
   ].filter(Boolean).join(', ');
   const text = summary(filed(counts.unmerged), versions && `${count(versions)} in two versions`,
     clashed && `${count(clashed)} kept as in the file`, did);
-  if (action?.kind === 'resolve') store.toast(text, { label: 'Resolve', run: () => openResolve(store, dealId) }, true);
-  else if (action?.kind === 'show') {
-    store.toast(text, { label: 'Show', run: () => store.ui({ selectedQuestion: action.questionId }) }, true);
-  } else if (counts.unmerged) store.toast(text, undefined, true);
-  else store.toast(did ? `Q&A log updated · ${did}` : 'Q&A log is up to date');
+  if (action?.kind === 'resolve') {
+    store.toast(text, 'warn', { label: 'Resolve', run: () => openResolve(store, dealId) }, true);
+  } else if (action?.kind === 'show') {
+    store.toast(text, 'warn', { label: 'Show', run: () => store.ui({ selectedQuestion: action.questionId }) }, true);
+  } else if (counts.unmerged) store.toast(text, 'warn', undefined, true);
+  else store.toast(did ? `Q&A log updated · ${did}` : 'Q&A log is up to date', 'done');
 }
 
 export function showQaLogUpdate(store: Store, dealId: string) {
@@ -32,25 +33,25 @@ export function showQaLogUpdate(store: Store, dealId: string) {
     announce: (outcome) => {
       switch (outcome.kind) {
         case 'busy':
-          store.toast('Q&A log is being updated');
+          store.toast('Q&A log is being updated', 'done');
           break;
         case 'failed':
-          store.toast(summary(filed(outcome.unmerged), `Q&A log not updated: ${outcome.error.message}`), undefined, {
-            sticky: !!outcome.unmerged, glyph: 'warn',
-          });
+          store.toast(summary(filed(outcome.unmerged), `Q&A log not updated: ${outcome.error.message}`),
+            'warn', undefined, !!outcome.unmerged);
           break;
         case 'retrying': {
           const message = outcome.by ? `${outcome.by} has the Q&A log open · retrying`
             : 'The Q&A log is in use elsewhere · retrying';
-          const toast = store.toast(message, { label: 'Retry Now', run: () => void outcome.retry() }, true);
+          const toast = store.toast(message, 'warn', { label: 'Retry Now', run: () => void outcome.retry() }, true);
           return () => store.dismissToast(toast);
         }
         case 'retryLimit':
-          store.toast('Q&A log not updated · in use elsewhere for 20 minutes',
+          store.toast('Q&A log not updated · in use elsewhere for 20 minutes', 'warn',
             { label: 'Retry', run: () => void outcome.retry() }, true);
           break;
         case 'created':
-          store.toast(summary('Q&A log made', filed(outcome.unmerged)), undefined, !!outcome.unmerged);
+          store.toast(summary('Q&A log made', filed(outcome.unmerged)),
+            outcome.unmerged ? 'warn' : 'done', undefined, !!outcome.unmerged);
           break;
         case 'updated':
           showUpdated(store, dealId, outcome);
