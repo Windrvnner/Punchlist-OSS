@@ -204,7 +204,7 @@ class Answering {
     if (this.stopped && !run.steps.some((x) => x.text === 'Stopped')) {
       run.steps.push({ kind: 'stop', text: 'Stopped', result: 'answered from what was found', done: true });
     }
-    const { files, listing, got } = await kit.send(run.whole);
+    const { files, listing, got } = await kit.send(run.whole, question.model);
     // a document that cannot be opened on this PC was not read
     if (got.length < run.whole.length) run.whole = got;
     const turn = this.turnOf(turnNumber, last, files, listing);

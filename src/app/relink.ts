@@ -38,7 +38,10 @@ export async function lookAgain(store: Store): Promise<FolderSearch | null> {
 /** The notice that stays while folders are missing, with Locate: shown again with the count now, or taken away at none. */
 function notice(store: Store, missing: number) {
   const n = notices.get(store); if (n !== undefined) { store.dismissToast(n); notices.delete(store); }
-  if (missing) notices.set(store, store.toast(said(missing), { label: 'Locate', run: () => openLocate(store) }, true));
+  if (missing) {
+    const locate = { label: 'Locate', run: () => openLocate(store) };
+    notices.set(store, store.toast(said(missing), 'warn', locate, true));
+  }
 }
 
 /**

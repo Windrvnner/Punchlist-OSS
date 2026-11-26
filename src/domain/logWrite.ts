@@ -45,7 +45,10 @@ export interface LogWrite {
 }
 
 /** a log's question number as it is written ("Q4", "4.", "#004", "A-4"): what comes before the number, the number, and what after */
-const numberParts = (v: string) => { const m = /^\s*(\D*?)0*(\d+)\s*([.)]?)\s*$/.exec(v); return m ? { pre: m[1], n: +m[2], post: m[3] } : null; };
+export const numberParts = (v: string) => {
+  const m = /^\s*(\D*?)0*(\d+)\s*([.)]?)\s*$/.exec(v);
+  return m ? { pre: m[1], n: +m[2], post: m[3] } : null;
+};
 /**
  * Which row of the log stands for each question, by question id: the row's index in `table.rows`. The import's own
  * lookup (`matchQuestions`, #1080), with each row's number as the log writes it ("Q4", "4.", "#004"). After a

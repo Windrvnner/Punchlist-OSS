@@ -11,11 +11,15 @@
  * - A row they added that the log lacks goes at the end of the log, as an update adds questions.
  * - Nothing is ever taken out of the log: a row they removed stays, as does a row only the log has.
  *
- * Rows are lined up by their question's words and, among rows that read alike, by their other cells; a row whose words
- * they changed by where it is among the rows lined up around it and its other cells (lineUp). Columns are lined up by their headings; one added since the version they edited counts as empty there. Pure: the tables are as the
+ * Rows are lined up by the one Q&A row lookup (lineUp, docs/decisions.md): the same number, text as the file holds it
+ * and sender, else the same text and sender. Where the lookup can't tell rows apart, the person places their edit
+ * (KeptAsk); a row it places nowhere is never written into. Columns are lined up by their headings; one added since the
+ * version they edited counts as empty there. Pure: the tables are as the
  * import reads them (tableFrom), and steps count rows and columns from 0 on the log's sheet.
  */
 import type { SheetEdit } from './sheets';
+import { formKeys, matchQuestions, type MatchRow } from './qaMatch';
+import { numberParts } from './logWrite';
 
 export type KeptTable = { columns: string[]; cols: number[]; rows: string[][]; lines: number[]; lastRow: number };
 export interface KeptMerge {
@@ -50,74 +54,143 @@ export interface KeptAsk {
 
 /** a column's key: its heading, spacing and case aside, and which of the columns so headed it is */
 const keys = (columns: string[]) => { const seen = new Map<string, number>(); return columns.map((c) => { const h = c.replace(/\s+/g, ' ').trim().toLowerCase(); const k = (seen.get(h) ?? 0) + 1; seen.set(h, k); return `${h}#${k}`; }); };
-/** a question's words as rows are lined up by them */
-const words = (s: string | undefined) => (s ?? '').replace(/\s+/g, ' ').trim();
-
-/** the columns other than the question's that two tables both have: each column's place in either's rows */
-type Pairs = { a: number; b: number }[];
-/**
- * how far two rows agree in those columns: cells both have and that say the same, and cells both have that differ; a cell of
- * the second row that `worked(col)` says holds a formula says nothing of which row it is, and is left out
- */
-const agree = (x: string[], y: string[], pairs: Pairs, worked: (col: number) => boolean = () => false) => { let same = 0, differ = 0; for (const p of pairs) { const u = (x[p.a] ?? '').trim(), v = (y[p.b] ?? '').trim(); if (u && v && !worked(p.b)) { if (u === v) same++; else differ++; } } return { same, differ }; };
+/** a row that asks a question: a heading or a blank line stands for none, as the log update reads it (logWrite.ts) */
+const hasQuestion = (r: string[], text: number) => (r[text] ?? '').trim() !== '';
 
 /**
- * Which row of `x` stands for each row of `base` (-1: none). A row with the same words: the only one, when only one row of
- * each reads so; otherwise (a question asked by several parties, say) the one that agrees with it in the most other cells
- * (number, Submitted by) more than it differs, never one under another number, and none when two agree as well. Then, for a row whose words were changed, the row at its place
- * between the rows lined up above and below it, when as many rows lie between those on both sides and both carry the same
- * question number (none without a number column), as long as that row's words are new (not another row's of `base`), it is not
- * taken, and it agrees with it in another cell (its number, say) more than it differs. In doubt, none: a row not lined up
- * is never written into.
+ * A table's rows by their question, exactly as written. A row with no question (a heading, a note) is never the same
+ * as another.
  */
-function lineUp(base: string[][], bt: number, x: string[][], xt: number, pairs: Pairs, worked: (row: number, col: number) => boolean, num?: { a: number; b: number }, who?: { a: number; b: number }, byPlace = true): number[] {
-  /**
-   * another party's row, whatever the cells all parties share say: Submitted by not the same, a blank one against a filled one
-   * included (a row given a submitter since may be another party's; their edits to it are then counted, not written)
-   */
-  const by = (r: string[], c: number) => (r[c] ?? '').trim();
-  const other = (r: string[], y: string[]) => !!who && by(r, who.a) !== by(y, who.b);
-  /** a cell that tells the row apart, filled in both and the same: its number, or who submitted it */
-  const known = (r: string[], y: string[]) => (!!num && !!by(r, num.a) && by(r, num.a) === by(y, num.b)) || (!!who && !!by(r, who.a) && by(r, who.a) === by(y, who.b));
-  const at = new Map<string, number[]>(); x.forEach((r, i) => { const w = words(r[xt]); if (w) { const l = at.get(w); if (l) l.push(i); else at.set(w, [i]); } });
-  const many = new Map<string, number>(); for (const r of base) { const w = words(r[bt]); if (w) many.set(w, (many.get(w) ?? 0) + 1); }
-  const taken = new Uint8Array(x.length); const out = new Array<number>(base.length).fill(-1);
-  base.forEach((r, i) => {
-    const w = words(r[bt]); const l = at.get(w)?.filter((j) => !taken[j] && !other(r, x[j])); if (!l?.length) return;
-    let pick = -1; const no = num ? (r[num.a] ?? '').trim() : '';
-    // never one under another question number, nor one that differs from it more than it agrees: the row it stands for may
-    // have been taken out, and the one left another party's (a duplicate asked since, say)
-    if (l.length === 1 && many.get(w) === 1 && (at.get(w)?.length ?? 0) === 1) {   // (another party's row never gets this far)
-      const xn = num ? (x[l[0]][num.b] ?? '').trim() : ''; const g = agree(r, x[l[0]], pairs, (c) => worked(l[0], c));
-      if (no && xn ? no === xn : g.differ === 0 || g.same > g.differ) pick = l[0];   // the same number settles it
-    } else {
-      // never one under another number; and in the log (not their version, made from this one), among rows that read alike,
-      // only one that a number or Submitted by shows is the same row, where it has either: the other cells all parties share
-      // (Workstream, Status) can't tell another party's from it
-      // In the log, a row whose number is another's (filled on one side only, too) or that differs in any cell is not taken
-      // either: which of the rows that read alike it is goes to the person (KeptAsk)
-      const xno = (j: number) => (num ? (x[j][num.b] ?? '').trim() : '');
-      const scored = l.filter((j) => (byPlace ? !no || !xno(j) || xno(j) === no : xno(j) === no) && (byPlace || !(num || who) || known(r, x[j])))
-        .map((j) => { const g = agree(r, x[j], pairs, (c) => worked(j, c)); return { j, s: g.same, d: g.differ }; }).filter((p) => p.s > p.d && (byPlace || p.d === 0)).sort((p, q) => q.s - p.s);
-      if (scored.length && (scored.length === 1 || scored[1].s < scored[0].s)) pick = scored[0].j;
-    }
-    if (pick >= 0) { taken[pick] = 1; out[i] = pick; }
-  });
-  // By place: only between two rows lined up by their words with as many rows between them on both sides, so a row put in
-  // or taken out near it never shifts one onto another (a new row put in just above a reworded one)
-  const fixedAt = out.map((j, i) => (j >= 0 ? i : -1)).filter((i) => i >= 0); let k = 0;
-  base.forEach((r, i) => {
-    if (out[i] >= 0) return;
-    while (k < fixedAt.length && fixedAt[k] < i) k++;
-    const p = k > 0 ? fixedAt[k - 1] : -1, n = k < fixedAt.length ? fixedAt[k] : base.length;
-    const xp = p >= 0 ? out[p] : -1, xn = n < base.length ? out[n] : x.length;
-    if (xn - xp !== n - p) return;
-    const j = xp + (i - p); if (!byPlace || !num || j < 0 || j >= x.length || taken[j] || many.has(words(x[j][xt]))) return;
-    // and only when both carry the same question number: other cells alike (Submitted by, Status) can't tell a new row from it
-    const no = (r[num.a] ?? '').trim(); if (!no || no !== (x[j][num.b] ?? '').trim() || other(r, x[j])) return;
-    const g = agree(r, x[j], pairs, (c) => worked(j, c)); if (g.same === 0 || g.same <= g.differ) return;
-    taken[j] = 1; out[i] = j;
-  });
+function byQuestion(rows: string[][], text: number): Map<string, number[]> {
+  const at = new Map<string, number[]>();
+  for (const [i, r] of rows.entries()) {
+    if (!hasQuestion(r, text)) continue;
+    const list = at.get(r[text]);
+    if (list) list.push(i);
+    else at.set(r[text], [i]);
+  }
+  return at;
+}
+
+/** the columns of a table the lookup reads: the question's, and the number's and Submitted by's where it has them */
+type LookupCols = { text: number; n?: number; by?: number };
+/** a row as the lookup reads it: its number as the log update reads it ("Q4", "4."), its question and its sender */
+const lookupRow = (r: string[], c: LookupCols): MatchRow => ({
+  n: c.n === undefined ? null : numberParts(r[c.n] ?? '')?.n ?? null,
+  text: r[c.text] ?? '',
+  askedBy: c.by === undefined ? '' : r[c.by] ?? '',
+});
+/**
+ * The columns of two tables the lookup reads: a number or Submitted by column only where both have it (`-1`: one
+ * lacks it), so a row is never told from another by a column one side doesn't have.
+ */
+function lookupCols(text: [number, number], n: [number, number], by: [number, number]): [LookupCols, LookupCols] {
+  const both = (c: [number, number], side: 0 | 1) => (c[0] >= 0 && c[1] >= 0 ? c[side] : undefined);
+  const side = (s: 0 | 1) => ({ text: text[s], n: both(n, s), by: both(by, s) });
+  return [side(0), side(1)];
+}
+/** a row's keys for the lookup's identity: its text forms, each with its sender and number */
+const identityKeys = (row: MatchRow) => formKeys(row.text)
+  .map((form) => `${form}\u0000${row.askedBy.trim()}\u0000${row.n ?? ''}`);
+/**
+ * Rows another row of the list has the same number, text (as the file holds it) and sender as: the lookup can't tell
+ * them apart.
+ */
+function lookalikes(rows: MatchRow[]): boolean[] {
+  const count = new Map<string, number>();
+  for (const row of rows) for (const key of identityKeys(row)) count.set(key, (count.get(key) ?? 0) + 1);
+  return rows.map((row) => identityKeys(row).some((key) => (count.get(key) ?? 0) > 1));
+}
+
+/** how many of `rows` (by index in `at`) have each text form */
+function formCounts(rows: MatchRow[], at: number[]): Map<string, number> {
+  const count = new Map<string, number>();
+  for (const k of at) for (const key of formKeys(rows[k].text)) count.set(key, (count.get(key) ?? 0) + 1);
+  return count;
+}
+
+/** Rows lined up (`out`, -1: none), and rows of `base` whose row is unclear, with the rows of `x` it may be */
+type LinedUp = { out: number[]; unclear: Map<number, number[]> };
+/**
+ * Which row of `x` stands for each row of `base`, by the one Q&A row lookup (`matchQuestions`, docs/decisions.md): the
+ * same number, text and sender, else the same text and sender; a row naming no sender matches any, the same sender
+ * first. `onlyBase` and `onlyX` narrow the rows looked at. Where its row is unclear, the person places it (KeptAsk,
+ * decisions.md:114), so it is lined up with none and listed in `unclear` (#1111): a row of `x` that another of its
+ * table has the same number, text and sender as, or a match across senders (one names none) while another row with
+ * that text is left over. A row of `base` that another of its own has the same identity as is lined up with none
+ * (the caller asks about rows of `base` that read alike). A row not lined up is never written into.
+ */
+function lineUp(base: string[][], bc: LookupCols, x: string[][], xc: LookupCols,
+  onlyBase: (i: number) => boolean = () => true, onlyX: (j: number) => boolean = () => true): LinedUp {
+  const at = base.flatMap((r, i) => (hasQuestion(r, bc.text) && onlyBase(i) ? [i] : []));
+  const xAt = x.flatMap((r, j) => (hasQuestion(r, xc.text) && onlyX(j) ? [j] : []));
+  const rows = at.map((i) => lookupRow(base[i], bc));
+  const xRows = xAt.map((j) => lookupRow(x[j], xc));
+  const alike = lookalikes(rows);
+  const xAlike = lookalikes(xRows);
+  const matched = matchQuestions(xRows, [rows.map((row, b) => ({ ...row, id: String(b) }))]);
+  const pairs = [...matched].map(([k, id]) => [k, Number(id)] as const);
+  const takenX = new Set(pairs.map(([k]) => k));
+  const takenB = new Set(pairs.map(([, b]) => b));
+  const freeX = formCounts(xRows, xRows.map((_, k) => k).filter((k) => !takenX.has(k)));
+  const freeB = formCounts(rows, rows.map((_, b) => b).filter((b) => !takenB.has(b)));
+  const out: LinedUp = { out: new Array<number>(base.length).fill(-1), unclear: new Map() };
+  for (const [k, b] of pairs) {
+    if (alike[b]) continue;
+    const others = otherCandidates(rows[b], xRows, k, xAlike[k], freeX, freeB, takenX);
+    if (others) out.unclear.set(at[b], [k, ...others].sort((p, q) => p - q).map((c) => xAt[c]));
+    else out.out[at[b]] = xAt[k];
+  }
+  return out;
+}
+/**
+ * The other rows of `x` (by index in `xRows`) the row of `base` matched with `k` may be, or null when its row is clear
+ * (#1111): those with the same identity as `k`, or, for a match across senders while another row with that text
+ * is left over on either side, the left-over rows of `x` with its text.
+ */
+function otherCandidates(row: MatchRow, xRows: MatchRow[], k: number, xAlike: boolean,
+  freeX: Map<string, number>, freeB: Map<string, number>, takenX: Set<number>): number[] | null {
+  if (xAlike) {
+    const keys = new Set(identityKeys(xRows[k]));
+    return xRows.flatMap((r, c) => (c !== k && identityKeys(r).some((key) => keys.has(key)) ? [c] : []));
+  }
+  if (row.askedBy.trim() === xRows[k].askedBy.trim()) return null;
+  const forms = formKeys(xRows[k].text);
+  if (!forms.some((key) => freeX.has(key) || freeB.has(key))) return null;
+  const sameText = (r: MatchRow) => formKeys(r.text).some((key) => forms.includes(key));
+  return xRows.flatMap((r, c) => (c !== k && !takenX.has(c) && sameText(r) ? [c] : []));
+}
+
+/** each table's question column, and the number's and Submitted by's of theirs and the log's (-1: none) */
+type MergeCols = { bt: number; kt: number; lt: number; n: [number, number]; by: [number, number] };
+/**
+ * Their rows not lined up yet (`unused`: added) that the log added too (theirs saved again): by their row, the log's
+ * row the one lookup finds (-1: none). Never a row that asks what a row of the version they edited asks, lined up or
+ * not: it may be that row, or another party's.
+ */
+function addedByLog(base: KeptTable, kept: KeptTable, log: KeptTable, c: MergeCols, unused: (j: number) => boolean) {
+  const baseTexts = new Set(base.rows.flatMap((r) => (hasQuestion(r, c.bt) ? formKeys(r[c.bt]) : [])));
+  const askedBefore = (l: number) => formKeys(log.rows[l][c.lt] ?? '').some((key) => baseTexts.has(key));
+  const [keptCols, logCols] = lookupCols([c.kt, c.lt], c.n, c.by);
+  return lineUp(kept.rows, keptCols, log.rows, logCols, unused, (l) => !askedBefore(l));
+}
+/**
+ * Their rows with no question (a heading) that hold every cell as one of the version they edited does (`asWas(j, i)`),
+ * each row of that version standing for one of theirs: the lookup places no such row, and it is not a row they added,
+ * so it is not added again. A copy they added has no row left to stand for it, so it is added (#1111).
+ */
+function unchangedHeadings(kept: string[][], kt: number, base: string[][], bt: number,
+  asWas: (j: number, i: number) => boolean): Set<number> {
+  const heading = (r: string[], text: number) => !hasQuestion(r, text) && r.some((v) => v.trim());
+  const free = base.flatMap((r, i) => (heading(r, bt) ? [i] : []));
+  const out = new Set<number>();
+  for (const [j, r] of kept.entries()) {
+    if (!heading(r, kt)) continue;
+    const at = free.findIndex((i) => asWas(j, i));
+    if (at < 0) continue;
+    free.splice(at, 1);
+    out.add(j);
+  }
   return out;
 }
 
@@ -144,7 +217,6 @@ export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text
   const head = (k: string) => k.slice(0, k.lastIndexOf('#')); const many = (ks: string[], h: string) => ks.filter((k) => head(k) === h).length;
   const sure = (k: string) => { const h = head(k), n = many(kk, h); return n === many(kl, h) && (n === many(kb, h) || (n === 1 && !many(kb, h))); };
   const both = kk.map((k, c) => ({ k: c, b: kb.indexOf(k), l: kl.indexOf(k) })).filter((c) => c.l >= 0 && (c.k === kt || sure(kk[c.k])));
-  const others = both.filter((c) => c.b >= 0 && c.k !== kt);                          // what rows are lined up by: the version they edited has them
   const goes = new Set(both.map((c) => c.k));
   const keptWorked = (j: number, c: number) => !!formula(kept.lines[j] - 1, kept.cols[c]), logWorked = (j: number, c: number) => fixed(log.lines[j] - 1, log.cols[c]);
   /**
@@ -164,18 +236,26 @@ export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text
   });
   const nkey = number ? kl[log.columns.indexOf(number)] : undefined; const nb = nkey ? kb.indexOf(nkey) : -1, nkk = nkey ? kk.indexOf(nkey) : -1, nll = nkey ? kl.indexOf(nkey) : -1;
   const bkey = by ? kl[log.columns.indexOf(by)] : undefined; const bb = bkey ? kb.indexOf(bkey) : -1, bkk = bkey ? kk.indexOf(bkey) : -1, bll = bkey ? kl.indexOf(bkey) : -1;
-  const ks = lineUp(base.rows, bt, kept.rows, kt, others.map((c) => ({ a: c.b, b: c.k })), keptWorked, nb >= 0 && nkk >= 0 ? { a: nb, b: nkk } : undefined, bb >= 0 && bkk >= 0 ? { a: bb, b: bkk } : undefined);
-  // by place only on their side: a row they reworded is theirs to change; one the log changed in its place may be another question
-  const ls = lineUp(base.rows, bt, log.rows, lt, others.map((c) => ({ a: c.b, b: c.l })), logWorked, nb >= 0 && nll >= 0 ? { a: nb, b: nll } : undefined, bb >= 0 && bll >= 0 ? { a: bb, b: bll } : undefined, false);
+  const [baseForKept, keptCols] = lookupCols([bt, kt], [nb, nkk], [bb, bkk]);
+  const ks = lineUp(base.rows, baseForKept, kept.rows, keptCols).out;
+  const [baseForLog, logCols] = lookupCols([bt, lt], [nb, nll], [bb, bll]);
+  const { out: ls, unclear } = lineUp(base.rows, baseForLog, log.rows, logCols);
   const clash = new Set<number>(); const used = new Uint8Array(kept.rows.length); const written = new Map<string, string>();   // the cells written, by "row,col"
   // Rows of the version they edited that read alike (a question asked twice): where nothing tells which is which, the
   // person says where their edit goes (`asks`, made into KeptAsk below)
-  const baseBy = new Map<string, number[]>(); base.rows.forEach((r, i) => { const w = words(r[bt]); if (!w) return; const at = baseBy.get(w); if (at) at.push(i); else baseBy.set(w, [i]); });
+  const baseBy = byQuestion(base.rows, bt);
   const alike = (w: string) => (baseBy.get(w)?.length ?? 0) > 1;
-  const asks: { j: number; b?: number }[] = []; const told = new Set<number>();   // rows of the version they edited an ask, or their row as it was, accounts for
+  // their rows to ask about (`only`: the log's rows they may be, when the lookup found them)
+  const asks: { j: number; b?: number; only?: number[] }[] = [];
+  const told = new Set<number>();   // rows of the version they edited an ask, or their row as it was, accounts for
   base.rows.forEach((br, i) => {
     const k = ks[i], l = ls[i]; if (k >= 0) used[k] = 1;
-    if (k >= 0 && l < 0 && alike(words(br[bt]))) { asks.push({ j: k, b: i }); told.add(i); return; }   // the log's rows that read so can't be told apart
+    // the log's rows that ask it can't be told apart
+    if (k >= 0 && l < 0 && (alike(br[bt]) || unclear.has(i))) {
+      asks.push({ j: k, b: i, only: unclear.get(i) });
+      told.add(i);
+      return;
+    }
     if (k < 0 || l < 0) { if (k >= 0) lost(k, i, true); return; }                      // a row they or the log took out: nothing to bring in
     lost(k, i);
     for (const c of both) {
@@ -187,23 +267,25 @@ export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text
       else clash.add(l);
     }
   });
-  // Rows they added. One the log has already (theirs saved again) is the log's row of the same words and the same number,
-  // or, with no number, one whose every cell both have agrees: what they filled in that the log's row lacks goes into it,
-  // and a cell both filled in differently is a clash, the log's stays. Any other is added: another party asking a question
-  // the log has is a row of its own.
-  const lp = both.filter((c) => c.k !== kt).map((c) => ({ a: c.k, b: c.l, l: c.l })); const nl = number ? log.columns.indexOf(number) : -1; const nk = nl >= 0 ? kk.indexOf(kl[nl]) : -1;
-  const byWords = new Map<string, number[]>(); log.rows.forEach((x, l) => { const w = words(x[lt]); if (!w) return; const at = byWords.get(w); if (at) at.push(l); else byWords.set(w, [l]); });   // a row with no question (a heading, a note) is never the same as another
-  // never a row that asks what a row of the version they edited asks, lined up or not: it may be that row, another party's
-  const fresh: number[] = []; const baseWords = new Set(base.rows.map((r) => words(r[bt])).filter(Boolean));
-  // where the log has a number or Submitted by column, only a row the cells it fills in show to be the same (as lineUp)
-  const tells = (r: string[], y: string[]) => !(nk >= 0 || bkk >= 0) || (nk >= 0 && nl >= 0 && !!(r[nk] ?? '').trim() && (r[nk] ?? '').trim() === (y[nl] ?? '').trim()) || (bkk >= 0 && bll >= 0 && !!(r[bkk] ?? '').trim() && (r[bkk] ?? '').trim() === (y[bll] ?? '').trim());
+  // Rows they added. One the log has already (theirs saved again) is the log's row the same lookup finds for it: what
+  // they filled in that the log's row lacks goes into it, and a cell both filled in differently is a clash, the log's
+  // stays. Any other is added.
+  const lp = both.filter((c) => c.k !== kt).map((c) => ({ a: c.k, b: c.l, l: c.l }));
+  const byWords = byQuestion(log.rows, lt);
+  const fresh: number[] = [];
+  /** their row `j` holds every cell as row `i` of the version they edited had it */
+  const asWas = (j: number, i: number) => kk.every((k, c) => {
+    const b = kb.indexOf(k);
+    return (kept.rows[j][c] ?? '') === (b >= 0 ? base.rows[i][b] ?? '' : '');
+  });
   // Their rows that read like several of the version they edited and were not lined up: each against the rows of the version
   // they edited not lined up either, in order when as many are left on both sides; one as it was needs nothing, any other
   // is asked about
   for (const [w, bi] of baseBy) {
     if (bi.length < 2) continue;
-    const free = bi.filter((i) => ks[i] < 0); const kj = kept.rows.map((_, j) => j).filter((j) => !used[j] && words(kept.rows[j][kt]) === w); if (!kj.length) continue;
-    const asWas = (j: number, i: number) => kk.every((k, c) => { const b = kb.indexOf(k); return (kept.rows[j][c] ?? '') === (b >= 0 ? base.rows[i][b] ?? '' : ''); });
+    const free = bi.filter((i) => ks[i] < 0);
+    const kj = kept.rows.map((_, j) => j).filter((j) => !used[j] && (kept.rows[j][kt] ?? '') === w);
+    if (!kj.length) continue;
     const rest = [...free]; const pairs: [number, number | undefined][] = free.length === kj.length ? kj.map((j, n) => [j, free[n]]) : kj.map((j) => { const n = rest.findIndex((i) => asWas(j, i)); return [j, n >= 0 ? rest.splice(n, 1)[0] : undefined]; });
     for (const [j, i] of pairs) { used[j] = 1; if (i !== undefined) told.add(i); if (i === undefined || !asWas(j, i)) asks.push({ j, b: i }); }
   }
@@ -215,7 +297,7 @@ export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text
    * version they edited lined up with it had them), and whether a cell both changed keeps the log's value.
    */
   const ask = (a: { j: number; b?: number }, only?: number[], counted = false) => {
-    const r = kept.rows[a.j]; const w = words(r[kt]);
+    const r = kept.rows[a.j]; const w = r[kt] ?? '';
     const was = (c: { b: number }, i = a.b) => (i !== undefined && c.b >= 0 ? base.rows[i][c.b] ?? '' : '');
     const mine = (c: { k: number; b: number }) => !keptWorked(a.j, c.k) && (a.b !== undefined ? (r[c.k] ?? '') !== was(c) : !!(r[c.k] ?? '').trim());
     const changed = both.filter((c) => mine(c));
@@ -237,37 +319,45 @@ export function mergeKept(base: KeptTable, kept: KeptTable, log: KeptTable, text
     const differ = both.filter((c) => c.k !== kt && !changed.includes(c) && new Set(rows.map((l) => (log.rows[l][c.l] ?? '').trim())).size > 1);
     out.ask.push({ question: r[kt] ?? '', cells: [...shown.map((c) => ({ c, changed: true })), ...differ.map((c) => ({ c, changed: false }))].sort((x, y) => x.c.l - y.c.l).map(({ c, changed: ch }) => ({ heading: log.columns[c.l], theirs: r[c.k] ?? '', rows: rows.map((l) => log.rows[l][c.l] ?? ''), changed: ch })), rows: options, add: cellsOf(a.j) });
   };
-  for (const a of asks) ask(a);
+  for (const a of asks) ask(a, a.only);
   // the words of rows of the version they edited that their version no longer lines up: one of theirs added at the end with
   // those words is likely that row changed (closed, answered) and can't be told from a new one, so it is counted
-  const unlined = new Set(base.rows.filter((_, i) => ks[i] < 0 && !told.has(i)).map((r) => words(r[bt])).filter(Boolean));
+  const unlined = new Set(base.rows.filter((r, i) => ks[i] < 0 && !told.has(i) && hasQuestion(r, bt))
+    .map((r) => r[bt]));
   // and any row their version doesn't line up (one they reworded, or one of several that read alike): a row they added may
   // be it, so any such addition is counted too
-  const reworded = base.rows.some((r, i) => ks[i] < 0 && !told.has(i) && words(r[bt]));
+  const reworded = base.rows.some((r, i) => ks[i] < 0 && !told.has(i) && hasQuestion(r, bt));
+  const savedAgain = addedByLog(base, kept, log, { bt, kt, lt, n: [nkk, nll], by: [bkk, bll] }, (j) => !used[j]);
+  /**
+   * A row the log has with the same question that holds all their row has, as the log will be with what is written
+   * above (a row of the version they edited they left as it was, their row saved again): it needs nothing.
+   */
+  const heldAlready = (r: string[]) => {
+    if (!kk.every((_, c) => goes.has(c) || !(r[c] ?? '').trim())) return false;
+    const now = (l: number, p: { b: number; l: number }) =>
+      written.get(`${log.lines[l] - 1},${log.cols[p.l]}`) ?? log.rows[l][p.b] ?? '';
+    const holds = (l: number) => lp.every((p) => !(r[p.a] ?? '').trim() || (r[p.a] ?? '').trim() === now(l, p).trim());
+    return (byWords.get(r[kt] ?? '') ?? []).some(holds);
+  };
+  const headingsAsWere = unchangedHeadings(kept.rows, kt, base.rows, bt, asWas);
   kept.rows.forEach((r, j) => {
-    if (used[j] || !r.some((v) => v.trim())) return;
-    const n = nk >= 0 ? (r[nk] ?? '').trim() : '';
-    // a row they added is only ever one the log added too (theirs saved again), never a row of the version they edited
+    if (used[j] || !r.some((v) => v.trim()) || headingsAsWere.has(j)) return;
     const mine = bkk >= 0 ? (r[bkk] ?? '').trim() : ''; const theirsBy = (l: number) => (bll >= 0 ? (log.rows[l][bll] ?? '').trim() : '');
-    const may = (byWords.get(words(r[kt])) ?? []).filter((l) => !baseWords.has(words(log.rows[l][lt])) && mine === theirsBy(l) && tells(r, log.rows[l])).filter((l) => {
-      const ln = nl >= 0 ? (log.rows[l][nl] ?? '').trim() : '';
-      return n && ln ? n === ln : agree(r, log.rows[l], lp, (c) => logWorked(l, c)).differ === 0;
-    });
-    // A row the log has with the same words that holds all it has (a row of the version they edited they left as it was,
-    // their row saved again) needs nothing; otherwise, with several that may be it, it is added, never written into one
-    // that may be another party's.
-    if (kk.every((_, c) => goes.has(c) || !(r[c] ?? '').trim()) && (byWords.get(words(r[kt])) ?? []).some((l) => lp.every((p) => !(r[p.a] ?? '').trim() || (r[p.a] ?? '').trim() === (written.get(`${log.lines[l] - 1},${log.cols[p.l]}`) ?? log.rows[l][p.b] ?? '').trim()))) return;   // as the log will be, with what is written above
-    const same = may.length === 1 ? may[0] : undefined;
+    if (heldAlready(r)) return;
+    const same = savedAgain.out[j] >= 0 ? savedAgain.out[j] : undefined;
     lost(j, undefined);
     // a formula they put in a row they added is never written: counted, unless the log's row holds one there too (saved again)
     for (const p of lp) if (keptWorked(j, p.a) && (r[p.a] ?? '').trim() && (same === undefined || !logWorked(same, p.b))) out.left++;
+    // the log added it for several parties, or twice: which row it is goes to the person (decisions.md:114, #1111)
+    const mayBe = savedAgain.unclear.get(j);
+    if (mayBe) { used[j] = 1; ask({ j }, mayBe, true); return; }
     // Added while a row of the version they edited is not lined up in theirs (one they reworded, say): it may be that row,
     // so the person says, among the log's rows for those (a few at most), or it is added and counted
-    if (same === undefined && (unlined.has(words(r[kt])) || reworded)) {
+    if (same === undefined && (unlined.has(r[kt] ?? '') || reworded)) {
       const maybe = base.rows.map((_, i) => (ks[i] < 0 && !told.has(i) ? ls[i] : -1)).filter((l) => l >= 0 && (bkk < 0 || bll < 0 || mine === theirsBy(l)));
       if (maybe.length && maybe.length <= 5) { used[j] = 1; ask({ j }, maybe, true); return; }
     }
-    if (same === undefined) { fresh.push(j); if (unlined.has(words(r[kt])) || reworded) out.left++; return; }
+    if (same === undefined) { fresh.push(j); if (unlined.has(r[kt] ?? '') || reworded) out.left++; return; }
     for (const p of lp) {
       const row = log.lines[same] - 1, col = log.cols[p.l]; const v = r[p.a] ?? '', had = written.get(`${row},${col}`);
       if (!v.trim() || keptWorked(j, p.a)) continue;

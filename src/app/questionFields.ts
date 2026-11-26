@@ -17,7 +17,7 @@ export function questionFieldCommit(store: Store, question: Question, field: Edi
     });
     if (result.ok || result.error.kind === 'storageFull') return result;
     const changed = isChangedElsewhere(result.error);
-    if (pick || !changed) store.toast(result.error.message, undefined, changed ? { glyph: 'warn' } : undefined);
+    if (pick || !changed) store.toast(result.error.message, 'warn');
     return result;
   };
 }
