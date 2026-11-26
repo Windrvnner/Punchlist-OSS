@@ -852,6 +852,17 @@ describe('a kept conversation', () => {
     expect(other.thread).toMatchObject({ id: 'conv_2', model: 'standard' }); expect(s.svc.removed).toEqual([gone.thread!.transcript]);
   });
 
+  it('a thread kept without its opened documents is no thread: a new conversation starts from the history (#1162)', async () => {
+    const s = setup(reader, undefined, { talks: true, turn: twoTurns });
+    const one = val(await s.ai.answer(ask('What is the lock-up?')));
+    const { opened: _opened, ...older } = one.thread!;
+    const later = { history: said(['What is the lock-up?']), thread: older as never };
+    const two = val(await s.ai.answer(ask('And the margin?', later)));
+    expect(two.thread!.id).toBe('conv_2');
+    expect(two.thread!.transcript).toBeTruthy();
+    expect(s.turns[2].prompt).toContain('Earlier in this conversation:\nPerson: What is the lock-up?');
+  });
+
   it('a kept conversation citing a document it opened before, since gone, keeps its answer and drops that citation '
     + '(#1162)', async () => {
     const GONE = `doc_${'9'.repeat(24)}`;

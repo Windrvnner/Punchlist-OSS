@@ -61,10 +61,12 @@ export class KeptConversation {
     private readonly width: number,
   ) {
     const { kit, question } = run;
-    const was = kit.talk && question.thread?.model === question.model ? question.thread : undefined;
+    // a thread kept without `opened` is an older one, whose model-side history names documents by label (#1162)
+    const kept = Array.isArray(question.thread?.opened) ? question.thread : undefined;
+    const was = kit.talk && kept?.model === question.model ? kept : undefined;
     this.id = was && was.tokens < compactAt(question.model) ? was.id : undefined;
     this.tokens = this.id ? was!.tokens : 0;
-    this.transcript = kit.talk ? question.thread?.transcript : undefined;
+    this.transcript = kit.talk ? kept?.transcript : undefined;
     this.mode = kit.talk ? kit.toolMode?.(question.model) ?? 'inline' : 'inline';
     this.calls = this.id && was?.call ? [was.call] : [];
   }

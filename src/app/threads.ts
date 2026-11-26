@@ -58,15 +58,24 @@ export function merged(kept: Message[], here: Message[]): { list: Message[]; unk
 
 /** what the chat agent did for an answer, as it is kept with the answer */
 const Research = z.object({ steps: z.array(z.object({ kind: z.enum(['search', 'read', 'stop']), text: z.string(), result: z.string(), done: z.boolean(), found: z.array(z.object({ where: z.string(), quote: z.string() })).optional() })), ms: z.number(), read: z.object({ docs: z.number(), of: z.number() }).optional() });
-/** the model service's conversation an answer left, as it is kept with the answer */
+/**
+ * the model service's conversation an answer left, as it is kept with the answer. A thread kept before it named its
+ * opened documents (it named them by label, as `tags`) still loads, without `opened`: the app then carries on from
+ * the history text instead (`carriedThread`), so no saved conversation is lost (#1162)
+ */
 const Thread = z.object({
   id: z.string().min(1),
   model: z.string(),
   tokens: z.number(),
-  opened: z.array(z.object({ dealId: z.string(), docId: z.string() })),
+  opened: z.array(z.object({ dealId: z.string(), docId: z.string() })).optional(),
   transcript: z.string().optional(),
   call: z.string().optional(),
 });
+/** the thread to carry on: the last answer's, unless it was kept without `opened`, which is no thread (#1162) */
+export function carriedThread(prior: readonly Pick<KeptMessage, 'role' | 'state' | 'thread'>[]) {
+  const last = [...prior].reverse().find((m) => m.role === 'ai' && m.state === 'done' && m.thread)?.thread;
+  return last && Array.isArray(last.opened) ? last : undefined;
+}
 /** the action offered under an answer (#1054), as it is kept with the answer */
 const Offer = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('newDeal') }),

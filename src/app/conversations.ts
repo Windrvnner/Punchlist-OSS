@@ -5,6 +5,7 @@
  * cannot misplace it.
  */
 import { isMine } from './commands/members';
+import { carriedThread } from './threads';
 import { checkedOffer } from './answerOffer';
 import type { Store } from './store';
 import { dealQuestions, type State, type Message } from './state';
@@ -298,7 +299,7 @@ async function answer(store: Store, scope: Scope, messageId: string, text: strin
     message: text, history: prior.filter((m) => m.state === 'done').map((m) => ({ role: m.role, text: m.text })), model: store.get().model || store.get().prefs.model || 'standard',   // before the models have loaded (just after a sign-in): the person's own default, else the standard tier
     attachments, runId: messageId, conversation: key,
     // the model service's conversation, as the last answer left it, is carried on
-    ...((t) => (t ? { thread: t } : {}))([...prior].reverse().find((m) => m.role === 'ai' && m.state === 'done' && m.thread)?.thread),
+    ...((t) => (t ? { thread: t } : {}))(carriedThread(prior)),
   }).finally(() => { following = false; setSteps(null); });
   store.touchCached();                                   // answering may have loaded documents into the store
   // apply only to the message this request was made for, if it is still pending

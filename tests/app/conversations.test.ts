@@ -96,6 +96,54 @@ describe('conversations', () => {
     const again = make({ kv, local }); await again.store.boot(); expect(again.store.get().threads[convKey(scope)][3].thread).toMatchObject({ id: 'conv_1', tokens: 200 });
   });
 
+  describe('a conversation saved before threads named opened documents (#1162)', () => {
+    const oldThread = { id: 'conv_old', model: 'standard', tokens: 50, tags: [{ tag: 'D1', dealId: 'd', docId: 'x' }] };
+    const kept = (id: string, role: string, text: string, thread?: object) =>
+      ({ id, role, text, state: 'done', at: `2026-01-0${id}T10:00:00.000Z`, ...(thread ? { thread } : {}) });
+    const oldStore = () => {
+      const local = new MemoryLocal();
+      local.write('threads', {
+        k: [kept('1', 'me', 'first question'), kept('2', 'ai', 'The answer cites D1', oldThread)],
+        j: [kept('3', 'me', 'other')],
+      });
+      return local;
+    };
+
+    it('loads, and a save keeps every conversation, its messages and its history text', async () => {
+      const local = oldStore();
+      const ai: Partial<AiService> = { answer: async () => ok({ text: 'New answer', sources: [] }) };
+      const { store } = make({ local, ai });
+      await store.boot();
+      expect(store.get().threads.k.map((m) => m.text)).toEqual(['first question', 'The answer cites D1']);
+      expect(Object.keys(store.get().threads).sort()).toEqual(['j', 'k']);
+      const dealId = await deal(store);
+      await ask(store, { kind: 'deal', dealId }, 'a new question');
+      const again = make({ local });
+      await again.store.boot();
+      expect(Object.keys(again.store.get().threads)).toEqual(expect.arrayContaining(['j', 'k']));
+      expect(again.store.get().threads.k).toHaveLength(2);
+    });
+
+    it('starts a fresh model conversation from the history text, not the old one', async () => {
+      const local = new MemoryLocal();
+      const kv = disk();
+      const first = make({ kv, local });
+      const dealId = await deal(first.store);
+      const scope: Scope = { kind: 'deal', dealId };
+      local.write('threads', {
+        [convKey(scope)]: [kept('1', 'me', 'first question'), kept('2', 'ai', 'The answer cites D1', oldThread)],
+      });
+      const given: { thread?: unknown; history?: { text: string }[] }[] = [];
+      const ai: Partial<AiService> = { answer: async (i) => { given.push(i); return ok({ text: 'ok', sources: [] }); } };
+      const { store } = make({ kv, local, ai });
+      await store.boot();
+      await store.loadDeal(dealId);
+      await ask(store, scope, 'next');
+      expect(given[0].thread).toBeUndefined();
+      expect(given[0].history!.map((m) => m.text)).toEqual(['first question', 'The answer cites D1']);
+    });
+  });
+
   it('asks, shows pending, then the answer; the thread is saved locally and survives a restart', async () => {
     const local = new MemoryLocal(); const kv = disk();
     const { store, repo } = make({ kv, local }); const dealId = await deal(store);
