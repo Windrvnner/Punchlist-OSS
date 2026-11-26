@@ -18,7 +18,7 @@ describe('blacklines', () => {
     ]);
     expect(Object.fromEntries(m)).toEqual({ fac: 'fa', epc: 'e', valrl: 'val' });
   });
-  it('compares the first words of "A vs B" as the search index splits them, so a number or a letter tells two names apart (#1220)', () => {
+  it('tells "A vs B" names apart by a first number or letter, as the index splits words (#1220)', () => {
     const m = cleanDrafts([doc('vs', 'Legal/2024 Budget vs 2025 Budget.pdf'), doc('a', 'Legal/2024 Budget.docx'),
       doc('ab', 'Legal/A1 Lease vs B1 Lease.pdf'), doc('l', 'Legal/A1 Lease.docx')]);
     expect(Object.fromEntries(m)).toEqual({});

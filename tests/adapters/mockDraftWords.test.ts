@@ -4,8 +4,11 @@ import { describe, it, expect } from 'vitest';
 import { mockAi } from '../../src/adapters/mocks';
 import type { Repository } from '../../src/ports';
 
-const finding = (title: string) => ({ envelope: { data: { status: 'open', title, body: [title], sources: [{ docId: 'doc1' }] } } });
-const repoOf = (...titles: string[]) => ({ list: async () => ({ ok: true, value: titles.map(finding) }) }) as unknown as Repository;
+const finding = (title: string) => ({
+  envelope: { data: { status: 'open', title, body: [title], sources: [{ docId: 'doc1' }] } },
+});
+const repoOf = (...titles: string[]) =>
+  ({ list: async () => ({ ok: true, value: titles.map(finding) }) }) as unknown as Repository;
 const draft = (repo: Repository, questionText: string) =>
   mockAi({ latency: [0, 0] }, repo).draft!({ dealId: 'd1', questionText } as never);
 
