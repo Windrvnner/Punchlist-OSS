@@ -60,26 +60,40 @@ const numberParts = (v: string) => { const m = /^\s*(\D*?)0*(\d+)\s*([.)]?)\s*$/
 export function matchRows(table: Pick<ReadTable, 'rows'>, mapping: Mapping, questions: Question[], sent: ReadonlyMap<string, Readonly<Record<string, string>>> = new Map()): Map<string, number> {
   const cell = (r: string[], k: ImportField) => (mapping[k] == null ? '' : String(r[mapping[k]!] ?? ''));
   const taken = new Set<number>(); const rowOf = new Map<string, number>();
-  // rows by exact text, in the log's order, so a log of thousands of rows is matched in a moment
-  // a text as the log file holds it (a line break as "\n", control characters as a space or gone) is the text it was written as
-  const byText = new Map<string, number[]>();
-  const addRow = (text: string, i: number) => { const list = byText.get(text); if (list) list.push(i); else byText.set(text, [i]); };
-  table.rows.forEach((r, i) => {
-    const text = cell(r, 'text'); if (!text.trim()) return;
-    for (const form of new Set([text, asLogHolds(text, ' '), asLogHolds(text, '')])) addRow(form, i);
-  });
-  const rowsOf = (q: Question) => [...new Set([q.text, asLogHolds(q.text, ' '), asLogHolds(q.text, '')])].flatMap((form) => byText.get(form) ?? []).sort((a, b) => a - b);
   // a name is as written, spaces around it aside; each row's and question's is worked out once
   const rowSender = table.rows.map((r) => cell(r, 'askedBy').trim());
   const rowNumber = table.rows.map((r) => numberParts(cell(r, 'n'))?.n);
-  const lastSent = (q: Question) => (sent.get(q.id)?.askedBy ?? '').trim();
-  const own = (i: number, q: Question) => rowSender[i] === q.askedBy.trim();
-  const written = (i: number, q: Question) => !!lastSent(q) && rowSender[i] === lastSent(q);
-  const unnamed = (i: number, q: Question) => !rowSender[i] || !q.askedBy.trim();
-  const tiers: ((i: number, q: Question) => boolean)[] = [own, written, unnamed];
-  for (const fits of tiers) for (const withNumber of [true, false]) for (const q of questions) {
+  const senderOf = new Map(questions.map((q) => [q.id, q.askedBy.trim()]));
+  const lastSent = new Map(questions.map((q) => [q.id, (sent.get(q.id)?.askedBy ?? '').trim()]));
+  // rows by exact text, then by sender, in the log's order, so a log of thousands of rows is matched in a moment
+  // a text as the log file holds it (a line break as "\n", control characters as a space or gone) is the text it was written as
+  const byText = new Map<string, number[]>();
+  const byTextAndSender = new Map<string, Map<string, number[]>>();
+  const push = <K>(map: Map<K, number[]>, key: K, i: number) => { const list = map.get(key); if (list) list.push(i); else map.set(key, [i]); };
+  const formsOf = (text: string) => [...new Set([text, asLogHolds(text, ' '), asLogHolds(text, '')])];
+  table.rows.forEach((r, i) => {
+    const text = cell(r, 'text'); if (!text.trim()) return;
+    for (const form of formsOf(text)) {
+      push(byText, form, i);
+      if (!byTextAndSender.has(form)) byTextAndSender.set(form, new Map());
+      push(byTextAndSender.get(form)!, rowSender[i], i);
+    }
+  });
+  /** the rows holding the question's text in any form, under that sender (any sender when null), in the log's order */
+  const rowsOf = (q: Question, sender: string | null) => {
+    const forms = formsOf(q.text);
+    const lists = forms.map((form) => (sender === null ? byText.get(form) : byTextAndSender.get(form)?.get(sender)) ?? []);
+    return forms.length === 1 ? lists[0] : lists.flat().sort((a, b) => a - b);
+  };
+  // a question's own sender first, then the sender it was last written with, then rows (or a question) naming no one
+  const tiers: ((q: Question) => number[])[] = [
+    (q) => rowsOf(q, senderOf.get(q.id)!),
+    (q) => (lastSent.get(q.id) ? rowsOf(q, lastSent.get(q.id)!) : []),
+    (q) => rowsOf(q, senderOf.get(q.id) ? '' : null),
+  ];
+  for (const candidates of tiers) for (const withNumber of [true, false]) for (const q of questions) {
     if (rowOf.has(q.id)) continue;
-    const i = rowsOf(q).find((row) => !taken.has(row) && fits(row, q) && (!withNumber || rowNumber[row] === q.n));
+    const i = candidates(q).find((row) => !taken.has(row) && (!withNumber || rowNumber[row] === q.n));
     if (i !== undefined) { taken.add(i); rowOf.set(q.id, i); }
   }
   return rowOf;
