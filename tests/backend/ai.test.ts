@@ -415,6 +415,17 @@ describe('the chat agent', () => {
     expect(sentNames(s.turns[1])).toEqual(['Credit Agreement.pdf']);
     expect(s.turns[1].prompt).toContain('Not found: Agreement.pdf.');
   });
+  it('a search finds a document by a one-letter word or one-digit number in its name', async () => {
+    const recs = { d1: [doc(8, 'Schedule B.pdf'), doc(9, 'Section 5.pdf'), doc(10, 'Annex.pdf')] };
+    const queries = ['B', '5'];
+    const search = (n: number) => ({ tool: 'search', what: 'documents', query: queries[n - 1], notes: '' });
+    const turn = (_c: Call, n: number) => (n <= 2 ? search(n) : { text: 'Done. [1]', sources: [] });
+    const s = setup(helper, recs, { pick: () => 'I cannot say', turn });
+    const r = val(await s.ai.answer({ ...ask('Which schedule?'), runId: 'r2' }));
+    const searched = r.research!.steps.filter((x) => x.kind === 'search' && /“[B5]”/.test(x.text));
+    const one = '1 listed · 1 opened · 1 passage';
+    expect(searched.map((x) => x.result)).toEqual([one, one]);
+  });
   it('searches, reads whole what it asks for, and answers citing only documents a model was given', async () => {
     const search =
       { tool: 'search', what: 'documents', query: 'board minutes hedging', notes: 'FA p. 1 has the ratio' };

@@ -188,7 +188,6 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - The chat's search gives its results a page at a time, ranked by one keyword scoring (BM25): documents `limits.docsPerCall` a page from the ranking, findings and Q&A `limits.searchPage` a page, each record whole and each Q&A row in full. The model asks for any page (#1102).
 - A question asked across deals reaches only the person's own deals.
 - A chat is one conversation on the model service; past its limit, it is compacted into an uploaded transcript.
-- One run of the chat agent (a chat answer, or the checks' gap search) takes up to `limits.chatTurns` (25) turns, and one search run, in chat or the checks, up to `limits.searchCalls` (15) calls; a chat itself has no length limit (#1066).
 - Each PC keeps its own word index of the data room; nothing is added to the shared folder.
 - Documents open in reading mode beside the conversation, with page keys and zoom.
 - Switching PDFs opens the cited page at the top and keeps the zoom (#447).
@@ -323,9 +322,13 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Say how an ambiguous instruction is being read. Ask about a product decision before it is built.
 - Each thing lives in one place: decisions here; bugs and Build list items (with their designs) as GitHub issues; review notes on pull requests; how the app works in the docs; the detailed contract in code comments and tests; and history in git. There are no Markdown review files or running logs.
 - The README covers what the app is and does, screenshots of the real app, and how to install and use it; developer setup is in docs/development.md.
-- A UI module names what it loads with a plain string and reads `import.meta` only as `import.meta.env`; the UI dependency check refuses any other import path, even one naming a UI module (#848).
-- A field's input-method composition (active, held after a blur mid-candidate, and the wait after compositionend for a blur that Chromium fires after it) is screen state in `src/ui`, like focus; when a typed field saves is decided in `src/app` (#953, #997).
-- A held field that receives composing input without a compositionstart stays held: its text shows Not saved until typing that is not composing in the focused field, Retry, or Take Theirs (#997).
+- A UI module names what it loads with a plain string and reads `import.meta` only as `import.meta.env`; the UI
+  dependency check refuses any other import path, even one naming a UI module (#848).
+- A field's input-method composition (active, held after a blur mid-candidate, and the wait after compositionend for a
+  blur that Chromium fires after it) is screen state in `src/ui`, like focus; when a typed field saves is decided in
+  `src/app` (#953, #997).
+- A held field that receives composing input without a compositionstart stays held: its text shows Not saved until
+  typing that is not composing in the focused field, Retry, or Take Theirs (#997).
 
 ## Deal screen
 
@@ -390,5 +393,5 @@ These decisions are built and wait to be confirmed:
 - The recovered copy of a deal deleted elsewhere is built, including who sees it, what it holds, and its notice's wording (#220).
 - Periodic records whose names differ only by a period are a series and take one place in the core set, their newest member's; every document stays searchable (docs/core-families-design.md).
 - An issues list or an advisor report is read like the app's other documents: the model reads the whole file once and returns each issues-list point in the list's own words, never reworded, and each advisor-report issue with its place in the file. There is no paging and no stop rule (#1026).
-- A document's word index keeps numbers as it keeps words, at two characters or more (a search leaves out shorter
-  ones too), and a Word file is indexed from its body and all its header, footer, footnote and endnote parts (#1025).
+- A document's word index and a search no longer drop a word or number for its length, and a Word file is indexed from
+  its body and all its header, footer, footnote and endnote parts (#1025).
