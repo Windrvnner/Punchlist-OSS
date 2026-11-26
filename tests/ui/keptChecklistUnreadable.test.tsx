@@ -106,4 +106,13 @@ describe('a kept checklist import that cannot be shown (#381)', () => {
     await act(() => render(<Keeping paste="" />, screen));
     expect(keptImport(key)?.paste).toBe('');
   });
+
+  it('shows an import kept with a bare Map of readings, as an earlier build kept it (#1073)', async () => {
+    await keptImportsReady;
+    const old = new Map([[1, { n: 1, k: 'item', text: 'Corporate records' }]]);
+    keepImport(key, { paste: 'Corporate records\nTax returns', reads: old, choices });
+    let left: unknown;
+    await act(() => render(<Keeping paste="Corporate records" seen={(value) => { left = value; }} />, screen));
+    expect(left).toMatchObject({ paste: 'Corporate records\nTax returns', reads: { reads: old } });
+  });
 });

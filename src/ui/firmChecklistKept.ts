@@ -64,8 +64,18 @@ function isChecklistKept(value: unknown): value is ChecklistKept {
   if (!kept || typeof kept !== 'object') return false;
   if (kept.paste !== undefined && typeof kept.paste !== 'string') return false;
   if (kept.text && !Array.isArray(kept.text.lines)) return false;
-  if (kept.reads && !(kept.reads.reads instanceof Map)) return false;
+  if (kept.reads && !(kept.reads instanceof Map) && !(kept.reads.reads instanceof Map)) return false;
   return isKeptTable(kept.table) && isKeptReview(kept.review) && isKeptChoices(kept.choices);
+}
+
+/**
+ * A kept import from before a reading carried its table's columns holds its lines' readings as a bare Map by line
+ * number. It is shown with that Map as the reading's lines, so its pasted text, review and choices are not lost
+ * (#1073).
+ */
+function inCurrentShape(kept: ChecklistKept): ChecklistKept {
+  const old: unknown = kept.reads;
+  return old instanceof Map ? { ...kept, reads: { reads: old } } : kept;
 }
 
 /**
@@ -80,7 +90,7 @@ export function useKeeper(layer: Layer | undefined, name: string | undefined, fr
   const [{ left, unreadable }] = useState(() => {
     const kept = fresh ? undefined : keptImport(key);
     const readable = isChecklistKept(kept);
-    return { left: readable ? kept : null, unreadable: kept !== undefined && !readable };
+    return { left: readable ? inCurrentShape(kept) : null, unreadable: kept !== undefined && !readable };
   });
   const setAside = useRef(fresh || unreadable);
   const holding = useRef(false);
