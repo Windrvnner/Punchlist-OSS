@@ -73,6 +73,7 @@ import { docFamilies } from './related';
 import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
 import { AI_DRAFTED, namesOnlyShown, questionsForIds, responseHeader } from './qaRow';
+import { docHandle, docsUnusable, sentAs, unknownIds } from './recordIds';
 import type { DealDoc, Looked, Unusable } from './agentKit';
 import {
   RATINGS, riskGroups, keyRisksOf, unratedFindings, type Grouped, type Rating, type RiskGroup,
@@ -251,9 +252,14 @@ const stoppedOn = (stopped: unknown) => (stopped as { code?: string }).code === 
 /** sent after a prompt whose reply was cut off at the length limit, to ask for the whole reply again in less room */
 const SHORTER = 'Your reply to this was cut off at the length limit. Send the whole reply again in the same form, about half as long: keep what matters most and say less about the rest.';
 
+/** how a pick introduces the files it lists (#1162) */
+const PICK_INTRO = 'These are files from the data room of a project-finance deal, the likeliest first. Each is given '
+  + 'by its id, then its full path from the root of the data room, with a short description where there is one, or '
+  + 'else the words it uses most. The deal\'s core documents are marked *.';
+
 const RULES = `Answer only from the documents you are given. Reply with one JSON object and nothing else.
 Cite like this: put [1], [2] … after each sentence that rests on a document, and list the sources in the same order:
-"sources": [{"doc": "D1", "page": 12, "quote": "a few words from that page"}]. For a spreadsheet give "cell": "Sheet name!B12" in place of "page".
+"sources": [{"doc": "its id", "page": 12, "quote": "a few words from that page"}]. For a spreadsheet give "cell": "Sheet name!B12" in place of "page".
 Cite pages only: no clause, section or paragraph numbers. A sentence with no document behind it gets no marker. Never cite a document you were not given.
 Never refer to a finding by an id or a code: say what it is about in words.
 A calculation may use plain symbols (+ − × ÷ * / = %) without writing them out in words, like this: "CFADS / debt service = 41.2m / 31.2m = 1.32x". No LaTeX or other math markup: no \\frac, \\times, ^{…} or _{…}, and no $ around a formula.
@@ -347,7 +353,7 @@ export const workstreamOf = (w: unknown) => (typeof w === 'string' ? WORKSTREAMS
 type Redo = Map<string, { why: string; said?: unknown }>;
 function checkPrompt(listing: string, items: ChecklistItem[], quick: boolean, redo?: Redo) {
   const where = quick ? '' : ' Add "where": the one or two places that show it, each naming a document you were given, '
-    + 'by its D number, and its page (or sheet and cell for a spreadsheet), with a short "quote" of the words there.';
+    + 'by its id, and its page (or sheet and cell for a spreadsheet), with a short "quote" of the words there.';
   const finding = '"finding" when they do not: what a lender needs is wrong, '
     + 'missing from a document that should have it, or differs between documents. Write it up: a one-line "title", '
     + `a "workstream" (one of ${WORKSTREAMS.join(' | ')}, or "" when unsure), `
@@ -356,7 +362,7 @@ function checkPrompt(listing: string, items: ChecklistItem[], quick: boolean, re
   const more = '"more" when these documents do not settle it: none of them deals with it, '
     + 'or they only report what other documents say (a report that says the permits are in place is not the permits). '
     + 'Add "need": a few words describing the documents that would settle it.';
-  const okShape = quick ? '' : ', "where": [{"doc": "D1", "page": 12, "quote": "…"}]';
+  const okShape = quick ? '' : ', "where": [{"doc": "its id", "page": 12, "quote": "…"}]';
   const shape = `Reply as JSON: {"items": [{"id": "I1", "result": "ok"${okShape}}, `
     + '{"id": "I2", "result": "finding", "title": "…", "workstream": "…", "body": ["…"], "sources": [...]}, '
     + '{"id": "I3", "result": "more", "need": "…"}]}';
@@ -1190,11 +1196,12 @@ export function nodeAi(o: AiOptions) {
   /** how much of a draft's change list goes into a prompt, in characters; past it the rest is counted, not listed */
   const CHANGES_UP_TO = 6000;
   /** A Word file's tracked changes as prompt lines: each changed passage as it was and as it reads now, with who changed what and when. */
-  async function changesOf(dealId: string, tag: string, docId: string): Promise<string[]> {
+  async function changesOf(dealId: string, id: string, docId: string): Promise<string[]> {
     if (!o.docs.changes) return [];
     let r: Result<ChangeList>; try { r = await o.docs.changes(dealId, docId); } catch { return []; }
     if (!r.ok || !r.value.passages.length) return [];
-    const out = [`  The changes in ${tag}, read from the file itself (these are fact, not a reading):`]; let used = 0, left = 0;
+    const out = [`  The changes in ${id}, read from the file itself (these are fact, not a reading):`];
+    let used = 0, left = 0;
     for (const p of r.value.passages) {
       const who = p.changes.map((c) => `${c.kind}${c.text ? ` "${c.text.replace(/\s+/g, ' ').trim()}"` : ''}${c.by ? ` by ${c.by}` : ''}${c.at ? ` on ${c.at.slice(0, 10)}` : ''}`).join('; ');
       const line = `  - was: "${p.before.replace(/\s+/g, ' ').trim()}" / now: "${p.after.replace(/\s+/g, ' ').trim()}" (${who})`;
@@ -1209,10 +1216,12 @@ export function nodeAi(o: AiOptions) {
    * and a change it reports from the blackline is its reading of the markup, cited to the blackline's page. With
    * pipeline A the markup's strike-through and colors may not reach it, so deleted words can read as kept ones.
    */
-  function blacklineLine(s: Sent, mine: Sent[], cleanId: string | null | false, against: Against = 'own'): string {
+  function blacklineLine(s: Sent, mine: Sent[], cleanId: string | null | false, against: Against,
+    idOf: (x: Sent) => string): string {
+    const id = idOf(s);
     const clean = cleanId ? mine.find((x) => x.rec.docId === cleanId) : undefined; const rec = cleanId ? o.docs.records(s.dealId).find((r) => r.docId === cleanId) : undefined;
     // a standalone blackline: no clean draft is in the data room, so what it shows is never taken as the deal's terms
-    const of = clean ? `its clean draft is ${clean.tag}. ${clean.tag} is what the deal's terms are` : rec ? `its clean draft is ${where(rec)}, which is not given here. The terms are what that clean draft says`
+    const of = clean ? `its clean draft is ${idOf(clean)}. ${idOf(clean)} is what the deal's terms are` : rec ? `its clean draft is ${where(rec)}, which is not given here. The terms are what that clean draft says`
       : cleanId === false
         ? 'no clean draft of it was found by its cover or name. '
           + 'What it shows is not confirmed as the deal\'s terms: say so wherever you rely on it'
@@ -1220,31 +1229,35 @@ export function nodeAi(o: AiOptions) {
     const sees = (o.blackline ?? control.blackline.pipeline) === 'A' ? ' Its strike-through and colors may not come through to you, so deleted words can read as if they were kept: be careful which wording is the new one.' : ' Struck-through words are deleted and colored words are inserted.';
     // what it was compared against (docs/other-project-documents-design.md): only this deal's own earlier draft makes its changes the deal's
     const vs = against === 'own' ? '' : against === 'other' && cleanId === false
-      ? ` ${s.tag} was made on another project: neither side of it is this deal's. Use it only to compare, and cite it only beside a document of this deal.`
-      : against === 'other' ? ` ${s.tag} compares this deal's draft with another project's document. Its deleted wording is the other project's, not an earlier draft of this deal: never report a deletion or insertion as a change made in this deal.`
-      : ` ${s.tag} compares its clean draft with another document, which may be an earlier draft of this deal or another project's. Do not report a difference as a change made in this deal unless a draft of this deal shows it.`;
+      ? ` ${id} was made on another project: neither side of it is this deal's. Use it only to compare, and cite it only beside a document of this deal.`
+      : against === 'other' ? ` ${id} compares this deal's draft with another project's document. Its deleted wording is the other project's, not an earlier draft of this deal: never report a deletion or insertion as a change made in this deal.`
+      : ` ${id} compares its clean draft with another document, which may be an earlier draft of this deal or another project's. Do not report a difference as a change made in this deal unless a draft of this deal shows it.`;
     const alone = against === 'own' ? '' : ` By itself it never shows that a finding is put right or that its problem is back.`;
-    return `  ${s.tag} is a blackline: a comparison of two ${against === 'own' ? 'drafts' : 'documents'} with the changes marked, made by a comparison tool; ${of}. Read ${s.tag} only for what changed, and give each change as what ${s.tag} appears to show, citing its page.${sees}${vs}${alone}`;
+    return `  ${id} is a blackline: a comparison of two ${against === 'own' ? 'drafts' : 'documents'} with the changes marked, made by a comparison tool; ${of}. Read ${id} only for what changed, and give each change as what ${id} appears to show, citing its page.${sees}${vs}${alone}`;
   }
-  async function send(sent: Sent[]): Promise<{ files: string[]; listing: string; got: Sent[] }> {
+  /** `spansDeals`: the prompt spans several deals, so each document is named with its deal (#1162) */
+  async function send(sent: Sent[], spansDeals = false): Promise<{ files: string[]; listing: string; got: Sent[] }> {
     const files: string[] = []; const lines: string[] = []; const got: Sent[] = [];
+    const idOf = (s: Sent) => docHandle(s, spansDeals);
     for (const dealId of new Set(sent.map((s) => s.dealId))) {
       const mine = sent.filter((s) => s.dealId === dealId); const ids = await o.keeper.ensure(await o.docs.wanted(dealId, mine.map((s) => s.rec.docId)));
       describeSoon(dealId, mine.map((s) => s.rec.docId));                          // a document that is read is worth describing: once, and not waited for
       for (const s of mine) {
         const id = ids[s.rec.docId]; if (!id) continue; files.push(id); got.push(s);
         const rec = o.docs.records(dealId).find((r) => r.docId === s.rec.docId) ?? s.rec;          // a Word file's pages are counted when it is first sent, just now
-        lines.push(`${s.tag}: ${where(rec)}${rec.pages ? ` (${rec.pages} pages)` : ''}`);
+        lines.push(`${idOf(s)}: ${where(rec)}${rec.pages ? ` (${rec.pages} pages)` : ''}`);
         // a draft's pages show its tracked changes as markup: say so, and send the changes themselves, read from the
         // file, which are fact
         if (rec.tracked) {
-          lines.push(`  ${s.tag} has ${rec.tracked} tracked changes. Its pages show them as markup, `
+          lines.push(`  ${idOf(s)} has ${rec.tracked} tracked changes. Its pages show them as markup, `
             + 'so its wording is proposed, not agreed.');
-          lines.push(...await changesOf(dealId, s.tag, rec.docId));
+          lines.push(...await changesOf(dealId, idOf(s), rec.docId));
         }
-        const k = kindsOf(dealId); if (k.pairs.has(rec.docId)) lines.push(blacklineLine(s, mine, k.pairs.get(rec.docId) ?? null, k.against.get(rec.docId)));
+        const k = kindsOf(dealId);
+        const against = k.against.get(rec.docId) ?? 'own';
+        if (k.pairs.has(rec.docId)) lines.push(blacklineLine(s, mine, k.pairs.get(rec.docId) ?? null, against, idOf));
         // another project's document (docs/other-project-documents-design.md): read, never a main source
-        else if (k.precedents.has(rec.docId)) lines.push(`  ${s.tag} is another project's document, not this deal's. Its terms are never this deal's: use it only to compare, and cite it only beside a document of this deal. By itself it never shows that a finding is put right or that its problem is back.`);
+        else if (k.precedents.has(rec.docId)) lines.push(`  ${idOf(s)} is another project's document, not this deal's. Its terms are never this deal's: use it only to compare, and cite it only beside a document of this deal. By itself it never shows that a finding is put right or that its problem is back.`);
       }
     }
     return { files, listing: lines.join('\n'), got };
@@ -1276,20 +1289,13 @@ export function nodeAi(o: AiOptions) {
   };
   /** whether any of these documents, which could not be sent, is one whose folder cannot be reached just now */
   const awayAmong = (dealId: string, docIds: string[]) => docIds.length > 0 && (o.docs.away?.(dealId, docIds).length ?? 0) > 0;
-  /** which of the documents that were sent a citation means: by its tag, however written ("D2", "d2", "[D2]"), or by its name or path */
-  function sentAs(doc: unknown, sent: Sent[]): Sent | undefined {
-    if (typeof doc !== 'string' && typeof doc !== 'number') return undefined;
-    const said = String(doc).trim().replace(/^["'`]+|["'`]+$/g, '').toLowerCase(); const named = sent.filter((x) => x.rec.name.toLowerCase() === said || where(x.rec).toLowerCase() === said);
-    if (named.length === 1) return named[0];
-    const n = tagNumber(doc, 'D'); return n === null ? undefined : sent.find((x) => x.tag === `D${n}`);
-  }
   /** Keep the sources we can stand behind, in order, and renumber the markers in the text to match. */
   function fit(text: string, cited: Cited[] | undefined, sent: Sent[], withDeal: boolean, once = false): { text: string; sources: Source[] } {
     const seen = new Map<string, Map<string, string | null | false>>(); const blacklines = (dealId: string) => { let m = seen.get(dealId); if (!m) { m = cleanOf(dealId); seen.set(dealId, m); } return m; };
     const pre = new Map<string, Set<string>>(); const precedents = (dealId: string) => pre.get(dealId) ?? (pre.set(dealId, kindsOf(dealId).precedents), pre.get(dealId)!);
     const sources: Source[] = []; const renumber = new Map<number, number>(); const placed = new Map<string, number>();
     (listOf(cited) as Cited[]).forEach((c, i) => {
-      const s = sentAs(c?.doc ?? c?.document, sent); if (!s) return;
+      const s = sentAs(c?.doc ?? c?.document, sent, where); if (!s) return;
       let loc: string;
       if (SHEET.test(s.rec.name)) { const cell = typeof c.cell === 'string' ? (c.cell.includes('!') || typeof c.sheet !== 'string' ? c.cell : `${c.sheet}!${c.cell}`).trim() : ''; if (!/^[^!]+!\$?[A-Za-z]{1,3}\$?\d+$/.test(cell)) return; loc = cell; }
       // a Word or PowerPoint file has its pages counted only when it is first sent, so the record is read again for them
@@ -1411,12 +1417,12 @@ export function nodeAi(o: AiOptions) {
     kind: string, deals: string[], model: string, ask: string, lookFor: string, must: Record<string, string[]>,
     shape: string,
     again?: {
-      escalate: string; usable: (reply: Record<string, unknown>) => boolean; wrong: string; unusable?: Unusable;
+      escalate: string; usable: (reply: Record<string, unknown>) => boolean; wrong: string; shown?: string[];
     },
     page?: DealDoc[],
   ): Promise<Result<{ reply: Record<string, unknown>; sent: Sent[] }>> {
     const keys = [...shape.matchAll(/"([a-z]+)":/g)].map((m) => m[1]).concat('need');                // the fields this question asks for
-    const sent: Sent[] = []; const add = (dealId: string, recs: DocRecord[]) => { for (const rec of withClean(dealId, recs)) if (!sent.some((s) => s.rec.docId === rec.docId && s.dealId === dealId)) sent.push({ tag: `D${sent.length + 1}`, dealId, rec }); };
+    const sent: Sent[] = []; const add = (dealId: string, recs: DocRecord[]) => { for (const rec of withClean(dealId, recs)) if (!sent.some((s) => s.rec.docId === rec.docId && s.dealId === dealId)) sent.push({ dealId, rec }); };
     const core: Record<string, string[]> = {};
     await Promise.all(deals.map(async (d) => { core[d] = await coreOf(d); }));
     try { for (const x of await firstRead(deals, lookFor, must, core, page)) add(x.dealId, x.recs); }
@@ -1425,11 +1431,13 @@ export function nodeAi(o: AiOptions) {
     let using = model;
     let pool: Sent[] | undefined;
     let canRetry = readCanRetry(model, again);
-    const unusable = again?.unusable;   // checked on every reply, whether or not it can be sent back (#1105)
+    // checked on every reply, whether or not it can be sent back: it names only the ids it was shown, and cites only
+    // the documents it was given (#1105, #1162)
+    const unusable = docsUnusable(sent, deals.length > 1, keys, where, again?.shown);
     for (let round = 1; ; round++) {
       let reply: Record<string, unknown> | null;
       try {
-        const { files, listing, got } = await send(sent);
+        const { files, listing, got } = await send(sent, deals.length > 1);
         // a finding is not reassessed on part of what was chosen while the rest is out of reach
         if (kind === 'reassess' && lostSome(sent, got)) return fail({ kind: 'failed', message: 'The documents for this could not be opened on this PC' });
         if (got.length < sent.length) sent.splice(0, sent.length, ...got);        // what could not be opened on this PC was not read, and cannot be cited
@@ -1467,7 +1475,8 @@ export function nodeAi(o: AiOptions) {
       const extras: { d: string; recs: DocRecord[] }[] = [];
       try { for (const d of deals) { const extra = (await pick(d, `${lookFor}\nWhat has been read does not settle it. Still needed: ${need.join('; ')}`, have, room, core[d], `${lookFor} ${need.join(' ')}`)) ?? top(d, need.join(' '), have, room, core[d], false); if (extra.length) extras.push({ d, recs: extra }); } }
       catch (e) { return failure(e, 'The documents could not be read'); }
-      const required = new Set(deals.flatMap((d) => (must[d] ?? []).map((id) => `${d}|${id}`))); const first = sent.splice(0);   // retagged from D1 for the new call
+      const required = new Set(deals.flatMap((d) => (must[d] ?? []).map((id) => `${d}|${id}`)));
+      const first = sent.splice(0);
       const kept = first.filter((x) => required.has(`${x.dealId}|${x.rec.docId}`)); const rest = first.filter((x) => !required.has(`${x.dealId}|${x.rec.docId}`));
       const taken: { d: string; rec: DocRecord }[] = []; const budget = Math.min(half, width - kept.length);
       for (let i = 0; taken.length < budget && extras.some((x) => i < x.recs.length); i++) for (const x of extras) if (i < x.recs.length && taken.length < budget) taken.push({ d: x.d, rec: x.recs[i] });
@@ -1682,8 +1691,9 @@ export function nodeAi(o: AiOptions) {
     // a reply cut off at the length limit keeps the items that came back whole: the caller asks about the rest in smaller parts
     let reply: { items?: unknown } | null; let cut = false;
     try {
+      // a reply naming a document it was not given is asked again (#1162)
       const asked: Ask = { kind: quick ? 'glance' : 'check', split: true, model, system: RULES, files,
-        prompt: checkPrompt(listing, items, quick, redo) };
+        prompt: checkPrompt(listing, items, quick, redo), unusable: docsUnusable(sent, false, ['items'], where) };
       reply = await askJson<{ items?: unknown }>(asked, ['items'], undefined, fix && !redo);
     }
     catch (e) { if (!isCutOff(e)) throw e; cut = true; reply = (e as { partial?: { items?: unknown } | null }).partial ?? null; }
@@ -1701,7 +1711,7 @@ export function nodeAi(o: AiOptions) {
         // a blackline's pages are the model's reading of a change, and another project's document is not this deal's:
         // alone they never settle an item
         if (!quick && where.length && where.every((x) => x.reading || x.precedent)) { out.set(it.id, { kind: 'none', need: `a document of this deal that shows it, not only a blackline or another project's document: ${it.text}` }); continue; }
-        out.set(it.id, quick || where.length ? { kind: 'ok', where } : { kind: 'weak', why: 'As "ok" it needs "where": at least one place that shows it, naming a document you were given, by its D number, and a page that document has (or a sheet and cell for a spreadsheet).', said: r, reason: 'It was found satisfied, but no page that shows it could be pointed to.' });
+        out.set(it.id, quick || where.length ? { kind: 'ok', where } : { kind: 'weak', why: 'As "ok" it needs "where": at least one place that shows it, naming a document you were given, by its id, and a page that document has (or a sheet and cell for a spreadsheet).', said: r, reason: 'It was found satisfied, but no page that shows it could be pointed to.' });
       }
       else if (result === 'more') out.set(it.id, { kind: 'none', need: strings(r.need).join('; ') || it.text });
       else if (result === 'finding') {
@@ -1711,7 +1721,7 @@ export function nodeAi(o: AiOptions) {
         // finding by itself
         if (fitted.sources.length && !fitted.sources.some((x) => mainIn(sent, x))) { out.set(it.id, { kind: 'none', need: `a document of this deal that shows it, not only another project's document or a blackline against one: ${it.text}` }); continue; }
         // a finding stands on one source we can open: what matters most is often said in a single place
-        const short = [!title && 'it has no title', !paras.length && 'it has no body', !fitted.sources.length && 'it needs at least one citation naming a document you were given, by its D number, and a page that document has (or a sheet and cell for a spreadsheet), and none of yours do'].filter(Boolean);
+        const short = [!title && 'it has no title', !paras.length && 'it has no body', !fitted.sources.length && 'it needs at least one citation naming a document you were given, by its id, and a page that document has (or a sheet and cell for a spreadsheet), and none of yours do'].filter(Boolean);
         const body = fitParas(fitted.text.split(/\s*\u0000\s*/).filter(Boolean));
         const workstream = workstreamOf(r.workstream);
         const raised: Seen = { kind: 'finding', title, workstream, body, sources: fitted.sources };
@@ -1811,7 +1821,7 @@ export function nodeAi(o: AiOptions) {
     const wrong = `"text" must be under ${MODEL_TEXT_MAX.toLocaleString('en-US')} characters, and "reused" `
       + 'may name only the earlier responses above, by their ids: put it right';
     const unusable = (text: string) => !namesOnlyShown(text, ids);
-    return { escalate, usable, wrong, unusable };
+    return { escalate, usable, wrong, shown: ids, unusable };
   }
   let briefs = new Map<string, { key: string; paragraphs: string[] }>();
   const service: AiService = {
@@ -1899,10 +1909,9 @@ export function nodeAi(o: AiOptions) {
       const own = { [i.dealId]: f.sources.map((s) => s.docId).filter((x): x is string => !!x) };
       const shape = '{"body": ["one paragraph per string, with [n] markers"], "sources": [...]}';
       // a reply that names a question id it was not shown is a failed reply, asked again (#1105)
-      const ids = said.map((q) => q.id);
-      const unusable = (text: string) => !namesOnlyShown(text, ids);
+      const shown = said.map((q) => q.id);
       const usable = (reply: Record<string, unknown>) => parasOf(reply).length > 0;
-      const again = { escalate: m.thorough, usable, wrong: '"body" has no paragraphs in it', unusable };
+      const again = { escalate: m.thorough, usable, wrong: '"body" has no paragraphs in it', shown };
       const about = `${f.title} ${f.body.join(' ')}`;
       const r = await read('reassess', [i.dealId], m.standard, ask, about, own, shape, again);
       if (!r.ok) return r;
@@ -2482,7 +2491,7 @@ export function nodeAi(o: AiOptions) {
       + 'by, and give it no [n] marker.';
     return `${heading}\n${responseLines(said)}\nTake these into account. ${named}`;
   }
-  const tagged = (dealId: string, docs: DocRecord[]): Sent[] => docs.map((rec, i) => ({ tag: `D${i + 1}`, dealId, rec }));
+  const sentOf = (dealId: string, docs: DocRecord[]): Sent[] => docs.map((rec) => ({ dealId, rec }));
   /** a finding as the checks see it; `closed`: a person closed it, and documents may bring that into question */
   type Raised = { id: string; rev: number; title: string; body: string[]; sources: Source[]; closed?: true };
   /**
@@ -2491,7 +2500,7 @@ export function nodeAi(o: AiOptions) {
    */
   async function verify(dealId: string, f: Raised, model: string, core: string[], also: string[] = [], heard: Asked[] = []): Promise<{ stands: boolean; why: string } | null> {
     const docs = await sendable(dealId, await start(dealId, `${f.title} ${f.body.join(' ')}`, [...also, ...f.sources.map((x) => x.docId).filter((x): x is string => !!x)]   /* what prompted the re-check first: the cap never drops it */, width, core)); if (!docs.length) return null;
-    const sent = tagged(dealId, docs); const { files, listing, got } = await send(sent);
+    const sent = sentOf(dealId, docs); const { files, listing, got } = await send(sent);
     if (!got.length || lostSome(sent, got)) return null;                        // a folder stopped answering since they were chosen: not judged on the rest
     // a closed finding is asked the other way round: "stands" is whether it stays closed
     const ask = f.closed ? `This finding was raised on the deal earlier, and a person has closed it.\nTitle: ${f.title}\nAs written: ${f.body.join(' ').replace(/\s*\[\d+\]/g, '')}\n\nGoing by the documents as they are now, does it stay closed? It does not if a document now shows the problem again, shows it was not settled, or makes it worse.\nReply as JSON: {"stands": true, "why": "one line"}`
@@ -2759,7 +2768,7 @@ export function nodeAi(o: AiOptions) {
         const done = await inParts(todo, size, async (part) => {
           for (;;) {
             try {
-              const seen = await check(part, tagged(dealId, using), model, redo, fix);
+              const seen = await check(part, sentOf(dealId, using), model, redo, fix);
               return { got: new Map(part.flatMap((it, k) => (seen?.has(it.id) ? [[k, seen.get(it.id)!] as const] : []))), ...(seen?.cut ? { cut: seen.cut.map((it) => part.indexOf(it)) } : {}) };
             } catch (e) {
               if (!isTooLong(e)) throw e;
