@@ -138,13 +138,18 @@ export function prepareImport(table: string[][], mapping: Mapping, lines?: numbe
     const nRaw = read(r, 'n').trim().replace(/^q/i, '');
     // the app numbers past Q999999, so a 7-digit number it exported reads back
     const n = /^\d{1,9}$/.test(nRaw) && +nRaw > 0 ? +nRaw : null;
-    const wsGiven = get(r, 'workstream').trim();
+    const wsGiven = get(r, 'workstream');
     const wsRaw = read(r, 'workstream').trim();
     // the app's spelling where it is one of ours; otherwise kept as written
     const ws = WORKSTREAMS.find((w) => w.toLowerCase() === wsRaw.toLowerCase()) ?? wsGiven;
     if (pr && !PRIORITY[pr.toLowerCase()]) { out.unknownValues++; unread('priority', pr); }
     if (st && !STATUS[st.toLowerCase()]) { out.unknownValues++; unread('status', st); }
-    const row: ImportRow = { n, text, askedBy: get(r, 'askedBy').trim(), received: '', workstream: ws, priority: PRIORITY[pr.toLowerCase()] ?? '', response: get(r, 'response'), respondedBy: get(r, 'respondedBy').trim(), responded: '', status: STATUS[st.toLowerCase()] ?? '', line };
+    // names and workstream are stored as the cell gives them; only the workstream lookup above reads it trimmed
+    const row: ImportRow = {
+      n, text, askedBy: get(r, 'askedBy'), received: '', workstream: ws,
+      priority: PRIORITY[pr.toLowerCase()] ?? '', response: get(r, 'response'),
+      respondedBy: get(r, 'respondedBy'), responded: '', status: STATUS[st.toLowerCase()] ?? '', line,
+    };
     out.rows.push(row);
     const rec = date('received'), res = date('responded');
     // the row's other date: keep the readings that leave received on or before responded
