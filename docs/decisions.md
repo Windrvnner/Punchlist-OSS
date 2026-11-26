@@ -254,6 +254,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A change that arrives before a change it builds on is held back without pausing the deal; one more than a day old is let go as a choice. A deal can't be deleted while such changes are on their way.
 - The connection status card shows only when something is wrong. The avatar's dot is the accent color or red, and OneDrive being unavailable for 15 minutes produces one notice.
 - A copied install is detected and stops writing. A build never changes a record written by a newer version.
+- The app carries no compatibility code for builds or data from before its release; the schema version gate stays (#1119).
 - A damaged undo journal (each PC's record of its actions, used for Undo and to recover interrupted work) is set aside, and its complete entries are still offered.
 - **Discard** on an interrupted action asks first in the confirm dialog, naming the action (#1055).
 - A deal's analysis is split between the PCs that have the deal open, in rounds (a round is one shared run of checks on the deal, split into pieces of work) that any PC can take over. A requested check that an abandoned round doesn't cover writes that round off.
