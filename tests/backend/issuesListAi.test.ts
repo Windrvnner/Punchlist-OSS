@@ -264,6 +264,21 @@ describe('the issues list sorter names findings by their ids (#1162)', () => {
     expect(val(r).points[3].same).toEqual({ finding: 'f5' });
   });
 
+  it('never takes an id it was not shown from a cut-off reply: the points are asked again (#1162)', async () => {
+    let n = 0;
+    const sort = (c: Call) => {
+      n++;
+      const shown = [...c.prompt.matchAll(/^P(\d+): /gm)].map((m) => +m[1]);
+      const row = (p: number, same: string) => ({ p, workstream: 'Legal', same });
+      if (n > 1) return { points: shown.map((p) => row(p, p === 4 ? 'f5' : '')) };
+      const whole = shown.slice(0, 5).map((p) => JSON.stringify(row(p, p === 4 ? 'f9999' : '')));
+      return `{"points": [${whole.join(', ')}, {"p": 6, "workst`;
+    };
+    const { r, sorts } = await sortWith(sort);
+    expect(sorts.length).toBeGreaterThan(1);
+    expect(val(r).points[3].same).toEqual({ finding: 'f5' });
+  });
+
   it('sizes each share of 2,000 findings with their ids counted, so every call stays within the budget', async () => {
     const LIMIT = 20_000;
     const F = Array.from({ length: 2000 }, (_, k) => ({ id: `f_01HZX3K9Q4V7M2B5N8C1D6${String(k).padStart(4, '0')}`,
