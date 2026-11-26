@@ -6,9 +6,9 @@ import type { DocRecord } from './documents';
 import type { ToolSpec } from './service';
 import type { QaRecord } from './qaRow';
 
-/** a document a model was given, with the tag it is cited by (D1, D2 …) */
-export interface Sent { tag: string; dealId: string; rec: DocRecord }
-/** a document of a deal, before it is given a tag */
+/** a document a model was given, cited by its id (recordIds.ts `docHandle`, #1162) */
+export interface Sent { dealId: string; rec: DocRecord }
+/** a document of a deal, before it is given to a model */
 export interface DealDoc { dealId: string; rec: DocRecord }
 /** a citation as a model writes it */
 export interface Cited {
@@ -67,8 +67,11 @@ export interface AgentKit {
   readPage(deals: string[], model: string, ask: string, docs: DealDoc[]): Promise<Looked>;
   /** the words of a text as a search compares them; with `dealId`, the deal's short names given their long form too */
   words(text: string, dealId?: string): Set<string>;
-  /** put documents in the store and list them for a prompt; `got` are those really there */
-  send(sent: Sent[]): Promise<{ files: string[]; listing: string; got: Sent[] }>;
+  /**
+   * put documents in the store and list them for a prompt, each by its id (`spansDeals`: with its deal); `got` are
+   * those really there
+   */
+  send(sent: Sent[], spansDeals?: boolean): Promise<{ files: string[]; listing: string; got: Sent[] }>;
   /** keep the citations that can be stood behind, renumbering the markers in the text */
   fit(text: string, cited: Cited[] | undefined, sent: Sent[], withDeal: boolean): { text: string; sources: Source[] };
   /** a document's path from its deal's folder, as prompts show it */
