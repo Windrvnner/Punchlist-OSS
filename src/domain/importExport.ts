@@ -174,17 +174,21 @@ export function prepareImport(table: string[][], mapping: Mapping, lines?: numbe
   return out;
 }
 
-/** Two texts that differ at most in how their line breaks are stored (CR LF, CR or LF): a spreadsheet does not keep that difference, so an import does not count it as a change. */
-export const sameText = (a: string, b: string) => a === b || a.replace(/\r\n?/g, '\n') === b.replace(/\r\n?/g, '\n');
+/**
+ * A text as a spreadsheet file holds it: the file keeps a line break as one "\n" and cannot hold control characters,
+ * so a writer stores each as a space or leaves it out (xlsx leaves it out). Both forms, in that order. This is how the
+ * file stores text, not a repair; every other difference is a real edit (docs/decisions.md).
+ */
+export const fileForms = (text: string) => [' ', ''].map((control) => text.replace(/\r\n?/g, '\n')
+  .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, control));
+/** Two texts that are the same as a file holds them (`fileForms`): an import does not count that as a change. */
+export const sameText = (a: string, b: string) => {
+  if (a === b) return true;
+  const [x, y] = [fileForms(a), fileForms(b)];
+  return x[0] === y[0] || x[1] === y[1];
+};
 /** Two texts with the same words, differing at most in their spaces and line breaks. */
 export const sameWords = (a: string, b: string) => a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
-
-/** How many rows would be new and how many match an existing number, for the preview. */
-export function importCounts(rows: ImportRow[], existing: Question[], mode: 'merge' | 'append') {
-  const have = new Set(existing.map((q) => q.n)); let add = 0, match = 0; const seen = new Set<number>();
-  for (const r of rows) { if (mode === 'merge' && r.n != null && (have.has(r.n) || seen.has(r.n))) match++; else { add++; if (r.n != null) seen.add(r.n); } }
-  return { add, match };
-}
 
 const longDate = (iso: string) => (iso ? localYmd(iso) : ''); // the local calendar date, written YYYY-MM-DD so it round-trips and sorts in a spreadsheet
 const STATUS_LABEL: Record<QuestionStatus, string> = { open: 'Open', answered: 'Answered', closed: 'Closed' };
