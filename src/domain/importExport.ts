@@ -58,9 +58,6 @@ export interface Prepared {
   unread: string[];
 }
 
-/** a date cell as the date field keeps it: a real date, or the text typed there as written (decision 99) */
-const keptDate = (raw: string): string => parseDate(raw) ?? raw;
-
 const PRIORITY: Record<string, ImportRow['priority']> = { high: 'High', medium: 'Medium', low: 'Low' };
 const STATUS: Record<string, QuestionStatus> = { open: 'open', outstanding: 'open', answered: 'answered', closed: 'closed' };
 
@@ -75,21 +72,33 @@ const STATUS: Record<string, QuestionStatus> = { open: 'open', outstanding: 'ope
  * anything else in a date column is kept as written, never parsed.
  */
 export function prepareImport(table: string[][], mapping: Mapping, lines?: number[]): Prepared {
-  // control characters (NUL, BEL, ESC and the like) are never content; tabs and line breaks are
-  const get = (r: string[], k: ImportField) => (mapping[k] == null ? '' : String(r[mapping[k]!] ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ''));
+  const get = (r: string[], k: ImportField) => (mapping[k] == null ? '' : String(r[mapping[k]!] ?? ''));
+  // a value read as a number, date, priority, status or workstream is read without control characters; text is
+  // kept whole
+  const read = (r: string[], k: ImportField) => (
+    get(r, k).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+  );
   const out: Prepared = { rows: [], skipped: 0, unknownValues: 0, unread: [] };
   const nameOf = (k: ImportField) => IMPORT_FIELDS.find(([f]) => f === k)?.[1] ?? k;
   for (const [at, r] of table.entries()) {
     const text = get(r, 'text'); if (!text) { out.skipped++; continue; }
     const line = lines?.[at] ?? at + 2; const unread = (k: ImportField, v: string) => out.unread.push(`Row ${line} ${nameOf(k)}: ${v.trim()}`);
-    const pr = get(r, 'priority').trim(); const st = get(r, 'status').trim(); const nRaw = get(r, 'n').trim().replace(/^q/i, ''); const n = /^\d{1,9}$/.test(nRaw) && +nRaw > 0 ? +nRaw : null;   // the app numbers past Q999999, so a 7-digit number it exported reads back
-    const wsRaw = get(r, 'workstream').trim(); const ws = WORKSTREAMS.find((w) => w.toLowerCase() === wsRaw.toLowerCase()) ?? wsRaw;   // the app's spelling where it is one of ours; otherwise kept as written
+    const pr = read(r, 'priority').trim();
+    const st = read(r, 'status').trim();
+    const nRaw = read(r, 'n').trim().replace(/^q/i, '');
+    // the app numbers past Q999999, so a 7-digit number it exported reads back
+    const n = /^\d{1,9}$/.test(nRaw) && +nRaw > 0 ? +nRaw : null;
+    const wsGiven = get(r, 'workstream').trim();
+    const wsRaw = read(r, 'workstream').trim();
+    // the app's spelling where it is one of ours; otherwise kept as written
+    const ws = WORKSTREAMS.find((w) => w.toLowerCase() === wsRaw.toLowerCase()) ?? wsGiven;
     if (pr && !PRIORITY[pr.toLowerCase()]) { out.unknownValues++; unread('priority', pr); }
     if (st && !STATUS[st.toLowerCase()]) { out.unknownValues++; unread('status', st); }
     const row: ImportRow = { n, text, askedBy: get(r, 'askedBy').trim(), received: '', workstream: ws, priority: PRIORITY[pr.toLowerCase()] ?? '', response: get(r, 'response'), respondedBy: get(r, 'respondedBy').trim(), responded: '', status: STATUS[st.toLowerCase()] ?? '', line };
     out.rows.push(row);
-    row.received = keptDate(get(r, 'received'));
-    row.responded = keptDate(get(r, 'responded'));
+    // a real date cell is its date; anything else typed there is kept whole, as written (decision 99)
+    row.received = parseDate(read(r, 'received')) ?? get(r, 'received');
+    row.responded = parseDate(read(r, 'responded')) ?? get(r, 'responded');
   }
   out.unread.sort((x, y) => +x.split(' ')[1] - +y.split(' ')[1]);   // in row order, as the file reads; the sort keeps each row's own order
   return out;
