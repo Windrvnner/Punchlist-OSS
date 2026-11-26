@@ -4,19 +4,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export const APPROVED_DIR = 'tests/browser/approved';
+// This machine's own images (PUNCHLIST_APPROVE=1), which local runs compare with in place of CI's. Never committed.
+export const LOCAL_DIR = 'out/browser/approved-local';
 // Where a screen that does not match leaves its new image and a map of what changed, for CI to upload.
 export const CHANGED_DIR = 'out/browser/approved';
 
-/** The approved image's path for a screen, or null when none is committed yet. */
+/** The image to compare a screen with: this machine's own when it has one, else the committed one, else null. */
 export function approvedPath(name) {
-  const file = path.join(APPROVED_DIR, `${name}.png`);
-  return fs.existsSync(file) ? file : null;
+  const files = [LOCAL_DIR, APPROVED_DIR].map((dir) => path.join(dir, `${name}.png`));
+  return files.find((file) => fs.existsSync(file)) ?? null;
 }
 
-/** Saves `png` as the screen's approved image (PUNCHLIST_APPROVE=1). */
+/** Saves `png` as this machine's own image of the screen (PUNCHLIST_APPROVE=1). */
 export function approve(name, png) {
-  fs.mkdirSync(APPROVED_DIR, { recursive: true });
-  fs.writeFileSync(path.join(APPROVED_DIR, `${name}.png`), png);
+  fs.mkdirSync(LOCAL_DIR, { recursive: true });
+  fs.writeFileSync(path.join(LOCAL_DIR, `${name}.png`), png);
 }
 
 /** Removes what an earlier run left in CHANGED_DIR, so it holds only this run's changed screens. */
