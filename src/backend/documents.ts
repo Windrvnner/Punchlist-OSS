@@ -519,6 +519,29 @@ export function nodeDocuments(o: DocumentsOptions) {
     } catch { return undefined; }
   }
 
+  /**
+   * The spreadsheets attached in the app whose words could not be read take the path a deal folder's take (#427): each
+   * run reads them again, unless the same file already failed since the app started, and names the ones still unread.
+   */
+  async function readAttachedSheets(dealId: string): Promise<string[]> {
+    const unreadNames: string[] = [];
+    for (const d of records(dealId).values()) {
+      const place = [d, ...(d.copies ?? [])].find((p) => p.folder === ATTACHED);
+      if (!place || paged(d.name) || d.words !== undefined) continue;
+      const at = path.join(attachments, place.rel);
+      // an attached file is named by its contents, so it never changes: only a restart reads a failed one again
+      const words = unpagedHere.has(at) ? undefined : await sheetWords(at, dealId, d.docId);
+      if (words === undefined) {
+        unpagedHere.set(at, { size: d.size, mtimeMs: 0 });
+        unreadNames.push(place.name);
+        continue;
+      }
+      const line = { docId: d.docId, hash: d.hash, name: place.name, folder: ATTACHED, rel: place.rel, size: d.size };
+      say(dealId, { ...line, words });
+    }
+    return unreadNames;
+  }
+
   // ---- indexing
   interface Job { folders: DealFolder[]; log: string[]; done: boolean; run: Promise<void>; timing?: IndexTiming; /** started by a look at folders already indexed, not by a person */ again?: boolean; /** with `again`: a check of everything starts by then and reads what this run finds, so a run that ends before it says so to onIndexed */ quietUntil?: number }
   /** The data room, a folder of it, or this PC's disk stopped answering: the run cannot go on, and must not be taken for one that finished. */
@@ -714,6 +737,9 @@ export function nodeDocuments(o: DocumentsOptions) {
       const had = both(dealId).shuts.get(folder.path)?.get(o.installId); const opened = openedHere(dealId, folder.path, localOf(dealId, folder.path), shut);
       if (told.has(folder.path) || !sameList(had?.shut ?? [], shut) || !sameList(had?.opened ?? [], opened) || (readBy?.get(o.installId) ?? '') < ago(DAY)) say(dealId, { docId: '', read: folder.path, ...(shut.length ? { shut } : {}), ...(opened.length ? { opened } : {}) });
     }
+    const attachedUnread = await readAttachedSheets(dealId);
+    unread += attachedUnread.length;
+    skipped.unread.push(...attachedUnread);
     // a file that was left out is named, so that a person can see which
     const shut = found.flatMap((x) => x.shut);
     job.log = [`Indexed ${plural(indexed, 'file')}`, ...(shut.length ? [`${plural(shut.length, 'folder')} could not be opened${named(shut)}`] : []), ...(unread ? [`${plural(unread, 'file')} could not be read${named(skipped.unread)}`] : []), ...(unpaged ? [`${plural(unpaged, 'file')} could not be turned into pages and ${unpaged === 1 ? 'was' : 'were'} not indexed${named(skipped.unpaged)}`] : []),
@@ -726,7 +752,11 @@ export function nodeDocuments(o: DocumentsOptions) {
     for (const { folder, files } of found) { if ([...unreadAt].some((k) => k.startsWith(`${folder.path}\u0000`))) delete printed[dealId]?.[folder.path]; else (printed[dealId] ??= {})[folder.path] = listingPrint(files); }
     savePrinted();
     // how the time went, for this PC: on the result, and as one line in a file here that holds the latest run only (it is written over, so it never grows)
-    const timing: IndexTiming = { files: list.length, brought, known: list.length - brought - unread, bytes, totalMs: Date.now() - started, readMs, workMs, atOnce };
+    // the attached spreadsheets not read are not among the files listed
+    const knownFiles = list.length - brought - (unread - attachedUnread.length);
+    const timing: IndexTiming = {
+      files: list.length, brought, known: knownFiles, bytes, totalMs: Date.now() - started, readMs, workMs, atOnce,
+    };
     job.timing = timing;
     const secs = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
     try { o.local.write('indexing-last.txt', `${clock()} ${dealId}: ${list.length.toLocaleString('en-US')} file${list.length === 1 ? '' : 's'} in ${secs(timing.totalMs)}; ${brought.toLocaleString('en-US')} read from the data room (${size(bytes)}) in ${secs(readMs)}, ${(readMs ? bytes / 1e6 / (readMs / 1000) : 0).toFixed(1)} MB/s, ${atOnce} at a time; ${secs(workMs)} converting and reading pages, waits included, in parallel with the reading; ${timing.known.toLocaleString('en-US')} already known\n`); } catch { /* the times are a convenience */ }
