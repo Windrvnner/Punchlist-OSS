@@ -97,9 +97,8 @@ const STATUS: Record<string, QuestionStatus> = { open: 'open', outstanding: 'ope
 /**
  * Apply a column mapping to a raw table. Rows without a question are skipped and counted; so are values that could not be read.
  * The question and response are kept exactly as written, spaces and line breaks included, so the app's own export comes
- * back unchanged. Names and workstream are identities, not prose: "Lender A " is the submitter
- * "Lender A", so the spaces around them go (the text inside is untouched). The values that are read as something else
- * (number, dates, priority, status) ignore the spaces around them too. A question of only spaces is a question, as one
+ * back unchanged, and so are the names and the workstream: each is stored as its cell gives it. The values that are
+ * read as something else (number, dates, priority, status) ignore the spaces around them. A question of only spaces is a question, as one
  * made in the app can be.
  * A numeric date valid both ways is settled by context, not by one format per file or column:
  * first the row's other date (a question is received before it is responded to), then the nearest settled dates above
