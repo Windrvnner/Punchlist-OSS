@@ -25,11 +25,12 @@ describe('matching a data room by its files', () => {
     const m = matchesIn(found, [rec('a.pdf', 1000), rec('b.pdf', 1000), rec('c.pdf', 5)]);
     expect(m.map((x) => x.file.room)).toEqual(['X/a.pdf']);
   });
-  it('a deal holds the room when more than half of its files match and the smallest match is identical', () => {
+  it('a deal holds the room when every one of its documents matches a file and the smallest match is identical', () => {
     const room = files(10, 'Doc');
-    expect(sameRoomAs('d', room, recsOf(room.slice(0, 6)), sameHash)).toEqual({ dealId: 'd', files: 10, matched: 6 });
-    // half is not more than half
-    expect(sameRoomAs('d', room, recsOf(room.slice(0, 5)), sameHash)).toBeNull();
+    expect(sameRoomAs('d', room, recsOf(room), sameHash)).toEqual({ dealId: 'd', files: 10, matched: 10 });
+    // files the deal has no document for do not matter; a document with no file does
+    expect(sameRoomAs('d', room, recsOf(room.slice(0, 9)), sameHash)).toEqual({ dealId: 'd', files: 10, matched: 9 });
+    expect(sameRoomAs('d', room, recsOf([...room, ...files(1, 'Gone')]), sameHash)).toBeNull();
     // the same names and sizes with other contents, or nothing that could be read: nothing is claimed
     expect(sameRoomAs('d', room, recsOf(room), () => 'other')).toBeNull();
     expect(sameRoomAs('d', room, recsOf(room), () => null)).toBeNull();

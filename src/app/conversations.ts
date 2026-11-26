@@ -123,21 +123,11 @@ const mid = () => `m${Date.now().toString(36)}${(seq++).toString(36)}`;
 
 /** a deal name as typed navigation compares it: without "Project", in any case */
 const navigationName = (name: string) => bareDealName(name.trim(), 'navigation').toLowerCase();
-/** the same, without the punctuation around it: "Fund IV" for "Project (Fund IV)" */
-const unwrappedName = (name: string) => navigationName(name).replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
-
-/**
- * The deal a typed name names: the one of that exact name, else the only one whose name matches once the punctuation
- * around it is left out. Two such deals name none, and the text goes to the chat agent.
- */
+/** The deal a typed name names: the one of that exact name (in any case, without "Project"). */
 function dealByName<T extends { name: string }>(deals: T[], typed: string): T | undefined {
   const exact = navigationName(typed);
   if (!exact) return;
-  const named = deals.find((deal) => navigationName(deal.name) === exact);
-  if (named) return named;
-  const unwrapped = unwrappedName(typed);
-  const near = unwrapped ? deals.filter((deal) => unwrappedName(deal.name) === unwrapped) : [];
-  return near.length === 1 ? near[0] : undefined;
+  return deals.find((deal) => navigationName(deal.name) === exact);
 }
 
 // #500: only the explicit verb and page suffix are syntax; a deal name can contain punctuation or Unicode.

@@ -4,8 +4,8 @@
  *
  *   1. A file matches a deal's document when its file name (in any case, as Windows reads names) and its size are the
  *      same. Each document matches one file at most.
- *   2. A deal holds the same data room when more than half of the new folders' files match its documents, and the
- *      smallest matched file is identical to its document by SHA-256.
+ *   2. A deal holds the same data room when every one of its documents (outside a precedents folder) matches one of
+ *      the new folders' files, and the smallest matched file is identical to its document by SHA-256.
  *
  * Files in a precedents folder (families.ts), on either side, are another project's and are not counted: a precedents
  * folder many deals read says nothing about which deal a data room is.
@@ -50,14 +50,15 @@ export function matchesIn<T extends RoomFile>(files: T[], recs: DocRecord[]): { 
 }
 
 /**
- * The deal's match when it holds the same data room: more than half of `files` match its documents, and the smallest
- * matched file is identical. `hashOf` gives a file's SHA-256, or null when it cannot be read.
+ * The deal's match when it holds the same data room: every one of its documents matches one of `files`, and the
+ * smallest matched file is identical. `hashOf` gives a file's SHA-256, or null when it cannot be read.
  */
 export function sameRoomAs<T extends RoomFile>(
   dealId: string, files: T[], recs: DocRecord[], hashOf: (file: T) => string | null,
 ): RoomMatch | null {
-  const matched = matchesIn(files, recs);
-  if (!matched.length || matched.length * 2 <= files.length) return null;
+  const own = recs.filter((r) => !otherProject(r) && !inPrecedents(r.rel));
+  const matched = matchesIn(files, own);
+  if (!own.length || matched.length !== own.length) return null;
   const smallest = matched.reduce((least, m) => (m.file.size < least.file.size ? m : least));
   return hashOf(smallest.file) === smallest.rec.hash ? { dealId, files: files.length, matched: matched.length } : null;
 }
