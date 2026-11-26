@@ -188,12 +188,16 @@ const addQuestion = async (page, text) => { await page.evaluate(() => { window._
     const asked = await page.locator('#ask-title').textContent({ timeout: 5000 }).catch(() => null);
     const named = asked && await page.textContent('#ask-text');
     if (asked) await page.click('#ask-keep');
+    await discard.click();
+    const escaped = await page.locator('#ask-title').count() === 1;
+    await page.keyboard.press('Escape');
+    const closed = await page.locator('#ask-title').count() === 0;
     const after = await kept();
     const dealName = await page.evaluate(() => Object.values(store.get().deals)[0].name);
     const unchanged = after.state === before.state && after.input.text === before.input.text;
     say('discard-interrupted-asks-first', asked === 'Discard this interrupted action?' &&
-      named === `New question interrupted · ${dealName}` && unchanged,
-    JSON.stringify({ asked, named, state: after.state }));
+      named === `New question · ${dealName}` && escaped && closed && unchanged,
+    JSON.stringify({ asked, named, escaped, closed, state: after.state }));
     await discard.click();
     await page.click('#ask-go');
     await page.waitForFunction((id) => store.get().ops[id]?.state === 'discarded', discardedId);
