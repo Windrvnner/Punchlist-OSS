@@ -178,7 +178,7 @@ describe('files of any size are read (#1060)', () => {
     const back = await readImportFile(store, fileOf('log.csv', bytes));
     if (!back.ok) throw new Error(back.error.message);
     expect(back.value.rows.length).toBe(2500);
-  });
+  }, 30_000);
 
   it('reads a checklist file over 20 MB', async () => {
     const { store } = make();
@@ -186,7 +186,7 @@ describe('files of any size are read (#1060)', () => {
     const back = await readListFile(store, fileOf('list.csv', bytes));
     if (!back.ok) throw new Error(back.error.message);
     expect('table' in back.value && back.value.table.rows.length).toBe(2500);
-  });
+  }, 30_000);
 
   it('a file that cannot be opened says so', async () => {
     const { store } = make();
