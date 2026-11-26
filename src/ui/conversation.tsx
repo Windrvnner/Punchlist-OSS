@@ -11,10 +11,9 @@ import { Icon } from './icons';
 import { FindingOpening } from './findings';
 import { SidePane } from './sidePane';
 import {
-  composerScope, composerText, convKey, dealIdOf, conversationDocs, findDoc, filesDealOf, scopeValid,
+  composerScope, composerText, convKey, dealIdOf, suggestions, conversationDocs, findDoc, filesDealOf, scopeValid,
   sendTyped, setComposerText, type Scope,
 } from '../app/conversations';
-import { suggestions } from '../app/suggestedQuestion';
 import { isOwnFiles, type Deal, type Question, type Source } from '../domain/model';
 import { attachFiles, composerChips } from '../app/attachments';
 import { type Message, type State, isReading, askAbout, askAcross } from '../app/state';

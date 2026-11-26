@@ -3,8 +3,7 @@
 // code picks the candidates and keeps one question per answer, the newest answer winning.
 import { expect, it } from 'vitest';
 import { CreateQuestion, SetResponse } from '../../src/app/commands/questions';
-import { ask, convKey, type Scope } from '../../src/app/conversations';
-import { suggestions } from '../../src/app/suggestedQuestion';
+import { ask, convKey, suggestions, type Scope } from '../../src/app/conversations';
 import { fail, ok } from '../../src/domain/result';
 import type { AiService } from '../../src/ports';
 import { val } from '../backend/reviewKit';

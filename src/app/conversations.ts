@@ -10,7 +10,7 @@ import { dealHash, pageHash, dealQuestions, type State, type Message } from './s
 import { docKey, ownFilesId, type Question, type Source } from '../domain/model';
 import { CreateQuestion, UseAsResponse } from './commands/questions';
 import { findQuestions } from '../domain/suggest';
-import { proposeQuestion } from './suggestedQuestion';
+import { proposeQuestion, suggestedFor } from './suggestedQuestion';
 import { withoutMarkers } from '../domain/cite';
 import type { Research } from '../ports';
 import { bareDealName, sameName } from './commands/deals';
@@ -355,7 +355,25 @@ async function answer(store: Store, scope: Scope, messageId: string, text: strin
   const list = store.get().threads[key] ?? [];
   if (!list.some((m) => m.id === messageId && m.state === 'pending')) return;
   store.setThread(key, list.map((m) => m.id !== messageId ? m : r.ok ? { ...m, text: r.value.text, sources: r.value.sources, ...(r.value.research ? { research: r.value.research } : {}), ...(r.value.thread ? { thread: r.value.thread } : {}), state: 'done' as const } : { ...m, state: 'failed' as const }));
-  if (r.ok) await proposeQuestion(store, scope, messageId);
+  if (r.ok) await proposeFor(store, scope, messageId);
+}
+
+/** Once an answer on a deal's or a finding's conversation finishes, the model proposes an open question (#1120). */
+async function proposeFor(store: Store, scope: Scope, messageId: string) {
+  if (scope.kind !== 'deal' && scope.kind !== 'finding') return;
+  const list = store.get().threads[convKey(scope)] ?? [];
+  const answer = list.find((m) => m.id === messageId);
+  if (answer) await proposeQuestion(store, scope.dealId, messageId, answerText(answer), answeredTexts(list));
+}
+
+/** The texts of a conversation's answers as they leave it, which a suggested question's response may already be. */
+const answeredTexts = (list: Message[]) => new Set(list.map((m) => answerText(m).trim()));
+
+/** The open question each answer may address, on a deal's or a finding's conversation (a question's is its own). */
+export function suggestions(s: State, scope: Scope): Map<string, string> {
+  if (scope.kind !== 'deal' && scope.kind !== 'finding') return new Map();
+  const list = s.threads[convKey(scope)] ?? [];
+  return suggestedFor(s, scope.dealId, list, answeredTexts(list));
 }
 
 /** An answer's text as it leaves the conversation, as a response or a question: finding links as words, no [n] markers. */
