@@ -14,17 +14,18 @@ const LabelText = z.string().trim().max(FOLDER_LABEL_MAX, `Keep the label under 
 const IndexHere = z.literal(true).optional();
 const FolderInput = z.object({ path: z.string().min(1), label: LabelText, files: z.number().int().nonnegative(), size: z.string() });
 
+/** A deal's name as it is kept: the spaces at both ends trimmed, and everything else as typed (#1121). */
+export const cleanName = (n: string) => n.trim();
 /**
- * A deal's name as it is kept: one form of each accented letter (NFC), invisible characters dropped, the spaces at
- * both ends trimmed, and every space inside it as typed.
+ * A deal's name as it is compared: one form of each accented letter (NFC), invisible characters dropped, and any run of
+ * spaces (non-breaking ones included) as one space. So "Proseware Wind" is the same deal as "Proseware  Wind", with a
+ * non-breaking space, or with a hidden character, and the name typed to delete a deal matches the one shown, though
+ * what is kept is never changed.
  */
-export const cleanName = (n: string) => n.normalize('NFC').replace(/[\u200B-\u200D\u2060\uFEFF]/g, '').trim();
-/**
- * A deal's name as it is compared: the kept form with any run of spaces (non-breaking ones included) as one space. So
- * "Proseware Wind" is the same deal as "Proseware  Wind" and "Proseware Wind" with a non-breaking space, and the name
- * typed to delete a deal matches the one shown, though what is kept is never changed.
- */
-export const sameName = (n: string) => cleanName(n).replace(/\s+/g, ' ');
+export const sameName = (n: string) => {
+  const folded = n.normalize('NFC').replace(/[\u200B-\u200D\u2060\uFEFF]/g, '');
+  return folded.trim().replace(/\s+/g, ' ');
+};
 /** the longest name a deal can have, "Project " included, whether it was made or renamed */
 export const DEAL_NAME_MAX = 120;
 /**
