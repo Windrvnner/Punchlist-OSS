@@ -58,13 +58,16 @@ async function labelOf(at: string): Promise<{ label: string; skip: number }> {
 export async function eachCsvCell(at: string, onCell: (cell: string) => void): Promise<void> {
   const { label, skip } = await labelOf(at);
   const decoder = new TextDecoder(label, { fatal: true });
+  // only the decoding is refused as invalid text: an error from `onCell` or the splitter is not
+  const decode = (piece?: Uint8Array): string => {
+    try {
+      return piece ? decoder.decode(piece, { stream: true }) : decoder.decode();
+    } catch {
+      throw new Error(invalidTextMessage(label));
+    }
+  };
   const cells = new CsvCells(onCell);
-  try {
-    await eachPiece(at, skip, (piece) => cells.push(decoder.decode(piece, { stream: true })));
-    cells.push(decoder.decode());
-  } catch (error) {
-    if (error instanceof TypeError) throw new Error(invalidTextMessage(label));
-    throw error;
-  }
+  await eachPiece(at, skip, (piece) => cells.push(decode(piece)));
+  cells.push(decode());
   cells.end();
 }

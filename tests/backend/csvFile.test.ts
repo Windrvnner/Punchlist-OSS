@@ -74,6 +74,16 @@ describe('a CSV read a piece at a time', () => {
     );
   });
 
+  it('lets an error thrown by the cell callback through unchanged (#382)', async () => {
+    const at = write('plain.csv', 'a,b\n');
+    const failure = new TypeError('the caller failed');
+    await expect(
+      eachCsvCell(at, () => {
+        throw failure;
+      }),
+    ).rejects.toBe(failure);
+  });
+
   it('holds only a piece of the file in memory, however large the file is', async () => {
     const at = write('huge.csv', 'ledger,entry\n'.repeat(8_000_000));      // about 104 MB
     global.gc?.();
