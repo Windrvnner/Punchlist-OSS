@@ -151,3 +151,22 @@ describe('prepareImport', () => {
     expect(importCounts(rows, existing, 'append')).toEqual({ add: 3, match: 0 });
   });
 });
+
+describe('a month written as a word', () => {
+  it('is read only as its full name or its three-letter abbreviation, as Excel takes it', () => {
+    const named = ['Jun 3 2026', 'June 3, 2026', '3 Sept 2026', '3-Sep-2026'];
+    for (const text of named) expect(parseDate(text), text).not.toBeNull();
+    const notMonths = ['Junk 3 2026', 'Marching 3 2026', '3 Decimal 2026', 'Mayhem 3 2026'];
+    for (const text of notMonths) expect(parseDate(text), text).toBeNull();
+  });
+});
+
+describe('control characters in a cell', () => {
+  it('stay in text and are ignored where the cell is read as a number, date, status or priority', () => {
+    const columns = ['Number', 'Question', 'Received', 'Status', 'Priority'];
+    const rows = [['12\u0000', 'Q\u0007text', '2026-09-30\u0000', 'Open\u0000', 'High\u0007']];
+    const [row] = prepareImport(rows, suggestMapping(columns)).rows;
+    expect(row).toMatchObject({ n: 12, text: 'Q\u0007text', received: '2026-09-30', status: 'open', priority: 'High' });
+  });
+});
+

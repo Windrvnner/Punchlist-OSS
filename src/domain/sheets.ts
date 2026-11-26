@@ -9,6 +9,24 @@ import { fail, ok } from './result';
 
 export interface Sheet { name: string; grid: string[][] }
 
+/** a real date cell as LibreOffice's plain reading gives it: YYYY-MM-DD, with its time if it has one */
+const PLAIN_DATE = /^\d{4}-\d{2}-\d{2}( \d.*)?$/;
+
+/**
+ * A workbook's cells as the file shows them ("1,234.50", "15%", "007"), except a real date cell, which stays in the
+ * plain reading's YYYY-MM-DD: the import settles a date from that, never from a display format that may be day or month
+ * first. `plain` and `shown` are the same workbook read both ways, so their sheets and cells line up.
+ */
+export function cellsAsShown(plain: Sheet[], shown: Sheet[]): Sheet[] {
+  return plain.map((sheet, s) => ({
+    name: sheet.name,
+    grid: sheet.grid.map((row, r) => row.map((cell, c) => {
+      const seen = shown[s]?.name === sheet.name ? shown[s].grid[r]?.[c] : undefined;
+      return seen === undefined || PLAIN_DATE.test(cell) ? cell : seen;
+    })),
+  }));
+}
+
 /** CSV as written by Excel and LibreOffice: commas, fields in double quotes when they hold a comma, quote or line break, "" for a quote. */
 export function parseCsv(text: string, bare?: (field: string) => string): string[][] {
   // `bare` rewrites a field written without quotes; LibreOffice quotes every text cell, so a bare field is a number or a date
