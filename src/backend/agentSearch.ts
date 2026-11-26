@@ -1,6 +1,7 @@
 /**
- * The chat agent's search tool (agent.ts): documents through the search helper on the fast model, and the deal's
- * findings and Q&A log, the records the app holds, by their words with no model call.
+ * The chat agent's search tool (agent.ts), a page at a time, every kind ranked by the same keyword scoring (#1102):
+ * a page of documents read by the search helper on the fast model, and the deal's findings and Q&A log, the records
+ * the app holds, with no model call.
  */
 import { int, strings } from './lenient';
 import { pageOf, rankRecords, type Page } from './recordSearch';
@@ -66,7 +67,8 @@ async function searchDocuments(run: AgentRun, asked: Asked, query: string, repor
   const ranking = await kit.ranking(question.deals, query);
   const shown = pageOf(ranking, asked.page, run.pages.width);
   if (!shown.items.length) {
-    report.out.push(ranking.length ? noPage('Documents', 'documents', asked, shown) : 'Documents: none answers to these words.');
+    const none = 'Documents: none answers to these words.';
+    report.out.push(ranking.length ? noPage('Documents', 'documents', asked, shown) : none);
     report.said.push(`${ranking.length} listed · none opened`);
     return;
   }

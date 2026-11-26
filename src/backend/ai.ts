@@ -1352,6 +1352,16 @@ export function nodeAi(o: AiOptions) {
   }
 
   /**
+   * What a read sends first: a page of the chat's document search as it is, with no pick and no second round
+   * (#1102); or else, for a draft or a reassessment, one deal's documents, what it must have and then the pick.
+   */
+  async function firstRead(deals: string[], lookFor: string, must: Record<string, string[]>,
+    core: Record<string, string[]>, page?: DealDoc[]): Promise<{ dealId: string; recs: DocRecord[] }[]> {
+    if (page) return page.map((x) => ({ dealId: x.dealId, recs: [x.rec] }));
+    const dealId = deals[0];
+    return [{ dealId, recs: await start(dealId, lookFor, must[dealId] ?? [], width, core[dealId]) }];
+  }
+  /**
    * One question, read from documents, in up to two rounds: the second only if the model says what is missing and
    * something answers to it. With `again`, a reply that cannot be used is sent back to the same model with what is
    * wrong with it (`wrong`), to be put right; and only if that fails too, the question goes once to the `escalate` model.
@@ -1365,15 +1375,8 @@ export function nodeAi(o: AiOptions) {
     const sent: Sent[] = []; const add = (dealId: string, recs: DocRecord[]) => { for (const rec of withClean(dealId, recs)) if (!sent.some((s) => s.rec.docId === rec.docId && s.dealId === dealId)) sent.push({ tag: `D${sent.length + 1}`, dealId, rec }); };
     const core: Record<string, string[]> = {};
     await Promise.all(deals.map(async (d) => { core[d] = await coreOf(d); }));
-    try {
-      // a page of the chat's document search is read as it is: no pick, and no second round (#1102)
-      if (page) {
-        for (const x of page) add(x.dealId, [x.rec]);
-      } else {
-        // a draft or a reassessment: one deal's documents, what it must have and then the pick (`start`)
-        add(deals[0], await start(deals[0], lookFor, must[deals[0]] ?? [], width, core[deals[0]]));
-      }
-    } catch (e) { return failure(e, 'The documents could not be read'); }
+    try { for (const x of await firstRead(deals, lookFor, must, core, page)) add(x.dealId, x.recs); }
+    catch (e) { return failure(e, 'The documents could not be read'); }
     if (!sent.length) return ok({ reply: {}, sent });
     let using = model;
     let pool: Sent[] | undefined;
