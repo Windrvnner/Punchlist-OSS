@@ -11,6 +11,7 @@
  * room at all, it stands alone: it is read by itself, still as the model's reading. Nothing here asks a model.
  */
 import { families, roomPath, inPrecedents, versionOf } from './families';
+import { indexWords } from './words';
 
 const PDF = /\.pdf$/i;
 /** "A vs B": two drafts' names with vs (or versus) between them, as people name a comparison */
@@ -47,8 +48,13 @@ export function coverOf(first: string): string | null {
 const namedAt = (cover: string, name: string) => { const c = ` ${base(cover)} `; const n = ` ${base(name)} `; return n.trim() ? c.lastIndexOf(n) : -1; };
 /** whether a cover names another file after `name`, found at `at`: then `name` is the original, not the newer draft */
 const namedLater = (cover: string, name: string, at: number) => /\s(?:docx?|pdf|rtf)\s/.test(` ${base(cover)} `.slice(at + ` ${base(name)}`.length).replace(/^\s*(?:docx?|pdf|rtf)\s/, ' '));
-/** a name's first word: both sides of "A vs B" share it when they are two drafts of one document */
-const head = (folded: string) => folded.split(' ').find((w) => /\p{L}{2}/u.test(w));
+/**
+ * a name's first index word, numbers and short words included, filler words left out (#1220): both sides of
+ * "A vs B" share it when they are two drafts of one document
+ */
+const head = (folded: string) => indexWords(folded)[0];
+/** whether two folded names share a first index word; names with only filler words share none (#1224) */
+const shareHead = (a: string, b: string) => head(a) !== undefined && head(a) === head(b);
 
 /** what blacklines need of a document: its id, name, place in the data room, when first seen, and its cover page if it has one */
 export interface BlacklineDoc { docId: string; name: string; folder: string; rel: string; seen?: string; cover?: string; /** the other places the same file is in */ copies?: { folder: string; rel: string; name?: string }[] }
@@ -102,13 +108,16 @@ export function cleanDrafts(docs: BlacklineDoc[]): Map<string, string | null | f
   }
   // a weaker word: a blackline only when the file of its name without that word is in its folder; otherwise an ordinary document
   for (const b of maybe.filter((d) => !otherProject(d))) { const here = one(clean.filter((d) => d !== b && dir(d) === dir(b) && bn(d) === stripped(b.name, MAYBE))); if (here) out.set(b.docId, here); }
-  // "A vs B": two drafts of one document, so both names start with the same word ("Doe vs Roe judgment" is a case,
-  // not a blackline), and A or B is in its folder. A, named first, is the newer draft, as in "A redline to B", so it
+  // "A vs B": two drafts of one document, so both names share their first index word ("Doe vs Roe judgment" is a
+  // case, not a blackline; numbers and short words count, filler words and plural endings do not, #1224), and A or B
+  // is in its folder. A, named first, is the newer draft, as in "A redline to B", so it
   // is the clean draft when it is there; with only B there, the newer draft is missing and it is unclear (null), not
   // read against B
   for (const b of versus.filter((d) => !otherProject(d))) {
-    const sides = base(b.name).split(VS).map((x) => x.trim()); if (sides.length !== 2 || !sides[0] || !sides[1] || head(sides[0]) !== head(sides[1])) continue;
-    const near = clean.filter((d) => d !== b && dir(d) === dir(b)); const a = one(near.filter((d) => bn(d) === sides[0]));
+    const sides = base(b.name).split(VS).map((x) => x.trim());
+    if (sides.length !== 2 || !sides[0] || !sides[1] || !shareHead(sides[0], sides[1])) continue;
+    const near = clean.filter((d) => d !== b && dir(d) === dir(b));
+    const a = one(near.filter((d) => bn(d) === sides[0]));
     if (a) out.set(b.docId, a); else if (a === undefined || near.some((d) => bn(d) === sides[1])) out.set(b.docId, null);
   }
   return out;

@@ -5,7 +5,7 @@
 import type { DocRecord } from './documents';
 import type { Cited } from './agent';
 import type { Source } from '../domain/model';
-import { list as listOf, strings, tagNumber } from './lenient';
+import { list as listOf, strings, tagNumber, prose, PARAGRAPH_SEAM } from './lenient';
 import {
   type ReportKit, type ReadLine, type ReadIssue, type Known, type Issue, type SentDoc,
   isCut, yes,
@@ -93,7 +93,8 @@ function isOwn(k: ReportKit, doc: string, f: Known) {
   return false;
 }
 
-const titleOf = (row: Record<string, unknown>) => (typeof row.title === 'string' ? row.title.trim() : '');
+/** the title as the model wrote it; a blank one is none (#1215) */
+const titleOf = (row: Record<string, unknown>) => (typeof row.title === 'string' && row.title.trim() ? row.title : '');
 
 /** One read of one report, in one call: what it has found. */
 class ReportRead {
@@ -154,7 +155,7 @@ class ReportRead {
   /** a new issue: a finding of its own */
   async raise(row: Record<string, unknown>, title: string, known: Known[], covering?: Known): Promise<boolean> {
     const k = this.k;
-    const fitted = k.fit(strings(row.body).join('\n\u0000\n'), row.sources as Cited[], this.s.sent);
+    const fitted = k.fit(prose(row.body).join(PARAGRAPH_SEAM), row.sources as Cited[], this.s.sent);
     // an issue stands on a page of the report a person can open, as any finding does
     if (!fitted.text || !fitted.sources.length) { this.unplaced++; return true; }
     const nth = (this.titles.get(title) ?? 0) + 1;
@@ -163,7 +164,7 @@ class ReportRead {
     const issue: Issue = {
       title,
       workstream: k.workstreamOf(row.workstream),
-      body: k.fitParas(fitted.text.split(/\s*\u0000\s*/).filter(Boolean)),
+      body: k.fitParas(fitted.text.split(PARAGRAPH_SEAM).filter((p) => p.trim())),
       sources: fitted.sources,
     };
     // a closed finding on the same issue is named: a wrong number falls back to the one given as covering it
@@ -184,8 +185,9 @@ class ReportRead {
 
   /** what the reply says beside its issues: who wrote the report, and which of the earlier draft's it drops */
   heard(reply: Record<string, unknown>) {
-    const advisor = typeof reply.advisor === 'string' ? reply.advisor.trim() : '';
-    if (advisor && !this.advisor) this.advisor = advisor.slice(0, 120);
+    const said = reply.advisor;
+    const advisor = typeof said === 'string' && said.trim() ? said : '';
+    if (advisor && !this.advisor) this.advisor = advisor;
     for (const e of strings(reply.dropped)) {
       const f = this.before?.issues[(tagNumber(e, 'E') ?? 0) - 1]?.finding;
       if (f) this.dropped.add(f);
@@ -232,7 +234,7 @@ const notReport = (reply: Record<string, unknown>) => 'report' in reply && !yes(
 export async function read(
   k: ReportKit, rec: DocRecord, before: ReadLine | undefined, last: boolean,
 ): Promise<ReadLine | 'not' | 'lost' | null> {
-  const s = await k.send(rec);
+  const s = await k.send(rec, k.models.standard);
   if (!s) return 'lost';                       // cannot be sent from this PC: left for one that can, not a try
   const r = new ReportRead(k, rec, s, before);
   const known = await k.findings();

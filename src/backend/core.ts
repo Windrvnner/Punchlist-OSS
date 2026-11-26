@@ -23,7 +23,7 @@
  * With no checklist yet, or one none of whose items names anything in the data room, each library group is taken as an
  * item. Nothing here asks a model.
  */
-import { tokens, fold } from './words';
+import { fold, indexWords as words } from './words';   // the word index's split (#1147)
 import { versionOf, PRECEDENTS } from './families';
 import type { DocFamilies } from './related';
 
@@ -69,8 +69,6 @@ export function compile(library: string[][], filler: Set<string>): Library {
   library.forEach((group, g) => { for (const x of group) { const t = x.trim(); if (!t) continue; const m: Member = { n: all.length, group: g, seq: words(t, filler), abbrev: ABBREV.test(t) ? t : null }; if (!m.abbrev && !m.seq.length) continue; all.push(m); if (m.abbrev) add(abbrevs, m.abbrev, m); else add(byFirst, m.seq[0], m); } });
   return { all, abbrevs, byFirst };
 }
-/** a text's words as compared: split as names are, plurals folded, filler, single letters and bare numbers left out ("10 Tax" is not about a 10-year term) */
-export function words(t: string, filler: Set<string>): string[] { return tokens(t).filter((w) => w.length >= 2 && !filler.has(w) && !/^\d+$/.test(w)).map(fold); }
 
 /**
  * The groups a piece of text names, with the positions of the words each phrase covers. A phrase counts only whole and in
@@ -95,7 +93,7 @@ export function coreSet(input: CoreInput): CoreSet {
     const cased = /\p{Ll}/u.test(d.path.replace(/\.[a-z0-9]{1,5}$/i, ''));
     const termsOf = (raw: string) => { const ws = words(raw, filler); return [...ws, ...groupsIn(raw, ws, members, false, cased).map((x) => gid(x.group))]; };
     const name = new Set(termsOf(file)); const folder = new Set(parts.flatMap(termsOf).filter((t) => !name.has(t)));
-    const ws = (d.words ?? []).map((w) => fold(w.toLowerCase())).filter((w) => w.length >= 2 && !filler.has(w));
+    const ws = (d.words ?? []).map((w) => fold(w.toLowerCase())).filter((w) => !filler.has(w));
     const most = new Set([...ws, ...groupsIn(ws.join(' '), ws, members, true).map((x) => gid(x.group))].filter((t) => !name.has(t) && !folder.has(t)));
     const nameWords = words(file, filler);
     return { d, name, folder, most, relations: nameWords.filter((w) => RELATION.has(w)).length, length: file.length, mark: versionOf(`${file}.x`)?.mark ?? [], other: parts.some((p) => PRECEDENTS.test(p.trim())), hub: isHubName(file) };

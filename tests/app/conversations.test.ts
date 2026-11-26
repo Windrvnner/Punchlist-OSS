@@ -38,6 +38,13 @@ function make(over: { ai?: Partial<AiService>; docs?: Partial<DocumentService>; 
 }
 async function deal(store: Store, name = 'Datum') { await store.boot(); await store.dispatch(CreateDeal, { name, folders: [] }); const id = Object.values(store.get().deals).find((d) => d.name === `Project ${name}`)!.id; await store.loadDeal(id); return id; }
 
+/** the operating question, and a stand-in model that proposes it under every answer while it is open (#1120) */
+const OPERATING = 'Confirm the operating assumption in the base case, and whether the technical advisor and the'
+  + ' information memorandum agree.';
+const proposing = (text: string): Partial<AiService> => ({
+  suggestQuestion: async ({ questions }) => ok(questions.filter((q) => q.text === text).map((q) => q.id)),
+});
+
 describe('conversations', () => {
   it('asked before the models have loaded (just after a sign-in, say), the question goes to the person’s default or the standard tier, never with no model', async () => {
     const models: string[] = [];
@@ -175,7 +182,8 @@ describe('conversations', () => {
     expect(store.get().questions[q.id]).toMatchObject({ response: 'Confirmed.', status: 'open', respondedBy: '', responded: '' });
   });
   it('suggests an open question under the newest answer that may address it, and only a person uses it', async () => {
-    const { store, repo } = make(); const dealId = await deal(store);
+    const { store, repo } = make({ ai: proposing(OPERATING) });
+    const dealId = await deal(store);
     await mockFirstPass(repo, dealId, 'Project Datum'); await sleep(20); await store.loadDeal(dealId);
     await store.dispatch(CreateQuestion, { dealId, text: 'Confirm the operating assumption in the base case, and whether the technical advisor and the information memorandum agree.' });
     await store.dispatch(CreateQuestion, { dealId, text: 'Provide the insurance certificates.' });
@@ -183,7 +191,7 @@ describe('conversations', () => {
     const scope: Scope = { kind: 'deal', dealId };
     await ask(store, scope, 'What are the three biggest issues?'); await ask(store, scope, 'Which of these would hold up financial close?');
     const [, first, , second] = store.get().threads[convKey(scope)];
-    expect([...suggestions(store.get(), scope)]).toEqual([[second.id, q.id]]);   // not under the first answer as well
+    expect([...suggestions(store.get(), scope)]).toEqual([[second.id, [q.id]]]);   // not under the first answer as well
     expect(suggestions(store.get(), { kind: 'question', dealId, questionId: q.id }).size).toBe(0);
     store.ui({ notThese: [`${second.id}|${q.id}`] });
     expect(suggestions(store.get(), scope).size).toBe(0);                          // "not this one" does not move it to the first answer
@@ -194,6 +202,18 @@ describe('conversations', () => {
     expect(suggestions(store.get(), scope).size).toBe(0);                          // nor under the earlier answer, now that it has this one
     expect(first.text).toMatch(/\{[^|}]+\|f_/);                                   // the first answer names findings: links leave as words
     expect(answerText(first)).not.toMatch(/[{}|]|f_[0-9A-Z]{26}/);
+  });
+  it('a question whose response differs from an answer only by a space is still suggested for it', async () => {
+    const { store, repo } = make({ ai: proposing(OPERATING) });
+    const dealId = await deal(store);
+    await mockFirstPass(repo, dealId, 'Project Datum'); await sleep(20); await store.loadDeal(dealId);
+    await store.dispatch(CreateQuestion, { dealId, text: OPERATING });
+    const q = Object.values(store.get().questions)[0];
+    const scope: Scope = { kind: 'deal', dealId };
+    await ask(store, scope, 'Which of these would hold up financial close?');
+    const answer = store.get().threads[convKey(scope)][1];
+    await store.dispatch(SetResponse, { dealId, questionId: q.id, response: `${answerText(answer)} ` });
+    expect([...suggestions(store.get(), scope)]).toEqual([[answer.id, [q.id]]]);
   });
   it('a person can ask the model whether an answer addresses the suggested question; its verdict is shown and changes nothing', async () => {
     let asked: { question: string; answer: string } | null = null;
@@ -236,12 +256,13 @@ describe('conversations', () => {
   it('"Not this one" is remembered on this PC across a reload, by answer and question, ' +
     'and changes no record', async () => {
     const local = new MemoryLocal(); const kv = disk();
-    const { store, repo } = make({ kv, local }); const dealId = await deal(store);
+    const { store, repo } = make({ kv, local, ai: proposing(OPERATING) });
+    const dealId = await deal(store);
     await mockFirstPass(repo, dealId, 'Project Datum'); await sleep(20); await store.loadDeal(dealId);
     await store.dispatch(CreateQuestion, { dealId, text: 'Confirm the operating assumption in the base case, and whether the technical advisor and the information memorandum agree.' });
     const q = Object.values(store.get().questions)[0]; const scope: Scope = { kind: 'deal', dealId };
     await ask(store, scope, 'Which of these would hold up financial close?'); const answer = store.get().threads[convKey(scope)][1];
-    expect([...suggestions(store.get(), scope)]).toEqual([[answer.id, q.id]]);
+    expect([...suggestions(store.get(), scope)]).toEqual([[answer.id, [q.id]]]);
     store.putAway(answer.id, q.id); store.putAway(answer.id, q.id);              // pressed twice, kept once
     expect(local.read('notThese')).toEqual([`${answer.id}|${q.id}`]); expect(suggestions(store.get(), scope).size).toBe(0);
     const { store: again } = make({ kv, local }); await again.boot(); await again.loadDeal(dealId);      // the app opened again on this PC

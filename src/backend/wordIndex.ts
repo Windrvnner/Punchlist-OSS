@@ -4,7 +4,7 @@
  *
  * What is kept for a document: how often it uses each word of any length (filler words left out, numbers
  * kept, plurals folded, no word order), how many words it has, and its title: the first 40 words of its first page.
- * Kept in this PC's local folder as one line per document in words3-<deal id>.jsonl, written once when the document is
+ * Kept in this PC's local folder as one line per document in words4-<deal id>.jsonl, written once when the document is
  * read and never changed; a later line for the same document replaces an earlier one.
  *
  * How a document answers to some words: each word counts by how rare it is in the deal (BM25's idf),
@@ -13,10 +13,8 @@
  * that uses the word on every page.
  */
 import type { Folder } from './logRepository';
-import { tokens, fold } from './words';
-import { control } from '../control';
+import { indexWords } from './words';
 
-const FILLER = new Set(control.lists.indexFiller.map((w) => w.toLowerCase()));   // matched against words in lower case
 /** BM25's usual constants: how soon repeated use levels off, and how much a long document's length is held against it */
 const K1 = 1.2, B = 0.75;
 /** the weights agreed for a match in the name or folder path, and in the title, against one body match */
@@ -24,18 +22,38 @@ export const WEIGHT = { name: 10, title: 4 } as const;
 /** how many words of the first page make the title */
 export const TITLE_WORDS = 40;
 
-/** a word as the index keeps it, or null for one it leaves out */
-const keep = (w: string) => (FILLER.has(w) ? null : fold(w));
-
 /** what the index keeps of one document's text */
 export interface DocWords { counts: Map<string, number>; length: number; title: string[] }
 /** Count the words of a document. `first` is its first page, when the text has pages; otherwise the text's own start is the title. */
 export function countWords(text: string, first = text): DocWords {
-  const counts = new Map<string, number>(); let length = 0;
-  for (const t of tokens(text)) { const w = keep(t); if (!w) continue; counts.set(w, (counts.get(w) ?? 0) + 1); length++; }
-  const title: string[] = [];
-  for (const t of tokens(first)) { if (title.length >= TITLE_WORDS) break; const w = keep(t); if (w && !title.includes(w)) title.push(w); }
-  return { counts, length, title };
+  const tally = new WordTally();
+  tally.add(text, first);
+  return tally.words();
+}
+
+/**
+ * The words of a text counted a piece at a time, as `countWords` counts a whole text: the pieces' first words make the
+ * title, unless `first` gives the text it is taken from.
+ */
+export class WordTally {
+  private readonly counts = new Map<string, number>();
+  private length = 0;
+  private readonly title: string[] = [];
+
+  add(text: string, first = text): void {
+    for (const w of indexWords(text)) {
+      this.counts.set(w, (this.counts.get(w) ?? 0) + 1);
+      this.length++;
+    }
+    for (const w of this.title.length < TITLE_WORDS ? indexWords(first) : []) {
+      if (this.title.length >= TITLE_WORDS) break;
+      if (!this.title.includes(w)) this.title.push(w);
+    }
+  }
+
+  words(): DocWords {
+    return { counts: this.counts, length: this.length, title: this.title };
+  }
 }
 
 /**
@@ -49,6 +67,8 @@ interface Line { d: string; n: number; t: string; w: string }
 export interface WordIndex {
   /** whether this PC has read the words of this document */
   has(dealId: string, docId: string): boolean;
+  /** whether this PC's index file for the deal, of the current version, exists */
+  built(dealId: string): boolean;
   /** keep a document's words; said again for a document already kept, it replaces them */
   add(dealId: string, docId: string, words: DocWords): void;
   /**
@@ -99,7 +119,8 @@ function weightOf(e: Scored, w: string, avgLength: number): number {
 export function wordIndex(local: Folder): WordIndex {
   const deals = new Map<string, DealIndex>();
   // the name carries the index's version: an index built under older rules is not read, so each document is read again
-  const file = (dealId: string) => `words3-${dealId}.jsonl`;
+  // (words4: read again so that a word keeps its combining marks, #1154; words3 saved most-used words, #1147)
+  const file = (dealId: string) => `words4-${dealId}.jsonl`;
   const put = (ix: DealIndex, l: Line) => {
     const was = ix.num.get(l.d);
     if (was !== undefined) { ix.alive[was] = false; ix.words[was] = ''; ix.total -= ix.length[was]; ix.live--; }      // a document read again: its old words go
@@ -127,6 +148,7 @@ export function wordIndex(local: Folder): WordIndex {
   };
   return {
     has: (dealId, docId) => of(dealId).num.has(docId),
+    built: (dealId) => local.list().includes(file(dealId)),
     add(dealId, docId, words) {
       const l: Line = { d: docId, n: words.length, t: words.title.join(' '), w: [...words.counts].map(([w, n]) => `${w}:${n}`).join(' ') };
       local.append(file(dealId), `${JSON.stringify(l)}\n`); put(of(dealId), l);

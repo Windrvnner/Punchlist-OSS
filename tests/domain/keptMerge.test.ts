@@ -1,15 +1,12 @@
 // Bringing an edit kept aside back into the Q&A log: a three-way merge, cell by cell, of their version against the
 // version they edited, into the log as it is now. At deal scale: 2,000 questions.
 import { describe, it, expect } from 'vitest';
-import { mergeKept, type KeptTable } from '../../src/domain/keptMerge';
-import { tableFrom, withSteps, type Sheet } from '../../src/domain/sheets';
+import { mergeKept } from '../../src/domain/keptMerge';
+import { N, table, after } from './keptMergeTables';
 
-const N = 2000; const HEAD = ['No.', 'Question', 'Response', 'Notes'];
+const HEAD = ['No.', 'Question', 'Response', 'Notes'];
 const q = (i: number) => `Question ${i}: please confirm item ${i}.`;
 const grid = () => [HEAD, ...Array.from({ length: N }, (_, k) => [String(k + 1), q(k + 1), '', ''])];
-const table = (g: string[][]): KeptTable => tableFrom([{ name: 'Log', grid: g }], { sheet: 'Log', headerRow: 1 })!;
-/** the log with the merge's steps made, as a grid */
-const after = (log: string[][], steps: ReturnType<typeof mergeKept>['steps']) => (withSteps([{ name: 'Log', grid: log }], 'Log', steps) as Sheet[])[0].grid;
 const set = (g: string[][], row: number, col: number, v: string) => { g[row][col] = v; return g; };
 
 describe('an edit kept aside, merged into the log', () => {
@@ -23,16 +20,15 @@ describe('an edit kept aside, merged into the log', () => {
     expect([g[7][2], g[9][2], g[11][2], g[1999][3]]).toEqual(['sroe on 7', 'ldoe on 9', 'ldoe on 11', 'sroe: chase']);
   });
 
-  it('lines rows up by their words when the log has rows put in or taken out above, and by place when they reworded one', () => {
+  it('lines rows up by the lookup when the log has rows put in or taken out above', () => {
     const base = grid(); const kept = grid(); const log = grid();
-    set(kept, 500, 2, 'sroe on 500'); set(kept, 600, 1, 'Question 600, reworded by sroe'); set(kept, 600, 2, 'sroe on 600');
+    set(kept, 500, 2, 'sroe on 500');
     // ldoe put a row in near the top, and took one out
     log.splice(3, 0, ['3a', 'A question ldoe put in', '', '']);
     log.splice(1000, 1);
-    const m = mergeKept(table(base), table(kept), table(log), 'Question', undefined, undefined, 'No.');   // a reworded row is lined up by place and its number
+    const m = mergeKept(table(base), table(kept), table(log), 'Question', undefined, undefined, 'No.');
     const g = after(log, m.steps);
     expect(g[501]).toEqual(['500', q(500), 'sroe on 500', '']);
-    expect(g[601]).toEqual(['600', 'Question 600, reworded by sroe', 'sroe on 600', '']);
     expect(m.clashes).toEqual([]); expect(g).toHaveLength(N + 1);                       // nothing taken out or added
   });
 
@@ -115,7 +111,8 @@ describe('an edit kept aside, merged into the log', () => {
       const base = g(); base[701] = ['701', 'Provide the audited accounts.', 'Lender A', 'Finance', 'Open', ''];
       const kept = base.map((r) => [...r]); kept[701][5] = 'sroe: for Lender A only';
       const log = base.map((r) => [...r]); log.push(['2001', 'Provide the audited accounts.', 'Buyer counsel', 'Legal', 'Open', '']); log.splice(701, 1);
-      const m = mergeKept(table(base), table(kept), table(log), 'Question', undefined, undefined, number);
+      const m = mergeKept(table(base), table(kept), table(log), 'Question', undefined, undefined, number, undefined,
+        'Submitted by');
       expect(m.steps).toEqual([]); expect(m.clashes).toEqual([]); expect(m.left).toBe(1);
     });
     it('a question asked once still lines up when the log closed it (one cell changed)', () => {
@@ -161,8 +158,8 @@ describe('an edit kept aside, merged into the log', () => {
     });
   });
 
-  describe('a blank Submitted by against a filled one is another party\'s row', () => {
-    // as above, with a number column too; a row with neither a number nor a submitter can't be told apart
+  describe('a row naming no sender matches any sender, the same sender first (docs/decisions.md)', () => {
+    // as above, with a number column too
     const H = ['No.', 'Workstream', 'Priority', 'Submitted by', 'Question', 'Status', 'Response'];
     const g = () => [H, ...Array.from({ length: N }, (_, k) => [String(k + 1), 'Finance', 'High', 'Lender A', q(k + 1), 'Open', ''])];
     for (const number of ['No.', '']) {
@@ -174,25 +171,41 @@ describe('an edit kept aside, merged into the log', () => {
         const log = base.map((r) => [...r]); log.splice(700, 1);
         const m = merge(base, kept, log); expect(m).toMatchObject({ steps: [], clashes: [], left: 0 }); expect(m.ask.map((x) => x.rows)).toEqual([[]]);
       });
-      it(`A3b: the app reworded a question, and a row with no submitter asks the old words${tail}`, () => {
-        const base = g(); const kept = g(); kept[300][6] = 'sroe: for Lender A only';
-        const log = g(); log[300][4] = 'Question 300, as the app now words it'; log.push(blank([...base[300]]));
-        expect(merge(base, kept, log)).toMatchObject({ steps: [], clashes: [], left: 1 });
-      });
-      it(`a question asked once, taken out, and asked since with no submitter${tail}`, () => {
+      /** the merge's steps: each cell's row, column and value */
+      const answers = (m: ReturnType<typeof merge>) =>
+        m.steps.map((s) => (s.kind === 'cell' ? [s.row, s.col, s.value] : s.kind));
+      it(`A3b: the app reworded a question, and a row with no submitter asks the old words: it is that row${tail}`,
+        () => {
+          const base = g();
+          const kept = g();
+          kept[300][6] = 'sroe: for Lender A only';
+          const log = g();
+          log[300][4] = 'Question 300, as the app now words it';
+          log.push(blank([...base[300]]));
+          const m = merge(base, kept, log);
+          expect(answers(m)).toEqual([[N + 1, 6, 'sroe: for Lender A only']]);
+          expect(m).toMatchObject({ clashes: [], left: 0 });
+        });
+      it(`a question asked once, taken out, and asked since with no submitter: that row is it${tail}`, () => {
         const base = g(); const kept = g(); kept[300][6] = 'sroe: for Lender A only';
         const log = g(); log.push(blank([...log[300]])); log.splice(300, 1);
-        expect(merge(base, kept, log)).toMatchObject({ steps: [], clashes: [], left: 1 });
+        const m = merge(base, kept, log);
+        expect(answers(m)).toEqual([[N, 6, 'sroe: for Lender A only']]);
+        expect(m).toMatchObject({ clashes: [], left: 0 });
       });
-      it(`the row they answered had no submitter, and a Lender B row asks it since${tail}`, () => {
+      it(`the row they answered had no submitter, and a Lender B row asks it since: that row is it${tail}`, () => {
         const base = g(); blank(base[300]); const kept = base.map((r) => [...r]); kept[300][6] = 'sroe: for nobody named';
         const log = base.map((r) => [...r]); log.push(['', 'Finance', 'High', 'Lender B', q(300), 'Open', '']); log.splice(300, 1);
-        expect(merge(base, kept, log)).toMatchObject({ steps: [], clashes: [], left: 1 });
+        const m = merge(base, kept, log);
+        expect(answers(m)).toEqual([[N, 6, 'sroe: for nobody named']]);
+        expect(m).toMatchObject({ clashes: [], left: 0 });
       });
-      it(`K: a row they added with no submitter is never filled into a Lender B row the log added${tail}`, () => {
+      it(`K: a row they added with no submitter is the Lender B row the log added with its text${tail}`, () => {
         const base = g(); const kept = [...g(), ['', 'Finance', 'High', '', 'Any liens?', 'Open', 'sroe: none']];
         const log = [...g(), ['', 'Finance', 'High', 'Lender B', 'Any liens?', 'Open', '']];
-        const m = merge(base, kept, log); expect(m).toMatchObject({ added: 1, clashes: [] }); expect(m.steps.filter((s) => s.kind === 'cell' && s.row <= N + 1)).toEqual([]);
+        const m = merge(base, kept, log);
+        expect(answers(m)).toEqual([[N + 1, 6, 'sroe: none']]);
+        expect(m).toMatchObject({ added: 0, clashes: [] });
       });
       it(`the same row, both with no submitter, still lines up${tail}`, () => {
         const base = g(); blank(base[300]); const kept = base.map((r) => [...r]); kept[300][6] = 'sroe on 300'; const log = base.map((r) => [...r]); log[300][5] = 'Closed';
@@ -256,10 +269,11 @@ describe('an edit kept aside, merged into the log', () => {
       expect(m).toMatchObject({ steps: [], added: 0, left: 0 }); expect(m.ask).toHaveLength(1);
       expect(m.ask[0].add).toEqual([{ col: 0, value: CAP }, { col: 2, value: 'Legal' }, { col: 3, value: 'Open' }, { col: 4, value: 'sroe: new ask, answered' }]);
     });
-    it('a row they added with no number is never filled into a row the log added, where the log has a number column', () => {
+    it('a row they added with no number is the row the log added with its text', () => {
       const base = grid(); const kept = [...grid(), ['', 'Any liens?', 'sroe: none', '']]; const log = [...grid(), ['2001', 'Any liens?', '', '']];
       const m = mergeKept(table(base), table(kept), table(log), 'Question', undefined, undefined, 'No.');
-      expect(m.added).toBe(1); expect(m.steps.filter((s) => s.kind === 'cell' && s.row <= N + 1)).toEqual([]);
+      expect(m.added).toBe(0);
+      expect(m.steps).toEqual([{ kind: 'cell', row: N + 1, col: 2, value: 'sroe: none' }]);
     });
   });
   it('E: a question they reworded, with no number column, is asked about; one of their own is added', () => {
@@ -339,11 +353,14 @@ describe('an edit kept aside, merged into the log', () => {
   describe('rows that read alike', () => {
     const H = ['No.', 'Question', 'Submitted by', 'Response'];
     const t = (rows: string[][]) => table([H, ...rows]);
-    it('are lined up by their other cells, so an answer goes to the party it was for, wherever the log has put that row', () => {
+    /** merged as Update Q&A Log merges them: by the number and Submitted by columns too */
+    const merge = (base: string[][], kept: string[][], log: string[][]) =>
+      mergeKept(t(base), t(kept), t(log), 'Question', undefined, undefined, 'No.', undefined, 'Submitted by');
+    it('are lined up by their number and sender, so an answer goes to its party wherever the log puts that row', () => {
       const base = [['1', 'Provide accounts.', 'Lender A', ''], ['2', 'Other', 'Lender A', ''], ['3', 'Provide accounts.', 'Lender B', '']];
       const kept = base.map((r) => [...r]); kept[0][3] = 'Answer for A only';
       const log = [base[2], base[1], base[0]].map((r) => [...r]);                     // sorted by party
-      const m = mergeKept(t(base), t(kept), t(log), 'Question');
+      const m = merge(base, kept, log);
       expect(m.steps).toEqual([{ kind: 'cell', row: 3, col: 3, value: 'Answer for A only' }]); expect(m.clashes).toEqual([]);
     });
     it('a row the log took out is not mistaken for another that reads alike, nor for the next row reworded', () => {
@@ -352,12 +369,12 @@ describe('an edit kept aside, merged into the log', () => {
       // ldoe took out rows 1 and 2, and reworded 3
       const log = [base[2], base[3]].map((r) => [...r]);
       log[0][1] = 'Q three, reworded';
-      expect(mergeKept(t(base), t(kept), t(log), 'Question').steps).toEqual([]);
+      expect(merge(base, kept, log).steps).toEqual([]);
     });
     it('a row they added for another party is added, though the log asks the same question already', () => {
       const base = [['1', 'Provide accounts.', 'Lender A', '']];
       const kept = [...base, ['2', 'Provide accounts.', 'Lender C', 'typed by sroe']];
-      const m = mergeKept(t(base), t(kept), t(base.map((r) => [...r])), 'Question');
+      const m = merge(base, kept, base.map((r) => [...r]));
       expect(m.added).toBe(1); expect(m.steps.filter((s) => s.kind === 'cell').map((s) => s.kind === 'cell' && s.value)).toEqual([2, 'Provide accounts.', 'Lender C', 'typed by sroe']);
     });
   });
@@ -386,10 +403,13 @@ describe('an edit kept aside, merged into the log', () => {
       const m = mergeKept(t(base), t([...base, ['11', 'sroe: any liens?', '', 'Open']]), t([...base, ['11', 'sroe: any liens?', '', 'Chased']]), 'Question', undefined, undefined, 'No.');
       expect(m).toMatchObject({ steps: [], added: 0, clashes: [10] });
     });
-    it('another party asking the same question, under its own number, is a row of its own', () => {
-      const m = mergeKept(t(base), t([...base, ['12', 'Any liens?', '', 'Party B']]), t([...base, ['11', 'Any liens?', '', 'Party A']]), 'Question', undefined, undefined, 'No.');
-      expect(m).toMatchObject({ added: 1, clashes: [] });
-    });
+    it('with no sender column, one with its text under another number is that row: a cell both filled keeps the log\'s',
+      () => {
+        const kept = [...base, ['12', 'Any liens?', '', 'Party B']];
+        const log = [...base, ['11', 'Any liens?', '', 'Party A']];
+        const m = mergeKept(t(base), t(kept), t(log), 'Question', undefined, undefined, 'No.');
+        expect(m).toMatchObject({ steps: [], added: 0, clashes: [10] });
+      });
   });
   it('a row they added with no question is never written into another row with none (a heading)', () => {
     const H = ['No.', 'Question', 'Response', 'Status']; const t = (rows: string[][]) => table([H, ...rows]);
@@ -423,5 +443,26 @@ describe('an edit kept aside, merged into the log', () => {
     const kept = [base[0], base[1], ['3', q(3), '', 'Open'], ['', q(3), 'old answer', '']];
     const m = mergeKept(t(base), t(kept), t(base.map((r) => [...r])), 'Question', undefined, undefined, 'No.');
     expect(m.steps.filter((s) => s.kind === 'cell' && s.row === 3)).toEqual([{ kind: 'cell', row: 3, col: 2, value: '' }]); expect(m).toMatchObject({ added: 1, clashes: [] });
+  });
+
+  describe('a row they added, which the log holds already under the same number', () => {
+    const rows = () => [
+      ['No.', 'Question', 'Response', 'Notes'], ['1', 'Question one', '', ''], ['2', 'Question two', '', ''],
+    ];
+    const merged = (theirs: string, logs: string) => mergeKept(
+      table(rows()), table([...rows(), ['9', 'Brand new question', theirs, '']]),
+      table([...rows(), ['9', 'Brand new question', logs, '']]), 'Question', undefined, undefined, 'No.',
+    );
+    it('needs nothing when a cell is the same character for character', () => {
+      expect(merged('a', 'a')).toMatchObject({ steps: [], cells: 0, added: 0, clashes: [] });
+    });
+    it('is a clash when a cell differs by a space at an end, whichever way', () => {
+      expect(merged('a ', 'a')).toMatchObject({ steps: [], cells: 0, clashes: [2] });
+      expect(merged('a', 'a ')).toMatchObject({ steps: [], cells: 0, clashes: [2] });
+    });
+    it('brings their cell in, as they wrote it, where the log has none', () => {
+      const step = { kind: 'cell', row: 3, col: 2, value: ' a\t' };
+      expect(merged(' a\t', '')).toMatchObject({ steps: [step], cells: 1, clashes: [] });
+    });
   });
 });

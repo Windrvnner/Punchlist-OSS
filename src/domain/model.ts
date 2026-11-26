@@ -22,7 +22,9 @@ export function isRealDate(s: string): boolean {
   return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d;
 }
 
-export const id = (prefix: string) => z.string().regex(new RegExp(`^${prefix}_[0-9A-HJKMNP-TV-Z]{26}$`));
+/** a ULID as an id carries it after its kind prefix: 26 characters of Crockford base32 */
+export const ULID = '[0-9A-HJKMNP-TV-Z]{26}';
+export const id = (prefix: string) => z.string().regex(new RegExp(`^${prefix}_${ULID}$`));
 export const DealId = id('d');
 export const QuestionId = id('q');
 export const FindingId = id('f');
