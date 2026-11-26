@@ -165,8 +165,8 @@ export class AgentRun {
   /** these documents with each blackline's clean draft put just before it, each once */
   private withCleanDrafts(picked: Sent[]): Sent[] {
     if (!this.kit.cleanDrafts) return picked;
-    const cleans = new Map(picked.map((s) => [s.dealId, new Map<string, DocRecord>()]));
-    for (const dealId of cleans.keys()) cleans.set(dealId, this.kit.cleanDrafts(dealId));
+    const deals = new Set(picked.map((s) => s.dealId));
+    const cleans = new Map([...deals].map((dealId) => [dealId, this.kit.cleanDrafts!(dealId)]));
     const paired = picked.flatMap((s) => {
       const clean = cleans.get(s.dealId)?.get(s.rec.docId);
       return clean ? [this.tagOf(s.dealId, clean), s] : [s];

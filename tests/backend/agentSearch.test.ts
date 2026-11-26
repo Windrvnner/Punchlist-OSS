@@ -127,6 +127,18 @@ describe('searching the Q&A log from the chat, a page at a time', () => {
     expect(result(s, 3)).toContain(longText(shown).trim());                // page 2 starts where page 1 stopped
   }, 60_000);
 
+  it('a search of everything holds its findings page and its Q&A page together within what the conversation holds', async () => {
+    const s = setup(calls({ tool: 'search', what: 'all', query: 'lock-up ratio' }), { compactAt: 4_000 });
+    await questions(s.repo, 40);
+    await findings(s.repo, 40);
+    expect((await s.ai.answer(ask('What is outstanding?'))).ok).toBe(true);
+    const got = result(s, 2);
+    const records = got.slice(got.indexOf('Findings:'));
+    expect((records.match(/^Finding “/gm) ?? []).length).toBeGreaterThan(0);
+    expect((records.match(/^Question: /gm) ?? []).length).toBeGreaterThan(0);
+    expect(records.length).toBeLessThan(12_000 + 500);                     // 4,000 tokens of 3 characters, and footers
+  }, 60_000);
+
   it('a Q&A result is the full row, found by any of its fields', async () => {
     const extra = { askedBy: 'Lender counsel', received: '2026-10-01', workstream: 'Legal', priority: 'High',
       respondedBy: 'Sponsor', responded: '2026-11-02' };
