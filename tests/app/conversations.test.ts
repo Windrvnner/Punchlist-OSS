@@ -9,8 +9,11 @@ import { RequestDraft, ApplyDraft, RecoverDrafts, DiscardDraft, AcceptDraft, Res
 import { CreateFinding, SetFindingStatus, ReviewFinding, DeleteFinding, RestoreFinding, RestoreFindingSnapshot, Reassess, ApplyReassessment, AttachDocumentToFinding } from '../../src/app/commands/findings';
 import { registry } from '../../src/app/commands/undo';
 import { csvCodec } from '../../src/adapters/spreadsheet';
-import { ask, retry, convKey, conversationDocs, docIndex, suggestions, useAnswer, answerText, asksOpenQuestions, askVerdict, type Scope } from '../../src/app/conversations';
+import {
+  ask, retry, convKey, conversationDocs, docIndex, suggestions, useAnswer, answerText, askVerdict, type Scope,
+} from '../../src/app/conversations';
 import { MAX_ATTACHED, attachFiles, addToSources } from '../../src/app/attachments';
+import { checkedOffer, runOffer } from '../../src/app/answerOffer';
 import { dealFindings } from '../../src/app/state';
 import type { AiService, DocumentService, LocalStore } from '../../src/ports';
 import { ok, fail } from '../../src/domain/result';
@@ -208,27 +211,21 @@ describe('conversations', () => {
     expect((await ai.addresses!({ dealId: 'd', question, answer: 'The lock-up ratio is 1.25x.' }) as any).value).toEqual({ verdict: 'partly', why: 'It gives some of what the question asks for, not all of it.' });
     expect((await ai.addresses!({ dealId: 'd', question, answer: 'Insurance is in place.' }) as any).value.verdict).toBe('no');
   });
-  it('a person can ask in words whether the answer above addresses an open question; the app answers without a model', async () => {
-    expect(['Does this answer any of our open questions?', 'would that address an open question', 'Do any open questions get answered by this?'].every(asksOpenQuestions)).toBe(true);
-    expect(['Which questions are still open?', 'What is still open across my deals?', 'Answer the question about the lock-up'].some(asksOpenQuestions)).toBe(false);
-    let calls = 0; const { store, repo, local } = make({ ai: { answer: async (i) => { calls++; return mockAi({ latency: [0, 0] }, repo).answer(i); } } }); const dealId = await deal(store);
+  it('a question about the open questions is asked of the model like any other (#1054)', async () => {
+    const asked: string[] = [];
+    const { store, repo } = make({ ai: { answer: async (i) => {
+      asked.push(i.message);
+      return ok({ text: `Answered: ${i.message}`, sources: [] });
+    } } });
+    const dealId = await deal(store);
     await mockFirstPass(repo, dealId, 'Project Datum'); await sleep(20); await store.loadDeal(dealId);
     const scope: Scope = { kind: 'deal', dealId };
-    await ask(store, scope, 'Does this answer any of our open questions?');
-    expect(store.get().threads[convKey(scope)][1].text).toBe('There is no answer in this conversation yet to check against the open questions.');
     await ask(store, scope, 'Which of these would hold up financial close?');
     await ask(store, scope, 'Does this answer any of our open questions?');
-    expect(store.get().threads[convKey(scope)][5].text).toBe('None of the open questions looks to be addressed by the answer above.');
-    await store.dispatch(CreateQuestion, { dealId, text: 'Confirm the operating assumption in the base case, and whether the technical advisor and the information memorandum agree.' });
-    const q = Object.values(store.get().questions)[0]; const answer = store.get().threads[convKey(scope)][3];
-    store.putAway(answer.id, q.id);                                                // put away earlier; asking brings it back, on this PC too
-    expect(local.read('notThese')).toEqual([`${answer.id}|${q.id}`]);
-    await ask(store, scope, 'does that answer an open question?');
     const list = store.get().threads[convKey(scope)];
-    expect(list[7].text).toMatch(/^The answer above may address Q1: “Confirm the operating assumption/);
-    expect([...suggestions(store.get(), scope)]).toEqual([[answer.id, q.id]]);   // under the answer, never under the app's replies
-    expect(calls).toBe(1); expect(local.read('notThese')).toEqual([]);
-    expect(store.get().questions[q.id].response).toBe('');
+    const second = 'Does this answer any of our open questions?';
+    expect(asked).toEqual(['Which of these would hold up financial close?', second]);
+    expect(list[3]).toMatchObject({ role: 'ai', state: 'done', text: `Answered: ${second}` });
   });
   it('"Not this one" is remembered on this PC across a reload, by answer and question, ' +
     'and changes no record', async () => {
@@ -245,7 +242,11 @@ describe('conversations', () => {
     expect(again.get().ui.notThese).toEqual([`${answer.id}|${q.id}`]); expect(suggestions(again.get(), scope).size).toBe(0);
     expect(again.get().questions[q.id]).toMatchObject({ response: '', status: 'open' });
     const { store: elsewhere } = make({ kv: { ...disk(), shared: kv.shared } }); await elsewhere.boot(); expect(elsewhere.get().ui.notThese).toEqual([]);   // another PC has its own
-    again.bringBack(answer.id); expect(local.read('notThese')).toEqual([]); expect(suggestions(again.get(), scope).size).toBe(1);
+    // **Undo** on the notice is the way back (#1054)
+    again.putAway(answer.id, q.id); const undo = again.get().ui.toasts.at(-1)!;
+    expect(undo).toMatchObject({ text: 'Suggestion hidden', action: { label: 'Undo' } });
+    undo.action!.run!();
+    expect(local.read('notThese')).toEqual([]); expect(suggestions(again.get(), scope).size).toBe(1);
   });
   it('another window of the same person follows what is put away, and adds to it rather than writing over it', async () => {
     // a local store two windows share, telling each of the other's writes, as the browser's storage event does
@@ -351,5 +352,58 @@ describe('attachments', () => {
     await attachFiles(store, { dealId: a, conv }, files(6)); await attachFiles(store, { dealId: a, conv }, files(4, 6)); await sleep(30);
     expect(store.get().ui.attachments.filter((x) => x.conv === conv).length).toBe(MAX_ATTACHED); expect(MAX_ATTACHED).toBe(8);
     expect(store.get().ui.toasts.at(-1)!.text).toBe('2 not attached: 8 files is the most for one message');
+  });
+});
+
+describe('actions the model offers under its answer (#1054)', () => {
+  const answering = (offer: unknown) => ({ answer: async () => ok({ text: 'Here it is.', sources: [], offer }) });
+  it('keeps only an offer that checks out against the deals and the conversation', async () => {
+    const { store } = make(); const dealId = await deal(store, 'Kestrel');
+    const deals: Scope = { kind: 'deal', dealId }; const home: Scope = { kind: 'all' };
+    const finding: Scope = { kind: 'finding', dealId, findingId: 'f_1' };
+    const check = (raw: unknown, scope: Scope = deals) => checkedOffer(store.get(), scope, raw);
+    expect(check({ action: 'new deal' }, home)).toEqual({ kind: 'newDeal' });
+    expect(check({ action: 'open page', page: 'qa' })).toEqual({ kind: 'page', dealId, page: 'qa' });
+    expect(check({ action: 'open page', deal: 'Project Kestrel', page: 'findings' }, home))
+      .toEqual({ kind: 'page', dealId, page: 'findings' });
+    expect(check({ action: 'add unresolved' })).toEqual({ kind: 'unresolved', dealId });
+    expect(check({ action: 'log question', question: 'Is the permit final?' }))
+      .toEqual({ kind: 'question', text: 'Is the permit final?' });
+    for (const [raw, scope] of [
+      [{ action: 'open page', page: 'qa' }, home], [{ action: 'open page', deal: 'Osprey', page: 'qa' }, deals],
+      [{ action: 'open page', page: 'memo' }, deals], [{ action: 'add unresolved' }, home],
+      [{ action: 'add unresolved' }, finding], [{ action: 'log question', question: '  ' }, deals],
+      [{ action: 'log question' }, deals], [{ action: 'delete deal' }, deals], ['new deal', deals], [null, deals],
+    ] as [unknown, Scope][]) expect(check(raw, scope)).toBeUndefined();
+  });
+  it('an answer keeps its checked offer across a reload; a malformed one is dropped and the answer kept', async () => {
+    const kv = disk(); const local = new MemoryLocal();
+    const { store } = make({ kv, local, ai: answering({ action: 'open page', page: 'checklist' }) });
+    const dealId = await deal(store, 'Kestrel'); const scope: Scope = { kind: 'deal', dealId };
+    await ask(store, scope, 'Take me to the checklist');
+    expect(store.get().threads[convKey(scope)][1].offer).toEqual({ kind: 'page', dealId, page: 'checklist' });
+    const { store: again } = make({ kv, local }); await again.boot();
+    expect(again.get().threads[convKey(scope)][1].offer).toEqual({ kind: 'page', dealId, page: 'checklist' });
+    const { store: odd } = make({ ai: answering({ action: 'open page', page: 42 }) });
+    const oddDeal = await deal(odd, 'Osprey'); const oddScope: Scope = { kind: 'deal', dealId: oddDeal };
+    await ask(odd, oddScope, 'Take me to the checklist');
+    expect(odd.get().threads[convKey(oddScope)][1]).toMatchObject({ text: 'Here it is.', state: 'done' });
+    expect(odd.get().threads[convKey(oddScope)][1].offer).toBeUndefined();
+  });
+  it('runs only when pressed, checks the deal again then, and runs nothing read-only', async () => {
+    const { store } = make(); const dealId = await deal(store, 'Kestrel'); const navigate = vi.fn();
+    runOffer(store, { kind: 'newDeal' }, navigate);
+    expect(store.get().ui.newDeal).toMatchObject({ name: '', folders: [] });
+    runOffer(store, { kind: 'page', dealId, page: 'qa' }, navigate);
+    expect(navigate).toHaveBeenCalledWith(`qa-${dealId}`);
+    runOffer(store, { kind: 'unresolved', dealId }, navigate);
+    expect(store.get().ui.dialog).toEqual({ kind: 'addUnresolved', dealId });
+    runOffer(store, { kind: 'page', dealId: 'd_gone', page: 'qa' }, navigate);
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(store.get().ui.toasts.at(-1)!.text).toBe('That deal is no longer in your list');
+    vi.spyOn(store, 'readOnly').mockReturnValue('Read-only');
+    store.ui({ newDeal: null });
+    runOffer(store, { kind: 'newDeal' }, navigate);
+    expect(store.get().ui.newDeal).toBeNull();
   });
 });

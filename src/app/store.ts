@@ -1758,9 +1758,13 @@ export class Store {
   putAway(answerId: string, questionId: string) {
     const key = `${answerId}|${questionId}`; const kept = this.readNotThese().filter((x) => x !== key);
     this.keepNotThese([...kept, key].slice(-NOT_THESE_KEEP));
+    // **Undo** is the only way back (#1054)
+    this.toast('Suggestion hidden', { label: 'Undo', run: () => this.putBack(answerId, questionId) });
   }
-  /** the suggestions put away under an answer come back (a person asked in words whether it addresses an open question) */
-  bringBack(answerId: string) { this.keepNotThese(this.readNotThese().filter((x) => !x.startsWith(answerId + '|'))); }
+  /** a suggestion put away comes back: the Undo of "Not this one" (#1054) */
+  putBack(answerId: string, questionId: string) {
+    this.keepNotThese(this.readNotThese().filter((x) => x !== `${answerId}|${questionId}`));
+  }
   private keepNotThese(notThese: string[]) {
     this.set({ ...this.state, ui: { ...this.state.ui, notThese } });
     this.services.local.write('notThese', notThese);
