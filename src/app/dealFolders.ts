@@ -1,7 +1,8 @@
 import type { Deal, Folder } from '../domain/model';
 import {
-  AddFolders, FOLDER_LABEL_MAX, folderInside, foldersWithRemoved, overlap, pathKey, RestoreFolder,
+  AddFolders, FOLDER_LABEL_MAX, folderInside, foldersWithRemoved, overlap, RestoreFolder,
 } from './commands/deals';
+import { windowsPath } from '../domain/sheets';
 import { liveFolders } from './indexing';
 import type { NewDealDraftSession } from './newDealDraft';
 import type { State, UiState } from './state';
@@ -23,7 +24,7 @@ export function guessLabel(path: string) {
 }
 
 export function folderListed(folders: readonly Pick<Folder, 'path'>[], path: string) {
-  return folders.some((folder) => pathKey(folder.path) === pathKey(path));
+  return folders.some((folder) => windowsPath(folder.path) === windowsPath(path));
 }
 
 /** Restoring a folder must leave the folders already waiting to be added usable. */
@@ -86,7 +87,7 @@ export async function readDealFolder(
       : `${over.label || over.path}, already on the list, is inside that folder`);
     return;
   }
-  const removed = existing?.removed.find((folder) => pathKey(folder.path) === pathKey(path));
+  const removed = existing?.removed.find((folder) => windowsPath(folder.path) === windowsPath(path));
   if (existing && removed) return restoreDealFolder(store, existing.id, removed);
 
   draft.started(path);
