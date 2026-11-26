@@ -14,7 +14,7 @@ import {
   sendTyped, setComposerText, useAnswer, type Scope,
 } from '../../src/app/conversations';
 import { initializeKeptText, saveKeptDrafts } from '../../src/app/keptText';
-import { initialState, type Attachment, type Message } from '../../src/app/state';
+import { dealHash, initialState, type Attachment, type Message } from '../../src/app/state';
 import { Store } from '../../src/app/store';
 import { Deal, Question } from '../../src/domain/model';
 import { fail, ok } from '../../src/domain/result';
@@ -93,7 +93,7 @@ it('runs navigation, unresolved, and logging before falling through to a model a
     setComposerText(key, text);
     return sendTyped(store, launch.scope, { launchSlot: launch.launchSlot, navigate });
   };
-  await send('Open Southridge’s Q&A');
+  await send('Open Southridge Q&A');
   expect(navigate).toHaveBeenCalledWith(`qa-${dealId}`);
   await send('Create a new deal');
   expect(store.get().ui.newDeal).toMatchObject({ name: '', folders: [] });
@@ -109,6 +109,30 @@ it('runs navigation, unresolved, and logging before falling through to a model a
   expect(store.get().threads[key][0].text).toBe(instructions[18]);
   expect(asked).toHaveBeenCalledTimes(1);
   expect(convKey(composerScope(scope, true).scope)).not.toBe(key);
+});
+
+it('takes only the whole command words as commands (#1054, #1112, #1115)', async () => {
+  const { store, scope, dealId, navigate, asked } = await start();
+  const key = convKey(scope);
+  const send = (text: string) => {
+    setComposerText(key, text);
+    return sendTyped(store, scope, { navigate });
+  };
+  await send('New deal terms in the amendment: what changed from the term sheet?');
+  await send('Add question marks to the summary');
+  await send('Open the Southridge');
+  expect(store.get().ui.newDeal).toBeNull();
+  expect(Object.values(store.get().questions)).toEqual([]);
+  expect(navigate).not.toHaveBeenCalled();
+  expect(asked).toHaveBeenCalledTimes(3);
+
+  await store.dispatch(CreateDeal, { name: 'Southridge’s', folders: [] });
+  const possessive = Object.values(store.get().deals).find((deal) => deal.name === 'Project Southridge’s')!;
+  await send('Open Southridge’s');
+  await send('open southridge');
+  const hash = (id: string) => dealHash(store.get().prefs, id);
+  expect(navigate.mock.calls.map(([target]) => target)).toEqual([hash(possessive.id), hash(dealId)]);
+  expect(asked).toHaveBeenCalledTimes(3);
 });
 
 it('waits for pending attachments, checks new files, and sends the latest text only once', async () => {
@@ -153,7 +177,7 @@ it('waits for pending attachments, checks new files, and sends the latest text o
 it('clears a typed question before its save and brings it back when refused', async () => {
   const { store, scope, dealId, navigate, asked } = await start();
   const key = convKey(scope);
-  const submitted = `  Add a question: ${instructions[30]}  `;
+  const submitted = `  Log a question: ${instructions[30]}  `;
   const original = store.dispatch.bind(store);
   const refuse = vi.spyOn(store, 'dispatch').mockResolvedValueOnce({
     ok: false, error: { kind: 'storageFull', message: 'The disk is full' },
@@ -242,7 +266,7 @@ it('keeps every refused command and all typing on a deal with thousands of quest
     return fail({ kind: 'storageFull', message: 'The disk is full' });
   };
   const first = `Log a question: ${instructions[2001]}`;
-  const second = `Add a question: ${instructions[2002]}\n\n${instructions[2003]}`;
+  const second = `Log a question: ${instructions[2002]}\n\n${instructions[2003]}`;
   const third = instructions[2004];
   setComposerText(key, first);
   const sending = sendTyped(store, scope, { navigate });

@@ -103,7 +103,7 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
     const accented = await deal(m, 'Énergie-Refinance');
     const suffix = await deal(m, 'Harbor Overview');
     const base = await deal(m, 'Harbor');
-    await deal(m, "Harbor's");
+    const possessive = await deal(m, "Harbor's");
     const article = await deal(m, 'The');
     for (const [name, id] of [
       ['Harbor-Refinance', hyphenated],
@@ -111,7 +111,8 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
       ['Project: Énergie-Refinance', accented],
       ['E\u0301nergie-Refinance\n', accented],
       ['Harbor Overview', suffix],
-      ['Harbor’s', base],
+      ['Harbor', base],
+      ["Harbor's", possessive],
       ['The', article],
     ]) {
       expect(navIntent(m.store, `Open ${name} Q&A`)).toBe(true);
