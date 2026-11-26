@@ -79,6 +79,22 @@ describe('folder names in any alphabet (#1154)', () => {
   });
 });
 
+describe('marks and ampersands in folder names (#1154)', () => {
+  it('keeps combining marks inside a word', () => {
+    expect(folderKey('दिन')).not.toBe(folderKey('दीन'));
+  });
+  it('keeps "O&M" and "OM" apart when one name is the one typed (#1154)', () => {
+    const dirs = foldersOf(['VDR/O&M/A.pdf', 'VDR/OM/B.pdf']);
+    expect(matchFolders(dirs, 'the O&M folder')).toEqual(['VDR/O&M']);
+    expect(matchFolders(dirs, 'OM')).toEqual(['VDR/OM']);
+  });
+  it('a leading number is not part of the name: "O&M" and "04. O&M" are both equal, so the words decide', () => {
+    const dirs = foldersOf(['VDR/04. O&M/A.pdf', 'VDR/O&M/B.pdf', 'VDR/OM/C.pdf']);
+    expect(matchFolders(dirs, 'O&M')).toEqual(['VDR/04. O&M', 'VDR/O&M', 'VDR/OM']);
+    expect(matchFolders(dirs, '04. O&M')).toEqual(['VDR/04. O&M']);   // a number said picks that folder alone
+  });
+});
+
 describe('reading a whole folder from the chat', () => {
   /** the grid permit's tag, as the batch that read it gave it, and a stand-in that finds the expiry in it alone */
   const gridReads = (seen: { tag?: string }) => (c: Call) => { const g = listed(c).find((x) => x.path.endsWith('Interconnection permit.pdf')); if (g) seen.tag = g.tag; return g ? { text: 'It expires on March 1, 2031. [1]', sources: [{ doc: g.tag, page: 1, quote: 'expires on March 1, 2031' }] } : { text: '', sources: [] }; };

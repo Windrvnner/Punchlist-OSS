@@ -25,6 +25,19 @@ export function foldersOf(paths: string[]): string[] {
   return [...out];
 }
 
+/** a name as written: lower case, without a leading number, "the" or the word "folder"; punctuation such as "&" kept */
+const asWritten = (s: string) => s.trim().toLowerCase().replace(/^\d+(?:[.\s]+\d+)*[.\s-]+/, '').replace(/^the\s+/, '')
+  .replace(/\s+folders?$/, '');
+
+/**
+ * The one folder whose last name is the name typed, compared as written (#1154): the words compare "O&M" and "OM" as
+ * one, so a folder named exactly as typed wins over the other. Several equal names, or none, leave it to the words.
+ */
+const namedAsTyped = (dirs: string[], typed: string) => {
+  const same = dirs.filter((d) => asWritten(d.split('/').at(-1)!) === asWritten(typed));
+  return same.length === 1 ? same : [];
+};
+
 /**
  * The folders that a person's words name, among `dirs` (paths from the data room, "VDR/04. Permits/Environmental").
  * A folder matches when its last names are the ones said ("Permits", or "Permits/Environmental"); failing any, when its
@@ -39,7 +52,9 @@ export function matchFolders(dirs: string[], said: string): string[] {
   const numbered = parts.some((p) => /^\d/.test(plain(p)));
   const words = parts.map(folderKey).join(' ').split(' ').filter(Boolean);
   const byWords = () => (!words.length ? [] : dirs.filter((d) => { const own = plain(d.split('/').at(-1)!).split(' '); return words.every((w) => own.includes(w)); }));
-  const found = [...(numbered ? [ending(plain)] : []), ending(folderKey)].find((x) => x.length) ?? byWords();
+  const typed = parts.length === 1 ? namedAsTyped(dirs, said) : [];
+  const byName = () => [...(numbered ? [ending(plain)] : []), ending(folderKey)].find((x) => x.length) ?? byWords();
+  const found = typed.length ? typed : byName();
   return found.filter((d) => !found.some((x) => x !== d && d.startsWith(`${x}/`))).sort();
 }
 
