@@ -152,7 +152,7 @@ function Response({ question, onOpen }: { question: Question; onOpen: (src: Sour
 /** One exchange: what was asked, with any files sent with it, and the answer, or where it has got to. */
 export function Exchange({ scope, mine, reply, waiting, onOpen, suggest }: {
   scope: Scope; mine: Message; reply: Message | undefined; waiting: string | undefined;
-  onOpen: (src: Source, ask?: string) => void; suggest: string | undefined;
+  onOpen: (src: Source, ask?: string) => void; suggest: string[] | undefined;
 }) {
   const store = useStore();
   let answer: ComponentChildren;

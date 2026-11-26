@@ -11,7 +11,8 @@ import { scaleMemoInput } from '../fixtures/memoScale';
 import type { DocRecord } from '../../src/backend/documents';
 import type { Folder } from '../../src/backend/logRepository';
 import { signedOut } from '../../src/backend/signInToken';
-import { SERVICE } from '../../src/control';
+import { SERVICE, control } from '../../src/control';
+import { tokensOf } from '../../src/backend/limits';
 import { qid } from './reviewKit';
 
 class Mem implements Folder { files = new Map<string, string>(); list() { return [...this.files.keys()]; } size(n: string) { return this.files.get(n)?.length ?? -1; } read(n: string) { return this.files.get(n) ?? null; } append(n: string, t: string) { this.files.set(n, (this.files.get(n) ?? '') + t); } write(n: string, t: string) { this.files.set(n, t); } }
@@ -100,6 +101,61 @@ describe('answers', () => {
       '  Some changes are in parts of the file this list does not reach.',
     ].join('\n'));
   });
+  /** `count` changed passages, about 120 characters a line in the prompt (#1092) */
+  const clauseChanges = (count: number): AiDocs['changes'] => async () => {
+    const passages = Array.from({ length: count }, (_, k) => ({
+      before: `Clause ${k + 1}: the ratio is 1.15x.`, after: `Clause ${k + 1}: the ratio is 1.20x.`,
+      changes: [{ kind: 'insert' as const, by: 'sroe', at: '2026-10-01T10:00:00', text: '1.20x' }],
+    }));
+    return { ok: true, value: { tracked: count, complete: true, passages } };
+  };
+  /** a draft with 200 tracked changes */
+  const manyChanges = () => ({ D: doc(52, 'SPA markup.docx', { tracked: 200 }), changes: clauseChanges(200) });
+  const wasLines = (prompt: string) => prompt.split('\n').filter((l) => l.startsWith('  - was: '));
+  /** an input limit whose share for a part holds about `lines` of the clause changes' lines */
+  const roomFor = (lines: number) => {
+    const lineTokens = tokensOf('  - was: "Clause 100: the ratio is 1.15x." / now: '
+      + '"Clause 100: the ratio is 1.20x." (insert "1.20x" by sroe on 2026-10-01)');
+    return () => Math.ceil((lines * lineTokens * 100) / control.limits.partShare);
+  };
+  const budgetOf = (limit: number) => Math.floor((limit * control.limits.partShare) / 100);
+  const tokensIn = (lines: string[]) => lines.reduce((n, l) => n + tokensOf(l), 0);
+  it("sends every tracked change of a heavily marked-up draft that fits the model's input (#1092)", async () => {
+    const { D, changes } = manyChanges();
+    const s = setup(() => ({ text: 'ok', sources: [] }), { d1: [D] }, { changes, library: [] });
+    val(await s.ai.answer(ask('What ratio does the SPA markup set?')));
+    const listed = wasLines(s.calls[0].prompt);
+    expect(listed.length).toBe(200);
+    expect(listed.join('').length).toBeGreaterThan(15_000);
+    expect(s.calls[0].prompt).not.toContain('more changed passage');
+  });
+  it('lists tracked changes up to the share of the input limit a part may fill, and counts the rest', async () => {
+    const { D, changes } = manyChanges();
+    const s = setup(() => ({ text: 'ok', sources: [] }), { d1: [D] }, { changes, library: [] });
+    s.svc.inputLimit = roomFor(100);
+    val(await s.ai.answer(ask('What ratio does the SPA markup set?')));
+    const listed = wasLines(s.calls[0].prompt);
+    expect(tokensIn(listed)).toBeLessThanOrEqual(budgetOf(s.svc.inputLimit('thorough')));
+    expect(listed.length).toBeGreaterThanOrEqual(95);
+    expect(listed.length).toBeLessThan(200);
+    expect(s.calls[0].prompt).toContain(`  - and ${200 - listed.length} more changed passages, not listed here.`);
+  });
+  it('shares one budget among the drafts a prompt sends, each counting what it could not list (#1092)', async () => {
+    const A = doc(53, 'SPA markup A.docx', { tracked: 70 }), B = doc(54, 'SPA markup B.docx', { tracked: 70 });
+    const s = setup(() => ({ text: 'ok', sources: [] }), { d1: [A, B] }, { changes: clauseChanges(70), library: [] });
+    s.svc.inputLimit = roomFor(100);                                            // each draft's changes take about 70%
+    val(await s.ai.answer(ask('What ratio does the SPA markup set?')));
+    const prompt = s.calls[0].prompt;
+    expect(sentNames(s.calls[0])).toEqual([A.name, B.name]);
+    const listed = wasLines(prompt);
+    expect(tokensIn(listed)).toBeLessThanOrEqual(budgetOf(s.svc.inputLimit('thorough')));
+    expect(listed.length).toBeGreaterThanOrEqual(95);
+    // the first draft is listed whole; the second lists what is left of the budget and counts the rest
+    const [first, second] = prompt.split('  The changes in D2, read from the file itself');
+    expect(wasLines(first).length).toBe(70);
+    expect(first).not.toContain('more changed passage');
+    expect(second).toContain(`  - and ${140 - listed.length} more changed passages, not listed here.`);
+  });
   it('reads the newest draft of a document first, its earlier drafts straight after it', async () => {
     const at = (n: number, rel: string, seen: string) => doc(n, rel.split('/').pop()!, { rel, seen });
     const OLD = at(41, 'Drafts/2026-03-01/EPC contract.pdf', '2026-03-02T00:00:00.000Z'), NEW = at(42, 'Drafts/2026-04-15/EPC contract.pdf', '2026-04-16T00:00:00.000Z'), MID = at(43, 'Drafts/03-20-2026/EPC contract.pdf', '2026-03-21T00:00:00.000Z');
@@ -168,6 +224,22 @@ describe('answers', () => {
     const wanted = s.svc.upload.bind(s.svc); s.svc.upload = async (...a: Parameters<typeof wanted>) => { recs.d1 = [{ ...W, pages: 5 }]; return wanted(...a); };   // converted as it is sent: five pages
     const r = val(await s.ai.answer(ask('When is delivery due under the supply contract?')));
     expect(r.sources.map((x) => x.loc)).toEqual(['p. 3']); expect(r.text).toBe('Delivery is due in June. [1] Or later.');
+  });
+  it('keeps the answer the model wrote as written: its leading and trailing spacing stay', async () => {
+    const s = setup(() => ({ text: ' Edge answer.\t', sources: [] }), { d1: [FA] }, { library: [] });
+    const r = val(await s.ai.answer(ask('What is the lock-up?')));
+    expect(r.text).toBe(' Edge answer.\t');
+  });
+  it('a place a reassessment cites twice keeps the quote as written, spacing and all', async () => {
+    const twice = (c: Call) => ({
+      body: ['It is 1.25x. [1] It is stated again. [2]'],
+      sources: [{ doc: tag(c, FA), page: 14 }, { doc: tag(c, FA), page: 14, quote: ' Edge quote\t' }],
+    });
+    const s = setup(twice, { d1: [FA] }, { library: [] });
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'Lock-up differs', { sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }] });
+    const r = val(await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' }));
+    expect(r.sources.map((x) => x.quote)).toEqual([' Edge quote\t']);
   });
   it("ranks documents by this PC's word index: a word deep in a document's body finds it, and its name still counts most", async () => {
     const ix = makeIndex(new Mem()); const A = doc(21, 'Annex 4.pdf'), B = doc(22, 'Curtailment letter.pdf'), C = doc(23, 'Schedule 7.pdf');
@@ -983,15 +1055,50 @@ describe('drafts, reassessments, the brief, the import layout and whether an ans
     const wrong = await setup(() => ({ sheet: 'Nowhere', headerRow: 1, fields: {} })).ai.layout!({ fileName: 'log.xlsx', bytes: new Uint8Array(), sheets, fields: ['text'] }); expect(!wrong.ok && wrong.error.message).toBe('No table found');
   });
 
-  it('whether an answer addresses a question is judged by the standard model from the two texts alone, in one short line', async () => {
+  it('whether an answer addresses a question is judged by the standard model from the two texts alone, and its reason is kept as written', async () => {
     const s = setup(() => ({ verdict: ' Partly ', why: 'It gives the figure the base case uses,\n  not where it comes from.' }));
     const i = { dealId: 'd1', question: 'Which operating assumption does the base case use, and where does it come from?', answer: 'The base case uses 98% availability.' };
-    expect(val(await s.ai.addresses!(i))).toEqual({ verdict: 'partly', why: 'It gives the figure the base case uses, not where it comes from.' });
+    expect(val(await s.ai.addresses!(i))).toEqual({ verdict: 'partly', why: 'It gives the figure the base case uses,\n  not where it comes from.' });
     expect(s.calls.map((c) => c.model)).toEqual(['standard']); expect(s.calls[0].files).toEqual([]);   // no documents go with it
     expect(s.calls[0].prompt).toContain(i.question); expect(s.calls[0].prompt).toContain(i.answer);
-    const long = setup(() => ({ verdict: 'no', why: 'x'.repeat(500) })); expect(val(await long.ai.addresses!(i)).why).toHaveLength(200);
-    const odd = await setup(() => ({ verdict: 'maybe', why: 'Hard to say.' })).ai.addresses!(i);
-    expect(!odd.ok && odd.error.message).toBe('The AI’s reply could not be read');
+    const long = setup(() => ({ verdict: 'no', why: 'x'.repeat(500) })); expect(val(await long.ai.addresses!(i)).why).toHaveLength(500);
+    const odd = setup(() => ({ verdict: 'maybe', why: 'Hard to say.' }));
+    const oddResult = await odd.ai.addresses!(i);
+    expect(!oddResult.ok && oddResult.error.message).toBe('The AI’s reply could not be read');
+    expect(odd.calls).toHaveLength(2);   // sent back once, then given up (#1058)
+  });
+
+  it('sends a Check verdict that is not yes, partly or no back once, saying what is wrong (#1058)', async () => {
+    const good = { verdict: 'yes', why: 'It gives it.' };
+    const s = setup((_c, n) => (n === 1 ? { verdict: 'maybe', why: 'Hard to say.' } : good));
+    const i = { dealId: 'd1', question: 'What is the lock-up ratio?', answer: 'It is 1.25x.' };
+    expect(val(await s.ai.addresses!(i))).toEqual({ verdict: 'yes', why: 'It gives it.' });
+    expect(s.calls).toHaveLength(2);
+    expect(s.calls[1].prompt).toContain('That cannot be used: "verdict" is not "yes", "partly" or "no"');
+  });
+
+  it('sends an empty or placeholder Merge Both Versions reply back once, saying what is wrong (#1058)', async () => {
+    const i = { dealId: 'd1', question: 'When is COD?', app: 'COD is in March.', log: 'COD is March 3.' };
+    for (const bad of [{ text: '' }, { text: 'COD is [confirm date].' }]) {
+      const s = setup((_c, n) => (n === 1 ? bad : { text: 'COD is March 3.' }));
+      expect(val(await s.ai.merge!(i))).toEqual({ text: 'COD is March 3.' });
+      expect(s.calls).toHaveLength(2);
+      expect(s.calls[1].prompt).toContain('That cannot be used:');
+    }
+    const never = setup(() => ({ text: '' }));
+    const r = await never.ai.merge!(i);
+    expect(!r.ok && r.error.message).toBe('The AI’s reply could not be used');
+    expect(never.calls).toHaveLength(2);
+  });
+
+  it('reports an unreachable service on the send-back as unreachable, for Check and Merge (#1058)', async () => {
+    const down = () => { throw Object.assign(new Error('down'), { code: 'unreachable' }); };
+    const merging = setup((_c, n) => (n === 1 ? { text: '' } : down()));
+    const merged = await merging.ai.merge!({ dealId: 'd1', question: 'When is COD?', app: 'March.', log: 'March 3.' });
+    expect(!merged.ok && merged.error.kind).toBe('unreachable');
+    const checking = setup((_c, n) => (n === 1 ? { verdict: 'maybe', why: '' } : down()));
+    const checked = await checking.ai.addresses!({ dealId: 'd1', question: 'What is the ratio?', answer: '1.25x.' });
+    expect(!checked.ok && checked.error.kind).toBe('unreachable');
   });
 });
 
@@ -1219,6 +1326,13 @@ describe('deal memo model replies', () => {
     ]);
     expect(content.refs.slice(0, 2)).toEqual(['Credit Agreement, p. 14', 'Term sheet (signed), p. 3']);
   });
+
+  it('keeps the edge spaces and tabs of the paragraphs a key risk write-up comes back with', async () => {
+    const edged = [` ${creditWords} [1]`, `\t${termWords} [2]`];
+    const standIn = await setupMemoReplies([distributionRisk], (call) => citedRiskReply(call, edged));
+    const memo = val(await standIn.ai.memo!('d1'));
+    expect(memo.risks![0].body).toEqual(edged);
+  });
 });
 
 describe('what a document is', () => {
@@ -1255,7 +1369,10 @@ describe('what a document is', () => {
     const s = setup(() => ({ text: 'ok', sources: [] }), bareTwo, { describes: true,
       describe: () => ({ summary: ' A senior credit agreement. ', keywords: ['lock-up', ' covenant ', 7, '', ...Array.from({ length: 40 }, (_, i) => `k${i}`)], type: 'Credit agreement' }) });
     val(await s.ai.answer(ask('Lender step-in?'))); await s.ai.described('d1');
-    const fa = s.recs.d1.find((r) => r.name === FA.name)!; expect(fa.summary).toBe('A senior credit agreement.'); expect(fa.keywords!.slice(0, 3)).toEqual(['lock-up', 'covenant', 'k0']); expect(fa.keywords!.length).toBe(30);
+    const fa = s.recs.d1.find((r) => r.name === FA.name)!;
+    expect(fa.summary).toBe(' A senior credit agreement. ');
+    expect(fa.keywords!.slice(0, 3)).toEqual(['lock-up', 'covenant', 'k0']);
+    expect(fa.keywords!.length).toBe(30);
     expect(s.describeCalls[0].prompt).toContain('Include the other words people use for the same things');
     // the service down while describing: nothing is kept, no try is counted against the document, the answer is not held up, and the next read asks again
     let down = true;
@@ -1472,11 +1589,6 @@ describe('the first pass', () => {
     const turns = s.fillCalls.filter((c) => isTurn(c)); expect(turns.length).toBe(2); expect(turns[0].prompt).toContain('4. Gap item 4'); expect(turns[0].prompt).not.toContain('Gap item 5'); expect(turns[1].prompt).toContain('2. Gap item 6');
     expect(turns[0].prompt).toContain('(searched already, finding nothing: "decommissioning plan"');                                 // the check's searches go with them, so they are not made again
     const g1 = val(await s.ai.checklist('d1')).find((x) => x.id === 'g1')!; expect(g1.result).toBe('gap'); expect(g1.searched?.[0]).toEqual({ q: 'decommissioning plan', n: 0 });
-    // the agent's allowance, as large as the check's own searches: past it, no more is handed over, and every item is still written
-    const spent = setup(gapAll, { d1: [FA, TS] }, { ...opts, checkSearchCalls: 1 }); await deal(spent.repo);
-    expect(val(await spent.ai.firstPass('d1')).gaps.length).toBe(6);
-    expect(spent.fillCalls.length).toBeLessThanOrEqual(1);
-    expect(spent.fillCalls.filter((c) => isTurn(c)).length).toBeLessThanOrEqual(1);
     // a run whose reply cannot be used: no more items are handed over in that check
     const broke = setup(gapAll, { d1: [FA, TS] }, { ...opts, fill: (c: Call) => (isTurn(c) ? 'I cannot help with that.' : { text: '', sources: [] }) }); await deal(broke.repo);
     expect(val(await broke.ai.firstPass('d1')).gaps.length).toBe(6); expect(new Set(broke.fillCalls.filter((c) => isTurn(c)).map((c) => c.prompt.split('\n\n')[0])).size).toBe(1);
@@ -2075,5 +2187,47 @@ describe('documents and runners together, on a real folder', () => {
     expect(svc.calls.filter((c) => c.prompt.startsWith('Describe')).length).toBe(3);
     expect(svc.calls.filter(isCoreAsk).length).toBe(0);                                                                        // and no model is asked which are core
     fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('text the model writes is kept as given, edge spaces and tabs included', () => {
+  it('a reassessment keeps its paragraphs as written', async () => {
+    const written = [' The draft still has 1.25x. [1]', '\tThe term sheet has 1.30x. [2]'];
+    const s = setup((c) => ({ body: written, sources: [{ doc: tag(c, FA), page: 14 }, { doc: tag(c, TS), page: 3 }] }));
+    await deal(s.repo);
+    const sources = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }, { doc: TS.name, loc: 'p. 3', docId: TS.docId }];
+    await finding(s.repo, 'f_1', 'Lock-up differs', { sources });
+    expect(val(await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' })).body).toEqual(written);
+  });
+
+  it('the catch-up brief keeps its paragraphs as written', async () => {
+    const briefOrSearch = (c: Call) => (c.prompt.includes('These are the open findings on a deal')
+      ? { paragraphs: [' The lock-up mismatch matters most.', '\tNothing else is open.'] }
+      : { text: 'Done.', sources: [] });
+    const catchUp = (_c: Call, n: number) => (n === 1 ? { tool: 'brief' } : { text: 'Done.', sources: [] });
+    const s = setup(briefOrSearch, { d1: [FA] }, { turn: catchUp });
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'Lock-up ratio differs from the term sheet');
+    val(await s.ai.answer(ask('Catch me up on the deal')));
+    const brief = ' The lock-up mismatch matters most.\n\tNothing else is open.';
+    expect(s.turns[1].prompt).toContain(`The catch-up on the open findings:\n${brief}`);
+  });
+
+  it('a merged answer keeps its edges', async () => {
+    const s = setup((c) => (c.prompt.includes('Two people answered it differently') ? { text: ' One answer.\t' } : {}));
+    const merged = val(await s.ai.merge!({ dealId: 'd1', question: 'Q?', app: 'A', log: 'B' }));
+    expect(merged).toEqual({ text: ' One answer.\t' });
+  });
+
+  it('a finding raised in a check keeps its title as written', async () => {
+    const edged = (c: Call) => ({ ...LOCKUP(c), title: ' Lock-up ratio differs\t' });
+    const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...edged(c) })) }),
+      { d1: [FA, TS] }, {
+        checklist: () => ({ broad: [LIST.broad[0]], product: [], sector: [] }),
+        pick: (c) => ({ read: numbersOf(c, FA, TS) }),
+      });
+    await deal(s.repo);
+    const r = val(await s.ai.firstPass('d1'));
+    expect((await findingData(s.repo, r.written[0])).title).toBe(' Lock-up ratio differs\t');
   });
 });

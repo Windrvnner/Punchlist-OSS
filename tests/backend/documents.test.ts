@@ -13,8 +13,8 @@ import {
 import type { Folder } from '../../src/backend/logRepository';
 import { nodeFolder } from '../../src/backend/nodeFolder';
 import { pdfText } from '../fixtures/pdfText';
-import { wordIndex } from '../../src/backend/wordIndex';
-import { tokens, fold } from '../../src/backend/words';
+import { countWords, wordIndex } from '../../src/backend/wordIndex';
+import { tokens, fold, topWords } from '../../src/backend/words';
 import { StoreKeeper, fromStoreName } from '../../src/backend/storeKeeper';
 import { StandInService } from '../../src/backend/service';
 import { nodeAi } from '../../src/backend/ai';
@@ -180,6 +180,15 @@ describe('documents on real folders', () => {
     expect((await a.docs.page('d1', { doc: 'Side Letter.pdf', docId: idOf(pdf('side letter')) }, 'p. 1')).ok).toBe(true);   // a citation already made still opens
     now = null; expect(a.docs.records('d1').map((r) => r.name)).toContain('Side Letter.pdf');   // a deal that cannot be read hides nothing
   });
+  it('a deal folder written with / or a trailing separator in another case still keeps its documents', async () => {
+    const { root, vdr } = room();
+    const a = pc(root, 'office');
+    val(await a.docs.index('d1', [folder(vdr)]));
+    await a.docs.settled('d1');
+    const written = vdr.replace(/\//g, '\\').toUpperCase() + '\\';
+    const b = pc(root, 'office', undefined, { foldersNow: () => [written] });
+    expect(b.docs.records('d1').map((r) => r.name)).toContain('Credit Agreement.pdf');
+  });
   it('counts what is in a folder, leaving out what the system keeps for itself', async () => {
     const { root, vdr } = room(); const a = pc(root, 'office');
     expect(val(await a.docs.scanFolder(vdr))).toEqual({ files: 5, size: `${Math.round((FA.length + SHA.length + EYR.length + MODEL.length + NOTES.length) / 1e3)} KB` });
@@ -322,15 +331,198 @@ describe('documents on real folders', () => {
     const end = val(await pc(root, 'A').docs.poll('d1')); expect(end.done).toBe(true); expect(end.stopped).toBeUndefined(); expect(end.folders).toMatchObject([{ path: vdr, files: 2, indexed: 2 }]);
   });
 
+  it('spreadsheets are read after every other file, so a large one holds up none (#427)', async () => {
+    const root = tmp(); const vdr = path.join(root, 'vdr');
+    put(vdr, 'A large.csv', 'ledger,entry\n'.repeat(1000));
+    put(vdr, 'B small.csv', 'ledger,entry\n');
+    put(vdr, 'C Agreement.pdf', FA);
+    const a = pc(root, 'office'); expect((await indexAll(a, vdr)).log).toEqual(['Indexed 3 files']);
+    const order = a.docs.records('d1').map((r) => r.name);
+    expect(order.indexOf('C Agreement.pdf')).toBeLessThan(order.indexOf('A large.csv'));
+    expect(order.indexOf('C Agreement.pdf')).toBeLessThan(order.indexOf('B small.csv'));
+  });
+
+  // a converter that cannot read any spreadsheet while `down.now` is set
+  const flakyConverter = (down: { now: boolean }) => {
+    const { convert } = standInConverter();
+    const read = convert.sheets!;
+    const sheets = (file: string) => (down.now ? Promise.reject(new Error('down')) : read(file));
+    return Object.assign(convert, { sheets });
+  };
+
+  it('a deal-folder spreadsheet not read is read by the next freshen, not skipped as unchanged (#427)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Credit Agreement.pdf', FA);
+    put(vdr, 'Budget.xlsx', MODEL);
+    const down = { now: true };
+    const a = pc(root, 'office', undefined, { convert: flakyConverter(down) });
+    const budget = () => a.docs.records('d1').find((d) => d.name === 'Budget.xlsx');
+    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Budget.xlsx');
+    expect(budget()?.words).toBeUndefined();
+    // still down: the look reads the folder again and names it again
+    val(await a.docs.freshen!('d1'));
+    await a.docs.settled('d1');
+    expect(val(await a.docs.poll('d1')).log).toContain('1 file could not be read: Budget.xlsx');
+    down.now = false;
+    expect(val(await a.docs.freshen!('d1'))).toBe('running');
+    await a.docs.settled('d1');
+    expect(budget()?.words).toEqual(MODEL_WORDS);
+    expect(val(await a.docs.poll('d1')).log).toEqual(['Indexed 2 files']);
+    expect(val(await a.docs.freshen!('d1'))).toBe('same');
+  });
+
+  it('a spreadsheet keeps the cells that are only numbers, in its words and in the index (#1023)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Ledger.csv', 'Item,Amount\nLoan,4567\nFee,4567\nTax,2026-03-14\n');
+    const a = pc(root, 'office', undefined, { index: true });
+    await indexAll(a, vdr);
+    const record = a.docs.records('d1').find((r) => r.name === 'Ledger.csv')!;
+    expect(record.words).toContain('4567');
+    expect(record.words).toContain('2026');
+    const kept = wordIndex(a.local).score('d1', new Set(['4567']), [{ docId: record.docId, named: new Set() }]);
+    expect(kept.get(record.docId)).toBeGreaterThan(0);
+  });
+
+  it('a successful read replaces an empty word list an earlier build recorded, also on reindex (#1023)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    const RATES = 'Tenor,Margin\nSenior term loan,2.25\n';
+    put(vdr, 'Rates.csv', RATES);
+    const docId = idOf(RATES);
+    const a = pc(root, 'office', undefined, { index: true });
+    await indexAll(a, vdr);
+    const oldLine = {
+      v: 1, pc: 'office', docId, hash: hashBytes(bytesOf(RATES)), name: 'Rates.csv', folder: vdr, rel: 'Rates.csv',
+      size: bytesOf(RATES).length, words: [],
+    };
+    const sayEmpty = (at: string) => fs.appendFileSync(
+      path.join(root, 'shared', 'docs-office-d1.jsonl'),
+      `${JSON.stringify({ ...oldLine, at })}\n`,
+    );
+    const rates = (x: ReturnType<typeof pc>) => x.docs.records('d1').find((r) => r.name === 'Rates.csv')!;
+    for (const [i, at] of ['2026-12-01T00:00:00.000Z', '2026-12-02T00:00:00.000Z'].entries()) {
+      sayEmpty(at);
+      fs.rmSync(path.join(root, 'local-office', 'words3-d1.jsonl'), { force: true });
+      const restarted = pc(root, 'office', undefined, { index: true });
+      expect(rates(restarted).words).toEqual([]);
+      await indexAll(restarted, vdr);
+      expect(rates(restarted).words, `reindex ${i + 1}`).toContain('senior');
+    }
+  });
+
+  it('an older version’s index file is not enough: the next freshen reads the folders once more (#1023)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Rates.csv', 'Tenor,Margin\nSenior term loan,2.25\n');
+    const a = pc(root, 'office', undefined, { index: true });
+    await indexAll(a, vdr);
+    const current = path.join(root, 'local-office', 'words3-d1.jsonl');
+    fs.renameSync(current, path.join(root, 'local-office', 'words-d1.jsonl'));      // what the older build left
+    const restarted = pc(root, 'office', undefined, { index: true });
+    expect(val(await restarted.docs.freshen!('d1'))).toBe('running');
+    await restarted.docs.settled('d1');
+    expect(fs.existsSync(current)).toBe(true);
+    const record = restarted.docs.records('d1').find((r) => r.name === 'Rates.csv')!;
+    const asked = [{ docId: record.docId, named: new Set<string>() }];
+    const found = wordIndex(restarted.local).score('d1', new Set(['senior']), asked);
+    expect(found.get(record.docId)).toBeGreaterThan(0);
+    expect(val(await restarted.docs.freshen!('d1'))).toBe('same');
+  });
+
+  it('a failed read of a spreadsheet recorded with an empty word list is not saved as no text (#1023)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Credit Agreement.pdf', FA);
+    put(vdr, 'Budget.xlsx', MODEL);
+    const down = { now: false };
+    await indexAll(pc(root, 'office', undefined, { index: true, convert: flakyConverter(down) }), vdr);
+    // what an earlier build left: an empty record, and an index that lacks the file while another document keeps it
+    const docId = idOf(MODEL);
+    const indexFile = path.join(root, 'local-office', 'words3-d1.jsonl');
+    const others = fs.readFileSync(indexFile, 'utf8').split('\n').filter((l) => l && JSON.parse(l).d !== docId);
+    fs.writeFileSync(indexFile, `${others.join('\n')}\n`);
+    const emptied = { v: 1, pc: 'office', at: '2026-12-01T00:00:00.000Z', docId, hash: hashBytes(MODEL),
+      name: 'Budget.xlsx', folder: vdr, rel: 'Budget.xlsx', size: MODEL.length, words: [] };
+    fs.appendFileSync(path.join(root, 'shared', 'docs-office-d1.jsonl'), `${JSON.stringify(emptied)}\n`);
+    down.now = true;
+    const a = pc(root, 'office', undefined, { index: true, convert: flakyConverter(down) });
+    const log = (await indexAll(a, vdr)).log.join(' ');
+    expect(log).toContain('1 file could not be read: Budget.xlsx');
+    expect(log).not.toContain('no readable text');
+    down.now = false;
+    expect(val(await a.docs.freshen!('d1'))).toBe('running');
+    await a.docs.settled('d1');
+    expect(a.docs.records('d1').find((r) => r.name === 'Budget.xlsx')?.words).toEqual(MODEL_WORDS);
+  });
+
+  it('a spreadsheet that really has no words is read once and not said again by later runs (#1023)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Blank.csv', ',,\n,,\n');
+    const a = pc(root, 'office', undefined, { index: true });
+    await indexAll(a, vdr);
+    const docId = idOf(',,\n,,\n');
+    const said = () => fs.readFileSync(path.join(root, 'shared', 'docs-office-d1.jsonl'), 'utf8')
+      .split('\n').filter((l) => l.includes(docId)).length;
+    expect(a.docs.records('d1').find((r) => r.docId === docId)?.words).toEqual([]);
+    const before = said();
+    await indexAll(a, vdr);
+    await indexAll(pc(root, 'office', undefined, { index: true }), vdr);
+    expect(said()).toBe(before);
+  });
+
+  it('a spreadsheet of 250,000 different words is counted as the same text read whole (#427)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    // each row a word of its own (four letters after a "z", so no two rows share one) and a note every row shares
+    const letters = (i: number) => [3, 2, 1, 0].map((p) => String.fromCharCode(97 + (Math.floor(i / 26 ** p) % 26)));
+    const rows = Array.from({ length: 250_000 }, (_, i) => [`z${letters(i).join('')}`, `ledger entry ${i}`]);
+    put(vdr, 'Names.csv', rows.map((row) => row.join(',')).join('\n'));
+    const a = pc(root, 'office', undefined, { index: true });
+    await indexAll(a, vdr);
+    const text = rows.flat().join('\n');
+    const expected = countWords(text);
+    expect(expected.counts.size).toBeGreaterThan(200_000);
+    const record = a.docs.records('d1').find((r) => r.name === 'Names.csv')!;
+    expect(record.words).toEqual(topWords(text));
+    const lines = fs.readFileSync(path.join(root, 'local-office', 'words3-d1.jsonl'), 'utf8').trim().split('\n');
+    const line = lines.map((l) => JSON.parse(l)).find((l) => l.d === record.docId);
+    expect(line.n).toBe(expected.length);
+    expect(line.t).toBe(expected.title.join(' '));
+    expect(line.w).toBe([...expected.counts].map(([w, n]) => `${w}:${n}`).join(' '));
+  }, 60000);
+
   it('a scan has no words and is indexed all the same; a long document is counted from pages spread through it; a record from before words were kept gets them', async () => {
     const root = tmp(); const vdr = path.join(root, 'vdr'); const blank = new TextEncoder().encode(new TextDecoder().decode(pdf('', 2)).replace(/\(, page \d\) Tj/g, (m) => ' '.repeat(m.length)));
     put(vdr, 'Scan.pdf', blank); put(vdr, 'Credit Agreement.pdf', FA); put(vdr, 'Rates.csv', 'Tenor,Margin\nSenior term loan,2.25\nSenior term loan,2.50\nJunior loan,6\n');
     const a = pc(root, 'office'); const p = await indexAll(a, vdr); const by = (n: string) => a.docs.records('d1').find((r) => r.name === n)!;
-    expect(p.log).toEqual(['Indexed 3 files', '1 file has no readable text and can be found by name only: Scan.pdf']); expect(by('Scan.pdf')).toMatchObject({ pages: 2, words: [] });   // and the person is told which expect(by('Rates.csv').words).toEqual(['loan', 'senior', 'term', 'junior', 'margin', 'tenor']);
-    // a spreadsheet too large to open quickly is indexed and found by its path, with no words
-    put(vdr, 'Huge export.csv', 'ledger,entry\n'.repeat(2_100_000)); await indexAll(a, vdr); expect(by('Huge export.csv')).toMatchObject({ size: 27_300_000, words: [] });
-    const long = await pdfLook(pdf('long report', 100), 10); expect(long.pages).toBe(100); expect(long.text.split('\n').map((l) => +l.split('page ')[1])).toEqual([1, 11, 21, 31, 41, 51, 61, 71, 81, 91]);
-    expect((await pdfLook(pdf('short report', 4), 10)).text.split('\n').length).toBe(4);
+    // and the person is told which
+    expect(p.log).toEqual(['Indexed 3 files', '1 file has no readable text and can be found by name only: Scan.pdf']);
+    expect(by('Scan.pdf')).toMatchObject({ pages: 2, words: [] });
+    const rates = 'Tenor,Margin\nSenior term loan,2.25\nSenior term loan,2.50\nJunior loan,6\n';
+    expect(by('Rates.csv').words).toEqual(topWords(rates));
+    // a large spreadsheet is read like any other: its words are counted, however big it is
+    put(vdr, 'Huge export.csv', 'ledger,entry\n'.repeat(2_100_000));
+    await indexAll(a, vdr);
+    expect(by('Huge export.csv')).toMatchObject({ size: 27_300_000, words: ['entry', 'ledger'] });
+    // a workbook that cannot be read now is not recorded as having no text: it is left unread, to be read again
+    put(vdr, 'Broken.xlsx', 'not a workbook');
+    const q = await indexAll(a, vdr);
+    expect(by('Broken.xlsx')?.words).toBeUndefined();
+    expect(q.log.join(' ')).toContain('could not be read');
+    // and it is named again on every run, not only the first
+    expect((await indexAll(a, vdr)).log.join(' ')).toContain('could not be read');
+    // and read again once the file changes, its words then recorded
+    put(vdr, 'Broken.xlsx', MODEL);
+    await indexAll(a, vdr);
+    expect(by('Broken.xlsx').words).toEqual(MODEL_WORDS);
+    const long = await pdfLook(pdf('long report', 100), 10);
+    expect(long.pages).toBe(100);
+    const sampled = (long.text ?? '').split('\n').map((l) => +l.split('page ')[1]);
+    expect(sampled).toEqual([1, 11, 21, 31, 41, 51, 61, 71, 81, 91]);
+    expect((await pdfLook(pdf('short report', 4), 10)).text?.split('\n').length).toBe(4);
     // a document another copy of the app recorded before words were kept: indexing here adds them, once
     const OLD = pdf('interconnection agreement', 2); put(vdr, 'Grid.pdf', OLD); const file = path.join(root, 'shared', 'docs-older-d1.jsonl');
     fs.appendFileSync(file, JSON.stringify({ v: 1, pc: 'older', at: '2026-11-01T00:00:00.000Z', docId: idOf(OLD), hash: hashBytes(OLD), name: 'Grid.pdf', folder: vdr, rel: 'Grid.pdf', size: OLD.length, pages: 2 }) + '\n');
@@ -338,7 +530,7 @@ describe('documents on real folders', () => {
     await indexAll(a, vdr);
     expect(by('Grid.pdf')).toMatchObject({ pages: 2, words: ['agreement', 'interconnection', '1', '2'] });
     const mine = () => fs.readFileSync(path.join(root, 'shared', 'docs-office-d1.jsonl'), 'utf8').trim().split('\n').length; const n = mine(); await indexAll(a, vdr); expect(mine()).toBe(n);
-  });
+  }, 60000);   // the large spreadsheet above is read in full
 
   it('a file that cannot be turned into pages is reported and is not indexed; the rest are', async () => {
     const { root, vdr } = room(); put(vdr, '01 Legal/Locked.docx', 'protected'); put(vdr, '01 Legal/Broken.pdf', 'not a pdf at all');
@@ -347,8 +539,18 @@ describe('documents on real folders', () => {
     expect(p.folders).toMatchObject([{ files: 7, indexed: 7, reviewed: 0 }]);                                                  // every file was dealt with, so there is nothing to resume
     expect(a.docs.records('d1').map((r) => r.name)).not.toContain('Locked.docx'); expect(a.docs.records('d1').length).toBe(5); expect(a.work()).toEqual([]);
     // with no converter on this PC, a Word file is one of those; PDFs and spreadsheets are not
-    const b = pc(tmp(), 'bare', new StandInService(), { convert: null, folders: [vdr] }); const q = await indexAll(b, vdr);
-    expect(q.log[1]).toBe('2 files could not be turned into pages and were not indexed: 01 Legal/Broken.pdf, 01 Legal/Locked.docx'); expect(b.docs.records('d1').map((r) => r.name).sort()).toEqual(['Credit Agreement.pdf', 'Energy Yield Report.pdf', 'Model v12.xlsx', 'Notes.docx', 'Shareholders Agreement.pdf']);   // a Word file is indexed from its text with no converter; only showing it needs one
+    const b = pc(tmp(), 'bare', new StandInService(), { convert: null, folders: [vdr] });
+    const q = await indexAll(b, vdr);
+    const notPaged = '2 files could not be turned into pages and were not indexed: ';
+    const lost = '01 Legal/Broken.pdf, 01 Legal/Locked.docx';
+    expect(q.log).toContain(notPaged + lost);
+    expect(q.log).toContain('1 file could not be read: 03 Financial/Model v12.xlsx');
+    // no converter, so the workbook's words cannot be read: it is listed by name and read again later;
+    // a Word file is indexed from its text with no converter, and only showing it needs one
+    const names = [
+      'Credit Agreement.pdf', 'Energy Yield Report.pdf', 'Model v12.xlsx', 'Notes.docx', 'Shareholders Agreement.pdf',
+    ];
+    expect(b.docs.records('d1').map((r) => r.name).sort()).toEqual(names);
   });
 
   it.skipIf(!hasOffice)(
@@ -364,6 +566,20 @@ describe('documents on real folders', () => {
     expect(a.docs.records('d1')[0]).toMatchObject({ name: 'Notes.docx', pages: 3, via: 'libreoffice' });                                    // converted when first opened, and its pages counted then
     const shown = a.docs.fileFor((page as { url: string }).url.replace('punchlist-doc://', ''))!; expect(await pdfPages(fs.readFileSync(shown))).toBe(3);
   }, 60000);
+
+  it.skipIf(!hasOffice)(
+    'a damaged workbook read through LibreOffice gets no word list and is named as not read (#427)',
+    async () => {
+      const root = tmp();
+      const vdr = path.join(root, 'vdr');
+      put(vdr, 'Broken.xlsx', 'PK\u0003\u0004 a workbook cut short');
+      const a = pc(root, 'office', new StandInService(), { convert: libreOfficeConverter({ soffice }) });
+      const p = await indexAll(a, vdr);
+      expect(p.log).toContain('1 file could not be read: Broken.xlsx');
+      expect(a.docs.records('d1').find((r) => r.name === 'Broken.xlsx')?.words).toBeUndefined();
+    },
+    60000,
+  );
 
   // A Word file with every kind of tracked change: a word replaced, a paragraph break deleted, text moved, a table row deleted and
   // one inserted, a whole paragraph deleted, formatting changed, a change in the footer, and a comment.
@@ -842,6 +1058,57 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     expect(sheetPart(MODEL_SHEETS, 'p. 3').rows[0].cells).toEqual(['Cover']);
     const { root, vdr } = room(); const a = pc(root, 'office'); await indexAll(a, vdr);
     expect(val(await a.docs.page('d1', { doc: 'Model v12.xlsx', docId: idOf(MODEL) }, 'Debt!B20'))).toEqual(v);
+  });
+
+  it('an attached spreadsheet not read is named, and read by the next run and the next freshen (#427)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Credit Agreement.pdf', FA);
+    const down = { now: true };
+    const a = pc(root, 'office', undefined, { convert: flakyConverter(down) });
+    const r = val(await a.docs.attach('d1', { name: 'Budget.xlsx', bytes: MODEL }));
+    const budget = () => a.docs.records('d1').find((d) => d.docId === r.docId)!;
+    expect(budget().words).toBeUndefined();
+    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Budget.xlsx');
+    // named while it fails, on the next run too, and the folder is looked at again although nothing in it changed
+    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Budget.xlsx');
+    down.now = false;
+    expect(val(await a.docs.freshen!('d1'))).toBe('running');
+    await a.docs.settled('d1');
+    expect(val(await a.docs.poll('d1')).log).toEqual(['Indexed 1 file']);
+    expect(budget().words).toEqual(MODEL_WORDS);
+  });
+
+  /** the converter of `flakyConverter`, counting the spreadsheets it is asked to read */
+  const countingConverter = (down: { now: boolean }, asked: string[]) => {
+    const convert = flakyConverter(down);
+    const read = convert.sheets!;
+    return Object.assign(convert, { sheets: (file: string) => { asked.push(file); return read(file); } });
+  };
+  it('an attached spreadsheet not read is read once in a run, with the index on, and named (#1023)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Credit Agreement.pdf', FA);
+    const down = { now: true };
+    const asked: string[] = [];
+    const a = pc(root, 'office', undefined, { index: true, convert: countingConverter(down, asked) });
+    val(await a.docs.attach('d1', { name: 'Budget.xlsx', bytes: MODEL }));
+    asked.length = 0;
+    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Budget.xlsx');
+    expect(asked.length).toBe(1);
+  });
+  it('never reads a spreadsheet attached by a place that leads out of its folder (#1156)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Credit Agreement.pdf', FA);
+    put(path.join(root, 'shared'), 'outside.xlsx', MODEL);
+    const { words: _none, ...line } = olderLine(ATTACHED, MODEL, '../outside.xlsx', []);
+    keepLines(root, [line]);
+    const asked: string[] = [];
+    const a = pc(root, 'office', undefined, { convert: countingConverter({ now: false }, asked) });
+    await indexAll(a, vdr);
+    expect(asked).toEqual([]);
+    expect(a.docs.records('d1').find((r) => r.docId === idOf(MODEL))?.words).toBeUndefined();
   });
 
   it('a file attached in the app is kept in the shared folder under this copy’s own name, loaded into the store, and opens on another PC', async () => {
@@ -1570,5 +1837,200 @@ describe('warm document collections', () => {
       listed.mockRestore();
       sized.mockRestore();
     }
+  });
+});
+
+/** PDFs holding this text have a page whose text cannot be read, as if pdf.js failed on it, while it is set (#1056) */
+const textFails = { marker: 'page text fails', on: false };
+vi.mock('pdfjs-dist/legacy/build/pdf.mjs', async (original) => {
+  const pdfjs = await original<typeof import('pdfjs-dist/legacy/build/pdf.mjs')>();
+  const getDocument: typeof pdfjs.getDocument = (source) => {
+    const task = pdfjs.getDocument(source);
+    const data = (source as { data?: Uint8Array }).data;
+    const failing = textFails.on && !!data && Buffer.from(data).toString('latin1').includes(textFails.marker);
+    if (!failing) return task;
+    const promise = task.promise.then((doc) => Object.assign(doc, {
+      getPage: async () => { throw new Error('page could not be read'); },
+    }));
+    // the loading task's promise is a getter: a stand-in task carries the changed document
+    return { promise, destroy: () => task.destroy() } as unknown as ReturnType<typeof pdfjs.getDocument>;
+  };
+  return { ...pdfjs, getDocument };
+});
+
+describe('a PDF whose page text cannot be read (#1056)', () => {
+  afterAll(() => { textFails.on = false; });
+
+  it('pdfLook gives its pages and no text', async () => {
+    textFails.on = true;
+    const look = await pdfLook(pdf(textFails.marker, 3), Infinity);
+    textFails.on = false;
+    expect(look.pages).toBe(3);
+    expect(look.text).toBeUndefined();
+  });
+
+  it('is listed with its pages and no words, named as not read, and read on the next run', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    for (let n = 1; n <= 200; n++) put(vdr, `Reports/Report ${n}.pdf`, pdf(`monthly report ${n}`, 2));
+    put(vdr, 'Legal/Guarantee.pdf', pdf(`guarantee ${textFails.marker}`, 3));
+    const a = pc(root, 'office', undefined, { index: true });
+    const record = (name: string) => a.docs.records('d1').find((r) => r.name === name);
+    textFails.on = true;
+    const first = await indexAll(a, vdr);
+    expect(record('Guarantee.pdf')).toMatchObject({ pages: 3 });
+    expect(record('Guarantee.pdf')?.words).toBeUndefined();
+    expect(first.log).toContain('1 file could not be read: Legal/Guarantee.pdf');
+    expect(first.log.join(' ')).not.toContain('no readable text');
+    expect(a.docs.records('d1').filter((r) => r.words?.includes('monthly')).length).toBe(200);
+    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Legal/Guarantee.pdf');
+    textFails.on = false;
+    const after = await indexAll(a, vdr);
+    expect(after.log.join(' ')).not.toContain('could not be read');
+    expect(record('Guarantee.pdf')?.words).toContain('guarantee');
+  }, 120_000);
+
+  it('a recovered PDF is read by the next freshen, also after a restart (#1056)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Credit Agreement.pdf', pdf('credit agreement', 2));
+    put(vdr, 'Legal/Guarantee.pdf', pdf(`guarantee ${textFails.marker}`, 3));
+    const a = pc(root, 'office', undefined, { index: true });
+    textFails.on = true;
+    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Legal/Guarantee.pdf');
+    // still failing: the folder is listed unchanged, and is read again, not taken as complete
+    expect(val(await a.docs.freshen!('d1'))).toBe('running');
+    await a.docs.settled('d1');
+    textFails.on = false;
+    const restarted = pc(root, 'office', undefined, { index: true });
+    expect(val(await restarted.docs.freshen!('d1'))).toBe('running');
+    await restarted.docs.settled('d1');
+    const record = restarted.docs.records('d1').find((r) => r.name === 'Guarantee.pdf');
+    expect(record?.words).toContain('guarantee');
+    expect(val(await restarted.docs.freshen!('d1'))).toBe('same');
+  }, 60_000);
+
+  it('an attached PDF whose text is unread is named on every run, and read when it can be (#1056)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Credit Agreement.pdf', pdf('credit agreement', 2));
+    const a = pc(root, 'office', undefined, { index: true });
+    textFails.on = true;
+    const attached = val(await a.docs.attach('d1', { name: 'Guarantee.pdf', bytes: pdf(textFails.marker, 2) }));
+    const record = () => a.docs.records('d1').find((r) => r.docId === attached.docId);
+    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Guarantee.pdf');
+    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Guarantee.pdf');
+    textFails.on = false;
+    expect((await indexAll(a, vdr)).log.join(' ')).not.toContain('could not be read');
+    expect(record()?.words).toBeDefined();
+  });
+
+  it('is attached with its pages and no words', async () => {
+    const root = tmp();
+    const a = pc(root, 'office');
+    textFails.on = true;
+    const attached = val(await a.docs.attach('d1', { name: 'Guarantee.pdf', bytes: pdf(textFails.marker, 2) }));
+    textFails.on = false;
+    const record = a.docs.records('d1').find((r) => r.docId === attached.docId);
+    expect(record).toMatchObject({ pages: 2 });
+    expect(record?.words).toBeUndefined();
+  });
+});
+
+describe('a place named by a record stays inside the folder it is in (#1156)', () => {
+  const opens = async (docs: ReturnType<typeof pc>['docs'], bytes: Uint8Array) => (
+    await docs.page('d1', { doc: 'outside.pdf', docId: idOf(bytes) }, 'p. 1')
+  ).ok;
+  /** where each unsafe name of a place in the attachments folder leads, and the name itself */
+  const unsafe = (root: string): [string, string][] => {
+    const absolute = path.join(root, 'elsewhere', 'outside.pdf');
+    return [
+      ['../outside.pdf', path.join(root, 'shared', 'outside.pdf')],
+      ['../attachments-evil/outside.pdf', path.join(root, 'shared', 'attachments-evil', 'outside.pdf')],
+      // a join keeps an absolute place inside the folder, so the file is put where a join would find it
+      [absolute, path.join(root, 'shared', 'attachments', absolute)],
+    ];
+  };
+  for (const [index, name] of [0, 1, 2].map((i) => [i, ['dotdot', 'sibling', 'absolute'][i]] as const)) {
+    it(`never opens or reads a file attached by a ${name} place, and says it cannot be found`, async () => {
+      const root = tmp(); const bytes = pdf('outside'); const [rel, file] = unsafe(root)[index];
+      put(path.dirname(file), path.basename(file), bytes);
+      fs.mkdirSync(path.join(root, 'vdr'), { recursive: true });
+      keepLines(root, [olderLine(ATTACHED, bytes, rel, ['outside'], 1)]);
+      const x = pc(root, 'office', undefined, { index: true });
+      expect(await opens(x.docs, bytes)).toBe(false);
+      await indexAll(x, path.join(root, 'vdr'));
+      expect(wordIndex(nodeFolder(path.join(root, 'local-office'))).has('d1', idOf(bytes))).toBe(false);
+    });
+  }
+  it('never opens a file of a deal folder that a record places outside that folder', async () => {
+    const root = tmp(); const vdr = path.join(root, 'vdr'); const bytes = pdf('outside');
+    put(vdr, 'a.pdf', pdf('inside')); put(root, 'outside.pdf', bytes);
+    keepLines(root, [olderLine(vdr, bytes, '../outside.pdf', ['outside'], 1)]);
+    expect(await opens(pc(root, 'office').docs, bytes)).toBe(false);
+  });
+  it('does not take a folder for the deal folder because a record placed outside it matches there', async () => {
+    const root = tmp(); const vdr = path.join(root, 'vdr'); const moved = path.join(root, 'moved');
+    const bytes = pdf('outside');
+    put(moved, 'other.pdf', pdf('other')); put(root, 'outside.pdf', bytes);
+    keepLines(root, [olderLine(vdr, bytes, '../outside.pdf', ['outside'], 1)]);
+    const x = pc(root, 'office');
+    expect(val(await x.docs.placeFolders([{ dealId: 'd1', folder: vdr, local: moved }]))).toBe(0);
+  });
+  it('keeps the page file of a document inside the work folder, whatever id a record gives it', async () => {
+    const root = tmp(); const vdr = path.join(root, 'vdr'); put(vdr, 'Notes.docx', NOTES);
+    const line = { ...olderLine(vdr, NOTES, 'Notes.docx', ['notes'], 3), docId: '../escape' };
+    keepLines(root, [line]);
+    const x = pc(root, 'office');
+    const page = await x.docs.page('d1', { doc: 'Notes.docx', docId: '../escape' }, 'p. 1');
+    expect(page.ok).toBe(false);
+    expect(fs.existsSync(path.join(root, 'escape.pdf'))).toBe(false);
+    expect(x.converted).toEqual([]);
+  });
+  it('does not find a folder for the deal because a record placed outside it matches there', async () => {
+    const root = tmp(); const old = path.join(root, 'old', 'vdr'); const now = path.join(root, 'new', 'vdr');
+    fs.mkdirSync(path.join(root, 'local-office'), { recursive: true });
+    const rule = { from: path.join(root, 'old'), to: path.join(root, 'new') };
+    fs.writeFileSync(path.join(root, 'local-office', 'folder-rules.json'), JSON.stringify([rule]));
+    // 25 records fill the sample the comparison looks at; the one that leads out of the folder sorts after them
+    const name = (i: number) => `f${String(i).padStart(2, '0')}.pdf`;
+    const files = Array.from({ length: 25 }, (_, i) => [pdf(`doc ${i}`), name(i)] as const);
+    for (const [bytes, rel] of files) put(now, rel, bytes);
+    const outside = pdf('outside'); put(path.join(root, 'new'), 'outside.pdf', outside);
+    const inside = files.map(([bytes, rel]) => olderLine(old, bytes, rel, ['doc'], 1));
+    keepLines(root, [...inside, olderLine(old, outside, 'z/../../outside.pdf', ['outside'], 1)]);
+    const x = pc(root, 'office', undefined, { folders: [old] });
+    expect(val(await x.docs.findFolders(['d1']))).toMatchObject({ placed: 0 });
+  });
+  const logOf = (root: string, name: string) => (
+    fs.readFileSync(path.join(root, 'shared', `docs-${name}-d1.jsonl`), 'utf8')
+  );
+  it('says no document left a place that leads out of its folder, though this PC saw it there', async () => {
+    const root = tmp(); const vdr = path.join(root, 'vdr'); const bytes = pdf('outside');
+    put(vdr, 'a.pdf', pdf('inside')); put(root, 'outside.pdf', bytes);
+    keepLines(root, [olderLine(vdr, bytes, '../outside.pdf', ['outside'], 1)]);   // this PC's own line: it saw it there
+    expect(await opens(pc(root, 'office').docs, bytes)).toBe(false);
+    expect(logOf(root, 'office')).not.toContain('"left"');
+  });
+  it('does not look in a shut folder another PC names that is outside the deal folder', async () => {
+    const root = tmp(); const vdr = path.join(root, 'vdr'); put(vdr, 'a.pdf', pdf('inside'));
+    fs.mkdirSync(path.join(root, 'sibling'));
+    const shut = { v: 1, pc: 'home', at: '2026-11-01T00:00:00.000Z', docId: '', read: vdr, shut: ['../sibling'] };
+    fs.mkdirSync(path.join(root, 'shared'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'shared', 'docs-home-d1.jsonl'), `${JSON.stringify(shut)}\n`);
+    await indexAll(pc(root, 'office'), vdr);
+    expect(logOf(root, 'office')).not.toContain('"opened"');
+  });
+  it('opens a copy kept inside its folder, and never one placed outside it', async () => {
+    const root = tmp(); const bytes = pdf('outside'); put(root, 'shared/outside.pdf', bytes);
+    const lines = (rel: string) => [
+      olderLine(ATTACHED, bytes, 'd1/office/gone.pdf', ['outside'], 1),
+      { ...olderLine(ATTACHED, bytes, rel, ['outside'], 1), at: '2026-11-02T00:00:00.000Z' },
+    ];
+    keepLines(root, lines('../outside.pdf'));
+    expect(await opens(pc(root, 'office').docs, bytes)).toBe(false);
+    put(root, 'shared/attachments/d1/office/copy.pdf', bytes);
+    keepLines(root, lines('d1/office/copy.pdf'));
+    expect(await opens(pc(root, 'office').docs, bytes)).toBe(true);
   });
 });

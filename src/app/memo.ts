@@ -93,10 +93,10 @@ function memoSaved(store: Store, file?: string) {
   const open = file && openPicked ? {
     label: 'Open',
     run: () => void openPicked(file).then((result) => {
-      if (!result.ok) store.toast(result.error.message);
+      if (!result.ok) store.toast(result.error.message, 'warn');
     }),
   } : undefined;
-  store.toast('Deal memo saved', open);
+  store.toast('Deal memo saved', 'done', open);
 }
 
 type PendingMemo = { memo: MemoWrite; error: Failure };
@@ -146,7 +146,7 @@ function showPendingMemo(store: Store, queue: PendingMemo[]) {
   };
   const label = next.error.kind === 'conflict' ? 'Save As…' : 'Retry';
   const action = { label, run: () => void retry() };
-  const notice = store.toast(next.error.message, action, { glyph: 'warn', sticky: 'stays' });
+  const notice = store.toast(next.error.message, 'warn', action, 'stays');
   const stopWatching = store.subscribe(() => {
     if (store.get().ui.toasts.some((toast) => toast.id === notice)) return;
     stopWatching();
@@ -195,5 +195,5 @@ export async function runMemo(store: Store, dealId: string): Promise<void> {
   const retry = { label: 'Retry', run: () => void runMemo(store, dealId) };
   const message = result.error.kind === 'unreachable' ? `Couldn’t make the deal memo: ${SERVICE} could not be reached`
     : 'Couldn’t make the deal memo';
-  store.toast(message, retry);
+  store.toast(message, 'warn', retry);
 }

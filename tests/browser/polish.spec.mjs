@@ -41,7 +41,11 @@ async function start(size = [1280, 736], scheme = 'dark') {
 for (const scheme of ['dark', 'light']) {
   const { ctx, page, id } = await start([1024, 640], scheme);
   // while a notice shows, an open dialog starts below it, and still fits
-  await page.evaluate(() => store.toast('Project Datum moved to Monitoring')); await page.waitForSelector('.toasts .toast'); await page.click('#u-menu'); await page.waitForSelector('.setdlg'); await page.waitForTimeout(400);
+  await page.evaluate(() => store.toast('Project Datum moved to Monitoring', 'done'))
+  await page.waitForSelector('.toasts .toast')
+  await page.click('#u-menu')
+  await page.waitForSelector('.setdlg')
+  await page.waitForTimeout(400);
   const dlg = await page.evaluate(() => { const d = document.querySelector('.setdlg'); const n = document.querySelector('.notices').getBoundingClientRect(); return { top: Math.round(d.getBoundingClientRect().top), notices: Math.round(n.bottom), shown: !!document.querySelector('.toasts .toast'), fits: d.scrollHeight <= d.clientHeight + 1 }; });
   say(`${scheme}:a-dialog-opens-below-the-notices-showing`, dlg.shown && dlg.top > dlg.notices && dlg.fits, JSON.stringify(dlg));
   await page.keyboard.press('Escape');

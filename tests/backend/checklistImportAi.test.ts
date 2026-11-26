@@ -32,7 +32,9 @@ describe('rewording a checklist being brought in', () => {
   it('takes an item split in two as its first item and the rest, and asks for "(if applicable)" only where it fits', async () => {
     const s = setup((c) => (!isReword(c) ? {} : { items: [{ n: 1, texts: ['Wetlands delineation complete (if applicable).', '  Section 404 permit in hand (if applicable).'], why: 'two conditions' }, { n: 2, texts: [], why: 'empty' }] }), {}, { shared: new Mem(), installId: 'pc' });
     const out = val(await s.ai.reword!({ items: ['Wetlands delineation complete; any Section 404 permit in hand', 'Insurance in place'] }));
-    expect(out).toEqual([{ at: 0, text: 'Wetlands delineation complete (if applicable).', also: ['Section 404 permit in hand (if applicable).'], why: 'two conditions' }]);
+    const also = ['  Section 404 permit in hand (if applicable).'];
+    const text = 'Wetlands delineation complete (if applicable).';
+    expect(out).toEqual([{ at: 0, text, also, why: 'two conditions' }]);
     expect(s.calls.find(isReword)!.prompt).toContain('never to every item');
   });
   it('a reply that cannot be read fails the whole review, so nothing half-asked is shown', async () => {
@@ -52,6 +54,15 @@ describe('items that ask for the same thing', () => {
   });
 });
 
+describe('what the duplicate check and the question wording keep as written', () => {
+  it('keeps the reason a pair is given as written, with no cut', async () => {
+    const why = ` same\n  thing ${'long '.repeat(40)}\t`;
+    const s = setup((c) => (isSame(c) ? { pairs: [{ a: 1, b: 2, why }] } : {}), {}, { shared: new Mem(), installId: 'pc' });
+    const out = val(await s.ai.sameMeaning!({ items: items(2), against: [] }));
+    expect(out.pairs.map((p) => p.why)).toEqual([why]);
+  });
+});
+
 describe('questions for the counterparty on what is unresolved (#2)', () => {
   const isPhrase = (c: Call) => c.prompt.includes('Write one question for the counterparty');
   // each point is asked with a tag of its own: "kqz: [gap] …"
@@ -60,6 +71,11 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
   const lines = (c: { prompt: string }) => tagged(c).map((x) => x.line);
   const ids = (c: { prompt: string }) => tagged(c).map((x) => x.id);
   const points = (n: number) => Array.from({ length: n }, (_, i) => ({ kind: (i % 5 ? 'gap' : 'finding') as 'gap' | 'finding', what: `Point ${i + 1}`, need: i % 5 ? `The signed copy ${i + 1}` : '' }));
+  it('keeps a question as the model wrote it, spacing and all', async () => {
+    const reply = (c: Call) => (isPhrase(c) ? { items: ids(c).map((id) => ({ id, text: ' Please send\n the copy.\t' })) } : {});
+    const s = setup(reply, {}, { shared: new Mem(), installId: 'pc' });
+    expect(val(await s.ai.phrase!({ dealId: 'd', items: points(2) }))).toEqual([' Please send\n the copy.\t', ' Please send\n the copy.\t']);
+  });
   it('asks in parts of 120 and gives each question back in the order of the points, whatever order the reply takes', async () => {
     const s = setup((c) => (isPhrase(c) ? { items: lines(c).map((l, n) => ({ id: ids(c)[n], text: `Q for ${l.split(' — ')[0]}` })).reverse() } : {}), {}, { shared: new Mem(), installId: 'pc' });
     const out = val(await s.ai.phrase!({ dealId: 'd', items: points(250) }));
@@ -112,13 +128,15 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
     expect(out[776]).toBeNull(); expect(out.filter((t) => t === null).length).toBe(1); expect(out[777]).toBe('Q for [gap] Point 778');
     expect(s.calls.filter(isPhrase).length).toBeLessThan(20);
   });
-  it('a service that starts failing every point after answering stops within a few dozen calls, offering what came back', async () => {
+  it('a service that fails every point after answering is asked down to single points, keeping what came', async () => {
     for (const fail of [() => ({ items: [] }), cut]) {
       let first = true;
       const s = setup((c) => { if (!isPhrase(c)) return {}; if (first) { first = false; return answer(c); } return fail(); }, {}, { shared: new Mem(), installId: 'pc' });
       const r = await s.ai.phrase!({ dealId: 'd', items: points(2000) });
       // what the first call phrased is offered, and the rest are set aside, for the preview to count with Retry
-      const v = val(r); expect(s.calls.filter(isPhrase).length).toBeLessThan(40);      // 20 with nothing, then 12 points asked alone from across the list
+      const v = val(r);
+      // each part that brought nothing is split down to single points: at most 2 x 1,880 - 1 asks for the rest (#1109)
+      expect(s.calls.filter(isPhrase).length).toBeLessThan(1 + 2 * 1880);
       expect([v.filter((t) => t !== null).length, v.filter((t) => t === null).length, v[0]]).toEqual([120, 1880, 'Q for [finding] Point 1']);
     }
     // every 10th point never answered, among points that are: each is set aside, and the run finishes
@@ -126,31 +144,35 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
     const out = val(await t.ai.phrase!({ dealId: 'd', items: points(2000) }));
     expect(out.filter((x) => x === null).length).toBe(200); expect(out[0]).toBe('Q for [finding] Point 1');
   });
-  it('no shape of failing service makes more calls than a run\'s bound (176 at 2,000 points)', async () => {
+  it('no shape of failing service makes more than 2 x 2,000 - 1 asks in a run (#1109)', async () => {
     const isFinding = (l: string) => l.startsWith('[finding]');
-    let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    let seed = 7;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
     let calls = 0;
-    const shapes: [string, (c: Call) => unknown, number, number][] = [
-      // name, stand-in, most calls, most cut-off calls
-      ['findings never phrased, empty', (c) => ({ items: answer(c).items.filter((_, n) => !isFinding(lines(c)[n])) }), 60, 0],
-      ['findings never phrased, a findings-only ask cut off', (c) => (lines(c).every(isFinding) ? cut() : { items: answer(c).items.filter((_, n) => !isFinding(lines(c)[n])) }), 60, 40],
-      ['half never answered', (c) => ({ items: answer(c).items.filter((x) => /[13579] /.test(`${x.text} `)) }), 60, 0],      // the 1,000 asked again
-      ['empty above 10 points, no word of it', (c) => (lines(c).length > 10 ? { items: [] } : answer(c)), 176, 0],
-      ['answers once, then cut off', (c) => (++calls > 1 ? cut() : answer(c)), 40, 40],      // 20 with nothing, then 12 points asked alone from across the list
-      ['70% of calls fail at random', (c) => (rnd() < 0.7 ? cut() : answer(c)), 176, 140],
-      ['every 10th point never answered', (c) => ({ items: answer(c).items.filter((x) => !/ Point \d*0$/.test(x.text)) }), 60, 0],
-      ['10% of points skipped at random', (c) => ({ items: answer(c).items.filter(() => rnd() >= 0.1) }), 80, 0],
-      ['30% of points skipped at random', (c) => ({ items: answer(c).items.filter(() => rnd() >= 0.3) }), 100, 0],
-      ['50% of points skipped at random', (c) => ({ items: answer(c).items.filter(() => rnd() >= 0.5) }), 140, 0],
-      ['the first half of every reply only', (c) => ({ items: answer(c).items.slice(0, Math.floor(lines(c).length / 2)) }), 120, 0],
-      ['the last half of every reply only', (c) => ({ items: answer(c).items.slice(Math.floor(lines(c).length / 2)) }), 120, 0],
+    const phrased = (c: Call, keep: (l: string, n: number) => boolean) =>
+      ({ items: answer(c).items.filter((_, n) => keep(lines(c)[n], n)) });
+    const most = 2 * 2000 - 1;
+    const shapes: [string, (c: Call) => unknown][] = [
+      ['findings never phrased, empty', (c) => phrased(c, (l) => !isFinding(l))],
+      ['findings never phrased, a findings-only ask cut off',
+        (c) => (lines(c).every(isFinding) ? cut() : phrased(c, (l) => !isFinding(l)))],
+      ['half never answered', (c) => phrased(c, (l) => /[13579] /.test(`${l.split(' — ')[0]} `))],
+      ['empty above 10 points, no word of it', (c) => (lines(c).length > 10 ? { items: [] } : answer(c))],
+      ['answers once, then cut off', (c) => (++calls > 1 ? cut() : answer(c))],
+      ['70% of calls fail at random', (c) => (rnd() < 0.7 ? cut() : answer(c))],
+      ['every 10th point never answered', (c) => phrased(c, (l) => !/ Point \d*0( |$)/.test(l))],
+      ['10% of points skipped at random', (c) => phrased(c, () => rnd() >= 0.1)],
+      ['30% of points skipped at random', (c) => phrased(c, () => rnd() >= 0.3)],
+      ['50% of points skipped at random', (c) => phrased(c, () => rnd() >= 0.5)],
+      ['the first half of every reply only', (c) => phrased(c, (_, n) => n < Math.floor(lines(c).length / 2))],
+      ['the last half of every reply only', (c) => phrased(c, (_, n) => n >= Math.floor(lines(c).length / 2))],
     ];
-    for (const [name, reply, most, mostCut] of shapes) {
-      let cuts = 0; calls = 0;
-      const s = setup((c) => { if (!isPhrase(c)) return {}; try { return reply(c); } catch (e) { cuts++; throw e; } }, {}, { shared: new Mem(), installId: 'pc' });
+    for (const [name, reply] of shapes) {
+      calls = 0;
+      const s = setup((c) => (isPhrase(c) ? reply(c) : {}), {}, { shared: new Mem(), installId: 'pc' });
       const r = await s.ai.phrase!({ dealId: 'd', items: points(2000) });
       const n = s.calls.filter(isPhrase).length;
-      console.log(name, n, cuts); expect([name, n <= most, cuts <= mostCut]).toEqual([name, true, true]);
+      expect([name, n <= most]).toEqual([name, true]);
       if (r.ok) expect(r.value.length).toBe(2000);
     }
     // a cut-off that follows the length of what is asked: short points first, then long ones, cut above 15 short points' worth
@@ -160,7 +182,8 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
     const t = setup((c) => { if (!isPhrase(c)) return {}; if (lines(c).join('').length > room) { cuts++; return cut(); } return { items: lines(c).map((l, n) => ({ id: ids(c)[n], text: `Q ${l.slice(0, 20)}` })) }; }, {}, { shared: new Mem(), installId: 'pc' });
     val(await t.ai.phrase!({ dealId: 'd', items: long }));
     const asked = t.calls.filter(isPhrase).length; console.log('length-based cut-off', asked, cuts);
-    expect(asked).toBeLessThanOrEqual(176); expect(cuts).toBeLessThan(100);      // a run's bound; parts halve after cut-offs (parts.ts)
+    expect(asked).toBeLessThanOrEqual(2 * 2000 - 1);
+    expect(cuts).toBeLessThan(100);      // parts halve after cut-offs (parts.ts)
     // a passing outage: the first 7 calls are cut off, then every part answers whole; the size comes back up
     for (const m of [3, 7]) {
       let k = 0; const v = setup((c) => (!isPhrase(c) ? {} : ++k <= m ? cut() : answer(c)), {}, { shared: new Mem(), installId: 'pc' });
@@ -193,18 +216,18 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
     // the parts come down, and a Retry finishes
     const mixed = pad(2000, (i) => (i * 37) % 300);
     const a = await retried((c, k) => { if (k < 6 || text(c) > 3000) throw cut(); return answer(c); }, mixed);
-    expect([a.got, a.runs <= 3, a.most <= 176]).toEqual([want(mixed), true, true]);
+    expect([a.got, a.runs <= 3, a.most <= bound(2000)]).toEqual([want(mixed), true, true]);
     // every point near the limit alone: each asked alone, over a few runs
     const huge = pad(300, () => 5000);
     const b = await retried((c) => { if (text(c) > 6000) throw cut(); return answer(c); }, huge);
     expect([b.got, b.runs <= 6]).toEqual([want(huge), true]);
     // the limit falls from 6,000 to 1,500 characters after 10 calls: the parts come down, and Retries finish
     const c = await retried((c, k) => { if (text(c) > (k < 10 ? 6000 : 1500)) throw cut(); return answer(c); }, mixed);
-    expect([c.got, c.runs <= 8, c.most <= 176]).toEqual([want(mixed), true, true]);
+    expect([c.got, c.runs <= 8, c.most <= bound(2000)]).toEqual([want(mixed), true, true]);
     // a service that cuts off a third of its replies whatever their length: each run is bounded, and Retry finishes
     let seed = 5; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
     const d = await retried((c) => { if (rnd() < 1 / 3) throw cut(); return answer(c); }, points(2000));
-    expect([d.got, d.runs <= 4, d.most <= 176]).toEqual([want(points(2000)), true, true]);
+    expect([d.got, d.runs <= 4, d.most <= bound(2000)]).toEqual([want(points(2000)), true, true]);
     // a stray preface with the last point left out, or the first left out with a stray item after: nothing misplaced.
     // The stray item's id has vowels, so it can never be one of the call's tags, which are drawn at random from
     // consonants only ('xxx' could be drawn, and then the stray item was rightly placed as that point's question)
@@ -213,6 +236,8 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
       val(e.r).forEach((t, k) => { expect([null, want(points(500))[k]]).toContain(t); });
     }
   });
+  // a run's asks are bounded by the halving: each part that brings nothing is split down to single points (#1109)
+  const bound = (n: number) => 2 * n - 1;
   const num = (l: string) => Number(/Point (\d+)/.exec(l)![1]) - 1;
   const holds = (c: Call, p: (j: number) => boolean) => lines(c).some((l) => p(num(l)));
   // a run, then Retry for just the points it could not draft, as the dialog does, until only failing points are left
@@ -231,18 +256,22 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
   it('failing points are set aside without holding up the rest, each run is bounded, and Retry recovers what a run left', async () => {
     // 3 to 300 failing points at the top of the list (cut off, or brought back empty; findings come first, and a model
     // may fail every part holding one): the first run offers most of the rest, Retry the others, and a Retry of only
-    // failing points fails within 25 calls (150 to 300 findings failed every run). A Retry that fails first
-    // notes 12 more points as failing, to be asked last, so the good ones are reached in a Retry or two
+    // failing points fails within 2 x m - 1 asks, as each part that brought nothing is halved down to single points
     const top = (n: number, f: number) => points(n).map((p, j) => ({ ...p, kind: (j < f ? 'finding' : 'gap') as 'gap' | 'finding' }));
     const ofKind = (c: Call) => lines(c).some((l) => l.startsWith('[finding]'));
     for (const [n, m, finding] of [[2000, 3, false], [2000, 13, false], [2000, 40, false], [2000, 150, true], [2000, 300, true], [5000, 300, true]] as const) for (const fail of [cut, () => ({ items: [] })]) {
       const a = await retrying(n, (c) => ((finding ? ofKind(c) : holds(c, (j) => j < m)) ? fail() : answer(c)), 6, finding ? top(n, m) : points(n));
-      expect([n, m, a.runs[0].ok, a.runs[0].left <= m + 40, a.left, a.runs.at(-1)!.ok, a.runs.at(-1)!.calls <= 25]).toEqual([n, m, true, true, range(0, m), false, true]);
+      const last = a.runs.at(-1)!;
+      const first = [a.runs[0].ok, a.runs[0].left <= m + 40];
+      const want = [n, m, true, true, range(0, m), false, true];
+      expect([n, m, ...first, a.left, last.ok, last.calls <= bound(m)]).toEqual(want);
     }
     // a few points that always fail, spread through 2,000 or 5,000: each run is bounded, and Retry ends with those only
-    for (const [n, every, most] of [[2000, 1000, 176], [2000, 200, 176], [2000, 100, 176], [5000, 1000, 376], [5000, 200, 376], [5000, 100, 376]]) {
+    for (const [n, every] of [[2000, 1000], [2000, 200], [2000, 100], [5000, 1000], [5000, 200], [5000, 100]]) {
       const a = await retrying(n, (c) => (holds(c, (j) => j % every === 3) ? cut() : answer(c)), 10);
-      expect([n, every, Math.max(...a.runs.map((r) => r.calls)) <= most, a.left, a.runs.at(-1)!.ok]).toEqual([n, every, true, range(0, n).filter((j) => j % every === 3), false]);
+      const most = Math.max(...a.runs.map((r) => r.calls));
+      const want = [n, every, true, range(0, n).filter((j) => j % every === 3), false];
+      expect([n, every, most <= bound(n), a.left, a.runs.at(-1)!.ok]).toEqual(want);
     }
     // a passing trouble (half of all calls cut off for a while, or an outage of 30 calls) beside a few points that always
     // fail: good points that failed alone meanwhile are split from the failing ones on Retry, and all come back (they
@@ -252,19 +281,26 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
       const a = await retrying(n, (c, k) => (holds(c, (j) => j % 400 === 17) || trouble(k) ? cut() : answer(c)), 10);
       expect([n, a.left, a.runs.at(-1)!.ok]).toEqual([n, range(0, n).filter((j) => j % 400 === 17), false]);
     }
-    // so many failing (1 in 20, 1 in 10, every finding) that finding them all costs more than a run's calls: each run is
-    // bounded and offers what came back, and each Retry brings more
-    for (const [n, f, most] of [[2000, (c: Call) => (holds(c, (j) => j % 20 === 3) ? cut() : answer(c)), 176], [2000, (c: Call) => (holds(c, (j) => j % 10 === 3) ? cut() : answer(c)), 176], [2000, (c: Call) => (lines(c).some((l) => l.startsWith('[finding]')) ? { items: [] } : answer(c)), 176], [5000, (c: Call) => (holds(c, (j) => j % 20 === 3) ? cut() : answer(c)), 376]] as const) {
+    // many failing (1 in 20, 1 in 10, every finding): each run is bounded and offers what came back, and each Retry
+    // brings more
+    const cutEvery = (m: number) => (c: Call) => (holds(c, (j) => j % m === 3) ? cut() : answer(c));
+    const noFindings = (c: Call) => (lines(c).some((l) => l.startsWith('[finding]')) ? { items: [] } : answer(c));
+    const shapes = [[2000, cutEvery(20)], [2000, cutEvery(10)], [2000, noFindings], [5000, cutEvery(20)]] as const;
+    for (const [n, f] of shapes) {
       const a = await retrying(n, f, 4);
-      expect([n, a.runs.every((r, j) => r.calls <= most && (!r.ok || r.left < (j ? a.runs[j - 1].left : n)))]).toEqual([n, true]);
+      const more = a.runs.every((r, j) => r.calls <= bound(n) && (!r.ok || r.left < (j ? a.runs[j - 1].left : n)));
+      expect([n, more]).toEqual([n, true]);
     }
     // two points a reply, far below what the limits allow, then every call fails after 500: each run is bounded and
-    // brings more, and once the service is down a Retry fails within 32 calls (20 with nothing, then 12 points alone)
+    // brings more, and once the service is down a Retry fails, bounded by the points it asks for
     for (const fail of [cut, () => ({ items: [] })]) {
       const c = await retrying(2000, (c, k) => (k >= 500 ? fail() : lines(c).length > 2 ? cut() : answer(c)), 8);
-      expect([c.runs.every((r, j) => r.calls <= 176 && (!r.ok || r.left < (j ? c.runs[j - 1].left : 2000))), c.runs.at(-1)!.ok, c.runs.at(-1)!.calls <= 32, 2000 - c.left.length > 800]).toEqual([true, false, true, true]);
+      const runs = c.runs;
+      const more = runs.every((r, j) => r.calls <= bound(2000) && (!r.ok || r.left < (j ? runs[j - 1].left : 2000)));
+      expect([more, runs.at(-1)!.ok, runs.at(-1)!.calls <= bound(runs.at(-1)!.left), 2000 - c.left.length > 800])
+        .toEqual([true, false, true, true]);
     }
-  });
+  }, 30_000);
   it('on a real checklist, a reply that leaves points out, swaps them or numbers them puts no question on the wrong point; a Retry is bounded as the first run', async () => {
     // the first 2,000 items of a deal-scale list, whose neighbors share most of their words: a question is taken only for
     // a tag of its part, so a model that leaves the third (and fourth, or sixth) point out, swaps the third and seventh,
@@ -278,18 +314,18 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
     const numbered = (it: It[]) => it.map((x, k) => ({ n: k + 1, text: x.text }));
     for (const [name, f, most] of [['as asked', (it: It[]) => it, 1], ['third left out', drop([2]), 3], ['third and fourth left out', drop([2, 3]), 3], ['third and sixth left out', drop([2, 5]), 3], ['third and seventh swapped', swap, 1], ['third to sixth reversed', reverse, 1]] as const) {
       const a = await retrying(2000, (c) => ({ items: f(answer(c).items) }), 10, real);
-      expect([name, a.left, a.runs.every((r) => r.ok && r.calls <= 176), a.runs.length <= most]).toEqual([name, [], true, true]);
+      const bounded = a.runs.every((r) => r.ok && r.calls <= bound(2000));
+      expect([name, a.left, bounded, a.runs.length <= most]).toEqual([name, [], true, true]);
     }
-    // a model that gives running numbers in place of the tags is understood only for a point asked alone: slow, as each
-    // point takes a call, but nothing lands on the wrong point, each run is bounded, and each brings more
+    // a model that gives running numbers in place of the tags is never understood, even for a point asked alone: no
+    // question lands on any point, each run is bounded, and every point is offered for Retry
     const n = await retrying(2000, (c) => ({ items: numbered(answer(c).items) }), 4, real);
-    expect(n.runs.every((r, j) => r.calls <= 176 && (!r.ok || r.left < (j ? n.runs[j - 1].left : 2000)))).toBe(true);
-    // spread-out points that bring back an empty reply (1 in 30; a Retry got fewer calls than the run before, and 263 good
-    // points were still left after 10), and 200 failing points of both kinds at the top, cut off: a Retry is allowed as
-    // many calls as the deal's first run, and the Retries reach every good point
+    expect([n.left.length, n.runs.every((r) => !r.ok && r.calls <= bound(2000))]).toEqual([2000, true]);
+    // spread-out points that bring back an empty reply (1 in 30), and 200 failing points of both kinds at the top, cut
+    // off: each run is bounded, and the Retries reach every good point
     for (const [bad, f] of [[(j: number) => j % 30 === 3, () => ({ items: [] })], [(j: number) => j < 200, cut]] as const) {
       const a = await retrying(2000, (c) => (holds(c, bad) ? f() : answer(c)), 10);
-      expect([a.left, a.runs.every((r) => r.calls <= 176)]).toEqual([range(0, 2000).filter(bad), true]);
+      expect([a.left, a.runs.every((r) => r.calls <= bound(2000))]).toEqual([range(0, 2000).filter(bad), true]);
     }
   });
   it('a reply that stops partway with no word from the service is treated as cut off: no half-written question is kept', async () => {
@@ -313,7 +349,8 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
     // a model that answers only its first 50 points and closes the reply is asked 50 at a time from then on
     const s3 = setup((c) => { if (!isPhrase(c)) return {}; const r = answer(c); r.items = r.items.slice(0, 50); return r; }, {}, { shared: new Mem(), installId: 'pc' });
     val(await s3.ai.phrase!({ dealId: 'd', items: points(2000) }));
-    expect(s3.calls.filter(isPhrase).length).toBeLessThan(45);      // each call still gets 50 back, with the rest asked first in the next
+    // each call still gets 50 back, and the points a list's replies left out are asked again together
+    expect(s3.calls.filter(isPhrase).length).toBeLessThan(45);
     // a whole reply with an unescaped quote in a question is not taken for one cut off
     const t = setup((c) => (!isPhrase(c) ? {} : `{"items":[${lines(c).map((_, n) => `{"id":"${ids(c)[n]}","text":"Please send the 5" pipe spec ${n + 1}"}`).join(',')}]}`), {}, { shared: new Mem(), installId: 'pc' });
     expect(val(await t.ai.phrase!({ dealId: 'd', items: points(3) }))[2]).toBe('Please send the 5" pipe spec 3');
@@ -339,7 +376,8 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
     const s = setup((c) => (isPhrase(c) ? cut() : {}), {}, { shared: new Mem(), installId: 'pc' });
     const r = await s.ai.phrase!({ dealId: 'd', items: points(3) });
     expect(r.ok).toBe(false); if (!r.ok) expect(r.error.message).toBe(`${SERVICE}’s reply was cut off, so nothing was added`);
-    expect(s.calls.filter(isPhrase).map((c) => lines(c).length)).toEqual([3, 1, 2, 1, 1, 1, 1, 1]);      // the first point cut off is asked alone, cut off again set aside, and so for each (parts.ts); each is asked alone once more at the end
+    // the first point cut off is asked alone, cut off again set aside, and so for each (parts.ts)
+    expect(s.calls.filter(isPhrase).map((c) => lines(c).length)).toEqual([3, 1, 2, 1, 1]);
     const t = setup((c) => (isPhrase(c) ? 'not JSON at all' : {}), {}, { shared: new Mem(), installId: 'pc' });
     const q = await t.ai.phrase!({ dealId: 'd', items: points(3) });
     expect(q.ok).toBe(false); if (!q.ok) expect(q.error.message).toBe(`${SERVICE}’s reply could not be read, so nothing was added`);
@@ -352,6 +390,49 @@ describe('questions for the counterparty on what is unresolved (#2)', () => {
     const u = setup((c) => { if (isPhrase(c)) throw new Error('boom'); return {}; }, {}, { shared: new Mem(), installId: 'pc' });
     const e = await u.ai.phrase!({ dealId: 'd', items: points(250) });
     expect(e.ok).toBe(false); expect(u.calls.filter(isPhrase).length).toBe(3);      // asked twice more, quietly (Retries), then the run fails
+  });
+  describe('sized to the model\'s limits, with the shared quiet retry (#1109)', () => {
+    const stage = (reply: (c: Call, k: number) => unknown) => {
+      let k = 0;
+      return setup((c) => (isPhrase(c) ? reply(c, k++) : {}), {}, { shared: new Mem(), installId: 'pc' });
+    };
+    const want = (n: number) => points(n).map((p, k) => `Q for [${p.kind}] Point ${k + 1}`);
+    it('a point never phrased among 2,000 is offered for Retry, and every other point is phrased', async () => {
+      const s = stage((c) => ({ items: answer(c).items.filter((x) => !x.text.endsWith(' Point 777')) }));
+      const out = val(await s.ai.phrase!({ dealId: 'd', items: points(2000) }));
+      expect(out).toEqual(want(2000).map((q, k) => (k === 776 ? null : q)));
+      // Retry asks for that point alone, and it fails again, saying why
+      const before = s.calls.filter(isPhrase).length;
+      const again = await s.ai.phrase!({ dealId: 'd', items: [points(2000)[776]] });
+      const asked = s.calls.filter(isPhrase).slice(before).map(lines);
+      expect(asked).toEqual([['[gap] Point 777 — needed: The signed copy 777']]);
+      expect(again.ok).toBe(false);
+    });
+    it('30 empty replies in a row, then good ones, still phrase every point', async () => {
+      const s = stage((c, k) => (k < 30 ? { items: [] } : answer(c)));
+      expect(val(await s.ai.phrase!({ dealId: 'd', items: points(2000) }))).toEqual(want(2000));
+    });
+    it('a part whose every reply is empty is halved down to single points: at most 2 x 64 - 1 asks', async () => {
+      const s = stage(() => ({ items: [] }));
+      const r = await s.ai.phrase!({ dealId: 'd', items: points(64) });
+      const asked = s.calls.filter(isPhrase).map((c) => lines(c).length);
+      expect(asked[0]).toBe(64);
+      expect(asked.length).toBeLessThanOrEqual(127);
+      expect(asked.filter((n) => n === 1).length).toBe(64);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error.message).toBe(`${SERVICE} left a point without a question, so nothing was added`);
+    });
+    it('a service that cannot be reached fails the run, and what came back is kept for asking again', async () => {
+      const down = () => { throw Object.assign(new Error('offline'), { code: 'unreachable' }); };
+      let up = false;
+      const s = stage((c, k) => (up || k === 0 ? answer(c) : down()));
+      expect((await s.ai.phrase!({ dealId: 'd', items: points(240) })).ok).toBe(false);
+      expect(s.calls.filter(isPhrase).length).toBe(2);
+      up = true;
+      expect(val(await s.ai.phrase!({ dealId: 'd', items: points(240) }))).toEqual(want(240));
+      const again = s.calls.filter(isPhrase).slice(2).flatMap(lines).map((l) => Number(/Point (\d+)/.exec(l)![1]));
+      expect(again.sort((a, b) => a - b)).toEqual(range(121, 241));
+    });
   });
 });
 
@@ -483,6 +564,11 @@ describe('model-written text is kept whole up to one Excel cell (#1104)', () => 
     const text = 'Wetlands delineation complete. '.repeat(22).trim();
     const s = setup((c) => (isReword(c) ? { items: [{ n: 1, text, why: 'unclear' }] } : {}), {}, stand);
     expect(val(await s.ai.reword!({ items: ['Wetlands'] }))[0].text).toBe(text);
+  });
+  it('keeps the reason the model gives for a rewording as written, with no cut', async () => {
+    const why = ` clear\n  reason ${'long '.repeat(40)}\t`;
+    const s = setup((c) => (isReword(c) ? { items: [{ n: 1, text: 'Wetlands delineation is complete', why }] } : {}), {}, stand);
+    expect(val(await s.ai.reword!({ items: ['Wetlands'] }))[0].why).toBe(why);
   });
   it('keeps all eight parts of a split item', async () => {
     const texts = Array.from({ length: 8 }, (_, k) => `Condition ${k + 1} is met`);

@@ -210,12 +210,14 @@ A deal's checklist is made up of its own item records, linked to the findings an
   If any selected question is no longer settled, none are closed. Each close is one change with one **Undo**.
 - **Add All Unresolved to Q&A…** (`AddUnresolved`) reads the rows again before writing and applies one change with one
   **Undo**. The fast model phrases a question for each gap or open finding that has no linked question. It works in
-  parts sized by `inParts` and asks again, one at a time, about any points that failed. Points still without a question
-  are counted and offered with **Retry**.
+  parts sized by `inParts`, and each call gets only the shared quiet retry. Points a reply left out are asked again as
+  a part; a part that brings nothing is split down to single points. Points still without a question are counted and
+  offered with **Retry**. A link from a point to an open question is offered only when a person approved it (#88);
+  no question is matched to a point by similar words.
 
 ## Q&A log, imports, and the memo
 
-- **The Q&A log** (`src/app/qaLog.ts`, `src/backend/qaLogs.ts`) is the team's own spreadsheet; the deal records only where it is. An update reads the log as it is, works out the cells to change (`logWrite` in `src/domain/logWrite.ts`, which finds each question's row with the import's own lookup, `matchQuestions` in `src/domain/qaMatch.ts`), and writes them into a copy (`editLog` in `src/backend/spreadsheets.ts`). It then checks that only those cells changed, archives the old version, and saves the copy over the log (`src/backend/qaLogFolder.ts`).
+- **The Q&A log** (`src/app/qaLog.ts`, `src/backend/qaLogs.ts`) is the team's own spreadsheet; the deal records only where it is. An update reads the log as it is, works out the cells to change (`logWrite` in `src/domain/logWrite.ts`, which finds each question's row with the import's own lookup, `matchQuestions` in `src/domain/qaMatch.ts`), and writes them into a copy (`editLog` in `src/backend/spreadsheets.ts`). It then checks that only those cells changed, archives the old version, and saves the copy over the log (`src/backend/qaLogFolder.ts`). An edit saved to the log just before an update moved it is merged back in cell by cell (`mergeKept` in `src/domain/keptMerge.ts`), with its rows lined up by the same lookup.
 - **Q&A import** reads and proposes a table layout through `src/app/transfer.ts`. Its preview uses prepared dates
   where available. `src/app/qaImport.ts` submits the prepared rows through `ImportQuestions`. That workflow resumes retained
   submissions by their journal correlation and finishes the saved log choice.
@@ -233,6 +235,14 @@ A deal's checklist is made up of its own item records, linked to the findings an
 ## Conversations
 
 A conversation belongs to one person and follows them between PCs. `src/backend/conversationLog.ts` keeps finished messages in per-PC `talk-<install>-<n>.jsonl` files in the shared folder, separate from the records, because a conversation never needs a choice between versions.
+
+Once an answer on a deal's or a finding's conversation finishes, `suggestQuestion` asks the standard model which open
+questions it addresses, showing each question by its permanent id in calls sized to its input limit. When the open
+questions take more than one call, they are asked in parts (`inParts`) and every question any part names is kept. A
+reply naming an id it was not shown, or no id and not "none", is a failed reply and is asked again (`namesOnlyShown`);
+code keeps only ids it offered. Each proposal is kept for the session with the question's text as asked
+(`src/app/suggestedQuestion.ts`), and shows only while that question is still open with exactly that text
+(`stillAsks`). The card under the answer lists each one, with its own Check, Use as Response and Not this one (#1120).
 
 ## UI rules
 
