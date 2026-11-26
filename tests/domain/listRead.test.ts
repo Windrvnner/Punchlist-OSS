@@ -96,13 +96,23 @@ describe('a list read whole by the model, tied out line by line', () => {
       ['A. Site', 'A.1 Real estate', 'Title report'], ['A. Site', 'A.2 Access', 'Road agreement']]);
   });
 
-  it('fills the lines a first reading left unplaced, taking a column it did not name from the second', () => {
+  it('fills a line the first reading left unplaced from the second, with the first reading\'s columns', () => {
     const lines = tableLines(['No', 'Description'], [['A', 'Site'], ['1', 'Title report']]);
     const first = reading(kinds([[1, 'columns'], [3, 'item']]), { item: 2 });
-    const filled = fillUnplaced(lines, first, reading(kinds([[1, 'left'], [2, 'section']]), { item: 1, heading: 2 }));
-    expect(filled.cells).toEqual({ item: 2, heading: 2 });
-    expect(tieOut(lines, filled).items).toEqual([{ section: 'Site', text: 'Title report', lines: [3] }]);
+    const filled = fillUnplaced(lines, first, reading(kinds([[1, 'left'], [2, 'item']]), { item: 1 }));
+    expect(filled.cells).toEqual({ item: 2 });
+    expect(tieOut(lines, filled).items.map((i) => i.text)).toEqual(['Site', 'Title report']);
     expect(unplaced(lines, filled)).toEqual([]);
+  });
+
+  it('does not let a column only the second reading names regroup the items the first placed', () => {
+    const lines = tableLines(['No', 'Description'], [['A', 'Site'], ['1', 'Title report']]);
+    const first = reading(kinds([[1, 'columns'], [3, 'item']]), { item: 2 });
+    const second = reading(kinds([[1, 'left'], [2, 'section'], [3, 'item']]), { item: 2, section: 1 });
+    const filled = fillUnplaced(lines, first, second);
+    expect(filled.cells).toEqual({ item: 2 });
+    expect(tieOut(lines, filled).items).toEqual([{ text: 'Title report', lines: [3] }]);
+    expect(unplaced(lines, filled)).toEqual([2]);
   });
 
   it('keeps the first reading\'s columns where it names them, so the items it placed keep their words', () => {
