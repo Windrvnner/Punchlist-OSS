@@ -1,6 +1,6 @@
 /**
- * The suggested open question under a chat answer (#1120): once an answer finishes, the model proposes the open question
- * it may address, and the card under the answer shows it until a person uses it or puts it away.
+ * The suggested open question under a chat answer (#1120): once an answer finishes, the model proposes the open
+ * question it may address, and the card under the answer shows it until a person uses it or puts it away.
  */
 import { answerText, convKey, type Scope } from './conversations';
 import { dealQuestions, type Message, type State } from './state';

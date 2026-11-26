@@ -369,12 +369,14 @@ for (const [index, size] of SIZES.entries()) {
   const seen = await page.evaluate(() => ({
     rows: document.querySelectorAll('#au-list .lrow').length,
     links: [...document.querySelectorAll('#au-list .lrow')].filter((r) => r.textContent.includes('Link to')).length,
-    foot: document.getElementById('au-count').textContent, alert: document.getElementById('au-count').getAttribute('role'),
+    foot: document.getElementById('au-count').textContent,
+    alert: document.getElementById('au-count').getAttribute('role'),
     go: !document.getElementById('au-go').disabled,
   }));
   const notice = 'Couldn’t check the open questions, so no links are suggested';
   say('a failed link check drafts every row with no link and says so in the footer',
-    seen.rows > 0 && seen.links === 0 && seen.foot === notice && seen.alert === 'alert' && seen.go, JSON.stringify(seen));
+    seen.rows > 0 && seen.links === 0 && seen.foot === notice && seen.alert === 'alert' && seen.go,
+    JSON.stringify(seen));
   await ctx.close();
 }
 

@@ -404,6 +404,42 @@ function handleAt(named: unknown, count: number): number | null {
   const n = typeof named === 'string' ? /^A(\d+)$/.exec(named.trim())?.[1] : undefined;
   return n && +n >= 1 && +n <= count ? +n - 1 : null;
 }
+type SamePair = { a: number; b: number; inAgainst: boolean; why: string };
+type SameMissed = { kind: 'unreachable' | 'failed'; at: number[] };
+/**
+ * What the parts of a split open-question match found (#1120), gathered as each part answers: the pairs, once each,
+ * with their questions placed in the whole log, and the points some part missed.
+ */
+function questionPartsTally(points: number) {
+  const pairs: SamePair[] = [];
+  const seen = new Set<string>();
+  const lost = new Set<number>();
+  let kind: SameMissed['kind'] | undefined;
+  let answered = false;
+  return {
+    add(value: { pairs: SamePair[]; missed?: SameMissed }, from: number) {
+      answered = true;
+      for (const at of value.missed?.at ?? []) lost.add(at);
+      kind ??= value.missed?.kind;
+      for (const pair of value.pairs) {
+        const whole = pair.inAgainst ? { ...pair, b: pair.b + from } : pair;
+        const key = `${whole.a}:${whole.b}:${whole.inAgainst}`;
+        if (!seen.has(key)) pairs.push(whole);
+        seen.add(key);
+      }
+    },
+    fail(why: SameMissed['kind']) {
+      kind ??= why;
+      for (let at = 0; at < points; at++) lost.add(at);
+    },
+    answered: () => answered,
+    result() {
+      pairs.sort((p, q) => p.a - q.a || Number(p.inAgainst) - Number(q.inAgainst) || p.b - q.b);
+      const at = [...lost].sort((x, y) => x - y);
+      return { pairs, ...(at.length ? { missed: { kind: kind ?? 'failed', at } } : {}) };
+    },
+  };
+}
 const SAME_RULES = 'Be strict: only pairs you are sure of, each named once.';
 const SAME_REPLY = 'Reply as JSON: {"pairs": [{"a": 2, "b": 9, "why": "…"}]}';
 /**
@@ -669,34 +705,31 @@ export function nodeAi(o: AiOptions) {
    * point ends with its pairs or a missed entry. The run fails only when no part answered.
    */
   const sameInQuestionParts = async (i: SameInput, size: number) => {
-    const pairs: { a: number; b: number; inAgainst: boolean; why: string }[] = [];
-    const seen = new Set<string>();
-    const lost = new Set<number>();
-    let kind: 'unreachable' | 'failed' | undefined;
+    const tally = questionPartsTally(i.items.length);
     let failed: Result<never> | undefined;
-    let answered = false;
     for (let from = 0; from < i.against.length; from += size) {
       const r = await service.sameMeaning!({ ...i, against: i.against.slice(from, from + size) });
-      if (!r.ok) {
+      if (r.ok) tally.add(r.value, from);
+      else {
         failed ??= r;
-        kind ??= r.error.kind === 'unreachable' ? 'unreachable' : 'failed';
-        for (let a = 0; a < i.items.length; a++) lost.add(a);
-        continue;
-      }
-      answered = true;
-      for (const a of r.value.missed?.at ?? []) lost.add(a);
-      kind ??= r.value.missed?.kind;
-      for (const pair of r.value.pairs) {
-        const whole = pair.inAgainst ? { ...pair, b: pair.b + from } : pair;
-        const key = `${whole.a}:${whole.b}:${whole.inAgainst}`;
-        if (!seen.has(key)) pairs.push(whole);
-        seen.add(key);
+        tally.fail(r.error.kind === 'unreachable' ? 'unreachable' : 'failed');
       }
     }
-    if (failed && !answered) return failed;
-    pairs.sort((p, q) => p.a - q.a || Number(p.inAgainst) - Number(q.inAgainst) || p.b - q.b);
-    const missed = lost.size ? { missed: { kind: kind ?? 'failed', at: [...lost].sort((a, b) => a - b) } } : {};
-    return ok({ pairs, ...missed });
+    return failed && !tally.answered() ? failed : ok(tally.result());
+  };
+  /**
+   * The open-question match split into parts when the log does not fit one call with the points (#1120); null when it
+   * fits, or for a checklist, to be asked as one call.
+   */
+  const sameSplitByQuestions = async (i: SameInput) => {
+    if (i.kind !== 'questions') return null;
+    let size: number;
+    try {
+      size = await questionPartSize(i);
+    } catch (e) {
+      return failure(e, UNREACHED);
+    }
+    return size < i.against.length ? sameInQuestionParts(i, size) : null;
   };
   /** points titled and compared with the findings in one call: a list of deal size (a few hundred points) is one call */
   const ISSUES_BATCH = 400;
@@ -2201,15 +2234,8 @@ export function nodeAi(o: AiOptions) {
       return ok(out as (string | null)[]);
     },
     async sameMeaning(i) {
-      if (i.kind === 'questions') {
-        let size: number;
-        try {
-          size = await questionPartSize(i);
-        } catch (e) {
-          return failure(e, UNREACHED);
-        }
-        if (size < i.against.length) return sameInQuestionParts(i, size);
-      }
+      const split = await sameSplitByQuestions(i);
+      if (split) return split;
       // The whole list and the general list go to the model in one call, which says which items ask for the same thing as
       // another. Only a list longer than SAME_BATCH is asked about in parts, each shown the items after it and the general
       // list (a pair with an earlier item was asked about in that item's part). A reply that cannot be read, as one too
