@@ -65,11 +65,10 @@ function envRead(node) {
     && node.property.name === 'env';
 }
 
-// What a module loads: other modules, by a plain string only, and import.meta only as import.meta.env. A module
-// name `forbidden` refuses, or a load whose path cannot be read, is recorded as an import.
-function moduleChecks(record, forbidden) {
+// What a UI module loads: other modules, by a plain string only, and import.meta only as import.meta.env.
+function moduleChecks(file, record) {
   function checkModule(node, source = node) {
-    if (stringValues(source).some(forbidden)) record('import', node);
+    if (stringValues(source).some((name) => forbiddenModule(file, name))) record('import', node);
   }
   function checkLoaded(node, argument) {
     if (computedPath(argument)) record('import', node);
@@ -105,29 +104,13 @@ function moduleChecks(record, forbidden) {
   };
 }
 
-function parsedProgram(file, source) {
+export function matchesIn(file, source) {
   const parsed = parseSync(file, source, { range: true });
   if (parsed.errors.length) throw new Error(`${file}: ${parsed.errors[0].message}`);
-  return parsed.program;
-}
-
-function recorder(offsets) {
-  return (kind, node) => (offsets[kind] ??= new Set()).add(node.start);
-}
-
-// The lines where a file loads a module `forbidden` refuses, by the UI's own scan, for another layer's rule (#648).
-// As for the UI, a load whose path is not a plain string, and import.meta other than .env, count too.
-export function importsIn(file, source, forbidden) {
   const offsets = {};
-  const { readsEnv, usesRequire, ...modules } = moduleChecks(recorder(offsets), forbidden);
-  new Visitor({ ...modules, MemberExpression: readsEnv, Identifier: usesRequire }).visit(parsedProgram(file, source));
-  return matchingLines(offsets, source).import ?? [];
-}
-
-export function matchesIn(file, source) {
-  const program = parsedProgram(file, source);
-  const offsets = {};
-  const record = recorder(offsets);
+  function record(kind, node) {
+    (offsets[kind] ??= new Set()).add(node.start);
+  }
   function checkProperty(key, computed) {
     const names = propertyNames(key, computed);
     if (names.includes('services')) record('services', key);
@@ -154,7 +137,7 @@ export function matchesIn(file, source) {
       if (entry.type === 'Property') checkProperty(entry.key, entry.computed);
     }
   }
-  const { readsEnv, usesRequire, ...modules } = moduleChecks(record, (name) => forbiddenModule(file, name));
+  const { readsEnv, usesRequire, ...modules } = moduleChecks(file, record);
   new Visitor({
     ...modules,
     MemberExpression(node) {
@@ -169,7 +152,7 @@ export function matchesIn(file, source) {
       if (storageNames.has(node.name)) record('storage', node);
       if (networkNames.has(node.name)) record('network', node);
     },
-  }).visit(program);
+  }).visit(parsed.program);
   return matchingLines(offsets, source);
 }
 

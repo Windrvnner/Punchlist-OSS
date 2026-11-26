@@ -9,7 +9,6 @@ Dependencies point inward, following these rules:
 - `domain` imports only `control`, `palette`, `ports` types, and zod.
 - `app` never imports `backend`, `adapters`, or `ui`.
 - `adapters` and `backend` implement the ports.
-- `backend` never imports `adapters`; code both share lives in `domain`.
 - `ui` reads `domain` helpers but changes records only through `app`.
 - `ui` never imports `backend`, `adapters`, `desktop`, or `shell`, and reaches services and storage only through `app`.
 - `logRepository.ts` and `changeLog.ts` are bundled into the browser build, so they must stay free of Node imports.
