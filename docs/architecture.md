@@ -209,7 +209,7 @@ A deal's checklist is made up of its own item records, linked to the findings an
   are counted and offered with **Retry**.
   Open questions that may already ask a point are offered under **Already Asked?** (#1218). Code scores each point's
   best open question as the percent of the point's telling words it names (`askedMatcher`, `src/domain/suggest.ts`),
-  and only a question at or above `limits.askedCutoff` (default 80) is a candidate (`askedCandidates`,
+  and only a question at or above `limits.askedCutoff` (default 80; 0 to 100) is a candidate (`askedCandidates`,
   `src/app/unresolvedLinks.ts`; a question is a candidate for one point). The optional port `covers` asks the
   standard model about all the candidates at once, in parts like the other batched calls, naming each pair by a neutral
   tag; code takes an answer only for an offered tag, once, as true or false (`confirmedLinks`). No candidate means no

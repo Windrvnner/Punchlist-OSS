@@ -305,9 +305,8 @@ const SPEC = {
       80,
       "Percent of an unresolved point's telling words that an open question must name before the model is asked " +
         "whether it already asks for the point (Add All Unresolved's Already Asked?). Below it no call is made and " +
-        "nothing is offered; at 50 a question naming half the point's words is checked, at 100 only one naming " +
-        'every word.',
-      50,
+        'nothing is offered; at 0 the best question for every point is checked, at 100 only one naming every word.',
+      0,
       100,
     ),
     searchCalls: count(15, 'About how many calls one search run makes before it returns what it found.', 1, 50),

@@ -92,3 +92,17 @@ it('keeps a link the person approved and does not offer its question for another
   expect(got.kept.map((l) => [l.point, l.q.id])).toEqual([['i:' + INSURANCE, 'q1']]);
   expect(got.candidates).toEqual([]);
 });
+
+it('at 0 checks the best question for every point that shares a word, at 100 only one naming every word', () => {
+  const pool = [question(1, 'Please send the insurance advisor report.')];   // names 3 of the 4 words: 75 percent
+  const unrelated = point('Lock-up ratio');
+  const at = (cutoff: number) => askedCandidates([point(INSURANCE), unrelated], pool, undefined, cutoff).candidates;
+  expect(at(0).map((c) => c.point.what)).toEqual([INSURANCE]);   // a point sharing no word has no best question
+  expect(at(100)).toEqual([]);
+  const full = [question(2, ASKS_INSURANCE)];
+  expect(askedCandidates([point(INSURANCE)], full, undefined, 100).candidates).toHaveLength(1);
+  const words = Array.from({ length: 100 }, (_, k) => `term${String.fromCharCode(97 + (k % 26), 97 + Math.floor(k / 26))}`);
+  const nearly = [question(3, words.slice(1).join(' '))];   // names 99 of the point's 100 words: 99 percent
+  expect(askedCandidates([point(words.join(' '))], nearly, undefined, 99).candidates[0].confidence).toBe(99);
+  expect(askedCandidates([point(words.join(' '))], nearly, undefined, 100).candidates).toEqual([]);
+});
