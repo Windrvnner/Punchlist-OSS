@@ -1905,7 +1905,8 @@ describe('text the model writes is kept as given, edge spaces and tabs included'
     await deal(s.repo);
     await finding(s.repo, 'f_1', 'Lock-up ratio differs from the term sheet');
     val(await s.ai.answer(ask('Catch me up on the deal')));
-    expect(s.turns[1].prompt).toContain('The catch-up on the open findings:\n The lock-up mismatch matters most.\n\tNothing else is open.');
+    const brief = ' The lock-up mismatch matters most.\n\tNothing else is open.';
+    expect(s.turns[1].prompt).toContain(`The catch-up on the open findings:\n${brief}`);
   });
 
   it('a merged answer keeps its edges', async () => {
@@ -1917,7 +1918,10 @@ describe('text the model writes is kept as given, edge spaces and tabs included'
   it('a finding raised in a check keeps its title as written', async () => {
     const edged = (c: Call) => ({ ...LOCKUP(c), title: ' Lock-up ratio differs\t' });
     const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...edged(c) })) }),
-      { d1: [FA, TS] }, { checklist: () => ({ broad: [LIST.broad[0]], product: [], sector: [] }), pick: (c) => ({ read: numbersOf(c, FA, TS) }) });
+      { d1: [FA, TS] }, {
+        checklist: () => ({ broad: [LIST.broad[0]], product: [], sector: [] }),
+        pick: (c) => ({ read: numbersOf(c, FA, TS) }),
+      });
     await deal(s.repo);
     const r = val(await s.ai.firstPass('d1'));
     expect((await findingData(s.repo, r.written[0])).title).toBe(' Lock-up ratio differs\t');

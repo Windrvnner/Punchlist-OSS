@@ -1278,7 +1278,10 @@ export function nodeAi(o: AiOptions) {
       placed.set(key, sources.length + 1); renumber.set(i + 1, sources.length + 1);
       sources.push({ doc: s.rec.name, loc, docId: s.rec.docId, ...(typeof c.quote === 'string' && c.quote ? { quote: c.quote } : {}), ...(withDeal ? { dealId: s.dealId } : {}), ...(blacklines(s.dealId).has(s.rec.docId) ? { reading: true } : precedents(s.dealId).has(s.rec.docId) ? { precedent: true } : {}) } as Source);   // a blackline's page is the model's reading of it; another project's document is tagged so
     });
-    const out = String(text ?? '').replace(/\s*\[(\d+)\]/g, (_m, n) => (renumber.has(+n) ? ` [${renumber.get(+n)}]` : '')).replace(/\{([^{}|]+)\|[^{}]*\}/g, '$1').replace(/ \[(\d+)\](?: ?\[\1\])+/g, once ? ' [$1]' : '$&');
+    const out = String(text ?? '')
+      .replace(/\s*\[(\d+)\]/g, (_m, n) => (renumber.has(+n) ? ` [${renumber.get(+n)}]` : ''))
+      .replace(/\{([^{}|]+)\|[^{}]*\}/g, '$1')
+      .replace(/ \[(\d+)\](?: ?\[\1\])+/g, once ? ' [$1]' : '$&');
     return { text: out, sources };
   }
   const dealIds = async (): Promise<string[]> => { const r = await o.repo.list('deal', '_'); return r.ok ? r.value.map((l) => l.id) : []; };
@@ -1836,7 +1839,8 @@ export function nodeAi(o: AiOptions) {
       if (!r.value.sent.length) return fail({ kind: 'failed', message: 'None of this finding’s documents are indexed, so there is nothing to reassess it against' });
       const paras = parasOf(r.value.reply);
       if (!paras.length) return fail({ kind: 'failed', message: UNREAD_REPLY });
-      const out = fit(paras.join(PARAGRAPH_SEAM), r.value.reply.sources as Cited[], r.value.sent, false, true);   // a finding: a place cited twice is one source, as when it was raised
+      // a finding: a place cited twice is one source, as when it was raised
+      const out = fit(paras.join(PARAGRAPH_SEAM), r.value.reply.sources as Cited[], r.value.sent, false, true);
       // a finding stays as written unless one of this deal's own documents bears it out
       if (!out.sources.some((x) => mainIn(r.value.sent, x))) return fail({ kind: 'failed', message: out.sources.length ? 'Only another project’s documents or a blackline against one bear on it, so it stays as written' : 'No page of the deal’s documents bears it out, so it stays as written' });
       return ok({ body: out.text.split(PARAGRAPH_SEAM).filter((p) => p.trim()), sources: out.sources });

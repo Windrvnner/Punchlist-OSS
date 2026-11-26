@@ -426,7 +426,9 @@ describe('an edit kept aside, merged into the log', () => {
   });
 
   describe('a row they added, which the log holds already under the same number', () => {
-    const rows = () => [['No.', 'Question', 'Response', 'Notes'], ['1', 'Question one', '', ''], ['2', 'Question two', '', '']];
+    const rows = () => [
+      ['No.', 'Question', 'Response', 'Notes'], ['1', 'Question one', '', ''], ['2', 'Question two', '', ''],
+    ];
     const merged = (theirs: string, logs: string) => mergeKept(
       table(rows()), table([...rows(), ['9', 'Brand new question', theirs, '']]),
       table([...rows(), ['9', 'Brand new question', logs, '']]), 'Question', undefined, undefined, 'No.',
@@ -439,7 +441,8 @@ describe('an edit kept aside, merged into the log', () => {
       expect(merged('a', 'a ')).toMatchObject({ steps: [], cells: 0, clashes: [2] });
     });
     it('brings their cell in, as they wrote it, where the log has none', () => {
-      expect(merged(' a\t', '')).toMatchObject({ steps: [{ kind: 'cell', row: 3, col: 2, value: ' a\t' }], cells: 1, clashes: [] });
+      const step = { kind: 'cell', row: 3, col: 2, value: ' a\t' };
+      expect(merged(' a\t', '')).toMatchObject({ steps: [step], cells: 1, clashes: [] });
     });
   });
 });
