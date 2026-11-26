@@ -91,6 +91,12 @@ export const whenText = (iso: string) => {
   return d.toLocaleDateString(LOCALE, { month: 'short', day: 'numeric' });
 };
 
+/** A "when" inside a sentence ("identified just now", "Closed 3 days ago"): lower case, except a date ("Nov 16") */
+export const whenInSentence = (iso: string) => {
+  const w = whenText(iso);
+  return /^[A-Z][a-z]{2} \d/.test(w) ? w : w[0].toLowerCase() + w.slice(1);
+};
+
 /**
  * Every menu closes the same way: a click outside it, or Escape. Escape closes only the menu
  * (not whatever is behind it) and returns focus to the button that opened it. `within` is a CSS
