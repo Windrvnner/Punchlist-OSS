@@ -442,8 +442,9 @@ function Interrupted({ id, what, where, onHide }: { id: string; what: string; wh
   const store = useStore();
   // Discard drops what was typed into the action, so it asks first in the app's confirm (#1055)
   const [asking, setAsking] = useState(false);
-  const named = `${what}${where ? ` · ${where}` : ''}`;
-  const text = `${what} interrupted${where ? ` · ${where}` : ''}`;
+  const place = where ? ` · ${where}` : '';
+  const named = `${what}${place}`;
+  const text = `${what} interrupted${place}`;
   const discard = () => {
     setAsking(false);
     void store.discardOp(id);
