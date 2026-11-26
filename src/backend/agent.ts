@@ -86,10 +86,12 @@ type Limits = {
 };
 
 /**
- * the most characters a page of findings or questions may hold: what the kept conversation holds before it is
- * compacted, so that one page never outgrows what one call may send (recordSearch.ts `pageOf`, #1091)
+ * the most characters a page of findings or questions may hold: half of what the kept conversation holds before it is
+ * compacted, so that a search of everything, which gives a page of each in one result, never outgrows what one call
+ * may send; the same whichever is searched, so that a page asked for by kind starts where a search of everything's
+ * page of that kind stopped (recordSearch.ts `pageOf`, #1091)
  */
-const pageChars = (limits: Limits, model: string) => limits.compactAt(model) * control.limits.charsPerToken;
+const pageChars = (limits: Limits, model: string) => (limits.compactAt(model) * control.limits.charsPerToken) / 2;
 
 const SEARCHES: readonly What[] = ['documents', 'findings', 'qa', 'all'];
 const REPLY_SHAPE = '{"tool": …} or {"text": "…", "sources": […]}';

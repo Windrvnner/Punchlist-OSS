@@ -112,7 +112,7 @@ describe('searching the Q&A log from the chat, a page at a time', () => {
   }, 60_000);
 
   it('a page holds fewer rows, each whole, when 25 would outgrow what the conversation holds', async () => {
-    // 4,000 tokens of 3 characters each: about nine of these rows a page
+    // half of 4,000 tokens of 3 characters each: about four of these rows a page
     const s = setup(calls(qa(), qa(2)), { compactAt: 4_000 });
     await questions(s.repo, 40);
     expect((await s.ai.answer(ask('What is outstanding?'))).ok).toBe(true);
@@ -128,15 +128,24 @@ describe('searching the Q&A log from the chat, a page at a time', () => {
   }, 60_000);
 
   it('a search of everything keeps its findings and Q&A pages within what the conversation holds', async () => {
-    const s = setup(calls({ tool: 'search', what: 'all', query: 'lock-up ratio' }), { compactAt: 4_000 });
+    const all = { tool: 'search', what: 'all', query: 'lock-up ratio' };
+    const next = (what: string) => ({ tool: 'search', what, query: 'lock-up ratio', page: 2 });
+    const s = setup(calls(all, next('findings'), next('qa')), { compactAt: 4_000 });
     await questions(s.repo, 40);
     await findings(s.repo, 40);
     expect((await s.ai.answer(ask('What is outstanding?'))).ok).toBe(true);
     const got = result(s, 2);
     const records = got.slice(got.indexOf('Findings:'));
-    expect((records.match(/^Finding “/gm) ?? []).length).toBeGreaterThan(0);
-    expect((records.match(/^Question: /gm) ?? []).length).toBeGreaterThan(0);
+    const [found, asked] = records.split('\nQ&A:');
+    const findingsShown = (found.match(/^Finding “/gm) ?? []).length;
+    const questionsShown = (asked.match(/^Question: /gm) ?? []).length;
+    expect(findingsShown).toBeGreaterThan(0);
+    expect(questionsShown).toBeGreaterThan(0);
     expect(records.length).toBeLessThan(12_000 + 500);                     // 4,000 tokens of 3 characters, and footers
+    expect(found).toContain('Ask for page 2 of "findings" for more.');
+    // the page its footer asks for starts where the search of everything stopped: no record is skipped
+    expect(result(s, 3)).toContain(`Finding “Lock-up ratio differs ${findingsShown}”`);
+    expect(result(s, 4)).toContain(`Question: Confirm the lock-up ratio (${questionsShown})`);
   }, 60_000);
 
   it('a Q&A result is the full row, found by any of its fields', async () => {

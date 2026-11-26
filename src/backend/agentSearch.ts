@@ -21,11 +21,8 @@ const LABEL = {
 } as const;
 export type What = keyof typeof LABEL;
 
-/**
- * what a search asks for: of what, which page of it, the query's words as they are compared, and the most characters
- * a page of findings or questions may hold in its result (`chars`)
- */
-interface Asked { what: What; page: number; words: Set<string>; chars: number }
+/** what a search asks for: of what, which page of it, and the query's words as they are compared */
+interface Asked { what: What; page: number; words: Set<string> }
 /** what one search found, as it is put together: for the main session, for the step's result, and for the step */
 interface Report { out: string[]; said: string[]; found: { where: string; quote: string }[] }
 /** the records of each deal, with the deal's name when there are several; `missed` the deals that could not be read */
@@ -49,9 +46,7 @@ export async function search(run: AgentRun, what: What, query: string, page = 1)
   const onPage = page > 1 ? ` · page ${page}` : '';
   const step = run.step({ kind: 'search', text: `Searched ${LABEL[what]} for ${quoted(query)}${onPage}` });
   const report: Report = { out: [], said: [], found: [] };
-  // a search of everything gives a page of findings and a page of questions in one result: each has half the room
-  const chars = what === 'all' ? run.pages.chars / 2 : run.pages.chars;
-  const asked: Asked = { what, page, words: queryWords(run, query), chars };
+  const asked: Asked = { what, page, words: queryWords(run, query) };
   if (what === 'documents' || what === 'all') await searchDocuments(run, asked, query, report);
   if (what === 'findings' || what === 'all') await searchFindings(run, asked, report);
   if (what === 'qa' || what === 'all') await searchQuestions(run, asked, report);
@@ -130,7 +125,7 @@ async function searchFindings(run: AgentRun, asked: Asked, report: Report): Prom
   const ranked = rankRecords(all, asked.words, (f) => `${f.title} ${f.body.join(' ')}`);
   const line = (f: (typeof all)[number]) =>
     `Finding “${f.title}” (${f.status}${f.deal ? `, ${f.deal}` : ''}): ${oneLine(f.body.join(' '))}`;
-  const shown = pageOf(ranked, asked.page, run.pages.searchPage, asked.chars, line);
+  const shown = pageOf(ranked, asked.page, run.pages.searchPage, run.pages.chars, line);
   const listing = ranked.length
     ? listed('Findings', 'findings', asked, shown, line)
     : noneFound('Findings', 'none answers to these words', missed.length, deals.length);
@@ -150,7 +145,7 @@ async function searchQuestions(run: AgentRun, asked: Asked, report: Report): Pro
   const { all, missed } = await gather(run, async (dealId) => byNumber(await run.kit.questions(dealId)));
   const ranked = rankRecords(all, asked.words, qaText);
   const row = (x: (typeof all)[number]) => qaRow(x, x.deal);
-  const shown = pageOf(ranked, asked.page, run.pages.searchPage, asked.chars, row);
+  const shown = pageOf(ranked, asked.page, run.pages.searchPage, run.pages.chars, row);
   const listing = ranked.length
     ? listed('Q&A', 'qa', asked, shown, row)
     : noneFound('Q&A', 'no question answers to these words', missed.length, deals.length);
