@@ -1,11 +1,11 @@
 // Reading a list in, whole: one reading, and when it leaves lines unplaced, one whole reading by the thorough model.
 import { describe, it, expect } from 'vitest';
-import { readList } from '../../src/app/listRead';
-import { tieOut, textLines, type LineRead, type ListReply } from '../../src/domain/listRead';
+import { pastedLines, readList } from '../../src/app/listRead';
+import { tableLines, tieOut, textLines, type LineRead, type ListReply } from '../../src/domain/listRead';
 import { mockAi } from '../../src/adapters/mocks';
 import { ok, fail, type Result } from '../../src/domain/result';
 import type { AiService } from '../../src/ports';
-import { ITEMS, LEFT_OUT, pastedLines } from '../fixtures/pastedList';
+import { ITEMS, LEFT_OUT, pastedLines as mockUpLines } from '../fixtures/pastedList';
 
 const LINES = ['1. Site', '1.1 Title report', '1.2 Leases cover the array', 'Page 2 of 6'];
 const RIGHT: LineRead[] = [{ n: 1, k: 'section' }, { n: 2, k: 'item' }, { n: 3, k: 'item' }, { n: 4, k: 'left' }];
@@ -62,9 +62,28 @@ describe('reading a list in, whole, every line accounted for', () => {
   });
 });
 
+describe('reading a table whose first reading named no columns', () => {
+  it('imports the rows by the columns the thorough reading names', async () => {
+    const lines = tableLines(['No', 'Requirement'], [['1', 'Title report'], ['2', 'Check Debt | Equity obligations']]);
+    const placed: LineRead[] = [{ n: 1, k: 'columns' }, { n: 2, k: 'item' }, { n: 3, k: 'item' }];
+    const { ai, calls } = fake([reading(placed), { lines: placed, cells: { item: 2 } }]);
+    const t = tieOut(lines, unwrap(await readList(ai, lines)));
+    expect(calls.map((c) => c.thorough)).toEqual([undefined, true]);
+    expect(t.items.map((i) => i.text)).toEqual(['Title report', 'Check Debt | Equity obligations']);
+    expect(t.left).toEqual([]);
+  });
+
+  it('writes a pasted cell\'s own " | " and backslash so that it stays one cell', () => {
+    const lines = pastedLines('No\tRequirement\n1\tCheck Debt | Equity obligations\n2\tC:\\dir\\file');
+    const placed: LineRead[] = [{ n: 1, k: 'columns' }, { n: 2, k: 'item' }, { n: 3, k: 'item' }];
+    const t = tieOut(lines, { reads: new Map(placed.map((r) => [r.n, r])), cells: { item: 2 } });
+    expect(t.items.map((i) => i.text)).toEqual(['Check Debt | Equity obligations', 'C:\\dir\\file']);
+  });
+});
+
 describe('the stand-in reading the mock-up list', () => {
   it('reads 120 items in their sections and leaves out the title, the note, the footers and the starred line', async () => {
-    const lines = textLines(pastedLines().join('\n'));
+    const lines = textLines(mockUpLines().join('\n'));
     const r = await readList(mockAi({ latency: [0, 0] }), lines); if (!r.ok) throw new Error(r.error.message);
     const t = tieOut(lines, r.value);
     // the app keeps every line exactly as the file has it, numbering and curly quotes included

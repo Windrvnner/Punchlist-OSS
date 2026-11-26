@@ -105,6 +105,25 @@ describe('a list read whole by the model, tied out line by line', () => {
     expect(unplaced(lines, filled)).toEqual([]);
   });
 
+  it('reads the table from the second reading\'s columns when the first reading named none', () => {
+    const lines = tableLines(['No', 'Description'], [['1', 'Site'], ['2', 'Title report']]);
+    const first = reading(kinds([[1, 'columns'], [2, 'item'], [3, 'item']]));
+    const second = reading(kinds([[1, 'columns'], [2, 'item'], [3, 'item']]), { item: 2 });
+    const filled = fillUnplaced(lines, first, second);
+    expect(filled.cells).toEqual({ item: 2 });
+    expect(tieOut(lines, filled).items.map((i) => i.text)).toEqual(['Site', 'Title report']);
+    expect(unplaced(lines, filled)).toEqual([]);
+  });
+
+  it('keeps a cell whole when its own text holds " | " or a backslash, and the columns after it in place', () => {
+    const rows = [['1', 'Check Debt | Equity obligations', 'Debt'], ['2', 'Path C:\\\\dir\\| x', 'Equity']];
+    const lines = tableLines(['No', 'Requirement', 'Area'], rows);
+    const read = kinds([[1, 'columns'], [2, 'item'], [3, 'item']]);
+    const t = tieOut(lines, reading(read, { item: 2, section: 3 }));
+    expect(t.items.map((i) => [i.section, i.text])).toEqual([
+      ['Debt', 'Check Debt | Equity obligations'], ['Equity', 'Path C:\\\\dir\\| x']]);
+  });
+
   it('does not let a column only the second reading names regroup the items the first placed', () => {
     const lines = tableLines(['No', 'Description'], [['A', 'Site'], ['1', 'Title report']]);
     const first = reading(kinds([[1, 'columns'], [3, 'item']]), { item: 2 });

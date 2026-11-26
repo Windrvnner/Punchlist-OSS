@@ -8,7 +8,7 @@
 import { decodeText } from '../domain/textEncoding';
 import type { AiService } from '../ports';
 import {
-  fillUnplaced, unplaced, textLines, tableLines, tieOut, readingOf, type ListReading, type TiedOut,
+  cellText, fillUnplaced, unplaced, textLines, tableLines, tieOut, readingOf, type ListReading, type TiedOut,
 } from '../domain/listRead';
 import { prepareChecklist, suggestChecklistColumns, type ChecklistMapping } from '../domain/checklistImport';
 import { keepImport } from './keptImports';
@@ -37,7 +37,12 @@ const SHEET = /\.(xlsx|xlsm|xls|xlsb|ods|csv)$/i; const PLAIN = /\.(txt|text|md)
  * Pasted text as lines. Text copied from a spreadsheet comes with its cells split by tabs: those are written " | ", as a
  * table's rows are given to the model, so a paste from Excel reads as the table it is.
  */
-export const pastedLines = (text: string): string[] => textLines(text).map((l) => l.replace(/\s*\t\s*/g, ' | ').replace(/^ \| | \| $/g, ''));
+export const pastedLines = (text: string): string[] => textLines(text).map(pastedLine);
+
+/** a line with tabs as table cells, each written as cellText writes it; a line with none is text, as it is */
+const pastedLine = (line: string): string => line.includes('\t')
+  ? line.split(/\s*\t\s*/).map(cellText).join(' | ').replace(/^ \| | \| $/g, '')
+  : line;
 
 /**
  * A chosen file as a source for the model: a spreadsheet as its table (`table`, every row from the top of the sheet, so

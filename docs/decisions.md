@@ -152,8 +152,9 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
   stored as the line is written (its edge spaces aside), never as the model words it. Here accuracy comes before cost:
   the standard model reads the whole list in one call and names each line's kind by its number, and for a table the
   columns that hold the item, section and subsection, and the headings of section and subsection rows; when lines are
-  left unplaced, the thorough model reads the whole list again and fills only those lines, with the first reading's
-  columns; a line those columns cannot place stays listed. A list the service refuses as
+  left unplaced, the thorough model reads the whole list again and fills only those lines; a table is read by the
+  first reading's columns, or by the thorough reading's when the first named none, and a line those columns cannot
+  place stays listed. A cell's own text is never shortened, even where it holds " | ". A list the service refuses as
   too long, or answers with a reply cut off, is read in halves, down to one line (#1073).
 - An item that joins two conditions becomes two items, and "(if applicable)" goes only on an item that may not apply to every deal.
 - Findings is the worklist and the Checklist is the coverage record; nothing is opened or closed on the Checklist.

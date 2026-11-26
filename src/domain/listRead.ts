@@ -46,18 +46,25 @@ export interface TiedOut {
   count: { lines: number; items: number; more: number; headings: number; blank: number; left: number };
 }
 
+/**
+ * A cell as written in a line: its backslashes and pipes are escaped, so that a " | " in the cell's own text is never
+ * taken for the separator between cells (decision: #1073).
+ */
+export const cellText = (cell: string): string => cell.replace(/[\\|]/g, '\\$&');
+
 /** A table as lines for the model: the heading row, then each row, its cells joined by " | ". */
 export function tableLines(columns: string[], rows: string[][]): string[] {
   // a line break inside a cell would split the row, so it becomes a space; the cell's other characters are kept
-  const line = (r: string[]) => r.map((c) => String(c ?? '').replace(/\r\n?|\n/g, ' ')).join(' | ');
+  const line = (r: string[]) => r.map((c) => cellText(String(c ?? '').replace(/\r\n?|\n/g, ' '))).join(' | ');
   return [line(columns), ...rows.map(line)];
 }
 
 /** Text as lines: every line break counts, so a line number means the same line to the person, the model and the app. */
 export const textLines = (text: string): string[] => text.replace(/\r\n?/g, '\n').split('\n');
 
-/** a table row's cells, as tableLines joins them */
-const rowCells = (line: string) => line.split(' | ');
+/** a table row's cells, as tableLines joins them, each as its own text (an escaped backslash or pipe undone) */
+const rowCells = (line: string) => line.split(' | ').map(uncellText);
+const uncellText = (cell: string) => cell.replace(/\\([\\|])/g, '$1');
 
 /** the cell a column names, as written, or '' when the line is not a table row or the column is past it */
 function cellAt(line: string, column: number | undefined): string {
@@ -71,7 +78,8 @@ function cellAt(line: string, column: number | undefined): string {
  * column for a section or subsection row. '' when there are none.
  */
 function wordsOf(line: string, k: LineRead['k'], cells: ListCells | undefined): string {
-  if (rowCells(line).length === 1) return line.trim();     // edge spaces are layout
+  // edge spaces are layout; with columns named the line is a table's one-cell row, written as cellText writes it
+  if (rowCells(line).length === 1) return cells ? uncellText(line.trim()) : line.trim();
   const column = k === 'item' ? cells?.item : k === 'section' ? cells?.heading : cells?.subheading;
   const cell = cellAt(line, column);
   return key(cell) ? cell : '';
@@ -88,16 +96,17 @@ export function unplaced(lines: string[], reading: ListReading): number[] {
 
 /**
  * The first reading, with the lines it left unplaced taken from a second reading of the whole list: what the first
- * placed is kept, and so are its columns, alone, since another column would regroup or re-word the items it placed.
- * A second reading places a line only where the first reading's columns can: a line they cannot place stays unplaced.
+ * placed is kept. A table is read by the first reading's columns, or by the second's when the first named none; a
+ * line those columns cannot place stays unplaced.
  */
 export function fillUnplaced(lines: string[], first: ListReading, second: ListReading): ListReading {
+  const columns = first.cells ?? second.cells;
   const reads = new Map(first.reads);
   for (const n of unplaced(lines, first)) {
     const again = second.reads.get(n);
-    if (again && usable(lines[n - 1], again, first.cells)) reads.set(n, again);
+    if (again && usable(lines[n - 1], again, columns)) reads.set(n, again);
   }
-  return first.cells ? { reads, cells: first.cells } : { reads };
+  return columns ? { reads, cells: columns } : { reads };
 }
 
 /** a reading is usable when its kind is known and an item or heading has words in its line */
