@@ -651,16 +651,20 @@ export function nodeAi(o: AiOptions) {
       return failure(e, 'The file could not be read');
     }
   }
+  /** a reply read as JSON, or none (`unusable`) when its caller cannot use it once its tries ran out (#1105) */
+  async function usableJson<T>(text: string, keys: string[], unusable?: Unusable) {
+    if (unusable && await unusable(text)) return { got: null, unusable: true };
+    return { got: json<T>(text, ...keys), unusable: false };
+  }
   async function askJson<T = Record<string, unknown>>(input: Ask, keys: string[], shape?: string, fix = true): Promise<T | null> {
     const raw = await whole(input, keys);
-    // one its caller still cannot use when its tries ran out is a failed reply (#1105)
-    if (input.unusable && await input.unusable(raw)) return null;
-    const got = json<T>(raw, ...keys); if (got || !fix || !String(raw ?? '').trim()) return got;
+    const read = await usableJson<T>(raw, keys, input.unusable);
+    if (read.got || read.unusable || !fix || !String(raw ?? '').trim()) return read.got;
     let fixed: string;
     try { fixed = await complete({ kind: 'fix', model: input.model, system: JSON_ONLY, prompt: `The reply below was meant to be one JSON object${shape ? ` in this shape: ${shape}` : ` with these fields: ${keys.join(', ')}`}. It cannot be read as written. Send it again as valid JSON, changing nothing else. If it is not an answer at all, reply {}.\n\n${raw}` }); }
     catch (e) { if (isCutOff(e)) throw cutReply(e, keys); if (unreachable(e)) throw e; return null; }
     if (unfinished(fixed)) throw cutReply(cutOff('The repaired reply stopped before its end', fixed), keys);
-    return json<T>(fixed, ...keys);
+    return (await usableJson<T>(fixed, keys, input.unusable)).got;
   }
   /**
    * A reply cut off at the output limit, whether the service said so or its JSON stops partway (limits.ts, decisions:
@@ -692,6 +696,10 @@ export function nodeAi(o: AiOptions) {
   type Talk = Ask & ConverseInput & { tried?: number };
   /** a turn's reply as text: its text, or the tool calls it made */
   const conversedText = (r: Conversed) => r.text || JSON.stringify(r.calls ?? '');
+  /** a turn its caller still cannot use fails as an empty one in a conversation does, to be asked again (#1105) */
+  async function refuseUnusable(r: Conversed, unusable?: Unusable): Promise<void> {
+    if (unusable && await unusable(conversedText(r))) throw new Error('The reply could not be used.');
+  }
   // Only a turn that begins a conversation is asked again, and as a new one: in a kept conversation the failed or empty turn
   // may already be part of it (North keeps it), and asking there again would send the turn, and its documents, twice, or an
   // empty turn some services refuse. Not a turn that answers tool calls either: its failure is how a model says it does not
@@ -739,8 +747,7 @@ export function nodeAi(o: AiOptions) {
       if (shorter) throw cutReply(cutOff('The reply stopped before its end', r.text), keys);
     }
     if (input.results?.length) doubted.delete(`${input.model}\nhybrid`);   // the model took tool results: an earlier passing 500 is forgotten
-    // a turn its caller still cannot use fails as an empty one in a conversation does, to be asked again (#1105)
-    if (input.unusable && await input.unusable(conversedText(r))) throw new Error('The reply could not be used.');
+    await refuseUnusable(r, input.unusable);
     const got = replyOf(r, keys);
     // an empty turn inside a conversation: failed, not answered. The chat asks it again as a new conversation (agent.ts;
     // decisions: Retries), since only a turn that begins one is asked again here
@@ -749,6 +756,7 @@ export function nodeAi(o: AiOptions) {
     try {
       const f = await converse({ kind: 'fix', model: input.model, conversation: r.conversation, prompt: `Your reply cannot be read as one JSON object in this shape: ${shape}. Send it again as valid JSON, changing nothing else.`, ...(input.tools ? { tools: input.tools } : {}) });
       if (unfinished(f.text ?? '')) throw cutReply(cutOff('The repaired reply stopped before its end', f.text), keys);   // a cut repair is never shown either
+      await refuseUnusable(f, input.unusable);
       return out(f, replyOf(f, keys), f.tokens ?? r.tokens);
     } catch (e) { if (unreachable(e)) throw e; return out(r, null); }
   }

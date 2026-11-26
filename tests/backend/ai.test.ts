@@ -476,8 +476,9 @@ describe('the chat agent', () => {
     val(await s.repo.transaction({ writes: [{ kind: 'question', id: 'q_2', data: { id: 'q_2', dealId: 'd1', n: 2, text: 'Confirm the lock-up ratio', response: 'It will be conformed to 1.30x.', status: 'answered' }, expectedRev: null }], index: { dealId: 'd1', add: [{ kind: 'question', id: 'q_2' }] } }));
     const r = val(await s.ai.answer(ask('What about the lock-up ratio?')));
     expect(s.turns[0].prompt).toContain('Finding “Lock-up ratio differs from the term sheet” (open): The draft has 1.25x.'); expect(s.turns[0].prompt).not.toContain('Insurance gap'); expect(s.turns[0].prompt).not.toContain('f_1');
-    expect(s.turns[1].prompt)
-      .toContain('q_2 · Answered\nQuestion: Confirm the lock-up ratio\nResponse to q_2: It will be conformed to 1.30x');
+    const listed = 'q_2 · Answered\nQuestion: Confirm the lock-up ratio\n'
+      + 'Response to q_2: It will be conformed to 1.30x';
+    expect(s.turns[1].prompt).toContain(listed);
     expect(r.research!.steps[1]).toMatchObject({ text: 'Searched Q&A for “lock-up ratio”', result: 'Q2', found: [{ where: 'Q2 · response received', quote: 'It will be conformed to 1.30x.' }] });
     expect(s.calls.length).toBe(1);                                                                                                        // only the first search's documents were read by a model
   });
@@ -704,6 +705,14 @@ describe('a kept conversation', () => {
     expect(gone.thread!.tags.slice(1, -1).every((t) => +t.tag.slice(1) > 6)).toBe(true); expect(gone.thread!.tags.at(-1)).toEqual({ tag: 'D6', dealId: 'd1', docId: 'deleted' });   // a document no longer here keeps its number
     const other = val(await s.ai.answer(ask('And the tenor?', { model: 'standard', history: said(['What is the lock-up?', 'And the margin?']), thread: gone.thread })));
     expect(other.thread).toMatchObject({ id: 'conv_2', model: 'standard' }); expect(s.svc.removed).toEqual([gone.thread!.transcript]);
+  });
+
+  it('a chat reply whose JSON repair names a question id on no deal is never shown (#1105)', async () => {
+    const repaired = { text: `It is 1.25x, per ${qid(99)}.`, sources: [] };
+    const turn = (c: Call) => (c.prompt.startsWith('Your reply cannot be read') ? repaired : 'I think it is 1.25x');
+    const s = setup(reader, undefined, { talks: true, turn });
+    const r = await s.ai.answer(ask('What is the lock-up?'));
+    expect(JSON.stringify(r)).not.toContain(qid(99));
   });
 
   it('a reply that cannot be read is sent back once in the same conversation, to be put right', async () => {
