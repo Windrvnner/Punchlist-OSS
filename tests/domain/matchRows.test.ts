@@ -41,6 +41,15 @@ describe('matchRows', () => {
   });
 });
 
+describe('a question as its log file holds it', () => {
+  it('is the row whose text has a line break as "\\n" and no control character: how the file stores it', () => {
+    const rows = [['1', 'Provide the model.\nAnd the lock-up level?']];
+    expect(matchRows({ rows }, mapping, [q('a', 1, 'Provide the model.\r\nAnd the lock-up level?')])).toEqual(new Map([['a', 0]]));
+    expect(matchRows({ rows: [['1', 'Provide Q3forecast']] }, mapping, [q('a', 1, 'Provide Q3\u0000forecast')])).toEqual(new Map([['a', 0]]));
+    expect(matchRows({ rows: [['1', 'Provide Q3 forecast']] }, mapping, [q('a', 1, 'Provide Q3\u0000forecast')])).toEqual(new Map([['a', 0]]));
+  });
+});
+
 describe('a party corrected in the app', () => {
   it('keeps the question\'s row, which still names what the app last wrote there, so the log gets no second row', () => {
     const withParty = { ...mapping, askedBy: 2 } as Mapping;

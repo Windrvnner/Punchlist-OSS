@@ -140,11 +140,17 @@ describe('a row that matches nothing exactly', () => {
   });
   it('slots in as the suggested question once accepted, and the suggestion is gone', async () => {
     const { store, dealId, rows, id } = await setup();
-    const accepted = [{ line: 2, questionId: id }];
+    const accepted = [{ line: 2, text: 'who is the EPC  Contractor', questionId: id }];
     const preview = previewImport(store, dealId, 'merge', rows, false, accepted);
     expect(preview.ok && [preview.value.suggestions, preview.value.created, preview.value.updated]).toEqual([[], 0, 1]);
     expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows, accepted })).ok).toBe(true);
     expect(dealQuestions(store.get(), dealId).map((q) => `${q.text}|${q.response}`)).toEqual(['who is the EPC  Contractor|Fabrikam']);
+  });
+  it('ignores an accepted choice made for other wording', async () => {
+    const { store, dealId, rows, id } = await setup();
+    const stale = [{ line: 2, text: 'some earlier wording', questionId: id }];
+    const preview = previewImport(store, dealId, 'merge', rows, false, stale);
+    expect(preview.ok && [preview.value.created, preview.value.updated]).toEqual([1, 0]);
   });
   it('is not suggested another sender\'s question, nor anything by number or other words', async () => {
     const { store, dealId } = await setup();

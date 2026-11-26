@@ -8,8 +8,6 @@
 import type { Question } from './model';
 import type { ReadTable, SheetEdit } from './sheets';
 import { prepareImport, IMPORT_FIELDS, type Mapping, type ImportField, type ImportRow } from './importExport';
-import { key } from './checklist';
-import { ROMAN_NUMERAL, NAMING_WORDS, normalizeReferences, setApartParts, isNamedChain } from './references';
 
 /** every field the app keeps up to date in the log, where the log has a column for it */
 const FIELDS: ImportField[] = ['n', 'text', 'askedBy', 'received', 'workstream', 'priority', 'status', 'response', 'respondedBy', 'responded'];
@@ -51,28 +49,6 @@ export interface LogWrite {
 const asLogHolds = (text: string, controls: string) =>
   text.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, controls);
 const sameInLog = (a: string, b: string) => a === b || asLogHolds(a, ' ') === asLogHolds(b, ' ') || asLogHolds(a, '') === asLogHolds(b, '');
-export function deMinimis(a: string, b: string): boolean {
-  if (readKey(a) === readKey(b)) return true;
-  const x = readKey(a, true), y = readKey(b, true);                                   // an emoji that became "?" is matched below
-  // a "?" or "\uFFFD" stands for any one character outside plain ASCII (or a run of them, as an emoji can become "??")
-  const lost = (s: string, t: string) => /[?\uFFFD]/.test(s) && new RegExp(`^${s.split(/[?\uFFFD]+/).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('(?:[^\\x00-\\x7F]+|[?\uFFFD]+)')}$`, 'u').test(t);
-  return lost(x, y) || lost(y, x);
-}
-/** a text with what a misreading changes taken out: its encoding repaired, Unicode's forms of one character made one, emoji and spacing gone */
-function readKey(s: string, emoji = false): string {
-  const t = mojibake(s).normalize('NFKC')
-    .replace(/[\u2018\u2019\u201A\u201B\u2032\u00B4`]/g, "'").replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"').replace(/[\u2010-\u2015\u2212]/g, '-');
-  return (emoji ? t : t.replace(/\p{Extended_Pictographic}|\u200D|\uFE0E|\uFE0F/gu, ''))
-    .replace(/\s+/g, ' ').trim();
-}
-/** UTF-8 text that was read as Windows-1252 ("â€™", "Ã©") made what it was; anything else as it is */
-const CP1252 = '\u20AC\u0081\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u008D\u017D\u008F\u0090\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u009D\u017E\u0178';
-function mojibake(s: string): string {
-  if (!/[\u00C2-\u00F4][\u0080-\u00BF\u0152-\u2122]/.test(s)) return s;
-  const bytes: number[] = [];
-  for (const ch of s) { const c = ch.codePointAt(0)!; const k = CP1252.indexOf(ch); if (c < 0x80 || (c >= 0xA0 && c <= 0xFF)) bytes.push(c); else if (k >= 0) bytes.push(0x80 + k); else return s; }
-  try { return new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(bytes)); } catch { return s; }
-}
 /** a log's question number as it is written ("Q4", "4.", "#004", "A-4"): what comes before the number, the number, and what after */
 const numberParts = (v: string) => { const m = /^\s*(\D*?)0*(\d+)\s*([.)]?)\s*$/.exec(v); return m ? { pre: m[1], n: +m[2], post: m[3] } : null; };
 /**
@@ -85,8 +61,14 @@ export function matchRows(table: Pick<ReadTable, 'rows'>, mapping: Mapping, ques
   const cell = (r: string[], k: ImportField) => (mapping[k] == null ? '' : String(r[mapping[k]!] ?? ''));
   const taken = new Set<number>(); const rowOf = new Map<string, number>();
   // rows by exact text, in the log's order, so a log of thousands of rows is matched in a moment
+  // a text as the log file holds it (a line break as "\n", control characters as a space or gone) is the text it was written as
   const byText = new Map<string, number[]>();
-  table.rows.forEach((r, i) => { const text = cell(r, 'text'); if (!text.trim()) return; const list = byText.get(text); if (list) list.push(i); else byText.set(text, [i]); });
+  const addRow = (text: string, i: number) => { const list = byText.get(text); if (list) list.push(i); else byText.set(text, [i]); };
+  table.rows.forEach((r, i) => {
+    const text = cell(r, 'text'); if (!text.trim()) return;
+    for (const form of new Set([text, asLogHolds(text, ' '), asLogHolds(text, '')])) addRow(form, i);
+  });
+  const rowsOf = (q: Question) => [...new Set([q.text, asLogHolds(q.text, ' '), asLogHolds(q.text, '')])].flatMap((form) => byText.get(form) ?? []).sort((a, b) => a - b);
   // a name is as written, spaces around it aside; each row's and question's is worked out once
   const rowSender = table.rows.map((r) => cell(r, 'askedBy').trim());
   const rowNumber = table.rows.map((r) => numberParts(cell(r, 'n'))?.n);
@@ -97,7 +79,7 @@ export function matchRows(table: Pick<ReadTable, 'rows'>, mapping: Mapping, ques
   const tiers: ((i: number, q: Question) => boolean)[] = [own, written, unnamed];
   for (const fits of tiers) for (const withNumber of [true, false]) for (const q of questions) {
     if (rowOf.has(q.id)) continue;
-    const i = (byText.get(q.text) ?? []).find((row) => !taken.has(row) && fits(row, q) && (!withNumber || rowNumber[row] === q.n));
+    const i = rowsOf(q).find((row) => !taken.has(row) && fits(row, q) && (!withNumber || rowNumber[row] === q.n));
     if (i !== undefined) { taken.add(i); rowOf.set(q.id, i); }
   }
   return rowOf;

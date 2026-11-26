@@ -236,7 +236,7 @@ function AnsweredRow({ answered, importing, onPick }: {
  * a row left alone is added as a new question.
  */
 function SuggestionsRow({ qa, suggestions }: { qa: ReadQa; suggestions: Suggestion[] }) {
-  const accept = (s: Suggestion) => qa.setAccepted([...qa.accepted, { line: s.line, questionId: s.questionId }]);
+  const accept = (s: Suggestion) => qa.setAccepted([...qa.accepted, { line: s.line, text: s.text, questionId: s.questionId }]);
   return (
     <div class="srow top"><div class="k">Could Match</div><div class="imprev imsug" id="im-suggest"><table>
       <thead><tr><th>Row</th><th>In the file</th><th>Could be</th><th /></tr></thead>

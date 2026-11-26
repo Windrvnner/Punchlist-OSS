@@ -7,7 +7,7 @@ import { QuestionId, type Question } from '../../domain/model';
 import type { ImportRow } from '../../domain/importExport';
 
 /** a row of the file, by its line in the file, the person chose to be that question */
-export const AcceptedMatch = z.object({ line: z.number().int().positive(), questionId: QuestionId });
+export const AcceptedMatch = z.object({ line: z.number().int().positive(), text: z.string(), questionId: QuestionId });
 export type AcceptedMatch = z.infer<typeof AcceptedMatch>;
 
 /** a row that matched no question, and the question it could be */
@@ -58,7 +58,8 @@ export function withAccepted(
   const taken = new Set(matched.values());
   for (const [idx, row] of rows.entries()) {
     const choice = accepted.find((a) => a.line === lineOf(row, idx));
-    if (!choice || result.has(idx) || taken.has(choice.questionId) || !known.has(choice.questionId)) continue;
+    // a choice made for other wording (the mapping or sheet changed since) no longer applies
+    if (!choice || choice.text !== row.text || result.has(idx) || taken.has(choice.questionId) || !known.has(choice.questionId)) continue;
     result.set(idx, choice.questionId); taken.add(choice.questionId);
   }
   return result;
@@ -70,10 +71,11 @@ export function withAccepted(
  */
 export function suggestMatches(rows: ImportRow[], live: Question[], matched: ReadonlyMap<number, string>): Suggestion[] {
   const taken = new Set(matched.values()); const out: Suggestion[] = [];
+  const wordsOf = new Map(live.map((q) => [q.id, plain(q.text)]));
   for (const [idx, row] of rows.entries()) {
     if (matched.has(idx)) continue;
     const wording = plain(row.text); const sender = row.askedBy.trim();
-    const hit = live.find((q) => !taken.has(q.id) && plain(q.text) === wording
+    const hit = live.find((q) => !taken.has(q.id) && wordsOf.get(q.id) === wording
       && (!sender || !q.askedBy.trim() || q.askedBy.trim() === sender));
     if (!hit) continue;
     taken.add(hit.id);
