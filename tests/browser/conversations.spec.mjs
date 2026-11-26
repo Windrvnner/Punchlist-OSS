@@ -119,7 +119,7 @@ const answered = (page) => page.waitForSelector('.msgs .ai:not(.pending):not(.fa
   }
   await page.evaluate(() => store.setPrefs({ landing: 'findings' })); await page.goto(URL + '#deal-' + id); await page.waitForSelector('.dtabs');
   say('navigation-intents', true);
-  await page.fill('#hask', 'log a question: Please confirm the insurance program.');
+  await page.fill('#hask', 'add a question: Please confirm the insurance program.');
   await page.press('#hask', 'Enter');
   await page.waitForFunction(() => Object.values(store.get().questions).some((q) => /insurance program/.test(q.text)));
   say('add-question-intent', (await page.evaluate(() => location.hash)) === '#deal-' + id);

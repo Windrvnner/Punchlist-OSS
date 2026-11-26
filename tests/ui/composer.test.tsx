@@ -55,10 +55,10 @@ async function mount(name: string, docs: Partial<DocumentService> = {}, underCon
   return { store, kv, repo, dealId, host, box, type, press, enter, questions, toasts };
 }
 
-describe('"log a question: …" in a deal’s ask box', () => {
+describe('"add a question: …" in a deal’s ask box', () => {
   it('makes the question and empties the box', async () => {
     const m = await mount('Yonder');
-    await m.enter('log a question: Please confirm the O&M term.');
+    await m.enter('add a question: Please confirm the O&M term.');
     expect(m.questions().map((q) => q.text)).toEqual(['Please confirm the O&M term.']);
     expect(m.box().value).toBe('');
   });
@@ -66,17 +66,17 @@ describe('"log a question: …" in a deal’s ask box', () => {
   it('with storage full, keeps the text in the box and says why', async () => {
     const m = await mount('Bellows');
     refuse(m.kv.local, toAQuestion, quota);
-    await m.enter('log a question: Please provide the insurance schedule.');
+    await m.enter('add a question: Please provide the insurance schedule.');
     expect(m.questions()).toHaveLength(0);
-    expect(m.box().value).toBe('log a question: Please provide the insurance schedule.');
+    expect(m.box().value).toBe('add a question: Please provide the insurance schedule.');
     expect(m.toasts().some((x) => /storage is full/.test(x))).toBe(true);
   });
 
   it('when saving fails, says why without a Retry: the text back in the box is how to send it again, so it is never logged twice', async () => {
     const m = await mount('Datum');
     refuse(m.kv.local, toAQuestion, () => new Error('This PC’s own copy of the changes cannot be written to'));
-    await m.enter('log a question: Please send the waiver.');
-    expect(m.box().value).toBe('log a question: Please send the waiver.');
+    await m.enter('add a question: Please send the waiver.');
+    expect(m.box().value).toBe('add a question: Please send the waiver.');
     const last = m.store.get().ui.toasts.at(-1);
     expect(last?.text).toMatch(/Couldn’t save/); expect(last?.action).toBeUndefined();
   });

@@ -136,9 +136,14 @@ function typedDealDestination(store: Store, text: string) {
   if (!command) return;
   const target = sameName(command[1]);
   const lookup = (name: string) => dealByName(Object.values(store.get().deals), name);
+  const possessive = (name: string) => lookup(name.replace(/['’]s$/i, '')) ?? lookup(name);
+  const named = (name: string) => {
+    const withoutArticle = name.replace(/^the\s+/i, '');
+    return possessive(withoutArticle) ?? (withoutArticle !== name ? possessive(name) : undefined);
+  };
   const suffix = /^(.+?)\s+(q ?& ?a|questions|findings|checklist|overview)$/i.exec(target);
-  const deal = suffix && lookup(suffix[1]);
-  return deal ? { deal, page: suffix[2].toLowerCase() } : { deal: lookup(target), page: '' };
+  const deal = suffix && named(suffix[1]);
+  return deal ? { deal, page: suffix[2].toLowerCase() } : { deal: named(target), page: '' };
 }
 
 function destinationHash(store: Store, text: string) {
@@ -155,7 +160,7 @@ export function navIntent(
   store: Store, text: string, navigate = navigateWindow, handled?: () => void,
 ): boolean {
   const typed = text.trim();
-  if (/^(new|create|add|start) (a )?(new )?deal$/i.test(typed)) {
+  if (/^(new|create|add|start) (a )?(new )?deal\b/i.test(typed)) {
     handled?.();
     store.ui({ newDeal: { name: '', folders: [], error: '', busy: false } });
     return true;
@@ -262,7 +267,7 @@ export async function sendTyped(store: Store, scope: Scope, view: SendView) {
     store.ui({ dialog: { kind: 'addUnresolved', dealId } });
     return;
   }
-  const question = dealId ? /^log a question[:\s]+(.+)/is.exec(text) : null;
+  const question = dealId ? /^(?:add|log) (?:a )?question[:\s]+(.+)/is.exec(text) : null;
   if (dealId && question) {
     take();
     await logTypedQuestion(store, dealId, question[1].trim(), text, key, view);
