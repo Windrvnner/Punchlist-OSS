@@ -97,7 +97,7 @@ async function searchFindings(run: AgentRun, queryWords: Set<string>, report: Re
   const some = missed.length ? ' · some could not be read' : '';
   report.said.push(missed.length === deals.length
     ? 'findings could not be read'
-    : `${got.length} ${noun(got.length, 'finding')}${moreMatched(matched.length - listed)}${some}`);
+    : listedNote(`${got.length} ${noun(got.length, 'finding')}`, listed, matched.length) + some);
 }
 
 /**
@@ -127,9 +127,7 @@ async function searchQuestions(run: AgentRun, queryWords: Set<string>, report: R
   }
   const more = got.length > 4 ? ` and ${got.length - 4} more` : '';
   const named = got.slice(0, 4).map((x) => `Q${x.n}`).join(', ') + more;
-  const unlisted = matched.length - listed;
-  const which = got.length ? named + moreMatched(unlisted)
-    : unlisted ? `${unlisted} matched`
+  const which = matched.length ? listedNote(named, listed, matched.length)
     : missed.length === deals.length ? 'questions could not be read' : 'no questions';
   report.said.push(which + (missed.length && missed.length < deals.length ? ' · some could not be read' : ''));
 }
@@ -227,8 +225,11 @@ function fitted(heading: string, lines: string[], listed: number): string {
   return `${heading}:\n${lines.slice(0, listed).join('\n')}${more}`;
 }
 
-/** the step's note of the records that matched but were not listed */
-const moreMatched = (count: number) => (count ? ` · ${count} more matched` : '');
+/** the step's note of a search of records: what it listed and how many more matched; only the count when none fit */
+const listedNote = (listedText: string, listed: number, matched: number) => {
+  if (!listed && matched) return `${matched} matched`;
+  return listed < matched ? `${listedText} · ${matched - listed} more matched` : listedText;
+};
 
 /**
  * What a search of records says when none answers: only the heading when no deal's records could be read (the deals
