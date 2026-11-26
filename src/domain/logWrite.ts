@@ -59,7 +59,7 @@ const QUESTION_WORD = /[\p{L}\p{M}|]+/gu;
  * Identifiers and combining marks stay distinct.
  */
 export function misreadKey(s: string): string {
-  return normalizeReferences(s.normalize('NFKC'))
+  return normalizeReferences(s.replace(/[\u0000\u0001]/g, '').normalize('NFKC'))   // the two placeholders below are never content
     .replace(/[\u2010-\u2015\u2212]/g, '-')                                             // dash shapes are one dash
     .replace(/[^\s]*\d[^\s]*/g, (t) => t.replace(/[lI|](?=[\d.,]|$)|(?<=[\d.,])[lI|]/g, '1').replace(/[oO](?=[\d.,])|(?<=[\d.,])[oO]/g, '0'))   // l00, 2O24
     .replace(QUESTION_WORD, repairWord)

@@ -100,6 +100,8 @@ const STATUS: Record<string, QuestionStatus> = { open: 'open', outstanding: 'ope
 export function prepareImport(table: string[][], mapping: Mapping, lines?: number[], o: { today?: string } = {}): Prepared {
   const today = o.today ?? localYmd(new Date().toISOString());
   const get = (r: string[], k: ImportField) => (mapping[k] == null ? '' : String(r[mapping[k]!] ?? ''));
+  // a value read as a number, date, priority, status or workstream is read without control characters; text is kept whole
+  const read = (r: string[], k: ImportField) => get(r, k).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
   const out: Prepared = { rows: [], skipped: 0, badDates: 0, unknownValues: 0, unread: [] };
   const nameOf = (k: ImportField) => IMPORT_FIELDS.find(([f]) => f === k)?.[1] ?? k;
   type DateCell = { raw: string; readings: string[]; done: (d: string) => void; bad: () => void };
@@ -107,9 +109,9 @@ export function prepareImport(table: string[][], mapping: Mapping, lines?: numbe
   for (const [at, r] of table.entries()) {
     const text = get(r, 'text'); if (!text) { out.skipped++; continue; }
     const line = lines?.[at] ?? at + 2; const unread = (k: ImportField, v: string) => out.unread.push(`Row ${line} ${nameOf(k)}: ${v.trim()}`);
-    const date = (k: 'received' | 'responded') => { const raw = get(r, k); const c = { raw, readings: dateReadings(raw), done: (d: string) => { row[k] = d; }, bad: () => { out.badDates++; unread(k, raw); } }; cells[k].push(c); return c; };
-    const pr = get(r, 'priority').trim(); const st = get(r, 'status').trim(); const nRaw = get(r, 'n').trim().replace(/^q/i, ''); const n = /^\d{1,9}$/.test(nRaw) && +nRaw > 0 ? +nRaw : null;   // the app numbers past Q999999, so a 7-digit number it exported reads back
-    const wsRaw = get(r, 'workstream').trim(); const ws = WORKSTREAMS.find((w) => w.toLowerCase() === wsRaw.toLowerCase()) ?? wsRaw;   // the app's spelling where it is one of ours; otherwise kept as written
+    const date = (k: 'received' | 'responded') => { const raw = read(r, k); const c = { raw, readings: dateReadings(raw), done: (d: string) => { row[k] = d; }, bad: () => { out.badDates++; unread(k, raw); } }; cells[k].push(c); return c; };
+    const pr = read(r, 'priority').trim(); const st = read(r, 'status').trim(); const nRaw = read(r, 'n').trim().replace(/^q/i, ''); const n = /^\d{1,9}$/.test(nRaw) && +nRaw > 0 ? +nRaw : null;   // the app numbers past Q999999, so a 7-digit number it exported reads back
+    const wsGiven = get(r, 'workstream').trim(); const wsRaw = read(r, 'workstream').trim(); const ws = WORKSTREAMS.find((w) => w.toLowerCase() === wsRaw.toLowerCase()) ?? wsGiven;   // the app's spelling where it is one of ours; otherwise kept as written
     if (pr && !PRIORITY[pr.toLowerCase()]) { out.unknownValues++; unread('priority', pr); }
     if (st && !STATUS[st.toLowerCase()]) { out.unknownValues++; unread('status', st); }
     const row: ImportRow = { n, text, askedBy: get(r, 'askedBy').trim(), received: '', workstream: ws, priority: PRIORITY[pr.toLowerCase()] ?? '', response: get(r, 'response'), respondedBy: get(r, 'respondedBy').trim(), responded: '', status: STATUS[st.toLowerCase()] ?? '', line };
