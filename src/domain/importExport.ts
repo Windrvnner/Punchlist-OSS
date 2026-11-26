@@ -3,7 +3,7 @@
  * writing the file format itself is the SpreadsheetCodec port's job (LibreOffice in the app).
  */
 import type { Question, Finding, QuestionStatus } from './model';
-import { localYmd, WORKSTREAMS } from './model';
+import { localYmd } from './model';
 import { splitCited } from './cite';
 import { isRealDate } from './model';
 import { AI_LABEL } from '../control';
@@ -105,7 +105,8 @@ export function prepareImport(table: string[][], mapping: Mapping, lines?: numbe
     const line = lines?.[at] ?? at + 2; const unread = (k: ImportField, v: string) => out.unread.push(`Row ${line} ${nameOf(k)}: ${v.trim()}`);
     const date = (k: 'received' | 'responded') => { const raw = get(r, k); const c = { raw, readings: dateReadings(raw), done: (d: string) => { row[k] = d; }, bad: () => { out.badDates++; unread(k, raw); } }; cells[k].push(c); return c; };
     const pr = get(r, 'priority').trim(); const st = get(r, 'status').trim(); const nRaw = get(r, 'n').trim().replace(/^q/i, ''); const n = /^\d{1,9}$/.test(nRaw) && +nRaw > 0 ? +nRaw : null;   // the app numbers past Q999999, so a 7-digit number it exported reads back
-    const wsRaw = get(r, 'workstream').trim(); const ws = WORKSTREAMS.find((w) => w.toLowerCase() === wsRaw.toLowerCase()) ?? wsRaw;   // the app's spelling where it is one of ours; otherwise kept as written
+    // the workstream as the log writes it, capitals included: never put into the app's spelling (#1059)
+    const ws = get(r, 'workstream').trim();
     if (pr && !PRIORITY[pr.toLowerCase()]) { out.unknownValues++; unread('priority', pr); }
     if (st && !STATUS[st.toLowerCase()]) { out.unknownValues++; unread('status', st); }
     const row: ImportRow = { n, text, askedBy: get(r, 'askedBy').trim(), received: '', workstream: ws, priority: PRIORITY[pr.toLowerCase()] ?? '', response: get(r, 'response'), respondedBy: get(r, 'respondedBy').trim(), responded: '', status: STATUS[st.toLowerCase()] ?? '', line };
@@ -163,10 +164,14 @@ export function questionsSheet(rows: Question[]): (string | number)[][] {
   return [['#', 'Workstream', 'Priority', 'Submitted by', 'Question', 'Received', 'Status', 'Response', 'Responded by', 'Date', 'Response origin'],
     ...rows.map((q) => [q.n, q.workstream, q.priority, q.askedBy, q.text, q.received, STATUS_LABEL[q.status], q.response, q.respondedBy, q.responded, origin(q)])];
 }
+/** A person's finding whose title the model wrote (an issues-list point) carries the AI mark on its title (#1063). */
+const personOrigin = (f: Finding) => (f.aiTitle ? `${AI_LABEL} title` : 'Person');
 export function findingsSheet(rows: Finding[]): (string | number)[][] {
   // the finding's own words, without the citation markers (the Sources column lists what they point to)
   const detail = (f: Finding) => f.body.map((p) => splitCited(p, f.sources.length).map((x) => x.text).join('')).join('\n\n');
-  const origin = (f: Finding) => (f.origin === 'ai' ? AI_LABEL : f.origin === 'chat' ? 'From conversation' : 'Person');
+  const origin = (f: Finding) => (
+    f.origin === 'ai' ? AI_LABEL : f.origin === 'chat' ? 'From conversation' : personOrigin(f)
+  );
   // no Reviewed by: a person in the app is never named in a spreadsheet
   const sources = (f: Finding) => f.sources.map((s) => s.doc + (s.loc ? ` · ${s.loc}` : '')).join('\n');
   const reviewedOn = (f: Finding) => (f.reviewed ? longDate(f.reviewed.at) : '');
