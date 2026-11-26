@@ -15,7 +15,7 @@ describe('the preview of a merge', () => {
     const { store } = make(); const dealId = await deal(store);
     // questions whose text holds a CR LF line break
     const first = rowsFrom(csvOf(Array.from({ length: 2000 }, (_, k) => `${k + 1},Question ${k}|Part two,`)))
-      .map((row) => ({ ...row, text: row.text.replace('|', '\r\n') }));
+      .map((row) => ({ ...row, text: row.text.replaceAll('|', '\r\n') }));
     expect((await store.dispatch(ImportQuestions, { dealId, mode: 'merge', rows: first })).ok).toBe(true);
     const made = dealQuestions(store.get(), dealId);
     expect(made[0].text).toBe('Question 0\r\nPart two');
