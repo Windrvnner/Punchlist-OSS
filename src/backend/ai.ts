@@ -514,18 +514,23 @@ export function nodeAi(o: AiOptions) {
   let offered: Awaited<ReturnType<ModelService['models']>> | null = null;
   const models = async () => (offered ??= await o.service.models());
   // ── the words a search compares ─────────────────────────────────────────────────────────────────────────────────────
-  const kept = (t: string) => tokens(t).filter((w) => w.length >= 2 && !STOP.has(w)).map(fold);
+  const kept = (t: string) => tokens(t).filter((w) => !STOP.has(w)).map(fold);
   /** a short name as a search compares it: "O&M" and "PPAs" as "om" and "ppa" */
   const shortKey = (k: string) => fold(tokens(k).join(''));
   /** each deal's short names, as the fast model saw them in its file paths (see `coreOf`), read from its latest core line by `lines` */
   const shorts = new Map<string, { from: unknown; map: Map<string, string[]> }>();
   /**
-   * The words of a text as they are compared: split wherever a name is split, plurals folded, common words and single
-   * letters left out, and, with `dealId`, every short name the deal's files use given its long form as well.
+   * The words of a text as they are compared: split wherever a name is split, plurals folded, common words left
+   * out, and, with `dealId`, every short name the deal's files use given its long form as well.
    */
   const words = (t: string, dealId?: string): Set<string> => {
-    const long = dealId ? shorts.get(dealId)?.map : undefined; const out = new Set<string>();
-    for (const w of tokens(t)) { if (w.length < 2 || STOP.has(w)) continue; out.add(fold(w)); for (const x of long?.get(fold(w)) ?? []) out.add(x); }
+    const long = dealId ? shorts.get(dealId)?.map : undefined;
+    const out = new Set<string>();
+    for (const w of tokens(t)) {
+      if (STOP.has(w)) continue;
+      out.add(fold(w));
+      for (const x of long?.get(fold(w)) ?? []) out.add(x);
+    }
     return out;
   };
 
@@ -624,16 +629,20 @@ export function nodeAi(o: AiOptions) {
     ].join('\n');
     const ask: Ask = { kind: 'issuesList', split: true, model, system: JSON_ONLY, files: [fileId], prompt };
     try {
-      const reply = await tried(() => askJson<{ points?: unknown }>(ask, ['points']));
-      if (!reply || !Array.isArray(reply.points)) {
-        return fail({ kind: 'failed', message: 'It could not be read as an issues list' });
-      }
-      const given = reply.points as { n?: unknown; text?: unknown }[];
-      // the point's words are the reply's as given, inner spacing and line breaks included: only its edges are
-      // trimmed, as the import command trims them too (#1026)
-      const texts = given.map((p) => ({ n: clean(p?.n), text: typeof p?.text === 'string' ? p.text.trim() : '' }));
-      return ok(texts.filter((p) => p.text));
-    } catch (e) { return failure(e, 'The file could not be read'); }
+      // a reply that is not an object with its points is asked for again (`tried`), as every other read is
+      const reply = await tried(async () => {
+        const got = await askJson<{ points?: unknown }>(ask, ['points']);
+        if (!got || !Array.isArray(got.points)) throw Object.assign(new Error(UNREAD_REPLY), { code: 'unread' });
+        return got.points as { n?: unknown; text?: unknown }[];
+      });
+      // the list's own words, number and point alike, are the reply's as given, inner spacing and line breaks
+      // included: only their edges are trimmed, as the import command trims them too (#1026)
+      const edges = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+      return ok(reply.map((p) => ({ n: edges(p?.n), text: edges(p?.text) })).filter((p) => p.text));
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'unread') return fail({ kind: 'failed', message: UNREAD_REPLY });
+      return failure(e, 'The file could not be read');
+    }
   }
   async function askJson<T = Record<string, unknown>>(input: Ask, keys: string[], shape?: string, fix = true): Promise<T | null> {
     const raw = await whole(input, keys); const got = json<T>(raw, ...keys); if (got || !fix || !String(raw ?? '').trim()) return got;

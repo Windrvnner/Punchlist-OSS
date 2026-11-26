@@ -95,7 +95,7 @@ export function coreSet(input: CoreInput): CoreSet {
     const cased = /\p{Ll}/u.test(d.path.replace(/\.[a-z0-9]{1,5}$/i, ''));
     const termsOf = (raw: string) => { const ws = words(raw, filler); return [...ws, ...groupsIn(raw, ws, members, false, cased).map((x) => gid(x.group))]; };
     const name = new Set(termsOf(file)); const folder = new Set(parts.flatMap(termsOf).filter((t) => !name.has(t)));
-    const ws = (d.words ?? []).map((w) => fold(w.toLowerCase())).filter((w) => w.length >= 2 && !filler.has(w));
+    const ws = (d.words ?? []).map((w) => fold(w.toLowerCase())).filter((w) => !filler.has(w));
     const most = new Set([...ws, ...groupsIn(ws.join(' '), ws, members, true).map((x) => gid(x.group))].filter((t) => !name.has(t) && !folder.has(t)));
     const nameWords = words(file, filler);
     return { d, name, folder, most, relations: nameWords.filter((w) => RELATION.has(w)).length, length: file.length, mark: versionOf(`${file}.x`)?.mark ?? [], other: parts.some((p) => PRECEDENTS.test(p.trim())), hub: isHubName(file) };
