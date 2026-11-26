@@ -16,11 +16,11 @@ export async function proposeQuestion(
   const ai = store.services.ai;
   const open = openToSuggest(store.get(), dealId, answered);
   if (!ai.suggestQuestion || !open.length) return;
-  const r = await ai.suggestQuestion({ dealId, answer, questions: open.map((q) => q.text) });
+  const r = await ai.suggestQuestion({ dealId, answer, questions: open.map(({ id, text }) => ({ id, text })) });
   if (!r.ok) return;
   // a question may have been edited or closed while the model read it: a proposal is for its text as asked
-  const proposals = r.value.flatMap((place) => {
-    const asked = open[place];
+  const proposals = [...new Set(r.value)].flatMap((id) => {
+    const asked = open.find((q) => q.id === id);
     const proposal = asked && { id: asked.id, text: asked.text };
     return proposal && stillAsks(store.get(), proposal) ? [proposal] : [];
   });
