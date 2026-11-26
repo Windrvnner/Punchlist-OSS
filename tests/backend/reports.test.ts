@@ -67,12 +67,14 @@ const ISSUES: Record<string, string[]> = {
 /** a scope note, as advisors write them: never a finding */
 const SCOPE = 'Given this is desktop research we were unable to verify the soil quality';
 
+/** the id a prompt shows the report by (#1162) */
+const reportId = (prompt: string) => /^(doc_\w+): /m.exec(prompt)?.[1] ?? 'doc_?';
 /**
  * the stand-in fast model sorting paths: an advisor's report, study or assessment is one; a memo or opinion it cannot
  * tell from the path
  */
 function sortReply(prompt: string) {
-  const rows = [...prompt.matchAll(/^(\d+): (.*)$/gm)].map((m) => ({ n: +m[1], path: m[2] }));
+  const rows = [...prompt.matchAll(/^(doc_\w+): (.*)$/gm)].map((m) => ({ n: m[1], path: m[2] }));
   const reports = rows
     .filter(
       (r) =>
@@ -101,19 +103,19 @@ function readReply(prompt: string, name: string, issues = ISSUES[name] ?? []) {
       .map((t, i) => {
         const k = known.find((x) => x.title === t);
         return k
-          ? { covered: k.f, sources: [{ doc: 'D1', page: 30 + i, quote: t }] }
+          ? { covered: k.f, sources: [{ doc: reportId(prompt), page: 30 + i, quote: t }] }
           : {
               title: t,
               workstream: 'Technical',
               body: [`The advisor raises that ${t.toLowerCase()}. [1]`],
               next: 'Ask the sponsor to address it.',
-              sources: [{ doc: 'D1', page: 10 + (i % 60), quote: t }],
+              sources: [{ doc: reportId(prompt), page: 10 + (i % 60), quote: t }],
             };
       })
       .concat(
         earlier
           .filter((e) => issues.includes(e.title))
-          .map((e, n) => ({ still: e.e, sources: [{ doc: 'D1', page: 60 + n, quote: e.title }] }) as never),
+          .map((e, n) => ({ still: e.e, sources: [{ doc: reportId(prompt), page: 60 + n, quote: e.title }] }) as never),
       ),
   };
 }
@@ -160,6 +162,7 @@ function kit(
     release: async (keys) => {
       for (const x of keys) held.delete(x);
     },
+    unusable: () => () => false,
     ask: async (input) => {
       const name = input.files?.length ? byFile.get(input.files[0])!.name : '';
       calls.push({ kind: input.kind, prompt: input.prompt, name });
@@ -174,13 +177,13 @@ function kit(
     },
     send: async (rec) => ({
       files: [`file:${rec.docId}`],
-      listing: `D1: ${where(rec)} (${rec.pages} pages)`,
-      sent: [{ tag: 'D1', dealId: 'd1', rec }] as Sent[],
+      listing: `${rec.docId}: ${where(rec)} (${rec.pages} pages)`,
+      sent: [{ dealId: 'd1', rec }] as Sent[],
     }),
     fit: (text, cited: Cited[] | undefined, sent) => ({
       text,
       sources: (cited ?? [])
-        .filter((c) => c.doc === 'D1' && typeof c.page === 'number' && c.page <= (sent[0].rec.pages ?? 0))
+        .filter((c) => c.doc === sent[0].rec.docId && typeof c.page === 'number' && c.page <= (sent[0].rec.pages ?? 0))
         .map((c) => ({
           doc: sent[0].rec.name,
           docId: sent[0].rec.docId,
@@ -481,7 +484,7 @@ describe('third-party reports at deal scale', () => {
                 workstream: 'Legal',
                 body: ['Raised again. [1]'],
                 next: '',
-                sources: [{ doc: 'D1', page: 4 + i }],
+                sources: [{ doc: reportId(prompt), page: 4 + i }],
                 earlier: 'F2',
               }
             : x,
@@ -587,12 +590,12 @@ describe('third-party reports at deal scale', () => {
     const findings = new Map<string, Known & { issue?: Issue }>([
       ['f_closed', { id: 'f_closed', title: 'Two lease parcels lack recorded memoranda', closed: true }],
     ]);
-    const answer = ({ kind }: { kind: string }) =>
+    const answer = ({ kind, prompt }: { kind: string; prompt: string }) =>
       kind === 'report'
         ? {
             advisor: 'Counsel',
             issues: [
-              { covered: 'F1', sources: [{ doc: 'D1', page: 3 }] },
+              { covered: 'F1', sources: [{ doc: reportId(prompt), page: 3 }] },
               {
                 covered: 'F1',
                 earlier: 'F99',
@@ -600,7 +603,7 @@ describe('third-party reports at deal scale', () => {
                 workstream: 'Legal',
                 body: ['Raised again. [1]'],
                 next: '',
-                sources: [{ doc: 'D1', page: 4 }],
+                sources: [{ doc: reportId(prompt), page: 4 }],
               },
             ],
           }
@@ -655,7 +658,7 @@ describe('third-party reports at deal scale', () => {
         if (kind === 'report' && name === 'Insurance Consultant Report.pdf') {
           reads++;
           const r = readReply(prompt, name);
-          return { ...r, issues: r.issues.map((x) => ({ ...x, sources: [{ doc: 'D1', page: 999 }] })) };
+          return { ...r, issues: r.issues.map((x) => ({ ...x, sources: [{ doc: reportId(prompt), page: 999 }] })) };
         }
         return undefined;
       },
@@ -712,7 +715,7 @@ describe('third-party reports at deal scale', () => {
                 ...x,
                 title: 'Inverter warranty shorter than the debt tenor',
                 body: ['Again. [1]'],
-                sources: [{ doc: 'D1', page: 3 }],
+                sources: [{ doc: reportId(prompt), page: 3 }],
               }
             : x,
         );
@@ -749,6 +752,26 @@ function setupReports(
   };
   return { ...s, reportCalls };
 }
+
+describe('third-party reports by their permanent ids (#1162)', () => {
+  it('the sort lists each file by its docId, and a reply naming an id it was not shown is refused', async () => {
+    const docs = room().slice(0, 3);
+    const asked: { prompt: string; unusable?: (text: string) => boolean | Promise<boolean> }[] = [];
+    const { k } = kit(docs);
+    const ask = k.ask;
+    k.ask = (input, keys) => {
+      asked.push(input);
+      return ask(input, keys);
+    };
+    await sweep(k);
+    const sort = asked.find((x) => x.prompt.includes('each by its id and path'))!;
+    expect(sort.prompt).toContain(`${docs[0].docId}: ${where(docs[0])}`);
+    expect(sort.prompt).not.toMatch(/^\d+: /m);
+    expect(await sort.unusable!(JSON.stringify({ reports: [docs[1].docId], unsure: [] }))).toBe(false);
+    expect(await sort.unusable!(JSON.stringify({ reports: [docs[1].docId.toUpperCase()], unsure: [] }))).toBe(true);
+    expect(await sort.unusable!(JSON.stringify({ reports: [2], unsure: [] }))).toBe(true);
+  });
+});
 
 describe('third-party reports in the app’s checks', () => {
   /**
