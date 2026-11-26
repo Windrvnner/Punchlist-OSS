@@ -36,7 +36,7 @@ const OWN_SENDER: SenderOf[] = [(q) => q.askedBy];
 function indexByText(questions: Question[]): Map<string, number[]> {
   const index = new Map<string, number[]>();
   for (const [at, q] of questions.entries()) {
-    for (const key of new Set(formKeys(q.text))) {
+    for (const key of formKeys(q.text)) {
       const list = index.get(key);
       if (list) list.push(at);
       else index.set(key, [at]);
@@ -67,12 +67,13 @@ function fitsSender(q: Question, row: MatchRow, senders: SenderOf[], tier: numbe
 }
 
 /**
- * The order the lookup tries: each sender tier, with the row's number and then without, and only then a row or question
- * naming no one, with the number and then without. The same sender comes first, so a row naming no one never takes a
- * question from its own sender's row (docs/decisions.md).
+ * The order the lookup tries: every sender tier with the row's number, then every sender tier without it, and only then
+ * a row or question naming no one, with the number and then without. A known sender comes first, so a row naming no
+ * one never takes a question from its own sender's row; within that, the number comes first, so a renumbered question
+ * keeps its row (docs/decisions.md).
  */
-const passesFor = (senders: SenderOf[]) => [...senders.keys(), -1]
-  .flatMap((tier) => [true, false].map((sameNumber) => ({ tier, sameNumber })));
+const passesFor = (senders: SenderOf[]) => [[...senders.keys()], [-1]]
+  .flatMap((tiers) => [true, false].flatMap((sameNumber) => tiers.map((tier) => ({ tier, sameNumber }))));
 
 /**
  * Which question each row is, by row index: the XLOOKUP of the merge (docs/decisions.md). Rows look up questions in

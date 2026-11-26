@@ -90,6 +90,12 @@ describe('the same lookup as the import (#1080)', () => {
     const asked = [q('qx', 12, 'Provide the model.', 'Lender A'), q('qy', 3, 'Provide the model.')];
     expect(matchRows({ rows }, withParty, asked)).toEqual(new Map([['qx', 0]]));
   });
+  it('keeps a renumbered question\'s row, under the sender the app last wrote, from one with the old sender', () => {
+    const withParty = { ...mapping, askedBy: 2 } as Mapping;
+    const asked = [q('a', 5, 'X', 'Lender A'), q('b', 9, 'X', 'Lendr A')];
+    const sent = new Map([['a', { askedBy: 'Lendr A' }]]);
+    expect(matchRows({ rows: [['5', 'X', 'Lendr A']] }, withParty, asked, sent)).toEqual(new Map([['a', 0]]));
+  });
   it('matches 2,000 rows by their place in the table, blank rows and headings between them shifting nothing', () => {
     const rows: string[][] = [];
     const qs: Question[] = [];
