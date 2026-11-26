@@ -21,8 +21,7 @@ function showUpdated(store: Store, dealId: string, outcome: Extract<QaLogUpdateO
     clashed && `${count(clashed)} kept as in the file`, did);
   if (action?.kind === 'resolve') {
     store.toast(text, 'warn', { label: 'Resolve', run: () => openResolve(store, dealId) }, true);
-  }
-  else if (action?.kind === 'show') {
+  } else if (action?.kind === 'show') {
     store.toast(text, 'warn', { label: 'Show', run: () => store.ui({ selectedQuestion: action.questionId }) }, true);
   } else if (counts.unmerged) store.toast(text, 'warn', undefined, true);
   else store.toast(did ? `Q&A log updated · ${did}` : 'Q&A log is up to date', 'done');
