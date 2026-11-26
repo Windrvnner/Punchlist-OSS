@@ -8,7 +8,7 @@ import type { Source } from '../domain/model';
 import { list as listOf, strings, tagNumber } from './lenient';
 import {
   type ReportKit, type ReadLine, type ReadIssue, type Known, type Issue, type SentDoc,
-  ISSUE_PAGE, isCut, partialOf, yes,
+  isCut, yes,
 } from './reportTypes';
 
 /** sentences of one paragraph, written out for the model */
@@ -60,8 +60,8 @@ function earlierAsk(tag: string, before: ReadIssue[] | undefined) {
   return `\n\nAn earlier draft of this report raised these issues:\n${listed}\n${rule}`;
 }
 
-/** the reply's shape, and the page of issues asked for */
-function replyAsk(tag: string, before: ReadIssue[] | undefined, after: string | undefined, size: number) {
+/** the reply's shape */
+function replyAsk(tag: string, before: ReadIssue[] | undefined) {
   const source = (page: number) => `"sources": [{"doc": "${tag}", "page": ${page}, "quote": "…"}]`;
   const full = `{"title": "…", "workstream": "…", "body": ["…"], ${source(12)}}`;
   const still = before?.length ? `, {"still": "E1", ${source(8)}}` : '';
@@ -70,24 +70,21 @@ function replyAsk(tag: string, before: ReadIssue[] | undefined, after: string | 
     'Also give "advisor": who wrote the report, in a few words (such as "the independent engineer").',
     `If ${tag} is not in fact a report by an outside advisor, reply {"report": false}.`,
   );
-  const from = after ? `, starting after the issue you titled "${after}"` : '';
-  const page = sentences(
-    `Give at most ${size} issues, in the order the report raises them${from},`,
-    'and set "more" to true if it raises issues after the last you give.',
-  );
+  const order = 'Give every issue, in the order the report raises them.';
   const issues = `[${full}, {"covered": "F2", ${source(30)}}${still}]`;
-  const shape = `Reply as JSON: {"advisor": "…", "issues": ${issues}, ${dropped}"more": false}`;
-  return `\n${advisor}\n${page}\n${shape}`;
+  const droppedPart = dropped ? `, ${dropped.replace(/, $/, '')}` : '';
+  const shape = `Reply as JSON: {"advisor": "…", "issues": ${issues}${droppedPart}}`;
+  return `\n${advisor}\n${order}\n${shape}`;
 }
 
 /** where a read has got to, as the prompt needs it */
-interface ReadAt { k: ReportKit; s: SentDoc; before?: ReadLine; after?: string; size: number }
+interface ReadAt { k: ReportKit; s: SentDoc; before?: ReadLine }
 
-/** the prompt that reads a page of a report's issues */
+/** the prompt that reads a report's issues */
 export function readAsk(r: ReadAt, known: Known[]) {
   const tag = r.s.sent[0].tag;
   const body = issuesAsk(r.k, tag) + knownAsk(tag, known) + earlierAsk(tag, r.before?.issues);
-  return `Documents:\n${r.s.listing}\n\n${body}${replyAsk(tag, r.before?.issues, r.after, r.size)}`;
+  return `Documents:\n${r.s.listing}\n\n${body}${replyAsk(tag, r.before?.issues)}`;
 }
 
 /** a finding this report raised: its id is the one `idFor` gives the report and its title */
@@ -98,21 +95,16 @@ function isOwn(k: ReportKit, doc: string, f: Known) {
 
 const titleOf = (row: Record<string, unknown>) => (typeof row.title === 'string' ? row.title.trim() : '');
 
-/** One read of one report through, a page of issues at a time: what it has found so far. */
+/** One read of one report, in one call: what it has found. */
 class ReportRead {
   issues: ReadIssue[] = [];
   advisor = '';
   /** findings of the earlier draft's issues this draft no longer raises */
   dropped = new Set<string>();
-  /** the title of the last issue given, for the next page to start after */
-  after: string | undefined;
-  size = ISSUE_PAGE;
-  /** the pages each title was raised on: the same title on the same page is a page given again */
+  /** the pages each title was raised on: the same title on the same page is one issue given twice */
   titles = new Map<string, Set<string>>();
   /** issues given with no page that opens */
   unplaced = 0;
-  /** every row any page has given, as written: a page of only rows already given moves the read nowhere */
-  private given = new Set<string>();
   /** pages that could not be added to a finding now: a later sweep adds them */
   owe = new Map<string, Source[]>();
 
@@ -194,26 +186,6 @@ class ReportRead {
     return true;
   }
 
-  /** ask for fewer issues a page; false when one at a time is already too long */
-  smaller() {
-    if (this.size === 1) return false;
-    this.size = Math.max(1, Math.floor(this.size / 2));
-    return true;
-  }
-
-  /** whether some row of this page is one no earlier page gave; all of them are kept as given */
-  adds(rows: Record<string, unknown>[]): boolean {
-    const fresh = rows.map((row) => JSON.stringify(row)).filter((key) => !this.given.has(key));
-    for (const key of fresh) this.given.add(key);
-    return fresh.length > 0;
-  }
-
-  /** the next page starts after the last issue given */
-  moveOn(rows: Record<string, unknown>[]) {
-    const lastRow = rows[rows.length - 1];
-    this.after = (lastRow && titleOf(lastRow)) || this.issues[this.issues.length - 1]?.title || this.after;
-  }
-
   /** what the reply says beside its issues: who wrote the report, and which of the earlier draft's it drops */
   heard(reply: Record<string, unknown>) {
     const advisor = typeof reply.advisor === 'string' ? reply.advisor.trim() : '';
@@ -239,8 +211,8 @@ class ReportRead {
   }
 }
 
-/** one page of issues from the model; a reply cut off comes back with `cut` and what came back whole */
-async function askPage(r: ReportRead, known: Known[]) {
+/** the report's issues from the model in one call; a reply cut off at the length limit comes back with `cut` */
+async function ask(r: ReportRead, known: Known[]) {
   const k = r.k;
   const prompt = readAsk(r, known);
   const input = { kind: 'report', split: true, model: k.models.standard, system: k.system, files: r.s.files, prompt };
@@ -248,52 +220,18 @@ async function askPage(r: ReportRead, known: Known[]) {
     return { reply: await k.ask(input, ['issues', 'report']), cut: false };
   } catch (e) {
     if (!isCut(e)) throw e;
-    return { reply: partialOf(e), cut: true };
+    return { reply: null, cut: true };
   }
 }
 
 /** a reply that says the document is not a report by an outside advisor, and gives no issues */
 const notReport = (reply: Record<string, unknown>) => 'report' in reply && !yes(reply.report) && !('issues' in reply);
 
-/** a reply that does not say whether more follow, and is a full page, is taken to have more */
-function hasMore(reply: Record<string, unknown>, rows: unknown[], size: number) {
-  return yes(reply.more) || (!('more' in reply) && rows.length >= size);
-}
-
-/** the rows of a reply; the last before a cut may itself be cut short, so it is left for the next page */
-function rowsOf(reply: Record<string, unknown> | null, cut: boolean) {
-  const all = reply ? (listOf(reply.issues) as Record<string, unknown>[]) : [];
-  return cut ? all.slice(0, -1) : all;
-}
-
-/** what one page of a read comes to: the read's end, or `'next'` to ask for the next page */
-type Step = { end: ReadLine | 'not' | 'lost' | null } | 'next';
-
-/** Ask for one page of issues and take what comes back. */
-async function readPage(r: ReportRead, call: number, last: boolean): Promise<Step> {
-  // the claim is kept up while the read goes on, so a long read does not lapse and let another PC read it too
-  if (call && !(await r.k.claim([`reports:read:${r.rec.docId}`])).length) return { end: 'lost' };
-  const known = await r.k.findings();
-  const page = await askPage(r, known);
-  // only the first page can say it is not a report: findings raised from earlier pages say otherwise
-  if (!call && page.reply && notReport(page.reply)) return { end: 'not' };
-  const reply = page.reply && notReport(page.reply) ? null : page.reply;
-  const rows = rowsOf(reply, page.cut);
-  if (page.cut && !rows.length) return r.smaller() ? 'next' : { end: null };   // too long to come back whole
-  if (!reply) return { end: null };
-  r.heard(reply);
-  if (!(await r.takeAll(rows, known))) return { end: null };
-  r.moveOn(rows);
-  const fresh = r.adds(rows);
-  if (!page.cut && (!rows.length || !hasMore(reply, rows, r.size))) return { end: finish(r, last) };
-  // a model that gives a page again and says there is more would go on for ever: the read is a try that failed
-  return fresh ? 'next' : { end: null };
-}
-
 /**
- * Read one report through. Returns the line to write; `'not'` when the model says it is not a report; `'lost'` when
- * another PC took the read over or this PC cannot send it; or null when the read could not finish: nothing is written
- * then, and the next sweep reads it again. Throws when the service fails.
+ * Read one report. Returns the line to write; `'not'` when the model says it is not a report; `'lost'` when this PC
+ * cannot send it; or null when the read could not finish (a reply that cannot be read, or one cut off at the length
+ * limit, or a finding that could not be written): nothing is written then, and the next sweep reads it again. Throws
+ * when the service fails.
  */
 export async function read(
   k: ReportKit, rec: DocRecord, before: ReadLine | undefined, last: boolean,
@@ -301,10 +239,13 @@ export async function read(
   const s = await k.send(rec);
   if (!s) return 'lost';                       // cannot be sent from this PC: left for one that can, not a try
   const r = new ReportRead(k, rec, s, before);
-  for (let call = 0; ; call++) {               // page after page until the report ends: no length is too long
-    const step = await readPage(r, call, last);
-    if (step !== 'next') return step.end;
-  }
+  const known = await k.findings();
+  const got = await ask(r, known);
+  if (!got.reply) return null;
+  if (notReport(got.reply)) return 'not';
+  r.heard(got.reply);
+  if (!(await r.takeAll(listOf(got.reply.issues) as Record<string, unknown>[], known))) return null;
+  return finish(r, last);
 }
 
 /**

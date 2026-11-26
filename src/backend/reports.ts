@@ -36,7 +36,7 @@ import {
 } from './reportTypes';
 
 export type { ReportKit, ReportLine, ReadIssue, Known, Issue } from './reportTypes';
-export { SORT_PART, ISSUE_PAGE, TRIES } from './reportTypes';
+export { SORT_PART, TRIES } from './reportTypes';
 
 /** whole numbers above 0 in a reply's list, given as numbers or as text such as "#12" */
 function numbers(x: unknown) {

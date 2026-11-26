@@ -11,7 +11,6 @@ import {
   sweep,
   stateOf,
   SORT_PART,
-  ISSUE_PAGE,
   type ReportKit,
   type ReportLine,
   type Issue,
@@ -85,23 +84,19 @@ function sortReply(prompt: string) {
   return { reports, unsure };
 }
 /**
- * the stand-in standard model reading a report: a page of its issues after the one named, an issue a listed finding has
- * as {"covered"}
+ * the stand-in standard model reading a report: all its issues in one reply, an issue a listed finding has as
+ * {"covered"}
  */
 function readReply(prompt: string, name: string, issues = ISSUES[name] ?? []) {
-  const size = +(/Give at most (\d+) issues/.exec(prompt)?.[1] ?? ISSUE_PAGE);
-  const after = /starting after the issue you titled "([^"]*)"/.exec(prompt)?.[1];
   const known = [...prompt.matchAll(/^F(\d+): (.*?)(?: \((?:closed|deleted)\))?$/gm)].map((m) => ({
     f: `F${m[1]}`,
     title: m[2],
   }));
   const earlier = [...prompt.matchAll(/^E(\d+): (.*)$/gm)].map((m) => ({ e: `E${m[1]}`, title: m[2] }));
   const fresh = issues.filter((t) => !earlier.some((e) => e.title === t));
-  const start = after ? fresh.indexOf(after) + 1 : 0;
-  const page = fresh.slice(start, start + size);
+  const page = fresh;
   return {
     advisor: 'the advisor',
-    more: start + size < fresh.length,
     dropped: earlier.filter((e) => !issues.includes(e.title)).map((e) => e.e),
     issues: page
       .map((t, i) => {
@@ -113,15 +108,13 @@ function readReply(prompt: string, name: string, issues = ISSUES[name] ?? []) {
               workstream: 'Technical',
               body: [`The advisor raises that ${t.toLowerCase()}. [1]`],
               next: 'Ask the sponsor to address it.',
-              sources: [{ doc: 'D1', page: 10 + i, quote: t }],
+              sources: [{ doc: 'D1', page: 10 + (i % 60), quote: t }],
             };
       })
       .concat(
-        start === 0
-          ? earlier
-              .filter((e) => issues.includes(e.title))
-              .map((e, n) => ({ still: e.e, sources: [{ doc: 'D1', page: 60 + n, quote: e.title }] }) as never)
-          : [],
+        earlier
+          .filter((e) => issues.includes(e.title))
+          .map((e, n) => ({ still: e.e, sources: [{ doc: 'D1', page: 60 + n, quote: e.title }] }) as never),
       ),
   };
 }
@@ -228,9 +221,9 @@ describe('third-party reports at deal scale', () => {
     const ms = performance.now() - t0;
     // 12 calls of paths only
     expect(calls.filter((c) => c.kind === 'reportSort').length).toBe(Math.ceil(1779 / SORT_PART));
-    // every issue of every report is a finding, once; the IE's 60 issues take three pages
+    // every issue of every report is a finding, once; the IE's 60 issues take one call
     expect(raisedTitles(findings).sort()).toEqual([...all].sort());
-    expect(calls.filter((c) => c.kind === 'report' && c.name === 'Independent Engineer Report.pdf').length).toBe(3);
+    expect(calls.filter((c) => c.kind === 'report' && c.name === 'Independent Engineer Report.pdf').length).toBe(1);
     for (const f of findings.values()) {
       expect(f.issue!.sources.length).toBe(1);
       expect(f.issue!.sources[0].loc).toMatch(/^p\. \d+$/);
@@ -256,25 +249,7 @@ describe('third-party reports at deal scale', () => {
     expect(ms).toBeLessThan(5_000);
   });
 
-  it('a model that gives its first page again and says there is more does not read for ever', async () => {
-    const name = 'Independent Engineer Report.pdf';
-    const docs = room().filter((d) => d.name === name);
-    let pages = 0;
-    const { k, log, calls } = kit(docs, {
-      answer: ({ kind, prompt }) => {
-        if (kind !== 'report') return undefined;
-        if (++pages > 50) return new Error('still reading after 50 pages');   // ends a read that would not
-        const first = readReply(prompt.replace(/, starting after the issue you titled "[^"]*"/, ''), name);
-        return { ...first, more: true };
-      },
-    });
-    await sweep(k);
-    // the first page is new, the second is it again: the read is a try that failed, and wrote nothing
-    expect(calls.filter((c) => c.kind === 'report' && c.name === name).length).toBeLessThan(10);
-    expect(stateOf(log).read.size).toBe(0);
-  });
-
-  it('reads a report of 600 issues to its end: no number of pages is too many', async () => {
+  it('reads a report of 600 issues in one call', async () => {
     const name = 'Independent Engineer Report.pdf';
     const docs = room().filter((d) => d.name === name);
     const was = ISSUES[name];
@@ -284,7 +259,7 @@ describe('third-party reports at deal scale', () => {
       await sweep(k);
       expect(raisedTitles(findings).length).toBe(600);
       expect(raisedTitles(findings)).toContain('Unique engineering issue number 600');
-      expect(calls.filter((c) => c.kind === 'report' && c.name === name).length).toBe(600 / ISSUE_PAGE);
+      expect(calls.filter((c) => c.kind === 'report' && c.name === name).length).toBe(1);
       expect(stateOf(log).read.size).toBe(1);
     } finally {
       ISSUES[name] = was;
@@ -334,34 +309,22 @@ describe('third-party reports at deal scale', () => {
     ]);
   });
 
-  it('a reply cut off keeps what came back whole and asks on from there, in smaller pages, losing and '
-    + 'repeating nothing', async () => {
+  it('a reply cut off at the length limit writes nothing, and is read again by the '
+    + 'next sweep', async () => {
     const docs = room().filter((d) => d.name === 'Independent Engineer Report.pdf');
-    let cuts = 0;
     const { k, findings, calls } = kit(docs, {
       answer: ({ kind, prompt, name }) => {
         if (kind !== 'report') return undefined;
         const r = readReply(prompt, name);
-        const size = r.issues.length;
-        if (size >= 10 && cuts < 3) {
-          cuts++;
-          return Object.assign(new Error('cut'), {
-            code: 'cutoff',
-            partial: { ...r, issues: r.issues.slice(0, 7).concat([{ title: 'Half an iss' } as never]) },
-          });
-        }
-        return r;
+        return Object.assign(new Error('cut'), { code: 'cutoff', partial: { ...r, issues: r.issues.slice(0, 7) } });
       },
     });
     await sweep(k);
-    expect(cuts).toBe(3);
-    expect(raisedTitles(findings).sort()).toEqual([...ISSUES['Independent Engineer Report.pdf']].sort());
-    expect(raisedTitles(findings).some((t) => t.startsWith('Half'))).toBe(false);
-    expect(calls.filter((c) => c.kind === 'report').length).toBeGreaterThan(3);
+    expect(raisedTitles(findings).length).toBe(0);
+    expect(calls.filter((c) => c.kind === 'report').length).toBe(1);
   });
 
-  it('a read that stops partway is not written; the next sweep reads it again and what it raised already '
-    + 'comes back covered', async () => {
+  it('a read that fails writes nothing; the next sweep reads it again', async () => {
     const docs = room().filter((d) => d.name === 'Independent Engineer Report.pdf');
     const findings = new Map<string, Known & { issue?: Issue }>();
     const log: ReportLine[] = [];
@@ -369,16 +332,13 @@ describe('third-party reports at deal scale', () => {
       findings,
       log,
       answer: ({ kind, prompt }) =>
-        kind === 'report' && prompt.includes('starting after')
-          ? Object.assign(new Error('unreachable'), { code: 'unreachable' })
-          : undefined,
+        kind === 'report' ? Object.assign(new Error('unreachable'), { code: 'unreachable' }) : undefined,
     });
     await expect(sweep(down.k)).rejects.toThrow('unreachable');
-    expect(raisedTitles(findings).length).toBe(ISSUE_PAGE);
+    expect(raisedTitles(findings).length).toBe(0);
     expect(stateOf(log).read.size).toBe(0);
     const up = kit(docs, { findings, log });
     await sweep(up.k);
-    // 60, none twice
     expect(raisedTitles(findings).sort()).toEqual([...ISSUES['Independent Engineer Report.pdf']].sort());
     expect(stateOf(log).read.size).toBe(1);
   });
@@ -429,8 +389,7 @@ describe('third-party reports at deal scale', () => {
     expect(raisedTitles(findings).length).toBe(4);
   });
 
-  it('an issue raised by a read that stopped partway is the report’s own: a later draft that drops it marks '
-    + 'its finding', async () => {
+  it('a later draft that drops an issue of an earlier draft marks its finding', async () => {
     const [v1, v2] = ['2025-01-10', '2025-03-02'].map((d, i) => ({
       ...room()[0],
       docId: `doc_ie_${i + 1}`,
@@ -445,10 +404,8 @@ describe('third-party reports at deal scale', () => {
         kit([v1], {
           findings,
           log,
-          answer: ({ kind, prompt }) =>
-            kind === 'report' && prompt.includes('starting after')
-              ? Object.assign(new Error('unreachable'), { code: 'unreachable' })
-              : undefined,
+          answer: ({ kind }) =>
+            kind === 'report' ? Object.assign(new Error('unreachable'), { code: 'unreachable' }) : undefined,
         }).k,
       ),
     ).rejects.toThrow();
@@ -635,7 +592,6 @@ describe('third-party reports at deal scale', () => {
       kind === 'report'
         ? {
             advisor: 'Counsel',
-            more: false,
             issues: [
               { covered: 'F1', sources: [{ doc: 'D1', page: 3 }] },
               {
@@ -741,18 +697,15 @@ describe('third-party reports at deal scale', () => {
     expect(raisedTitles(findings).sort()).toEqual([both, 'Module degradation above the base case assumption'].sort());
   });
 
-  it('a model that names a covering finding and writes the issue out too, gives a page again, or leaves out '
-    + '"more" on a full page, raises each issue once', async () => {
+  it('a model that names a covering finding and writes the issue out too raises each issue once', async () => {
     const docs = room().filter((d) => d.name === 'Independent Engineer Report.pdf');
     const findings = new Map<string, Known & { issue?: Issue }>([
       ['f_check', { id: 'f_check', title: 'Inverter warranty shorter than the debt tenor' }],
     ]);
-    let calls = 0;
     const { k } = kit(docs, {
       findings,
       answer: ({ kind, prompt, name }) => {
         if (kind !== 'report') return undefined;
-        calls++;
         const r = readReply(prompt, name);
         const issues = r.issues.map((x) =>
           'covered' in x
@@ -764,21 +717,7 @@ describe('third-party reports at deal scale', () => {
               }
             : x,
         );
-        const { more: _m, ...rest } = r;
-        return calls === 2
-          ? {
-              ...rest,
-              issues: [
-                ...readReply(prompt.replace(/, starting after the issue you titled "[^"]*"/, ''), name).issues.slice(
-                  0,
-                  5,
-                ),
-                ...issues,
-              ],
-            }
-          : r.more
-            ? { ...rest, issues }
-            : { ...r, issues };
+        return { ...r, issues };
       },
     });
     await sweep(k);
@@ -861,8 +800,8 @@ describe('third-party reports in the app’s checks', () => {
     const read = s.reportCalls
       .filter((c) => c.prompt.includes('is a report by an outside advisor'))
       .map((c) => `${fromStoreName(c.files[0].name)!.name}`);
-    // 60 issues, three pages, one draft
-    expect(read.filter((n) => n === 'Independent Engineer Report.pdf').length).toBe(3);
+    // 60 issues, one call, one draft
+    expect(read.filter((n) => n === 'Independent Engineer Report.pdf').length).toBe(1);
     expect(read.some((n) => /Project Coho|blackline/.test(n))).toBe(false);
     const fs = val(await s.repo.list('finding', 'd1')).map((l) => l.envelope.data as Finding);
     const expected = Object.entries(ISSUES)

@@ -596,13 +596,35 @@ export function nodeAi(o: AiOptions) {
   const SAME_BATCH = 3000;
   /** parts of the duplicate check asked at once */
   const SAME_AT_ONCE = 4;
-  /** points of an issues list read from the file in one call: each comes back in full, so a long list takes a few calls */
-  const ISSUES_PAGE = 80;
   /** points titled and compared with the findings in one call: a list of deal size (a few hundred points) is one call */
   const ISSUES_BATCH = 400;
-  /** tries at reading one page of a list before the read fails: a page that fails its check is asked for again */
-  const ISSUES_TRIES = 3;
   const MEMO_RATE_BATCH = 40;   // open findings rated in one call for the deal memo
+  /**
+   * An issues list's points, read from its file in one call, as every other document is read: the model gives each
+   * point briefly, in its own words, with the number or reference the list gives it (#1026). The reply is not paged,
+   * checked against the file's text or matched to it. A reply that cannot be read is asked for again (`tried`); one cut
+   * off at the length limit fails the read, as it does anywhere else.
+   */
+  async function readIssuePoints(
+    name: string, fileId: string, model: Ask['model'], tried: <T>(ask: () => Promise<T>) => Promise<T>,
+  ): Promise<Result<{ n: string; text: string }[]>> {
+    const prompt = [
+      `${name} is an issues list: the points one party raises on a deal's documents. List every point of it, in order.`,
+      'For each: "n": its number or reference as the list writes it ("" when it has none); "text": the point, stated',
+      'briefly in your own words. Leave out headings, introductions and notes that raise no point.',
+      'Reply as JSON: {"points": [{"n": "1", "text": "…"}]}',
+    ].join('\n');
+    const ask: Ask = { kind: 'issuesList', split: true, model, system: JSON_ONLY, files: [fileId], prompt };
+    try {
+      const reply = await tried(() => askJson<{ points?: unknown }>(ask, ['points']));
+      if (!reply || !Array.isArray(reply.points)) {
+        return fail({ kind: 'failed', message: 'It could not be read as an issues list' });
+      }
+      const clean = (t: unknown) => String(t ?? '').replace(/\s+/g, ' ').trim();
+      const given = reply.points as { n?: unknown; text?: unknown }[];
+      return ok(given.map((p) => ({ n: clean(p?.n).replace(/^#/, ''), text: clean(p?.text) })).filter((p) => p.text));
+    } catch (e) { return failure(e, 'The file could not be read'); }
+  }
   async function askJson<T = Record<string, unknown>>(input: Ask, keys: string[], shape?: string, fix = true): Promise<T | null> {
     const raw = await whole(input, keys); const got = json<T>(raw, ...keys); if (got || !fix || !String(raw ?? '').trim()) return got;
     let fixed: string;
@@ -2090,11 +2112,11 @@ export function nodeAi(o: AiOptions) {
       return ok({ pairs: out, ...(items ? { missed: { kind, at: lost.sort((a, b) => a - b) } } : {}) });
     },
     async issuesList(i) {
-      // Two steps. The list is read from its file, a page of points at a time, each point in its own words: a long list's
-      // words run past what one reply can hold. Then the points are titled and compared with the deal's findings and each
-      // other, with no file: the whole list in one call, as the checklist's duplicate check is asked, in
-      // parts only for a list longer than ISSUES_BATCH. A reply that cannot be read is asked for again for half as many
-      // points. Nothing is half done: a point that cannot be read or sorted fails the whole, to be asked again.
+      // Two steps. The list is read from its file in one call, each point briefly in its own words. Then the points are
+      // titled and compared with the deal's findings and each other, with no file: the whole list in one call, as the
+      // checklist's duplicate check is asked, in parts only for a list longer than ISSUES_BATCH. A reply that cannot be
+      // read is asked for again for half as many points. Nothing is half done: a point that cannot be read or sorted
+      // fails the whole, to be asked again.
       // a call that fails (a timeout, a server error) is asked again twice by every call's own retry (retry.ts), which
       // also covers that case, so it is not asked again here too; only a reply that cannot be read is (`unread`), twice
       const tried = async <T>(ask: () => Promise<T>): Promise<T> => { for (let k = 0; ; k++) { try { return await ask(); } catch (e) { if ((e as { code?: string })?.code !== 'unread' || k >= 2) throw e; } } };
@@ -2102,58 +2124,9 @@ export function nodeAi(o: AiOptions) {
       try { fileId = (await o.keeper.ensure(await o.docs.wanted(i.dealId, [i.doc.docId])))[i.doc.docId]; } catch (e) { return failure(e, 'The file could not be read'); }
       if (!fileId) return fail({ kind: 'failed', message: 'The file could not be read' });
       const fast = (await models()).fast; const clean = (t: unknown) => String(t ?? '').replace(/\s+/g, ' ').trim();
-      const read: { n: string; text: string }[] = [];
-      const unreadSays = 'It could not be read to its end, so nothing was imported';
-      const unread = () => fail<never>({ kind: 'failed', message: unreadSays });
-      try {
-        // The list is read to its end or not at all. Each page is then checked against the file in a call of
-        // its own: the model is shown the points read for that stretch (number and full words) and asked which of the list's
-        // points in it are missing, which lines are not points of their own (one given twice), and which differ from the
-        // list's words in any way, so a figure misread mid-point is caught. This holds for any
-        // numbering ("4.2(a)", letters, or none) and costs one call a page. A page that fails the check, or a
-        // reply that cannot be read, is asked for again, at half the size after a failed check; after ISSUES_TRIES tries at
-        // the same place the read fails and nothing is brought in. A page that comes back empty, or short saying nothing
-        // follows, is checked to the end of the list, so a model that stops early is caught, and a stray "more" on the last page costs
-        // only one more read. Only the check says a line is a point given twice, so the list's own repeats are kept
-        //. A reply cut off is asked for again at half the size, and the size stays.
-        let size = ISSUES_PAGE, page = size, tries = 0;
-        const opening = (t: string) => JSON.stringify(t.split(' ').slice(0, 8).join(' '));
-        const point = (p: { n: string; text: string }) => `${p.n ? `numbered ${JSON.stringify(p.n)}, ` : ''}beginning ${opening(p.text)}`;
-        // where the next page starts, in the list's own terms too: a count alone is easy to lose
-        const after = () => { const p = read[read.length - 1]; return `. That last point${p.n ? ` is numbered ${JSON.stringify(p.n)} and` : ''} begins ${opening(p.text)}`; };
-        // [], "none", ["none"] and "" all say there is nothing; a reply with no answer at all does not
-        const nothing = (v: unknown): boolean => (typeof v === 'string' && /^(none)?$/i.test(v.trim())) || (Array.isArray(v) && v.every((x) => typeof x === 'string' && nothing(x)));
-        const checked = async (got: { n: string; text: string }[], toEnd: boolean): Promise<boolean> => {
-          const prev = read[read.length - 1];
-          const stretch = `${prev ? `after the point ${point(prev)}` : 'from its first point'}, ${toEnd || !got.length ? 'to the end of the list' : `up to the point ${point(got[got.length - 1])}`}`;
-          let reply: { missing?: unknown; extra?: unknown; wrong?: unknown } | null = null;
-          // each line gives the point's words in full, so words cut short, taken from another point, or changed show
-          const line = (p: { n: string; text: string }) => `${p.n ? `numbered ${JSON.stringify(p.n)}: ` : ''}${JSON.stringify(p.text)}`;
-          try { reply = await tried(() => askJson({ kind: 'issuesList', split: true, model: fast, system: JSON_ONLY, files: [fileId!], prompt: `In ${i.doc.doc}, these were read as its points ${stretch}:\n${got.map((p, k) => `${k + 1}. ${line(p)}`).join('\n') || '(none)'}\n\nCompare them with the list itself, over that stretch only. "missing": the number (or opening words) of each point of the list in that stretch that is not above; "extra": the line number above of each line that is not a point of its own in the list (a point given twice, or not a point); "wrong": the line number above of each line whose words differ from that point's words in the list in any way (a word or figure changed, added or left out, the words cut short, or another point's words), apart from line breaks. Give [] for each when there is nothing.\nReply as JSON: {"missing": [], "extra": [], "wrong": []}` }, ['missing', 'extra', 'wrong'])); }
-          catch (e) { if ((e as { code?: string })?.code !== 'cutoff') throw e; }
-          return !!reply && nothing(reply.missing) && [reply.extra, reply.wrong].every((v) => v === undefined || nothing(v));
-        };
-        // page after page until the list ends: no length is too long (a page that fails is retried, ISSUES_TRIES)
-        let lastPage = '';
-        for (;;) {
-          const asking = page; let cutoff = false;
-          let reply: { points?: unknown; more?: unknown } | null = null;
-          try { reply = await tried(() => askJson({ kind: 'issuesList', split: true, model: fast, system: JSON_ONLY, files: [fileId], prompt: `${i.doc.doc} is an issues list: the points one party raises on a deal's documents. List its points in order${read.length ? `, from the one after point ${read.length} (counting the first as 1)${after()}` : ''}, at most ${page}.\nFor each: "n": its number or reference as the list writes it ("" when it has none); "text": the point in its own words exactly as written, joined into one paragraph when it runs over several lines. Leave out headings, introductions and notes that raise no point.\n"more": true when the list has points after the last one you give.\nReply as JSON: {"points": [{"n": "1", "text": "…"}], "more": false}` }, ['points'])); }
-          catch (e) { if ((e as { code?: string })?.code !== 'cutoff') throw e; cutoff = true; }
-          if (cutoff) { if (asking > 10) { page = size = Math.ceil(asking / 2); continue; } return fail({ kind: 'failed', message: 'It could not be read as an issues list' }); }
-          if (!reply || !Array.isArray(reply.points)) { if (++tries >= ISSUES_TRIES) return fail({ kind: 'failed', message: 'It could not be read as an issues list' }); continue; }
-          const got = (reply.points as { n?: unknown; text?: unknown }[]).map((p) => ({ n: clean(p?.n).replace(/^#/, ''), text: clean(p?.text) })).filter((p) => p.text);
-          // a page given again moves the read nowhere: it fails, as an unreadable reply does
-          const thisPage = JSON.stringify(got);
-          if (got.length && thisPage === lastPage) { if (++tries >= ISSUES_TRIES) return unread(); continue; }
-          // a full page that says nothing follows is read on from, as the model may have left "more" out; the next page then ends it
-          const toEnd = !got.length || (got.length < asking && !(reply.more === true || /^(true|yes)$/i.test(String(reply.more ?? '').trim())));
-          if (!(await checked(got, toEnd))) { if (++tries >= ISSUES_TRIES) return unread(); page = Math.max(10, Math.ceil(asking / 2)); continue; }
-          // past the check: the next page is the full size again
-          tries = 0; page = size; read.push(...got); lastPage = thisPage;
-          if (toEnd) break;
-        }
-      } catch (e) { return failure(e, 'The file could not be read'); }
+      const got = await readIssuePoints(i.doc.doc, fileId, fast, tried);
+      if (!got.ok) return got;
+      const read = got.value;
       if (!read.length) return fail({ kind: 'failed', message: 'No points were found in it' });
       // a point the list numbers nothing is known by its place
       const points = read.map((p, k) => ({ ...p, n: p.n || String(k + 1) }));
