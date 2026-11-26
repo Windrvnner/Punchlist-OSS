@@ -1,7 +1,8 @@
 /**
- * The cells of a CSV file on disk, read a piece at a time: a file of any size is read with the memory of one piece.
- * The file's encoding is told as `decodeText` tells it (a byte-order mark, UTF-16 without one, UTF-8, else
- * Windows-1252), and a file that is not UTF-16 is read once through to find out whether it is UTF-8, so that text
+ * The cells of a CSV file on disk, read a piece at a time, so the file is never held in memory whole: the reader keeps
+ * one piece and the cell being read, and what grows with the file is only what the caller keeps of its cells.
+ * The encoding is decided by `encodingOf`, as `decodeText` decides it, from the start of the file. The start alone
+ * cannot say whether all of a file is UTF-8, so a file that is not UTF-16 is read once through to find out, and text
  * is never decoded as the wrong thing.
  */
 import fs from 'node:fs';
@@ -9,7 +10,6 @@ import { CsvCells } from '../domain/csvCells';
 import { encodingOf } from '../adapters/spreadsheet';
 
 const PIECE = 1 << 20;
-const UTF8_MARK = 3;
 
 function head(at: string): Uint8Array {
   const fd = fs.openSync(at, 'r');
@@ -41,12 +41,13 @@ async function isUtf8(at: string, skip: number): Promise<boolean> {
   }
 }
 
+/** the file's encoding as a TextDecoder label, and the length of the byte-order mark to skip */
 async function labelOf(at: string): Promise<{ label: string; skip: number }> {
-  const first = head(at);
-  const encoding = encodingOf(first);
-  if (encoding.startsWith('utf-16')) return { label: encoding.slice(0, 8), skip: encoding.endsWith('-bom') ? 2 : 0 };
-  const marked = first[0] === 0xef && first[1] === 0xbb && first[2] === 0xbf;
-  const skip = marked ? UTF8_MARK : 0;
+  const encoding = encodingOf(head(at));
+  const label = encoding.replace('-bom', '');
+  const wide = label.startsWith('utf-16');
+  const skip = encoding.endsWith('-bom') ? (wide ? 2 : 3) : 0;
+  if (wide) return { label, skip };
   return { label: (await isUtf8(at, skip)) ? 'utf-8' : 'windows-1252', skip };
 }
 

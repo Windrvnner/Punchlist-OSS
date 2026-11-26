@@ -1,7 +1,7 @@
 /**
- * The cells of a CSV read a piece at a time, so that a file of any size is read with the memory of one piece. It splits
- * cells as `parseCsv` does (quotes, doubled quotes, commas, line breaks) and hands each cell over as it ends; it keeps
- * only the cell being read.
+ * The cells of a CSV read a piece at a time, so that a file of any size is never held whole. It splits cells as
+ * `parseCsv` does (quotes, doubled quotes, commas, line breaks) and hands each cell over as it ends; it keeps only the
+ * cell being read.
  */
 export class CsvCells {
   private field = '';
