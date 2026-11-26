@@ -51,11 +51,11 @@ export function checkedOffer(state: State, scope: Scope, raw: unknown): Offer | 
   return undefined;
 }
 
-/**
- * A person pressed the offer's button. Checked again now, as the deal may have gone since the answer came; **Log
- * Question** opens its card on screen instead.
- */
-export function runOffer(store: Store, offer: Offer, navigate: (hash: string) => void) {
+/** An offer that runs when pressed; **Log Question** opens its card on screen instead. */
+export type RunOffer = Exclude<Offer, { kind: 'question' }>;
+
+/** A person pressed the offer's button. Checked again now, as the deal may have gone since the answer came. */
+export function runOffer(store: Store, offer: RunOffer, navigate: (hash: string) => void) {
   const readOnly = store.readOnly();
   if (readOnly) {
     store.toast(readOnly);
@@ -65,7 +65,6 @@ export function runOffer(store: Store, offer: Offer, navigate: (hash: string) =>
     openNewDeal(store);
     return;
   }
-  if (offer.kind === 'question') return;
   if (!store.get().deals[offer.dealId]) {
     store.toast('That deal is no longer in your list');
     return;

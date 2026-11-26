@@ -193,7 +193,7 @@ export async function sendTyped(store: Store, scope: Scope, view: SendView) {
   // A recovered copy now has the draft and files (#117). Do not clear or send them from the old scope.
   if (store.readOnly() || scopeValid(state, scope) !== true || (filesDeal && dealCopied(store, filesDeal))) return;
   const dealId = scope.kind === 'deal' ? scope.dealId : undefined;
-  if (dealId && showsLogQuestion(key)) {
+  if (dealId && showsLogQuestion(key, composerText(key))) {
     await sendLogQuestion(store, dealId, key, view);
     return;
   }

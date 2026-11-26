@@ -23,6 +23,8 @@ const loggingBoxes = () => logging ??= keptDrafts('log-question', isOn);
 export function initializeRefusedCommands() {
   heldCommands();
   loggingBoxes();
+  // The old map's text is in its box already, so a restart drops the map rather than keep it unread
+  keptDrafts('refused-commands', isTexts).clear();
 }
 
 /** Whether the box's text, after any refused question at its head, is a question to log (**Log Question**). */
@@ -34,7 +36,8 @@ export function setLogQuestion(key: string, on: boolean) {
 }
 
 /** The box shows the **Log Question** chip while it is on, or while a refused question stands at its head. */
-export const showsLogQuestion = (key: string) => logQuestionOn(key) || heldCommands().has(key);
+export const showsLogQuestion = (key: string, text: string) =>
+  logQuestionOn(key) || commandsAtHead(text.trim(), heldCommands().get(key) ?? []).length > 0;
 
 /** Taking the chip off makes the whole box an ordinary question again, refused questions at its head included. */
 export function clearLogQuestion(key: string) {

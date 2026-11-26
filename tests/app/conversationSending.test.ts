@@ -92,10 +92,10 @@ it('runs slash commands only when picked, and asks the model everything typed (#
   const { store, scope, dealId, navigate, asked } = await start();
   const launch = composerScope(scope, true);
   const key = convKey(launch.scope);
-  const names = (text: string, where: Scope = launch.scope) => slashCommands(where, text)?.map((c) => c.name);
-  expect(names('/')).toEqual(['Add All Unresolved to Q&A…', 'Log Question', 'New Deal…']);
-  expect(names('/DEAL')).toEqual(['New Deal…']);
-  expect(names('/', { kind: 'all' })).toEqual(['New Deal…']);
+  const names = (text: string, where: Scope = launch.scope) => slashCommands(where, text)?.map((c) => c.command);
+  expect(names('/')).toEqual(['/add-unresolved', '/log-question', '/new-deal']);
+  expect(names('/DEAL')).toEqual(['/new-deal']);
+  expect(names('/', { kind: 'all' })).toEqual(['/new-deal']);
   expect(names('/new\nmore')).toBeUndefined();
   expect(names('New deal')).toBeUndefined();
   setComposerText(key, '/new');
@@ -108,7 +108,7 @@ it('runs slash commands only when picked, and asks the model everything typed (#
   setComposerText(key, instructions[4]);
   await sendTyped(store, launch.scope, { launchSlot: launch.launchSlot, navigate });
   expect(Object.values(store.get().questions).map((q) => q.text)).toEqual([instructions[4]]);
-  expect(showsLogQuestion(key)).toBe(false);
+  expect(showsLogQuestion(key, composerText(key))).toBe(false);
   expect(asked).not.toHaveBeenCalled();
   expect(navigate).not.toHaveBeenCalled();
 
@@ -180,7 +180,7 @@ it('clears a typed question before its save and brings it back when refused', as
   expect(refused).toHaveBeenCalledOnce();
   expect(composerText(key)).toBe(submitted.trim());
   // It comes back as a question to log, and a restart keeps it so (#1054).
-  expect(showsLogQuestion(key)).toBe(true);
+  expect(showsLogQuestion(key, composerText(key))).toBe(true);
   saveKeptDrafts();
   const keptChips = (local.read(KEPT_TEXT_KEY) as { 'log-question'?: [string, unknown][] } | null)?.['log-question'];
   expect(new Map(keptChips).get(key)).toBe(true);
@@ -203,7 +203,7 @@ it('clears a typed question before its save and brings it back when refused', as
   release();
   await sending;
   expect(composerText(key)).toBe(instructions[34]);
-  expect(showsLogQuestion(key)).toBe(false);
+  expect(showsLogQuestion(key, composerText(key))).toBe(false);
   expect(Object.values(store.get().questions)).toMatchObject([{ dealId, text: instructions[30] }]);
   expect(asked).not.toHaveBeenCalled();
 });
@@ -321,6 +321,20 @@ it('logs a refused command alone after the text typed during its save was edited
   await sendTyped(store, scope, { navigate });
   expect(Object.values(store.get().questions).map((question) => question.text)).toEqual([instructions[70]]);
   expect(composerText(key)).toBe('What is the revenue?');
+});
+
+it('asks the model, and drops the chip, once the refused question no longer heads the box (#1054)', async () => {
+  const { store, scope, navigate, asked } = await start();
+  const key = convKey(scope);
+  const command = instructions[80];
+  await refusedWhileTyping(store, scope, command, 'What is the revenue?');
+  expect(showsLogQuestion(key, composerText(key))).toBe(true);
+  setComposerText(key, 'What is the revenue?');
+  expect(showsLogQuestion(key, composerText(key))).toBe(false);
+  await sendTyped(store, scope, { navigate });
+  expect(Object.values(store.get().questions)).toHaveLength(0);
+  expect(asked).toHaveBeenCalledOnce();
+  expect(store.get().threads[key][0].text).toBe('What is the revenue?');
 });
 
 it('leaves a refused command to Retry, not the box, when the store keeps it as interrupted work', async () => {
