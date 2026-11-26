@@ -2123,6 +2123,21 @@ describe('documents by their permanent id (#1162)', () => {
     expect(two.thread!.opened.slice(0, one.thread!.opened.length)).toEqual(one.thread!.opened);
   });
 
+  it('on Home a document keeps the id it was first shown by when a second deal joins the conversation', async () => {
+    const id = `d1/${SIDE.docId}`;
+    const turn = (c: Call) => (c.prompt.includes('Question: And the tenor?')
+      ? { text: 'The side letter says so. [1]', sources: [{ doc: id, page: 2 }] }
+      : { text: 'Step-in is allowed.', sources: [] });
+    const s = setup(citeAll, undefined, { talks: true, turn });
+    const home = (message: string, dealIds: string[], extra: object = {}) =>
+      ask(message, { dealId: undefined, dealIds, ...extra });
+    const one = val(await s.ai.answer(home('What does the side letter say about step-in?', ['d1'])));
+    expect(s.turns[0].prompt).toMatch(new RegExp(`^${id}: vdr/Side letter\\.pdf`, 'm'));
+    const later = { history: [{ role: 'me' as const, text: 'Step-in?' }], thread: one.thread };
+    const two = val(await s.ai.answer(home('And the tenor?', ['d1', 'd2'], later)));
+    expect(two.sources.map((x) => x.docId)).toEqual([SIDE.docId]);
+  });
+
   it('a chat reply citing a document it never opened is asked again', async () => {
     const turn = (_c: Call, n: number) => ({ text: 'It is 1.25x. [1]', sources: [{ doc: n === 1 ? OTHER.docId : FA.docId, page: 2 }] });
     const s = setup(citeAll, undefined, { turn });

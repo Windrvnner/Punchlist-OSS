@@ -59,9 +59,12 @@ export class AgentRun {
     if (kit.talk) this.keepOpened(question.thread?.opened ?? []);
   }
 
-  /** whether the run's prompts span several deals, and so name each document with its deal (#1162) */
+  /**
+   * whether the run's prompts name each document with its deal (#1162): whenever the conversation may span deals (asked
+   * on Home), however many it spans now, so that a later turn names a document by the id it was first shown by
+   */
   get spansDeals(): boolean {
-    return this.question.deals.length > 1;
+    return this.question.withDeal;
   }
 
   /** the id a document is cited by in this run's prompts */
