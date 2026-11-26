@@ -1,26 +1,33 @@
 /**
- * The cells of a CSV read a piece at a time, so that a file of any size is never held whole. It splits cells as
- * `parseCsv` does (quotes, doubled quotes, commas, line breaks) and hands each cell over as it ends; it keeps only the
- * cell being read.
+ * The one CSV splitter: `parseCsv` and the streaming file reader both run on it. It reads text a piece at a time
+ * (quotes, doubled quotes, commas, line breaks) and hands each cell over as it ends, so a caller that keeps nothing
+ * holds only the cell being read. A cell's `quoted` tells the caller whether it was written in quotes.
  */
 export class CsvCells {
   private field = '';
   private quoted = false;
+  private wasQuoted = false;        // the cell being read has had quotes
   private pendingQuote = false;     // a quote that ended a piece: a second one after it is a doubled quote
-  private open = false;             // a cell has begun (so the end of the file closes it)
+  private cellsInRow = 0;
   // the last character outside quotes was a carriage return: a line feed after it is the same break
   private returned = false;
 
-  constructor(private readonly onCell: (cell: string) => void) {}
+  constructor(
+    private readonly onCell: (cell: string, quoted: boolean) => void,
+    private readonly onRow: () => void = () => {},
+  ) {}
 
   /** the next piece of the file's text */
   push(text: string): void {
     for (const c of text) this.take(c);
   }
 
-  /** the file has ended: the cell being read is the last */
+  /** the text has ended: what is left of the last cell and row is theirs */
   end(): void {
-    if (this.open) this.close();
+    if (this.field || this.cellsInRow) {
+      this.endCell();
+      this.onRow();
+    }
   }
 
   private take(c: string): void {
@@ -40,16 +47,24 @@ export class CsvCells {
     const secondOfBreak = this.returned && c === '\n';
     this.returned = c === '\r';
     if (secondOfBreak) return;
-    this.open = true;
-    if (c === '"') this.quoted = true;
-    else if (c === ',' || c === '\n' || c === '\r') this.close(c === ',');
-    else this.field += c;
+    if (c === '"') {
+      this.quoted = true;
+      this.wasQuoted = true;
+    } else if (c === ',') {
+      this.endCell();
+    } else if (c === '\n' || c === '\r') {
+      this.endCell();
+      this.cellsInRow = 0;
+      this.onRow();
+    } else {
+      this.field += c;
+    }
   }
 
-  private close(more = false): void {
-    this.onCell(this.field.replace(/\r\n?/g, '\n'));
+  private endCell(): void {
+    this.onCell(this.field.replace(/\r\n?/g, '\n'), this.wasQuoted);
     this.field = '';
-    this.quoted = false;
-    this.open = more;
+    this.wasQuoted = false;
+    this.cellsInRow++;
   }
 }
