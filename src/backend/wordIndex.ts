@@ -13,19 +13,14 @@
  * that uses the word on every page.
  */
 import type { Folder } from './logRepository';
-import { tokens, fold } from './words';
-import { control } from '../control';
+import { indexWords } from './words';
 
-const FILLER = new Set(control.lists.indexFiller.map((w) => w.toLowerCase()));   // matched against words in lower case
 /** BM25's usual constants: how soon repeated use levels off, and how much a long document's length is held against it */
 const K1 = 1.2, B = 0.75;
 /** the weights agreed for a match in the name or folder path, and in the title, against one body match */
 export const WEIGHT = { name: 10, title: 4 } as const;
 /** how many words of the first page make the title */
 export const TITLE_WORDS = 40;
-
-/** a word as the index keeps it, or null for one it leaves out */
-const keep = (w: string) => (FILLER.has(w) ? null : fold(w));
 
 /** what the index keeps of one document's text */
 export interface DocWords { counts: Map<string, number>; length: number; title: string[] }
@@ -46,16 +41,13 @@ export class WordTally {
   private readonly title: string[] = [];
 
   add(text: string, first = text): void {
-    for (const t of tokens(text)) {
-      const w = keep(t);
-      if (!w) continue;
+    for (const w of indexWords(text)) {
       this.counts.set(w, (this.counts.get(w) ?? 0) + 1);
       this.length++;
     }
-    for (const t of this.title.length < TITLE_WORDS ? tokens(first) : []) {
+    for (const w of this.title.length < TITLE_WORDS ? indexWords(first) : []) {
       if (this.title.length >= TITLE_WORDS) break;
-      const w = keep(t);
-      if (w && !this.title.includes(w)) this.title.push(w);
+      if (!this.title.includes(w)) this.title.push(w);
     }
   }
 
