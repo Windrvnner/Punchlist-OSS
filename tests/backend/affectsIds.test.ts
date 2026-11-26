@@ -3,6 +3,7 @@
 // their permanent ids, never by per-prompt labels; a reply naming an id it was not shown is asked again (#1162).
 import { describe, expect, it } from 'vitest';
 import { tokensOf } from '../../src/backend/limits';
+import type { DocRecord } from '../../src/backend/documents';
 import { affectsShown, deal, doc, finding, itemsIn, Mem, OK, question, setup, val, type Call } from './reviewKit';
 
 const FA = doc(1, 'Credit Agreement.pdf', { words: ['facility', 'agreement', 'margin'] });
@@ -65,32 +66,88 @@ describe('the fast model names what new documents affect by permanent ids (#1162
   });
 });
 
-/** a deal with 500 settled items and 300 open findings, sent to a stand-in model whose input limit is `limit` */
-async function dealScale(limit?: number) {
-  const items = Array.from({ length: 500 }, (_, k) => ({ id: `i_${String(k).padStart(24, '0')}`,
+/** `n` new documents, each with a short summary */
+const arrivals = (n: number) => Array.from({ length: n }, (_, k) => doc(1000 + k, `Arrival ${k}.pdf`,
+  { summary: `Notice number ${k} on the offtake agreement` }));
+type Scale = { limit?: number; out?: number; arrived?: DocRecord[]; findings?: number; items?: number;
+  affects?: (c: Call, n: number) => unknown };
+const findingId = (k: number) => `f_01HZX3K9Q4V7M2B5N8C1D6${String(k).padStart(4, '0')}`;
+
+/** a deal with settled items and open findings, sent to a stand-in model whose input limit is `limit` */
+async function dealScale(o: Scale = {}) {
+  const items = Array.from({ length: o.items ?? 500 }, (_, k) => ({ id: `i_${String(k).padStart(24, '0')}`,
     text: `Point ${k + 1} of the finance documents is in order and agreed` }));
   const s = setup(okAll, { d1: [FA] }, { shared: new Mem(), installId: 'pc',
-    checklist: () => ({ broad: items, product: [], sector: [] }), affects: () => ({ affected: [] }) });
-  if (limit) s.svc.inputLimit = () => limit;
+    checklist: () => ({ broad: items, product: [], sector: [] }), affects: o.affects ?? (() => ({ affected: [] })),
+    verify: () => ({ stands: false, why: 'The notice ends the offtake.' }) });
+  if (o.limit) s.svc.inputLimit = () => o.limit!;
+  if (o.out) s.svc.outputLimit = () => o.out!;
   await deal(s.repo);
   val(await s.ai.firstPass('d1'));
-  const ids = Array.from({ length: 300 }, (_, k) => `f_01HZX3K9Q4V7M2B5N8C1D6${String(k).padStart(4, '0')}`);
+  const ids = Array.from({ length: o.findings ?? 300 }, (_, k) => findingId(k));
   for (const [k, id] of ids.entries()) await finding(s.repo, id, `Finding ${k + 1} on the credit agreement terms`);
-  s.recs.d1 = [...s.recs.d1, NOTICE];
-  val(await s.ai.firstPass('d1'));
-  return { s, items: items.map((it) => it.id), findings: ids };
+  s.recs.d1 = [...s.recs.d1, ...(o.arrived ?? [NOTICE])];
+  const pass = val(await s.ai.firstPass('d1'));
+  return { s, pass, items: items.map((it) => it.id), findings: ids };
 }
 
 describe('the affects prompt at deal scale (#1162)', () => {
   it('splits 300 findings and 500 items into parts whose prompts stay within the input limit', async () => {
     const LIMIT = 12_000;
-    const { s, items, findings } = await dealScale(LIMIT);
+    const { s, items, findings } = await dealScale({ limit: LIMIT });
     expect(s.affectCalls.length).toBeGreaterThan(1);
     for (const c of s.affectCalls) expect(tokensOf(c.prompt)).toBeLessThanOrEqual(LIMIT);
     const shown = s.affectCalls.map(affectsShown);
     expect(shown.flatMap((x) => x.findings).sort()).toEqual([...findings].sort());
     expect(shown.flatMap((x) => x.items).sort()).toEqual([...items].sort());
     expect(shown.every((x) => x.docs.join() === NOTICE.docId)).toBe(true);
+  }, 60_000);
+
+  it('puts every target against every one of 250 arrivals, with the arrivals counted in each part', async () => {
+    const LIMIT = 6500;
+    const arrived = arrivals(250);
+    const { s, items, findings } = await dealScale({ limit: LIMIT, arrived, findings: 60, items: 100 });
+    for (const c of s.affectCalls) expect(tokensOf(c.prompt)).toBeLessThanOrEqual(LIMIT);
+    const seen = new Map<string, string[]>();
+    for (const x of s.affectCalls.map(affectsShown)) {
+      for (const d of x.docs) seen.set(d, [...(seen.get(d) ?? []), ...x.findings, ...x.items]);
+    }
+    expect([...seen.keys()].sort()).toEqual(arrived.map((r) => r.docId).sort());
+    for (const targets of seen.values()) expect(targets.sort()).toEqual([...findings, ...items].sort());
+  }, 120_000);
+
+  it('sizes a part by the reply it may bring: each target, with every arrival named beside it', async () => {
+    const OUT = 3000;
+    const arrived = arrivals(40);
+    const { s } = await dealScale({ out: OUT, arrived, findings: 30, items: 1 });
+    const reply = tokensOf(`${findingId(0)} ${arrived.map((r) => r.docId).join(' ')}`);
+    const room = Math.floor((OUT * 0.6) / reply);
+    expect(room).toBeLessThan(30);
+    expect(s.affectCalls.length).toBeGreaterThan(1);
+    for (const c of s.affectCalls) expect(affectsShown(c).findings.length).toBeLessThanOrEqual(room);
+  }, 60_000);
+
+  it('keeps what earlier parts named when a later part cannot be read', async () => {
+    const affects = (c: Call, n: number) => {
+      const shown = affectsShown(c);
+      return { affected: [n === 1 ? `${shown.findings[0]} ${NOTICE.docId}` : `${shown.findings[0]}x ${NOTICE.docId}`] };
+    };
+    const { s, pass, findings } = await dealScale({ limit: 1500, findings: 60, items: 1, affects });
+    expect(s.affectCalls.length).toBeGreaterThan(3);   // a second part, asked three times before it fails
+    // the first part's answer stands: of its findings only the one it named is marked; the rest go by shared words
+    const first = affectsShown(s.affectCalls[0]).findings;
+    expect(pass.marked.filter((id) => first.includes(id))).toEqual([findings[0]]);
+    expect(pass.marked.length).toBeGreaterThan(1);
+  }, 60_000);
+
+  it('keeps the whole entries of a reply cut off, and asks again for the rest', async () => {
+    const affects = (c: Call, n: number) => {
+      const [first, second] = affectsShown(c).findings;
+      const entry = (id: string) => JSON.stringify(`${id} ${NOTICE.docId}`);
+      return n === 1 ? `{"affected": [${entry(first)}, ${entry(second)}, "f_01HZ` : { affected: [] };
+    };
+    const { pass, findings } = await dealScale({ findings: 5, items: 1, affects });
+    expect(pass.marked.sort()).toEqual([findings[0], findings[1]]);
   }, 60_000);
 });
 
@@ -130,7 +187,7 @@ describe('the fast model names the findings a response affects by their ids (#11
 
 describe('the affects prompt size at deal scale (#1162)', () => {
   it('counts the tokens the ids add over per-prompt labels', async () => {
-    const { s, items, findings } = await dealScale();
+    const { s, items, findings } = await dealScale({ out: 100_000 });
     expect(s.affectCalls.length).toBe(1);
     const prompt = s.affectCalls[0].prompt;
     const labelled = [...findings.map((id, k) => [id, `F${k + 1}`]), ...items.map((id, k) => [id, `C${k + 1}`]),

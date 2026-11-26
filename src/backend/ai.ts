@@ -3583,31 +3583,55 @@ export function nodeAi(o: AiOptions) {
     const renote = async (it: ChecklistItem) => { const l = latest.get(it.id)!; readFor.set(it.id, new Set(l.docs ?? [])); await note(it, 'finding', l.finding); };
     return ok({ about, recs, list, m, latest, prior, known, fresh, current, findings, closed, owned, why, stale, written, work, glance, finish, reworded, renote, here, have: have.value, tombs: tombs.value, gaps: () => gapsOf(latest, done), unsettled: () => list.filter((it) => latest.get(it.id)?.result === 'unsettled').map((it) => it.id), first: !known, everChecked });
   }
+  /** what `affects` found: what the arrivals touch, and the targets (by id) the model gave no answer on */
+  type Affected = { findings: Map<string, DocRecord[]>; items: Set<string>; unsaid: Set<string> };
+  /** a finding or a settled item an affects call may name: its id, the line that lists it, and what it is */
+  type Target = { id: string; line: string; finding?: Raised; item?: ChecklistItem };
   /**
    * Which of a deal's open findings and settled items some new documents could affect, and for each finding which of
    * the new documents it is: the fast model's view, knock-on effects included. A hundred arrivals to a question, so a
    * large folder arriving is several questions and not one too long to answer, and the findings and items in parts
-   * sized to the input limit (parts.ts). Null when it cannot say.
+   * sized to the limits (`affectsSize`, parts.ts). What the parts that answered named is kept when another part cannot
+   * be read: the targets that part held are `unsaid`, for the caller to place by shared words.
    */
-  async function affects(arrived: DocRecord[], findings: Raised[], items: ChecklistItem[]): Promise<{ findings: Map<string, DocRecord[]>; items: Set<string> } | null> {
-    const out = { findings: new Map<string, DocRecord[]>(), items: new Set<string>() };
+  async function affects(arrived: DocRecord[], findings: Raised[], items: ChecklistItem[]): Promise<Affected> {
+    const out: Affected = { findings: new Map(), items: new Set(), unsaid: new Set() };
     if (!arrived.length || (!findings.length && !items.length)) return out;
     const fast = (await models()).fast;
-    const lines = [...findings.map(findingLine), ...items.map(itemLine)];
-    // the fast model names each one it could change, so its reply grows as a quick look's does (#1162)
-    const size = partSize({ cap: lines.length, out: control.limits.glanceReplyTokens, outLimit: outLimit(fast),
-      in: tokensEach(lines), inLimit: inLimit(fast) });
+    const targets: Target[] = [
+      ...findings.map((f) => ({ id: f.id, line: findingLine(f), finding: f })),
+      ...items.map((it) => ({ id: it.id, line: itemLine(it), item: it })),
+    ];
+    let failed = false;
     for (let at = 0; at < arrived.length; at += ARRIVALS) {
-      const part = arrived.slice(at, at + ARRIVALS);
-      for (let from = 0; from < lines.length; from += size) {
-        const these = findings.slice(from, from + size);
-        const theseItems = items.slice(Math.max(0, from - findings.length), Math.max(0, from + size - findings.length));
-        const reply = await askAffected(part, these, theseItems, fast);
-        if (!reply) return null;
-        takeAffected(strings(reply.affected), part, these, theseItems, out);
+      if (failed) {
+        for (const t of targets) out.unsaid.add(t.id);
+        continue;
       }
+      const part = arrived.slice(at, at + ARRIVALS);
+      const done = await inParts(targets, affectsSize(part, targets, fast), (these) => askAffected(part, these, fast));
+      if (done.stopped !== undefined && unreachable(done.stopped)) throw done.stopped;
+      for (const k of [...done.left, ...done.unasked]) out.unsaid.add(targets[k].id);
+      failed = done.stopped !== undefined && !isCutOff(done.stopped) && !isTooLong(done.stopped);
+      for (const [k, named] of done.got) takeAffected(named, targets[k], out);
     }
     return out;
+  }
+  /** the new documents an affects prompt lists, one line each, by docId */
+  const arrivalLines = (part: DocRecord[]) => part.map((r) => `${r.docId}: ${shown(r)}`);
+  /**
+   * How many targets one affects call takes: as many as fit the input limit beside the arrivals it lists, and as
+   * have a reply that fits the output limit when it names each of them with every arrival listed, as its ids are
+   * written (#1162)
+   */
+  function affectsSize(part: DocRecord[], targets: Target[], model: string): number {
+    const share = control.limits.partShare / 100;
+    const docIds = part.map((r) => r.docId).join(' ');
+    const room = Math.max(1, inLimit(model) - Math.ceil(tokensOf(arrivalLines(part).join('\n')) / share));
+    return partSize({
+      cap: targets.length, out: tokensEach(targets.map((t) => `"${t.id} ${docIds}", `)), outLimit: outLimit(model),
+      in: tokensEach(targets.map((t) => t.line)), inLimit: room,
+    });
   }
   /** the values an affects reply gives under "affected" */
   const affectedIn = (text: string) => listOf(json<{ affected?: unknown }>(text, 'affected')?.affected);
@@ -3619,7 +3643,7 @@ export function nodeAi(o: AiOptions) {
   function affectsPrompt(part: DocRecord[], findings: Raised[], items: ChecklistItem[]) {
     const closed = findings.some((f) => f.closed)
       ? ', and findings a person has closed, marked (closed), which new documents may bring into question' : '';
-    const arrivals = part.map((r) => `${r.docId}: ${shown(r)}`).join('\n');
+    const arrivals = arrivalLines(part).join('\n');
     const blocks = [
       `These documents have just arrived in the data room of a project-finance deal:\n${arrivals}`,
       ...(findings.length ? [`These are the deal's open findings${closed}:\n${findings.map(findingLine).join('\n')}`]
@@ -3632,37 +3656,53 @@ export function nodeAi(o: AiOptions) {
     return `${blocks.join('\n\n')}\n\n${question}\nReply as JSON: {"affected": ["<finding or item id> <document id>"]}`;
   }
   /**
-   * The fast model's answer on some arrivals, findings and items, or null when it cannot say. A reply naming any id it
-   * was not shown, on either side of a pair, is a failed reply, asked again (#1162).
+   * The fast model's answer on some arrivals and targets, by place in `these`: for each target the answer covers, the
+   * arrivals named beside it, or null when it was not named. A reply naming any id it was not shown, on either side of
+   * a pair, is a failed reply, asked again (#1162), and fails the part when its tries run out. A reply cut off keeps
+   * the targets named in its whole entries, as the last entry may be cut short, and the rest are asked again; a
+   * target a cut reply does not name is not known to be unaffected.
    */
-  async function askAffected(part: DocRecord[], findings: Raised[], items: ChecklistItem[], model: string) {
-    const targets = [...findings.map((f) => f.id), ...items.map((it) => it.id)];
+  async function askAffected(part: DocRecord[], these: Target[], model: string): Promise<PartReply<DocRecord[] | null>> {
+    const ids = these.map((t) => t.id);
     const docIds = part.map((r) => r.docId);
-    const unusable = (text: string) => !namesOnlyShown(text, [...targets, ...docIds])
-      || unknownInPairs(affectedIn(text), targets, docIds).length > 0;
+    const unusable = (text: string) => !namesOnlyShown(text, [...ids, ...docIds])
+      || unknownInPairs(affectedIn(text), ids, docIds).length > 0;
+    const findings = these.flatMap((t) => (t.finding ? [t.finding] : []));
+    const items = these.flatMap((t) => (t.item ? [t.item] : []));
     const prompt = affectsPrompt(part, findings, items);
     const input: Ask = { kind: 'affects', split: true, model, system: JSON_ONLY, prompt, unusable };
     let reply: { affected?: unknown } | null;
+    let cut = false;
     try {
       reply = await askJson<{ affected?: unknown }>(input, ['affected']);
     } catch (e) {
-      if (unreachable(e)) throw e;
-      return null;
+      if (!isCutOff(e)) throw e;
+      cut = true;
+      reply = (e as { partial?: { affected?: unknown } | null }).partial ?? null;
     }
-    return reply && 'affected' in reply ? reply : null;
+    const unread = () => Object.assign(new Error(UNREAD_REPLY), { code: 'unread' });
+    if (!reply || !('affected' in reply)) throw unread();
+    const pairs = strings(reply.affected);
+    const whole = cut ? pairs.slice(0, -1) : pairs;
+    if (cut && await unusable(JSON.stringify({ affected: whole }))) throw unread();
+    const got = new Map<number, DocRecord[] | null>(cut ? [] : these.map((_, k) => [k, null]));
+    for (const pair of whole) {
+      const [target, ...named] = pair.split(' ');
+      const k = ids.indexOf(target);
+      if (k < 0) continue;
+      const had = got.get(k) ?? [];
+      for (const r of part.filter((x) => named.includes(x.docId))) if (!had.includes(r)) had.push(r);
+      got.set(k, had);
+    }
+    return { got, ...(cut ? { cut: these.map((_, k) => k).filter((k) => !got.has(k)) } : {}) };
   }
-  /** each pair of a usable affects reply, mapped back by exact id: a finding with the arrivals beside it, or an item */
-  function takeAffected(pairs: string[], part: DocRecord[], findings: Raised[], items: ChecklistItem[],
-    out: { findings: Map<string, DocRecord[]>; items: Set<string> }) {
-    for (const pair of pairs) {
-      const [target, ...docIds] = pair.split(' ');
-      const by = part.filter((r) => docIds.includes(r.docId));
-      if (items.some((it) => it.id === target)) out.items.add(target);
-      if (!findings.some((f) => f.id === target)) continue;
-      const had = out.findings.get(target) ?? [];
-      for (const r of by) if (!had.includes(r)) had.push(r);
-      out.findings.set(target, had);
-    }
+  /** what an answer on one target puts in the result: a finding with the arrivals beside it, or an item */
+  function takeAffected(named: DocRecord[] | null, target: Target, out: Affected) {
+    if (!named) return;
+    if (target.item) out.items.add(target.id);
+    const had = out.findings.get(target.id) ?? [];
+    for (const r of named) if (!had.includes(r)) had.push(r);
+    if (target.finding) out.findings.set(target.id, had);
   }
 
   const extras = {
@@ -4284,12 +4324,16 @@ export function nodeAi(o: AiOptions) {
           const settledItems = x.list.filter((it) => !x.owned(it) && x.why(it) !== 'new' && !!x.latest.get(it.id)); const open = x.findings.filter((f) => !marked.includes(f.id));
           const hit = await affects(x.fresh, [...open, ...x.closed], settledItems);
           const nearTo = (f: Raised) => { const q = words(`${f.title} ${f.body.join(' ')}`, dealId); return x.fresh.map((r) => ({ r, n: score(r, q, dealId) })).sort((a, b) => b.n - a.n); };
-          revisit = [...revisit, ...(hit ? [...hit.items].map((id) => settledItems.find((it) => it.id === id)!) : x.list.filter((it) => x.why(it) === 'word'))].filter((it, i, all) => all.indexOf(it) === i);
+          // what the model gave no answer on (all of it, when it could not say) goes by shared words
+          const byWords = x.list.filter((it) => hit.unsaid.has(it.id) && x.why(it) === 'word');
+          revisit = [...revisit, ...[...hit.items].map((id) => settledItems.find((it) => it.id === id)!), ...byWords].filter((it, i, all) => all.indexOf(it) === i);
           // each finding with the arrivals named beside it. Where the model named the finding and no arrival, the arrivals that words cannot place
           // (a scan has none) come first, then the nearest in words; where it could not say at all, the nearest in words
           const blind = x.fresh.filter((r) => !r.words?.length && !r.summary);
-          look = hit ? [...hit.findings].map(([id, by]) => { const f = [...open, ...x.closed].find((y) => y.id === id)!; return { f, also: (by.length ? by : [...blind, ...nearTo(f).map((y) => y.r).filter((r) => !blind.includes(r))]).slice(0, 3) }; })
-            : open.filter((f) => nearTo(f).some((y) => y.n > 0)).map((f) => ({ f, also: nearTo(f).slice(0, 3).map((y) => y.r) }));
+          const named = [...hit.findings].map(([id, by]) => { const f = [...open, ...x.closed].find((y) => y.id === id)!; return { f, also: (by.length ? by : [...blind, ...nearTo(f).map((y) => y.r).filter((r) => !blind.includes(r))]).slice(0, 3) }; });
+          const nearer = open.filter((f) => hit.unsaid.has(f.id) && !hit.findings.has(f.id) && nearTo(f).some((y) => y.n > 0))
+            .map((f) => ({ f, also: nearTo(f).slice(0, 3).map((y) => y.r) }));
+          look = [...named, ...nearer];
         }
       }
       return [...must.map((it) => item(it, 'check', x.why(it) ?? 'new')), ...revisit.filter((it) => !must.includes(it)).map((it) => item(it, 'revisit', x.why(it) ?? 'touched')), ...look.map(({ f, also }) => ({ key: `finding:${f.id}`, also: also.map((r) => r.docId) }))];

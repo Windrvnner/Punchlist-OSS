@@ -289,8 +289,8 @@ const SPEC = {
     checkReplyTokens: count(250, 'About how many tokens the standard model\'s reply on one checklist item takes (a place and its quote, or a finding written up), to size a check\'s batches.', 10, 5_000),
     glanceReplyTokens: count(
       20,
-      'The same for the fast model\'s quick look at one item, for the standard model\'s check of one ' +
-        'Already Asked? pair, and for each finding or item it names when new documents arrive, to size those parts.',
+      'The same for the fast model\'s quick look at one item, and for the standard model\'s check of one ' +
+        'Already Asked? pair.',
       5,
       1_000,
     ),
