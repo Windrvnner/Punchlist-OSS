@@ -98,8 +98,9 @@ reports a lost connection, timeout, rate limit, or server error as `unreachable`
 file, and lowered where the service reports a smaller limit) and the two errors that every connector throws in the
 same way: `cutoff` and `toolong`. `src/backend/parts.ts` sizes work on many items so that each part fits, and halves
 the parts after a reply is cut off. Every model call goes through one retry policy (`src/backend/retry.ts`): two more
-tries, with a doubling wait, for an empty reply or for a failure that resending can fix (that is, not unreachable, cut
-off, too long, or a 4xx error). Every call gets these retries, however many calls before it failed.
+tries, with a doubling wait, for an empty reply, for a reply its caller cannot use (one naming a question id it was
+not shown), or for a failure that resending can fix (that is, not unreachable, cut off, too long, or a 4xx error).
+Every call gets these retries, however many calls before it failed.
 
 **Desktop shell.** The desktop app is an Electron app. The main process (`src/desktop/main.ts`) assembles the backend and serves it to a single window across a bridge. The window runs the same Store and UI as the browser demo.
 
