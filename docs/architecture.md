@@ -212,8 +212,22 @@ A deal's checklist is made up of its own item records, linked to the findings an
   **Undo**. The fast model phrases a question for each gap or open finding that has no linked question. It works in
   parts sized by `inParts`, and each call gets only the shared quiet retry. Points a reply left out are asked again as
   a part; a part that brings nothing is split down to single points. Points still without a question are counted and
-  offered with **Retry**. A link from a point to an open question is offered only when a person approved it (#88);
-  no question is matched to a point by similar words.
+  offered with **Retry**.
+  A link from a point to an open question is offered when a person approved it (#88), or under **Already Asked?** when
+  the question passes a keyword confidence and the model confirms it (#1218). Code scores each point's best open
+  question by the share of the point's words that the question names (`askedMatcher`, `src/domain/askedMatch.ts`),
+  with the words the search index keeps (`indexWords`, defined in `src/domain/words.ts` and re-exported by the
+  backend's `words.ts`, which the word index uses: numbers and short words count, filler is left out, plurals are
+  folded). A question is a candidate only when the share reaches `limits.askedCutoff` (`reaches`, whole numbers;
+  `askedCandidates` in `src/app/unresolvedLinks.ts`; a question is a candidate for one point only, ties go to the lower
+  question number). The index's words are reused, not its BM25 ranking: `app` cannot import the backend's
+  `recordSearch.ts`, and a raw BM25 score is not a percentage.
+  The optional port `covers` asks the standard model about all candidates at once, after the points are
+  phrased, in parts like the other batched calls, naming each pair by a neutral tag and sending the texts as
+  written, with no question number; code takes an answer only for an offered tag, once, as true or false
+  (`src/backend/covers.ts`, `confirmedLinks`). `covers` is a yes or no for a pair, where `addresses` gives yes,
+  partly, or no for an answer to a question. No candidate means no call, and a failed or rejected call means no offer.
+  No question is matched to a point by similar words alone.
 
 ## Q&A log, imports, and the memo
 
