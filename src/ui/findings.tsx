@@ -14,7 +14,7 @@ import { Ref } from './ref';
 import { byDocument, fewDocuments } from '../app/citations';
 import { DocName } from './docName';
 import { FindingsHead } from './findingsHead';
-import { workstreamChoices } from '../domain/order';
+import { NO_WORKSTREAM, workstreamChoices } from '../domain/order';
 import { versionsWord, type State } from '../app/state';
 import { checkLeftCount, uncheckedChecklistCount } from '../app/dealCounts';
 import { findingsView } from '../app/findingsView';
@@ -282,6 +282,8 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
     onDone();
   };
   const wsOptions = workstreamChoices([f.workstream]);   // a name of its own (from an import) takes its place A to Z
+  // a finding the model left with no workstream keeps "No workstream" on offer, last (#1062)
+  const noWorkstream = !base.current.workstream;
   const save = () => {
     if (busy) return;
     remember({});   // the kept draft holds what is sent, so the save can tell what is typed after it (#771)
@@ -292,11 +294,21 @@ function EditFindingCard({ f, onDone }: { f: Finding; onDone: () => void }) {
     <div class="card addf fedit" data-holds-work onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onDone(); } }}>
       <div class="lbl">Title</div>
       <input class="in" id="fe-title" aria-label="Title" maxLength={Math.max(TITLE_MAX, f.title.length)} value={title} ref={(el) => { if (el && !el.dataset.f) { el.dataset.f = '1'; el.focus(); } }} onInput={(e) => setTitle((e.currentTarget as HTMLInputElement).value)} />
-      <select class={`field ${ws ? '' : 'unset'}`} id="fe-ws" aria-label="Workstream" value={ws} onChange={(e) => setWs((e.currentTarget as HTMLSelectElement).value)}>{wsOptions.map((w) => <option key={w} value={w}>{w}</option>)}</select>
+      <select class={`field ${ws ? '' : 'unset'}`} id="fe-ws" aria-label="Workstream" value={ws}
+        onChange={(e) => setWs((e.currentTarget as HTMLSelectElement).value)}>
+        {wsOptions.map((w) => <option key={w} value={w}>{w}</option>)}
+        {noWorkstream && <option value="">{NO_WORKSTREAM}</option>}
+      </select>
       {/* #636: each citation is a tag after the sentence it supports; the tooltip says so, the screen does not */}
       <div class="lbl" title={CITE_TIP}>Detail</div>
       <CitedEditor id="fe-body" label="Detail" text={body} sources={f.sources} onText={setBody} />
-      <div class="cacts">{error && <p class="emptyline err" id="fe-err" role="alert">{error}</p>}<button type="button" class="btn sm pri" id="fe-save" disabled={busy || !title.trim() || !ws} onClick={() => void save()}>Save</button><button type="button" class="btn sm" id="fe-cancel" onClick={cancel}>Cancel</button></div>
+      <div class="cacts">
+        {error && <p class="emptyline err" id="fe-err" role="alert">{error}</p>}
+        {/* a workstream is always set or, where none was, may stay blank (#1062) */}
+        <button type="button" class="btn sm pri" id="fe-save" disabled={busy || !title.trim()}
+          onClick={() => void save()}>Save</button>
+        <button type="button" class="btn sm" id="fe-cancel" onClick={cancel}>Cancel</button>
+      </div>
     </div>
   );
 }

@@ -111,6 +111,25 @@ for (const [size, scheme] of [[[1280, 736], 'dark'], [[1280, 736], 'light'], [[1
     const edit = await texts(page, '#fe-ws option');
     say(`${tag}: ` + 'Editing a finding: its own workstream takes its place A to Z', JSON.stringify(edit) === JSON.stringify(az([...app, 'Permitting'])), JSON.stringify(edit));
     await page.keyboard.press('Escape');
+    // a finding the model left with no workstream: "No workstream" is shown, last, and the title alone saves (#1062)
+    await page.evaluate(async ([d, f]) => {
+      const x = store.get().findings[f];
+      const edit = { dealId: d, findingId: f, title: x.title, workstream: '', body: x.body };
+      await store.dispatch(store.commandNamed('EditFinding'), edit, { quiet: true });
+    }, [id, fid]);
+    await page.click('#f-edit'); await page.waitForSelector('#fe-ws');
+    const blank = await texts(page, '#fe-ws option');
+    const shown = await page.$eval('#fe-ws', (el) => el.selectedOptions[0]?.textContent);
+    say(`${tag}: ` + 'Editing a finding with no workstream: No workstream last and shown',
+      JSON.stringify(blank) === JSON.stringify([...az(app), 'No workstream']) && shown === 'No workstream',
+      JSON.stringify([blank, shown]));
+    await page.fill('#fe-title', 'Interconnection deposit is not posted');
+    say(`${tag}: ` + 'Editing a finding with no workstream: Save is on', await page.isEnabled('#fe-save'));
+    await page.click('#fe-save'); await page.waitForSelector('#fe-title', { state: 'detached' });
+    const saved = await page.evaluate((f) => store.get().findings[f], fid);
+    say(`${tag}: ` + 'Editing a finding with no workstream: the title saves, the workstream stays blank',
+      saved.title === 'Interconnection deposit is not posted' && saved.workstream === '',
+      JSON.stringify(saved.workstream));
     // the Findings page's own workstream filter, in its filter menu once the list is long
     await page.evaluate(async (d) => { for (const [i, w] of ['Phase 10 grid', 'Phase 2 grid', 'accounting', 'Água e meio', 'Legal', 'Tax', 'Commercial', 'Insurance', 'Technical', 'Legal'].entries())
       await store.dispatch(store.commandNamed('CreateFinding'), { dealId: d, title: `Point ${i + 1} on the grid`, workstream: w }, { quiet: true }); }, id);
