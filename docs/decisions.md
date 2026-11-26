@@ -152,6 +152,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A deal has no "Add an item": the checklist stays based on the master checklist.
 - **Turn Off Item** is in an item's ⋯ menu; a turned-off item stays in place, dimmed.
 - A list can be pasted in or imported from any clearly laid-out file. The model reads it, every line is accounted for, and lines left out are listed with a checkbox to bring them in. A line brought in comes in exactly as written, its bullet or number included; every item's wording is kept exactly as the file gives it, and a line the model reads is stored as the line is written (its edge spaces aside), never as the model words it. Here accuracy comes before cost: the standard model reads the list, and the thorough model retries lines it couldn't place.
+- A spreadsheet row brought in keeps every cell, separated by tabs, as a spreadsheet copies a row (#1061).
 - An item that joins two conditions becomes two items, and "(if applicable)" goes only on an item that may not apply to every deal.
 - Findings is the worklist and the Checklist is the coverage record; nothing is opened or closed on the Checklist.
 - An opened gap says what is needed and which documents were read, naming any that couldn't be read.

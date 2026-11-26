@@ -39,6 +39,16 @@ export function tableLines(columns: string[], rows: string[][]): string[] {
   return [line(columns), ...rows.map(line)];
 }
 
+/**
+ * A table's rows as a spreadsheet copies them, line for line with `tableLines`: each row's cells separated by tabs, its
+ * cells' own line breaks kept, empty cells at the row's edges left out. A left-out row a person brings in comes in so
+ * (decisions: Checklist; #1061).
+ */
+export function tableRowsAsWritten(columns: string[], rows: string[][]): string[] {
+  const row = (r: string[]) => r.map((c) => String(c ?? '')).join('\t').trim();
+  return [row(columns), ...rows.map(row)];
+}
+
 /** Text as lines: every line break counts, so a line number means the same line to the person, the model and the app. */
 export const textLines = (text: string): string[] => text.replace(/\r\n?/g, '\n').split('\n');
 
@@ -87,10 +97,14 @@ function usable(line: string, r: LineRead | undefined): boolean {
 
 /**
  * Every line accounted for. `bringIn` holds lines left out that a person checked: each becomes an item where it sits,
- * under the heading above it, with its own words. A reading that is not usable leaves its line out; a "more" line with
- * no item above it in the same section is left out too, never joined to an item it does not belong to.
+ * under the heading above it, with its own words as the source writes them (`written`, line for line with `lines`:
+ * a pasted line as pasted, a table row as `tableRowsAsWritten` gives it), as does the rest of an item on a line
+ * below it. A reading that is not usable leaves its line out; a "more" line with no item above it in the same section
+ * is left out too, never joined to an item it does not belong to.
  */
-export function tieOut(lines: string[], reads: ReadonlyMap<number, LineRead>, bringIn: ReadonlySet<number> = new Set()): TiedOut {
+export function tieOut(
+  lines: string[], reads: ReadonlyMap<number, LineRead>, bringIn: ReadonlySet<number> = new Set(), written = lines,
+): TiedOut {
   const items: ReadItem[] = []; const left: number[] = [];
   const count = { lines: lines.length, items: 0, more: 0, headings: 0, blank: 0, left: 0 };
   let section = ''; let subsection = ''; let last: ReadItem | null = null;
@@ -107,7 +121,7 @@ export function tieOut(lines: string[], reads: ReadonlyMap<number, LineRead>, br
     if (r!.k === 'columns') { count.headings++; return; }
     if (r!.k === 'more') {
       if (!last) { leave(n); return; }
-      const it: ReadItem = last; it.text = `${it.text} ${line.trim()}`; it.lines.push(n); count.more++; return;
+      const it: ReadItem = last; it.text = `${it.text} ${written[i].trim()}`; it.lines.push(n); count.more++; return;
     }
     if (r!.k === 'item') {
       // a table row's own section cell starts that section (and no subsection) for it and the rows under it, as a section
@@ -124,7 +138,7 @@ export function tieOut(lines: string[], reads: ReadonlyMap<number, LineRead>, br
 
   function leave(n: number) {
     // a line brought in comes in exactly as written, its bullet or list number included
-    if (bringIn.has(n)) { add(lines[n - 1], n); last = null; return; }
+    if (bringIn.has(n)) { add(written[n - 1], n); last = null; return; }
     left.push(n); count.left++;
   }
 }

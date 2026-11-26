@@ -9,7 +9,7 @@ import {
 import { importKey, initializeKeptImports, keptImport, keptImportsReady, saveImport } from '../../src/app/keptImports';
 import {
   checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistReading, checklistRequests, checklistSourceLines,
-  loadChecklistSource, readChecklistColumns, rereadChecklistTable, tieChecklistLines,
+  checklistWrittenLines, loadChecklistSource, readChecklistColumns, rereadChecklistTable, tieChecklistLines,
 } from '../../src/app/listRead';
 import { firmOf, listId, norm } from '../../src/domain/checklist';
 import type { LineRead } from '../../src/domain/listRead';
@@ -152,6 +152,20 @@ async function portfolioFile(questions: string[]) {
   ]));
   return new File([csv.bytes.slice().buffer], 'Portfolio checklist.csv');
 }
+
+it('brings a left-out pasted line in exactly as pasted, its tabs included (#1061)', () => {
+  const pasted = ['Insurance', '1.2\tInsurance certificates\tLender to confirm', '1.3\tBroker letter'].join('\n');
+  const source = checklistPaste(pasted)!;
+  const lines = checklistSourceLines(source, null)!;
+  expect(lines[1]).toBe('1.2 | Insurance certificates | Lender to confirm');   // as the model reads it
+  const reads = new Map<number, LineRead>([
+    [1, { n: 1, k: 'section', text: 'Insurance' }], [2, { n: 2, k: 'left' }],
+    [3, { n: 3, k: 'item', text: 'Broker letter' }],
+  ]);
+  const written = checklistWrittenLines(source, null);
+  const tied = tieChecklistLines(lines, reads, new Set([2]), written)!;
+  expect(tied.items.map((i) => i.text)).toEqual(['1.2\tInsurance certificates\tLender to confirm', 'Broker letter']);
+});
 
 it('re-reads a portfolio spreadsheet by hand after the model fails, preserving its rows and counts', async () => {
   const app = await readyApp();

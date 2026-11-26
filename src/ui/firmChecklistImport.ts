@@ -12,7 +12,8 @@ import {
 } from '../app/checklistImport';
 import {
   checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistReading, checklistRequests,
-  checklistSourceLines, clearChecklistHeading, loadChecklistSource, rereadChecklistTable, tieChecklistLines,
+  checklistSourceLines, checklistWrittenLines, clearChecklistHeading, loadChecklistSource, rereadChecklistTable,
+  tieChecklistLines, type ChecklistText,
 } from '../app/listRead';
 import type { LineRead } from '../domain/listRead';
 import type { ChecklistMapping } from '../domain/checklistImport';
@@ -60,7 +61,8 @@ export function useListSource(store: Store, work: Work, keeper: Keeper) {
   const file = useListFile(store, work, keeper, pasteSource);
   const { table, text, mapping, byColumns } = file;
   const lines = useMemo(() => checklistSourceLines(text, table), [text, table]);
-  const reading = useModelReading(store, work, lines, byColumns, left);
+  const written = useMemo(() => checklistWrittenLines(text, table), [text, table]);
+  const reading = useModelReading(store, work, { lines, written }, byColumns, left);
   const prepared = useMemo(
     () => checklistItemsAsRead(byColumns, table, mapping, reading.tied),
     [byColumns, table, mapping, reading.tied],
@@ -90,7 +92,7 @@ const NO_MAPPING: ChecklistMapping = { item: null, section: null, subsection: nu
 function useListFile(store: Store, work: Work, { key, left }: Keeper, pasteSource: ReturnType<typeof checklistPaste>) {
   const [table, setTable] = useState<ImportTable | null>(left?.table ?? null);
   const [mapping, setMapping] = useState<ChecklistMapping>(left?.choices?.mapping ?? NO_MAPPING);
-  const [text, setText] = useState<{ name: string; lines: string[] } | null>(left?.text ?? null);
+  const [text, setText] = useState<ChecklistText | null>(left?.text ?? null);
   const [byColumns, setByColumns] = useState(!!left?.choices?.byColumns);
   const [sheetRead, setSheetRead] = useState<{ sheet?: string }>();
   const take = (read: ImportTable, suggested: ChecklistMapping) => {
@@ -189,8 +191,10 @@ async function updateTableRead(
  * another sheet; Retry asks again. `bringIn` holds the lines left out that a person checked to bring in.
  */
 function useModelReading(
-  store: Store, work: Work, lines: string[] | null, byColumns: boolean, left: ChecklistKept | null,
+  store: Store, work: Work, source: { lines: string[] | null; written: string[] | null }, byColumns: boolean,
+  left: ChecklistKept | null,
 ) {
+  const { lines, written } = source;
   const [reads, setReads] = useState<Map<number, LineRead> | null>(left?.reads ?? null);
   const [readFailed, setReadFailed] = useState<Asked | ''>(left?.choices?.readFailed ?? '');
   const [bringIn, setBringIn] = useState<Set<number>>(left?.choices?.bringIn ?? new Set());
@@ -219,7 +223,7 @@ function useModelReading(
   useEffect(() => { void reading.sourceChanged(lines, byColumns, events); }, [lines, byColumns]);
   /** the lines the model left out, before any is checked to bring in: the "Left out" list */
   const tiedBase = useMemo(() => tieChecklistLines(lines, reads), [lines, reads]);
-  const tied = useMemo(() => tieChecklistLines(lines, reads, bringIn), [lines, reads, bringIn]);
+  const tied = useMemo(() => tieChecklistLines(lines, reads, bringIn, written), [lines, reads, bringIn, written]);
   const flipBringIn = (line: number) => setBringIn(toggled(bringIn, line));
   const forget = () => {
     setReads(null);
