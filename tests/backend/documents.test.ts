@@ -228,15 +228,45 @@ describe('documents on real folders', () => {
     const end = val(await pc(root, 'A').docs.poll('d1')); expect(end.done).toBe(true); expect(end.stopped).toBeUndefined(); expect(end.folders).toMatchObject([{ path: vdr, files: 2, indexed: 2 }]);
   });
 
-  it('spreadsheets are read after every other file, smallest first, so a large one holds up none (#427)', async () => {
+  it('spreadsheets are read after every other file, so a large one holds up none (#427)', async () => {
     const root = tmp(); const vdr = path.join(root, 'vdr');
     put(vdr, 'A large.csv', 'ledger,entry\n'.repeat(1000));
     put(vdr, 'B small.csv', 'ledger,entry\n');
     put(vdr, 'C Agreement.pdf', FA);
     const a = pc(root, 'office'); expect((await indexAll(a, vdr)).log).toEqual(['Indexed 3 files']);
     const order = a.docs.records('d1').map((r) => r.name);
+    expect(order.indexOf('C Agreement.pdf')).toBeLessThan(order.indexOf('A large.csv'));
     expect(order.indexOf('C Agreement.pdf')).toBeLessThan(order.indexOf('B small.csv'));
-    expect(order.indexOf('B small.csv')).toBeLessThan(order.indexOf('A large.csv'));
+  });
+
+  // a converter that cannot read any spreadsheet while `down.now` is set
+  const flakyConverter = (down: { now: boolean }) => {
+    const { convert } = standInConverter();
+    const read = convert.sheets!;
+    const sheets = (file: string) => (down.now ? Promise.reject(new Error('down')) : read(file));
+    return Object.assign(convert, { sheets });
+  };
+
+  it('a deal-folder spreadsheet not read is read by the next freshen, not skipped as unchanged (#427)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Credit Agreement.pdf', FA);
+    put(vdr, 'Budget.xlsx', MODEL);
+    const down = { now: true };
+    const a = pc(root, 'office', undefined, { convert: flakyConverter(down) });
+    const budget = () => a.docs.records('d1').find((d) => d.name === 'Budget.xlsx');
+    expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Budget.xlsx');
+    expect(budget()?.words).toBeUndefined();
+    // still down: the look reads the folder again and names it again
+    val(await a.docs.freshen!('d1'));
+    await a.docs.settled('d1');
+    expect(val(await a.docs.poll('d1')).log).toContain('1 file could not be read: Budget.xlsx');
+    down.now = false;
+    expect(val(await a.docs.freshen!('d1'))).toBe('running');
+    await a.docs.settled('d1');
+    expect(budget()?.words).toEqual(['line', 'cover', 'debt']);
+    expect(val(await a.docs.poll('d1')).log).toEqual(['Indexed 2 files']);
+    expect(val(await a.docs.freshen!('d1'))).toBe('same');
   });
 
   it('a spreadsheet of 250,000 different words is counted as the same text read whole (#427)', async () => {
@@ -253,7 +283,7 @@ describe('documents on real folders', () => {
     expect(expected.counts.size).toBeGreaterThan(200_000);
     const record = a.docs.records('d1').find((r) => r.name === 'Names.csv')!;
     expect(record.words).toEqual(topWords(text));
-    const lines = fs.readFileSync(path.join(root, 'local-office', 'words-d1.jsonl'), 'utf8').trim().split('\n');
+    const lines = fs.readFileSync(path.join(root, 'local-office', 'words2-d1.jsonl'), 'utf8').trim().split('\n');
     const line = lines.map((l) => JSON.parse(l)).find((l) => l.d === record.docId);
     expect(line.n).toBe(expected.length);
     expect(line.t).toBe(expected.title.join(' '));
@@ -809,28 +839,23 @@ fs.appendFileSync(${JSON.stringify(seen)}, src + '\\t' + fs.readFileSync(src).le
     expect(val(await a.docs.page('d1', { doc: 'Model v12.xlsx', docId: idOf(MODEL) }, 'Debt!B20'))).toEqual(v);
   });
 
-  it('an attached spreadsheet that cannot be read is named, and read again on the next run (#427)', async () => {
+  it('an attached spreadsheet not read is named, and read by the next run and the next freshen (#427)', async () => {
     const root = tmp();
     const vdr = path.join(root, 'vdr');
     put(vdr, 'Credit Agreement.pdf', FA);
-    // a converter that cannot read any spreadsheet until `down` is set back
-    let down = true;
-    const flaky = () => {
-      const { convert } = standInConverter();
-      const read = convert.sheets!;
-      const sheets = (file: string) => (down ? Promise.reject(new Error('down')) : read(file));
-      return Object.assign(convert, { sheets });
-    };
-    const a = pc(root, 'office', undefined, { convert: flaky() });
+    const down = { now: true };
+    const a = pc(root, 'office', undefined, { convert: flakyConverter(down) });
     const r = val(await a.docs.attach('d1', { name: 'Budget.xlsx', bytes: MODEL }));
-    const budget = (x: ReturnType<typeof pc>) => x.docs.records('d1').find((d) => d.docId === r.docId)!;
-    expect(budget(a).words).toBeUndefined();
+    const budget = () => a.docs.records('d1').find((d) => d.docId === r.docId)!;
+    expect(budget().words).toBeUndefined();
     expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Budget.xlsx');
-    // named while it fails, and read again on the next run, without a restart
+    // named while it fails, on the next run too, and the folder is looked at again although nothing in it changed
     expect((await indexAll(a, vdr)).log).toContain('1 file could not be read: Budget.xlsx');
-    down = false;
-    expect((await indexAll(a, vdr)).log.join(' ')).not.toContain('could not be read');
-    expect(budget(a).words).toEqual(['line', 'cover', 'debt']);
+    down.now = false;
+    expect(val(await a.docs.freshen!('d1'))).toBe('running');
+    await a.docs.settled('d1');
+    expect(val(await a.docs.poll('d1')).log).toEqual(['Indexed 1 file']);
+    expect(budget().words).toEqual(['line', 'cover', 'debt']);
   });
 
   it('a file attached in the app is kept in the shared folder under this copy’s own name, loaded into the store, and opens on another PC', async () => {
