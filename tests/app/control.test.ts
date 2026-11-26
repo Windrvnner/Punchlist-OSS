@@ -57,7 +57,9 @@ describe('the control file', () => {
 
   it('ships the Already Asked? cutoff at 80 percent, any whole percent from 0 to 100 (#1218)', () => {
     expect(control.limits.askedCutoff).toBe(80);
-    for (const value of [0, 50, 100]) expect(checkControl(edited((c) => { c.limits.askedCutoff = value; }))).toEqual([]);
+    for (const value of [0, 50, 100]) {
+      expect(checkControl(edited((c) => { c.limits.askedCutoff = value; }))).toEqual([]);
+    }
     for (const value of [-1, 101, 80.5]) {
       expect(checkControl(edited((c) => { c.limits.askedCutoff = value; })))
         .toEqual(['limits.askedCutoff must be a whole number from 0 to 100.']);

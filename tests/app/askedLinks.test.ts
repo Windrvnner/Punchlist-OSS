@@ -101,7 +101,8 @@ it('at 0 checks the best question for every point that shares a word, at 100 onl
   expect(at(100)).toEqual([]);
   const full = [question(2, ASKS_INSURANCE)];
   expect(askedCandidates([point(INSURANCE)], full, undefined, 100).candidates).toHaveLength(1);
-  const words = Array.from({ length: 100 }, (_, k) => `term${String.fromCharCode(97 + (k % 26), 97 + Math.floor(k / 26))}`);
+  const letter = (k: number) => String.fromCharCode(97 + k);
+  const words = Array.from({ length: 100 }, (_, k) => `term${letter(k % 26)}${letter(Math.floor(k / 26))}`);
   const nearly = [question(3, words.slice(1).join(' '))];   // names 99 of the point's 100 words: 99 percent
   expect(askedCandidates([point(words.join(' '))], nearly, undefined, 99).candidates[0].confidence).toBe(99);
   expect(askedCandidates([point(words.join(' '))], nearly, undefined, 100).candidates).toEqual([]);
