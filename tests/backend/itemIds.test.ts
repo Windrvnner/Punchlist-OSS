@@ -62,6 +62,12 @@ describe('a check names checklist items by their ids (#1162)', () => {
     expect([results.get(permitId), results.get(roadId)]).toEqual(['ok', 'ok']);
   });
 
+  it('saves nothing from replies that still name an item id one character off when the tries run out', async () => {
+    const { s, results } = await firstPass((c) => settle(c, [nearly(permitId), roadId]));
+    expect(s.calls.length).toBeGreaterThanOrEqual(3);
+    expect([results.get(permitId), results.get(roadId)]).not.toContain('ok');
+  });
+
   it('a second look names each item it sends back by its id', async () => {
     const { s } = await firstPass((c, n) => settle(c, n === 1 ? [roadId] : [permitId]));
     expect(s.calls[1].prompt).toContain(`Put each right:\n${permitId}: It was missing from your reply.`);

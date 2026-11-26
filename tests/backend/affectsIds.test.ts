@@ -56,6 +56,13 @@ describe('the fast model names what new documents affect by permanent ids (#1162
     expect(s.affectCalls[2].prompt).toBe(s.affectCalls[0].prompt);
     expect(pass.marked).toEqual(['f_1']);
   });
+
+  it('takes nothing from replies that still name an unknown id when the tries run out', async () => {
+    const { s, after } = await arrive(() => ({ affected: [`i2 ${NOTICE.docId}x`] }));
+    expect(s.affectCalls.length).toBe(3);
+    // the item it named is not looked at again: the run goes by shared words instead, as when the model cannot say
+    expect(after.flatMap((c) => itemsIn(c).map((it) => it.text))).not.toContain('The margin is agreed');
+  });
 });
 
 /** a deal with 500 settled items and 300 open findings, sent to a stand-in model whose input limit is `limit` */
