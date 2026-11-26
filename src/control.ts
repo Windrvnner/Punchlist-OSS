@@ -277,7 +277,9 @@ const SPEC = {
     shortlist: count(100, 'Best-ranked documents the fast model picks a call\'s documents from.', 8, 1000),
     itemsPerCall: count(20, 'Checklist items checked in one call.', 1, 50),
     inputTokens: count(180_000, 'Most tokens one model call may send, documents included. Batches of items are sized to fit and a chat is compacted before it outgrows it. Documents are read by the service, so the app cannot count them: a call the service refuses as too long is asked again with fewer documents or items, whatever this says.', 4_000, 2_000_000),
-    outputTokens: count(16_000, 'Most tokens one model reply may hold. Sent with every call; work asked in batches is sized to fit, and a reply cut off anyway is asked again in smaller parts.', 1_000, 200_000),
+    outputTokens: count(32_000, 'Most tokens one model reply may hold. Sent with every call; work asked in batches is '
+      + 'sized to fit, and a reply cut off anyway is asked again in smaller parts. A temporary hold until real reply '
+      + 'sizes are measured (docs/decisions.md).', 1_000, 200_000),
     storedFiles: count(500,
       "The app's own stored or locally cached model files. The least recently used go first.",
       10, 5000),
@@ -434,6 +436,18 @@ const ssoFields = {
   bedrock: ['ssoRegion', 'startUrl', 'account', 'role'],
   vertex: ['clientId'],
 } as const;
+
+/**
+ * What a cloud service's saved sign-in belongs to: the service, its address and its sign-in fields. A change to any of
+ * them asks the person to sign in again; a change to anything else, such as a model ID, does not.
+ */
+export function signInBinding(c: Control): string | undefined {
+  const provider = c.models.service;
+  if (!isCloudProvider(provider)) return undefined;
+  const settings = c[provider] as Record<string, unknown>;
+  const fields = ['address', ...ssoFields[provider]].map((field) => [field, settings[field]]);
+  return JSON.stringify({ provider, ...Object.fromEntries(fields) });
+}
 
 function cloudProblem(c: Control): string | null {
   const provider = c.models.service;

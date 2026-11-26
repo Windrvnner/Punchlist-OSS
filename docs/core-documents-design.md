@@ -21,7 +21,7 @@ The design has these goals:
 These are reused as they are:
 - `families.ts`: drafts in sibling dated folders, newest first; `draftsInOrder` and the `earlier` map.
 - `blacklines.ts`: a blackline by name or by its cover page (`cover`, kept at indexing), its clean draft, standalone ones.
-- `sameRoom.ts`: documents other deals hold by content.
+- `sameRoom.ts`: whether a new deal's folders hold a data room a deal already has.
 - The checks' search agent (`searchFor`; the first pass and Check again in [decisions.md](decisions.md#ai-and-models)): the fast model's searches per item, each item's trail of its latest 8 searches on its result, and "a gap already searched for on the same documents and wording is not searched again".
 - Checklist items' `section` and `subsection` headings ([`src/domain/checklist.ts`](../src/domain/checklist.ts)).
 - The word index ([`src/backend/wordIndex.ts`](../src/backend/wordIndex.ts)) and `scores`; a document with no readable text (a scan) is already marked at indexing as an empty `words` list ([`DocRecord`](../src/backend/documents.ts)).

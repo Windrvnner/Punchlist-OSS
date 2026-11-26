@@ -135,10 +135,14 @@ describe('answers', () => {
     val(await sees.ai.answer(ask('What changed?', { attachments: [{ doc: BL.name, docId: BL.docId }] }))); expect(sees.turns[0].prompt).toContain('Struck-through words are deleted and colored words are inserted.');
   });
   it('leaves out a blackline whose clean draft is not clear', async () => {
-    const PAIRED = doc(72, 'Side letter blackline.pdf', { summary: 'Side letter step-in changes.' }), UNCLEAR = doc(73, 'Lease redline.pdf', { summary: 'Lease step-in changes.' });
+    const PAIRED = doc(72, 'Side letter blackline.pdf', { summary: 'Side letter step-in changes.' });
+    const cover = 'Comparison of Lease v1.docx and Lease.pdf. Insertions 2';
+    const UNCLEAR = doc(73, 'Lease redline.pdf', { summary: 'Lease step-in changes.', cover });
     const L1 = doc(76, 'Lease.pdf', { folder: 'vdr', rel: 'One/Lease.pdf' }), L2 = doc(77, 'Lease.pdf', { folder: 'vdr', rel: 'Two/Lease.pdf' });
     const s = setup(() => ({ text: 'ok', sources: [] }), { d1: [SIDE, PAIRED, UNCLEAR, L1, L2] }, { library: [] });
-    val(await s.ai.answer(ask('What step-in changes do the blacklines make?'))); expect(sentNames(s.calls[0])).toEqual(['Side letter blackline.pdf', 'Side letter.pdf']);   // the side letter's is read with it; the lease's could be either lease
+    val(await s.ai.answer(ask('What step-in changes do the blacklines make?')));
+    // the side letter's is read with it; the lease's cover names two files of one name
+    expect(sentNames(s.calls[0])).toEqual(['Side letter blackline.pdf', 'Side letter.pdf']);
     const PEER = doc(75, 'Peer comparison.pdf', { summary: 'Step-in terms of peer projects.' }); const r = setup(() => ({ text: 'ok', sources: [] }), { d1: [PEER] }, { library: [] });
     val(await r.ai.answer(ask('What step-in terms do peers have?'))); expect(sentNames(r.calls[0])).toEqual(['Peer comparison.pdf']);      // a report named "comparison" is no blackline: it is read
   });
@@ -146,7 +150,9 @@ describe('answers', () => {
     const LONE = doc(78, 'Lease redline.pdf', { summary: 'Lease step-in changes.' });
     const s = setup((c) => ({ text: 'Step-in now needs 30 days. [1]', sources: [{ doc: tag(c, LONE), page: 2 }] }), { d1: [LONE] }, { library: [] });
     const r = val(await s.ai.answer(ask('What step-in changes does the lease redline make?'))); expect(sentNames(s.calls[0])).toEqual(['Lease redline.pdf']);
-    expect(s.calls[0].prompt).toContain(`${tag(s.calls[0], LONE)} is a blackline: a comparison of two documents with the changes marked, made by a comparison tool; no clean draft of it is in the data room.`);
+    const lone = tag(s.calls[0], LONE);
+    expect(s.calls[0].prompt).toContain(`${lone} is a blackline: a comparison of two documents with the `
+      + 'changes marked, made by a comparison tool; no clean draft of it was found by its cover or name.');
     expect(r.sources.map((x) => x.reading)).toEqual([true]);
   });
   it("checks a Word file's cited page against the pages counted when it was first sent", async () => {
@@ -340,6 +346,25 @@ describe('the chat agent', () => {
   /** the search helper's reading: what the script says the documents it was given say, citing each of them on page 1 */
   const helper = (c: Call) => ({ text: c.files.map((_f, i) => `Found in D${i + 1}. [${i + 1}]`).join(' '), sources: c.files.map((_f, i) => ({ doc: `D${i + 1}`, page: 1, quote: `words ${i + 1}` })) });
 
+  it('reads a document only by its whole path or name, never by the end of another name', async () => {
+    const s = setup(helper, undefined, { pick: () => ({ read: [] }), turn: (_c, n) => n === 1
+      ? { tool: 'read', docs: ['Agreement.pdf', 'credit agreement.PDF'] }
+      : { text: 'Done.', sources: [] } });
+    val(await s.ai.answer(ask('What does the agreement say?')));
+    expect(sentNames(s.turns[1])).toEqual(['Credit Agreement.pdf']);
+    expect(s.turns[1].prompt).toContain('Not found: Agreement.pdf.');
+  });
+  it('a search finds a document by a one-letter word or one-digit number in its name', async () => {
+    const recs = { d1: [doc(8, 'Schedule B.pdf'), doc(9, 'Section 5.pdf'), doc(10, 'Annex.pdf')] };
+    const queries = ['B', '5'];
+    const search = (n: number) => ({ tool: 'search', what: 'documents', query: queries[n - 1], notes: '' });
+    const turn = (_c: Call, n: number) => (n <= 2 ? search(n) : { text: 'Done. [1]', sources: [] });
+    const s = setup(helper, recs, { pick: () => 'I cannot say', turn });
+    const r = val(await s.ai.answer({ ...ask('Which schedule?'), runId: 'r2' }));
+    const searched = r.research!.steps.filter((x) => x.kind === 'search' && /“[B5]”/.test(x.text));
+    const one = '1 listed · 1 opened · 1 passage';
+    expect(searched.map((x) => x.result)).toEqual([one, one]);
+  });
   it('searches, reads whole what it asks for, and answers citing only documents a model was given', async () => {
     const s = setup(helper, undefined, { pick: (c) => ({ read: numbersOf(c, FA) }), turn: (c, n) => n === 1 ? { tool: 'search', what: 'documents', query: 'board minutes hedging', notes: 'FA p. 1 has the ratio' }
       : n === 2 ? { tool: 'read', docs: [tag(c, FA), 'vdr/Board minutes March.pdf', 'nowhere.pdf'] }

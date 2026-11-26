@@ -16,7 +16,6 @@ import {
   issuesListTitle, keptIssuesList, pointsByList, readIssuesList, reviewIssuesList, submitIssuesList,
   type IssuesListKept, type ReadIssuesList,
 } from '../app/issuesList';
-import { AI_LABEL } from '../control';
 import type { Finding, ListPoint } from '../domain/model';
 import { keepImport, dropImport, importKey } from '../app/keptImports';
 import { useKeptImportsReady, useFreshOnCrash } from './keptImports';
@@ -139,10 +138,9 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
               <label class="keep"><input type="checkbox" aria-label={`Keep #${p.n} separate`} disabled={busy === 'importing'} checked={kept.has(k)} onChange={(e) => { const on = (e.currentTarget as HTMLInputElement).checked; setKept((x) => { const y = new Set(x); if (on) y.add(k); else y.delete(k); return y; }); }} />Keep separate</label></div>
           ); })}
         </div></div>}
-        {/* every finding Import will make, read only: its title and workstream are the model's */}
+        {/* every finding Import will make, read only: its title the point's own words, its workstream the model's */}
         {fresh.length > 0 && <div class="srow top"><div class="k">New Findings<span
-          class="cnt">{num(fresh.length)}</span><b class="aim"
-          title={`Titles written by ${AI_LABEL}`}>{AI_LABEL}</b></div><div id="il-new">
+          class="cnt">{num(fresh.length)}</span></div><div id="il-new">
           {fresh.map((k) => <div class="iln" key={k}><span class="n" title={`#${points[k].n}`}>#{points[k].n}</span><span class="t">{points[k].title}</span><span class="ws">{points[k].workstream}</span></div>)}
         </div></div>}
       </div>

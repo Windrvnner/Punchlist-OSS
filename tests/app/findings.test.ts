@@ -62,6 +62,20 @@ describe('findings', () => {
     expect(unchanged.ok).toBe(true);
   });
 
+  it('a finding with no workstream, as from an issues list, has its title edited alone (#1062)', async () => {
+    const { store } = make(); const dealId = await deal(store);
+    await store.dispatch(CreateFinding, { dealId, title: 'Survey not dated', workstream: 'Legal', body: ['Detail.'] });
+    const f = dealFindings(store.get(), dealId)[0];
+    const state = { ...store.get(), findings: { ...store.get().findings, [f.id]: { ...f, workstream: '' } } };
+    const base = { title: f.title, workstream: '', body: f.body };
+    const ctx = { at: clock.now(), actor: 'adoe', firm: '', opId: 'op_ws', ids };
+    const input = EditFinding.input.safeParse({ dealId, findingId: f.id, ...base, title: 'Survey is not dated', base });
+    expect(input.success).toBe(true);
+    const r = EditFinding.plan(state, input.data!, ctx as any);
+    expect(r.ok).toBe(true);
+    expect((r as any).value.upserts[0].record).toMatchObject({ title: 'Survey is not dated', workstream: '' });
+  });
+
   it('saving an edit writes only what this person changed, never undoing a change made elsewhere meanwhile', async () => {
     const { store } = make(); const dealId = await deal(store);
     await store.dispatch(CreateFinding, { dealId, title: 'Lock-up is loose', workstream: 'Legal', body: ['Detail.'] }); const f = dealFindings(store.get(), dealId)[0];

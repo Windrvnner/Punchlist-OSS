@@ -14,10 +14,10 @@ function uiSource(file) {
   return /\.tsx?$/.test(file) && !basename(file).includes('.test.');
 }
 
-async function scan(files, contents, checkGlobs) {
+function scan(files, contents) {
   const found = {};
   for (const file of files.filter(uiSource).sort()) {
-    const lines = await matchesIn(file, contents(file), checkGlobs);
+    const lines = matchesIn(file, contents(file));
     if (Object.keys(lines).length) found[file] = lines;
   }
   return found;
@@ -37,7 +37,7 @@ function committedCounts(ref) {
 }
 
 // Comparing the proposed baseline with main catches an edit that raises both the count and its allowance.
-async function committedBaseline() {
+function committedBaseline() {
   for (const ref of ['origin/main', 'main']) {
     const base = spawnSync('git', ['merge-base', 'HEAD', ref], { encoding: 'utf8' });
     if (base.status !== 0) continue;
@@ -46,8 +46,7 @@ async function committedBaseline() {
     if (counts) return counts;
     // On the branch introducing the check, main's source is the record of its existing exceptions.
     const files = git('ls-tree', '-r', '-z', '--name-only', at, '--', 'src/ui').split('\0');
-    // Existing glob imports have no allowance in the original baseline. Resolve only the working source.
-    return countsFor(await scan(files, (file) => git('show', `${at}:${file}`), false));
+    return countsFor(scan(files, (file) => git('show', `${at}:${file}`)));
   }
   // Exported sources have no history. In a Git checkout, HEAD alone cannot prove a committed allowance is valid.
   if (spawnSync('git', ['rev-parse', '--show-toplevel']).status !== 0) return null;
@@ -82,9 +81,9 @@ function compareFile(file, lines, baseline, committed) {
 const files = readdirSync('src/ui', { recursive: true, withFileTypes: true })
   .filter((entry) => entry.isFile())
   .map((entry) => `${entry.parentPath.replaceAll('\\', '/')}/${entry.name}`);
-const found = await scan(files, read, true);
+const found = scan(files, read);
 const baseline = JSON.parse(read(baselinePath));
-const committed = await committedBaseline();
+const committed = committedBaseline();
 const problems = [];
 for (const file of new Set([...Object.keys(found), ...Object.keys(baseline)])) {
   const ceiling = committed ? (committed[file] ?? {}) : null;

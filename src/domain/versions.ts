@@ -27,8 +27,8 @@ function canonical(v: unknown): unknown {
  */
 const ITEM_BOOKKEEPING = new Set(['text', 'from', 'section', 'subsection', 'normV', 'onBy']);
 /**
- * A finding made from an issues list's point, while its title is still the one the model wrote: who brought
- * the list in, when, and the title the model gave it are bookkeeping. The same list imported on two PCs before either has
+ * A finding made from an issues list's point, while its title is still the point's own words: who brought
+ * the list in, when, and the title it was given are bookkeeping. The same list imported on two PCs before either has
  * the other's makes the same finding twice, the same point in the same words; that is one version, not a choice for a
  * person. A person who rewrites the title clears `aiTitle`, so from then on the title counts.
  */

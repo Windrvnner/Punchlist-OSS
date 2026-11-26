@@ -13,11 +13,31 @@ const q = (t: string) => new Set(tokens(t).map(fold));
 const named = (docId: string, name: string) => ({ docId, named: q(name) });
 
 describe("each PC's word index", () => {
-  it('counts every word, leaving out filler words and bare numbers, with plurals folded, and takes the title from the first page', () => {
-    const w = countWords('The Permits were granted. Permit 12 of 2026 covers air emissions.', 'Environmental Permit Schedule');
-    expect(Object.fromEntries(w.counts)).toEqual({ permit: 2, granted: 1, cover: 1, air: 1, emission: 1 });
-    expect(w.length).toBe(6); expect(w.title).toEqual(['environmental', 'permit', 'schedule']);
+  it('counts every word, numbers included, not filler words, folds plurals, and takes the title from page one', () => {
+    const text = 'The Permits were granted. Permit 12 of 2026 covers air emissions.';
+    const w = countWords(text, 'Environmental Permit Schedule');
+    expect(Object.fromEntries(w.counts))
+      .toEqual({ permit: 2, granted: 1, '12': 1, '2026': 1, cover: 1, air: 1, emission: 1 });
+    expect(w.length).toBe(8);
+    expect(w.title).toEqual(['environmental', 'permit', 'schedule']);
     expect(countWords(Array.from({ length: 60 }, (_, i) => `word${String.fromCharCode(97 + (i % 26))}${String.fromCharCode(97 + Math.floor(i / 26))}`).join(' ')).title.length).toBe(TITLE_WORDS);
+  });
+  it('counts a word or number of any length, leaving out only the filler words', () => {
+    const w = countWords('Schedule B lists item 5 and item 12.');
+    expect(Object.fromEntries(w.counts)).toEqual({ schedule: 1, b: 1, list: 1, item: 2, '5': 1, '12': 1 });
+  });
+  it('scores documents with the same evidence the same, whatever order the words were asked in', () => {
+    const ix = wordIndex(nodeFolder(dir()));
+    const docs = Array.from({ length: 12 }, (_, i) => `Agreement ${i}`);
+    for (const [i, name] of docs.entries()) ix.add('d', `doc${i}`, countWords(`${name} is signed.`, name));
+    const files = docs.map((name, i) => named(`doc${i}`, name));
+    // each document's own number sits at a different place among the other words asked about
+    const words = docs.flatMap((_, i) => [
+      String(i), ...(i % 4 === 1 ? ['agreement'] : []), ...(i % 5 === 2 ? ['signed'] : []),
+    ]);
+    const ask = q(words.join(' '));
+    const scores = [...ix.score('d', ask, files).values()];
+    expect(new Set(scores).size).toBe(1);
   });
   it('ranks a match in the name above the title, and the title above the body, by the agreed weights', () => {
     const ix = wordIndex(nodeFolder(dir()));
@@ -42,10 +62,16 @@ describe("each PC's word index", () => {
   it('is kept on this PC, read back after a restart, and a document read again replaces its old words', () => {
     const d = dir(); const a = wordIndex(nodeFolder(d));
     a.add('deal', 'x', countWords('Turbine supply agreement.')); a.add('deal', 'x', countWords('Operation and maintenance agreement.'));
-    expect(fs.readdirSync(d)).toEqual(['words-deal.jsonl']);
+    expect(fs.readdirSync(d)).toEqual(['words2-deal.jsonl']);
     const b = wordIndex(nodeFolder(d)); expect(b.has('deal', 'x')).toBe(true);
     expect(b.score('deal', q('turbine'), [named('x', 'x.pdf')]).get('x')).toBe(0);
     expect(b.score('deal', q('maintenance'), [named('x', 'x.pdf')]).get('x')).toBeGreaterThan(0);
-    fs.appendFileSync(path.join(d, 'words-deal.jsonl'), '{"d":"y","n":3,"t":"'); expect(wordIndex(nodeFolder(d)).has('deal', 'y')).toBe(false);   // a line cut short is read again later
+    fs.appendFileSync(path.join(d, 'words2-deal.jsonl'), '{"d":"y","n":3,"t":"');
+    expect(wordIndex(nodeFolder(d)).has('deal', 'y')).toBe(false);   // a line cut short is read again later
+  });
+  it('does not read an index built under older rules, so each document is read again', () => {
+    const d = dir();
+    fs.writeFileSync(path.join(d, 'words-deal.jsonl'), '{"d":"x","n":1,"t":"","w":"turbine:1"}\n');
+    expect(wordIndex(nodeFolder(d)).has('deal', 'x')).toBe(false);
   });
 });

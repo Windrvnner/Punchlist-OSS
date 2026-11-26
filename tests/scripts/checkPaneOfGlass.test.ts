@@ -1,13 +1,11 @@
 // @vitest-environment node
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
-  copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
-  symlinkSync, writeFileSync,
+  copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { builtReaderSources, servedReaderSources } from './viteReaderSources';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const script = path.resolve('scripts/check-pane-of-glass.mjs');
@@ -36,20 +34,6 @@ function fixture(baseline: Baseline = {}) {
   setBaseline(baseline);
   const baselineText = () => readFileSync(path.join(dir, baselineFile), 'utf8');
   return { dir, write, setBaseline, baselineText, run: (...args: string[]) => check(dir, ...args) };
-}
-
-function loadCompiledFixture(repo: ReturnType<typeof fixture>, file: string, loader: string) {
-  repo.write('package.json', '{"type":"module"}');
-  repo.write('build/checklist.mjs', "export const caption = 'Checklist'");
-  const compiler = path.resolve('node_modules/typescript/bin/tsc');
-  const args = [compiler, '--ignoreConfig', '--strict', '--isolatedModules', '--target', 'ES2022',
-    '--module', 'ESNext', '--moduleResolution', 'bundler', '--skipLibCheck', '--outDir', 'build', file];
-  const options = { cwd: repo.dir, encoding: 'utf8' } as const;
-  const emit = spawnSync(process.execPath, args, options);
-  expect(emit.status, emit.stdout + emit.stderr).toBe(0);
-  const run = spawnSync(process.execPath, ['--input-type=module', '-e', loader], options);
-  expect(run.status, run.stderr).toBe(0);
-  return run.stdout.trim();
 }
 
 afterEach(() => {
@@ -110,253 +94,55 @@ describe('UI dependency checks', () => {
     expect(result.stderr).toContain('"The frontend is a pane of glass" in CLAUDE.md');
   });
 
-  it.each(['ui', 'backend'])('reports globs that import the %s layer in either Vite mode', (layer) => {
+  // Decision: a UI module names what it loads with a plain string and reads import.meta only as import.meta.env
+  // (#848). A path the check would have to work out is refused even when it names a UI module.
+  it.each(['./checklist.mjs', 'node:path'])('refuses a dynamic import of a path held in a constant (%s)', (name) => {
     const repo = fixture();
     const file = 'src/ui/checklistReader.ts';
-    const target = `../${layer}/term.ts`;
-    const version = JSON.parse(readFileSync('package.json', 'utf8')).version;
-    repo.write('src/ui/term.ts', 'export const term = "Checklist"');
-    repo.write('src/backend/term.ts', 'export const term = "Checklist"');
-    repo.write(file, [
-      `import '${target}'`,
-      `export const eager = import.meta.glob('${target}', { eager: true, import: 'term' })`,
-      `export const lazy = import.meta.glob('${target}')`,
-      `export const keys = (Object.keys)(import.meta.glob('${target}'))`,
-      `export const text = import.meta.glob('${target}', { query: '?raw' })`,
-      `export const url = import.meta.glob('${target}', { as: 'url' })`,
-      `export function Reader() { return new.target ? {} : import.meta.glob('../${layer}/{term}.ts') }`,
-      `export const dev = import.meta.env.DEV ? import.meta.glob('../${layer}/{term}.ts') : {}`,
-      `export function* steps() { return (yield 'Checklist') ? import.meta.glob('${target}') : {} }`,
-      "export const local = import.meta.glob(['../{backend,ui}/term.ts', '!../backend/**'])",
-      "export const pairs = import.meta.glob('../[!b]*/term.ts')",
-      `export const folded = import.meta.glob('../${layer.toUpperCase()}/*.ts', { caseSensitive: false })`,
-      `export const typed = (import.meta.glob<{ term: string }>)('${target}')`,
-      `export const common = require('${target}')`,
-      `import direct = require('${target}')`,
-      'export { direct }',
-      `export const relative = import.meta.env.BASE_URL === './' ? import.meta.glob('../${layer}/{term}.ts') : {}`,
-      `export const absolute = import.meta.env.BASE_URL !== './' ? import.meta.glob('../${layer}/{term}.ts') : {}`,
-      `export const stale = __APP_VERSION__ !== '${version}' ? import.meta.glob('../${layer}/{term}.ts') : {}`,
-      `export const based = import.meta.glob('./term.ts', { base: '../${layer}', query: { [0]: -1, raw: true } })`,
-      `export const basedLazy = import.meta.glob('./term.ts', { 'base': '../${layer}', eager: false })`,
-      'const __paneMeta = false',
-      `export const available = import.meta ? import.meta.glob('../${layer}/{term}.ts') : {}`,
-    ].join('\n'));
+    repo.write(file, [`const moduleName = '${name}'`, 'export const loadPath = () => import(moduleName)'].join('\n'));
     const result = repo.run();
-    const folded = existsSync(path.join(repo.dir, 'src/BACKEND/term.ts'));
-    expect(result.status, result.stderr).toBe(layer === 'ui' ? 0 : 1);
-    if (layer === 'backend') {
-      const lines = [1, 2, 3, 5, 6, 7, 9, ...(folded ? [12] : []), 13, 14, 15, 17, 20, 21, 23];
-      expect(result.stderr).toContain(`${file} import (lines ${lines.join(', ')}): ${lines.length} exceeds`);
-    }
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${file} import (lines 2): 1 exceeds`);
   });
 
-  it('matches the browser application build when production folds an environment condition', () => {
+  it('refuses every computed module path and every import.meta read but env', () => {
     const repo = fixture();
     const file = 'src/ui/readers.ts';
-    const conditions = [
-      ['development', "process.env.NODE_ENV === 'development'"],
-      ['production', "process.env.NODE_ENV === 'production'"],
-      ['globalDev', "globalThis.process.env.NODE_ENV === 'development'"],
-      ['globalProd', "globalThis.process.env.NODE_ENV === 'production'"],
-      ['client', '!import.meta.env.SSR'],
-      ['server', 'import.meta.env.SSR'],
+    const lines = [
+      "const paths = { reader: '../backend/reader' }",
+      'export const fromObject = () => import(paths.reader)',
+      'const { reader } = paths',
+      'export const destructured = () => import(reader)',
+      "export const either = (local: boolean) => import(local ? './reader' : './other')",
+      'export const built = (name: string) => import(`./${name}`)',
+      "export const joined = (name: string) => import('./' + name)",
+      'export const required = (name: string) => require(name)',
+      "export const globbed = import.meta.glob('../backend/*.ts')",
+      "export const bracketed = import.meta['glob']('../backend/*.ts')",
+      'const meta = import.meta',
+      'export const env = import.meta.env.DEV',
+      "export const viaCall = require.call(null, '../backend/reader')",
+      "export const wrapped = (require as (name: string) => unknown)('../backend/reader')",
+      "export const fromModule = module.require('../backend/reader')",
+      "export const created = createRequire('/app')('../backend/reader')",
+      'export const parenthesized = (import.meta).env.MODE',
     ];
-    const rows = conditions.map(([name, condition]) => {
-      repo.write(`src/backend/${name}.ts`, `export const term = '${name}'`);
-      return `  ${condition} ? import.meta.glob('../backend/{${name}}.ts') : {},`;
-    });
-    repo.write(file, ['export const readers = [', ...rows, ']'].join('\n'));
-    const sources = builtReaderSources(repo.dir);
-    const selected = conditions.filter(([name]) => sources.some((id) => id.endsWith(`/src/backend/${name}.ts`)));
-    expect(selected.map(([name]) => name)).toEqual(['production', 'globalProd', 'client']);
+    repo.write(file, lines.join('\n'));
     const result = repo.run();
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(`${file} import (lines 3, 5, 6): 3 exceeds`);
+    expect(result.stderr).toContain(`${file} import (lines 2, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16): 13 exceeds`);
   });
 
-  describe.each(['ui', 'backend'])('browser preset aliases into the %s layer', (layer) => {
-    const other = layer === 'ui' ? 'backend' : 'ui';
-    const file = 'src/ui/readers.ts';
-
-    function aliasedReader() {
-      const repo = fixture();
-      for (const place of [layer, other]) repo.write(`src/${place}/term.ts`, 'export const term = "Checklist"');
-      const exports = { '.': './term.ts', './test-utils': './term.ts', './jsx-runtime': './term.ts' };
-      for (const name of ['react', 'react-dom', 'preact']) {
-        const aliased = name === 'preact';
-        const paths = aliased ? { ...exports, './compat': './term.ts', './*': './other.js' } : exports;
-        repo.write(`node_modules/${name}/other.js`, 'export const ready = true');
-        repo.write(`node_modules/${name}/package.json`, JSON.stringify({ name, exports: paths }));
-        const entry = path.join(repo.dir, 'node_modules', name, 'term.ts');
-        symlinkSync(`../../src/${aliased ? layer : other}/term.ts`, entry);
-      }
-      const packages = ['react', 'react-dom', 'react/jsx-runtime', 'react-dom/test-utils'];
-      const calls = packages.map((name) => `  import.meta.glob('${name}'),`);
-      repo.write(file, ['export const readers = [', ...calls, ']'].join('\n'));
-      return repo;
-    }
-
-    function checkTerms(ids: string[]) {
-      expect(ids.some((id) => id.endsWith(`/src/${layer}/term.ts`))).toBe(true);
-      expect(ids.some((id) => id.endsWith(`/src/${other}/term.ts`))).toBe(false);
-    }
-
-    it('serves the aliased module in development', async () => {
-      checkTerms(await servedReaderSources(aliasedReader().dir, file));
-    });
-    it('bundles the aliased module in production', () => {
-      checkTerms(builtReaderSources(aliasedReader().dir));
-    });
-    it('checks the aliased package export at each original call', () => {
-      const result = aliasedReader().run();
-      expect(result.status, result.stderr).toBe(layer === 'ui' ? 0 : 1);
-      if (layer === 'backend') expect(result.stderr).toContain(`${file} import (lines 2, 3, 4, 5): 4 exceeds`);
-    });
-  });
-
-  it.each(['ui', 'backend'])('resolves a workspace export to its real %s module', (layer) => {
+  it('allows modules named with a plain string', () => {
     const repo = fixture();
-    const file = 'src/ui/readers.ts';
-    repo.write('src/manifest.json', '\ufeff' + JSON.stringify({ type: 'module' }));
-    symlinkSync('src/manifest.json', path.join(repo.dir, 'package.json'), 'file');
-    repo.write(`src/${layer}/term.ts`, 'export const term = true');
-    const name = 'deal-terms';
-    repo.write(`packages/${name}/package.json`, JSON.stringify({ name, exports: { './check': './internal/term.ts' } }));
-    const internal = path.join(repo.dir, 'packages', name, 'internal');
-    mkdirSync(internal);
-    symlinkSync(`../../../src/${layer}/term.ts`, path.join(internal, 'term.ts'), 'file');
-    mkdirSync(path.join(repo.dir, 'node_modules'));
-    symlinkSync('../packages/' + name, path.join(repo.dir, 'node_modules', name), 'dir');
-    repo.write(file, "export const readers = import.meta.glob('deal-terms/check')");
-    const result = repo.run();
-    expect(result.status, result.stderr).toBe(layer === 'ui' ? 0 : 1);
-    if (layer === 'backend') expect(result.stderr).toContain(`${file} import (lines 1): 1 exceeds`);
-  });
-
-  it('reports the direct dynamic import of a local string constant and allows the UI equivalent', () => {
-    const repo = fixture();
-    const file = 'src/ui/checklistReader.ts';
-    repo.write('src/ui/checklist.mjs', "export const caption = 'Checklist'");
-    const load = [
-      "import { loadPath } from './src/ui/checklistReader.ts'",
-      'const loaded = await loadPath()',
-      "console.log(loaded === await import('node:path') ? 'node:path' : loaded.caption)",
-    ].join('\n');
-    for (const name of ['./checklist.mjs', 'node:path']) {
-      const source = [`const moduleName = '${name}'`, 'export const loadPath = () => import(moduleName)'];
-      repo.write(file, source.join('\n'));
-      const args = ['--experimental-strip-types', '--input-type=module', '-e', load];
-      const runtime = spawnSync(process.execPath, args, { cwd: repo.dir, encoding: 'utf8' });
-      expect(runtime.status, runtime.stderr).toBe(0);
-      const local = name === './checklist.mjs';
-      expect(runtime.stdout.trim()).toBe(local ? 'Checklist' : 'node:path');
-      const result = repo.run();
-      expect(result.status, result.stderr).toBe(local ? 0 : 1);
-      if (!local) expect(result.stderr).toContain(`${file} import (lines 2): 1 exceeds`);
-    }
-  });
-
-  it('follows immutable aliases in their declaring scope and ignores runtime and type-only inputs', () => {
-    const repo = fixture();
-    const file = 'src/ui/modulePicker.ts';
-    repo.write('src/ui/checklist.mjs', "export const caption = 'Checklist'");
-    const source = [
-      "type page = 'node:path' | './checklist.mjs'",
-      "const page: page = 'node:path' as const",
-      'const first = page',
-      'const selected = (first satisfies string)',
-      "export function open() { const page = './checklist.mjs'; return import(selected!) }",
-      "export function local() { const page = './checklist.mjs'; return import(page) }",
-      "export function supplied(page: 'node:path') { return import(page) }",
-      "declare const fromState: 'node:path'",
-      'export const runtime = () => import(fromState)',
-      "const annotated = chooseModule() as 'node:path'",
-      'export const dynamic = () => import(annotated)',
-      "let changing = 'node:path'",
-      "changing = './checklist.mjs'",
-      'export const changed = () => import(changing)',
-      'function recordClass(_target: object) {}',
-      '@recordClass',
-      'export class Picker { accessor label = "Checklist" }',
-      "export function sameValue() { type page = './checklist.mjs'; return import(page) }",
-      'declare function chooseModule(): string',
-    ].join('\n');
-    repo.write(file, source);
-    const result = repo.run();
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(`${file} import (lines 5, 18): 2 exceeds`);
-    repo.write(file, source.replace("const page: page = 'node:path'", "const page: page = './checklist.mjs'"));
-    expect(repo.run().status).toBe(0);
-  });
-
-  it('resolves runtime constants across erased TypeScript namespaces', () => {
-    const repo = fixture();
-    const file = 'src/ui/page.ts';
-    const loader = [
-      "import { load, Panel, Other } from './build/page.js'",
-      "const builtIn = await import('node:path')",
-      'const modules = await Promise.all([load(), Panel.load(), Other.load()])',
-      "console.log(modules.map(page => page === builtIn ? 'node:path' : page.caption).join(','))",
-    ].join('\n');
-    for (const name of ['node:path', './checklist.mjs']) {
-      const source = [
-        `const page = '${name}'`,
-        'namespace page { export type Caption = string }',
-        'export const load = () => import(page)',
-        'export namespace Panel {',
-        '  namespace page { export namespace Meta { export interface Caption { text: string } } }',
-        '  export const load = () => import(page)',
-        '}',
-        'export namespace Other {',
-        "  namespace page { export function toString() { return './checklist.mjs' } }",
-        '  export const load = () => import(page as unknown as string)',
-        '}',
-      ];
-      repo.write(file, source.join('\n'));
-      const local = name === './checklist.mjs';
-      const loaded = loadCompiledFixture(repo, file, loader);
-      expect(loaded).toBe(local ? 'Checklist,Checklist,Checklist' : 'node:path,node:path,Checklist');
-      const result = repo.run();
-      expect(result.status, result.stderr).toBe(local ? 0 : 1);
-      if (!local) expect(result.stderr).toContain(`${file} import (lines 3, 6): 2 exceeds`);
-    }
-  });
-
-  it('keeps emitted dotted namespaces in scope and resolves names across erased dotted namespaces', () => {
-    const repo = fixture();
-    const file = 'src/ui/page.ts';
-    const source = [
-      "const page = 'node:path'",
-      'export namespace Panel {',
-      "  namespace page.meta { export const caption = 'Checklist' }",
-      "  page.toString = () => './checklist.mjs'",
-      '  export const load = () => import(page as unknown as string)',
-      '}',
-      'export namespace Erased {',
-      '  namespace page.meta.labels { export type Caption = string }',
-      '  export const load = () => import(page)',
-      '}',
-      "const meta = 'node:path'",
-      'export namespace Nested {',
-      '  export namespace rows.meta {',
-      "    export const toString = () => './checklist.mjs'",
-      '    export const load = () => import(meta as unknown as string)',
-      '  }',
-      '  export const outside = () => import(meta)',
-      '}',
-    ].join('\n');
-    const loader = [
-      "import { Panel, Erased, Nested } from './build/page.js'",
-      "const builtIn = await import('node:path')",
-      'const pages = await Promise.all([Panel.load(), Erased.load(), Nested.rows.meta.load(), Nested.outside()])',
-      "console.log(pages.map(page => page === builtIn ? 'node:path' : page.caption).join(','))",
-    ].join('\n');
-    repo.write(file, source);
-    expect(loadCompiledFixture(repo, file, loader)).toBe('Checklist,node:path,Checklist,node:path');
-    expect(repo.run().stderr).toContain(`${file} import (lines 9, 17): 2 exceeds`);
-    repo.write(file, source.replaceAll('node:path', './checklist.mjs'));
-    expect(loadCompiledFixture(repo, file, loader)).toBe('Checklist,Checklist,Checklist,Checklist');
+    repo.write('src/ui/reader.ts', 'export const caption = "Checklist"');
+    repo.write('src/ui/pages.ts', [
+      "export const reader = () => import('./reader')",
+      "export const pdf = () => import('pdfjs-dist/legacy/build/pdf.mjs')",
+      'export const template = () => import(`./reader`)',
+      "export const required = () => require('./reader')",
+      'export const mode = import.meta.env.MODE',
+    ].join('\n'));
     expect(repo.run().status).toBe(0);
   });
 
@@ -409,7 +195,7 @@ describe('UI dependency checks', () => {
       'const pattern = /localStorage/',
       'const title = <b>store.services.repo and localStorage</b>',
       'const choices = { services: true }',
-      "const table = import(checked ? './table' : '../app/table')",
+      "const table = import('../app/table')",
       'const cookie = draft.label',
     ].join('\n');
     repo.write('src/ui/view.test.tsx', examples);

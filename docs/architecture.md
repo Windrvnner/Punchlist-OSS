@@ -94,7 +94,12 @@ connector with a provider-specific transport. [Windows setup requirements](requi
 above the interface is tested against `StandInService`, and each connector is tested against a stand-in. A connector
 reports a lost connection, timeout, rate limit, or server error as `unreachable` so a check waits and resumes.
 
-**Limits and retries.** `src/backend/limits.ts` holds each model's output and input limits (taken from the control file, and lowered where the service reports a smaller limit) and the two errors that every connector throws in the same way: `cutoff` and `toolong`. `src/backend/parts.ts` sizes work on many items so that each part fits, and halves the parts after a reply is cut off. Every model call goes through one retry policy (`src/backend/retry.ts`): two more tries, with a doubling wait, for an empty reply or for a failure that resending can fix (that is, not unreachable, cut off, too long, or a 4xx error). After three failed calls in a row to one model, retries stop until a call succeeds.
+**Limits and retries.** `src/backend/limits.ts` holds each model's output and input limits (taken from the control
+file, and lowered where the service reports a smaller limit) and the two errors that every connector throws in the
+same way: `cutoff` and `toolong`. `src/backend/parts.ts` sizes work on many items so that each part fits, and halves
+the parts after a reply is cut off. Every model call goes through one retry policy (`src/backend/retry.ts`): two more
+tries, with a doubling wait, for an empty reply or for a failure that resending can fix (that is, not unreachable, cut
+off, too long, or a 4xx error). Every call gets these retries, however many calls before it failed.
 
 **Desktop shell.** The desktop app is an Electron app. The main process (`src/desktop/main.ts`) assembles the backend and serves it to a single window across a bridge. The window runs the same Store and UI as the browser demo.
 
@@ -118,8 +123,8 @@ with a record's current versions in `changeLogHeads.ts` and the folding of draft
   names the versions it was based on. Two current versions that differ are a clash, which is kept for a person to
   resolve; the app never picks one. A question's draft is written by the app, so it folds into a person's change rather
   than clashing with it (`DraftFold` in `src/backend/changeLogDrafts.ts`). Any field that two PCs can write differently
-  for the same content (a timestamp, who made the change, or a title the model wrote) must be listed as a bookkeeping
-  field in `src/domain/versions.ts`. Otherwise, records with derived IDs clash when they should not.
+  for the same content (a timestamp, who made the change, or the model's workstream choice) must be listed as a
+  bookkeeping field in `src/domain/versions.ts`. Otherwise, records with derived IDs clash when they should not.
 - **Clashes stay local to one record.** A line built on a version that hasn't arrived yet is held back until that version arrives, without pausing the rest of the deal. A held line more than a day old is let go and shown as a choice (`letGoStuck`).
 - **Nothing is thrown away.** Every version that is not kept becomes a deletion entry under **Deleted** (`src/app/commands/keptVersions.ts`). When a deal is deleted on one PC, another PC keeps any changes the deleting PC hadn't seen, as a recovered copy (`src/domain/recovered.ts`).
 - **A local copy guards against sync loss.** Each PC keeps its own files outside the synced folder, and restores any lines that the shared copy loses, even when the shared folder lost all of them and the PC lost its install files too.
@@ -205,14 +210,14 @@ A deal's checklist is made up of its own item records, linked to the findings an
 
 ## Q&A log, imports, and the memo
 
-- **The Q&A log** (`src/app/qaLog.ts`, `src/backend/qaLogs.ts`) is the team's own spreadsheet; the deal records only where it is. An update reads the log as it is, works out the cells to change (`logWrite` in `src/domain/logWrite.ts`), and writes them into a copy (`editLog` in `src/backend/spreadsheets.ts`). It then checks that only those cells changed, archives the old version, and saves the copy over the log (`src/backend/qaLogFolder.ts`).
+- **The Q&A log** (`src/app/qaLog.ts`, `src/backend/qaLogs.ts`) is the team's own spreadsheet; the deal records only where it is. An update reads the log as it is, works out the cells to change (`logWrite` in `src/domain/logWrite.ts`, which finds each question's row with the import's own lookup, `matchQuestions` in `src/domain/qaMatch.ts`), and writes them into a copy (`editLog` in `src/backend/spreadsheets.ts`). It then checks that only those cells changed, archives the old version, and saves the copy over the log (`src/backend/qaLogFolder.ts`).
 - **Q&A import** reads and proposes a table layout through `src/app/transfer.ts`. Its preview uses prepared dates
   where available. `src/app/qaImport.ts` submits the prepared rows through `ImportQuestions`. That workflow resumes retained
   submissions by their journal correlation and finishes the saved log choice.
 - **The master checklist** is brought in pasted or from a file, read line by line by the model, and tied out so that every line is accounted for (`src/app/listRead.ts`, `src/domain/listRead.ts`). Its items go to every deal that uses the list and is not marked Closed, with one **Undo** for all of them.
-- **An issues list** is attached and read through `src/app/issuesList.ts`. The model reads and checks each page against the
-  file and proposes titles and matches (`issuesList` in `src/backend/ai.ts`). The preview and import command resolve the
-  same matches through `src/app/issuesListJoins.ts`.
+- **An issues list** is attached and read through `src/app/issuesList.ts`. The model reads the file once, then proposes
+  titles and matches (`issuesList` in `src/backend/ai.ts`). The preview and import command resolve the same matches
+  through `src/app/issuesListJoins.ts`.
 - **An import in progress** (the file, the model's reading, the choices, and the check marks) is kept on each PC,
   part by part, through the `KeptImports` port. Both shells use the IndexedDB adapter. `src/app/keptImports.ts` keeps
   the parts and coordinates Q&A submission checkpoints. A submission reaches the store before its operation starts
