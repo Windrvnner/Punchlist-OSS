@@ -59,6 +59,43 @@ export interface WordIndex {
   score(dealId: string, q: Set<string>, docs: { docId: string; named: Set<string> }[], namedOnly?: boolean): Map<string, number>;
 }
 
+/** one thing scored: the words of its name, of its title, how often its body uses a word, and its length in words */
+export interface Scored {
+  id: string; named: Set<string>; title: Set<string>; tf: (w: string) => number; length: number;
+}
+/** what rarity and length are measured against: how many things there are, their mean length, how many use a word */
+export interface Corpus { size: number; avgLength: number; docsWith: (w: string) => number }
+
+/**
+ * How well each thing answers to the words `q`, by BM25: each word counts by how rare it is in the corpus (its idf),
+ * times `WEIGHT.name` in the name, `WEIGHT.title` in the title, and BM25's term weight for how often the body uses it.
+ * The one scoring of every keyword search: documents through the index, and the findings and questions a chat searches.
+ */
+export function bm25(q: Set<string>, entries: Scored[], corpus: Corpus): Map<string, number> {
+  const idf = new Map<string, number>();
+  for (const w of q) {
+    const n = corpus.docsWith(w);
+    idf.set(w, Math.log(1 + (corpus.size - n + 0.5) / (n + 0.5)));
+  }
+  const out = new Map<string, number>();
+  for (const e of entries) {
+    const terms = [...q].map((w) => weightOf(e, w, corpus.avgLength) * (idf.get(w) ?? 0));
+    // added smallest first, so two things with the same evidence score the same whatever order the words were asked
+    // in: a tie is decided by the ranking's own tie-break, never by rounding
+    out.set(e.id, terms.sort((x, y) => x - y).reduce((sum, t) => sum + t, 0));
+  }
+  return out;
+}
+
+/** what one word is worth in one thing before its rarity: its name, its title, and its body's use of it */
+function weightOf(e: Scored, w: string, avgLength: number): number {
+  let m = e.named.has(w) ? WEIGHT.name : 0;
+  if (e.title.has(w)) m += WEIGHT.title;
+  const tf = e.tf(w);
+  if (tf) m += (tf * (K1 + 1)) / (tf + K1 * (1 - B + (B * e.length) / avgLength));
+  return m;
+}
+
 export function wordIndex(local: Folder): WordIndex {
   const deals = new Map<string, DealIndex>();
   // the name carries the index's version: an index built under older rules is not read, so each document is read again
@@ -76,6 +113,12 @@ export function wordIndex(local: Folder): WordIndex {
     for (let k = 0; k < ix.words.length; k++) { if (!ix.alive[k]) continue; const s = ix.words[k]; const i = s.indexOf(key); if (i >= 0) m.set(k, Number(s.slice(i + key.length, s.indexOf(' ', i + key.length)))); }
     ix.uses.set(w, m); return m;
   };
+  /** a document as BM25 scores it: by its name alone when the index has not read it (`k` undefined) */
+  const scoredOf = (ix: DealIndex, d: { docId: string; named: Set<string> }, k: number | undefined): Scored => {
+    if (k === undefined) return { id: d.docId, named: d.named, title: new Set(), tf: () => 0, length: 0 };
+    const tf = (w: string) => usesOf(ix, w).get(k) ?? 0;
+    return { id: d.docId, named: d.named, title: ix.title[k], tf, length: ix.length[k] };
+  };
   const of = (dealId: string): DealIndex => {
     let ix = deals.get(dealId); if (ix) return ix;
     ix = { num: new Map(), length: [], title: [], alive: [], words: [], uses: new Map(), total: 0, live: 0 }; deals.set(dealId, ix);
@@ -89,28 +132,10 @@ export function wordIndex(local: Folder): WordIndex {
       local.append(file(dealId), `${JSON.stringify(l)}\n`); put(of(dealId), l);
     },
     score(dealId, q, docs, namedOnly = false) {
-      const ix = of(dealId); const n = Math.max(ix.live, docs.length, 1); const avg = ix.total / Math.max(ix.live, 1) || 1;
-      // for each word asked about: how often each live document uses it, and in how many documents it is (for its idf)
-      const uses = new Map<string, Map<number, number>>(); const idf = new Map<string, number>();
-      for (const w of q) { const m = usesOf(ix, w); uses.set(w, m); idf.set(w, Math.log(1 + (n - m.size + 0.5) / (m.size + 0.5))); }
-      const out = new Map<string, number>();
-      for (const d of docs) {
-        const k = namedOnly ? undefined : ix.num.get(d.docId);
-        const terms: number[] = [];
-        for (const w of q) {
-          let m = d.named.has(w) ? WEIGHT.name : 0;
-          if (k !== undefined) {
-            if (ix.title[k].has(w)) m += WEIGHT.title;
-            const tf = uses.get(w)?.get(k) ?? 0;
-            if (tf) m += (tf * (K1 + 1)) / (tf + K1 * (1 - B + (B * ix.length[k]) / avg));
-          }
-          terms.push(m * (idf.get(w) ?? 0));
-        }
-        // added smallest first, so two documents with the same evidence score the same whatever order the words
-        // were asked in: a tie is decided by the ranking's own tie-break, never by rounding
-        out.set(d.docId, terms.sort((x, y) => x - y).reduce((sum, t) => sum + t, 0));
-      }
-      return out;
+      const ix = of(dealId);
+      const corpus = { size: Math.max(ix.live, docs.length, 1), avgLength: ix.total / Math.max(ix.live, 1) || 1,
+        docsWith: (w: string) => usesOf(ix, w).size };
+      return bm25(q, docs.map((d) => scoredOf(ix, d, namedOnly ? undefined : ix.num.get(d.docId))), corpus);
     },
   };
 }

@@ -4,6 +4,7 @@ import type { ModelThread, ResearchStep } from '../ports';
 import type { Source } from '../domain/model';
 import type { DocRecord } from './documents';
 import type { ToolSpec } from './service';
+import type { QaRecord } from './qaRow';
 
 /** a document a model was given, with the tag it is cited by (D1, D2 …) */
 export interface Sent { tag: string; dealId: string; rec: DocRecord }
@@ -33,7 +34,8 @@ export type FolderFound = { folders: string[]; docs: DealDoc[]; near: string[] }
 /** what the search helper read: its reply and the documents it gave the model */
 export type Looked = Result<{ reply: Record<string, unknown>; sent: Sent[] }>;
 export type FindingRecord = { title: string; body: string[]; status: string };
-export type QuestionRecord = { n?: number; text?: string; response?: string; status?: string };
+/** a question of the Q&A log as the store holds it (qaRow.ts) */
+export type QuestionRecord = QaRecord;
 
 /** what the agent needs of the AI runners (ai.ts), which make it */
 export interface AgentKit {
@@ -50,22 +52,22 @@ export interface AgentKit {
    */
   folder(deals: string[], said: string, what: string): Promise<FolderFound>;
   /**
-   * the search helper's reading: the keyword ranking, the fast model's pick, and the documents read on the service;
-   * `skip` are documents per deal it leaves out
+   * the chat's document search as fixed pages: every document of these deals that answers to a word of the query, best
+   * first by the keyword ranking, the deals taken in turn
    */
-  look(deals: string[], model: string, ask: string, lookFor: string, skip: Record<string, string[]>): Promise<Looked>;
-  /** how many of the deals' documents answer to any word of a query: what "listed" counts */
-  listed(deals: string[], query: string): number;
-  /** the words of a text as a search compares them */
-  words(text: string): Set<string>;
+  ranking(deals: string[], query: string): Promise<DealDoc[]>;
+  /** the search helper's reading of one page of that ranking, on the service, as it is: no pick, one round */
+  readPage(deals: string[], model: string, ask: string, docs: DealDoc[]): Promise<Looked>;
+  /** the words of a text as a search compares them; with `dealId`, the deal's short names given their long form too */
+  words(text: string, dealId?: string): Set<string>;
   /** put documents in the store and list them for a prompt; `got` are those really there */
   send(sent: Sent[]): Promise<{ files: string[]; listing: string; got: Sent[] }>;
   /** keep the citations that can be stood behind, renumbering the markers in the text */
   fit(text: string, cited: Cited[] | undefined, sent: Sent[], withDeal: boolean): { text: string; sources: Source[] };
   /** a document's path from its deal's folder, as prompts show it */
   where(rec: DocRecord): string;
-  /** these documents with each blackline's clean draft put just before it: a blackline is read with its clean draft */
-  withClean?(dealId: string, recs: DocRecord[]): DocRecord[];
+  /** each blackline of a deal, by id, with its clean draft: a blackline is read with its clean draft */
+  cleanDrafts?(dealId: string): Map<string, DocRecord>;
   /** null when the deal's records cannot be read just now: the agent is told so, never that the deal has none */
   findings(dealId: string): Promise<FindingRecord[] | null>;
   questions(dealId: string): Promise<QuestionRecord[] | null>;
@@ -112,6 +114,8 @@ export interface AgentOptions {
   width?: number;
   /** a folder of more documents than this is read only once the person has agreed (200) */
   folderDocs?: number;
+  /** findings or questions one search of them gives a page (control.limits.searchPage: 25) */
+  searchPage?: number;
   /**
    * tokens at which a kept conversation is compacted (control.limits.compactAt: 125k), or that for each model, so that
    * a conversation never outgrows what one call may send

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { nodeFolder } from '../../src/backend/nodeFolder';
-import { wordIndex, countWords, TITLE_WORDS } from '../../src/backend/wordIndex';
+import { wordIndex, countWords, bm25, TITLE_WORDS, WEIGHT } from '../../src/backend/wordIndex';
 import { tokens, fold } from '../../src/backend/words';
 
 const roots: string[] = []; afterAll(() => { for (const r of roots) fs.rmSync(r, { recursive: true, force: true }); });
@@ -73,5 +73,23 @@ describe("each PC's word index", () => {
     const d = dir();
     fs.writeFileSync(path.join(d, 'words-deal.jsonl'), '{"d":"x","n":1,"t":"","w":"turbine:1"}\n');
     expect(wordIndex(nodeFolder(d)).has('deal', 'x')).toBe(false);
+  });
+  it('scores anything given as name, title and body words by the same BM25 the index uses', () => {
+    const corpus = { size: 10, avgLength: 20, docsWith: (w: string) => (w === 'lockup' ? 1 : 9) };
+    const idf = (n: number) => Math.log(1 + (10 - n + 0.5) / (n + 0.5));
+    const none = (_w: string) => 0;
+    const got = bm25(new Set(['lockup']), [
+      { id: 'named', named: new Set(['lockup']), title: new Set(), tf: none, length: 20 },
+      { id: 'titled', named: new Set(), title: new Set(['lockup']), tf: none, length: 20 },
+      { id: 'body', named: new Set(), title: new Set(), tf: (w) => (w === 'lockup' ? 1 : 0), length: 20 },
+      { id: 'none', named: new Set(), title: new Set(), tf: none, length: 20 },
+    ], corpus);
+    expect(got.get('named')).toBeCloseTo(WEIGHT.name * idf(1), 10);
+    expect(got.get('titled')).toBeCloseTo(WEIGHT.title * idf(1), 10);
+    // one use in a document of average length: a term weight of 1
+    expect(got.get('body')).toBeCloseTo(idf(1), 10);
+    expect(got.get('none')).toBe(0);
+    expect(bm25(new Set(['other']), [{ id: 'b', named: new Set(['other']), title: new Set(), tf: none, length: 20 }],
+      corpus).get('b')).toBeCloseTo(WEIGHT.name * idf(9), 10);
   });
 });

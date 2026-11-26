@@ -19,10 +19,10 @@ const ROLE = 'You are researching a question about a project-finance deal from i
   + 'log. You work in turns.';
 const CITE_RULE = 'Cite only documents listed under "Documents opened so far", by their tag. A finding or a response '
   + 'from the Q&A log is not a document: say what it is in words and give it no marker.';
-const SEARCH_HELP = 'A helper searches the documents by their words, file names and folder paths, opens the likeliest, '
-  + 'and returns passages with document and page. "findings" and "qa" search the deal\'s findings and its questions '
-  + 'and responses. Search in other words, or for a document by the name it is likely to have, when a search finds '
-  + 'nothing useful.';
+const SEARCH_HELP = 'A helper searches the documents by their words, file names and folder paths, reads a page of '
+  + 'the best matches, and returns passages with document and page. "findings" and "qa" search the deal\'s findings '
+  + 'and its questions and responses. Search in other words, or for a document by the name it is likely to have, when '
+  + 'a search finds nothing useful. Results come a page at a time: give "page" for the next one.';
 const readHelp = (width: number) => `Have up to ${width} documents attached to your next turn, by tag or by path, so `
   + 'that you can look through them yourself. Do this when the passages a search returned are not enough to answer.';
 const FOLDER_WHEN = 'Have every document in a folder read, the most important first, when you are asked to read or '
@@ -37,7 +37,7 @@ const FOLDER_RESULT = 'You get what each batch of its documents says, with docum
 export const inlineTools = (width: number) => [
   `${ROLE} Each turn, reply with one JSON object and nothing else, one of these:`,
   '{"tool": "search", "what": "documents" | "findings" | "qa" | "all", "query": "a few words to search for", '
-    + '"notes": "what you have learned so far, with document and page"}',
+    + '"page": 1, "notes": "what you have learned so far, with document and page"}',
   `  ${SEARCH_HELP}`,
   '{"tool": "read", "docs": ["D3", "D7"], "notes": "…"}',
   `  ${readHelp(width)}`,
@@ -85,6 +85,7 @@ export const toolSpecs = (width: number): ToolSpec[] => [
       properties: {
         what: { type: 'string', enum: ['documents', 'findings', 'qa', 'all'] },
         query: text('A few words to search for.'),
+        page: { type: 'integer', minimum: 1, description: 'Which page of the results: 1 if left out.' },
         notes,
       },
       required: ['what', 'query'],

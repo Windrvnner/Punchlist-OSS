@@ -11,7 +11,9 @@ import { prepareImport, IMPORT_FIELDS, sameText, type Mapping, type ImportField,
 import { matchQuestions } from './qaMatch';
 
 /** every field the app keeps up to date in the log, where the log has a column for it */
-const FIELDS: ImportField[] = ['n', 'text', 'askedBy', 'received', 'workstream', 'priority', 'status', 'response', 'respondedBy', 'responded'];
+export const FIELDS: ImportField[] = [
+  'n', 'text', 'askedBy', 'received', 'workstream', 'priority', 'status', 'response', 'respondedBy', 'responded',
+];
 const STATUS_LABEL: Record<Question['status'], string> = { open: 'Open', answered: 'Answered', closed: 'Closed' };
 /** a date field's step says so, so a workbook gets a real date in the column's own format */
 const dated = (k: ImportField) => (k === 'received' || k === 'responded' ? { date: true as const } : {});
