@@ -277,7 +277,9 @@ const SPEC = {
     shortlist: count(100, 'Best-ranked documents the fast model picks a call\'s documents from.', 8, 1000),
     itemsPerCall: count(20, 'Checklist items checked in one call.', 1, 50),
     inputTokens: count(180_000, 'Most tokens one model call may send, documents included. Batches of items are sized to fit and a chat is compacted before it outgrows it. Documents are read by the service, so the app cannot count them: a call the service refuses as too long is asked again with fewer documents or items, whatever this says.', 4_000, 2_000_000),
-    outputTokens: count(32_000, 'Most tokens one model reply may hold. Sent with every call; work asked in batches is sized to fit, and a reply cut off anyway is asked again in smaller parts. A temporary hold until real reply sizes are measured (docs/decisions.md).', 1_000, 200_000),
+    outputTokens: count(32_000, 'Most tokens one model reply may hold. Sent with every call; work asked in batches is '
+      + 'sized to fit, and a reply cut off anyway is asked again in smaller parts. A temporary hold until real reply '
+      + 'sizes are measured (docs/decisions.md).', 1_000, 200_000),
     storedFiles: count(500,
       "The app's own stored or locally cached model files. The least recently used go first.",
       10, 5000),
