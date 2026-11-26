@@ -1047,19 +1047,9 @@ describe('deal memo model replies', () => {
       name: '201 words in two paragraphs',
       paragraphs: [`${'covenant '.repeat(99)}threshold. [1]`, `${'distribution '.repeat(100)}test. [2]`],
     },
-    { name: 'one 100,000-character token', paragraphs: ['', '  ', `${'x'.repeat(100_000)} [1]`] },
-    { name: '202 words separated by citation markers', paragraphs: ['Ratio.[1]Term '.repeat(101)] },
-    {
-      name: 'oversized text joined when invalid citations are removed',
-      paragraphs: [`${Array(15).fill('x'.repeat(200)).join(' [999]')} The draft sets the ratio. [1]`],
-    },
     {
       name: 'oversized text joined when export drops control characters',
       paragraphs: [`${Array(15).fill('x'.repeat(199)).join('\u000b')} The draft sets the ratio. [1]`],
-    },
-    {
-      name: 'oversized text containing zero-width separators',
-      paragraphs: [`${Array(15).fill('x'.repeat(199)).join('\ufeff')} The draft sets the ratio. [1]`],
     },
     {
       name: '201 words after removing a finding ID',
@@ -1136,21 +1126,24 @@ describe('deal memo model replies', () => {
     });
   });
 
-  it('uses the findings’ own cited words after every key risk write-up exceeds the limits', async () => {
+  it('keeps the last deal memo key risk write-up as given when every reply is over the limit (#806)', async () => {
+    const longest = overlong[1].paragraphs;
     const standIn = await setupMemoReplies([distributionRisk], (call, attempt) =>
-      citedRiskReply(call, overlong[attempt - 1].paragraphs));
+      citedRiskReply(call, attempt < 3 ? overlong[0].paragraphs : longest));
     const memo = val(await standIn.ai.memo!('d1'));
     expect(standIn.calls.filter(memoWrite).map(({ model }) => model)).toEqual(['standard', 'standard', 'thorough']);
-    expect(memo.risks![0]).toEqual(distributionRisk);
-    const content = memoContent({
-      ...scaleMemoInput, deal: memoDeal, findings: memoFindings,
-      groups: memo.risks, ratings: memo.ratings, summary: memo.summary,
-    });
-    expect(content.risks[0].paras).toEqual([
-      [{ text: 'The draft uses a 1.25x ratio.', refs: [1] }],
-      [{ text: 'The draft uses a six-month period.', refs: [2] }],
-    ]);
-    expect(content.refs.slice(0, 2)).toEqual(['Credit Agreement, p. 14', 'Term sheet (signed), p. 3']);
+    expect(memo.risks![0].body).toEqual(longest);
+  });
+
+  it('sends a long deal memo key risk write-up back to shorten and uses the shorter reply (#806)', async () => {
+    const short = [`${creditWords} [1]`];
+    const standIn = await setupMemoReplies([distributionRisk], (call, attempt) =>
+      citedRiskReply(call, attempt === 1 ? overlong[1].paragraphs : short));
+    const memo = val(await standIn.ai.memo!('d1'));
+    const writes = standIn.calls.filter(memoWrite);
+    expect(writes.map(({ model }) => model)).toEqual(['standard', 'standard']);
+    expect(writes[1].prompt).toContain('shorten it to fit');
+    expect(memo.risks![0].body).toEqual(short);
   });
 });
 

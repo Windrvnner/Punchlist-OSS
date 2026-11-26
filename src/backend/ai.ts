@@ -416,8 +416,6 @@ function memoGroupRows(value: unknown, ids: Set<string>): RiskGroup[] {
 const withoutMemoMarks = (text: string, space = '') => text.replace(/\s*\[\d+\]/g, space)
   .replace(/\{([^{}|]+)\|[^{}]*\}/g, '$1').trim();
 const MEMO_RISK_WORDS = 200;
-const MEMO_RISK_TEXT_CHARS = 4_000;
-const MEMO_RISK_TOKEN_CHARS = 256;
 const MEMO_RISK_SHAPE = '{"paragraphs": ["one paragraph per string, with [n] markers"], "sources": [...]}';
 
 /** Count paragraph breaks inside strings, including the separator used to fit citations across paragraphs (#659). */
@@ -426,20 +424,13 @@ function memoRiskParagraphs(value: unknown): string[] {
     .map((paragraph) => paragraph.trim()).filter(Boolean);
 }
 
-/** Bound the write-up even when malformed text fits the word count (#659). */
+/** Whether a write-up is within two paragraphs and the word target. Only a retry hangs on this (#806). */
 function memoRiskFits(paragraphs: string[], ids: Set<string>): boolean {
   if (!paragraphs.length || paragraphs.length > 2) return false;
-  const text = paragraphs.join(' ');
   // Control characters discarded by the document builder can hide unbroken text (#659).
   const invalidText = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/;
-  if (text.length > MEMO_RISK_TEXT_CHARS || invalidText.test(text)) return false;
-  const scrubbed = paragraphs.map((paragraph) => unid(paragraph, ids));
-  // Citation fitting can join adjacent text when it removes an invalid marker (#659).
-  const withoutCitations = scrubbed.map((paragraph) => withoutMemoMarks(paragraph)).join(' ');
-  // Only ordinary document whitespace can separate printed words (#659).
-  const oversized = (value: string) => value.split(/[ \t\r\n]+/).some((token) => token.length > MEMO_RISK_TOKEN_CHARS);
-  if (oversized(text) || oversized(withoutCitations)) return false;
-  const prose = scrubbed.map((paragraph) => withoutMemoMarks(paragraph, ' ')).join(' ');
+  if (invalidText.test(paragraphs.join(' '))) return false;
+  const prose = paragraphs.map((paragraph) => withoutMemoMarks(unid(paragraph, ids), ' ')).join(' ');
   const words = prose.match(/\S+/g) ?? [];
   return words.length > 0 && words.length <= MEMO_RISK_WORDS;
 }
@@ -453,16 +444,21 @@ function readCorrection(
   return `${prompt}${echo}\n\nThat cannot be used: ${again.wrong}. Send the whole reply again, put right.`;
 }
 
+/** A write-up is kept as the model gave it, however long, unless it is empty or gives advice (#806). */
+function memoRiskKept(reply: Record<string, unknown>, advises: (text: string) => boolean): boolean {
+  const paragraphs = memoRiskParagraphs(reply.paragraphs);
+  return paragraphs.length > 0 && !paragraphs.some(advises);
+}
+
 /** Send unusable write-ups through the document reader's retry policy (#659). */
 function memoRiskReadOptions(escalate: string, advises: (text: string) => boolean, ids: Set<string>) {
   const usable = (reply: Record<string, unknown>) => {
     const paragraphs = memoRiskParagraphs(reply.paragraphs);
     return memoRiskFits(paragraphs, ids) && !paragraphs.some(advises);
   };
-  const wrong = 'it is empty, contains oversized text, gives advice or a judgment, or exceeds '
-    + `the limit of two paragraphs and ${MEMO_RISK_WORDS} words`;
-  // Keep an oversized reply from making the correction request too long (#659).
-  return { escalate, usable, wrong, maxEcho: MEMO_RISK_TEXT_CHARS, retrySharedModel: true };
+  const wrong = 'it is empty, gives advice or a judgment, or is longer than '
+    + `two paragraphs and ${MEMO_RISK_WORDS} words: shorten it to fit`;
+  return { escalate, usable, wrong, retrySharedModel: true };
 }
 
 /**
@@ -1923,7 +1919,7 @@ export function nodeAi(o: AiOptions) {
         const r = await read('memoRisk', [dealId], m.standard, ask, fs.map(plain).join(' '), { [dealId]: sourceIds },
           MEMO_RISK_SHAPE, options);
         if (!r.ok) { if (r.error.kind === 'unreachable') throw Object.assign(new Error(r.error.message), { code: 'unreachable' }); return g; }
-        if (!options.usable(r.value.reply) || !r.value.sent.length) return g;
+        if (!memoRiskKept(r.value.reply, advises) || !r.value.sent.length) return g;
         const paras = memoRiskParagraphs(r.value.reply.paragraphs).map((p) => unid(p, ids).trim()).filter(Boolean);
         const out = fit(paras.join('\n\u0000\n'), r.value.reply.sources as Cited[], r.value.sent, false, true);
         return { ...g, body: out.text.split(/\s*\u0000\s*/).filter(Boolean), sources: out.sources };
