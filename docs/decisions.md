@@ -172,7 +172,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Home asks “What would you like to know?” and shows example questions in its composer (#654).
 - No conversation shows sample questions above its composer.
 - Each question asked from an ask box starts a new conversation; follow-ups continue it.
-- The composer takes no typed-word commands: everything typed is asked of the AI. "/" at the start of an empty box offers **Add All Unresolved to Q&A…**, **Log Question**, and **New Deal…** (the first two on a deal), and what follows the "/" narrows them. The AI can offer one of them, or opening a deal's page, as a button under its answer; nothing runs until a person presses it (#1054).
+- The composer takes no typed-word commands: everything typed is asked of the AI. "/" at the start of an empty box offers `/add-unresolved` (**Add All Unresolved to Q&A…**), `/log-question` (**Log Question**), and `/new-deal` (**New Deal…**), the first two on a deal,, and what follows the "/" narrows them. The AI can offer one of them, or opening a deal's page, as a button under its answer; nothing runs until a person presses it (#1054).
 - **Not this one** on a suggested open question has **Undo** in its notice (#1054).
 - Every chat shows AI text the same way: a finding's or question's text at the answer's size, with its sources as the answer's chips above it. The send button is a paper airplane pointing to the top right. Screen text says "AI", never "the model".
 - A deal page's ask box is the conversation composer in place: it is one line at rest and pushes the page down when used (option A).

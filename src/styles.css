@@ -856,9 +856,14 @@ body.reading .chatwrap.withdoc .reading-pane{animation:settle var(--slow) var(--
 .mmenu{right:auto;left:0;top:auto;bottom:calc(100% + 8px);min-width:160px}
 .home .mmenu{bottom:auto;top:calc(100% + 8px)}
 /* the slash commands (#1054): under the box, or over a conversation's composer, item text in line with the typed text */
-.slashmenu{width:240px;left:2px;bottom:calc(100% + 11px)}
-.slashmenu.down,.home .slashmenu{bottom:auto;top:calc(100% + 11px)}
-.askslot .askbox .slashmenu{left:4px}
+.slashmenu{left:0;right:0;width:auto;top:auto;bottom:calc(100% + 8px);border-radius:var(--r-pane);padding:8px;gap:2px}
+/* Home's and a deal page's boxes sit high: their menus drop below */
+.slashmenu.down{bottom:auto;top:calc(100% + 8px)}
+.slashmenu .mi{display:flex;flex-direction:column;gap:3px;padding:10px 14px;border-radius:var(--r-card)}
+.slashmenu .mi.hi{background:var(--card-hover)}
+@media (forced-colors:active){.slashmenu .mi.hi{outline:2px solid Highlight;outline-offset:-2px}}
+.slashmenu .sc{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:14px;color:var(--ink)}
+.slashmenu .sa{font-size:13px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #homeask{position:relative}
 
 .xdlg{padding-bottom:18px}.sdlg .srow.top{align-items:start}.sdlg .srow.top .k{padding-top:4px}

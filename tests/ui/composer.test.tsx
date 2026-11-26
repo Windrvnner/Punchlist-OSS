@@ -60,7 +60,7 @@ describe('slash commands in a deal’s ask box (#1054)', () => {
     m.box().dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
   });
   const options = (m: Awaited<ReturnType<typeof mount>>) =>
-    [...m.host.querySelectorAll('.slashmenu [role="option"]')].map((el) => el.textContent);
+    [...m.host.querySelectorAll('.slashmenu [role="option"] .sc')].map((el) => el.textContent);
   /** "/lo" and Enter: the Log Question chip, then the question typed after it */
   const logQuestion = async (m: Awaited<ReturnType<typeof mount>>, question: string) => {
     await m.type('/lo');
@@ -71,12 +71,12 @@ describe('slash commands in a deal’s ask box (#1054)', () => {
   it('"/" offers the commands, typing narrows them, and Enter picks one without sending', async () => {
     const m = await mount('Yonder');
     await m.type('/');
-    expect(options(m)).toEqual(['Add All Unresolved to Q&A…', 'Log Question', 'New Deal…']);
+    expect(options(m)).toEqual(['/add-unresolved', '/log-question', '/new-deal']);
     expect(m.box().getAttribute('aria-activedescendant')).toMatch(/-slash-0$/);
     await key('ArrowDown')(m);
-    expect(m.host.querySelector('[role="option"][aria-selected="true"]')?.textContent).toBe('Log Question');
+    expect(m.host.querySelector('[role="option"][aria-selected="true"] .sc')?.textContent).toBe('/log-question');
     await m.type('/deal');
-    expect(options(m)).toEqual(['New Deal…']);
+    expect(options(m)).toEqual(['/new-deal']);
     await m.press();
     expect(m.store.get().ui.newDeal).toMatchObject({ name: '' });
     expect(m.box().value).toBe('');
@@ -88,7 +88,12 @@ describe('slash commands in a deal’s ask box (#1054)', () => {
     await m.type('/permits');
     expect(options(m)).toEqual([]);
     await m.type('/new');
+    let reachedPage = false;
+    const pageKeys = (e: KeyboardEvent) => { if (e.key === 'Escape') reachedPage = true; };
+    document.addEventListener('keydown', pageKeys);
     await key('Escape')(m);
+    document.removeEventListener('keydown', pageKeys);
+    expect(reachedPage).toBe(false);   // the reading pane behind the box stays open
     expect(options(m)).toEqual([]);
     expect(m.box().value).toBe('/new');
     await m.press();

@@ -2,8 +2,8 @@
 import { useEffect, useState } from 'preact/hooks';
 import { useStore } from './hooks';
 import { Icon } from './icons';
-import { runSlashCommand, slashCommands, type SlashCommand } from '../app/slashCommands';
-import { clearLogQuestion, showsLogQuestion } from '../app/refusedCommands';
+import { runSlashCommand, showsLogQuestionChip, slashCommands, type SlashCommand } from '../app/slashCommands';
+import { clearLogQuestion } from '../app/refusedCommands';
 import type { Scope } from '../app/conversations';
 
 /**
@@ -33,7 +33,7 @@ export function useSlashCommands({ scope, boxKey, text, formId, up, changed }: {
     runSlashCommand(store, scope, command.id);
     changed();
   };
-  const chipShown = showsLogQuestion(boxKey) && scope.kind === 'deal';
+  const chipShown = showsLogQuestionChip(scope, text);
   const removeChip = () => {
     clearLogQuestion(boxKey);
     changed();
@@ -63,7 +63,10 @@ function menuKey(e: KeyboardEvent, count: number, at: number, to: {
 }): boolean {
   const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0;
   if (step) to.move((at + step + count) % count);
-  else if (e.key === 'Escape') to.close();
+  else if (e.key === 'Escape') {
+    to.close();
+    e.stopPropagation();   // the menu takes this Escape, not the reading pane behind the box
+  }
   else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) to.pick(Math.min(at, count - 1));
   else return false;
   e.preventDefault();
@@ -78,9 +81,10 @@ function SlashMenu({ id, commands, at, up, pick }: {
     <div class={`colmenu glass mmenu slashmenu ${up ? '' : 'down'}`} id={id} role="listbox" aria-label="Commands">
       {commands.map((command, i) => (
         <button type="button" role="option" id={`${id}-${i}`} key={command.id} aria-selected={i === at}
-          class={`mi ${i === at ? 'on' : ''}`} tabIndex={-1}
+          class={`mi ${i === at ? 'hi' : ''}`} tabIndex={-1}
           onMouseDown={(e) => e.preventDefault()} onClick={() => pick(command)}>
-          {command.name}
+          <span class="sc">{command.command}</span>
+          <span class="sa">{command.about}</span>
         </button>
       ))}
     </div>

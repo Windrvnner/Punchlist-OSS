@@ -142,7 +142,7 @@ const answered = (page) => page.waitForSelector('.msgs .ai:not(.pending):not(.fa
   await page.waitForSelector('.slashmenu [role="option"]');
   const menu = await page.evaluate(() => {
     const m = document.querySelector('.slashmenu'); const box = document.querySelector('#dask').getBoundingClientRect();
-    const items = [...m.querySelectorAll('[role="option"]')].map((o) => o.textContent);
+    const items = [...m.querySelectorAll('[role="option"] .sc')].map((o) => o.textContent);
     return { items, top: m.matches(':popover-open'),
       below: m.getBoundingClientRect().top >= box.bottom, focus: document.activeElement?.id };
   });
@@ -151,7 +151,7 @@ const answered = (page) => page.waitForSelector('.msgs .ai:not(.pending):not(.fa
   await page.waitForFunction(() => Object.values(store.get().questions).some((q) => /insurance program/.test(q.text)));
   const after = await page.evaluate(() => ({ hash: location.hash, chip: !!document.querySelector('#log-question-chip'),
     box: document.querySelector('#hask').value }));
-  say('slash-log-question', JSON.stringify(menu.items) === '["Log Question"]' && menu.top && menu.below
+  say('slash-log-question', JSON.stringify(menu.items) === '["/log-question"]' && menu.top && menu.below
     && menu.focus === 'hask' && after.hash === '#deal-' + id && !after.chip && after.box === '',
   JSON.stringify({ menu, after }));
   await page.goto(URL + '#deals'); await page.waitForSelector('#homeask'); await page.evaluate(() => { window.__fail = { answer: true }; });
