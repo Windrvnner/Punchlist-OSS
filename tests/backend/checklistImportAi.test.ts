@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { setup, val, Mem, type Call } from './reviewKit';
 import { dealList } from './dealList';
 import { SERVICE } from '../../src/control';
-import { TOO_LONG_REPLY } from '../../src/backend/limits';
+import { TOO_LONG_REPLY, TOO_LONG_ASK } from '../../src/backend/limits';
 
 const range = (from: number, to: number) => Array.from({ length: to - from }, (_, k) => from + k);
 
@@ -469,6 +469,27 @@ describe('reading a list in, whole, in one call', () => {
   });
   it('a reply that cannot be read fails the read, so half a list is never shown as all of it', async () => {
     expect((await replying('not JSON at all').ai.readList!({ lines: list.slice(0, 5) })).ok).toBe(false);
+  });
+  it('a list the service refuses as too long is read in halves, each line named once, columns from the first part', async () => {
+    const refuse = () => { throw Object.assign(new Error('too long'), { code: 'toolong' }); };
+    const s = setup((c) => {
+      if (!isRead(c)) return {};
+      if (shown(c).length > 600) return refuse();
+      return { item: shown(c).map(String), cells: shown(c)[0] === 1 ? { item: 2 } : undefined };
+    }, {}, pc);
+    const out = val(await s.ai.readList!({ lines: list }));
+    const calls = s.calls.filter(isRead);
+    expect(calls.length).toBeGreaterThan(3);
+    const every = list.flatMap((l, i) => (l.trim() ? [i + 1] : []));
+    expect(calls.flatMap((c) => (shown(c).length <= 600 ? shown(c) : []))).toEqual(every);
+    expect(out.lines.map((r) => r.n)).toEqual(every);
+    expect(out.cells).toEqual({ item: 2 });
+  });
+  it('a list too long even as one line fails the read, saying so', async () => {
+    const refuse = () => { throw Object.assign(new Error('too long'), { code: 'toolong' }); };
+    const s = setup((c) => (isRead(c) ? refuse() : {}), {}, pc);
+    const r = await s.ai.readList!({ lines: list.slice(0, 5) });
+    expect(r.ok ? '' : r.error.message).toBe(TOO_LONG_ASK);
   });
   it('a reply cut off at the length limit fails the read, saying so, and is never asked for shorter', async () => {
     const cut = () => { throw Object.assign(new Error('cut off'), { code: 'cutoff' }); };

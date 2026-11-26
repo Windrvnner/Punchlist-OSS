@@ -56,7 +56,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { ulid } from 'ulid';
 import { readJson, unfinished, list as listOf, strings, int, pageOf, word, tagNumber, isObject } from './lenient';
 import type { LineRead } from '../domain/listRead';
-import { listReadPrompt, listReply, LIST_KINDS } from './listReadAi';
+import { listReadPrompt, listReply, readListInParts, LIST_KINDS } from './listReadAi';
 import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK } from './limits';
 import { UNREAD_REPLY, UNUSABLE_REPLY, UNREACHED, CUT_ON_IT, CUT_BEFORE_IT, UNUSABLE_ON_IT } from './limits';
 import { inParts, partSize } from './parts';
@@ -1919,10 +1919,10 @@ export function nodeAi(o: AiOptions) {
       return ok([...done.got].sort((a, b) => a[0] - b[0]).map(([at, r]) => ({ at, ...r })));
     },
     async readList(i) {
-      // What each line of a list is, read whole in one call as the app's other reads are (#1026): the standard model,
-      // or the thorough one when asked, names each line's kind by number and a table's columns (listReadAi.ts). A reply
-      // cut off at the length limit fails the read, as the issues list's does (`split`, readIssuePoints), so half a
-      // list is never shown as all of it.
+      // What each line of a list is, read whole in one call (#1026): the standard model, or the thorough one when
+      // asked, names each line's kind by number and a table's columns (listReadAi.ts). A request the service refuses as
+      // too long is asked again in halves. A reply cut off at the length limit fails the read, as the issues list's
+      // does (`split`, readIssuePoints), so half a list is never shown as all of it.
       let model: string;
       try {
         const m = await models();
@@ -1930,9 +1930,13 @@ export function nodeAi(o: AiOptions) {
       } catch (e) { return failure(e, UNREACHED); }
       if (!i.lines.some((l) => l.trim())) return ok({ lines: [] });
       try {
-        const ask: Ask = { kind: 'readList', split: true, model, system: JSON_ONLY, prompt: listReadPrompt(i.lines) };
-        const reply = await askJson(ask, [...LIST_KINDS, 'cells']);
-        return reply ? ok(listReply(reply, i.lines)) : fail({ kind: 'failed', message: UNREAD_REPLY });
+        const read = await readListInParts(i.lines, async (span) => {
+          const prompt = listReadPrompt(i.lines, span);
+          const ask: Ask = { kind: 'readList', split: true, model, system: JSON_ONLY, prompt };
+          const reply = await askJson(ask, [...LIST_KINDS, 'cells']);
+          return reply ? listReply(reply, i.lines, span) : null;
+        });
+        return read ? ok(read) : fail({ kind: 'failed', message: UNREAD_REPLY });
       } catch (e) { return failure(e, UNREAD_REPLY); }
     },
     async phrase(i) {

@@ -4,13 +4,19 @@
  * numbers and ranges, and a table's columns; it gives no words, so every item is worded as its line in the file.
  */
 import { int, isObject, list } from './lenient';
+import { isTooLong } from './limits';
 import type { LineRead, ListCells, ListReply } from '../domain/listRead';
 
 export const LIST_KINDS: LineRead['k'][] = ['section', 'subsection', 'item', 'more', 'columns', 'left'];
 
-/** Every line that is not blank, numbered from 1, and what to say of each. */
-export function listReadPrompt(lines: string[]): string {
-  const shown = lines.flatMap((line, k) => (line.trim() ? [`${k + 1}: ${line.replace(/\s+$/, '')}`] : [])).join('\n');
+/** the lines `from` to `to` (0-based, `to` not included) of a list: the whole list unless it is asked in parts */
+export interface ListSpan { from: number; to: number }
+
+/** Every line of the span that is not blank, numbered from 1 in the whole list, and what to say of each. */
+export function listReadPrompt(lines: string[], span: ListSpan = { from: 0, to: lines.length }): string {
+  const own = lines.slice(span.from, span.to);
+  const shown = own.flatMap((line, k) => (line.trim() ? [`${span.from + k + 1}: ${line.replace(/\s+$/, '')}`] : []))
+    .join('\n');
   return [
     'A firm\'s due diligence checklist for project-finance deals was pasted or imported as the numbered lines below.',
     'A table\'s row has its cells joined by " | ".',
@@ -31,12 +37,12 @@ export function listReadPrompt(lines: string[]): string {
 }
 
 /** the line numbers an entry names: a number, or a range "a-b" or "a–b" (both ends in), within the list */
-function numbersIn(entry: unknown, count: number): number[] {
+function numbersIn(entry: unknown, span: ListSpan): number[] {
   const range = typeof entry === 'string' ? /^\s*(\d+)\s*[-–]\s*(\d+)\s*$/.exec(entry) : null;
   const [from, to] = range ? [Number(range[1]), Number(range[2])] : [int(entry), int(entry)];
   if (from === null || to === null) return [];
   const out: number[] = [];
-  for (let n = Math.max(1, from); n <= Math.min(to, count); n++) out.push(n);
+  for (let n = Math.max(span.from + 1, from); n <= Math.min(to, span.to); n++) out.push(n);
   return out;
 }
 
@@ -67,11 +73,13 @@ function columnsOf(value: unknown): ListCells | undefined {
  * The reply as a reading: each line that is not blank and is named under exactly one kind. A line named under two
  * kinds is left without a reading, so the app asks about it again rather than choose one.
  */
-export function listReply(reply: Record<string, unknown>, lines: string[]): ListReply {
+export function listReply(
+  reply: Record<string, unknown>, lines: string[], span: ListSpan = { from: 0, to: lines.length },
+): ListReply {
   const named = new Map<number, Set<LineRead['k']>>();
   for (const k of LIST_KINDS) {
     for (const entry of list(reply[k])) {
-      for (const n of numbersIn(entry, lines.length)) {
+      for (const n of numbersIn(entry, span)) {
         if (lines[n - 1].trim()) named.set(n, (named.get(n) ?? new Set()).add(k));
       }
     }
@@ -79,4 +87,27 @@ export function listReply(reply: Record<string, unknown>, lines: string[]): List
   const read = [...named].filter(([, kinds]) => kinds.size === 1).sort((a, b) => a[0] - b[0]);
   const cells = columnsOf(reply.cells);
   return { lines: read.map(([n, kinds]) => ({ n, k: [...kinds][0] })), ...(cells ? { cells } : {}) };
+}
+
+/**
+ * Read a list whole, in one call. A request the service refuses as too long (`toolong`) is asked again as two halves of
+ * the lines, down to one line, and the halves' readings joined (decisions: every AI feature adapts to a request that is
+ * too long). A table's columns are taken from the first part that gives them, as its heading row is in the first part.
+ * A reply cut off, or any other failure, is not split here: it fails the read.
+ */
+export async function readListInParts(
+  lines: string[], ask: (span: ListSpan) => Promise<ListReply | null>,
+  span: ListSpan = { from: 0, to: lines.length },
+): Promise<ListReply | null> {
+  try {
+    return await ask(span);
+  } catch (e) {
+    if (!isTooLong(e) || span.to - span.from < 2) throw e;
+    const middle = Math.ceil((span.from + span.to) / 2);
+    const first = await readListInParts(lines, ask, { from: span.from, to: middle });
+    const second = await readListInParts(lines, ask, { from: middle, to: span.to });
+    if (!first || !second) return null;
+    const cells = first.cells ?? second.cells;
+    return { lines: [...first.lines, ...second.lines], ...(cells ? { cells } : {}) };
+  }
 }
