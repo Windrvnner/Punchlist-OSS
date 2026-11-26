@@ -10,8 +10,8 @@ const row = (n: number | null, text: string, askedBy = '') => ({ n, text, askedB
 
 describe('the text as the file holds it', () => {
   it('matches a line break stored as "\\n" either way round', () => {
-    expect(matchQuestions([row(null, 'Provide the model.\nAnd the lock-up?')], [[q('a', 1, 'Provide the model.\r\nAnd the lock-up?')]]))
-      .toEqual(new Map([[0, 'a']]));
+    const asked = [[q('a', 1, 'Provide the model.\r\nAnd the lock-up?')]];
+    expect(matchQuestions([row(null, 'Provide the model.\nAnd the lock-up?')], asked)).toEqual(new Map([[0, 'a']]));
     expect(matchQuestions([row(null, 'A\r\nB')], [[q('a', 1, 'A\nB')]])).toEqual(new Map([[0, 'a']]));
   });
   it('matches a control character stored as a space or left out', () => {
@@ -31,6 +31,10 @@ describe('the text as the file holds it', () => {
     expect(sameText('A\u0001B', 'AB')).toBe(true);
     expect(sameText('A  B', 'A B')).toBe(false);
   });
+  it('matches only what that comparison calls the same, form by form', () => {
+    expect(sameText('a\u0001b', 'a\u0002 b')).toBe(false);
+    expect(matchQuestions([row(null, 'a\u0001b')], [[q('a', 1, 'a\u0002 b')]])).toEqual(new Map());
+  });
 });
 
 describe('number and sender', () => {
@@ -38,9 +42,9 @@ describe('number and sender', () => {
     const asked = [[q('a', 3, 'Same words'), q('b', 7, 'Same words')]];
     expect(matchQuestions([row(7, 'Same words'), row(3, 'Same words')], asked)).toEqual(new Map([[0, 'b'], [1, 'a']]));
   });
-  it('takes the row\'s number before its sender: a row naming no one under the number wins', () => {
+  it('takes its sender\'s row before a row naming no one, even one under the question\'s number', () => {
     const asked = [[q('q5', 5, 'X', 'Lender A')]];
-    expect(matchQuestions([row(9, 'X', 'Lender A'), row(5, 'X')], asked)).toEqual(new Map([[1, 'q5']]));
+    expect(matchQuestions([row(9, 'X', 'Lender A'), row(5, 'X')], asked)).toEqual(new Map([[0, 'q5']]));
   });
   it('takes the same sender before a side naming no one, and never another party', () => {
     const asked = [[q('a', 1, 'Provide the model.', 'Lender A'), q('b', 2, 'Provide the model.', 'Lender B')]];
@@ -57,13 +61,15 @@ describe('number and sender', () => {
     expect(matchQuestions(rows, asked)).toEqual(new Map([[0, 'b']]));
   });
   it('takes a live question before a deleted one', () => {
-    expect(matchQuestions([row(null, 'X')], [[q('live', 1, 'X')], [q('gone', 2, 'X')]])).toEqual(new Map([[0, 'live']]));
+    const pools = [[q('live', 1, 'X')], [q('gone', 2, 'X')]];
+    expect(matchQuestions([row(null, 'X')], pools)).toEqual(new Map([[0, 'live']]));
   });
 });
 
 describe('at deal scale', () => {
   it('matches 3,000 rows to 3,000 questions in the same words in a moment', () => {
-    const rows = Array.from({ length: 3000 }, (_, k) => row(k + 5001, 'Provide the model.', k % 2 ? 'Lender A, LLC' : ''));
+    const rows = Array.from({ length: 3000 },
+      (_, k) => row(k + 5001, 'Provide the model.', k % 2 ? 'Lender A, LLC' : ''));
     const asked = [Array.from({ length: 3000 }, (_, k) => q(`q${k}`, k + 1, 'Provide the model.', 'Lender A'))];
     const at = Date.now(); const m = matchQuestions(rows, asked); const ms = Date.now() - at;
     expect(ms).toBeLessThan(2_000);

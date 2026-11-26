@@ -29,24 +29,28 @@ export type MatchRow = Pick<ImportRow, 'n' | 'text' | 'askedBy'>;
 export type SenderOf = (q: Question) => string;
 const OWN_SENDER: SenderOf[] = [(q) => q.askedBy];
 
-/** each question's place in the pools, by every form its text takes in a file, so thousands of rows match quickly */
+/**
+ * each question's place in the pools, by each form its text takes in a file (`fileForms`, keyed by which form it is, as
+ * `sameText` compares them), so thousands of rows match quickly
+ */
 function indexByText(questions: Question[]): Map<string, number[]> {
   const index = new Map<string, number[]>();
   for (const [at, q] of questions.entries()) {
-    for (const form of new Set(fileForms(q.text))) {
-      const list = index.get(form);
+    for (const key of new Set(formKeys(q.text))) {
+      const list = index.get(key);
       if (list) list.push(at);
-      else index.set(form, [at]);
+      else index.set(key, [at]);
     }
   }
   return index;
 }
+const formKeys = (text: string) => fileForms(text).map((form, which) => `${which}:${form}`);
 
 /** the places of the questions whose text is the row's as the file holds it, in pool order; worked out once per text */
 function candidatesOf(index: Map<string, number[]>, cache: Map<string, number[]>, text: string): number[] {
   const known = cache.get(text);
   if (known) return known;
-  const places = [...new Set(fileForms(text).flatMap((form) => index.get(form) ?? []))].sort((a, b) => a - b);
+  const places = [...new Set(formKeys(text).flatMap((key) => index.get(key) ?? []))].sort((x, y) => x - y);
   cache.set(text, places);
   return places;
 }
@@ -63,11 +67,18 @@ function fitsSender(q: Question, row: MatchRow, senders: SenderOf[], tier: numbe
 }
 
 /**
+ * The order the lookup tries: each sender tier, with the row's number and then without, and only then a row or question
+ * naming no one, with the number and then without. The same sender comes first, so a row naming no one never takes a
+ * question from its own sender's row (docs/decisions.md).
+ */
+const passesFor = (senders: SenderOf[]) => [...senders.keys(), -1]
+  .flatMap((tier) => [true, false].map((sameNumber) => ({ tier, sameNumber })));
+
+/**
  * Which question each row is, by row index: the XLOOKUP of the merge (docs/decisions.md). Rows look up questions in
- * file order; a question is taken by one row only. First the question with the row's number and text, then any with the
- * text; within each, the sender tiers in order (`senders`: the question's own sender by default), then a row or question
- * naming no one. The text is the same when it is the same as the file holds it (`sameText`). The pools are searched in
- * order (live, then deleted). Used by the import, its preview and Update Q&A Log alike (#1080).
+ * file order, in the order of `passesFor`; a question is taken by one row only. The sender tiers are `senders` (the
+ * question's own sender by default). The text is the same when it is the same as the file holds it (`sameText`). The
+ * pools are searched in order (live, then deleted). Used by the import, its preview and Update Q&A Log alike (#1080).
  */
 export function matchQuestions(
   rows: MatchRow[], pools: Question[][], senders: SenderOf[] = OWN_SENDER,
@@ -77,17 +88,15 @@ export function matchQuestions(
   const cache = new Map<string, number[]>();
   const matched = new Map<number, string>();
   const taken = new Set<string>();
-  const tiers = [...senders.keys(), -1];
-  for (const sameNumber of [true, false]) {
-    for (const tier of tiers) {
-      for (const [idx, row] of rows.entries()) {
-        if (matched.has(idx) || (sameNumber && row.n == null)) continue;
-        const hit = candidatesOf(index, cache, row.text).map((at) => questions[at]).find((q) => !taken.has(q.id)
-          && (!sameNumber || q.n === row.n) && fitsSender(q, row, senders, tier));
-        if (!hit) continue;
-        matched.set(idx, hit.id);
-        taken.add(hit.id);
-      }
+  for (const { tier, sameNumber } of passesFor(senders)) {
+    for (const [idx, row] of rows.entries()) {
+      if (matched.has(idx) || (sameNumber && row.n == null)) continue;
+      const fits = (q: Question) => !taken.has(q.id) && (!sameNumber || q.n === row.n)
+        && fitsSender(q, row, senders, tier);
+      const hit = candidatesOf(index, cache, row.text).map((at) => questions[at]).find(fits);
+      if (!hit) continue;
+      matched.set(idx, hit.id);
+      taken.add(hit.id);
     }
   }
   return matched;

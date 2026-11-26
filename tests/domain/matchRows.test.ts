@@ -74,14 +74,21 @@ describe('a party corrected in the app, beside a question still under the old na
 });
 
 describe('the same lookup as the import (#1080)', () => {
-  it('keeps each question\'s own row in a log numbered its own way ("7.", "3."), so no two responses are swapped', () => {
+  it('keeps each question\'s own row in a log numbered its own way ("7.", "3."): no two responses swap', () => {
     const rows = [['7.', 'Same words'], ['3.', 'Same words']];
-    expect(matchRows({ rows }, mapping, [q('a', 3, 'Same words'), q('b', 7, 'Same words')])).toEqual(new Map([['b', 0], ['a', 1]]));
+    const asked = [q('a', 3, 'Same words'), q('b', 7, 'Same words')];
+    expect(matchRows({ rows }, mapping, asked)).toEqual(new Map([['b', 0], ['a', 1]]));
   });
-  it('gives the row of the question\'s number before a row of its sender under another number', () => {
+  it('gives a question its sender\'s row before a row naming no one under its number', () => {
     const withParty = { ...mapping, askedBy: 2 } as Mapping;
     const rows = [['9', 'X', 'Lender A'], ['5', 'X', '']];
-    expect(matchRows({ rows }, withParty, [q('q5', 5, 'X', 'Lender A')])).toEqual(new Map([['q5', 1]]));
+    expect(matchRows({ rows }, withParty, [q('q5', 5, 'X', 'Lender A')])).toEqual(new Map([['q5', 0]]));
+  });
+  it('keeps a renumbered question\'s row from a question naming no one that took its old number', () => {
+    const withParty = { ...mapping, askedBy: 2 } as Mapping;
+    const rows = [['3', 'Provide the model.', 'Lender A']];
+    const asked = [q('qx', 12, 'Provide the model.', 'Lender A'), q('qy', 3, 'Provide the model.')];
+    expect(matchRows({ rows }, withParty, asked)).toEqual(new Map([['qx', 0]]));
   });
   it('matches 2,000 rows by their place in the table, blank rows and headings between them shifting nothing', () => {
     const rows: string[][] = [];
