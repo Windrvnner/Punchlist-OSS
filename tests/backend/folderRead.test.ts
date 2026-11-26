@@ -88,6 +88,11 @@ describe('marks and ampersands in folder names (#1154)', () => {
     expect(matchFolders(dirs, 'the O&M folder')).toEqual(['VDR/O&M']);
     expect(matchFolders(dirs, 'OM')).toEqual(['VDR/OM']);
   });
+  it('finds "O&M" among numbered folders by its name without the number (#1154)', () => {
+    const dirs = foldersOf(['VDR/04. O&M/A.pdf', 'VDR/05. OM/B.pdf']);
+    expect(matchFolders(dirs, 'the O&M folder')).toEqual(['VDR/04. O&M']);
+    expect(matchFolders(dirs, 'OM')).toEqual(['VDR/05. OM']);
+  });
   it('a leading number is not part of the name: "O&M" and "04. O&M" are both equal, so the words decide', () => {
     const dirs = foldersOf(['VDR/04. O&M/A.pdf', 'VDR/O&M/B.pdf', 'VDR/OM/C.pdf']);
     expect(matchFolders(dirs, 'O&M')).toEqual(['VDR/04. O&M', 'VDR/O&M', 'VDR/OM']);

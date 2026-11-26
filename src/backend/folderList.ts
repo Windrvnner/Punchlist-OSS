@@ -6,8 +6,11 @@
 
 import { tokens } from './words';
 
+/** a leading folder number ("04. ", "04.1 ", or "04 1 " once tokenized) */
+const LEADING_NUMBER = /^\d+(?:[.\s]+\d+)*[.\s-]+/;
+
 /** a folder's name as a person says it: lower case, without a leading number, "the" or the word "folder", spaces collapsed */
-export const folderKey = (s: string) => plain(s).replace(/^\d+(?: \d+)* /, '').replace(/^the /, '').trim();
+export const folderKey = (s: string) => plain(s).replace(LEADING_NUMBER, '').replace(/^the /, '').trim();
 /**
  * a folder's name in the search index's words (letters of any alphabet), without "the" and the word "folder",
  * but with its number: "07. Permits" and "07 permits" are the same
@@ -26,7 +29,7 @@ export function foldersOf(paths: string[]): string[] {
 }
 
 /** a name as written: lower case, without a leading number, "the" or the word "folder"; punctuation such as "&" kept */
-const asWritten = (s: string) => s.trim().toLowerCase().replace(/^\d+(?:[.\s]+\d+)*[.\s-]+/, '').replace(/^the\s+/, '')
+const asWritten = (s: string) => s.trim().toLowerCase().replace(LEADING_NUMBER, '').replace(/^the\s+/, '')
   .replace(/\s+folders?$/, '');
 
 /**
