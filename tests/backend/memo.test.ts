@@ -138,6 +138,14 @@ describe('the deal memo’s ratings and summary', () => {
     expect(s.sums.length).toBeGreaterThan(1);   // retried before it fails
   });
 
+  it('fails the memo when the model gives no summary paragraphs on any try (#1065)', async () => {
+    const s = setup(by({ f_1: 'High' }), () => ({ paragraphs: [] }));
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'One');
+    const r = await s.ai.memo!('d1');
+    expect(!r.ok && r.error.kind).toBe('failed');
+  });
+
   it('fails the memo with the too-long-reply failure, and saves nothing, when the summary is cut off (#1065)', async () => {
     const cut = () => { throw Object.assign(new Error('cut off'), { code: 'cutoff' }); };
     const s = setup(by({ f_1: 'High' }), cut);
