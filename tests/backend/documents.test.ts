@@ -1572,3 +1572,63 @@ describe('warm document collections', () => {
     }
   });
 });
+
+describe('a place named by a record stays inside the folder it is in (#1156)', () => {
+  const opens = async (docs: ReturnType<typeof pc>['docs'], bytes: Uint8Array) => (
+    await docs.page('d1', { doc: 'outside.pdf', docId: idOf(bytes) }, 'p. 1')
+  ).ok;
+  /** where each unsafe name of a place in the attachments folder leads, and the name itself */
+  const unsafe = (root: string): [string, string][] => [
+    ['../outside.pdf', path.join(root, 'shared', 'outside.pdf')],
+    ['../attachments-evil/outside.pdf', path.join(root, 'shared', 'attachments-evil', 'outside.pdf')],
+    [path.join(root, 'elsewhere', 'outside.pdf'), path.join(root, 'elsewhere', 'outside.pdf')],
+  ];
+  for (const [index, name] of [0, 1, 2].map((i) => [i, ['dotdot', 'sibling', 'absolute'][i]] as const)) {
+    it(`never opens or reads a file attached by a ${name} place, and says it cannot be found`, async () => {
+      const root = tmp(); const bytes = pdf('outside'); const [rel, file] = unsafe(root)[index];
+      put(path.dirname(file), path.basename(file), bytes);
+      fs.mkdirSync(path.join(root, 'vdr'), { recursive: true });
+      keepLines(root, [olderLine(ATTACHED, bytes, rel, ['outside'], 1)]);
+      const x = pc(root, 'office', undefined, { index: true });
+      expect(await opens(x.docs, bytes)).toBe(false);
+      await indexAll(x, path.join(root, 'vdr'));
+      expect(wordIndex(nodeFolder(path.join(root, 'local-office'))).has('d1', idOf(bytes))).toBe(false);
+    });
+  }
+  it('never opens a file of a deal folder that a record places outside that folder', async () => {
+    const root = tmp(); const vdr = path.join(root, 'vdr'); const bytes = pdf('outside');
+    put(vdr, 'a.pdf', pdf('inside')); put(root, 'outside.pdf', bytes);
+    keepLines(root, [olderLine(vdr, bytes, '../outside.pdf', ['outside'], 1)]);
+    expect(await opens(pc(root, 'office').docs, bytes)).toBe(false);
+  });
+  it('does not take a folder for the deal folder because a record placed outside it matches there', async () => {
+    const root = tmp(); const vdr = path.join(root, 'vdr'); const moved = path.join(root, 'moved');
+    const bytes = pdf('outside');
+    put(moved, 'other.pdf', pdf('other')); put(root, 'outside.pdf', bytes);
+    keepLines(root, [olderLine(vdr, bytes, '../outside.pdf', ['outside'], 1)]);
+    const x = pc(root, 'office');
+    expect(val(await x.docs.placeFolders([{ dealId: 'd1', folder: vdr, local: moved }]))).toBe(0);
+  });
+  it('keeps the page file of a document inside the work folder, whatever id a record gives it', async () => {
+    const root = tmp(); const vdr = path.join(root, 'vdr'); put(vdr, 'Notes.docx', NOTES);
+    const line = { ...olderLine(vdr, NOTES, 'Notes.docx', ['notes'], 3), docId: '../escape' };
+    keepLines(root, [line]);
+    const x = pc(root, 'office');
+    const page = await x.docs.page('d1', { doc: 'Notes.docx', docId: '../escape' }, 'p. 1');
+    expect(page.ok).toBe(false);
+    expect(fs.existsSync(path.join(root, 'escape.pdf'))).toBe(false);
+    expect(x.converted).toEqual([]);
+  });
+  it('opens a copy kept inside its folder, and never one placed outside it', async () => {
+    const root = tmp(); const bytes = pdf('outside'); put(root, 'shared/outside.pdf', bytes);
+    const lines = (rel: string) => [
+      olderLine(ATTACHED, bytes, 'd1/office/gone.pdf', ['outside'], 1),
+      { ...olderLine(ATTACHED, bytes, rel, ['outside'], 1), at: '2026-11-02T00:00:00.000Z' },
+    ];
+    keepLines(root, lines('../outside.pdf'));
+    expect(await opens(pc(root, 'office').docs, bytes)).toBe(false);
+    put(root, 'shared/attachments/d1/office/copy.pdf', bytes);
+    keepLines(root, lines('d1/office/copy.pdf'));
+    expect(await opens(pc(root, 'office').docs, bytes)).toBe(true);
+  });
+});

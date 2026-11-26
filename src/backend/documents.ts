@@ -38,6 +38,7 @@ import { countWords, type WordIndex } from './wordIndex';
 import { officeText, DIRECT } from './officeText';
 import { families, roomPath, ATTACHED } from './families';
 import { coverOf } from './blacklines';
+import { insideRoot } from './insideRoot';
 import { appendOwn, dealFiles, healOwn, wholeLines } from './ownFile';
 import { randomUUID } from 'node:crypto';
 import { countedFiles, sameRoomAs, type RoomMatch } from './sameRoom';
@@ -219,7 +220,9 @@ export function nodeDocuments(o: DocumentsOptions) {
     // pages made by one converter are not shown or sent from another: they may break in different places
     if (d.via !== undefined && d.via !== o.convert.id) throw new Error(`${d.name} was indexed with a different converter (${d.via}) than this PC has (${o.convert.id})`);
     fs.mkdirSync(o.workPath, { recursive: true });
-    const out = path.join(o.workPath, `${d.docId}.pdf`); if (fs.existsSync(out) && !info) return out;
+    const out = pageFile(d.docId);
+    if (out === null) throw new Error(`${d.name} has an id that is not a file name`);
+    if (fs.existsSync(out) && !info) return out;
     const convert = o.convert, work = o.workPath;
     return oneConversion(() => convert(at, work, `${d.docId}.pdf`, info, d.name));
   }
@@ -234,7 +237,12 @@ export function nodeDocuments(o: DocumentsOptions) {
     catch (e) { if (pdf !== at) discard(d.docId); throw e; }
     return pdf;
   }
-  const discard = (docId: string) => { if (o.workPath && !open.includes(docId)) fs.rmSync(path.join(o.workPath, `${docId}.pdf`), { force: true }); };
+  /** where a document's pages are made, or null for an id of a record that leads out of the work folder (#1156) */
+  const pageFile = (docId: string) => (o.workPath ? insideRoot(o.workPath, `${docId}.pdf`) : null);
+  const discard = (docId: string) => {
+    const file = pageFile(docId);
+    if (file !== null && !open.includes(docId)) fs.rmSync(file, { force: true });
+  };
 
   // ---- fingerprints: a file is read once, and again only if its size or date changes
   let hashes: Record<string, { size: number; mtimeMs: number; hash: string }> = {};
@@ -379,7 +387,11 @@ export function nodeDocuments(o: DocumentsOptions) {
   }
 
   // ---- where a document is on this PC
-  const placeOf = (dealId: string, d: DocRecord) => (d.folder === ATTACHED ? path.join(attachments, d.rel) : path.join(localOf(dealId, d.folder), d.rel));
+  /** a record's place on this PC, or null when its `rel` leads out of the folder it is in (#1156) */
+  const placeOf = (dealId: string, d: { folder: string; rel: string }) => {
+    const root = d.folder === ATTACHED ? attachments : localOf(dealId, d.folder);
+    return insideRoot(root, d.rel);
+  };
   /**
    * What this PC can say, right now, of a file's place in one of the deal's folders:
    *   'there'   the file is at the place, with these contents;
@@ -396,11 +408,13 @@ export function nodeDocuments(o: DocumentsOptions) {
    * `lists` keeps each folder's names for one pass over many places.
    */
   function spot(dealId: string, p: { folder: string; rel: string }, hash: string, lists: Lists = new Map(), shut?: { rel?: string }): 'there' | 'left' | 'unread' | 'away' | 'shut' {
-    const root = localOf(dealId, p.folder); const at = path.join(root, p.rel);
+    const root = localOf(dealId, p.folder); const at = insideRoot(root, p.rel);
     const names = (dir: string) => {
       if (!lists.has(dir)) { try { lists.set(dir, fs.readdirSync(dir)); } catch (e) { const code = (e as { code?: string })?.code ?? ''; lists.set(dir, code === 'ENOTDIR' ? 'file' : dir !== root && NO_ENTRY.includes(code) ? 'shut' : null); } }
       return lists.get(dir) ?? null;
     };
+    // a place leading out of the folder is not looked at (#1156)
+    if (at === null) return 'unread';
     const top = names(root); if (!Array.isArray(top) || !top.some((n) => !SKIP.test(n))) return 'away';
     let dir = root; const on: string[] = [];
     for (const part of p.rel.split('/')) {
@@ -429,7 +443,8 @@ export function nodeDocuments(o: DocumentsOptions) {
     resting.set(abs, Date.now() + REST_MS); return null;
   }
   async function locate(dealId: string, d: DocRecord): Promise<string | null> {
-    const at = placeOf(dealId, d); if (fs.existsSync(at) && (await hashWaiting(at)) === d.hash) return at;
+    const at = placeOf(dealId, d);
+    if (at !== null && fs.existsSync(at) && (await hashWaiting(at)) === d.hash) return at;
     // It is not where it was. It is said to have left that place (it may be at a copy's place, or moved) only when this PC
     // sees that it has: while the folder cannot be reached nothing is said, and the document is still the deal's.
     let shut = false;                                                           // in a folder this person may not open
@@ -438,7 +453,10 @@ export function nodeDocuments(o: DocumentsOptions) {
       if (now === 'left' && seenHereAt(dealId, d.docId, d.folder, d.rel)) { try { say(dealId, { docId: d.docId, left: { folder: d.folder, rel: d.rel } }); } catch { /* said at the next indexing */ } }
       shut = now === 'shut';
     }
-    for (const c of d.copies ?? []) { const there = c.folder === ATTACHED ? path.join(attachments, c.rel) : path.join(localOf(dealId, c.folder), c.rel); if (fs.existsSync(there) && hashOf(there) === d.hash) return there; }
+    for (const c of d.copies ?? []) {
+      const there = placeOf(dealId, c);
+      if (there !== null && fs.existsSync(there) && hashOf(there) === d.hash) return there;
+    }
     // A file in a folder this person may not open has not moved, as far as anyone can tell: the data room is not searched for
     // it, which would list every folder and look at every file on each ask for one of its documents.
     if (shut) return null;
@@ -468,7 +486,12 @@ export function nodeDocuments(o: DocumentsOptions) {
   function compare(dealId: string, folder: string, candidate: string): FolderMatch {
     const recs = [...records(dealId).values()].filter((d) => d.folder === folder).sort((a, b) => (a.rel < b.rel ? -1 : 1));
     const step = Math.max(1, Math.floor(recs.length / 25)); const sample = recs.filter((_, i) => i % step === 0).slice(0, 25); let matched = 0;
-    for (const d of sample) { const at = path.join(candidate, d.rel); try { if (fs.statSync(at).size === d.size && hashOf(at) === d.hash) matched++; } catch { /* not there */ } }
+    for (const d of sample) {
+      const at = insideRoot(candidate, d.rel);
+      try {
+        if (at !== null && fs.statSync(at).size === d.size && hashOf(at) === d.hash) matched++;
+      } catch { /* not there */ }
+    }
     saveHashes(true); return { folder, matched, checked: sample.length };
   }
 
@@ -568,8 +591,9 @@ export function nodeDocuments(o: DocumentsOptions) {
     for (const d of all(dealId).values()) {
       const place = [d, ...(d.copies ?? [])].find((p) => p.folder === ATTACHED);
       if (!place || o.index.has(dealId, d.docId)) continue;
-      const at = path.join(attachments, place.rel);
-      if (!fs.existsSync(at)) continue;
+      // a place leading out of the folder is not read (#1156)
+      const at = insideRoot(attachments, place.rel);
+      if (at === null || !fs.existsSync(at)) continue;
       const read = await readFile(dealId, d.docId, place.name, at, d, d.size, false);
       if (!wordsChanged(d.words, read.words) && read.pages === d.pages) continue;
       const line = { docId: d.docId, hash: d.hash, name: place.name, folder: ATTACHED, rel: place.rel, size: d.size };
@@ -1072,7 +1096,8 @@ export function nodeDocuments(o: DocumentsOptions) {
     if (!here(dealId, folder, candidate)) return false;                     // an empty folder is never a data room documents were read from, even one a person points at
     if (!shown) for (const d of records(dealId).values()) {
       if (d.folder !== folder) continue;
-      try { if (fs.statSync(path.join(candidate, d.rel)).size !== d.size) return false; } catch { return false; }
+      const at = insideRoot(candidate, d.rel);
+      try { if (at === null || fs.statSync(at).size !== d.size) return false; } catch { return false; }
     }
     const m = compare(dealId, folder, candidate);
     return m.checked > 0 ? m.matched === m.checked : shown;
