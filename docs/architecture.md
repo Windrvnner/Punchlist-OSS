@@ -214,7 +214,7 @@ A deal's checklist is made up of its own item records, linked to the findings an
 - **Q&A import** reads and proposes a table layout through `src/app/transfer.ts`. Its preview uses prepared dates
   where available. `src/app/qaImport.ts` submits the prepared rows through `ImportQuestions`. That workflow resumes retained
   submissions by their journal correlation and finishes the saved log choice.
-- **The master checklist** is brought in pasted or from a file, read whole by the model in one call (in halves only when the service refuses it as too long), and tied out so that every line is accounted for (`src/app/listRead.ts`, `src/domain/listRead.ts`). Its items go to every deal that uses the list and is not marked Closed, with one **Undo** for all of them.
+- **The master checklist** is brought in pasted or from a file, read whole by the model in one call (in halves, through `parts.ts`, when the service refuses it as too long or cuts the reply off), and tied out so that every line is accounted for (`src/app/listRead.ts`, `src/domain/listRead.ts`). Its items go to every deal that uses the list and is not marked Closed, with one **Undo** for all of them.
 - **An issues list** is attached and read through `src/app/issuesList.ts`. The model reads the file once, then proposes
   titles and matches (`issuesList` in `src/backend/ai.ts`). The preview and import command resolve the same matches
   through `src/app/issuesListJoins.ts`.

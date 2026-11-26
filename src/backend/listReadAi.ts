@@ -4,7 +4,8 @@
  * numbers and ranges, and a table's columns; it gives no words, so every item is worded as its line in the file.
  */
 import { int, isObject, list } from './lenient';
-import { isTooLong } from './limits';
+import { UNREAD_REPLY } from './limits';
+import { inParts } from './parts';
 import type { LineRead, ListCells, ListReply } from '../domain/listRead';
 
 export const LIST_KINDS: LineRead['k'][] = ['section', 'subsection', 'item', 'more', 'columns', 'left'];
@@ -90,24 +91,25 @@ export function listReply(
 }
 
 /**
- * Read a list whole, in one call. A request the service refuses as too long (`toolong`) is asked again as two halves of
- * the lines, down to one line, and the halves' readings joined (decisions: every AI feature adapts to a request that is
- * too long). A table's columns are taken from the first part that gives them, as its heading row is in the first part.
- * A reply cut off, or any other failure, is not split here: it fails the read.
+ * Read a list whole, in one call, through `inParts` (parts.ts), which asks again in halves when the service refuses a
+ * request as too long (`toolong`), down to one line, and does the same for a reply cut off at the length limit
+ * (decisions: every AI feature adapts to a request that is too long or a reply cut off). The halves' readings are
+ * joined; a table's columns are taken from the first part that gives them, as its heading row is in the first part.
+ * A line never read, a reply that cannot be read and any other failure stop the run: `stopped` says why, and `read`
+ * is then absent, so half a list is never shown as all of it.
  */
 export async function readListInParts(
   lines: string[], ask: (span: ListSpan) => Promise<ListReply | null>,
-  span: ListSpan = { from: 0, to: lines.length },
-): Promise<ListReply | null> {
-  try {
-    return await ask(span);
-  } catch (e) {
-    if (!isTooLong(e) || span.to - span.from < 2) throw e;
-    const middle = Math.ceil((span.from + span.to) / 2);
-    const first = await readListInParts(lines, ask, { from: span.from, to: middle });
-    const second = await readListInParts(lines, ask, { from: middle, to: span.to });
-    if (!first || !second) return null;
-    const cells = first.cells ?? second.cells;
-    return { lines: [...first.lines, ...second.lines], ...(cells ? { cells } : {}) };
-  }
+): Promise<{ read?: ListReply; stopped?: unknown }> {
+  const cellsFound: ListCells[] = [];
+  const done = await inParts(lines.map((_, at) => at), lines.length, async (part) => {
+    const reply = await ask({ from: part[0], to: part[part.length - 1] + 1 });
+    if (!reply) throw Object.assign(new Error(UNREAD_REPLY), { code: 'unread' });
+    if (reply.cells) cellsFound.push(reply.cells);
+    return { got: new Map(reply.lines.map((r) => [r.n - 1 - part[0], r])) };
+  });
+  if (done.stopped !== undefined) return { stopped: done.stopped };
+  const cells = cellsFound[0];
+  const read = [...done.got.values()].sort((a, b) => a.n - b.n);
+  return { read: { lines: read, ...(cells ? { cells } : {}) } };
 }
