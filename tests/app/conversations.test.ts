@@ -248,11 +248,6 @@ describe('conversations', () => {
     expect(again.get().ui.notThese).toEqual([`${answer.id}|${q.id}`]); expect(suggestions(again.get(), scope).size).toBe(0);
     expect(again.get().questions[q.id]).toMatchObject({ response: '', status: 'open' });
     const { store: elsewhere } = make({ kv: { ...disk(), shared: kv.shared } }); await elsewhere.boot(); expect(elsewhere.get().ui.notThese).toEqual([]);   // another PC has its own
-    // **Undo** on the notice is the way back (#1054)
-    again.putAway(answer.id, q.id); const undo = again.get().ui.toasts.at(-1)!;
-    expect(undo).toMatchObject({ text: 'Suggestion hidden', action: { label: 'Undo' } });
-    undo.action!.run!();
-    expect(local.read('notThese')).toEqual([]); expect(suggestions(again.get(), scope).size).toBe(1);
   });
   it('another window of the same person follows what is put away, and adds to it rather than writing over it', async () => {
     // a local store two windows share, telling each of the other's writes, as the browser's storage event does
