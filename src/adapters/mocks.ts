@@ -8,7 +8,6 @@ import { ulid } from 'ulid';
 import type { AiService, DocumentService, FileSystem, Session, Clock, Ids, Repository, ChecklistRow, Research, ResearchStep, CheckState, IssuePoint } from '../ports';
 import { CHECK_REASON, type Deal, type Folder, type RecordKind } from '../domain/model';
 import { ok, fail, type Result } from '../domain/result';
-import { tellingWords } from '../domain/suggest';
 import { key } from '../domain/checklist';
 import type { LineRead } from '../domain/listRead';
 import { suggestChecklistColumns, type ChecklistMapping } from '../domain/checklistImport';
@@ -34,6 +33,28 @@ export function mockLatency(opts: MockOptions) {
 /** a title read mid-sentence: its first letter lower-cased, unless the first word is an acronym ("DSRA") */
 const midSentence = (t: string) => (/^\p{Lu}{2}/u.test(t) ? t : t.charAt(0).toLowerCase() + t.slice(1));
 const findingLink = (f: { id: string; title?: string; }) => { const p = String(f.title ?? '').replace(/[{}|]/g, ' ').replace(/\s+/g, ' ').trim(); return `{${p ? midSentence(p) : 'finding'}|${f.id}}`; };
+
+/**
+ * The stand-ins' rough reading of a text, in place of a model's: its words of four letters or more, a plain plural taken
+ * as its singular, leaving out words any diligence text uses. Only the stand-ins below use it.
+ */
+const COMMON = new Set([
+  'about', 'also', 'been', 'being', 'between', 'both', 'cannot', 'come', 'comes', 'confirm', 'could', 'detail',
+  'does', 'done', 'each', 'either', 'from', 'have', 'here', 'into', 'just', 'like', 'made', 'make', 'many', 'more',
+  'most', 'much', 'must', 'only', 'other', 'over', 'please', 'provide', 'same', 'should', 'show', 'some', 'such',
+  'than', 'that', 'their', 'them', 'then', 'there', 'these', 'they', 'this', 'those', 'through', 'throughout',
+  'under', 'upon', 'used', 'uses', 'using', 'very', 'want', 'were', 'what', 'when', 'where', 'whether', 'which',
+  'while', 'will', 'with', 'within', 'would', 'your', 'document', 'documents', 'project', 'question', 'answer',
+  'response', 'closest', 'support', 'data', 'room', 'matter', 'finding', 'findings',
+]);
+function tellingWords(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const word of text.toLowerCase().match(/[a-z][a-z-]{3,}/g) ?? []) {
+    const one = word.length > 4 && word.endsWith('s') && !word.endsWith('ss') ? word.slice(0, -1) : word;
+    if (!COMMON.has(word) && !COMMON.has(one)) out.add(one);
+  }
+  return out;
+}
 
 async function gate<T>(opts: MockOptions, name: string, fn: () => T | Promise<T>): Promise<Result<T>> {
   await mockLatency(opts)();
