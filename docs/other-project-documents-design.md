@@ -23,7 +23,7 @@ Before this design, three things were missing for a redline against another proj
 Nothing in this design guesses at names to call something another project's:
 - **Capitalized names after "compared to" or "vs"** would flag this deal's own blacklines: "SPA v3 Redline to SPA v2" names "SPA v2".
 - **Other deals' names** depended on which deals a person has and how far start-up has loaded them (startup in [architecture.md](architecture.md#storage-shared-between-pcs)), so people got different answers.
-- **Documents 3 or more other deals hold** (`SHARED_BY`, `sameRoom.ts`; this design's first draft): with four deals made from one data room, `alsoIn` drops every document 3 others hold ([`alsoIn`](../src/backend/ai.ts)), so the whole room would be another project's; and it depends on loaded deals.
+- **Documents 3 or more other deals hold** (`SHARED_BY`, `ai.ts`; this design's first draft): with four deals made from one data room, `alsoIn` drops every document 3 others hold ([`alsoIn`](../src/backend/ai.ts)), so the whole room would be another project's; and it depends on loaded deals.
 - **"A vs B" with different first words** (this design's second draft): it made "Budget vs Actual Q3.pdf" and "Base Case vs Downside Case.pdf" into blacklines, and "Doe vs Roe judgment.pdf" and "Landlord vs Tenant dispute summary.pdf" too, against the cases in [`blacklines.test.ts`](../tests/backend/blacklines.test.ts). A comparison tool's output is a blackline by its cover page whatever its name, so only an uncovered, oddly named comparison is missed, and it is read as now.
 - **"Precedent" in a file's name** (second draft): "Gas Transportation Precedent Agreement.pdf" is this deal's own contract.
 
@@ -31,7 +31,7 @@ A blackline is called this deal's own only when that is confirmed; otherwise the
 
 ## Reused
 
-- `blacklines.ts`: `isBlackline`, `cleanDrafts` (clean, unclear or standalone), `coverOf` and the kept cover, and the name forms "A Redline to B" and "A vs B" (`wants`, `VS`), all unchanged in what they decide.
+- `blacklines.ts`: `isBlackline`, `cleanDrafts` (clean, unclear or standalone), `coverOf` and the kept cover, and the name forms "A Redline to B" and "A vs B" (`wants`, `VS`). A blackline whose cover and name find no clean draft stands alone; a file that only shares a word of its name no longer makes it unclear.
 - `families.ts`: drafts in sibling dated folders; with part 1, versions in one folder; `roomPath`.
 - Part 1's precedent-folder rule: a folder named Precedent, Precedents or Precedent Documents once a leading number and punctuation are taken off ("12. Precedents", never "Conditions Precedent").
 - The "reading" tag, its chip and tooltip ([`ResearchView`](../src/ui/research.tsx)), and the rule in [`check`](../src/backend/ai.ts).
@@ -44,7 +44,7 @@ A blackline is called this deal's own only when that is confirmed; otherwise the
 
 A document is of another project when every place it is in (`roomPath` of its main place and of each copy, so the deal folder's own name counts: a deal folder "X:\Precedents" is one) has a precedents folder on it. A precedent copied into a working folder, or this deal's executed agreement also filed in Precedents, is this deal's own. "Form", "Forms" and "Templates" are not used (this deal's own forms and filings). The test uses names and paths only, so the result is the same on every PC.
 
-A document of another project is never in a family and never a clean draft. A blackline that is itself of another project gets no clean draft from this deal: `cleanDrafts` maps it to `false` (read on its own, as a standalone blackline already is), and it is told as a blackline made on another project (D). Precedent-folder files are also left out of `cleanDrafts` step 4, so one sharing a this-deal blackline's first word does not make it unclear.
+A document of another project is never in a family and never a clean draft. A blackline that is itself of another project gets no clean draft from this deal: `cleanDrafts` maps it to `false` (read on its own, as a standalone blackline already is), and it is told as a blackline made on another project (D).
 
 ### B. What a blackline was compared against
 
@@ -83,7 +83,7 @@ Every secondary source takes at most two places in any pick (the parent design's
 
 ### E. Unclear blacklines
 
-A blackline whose clean draft cannot be told, even from its folder path, name and cover, stays out of every choice, as before ([`ranked`](../src/backend/ai.ts)). A blackline misread is a far greater risk than one missed.
+A blackline whose cover or name finds more than one possible clean draft, even with its folder path, stays out of every choice, as before ([`ranked`](../src/backend/ai.ts)). A blackline misread is a far greater risk than one missed.
 
 ### F. Speed
 

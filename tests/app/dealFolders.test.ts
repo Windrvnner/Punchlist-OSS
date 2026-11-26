@@ -149,7 +149,7 @@ describe('deal checks with the repository and document service', () => {
     const { deal } = await createDealFromForm(store, form);
     const ids = Object.keys(store.get().deals);
     expect(ids.length).toBeGreaterThan(100);
-    const room = { dealId: ids[0], files: 540, matched: 478, printed: 8, same: 8 };
+    const room = { dealId: ids[0], files: 540, matched: 478 };
     const sameRoom = vi.spyOn(store.services.docs, 'sameRoom').mockResolvedValue(ok([room]));
     await expect(findDealTwin(store, { ...form, folders: [debt] })).resolves.toEqual({
       dealId: ids[0], named: false, room,
