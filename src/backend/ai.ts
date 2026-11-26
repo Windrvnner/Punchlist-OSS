@@ -350,6 +350,11 @@ const deeper = (f: FullCheck | undefined) => (f?.mode === 'quick' && f.sample &&
 export const workstreamOf = (w: unknown) => (typeof w === 'string' ? WORKSTREAMS.find((x) => x.toLowerCase() === w.trim().toLowerCase()) ?? '' : '');
 /** what the model is told when it checks checklist items against documents; `redo` holds why its last replies failed */
 type Redo = Map<string, { why: string; said?: unknown }>;
+/**
+ * A checklist item as a check prompt lists it: by its permanent id, never a running number its words could be
+ * confused with, and its words; parts are sized by this line, id included (#1162)
+ */
+const checkLine = (it: ChecklistItem) => `${it.id}: ${it.text}`;
 function checkPrompt(listing: string, items: ChecklistItem[], quick: boolean, redo?: Redo) {
   const where = quick ? '' : ' Add "where": the one or two places that show it, each naming a document you were given, '
     + 'by its id, and its page (or sheet and cell for a spreadsheet), with a short "quote" of the words there.';
@@ -365,8 +370,7 @@ function checkPrompt(listing: string, items: ChecklistItem[], quick: boolean, re
   const shape = `Reply as JSON: {"items": [{"id": "its id", "result": "ok"${okShape}}, `
     + '{"id": "its id", "result": "finding", "title": "…", "workstream": "…", "body": ["…"], "sources": [...]}, '
     + '{"id": "its id", "result": "more", "need": "…"}]}';
-  // each item is shown by its permanent id, never a running number its words could be confused with (#1162)
-  const asked = items.map((it) => `${it.id}: ${it.text}`).join('\n');
+  const asked = items.map(checkLine).join('\n');
   return `Documents:\n${listing}\n\nCheck each of these checklist items, each with its id, against the documents:\n`
     + `${asked}\n\n`
     + `Give each item one "result":\n"ok" when the documents satisfy it.${where}\n${finding}\n${more}\n${shape}`
@@ -650,11 +654,13 @@ export function nodeAi(o: AiOptions) {
   /** a point as one line of a `phrase` call: its kind, what is unresolved, and what would settle it */
   const phraseLine = (x: PhrasePoint) =>
     `[${x.kind}] ${x.what.replace(/\s+/g, ' ')}${x.need ? ` — needed: ${x.need.replace(/\s+/g, ' ')}` : ''}`;
-  /** what one `phrase` call asks, each point named by its record id, never a per-prompt label (#1162) */
+  /** a point as a `phrase` call lists it: by its record id, never a per-prompt label, so parts count the id (#1162) */
+  const phrasePromptLine = (x: PhrasePoint) => `${x.id}: ${phraseLine(x)}`;
+  /** what one `phrase` call asks, each point named by its record id */
   const phrasePrompt = (points: PhrasePoint[]) => [
     'These are unresolved points in the due diligence of a project-finance deal: checklist items no document'
       + ' settles yet ("gap"), and open findings ("finding"). Each starts with its id.',
-    ...points.map((x) => `${x.id}: ${phraseLine(x)}`),
+    ...points.map(phrasePromptLine),
     '',
     'Write one question for the counterparty for each point, asking plainly for the document or confirmation that'
       + ' would settle it. One or two sentences each, polite and specific, in the deal team\'s voice; keep every name'
@@ -2560,7 +2566,7 @@ export function nodeAi(o: AiOptions) {
       const run = phraseRunFor(i.dealId, i.items);
       const size = partSize({
         cap: CHECKLIST_BATCH, out: control.limits.phraseReplyTokens, outLimit: outLimit(fast),
-        in: tokensEach(i.items.map(phraseLine)), inLimit: inLimit(fast),
+        in: tokensEach(i.items.map(phrasePromptLine)), inLimit: inLimit(fast),
       });
       for (let list = run.queue.shift(); list; list = run.queue.shift()) {
         const done = await inParts(list, size, (part) => askPhrasePart(run, fast, part));
@@ -3084,7 +3090,10 @@ export function nodeAi(o: AiOptions) {
       let pending = items; let rest = docs.filter((d) => !tooLongAlone.has(d.docId));
       while (pending.length && rest.length) {
         let using = rest.slice(0, r.docs); const todo = pending;
-        const size = Math.min(r.items, partSize({ cap: todo.length, out: model === m.fast ? control.limits.glanceReplyTokens : control.limits.checkReplyTokens, outLimit: outLimit(model), in: tokensEach(todo.map((it) => it.text)), inLimit: inLimit(model) }));
+        const replyEach = model === m.fast ? control.limits.glanceReplyTokens : control.limits.checkReplyTokens;
+        const inEach = tokensEach(todo.map(checkLine));
+        const outs = { out: replyEach, outLimit: outLimit(model) };
+        const size = Math.min(r.items, partSize({ cap: todo.length, ...outs, in: inEach, inLimit: inLimit(model) }));
         const done = await inParts(todo, size, async (part) => {
           for (;;) {
             try {

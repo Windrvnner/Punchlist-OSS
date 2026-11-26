@@ -3,6 +3,7 @@
 // by an id it was not shown is asked again (#1162).
 import { describe, expect, it } from 'vitest';
 import { itemId } from '../../src/domain/checklist';
+import { tokensOf } from '../../src/backend/limits';
 import { checkLines, deal, doc, itemsIn, listed, Mem, OK, setup, val, type Call } from './reviewKit';
 
 const PERMIT = 'The environmental permit for operation is in place';
@@ -144,5 +145,38 @@ describe('phrasing names each point by its record id (#1162)', () => {
     expect(calls.length).toBe(2);
     expect(calls[1].prompt).toBe(calls[0].prompt);
     expect(out).toEqual(['Q1', 'Q2']);
+  });
+});
+
+describe('parts are sized with each item\'s id counted (#1162)', () => {
+  /** the tokens the lines of a prompt that start with an item id take, ids included */
+  const idLines = (prompt: string) =>
+    (prompt.match(/^i_[0-9a-f]{24}: .*$/gm) ?? []).reduce((n, l) => n + tokensOf(l), 0);
+  /** 60% of the input limit: what a part's items are sized to fill (control: limits.partShare) */
+  const LIMIT = 500;
+  const share = LIMIT * 0.6;
+  const short = Array.from({ length: 40 }, (_, k) => `Item ${k + 1} is in place`)
+    .map((text) => ({ id: itemId('d1', text), text }));
+
+  it('a check part\'s item lines, ids and all, fit its share of the input limit', async () => {
+    const shared = new Mem();
+    const s = setup((c) => settle(c, itemsIn(c).map((it) => it.tag)), { d1: room },
+      { shared, installId: 'pc', checklist: () => ({ broad: short, product: [], sector: [] }), pick: pickAll });
+    s.svc.inputLimit = () => LIMIT;
+    await deal(s.repo);
+    val(await s.ai.firstPass('d1'));
+    expect(s.calls.length).toBeGreaterThan(0);
+    for (const c of s.calls) expect(idLines(c.prompt)).toBeLessThanOrEqual(share);
+  });
+
+  it('a phrase part\'s point lines, ids and all, fit its share of the input limit', async () => {
+    const isPhrase = (c: Call) => c.prompt.includes('Write one question for the counterparty');
+    const s = setup((c) => (isPhrase(c) ? { items: [] } : {}), {}, { shared: new Mem(), installId: 'pc' });
+    s.svc.inputLimit = () => LIMIT;
+    const gaps = short.map((it) => ({ kind: 'gap' as const, id: it.id, what: it.text, need: '' }));
+    await s.ai.phrase!({ dealId: 'd1', items: gaps });
+    const asked = s.calls.filter(isPhrase);
+    expect(asked.length).toBeGreaterThan(0);
+    for (const c of asked) expect(idLines(c.prompt)).toBeLessThanOrEqual(share);
   });
 });
