@@ -16,7 +16,11 @@ export const folderKey = (s: string) => plain(s).replace(LEADING_NUMBER, '').rep
  * but with its number: "07. Permits" and "07 permits" are the same
  */
 const plain = (s: string) => withoutTheAndFolder(` ${tokens(s).join(' ')} `);
-/** a space-padded name without the word "folder" and a leading "the", spaces collapsed: the rule, once */
+/**
+ * a space-padded name without the word "folder" and a leading "the", spaces collapsed: the rule, once.
+ * A "folder" inside a name goes too, as it does in the words; folders whose names are then equal are left to the
+ * word match (#1154)
+ */
 const withoutTheAndFolder = (padded: string) => padded
   .replace(/ folders? /g, ' ')
   .replace(/^ the /, ' ')
@@ -31,7 +35,7 @@ export function foldersOf(paths: string[]): string[] {
 }
 
 /** a name as written: lower case, without a leading number, "the" or the word "folder"; punctuation such as "&" kept */
-const asWritten = (s: string) => withoutTheAndFolder(` ${s.toLowerCase()} `).replace(LEADING_NUMBER, '');
+const asWritten = (s: string) => withoutTheAndFolder(` ${s.trim().toLowerCase().replace(LEADING_NUMBER, '')} `);
 
 /**
  * The one folder whose last name is the name typed, compared as written (#1154): the words compare "O&M" and "OM" as

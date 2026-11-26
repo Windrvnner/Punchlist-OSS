@@ -93,6 +93,10 @@ describe('marks and ampersands in folder names (#1154)', () => {
     expect(matchFolders(dirs, 'the O&M folder')).toEqual(['VDR/04. O&M']);
     expect(matchFolders(dirs, 'OM')).toEqual(['VDR/05. OM']);
   });
+  it('drops the number before "the": "04. The O&M" is named "O&M" (#1154)', () => {
+    const dirs = foldersOf(['VDR/04. The O&M/A.pdf', 'VDR/OM/B.pdf']);
+    expect(matchFolders(dirs, 'O&M')).toEqual(['VDR/04. The O&M']);
+  });
   it('when several folders share the typed name after their numbers, the word match decides', () => {
     const dirs = foldersOf(['VDR/04. O&M/A.pdf', 'VDR/O&M/B.pdf', 'VDR/OM/C.pdf']);
     expect(matchFolders(dirs, 'O&M')).toEqual(['VDR/04. O&M', 'VDR/O&M', 'VDR/OM']);
