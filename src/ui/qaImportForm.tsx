@@ -3,7 +3,7 @@
  * questions the deal already has), a preview of the first rows, what the import will overwrite, and the footer that
  * says what Import will do.
  */
-import { shownDate } from './hooks';
+import { fmtDate } from './hooks';
 import { LeaveFoot } from './dialogs';
 import { checkedOf, chosenOf } from './fieldValue';
 import { showTip, hideTip } from './tip';
@@ -188,13 +188,15 @@ function PreviewRow({ mapping, rows }: { mapping: Mapping; rows: QaPreviewRow[] 
 }
 
 /**
- * A preview cell's words. A real date shows formatted; text typed in a date column shows as written.
+ * A preview cell's words. A date shows as the import will read it, so one valid both ways shows the reading its
+ * context chose; one that can't be read shows a dash.
  */
 function previewCell(field: ImportField, row: QaPreviewRow, mapping: Mapping) {
   const value = String(row.cells[mapping[field]!] ?? '');
   if (field !== 'received' && field !== 'responded') return value;
-  const typed = row.dates[field];
-  return shownDate(typed);   // not a real date: shown as written
+  const iso = row.dates[field];
+  if (iso) return fmtDate(iso);
+  return value.trim() ? '—' : '';
 }
 
 /** What happens to questions the deal already has: merged, or added again as new */
@@ -274,7 +276,7 @@ function ChangesRow({ changes }: { changes: ImportChange[] }) {
 /** A value in the changes table as the Q&A page shows it: dates formatted, the status capitalized, a dash for none */
 function changeText(change: { field: string }, value: string) {
   if (!value) return '—';
-  if (change.field === 'Received' || change.field === 'Date') return shownDate(value);
+  if (change.field === 'Received' || change.field === 'Date') return fmtDate(value);
   if (change.field === 'Status') return value.charAt(0).toUpperCase() + value.slice(1);
   return value;
 }
@@ -297,7 +299,7 @@ function ImportFoot({ qa, plan, onImport }: { qa: ReadQa; plan: ImportPlan; onIm
   );
 }
 
-/** Which values were not read, for the tooltip on the line that counts them */
+/** Which dates and values were not read, for the tooltip on the line that counts them */
 function unreadText(prepared: Prepared | null) {
   const unread = prepared?.unread ?? [];
   if (!unread.length) return '';
@@ -305,7 +307,7 @@ function unreadText(prepared: Prepared | null) {
   return `${unread.slice(0, UNREAD_NAMED).join(' · ')}${more > 0 ? ` · and ${more} more` : ''}`;
 }
 
-/** The footer line takes the focus and shows the unread values on hover or focus, when there are some */
+/** The footer line takes the focus and shows the unread dates and values on hover or focus, when there are some */
 function unreadTipProps(unread: string) {
   if (!unread) return {};
   const off = (e: Event) => hideTip(e.currentTarget as HTMLElement);
@@ -344,11 +346,12 @@ function importSummary(mode: ImportMode, plan: ImportPlan) {
   ].filter(Boolean);
 }
 
-/** The rows and values the file holds that the import leaves out or could not read */
+/** The rows, dates and values the file holds that the import leaves out or could not read */
 function leftOutNotes(prepared: Prepared | null): string[] {
   if (!prepared) return [];
   return [
     prepared.skipped ? `${plural(prepared.skipped, 'row')} without a question left out` : '',
+    prepared.badDates ? `${plural(prepared.badDates, 'date')} not read` : '',
     prepared.unknownValues ? `${plural(prepared.unknownValues, 'value')} not recognized` : '',
   ].filter(Boolean);
 }

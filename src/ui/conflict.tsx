@@ -5,7 +5,7 @@
  */
 import { useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import { useAppState, useStore, shownDate, fmtDateTime } from './hooks';
+import { useAppState, useStore, fmtDate, fmtDateTime } from './hooks';
 import { type Conflict, type State, conflictLabel, versionsWord } from '../app/state';
 import { ResolveConflict } from '../app/commands/conflicts';
 import { GROUP_LABEL } from '../app/commands/deals';
@@ -22,7 +22,7 @@ import { openConflict } from './twoVersions';
 
 type Fmt = (value: any, record: any, s: State) => string;
 const text: Fmt = (v) => String(v ?? '');
-const day: Fmt = (v) => (v ? shownDate(v) : '');
+const day: Fmt = (v) => (v ? fmtDate(v) : '');
 const sources = (list: Source[] | undefined) => (list ?? []).map((x) => x.doc + (x.loc ? ` · ${x.loc}` : '')).join('\n');
 
 /** Every field a record has, in the order a person would look for a difference, with how each reads. */

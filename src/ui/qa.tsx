@@ -1,6 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { RefObject } from 'preact';
-import { useAppState, useStore, shownDate, useDismiss } from './hooks';
+import { useAppState, useStore, fmtDate, useDismiss } from './hooks';
 import { EditField, ReadOnlyContext } from './editField';
 import { readQuestion, keepsUnsaved, unsavedText, unsavedBase, typedResponse } from '../app/fieldDrafts';
 import { questionFieldCommit, type EditableQuestionField } from '../app/questionFields';
@@ -692,7 +692,7 @@ function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted 
               onBlurCapture={() => { typingIn.delete(q.id); left.current = !!q.draft && !q.response.trim() && !holds; setBox((b) => (mine(b) ? { ...b, focused: false } : b)); }}><EditField keep={`${q.id}:response`} read={readQuestion(q.id, 'response')} label="Response" multiline className="rtext" placeholder="Type the response" value={q.response} rev={q.rev} onText={(text, over, elsewhere) => setBox((b) => (mine(b) && b.text === text && b.over === over && b.elsewhere === elsewhere ? b : { id: q.id, v: visit.current, text, over, elsewhere, focused: mine(b) && b.focused }))} commit={(v, over) => store.dispatch(SetResponse, { dealId: q.dealId, questionId: q.id, response: v }, { quiet: true, over })} /></span>
             {stacked && <><div class="qlbl qlbl2"><span class="sub">{stackLabel(q)}</span><span class="grow" /><DraftActions q={q} typed={typed} over={typedOver} elsewhere={mine(box) && box.elsewhere} /></div><DraftBox q={q} /></>}</div>}
       </div>
-      {q.received && <span class="sr-only">{shownDate(q.received)}</span>}
+      {q.received && <span class="sr-only">{fmtDate(q.received)}</span>}
       {asking && <AskFirst ask={`Delete Q${q.n}?`} go="Delete" why="It can be restored from Deleted" onKeep={() => setAsking(false)} onGo={() => { setAsking(false); void del(); }} />}
     </section>
   );
@@ -935,7 +935,7 @@ function QaRow({ r, hide, wide, versions, changed, was = {}, mark, waiting, besi
       : r.response && r.provenance?.origin === 'ai' ? <span class={`${cls('rs')} dr has`}><b class="aim">{AI_LABEL}</b><span dir="auto">{r.response}</span>{chg('rs')}</span>
       : <span class={cls('rs')} dir="auto">{r.response || null}{chg('rs')}</span>)}
     {shown('rby') && <span class={cls('rby')}>{r.respondedBy || null}{chg('rby')}</span>}
-    {shown('rdt') && <span class={cls('rdt')}>{shownDate(r.responded)}{chg('rdt')}</span>}
+    {shown('rdt') && <span class={cls('rdt')}>{fmtDate(r.responded)}{chg('rdt')}</span>}
     {shown('stc') && (versions && !shown('rs') ? <span class="stc cfrs" title={mark}>{vword}</span> : <span class={cls('stc')}>{STATUS_LABEL[r.status]}{chg('stc')}</span>)}
   </>);
 }
@@ -961,14 +961,7 @@ function Sizer({ list, wide, hide }: { list: Question[]; wide: boolean; hide: Re
   const widest = (f: (r: Question) => string) => list.reduce((w, r) => { const v = f(r) ?? ''; return v.length > w.length ? v : w; }, '');
   return (
     <div class="li vsize" aria-hidden="true">
-      <span class="n">{widest((r) => String(r.n))}</span>
-      {!hide.priority && <span class="pr">{widest((r) => r.priority)}</span>}
-      {!hide.askedBy && <span class="by">{widest((r) => r.askedBy)}</span>}
-      <span class="q" />
-      {wide && !hide.response && <span class="rs" />}
-      {wide && !hide.respondedBy && <span class="rby">{widest((r) => r.respondedBy)}</span>}
-      {wide && !hide.responded && <span class="rdt">{widest((r) => shownDate(r.responded))}</span>}
-      {wide && !hide.status && <span class="stc">{widest((r) => STATUS_LABEL[r.status])}</span>}
+      <span class="n">{widest((r) => String(r.n))}</span>{!hide.priority && <span class="pr">{widest((r) => r.priority)}</span>}{!hide.askedBy && <span class="by">{widest((r) => r.askedBy)}</span>}<span class="q" />{wide && !hide.response && <span class="rs" />}{wide && !hide.respondedBy && <span class="rby">{widest((r) => r.respondedBy)}</span>}{wide && !hide.responded && <span class="rdt">{widest((r) => fmtDate(r.responded))}</span>}{wide && !hide.status && <span class="stc">{widest((r) => STATUS_LABEL[r.status])}</span>}
     </div>
   );
 }

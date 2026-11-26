@@ -5,7 +5,6 @@
  * Shows pending / not-saved / updated-elsewhere beside the field.
  */
 import { TEXT_MAX } from '../domain/importExport';
-import { isRealDate } from '../domain/model';
 import { limitClass, limitTitle } from './limit';
 import {
   type FieldDraft, type FieldValue, type ReadField, restoreFieldDraft, showFieldDraft, takeHandedText,
@@ -103,9 +102,8 @@ export function EditField({
   // so a click or Tab lands in it and it shows itself while focused
   const asText = dateAtRest(type, focused, half, draft);
   const shown = dateLabel(asText, className);
-  const asDate = () => dateControl(common, dateEditable(focused, half, draft, value));
   const field = multiline ? <textarea rows={1} {...common} />
-    : type === 'date' ? asDate() : <input type="text" {...common} />;
+    : type === 'date' ? dateControl(common, focused || half || !!draft) : <input type="text" {...common} />;
   return (
     <span class={`efwrap ${asText ? 'dtext' : ''} ${cap ? 'capped' : ''}`}>
       {cap ? <span class={`efcap ${cap.cls ?? ''}`} title={cap.title}
@@ -116,19 +114,8 @@ export function EditField({
   );
 }
 
-/**
- * a date input while edited or holding a real date. A record holding text typed in a log stays a text field, focused
- * too, so it is shown and edited as written (a date input would show it blank) (#1022). While focused, the record
- * decides, not the draft, so a year still being typed into the date input does not turn it into a text field.
- */
-function dateEditable(focused: boolean, half: boolean, draft: string, value: string): boolean {
-  const typed = (text: string) => !!text && !isRealDate(text);
-  const typedText = typed(value) || (!focused && !half && typed(draft));
-  return (focused || half || !!draft) && !typedText;
-}
-
 function dateAtRest(type: 'date' | 'text', focused: boolean, half: boolean, value: string): string {
-  return type === 'date' && !focused && !half && isRealDate(value) ? fmtDate(value) : '';
+  return type === 'date' && !focused && !half && /^\d{4}-\d{2}-\d{2}$/.test(value) ? fmtDate(value) : '';
 }
 
 function dateLabel(text: string, className: string | undefined) {

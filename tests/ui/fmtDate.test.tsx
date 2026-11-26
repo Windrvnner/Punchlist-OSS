@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fmtDate, shownDate } from '../../src/ui/hooks';
+import { fmtDate } from '../../src/ui/hooks';
 
 /** The previous formatter is the output oracle, including its permissive Date parsing (#324). */
 function previousDate(ymd: string): string {
@@ -65,18 +65,5 @@ describe('calendar date formatting (#324)', () => {
     const value = '-271821-04-19';
     expect(+new Date(value + 'T12:00:00')).toBe(-8_640_000_000_000_000);
     expect(fmtDate(value)).toBe(previousDate(value));
-  });
-});
-
-describe('shownDate (#1022)', () => {
-  it('formats a real date and shows typed text exactly as written', () => {
-    expect(shownDate('2026-11-12')).toBe(fmtDate('2026-11-12'));
-    expect(shownDate('11/02/2026')).toBe('11/02/2026');
-    expect(shownDate('Nov-ish')).toBe('Nov-ish');
-    expect(shownDate('')).toBe('');
-  });
-
-  it('shows text that is not a real date as written, never rolled into one', () => {
-    for (const typed of ['2026', '2026-11', '2026-02-30', '11/02/2026']) expect(shownDate(typed), typed).toBe(typed);
   });
 });
