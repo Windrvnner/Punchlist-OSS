@@ -4,10 +4,19 @@
  * the word "folder", and with or without a leading number ("04. Permits" is "permits"). Nothing here asks a model.
  */
 
+import { tokens } from './words';
+
 /** a folder's name as a person says it: lower case, without a leading number, "the" or the word "folder", spaces collapsed */
 export const folderKey = (s: string) => plain(s).replace(/^\d+(?: \d+)* /, '').replace(/^the /, '').trim();
-/** a folder's name with case, punctuation, "the" and the word "folder" aside, but with its number: "07. Permits" and "07 permits" are the same */
-const plain = (s: string) => ` ${s.toLowerCase().replace(/[^a-z0-9&]+/g, ' ')} `.replace(/ folders? /g, ' ').replace(/^ the /, ' ').replace(/\s+/g, ' ').trim();
+/**
+ * a folder's name in the search index's words (letters of any alphabet), without "the" and the word "folder",
+ * but with its number: "07. Permits" and "07 permits" are the same
+ */
+const plain = (s: string) => ` ${tokens(s).join(' ')} `
+  .replace(/ folders? /g, ' ')
+  .replace(/^ the /, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
 
 /** every folder that holds a document, given the documents' paths from the data room ("VDR/Permits/A.pdf" gives "VDR" and "VDR/Permits") */
 export function foldersOf(paths: string[]): string[] {
