@@ -1,24 +1,27 @@
 /**
- * A list read by the model, tied out line by line. The input, pasted text, a document or a table, is a list of
- * lines. The model says what each line is; the app checks every answer against the line itself and accounts for every
- * line: an item (or the rest of the item above it), a heading, a table's own heading row, a blank, or a line left out.
- * A line the model did not account for, or answered with words the line does not hold, is unplaced: it is asked about
- * again and, if still unplaced, left out. Nothing in the input is dropped: a line left out is listed, and a person can
- * bring it in where it sits.
+ * A list read whole by the model, tied out line by line. The input, pasted text, a document or a table, is a list of
+ * lines. The model reads it in one call and says what kind each line is, and for a table which columns hold the item,
+ * section and subsection; it never gives the words. Every item and heading is worded as its line in the file. The app
+ * accounts for every line: an item (or the rest of the item above it), a heading, a table's own heading row, a blank,
+ * or a line left out. A line the model did not name, or a table row whose named cell is blank, is unplaced: it is asked
+ * about again and, if still unplaced, left out. Nothing in the input is dropped: a line left out is listed, and a person
+ * can bring it in where it sits.
  */
 import { key, type ListItem } from './checklist';
 
-/** what the model says a line is; `text` is the part of the line it takes, as the line has it */
+/** what the model says a line is */
 export interface LineRead {
   /** the line's number, from 1 */
   n: number;
   /** section or subsection: a heading; item: a new item; more: the rest of the item above (a wrapped line); columns: a table's heading row; left: not an item */
   k: 'section' | 'subsection' | 'item' | 'more' | 'columns' | 'left';
-  text?: string;
-  /** a table row's own section and subsection cells, when it has them */
-  section?: string;
-  subsection?: string;
 }
+
+/** for a table, the columns (from 1) that hold each row's item, section and subsection */
+export interface ListCells { item: number; section?: number; subsection?: number }
+
+/** the model's reading of a whole list: each line's kind, by its number, and a table's columns */
+export interface ListReading { reads: Map<number, LineRead>; cells?: ListCells }
 
 /** an item, with the lines it came from */
 export type ReadItem = ListItem & { lines: number[] };
@@ -42,47 +45,39 @@ export function tableLines(columns: string[], rows: string[][]): string[] {
 /** Text as lines: every line break counts, so a line number means the same line to the person, the model and the app. */
 export const textLines = (text: string): string[] => text.replace(/\r\n?/g, '\n').split('\n');
 
-/** a word of a line's leading label: a number, letter, roman numeral or bullet, or a word such as "Section" before one */
-const LABEL = /^((section|part|article|schedule|annex|exhibit|appendix|item)|[-•*–—:.()[\]0-9]+|\(?([a-z]|[ivxlc]+)\)?[.):]?|\d+(\.\d+)*[a-z]?[.):]?)$/i;
+/** a table row's cells, as tableLines joins them */
+const cellsOf = (line: string) => line.split(' | ');
 
-/**
- * Whether `part` is all of the line's words, case, spacing and quotes aside: for a table row ("a | b"), one whole cell;
- * otherwise the whole line, but for a leading number, letter or bullet ("1.2", "a)", "Section 3:"). So an item the model
- * shortened is not taken as accounted for with words of its line missing.
- */
-function holds(line: string, part: string): boolean {
-  const p = key(part); if (!p) return false;
-  const cells = line.split(' | ');
-  if (cells.length > 1) return cells.some((c) => key(c) === p);
-  const l = key(line); if (!l.endsWith(p)) return false;
-  return l.slice(0, l.length - p.length).split(/\s+/).filter(Boolean).every((w) => LABEL.test(w));
+/** the cell a column names, as written, or '' when the line is not a table row or the column is past it */
+function cellAt(line: string, column: number | undefined): string {
+  const cells = cellsOf(line);
+  return cells.length > 1 && column && column >= 1 ? (cells[column - 1] ?? '') : '';
 }
 
 /**
- * The words a reading stands for, exactly as the line has them: for a table row ("a | b") the whole cell the reading names,
- * otherwise the whole line without its edge spaces, numbering and bullets included. The model's own wording is only checked against the line.
+ * The words a line's item or heading stands for, exactly as the file has them: a text line whole (its edge spaces
+ * aside), a table row the cell the model's columns name for that kind. '' when there are none.
  */
-function asWritten(line: string, part: string): string {
-  const cells = line.split(' | ');
-  return cells.length > 1 ? cells.find((c) => key(c) === key(part)) ?? part : line.trim();   // edge spaces are layout
+function wordsOf(line: string, k: LineRead['k'], cells: ListCells | undefined): string {
+  if (cellsOf(line).length === 1) return line.trim();     // edge spaces are layout
+  const column = k === 'item' ? cells?.item : k === 'section' ? cells?.section : cells?.subsection;
+  const cell = cellAt(line, column);
+  return key(cell) ? cell : '';
 }
 
-/**
- * The lines that are not blank and have no usable reading: the ones to ask about again. A reading is usable when its kind
- * is known and any words it takes (an item, a heading, a table row's section) are in the line.
- */
-export function unplaced(lines: string[], reads: ReadonlyMap<number, LineRead>): number[] {
+/** The lines that are not blank and have no usable reading: the ones to ask about again. */
+export function unplaced(lines: string[], reading: ListReading): number[] {
   const out: number[] = [];
-  lines.forEach((line, i) => { if (key(line) && !usable(line, reads.get(i + 1))) out.push(i + 1); });
+  lines.forEach((line, i) => { if (key(line) && !usable(line, reading.reads.get(i + 1), reading.cells)) out.push(i + 1); });
   return out;
 }
 
-function usable(line: string, r: LineRead | undefined): boolean {
+/** a reading is usable when its kind is known and an item or heading has words in its line */
+function usable(line: string, r: LineRead | undefined, cells: ListCells | undefined): boolean {
   if (!r) return false;
   if (r.k === 'left' || r.k === 'columns' || r.k === 'more') return true;
   if (r.k !== 'item' && r.k !== 'section' && r.k !== 'subsection') return false;
-  if (!r.text || !holds(line, r.text)) return false;
-  return (!r.section || holds(line, r.section)) && (!r.subsection || holds(line, r.subsection));
+  return !!wordsOf(line, r.k, cells);
 }
 
 /**
@@ -90,7 +85,8 @@ function usable(line: string, r: LineRead | undefined): boolean {
  * under the heading above it, with its own words. A reading that is not usable leaves its line out; a "more" line with
  * no item above it in the same section is left out too, never joined to an item it does not belong to.
  */
-export function tieOut(lines: string[], reads: ReadonlyMap<number, LineRead>, bringIn: ReadonlySet<number> = new Set()): TiedOut {
+export function tieOut(lines: string[], reading: ListReading, bringIn: ReadonlySet<number> = new Set()): TiedOut {
+  const { reads, cells } = reading;
   const items: ReadItem[] = []; const left: number[] = [];
   const count = { lines: lines.length, items: 0, more: 0, headings: 0, blank: 0, left: 0 };
   let section = ''; let subsection = ''; let last: ReadItem | null = null;
@@ -101,21 +97,21 @@ export function tieOut(lines: string[], reads: ReadonlyMap<number, LineRead>, br
     const n = i + 1;
     if (!key(line)) { count.blank++; return; }
     const r = reads.get(n);
-    if (!usable(line, r)) { leave(n); return; }
-    if (r!.k === 'section') { section = asWritten(line, r!.text!); subsection = ''; last = null; count.headings++; return; }
-    if (r!.k === 'subsection') { subsection = asWritten(line, r!.text!); last = null; count.headings++; return; }
-    if (r!.k === 'columns') { count.headings++; return; }
-    if (r!.k === 'more') {
+    if (!r || !usable(line, r, cells)) { leave(n); return; }
+    if (r.k === 'section') { section = wordsOf(line, r.k, cells); subsection = ''; last = null; count.headings++; return; }
+    if (r.k === 'subsection') { subsection = wordsOf(line, r.k, cells); last = null; count.headings++; return; }
+    if (r.k === 'columns') { count.headings++; return; }
+    if (r.k === 'more') {
       if (!last) { leave(n); return; }
       const it: ReadItem = last; it.text = `${it.text} ${line.trim()}`; it.lines.push(n); count.more++; return;
     }
-    if (r!.k === 'item') {
+    if (r.k === 'item') {
       // a table row's own section cell starts that section (and no subsection) for it and the rows under it, as a section
       // filled in only on the first row of each section is laid out; its subsection cell does the same within the section
-      const s = r!.section ? asWritten(line, r!.section) : ''; const sub = r!.subsection ? asWritten(line, r!.subsection) : '';
+      const s = cellAt(line, cells?.section); const sub = cellAt(line, cells?.subsection);
       if (key(s) && key(s) !== key(section)) { section = s; subsection = ''; }
       if (key(sub)) subsection = sub;
-      add(asWritten(line, r!.text!), n);
+      add(wordsOf(line, r.k, cells), n);
       return;
     }
     leave(n);
