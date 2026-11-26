@@ -54,7 +54,7 @@ async function heldLayout() {
     layout, table: first.value as ImportTable,
     answer: (value: Result<Proposal>) => answer(value),
     holdReads: () => { holdReads = true; },
-    releaseRead: () => reads.shift()?.(),
+    releaseRead: () => { for (const release of reads.splice(0)) release(); },
   };
 }
 
@@ -120,5 +120,24 @@ describe('cancelling an ask', () => {
     await switching;
     expect(held.layout.view).toMatchObject({ reading: false, mapping: { text: 2 } });
     expect(held.layout.view.table?.sheet).toBe('Updated review');
+  });
+});
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+describe('a reread overtaken by an ask', () => {
+  it.each(['fails', 'lands'] as const)('does not stay reading when the proposal %s', async (how) => {
+    const held = await heldLayout();
+    held.holdReads();
+    const reading = held.layout.reread({ sheet: 'Updated review' });
+    const asked = held.layout.ask(held.table);
+    await settle();
+    held.releaseRead();
+    await reading;
+    held.answer(how === 'lands' ? updated : fail({ kind: 'invalid' as const, message: 'No proposal' }));
+    await settle();
+    held.releaseRead();
+    await asked;
+    expect(held.layout.view).toMatchObject({ reading: false, asking: false });
   });
 });

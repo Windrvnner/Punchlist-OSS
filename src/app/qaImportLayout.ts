@@ -45,12 +45,12 @@ export class QaImportLayout {
 
   /**
    * The model proposes the sheet, the heading row and the columns; the app checks the proposal against the file and
-   * shows it. Anything the person does meanwhile overtakes it. Returns the error the dialog shows ('' clears it), or
-   * undefined to leave it as it is.
+   * shows it. Anything the person does meanwhile overtakes it, and it overtakes a sheet read in flight. Returns the
+   * error the dialog shows ('' clears it), or undefined to leave it as it is.
    */
   async ask(asked: ImportTable): Promise<string | undefined> {
     const mine = ++this.request;
-    this.show({ ...this.current, asking: true });
+    this.show({ ...this.current, asking: true, reading: false, wantedSheet: undefined });
     const proposal = await proposeLayout(this.store, asked);
     if (this.request !== mine) return undefined;
     if (proposal.ok) {
