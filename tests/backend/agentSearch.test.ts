@@ -13,6 +13,7 @@ import type { Folder } from '../../src/backend/logRepository';
 import type { DocRecord } from '../../src/backend/documents';
 import { pageNumber } from '../../src/backend/agentSearch';
 import { inlineTools, toolSpecs } from '../../src/backend/agentPrompts';
+import { qaRow } from '../../src/backend/qaRow';
 
 class Mem implements Folder {
   files = new Map<string, string>();
@@ -123,6 +124,13 @@ describe('searching the Q&A log from the chat, a page at a time', () => {
     expect(got).toContain(`Response to Q1 from Sponsor, 2026-11-02: ${longText(0).trim()}`);
     expect(got).toContain('Page 1 of 1.');
   }, 60_000);
+
+  it('a row with who responded and when, but no response yet, still shows them', () => {
+    const asked = { n: 7, status: 'open' as const, text: 'Send the permit' };
+    const row = qaRow({ ...asked, respondedBy: 'Sponsor', responded: '2026-11-03' });
+    expect(row.split('\n')[2]).toBe('Response to Q7 from Sponsor, 2026-11-03: none yet');
+    expect(qaRow({ n: 8, status: 'open', text: 'Send the lease' }).split('\n')[2]).toBe('Response to Q8: none yet');
+  });
 
   it('an AI draft in a Q&A row is labeled as one', async () => {
     const s = setup(calls(qa()));

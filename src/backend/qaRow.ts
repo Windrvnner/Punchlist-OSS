@@ -29,7 +29,7 @@ export function qaRow(q: QaRecord, deal = ''): string {
   const details = DETAILS.map(([k, label]) => (cell(q, k) ? `${label} ${cell(q, k)}` : ''));
   const head = [`Q${q.n}`, cell(q, 'status'), ...details, deal];
   const said = cell(q, 'response');
-  const response = said ? `${responseHeader(q)}: ${said}` : `Response to Q${q.n}: none yet`;
+  const response = `${responseHeader(q)}: ${said || 'none yet'}`;
   return `${head.filter(Boolean).join(' · ')}\nQuestion: ${cell(q, 'text')}\n${response}`;
 }
 
