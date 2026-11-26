@@ -89,10 +89,9 @@ export interface AgentKit {
    */
   steppedDown?(model: string, to: ToolMode, sure?: boolean): void;
   /**
-   * how many times a failed call to this model may be asked again now (decisions: Retries): 0 when retries are off,
-   * or while it fails every call
+   * how many times a failed call may be asked again (decisions: Retries): 0 when retries are off
    */
-  retriesFor?(model: string): number;
+  retries?(): number;
   /** put a conversation's transcript in the service's store, where the model can search it; the file's id */
   keepTranscript?(text: string): Promise<string>;
   /** take a file out of the service's store; one already gone is not an error */

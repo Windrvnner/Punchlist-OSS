@@ -564,7 +564,7 @@ export function nodeAi(o: AiOptions) {
     return retried(async () => {
       if (b && (b.left-- <= 0 || (b.deal && b.deal.left-- <= 0))) throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
       let reply = ''; try { reply = await o.service.complete(input); return reply; } finally { count(kind, input, String(reply ?? '')); }
-    }, (r) => !String(r ?? '').trim(), input.model);
+    }, (r) => !String(r ?? '').trim());
   };
   /**
    * Ask, and read the reply. A reply that cannot be read even loosely is sent back once to the model that wrote it, with
@@ -682,7 +682,8 @@ export function nodeAi(o: AiOptions) {
       if (b && (b.left-- <= 0 || (b.deal && b.deal.left-- <= 0))) throw Object.assign(new Error('This search made as many calls as one search may.'), { code: 'spent' });
       let reply = ''; try { const r = await o.service.converse!(input); reply = r.text || JSON.stringify(r.calls ?? ''); return r; } finally { count(kind, input, String(reply ?? '')); }
     };
-    return input.results?.length || input.conversation ? once() : retried(once, (r) => !String(r.text ?? '').trim() && !r.calls?.length, input.model, tried);
+    if (input.results?.length || input.conversation) return once();
+    return retried(once, (r) => !String(r.text ?? '').trim() && !r.calls?.length, tried);
   };
   /** models that refused a way of calling tools in this run of the app, and the way they stepped down to */
   const stepped = new Map<string, ToolMode>();
@@ -1265,7 +1266,7 @@ export function nodeAi(o: AiOptions) {
       toolMode: (model: string) => stepped.get(model) ?? o.toolCalls ?? control.models.toolCalls,
       // a refusal that could also be a passing error (a 500 on a turn of tool results) holds for the run only when it comes twice with no tool results taken between
       steppedDown: (model: string, to: ToolMode, sure = true) => { const k = `${model}\n${to}`; if (sure || doubted.has(k)) stepped.set(model, to); else doubted.add(k); },
-      retriesFor: retried.retriesFor,
+      retries: retried.retries,
       ...(o.service.upload ? { keepTranscript: (text: string) => o.service.upload!({ name: `conversation-${Date.now().toString(36)}.txt`, bytes: new TextEncoder().encode(text) }) } : {}),
       ...(o.service.remove ? { drop: (fileId: string) => o.service.remove!(fileId) } : {}),
     } : {}),
