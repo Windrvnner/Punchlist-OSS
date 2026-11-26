@@ -14,9 +14,12 @@ import {
   withoutFindingLinks, type Scope,
 } from '../app/conversations';
 import { splitCited } from '../domain/cite';
-import type { Message, State } from '../app/state';
+import { DEAL_PAGES, type Message, type State } from '../app/state';
 import type { Deal, Question, Source } from '../domain/model';
 import { QuestionCard, FindingCard } from './answerCards';
+import { runOffer } from '../app/answerOffer';
+import { bareDealName } from '../app/commands/deals';
+import type { AnswerOffer } from '../ports';
 
 type Verdict = State['ui']['verdicts'][string];
 
@@ -65,7 +68,7 @@ export function Answer({ scope, message: answer, asked, onOpen, suggest }: {
   const store = useStore();
   const state = useAppState();
   const deal = scope.kind === 'all' ? null : state.deals[scope.dealId];
-  const [card, setCard] = useState<null | 'q' | 'f' | 'use'>(null);
+  const [card, setCard] = useState<null | 'q' | 'f' | 'use' | 'offer'>(null);
   // a card or the Replace prompt, opened from a button (or a question picked from the list), gives the focus back to
   // it when it closes
   const from = useRef<HTMLElement | null>(null);
@@ -98,7 +101,7 @@ export function Answer({ scope, message: answer, asked, onOpen, suggest }: {
     closeReplace();
     void use.useOn(questionId, response).then(closeUseCard);
   };
-  const openCard = (opener: HTMLElement, which: 'q' | 'f' | 'use') => {
+  const openCard = (opener: HTMLElement, which: 'q' | 'f' | 'use' | 'offer') => {
     from.current = opener;
     setCard(which);
   };
@@ -110,6 +113,7 @@ export function Answer({ scope, message: answer, asked, onOpen, suggest }: {
         onOpen={openFromAnswer} />}
       <AnswerText answer={answer} plain={plain} marked={marked} deal={deal} onOpen={openFromAnswer} />
       <AnswerActs scope={scope} hasDeal={!!deal} clean={clean} openCard={openCard} askUse={use.askUse} />
+      {answer.offer && <OfferButton offer={answer.offer} openCard={(button) => openCard(button, 'offer')} />}
       {card === 'use' && deal && <UsePicker id={answer.id} deal={deal}
         onPick={(questionId) => use.askUse(questionId, true)} onClose={closeCard} />}
       {suggested && deal && <SuggestedQuestion question={suggested} dealId={deal.id} answer={answer}
@@ -118,6 +122,9 @@ export function Answer({ scope, message: answer, asked, onOpen, suggest }: {
       {card === 'q' && deal && <QuestionCard scope={scope} answerId={answer.id}
         initial={questionFromAnswer(scope, answer, asked)} onDone={closeCard} />}
       {card === 'f' && deal && <FindingCard dealId={deal.id} answer={answer} onDone={closeCard} />}
+      {/* the offered question's card keeps its own draft, apart from Add as question's (#1054) */}
+      {card === 'offer' && deal && answer.offer?.kind === 'question' && <QuestionCard scope={scope}
+        answerId={`offer:${answer.id}`} initial={answer.offer.text} onDone={closeCard} />}
     </div>
   );
 }
@@ -137,6 +144,36 @@ function AnswerText({ answer, plain, marked, deal, onOpen }: {
   return (
     <Brief paragraphs={[answer.text]} deal={deal} marked={sideFinding}
       onFinding={(finding) => store.ui({ side: { kind: 'finding', id: finding.id } })} />
+  );
+}
+
+/** What the button for an offered action says. */
+function offerLabel(state: State, offer: AnswerOffer) {
+  if (offer.kind === 'newDeal') return 'New Deal…';
+  if (offer.kind === 'question') return 'Log Question…';
+  if (offer.kind === 'unresolved') return 'Add All Unresolved to Q&A…';
+  const deal = state.deals[offer.dealId];
+  const page = DEAL_PAGES.find(([id]) => id === offer.page)?.[1] ?? '';
+  return deal ? `Open ${bareDealName(deal.name)} ${page}` : `Open ${page}`;
+}
+
+/**
+ * The action the model offered with its answer (#1054): nothing runs until it is pressed. **Log Question…** opens the
+ * question's card, the others run at once.
+ */
+function OfferButton({ offer, openCard }: { offer: AnswerOffer; openCard: (opener: HTMLElement) => void }) {
+  const store = useStore();
+  const state = useAppState();
+  const press = (button: HTMLElement) => {
+    if (offer.kind === 'question') openCard(button);
+    else runOffer(store, offer, (hash) => { location.hash = hash; });
+  };
+  return (
+    <div class="offer">
+      <button type="button" class="btn sm" onClick={(e) => press(e.currentTarget as HTMLElement)}>
+        {offerLabel(state, offer)}
+      </button>
+    </div>
   );
 }
 

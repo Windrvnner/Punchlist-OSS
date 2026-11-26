@@ -218,6 +218,30 @@ async function storedFolders(repo: Repository | undefined, dealId: string): Prom
 
 /** the stand-in chat agent's answers being worked on, by run id */
 const researching = new Map<string, { steps: ResearchStep[]; t0: number; stopped?: boolean }>();
+/**
+ * Stand-in for the model offering an action under its answer (#1054), so the demo and the browser suites can show the
+ * button: a few fixed requests, each offering what a model would. The real model decides from the words itself.
+ */
+function standInOffer(message: string): { text?: string; sources?: []; offer?: unknown } {
+  const said = message.trim().toLowerCase();
+  const offering = (text: string, offer: unknown) => ({ text, sources: [] as [], offer });
+  if (said === 'set up a new deal') {
+    return offering('You can start the new deal here.', { action: 'new deal' });
+  }
+  if (said === 'take me to the q&a') {
+    return offering('Here is this deal’s Q&A log.', { action: 'open page', page: 'qa' });
+  }
+  if (said === 'put every gap in the q&a log') {
+    const text = 'Each gap and open finding without a question can go to the Q&A log.';
+    return offering(text, { action: 'add unresolved' });
+  }
+  if (said === 'ask them for the permit list') {
+    const question = 'Please provide the list of permits held for the project.';
+    return offering(`Here is a question for the counterparty: “${question}”`, { action: 'log question', question });
+  }
+  return {};
+}
+
 export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => ({
   dealBrief: (dealId) => gate(opts, 'dealBrief', async () => {
     const fs = (await storedFindings(repo, dealId)).filter((f) => f.status === 'open');
@@ -303,7 +327,8 @@ export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => 
       await wait(opts.latency ? opts.latency[1] : 700); read.done = true; read.result = cited.filter((x) => x.doc === doc).map((x) => x.loc).join(', ');
     }
     if (i.runId) researching.delete(i.runId);
-    return ok({ ...r.value, research: { steps: steps.map((step) => ({ ...step })), ms: Date.now() - t0, read } });
+    const research = { steps: steps.map((step) => ({ ...step })), ms: Date.now() - t0, read };
+    return ok({ ...r.value, research, ...standInOffer(i.message) });
   },
   research: async (runId) => { const r = researching.get(runId); return ok(r ? { steps: r.steps.map((x) => ({ ...x })), ms: Date.now() - r.t0 } : null); },
   stop: async (runId) => { const r = researching.get(runId); if (r) r.stopped = true; return ok(!!r); },
