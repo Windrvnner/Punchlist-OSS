@@ -23,8 +23,11 @@ export function topWords(text: string, n = 30): string[] {
  * Nothing is left out here for being short or common: that is for whoever compares.
  */
 export function tokens(text: string): string[] {
-  return text.replace(/([\p{Ll}\p{N}]\p{M}*)(\p{Lu})/gu, '$1 $2').replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, '$1 $2').toLowerCase()
-    .replace(/(^|[^\p{L}\p{M}\p{N}])(\p{L})\s*&\s*(\p{L})(?![\p{L}\p{M}\p{N}])/gu, '$1$2$3').match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
+  const camelCase = /([\p{Ll}\p{N}]\p{M}*)(\p{Lu})/gu;
+  const acronymThenWord = /(\p{Lu})(\p{Lu}\p{Ll})/gu;
+  const letterAmpersandLetter = /(^|[^\p{L}\p{M}\p{N}])(\p{L})\s*&\s*(\p{L})(?![\p{L}\p{M}\p{N}])/gu;
+  return text.replace(camelCase, '$1 $2').replace(acronymThenWord, '$1 $2').toLowerCase()
+    .replace(letterAmpersandLetter, '$1$2$3').match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
 }
 /** a word as a search compares it: a plural and its singular are one word */
 export const fold = (w: string) => (w.length > 4 && w.endsWith('ies') ? `${w.slice(0, -3)}y` : w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w);
