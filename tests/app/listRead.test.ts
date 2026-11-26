@@ -53,7 +53,9 @@ describe('the stand-in reading the mock-up list', () => {
 });
 
 describe('a pasted line keeps its own text (#1061)', () => {
-  const pasted = ['Insurance', '1.2\tInsurance certificates\tLender to confirm', '1.3\tBroker letter', '\tand cover note'];
+  const pasted = [
+    'Insurance', '1.2\tInsurance certificates\tLender to confirm', '1.3\tBroker letter', '\tand cover note',
+  ];
   const source = checklistPaste(pasted.join('\n'))!;
   const lines = checklistSourceLines(source, null)!;
   const written = checklistWrittenLines(source, null);
