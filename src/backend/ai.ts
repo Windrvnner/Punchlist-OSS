@@ -1905,7 +1905,9 @@ export function nodeAi(o: AiOptions) {
         const got = new Map<number, { text: string; why: string; also?: string[] }>(); let last = 0; let inOrder = true;
         for (const x of kept) {
           // an item split in two comes as "texts"; one reworded as "text"
-          const n = int(x?.n); const texts = (Array.isArray(x?.texts) ? strings(x.texts) : typeof x?.text === 'string' ? [x.text] : []).map((t) => t.replace(/\s+/g, ' ').trim().slice(0, 500)).filter(Boolean).slice(0, 6);
+          const n = int(x?.n);
+          const given = Array.isArray(x?.texts) ? strings(x.texts) : typeof x?.text === 'string' ? [x.text] : [];
+          const texts = given.map((t) => fitText(t.replace(/\s+/g, ' ').trim())).filter(Boolean);
           if (n === null || n < 1 || n > part.length) continue; if (n <= last) inOrder = false; last = Math.max(last, n);
           if (!texts.length || (texts.length === 1 && texts[0] === part[n - 1].trim()) || got.has(n - 1)) continue;
           got.set(n - 1, { text: texts[0], why: (strings(x.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 120), ...(texts.length > 1 ? { also: texts.slice(1) } : {}) });
@@ -2003,7 +2005,11 @@ export function nodeAi(o: AiOptions) {
         if (part.length === 1 && items.filter((x) => x.text).length === 1) for (const x of items) if (x.text) x.m = 0;
         const got = new Map<number, string>();
         let last = -1;
-        for (const x of items) { if (x.m === undefined || !x.text) continue; last = x.m; if (!twice.has(x.m)) got.set(x.m, x.text.slice(0, 2000)); }
+        for (const x of items) {
+          if (x.m === undefined || !x.text) continue;
+          last = x.m;
+          if (!twice.has(x.m)) got.set(x.m, fitText(x.text));
+        }
         if (cut) got.delete(last);      // the last entry of a cut reply may be cut short
         if (got.size) { answered++; streak = 0; }
         else { empty++; streak++; why = cut ? `${SERVICE}’s reply was cut off, so nothing was added` : reply && Array.isArray(reply.items) ? `${SERVICE} left a point without a question, so nothing was added` : `${SERVICE}’s reply could not be read, so nothing was added`; }
