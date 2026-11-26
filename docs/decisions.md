@@ -96,6 +96,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
   last accepted table until another sheet or heading row is read (#380).
 - **Undo Last Import…** in the Q&A page's ⋯ menu takes back this PC's last import after a confirmation, with no Undo after it, and leaves alone questions changed since the import.
 - A responder column is read as the response's author.
+- Q&A logs and checklists are Excel files (.xlsx, .xlsm, .xls, .xlsb) and .csv, read as Excel reads it. No other spreadsheet format is read for them. A log in .xlsb is read but not yet updated (#94, #1021).
 - On import, real date cells are read as dates and plain numbers are not. An ambiguous date is settled by the row's other date, its neighbors, and the rule that no date is in the future; otherwise it is left blank and listed.
 - Marking imported questions that have a response as Answered is optional and off by default.
 - Merge matches a row by wording first, then by number; a row that matches a deleted question brings it back. A row that names who submitted it never matches another party's question. "Will overwrite" is shown field by field first.
@@ -134,7 +135,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Title, workstream, and detail stay editable; a finding has no next step. The fast model fills in the
   workstream from the firm's list only, or leaves it blank.
 - The workstreams are Technical, Legal, Commercial, Financial, Structure, Insurance, Tax, Regulatory & permits, Real estate, HR & benefits, IT & cyber, Antitrust & FDI, Compliance, and Environmental & social. A firm can set its own in `firm.workstreams`, and a record keeps a workstream that was taken off the list.
-- An issues list (PDF, Word, or email) imports into Findings. Each point joins an existing finding it repeats, or becomes a new finding with an AI title and counsel's words; points are compared with open and closed findings and shown under **Already Raised** (each with **Keep separate**) and **New Findings** before **Import**.
+- An issues list (a PDF, a Word file, or pasted text) imports into Findings. Each point joins an existing finding it repeats, or becomes a new finding with an AI title and counsel's words; points are compared with open and closed findings and shown under **Already Raised** (each with **Keep separate**) and **New Findings** before **Import**. An email is not read as an issues list (#1021).
 - A finding's page shows the checklist item that raised it, the questions asked about the finding or its item, and **Ask the Counterparty** while the finding is open and its item is turned on. The question is linked to both and takes the finding's workstream (#2).
 - A file attached on a finding goes with the next message only, and joins the finding's sources through **Add to Sources**.
 - Every source of a finding is within reach, listed by document with its places. A hover lists up to four documents; a longer list opens under the detail (flow A).

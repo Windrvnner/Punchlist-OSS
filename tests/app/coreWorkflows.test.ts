@@ -92,7 +92,7 @@ async function importLenderIssues(store: Store, dealId: string) {
   }));
   const subject = 'Subject: Southridge loan documentation issues';
   const body = points.map(({ n, text }) => `${n}. ${text}`).join('\r\n');
-  const file = new File([`${subject}\r\n\r\n${body}`], 'Lender issues list.eml');
+  const file = new File([`${subject}\r\n\r\n${body}`], 'Lender issues list.txt');
   const doc = { docId: 'doc_southridge1', doc: file.name };
   const attach = vi.fn(async () => ok(doc));
   const read = vi.fn(async () => ok({ points }));

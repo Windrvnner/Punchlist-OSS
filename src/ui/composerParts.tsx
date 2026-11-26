@@ -71,7 +71,7 @@ export function AttachButton({ target, count, readOnly }: {
         <Icon name="clip" size={13} /><span class="t">Attach</span>
         {count > 0 && <span class="acount">{count}/{MAX_ATTACHED}</span>}
       </button>
-      <input type="file" ref={file} hidden multiple accept=".pdf,.docx,.xlsx,.xls,.csv,.msg,.eml"
+      <input type="file" ref={file} hidden multiple accept=".pdf,.docx,.xlsx,.xls,.csv"
         onChange={(e) => chosen(e.currentTarget as HTMLInputElement)} />
     </>
   );
