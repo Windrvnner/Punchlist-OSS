@@ -61,7 +61,7 @@ import type { Source } from '../domain/model';
 import type { DocRecord } from './documents';
 import { strings, list as listOf, int } from './lenient';
 import { TOO_LONG_ASK, TOO_LONG_REPLY, UNREAD_REPLY } from './limits';
-import { SERVICE } from '../control';
+import { SERVICE, control } from '../control';
 import { codeOf, type AgentKit, type AgentOptions, type AgentQuestion } from './agentKit';
 import type { Cited, Run, Sent } from './agentKit';
 import { AgentRun } from './agentRun';
@@ -81,6 +81,14 @@ type Answered = {
 };
 /** the agent's limits, its options with their defaults */
 type Limits = { turns: number; width: number; folderDocs: number; compactAt: (model: string) => number };
+
+/**
+ * The characters one reply's tool results may take together: sized the way batches are, `limits.partShare` of the
+ * tokens at which its conversation is compacted, at `limits.charsPerToken` (#480). What is left of it bounds each
+ * result, so that a fresh prompt holding all of them fits the model however many turns the reply takes.
+ */
+const roomOf = (compactAt: number) =>
+  Math.floor((compactAt * control.limits.partShare) / 100) * control.limits.charsPerToken;
 
 const SEARCHES: readonly What[] = ['documents', 'findings', 'qa', 'all'];
 const REPLY_SHAPE = '{"tool": …} or {"text": "…", "sources": […]}';
@@ -143,7 +151,7 @@ class Answering {
     private readonly limits: Limits,
     folderMemory: FolderMemory,
   ) {
-    this.run = new AgentRun(kit, question, progress);
+    this.run = new AgentRun(kit, question, progress, roomOf(limits.compactAt(question.model)));
     this.folders = new FolderReader(this.run, folderMemory, limits);
     this.conversation = new KeptConversation(this.run, limits.compactAt, limits.width);
   }

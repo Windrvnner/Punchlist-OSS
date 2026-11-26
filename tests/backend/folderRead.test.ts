@@ -113,14 +113,52 @@ describe('reading a whole folder from the chat', () => {
     const recs = Array.from({ length: 2000 }, (_v, i) => doc(`Permits/Permit ${String(i + 1).padStart(4, '0')}.pdf`));
     const s = setup(recs, (_c, k) => (k === 1 ? { tool: 'folder', folder: 'permits', lookFor: 'expiry' } : { text: 'ok', sources: [] }), {
       folderDocs: 5000,
+      compactAt: 8_000,
       // every batch finds something in each of its documents, at length
       reads: (c) => { const l = listed(c); return { text: l.map((x, i) => `${x.path} expires in 2030 and carries conditions on noise, dust, water use, traffic and reporting that the sponsor must meet every quarter. [${i + 1}]`).join(' '), sources: l.map((x) => ({ doc: x.tag, page: 1, quote: 'expires in 2030' })) }; },
     });
     expect((await s.ai.answer(ask('Review the permits folder'))).ok).toBe(true);
     expect(s.batches.length).toBe(250);
-    const next = s.turns[1].prompt; expect(next.length).toBeLessThan(40_000);
+    const next = s.turns[1].prompt;
+    // what the read hands back fits this reply's room: 60% of compactAt, at 3 characters a token
+    const result = next.slice(next.indexOf('You had all 2000'));
+    expect(result.length).toBeLessThan(Math.floor((8_000 * 60) / 100) * 3);
     expect(next).toContain('You had all 2000 documents in VDR/Permits read'); expect(next).toMatch(/Documents \d+–\d+: passages at D\d+ p\. 1/); expect(next).toMatch(/\d+ more batches found passages, past what fits here/);
   }, 30_000);
+
+  /** a stand-in batch reader that finds, at length, the expiry of every document it is given */
+  const longReads = (c: Call) => {
+    const l = listed(c);
+    const says = (x: { path: string }, i: number) =>
+      `${x.path} expires in 2030 and carries conditions on noise, dust, water use, traffic and reporting. [${i + 1}]`;
+    return { text: l.map(says).join(' '), sources: l.map((x) => ({ doc: x.tag, page: 1, quote: 'expires in 2030' })) };
+  };
+
+  it('a folder of 200 documents comes back whole: what each batch found, in full (#480)', async () => {
+    const recs = Array.from({ length: 200 }, (_v, i) => doc(`Permits/Permit ${String(i + 1).padStart(3, '0')}.pdf`));
+    const first = (k: number) => (k === 1 ? { tool: 'folder', folder: 'permits', lookFor: 'expiry', all: true } : null);
+    const s = setup(recs, (_c, k) => first(k) ?? { text: 'ok', sources: [] }, { folderDocs: 5000, reads: longReads });
+    expect((await s.ai.answer(ask('Review the permits folder'))).ok).toBe(true);
+    expect(s.batches.length).toBe(25);
+    const next = s.turns[1].prompt;
+    for (const r of recs) expect(next).toContain(`${r.rel} expires in 2030 and carries conditions`);
+    expect(next).not.toContain('past what fits here');
+  }, 30_000);
+
+  it('folder reads on every one of 25 turns stay within the room, and the reply answers (#480)', async () => {
+    const recs = Array.from({ length: 300 }, (_v, i) => doc(`Permits/Permit ${String(i + 1).padStart(3, '0')}.pdf`));
+    const read = (k: number) => ({ tool: 'folder', folder: 'permits', lookFor: `expiry ${k}`, all: true });
+    const s = setup(recs, (c, k) => (c.prompt.includes('It is your last') ? { text: 'ok', sources: [] } : read(k)), {
+      folderDocs: 5000, compactAt: 8_000, turns: 25, reads: longReads,
+    });
+    expect((await s.ai.answer(ask('Review the permits folder'))).ok).toBe(true);
+    expect(s.turns.length).toBe(25);
+    const last = s.turns[24].prompt;
+    const results = last.slice(last.indexOf('What you have done so far'));
+    // past the room, each turn adds only its count line
+    expect(results.length).toBeLessThan(Math.floor((8_000 * 60) / 100) * 3 + 25 * 250);
+    expect(last).toMatch(/\d+ more batches found passages, past what fits here/);
+  }, 60_000);
 
   it('a folder read through says so; a name that matches none gets the folders that are there', async () => {
     const small = Array.from({ length: 20 }, (_v, i) => doc(`Insurance/Policy ${i + 1}.pdf`));

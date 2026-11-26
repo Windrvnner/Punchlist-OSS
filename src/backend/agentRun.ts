@@ -46,8 +46,23 @@ export class AgentRun {
   /** the number of the next tag */
   private nextTag = 1;
 
-  constructor(readonly kit: AgentKit, readonly question: AgentQuestion, readonly progress: Run) {
+  /**
+   * @param room the characters this reply's tool results may take together (agent.ts `roomOf`, from the model's input
+   * limit); with none given, no bound
+   */
+  constructor(
+    readonly kit: AgentKit,
+    readonly question: AgentQuestion,
+    readonly progress: Run,
+    readonly room = Number.POSITIVE_INFINITY,
+  ) {
     if (kit.talk) this.keepTags(question.thread?.tags ?? []);
+  }
+
+  /** the characters of the room the tool results so far have left (#480) */
+  left(): number {
+    const used = this.done.reduce((sum, x) => sum + x.length, 0);
+    return Math.max(0, this.room - used);
   }
 
   get steps(): ResearchStep[] {

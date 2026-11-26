@@ -13,11 +13,6 @@ import { batchAsk, noun, oneLine, quoted, shorten } from './agentPrompts';
 
 /** batches of a folder review read at the same time */
 const AT_ONCE = 3;
-/**
- * the most characters one folder read tells the main session of what it found: well inside a model's context however
- * large the folder
- */
-const FOLDER_TEXT = 24_000;
 /** about how many characters listing one document to cite adds to the main session's prompt */
 const LISTING_CHARS = 60;
 /** how many conversations the agent keeps folder reads and asks for */
@@ -74,9 +69,9 @@ export class FolderReader {
    * Read a whole folder for something, a batch of `width` documents at a time, the most important first; what was
    * found, for the prompt. A folder read for the same thing before in this conversation reads only what was not read
    * then (documents added since included); for something else, or in another conversation, it is read again. More
-   * than `folderDocs` documents still to read are read only when the person has `agreed`. What goes back is bounded
-   * (`FOLDER_TEXT`): batches that found nothing are counted, not listed, and past the bound a batch that found
-   * something gives its places only. Throws only when the service cannot be reached.
+   * than `folderDocs` documents still to read are read only when the person has `agreed`. What goes back is bounded by
+   * what is left of the reply's room (`AgentRun.left`): batches that found nothing are counted, not listed, and past
+   * half of it a batch that found something gives its places only. Throws only when the service cannot be reached.
    */
   async read(said: string, lookFor: string, agreed: boolean): Promise<string> {
     const look = oneLine(lookFor).toLowerCase();
@@ -355,10 +350,12 @@ class FolderPass {
   }
 
   /**
-   * What was found, bounded: in full for the first half of the room, then by its places alone; a batch past the room
-   * is counted, and its documents are not listed to the model, so the prompt stays bounded however large the folder.
+   * What was found, bounded by what is left of the reply's room: in full for the first half of it, then by its places
+   * alone; a batch past it is counted, and its documents are not listed to the model, so the prompt stays bounded
+   * however large the folder.
    */
   private boundedFindings(): string[] {
+    const room = this.run.left();
     let used = 0;
     let over = 0;
     const lines: string[] = [];
@@ -368,8 +365,8 @@ class FolderPass {
       const short = `${finding.at}: passages at ${finding.places}.`;
       const newDocs = finding.got.filter((x) => !this.before.has(x));
       const listing = newDocs.length * LISTING_CHARS;
-      const line = used + full.length + listing <= FOLDER_TEXT / 2 ? full
-        : used + short.length + listing <= FOLDER_TEXT ? short
+      const line = used + full.length + listing <= room / 2 ? full
+        : used + short.length + listing <= room ? short
         : '';
       if (line) {
         lines.push(line);
