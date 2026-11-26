@@ -31,26 +31,31 @@ const keep = (w: string) => (w.length < 2 || /^\d+$/.test(w) || FILLER.has(w) ? 
 export interface DocWords { counts: Map<string, number>; length: number; title: string[] }
 /** Count the words of a document. `first` is its first page, when the text has pages; otherwise the text's own start is the title. */
 export function countWords(text: string, first = text): DocWords {
-  const counts = new Map<string, number>(); let length = 0;
-  for (const t of tokens(text)) { const w = keep(t); if (!w) continue; counts.set(w, (counts.get(w) ?? 0) + 1); length++; }
-  const title: string[] = [];
-  for (const t of tokens(first)) { if (title.length >= TITLE_WORDS) break; const w = keep(t); if (w && !title.includes(w)) title.push(w); }
-  return { counts, length, title };
+  const tally = new WordTally();
+  tally.add(text, first);
+  return tally.words();
 }
 
-/** the words of a text counted a piece at a time as `countWords` counts them, the first making the title */
+/**
+ * The words of a text counted a piece at a time, as `countWords` counts a whole text: the pieces' first words make the
+ * title, unless `first` gives the text it is taken from.
+ */
 export class WordTally {
   private readonly counts = new Map<string, number>();
   private length = 0;
   private readonly title: string[] = [];
 
-  add(text: string): void {
+  add(text: string, first = text): void {
     for (const t of tokens(text)) {
       const w = keep(t);
       if (!w) continue;
       this.counts.set(w, (this.counts.get(w) ?? 0) + 1);
       this.length++;
-      if (this.title.length < TITLE_WORDS && !this.title.includes(w)) this.title.push(w);
+    }
+    for (const t of this.title.length < TITLE_WORDS ? tokens(first) : []) {
+      if (this.title.length >= TITLE_WORDS) break;
+      const w = keep(t);
+      if (w && !this.title.includes(w)) this.title.push(w);
     }
   }
 
