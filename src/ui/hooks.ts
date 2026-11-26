@@ -91,7 +91,7 @@ export const whenText = (iso: string) => {
   return d.toLocaleDateString(LOCALE, { month: 'short', day: 'numeric' });
 };
 
-/** A "when" in the middle of a sentence ("identified just now", "Closed 3 days ago"): lower case, except a date ("Nov 16") */
+/** A "when" inside a sentence ("identified just now", "Closed 3 days ago"): lower case, except a date ("Nov 16") */
 export const whenInSentence = (iso: string) => {
   const w = whenText(iso);
   return /^[A-Z][a-z]{2} \d/.test(w) ? w : w[0].toLowerCase() + w.slice(1);

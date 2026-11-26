@@ -406,7 +406,8 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
   const marked = new Set(f.body.flatMap((b) => splitCited(b, f.sources.length).flatMap((p) => p.refs)));
   const docs = byDocument(f.sources);
   const listed = !fewDocuments(f.sources);
-  const raised = f.origin !== 'ai' && f.raisedBy ? `Raised by ${f.raisedBy} · ${fmtDate(localYmd(f.raisedAt))}` : `identified ${whenInSentence(f.raisedAt)}`;
+  const raisedBy = `Raised by ${f.raisedBy} · ${fmtDate(localYmd(f.raisedAt))}`;
+  const raised = f.origin !== 'ai' && f.raisedBy ? raisedBy : `identified ${whenInSentence(f.raisedAt)}`;
   const commit = async (status: 'open' | 'closed', text: string) => { const r = await store.dispatch(SetFindingStatus, { dealId, findingId, status, note: text.trim() || undefined }, { idempotencyKey: 'fst-' + f.id }); if (r.ok) setNote(null); };
   const del = async () => {
     const result = await store.dispatch(DeleteFinding, { dealId, findingId }, { idempotencyKey: 'fdel-' + f.id });
@@ -415,7 +416,9 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
   };
   return (
       <div class="opening">
-        <div class="lbl fmeta"><span>{f.workstream}{dot(f)}{raised}{f.reviewed ? ` · reviewed by ${f.reviewed.by}, ${fmtDate(localYmd(f.reviewed.at))}` : ''}{last ? ` · ${lastText} · ${whenText(last.at).toLowerCase()}` : ''}<OnListMark f={f} /></span>
+        <div class="lbl fmeta"><span>{f.workstream}{dot(f)}{raised}
+          {f.reviewed ? ` · reviewed by ${f.reviewed.by}, ${fmtDate(localYmd(f.reviewed.at))}` : ''}
+          {last ? ` · ${lastText} · ${whenInSentence(last.at)}` : ''}<OnListMark f={f} /></span>
           <span class="fctl">
             {/* each control keeps its place and its width whatever the finding's state, so the hand finds it without looking */}
             <button type="button" class={`btn sm rev ${f.reviewed ? 'on' : ''}`} id="f-review" aria-pressed={!!f.reviewed} onClick={() => void store.dispatch(ReviewFinding, { dealId, findingId, reviewed: !f.reviewed }, { idempotencyKey: 'frev-' + f.id })}><Icon name={f.reviewed ? 'check' : 'checkbox'} size={14} /> Reviewed</button>
