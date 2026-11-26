@@ -5,7 +5,6 @@
  * the person checks "Keep separate". Every other point is listed under "New findings", read only, with the title and
  * workstream the model gave it. Nothing is recorded until Import.
  */
-import type { ComponentChildren } from 'preact';
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { useAppState, useStore } from './hooks';
 import { Icon } from './icons';
@@ -74,7 +73,7 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
   const [busy, setBusy] = useState<'' | 'reading' | 'importing'>('');
   const [error, setError] = useState('');
   const [restart, setRestart] = useState(false); const [swapping, setSwapping] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null); const token = useRef(0);
+  const token = useRef(0);
   // The list as read and the check marks are kept on this PC as they change, so closing, a reload or a restart loses neither,
   // nor the model call that read the list: opening the import again picks it up where it was left. Another
   // list read in its place, "start over" (which asks first) or the import itself lets it go.
@@ -85,6 +84,13 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
   useLayoutEffect(keep, [list, kept]);
   const close = () => { if (busy === 'importing') return; setSwapping(false); token.current++; store.ui({ dialog: null }); };
   const startOver = () => { token.current++; dropImport(KEY); setRestart(false); setSwapping(false); setBusy(''); setError(''); setList(null); setKept(new Set()); };
+  // back to the file and the paste box, the paste as it was left, as the checklist's change; the list stays kept
+  const change = () => {
+    setSwapping(false);
+    setRestart(false);
+    setError('');
+    setList(null);
+  };
 
   type Reader = (current: () => boolean) => ReturnType<typeof readIssuesList>;
   const load = async (name: string, reader: Reader) => {
@@ -105,11 +111,9 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
   const read = (file: File) => void load(file.name, (current) => readIssuesList(store, dealId, file, current));
   const pasted = (text: string) => void load('the pasted list',
     (current) => readPastedIssuesList(store, dealId, text, current));
-  const pick = <FileInput id="il-file" accept={ACCEPT} inputRef={fileRef} onFile={read} />;
-  const browse = () => fileRef.current?.click();
 
   if (!list) return <PickStep keyName={KEY} fresh={afresh} error={error} reading={busy === 'reading'} onFile={read}
-    onPaste={pasted} onClose={close} browse={browse}>{pick}</PickStep>;
+    onPaste={pasted} onClose={close} />;
 
   const { points } = list;
   const { shown, raised, fresh, input } = reviewIssuesList(s, dealId, list, kept);
@@ -126,13 +130,13 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
     if (!r.ok) { keepNow.current(); setError(`Couldn’t import: ${r.error.message}`); return; }
     store.ui({ dialog: null });
   };
-  const name = issuesListTitle(list.doc.doc);
   return (
     <Modal onClose={close} label="Import an issues list" blur className="sdlg imdlg ilf">
       <Head onClose={close} disabled={busy === 'importing'} />
       <div class="ilf-body" style={{ '--nw': nw }}>
-        {/* the end of the name stays in sight when it is cut: lists from one counsel differ by their date */}
-        <div class="srow"><div class="k">File</div><div class="ilfile"><span class="fnw" title={list.doc.doc}><span class="fn">{name.slice(0, -9)}</span><span>{name.slice(-9)}</span></span><span class="c" id="il-count">{plural(points.length, 'point')}</span><button type="button" class="linkb" id="il-change" disabled={!!busy} onClick={() => { setRestart(false); if (kept.size) setSwapping(true); else fileRef.current?.click(); }}>change</button><button type="button" class="linkb" id="il-restart" disabled={!!busy} onClick={() => { setSwapping(false); setRestart(true); }}>start over</button>{pick}<span class="grow" /></div></div>
+        <ListFileRow file={list.doc.doc} points={points.length} busy={!!busy}
+          onChange={() => (kept.size ? setSwapping(true) : change())}
+          onRestart={() => { setSwapping(false); setRestart(true); }} />
         {raised.length > 0 && <div class="srow top"><div class="k">Already Raised<span
           class="cnt">{num(raised.length)}</span></div><div id="il-raised">
           {raised.map((k) => { const p = points[k]; const [what, words] = was(k); return (
@@ -148,7 +152,8 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
         </div></div>}
       </div>
       {/* another list would drop the points checked on this one: asked first, as closing is */}
-      {swapping ? <LeaveFoot id="il-swap" ask="Choose another list?" go="Choose" keep={() => setSwapping(false)} leave={() => { setSwapping(false); fileRef.current?.click(); }} />
+      {swapping ? <LeaveFoot id="il-swap" ask="Choose another list?" go="Choose" keep={() => setSwapping(false)}
+        leave={change} />
         : restart ? <LeaveFoot id="il-restart-ask" ask="Clear this import and start over?" go="Start Over"
           keep={() => setRestart(false)} leave={startOver} />
         : <div class="xfoot"><span id="il-line" class={error ? 'err' : ''} role={error ? 'alert' : undefined}>{error || (busy === 'reading' ? 'Reading the list' : busy === 'importing' ? 'Importing' : plural(fresh.length, 'new finding'))}</span><span class="grow" /><button class="btn sm pri" type="button" id="il-go" disabled={!!busy} onClick={() => void run()}>Import</button></div>}
@@ -171,13 +176,11 @@ interface PickProps {
   onFile: (file: File) => void;
   onPaste: (text: string) => void;
   onClose: () => void;
-  browse: () => void;
-  /** the hidden file input */
-  children: ComponentChildren;
 }
 
 /** Step 1: a file, or the list pasted into the box and sent with Next, as a checklist is pasted (firmChecklistSteps) */
-function PickStep({ keyName, fresh, error, reading, onFile, onPaste, onClose, browse, children }: PickProps) {
+function PickStep({ keyName, fresh, error, reading, onFile, onPaste, onClose }: PickProps) {
+  const fileRef = useRef<HTMLInputElement>(null);
   const [paste, setPaste] = useState(() => (fresh ? '' : keptPaste(keyName)));
   // what is typed in the box is kept on this PC as it changes, so closing, a reload or a restart loses none of it
   useLayoutEffect(() => {
@@ -190,14 +193,38 @@ function PickStep({ keyName, fresh, error, reading, onFile, onPaste, onClose, br
       <Head onClose={onClose} />
       <PickFileRow dropId="il-drop" errorId="il-error" error={error} onFile={onFile}>
         Drop a file here, or{' '}
-        <button type="button" class="linkb" id="il-browse" onClick={browse}>choose a file…</button>
-        {children}
+        <button type="button" class="linkb" id="il-browse" onClick={() => fileRef.current?.click()}>
+          choose a file…</button>
+        <FileInput id="il-file" accept={ACCEPT} inputRef={fileRef} onFile={onFile} />
       </PickFileRow>
       <PasteRow id="il-paste" value={paste} onInput={setPaste} />
       <div class="xfoot"><span id="il-line">{line}</span><span class="grow" />
         <PasteNext id="il-paste-next" lines={lines} busy={reading} onNext={() => onPaste(paste)} />
       </div>
     </Modal>
+  );
+}
+
+interface FileRowProps {
+  file: string;
+  points: number;
+  busy: boolean;
+  onChange: () => void;
+  onRestart: () => void;
+}
+
+/** The list's file, its points, change and start over. The end of the name stays in sight when it is cut: lists from
+ * one counsel differ by their date. */
+function ListFileRow({ file, points, busy, onChange, onRestart }: FileRowProps) {
+  const name = issuesListTitle(file);
+  return (
+    <div class="srow"><div class="k">File</div><div class="ilfile">
+      <span class="fnw" title={file}><span class="fn">{name.slice(0, -9)}</span><span>{name.slice(-9)}</span></span>
+      <span class="c" id="il-count">{plural(points, 'point')}</span>
+      <button type="button" class="linkb" id="il-change" disabled={busy} onClick={onChange}>change</button>
+      <button type="button" class="linkb" id="il-restart" disabled={busy} onClick={onRestart}>start over</button>
+      <span class="grow" />
+    </div></div>
   );
 }
 
