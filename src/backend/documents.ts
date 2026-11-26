@@ -494,7 +494,8 @@ export function nodeDocuments(o: DocumentsOptions) {
   }
   /**
    * The words a spreadsheet uses most; undefined when it could not be read, which is not the same as having none (it is
-   * read again). Read a cell at a time, so a spreadsheet of any size is read with the memory of one piece of it.
+   * read again). Read a cell at a time, so the file is never held whole: memory grows with the words it uses, not
+   * with its size.
    */
   async function sheetWords(at: string, dealId?: string, docId?: string): Promise<string[] | undefined> {
     try {
