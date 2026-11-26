@@ -26,9 +26,9 @@ export const handleOf = (k: number): string => `R${k + 1}`;
 
 /**
  * "response R1" or "the response R1" in a model's text: the one form the prompts ask for. A bare R1 is never taken for
- * a handle, nor one with a decimal after it, since amounts in rand read "R1.2 billion" (#1105).
+ * a handle, so amounts in rand ("R1.2 billion") stay as written (#1105).
  */
-const HANDLE = /\b(?:([Tt]he) )?([Rr]esponse) R(\d+)\b(?![.,]\d)/g;
+const HANDLE = /\b(?:([Tt]he) )?([Rr]esponse) R(\d+)\b/g;
 
 /**
  * A model's text with each handle it was shown, named as "response R1", put back as "the response to Q12" (#1105).
