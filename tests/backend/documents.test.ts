@@ -6,7 +6,7 @@ import { PassThrough } from 'node:stream';
 import { spawnSync } from 'node:child_process';
 import { sheetPart, type Sheet } from '../../src/domain/sheets';
 import { nodeDocuments, docIdFor, hashBytes } from '../../src/backend/documents';
-import { roomPath } from '../../src/backend/families';
+import { roomPath, ATTACHED } from '../../src/backend/families';
 import {
   holdFolder, libreOfficeConverter, shortExt, pdfPages, pdfLook, readChangeList, type Converter,
 } from '../../src/backend/convert';
@@ -129,6 +129,29 @@ describe('documents on real folders', () => {
     const rowNumbers = Array.from({ length: 40 }, (_, i) => String(i + 1)).sort().slice(0, 28);
     expect(wordsOf(FA)).toEqual(['agreement', 'credit', '1', '2', '3']);
     expect(wordsOf(NOTES)).toEqual(['note', 'three', 'two']);
+    expect(wordsOf(MODEL)).toEqual(['line', 'cover', ...rowNumbers]);
+  });
+  it('reads again a PDF and a sheet attached in the app that its index under older rules held (#1147)', async () => {
+    const root = tmp();
+    const vdr = path.join(root, 'vdr');
+    put(vdr, 'Grid.pdf', pdf('grid'));   // the sheet is attached only, in no folder
+    const TERMS = pdf('term sheet', 2);
+    const attached: [Uint8Array, string, string[], number?][] = [
+      [TERMS, `d1/office/${idOf(TERMS)}.pdf`, ['sheet', 'term'], 2],
+      [MODEL, `d1/office/${idOf(MODEL)}.xlsx`, ['line', 'cover', 'debt']],
+    ];
+    for (const [bytes, rel] of attached) put(path.join(root, 'shared', 'attachments'), rel, bytes);
+    keepLines(root, attached.map(([bytes, rel, words, pages]) => olderLine(ATTACHED, bytes, rel, words, pages)));
+    const indexed = attached.map(([bytes]) => JSON.stringify({ d: idOf(bytes), n: 1, t: '', w: 'sheet:1' }));
+    fs.mkdirSync(path.join(root, 'local-office'));
+    fs.writeFileSync(path.join(root, 'local-office', 'words2-d1.jsonl'), `${indexed.join('\n')}\n`);
+    await indexAll(pc(root, 'office', undefined, { index: true }), vdr);
+    const ix = wordIndex(nodeFolder(path.join(root, 'local-office')));
+    expect(attached.map(([bytes]) => ix.has('d1', idOf(bytes)))).toEqual([true, true]);
+    const reread = pc(root, 'office', undefined, { index: true }).docs.records('d1');
+    const wordsOf = (bytes: Uint8Array) => reread.find((r) => r.docId === idOf(bytes))?.words;
+    const rowNumbers = Array.from({ length: 40 }, (_, i) => String(i + 1)).sort().slice(0, 28);
+    expect(wordsOf(TERMS)).toEqual(['sheet', 'term', '1', '2']);
     expect(wordsOf(MODEL)).toEqual(['line', 'cover', ...rowNumbers]);
   });
   it('a folder taken off the deal stops feeding checks and questions, and its documents still open', async () => {

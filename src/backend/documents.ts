@@ -490,6 +490,89 @@ export function nodeDocuments(o: DocumentsOptions) {
     } catch { return []; }
   }
 
+  /** what reading a file gave; `stuck`: it did not turn into pages; `unpageable`: it would not this time */
+  interface FileRead {
+    pages?: number; via?: string; tracked?: number; words?: string[]; cover?: string;
+    stuck: boolean; unpageable: boolean;
+  }
+  /** what a record line says of a file read: the pages, words and cover it has */
+  const readOf = (r: FileRead) => ({
+    ...(r.pages !== undefined ? { pages: r.pages } : {}), ...(r.via !== undefined ? { via: r.via } : {}),
+    ...(r.tracked !== undefined ? { tracked: r.tracked } : {}), ...(r.words !== undefined ? { words: r.words } : {}),
+    ...(r.cover !== undefined ? { cover: r.cover } : {}),
+  });
+  /** a Word or PowerPoint file's words, read straight from the file into `r`; false when it cannot be read so */
+  function readDirect(dealId: string, docId: string, name: string, src: string, r: FileRead): boolean {
+    try {
+      const text = officeText(fs.readFileSync(src), name);
+      r.words = topWords(text.text);
+      if (text.tracked && r.pages === undefined) r.tracked = text.tracked;
+      o.index?.add(dealId, docId, countWords(text.text, text.first));
+      return true;
+    } catch { return false; }   // to the converter
+  }
+  /** a file's pages and words, read from the PDF made of it (or itself) into `r`; throws for one that won't convert */
+  async function readPages(
+    dealId: string, docId: string, name: string, src: string, via: string | undefined, r: FileRead,
+  ) {
+    const info: ConvertInfo = {};
+    const pdf = await asPdf({ docId, name, ...(via !== undefined ? { via } : {}) }, src, info);
+    if (pdf !== src) {
+      r.via = o.convert?.id;
+      if (info.tracked) r.tracked = info.tracked;
+    }
+    try {
+      const look = await pdfLook(fs.readFileSync(pdf), Infinity);
+      r.pages = look.pages;
+      r.words = topWords(look.text);
+      o.index?.add(dealId, docId, countWords(look.text, look.first));
+      if (PDF.test(name)) r.cover = coverOf(look.first) ?? undefined;
+    } finally { if (pdf !== src) discard(docId); }
+  }
+  /**
+   * Read a file's pages and words on this PC, as far as its record (`had`) lacks them or this PC's own index lacks the
+   * document. `failed`: known from this session not to turn into pages. Shared by the folders' run and the files
+   * attached in the app (#1147).
+   */
+  async function readFile(
+    dealId: string, docId: string, name: string, src: string,
+    had: DocRecord | undefined, bytes: number, failed: boolean,
+  ): Promise<FileRead> {
+    const r: FileRead = { pages: had?.pages, via: had?.via, tracked: had?.tracked, words: had?.words, cover: had?.cover,
+      stuck: false, unpageable: false };
+    // this PC keeps its own index, so it reads the words of every file in its copy once
+    const unindexed = !!o.index && !o.index.has(dealId, docId);
+    // Word and PowerPoint: the text is read from the file, and it is converted only when first sent or opened. One that
+    // cannot be read so (damaged, or locked with a password) goes to the converter, which says whether it makes pages.
+    const direct = DIRECT.test(name);
+    const unread = r.words === undefined || unindexed;
+    const readDirectly = direct && unread && readDirect(dealId, docId, name, src, r);
+    if (paged(name) && (direct ? unread && !readDirectly : r.pages === undefined || unread)) {
+      r.stuck = failed;   // known not to turn into pages: it was not brought across, and is counted and named as before
+      if (!r.stuck) {
+        try { await readPages(dealId, docId, name, src, had?.via, r); } catch { r.stuck = true; r.unpageable = true; }
+      }
+    } else if (!paged(name) && unread) r.words = await sheetWords(src, bytes, dealId, docId);
+    return r;
+  }
+  /**
+   * The files attached in the app that this PC's index does not hold (after the index's version changed, #1147): they
+   * are in no folder the run reads, so each is read where it is kept, and its record said again if it changed.
+   */
+  async function readAttachedUnindexed(dealId: string) {
+    if (!o.index) return;
+    for (const d of all(dealId).values()) {
+      const place = [d, ...(d.copies ?? [])].find((p) => p.folder === ATTACHED);
+      if (!place || o.index.has(dealId, d.docId)) continue;
+      const at = path.join(attachments, place.rel);
+      if (!fs.existsSync(at)) continue;
+      const read = await readFile(dealId, d.docId, place.name, at, d, d.size, false);
+      if (!wordsChanged(d.words, read.words) && read.pages === d.pages) continue;
+      const line = { docId: d.docId, hash: d.hash, name: place.name, folder: ATTACHED, rel: place.rel, size: d.size };
+      say(dealId, { ...line, ...readOf(read) });
+    }
+  }
+
   // ---- indexing
   interface Job { folders: DealFolder[]; log: string[]; done: boolean; run: Promise<void>; timing?: IndexTiming; /** started by a look at folders already indexed, not by a person */ again?: boolean; /** with `again`: a check of everything starts by then and reads what this run finds, so a run that ends before it says so to onIndexed */ quietUntil?: number }
   /** The data room, a folder of it, or this PC's disk stopped answering: the run cannot go on, and must not be taken for one that finished. */
@@ -583,18 +666,15 @@ export function nodeDocuments(o: DocumentsOptions) {
             const docId = docIdFor(hash); const had = known(dealId, docId); here.add(docId); foundAt.set(placeKey(folder.path, f.rel), new Set([docId]));                  // the file is there, whether or not it can be turned into pages today
             // a file shown as pages is never indexed without them: it must convert, and the PDF must open
             // nothing is uploaded and no model is asked here: the file is counted, and its words are, on this PC
-            let pages = had?.pages; let via = had?.via; let tracked = had?.tracked; let words = had?.words; let cover = had?.cover; let asPages = true; const t0 = Date.now();
-            const unindexed = !!o.index && !o.index.has(dealId, docId);   // this PC keeps its own index, so it reads the words of every file in its copy once
-            // Word and PowerPoint: the text is read from the file, and it is converted only when first sent or opened.
-            // One that cannot be read so (damaged, or locked with a password) goes to the converter, as before, which says whether it can make pages.
-            const direct = DIRECT.test(name); const unread = words === undefined || unindexed; let readDirect = false;
-            if (direct && unread) try { const r = officeText(fs.readFileSync(src), name); words = topWords(r.text); if (r.tracked && pages === undefined) tracked = r.tracked; o.index?.add(dealId, docId, countWords(r.text, r.first)); readDirect = true; } catch { /* to the converter */ }
-            if (paged(name) && (direct ? unread && !readDirect : pages === undefined || unread)) {
-              let stuck = !!failed;                                         // known not to turn into pages: it was not brought across, and is counted and named as before
-              if (!stuck) try { const info: ConvertInfo = {}; const pdf = await asPdf({ docId, name, ...(had?.via !== undefined ? { via: had.via } : {}) }, src, info); if (pdf !== src) { via = o.convert?.id; if (info.tracked) tracked = info.tracked; } try { const look = await pdfLook(fs.readFileSync(pdf), Infinity); pages = look.pages; words = topWords(look.text); o.index?.add(dealId, docId, countWords(look.text, look.first)); if (PDF.test(name)) cover = coverOf(look.first) ?? undefined; } finally { if (pdf !== src) discard(docId); } }
-              catch { stuck = true; unpagedHere.set(f.abs, { size: f.size, mtimeMs: f.mtimeMs }); }
-              if (stuck && pages === undefined) { asPages = false; unpaged++; skipped.unpaged.push(f.rel); }      // pages it already had stay; only its words are missing
-            } else if (!paged(name) && (words === undefined || unindexed)) words = await sheetWords(src, bytesRead, dealId, docId);
+            let asPages = true; const t0 = Date.now();
+            const fileRead = await readFile(dealId, docId, name, src, had, bytesRead, !!failed);
+            const { pages, words, cover, stuck, unpageable } = fileRead;
+            if (unpageable) unpagedHere.set(f.abs, { size: f.size, mtimeMs: f.mtimeMs });
+            if (stuck && pages === undefined) {   // pages it already had stay; only its words are missing
+              asPages = false;
+              unpaged++;
+              skipped.unpaged.push(f.rel);
+            }
             workMs += Date.now() - t0;
             if (asPages) {
               // said once per place: a copy of a file already known is a second place for the same document, not a new one, and is not said again each run
@@ -602,12 +682,8 @@ export function nodeDocuments(o: DocumentsOptions) {
                 || (had.cover === undefined && cover !== undefined) || !seenHereAt(dealId, docId, folder.path, f.rel);
               if (changed) {
                 told.add(folder.path);
-                say(dealId, {
-                  docId, hash, name, folder: folder.path, rel: f.rel, size: bytesRead,
-                  ...(pages !== undefined ? { pages } : {}), ...(via !== undefined ? { via } : {}),
-                  ...(tracked !== undefined ? { tracked } : {}), ...(words !== undefined ? { words } : {}),
-                  ...(cover !== undefined ? { cover } : {}),
-                });
+                const line = { docId, hash, name, folder: folder.path, rel: f.rel, size: bytesRead };
+                say(dealId, { ...line, ...readOf(fileRead) });
               }
               indexed++; if (words !== undefined && !words.length) skipped.wordless.push(f.rel);
             }
@@ -622,6 +698,7 @@ export function nodeDocuments(o: DocumentsOptions) {
       if (inbox) { try { fs.rmdirSync(inbox); } catch { /* another deal is being indexed, or it was never made */ } }
     }
     saveHashes(true);
+    await readAttachedUnindexed(dealId);
     // what is no longer where it was seen in these folders has left that place; it may still be at another. A folder that reads as empty is taken as unreadable, not as emptied.
     for (const { folder, files, shut } of found) {
       if (!files.length) continue;
