@@ -74,12 +74,12 @@ Every secondary source takes at most two places in any pick (the parent design's
 
 ### D. What the model is told
 
-`blacklineLine` gains the result of (B); a line for a document of another project is added in `send` the same way:
+`blacklineLine` gains the result of (B); a line for a document of another project is added in `send` the same way. Each document is named by its id (its docId, #1162), written `<id>` here:
 - **Own:** as now ("a comparison of two drafts").
-- **Another project:** "D3 compares this deal's draft (its clean draft is D2) with another project's document. Its deleted wording is the other project's, not an earlier draft of this deal: never report a deletion or insertion as a change made in this deal."
-- **Not known:** "D3 compares its clean draft with another document, which may be an earlier draft of this deal or another project's. Do not report a difference as a change made in this deal unless a draft of this deal shows it."
-- **Blackline made on another project** (itself in a precedents folder): "D3 is a blackline made on another project; neither side is this deal's. Use it only to compare, and cite it only beside a document of this deal."
-- **Document of another project:** "D4 is another project's document, not this deal's. Its terms are never this deal's: use it only to compare, and cite it only beside a document of this deal. By itself it never shows that a finding is put right or that its problem is back."
+- **Another project:** "<id> compares this deal's draft (its clean draft is <id>) with another project's document. Its deleted wording is the other project's, not an earlier draft of this deal: never report a deletion or insertion as a change made in this deal."
+- **Not known:** "<id> compares its clean draft with another document, which may be an earlier draft of this deal or another project's. Do not report a difference as a change made in this deal unless a draft of this deal shows it."
+- **Blackline made on another project** (itself in a precedents folder): "<id> is a blackline made on another project; neither side is this deal's. Use it only to compare, and cite it only beside a document of this deal."
+- **Document of another project:** "<id> is another project's document, not this deal's. Its terms are never this deal's: use it only to compare, and cite it only beside a document of this deal. By itself it never shows that a finding is put right or that its problem is back."
 
 ### E. Unclear blacklines
 
