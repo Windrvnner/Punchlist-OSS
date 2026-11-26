@@ -8,6 +8,7 @@ import { Modal, DialogHead } from './dialogs';
 import { FileInput, PickFileRow } from './fileDrop';
 import { proposeLayout, previewImport, type ImportLocation, type ImportTable } from '../app/transfer';
 import type { ImportField } from '../domain/importExport';
+import type { AcceptedMatch } from '../app/commands/importMatching';
 import {
   clearQaImport, keepQaImport, keptQaImport, loadQaImport, prepareQaImport, qaImportPartyCount,
   replaceQaImport, submitQaImport, summarizeQaImport, type ImportMode, type QaChoices,
@@ -73,6 +74,8 @@ function useQaImportState(store: Store, dealId: string, fresh: boolean) {
   const [path, setPath] = useState<string | null>(choices?.path ?? null);
   const [mode, setMode] = useState<ImportMode>(choices?.mode ?? 'merge');
   const [answered, setAnswered] = useState(!!choices?.answered);
+  // the suggestions the person accepted, by the file's line; none is applied until they accept it
+  const [accepted, setAccepted] = useState<AcceptedMatch[]>(choices?.accepted ?? []);
   // the file becomes the deal's log only if this stays checked. It starts checked only for a
   // consolidated log, one with two or more parties under Submitted by; one party's own list is not the deal's log
   // Once the person checks or unchecks it (touched), the app leaves it as they set it.
@@ -90,7 +93,7 @@ function useQaImportState(store: Store, dealId: string, fresh: boolean) {
   // (another file, another choice, the dialog closed) and changes nothing
   const token = useRef(0);
   return {
-    key, table, mapping, reader, path, setPath, mode, setMode, answered, setAnswered,
+    key, table, mapping, reader, accepted, setAccepted, path, setPath, mode, setMode, answered, setAnswered,
     makeLog, setMakeLog, touched, busy: reading ? 'reading' as const : busy, setBusy, wantedSheet,
     error: error || readError, setError, restart, setRestart, fileRef, token, unapplied, warning,
   };
@@ -100,13 +103,13 @@ export type QaImportState = ReturnType<typeof useQaImportState>;
 /** What the import will do with the file as mapped: its rows, and what they add to and change in the deal */
 function useImportPlan(store: Store, dealId: string, qa: QaImportState) {
   const state = useAppState();
-  const { table, mapping, mode, answered } = qa;
+  const { table, mapping, mode, answered, accepted } = qa;
   const file = useMemo(() => (table && mapping ? prepareQaImport(table, mapping) : null), [table, mapping]);
   const prepared = file?.prepared ?? null;
   // The same plan the command would run, without committing it.
   const dry = useMemo(
-    () => (prepared?.rows.length ? previewImport(store, dealId, mode, prepared.rows, answered) : null),
-    [prepared, mode, answered, state.questions, state.tombstones],
+    () => (prepared?.rows.length ? previewImport(store, dealId, mode, prepared.rows, answered, accepted) : null),
+    [prepared, mode, answered, accepted, state.questions, state.tombstones],
   );
   return {
     ...summarizeQaImport(state, dealId, qa.key, mode, prepared, dry),
@@ -122,13 +125,13 @@ export type ImportPlan = ReturnType<typeof useImportPlan>;
  * over", which asks first, or the import itself lets it go.
  */
 function useKeepAsItChanges(qa: QaImportState) {
-  const { key, table, mapping, path, mode, answered, makeLog, touched } = qa;
+  const { key, table, mapping, path, mode, answered, makeLog, touched, accepted } = qa;
   // Hand choices to the app before the next frame.
   useLayoutEffect(() => {
     if (table && mapping) {
-      keepQaImport(key, table, { mapping, path, mode, answered, makeLog, touched: touched.current });
+      keepQaImport(key, table, { mapping, path, mode, answered, makeLog, touched: touched.current, accepted });
     }
-  }, [table, mapping, path, mode, answered, makeLog]);
+  }, [table, mapping, path, mode, answered, makeLog, accepted]);
 }
 
 /** What the person can do in the dialog: read a file, ask the model, read the file again, import, start over, close */
@@ -153,6 +156,7 @@ function useQaImportActions(store: Store, dealId: string, qa: QaImportState, pla
     qa.setPath(null);
     qa.setMode('merge');
     qa.setAnswered(false);
+    qa.setAccepted([]);
     qa.setMakeLog(false);
     qa.touched.current = false;
   };
@@ -195,6 +199,7 @@ function fileReading(store: Store, dealId: string, qa: QaImportState) {
     const { table, path, askForLayout } = read.value;
     reader.replace(table);
     qa.setPath(path);
+    qa.setAccepted([]);
     qa.touched.current = false;
     if (askForLayout) void askAi(table, mine);
   };
@@ -242,7 +247,7 @@ async function runImport(store: Store, dealId: string, qa: QaImportState, plan: 
   qa.setBusy('importing');
   qa.setError('');
   qa.setRestart(false);
-  const choices = { mapping, path, mode, answered, makeLog, touched: touched.current };
+  const choices = { mapping, path, mode, answered, makeLog, touched: touched.current, accepted: qa.accepted };
   try {
     const result = await submitQaImport(store, dealId, { table, choices }, plan.prepared?.rows ?? []);
     if (result.ok) store.ui({ dialog: null });
@@ -257,6 +262,7 @@ async function runImport(store: Store, dealId: string, qa: QaImportState, plan: 
 
 function restoreChoices(qa: QaImportState, table: ImportTable, choices: QaChoices) {
   qa.reader.replace(table, choices.mapping);
+  qa.setAccepted(choices.accepted ?? []);
   qa.setPath(choices.path);
   qa.setMode(choices.mode);
   qa.setAnswered(choices.answered);

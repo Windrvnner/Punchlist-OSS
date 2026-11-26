@@ -89,10 +89,13 @@ describe('answers', () => {
     const s = setup(() => ({ text: 'ok', sources: [] }), { d1: [D] }, { changes, library: [] });
     val(await s.ai.answer(ask('What ratio does the SPA draft set?')));
     expect(asked).toEqual([D.docId]);
-    expect(s.calls[0].prompt).toContain(`D1 has 2 tracked changes. Its pages show it with all of them accepted, so its wording is proposed, not agreed.
-  The changes in D1, read from the file itself (these are fact, not a reading):
-  - was: "The ratio is 1.15x." / now: "The ratio is 1.20x." (delete "1.15x" by sroe on 2026-10-01; insert "1.20x" by sroe on 2026-10-01)
-  Some changes are in parts of the file this list does not reach.`);
+    expect(s.calls[0].prompt).toContain([
+      'D1 has 2 tracked changes. Its pages show them as markup, so its wording is proposed, not agreed.',
+      '  The changes in D1, read from the file itself (these are fact, not a reading):',
+      '  - was: "The ratio is 1.15x." / now: "The ratio is 1.20x." '
+        + '(delete "1.15x" by sroe on 2026-10-01; insert "1.20x" by sroe on 2026-10-01)',
+      '  Some changes are in parts of the file this list does not reach.',
+    ].join('\n'));
   });
   it('lists the newest draft of a document first, its earlier drafts straight after it and marked as such', async () => {
     const at = (n: number, rel: string, seen: string) => doc(n, rel.split('/').pop()!, { rel, seen });
@@ -308,7 +311,9 @@ describe('answers', () => {
   it('a draft with tracked changes is sent with one line saying its wording is proposed, and nothing else about them', async () => {
     const draft = doc(8, 'SPA draft.docx', { tracked: 212 });
     const s = setup(() => ({ text: 'ok', sources: [] }), { d1: [draft] }); val(await s.ai.answer(ask('What does the SPA draft say about the lock-up?')));
-    expect(s.calls[0].prompt).toContain('D1 has 212 tracked changes. Its pages show it with all of them accepted, so its wording is proposed, not agreed.');
+    expect(s.calls[0].prompt).toContain(
+      'D1 has 212 tracked changes. Its pages show them as markup, so its wording is proposed, not agreed.',
+    );
     expect(s.calls[0].prompt).not.toMatch(/was: "|deleted by|inserted by/i); expect(s.calls[0].files.length).toBe(1);
   });
 

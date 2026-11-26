@@ -12,7 +12,7 @@ import { CreateQuestion, UseAsResponse } from './commands/questions';
 import { findQuestions, mayAddress } from '../domain/suggest';
 import { withoutMarkers } from '../domain/cite';
 import type { Research } from '../ports';
-import { bareDealName, cleanName } from './commands/deals';
+import { bareDealName, sameName } from './commands/deals';
 import { TITLE_MAX } from './commands/findings';
 import { chipsSendable, dealCopied, filesSendable } from './attachments';
 import { isText, keptDrafts } from './keptText';
@@ -122,8 +122,8 @@ let seq = 0;
 const mid = () => `m${Date.now().toString(36)}${(seq++).toString(36)}`;
 
 /** a deal name as typed navigation compares it: without "Project", in any case */
-const navigationName = (name: string) => bareDealName(name.trim(), 'navigation').toLowerCase();
-/** The deal a typed name names: the one of that exact name (in any case, without "Project"). */
+const navigationName = (name: string) => sameName(bareDealName(name.trim(), 'navigation')).toLowerCase();
+/** The deal a typed name names: that exact name, in any case, without "Project", spaces between words aside. */
 function dealByName<T extends { name: string }>(deals: T[], typed: string): T | undefined {
   const exact = navigationName(typed);
   if (!exact) return;
@@ -134,7 +134,7 @@ function dealByName<T extends { name: string }>(deals: T[], typed: string): T | 
 function typedDealDestination(store: Store, text: string) {
   const command = /^(?:take me to|go to|open|show me|show|switch to|jump to)\s+(.+)$/is.exec(text);
   if (!command) return;
-  const target = cleanName(command[1]);
+  const target = sameName(command[1]);
   const lookup = (name: string) => dealByName(Object.values(store.get().deals), name);
   const possessive = (name: string) => lookup(name.replace(/['’]s$/i, '')) ?? lookup(name);
   const named = (name: string) => {

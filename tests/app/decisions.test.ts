@@ -65,7 +65,7 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
     const typed = ['Project-Lucerne Solar', 'project: Northwind Wind', 'PROJECT.Tailspin', 'Project',
       '  project   Contoso Hydro '];
     const saved = ['Project-Lucerne Solar', 'Project: Northwind Wind', 'Project.Tailspin', 'Project',
-      'Project Contoso Hydro'];
+      'Project   Contoso Hydro'];
     for (const name of typed) {
       await m.store.dispatch(CreateDeal, { name, folders: [] }, { quiet: true });
     }
@@ -162,15 +162,19 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
   it('keeps names in one form, and the name as shown deletes the deal; none over 120', async () => {
     const m = make();
     expect((await m.store.dispatch(CreateDeal, { name: 'Proseware  Wind', folders: [] })).ok).toBe(true);
-    expect(Object.values(m.store.get().deals).some((d) => d.name === 'Project Proseware Wind')).toBe(true);   // the double space is kept as one
+    const named = (name: string) => Object.values(m.store.get().deals).filter((d) => d.name === name);
+    expect(named('Project Proseware  Wind')).toHaveLength(1);   // the double space is kept as typed
     expect((await m.store.dispatch(CreateDeal, { name: 'Proseware Wind\u200b', folders: [] })).ok).toBe(true);
-    expect(Object.values(m.store.get().deals).filter((d) => d.name === 'Project Proseware Wind')).toHaveLength(2);   // the hidden character is dropped
+    expect(named('Project Proseware Wind')).toHaveLength(1);   // the hidden character is dropped, the spaces left alone
     expect((await m.store.dispatch(CreateDeal, { name: 'Luce\u0301rne', folders: [] })).ok).toBe(true);   // e and a combining accent
     const b = Object.values(m.store.get().deals).find((d) => d.name.includes('rne') && !d.name.includes('Wind'))!;
     expect(b.name).toBe('Project Luc\u00e9rne');
     expect((await m.store.dispatch(CreateDeal, { name: 'x'.repeat(113), folders: [] }, { quiet: true })).ok).toBe(false);   // 121 with "Project "
     expect((await m.store.dispatch(CreateDeal, { name: 'x'.repeat(112), folders: [] }, { quiet: true })).ok).toBe(true);
     expect((await m.store.dispatch(DeleteDeal, { dealId: b.id, typedName: 'Project Luce\u0301rne' }, { quiet: true })).ok).toBe(true);
+    // the name typed to delete matches the one shown whatever its runs of spaces
+    const spaced = named('Project Proseware  Wind')[0];
+    expect((await m.store.dispatch(DeleteDeal, { dealId: spaced.id, typedName: 'Project Proseware Wind' }, { quiet: true })).ok).toBe(true);
   });
 
   it('a question made here is submitted by the firm; there is no direction to set', async () => {
