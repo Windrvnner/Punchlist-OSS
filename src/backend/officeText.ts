@@ -62,8 +62,8 @@ export function officeText(bytes: Uint8Array, name: string): OfficeText {
   // text moved away keeps its words in w:t at the old place: as accepted, only the new place has them
   const words = (part: string) => textOf(part.replace(/<w:moveFrom\b[^>]*>[\s\S]*?<\/w:moveFrom>/g, ''), 'w:t', 'w:p');
   const text = words(xml);
-  // headers, footers, footnotes and endnotes (what the PDF shows) follow the body, in the zip's order (the order does
-  // not change what the index finds); the title stays the body's start
+  // every header, footer, footnote and endnote part follows the body, in the zip's order (the order does not change
+  // what the index finds), a header the document does not use included; the title stays the body's start
   const others = [...parts].filter(([n]) => n !== 'word/document.xml').map(([, x]) => words(x.toString('utf8')));
   // each tracked change is one element: an insertion, a deletion, a move (from and to), a change of format, or a table cell added or taken out. Counted so, Word's count matches LibreOffice's
   const tracked = (xml.match(/<w:(?:ins|del|moveFrom|moveTo|rPrChange|pPrChange|tblPrChange|trPrChange|tcPrChange|sectPrChange|cellIns|cellDel)[\s>]/g) ?? []).length;
