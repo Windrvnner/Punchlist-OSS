@@ -72,12 +72,17 @@ function holds(line: string, part: string): boolean {
 }
 
 /**
- * The words a reading stands for, exactly as the line has them: for a table row ("a | b") the whole cell the reading names,
- * otherwise the whole line without its edge spaces, numbering and bullets included. The model's own wording is only checked against the line.
+ * The words a reading stands for, exactly as the source writes them (`own`, the line as `written` gives it): for a table
+ * row ("a | b") the whole cell the reading names, taken from the row's own cells (tab-separated) so that a line break in
+ * the cell stays; otherwise the whole line without its edge spaces, numbering and bullets included. The model's own
+ * wording is only checked against the line (#1061).
  */
-function asWritten(line: string, part: string): string {
+function asWritten(line: string, part: string, own = line): string {
   const cells = line.split(' | ');
-  return cells.length > 1 ? cells.find((c) => key(c) === key(part)) ?? part : line.trim();   // edge spaces are layout
+  if (cells.length === 1) return own.trim();   // edge spaces are layout
+  const ownCells = own.split('\t');
+  const from = ownCells.length === cells.length ? ownCells : cells;
+  return from.find((c) => key(c) === key(part)) ?? part;
 }
 
 /**
@@ -118,21 +123,27 @@ export function tieOut(
     const n = i + 1;
     if (!key(line)) { count.blank++; return; }
     const r = reads.get(n);
+    const words = (part: string) => asWritten(line, part, written[i]);
     if (!usable(line, r)) { leave(n); return; }
-    if (r!.k === 'section') { section = asWritten(line, r!.text!); subsection = ''; last = null; count.headings++; return; }
-    if (r!.k === 'subsection') { subsection = asWritten(line, r!.text!); last = null; count.headings++; return; }
+    if (r!.k === 'section') { section = words(r!.text!); subsection = ''; last = null; count.headings++; return; }
+    if (r!.k === 'subsection') { subsection = words(r!.text!); last = null; count.headings++; return; }
     if (r!.k === 'columns') { count.headings++; return; }
     if (r!.k === 'more') {
       if (!last) { leave(n); return; }
-      const it: ReadItem = last; it.text = `${it.text} ${withoutEdgeSpaces(written[i])}`; it.lines.push(n); count.more++; return;
+      const it: ReadItem = last;
+      it.text = `${it.text} ${withoutEdgeSpaces(written[i])}`;
+      it.lines.push(n);
+      count.more++;
+      return;
     }
     if (r!.k === 'item') {
       // a table row's own section cell starts that section (and no subsection) for it and the rows under it, as a section
       // filled in only on the first row of each section is laid out; its subsection cell does the same within the section
-      const s = r!.section ? asWritten(line, r!.section) : ''; const sub = r!.subsection ? asWritten(line, r!.subsection) : '';
+      const s = r!.section ? words(r!.section) : '';
+      const sub = r!.subsection ? words(r!.subsection) : '';
       if (key(s) && key(s) !== key(section)) { section = s; subsection = ''; }
       if (key(sub)) subsection = sub;
-      add(asWritten(line, r!.text!), n);
+      add(words(r!.text!), n);
       return;
     }
     leave(n);

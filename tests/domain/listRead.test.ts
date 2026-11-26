@@ -61,6 +61,17 @@ describe('a list read by the model, tied out line by line', () => {
     expect(tableRowsAsWritten(columns, [['', 'Two\nlines', '']])[1]).toBe('\tTwo\nlines\t');
   });
 
+  it('words a table row\'s item as its cell is written, a line break inside it kept (#1061)', () => {
+    const columns = ['Area', 'Requirement'];
+    const rows = [['Land', 'Site control\ncovers the array'], ['Land', ' Permits ']];
+    const lines = tableLines(columns, rows);
+    expect(lines[1]).toBe('Land | Site control covers the array');   // as the model reads it
+    const read = reads([{ n: 1, k: 'columns' }, { n: 2, k: 'item', text: 'Site control covers the array',
+      section: 'Land' }, { n: 3, k: 'item', text: 'Permits', section: 'Land' }]);
+    const t = tieOut(lines, read, new Set(), tableRowsAsWritten(columns, rows));
+    expect(t.items.map((i) => i.text)).toEqual(['Site control\ncovers the array', ' Permits ']);
+  });
+
   it('reads a table row with its own section and subsection, and the heading row as a heading', () => {
     const lines = tableLines(['Area', 'Requirement'], [['Interconnection', 'Network upgrade costs  capped'], ['Land', 'Site control covers the array']]);
     expect(lines[1]).toBe('Interconnection | Network upgrade costs  capped');   // the cell's own spacing stays
