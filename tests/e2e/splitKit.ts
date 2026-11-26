@@ -6,7 +6,17 @@ import path from 'node:path';
 import { tmp, put, pdf, pcApp, until, StandInService, type PcApp } from './kit';
 import { CreateDeal } from '../../src/app/commands/deals';
 import { startIndexing } from '../../src/app/indexing';
-import { isPickAsk, isPickForAsk, isDescribeAsk, isAffectsAsk, isVerifyAsk, isHearAsk, itemsIn, listed, nth } from '../backend/reviewKit';
+import {
+  isPickAsk,
+  isPickForAsk,
+  isDescribeAsk,
+  isAffectsAsk,
+  isVerifyAsk,
+  isHearAsk,
+  itemsIn,
+  listed,
+  nth,
+} from '../backend/reviewKit';
 import type { Timing, nodeAi } from '../../src/backend/ai';
 import { view, type RLine } from '../../src/backend/rounds';
 import { signedOut } from '../../src/backend/signInToken';
@@ -56,7 +66,12 @@ export function model(script: Script = {}) {
     if (sc.signedOut?.()) throw signedOut();
     const ref = (n: number) => nth(c, n);
     if (isDescribeAsk(c as any)) return JSON.stringify({ summary: 'A finance document.', keywords: ['finance'] });
-    if (isPickAsk(c as any) || isPickForAsk(c as any)) return JSON.stringify({ read: listed(c as any).slice(0, 2).map((r) => r.id) });
+    if (isPickAsk(c as any) || isPickForAsk(c as any))
+      return JSON.stringify({
+        read: listed(c as any)
+          .slice(0, 2)
+          .map((r) => r.id),
+      });
     if (isAffectsAsk(c as any) || isHearAsk(c as any)) return JSON.stringify({ affected: [] });
     if (isVerifyAsk(c as any)) { const title = /Title: (.*)/.exec(c.prompt)?.[1] ?? ''; const st = sc.stands ? sc.stands(title, c.model) : true; return st === null ? 'no idea' : JSON.stringify({ stands: st, why: st ? 'It stands.' : 'A document now settles it.' }); }
     const items = itemsIn(c as any);

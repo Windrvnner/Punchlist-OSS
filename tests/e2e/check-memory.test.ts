@@ -8,7 +8,19 @@ import path from 'node:path';
 import v8 from 'node:v8';
 import vm from 'node:vm';
 import { tmp, put, pdf, pcApp, newDeal, StandInService } from './kit';
-import { isPickAsk, isPickForAsk, isDescribeAsk, isAffectsAsk, isVerifyAsk, isHearAsk, itemsIn, OK, val, type Call, nth } from '../backend/reviewKit';
+import {
+  isPickAsk,
+  isPickForAsk,
+  isDescribeAsk,
+  isAffectsAsk,
+  isVerifyAsk,
+  isHearAsk,
+  itemsIn,
+  OK,
+  val,
+  type Call,
+  nth,
+} from '../backend/reviewKit';
 
 const ITEMS = 2000, DOCS = 120, CHECKS = 3;
 const roots: string[] = []; afterAll(() => { for (const r of roots) fs.rmSync(r, { recursive: true, force: true }); });

@@ -17,9 +17,15 @@ const seen = { calls: 0, down: false };
 function model() {
   return new StandInService((c) => {
     seen.calls++;
-    const ref = (name: string) => new RegExp(`^(doc_[0-9a-f]{24}): (?:.*/)?${name.replace(/[()]/g, '\\$&')}`, 'm').exec(c.prompt)?.[1];
+    const ref = (name: string) =>
+      new RegExp(`^(doc_[0-9a-f]{24}): (?:.*/)?${name.replace(/[()]/g, '\\$&')}`, 'm').exec(c.prompt)?.[1];
     if (isDescribeAsk(c as any)) return JSON.stringify({ summary: 'A document.', keywords: [] });
-    if (isPickAsk(c as any) || isPickForAsk(c as any)) return JSON.stringify({ read: listed(c as any).slice(0, 4).map((r) => r.id) });
+    if (isPickAsk(c as any) || isPickForAsk(c as any))
+      return JSON.stringify({
+        read: listed(c as any)
+          .slice(0, 4)
+          .map((r) => r.id),
+      });
     if (isAffectsAsk(c as any)) return JSON.stringify({ items: [...c.prompt.matchAll(/^(I\d+):/gm)].map((m) => m[1]), findings: [] });
     const items = itemsIn(c as any);
     if (items.length && seen.down) {

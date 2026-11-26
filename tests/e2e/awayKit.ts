@@ -4,7 +4,18 @@ import { expect, afterAll } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tmp, put, StandInService, type PcApp } from './kit';
-import { isPickAsk, isPickForAsk, isDescribeAsk, isAffectsAsk, isVerifyAsk, isHearAsk, itemsIn, OK, type Call, nth } from '../backend/reviewKit';
+import {
+  isPickAsk,
+  isPickForAsk,
+  isDescribeAsk,
+  isAffectsAsk,
+  isVerifyAsk,
+  isHearAsk,
+  itemsIn,
+  OK,
+  type Call,
+  nth,
+} from '../backend/reviewKit';
 
 export const N_ITEMS = 2000, N_DOCS = 120;
 export const LIST = () => ({ broad: Array.from({ length: N_ITEMS }, (_, i) => ({ id: `b${i}`, text: `Agreement number ${i} is signed and dated` })), product: [], sector: [] });
@@ -16,7 +27,23 @@ export function model(onCheck: () => void = () => {}) {
     if (isPickAsk(c) || isPickForAsk(c)) return 'I cannot say';
     const items = itemsIn(c);
     // each item is settled on its own agreement when the call has it, as a real model would cite it (a Check again starts from it)
-    if (items.length) { onCheck(); const docs = [...c.prompt.matchAll(/^(doc_[0-9a-f]{24}): ([^\n]*)$/gm)]; return JSON.stringify({ items: items.map((it) => { const n = /Agreement number (\d+)/.exec(it.text)?.[1]; const d = n && c.prompt.includes('Add "where"') ? docs.find((m) => new RegExp(`Agreement ${n}\\.pdf`).test(m[2])) : undefined; return { id: it.tag, ...(d ? { result: 'ok', where: [{ doc: d[1], page: 1, quote: 'As the item requires.' }] } : OK(c)) }; }) }); }
+    if (items.length) {
+      onCheck();
+      const docs = [...c.prompt.matchAll(/^(doc_[0-9a-f]{24}): ([^\n]*)$/gm)];
+      return JSON.stringify({
+        items: items.map((it) => {
+          const n = /Agreement number (\d+)/.exec(it.text)?.[1];
+          const d =
+            n && c.prompt.includes('Add "where"')
+              ? docs.find((m) => new RegExp(`Agreement ${n}\\.pdf`).test(m[2]))
+              : undefined;
+          return {
+            id: it.tag,
+            ...(d ? { result: 'ok', where: [{ doc: d[1], page: 1, quote: 'As the item requires.' }] } : OK(c)),
+          };
+        }),
+      });
+    }
     if (isAffectsAsk(c)) return JSON.stringify({ items: [], findings: [] });
     if (isHearAsk(c)) return JSON.stringify({ affected: [] });
     if (isVerifyAsk(c)) return JSON.stringify({ stands: true, why: '' });

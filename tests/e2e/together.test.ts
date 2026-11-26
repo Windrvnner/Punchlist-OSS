@@ -19,9 +19,27 @@ function model() {
     await new Promise((r) => setTimeout(r, 40));
     const ref = (name: string) => new RegExp(`^(doc_[0-9a-f]{24}): (?:.*/)?${name}`, 'm').exec(c.prompt)?.[1];
     if (isDescribeAsk(c as any)) return JSON.stringify({ summary: 'A document.', keywords: [] });
-    if (isPickAsk(c as any) || isPickForAsk(c as any)) return JSON.stringify({ read: listed(c as any).slice(0, 2).map((r) => r.id) });
+    if (isPickAsk(c as any) || isPickForAsk(c as any))
+      return JSON.stringify({
+        read: listed(c as any)
+          .slice(0, 2)
+          .map((r) => r.id),
+      });
     const items = itemsIn(c as any);
-    if (items.length) return JSON.stringify({ items: items.map((it) => (/signed/.test(it.text) ? (c.prompt.includes('Add "where"') ? { id: it.tag, result: 'ok', where: [{ doc: ref('Term sheet.pdf') ?? nth(c as any, 1), page: 1, quote: 'signed' }] } : { id: it.tag, result: 'ok' }) : { id: it.tag, result: 'more', need: 'The model audit report' })) });
+    if (items.length)
+      return JSON.stringify({
+        items: items.map((it) =>
+          /signed/.test(it.text)
+            ? c.prompt.includes('Add "where"')
+              ? {
+                  id: it.tag,
+                  result: 'ok',
+                  where: [{ doc: ref('Term sheet.pdf') ?? nth(c as any, 1), page: 1, quote: 'signed' }],
+                }
+              : { id: it.tag, result: 'ok' }
+            : { id: it.tag, result: 'more', need: 'The model audit report' },
+        ),
+      });
     return JSON.stringify({ text: 'ok', sources: [] });
   });
   return svc;
