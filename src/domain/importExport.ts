@@ -95,7 +95,7 @@ const STATUS: Record<string, QuestionStatus> = { open: 'open', outstanding: 'ope
 /**
  * Apply a column mapping to a raw table. Rows without a question are skipped and counted; so are values that could not be read.
  * The question and response are kept exactly as written, spaces and line breaks included, so the app's own export comes
- * back unchanged, and so are the names and the workstream: each is stored as its cell gives it. The values that are
+ * back unchanged, and so are the names and the workstream: each is kept whole, as its cell gives it. The values that are
  * read as something else (number, dates, priority, status) ignore the spaces around them. A question of only spaces
  * is a question, as one made in the app can be.
  * A numeric date valid both ways is settled by context, not by one format per file or column:
@@ -140,7 +140,7 @@ export function prepareImport(table: string[][], mapping: Mapping, lines?: numbe
     const ws = get(r, 'workstream');
     if (pr && !PRIORITY[pr.toLowerCase()]) { out.unknownValues++; unread('priority', pr); }
     if (st && !STATUS[st.toLowerCase()]) { out.unknownValues++; unread('status', st); }
-    // names and workstream are stored as the cell gives them
+    // names and workstream are kept whole, as the cell gives them
     const row: ImportRow = {
       n, text, askedBy: get(r, 'askedBy'), received: '', workstream: ws,
       priority: PRIORITY[pr.toLowerCase()] ?? '', response: get(r, 'response'),
