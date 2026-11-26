@@ -208,12 +208,16 @@ A deal's checklist is made up of its own item records, linked to the findings an
   parts sized by `inParts` and asks again, one at a time, about any points that failed. Points still without a question
   are counted and offered with **Retry**.
   Open questions that may already ask a point are offered under **Already Asked?** (#1218). Code scores each point's
-  best open question as the percent of the point's telling words it names (`askedMatcher`, `src/domain/suggest.ts`),
-  and only a question at or above `limits.askedCutoff` (default 80; 0 to 100) is a candidate (`askedCandidates`,
-  `src/app/unresolvedLinks.ts`; a question is a candidate for one point). The optional port `covers` asks the
-  standard model about all the candidates at once, in parts like the other batched calls, naming each pair by a neutral
-  tag; code takes an answer only for an offered tag, once, as true or false (`confirmedLinks`). No candidate means no
-  call. Links a person approved (#88) are kept without asking.
+  best open question by the telling words it names (`askedMatcher`, `src/domain/askedMatch.ts`, on the telling words of
+  `src/domain/tellingWords.ts`) and a question is a candidate only when the share reaches `limits.askedCutoff`
+  (`reaches`, whole numbers; `askedCandidates` in `src/app/unresolvedLinks.ts`; a question is a candidate for one point
+  only). The domain index is reused because `app` cannot import the backend's BM25 (`recordSearch.ts`), whose raw score
+  is not a percentage. The optional port `covers` asks the standard model about all candidates at once, after the
+  points are phrased, in parts like the other batched calls, naming each pair by a neutral tag and sending the texts as
+  written; code takes an answer only for an offered tag, once, as true or false (`src/backend/covers.ts`,
+  `confirmedLinks`). `covers` is a yes or no for a pair, where `addresses` gives yes, partly, or no for an answer to a
+  question. No candidate means no call, and a failed or rejected call means no offer. Links a person approved (#88) are
+  kept without asking.
 
 ## Q&A log, imports, and the memo
 
