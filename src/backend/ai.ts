@@ -702,7 +702,8 @@ export function nodeAi(o: AiOptions) {
   /**
    * A Q&A log too long to show with the points in one call is asked about a part of its questions at a time, each part
    * with every point (#1120). Pairs map back to the whole log; a part not answered lists every point as missed, so each
-   * point ends with its pairs or a missed entry. The run fails only when no part answered.
+   * point ends with its pairs or a missed entry. A service error would most likely come again, so no part is begun
+   * after one, as in `sameMeaning`. The run fails only when no part answered.
    */
   const sameInQuestionParts = async (i: SameInput, size: number) => {
     const tally = questionPartsTally(i.items.length);
@@ -711,8 +712,10 @@ export function nodeAi(o: AiOptions) {
       const r = await service.sameMeaning!({ ...i, against: i.against.slice(from, from + size) });
       if (r.ok) tally.add(r.value, from);
       else {
-        failed ??= r;
+        // every point is missed now, whatever the parts not begun would have found
+        failed = r;
         tally.fail(r.error.kind === 'unreachable' ? 'unreachable' : 'failed');
+        break;
       }
     }
     return failed && !tally.answered() ? failed : ok(tally.result());

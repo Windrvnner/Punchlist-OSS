@@ -77,6 +77,8 @@ describe('a Q&A log too long to show with the points in one call', () => {
     const out = val(await s.ai.sameMeaning!({ items: points(150), against: questions(2000), kind: 'questions' }));
     expect(out.pairs.map((p) => [p.a, p.b])).toEqual([[0, 0]]);
     expect(out.missed?.at).toEqual(Array.from({ length: 150 }, (_, k) => k));
+    // no part is begun after the service error: the last part asked is the one that failed
+    expect(shownQuestions(s.calls.filter(isMatch).at(-1)!)).toContain(questions(2000)[1499]);
   });
 });
 
