@@ -896,11 +896,10 @@ export function nodeDocuments(o: DocumentsOptions) {
       return ok(fam.drafts.map((d) => { const r = at.get(d.docId)!; return { doc: r.name, docId: d.docId, date: d.date, folder: path.posix.dirname(roomPath(r).replace(/\\/g, '/')) }; }));
     }),
     /**
-     * Is the data room in these folders one a deal already has? Each of `dealIds` whose every document (outside a
-     * precedents folder) matches one of the folders' files by name and size, with the smallest match identical by
-     * content (sameRoom.ts). Files in a
-     * precedents folder are not counted. Only those deals come back, best first. Nothing is recorded and no model is
-     * asked.
+     * Is the data room in these folders one a deal already has? Each of `dealIds` whose every data-room document
+     * matches one of the folders' files by name and size, with the smallest match identical by content (sameRoom.ts).
+     * Files in a precedents folder, on either side, and documents only attached in the app are not counted. Only those
+     * deals come back, best first. Nothing is recorded and no model is asked.
      */
     sameRoom: safe(async (paths: string[], dealIds: string[]): Promise<Result<RoomMatch[]>> => {
       // the folders' files as the New deal form listed them, each with its path from the folder's own name
