@@ -55,6 +55,15 @@ describe('the control file', () => {
     }
   });
 
+  it('ships the Already Asked? cutoff at 80 percent, within 50 to 100 (#1218)', () => {
+    expect(control.limits.askedCutoff).toBe(80);
+    for (const value of [50, 100]) expect(checkControl(edited((c) => { c.limits.askedCutoff = value; }))).toEqual([]);
+    for (const value of [49, 101, 80.5]) {
+      expect(checkControl(edited((c) => { c.limits.askedCutoff = value; })))
+        .toEqual(['limits.askedCutoff must be a whole number from 50 to 100.']);
+    }
+  });
+
   it('reports every problem at once, and a value missing or of the wrong kind', () => {
     const problems = checkControl(edited((c) => { c.limits.chatTurns = 0; delete c.limits.searchCalls; c.lists.searchFiller = 'agreement'; }));
     expect(problems).toEqual(['limits.chatTurns must be a whole number from 1 to 100.', 'limits.searchCalls is missing.', 'lists.searchFiller must list 0 to 2000 entries.']);

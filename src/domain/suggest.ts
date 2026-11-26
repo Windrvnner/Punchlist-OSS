@@ -22,16 +22,39 @@ const wordCache = new WeakMap<object, { text: string; words: Set<string> }>();
 const wordsOf = (q: { text: string }) => { let c = wordCache.get(q); if (!c || c.text !== q.text) { c = { text: q.text, words: tellingWords(q.text) }; wordCache.set(q, c); } return c.words; };
 
 /**
- * mayAddress for many texts against the same questions: the questions are indexed by word once, so each text looks only
- * at the questions sharing a word with it (2,000+ open questions against hundreds of checklist points).
+ * For many texts against the same questions: the questions are indexed by word once, so each text looks only at the
+ * questions sharing a word with it (2,000+ open questions against hundreds of checklist points). Gives each question
+ * that shares a telling word with the text, with how many it shares.
  */
-export function addresser<Q extends { id: string; n: number; text: string }>(questions: Q[]): (text: string) => Q[] {
+function sharedWith<Q extends { id: string; n: number; text: string }>(questions: Q[]): (text: string) => Map<Q, number> {
   const byWord = new Map<string, Q[]>();
   for (const q of questions) for (const w of wordsOf(q)) { const l = byWord.get(w); if (l) l.push(q); else byWord.set(w, [q]); }
   return (text) => {
     const shared = new Map<Q, number>();
     for (const w of tellingWords(text)) for (const q of byWord.get(w) ?? []) shared.set(q, (shared.get(q) ?? 0) + 1);
-    return [...shared].filter(([q, n]) => n >= MIN_SHARED && n / wordsOf(q).size >= 1 / 3).sort(([a, x], [b, y]) => y - x || a.n - b.n).map(([q]) => q);
+    return shared;
+  };
+}
+
+/** mayAddress for many texts against the same questions */
+export function addresser<Q extends { id: string; n: number; text: string }>(questions: Q[]): (text: string) => Q[] {
+  const sharing = sharedWith(questions);
+  return (text) => [...sharing(text)].filter(([q, n]) => n >= MIN_SHARED && n / wordsOf(q).size >= 1 / 3).sort(([a, x], [b, y]) => y - x || a.n - b.n).map(([q]) => q);
+}
+
+/**
+ * The open question that names the largest share of an unresolved point's telling words, with that share as a whole
+ * percent (rounded down), or nothing when none is shared (#1218). Of equal shares the lower number wins. The percent is
+ * the confidence that the app's `limits.askedCutoff` is compared with before a model is asked to check the pair.
+ */
+export function askedMatcher<Q extends { id: string; n: number; text: string }>(questions: Q[]): (text: string) => { q: Q; confidence: number } | undefined {
+  const sharing = sharedWith(questions);
+  return (text) => {
+    let best: { q: Q; shared: number } | undefined;
+    for (const [q, shared] of sharing(text)) {
+      if (!best || shared > best.shared || (shared === best.shared && q.n < best.q.n)) best = { q, shared };
+    }
+    return best && { q: best.q, confidence: Math.floor((100 * best.shared) / tellingWords(text).size) };
   };
 }
 

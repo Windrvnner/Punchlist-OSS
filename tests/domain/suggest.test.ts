@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mayAddress, tellingWords, findQuestions } from '../../src/domain/suggest';
+import { askedMatcher, mayAddress, tellingWords, findQuestions } from '../../src/domain/suggest';
 
 const q = (n: number, text: string) => ({ id: 'q' + n, n, text });
 const OPERATING = q(4, 'Confirm the operating assumption used in the base case, and where it comes from. If the technical advisor and the information memorandum differ, say which one the model follows and why.');
@@ -41,4 +41,26 @@ describe('the open questions a person picks from, narrowed as they type', () => 
     expect(ns('Lock-up')).toEqual([2]); expect(ns('the base')).toEqual([4]); expect(ns('confirm')).toEqual([4, 21]); expect(ns('permit sub')).toEqual([12]); expect(ns('permit lock')).toEqual([]);
   });
   it('leaves the list it was given as it was', () => { findQuestions('', list); expect(list.map((x) => x.n)).toEqual([2, 7, 4, 12, 21]); });
+});
+
+describe('the open question that most likely asks what an unresolved point lacks (#1218)', () => {
+  const GAP = 'Insurance advisor report (final)';
+  it('scores the share of the point’s telling words that the question names, as a whole percent', () => {
+    const full = q(1, 'Has the insurance advisor issued its final report yet?');
+    expect(askedMatcher([full])(GAP)).toEqual({ q: full, confidence: 100 });
+    const part = q(2, 'Please send the insurance advisor report.');
+    expect(askedMatcher([part])(GAP)).toEqual({ q: part, confidence: 75 });
+  });
+  it('names the best-covering question, the lower number when two cover the point equally', () => {
+    const a = q(3, 'Insurance advisor report?');
+    const b = q(2, 'Insurance advisor report, please.');
+    const best = q(5, 'Insurance advisor final report?');
+    expect(askedMatcher([a, b, best])(GAP)?.q.n).toBe(5);
+    expect(askedMatcher([a, b])(GAP)?.q.n).toBe(2);
+  });
+  it('names nothing when no telling word is shared, or the point has none', () => {
+    expect(askedMatcher([INSURANCE])('Lock-up ratio')).toBeUndefined();
+    expect(askedMatcher([INSURANCE])('and the of')).toBeUndefined();
+    expect(askedMatcher([])(GAP)).toBeUndefined();
+  });
 });
