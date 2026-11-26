@@ -108,12 +108,10 @@ describe('complete families: what the design promises', () => {
     expect(f.of.get('Projects/Amendment No. 1 to EPC Contract.pdf')).toHaveLength(2); expect(f.alone.has('Projects/Amendment No. 1 to EPC Contract.pdf')).toBe(false);
     expect(f.alone.has('Projects/Relecloud/EPC/Schedule 1 - Scope.pdf')).toBe(true);
   });
-  it('sibling folders "Wind Farm 1" and "Wind Farm 2" keep their own series, numbers now being words (#1147)', () => {
-    const months = ['Jan', 'Feb', 'Mar'];
-    const paths = [1, 2].flatMap((n) => months.map((m) => `Ops/Wind Farm ${n}/Monthly Report ${m} 2025.pdf`));
-    const newest = read(paths).series.map((s) => `${s[0]}|${s.length}`).sort();
-    const each = [1, 2].map((n) => `Ops/Wind Farm ${n}/Monthly Report Mar 2025.pdf|3`);
-    expect(newest).toEqual(each);
+  it('a single letter tells two agreements apart: an amendment to Class B goes under Class B alone (#1147)', () => {
+    const classes = ['Equity/Class A Membership Agreement.pdf', 'Equity/Class B Membership Agreement.pdf'];
+    const amendment = 'Equity/First Amendment to Class B Membership Agreement.pdf';
+    expect(read([...classes, amendment]).of.get(amendment)).toEqual(['Equity/Class B Membership Agreement.pdf']);
   });
   it('undated monthly records of several assets stay apart; a running number after the record\'s word is a period', () => {
     expect(read([1, 2, 3].map((n) => `Rep/Monthly Report - Solar ${n}.pdf`)).series).toEqual([]);
