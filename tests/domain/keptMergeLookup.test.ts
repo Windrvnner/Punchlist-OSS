@@ -87,4 +87,44 @@ describe('rows are lined up with the one Q&A row lookup (#1111)', () => {
     const a = after(log, m.steps);
     for (let i = 20; i <= N; i += 20) expect(a[i + 1]).toEqual([String(i), base[i][1], base[i][2], `sroe on ${i}`]);
   });
+  it('a row naming no sender, with the log asking it for two parties, goes to the person', () => {
+    const base = deal();
+    base[5][2] = '';
+    const kept = base.map((r) => [...r]);
+    kept[5][3] = 'Answer typed';
+    const log = base.map((r) => [...r]);
+    log[5][2] = 'Lender A';
+    log.push([...log[5]]);
+    log[N + 1][2] = 'Lender B';
+    const m = merge(base, kept, log);
+    expect(m).toMatchObject({ steps: [], cells: 0, left: 0 });
+    expect(lines(m)).toEqual([[6, N + 2]]);
+  });
+  it('a row they added naming no sender, that the log added for two parties, goes to the person', () => {
+    const base = deal();
+    const kept = [...deal(), ['', 'Provide the new lease.', '', 'Their answer']];
+    const log = [...deal(), ['2001', 'Provide the new lease.', 'Lender A', ''], ['2002', 'Provide the new lease.', 'Lender B', '']];
+    const m = merge(base, kept, log);
+    expect(m).toMatchObject({ steps: [], added: 0, left: 0 });
+    expect(lines(m)).toEqual([[N + 2, N + 3]]);
+    expect(m.ask[0].add).toContainEqual({ col: 3, value: 'Their answer' });           // or a row of its own
+  });
+  it('a row the log holds twice, with the same number, text and sender, goes to the person', () => {
+    const base = deal();
+    const kept = deal();
+    kept[9][3] = 'sroe on 9';
+    const log = deal();
+    log.splice(10, 0, [...log[9]]);
+    const m = merge(base, kept, log);
+    expect(m).toMatchObject({ steps: [], cells: 0, left: 0 });
+    expect(lines(m)).toEqual([[10, 11]]);
+  });
+  it('a copy they added of a heading row is added; the heading itself is not added again', () => {
+    const H2 = ['No.', 'Question', 'Response'];
+    const base = [H2, ['1', 'First question', ''], ['Section B', '', ''], ['2', 'Second question', '']];
+    const kept = [...base.map((r) => [...r]), ['Section B', '', '']];
+    const m = mergeKept(table(base), table(kept), table(base.map((r) => [...r])), 'Question', undefined, undefined, 'No.');
+    expect(m.added).toBe(1);
+    expect(after(base, m.steps).slice(-2)).toEqual([['2', 'Second question', ''], ['Section B']]);
+  });
 });
