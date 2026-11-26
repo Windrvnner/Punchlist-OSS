@@ -134,6 +134,7 @@ The browser build runs on stand-in services (`src/adapters/mocks.ts`), with thes
 | `__oneDrive = false` | Acts as if OneDrive is not running |
 | `__copies` and `__places` | Set a document's copies |
 | `__sameRoom` and `__alsoIn` | Make another deal hold the same data room |
+| `__addressed` | Lists the question texts the stand-in model proposes under a chat answer |
 
 To test two copies of the code side by side, give the second copy its own port: `PUNCHLIST_PORT=4201 npm run browser -- …`.
 
