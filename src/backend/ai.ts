@@ -389,6 +389,92 @@ type Seen =
   }
   | { kind: 'finding'; title: string; workstream: string; body: string[]; sources: Source[] };
 const JSON_ONLY = 'Reply with one JSON object and nothing else.';
+/** the words the two answer judgements share: whether an answer addresses a question, and which one (#1120) */
+const answerFromDocs = (answer: string) => `This answer was written from the deal's documents:\n${answer}`;
+const GIVES_WHAT_ASKED = 'does it give what the question asks for?';
+/** the prompt naming open questions A1…An, never by their numbers, for the answer to be matched to one (#1120) */
+function suggestPrompt(answer: string, questions: string[]) {
+  const listed = questions.map((q, k) => `A${k + 1}: ${q.replace(/\s+/g, ' ')}`).join('\n');
+  return [
+    `These open questions were asked on a project-finance deal:\n${listed}\n`,
+    `${answerFromDocs(answer)}\n`,
+    `Which one of these open questions does the answer address: for which ${GIVES_WHAT_ASKED} Name the one it`
+      + ' addresses most fully, or "none" if it addresses none of them.',
+    'Reply as JSON: {"question": "A2" | "none"}',
+  ].join('\n');
+}
+/** the place, from 0, of the handle a reply names among `count` shown; null for "none" or a handle not shown */
+function handleAt(named: unknown, count: number): number | null {
+  const n = typeof named === 'string' ? /^A(\d+)$/.exec(named.trim())?.[1] : undefined;
+  return n && +n >= 1 && +n <= count ? +n - 1 : null;
+}
+type SamePair = { a: number; b: number; inAgainst: boolean; why: string };
+type SameMissed = { kind: 'unreachable' | 'failed'; at: number[] };
+/**
+ * What the parts of a split open-question match found (#1120), gathered as each part answers: the pairs, once each,
+ * with their questions placed in the whole log, and the points some part missed.
+ */
+function questionPartsTally(points: number) {
+  const pairs: SamePair[] = [];
+  const seen = new Set<string>();
+  const lost = new Set<number>();
+  let kind: SameMissed['kind'] | undefined;
+  let answered = false;
+  return {
+    add(value: { pairs: SamePair[]; missed?: SameMissed }, from: number) {
+      answered = true;
+      for (const at of value.missed?.at ?? []) lost.add(at);
+      kind ??= value.missed?.kind;
+      for (const pair of value.pairs) {
+        const whole = pair.inAgainst ? { ...pair, b: pair.b + from } : pair;
+        const key = `${whole.a}:${whole.b}:${whole.inAgainst}`;
+        if (!seen.has(key)) pairs.push(whole);
+        seen.add(key);
+      }
+    },
+    fail(why: SameMissed['kind']) {
+      kind ??= why;
+      for (let at = 0; at < points; at++) lost.add(at);
+    },
+    answered: () => answered,
+    result() {
+      pairs.sort((p, q) => p.a - q.a || Number(p.inAgainst) - Number(q.inAgainst) || p.b - q.b);
+      const at = [...lost].sort((x, y) => x - y);
+      return { pairs, ...(at.length ? { missed: { kind: kind ?? 'failed', at } } : {}) };
+    },
+  };
+}
+const SAME_RULES = 'Be strict: only pairs you are sure of, each named once.';
+const SAME_REPLY = 'Reply as JSON: {"pairs": [{"a": 2, "b": 9, "why": "…"}]}';
+/**
+ * The duplicate check's prompt for one part: `count` items asked about first, then the rest they are compared
+ * with. With `kind: 'questions'`, a deal's unresolved points against its open questions, each line marked as one or
+ * the other (#1120).
+ */
+function samePrompt(kind: 'questions' | undefined, count: number, shown: { text: string; point: boolean }[]) {
+  if (kind === 'questions') {
+    const listed = shown.map((x, k) => `${k + 1}: [${x.point ? 'point' : 'question'}] ${x.text}`).join('\n');
+    return [
+      'These are points still unresolved on a project-finance deal and the open questions already asked on its Q&A'
+        + ` log, each marked [point] or [question]. Items 1 to ${count} are being matched.`,
+      `${listed}\n`,
+      `Which of items 1 to ${count} does an open question already ask for, so that its answer would settle the point?`
+        + ` ${SAME_RULES} A question on the same subject that asks for something different is not a pair.`
+        + ' "why": a few words on what both ask for.',
+      SAME_REPLY,
+    ].join('\n');
+  }
+  const listed = shown.map((x, k) => `${k + 1}: ${x.text}`).join('\n');
+  return [
+    `These are items of a due diligence checklist for project-finance deals. Items 1 to ${count} are being brought`
+      + ' in; the others are already listed.',
+    `${listed}\n`,
+    `Which of items 1 to ${count} ask for exactly the same thing as another item, so that checking one settles the`
+      + ` other? ${SAME_RULES} Two items on the same subject that ask for different things are not a pair (an executed`
+      + ' agreement and its terms are different things). "why": a few words on what both ask for.',
+    SAME_REPLY,
+  ].join('\n');
+}
 /** the rules for a draft from earlier responses alone, when no document bears on the question */
 const PRIOR_RULES = 'Answer only from the earlier responses you are given: choose those that answer the question as it is asked. Reply with one JSON object and nothing else. Cite no documents: give "sources": [].';
 /**
@@ -746,6 +832,54 @@ export function nodeAi(o: AiOptions) {
   const SAME_BATCH = 3000;
   /** parts of the duplicate check asked at once */
   const SAME_AT_ONCE = 4;
+  type SameInput = Parameters<NonNullable<AiService['sameMeaning']>>[0];
+  /**
+   * How many of a deal's open questions one call may show beside all its points (#1120): every call shows every point,
+   * and the questions fill the rest of the share of the input limit a part is sized to (parts.ts `partSize`).
+   */
+  const questionPartSize = async (i: SameInput) => {
+    const limit = inLimit((await models()).fast);
+    const pointTokens = tokensEach(i.items) * i.items.length;
+    const forQuestions = limit - (pointTokens * 100) / control.limits.partShare;
+    return partSize({
+      cap: i.against.length, out: 1, outLimit: Infinity, in: tokensEach(i.against), inLimit: forQuestions,
+    });
+  };
+  /**
+   * A Q&A log too long to show with the points in one call is asked about a part of its questions at a time, each part
+   * with every point (#1120). Pairs map back to the whole log; a part not answered lists every point as missed, so each
+   * point ends with its pairs or a missed entry. A service error would most likely come again, so no part is begun
+   * after one, as in `sameMeaning`. The run fails only when no part answered.
+   */
+  const sameInQuestionParts = async (i: SameInput, size: number) => {
+    const tally = questionPartsTally(i.items.length);
+    let failed: Result<never> | undefined;
+    for (let from = 0; from < i.against.length; from += size) {
+      const r = await service.sameMeaning!({ ...i, against: i.against.slice(from, from + size) });
+      if (r.ok) tally.add(r.value, from);
+      else {
+        // every point is missed now, whatever the parts not begun would have found
+        failed = r;
+        tally.fail(r.error.kind === 'unreachable' ? 'unreachable' : 'failed');
+        break;
+      }
+    }
+    return failed && !tally.answered() ? failed : ok(tally.result());
+  };
+  /**
+   * The open-question match split into parts when the log does not fit one call with the points (#1120); null when it
+   * fits, or for a checklist, to be asked as one call.
+   */
+  const sameSplitByQuestions = async (i: SameInput) => {
+    if (i.kind !== 'questions') return null;
+    let size: number;
+    try {
+      size = await questionPartSize(i);
+    } catch (e) {
+      return failure(e, UNREACHED);
+    }
+    return size < i.against.length ? sameInQuestionParts(i, size) : null;
+  };
   /** points titled and compared with the findings in one call: a list of deal size (a few hundred points) is one call */
   const ISSUES_BATCH = 400;
   const MEMO_RATE_BATCH = 40;   // open findings rated in one call for the deal memo
@@ -2107,13 +2241,48 @@ export function nodeAi(o: AiOptions) {
     /** Whether an answer addresses a question: the standard model judges from the two texts, with no documents. */
     async addresses(i) {
       let reply: { verdict?: unknown; why?: unknown } | null;
-      try { reply = await askJson({ kind: 'addresses', model: (await models()).standard, system: JSON_ONLY, prompt: `This question was asked on a project-finance deal:\n${i.question}\n\nThis answer was written from the deal's documents:\n${i.answer}\n\nDoes the answer address the question: does it give what the question asks for? Say "yes" if it does, "partly" if it gives some of it, "no" if it does not. Add "why": one short sentence, under twenty words, saying what it gives or leaves out.\nReply as JSON: {"verdict": "yes" | "partly" | "no", "why": "…"}` }, ['verdict', 'why']); }
+      const prompt = [
+        `This question was asked on a project-finance deal:\n${i.question}\n`,
+        `${answerFromDocs(i.answer)}\n`,
+        `Does the answer address the question: ${GIVES_WHAT_ASKED} Say "yes" if it does, "partly" if it gives`
+          + ' some of it, "no" if it does not. Add "why": one short sentence, under twenty words, saying what it gives'
+          + ' or leaves out.',
+        'Reply as JSON: {"verdict": "yes" | "partly" | "no", "why": "…"}',
+      ].join('\n');
+      try {
+        reply = await askJson({ kind: 'addresses', model: (await models()).standard, system: JSON_ONLY, prompt }, [
+          'verdict', 'why',
+        ]);
+      }
       catch (e) { return failure(e, UNREACHED); }
       const verdict = word(reply?.verdict);
       if (verdict !== 'yes' && verdict !== 'partly' && verdict !== 'no') {
         return fail({ kind: 'failed', message: UNREAD_REPLY });
       }
       return ok({ verdict, why: (strings(reply!.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 200) });     // one short line on the card, however much it wrote
+    },
+    /**
+     * Which open question an answer addresses (#1120): the standard model reads the answer and the questions, under
+     * neutral handles, in parts sized to its input limit; the first part that names one gives the proposal.
+     */
+    async suggestQuestion(i) {
+      try {
+        const model = (await models()).standard;
+        // the reply is one handle however many questions are shown, so only the input limit sizes a part
+        const size = partSize({
+          cap: i.questions.length, out: 1, outLimit: Infinity, in: tokensEach(i.questions), inLimit: inLimit(model),
+        });
+        for (let from = 0; from < i.questions.length; from += size) {
+          const part = i.questions.slice(from, from + size);
+          const prompt = suggestPrompt(i.answer, part);
+          const reply = await askJson<{ question?: unknown }>({
+            kind: 'suggestQuestion', model, system: JSON_ONLY, prompt,
+          }, ['question']);
+          const at = handleAt(reply?.question, part.length);
+          if (at !== null) return ok(from + at);
+        }
+        return ok(null);
+      } catch (e) { return failure(e, UNREACHED); }
     },
     async merge(i) {
       let reply: { text?: unknown } | null;
@@ -2221,6 +2390,8 @@ export function nodeAi(o: AiOptions) {
       return ok(run.out as (string | null)[]);
     },
     async sameMeaning(i) {
+      const split = await sameSplitByQuestions(i);
+      if (split) return split;
       // The whole list and the general list go to the model in one call, which says which items ask for the same thing as
       // another. Only a list longer than SAME_BATCH is asked about in parts, each shown the items after it and the general
       // list (a pair with an earlier item was asked about in that item's part). A reply that cannot be read, as one too
@@ -2240,7 +2411,12 @@ export function nodeAi(o: AiOptions) {
         if (stop) { missed[stop] += part.mine.length; lost.push(...part.mine); return; }     // a half begun after another part's service error
         const { mine } = part; const shown = [...mine, ...part.rest];
         let reply: { pairs?: unknown } | null = null; let cut = false;
-        try { reply = await askJson({ kind: 'sameMeaning', split: true, model: (await models()).fast, system: JSON_ONLY, prompt: `These are items of a due diligence checklist for project-finance deals. Items 1 to ${mine.length} are being brought in; the others are already listed.\n${shown.map((g, k) => `${k + 1}: ${text(g)}`).join('\n')}\n\nWhich of items 1 to ${mine.length} ask for exactly the same thing as another item, so that checking one settles the other? Be strict: only pairs you are sure of, each named once. Two items on the same subject that ask for different things are not a pair (an executed agreement and its terms are different things). "why": a few words on what both ask for.\nReply as JSON: {"pairs": [{"a": 2, "b": 9, "why": "…"}]}` }, ['pairs']); }
+        const prompt = samePrompt(i.kind, mine.length, shown.map((g) => ({ text: text(g), point: g < n })));
+        try {
+          const fast = (await models()).fast;
+          const call = { kind: 'sameMeaning', split: true, model: fast, system: JSON_ONLY, prompt };
+          reply = await askJson(call, ['pairs']);
+        }
         // An error from the service would most likely come again, and a service that does not answer may take the
         // connector's whole wait each time: no more parts are begun, and those not begun are counted as missed with it
         catch (e) {

@@ -38,6 +38,13 @@ function make(over: { ai?: Partial<AiService>; docs?: Partial<DocumentService>; 
 }
 async function deal(store: Store, name = 'Datum') { await store.boot(); await store.dispatch(CreateDeal, { name, folders: [] }); const id = Object.values(store.get().deals).find((d) => d.name === `Project ${name}`)!.id; await store.loadDeal(id); return id; }
 
+/** the operating question, and a stand-in model that proposes it under every answer while it is open (#1120) */
+const OPERATING = 'Confirm the operating assumption in the base case, and whether the technical advisor and the'
+  + ' information memorandum agree.';
+const proposing = (text: string): Partial<AiService> => ({
+  suggestQuestion: async ({ questions }) => ok(questions.includes(text) ? questions.indexOf(text) : null),
+});
+
 describe('conversations', () => {
   it('asked before the models have loaded (just after a sign-in, say), the question goes to the person’s default or the standard tier, never with no model', async () => {
     const models: string[] = [];
@@ -175,7 +182,8 @@ describe('conversations', () => {
     expect(store.get().questions[q.id]).toMatchObject({ response: 'Confirmed.', status: 'open', respondedBy: '', responded: '' });
   });
   it('suggests an open question under the newest answer that may address it, and only a person uses it', async () => {
-    const { store, repo } = make(); const dealId = await deal(store);
+    const { store, repo } = make({ ai: proposing(OPERATING) });
+    const dealId = await deal(store);
     await mockFirstPass(repo, dealId, 'Project Datum'); await sleep(20); await store.loadDeal(dealId);
     await store.dispatch(CreateQuestion, { dealId, text: 'Confirm the operating assumption in the base case, and whether the technical advisor and the information memorandum agree.' });
     await store.dispatch(CreateQuestion, { dealId, text: 'Provide the insurance certificates.' });
@@ -236,7 +244,8 @@ describe('conversations', () => {
   it('"Not this one" is remembered on this PC across a reload, by answer and question, ' +
     'and changes no record', async () => {
     const local = new MemoryLocal(); const kv = disk();
-    const { store, repo } = make({ kv, local }); const dealId = await deal(store);
+    const { store, repo } = make({ kv, local, ai: proposing(OPERATING) });
+    const dealId = await deal(store);
     await mockFirstPass(repo, dealId, 'Project Datum'); await sleep(20); await store.loadDeal(dealId);
     await store.dispatch(CreateQuestion, { dealId, text: 'Confirm the operating assumption in the base case, and whether the technical advisor and the information memorandum agree.' });
     const q = Object.values(store.get().questions)[0]; const scope: Scope = { kind: 'deal', dealId };

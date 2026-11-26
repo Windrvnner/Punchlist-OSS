@@ -191,6 +191,12 @@ export interface AiService {
    */
   addresses?(input: { dealId: string; question: string; answer: string }): Promise<Result<{ verdict: 'yes' | 'partly' | 'no'; why: string }>>;
   /**
+   * Optional. Which of a deal's open questions, if any, an answer from a conversation addresses: its place in
+   * `questions`, or null. Asked once an answer finishes, for the suggested open question card (#1120). The backend
+   * shows the questions under neutral handles, in calls sized to the model's input limit. Only a proposal.
+   */
+  suggestQuestion?(input: { dealId: string; answer: string; questions: string[] }): Promise<Result<number | null>>;
+  /**
    * Optional. One response that reconciles two versions of a question's response (the app's and the Q&A log's):
    * every fact from both, said once, as one answer. Where they disagree, the more specific (a date, a figure, a document
    * reference) stands. Never the two pasted together, and never a note, bracket or placeholder for a person to fill in. It
@@ -237,8 +243,15 @@ export interface AiService {
    * one call where it can be, and in parts where it cannot (a very long list, or a reply too long for the service): when
    * some parts could not be asked and others were, the pairs found are kept and `missed` lists the items that were not
    * compared (`at`), and why. `only` asks about just those items again, so that no pair is left unasked.
+   * `kind: 'questions'`: `items` are a deal's unresolved points and `against` its open questions, and a pair is a point
+   * that a question already asks for (Add All Unresolved, #1120).
    */
-  sameMeaning?(input: { items: string[]; against: string[]; only?: number[] }): Promise<Result<{ pairs: { a: number; b: number; inAgainst: boolean; why: string }[]; missed?: { kind: 'unreachable' | 'failed'; at: number[] } }>>;
+  sameMeaning?(input: {
+    items: string[]; against: string[]; only?: number[]; kind?: 'questions';
+  }): Promise<Result<{
+    pairs: { a: number; b: number; inAgainst: boolean; why: string }[];
+    missed?: { kind: 'unreachable' | 'failed'; at: number[] };
+  }>>;
   /**
    * Optional. The points of an issues list, read from a file a person attached to the deal (`doc`): a PDF, a Word
    * file or an email. Each point keeps its own number on the list (`n`, as the list writes it, or its place when the list
