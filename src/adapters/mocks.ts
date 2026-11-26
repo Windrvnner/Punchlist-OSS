@@ -223,13 +223,17 @@ const researching = new Map<string, { steps: ResearchStep[]; t0: number; stopped
  * Stand-in for the model offering an action under its answer (#1054), so the demo and the browser suites can show the
  * button: a few fixed requests, each offering what a model would. The real model decides from the words itself.
  */
-function standInOffer(message: string): { offer?: unknown } {
+function standInOffer(message: string): { text?: string; sources?: []; offer?: unknown } {
   const said = message.trim().toLowerCase();
-  if (said === 'set up a new deal') return { offer: { action: 'new deal' } };
-  if (said === 'take me to the q&a') return { offer: { action: 'open page', page: 'qa' } };
-  if (said === 'put every gap in the q&a log') return { offer: { action: 'add unresolved' } };
+  const offering = (text: string, offer: unknown) => ({ text, sources: [] as [], offer });
+  if (said === 'set up a new deal') return offering('You can start the new deal here.', { action: 'new deal' });
+  if (said === 'take me to the q&a') return offering('Here is this deal’s Q&A log.', { action: 'open page', page: 'qa' });
+  if (said === 'put every gap in the q&a log') {
+    return offering('Each gap and open finding without a question can go to the Q&A log.', { action: 'add unresolved' });
+  }
   if (said === 'ask them for the permit list') {
-    return { offer: { action: 'log question', question: 'Please provide the list of permits held for the project.' } };
+    const question = 'Please provide the list of permits held for the project.';
+    return offering(`Here is a question for the counterparty: “${question}”`, { action: 'log question', question });
   }
   return {};
 }
