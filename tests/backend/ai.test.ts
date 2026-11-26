@@ -12,6 +12,7 @@ import type { DocRecord } from '../../src/backend/documents';
 import type { Folder } from '../../src/backend/logRepository';
 import { signedOut } from '../../src/backend/signInToken';
 import { SERVICE } from '../../src/control';
+import { qid } from './reviewKit';
 
 class Mem implements Folder { files = new Map<string, string>(); list() { return [...this.files.keys()]; } size(n: string) { return this.files.get(n)?.length ?? -1; } read(n: string) { return this.files.get(n) ?? null; } append(n: string, t: string) { this.files.set(n, (this.files.get(n) ?? '') + t); } write(n: string, t: string) { this.files.set(n, t); } }
 import { wordIndex as makeIndex, countWords, type WordIndex } from '../../src/backend/wordIndex';
@@ -475,8 +476,9 @@ describe('the chat agent', () => {
     val(await s.repo.transaction({ writes: [{ kind: 'question', id: 'q_2', data: { id: 'q_2', dealId: 'd1', n: 2, text: 'Confirm the lock-up ratio', response: 'It will be conformed to 1.30x.', status: 'answered' }, expectedRev: null }], index: { dealId: 'd1', add: [{ kind: 'question', id: 'q_2' }] } }));
     const r = val(await s.ai.answer(ask('What about the lock-up ratio?')));
     expect(s.turns[0].prompt).toContain('Finding “Lock-up ratio differs from the term sheet” (open): The draft has 1.25x.'); expect(s.turns[0].prompt).not.toContain('Insurance gap'); expect(s.turns[0].prompt).not.toContain('f_1');
-    expect(s.turns[1].prompt)
-      .toContain('Q2 · Answered\nQuestion: Confirm the lock-up ratio\nResponse to Q2: It will be conformed to 1.30x.');
+    const listed = 'q_2 · Answered\nQuestion: Confirm the lock-up ratio\n'
+      + 'Response to q_2: It will be conformed to 1.30x';
+    expect(s.turns[1].prompt).toContain(listed);
     expect(r.research!.steps[1]).toMatchObject({ text: 'Searched Q&A for “lock-up ratio”', result: 'Q2', found: [{ where: 'Q2 · response received', quote: 'It will be conformed to 1.30x.' }] });
     expect(s.calls.length).toBe(1);                                                                                                        // only the first search's documents were read by a model
   });
@@ -631,6 +633,59 @@ describe('a kept conversation', () => {
     expect(two.thread!.tags.slice(0, one.thread!.tags.length)).toEqual(one.thread!.tags); expect(two.thread!.tokens).toBeGreaterThan(one.thread!.tokens);
   });
 
+  it('an answer naming a question id that is not on the deal is a failed reply, asked again (#1105)', async () => {
+    const revenue = qid(3);
+    const fell = { n: 3, status: 'answered', text: 'How did revenue move?', response: 'It fell.' };
+    const said = (id: string) => ({ text: `Response ${id} says revenue fell.`, sources: [] });
+    const s = setup(reader, undefined, { turn: (_c, n) => said(n === 1 ? qid(99) : revenue) });
+    await deal(s.repo);
+    val(await question(s.repo, revenue, fell));
+    expect(val(await s.ai.answer(ask('How did revenue move?'))).text).toBe('The response to Q3 says revenue fell.');
+    expect(s.turns.length).toBe(2);
+    expect(s.turns[1].prompt).toBe(s.turns[0].prompt);
+    // still naming it when its tries run out: a failed answer, never shown with the id in it
+    const still = setup(reader, undefined, { turn: () => said(qid(99)) });
+    await deal(still.repo);
+    val(await question(still.repo, revenue, fell));
+    expect((await still.ai.answer(ask('How did revenue move?'))).ok).toBe(false);
+    expect(still.turns.length).toBe(3);
+  });
+
+  it('a kept conversation turn naming a question id not on the deal is asked in a new one (#1105)', async () => {
+    const revenue = qid(3);
+    const fell = { n: 3, status: 'answered', text: 'How did revenue move?', response: 'It fell.' };
+    const named = (n: number) => (n === 2 ? qid(99) : revenue);
+    const turn = (_c: Call, n: number) => ({ text: `Response ${named(n)} says it fell.`, sources: [] });
+    const s = setup(reader, undefined, { talks: true, turn });
+    await deal(s.repo);
+    val(await question(s.repo, revenue, fell));
+    const one = val(await s.ai.answer(ask('How did revenue move?')));
+    const later = { history: said(['How did revenue move?']), thread: one.thread };
+    const two = val(await s.ai.answer(ask('And since?', later)));
+    expect(two.text).toBe('The response to Q3 says it fell.');
+    expect(s.turns.length).toBe(3);
+    expect(s.svc.conversations.size).toBe(2);
+  });
+
+  it('a question is shown by its id on every turn, and named by its number when answered (#1105)', async () => {
+    const revenue = qid(3);
+    const turn = () => ({ text: `Response ${revenue} still stands; the tariff is R1.2 billion.`, sources: [] });
+    const s = setup(reader, undefined, { talks: true, turn });
+    await deal(s.repo);
+    const fell = { n: 3, status: 'answered', text: 'How did revenue move?', response: 'It fell.' };
+    val(await question(s.repo, revenue, fell));
+    const one = val(await s.ai.answer(ask('How did revenue move?')));
+    expect(one.text).toBe('The response to Q3 still stands; the tariff is R1.2 billion.');
+    expect(s.turns[0].prompt).toContain(`${revenue} · Answered\nQuestion: How did revenue move?`);
+    expect(s.turns[0].prompt).not.toMatch(/^[QR]\d+ · |Response to [QR]\d/m);
+    const data = { id: revenue, dealId: 'd1', ...fell, n: 4 };
+    const renumbered = { kind: 'question' as const, id: revenue, data, expectedRev: 1 };
+    val(await s.repo.transaction({ writes: [renumbered] }));
+    const later = { history: said(['How did revenue move?']), thread: one.thread };
+    const two = val(await s.ai.answer(ask('Was the tariff reset?', later)));
+    expect(two.text).toBe('The response to Q4 still stands; the tariff is R1.2 billion.');
+  });
+
   it('a full conversation is compacted: the conversation so far goes in a transcript file, attached to a new one, and the last transcript is deleted', async () => {
     const s = setup(reader, undefined, { talks: true, turn: twoTurns, compactAt: 20_000 });
     const one = val(await s.ai.answer(ask('What is the lock-up?')));
@@ -650,6 +705,14 @@ describe('a kept conversation', () => {
     expect(gone.thread!.tags.slice(1, -1).every((t) => +t.tag.slice(1) > 6)).toBe(true); expect(gone.thread!.tags.at(-1)).toEqual({ tag: 'D6', dealId: 'd1', docId: 'deleted' });   // a document no longer here keeps its number
     const other = val(await s.ai.answer(ask('And the tenor?', { model: 'standard', history: said(['What is the lock-up?', 'And the margin?']), thread: gone.thread })));
     expect(other.thread).toMatchObject({ id: 'conv_2', model: 'standard' }); expect(s.svc.removed).toEqual([gone.thread!.transcript]);
+  });
+
+  it('a chat reply whose JSON repair names a question id on no deal is never shown (#1105)', async () => {
+    const repaired = { text: `It is 1.25x, per ${qid(99)}.`, sources: [] };
+    const turn = (c: Call) => (c.prompt.startsWith('Your reply cannot be read') ? repaired : 'I think it is 1.25x');
+    const s = setup(reader, undefined, { talks: true, turn });
+    const r = await s.ai.answer(ask('What is the lock-up?'));
+    expect(JSON.stringify(r)).not.toContain(qid(99));
   });
 
   it('a reply that cannot be read is sent back once in the same conversation, to be put right', async () => {
@@ -817,7 +880,8 @@ describe('drafts, reassessments, the brief, the import layout and whether an ans
     const s = setup((c, n) => (n === 1 ? { status: 'found', text: 'x'.repeat(31_000), sources: [] } : { status: 'found', text: 'Shorter.', sources: [] }));
     await s.ai.draft({ dealId: 'd1', questionId: 'q_1', questionText: 'Confirm the lock-up ratio.' });
     expect(s.calls[0].system ?? s.calls[0].prompt).toMatch(/30,000 characters/);
-    expect(s.calls.length).toBe(2); expect(s.calls[1].prompt).toMatch(/longer than 30,000 characters: cut it down/);
+    expect(s.calls.length).toBe(2);
+    expect(s.calls[1].prompt).toMatch(/"text" must be under 30,000 characters/);
   });
 
   it('a draft or a reassessment resting only on another project’s document is not offered', async () => {
@@ -879,7 +943,10 @@ describe('drafts, reassessments, the brief, the import layout and whether an ans
       const once = setup((c, n) => (n === 1 ? bad : good(c))); await deal(once.repo); await finding(once.repo, 'f_1', 'Lock-up differs', { sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }] });
       expect(val(await once.ai.reassess({ dealId: 'd1', findingId: 'f_1' })).body).toEqual(['Still 1.25x. [1]']); expect(once.calls.map((c) => c.model)).toEqual(['standard', 'standard']);   // one failure: the standard model again, not a dearer one
       // what could be read is sent back with what is wrong with it; what could not be read at all is simply asked again
-      if (typeof bad === 'object' && 'body' in bad) expect(once.calls[1].prompt).toBe(`${once.calls[0].prompt}\n\nYou replied:\n{"body":[]}\n\nThat cannot be used: "body" has no paragraphs in it. Send the whole reply again, put right.`); else expect(once.calls[1].prompt).toBe(once.calls[0].prompt);
+      const putRight = 'That cannot be used: "body" has no paragraphs in it. Send the whole reply again, put right.';
+      const correction = `${once.calls[0].prompt}\n\nYou replied:\n{"body":[]}\n\n${putRight}`;
+      if (typeof bad === 'object' && 'body' in bad) expect(once.calls[1].prompt).toBe(correction);
+      else expect(once.calls[1].prompt).toBe(once.calls[0].prompt);
       const twice = setup((c, n) => (n <= 2 ? bad : good(c))); await deal(twice.repo); await finding(twice.repo, 'f_1', 'Lock-up differs', { sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }] });
       expect(val(await twice.ai.reassess({ dealId: 'd1', findingId: 'f_1' })).body).toEqual(['Still 1.25x. [1]']); expect(twice.calls.map((c) => c.model)).toEqual(['standard', 'standard', 'thorough']); expect(twice.calls[2].prompt).toBe(twice.calls[0].prompt);
     }
@@ -923,8 +990,43 @@ describe('drafts, reassessments, the brief, the import layout and whether an ans
     expect(s.calls.map((c) => c.model)).toEqual(['standard']); expect(s.calls[0].files).toEqual([]);   // no documents go with it
     expect(s.calls[0].prompt).toContain(i.question); expect(s.calls[0].prompt).toContain(i.answer);
     const long = setup(() => ({ verdict: 'no', why: 'x'.repeat(500) })); expect(val(await long.ai.addresses!(i)).why).toHaveLength(200);
-    const odd = await setup(() => ({ verdict: 'maybe', why: 'Hard to say.' })).ai.addresses!(i);
-    expect(!odd.ok && odd.error.message).toBe('The AI’s reply could not be read');
+    const odd = setup(() => ({ verdict: 'maybe', why: 'Hard to say.' }));
+    const oddResult = await odd.ai.addresses!(i);
+    expect(!oddResult.ok && oddResult.error.message).toBe('The AI’s reply could not be read');
+    expect(odd.calls).toHaveLength(2);   // sent back once, then given up (#1058)
+  });
+
+  it('sends a Check verdict that is not yes, partly or no back once, saying what is wrong (#1058)', async () => {
+    const good = { verdict: 'yes', why: 'It gives it.' };
+    const s = setup((_c, n) => (n === 1 ? { verdict: 'maybe', why: 'Hard to say.' } : good));
+    const i = { dealId: 'd1', question: 'What is the lock-up ratio?', answer: 'It is 1.25x.' };
+    expect(val(await s.ai.addresses!(i))).toEqual({ verdict: 'yes', why: 'It gives it.' });
+    expect(s.calls).toHaveLength(2);
+    expect(s.calls[1].prompt).toContain('That cannot be used: "verdict" is not "yes", "partly" or "no"');
+  });
+
+  it('sends an empty or placeholder Merge Both Versions reply back once, saying what is wrong (#1058)', async () => {
+    const i = { dealId: 'd1', question: 'When is COD?', app: 'COD is in March.', log: 'COD is March 3.' };
+    for (const bad of [{ text: '' }, { text: 'COD is [confirm date].' }]) {
+      const s = setup((_c, n) => (n === 1 ? bad : { text: 'COD is March 3.' }));
+      expect(val(await s.ai.merge!(i))).toEqual({ text: 'COD is March 3.' });
+      expect(s.calls).toHaveLength(2);
+      expect(s.calls[1].prompt).toContain('That cannot be used:');
+    }
+    const never = setup(() => ({ text: '' }));
+    const r = await never.ai.merge!(i);
+    expect(!r.ok && r.error.message).toBe('The AI’s reply could not be used');
+    expect(never.calls).toHaveLength(2);
+  });
+
+  it('reports an unreachable service on the send-back as unreachable, for Check and Merge (#1058)', async () => {
+    const down = () => { throw Object.assign(new Error('down'), { code: 'unreachable' }); };
+    const merging = setup((_c, n) => (n === 1 ? { text: '' } : down()));
+    const merged = await merging.ai.merge!({ dealId: 'd1', question: 'When is COD?', app: 'March.', log: 'March 3.' });
+    expect(!merged.ok && merged.error.kind).toBe('unreachable');
+    const checking = setup((_c, n) => (n === 1 ? { verdict: 'maybe', why: '' } : down()));
+    const checked = await checking.ai.addresses!({ dealId: 'd1', question: 'What is the ratio?', answer: '1.25x.' });
+    expect(!checked.ok && checked.error.kind).toBe('unreachable');
   });
 });
 
@@ -1631,7 +1733,13 @@ describe('when something changes', () => {
     val(await question(s.repo, 'q_12', { n: 12, text: 'Which lock-up ratio was agreed?', response: 'The agreed ratio is 1.25x;\nthe term sheet is out of date.', respondedBy: 'Sponsor counsel', responded: '2026-11-10', linkedFinding: 'f_1' }));
     val(await question(s.repo, 'q_13', { n: 13, text: 'Not answered yet', response: '  ', linkedFinding: 'f_1' })); val(await question(s.repo, 'q_14', { n: 14, text: 'About something else', response: 'Unrelated.', linkedFinding: 'f_2' })); val(await question(s.repo, 'q_15', { n: 15, text: 'Linked to nothing', response: 'Also unrelated.' }));
     expect(val(await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' }))).toEqual({ body: ['The response to Q12 confirms 1.25x was agreed. The draft says the same. [1]'], sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }] });
-    expect(s.calls[0].prompt).toContain('Responses received on the questions asked about this finding:\nQ12: Which lock-up ratio was agreed?\nResponse to Q12 from Sponsor counsel, 2026-11-10: The agreed ratio is 1.25x; the term sheet is out of date.\nTake these into account. A response is not a document: refer to it as "the response to Q12" and give it no [n] marker.');
+    expect(s.calls[0].prompt).toContain([
+      'Responses received on the questions asked about this finding:',
+      'q_12: Which lock-up ratio was agreed?',
+      'Response to q_12 from Sponsor counsel, 2026-11-10: The agreed ratio is 1.25x; the term sheet is out of date.',
+      'Take these into account. A response is not a document: refer to it as "response <id>", with the id its '
+        + 'question is shown by, and give it no [n] marker.',
+    ].join('\n'));
     expect(s.calls[0].prompt).not.toMatch(/Q13|Q14|Q15|Unrelated/);
     // a response that was an AI draft from the data room is said to be one, not passed off as received from the firm
     // (no separate "closed internally")
@@ -1646,25 +1754,109 @@ describe('when something changes', () => {
         provenance: { origin: 'ai', sources: [], actor: 'adoe', at: '2026-11-12T10:00:00.000Z' },
       }),
     );
-    val(await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' })); expect(s.calls.at(-1)!.prompt).toContain('Response to Q16 (drafted by AI from the data room, not received from anyone), 2026-11-12: The draft sets 1.25x.');
+    val(await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' }));
+    const drafted = 'Response to q_16 (drafted by AI from the data room, not received from anyone), 2026-11-12';
+    expect(s.calls.at(-1)!.prompt).toContain(`${drafted}: The draft sets 1.25x.`);
     const none = setup((c) => ({ body: ['Still so. [1]'], sources: [{ doc: tag(c, FA), page: 14 }] })); await deal(none.repo); await finding(none.repo, 'f_1', 'Lock-up differs', { sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }] });
     val(await none.ai.reassess({ dealId: 'd1', findingId: 'f_1' })); expect(none.calls[0].prompt).not.toContain('Responses received');
+  });
+
+  it('a reassessment shows the model each question by its id, never its number (#1105)', async () => {
+    const revenue = qid(3);
+    const sources = (c: Call) => [{ doc: tag(c, FA), page: 14 }];
+    // amounts in rand ("R1.2 billion") are the documents' own words, never a question
+    const said = `Revenue fell, per response ${revenue}; the tariff is R1.2 billion and capex R50 million. [1]`;
+    const reply = (c: Call) => ({ body: [said], sources: sources(c) });
+    const s = setup(reply);
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'Revenue below plan', { sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }] });
+    const fell = { n: 3, text: 'How did revenue move?', response: 'Revenue fell in Q3 2026.', linkedFinding: 'f_1' };
+    val(await question(s.repo, revenue, fell));
+    const reassessed = val(await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' }));
+    const kept = 'Revenue fell, per the response to Q3; the tariff is R1.2 billion and capex R50 million. [1]';
+    expect(reassessed.body).toEqual([kept]);
+    const prompt = s.calls[0].prompt;
+    expect(prompt).toContain(`${revenue}: How did revenue move?\nResponse to ${revenue}: Revenue fell in Q3 2026.`);
+    expect(prompt).not.toMatch(/^[QR]\d+:|Response to [QR]\d/m);
+  });
+
+  it('a reassessment naming a question id it was not shown is asked again (#1105)', async () => {
+    const revenue = qid(3);
+    const sources = (c: Call) => [{ doc: tag(c, FA), page: 14 }];
+    const said = (n: number) => `Revenue fell, per response ${n === 1 ? qid(99) : revenue}. [1]`;
+    const s = setup((c, n) => ({ body: [said(n)], sources: sources(c) }));
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'Revenue below plan', { sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }] });
+    const fell = { n: 3, text: 'How did revenue move?', response: 'Revenue fell.', linkedFinding: 'f_1' };
+    val(await question(s.repo, revenue, fell));
+    const reassessed = val(await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' }));
+    expect(reassessed.body).toEqual(['Revenue fell, per the response to Q3. [1]']);
+    expect(s.calls.length).toBe(2);
+    expect(s.calls[1].prompt).toBe(s.calls[0].prompt);
+  });
+
+  it.each([['its own thorough model', 'thorough'], ['the standard model as its thorough one', 'standard']])(
+    'a reassessment still naming an unshown question id when its tries run out fails, with %s (#1105)',
+    async (_label, thorough) => {
+      const sources = (c: Call) => [{ doc: tag(c, FA), page: 14 }];
+      const s = setup((c) => ({ body: [`Revenue fell, per response ${qid(99)}. [1]`], sources: sources(c) }));
+      s.svc.offered = { ...s.svc.offered, thorough };
+      await deal(s.repo);
+      const cited = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }];
+      await finding(s.repo, 'f_1', 'Revenue below plan', { sources: cited });
+      const fell = { n: 3, text: 'How did revenue move?', response: 'Revenue fell.', linkedFinding: 'f_1' };
+      val(await question(s.repo, qid(3), fell));
+      expect((await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' })).ok).toBe(false);
+      expect(JSON.stringify(val(await s.repo.get('finding', 'f_1')))).not.toContain(qid(99));
+    },
+  );
+
+  it('a JSON repair of a reassessment that names a question id it was not shown is never used (#1105)', async () => {
+    // the reply cannot be read as JSON; its repair cites the document the reply named, and an unshown question id
+    const named = (c: Call) => {
+      const doc = /Source: (D\d+)/.exec(c.prompt)?.[1];
+      return { body: [`Revenue fell, per response ${qid(99)}. [1]`], sources: [{ doc, page: 14 }] };
+    };
+    const s = setup((c) => `Revenue fell. Source: ${tag(c, FA)}`, undefined, { fix: named });
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'Revenue below plan', { sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }] });
+    const fell = { n: 3, text: 'How did revenue move?', response: 'Fell.', linkedFinding: 'f_1' };
+    val(await question(s.repo, qid(3), fell));
+    expect((await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' })).ok).toBe(false);
+    expect(s.fixCalls.length).toBeGreaterThan(0);
   });
 
   it('a response on a question linked to no finding is followed through like a new document: the fast model says which findings it could change, and one that no longer stands is marked', async () => {
     const shared = new Mem(); const src = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }];
     const s = setup((c) => ({ body: ['Settled by the response to Q12. [1]'], sources: [{ doc: tag(c, FA), page: 14 }] }), undefined, { shared, installId: 'office',
-      hears: () => ({ affected: ['F1 Q12', 'F2: Q15', 'F9 Q12', 'nonsense'] }), verify: (c) => (c.model === 'fast' && c.prompt.includes('Title: Lock-up differs') ? { stands: false, why: 'the response settles it' } : c.model === 'standard' ? { stands: false, why: 'agreed' } : { stands: true, why: '' }) });
+      hears: () => ({ affected: ['F1 q_12', 'F2: q_15', 'F9 q_12', 'nonsense'] }),
+      verify: (c) => (c.model === 'fast' && c.prompt.includes('Title: Lock-up differs')
+        ? { stands: false, why: 'the response settles it' }
+        : c.model === 'standard' ? { stands: false, why: 'agreed' } : { stands: true, why: '' }) });
     await deal(s.repo); await finding(s.repo, 'f_1', 'Lock-up differs', { sources: src }); await finding(s.repo, 'f_2', 'Hedging not approved', { sources: src }); await finding(s.repo, 'f_3', 'Closed already', { status: 'closed', sources: src });
     val(await question(s.repo, 'q_12', { n: 12, text: 'Which lock-up ratio was agreed?', response: 'The agreed ratio is 1.25x; the term sheet is out of date.', respondedBy: 'Sponsor counsel', responded: '2026-11-10' }));
     val(await question(s.repo, 'q_13', { n: 13, text: 'Not answered yet', response: ' ' })); val(await question(s.repo, 'q_14', { n: 14, text: 'Tied to a finding', response: 'The app marks that one itself.', linkedFinding: 'f_2' })); val(await question(s.repo, 'q_15', { n: 15, text: 'Has the board approved the hedging?', response: 'Not yet.' }));
     expect(val(await s.ai.responses('d1'))).toEqual({ heard: ['q_12', 'q_15'], marked: ['f_1'] });
     // one question to the fast model, with no documents: the two responses tied to nothing, and the open findings
     expect(s.hearCalls.length).toBe(1); expect(s.hearCalls[0].model).toBe('fast'); expect(s.hearCalls[0].files).toEqual([]);
-    expect(s.hearCalls[0].prompt).toContain('Q12: Which lock-up ratio was agreed?\nResponse to Q12 from Sponsor counsel, 2026-11-10: The agreed ratio is 1.25x; the term sheet is out of date.\nQ15: Has the board approved the hedging?\nResponse to Q15: Not yet.\n'); expect(s.hearCalls[0].prompt).toContain('F1: Lock-up differs\nF2: Hedging not approved\n'); expect(s.hearCalls[0].prompt).not.toMatch(/Q13:|Q14:|Closed already/);
+    expect(s.hearCalls[0].prompt).toContain([
+      'q_12: Which lock-up ratio was agreed?',
+      'Response to q_12 from Sponsor counsel, 2026-11-10: The agreed ratio is 1.25x; the term sheet is out of date.',
+      'q_15: Has the board approved the hedging?',
+      'Response to q_15: Not yet.\n',
+    ].join('\n'));
+    expect(s.hearCalls[0].prompt).toContain('F1: Lock-up differs\nF2: Hedging not approved\n');
+    expect(s.hearCalls[0].prompt).toContain('Reply as JSON: {"affected": ["F2 <id>", "F5 <id>"]}');
+    expect(s.hearCalls[0].prompt).not.toMatch(/Q\d|Tied to a finding|Closed already/);
     // each finding it named was looked at with its response beside it, by the fast model first; only the one that doubted went to the standard model
-    expect(s.verifyCalls.map((c) => [c.model, /Title: (.*)/.exec(c.prompt)![1], /Response to Q(\d+)/.exec(c.prompt)![1]])).toEqual([['fast', 'Lock-up differs', '12'], ['standard', 'Lock-up differs', '12'], ['fast', 'Hedging not approved', '14']]);
-    expect(s.verifyCalls[2].prompt).toContain('Response to Q15: Not yet.');                                                              // its own linked response, and the one said to bear on it
+    const firstResponse = (c: { prompt: string }) => /Response to q_\d+[^:]*: (.*)/.exec(c.prompt)![1];
+    expect(s.verifyCalls.map((c) => [c.model, /Title: (.*)/.exec(c.prompt)![1], firstResponse(c)])).toEqual([
+      ['fast', 'Lock-up differs', 'The agreed ratio is 1.25x; the term sheet is out of date.'],
+      ['standard', 'Lock-up differs', 'The agreed ratio is 1.25x; the term sheet is out of date.'],
+      ['fast', 'Hedging not approved', 'The app marks that one itself.'],
+    ]);
+    // its own linked response, and the one said to bear on it
+    expect(s.verifyCalls[2].prompt).toContain('Response to q_15: Not yet.');
     const f = async (id: string) => val(await s.repo.get('finding', id))!.envelope.data as { updated?: boolean; updatedWhy?: string; title: string; body: string[] };
     expect(await f('f_1')).toMatchObject({ updated: true, updatedWhy: 'Response received on Q12', updatedOn: { questions: ['q_12'] }, title: 'Lock-up differs', body: ['As written. [1]'] });   // which question, by id as well as in words expect((await f('f_2')).updated).toBeUndefined(); expect(s.announced).toEqual(['f_1']);
     expect(s.usage.at(-1)!.run).toBe('responses'); expect(s.usage.at(-1)!.calls.map((l) => `${l.kind}/${l.model} ×${l.calls}`).sort()).toContain('affects/fast ×1');
@@ -1672,14 +1864,39 @@ describe('when something changes', () => {
     const before = s.svc.calls.length; expect(val(await s.ai.responses('d1'))).toEqual({ heard: [], marked: [] }); expect(s.svc.calls.length).toBe(before);
     const home = setup(() => ({}), undefined, { shared, installId: 'home', repo: s.repo }); expect(val(await home.ai.responses('d1'))).toEqual({ heard: [], marked: [] }); expect(home.svc.calls.length).toBe(0);
     // when a person reassesses the finding, the response that set it off is read with it, though the question is tied to nothing
-    val(await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' })); expect(s.calls.at(-1)!.prompt).toContain('Response to Q12 from Sponsor counsel, 2026-11-10: The agreed ratio is 1.25x; the term sheet is out of date.'); expect(s.calls.at(-1)!.prompt).not.toContain('Q15');
+    val(await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' }));
+    const counsel = 'Response to q_12 from Sponsor counsel, 2026-11-10';
+    expect(s.calls.at(-1)!.prompt).toContain(`${counsel}: The agreed ratio is 1.25x; the term sheet is out of date.`);
+    expect(s.calls.at(-1)!.prompt).not.toContain('Has the board approved the hedging?');
     // a response reworded is a new response; one left as it was is not
     val(await s.repo.transaction({ writes: [{ kind: 'question', id: 'q_15', data: { id: 'q_15', dealId: 'd1', n: 15, text: 'Has the board approved the hedging?', response: 'Approved on November 3.' }, expectedRev: 1 }] }));
-    expect(val(await s.ai.responses('d1')).heard).toEqual(['q_15']); expect(s.hearCalls.length).toBe(2); expect(s.hearCalls[1].prompt).not.toContain('Q12:');
+    expect(val(await s.ai.responses('d1')).heard).toEqual(['q_15']); expect(s.hearCalls.length).toBe(2);
+    expect(s.hearCalls[1].prompt).not.toContain('Which lock-up ratio was agreed?');
+  });
+
+  it('a look at responses naming a question id it was not shown is a failed reply, asked again (#1105)', async () => {
+    const src = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }];
+    const named = (n: number) => ({ affected: [`F1 ${n === 1 ? qid(99) : qid(12)}`] });
+    const verify = () => ({ stands: false, why: 'settled' });
+    const s = setup(() => ({}), undefined, { hears: (_c, n) => named(n), verify });
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'Lock-up differs', { sources: src });
+    val(await question(s.repo, qid(12), { n: 12, text: 'Which ratio?', response: '1.25x.' }));
+    expect(val(await s.ai.responses('d1'))).toEqual({ heard: [qid(12)], marked: ['f_1'] });
+    expect(s.hearCalls.length).toBe(2);
+    // still naming it when its tries run out: the look failed, and the response is looked at the next time
+    const still = setup(() => ({}), undefined, { hears: () => named(1) });
+    await deal(still.repo);
+    await finding(still.repo, 'f_1', 'Lock-up differs', { sources: src });
+    val(await question(still.repo, qid(12), { n: 12, text: 'Which ratio?', response: '1.25x.' }));
+    expect((await still.ai.responses('d1')).ok).toBe(false);
+    expect(still.hearCalls.length).toBe(3);
   });
 
   it('a response mark adds its questions to an earlier one from responses, and leaves a mark set for another reason as it is', async () => {
-    const src = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }]; const opts = { hears: () => ({ affected: ['F1 Q12'] }), verify: (c: any) => ({ stands: c.model === 'never', why: 'the response settles it' }) };
+    const src = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }];
+    const verify = (c: any) => ({ stands: c.model === 'never', why: 'the response settles it' });
+    const opts = { hears: () => ({ affected: ['F1 q_12'] }), verify };
     const data = async (s: any) => (val(await s.repo.get('finding', 'f_1')) as any).envelope.data as { updated?: boolean; updatedWhy?: string; updatedOn?: { questions: string[] } };
     // marked by a response to a question linked to it: the backend's mark adds Q12 to it
     const a = setup(() => ({}), undefined, opts); await deal(a.repo); await finding(a.repo, 'f_1', 'Lock-up differs', { sources: src, updated: true, updatedWhy: 'Response received on Q3', updatedOn: { questions: ['q_3'] } });
@@ -1693,7 +1910,10 @@ describe('when something changes', () => {
 
   it('a mark that cannot be written leaves the work undone: the response is set against the finding again next time, and the finding is marked then', async () => {
     const src = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }];
-    const s = setup(() => ({}), undefined, { hears: () => ({ affected: ['F1 Q12'] }), verify: (c: any) => ({ stands: false, why: 'the response settles it' }) }); await deal(s.repo); await finding(s.repo, 'f_1', 'Lock-up differs', { sources: src });
+    const verify = () => ({ stands: false, why: 'the response settles it' });
+    const s = setup(() => ({}), undefined, { hears: () => ({ affected: ['F1 q_12'] }), verify });
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'Lock-up differs', { sources: src });
     val(await question(s.repo, 'q_12', { n: 12, text: 'Which ratio?', response: '1.25x.' }));
     const back = refuse(s.repo.shared, (t) => t.includes('"kind":"finding"'), quota);  // the shared folder takes no finding changes just now
     const first = await s.ai.responses('d1'); expect(first.ok).toBe(false);
@@ -1717,10 +1937,18 @@ describe('when something changes', () => {
     expect(none.hearCalls[1].prompt).toContain('F1: Hedging not approved'); expect(none.hearCalls[1].prompt).not.toContain('Lock-up differs'); expect(val(await none.ai.responses('d1')).heard).toEqual([]);
     // the fast model doubts, the standard model does not: nothing is marked
     const doubt = setup(() => ({}), undefined, { hears: () => ({ affected: ['F1'] }), verify: (c) => ({ stands: c.model !== 'fast', why: '' }) }); await deal(doubt.repo); await finding(doubt.repo, 'f_1', 'Lock-up differs', { sources: src }); val(await question(doubt.repo, 'q_12', q12));
-    expect(val(await doubt.ai.responses('d1'))).toEqual({ heard: ['q_12'], marked: [] }); expect(doubt.verifyCalls.map((c) => c.model)).toEqual(['fast', 'standard']); expect(doubt.verifyCalls[0].prompt).toContain('Response to Q12: The agreed ratio is 1.25x.');   // named with no question: the response in the call goes beside it
+    expect(val(await doubt.ai.responses('d1'))).toEqual({ heard: ['q_12'], marked: [] });
+    expect(doubt.verifyCalls.map((c) => c.model)).toEqual(['fast', 'standard']);
+    // named with no question: the response in the call goes beside it
+    expect(doubt.verifyCalls[0].prompt).toContain('Response to q_12: The agreed ratio is 1.25x.');
     expect(val(await doubt.ai.responses('d1')).heard).toEqual([]);                                                                              // the standard model answered: that was a look
     // neither model gives a usable answer on the finding: that was not a look, and the next call tries again
-    let ok = false; const mute = setup(() => ({}), undefined, { hears: () => ({ affected: ['F1 Q12'] }), verify: () => (ok ? { stands: false, why: 'settled' } : 'no idea') }); await deal(mute.repo); await finding(mute.repo, 'f_1', 'Lock-up differs', { sources: src }); val(await question(mute.repo, 'q_12', q12));
+    let ok = false;
+    const unsure = () => (ok ? { stands: false, why: 'settled' } : 'no idea');
+    const mute = setup(() => ({}), undefined, { hears: () => ({ affected: ['F1 q_12'] }), verify: unsure });
+    await deal(mute.repo);
+    await finding(mute.repo, 'f_1', 'Lock-up differs', { sources: src });
+    val(await question(mute.repo, 'q_12', q12));
     expect(val(await mute.ai.responses('d1'))).toEqual({ heard: ['q_12'], marked: [] }); ok = true; expect(val(await mute.ai.responses('d1'))).toEqual({ heard: ['q_12'], marked: ['f_1'] }); expect(mute.hearCalls.length).toBe(2);
     expect(val(await mute.ai.responses('d1')).heard).toEqual([]);
     // a reply that cannot be read, or a service that cannot be reached: nothing is recorded, and the next call asks again
