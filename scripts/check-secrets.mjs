@@ -11,8 +11,19 @@ const files = (all ? git('ls-files', '-z') : git('diff', '--cached', '--name-onl
   .split('\0')
   .filter(Boolean);
 
-// Key shapes: Anthropic, OpenAI (including project keys), AWS, GitHub, Slack, and a JWT (North's sign-in token)
-const KEY = /\b(sk-ant-[A-Za-z0-9_-]{16,}|sk-(?:proj-)?[A-Za-z0-9_-]{32,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{30,}|xox[baprs]-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/;
+// Key shapes: Anthropic, OpenAI (including project keys), AWS, GitHub, Slack, Google, and a JWT (North's sign-in token)
+const KEY_SHAPES = [
+  'sk-ant-[A-Za-z0-9_-]{16,}',
+  'sk-(?:proj-)?[A-Za-z0-9_-]{32,}',
+  'AKIA[0-9A-Z]{16}',
+  'gh[pousr]_[A-Za-z0-9]{30,}',
+  'xox[baprs]-[A-Za-z0-9-]{10,}',
+  'AIza[0-9A-Za-z_-]{35}',
+  'eyJ[A-Za-z0-9_-]{10,}\\.eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}',
+];
+const KEY = new RegExp(`\\b(${KEY_SHAPES.join('|')})`);
+// and a private key in PEM form (a cloud service account) or PGP armor. It starts with dashes, where \b cannot match.
+const PRIVATE_KEY = /-----BEGIN ([A-Z]+ )*PRIVATE KEY( BLOCK)?-----/;
 // and the project's own key, whatever its shape, read from .env on this PC (never printed)
 let own = '';
 try { own = /^PUNCHLIST_AI_KEY=(.+)$/m.exec(fs.readFileSync('.env', 'utf8'))?.[1].trim() ?? ''; } catch { /* no .env here (CI) */ }
@@ -23,6 +34,7 @@ for (const f of files) {
   let text;
   try { text = (all ? fs.readFileSync(f) : git('show', `:${f}`)).toString('latin1'); }
   catch { bad.push(`${f} (could not be read to check)`); continue; }
-  if (KEY.test(text) || (own.length >= 16 && text.includes(own))) bad.push(`${f} (looks like an API key or token)`);
+  const ownKey = own.length >= 16 && text.includes(own);
+  if (KEY.test(text) || PRIVATE_KEY.test(text) || ownKey) bad.push(`${f} (looks like an API key or token)`);
 }
 if (bad.length) { console.error(`Refused: secrets must stay in .env, which git ignores.\n  ${bad.join('\n  ')}`); process.exit(1); }

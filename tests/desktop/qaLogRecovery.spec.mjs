@@ -14,6 +14,15 @@ async function update(page, dealId) {
   await page.getByRole('menuitem', { name: 'Update Q&A Log' }).click();
 }
 
+/**
+ * Whether the process ended from the kill the test planted. Windows has no signals: a process killed that way
+ * ends with exit code 1 and no signal (#1027).
+ */
+function killedDirectly(code, signal) {
+  if (process.platform === 'win32') return code === 1 && signal === null;
+  return signal === 'SIGKILL';
+}
+
 async function interrupt({ app, page }, dealId, file) {
   const original = path.join(logFolder, file);
   const before = new Set(fs.readdirSync(logFolder));
@@ -29,11 +38,12 @@ async function interrupt({ app, page }, dealId, file) {
   const click = update(page, dealId).catch((error) => {
     if (!/closed/i.test(error.message)) throw error;
   });
-  const [[, signal]] = await Promise.all([exit, click]).catch(async (error) => {
+  const [[code, signal]] = await Promise.all([exit, click]).catch(async (error) => {
     const notices = await page.evaluate(() => store.get().ui.toasts.map((toast) => toast.text)).catch(() => []);
     throw new Error(`The ${path.extname(file)} update did not reach the move. ${notices.join(' ')}`, { cause: error });
   });
-  assert.equal(signal, 'SIGKILL', 'the desktop process exits directly after moving the log');
+  const ended = `code ${code}, signal ${signal}`;
+  assert(killedDirectly(code, signal), `the desktop process exits directly after moving the log (${ended})`);
   assert(!fs.existsSync(original));
   const aside = fs.readdirSync(logFolder).find((name) => name.endsWith('.old') && !before.has(name));
   assert(aside);
