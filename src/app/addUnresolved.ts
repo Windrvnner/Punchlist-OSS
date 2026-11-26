@@ -1,11 +1,12 @@
 import { SERVICE } from '../control';
+import type { Question } from '../domain/model';
 import { fail, ok, type Result } from '../domain/result';
 import type { AiService } from '../ports';
 import { AddUnresolved, UNRESOLVED_LINK_CHANGED } from './commands/addUnresolved';
 import { unresolvedPoints, unresolvedTargets, type State, type Unresolved } from './state';
 import type { Store } from './store';
 import {
-  canLinkUnresolved, isApprovedLink, linkApproval, unresolvedPointFingerprint,
+  canLinkUnresolved, isApprovedLink, keptLinks, linkApproval, suggestUnresolvedLinks, unresolvedPointFingerprint,
   type ApprovedLinks, type UnresolvedLink,
 } from './unresolvedLinks';
 
@@ -59,6 +60,31 @@ async function phrasePoints(store: Store, dealId: string, points: Unresolved[]):
   return ok(points.map((p) => phrasing.text.get(phraseKey(p)) ?? null));
 }
 
+/**
+ * The model's proposals (#1120): for each point without a kept link, the open questions it says already ask for it, by
+ * point key. A failed call, or a point the call missed, has none, and nothing is linked unless a person checks it.
+ */
+async function proposedLinks(
+  store: Store, points: Unresolved[], pool: Question[], kept: ReadonlyMap<string, Question>,
+) {
+  const proposed = new Map<string, string[]>();
+  const ai = store.services.ai;
+  const keptIds = new Set([...kept.values()].map((q) => q.id));
+  const asked = points.filter((point) => !kept.has(point.key));
+  const open = pool.filter((q) => !keptIds.has(q.id));
+  if (!ai.sameMeaning || !asked.length || !open.length) return proposed;
+  const items = asked.map((point) => `${point.what} ${point.need}`);
+  const result = await ai.sameMeaning({ items, against: open.map((q) => q.text), kind: 'questions' });
+  if (!result.ok) return proposed;
+  for (const pair of result.value.pairs) {
+    const point = asked[pair.a];
+    const q = open[pair.b];
+    if (!pair.inAgainst || !point || !q) continue;
+    proposed.set(point.key, [...(proposed.get(point.key) ?? []), q.id]);
+  }
+  return proposed;
+}
+
 function drafts(points: Unresolved[], text: (string | null)[]) {
   const drafted: DraftedPoint[] = [];
   const out: Unresolved[] = [];
@@ -80,12 +106,16 @@ export async function prepareUnresolved(
   if (progress?.signal.aborted) return;
   const state = store.get();
   if (!Array.isArray(state.checklists[dealId])) return fail({ kind: 'failed', message: UNREAD_CHECKLIST });
-  const { points, links } = unresolvedPoints(state, dealId, approved);
+  const { points, pool } = unresolvedPoints(state, dealId);
   progress?.count(points.length);
   if (!points.length) return ok({ points: [], links: [], out: [] });
-  const result = await phrasePoints(store, dealId, points);
+  const kept = keptLinks(points, pool, approved);
+  const [result, proposed] = await Promise.all([
+    phrasePoints(store, dealId, points), proposedLinks(store, points, pool, kept),
+  ]);
   if (progress?.signal.aborted) return;
   if (!result.ok) return result;
+  const links = suggestUnresolvedLinks(points, pool, kept, proposed);
   const byKey = new Map(points.map((p) => [p.key, p]));
   const suggested = links.map((link) => ({ point: byKey.get(link.point)!, q: link.q }));
   return ok({ ...drafts(points, result.value), links: suggested });
