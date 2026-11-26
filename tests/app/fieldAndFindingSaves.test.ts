@@ -37,7 +37,6 @@ async function field(restored?: string) {
     partialNow: () => false,
     focused: () => restored === undefined,
     locked: () => locked,
-    stopTimer: () => false,
     markPartial: () => {},
     replaceText: (value) => { text = value; },
     adoptBase: () => {},
@@ -52,9 +51,11 @@ async function field(restored?: string) {
     resolve(result: Awaited<ReturnType<FieldCommit>>): void;
   }[] = [];
   const commit: FieldCommit = (value, over) => new Promise((resolve) => pending.push({ value, over, resolve }));
+  // a keystroke, without the wait for a pause in typing: each test sends its saves itself
   const type = (value: string) => {
     input.replaceText(value);
-    save.typed(text);
+    save.typed(text, commit, 500);
+    save.stopTimer();
   };
   const lock = (next: boolean) => {
     locked = next;
