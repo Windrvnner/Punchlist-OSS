@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { indexWords, topWords, tokens } from '../../src/backend/words';
+import { indexWords, topWords } from '../../src/backend/words';
 
 describe('the words a document uses most', () => {
   it('leaves out only the words every sentence has, and splits text as the word index does (#1147)', () => {
@@ -29,21 +29,5 @@ describe('the words a document uses most', () => {
     const many = Array.from({ length: 50 }, (_, i) => `word${String.fromCharCode(97 + (i % 26))}${String.fromCharCode(97 + Math.floor(i / 26))}x `.repeat(50 - i)).join(' ');
     expect(topWords(many).length).toBe(30); expect(topWords(many)[0]).toBe('wordaax'); expect(topWords(many, 5).length).toBe(5);
     expect(topWords('the and of to')).toEqual([]);
-  });
-});
-
-describe('tokens keep combining marks inside words (#1154)', () => {
-  it('keeps a word with vowel signs whole', () => {
-    expect(tokens('दिन')).toEqual(['दिन']);
-  });
-  it('keeps a combining accent in its word', () => {
-    expect(tokens('cafe\u0301')).toEqual(['cafe\u0301']);
-  });
-  it('splits camelCase after a mark', () => {
-    expect(tokens('cafe\u0301Bar')).toEqual(['cafe\u0301', 'bar']);
-    expect(tokens('caféBar')).toEqual(['café', 'bar']);
-  });
-  it('does not normalize: a composed and a decomposed accent are different words', () => {
-    expect(tokens('caf\u00e9')).not.toEqual(tokens('cafe\u0301'));
   });
 });

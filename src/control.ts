@@ -287,7 +287,13 @@ const SPEC = {
     compactShare: count(80, 'Percent of limits.inputTokens at which a long conversation is compacted, when that comes before limits.compactAt.', 30, 95),
     partShare: count(60, 'Percent of limits.outputTokens, and of limits.inputTokens, that a batch of items is sized to fill. The rest is margin: what an item takes is only estimated, and the prompt\'s own words and documents also count.', 20, 95),
     checkReplyTokens: count(250, 'About how many tokens the standard model\'s reply on one checklist item takes (a place and its quote, or a finding written up), to size a check\'s batches.', 10, 5_000),
-    glanceReplyTokens: count(20, 'The same for the fast model\'s quick look at one item.', 5, 1_000),
+    glanceReplyTokens: count(
+      20,
+      'The same for the fast model\'s quick look at one item, and for the standard model\'s check of one ' +
+        'Already Asked? pair.',
+      5,
+      1_000,
+    ),
     rewordReplyTokens: count(80, 'The same for one item\'s new wording on import.', 10, 2_000),
     readLineTokens: count(40, 'The same for what one line of a list brought in is (a heading, an item and its words, or not an item).', 5, 1_000),
     phraseReplyTokens: count(80, 'The same for one question to the counterparty drafted by Add all unresolved.', 10, 2_000),
@@ -297,6 +303,16 @@ const SPEC = {
       'About how many turns one run of the chat agent, in a chat or in the checks\' gap search, '
       + 'takes before it answers with what it has.', 1, 100),
     aiRetries: count(2, 'Times an AI call that failed, or gave an empty reply, is asked again quietly before the failure is shown. A service that cannot be reached is waited for instead.', 0, 5),
+    askedCutoff: count(
+      80,
+      "Percent of an unresolved point's words (as the search index keeps them) that an open question must name " +
+        "before the model is asked whether it already asks for the point (Add All Unresolved's Already Asked?). " +
+        'Below it no call is made and ' +
+        'nothing is offered; at 0 every point that shares a word with a question is checked, ' +
+        'at 100 only a point whose words a question names all of.',
+      0,
+      100,
+    ),
     searchCalls: count(15,
       'About how many calls one search run, in a chat or in the checks, makes before it returns what it found.',
       1, 50),
