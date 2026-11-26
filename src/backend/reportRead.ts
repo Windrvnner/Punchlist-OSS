@@ -8,7 +8,7 @@ import type { Source } from '../domain/model';
 import { list as listOf, strings, tagNumber } from './lenient';
 import {
   type ReportKit, type ReadLine, type ReadIssue, type Known, type Issue, type SentDoc,
-  ISSUE_PAGE, ISSUE_READS, isCut, partialOf, yes,
+  ISSUE_PAGE, isCut, partialOf, yes,
 } from './reportTypes';
 
 /** sentences of one paragraph, written out for the model */
@@ -111,6 +111,8 @@ class ReportRead {
   titles = new Map<string, Set<string>>();
   /** issues given with no page that opens */
   unplaced = 0;
+  /** every row any page has given, as written: a page of only rows already given moves the read nowhere */
+  private given = new Set<string>();
   /** pages that could not be added to a finding now: a later sweep adds them */
   owe = new Map<string, Source[]>();
 
@@ -199,6 +201,13 @@ class ReportRead {
     return true;
   }
 
+  /** whether some row of this page is one no earlier page gave; all of them are kept as given */
+  adds(rows: Record<string, unknown>[]): boolean {
+    const fresh = rows.map((row) => JSON.stringify(row)).filter((key) => !this.given.has(key));
+    for (const key of fresh) this.given.add(key);
+    return fresh.length > 0;
+  }
+
   /** the next page starts after the last issue given */
   moveOn(rows: Record<string, unknown>[]) {
     const lastRow = rows[rows.length - 1];
@@ -275,8 +284,10 @@ async function readPage(r: ReportRead, call: number, last: boolean): Promise<Ste
   r.heard(reply);
   if (!(await r.takeAll(rows, known))) return { end: null };
   r.moveOn(rows);
+  const fresh = r.adds(rows);
   if (!page.cut && (!rows.length || !hasMore(reply, rows, r.size))) return { end: finish(r, last) };
-  return 'next';
+  // a model that gives a page again and says there is more would go on for ever: the read is a try that failed
+  return fresh ? 'next' : { end: null };
 }
 
 /**
@@ -290,11 +301,10 @@ export async function read(
   const s = await k.send(rec);
   if (!s) return 'lost';                       // cannot be sent from this PC: left for one that can, not a try
   const r = new ReportRead(k, rec, s, before);
-  for (let call = 0; call < ISSUE_READS; call++) {
+  for (let call = 0; ; call++) {               // page after page until the report ends: no length is too long
     const step = await readPage(r, call, last);
     if (step !== 'next') return step.end;
   }
-  return null;                                 // still going: something is wrong, and nothing is called read
 }
 
 /**

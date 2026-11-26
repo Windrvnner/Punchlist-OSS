@@ -256,6 +256,41 @@ describe('third-party reports at deal scale', () => {
     expect(ms).toBeLessThan(5_000);
   });
 
+  it('a model that gives its first page again and says there is more does not read for ever', async () => {
+    const name = 'Independent Engineer Report.pdf';
+    const docs = room().filter((d) => d.name === name);
+    let pages = 0;
+    const { k, log, calls } = kit(docs, {
+      answer: ({ kind, prompt }) => {
+        if (kind !== 'report') return undefined;
+        if (++pages > 50) return new Error('still reading after 50 pages');   // ends a read that would not
+        const first = readReply(prompt.replace(/, starting after the issue you titled "[^"]*"/, ''), name);
+        return { ...first, more: true };
+      },
+    });
+    await sweep(k);
+    // the first page is new, the second is it again: the read is a try that failed, and wrote nothing
+    expect(calls.filter((c) => c.kind === 'report' && c.name === name).length).toBeLessThan(10);
+    expect(stateOf(log).read.size).toBe(0);
+  });
+
+  it('reads a report of 600 issues to its end: no number of pages is too many', async () => {
+    const name = 'Independent Engineer Report.pdf';
+    const docs = room().filter((d) => d.name === name);
+    const was = ISSUES[name];
+    ISSUES[name] = Array.from({ length: 600 }, (_, i) => `Unique engineering issue number ${i + 1}`);
+    try {
+      const { k, log, findings, calls } = kit(docs);
+      await sweep(k);
+      expect(raisedTitles(findings).length).toBe(600);
+      expect(raisedTitles(findings)).toContain('Unique engineering issue number 600');
+      expect(calls.filter((c) => c.kind === 'report' && c.name === name).length).toBe(600 / ISSUE_PAGE);
+      expect(stateOf(log).read.size).toBe(1);
+    } finally {
+      ISSUES[name] = was;
+    }
+  });
+
   it('tells the model the rule: anything flagged is an issue, unclear ones are raised, notes on the '
     + 'advisor’s own scope are not', async () => {
     const docs = room().filter((d) => d.name === 'Phase I Environmental Site Assessment.pdf');

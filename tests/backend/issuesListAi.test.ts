@@ -114,13 +114,13 @@ describe('reading an issues list', () => {
       expect((await read(f)).n).toBe(164);
     }
   });
-  it('fails, bringing in nothing, when the list cannot be read to its end', async () => {
+  it('fails, bringing in nothing, when the list cannot be read to its end, and reads on while it can', async () => {
     // the same point again and again: each page after the first fails its check, three times
     const same = await read(stand(LIST, { edit: () => ({ points: [LIST[0]], more: true }) }));
     expect(same.n).toBe(UNREAD); expect(same.reads.length).toBe(4); expect(same.s.calls.filter(isSort).length).toBe(0);
-    // a list still going at the last call allowed
-    const endless = await read(stand(plain(300), { edit: (pts) => ({ points: pts.slice(0, 1), more: true }) }));
-    expect(endless.n).toBe('It is too long to read: more than 100 points'); expect(endless.reads.length).toBe(100); expect(endless.s.calls.filter(isSort).length).toBe(0);
+    // a model that gives one point a page still gets to the end of a long list: no number of pages is too many
+    const slow = await read(stand(plain(300), { edit: (pts) => ({ points: pts.slice(0, 1), more: true }) }));
+    expect(slow.n).toBe(300); expect(slow.reads.length).toBe(301);
     // empty pages while points are left
     expect((await read(stand(LIST, { edit: (pts, call) => ({ points: call ? [] : pts, more: true }) }))).n).toBe(UNREAD);
   });
@@ -142,6 +142,12 @@ describe('reading an issues list', () => {
       expect((await read(stand(L, { shift: (f, c) => (c === 1 ? f + 10 : f) }))).n).toBe(164);
       for (const shift of [(f: number, c: number) => (c >= 1 ? 0 : f), (f: number, c: number) => (c >= 1 ? f + 10 : f)]) expect((await read(stand(L, { shift }))).n).toBe(UNREAD);
     }
+  });
+  it('a page given again fails the page, even when the check passes it, and the read brings in nothing', async () => {
+    const passes = () => ({ missing: [], extra: [], wrong: [] });
+    const again = await read(stand(LIST, { shift: (f, c) => (c >= 1 ? 0 : f), check: passes }));
+    expect(again.n).toBe(UNREAD);
+    expect(again.reads.length).toBeLessThan(10);
   });
   it('asks for the next page by the last point read: its number and its opening words', async () => {
     const { reads } = await read(stand(LIST));
