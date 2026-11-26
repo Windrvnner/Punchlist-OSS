@@ -2123,11 +2123,11 @@ export function nodeAi(o: AiOptions) {
       return ok({ pairs: out, ...(items ? { missed: { kind, at: lost.sort((a, b) => a - b) } } : {}) });
     },
     async issuesList(i) {
-      // Two steps. The list is read from its file in one call, each point in the list's own words. Then the points are
-      // sorted into workstreams and compared with the deal's findings and each other, with no file: the whole list in
-      // one call, as the checklist's duplicate check is asked, in parts only for a list longer than ISSUES_BATCH. A reply
-      // that cannot be read is asked for again for half as many points. Nothing is half done: a point that cannot be read or sorted
-      // fails the whole, to be asked again.
+      // Two steps. The list is read from its file in one call, each point in the list's own words. Then the points
+      // are sorted into workstreams and compared with the deal's findings and each other, with no file: the whole
+      // list in one call, as the checklist's duplicate check is asked, in parts only for a list longer than
+      // ISSUES_BATCH. A reply that cannot be read is asked for again for half as many points. Nothing is half
+      // done: a point that cannot be read or sorted fails the whole, to be asked again.
       // a call that fails (a timeout, a server error) is asked again twice by every call's own retry (retry.ts), which
       // also covers that case, so it is not asked again here too; only a reply that cannot be read is (`unread`), twice
       const tried = async <T>(ask: () => Promise<T>): Promise<T> => { for (let k = 0; ; k++) { try { return await ask(); } catch (e) { if ((e as { code?: string })?.code !== 'unread' || k >= 2) throw e; } } };

@@ -58,7 +58,8 @@ describe('reading an issues list', () => {
   it('reads the list in one call, then compares its points with 126 findings in one call, and maps each '
     + 'repeat', async () => {
     // the reader's words are kept as given, inner spacing included; only the edges are trimmed
-    const spaced = (pts: P[]) => ({ points: pts.map((p, k) => ({ ...p, text: k === 1 ? `${p.text}\n  and  more` : `  ${p.text}\n` })) });
+    const wordy = (p: P, k: number) => (k === 1 ? `${p.text}\n  and  more` : `  ${p.text}\n`);
+    const spaced = (pts: P[]) => ({ points: pts.map((p, k) => ({ ...p, text: wordy(p, k) })) });
     const { r, s, reads } = await read(stand(LIST, { edit: spaced }));
     const out = val(r);
     expect(reads.length).toBe(1);
@@ -68,7 +69,8 @@ describe('reading an issues list', () => {
     expect(s.calls.filter(isSort)[0].files).toEqual([]);
     expect(out.points.length).toBe(164);
     expect(out.points[0]).toEqual({ n: '1', text: POINTS[0], title: POINTS[0], workstream: 'Legal', same: { finding: 'f0' } });
-    expect(out.points[1].text).toBe(`${POINTS[1]}\n  and  more`);   // inner spacing and line breaks kept
+    // inner spacing and line breaks kept
+    expect(out.points[1].text).toBe(`${POINTS[1]}\n  and  more`);
     expect(out.points[1].workstream).toBe('Financial');
     expect(out.points[2].workstream).toBe('Legal');   // the workstream as the app names it, whatever the case
     expect(out.points.filter((p) => p.same && 'finding' in p.same).length).toBe(23);
