@@ -205,8 +205,9 @@ A deal's checklist is made up of its own item records, linked to the findings an
   If any selected question is no longer settled, none are closed. Each close is one change with one **Undo**.
 - **Add All Unresolved to Q&A…** (`AddUnresolved`) reads the rows again before writing and applies one change with one
   **Undo**. The fast model phrases a question for each gap or open finding that has no linked question. It works in
-  parts sized by `inParts` and asks again, one at a time, about any points that failed. Points still without a question
-  are counted and offered with **Retry**.
+  parts sized by `inParts`, and each call gets only the shared quiet retry. Points a reply left out are asked again as
+  a part; a part that brings nothing is split down to single points. Points still without a question are counted and
+  offered with **Retry**.
 
 ## Q&A log, imports, and the memo
 
