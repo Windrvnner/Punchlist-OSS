@@ -632,6 +632,40 @@ describe('a kept conversation', () => {
     expect(two.thread!.tags.slice(0, one.thread!.tags.length)).toEqual(one.thread!.tags); expect(two.thread!.tokens).toBeGreaterThan(one.thread!.tokens);
   });
 
+  it('an answer naming a question id that is not on the deal is a failed reply, asked again (#1105)', async () => {
+    const revenue = qid(3);
+    const fell = { n: 3, status: 'answered', text: 'How did revenue move?', response: 'It fell.' };
+    const said = (id: string) => ({ text: `Response ${id} says revenue fell.`, sources: [] });
+    const s = setup(reader, undefined, { turn: (_c, n) => said(n === 1 ? qid(99) : revenue) });
+    await deal(s.repo);
+    val(await question(s.repo, revenue, fell));
+    expect(val(await s.ai.answer(ask('How did revenue move?'))).text).toBe('The response to Q3 says revenue fell.');
+    expect(s.turns.length).toBe(2);
+    expect(s.turns[1].prompt).toBe(s.turns[0].prompt);
+    // still naming it when its tries run out: a failed answer, never shown with the id in it
+    const still = setup(reader, undefined, { turn: () => said(qid(99)) });
+    await deal(still.repo);
+    val(await question(still.repo, revenue, fell));
+    expect((await still.ai.answer(ask('How did revenue move?'))).ok).toBe(false);
+    expect(still.turns.length).toBe(3);
+  });
+
+  it('a kept conversation turn naming a question id not on the deal is asked in a new one (#1105)', async () => {
+    const revenue = qid(3);
+    const fell = { n: 3, status: 'answered', text: 'How did revenue move?', response: 'It fell.' };
+    const named = (n: number) => (n === 2 ? qid(99) : revenue);
+    const turn = (_c: Call, n: number) => ({ text: `Response ${named(n)} says it fell.`, sources: [] });
+    const s = setup(reader, undefined, { talks: true, turn });
+    await deal(s.repo);
+    val(await question(s.repo, revenue, fell));
+    const one = val(await s.ai.answer(ask('How did revenue move?')));
+    const later = { history: said(['How did revenue move?']), thread: one.thread };
+    const two = val(await s.ai.answer(ask('And since?', later)));
+    expect(two.text).toBe('The response to Q3 says it fell.');
+    expect(s.turns.length).toBe(3);
+    expect(s.svc.conversations.size).toBe(2);
+  });
+
   it('a question is shown by its id on every turn, and named by its number when answered (#1105)', async () => {
     const revenue = qid(3);
     const turn = () => ({ text: `Response ${revenue} still stands; the tariff is R1.2 billion.`, sources: [] });
@@ -1770,6 +1804,25 @@ describe('when something changes', () => {
     val(await s.repo.transaction({ writes: [{ kind: 'question', id: 'q_15', data: { id: 'q_15', dealId: 'd1', n: 15, text: 'Has the board approved the hedging?', response: 'Approved on November 3.' }, expectedRev: 1 }] }));
     expect(val(await s.ai.responses('d1')).heard).toEqual(['q_15']); expect(s.hearCalls.length).toBe(2);
     expect(s.hearCalls[1].prompt).not.toContain('Which lock-up ratio was agreed?');
+  });
+
+  it('a look at responses naming a question id it was not shown is a failed reply, asked again (#1105)', async () => {
+    const src = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }];
+    const named = (n: number) => ({ affected: [`F1 ${n === 1 ? qid(99) : qid(12)}`] });
+    const verify = () => ({ stands: false, why: 'settled' });
+    const s = setup(() => ({}), undefined, { hears: (_c, n) => named(n), verify });
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'Lock-up differs', { sources: src });
+    val(await question(s.repo, qid(12), { n: 12, text: 'Which ratio?', response: '1.25x.' }));
+    expect(val(await s.ai.responses('d1'))).toEqual({ heard: [qid(12)], marked: ['f_1'] });
+    expect(s.hearCalls.length).toBe(2);
+    // still naming it when its tries run out: the look failed, and the response is looked at the next time
+    const still = setup(() => ({}), undefined, { hears: () => named(1) });
+    await deal(still.repo);
+    await finding(still.repo, 'f_1', 'Lock-up differs', { sources: src });
+    val(await question(still.repo, qid(12), { n: 12, text: 'Which ratio?', response: '1.25x.' }));
+    expect((await still.ai.responses('d1')).ok).toBe(false);
+    expect(still.hearCalls.length).toBe(3);
   });
 
   it('a response mark adds its questions to an earlier one from responses, and leaves a mark set for another reason as it is', async () => {

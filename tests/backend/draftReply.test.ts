@@ -43,4 +43,9 @@ describe('withoutDraftCredits (#286, #1105)', () => {
     const reply = { text: ' One. [1]\nTwo.\n\nThree. ', sources: [a] };
     expect(withoutDraftCredits(reply, [shown, qid(13)])).toBe(reply);
   });
+
+  it('drops only a sentence naming a shown id: an R label or an unshown id stays (#1105)', () => {
+    const reply = { text: `As in R1. [1] See ${qid(13)}. [2] As in ${shown}. [3]`, sources: [a, b, c] };
+    expect(withoutDraftCredits(reply, [shown])).toEqual({ text: `As in R1. [1] See ${qid(13)}. [2]`, sources: [a, b] });
+  });
 });
