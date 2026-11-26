@@ -101,6 +101,9 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
     setKept(new Set());
   };
   const read = (file: File) => void load(file.name, (current) => readIssuesList(store, dealId, file, current));
+  // the paste listener calls the latest load, so it sees the state of the render at the paste
+  const loadNow = useRef(load);
+  loadNow.current = load;
   // text pasted (Ctrl+V) while no list is read is the list, as a pasted checklist is
   useEffect(() => {
     if (list) return;
@@ -108,11 +111,11 @@ function IssuesListImport({ dealId, fresh: afresh }: { dealId: string; fresh: bo
       const text = event.clipboardData?.getData('text/plain') ?? '';
       if (!text.trim()) return;
       event.preventDefault();
-      void load('the pasted list', (current) => readPastedIssuesList(store, dealId, text, current));
+      void loadNow.current('the pasted list', (current) => readPastedIssuesList(store, dealId, text, current));
     };
     document.addEventListener('paste', onPaste);
     return () => document.removeEventListener('paste', onPaste);
-  });
+  }, [list, store, dealId]);
   const pick = <FileInput id="il-file" accept={ACCEPT} inputRef={fileRef} onFile={read} />;
   const browse = () => fileRef.current?.click();
 
