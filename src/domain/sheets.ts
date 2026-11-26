@@ -43,7 +43,7 @@ export function parseCsv(text: string, bare?: (field: string) => string): string
     else field += c;
   }
   if (field || row.length) { end(); rows.push(row); }
-  return rows.map((r) => r.map((x) => x.replace(/\r\n?/g, '\n')));
+  return rows;
 }
 
 /** a sheet's used rows, and the sheet row number of the first of them (rows above are blank) */
@@ -145,7 +145,7 @@ export function withSteps(all: Sheet[], sheet: string, steps: SheetEdit[]): Shee
   const t = want.find((s) => s.name === sheet); if (!t) return null;
   for (const s of steps) {
     if (s.kind === 'rows') t.grid.splice(s.after + 1, 0, ...Array.from({ length: s.count }, () => [] as string[]));
-    else { while (t.grid.length <= s.row) t.grid.push([]); const r = t.grid[s.row]; while (r.length <= s.col) r.push(''); r[s.col] = String(s.value).replace(/\r\n?/g, '\n'); }
+    else { while (t.grid.length <= s.row) t.grid.push([]); const r = t.grid[s.row]; while (r.length <= s.col) r.push(''); r[s.col] = String(s.value); }
   }
   return want;
 }
