@@ -943,12 +943,7 @@ describe('drafts, reassessments, the brief, the import layout and whether an ans
       const once = setup((c, n) => (n === 1 ? bad : good(c))); await deal(once.repo); await finding(once.repo, 'f_1', 'Lock-up differs', { sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }] });
       expect(val(await once.ai.reassess({ dealId: 'd1', findingId: 'f_1' })).body).toEqual(['Still 1.25x. [1]']); expect(once.calls.map((c) => c.model)).toEqual(['standard', 'standard']);   // one failure: the standard model again, not a dearer one
       // what could be read is sent back with what is wrong with it; what could not be read at all is simply asked again
-      const wrong = '"body" has no paragraphs in it, or names a question id that is not one of the responses above';
-      const sentBack = `\n\nYou replied:\n{"body":[]}\n\nThat cannot be used: ${wrong}. `
-        + 'Send the whole reply again, put right.';
-      const first = once.calls[0].prompt;
-      const told = typeof bad === 'object' && 'body' in bad ? `${first}${sentBack}` : first;
-      expect(once.calls[1].prompt).toBe(told);
+      if (typeof bad === 'object' && 'body' in bad) expect(once.calls[1].prompt).toBe(`${once.calls[0].prompt}\n\nYou replied:\n{"body":[]}\n\nThat cannot be used: "body" has no paragraphs in it. Send the whole reply again, put right.`); else expect(once.calls[1].prompt).toBe(once.calls[0].prompt);
       const twice = setup((c, n) => (n <= 2 ? bad : good(c))); await deal(twice.repo); await finding(twice.repo, 'f_1', 'Lock-up differs', { sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }] });
       expect(val(await twice.ai.reassess({ dealId: 'd1', findingId: 'f_1' })).body).toEqual(['Still 1.25x. [1]']); expect(twice.calls.map((c) => c.model)).toEqual(['standard', 'standard', 'thorough']); expect(twice.calls[2].prompt).toBe(twice.calls[0].prompt);
     }
@@ -1752,11 +1747,11 @@ describe('when something changes', () => {
     expect(prompt).not.toMatch(/^[QR]\d+:|Response to [QR]\d/m);
   });
 
-  it('a reassessment that names a question it was not shown is sent back to be put right (#1105)', async () => {
+  it('a reassessment naming a question id it was not shown is asked again (#1105)', async () => {
     const revenue = qid(3);
     const sources = (c: Call) => [{ doc: tag(c, FA), page: 14 }];
-    const named = (c: Call) => (c.prompt.includes('That cannot be used') ? revenue : qid(99));
-    const s = setup((c) => ({ body: [`Revenue fell, per response ${named(c)}. [1]`], sources: sources(c) }));
+    const said = (n: number) => `Revenue fell, per response ${n === 1 ? qid(99) : revenue}. [1]`;
+    const s = setup((c, n) => ({ body: [said(n)], sources: sources(c) }));
     await deal(s.repo);
     await finding(s.repo, 'f_1', 'Revenue below plan', { sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }] });
     const fell = { n: 3, text: 'How did revenue move?', response: 'Revenue fell.', linkedFinding: 'f_1' };
@@ -1764,7 +1759,38 @@ describe('when something changes', () => {
     const reassessed = val(await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' }));
     expect(reassessed.body).toEqual(['Revenue fell, per the response to Q3. [1]']);
     expect(s.calls.length).toBe(2);
-    expect(s.calls[1].prompt).toContain('names a question id that is not one of the responses above');
+    expect(s.calls[1].prompt).toBe(s.calls[0].prompt);
+  });
+
+  it.each([['its own thorough model', 'thorough'], ['the standard model as its thorough one', 'standard']])(
+    'a reassessment still naming an unshown question id when its tries run out fails, with %s (#1105)',
+    async (_label, thorough) => {
+      const sources = (c: Call) => [{ doc: tag(c, FA), page: 14 }];
+      const s = setup((c) => ({ body: [`Revenue fell, per response ${qid(99)}. [1]`], sources: sources(c) }));
+      s.svc.offered = { ...s.svc.offered, thorough };
+      await deal(s.repo);
+      const cited = [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }];
+      await finding(s.repo, 'f_1', 'Revenue below plan', { sources: cited });
+      const fell = { n: 3, text: 'How did revenue move?', response: 'Revenue fell.', linkedFinding: 'f_1' };
+      val(await question(s.repo, qid(3), fell));
+      expect((await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' })).ok).toBe(false);
+      expect(JSON.stringify(val(await s.repo.get('finding', 'f_1')))).not.toContain(qid(99));
+    },
+  );
+
+  it('a JSON repair of a reassessment that names a question id it was not shown is never used (#1105)', async () => {
+    // the reply cannot be read as JSON; its repair cites the document the reply named, and an unshown question id
+    const named = (c: Call) => {
+      const doc = /Source: (D\d+)/.exec(c.prompt)?.[1];
+      return { body: [`Revenue fell, per response ${qid(99)}. [1]`], sources: [{ doc, page: 14 }] };
+    };
+    const s = setup((c) => `Revenue fell. Source: ${tag(c, FA)}`, undefined, { fix: named });
+    await deal(s.repo);
+    await finding(s.repo, 'f_1', 'Revenue below plan', { sources: [{ doc: FA.name, loc: 'p. 14', docId: FA.docId }] });
+    const fell = { n: 3, text: 'How did revenue move?', response: 'Fell.', linkedFinding: 'f_1' };
+    val(await question(s.repo, qid(3), fell));
+    expect((await s.ai.reassess({ dealId: 'd1', findingId: 'f_1' })).ok).toBe(false);
+    expect(s.fixCalls.length).toBeGreaterThan(0);
   });
 
   it('a response on a question linked to no finding is followed through like a new document: the fast model says which findings it could change, and one that no longer stands is marked', async () => {

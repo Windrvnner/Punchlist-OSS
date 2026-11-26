@@ -1898,12 +1898,11 @@ export function nodeAi(o: AiOptions) {
         + `Title: ${f.title}\nAs written: ${f.body.join(' ')}${responsesText(said)}`;
       const own = { [i.dealId]: f.sources.map((s) => s.docId).filter((x): x is string => !!x) };
       const shape = '{"body": ["one paragraph per string, with [n] markers"], "sources": [...]}';
-      // a reply that names a question id it was not shown is a failed reply, sent back (#1105)
+      // a reply that names a question id it was not shown is a failed reply, asked again (#1105)
       const ids = said.map((q) => q.id);
-      const usable = (reply: Record<string, unknown>) =>
-        parasOf(reply).length > 0 && namesOnlyShown(parasOf(reply).join('\n'), ids);
-      const wrong = '"body" has no paragraphs in it, or names a question id that is not one of the responses above';
-      const again = { escalate: m.thorough, usable, wrong };
+      const unusable = (text: string) => !namesOnlyShown(text, ids);
+      const usable = (reply: Record<string, unknown>) => parasOf(reply).length > 0;
+      const again = { escalate: m.thorough, usable, wrong: '"body" has no paragraphs in it', unusable };
       const about = `${f.title} ${f.body.join(' ')}`;
       const r = await read('reassess', [i.dealId], m.standard, ask, about, own, shape, again);
       if (!r.ok) return r;
