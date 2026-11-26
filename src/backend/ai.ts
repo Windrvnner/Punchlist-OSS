@@ -2148,9 +2148,7 @@ export function nodeAi(o: AiOptions) {
       if (!read.length) return fail({ kind: 'failed', message: 'No points were found in it' });
       // a point the list numbers nothing is known by its place
       const points = read.map((p, k) => ({ ...p, n: p.n || String(k + 1) }));
-      const fs = i.findings.map((f) => `${f.title.replace(/\s+/g, ' ')}${f.text ? `: ${clean(f.text.replace(/\s*\[\d+\]/g, '')).slice(0, 240)}` : ''}`);
-      // the findings whose text the fullest form cuts short: a join named to one of them is confirmed too, at any level
-      const cutShort = new Set(i.findings.flatMap((f, k) => (f.text && clean(f.text.replace(/\s*\[\d+\]/g, '')).length > 240 ? [k] : [])));
+      const fs = i.findings.map((f) => `${f.title.replace(/\s+/g, ' ')}${f.text ? `: ${clean(f.text.replace(/\s*\[\d+\]/g, ''))}` : ''}`);
       const ws = new Map(i.workstreams.map((w) => [w.toLowerCase(), w]));
       const sorted = new Map<number, { title: string; workstream: string; same?: { finding: string } | { point: number } }>();
       // A part's call holds its own points, every point before them (an earlier point it may repeat) and the findings, so
@@ -2221,8 +2219,8 @@ export function nodeAi(o: AiOptions) {
           // a point asked about with several shares keeps its first title, and the first thing any share says it repeats
           const had = sorted.get(k);
           if (!had) sorted.set(k, { title, workstream, ...(same ? { same } : {}) }); else if (!had.same && same) had.same = same;
-          // confirmed below whenever either side was shown shorter than it is: a point or finding by opening words or title, or a finding's text cut short
-          if (same && (level >= 1 || ('finding' in same && cutShort.has(at))) && sorted.get(k)!.same === same) loose.add(k);
+          // confirmed below whenever either side was shown shorter than it is: a point or finding by opening words or title
+          if (same && level >= 1 && sorted.get(k)!.same === same) loose.add(k);
           missing.delete(k);
         }
         if (!missing.size) return true;
@@ -2237,7 +2235,7 @@ export function nodeAi(o: AiOptions) {
         await Promise.all(Array.from({ length: Math.min(SAME_AT_ONCE, parts.length) }, async () => { while (whole && next < parts.length) { try { whole = (await ask(parts[next++], 3)) && whole; } catch (e) { whole = false; throw e; } } }));
         if (!whole) return fail({ kind: 'failed', message: UNREAD_REPLY });
       } catch (e) { return failure(e, UNREAD_REPLY); }
-      // A "same" named from opening words, titles or a finding's text cut short may be the wrong one: two points can open
+      // A "same" named from opening words or titles may be the wrong one: two points can open
       // alike and ask opposite things, as can a revised point and the finding its first version made. Each is confirmed in a call that shows both in full, a part at a time (parts.ts); one not confirmed, or
       // cut off even alone, is not joined, and its point becomes a finding of its own. A call that fails fails the import.
       const full = (f: { title: string; text?: string }) => `${f.title.replace(/\s+/g, ' ')}${f.text ? `: ${clean(f.text.replace(/\s*\[\d+\]/g, ''))}` : ''}`;
