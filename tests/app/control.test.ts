@@ -55,6 +55,13 @@ describe('the control file', () => {
     }
   });
 
+  it('keeps the per-run allowances of the chat agent and the checks as the only call limits', () => {
+    expect([control.limits.chatTurns, control.limits.searchCalls]).toEqual([25, 15]);
+    expect(Object.keys(control.limits)).not.toContain('checkSearchCalls');
+    expect(checkControl(edited((c) => { c.limits.searchCalls = 51; })))
+      .toEqual(['limits.searchCalls must be a whole number from 1 to 50.']);
+  });
+
   it('reports every problem at once, and a value missing or of the wrong kind', () => {
     const problems = checkControl(edited((c) => { c.limits.chatTurns = 0; delete c.limits.searchCalls; c.lists.searchFiller = 'agreement'; }));
     expect(problems).toEqual(['limits.chatTurns must be a whole number from 1 to 100.', 'limits.searchCalls is missing.', 'lists.searchFiller must list 0 to 2000 entries.']);

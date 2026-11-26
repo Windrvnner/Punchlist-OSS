@@ -144,8 +144,8 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
     expect(m.store.get().deals[a].name).toBe('Project Wingtip Storage');
     await m.store.dispatch(CreateDeal, { name: 'Project\u0301 Adatum', folders: [] });   // an accent on the t
     expect(Object.values(m.store.get().deals).some((d) => d.name === 'Project Project\u0301 Adatum')).toBe(true);
-    // the field's limit is worked out on the name as it will be kept: a hidden space after "Project" is dropped
-    expect(dealNameRoom('Project\u200Bx')).toBe(112);
+    // the field's limit is worked out on the name as typed: a hidden space after "Project" still follows the word
+    expect(dealNameRoom('Project\u200Bx')).toBe(120);
     expect(dealNameRoom('  project Contoso')).toBe(120);
   });
 
@@ -159,16 +159,16 @@ describe('a deal can be renamed, moved between groups, and told which way new qu
     expect(Object.values(m.store.get().deals).filter((d) => d.name === 'Project Wingtip')).toHaveLength(3);
   });
 
-  it('keeps names in one form, and the name as shown deletes the deal; none over 120', async () => {
+  it('keeps names as typed, and the name as shown deletes the deal; none over 120', async () => {
     const m = make();
     expect((await m.store.dispatch(CreateDeal, { name: 'Proseware  Wind', folders: [] })).ok).toBe(true);
     const named = (name: string) => Object.values(m.store.get().deals).filter((d) => d.name === name);
     expect(named('Project Proseware  Wind')).toHaveLength(1);   // the double space is kept as typed
     expect((await m.store.dispatch(CreateDeal, { name: 'Proseware Wind\u200b', folders: [] })).ok).toBe(true);
-    expect(named('Project Proseware Wind')).toHaveLength(1);   // the hidden character is dropped, the spaces left alone
+    expect(named('Project Proseware Wind\u200b')).toHaveLength(1);   // the hidden character is kept as typed
     expect((await m.store.dispatch(CreateDeal, { name: 'Luce\u0301rne', folders: [] })).ok).toBe(true);   // e and a combining accent
     const b = Object.values(m.store.get().deals).find((d) => d.name.includes('rne') && !d.name.includes('Wind'))!;
-    expect(b.name).toBe('Project Luc\u00e9rne');
+    expect(b.name).toBe('Project Luce\u0301rne');   // stored as typed, not recomposed
     expect((await m.store.dispatch(CreateDeal, { name: 'x'.repeat(113), folders: [] }, { quiet: true })).ok).toBe(false);   // 121 with "Project "
     expect((await m.store.dispatch(CreateDeal, { name: 'x'.repeat(112), folders: [] }, { quiet: true })).ok).toBe(true);
     expect((await m.store.dispatch(DeleteDeal, { dealId: b.id, typedName: 'Project Luce\u0301rne' }, { quiet: true })).ok).toBe(true);
@@ -371,7 +371,8 @@ describe('toasts', () => {
     const m = make(); await m.store.boot();
     vi.useFakeTimers();
     try {
-      m.store.toast('First', { label: 'Undo', run() {} }); m.store.toast('Second', { label: 'Undo', run() {} });
+      m.store.toast('First', 'done', { label: 'Undo', run() {} });
+      m.store.toast('Second', 'done', { label: 'Undo', run() {} });
       expect(m.store.get().ui.toasts.map((x) => x.text)).toEqual(['First', 'Second']);
       vi.advanceTimersByTime(Store.TOAST_MS - 100);
       m.store.holdToasts(); vi.advanceTimersByTime(60000);
@@ -637,7 +638,7 @@ describe('Undo of a withdrawn response', () => {
 describe('notices', () => {
   it('at most three show: a fourth pushes out the oldest and its Undo with it, so Ctrl Z never reaches one that was not on screen', async () => {
     const m = make(); await m.store.boot();
-    for (const n of [1, 2, 3, 4]) m.store.toast(`Notice ${n}`, { label: 'Undo', run: () => {} });
+    for (const n of [1, 2, 3, 4]) m.store.toast(`Notice ${n}`, 'done', { label: 'Undo', run: () => {} });
     expect(m.store.get().ui.toasts.map((t) => t.text)).toEqual(['Notice 2', 'Notice 3', 'Notice 4']);
   });
 });
