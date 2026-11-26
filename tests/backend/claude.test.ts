@@ -81,8 +81,8 @@ describe('asking', () => {
     await expect(s.complete({ model: 'fast', prompt: 'q' })).rejects.toMatchObject({ code: 'cutoff' });
     await expect(s.converse!({ model: 'fast', prompt: 'q' })).rejects.toMatchObject({ code: 'cutoff' });
     await expect(s.complete({ model: 'fast', prompt: 'q' })).rejects.toMatchObject({ code: 'toolong', status: 400 });
-    expect(api.sent.map((b) => b.max_tokens)).toEqual([16000, 16000, 16000]);                  // the control file's limits.outputTokens
-    expect([s.outputLimit!('fast'), s.inputLimit!('fast')]).toEqual([16000, 180000]);
+    expect(api.sent.map((b) => b.max_tokens)).toEqual([32000, 32000, 32000]);                  // the control file's limits.outputTokens
+    expect([s.outputLimit!('fast'), s.inputLimit!('fast')]).toEqual([32000, 180000]);
   });
   it('stops at its call limit before sending', async () => {
     const api = fakeApi(); const s = svc(api, { maxCalls: 1 });

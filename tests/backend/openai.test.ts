@@ -21,10 +21,10 @@ describe('the OpenAI-compatible connector', () => {
     expect(await s.models()).toEqual({ models: [{ id: 'small-model', name: 'small-model' }, { id: 'mid-model', name: 'mid-model' }, { id: 'large-model', name: 'large-model' }], default: 'mid-model', ...MODELS });
     const id = await s.upload({ name: 'doc_1__Credit Agreement.pdf', bytes: text('%PDF-1.7 a page') });
     expect(await s.complete({ model: 'thorough', system: 'Be brief.', prompt: 'What is the ratio?', files: [id] })).toBe('{"a": 1}');
-    expect(api.sent[0]).toEqual({ path: '/v1/responses', body: { model: 'large-model', instructions: 'Be brief.', input: [{ role: 'user', content: [{ type: 'input_file', file_id: id }, { type: 'input_text', text: 'What is the ratio?' }] }], store: false, max_output_tokens: 16000 } });
+    expect(api.sent[0]).toEqual({ path: '/v1/responses', body: { model: 'large-model', instructions: 'Be brief.', input: [{ role: 'user', content: [{ type: 'input_file', file_id: id }, { type: 'input_text', text: 'What is the ratio?' }] }], store: false, max_output_tokens: 32000 } });
     expect(api.responses.size).toBe(0);
     expect(await svc(api, { api: 'chat' }).complete({ model: 'fast', system: 'Be brief.', prompt: 'And now?', files: [id] })).toBe('{"b": 2}');
-    expect(api.sent[1]).toEqual({ path: '/v1/chat/completions', body: { model: 'small-model', messages: [{ role: 'system', content: 'Be brief.' }, { role: 'user', content: [{ type: 'file', file: { file_id: id } }, { type: 'text', text: 'And now?' }] }], max_tokens: 16000 } });
+    expect(api.sent[1]).toEqual({ path: '/v1/chat/completions', body: { model: 'small-model', messages: [{ role: 'system', content: 'Be brief.' }, { role: 'user', content: [{ type: 'file', file: { file_id: id } }, { type: 'text', text: 'And now?' }] }], max_tokens: 32000 } });
     expect(api.files.get(id)).toMatchObject({ name: 'doc_1__Credit Agreement.pdf', type: 'application/pdf', purpose: 'user_data' });
     expect(api.keys.every((k) => k === 'Bearer k1')).toBe(true);
   });
@@ -36,7 +36,7 @@ describe('the OpenAI-compatible connector', () => {
     expect(one).toMatchObject({ text: 'heard 1 turns; \nRules.; The ratio is 1.25x.', conversation: 'resp_2' }); expect(one.tokens).toBeGreaterThan(0);
     const two = await s.converse!({ model: 'standard', prompt: 'second', conversation: one.conversation });
     expect(two.text).toBe('heard 2 turns; \nRules.; The ratio is 1.25x.');              // the system and the file came from the server's copy
-    expect(api.sent[1].body).toEqual({ model: 'mid-model', store: true, previous_response_id: 'resp_2', input: [{ role: 'user', content: [{ type: 'input_text', text: 'second' }] }], max_output_tokens: 16000 });
+    expect(api.sent[1].body).toEqual({ model: 'mid-model', store: true, previous_response_id: 'resp_2', input: [{ role: 'user', content: [{ type: 'input_text', text: 'second' }] }], max_output_tokens: 32000 });
     expect(two.tokens!).toBeGreaterThan(one.tokens!);
   });
 
@@ -143,7 +143,7 @@ describe('the OpenAI-compatible connector', () => {
       await expect(s.converse!({ model: 'fast', prompt: 'q' })).rejects.toMatchObject({ code: 'cutoff' });
       await expect(s.complete({ model: 'fast', prompt: 'q' })).rejects.toMatchObject({ code: 'toolong' });
       await expect(s.complete({ model: 'fast', prompt: 'q' })).rejects.toMatchObject({ code: 'toolong' });
-      expect([s.outputLimit!('fast'), s.inputLimit!('fast')]).toEqual([16000, 180000]);
+      expect([s.outputLimit!('fast'), s.inputLimit!('fast')]).toEqual([32000, 180000]);
     });
   }
 
