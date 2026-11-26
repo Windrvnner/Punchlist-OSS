@@ -68,6 +68,10 @@ export const itemsIn = (c: Call) => {
   const asked = c.prompt.split(CHECK_ITEMS)[1].split('\n\nGive each item one')[0];
   return [...asked.matchAll(/^(\S+): (.*)$/gm)].map((m) => ({ tag: m[1], text: m[2] }));
 };
+/** the items a search asks about, each by its id (#1162), and its words */
+export const queriedIn = (c: { prompt: string }) =>
+  [...c.prompt.split('\n\nThe documents in the data room')[0].matchAll(/^(\S+): (.*)$/gm)]
+    .map((m) => ({ tag: m[1], text: m[2] }));
 /** the rows of a pick's listing: docId and path (#1162) */
 export const listed = (c: Call) =>
   [...c.prompt.matchAll(/^(doc_[0-9a-f]{24})(?: \*)?: ([^\n]*)$/gm)].map((m) => ({

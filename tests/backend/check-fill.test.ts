@@ -2,7 +2,7 @@
 // Filling gaps through the chat agent (docs/core-documents-design.md, part 4): the agent only ever adds to what a check
 // found, and a run of it stops at the agent's own turn limit.
 import { it, expect } from 'vitest';
-import { setup, doc, val, deal, itemsIn, OK, isPickAsk, LISTED_ID, type Call } from './reviewKit';
+import { setup, doc, val, deal, itemsIn, OK, isPickAsk, LISTED_ID, queriedIn, type Call } from './reviewKit';
 import type { DocRecord } from '../../src/backend/documents';
 
 const esc = (d: DocRecord) => d.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -63,7 +63,7 @@ it('a busy agent stops at its turns per run, and the check\'s own searches are u
     checklist: () => ({ broad: items, product: [], sector: [] }),
     pick: () => ({ read: [] }), pickFor: () => ({ read: {} }),
     query: (c: Call) => ({
-      queries: Object.fromEntries([...c.prompt.matchAll(/^(I\d+):/gm)].map((m) => [m[1], ['decommissioning plan']])),
+      queries: Object.fromEntries(queriedIn(c).map((x) => [x.tag, ['decommissioning plan']])),
     }),
   };
   const quiet = setup(gapAll, { d1: [FA, TS] }, opts); await deal(quiet.repo); val(await quiet.ai.firstPass('d1'));
@@ -90,7 +90,7 @@ it('the gap filler\'s own search stops at limits.searchCalls', async () => {
   const reply = (c: Call) => (isTurn(c) ? turn() : isSearchRead(c) ? 'not a reading'
     : { items: itemsIn(c).map((it) => ({ id: it.tag, result: 'more', need: 'the water rights' })) });
   const queries = (c: Call) => ({
-    queries: Object.fromEntries([...c.prompt.matchAll(/^(I\d+):/gm)].map((m) => [m[1], ['water rights']])),
+    queries: Object.fromEntries(queriedIn(c).map((x) => [x.tag, ['water rights']])),
   });
   const s = setup(reply, { d1: [FA, TS, WATER] }, {
     checklist: () => ({ broad: [X1], product: [], sector: [] }),
@@ -113,7 +113,7 @@ it('each search the gap filler makes has its own limits.searchCalls, so more cal
   const reply = (c: Call) => (isTurn(c) ? turn() : isSearchRead(c) ? { text: 'Nothing here.', sources: [] }
     : { items: itemsIn(c).map((it) => ({ id: it.tag, result: 'more', need: 'the water rights' })) });
   const queries = (c: Call) => ({
-    queries: Object.fromEntries([...c.prompt.matchAll(/^(I\d+):/gm)].map((m) => [m[1], ['water rights']])),
+    queries: Object.fromEntries(queriedIn(c).map((x) => [x.tag, ['water rights']])),
   });
   const s = setup(reply, { d1: [FA, TS, WATER] }, {
     checklist: () => ({ broad: [X1], product: [], sector: [] }),

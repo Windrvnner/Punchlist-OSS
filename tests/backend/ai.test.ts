@@ -13,7 +13,7 @@ import type { Folder } from '../../src/backend/logRepository';
 import { signedOut } from '../../src/backend/signInToken';
 import { SERVICE, control } from '../../src/control';
 import { tokensOf } from '../../src/backend/limits';
-import { qid, LISTED_ID, listedIds, listed, itemsIn } from './reviewKit';
+import { qid, LISTED_ID, listedIds, listed, itemsIn, queriedIn } from './reviewKit';
 
 class Mem implements Folder { files = new Map<string, string>(); list() { return [...this.files.keys()]; } size(n: string) { return this.files.get(n)?.length ?? -1; } read(n: string) { return this.files.get(n) ?? null; } append(n: string, t: string) { this.files.set(n, (this.files.get(n) ?? '') + t); } write(n: string, t: string) { this.files.set(n, t); } }
 import { wordIndex as makeIndex, countWords, type WordIndex } from '../../src/backend/wordIndex';
@@ -1748,7 +1748,7 @@ describe('the first pass', () => {
       pick: (c: Call) => ({ read: idsOf(c, FA) }),
       pickFor: () => ({ read: {} }),
       query: (c: Call) => ({
-        queries: Object.fromEntries([...c.prompt.matchAll(/^(I\d+):/gm)].map((m) => [m[1], ['decommissioning plan']])),
+        queries: Object.fromEntries(queriedIn(c).map((x) => [x.tag, ['decommissioning plan']])),
       }),
     };
     // found nothing: each run hands over at most four items, and every item stays a gap with what was searched for

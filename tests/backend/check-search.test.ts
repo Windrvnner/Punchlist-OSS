@@ -16,6 +16,7 @@ import {
   type Call,
   OK,
   LISTED_ID,
+  queriedIn,
 } from './reviewKit';
 import type { DocRecord } from '../../src/backend/documents';
 
@@ -34,8 +35,11 @@ const items = [
   { id: 'h1', text: 'A hedging strategy has been approved by the board' },
 ];
 const checklist = () => ({ broad: items, product: [], sector: [] });
-/** a fast model that searches as a person would: the permit by its usual name, the insurance by the policy, and nothing that the hedging item could find */
-const queries = (c: Call) => { const out: Record<string, string[]> = {}; for (const m of c.prompt.matchAll(/^(I\d+): (.*)$/gm)) out[m[1]] = /permit/i.test(m[2]) ? ['EPA consent', 'discharge conditions'] : /insurance/i.test(m[2]) ? ['construction all risks policy'] : ['hedge swap ISDA']; return { queries: out }; };
+/** the searches a person would make: the permit by its usual name, the insurance by the policy, and nothing that
+ * the hedging item could find */
+const searchesFor = (text: string) => (/permit/i.test(text) ? ['EPA consent', 'discharge conditions']
+  : /insurance/i.test(text) ? ['construction all risks policy'] : ['hedge swap ISDA']);
+const queries = (c: Call) => ({ queries: Object.fromEntries(queriedIn(c).map((x) => [x.tag, searchesFor(x.text)])) });
 /** a standard model that settles what it is given the right document for, and asks for more otherwise */
 const answer = (c: Call) => ({
   items: itemsIn(c).map((it) => {
@@ -106,7 +110,15 @@ describe('checks on the search agent', () => {
 
   it('a reply that gives an item no searches is not taken to mean nothing was found: it is picked for as before, never made a gap by itself', async () => {
     // the reply can be read, but names no search for anything (or for an item when asked once more): the items are picked for, as on main
-    for (const query of [() => ({ queries: {} }), () => ({ queries: { I1: [], I2: [], I3: [] } }), () => ({ queries: { I1: ['N/A'], I2: ['-', 'the of a'], I3: ['…'] } }), () => ({ queries: { I1: ['None'], I2: ['not applicable', 'TBD'], I3: ['unknown', 'no search needed'] } }), () => ({ queries: { I1: ['No searches'], I2: ['No searches needed', 'Nones'], I3: ['Unknowns', 'n.a.'] } }), (c: Call, n: number) => (n === 1 ? queries(c) : { queries: {} })]) {
+    const noSearches = [
+      () => ({ queries: {} }),
+      () => ({ queries: { p1: [], i1: [], h1: [] } }),
+      () => ({ queries: { p1: ['N/A'], i1: ['-', 'the of a'], h1: ['…'] } }),
+      () => ({ queries: { p1: ['None'], i1: ['not applicable', 'TBD'], h1: ['unknown', 'no search needed'] } }),
+      () => ({ queries: { p1: ['No searches'], i1: ['No searches needed', 'Nones'], h1: ['Unknowns', 'n.a.'] } }),
+      (c: Call, n: number) => (n === 1 ? queries(c) : { queries: {} }),
+    ];
+    for (const query of noSearches) {
       const s = setup(
         answer,
         { d1: room },
@@ -139,7 +151,7 @@ describe('checks on the search agent', () => {
           checklist,
           query: (c) => {
             const out: Record<string, string[]> = {};
-            for (const m of (c as Call).prompt.matchAll(/^(I\d+): /gm)) out[m[1]] = [p];
+            for (const x of queriedIn(c as Call)) out[x.tag] = [p];
             return { queries: out };
           },
           pick: (c) => ({
@@ -156,7 +168,9 @@ describe('checks on the search agent', () => {
     }
     // short real searches still count: they find nothing for the hedging item, so it is searched once more, then a gap with no pick
     for (const q of ['PPA', 'EPC contract', 'O&M agreement', 'term sheet', 'Schedule 1', 'other agreements', 'ISDA', 'LC']) {
-      const s = setup(answer, { d1: room }, { checklist, query: (c) => { const out: Record<string, string[]> = {}; for (const m of (c as Call).prompt.matchAll(/^(I\d+): (.*)$/gm)) out[m[1]] = /hedging/i.test(m[2]) ? [q] : ['EPA consent', 'construction all risks policy']; return { queries: out }; }, pick: pickFound, pickFor: pickForFound });
+      const short = (text: string) => (/hedging/i.test(text) ? [q] : ['EPA consent', 'construction all risks policy']);
+      const query = (c: Call) => ({ queries: Object.fromEntries(queriedIn(c).map((x) => [x.tag, short(x.text)])) });
+      const s = setup(answer, { d1: room }, { checklist, query, pick: pickFound, pickFor: pickForFound });
       await deal(s.repo); val(await s.ai.firstPass('d1'));
       expect([q, s.pickForCalls.length]).toEqual([q, 0]);
       expect([q, val(await s.ai.checklist('d1')).find((x) => x.id === 'h1')!.searched?.[0]?.q]).toEqual([q, q]);
@@ -242,7 +256,7 @@ describe('checks on the search agent', () => {
     // once a document arrives, the gap is searched for again, and only the gap
     s.recs.d1 = [...room, doc(9, 'Board minutes.pdf', { rel: '02 Corporate/Board minutes.pdf', words: ['board', 'minutes', 'resolution'] })];
     const q1 = s.queryCalls.length; val(await s.ai.checkAll({ dealId: 'd1' }));
-    const asked = s.queryCalls.slice(q1).flatMap((c) => [...c.prompt.matchAll(/^I\d+: (.*)$/gm)].map((m) => m[1]));
+    const asked = s.queryCalls.slice(q1).flatMap((c) => queriedIn(c).map((x) => x.text));
     expect(asked.length).toBeGreaterThan(0); expect(asked.every((t) => t.startsWith('A hedging strategy'))).toBe(true);
   });
 });

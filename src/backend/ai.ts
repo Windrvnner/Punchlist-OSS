@@ -1383,18 +1383,50 @@ export function nodeAi(o: AiOptions) {
   const isSearch = (x: string) => kept(x).some((w) => !NO_SEARCH.has(w));
   const SEARCHES = 3;                                                            // searches the fast model may give one item at a time
   const FOUND = 12;                                                              // documents one item's searches put at the head of the pick list
+  /** a checklist item for a search, and the searches already made for it that found nothing */
+  const triedLine = (t: { id: string; what: string }, tried?: Map<string, Trail>) => {
+    const done = tried?.get(t.id) ?? [];
+    const before = done.length ? ` (searched already, finding nothing: ${done.map((x) => `"${x.q}"`).join(', ')})` : '';
+    // each item is shown by its permanent id, never a running number its words could be confused with (#1162)
+    return `${t.id}: ${t.what.replace(/\s+/g, ' ')}${before}`;
+  };
+  /** what the fast model is asked for the searches for some checklist items; `tried`, when it is asked once more */
+  const queryPrompt = (them: { id: string; what: string }[], tried?: Map<string, Trail>) => {
+    const again = tried ? ' Each has been searched for already and nothing answered: search in other words.' : '';
+    return [
+      'These are items of a due diligence checklist for a project-finance deal, each with its id:',
+      ...them.map((t) => triedLine(t, tried)),
+      '',
+      'The documents in the data room are searched by the words in their file names, folder names and text. For each'
+        + ` item, write up to ${SEARCHES} short searches, a few words each, for the documents that would settle it: the`
+        + ' names such documents usually have, and the words and defined terms they use. If you have no search for an'
+        + ` item, give it an empty list.${again}`,
+      `Reply as JSON: {"queries": {"${them[0].id}": ["…", "…"]}}`,
+    ].join('\n');
+  };
+  /** a search reply naming an item, in its words or as a key, by an id it was not shown is asked again (#1162) */
+  const queryUnusable = (ids: string[]) => (text: string) => {
+    const queries = readJson(text, ['queries'])?.queries;
+    return !namesOnlyShown(text, ids) || (isObject(queries) && unknownIds(Object.keys(queries), ids).length > 0);
+  };
   async function searchFor(
     dealId: string, things: { id: string; what: string }[], not: Set<string>, core: string[],
   ): Promise<{ found: Map<string, DocRecord[]>; trails: Map<string, Trail> } | null> {
     if (!things.length) return { found: new Map(), trails: new Map() };
     const ask = async (them: typeof things, tried?: Map<string, Trail>): Promise<Map<string, string[]> | null> => {
       let reply: { queries?: unknown } | null;
-      try { reply = await askJson({ kind: 'query', model: (await models()).fast, system: JSON_ONLY, prompt: `These are items of a due diligence checklist for a project-finance deal:\n${them.map((t, i) => `I${i + 1}: ${t.what.replace(/\s+/g, ' ')}${tried?.get(t.id)?.length ? ` (searched already, finding nothing: ${tried.get(t.id)!.map((x) => `"${x.q}"`).join(', ')})` : ''}`).join('\n')}\n\nThe documents in the data room are searched by the words in their file names, folder names and text. For each item, write up to ${SEARCHES} short searches, a few words each, for the documents that would settle it: the names such documents usually have, and the words and defined terms they use. If you have no search for an item, give it an empty list.${tried ? ' Each has been searched for already and nothing answered: search in other words.' : ''}\nReply as JSON: {"queries": {"I1": ["…", "…"], "I2": ["…"]}}` }, ['queries'], undefined, false); }
+      const input: Ask = { kind: 'query', model: (await models()).fast, system: JSON_ONLY,
+        prompt: queryPrompt(them, tried), unusable: queryUnusable(them.map((t) => t.id)) };
+      try { reply = await askJson(input, ['queries'], undefined, false); }
       catch (e) { if (unreachable(e)) throw e; return null; }                  // out of calls for this search, or the call failed: no search
       if (!reply?.queries || typeof reply.queries !== 'object' || Array.isArray(reply.queries)) return null;
       const out = new Map<string, string[]>();
       // a "search" with no word the index can look for ("N/A", "-", only filler words), or only placeholders ("None", "TBD"), is how a model gives none: it is not counted as one
-      for (const [k, v] of Object.entries(reply.queries as Record<string, unknown>)) { const n = tagNumber(k, 'I'); const t = n ? them[n - 1] : undefined; if (t) out.set(t.id, strings(v).map((x) => cut(x.replace(/\s+/g, ' ').trim(), 60)).filter((x) => isSearch(x)).slice(0, SEARCHES)); }
+      for (const [k, v] of Object.entries(reply.queries as Record<string, unknown>)) {
+        const t = them.find((x) => x.id === k);
+        const said = strings(v).map((x) => cut(x.replace(/\s+/g, ' ').trim(), 60));
+        if (t) out.set(t.id, said.filter((x) => isSearch(x)).slice(0, SEARCHES));
+      }
       return out;
     };
     // a search's count is of every document that answers to it, read already or not, so a trail never says nothing answered when something did

@@ -18,14 +18,18 @@ const nearly = (id: string) => id.slice(0, -1) + (id.endsWith('0') ? '1' : '0');
 /** a check reply that settles every item, each named by the given id */
 const settle = (c: Call, ids: string[]) => ({ items: ids.map((id) => ({ id, ...OK(c) })) });
 
-async function firstPass(script: (c: Call, n: number) => unknown) {
+async function firstPass(script: (c: Call, n: number) => unknown, more: Parameters<typeof setup>[2] = {}) {
   const shared = new Mem();
-  const s = setup(script, { d1: room }, { shared, installId: 'pc', checklist, pick: pickAll });
+  const s = setup(script, { d1: room }, { shared, installId: 'pc', checklist, pick: pickAll, ...more });
   await deal(s.repo);
   const pass = val(await s.ai.firstPass('d1'));
   const results = new Map(checkLines(shared).filter((l) => l.item).map((l) => [l.item, l.result]));
-  return { s, pass, results };
+  const trails = new Map(checkLines(shared).filter((l) => l.item).map((l) => [l.item, l.trail]));
+  return { s, pass, results, trails };
 }
+/** a search reply giving each item one search, its second word, under the given ids */
+const searches = (ids: string[]) =>
+  ({ queries: Object.fromEntries(ids.map((id, k) => [id, [items[k].text.split(' ')[1]]])) });
 
 describe('a check names checklist items by their ids (#1162)', () => {
   it('lists each item by its id, with its own words as written', async () => {
@@ -59,5 +63,24 @@ describe('a check names checklist items by their ids (#1162)', () => {
   it('a second look names each item it sends back by its id', async () => {
     const { s } = await firstPass((c, n) => settle(c, n === 1 ? [roadId] : [permitId]));
     expect(s.calls[1].prompt).toContain(`Put each right:\n${permitId}: It was missing from your reply.`);
+  });
+});
+
+describe('a search names checklist items by their ids (#1162)', () => {
+  it('lists each item by its id and takes the searches given under it', async () => {
+    const { s, trails } = await firstPass((c) => settle(c, [permitId, roadId]), {
+      query: () => searches([permitId, roadId]),
+    });
+    expect(s.queryCalls[0].prompt).toContain(`\n${permitId}: ${PERMIT}\n${roadId}: ${ROAD}\n`);
+    expect(s.queryCalls[0].prompt).not.toMatch(/^I1: /m);
+    expect(trails.get(permitId)?.[0]?.q).toBe('environmental');
+  });
+
+  it('asks again, quietly, when a reply names an item id with one character changed', async () => {
+    const { s, trails } = await firstPass((c) => settle(c, [permitId, roadId]), {
+      query: (_c, n) => searches(n === 1 ? [nearly(permitId), roadId] : [permitId, roadId]),
+    });
+    expect(s.queryCalls[1].prompt).toBe(s.queryCalls[0].prompt);
+    expect(trails.get(permitId)?.[0]?.q).toBe('environmental');
   });
 });
