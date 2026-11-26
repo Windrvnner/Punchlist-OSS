@@ -40,7 +40,8 @@ describe('own files', () => {
     const shared = new Mem(), local = new Mem(); const repo = memRepo();
     await repo.transaction({ writes: [{ kind: 'deal', id: 'd1', data: { id: 'd1', name: 'Proseware' }, expectedRev: null }], index: { dealId: '_', add: [{ kind: 'deal', id: 'd1' }] } });
     const more = { items: [{ id: 'b1', result: 'more', need: 'the audit report' }] };
-    const svc = new StandInService((c) => JSON.stringify(c.prompt.includes('Check each of these') ? more : { core: [] }));
+    const isCheck = (c: { prompt: string }) => c.prompt.includes('Check each of these');
+    const svc = new StandInService((c) => JSON.stringify(isCheck(c) ? more : { core: [] }));
     const docs: AiDocs = { records: () => [{ docId: 'doc_1', hash: 'h', name: 'A.pdf', folder: 'vdr', rel: 'A.pdf', size: 1, pages: 1 }], wanted: async () => [{ docId: 'doc_1', name: 'A.pdf', read: async () => new TextEncoder().encode('A') }] } as any;
     const make = (installId: string, loc?: Mem) => nodeAi({ service: svc, docs, keeper: new StoreKeeper(svc, new Mem(), { recheckMs: 0 }), repo, shared, local: loc, installId, checklist: () => ({ broad: [{ id: 'b1', text: 'The model is audited' }], product: [], sector: [] }) });
     const office = make('office', local);
