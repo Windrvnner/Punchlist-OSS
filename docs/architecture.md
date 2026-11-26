@@ -140,7 +140,7 @@ The code is in `src/backend/documents.ts`, `convert.ts`, `officeText.ts`, `wordI
   `docs-<install>-<deal>.jsonl` files. Files attached directly to a deal can be copied into the shared folder under
   `attachments/`. Files attached from Home are kept with that person's conversations.
 - **A document's ID is derived from the SHA-256 hash of its bytes** (`docIdFor`), so every PC gets the same ID, and a citation opens the document by its content or not at all.
-- **Everything with pages becomes a PDF**, so the page cited is the page shown. LibreOffice does the conversion without a window, with its own profile, and accepts tracked changes. Spreadsheets stay in their own format and are cited by sheet and cell.
+- **Everything with pages becomes a PDF**, so the page cited is the page shown. LibreOffice does the conversion without a window, with its own profile, and shows tracked changes as markup. Spreadsheets stay in their own format and are cited by sheet and cell.
 - **Indexing asks no model and uploads nothing.** Supported files that can be read are fingerprinted and page-counted. Their words go into this PC's own word index (`wordIndex.ts`), which ranks by name and path, title, and BM25 on the body text. Text in Word and PowerPoint files is read straight from the file.
 - **Folders are checked again** every `timings.folderCheck` without opening any files (`freshen` in `src/app/folderWatch.ts`). A folder that has changed is indexed again once its listing stops changing.
 - **A document leaves a deal only when a PC sees that it has gone** (`spot` in `documents.ts`):

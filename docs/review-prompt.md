@@ -40,6 +40,10 @@ verdict, and no criteria in your own words.
 > - Simplicity: list every score, threshold, fallback, text normalization or guess the diff adds, with the decision
 >   that asks for it, and say what the simplest version of the stated need would be. `npm run check` lists the added
 >   lines that name a guess. If the diff does more, that is blocker 9 even when the issue asked for it.
+> - Same job, same way: find the existing code that already does the same kind of job as the change (an AI read of
+>   documents, an import, saving, retries, a dialog). Check that the change uses that approach and code, and that the
+>   pull request description names the existing path it follows. When such code exists, a new or different approach,
+>   or no named path, is blocker 10.
 >
 > A finding blocks the merge only when it is one of these:
 >
@@ -76,6 +80,9 @@ verdict, and no criteria in your own words.
 >    A cap or limit that no service refusal or decision sets, on what the model reads (pages, documents, sizes, words,
 >    counts); content marked unreadable or dropped from a check or search though the model can read it, unless a
 >    decision says so; and a failed read saved as "no text" instead of retried, are blockers.
+> 10. A change that does the same kind of job as existing code (an AI read of documents, an import, saving, retries,
+>     a dialog) that uses a new or different approach instead of the existing approach and code, or whose pull
+>     request description does not name the existing path it follows.
 >
 > Anything else is minor. A minor finding that is small and in code the pull request already touches is fixed in
 > the same pull request, without a review round of its own. File every other minor finding (in other code, or too
