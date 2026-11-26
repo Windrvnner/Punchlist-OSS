@@ -51,6 +51,24 @@ describe('reading a kept checklist import', () => {
   });
 });
 
+describe('a checklist import kept with a bare Map of readings (#1073)', () => {
+  const rows = ['Item | Section', 'Audited accounts | Financial', 'Lease | Property'];
+  const oldReads = new Map([[2, { k: 'item', words: 'Audited accounts' }], [3, { k: 'item', words: 'Lease' }]]);
+
+  it('reads again text pasted from a spreadsheet, so no row is left out', () => {
+    const text = { name: 'list.txt', lines: rows };
+    keepImport(key, { ...whole, table: null, text, reads: oldReads });
+    const { left } = readKeptChecklist(key, false);
+    expect(left).toEqual({ ...whole, table: null, text, reads: null });
+  });
+
+  it('shows plain text with the Map as its reading', () => {
+    const text = { name: 'list.txt', lines: ['Audited accounts', 'Lease'] };
+    keepImport(key, { ...whole, table: null, text, reads: oldReads });
+    expect(readKeptChecklist(key, false).left?.reads).toEqual({ reads: oldReads });
+  });
+});
+
 describe('keeping the checklist import as it changes', () => {
   it('writes a list over whole and stops setting aside', () => {
     keepImport(key, { paste: 'An earlier paste', headingDraft: '3' });

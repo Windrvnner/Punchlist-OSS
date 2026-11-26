@@ -66,14 +66,16 @@ function isChecklistKept(value: unknown): value is ChecklistKept {
 
 /**
  * A kept import from before a reading carried its table's columns holds its lines' readings as a bare Map by line
- * number. A text's lines are shown with that Map as the reading. A table's rows cannot be worded without the columns
- * the reading named, so its reading is dropped and the table is read again, keeping its pasted text and choices, and
- * no row is silently left out (#1073).
+ * number. A text's lines are shown with that Map as the reading. A table's rows, and the lines of text pasted from a
+ * spreadsheet (cells joined with " | "), cannot be worded without the columns the reading named, so the reading is
+ * dropped and the list is read again, keeping its pasted text, table and choices, and no row is silently left out
+ * (#1073).
  */
 function inCurrentShape(kept: ChecklistKept): ChecklistKept {
   const old: unknown = kept.reads;
   if (!(old instanceof Map)) return kept;
-  return kept.table ? { ...kept, reads: null } : { ...kept, reads: { reads: old } };
+  const hasCells = kept.table || kept.text?.lines.some((line) => line.includes(' | '));
+  return hasCells ? { ...kept, reads: null } : { ...kept, reads: { reads: old } };
 }
 
 /**
