@@ -204,18 +204,16 @@ describe('conversations', () => {
     expect(answerText(first)).not.toMatch(/[{}|]|f_[0-9A-Z]{26}/);
   });
   it('a question whose response differs from an answer only by a space is still suggested for it', async () => {
-    const { store, repo } = make(); const dealId = await deal(store);
+    const { store, repo } = make({ ai: proposing(OPERATING) });
+    const dealId = await deal(store);
     await mockFirstPass(repo, dealId, 'Project Datum'); await sleep(20); await store.loadDeal(dealId);
-    const text = 'Confirm the operating assumption in the base case, and whether the technical advisor and the '
-      + 'information memorandum agree.';
-    await store.dispatch(CreateQuestion, { dealId, text });
-    const q = Object.values(store.get().questions).find((x) => x.n === 1)!;
+    await store.dispatch(CreateQuestion, { dealId, text: OPERATING });
+    const q = Object.values(store.get().questions)[0];
     const scope: Scope = { kind: 'deal', dealId };
-    await ask(store, scope, 'What are the three biggest issues?');
     await ask(store, scope, 'Which of these would hold up financial close?');
-    const [, , , second] = store.get().threads[convKey(scope)];
-    await store.dispatch(SetResponse, { dealId, questionId: q.id, response: `${answerText(second)} ` });
-    expect([...suggestions(store.get(), scope)]).toEqual([[second.id, q.id]]);
+    const answer = store.get().threads[convKey(scope)][1];
+    await store.dispatch(SetResponse, { dealId, questionId: q.id, response: `${answerText(answer)} ` });
+    expect([...suggestions(store.get(), scope)]).toEqual([[answer.id, [q.id]]]);
   });
   it('a person can ask the model whether an answer addresses the suggested question; its verdict is shown and changes nothing', async () => {
     let asked: { question: string; answer: string } | null = null;
