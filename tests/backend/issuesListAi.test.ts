@@ -1,5 +1,5 @@
 // @vitest-environment node
-// Reading an issues list: the list is read from its file in one call, each point briefly in its own words, then every
+// Reading an issues list: the list is read from its file in one call, each point in the list's own words, then every
 // point is titled and compared with the deal's findings and the earlier points in one call. At deal scale: a 164-point
 // list against 126 findings, 23 points repeating a finding and 4 repeating an earlier point, and a 400-point list.
 import { describe, it, expect } from 'vitest';
@@ -74,6 +74,11 @@ describe('reading an issues list', () => {
     expect(out.points[60].same).toEqual({ point: 25 });
     expect(out.points[141].same).toEqual({ point: 112 });
     expect(s.calls.filter(isSort)[0].prompt).toContain('F1: Finding 0 on the credit agreement: What finding 0 says.');   // citation markers left out
+  });
+  it('asks for each point in the list\'s own words, never reworded', async () => {
+    const { reads } = await read(stand(plain(3)));
+    expect(reads[0].prompt).toContain('exactly as written. Never reword, shorten or merge');
+    expect(reads[0].prompt).not.toContain('your own words');
   });
   it('reads a 400-point list in one call, whatever its length, with no paging and no check', async () => {
     const { n, reads, s } = await read(stand(plain(400)));

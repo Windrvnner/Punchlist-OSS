@@ -601,7 +601,7 @@ export function nodeAi(o: AiOptions) {
   const MEMO_RATE_BATCH = 40;   // open findings rated in one call for the deal memo
   /**
    * An issues list's points, read from its file in one call, as every other document is read: the model gives each
-   * point briefly, in its own words, with the number or reference the list gives it (#1026). The reply is not paged,
+   * point with the words the list gives it and the number or reference the list gives it (#1026). The reply is not paged,
    * checked against the file's text or matched to it. A reply that cannot be read is asked for again (`tried`); one cut
    * off at the length limit fails the read, as it does anywhere else.
    */
@@ -613,8 +613,9 @@ async function readIssuePoints(
   ): Promise<Result<{ n: string; text: string }[]>> {
     const prompt = [
       `${name} is an issues list: the points one party raises on a deal's documents. List every point of it, in order.`,
-      'For each: "n": its number or reference as the list writes it ("" when it has none); "text": the point, stated',
-      'briefly in your own words. Leave out headings, introductions and notes that raise no point.',
+      'For each: "n": its number or reference as the list writes it ("" when it has none); "text": the point, in the',
+      'list\'s own words exactly as written. Never reword, shorten or merge. Leave out headings, introductions and notes',
+      'that raise no point.',
       'Reply as JSON: {"points": [{"n": "1", "text": "…"}]}',
     ].join('\n');
     const ask: Ask = { kind: 'issuesList', split: true, model, system: JSON_ONLY, files: [fileId], prompt };
@@ -2119,7 +2120,7 @@ async function readIssuePoints(
       return ok({ pairs: out, ...(items ? { missed: { kind, at: lost.sort((a, b) => a - b) } } : {}) });
     },
     async issuesList(i) {
-      // Two steps. The list is read from its file in one call, each point briefly in its own words. Then the points are
+      // Two steps. The list is read from its file in one call, each point in the list's own words. Then the points are
       // titled and compared with the deal's findings and each other, with no file: the whole list in one call, as the
       // checklist's duplicate check is asked, in parts only for a list longer than ISSUES_BATCH. A reply that cannot be
       // read is asked for again for half as many points. Nothing is half done: a point that cannot be read or sorted

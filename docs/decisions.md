@@ -374,4 +374,4 @@ These decisions are built and wait to be confirmed:
 - Once two PCs' imports of one list have synced, the second PC's Undo of its import is refused.
 - The recovered copy of a deal deleted elsewhere is built, including who sees it, what it holds, and its notice's wording (#220).
 - Periodic records whose names differ only by a period are a series and take one place in the core set, their newest member's; every document stays searchable (docs/core-families-design.md).
-- An issues list or an advisor report is read like the app's other documents: the model reads the whole file once and returns each point or issue briefly in its own words with its place in the file. There is no paging and no stop rule (#1026).
+- An issues list or an advisor report is read like the app's other documents: the model reads the whole file once and returns each issues-list point in the list's own words, never reworded, and each advisor-report issue with its place in the file. There is no paging and no stop rule (#1026).
