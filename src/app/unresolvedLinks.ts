@@ -1,5 +1,7 @@
 import type { Question } from '../domain/model';
-import { addresser } from '../domain/suggest';
+import { control } from '../control';
+import { askedMatcher } from '../domain/suggest';
+import type { AiService } from '../ports';
 import type { Unresolved } from './state';
 
 export type UnresolvedLink = { point: Unresolved; q: Question };
@@ -25,8 +27,21 @@ export function canLinkUnresolved(q: Question, conflicted: boolean): boolean {
     && !q.linkedItem && !q.linkedFinding && !conflicted;
 }
 
-/** Reserve the exact approved links before offering guesses for the remaining points. */
-export function suggestUnresolvedLinks(points: Unresolved[], pool: Question[], approved?: ApprovedLinks) {
+/** An open question that names enough of a point's words for the model to be asked whether it covers the point. */
+export type AskedCandidate = { point: Unresolved; q: Question; confidence: number };
+
+/** What a point says to the model: its wording, and what it needs when it says so. */
+export const pointText = (point: Unresolved) => (point.need ? `${point.what} — needed: ${point.need}` : point.what);
+
+/**
+ * Where each unresolved point's offer comes from (#1218). The exact links a person approved are kept first. Every other
+ * point gets its best-matching open question as a candidate only when the match's confidence reaches `cutoff`
+ * (`limits.askedCutoff`); a question is a candidate for one point only, the one it names most of the words of.
+ * The model is asked about the candidates (`confirmedLinks`), never about a match below the cutoff.
+ */
+export function askedCandidates(
+  points: Unresolved[], pool: Question[], approved?: ApprovedLinks, cutoff = control.limits.askedCutoff,
+) {
   const kept = new Map<string, Question>();
   const taken = new Set<string>();
   if (approved?.size) {
@@ -39,13 +54,27 @@ export function suggestUnresolvedLinks(points: Unresolved[], pool: Question[], a
       taken.add(q.id);
     }
   }
-  const likely = addresser(pool.filter((q) => !taken.has(q.id)));
-  const links: { point: string; q: Question }[] = [];
+  const match = askedMatcher(pool.filter((q) => !taken.has(q.id)));
+  const best = new Map<string, AskedCandidate>();
   for (const point of points) {
-    const q = kept.get(point.key) ?? likely(`${point.what} ${point.need}`).find((guess) => !taken.has(guess.id));
-    if (!q) continue;
-    taken.add(q.id);
-    links.push({ point: point.key, q });
+    const found = kept.has(point.key) ? undefined : match(`${point.what} ${point.need}`);
+    const rival = found && best.get(found.q.id);
+    if (!found || found.confidence < cutoff || (rival && rival.confidence >= found.confidence)) continue;
+    best.set(found.q.id, { point, q: found.q, confidence: found.confidence });
   }
-  return links;
+  const order = new Map(points.map((point, index) => [point.key, index]));
+  const candidates = [...best.values()].sort((a, b) => order.get(a.point.key)! - order.get(b.point.key)!);
+  return { kept: points.flatMap((point) => (kept.has(point.key) ? [{ point: point.key, q: kept.get(point.key)! }] : [])), candidates };
+}
+
+/**
+ * The candidates the model says already cover their point. A model that is missing, fails, or gives no answer for a
+ * pair makes no offer for it: the point is then asked as a new question. Nothing is linked here; a person ticks each one.
+ */
+export async function confirmedLinks(ai: AiService, dealId: string, candidates: AskedCandidate[]) {
+  if (!candidates.length || !ai.covers) return [];
+  const checks = candidates.map(({ point, q }) => ({ point: pointText(point), question: q.text }));
+  const verdicts = await ai.covers({ dealId, checks });
+  if (!verdicts.ok) return [];
+  return candidates.filter((_, index) => verdicts.value[index] === true).map(({ point, q }) => ({ point: point.key, q }));
 }
