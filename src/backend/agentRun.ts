@@ -126,15 +126,11 @@ export class AgentRun {
     const picked: Sent[] = [];
     const missing: string[] = [];
     for (const name of named) {
-      // a name is tried as the model wrote it first, so a document whose own name starts or ends with a bracket or
-      // quote is found; only when nothing matches is the model's wrapping quote or bracket taken off
-      const said = name.trim();
-      const unwrapped = said.replace(/^["'`[]+|["'`\]]+$/g, '');
-      const tag = /^d\s*(\d+)$/i.exec(unwrapped);
-      const sent = tag ? this.opened.find((x) => x.tag === `D${+tag[1]}`)
-        : this.byPath(said, recs) ?? this.byPath(unwrapped, recs);
+      const said = name.trim().replace(/^["'`[]+|["'`\]]+$/g, '');
+      const tag = /^d\s*(\d+)$/i.exec(said);
+      const sent = tag ? this.opened.find((x) => x.tag === `D${+tag[1]}`) : this.byPath(said, recs);
       if (sent && !picked.includes(sent)) picked.push(sent);
-      else if (!sent) missing.push(unwrapped);
+      else if (!sent) missing.push(said);
     }
     const paired = this.withCleanDrafts(picked);
     this.whole = paired.slice(0, width);

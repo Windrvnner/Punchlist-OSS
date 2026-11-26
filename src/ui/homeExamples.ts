@@ -29,9 +29,8 @@ const GENERIC = [
 export function homeExamples(dealNames: string[]): string[] {
   const names = dealNames.filter((name) => name.trim());
   if (!names.length) return GENERIC;
-  // a function replacer, so a deal name holding "$&" or "$'" is shown as written, never read as a replacement pattern
-  const examples = ABOUT_ONE.map((pattern, i) => pattern.replace('{a}', () => names[i % names.length]));
-  if (names.length > 1) examples.splice(2, 0, ABOUT_TWO.replace('{a}', () => names[0]).replace('{b}', () => names[1]));
+  const examples = ABOUT_ONE.map((pattern, i) => pattern.replace('{a}', names[i % names.length]));
+  if (names.length > 1) examples.splice(2, 0, ABOUT_TWO.replace('{a}', names[0]).replace('{b}', names[1]));
   return examples;
 }
 

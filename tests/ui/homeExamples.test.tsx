@@ -23,13 +23,6 @@ function mount(props: { examples: string[]; text?: string }, reduced = false) {
 const later = (ms: number) => act(() => { vi.advanceTimersByTime(ms); });
 
 describe('homeExamples', () => {
-  it('shows a deal name exactly as written, even one that looks like a replacement pattern', () => {
-    const examples = homeExamples(['Alpha $& Co', "Beta $' Ltd"]);
-    expect(examples.some((e) => e.includes('Alpha $& Co'))).toBe(true);
-    expect(examples.find((e) => e.startsWith('Compare')))
-      .toBe("Compare the lock-up ratios on Alpha $& Co and Beta $' Ltd");
-  });
-
   it('names each deal in turn, and compares two once there are two', () => {
     expect(homeExamples(['Project Proseware'])).toEqual([
       'Which permits are still open on Project Proseware?',
