@@ -98,17 +98,25 @@ describe('answers', () => {
       '  Some changes are in parts of the file this list does not reach.',
     ].join('\n'));
   });
-  /** a draft with 200 tracked changes, about 100 characters a line in the prompt (#1092) */
-  const manyChanges = () => {
-    const D = doc(52, 'SPA markup.docx', { tracked: 200 });
-    const passages = Array.from({ length: 200 }, (_, k) => ({
+  /** `count` changed passages, about 120 characters a line in the prompt (#1092) */
+  const clauseChanges = (count: number): AiDocs['changes'] => async () => {
+    const passages = Array.from({ length: count }, (_, k) => ({
       before: `Clause ${k + 1}: the ratio is 1.15x.`, after: `Clause ${k + 1}: the ratio is 1.20x.`,
       changes: [{ kind: 'insert' as const, by: 'sroe', at: '2026-10-01T10:00:00', text: '1.20x' }],
     }));
-    const changes: AiDocs['changes'] = async () => ({ ok: true, value: { tracked: 200, complete: true, passages } });
-    return { D, changes };
+    return { ok: true, value: { tracked: count, complete: true, passages } };
   };
+  /** a draft with 200 tracked changes */
+  const manyChanges = () => ({ D: doc(52, 'SPA markup.docx', { tracked: 200 }), changes: clauseChanges(200) });
   const wasLines = (prompt: string) => prompt.split('\n').filter((l) => l.startsWith('  - was: '));
+  /** an input limit whose share for a part holds about `lines` of the clause changes' lines */
+  const roomFor = (lines: number) => {
+    const lineTokens = tokensOf('  - was: "Clause 100: the ratio is 1.15x." / now: '
+      + '"Clause 100: the ratio is 1.20x." (insert "1.20x" by sroe on 2026-10-01)');
+    return () => Math.ceil((lines * lineTokens * 100) / control.limits.partShare);
+  };
+  const budgetOf = (limit: number) => Math.floor((limit * control.limits.partShare) / 100);
+  const tokensIn = (lines: string[]) => lines.reduce((n, l) => n + tokensOf(l), 0);
   it("sends every tracked change of a heavily marked-up draft that fits the model's input (#1092)", async () => {
     const { D, changes } = manyChanges();
     const s = setup(() => ({ text: 'ok', sources: [] }), { d1: [D] }, { changes, library: [] });
@@ -121,16 +129,29 @@ describe('answers', () => {
   it('lists tracked changes up to the share of the input limit a part may fill, and counts the rest', async () => {
     const { D, changes } = manyChanges();
     const s = setup(() => ({ text: 'ok', sources: [] }), { d1: [D] }, { changes, library: [] });
-    const lineTokens = tokensOf(wasLines('  - was: "Clause 100: the ratio is 1.15x." / now: '
-      + '"Clause 100: the ratio is 1.20x." (insert "1.20x" by sroe on 2026-10-01)')[0]);
-    s.svc.inputLimit = () => Math.ceil((100 * lineTokens * 100) / control.limits.partShare);   // room for about 100
+    s.svc.inputLimit = roomFor(100);
     val(await s.ai.answer(ask('What ratio does the SPA markup set?')));
     const listed = wasLines(s.calls[0].prompt);
-    const budget = Math.floor((s.svc.inputLimit('thorough') * control.limits.partShare) / 100);
-    expect(listed.reduce((n, l) => n + tokensOf(l), 0)).toBeLessThanOrEqual(budget);
+    expect(tokensIn(listed)).toBeLessThanOrEqual(budgetOf(s.svc.inputLimit('thorough')));
     expect(listed.length).toBeGreaterThanOrEqual(95);
     expect(listed.length).toBeLessThan(200);
     expect(s.calls[0].prompt).toContain(`  - and ${200 - listed.length} more changed passages, not listed here.`);
+  });
+  it('shares one budget among the drafts a prompt sends, each counting what it could not list (#1092)', async () => {
+    const A = doc(53, 'SPA markup A.docx', { tracked: 70 }), B = doc(54, 'SPA markup B.docx', { tracked: 70 });
+    const s = setup(() => ({ text: 'ok', sources: [] }), { d1: [A, B] }, { changes: clauseChanges(70), library: [] });
+    s.svc.inputLimit = roomFor(100);                                            // each draft's changes take about 70%
+    val(await s.ai.answer(ask('What ratio does the SPA markup set?')));
+    const prompt = s.calls[0].prompt;
+    expect(sentNames(s.calls[0])).toEqual([A.name, B.name]);
+    const listed = wasLines(prompt);
+    expect(tokensIn(listed)).toBeLessThanOrEqual(budgetOf(s.svc.inputLimit('thorough')));
+    expect(listed.length).toBeGreaterThanOrEqual(95);
+    // the first draft is listed whole; the second lists what is left of the budget and counts the rest
+    const [first, second] = prompt.split('  The changes in D2, read from the file itself');
+    expect(wasLines(first).length).toBe(70);
+    expect(first).not.toContain('more changed passage');
+    expect(second).toContain(`  - and ${140 - listed.length} more changed passages, not listed here.`);
   });
   it('lists the newest draft of a document first, its earlier drafts straight after it and marked as such', async () => {
     const at = (n: number, rel: string, seen: string) => doc(n, rel.split('/').pop()!, { rel, seen });

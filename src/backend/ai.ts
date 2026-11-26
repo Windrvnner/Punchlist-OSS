@@ -1099,22 +1099,24 @@ export function nodeAi(o: AiOptions) {
     const not = new Set([...given.map((r) => r.docId), ...skip]);
     return withClean(dealId, [...given, ...((await pick(dealId, question, not, room - given.length, core)) ?? top(dealId, question, not, room - given.length, core, true))]);
   }
+  /** a draft's tracked changes as prompt lines, and the tokens they take */
+  type ChangeLines = { lines: string[]; used: number };
   /**
    * A Word file's tracked changes as prompt lines: each changed passage as it was and as it reads now, with who changed
-   * what and when. They are listed up to the share of `model`'s input limit that a part may fill, in tokens, and the
-   * rest is counted (#1092).
+   * what and when. They are listed while their tokens fit in `room`, what is left of the prompt's budget for tracked
+   * changes, and the rest is counted (#1092). `used` is the tokens the listed passages took.
    */
-  async function changesOf(dealId: string, tag: string, docId: string, model: string): Promise<string[]> {
-    if (!o.docs.changes) return [];
-    let r: Result<ChangeList>; try { r = await o.docs.changes(dealId, docId); } catch { return []; }
-    if (!r.ok || !r.value.passages.length) return [];
+  async function changesOf(dealId: string, tag: string, docId: string, room: number): Promise<ChangeLines> {
+    const none: ChangeLines = { lines: [], used: 0 };
+    if (!o.docs.changes) return none;
+    let r: Result<ChangeList>; try { r = await o.docs.changes(dealId, docId); } catch { return none; }
+    if (!r.ok || !r.value.passages.length) return none;
     const out = [`  The changes in ${tag}, read from the file itself (these are fact, not a reading):`]; let used = 0, left = 0;
-    const budget = Math.floor((inLimit(model) * control.limits.partShare) / 100);
     for (const p of r.value.passages) {
       const who = p.changes.map((c) => `${c.kind}${c.text ? ` "${c.text.replace(/\s+/g, ' ').trim()}"` : ''}${c.by ? ` by ${c.by}` : ''}${c.at ? ` on ${c.at.slice(0, 10)}` : ''}`).join('; ');
       const line = `  - was: "${p.before.replace(/\s+/g, ' ').trim()}" / now: "${p.after.replace(/\s+/g, ' ').trim()}" (${who})`;
       const tokens = tokensOf(line);
-      if (used + tokens > budget) {
+      if (used + tokens > room) {
         left++;
         continue;
       }
@@ -1123,7 +1125,7 @@ export function nodeAi(o: AiOptions) {
     }
     if (left) out.push(`  - and ${left} more changed passage${left === 1 ? '' : 's'}, not listed here.`);
     if (!r.value.complete) out.push('  Some changes are in parts of the file this list does not reach.');
-    return out;
+    return { lines: out, used };
   }
   /**
    * What the model is told of a blackline: the clean draft is the truth for the deal's terms,
@@ -1150,10 +1152,12 @@ export function nodeAi(o: AiOptions) {
   /**
    * Put these documents in the store and describe them for the prompt. `got` are the ones that are really there: a
    * document whose file cannot be found on this PC is left out, and nothing may be recorded as read from it. `model`
-   * is the one the prompt goes to: a draft's tracked changes are listed to fit its input limit.
+   * is the one the prompt goes to: the drafts' tracked changes share one budget, the share of its input limit that a
+   * part may fill, drawn on in the order the drafts are listed (#1092).
    */
   async function send(sent: Sent[], model: string): Promise<{ files: string[]; listing: string; got: Sent[] }> {
     const files: string[] = []; const lines: string[] = []; const got: Sent[] = [];
+    let changesRoom = Math.floor((inLimit(model) * control.limits.partShare) / 100);
     for (const dealId of new Set(sent.map((s) => s.dealId))) {
       const mine = sent.filter((s) => s.dealId === dealId); const ids = await o.keeper.ensure(await o.docs.wanted(dealId, mine.map((s) => s.rec.docId)));
       describeSoon(dealId, mine.map((s) => s.rec.docId));                          // a document that is read is worth describing: once, and not waited for
@@ -1166,7 +1170,9 @@ export function nodeAi(o: AiOptions) {
         if (rec.tracked) {
           lines.push(`  ${s.tag} has ${rec.tracked} tracked changes. Its pages show them as markup, `
             + 'so its wording is proposed, not agreed.');
-          lines.push(...await changesOf(dealId, s.tag, rec.docId, model));
+          const changes = await changesOf(dealId, s.tag, rec.docId, changesRoom);
+          lines.push(...changes.lines);
+          changesRoom -= changes.used;
         }
         const k = kindsOf(dealId); if (k.pairs.has(rec.docId)) lines.push(blacklineLine(s, mine, k.pairs.get(rec.docId) ?? null, k.against.get(rec.docId)));
         // another project's document (docs/other-project-documents-design.md): read, never a main source
