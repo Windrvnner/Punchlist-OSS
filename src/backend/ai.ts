@@ -51,7 +51,7 @@ import type { DocRecord, Review } from './documents';
 import type { Folder } from './logRepository';
 import { appendOwn, dealFiles, healOwn, wholeLines } from './ownFile';
 import { createHash } from 'node:crypto';
-import { ListRecord, Item, firmOf, orderItems } from '../domain/checklist';
+import { ListRecord, Item, firmOf, orderItems, key } from '../domain/checklist';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ulid } from 'ulid';
 import { readJson, unfinished, list as listOf, strings, int, pageOf, word, tagNumber, isObject } from './lenient';
@@ -1616,12 +1616,21 @@ export function nodeAi(o: AiOptions) {
   /** the four layers as one list, broad first; an item worded the same as an earlier one is checked once */
   function merge(c: Checklist): ChecklistItem[] {
     const seenText = new Set<string>(); const seenId = new Set<string>(); const out: ChecklistItem[] = [];
-    for (const it of [...(c?.broad ?? []), ...(c?.product ?? []), ...(c?.sector ?? []), ...(c?.technology ?? [])]) {
-      const id = typeof it?.id === 'string' ? it.id.trim() : ''; const text = typeof it?.text === 'string' ? it.text.trim() : ''; const same = text.toLowerCase().replace(/\s+/g, ' ');
-      if (!id || !text || seenId.has(id) || seenText.has(same)) continue;
-      seenId.add(id); seenText.add(same); out.push({ id, text });
+    for (const raw of [...(c?.broad ?? []), ...(c?.product ?? []), ...(c?.sector ?? []), ...(c?.technology ?? [])]) {
+      const { id, text } = trimmedItem(raw);
+      const wording = key(text);
+      if (!id || !text || seenId.has(id) || seenText.has(wording)) continue;
+      seenId.add(id);
+      seenText.add(wording);
+      out.push({ id, text });
     }
     return out;
+  }
+  /** an item's id and wording with the white space at each end trimmed; anything not text is empty */
+  function trimmedItem(it: { id?: unknown; text?: unknown } | undefined): { id: string; text: string } {
+    const id = typeof it?.id === 'string' ? it.id.trim() : '';
+    const text = typeof it?.text === 'string' ? it.text.trim() : '';
+    return { id, text };
   }
   /**
    * Ask one model about some checklist items against some documents. Null when its reply cannot be read at all. Throws
