@@ -36,7 +36,6 @@ import { SERVICE } from '../control';
 import { takeNavPatch, closeDocument, takeFocusAfter } from './nav';
 import { isReading, dealHash, dealTwinLabels } from '../app/state';
 import { num } from './counts';
-import { openNewDeal } from '../app/dealFolders';
 
 function routeFromHash(): State['ui']['route'] {
   const h = (location.hash || '#deals').slice(1);
@@ -311,7 +310,7 @@ function Home() {
         : <button type="button" class="btn pri fr-new" id="fr-new"
           title={ro ??
           'Name the deal and point it at the data-room folders. Indexing and the first pass start on their own.'}
-          disabled={!!ro} onClick={() => openNewDeal(store)}><Icon
+          disabled={!!ro} onClick={() => store.ui({ newDeal: { name: '', folders: [], error: '', busy: false } })}><Icon
           name="plus" size={15} /> New Deal</button>}
     </div></div>
   );

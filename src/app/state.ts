@@ -1,7 +1,7 @@
 import { distinguishingWords, type TwinFocus } from './dealLabel';
 import type { Deal, Question, Finding, Tombstone, Member, Operation, DealId, QuestionId, FindingId, AuditEntry, Source, Folder, RecordKind, ClashKind } from '../domain/model';
 import type { Item, ListRecord } from '../domain/checklist';
-import type { AnswerOffer, CheckState, ModelThread, Research } from '../ports';
+import type { CheckState, ModelThread, Research } from '../ports';
 import type { PageView, SyncState, FolderSearch, FolderPlace, Seen } from '../ports';
 import { control } from '../control';
 import { readLogCells, holds } from '../domain/logWrite';
@@ -14,22 +14,7 @@ import { canLinkUnresolved, suggestUnresolvedLinks, type ApprovedLinks } from '.
 
 export type BootStage = 'session' | 'deals' | 'journal' | 'ready';
 
-export interface Message {
-  id: string;
-  role: 'me' | 'ai';
-  text: string;
-  sources?: Source[];
-  state: 'done' | 'pending' | 'failed';
-  at: string;
-  /** files sent with this message */
-  attached?: { doc: string; docId: string }[];
-  /** what the chat agent did to find this answer */
-  research?: Research;
-  /** the model service's conversation as this answer left it */
-  thread?: ModelThread;
-  /** the action offered under it, checked (#1054) */
-  offer?: AnswerOffer;
-}
+export interface Message { id: string; role: 'me' | 'ai'; text: string; sources?: Source[]; state: 'done' | 'pending' | 'failed'; at: string; /** files sent with this message */ attached?: { doc: string; docId: string }[]; /** what the chat agent did to find this answer */ research?: Research; /** the model service's conversation as this answer left it */ thread?: ModelThread }
 /** The firm's name, which questions we ask and responses we give are stamped with: set in the control file (firm.name),
  * not in Settings. */
 export const FIRM = control.firm.name;

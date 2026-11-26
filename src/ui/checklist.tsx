@@ -23,7 +23,6 @@ import { AskCard, AskedList, STATUS } from './askCounterparty';
 import { useChecklistDraft } from './checklistDraft';
 import { checklistQuestionTarget } from '../app/checklistQuestion';
 import { AddDealItems, SetItemsOff, offeredItems, unlistedItems } from '../app/commands/checklist';
-import { openAddUnresolved } from '../app/addUnresolved';
 
 type Kind = ItemKind;
 const CHECKLIST_INDEXING_TIP = 'The first pass starts when every folder has been indexed; items appear here as they are checked.';
@@ -270,7 +269,7 @@ function CkMore({ dealId }: { dealId: string }) {
   const why = ro ?? (can.phrase ? undefined : 'Questions can’t be phrased here');
   const open = (done: () => void) => {
     done();
-    openAddUnresolved(store, dealId);
+    store.ui({ dialog: { kind: 'addUnresolved', dealId } });
   };
   return <MoreMenu id="ck-pmore" menuId="ck-menu" wrapClass="ckpmore" items={(done) => (
     <MenuItem id="ck-add-unresolved" why={why} onClick={() => open(done)}>

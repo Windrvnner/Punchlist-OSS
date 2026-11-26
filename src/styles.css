@@ -481,7 +481,6 @@ body.reading .tcomp.narrow{left:var(--cl,30px);width:var(--cw,380px);bottom:30px
 .msgs .acts{display:flex;gap:14px;margin-top:6px}
 .msgs .acts button{background:none;border:0;padding:0;font-size:12px;color:var(--ink-3);cursor:pointer}
 .msgs .acts button:hover{color:var(--accent)}
-.msgs .offer{display:flex;margin-top:10px}   /* an action the model offered, under the actions (#1054) */
 .msgs .ai p{margin:0}
 .msgs .ai .dlink{font-weight:600}
 .chat .ref{position:relative;display:inline}
@@ -855,16 +854,6 @@ body.reading .chatwrap.withdoc .reading-pane{animation:settle var(--slow) var(--
 .mwrap{position:relative;display:inline-flex}
 .mmenu{right:auto;left:0;top:auto;bottom:calc(100% + 8px);min-width:160px}
 .home .mmenu{bottom:auto;top:calc(100% + 8px)}
-/* the slash commands (#1054): under the box, or over a conversation's composer, text in line with the typed text */
-.slashmenu{left:0;right:0;width:auto;top:auto;bottom:calc(100% + 8px);border-radius:var(--r-pane);padding:8px;gap:2px}
-/* Home's and a deal page's boxes sit high: their menus drop below */
-.slashmenu.down{bottom:auto;top:calc(100% + 8px)}
-.slashmenu .mi{display:flex;flex-direction:column;gap:3px;padding:10px 14px;border-radius:var(--r-card)}
-.slashmenu .mi.hi{background:var(--card-hover)}
-@media (forced-colors:active){.slashmenu .mi.hi{outline:2px solid Highlight;outline-offset:-2px}}
-.slashmenu .sc{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:14px;color:var(--ink)}
-.slashmenu .sa{font-size:13px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#homeask{position:relative}
 
 .xdlg{padding-bottom:18px}.sdlg .srow.top{align-items:start}.sdlg .srow.top .k{padding-top:4px}
 /* the rows keep their 8px inset for the hover fill, so the list sits 8px further left and its boxes line up with the controls above and below */

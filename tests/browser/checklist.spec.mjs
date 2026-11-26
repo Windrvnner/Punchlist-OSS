@@ -473,16 +473,12 @@ for (const [index, size] of SIZES.entries()) {
   }
 }
 
-{ // #2, #1054: Add All Unresolved is also a slash command in the ask box, and opens the same preview
+{ // #2: Add all unresolved can also be typed in the ask box, and opens the same preview
   const { ctx, page } = await checklist('dark', SIZES[0]);
-  await page.click('#dask textarea'); await page.keyboard.type('/unres');
-  await page.waitForSelector('.slashmenu [role="option"]');
-  await page.press('#dask textarea', 'Enter');
+  await page.click('#dask textarea'); await page.fill('#dask textarea', 'Add all unresolved to Q&A'); await page.press('#dask textarea', 'Enter');
   const opened = await page.waitForSelector('#au-list .lrow', { timeout: 10000 }).then(() => true, () => false);
   const left = await page.evaluate(() => ({ text: document.querySelector('#dask textarea').value, threads: Object.keys(store.get().threads).length }));
-  say('#2 the Add All Unresolved slash command opens its preview, and asks nothing',
-    opened && left.text === '' && left.threads === 0 && !page.errors.length,
-    JSON.stringify({ opened, left, errors: page.errors }));
+  say('#2 typing Add all unresolved in the ask box opens its preview, and asks nothing', opened && left.text === '' && left.threads === 0 && !page.errors.length, JSON.stringify({ opened, left, errors: page.errors }));
   await ctx.close();
 }
 

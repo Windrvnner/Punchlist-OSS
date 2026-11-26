@@ -60,25 +60,7 @@ export function merged(kept: Message[], here: Message[]): { list: Message[]; unk
 const Research = z.object({ steps: z.array(z.object({ kind: z.enum(['search', 'read', 'stop']), text: z.string(), result: z.string(), done: z.boolean(), found: z.array(z.object({ where: z.string(), quote: z.string() })).optional() })), ms: z.number(), read: z.object({ docs: z.number(), of: z.number() }).optional() });
 /** the model service's conversation an answer left, as it is kept with the answer */
 const Thread = z.object({ id: z.string().min(1), model: z.string(), tokens: z.number(), tags: z.array(z.object({ tag: z.string(), dealId: z.string(), docId: z.string() })), transcript: z.string().optional(), call: z.string().optional() });
-/** the action offered under an answer (#1054), as it is kept with the answer */
-const Offer = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('newDeal') }),
-  z.object({ kind: z.literal('page'), dealId: z.string(), page: z.enum(['overview', 'findings', 'checklist', 'qa']) }),
-  z.object({ kind: z.literal('unresolved'), dealId: z.string() }),
-  z.object({ kind: z.literal('question'), text: z.string() }),
-]);
-const Kept = z.object({
-  id: z.string(),
-  role: z.enum(['me', 'ai']),
-  text: z.string(),
-  sources: z.array(Source).optional(),
-  state: z.enum(['done', 'pending', 'failed']),
-  at: z.string(),
-  attached: z.array(z.object({ doc: z.string(), docId: z.string().min(1) })).optional(),
-  research: Research.optional(),
-  thread: Thread.optional(),
-  offer: Offer.optional(),
-});
+const Kept = z.object({ id: z.string(), role: z.enum(['me', 'ai']), text: z.string(), sources: z.array(Source).optional(), state: z.enum(['done', 'pending', 'failed']), at: z.string(), attached: z.array(z.object({ doc: z.string(), docId: z.string().min(1) })).optional(), research: Research.optional(), thread: Thread.optional() });
 /**
  * Conversations kept in the window's local store, for a Store given no ConversationStore (the browser demo). A save adds
  * messages to a conversation by id and never writes the whole set back, so two windows asking in one conversation each

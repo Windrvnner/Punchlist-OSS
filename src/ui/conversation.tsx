@@ -1,7 +1,6 @@
 // A conversation with the model: the page (what it is about, the exchanges, and reading mode's document or the side
 // pane beside them) and the composer, which is also the ask box at the top of a deal's pages and on Home.
 import type { RefObject } from 'preact';
-import { useSlashCommands } from './slashMenu';
 import { SERVICE } from '../control';
 import { isMine } from '../app/commands/members';
 import { ReadOnlyContext } from './editField';
@@ -356,7 +355,6 @@ export function Composer({ scope: given, launch, placeholder: placeholderGiven, 
   const placeholder = readOnly ? 'Read-only' : example ?? placeholderGiven ?? placeholderFor(state, scope, deal);
   const { id, look } = composerLook(launch, oneLine, reading, beside, menu);
   const pastId = launch ? 'past' : 'p-past';
-  const slash = useSlashCommands({ scope, boxKey: key, text, formId: id, up: !launch, changed: textChanged });
   const focusOut = (e: FocusEvent) => {
     const to = e.relatedTarget as HTMLElement | null;
     if (!to || !form.current?.contains(to) || inPastList(to)) setActive(false);
@@ -367,14 +365,11 @@ export function Composer({ scope: given, launch, placeholder: placeholderGiven, 
       onFocusIn={(e) => { if (!inPastList(e.target as HTMLElement)) setActive(true); }}
       onDragOver={(e) => { if (target && !readOnly) e.preventDefault(); }}
       onDrop={(e) => dropFiles(e, store, readOnly ? null : target)}>
-      <div class="chips">{slash.chip}{chips.map((chip) => <Chip key={chip.id} chip={chip} scope={scope} />)}</div>
+      <div class="chips">{chips.map((chip) => <Chip key={chip.id} chip={chip} scope={scope} />)}</div>
       <textarea id={launch ? 'hask' : 'pask'} ref={box} rows={1} dir="auto" placeholder={placeholder} aria-label="Ask"
         readOnly={!!readOnly} title={readOnly ?? undefined} value={text}
-        aria-controls={slash.listId} aria-expanded={slash.listId ? true : undefined}
-        aria-activedescendant={slash.activeId}
         onInput={(e) => setText((e.currentTarget as HTMLTextAreaElement).value)}
-        onKeyDown={(e) => { if (!slash.onKey(e) && isSendKey(e)) submit(e, send); }} />
-      {slash.menu}
+        onKeyDown={(e) => { if (isSendKey(e)) submit(e, send); }} />
       <div class="bar">
         {target && <AttachButton target={target} count={chips.length} readOnly={readOnly} />}
         <ModelPill open={menu} setOpen={setMenu} up={!launch} />
