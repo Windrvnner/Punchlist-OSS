@@ -119,3 +119,15 @@ describe('the fast model names the findings a response affects by their ids (#11
     expect(val(got).marked).toEqual(['f_1']);
   });
 });
+
+describe('the affects prompt size at deal scale (#1162)', () => {
+  it('counts the tokens the ids add over per-prompt labels', async () => {
+    const { s, items, findings } = await dealScale();
+    expect(s.affectCalls.length).toBe(1);
+    const prompt = s.affectCalls[0].prompt;
+    const labelled = [...findings.map((id, k) => [id, `F${k + 1}`]), ...items.map((id, k) => [id, `C${k + 1}`]),
+      [NOTICE.docId, 'N1']].reduce((text, [id, label]) => text.replace(`\n${id}: `, `\n${label}: `), prompt);
+    // 300 findings and 500 items: about 15,500 tokens with labels, 21,650 with ids, well within one call's share
+    expect([tokensOf(labelled), tokensOf(prompt)]).toEqual([15_502, 21_649]);
+  }, 60_000);
+});
