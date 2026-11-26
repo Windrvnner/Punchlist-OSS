@@ -80,7 +80,11 @@ const mgap = () => page.evaluate(() => Math.round(document.querySelector('.mmenu
 const m0 = await mgap(); await page.setViewportSize({ width: 1024, height: 640 }); await page.waitForTimeout(400); const m1 = await mgap(); await page.keyboard.press('Escape'); await page.setViewportSize({ width: 1280, height: 736 });
 say('open-menu-follows-its-button-on-resize', Math.abs(m0 - m1) <= 1, JSON.stringify({ m0, m1 }));
 // a notice shown while a menu is open stays above the menu's backdrop
-await page.click('#pcomposer .mwrap button'); await page.waitForSelector('.mmenu'); await page.evaluate(() => store.toast('Saved')); await page.waitForSelector('#toast'); await page.waitForTimeout(300);
+await page.click('#pcomposer .mwrap button')
+await page.waitForSelector('.mmenu')
+await page.evaluate(() => store.toast('Saved', 'done'))
+await page.waitForSelector('#toast')
+await page.waitForTimeout(300);
 const n = await page.evaluate(() => { const t = document.getElementById('toast').getBoundingClientRect(); const e = document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2); return !!e?.closest('#toast, .notices'); });
 say('notice-above-menu-backdrop', n); await page.keyboard.press('Escape');
 // a right press on the backdrop closes the menu, and the next key press on the menu's button still opens it

@@ -116,7 +116,7 @@ export function FindingCard({ dealId, answer, onDone }: {
     void out.send(async (cancelled, onScreen) => {
       const result = await saveAnswerFinding(store, { dealId, text, sources, draft, sent, cancelled });
       if (result.kind === 'refused') {
-        store.toast(result.reason);
+        store.toast(result.reason, 'warn');
         return false;
       }
       if (result.editing && result.made && onScreen()) location.hash = findingHref(result.made);
@@ -156,11 +156,11 @@ function toastCreated(store: Store, created: Finding | undefined) {
   const href = created && findingHref(created);
   // already open in Edit (#115): Open would only take the person where they are
   if (!href || location.hash === href) {
-    store.toast('Finding created');
+    store.toast('Finding created', 'done');
     return;
   }
   const open = () => {
     location.hash = href.slice(1);
   };
-  store.toast('Finding created', { label: 'Open', run: open });
+  store.toast('Finding created', 'done', { label: 'Open', run: open });
 }

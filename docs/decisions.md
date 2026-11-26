@@ -196,7 +196,9 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Documents open in reading mode beside the conversation, with page keys and zoom.
 - Switching PDFs opens the cited page at the top and keeps the zoom (#447).
 - In the browser demo, a PDF without a preview shows its title, page number, and a preview status (#443).
-- Decided but not built: plain-symbol math, a named finding opening in a side pane, answer actions as icons, and a suggested open question card.
+- Decided but not built: plain-symbol math, a named finding opening in a side pane, and answer actions as icons.
+- A card under an answer suggests each open question the model proposes it addresses; every part's named question is
+  kept and shown, each usable on its own, and only a person uses one (#1120).
 
 ## Deal memo
 
@@ -259,6 +261,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A change that arrives before a change it builds on is held back without pausing the deal; one more than a day old is let go as a choice. A deal can't be deleted while such changes are on their way.
 - The connection status card shows only when something is wrong. The avatar's dot is the accent color or red, and OneDrive being unavailable for 15 minutes produces one notice.
 - A copied install is detected and stops writing. A build never changes a record written by a newer version.
+- The app carries no compatibility code for builds or data from before its release; the schema version gate stays
+  (#1119).
 - A damaged undo journal (each PC's record of its actions, used for Undo and to recover interrupted work) is set aside, and its complete entries are still offered.
 - **Discard** on an interrupted action asks first in the confirm dialog, naming the action (#1055).
 - A deal's analysis is split between the PCs that have the deal open, in rounds (a round is one shared run of checks on the deal, split into pieces of work) that any PC can take over. A requested check that an abandoned round doesn't cover writes that round off.
@@ -273,7 +277,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 ## AI and models
 
 - A model is used only for work that needs language understanding. Parsing, matching, numbering, dates and periods, sorting, counting, and formatting are done in code, including the selecting, matching, formatting, and checking around an AI feature's model call; a model sees questions and earlier responses by their permanent ids, never their numbers or other identifiers its prose could be confused with (#286, #1105).
-- A model reply naming a question id it was not shown is a failed reply and is asked again (#1105).
+- A model reply naming a question id it was not shown, or one that must name a question and names none, is a failed
+  reply and is asked again (#1105).
 - There are three tiers, Fast, Standard, and Thorough, named only by tier. The control file sets each tier's model and which ones people can pick. For automated checks, Thorough is a fallback
   after Standard fails twice.
 - To manage cost, use the fast model for initial sorting and Standard for confirmation. Batch work to fit the

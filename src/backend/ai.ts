@@ -58,7 +58,7 @@ import { readJson, unfinished, list as listOf, strings, int, pageOf, word, tagNu
 import type { LineRead } from '../domain/listRead';
 import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK } from './limits';
 import { UNREAD_REPLY, UNUSABLE_REPLY, UNREACHED, CUT_ON_IT, CUT_BEFORE_IT, UNUSABLE_ON_IT } from './limits';
-import { inParts, partSize } from './parts';
+import { inParts, partSize, type PartReply, type PartsDone } from './parts';
 import { tokens, fold } from './words';
 import type { WordIndex } from './wordIndex';
 import { families, roomPath } from './families';
@@ -72,7 +72,7 @@ import {
 import { docFamilies } from './related';
 import type { ChangeList } from './convert';
 import { chatAgent, type AgentKit, type Sent, type Cited } from './agent';
-import { AI_DRAFTED, namesOnlyShown, questionsForIds, responseHeader } from './qaRow';
+import { AI_DRAFTED, namesOnlyShown, questionIdsIn, questionsForIds, responseHeader } from './qaRow';
 import type { DealDoc, Looked, Unusable } from './agentKit';
 import {
   RATINGS, riskGroups, keyRisksOf, unratedFindings, type Grouped, type Rating, type RiskGroup,
@@ -387,6 +387,29 @@ type Seen =
   }
   | { kind: 'finding'; title: string; workstream: string; body: string[]; sources: Source[] };
 const JSON_ONLY = 'Reply with one JSON object and nothing else.';
+/** the words the two answer judgements share: whether an answer addresses a question, and which one (#1120) */
+const answerFromDocs = (answer: string) => `This answer was written from the deal's documents:\n${answer}`;
+const GIVES_WHAT_ASKED = 'does it give what the question asks for?';
+/** the prompt showing open questions by their permanent ids, never their numbers, to match an answer to one (#1120) */
+function suggestPrompt(answer: string, questions: { id: string; text: string }[]) {
+  const listed = questions.map((q) => `${q.id}: ${q.text.replace(/\s+/g, ' ')}`).join('\n');
+  return [
+    `These open questions were asked on a project-finance deal, each with its id:\n${listed}\n`,
+    `${answerFromDocs(answer)}\n`,
+    `Which one of these open questions does the answer address: for which ${GIVES_WHAT_ASKED} Name the one it`
+      + ' addresses most fully by its id, or "none" if it addresses none of them.',
+    'Reply as JSON: {"question": "<an id above>" | "none"}',
+  ].join('\n');
+}
+/** the id a reply names among the ids shown, or null for "none" (the reply was checked by `namesOneShown`) */
+const namedId = (text: string, shown: readonly string[]) =>
+  questionIdsIn(text).find((id) => shown.includes(id)) ?? null;
+/**
+ * Whether a reply to the open-question match can be used: it names an id that was shown and none that was not, or says
+ * "none". Any other reply is a failed one, asked again (#1105).
+ */
+const namesOneShown = (text: string, shown: readonly string[]) =>
+  namesOnlyShown(text, shown) && (namedId(text, shown) !== null || /\bnone\b/i.test(text));
 /** the rules for a draft from earlier responses alone, when no document bears on the question */
 const PRIOR_RULES = 'Answer only from the earlier responses you are given: choose those that answer the question as it is asked. Reply with one JSON object and nothing else. Cite no documents: give "sources": [].';
 /**
@@ -607,9 +630,6 @@ export function nodeAi(o: AiOptions) {
   // points that failed alone, per deal, by their key: asking again (Retry) puts them last, after the points that were only
   // held up beside them, so those come back first; they are still split and asked alone like any other
   const phraseFailed = new Map<string, Set<string>>();
-  // the most points `phrase` has been asked for at once, per deal: a Retry's calls are bounded as the deal's first run
-  // was, as the points a Retry asks for are the hardest to tell apart
-  const phraseMost = new Map<string, number>();
   /**
    * n tags of three consonants, different from each other, to name the points of one `phrase` call: drawn at random, so
    * they do not run in order, and with no vowel, so none is a word
@@ -618,6 +638,151 @@ export function nodeAi(o: AiOptions) {
     const C = 'bcdfghjkmnpqrstvwxz'; const seen = new Set<string>();
     while (seen.size < n) seen.add(Array.from({ length: 3 }, () => C[Math.floor(Math.random() * C.length)]).join(''));
     return [...seen];
+  };
+  /** a point `phrase` is asked to put as a question (ports: AiService.phrase) */
+  type PhrasePoint = { kind: 'gap' | 'finding'; what: string; need: string };
+  /** a point's key, by which `phraseKept` and `phraseFailed` know it from one run to the next */
+  const phraseKey = (x: PhrasePoint) => JSON.stringify([x.kind, x.what, x.need]);
+  /** a point as one line of a `phrase` call: its kind, what is unresolved, and what would settle it */
+  const phraseLine = (x: PhrasePoint) =>
+    `[${x.kind}] ${x.what.replace(/\s+/g, ' ')}${x.need ? ` — needed: ${x.need.replace(/\s+/g, ' ')}` : ''}`;
+  /** what one `phrase` call asks, each point named by its tag */
+  const phrasePrompt = (points: PhrasePoint[], tags: string[]) => [
+    'These are unresolved points in the due diligence of a project-finance deal: checklist items no document'
+      + ' settles yet ("gap"), and open findings ("finding"). Each starts with its id.',
+    ...points.map((x, m) => `${tags[m]}: ${phraseLine(x)}`),
+    '',
+    'Write one question for the counterparty for each point, asking plainly for the document or confirmation that'
+      + ' would settle it. One or two sentences each, polite and specific, in the deal team\'s voice; keep every name'
+      + ' and figure; say nothing about how the point was found. Give every point a question, with that point\'s id.',
+    `Reply as JSON: {"items": [{"id": "${tags[0]}", "text": "…"}]}`,
+  ].join('\n');
+  /** why a `phrase` reply brought no question back, as the run's failure says it when no point gets one */
+  const phraseWhy = (cut: boolean, reply: { items?: unknown } | null) => {
+    if (cut) return `${SERVICE}’s reply was cut off, so nothing was added`;
+    if (reply && Array.isArray(reply.items)) return `${SERVICE} left a point without a question, so nothing was added`;
+    return `${SERVICE}’s reply could not be read, so nothing was added`;
+  };
+  /** the entries of a `phrase` reply: each one's place in the call, by its tag, and its text */
+  const phraseEntries = (reply: { items?: unknown } | null, tags: string[]) => {
+    const at = new Map(tags.map((t, m) => [t, m]));
+    return (listOf(reply?.items) as { id?: unknown; text?: unknown }[]).map((x) => ({
+      m: typeof x?.id === 'string' ? at.get(x.id.trim().toLowerCase()) : undefined,
+      text: typeof x?.text === 'string' ? x.text.replace(/\s+/g, ' ').trim() : '',
+    }));
+  };
+  /** the places a reply gives more than one question: such a question is not known to belong to either */
+  const givenTwice = (items: { m?: number }[]) =>
+    new Set(items.filter((x, j) => x.m !== undefined && items.findIndex((y) => y.m === x.m) !== j).map((x) => x.m));
+  /**
+   * The questions of a `phrase` reply, by place in the call: only an entry with one of the call's tags is kept, even
+   * for a point asked alone, so stray text is never taken for a question; the last entry of a cut reply may be cut
+   * short, so it is left out
+   */
+  const phraseGot = (items: { m?: number; text: string }[], cut: boolean) => {
+    const twice = givenTwice(items);
+    const got = new Map<number, string>();
+    let last = -1;
+    for (const x of items) {
+      if (x.m === undefined || !x.text) continue;
+      last = x.m;
+      if (!twice.has(x.m)) got.set(x.m, fitText(x.text));
+    }
+    if (cut) got.delete(last);
+    return got;
+  };
+  /**
+   * One `phrase` call: the questions that came back whole, by place in `points`, whether the reply was cut off, and
+   * why, when none came back. Each point is named by a short tag of its own, not a running number, and a question is
+   * taken only for a tag of this call, so a reply that leaves a point out, or puts two in another order, cannot move a
+   * question onto another point. A reply cut off, whether the service says so or its JSON is left open, keeps what
+   * came before its last entry; a whole reply with a stray quote in it is read as whole. Any other error is thrown.
+   */
+  async function askPhrase(model: string, points: PhrasePoint[]) {
+    const tags = tagsFor(points.length);
+    const prompt = phrasePrompt(points, tags);
+    let raw = '';
+    let cut = false;
+    try {
+      raw = String(await complete({ kind: 'phrase', model, system: JSON_ONLY, prompt }) ?? '');
+    } catch (e) {
+      if (!isCutOff(e)) throw e;
+      cut = true;
+      raw = (e as { text?: string }).text ?? '';
+    }
+    const reply = json<{ items?: unknown }>(raw, 'items');
+    if (jsonEnd(raw, 'items') === 'open') cut = true;
+    const got = phraseGot(phraseEntries(reply, tags), cut);
+    return { got, cut, why: got.size ? '' : phraseWhy(cut, reply) };
+  }
+  /** some points of a `phrase` run, by kind (gaps, then findings), leaving out a kind with none */
+  const phraseByKind = (points: PhrasePoint[], part: number[]) =>
+    (['gap', 'finding'] as const).map((kind) => part.filter((k) => points[k].kind === kind)).filter((l) => l.length);
+  /**
+   * A part whose whole reply brought nothing, to ask again: split by kind when it holds both (so a model that fails
+   * every finding fails only parts of findings), otherwise in halves; nothing for a single point, offered for Retry
+   */
+  const splitPhrasePart = (points: PhrasePoint[], part: number[]) => {
+    const kinds = phraseByKind(points, part);
+    if (kinds.length > 1) return kinds;
+    const half = Math.ceil(part.length / 2);
+    return part.length > 1 ? [part.slice(0, half), part.slice(half)] : [];
+  };
+  /**
+   * One `phrase` run: its points, what came back for them so far (`out`: a question, null for Retry, or not yet), the
+   * deal's kept questions and points that failed alone, the lists still to ask, and why the last reply brought nothing
+   */
+  type PhraseRun = {
+    points: PhrasePoint[];
+    had: Map<string, string>;
+    failed: Set<string>;
+    out: (string | null | undefined)[];
+    queue: number[][];
+    leftOut: number[];
+    why: string;
+  };
+  /** a `phrase` run: points kept from a failed run are not asked; points that failed alone before are asked last */
+  const phraseRunFor = (dealId: string, points: PhrasePoint[]): PhraseRun => {
+    const had = phraseKept.get(dealId) ?? new Map<string, string>();
+    phraseKept.set(dealId, had);
+    const failed = phraseFailed.get(dealId) ?? new Set<string>();
+    phraseFailed.set(dealId, failed);
+    const out = points.map((x) => had.get(phraseKey(x)));
+    const todo = range(0, points.length).filter((k) => out[k] === undefined);
+    const was = (k: number) => failed.has(phraseKey(points[k]));
+    const queue = [todo.filter((k) => !was(k)), todo.filter(was)].filter((l) => l.length);
+    return { points, had, failed, out, queue, leftOut: [], why: '' };
+  };
+  /**
+   * One part of a `phrase` run asked, for inParts: a cut reply is handed to it (parts.ts); what a whole reply leaves
+   * is asked again: the points it left out with those the rest of the list leaves (keepPhrased), a part that brought
+   * nothing split (splitPhrasePart); a single point that brought nothing is offered for Retry (null)
+   */
+  const askPhrasePart = async (run: PhraseRun, model: string, part: number[]): Promise<PartReply<string>> => {
+    const reply = await askPhrase(model, part.map((k) => run.points[k]));
+    run.why = reply.why || run.why;
+    const alone = part.length === 1 && !reply.got.size;
+    if (alone) run.failed.add(phraseKey(run.points[part[0]]));      // asked last by a later run
+    if (reply.cut) return { got: reply.got, cut: range(0, part.length).filter((m) => !reply.got.has(m)) };
+    if (alone) run.out[part[0]] = null;
+    if (reply.got.size) run.leftOut.push(...part.filter((_, m) => !reply.got.has(m)));
+    else run.queue.push(...splitPhrasePart(run.points, part));
+    return { got: reply.got };
+  };
+  /** what one list of a `phrase` run brought back (inParts), kept in the run */
+  const keepPhrased = (run: PhraseRun, list: number[], done: PartsDone<string>) => {
+    for (const [at, text] of done.got) {
+      const key = phraseKey(run.points[list[at]]);
+      run.out[list[at]] = text;
+      run.had.set(key, text);
+      run.failed.delete(key);
+    }
+    for (const at of done.left) run.out[list[at]] = null;      // cut off even alone (parts.ts): offered for Retry
+    // not asked, as three points in a row were cut off alone (parts.ts): asked again as a list of their own
+    if (done.unasked.length) run.queue.push(done.unasked.map((at) => list[at]));
+    // the points the list's whole replies left out, asked again together, a list for each kind, in parts as any list
+    run.queue.push(...phraseByKind(run.points, run.leftOut));
+    run.leftOut = [];
   };
   /**
    * items asked about in one call of the duplicate check: a list of deal size is asked about whole, in one call (2,400
@@ -864,8 +1029,8 @@ export function nodeAi(o: AiOptions) {
       claim: (keys) => claimReports(dealId, keys),
       release: async (keys) => { if (o.shared) await release(dealId, keys).catch(() => undefined); },
       ask: (input, keys) => askJson(input, keys),
-      send: async (rec) => {
-        const r = await send(tagged(dealId, [rec]));
+      send: async (rec, model) => {
+        const r = await send(tagged(dealId, [rec]), model);
         return r.got.length ? { files: r.files, listing: r.listing, sent: r.got } : null;
       },
       fit: (text, cited, sent) => fit(text, cited, sent, false, true),
@@ -1199,26 +1364,33 @@ export function nodeAi(o: AiOptions) {
     const not = new Set([...given.map((r) => r.docId), ...skip]);
     return withClean(dealId, [...given, ...((await pick(dealId, question, not, room - given.length, core)) ?? top(dealId, question, not, room - given.length, core, true))]);
   }
+  /** a draft's tracked changes as prompt lines, and the tokens they take */
+  type ChangeLines = { lines: string[]; used: number };
   /**
-   * Put these documents in the store and describe them for the prompt. `got` are the ones that are really there: a
-   * document whose file cannot be found on this PC is left out, and nothing may be recorded as read from it.
+   * A Word file's tracked changes as prompt lines: each changed passage as it was and as it reads now, with who changed
+   * what and when. They are listed while their tokens fit in `room`, what is left of the prompt's budget for tracked
+   * changes, and the rest is counted (#1092). `used` is the tokens the listed passages took.
    */
-  /** how much of a draft's change list goes into a prompt, in characters; past it the rest is counted, not listed */
-  const CHANGES_UP_TO = 6000;
-  /** A Word file's tracked changes as prompt lines: each changed passage as it was and as it reads now, with who changed what and when. */
-  async function changesOf(dealId: string, tag: string, docId: string): Promise<string[]> {
-    if (!o.docs.changes) return [];
-    let r: Result<ChangeList>; try { r = await o.docs.changes(dealId, docId); } catch { return []; }
-    if (!r.ok || !r.value.passages.length) return [];
+  async function changesOf(dealId: string, tag: string, docId: string, room: number): Promise<ChangeLines> {
+    const none: ChangeLines = { lines: [], used: 0 };
+    if (!o.docs.changes) return none;
+    let r: Result<ChangeList>; try { r = await o.docs.changes(dealId, docId); } catch { return none; }
+    if (!r.ok || !r.value.passages.length) return none;
     const out = [`  The changes in ${tag}, read from the file itself (these are fact, not a reading):`]; let used = 0, left = 0;
     for (const p of r.value.passages) {
       const who = p.changes.map((c) => `${c.kind}${c.text ? ` "${c.text.replace(/\s+/g, ' ').trim()}"` : ''}${c.by ? ` by ${c.by}` : ''}${c.at ? ` on ${c.at.slice(0, 10)}` : ''}`).join('; ');
       const line = `  - was: "${p.before.replace(/\s+/g, ' ').trim()}" / now: "${p.after.replace(/\s+/g, ' ').trim()}" (${who})`;
-      if (used + line.length > CHANGES_UP_TO) { left++; continue; } out.push(line); used += line.length;
+      const tokens = tokensOf(line);
+      if (used + tokens > room) {
+        left++;
+        continue;
+      }
+      out.push(line);
+      used += tokens;
     }
     if (left) out.push(`  - and ${left} more changed passage${left === 1 ? '' : 's'}, not listed here.`);
     if (!r.value.complete) out.push('  Some changes are in parts of the file this list does not reach.');
-    return out;
+    return { lines: out, used };
   }
   /**
    * What the model is told of a blackline: the clean draft is the truth for the deal's terms,
@@ -1242,8 +1414,15 @@ export function nodeAi(o: AiOptions) {
     const alone = against === 'own' ? '' : ` By itself it never shows that a finding is put right or that its problem is back.`;
     return `  ${s.tag} is a blackline: a comparison of two ${against === 'own' ? 'drafts' : 'documents'} with the changes marked, made by a comparison tool; ${of}. Read ${s.tag} only for what changed, and give each change as what ${s.tag} appears to show, citing its page.${sees}${vs}${alone}`;
   }
-  async function send(sent: Sent[]): Promise<{ files: string[]; listing: string; got: Sent[] }> {
+  /**
+   * Put these documents in the store and describe them for the prompt. `got` are the ones that are really there: a
+   * document whose file cannot be found on this PC is left out, and nothing may be recorded as read from it. `model`
+   * is the one the prompt goes to: the drafts' tracked changes share one budget, the share of its input limit that a
+   * part may fill, drawn on in the order the drafts are listed (#1092).
+   */
+  async function send(sent: Sent[], model: string): Promise<{ files: string[]; listing: string; got: Sent[] }> {
     const files: string[] = []; const lines: string[] = []; const got: Sent[] = [];
+    let changesRoom = Math.floor((inLimit(model) * control.limits.partShare) / 100);
     for (const dealId of new Set(sent.map((s) => s.dealId))) {
       const mine = sent.filter((s) => s.dealId === dealId); const ids = await o.keeper.ensure(await o.docs.wanted(dealId, mine.map((s) => s.rec.docId)));
       describeSoon(dealId, mine.map((s) => s.rec.docId));                          // a document that is read is worth describing: once, and not waited for
@@ -1256,7 +1435,9 @@ export function nodeAi(o: AiOptions) {
         if (rec.tracked) {
           lines.push(`  ${s.tag} has ${rec.tracked} tracked changes. Its pages show them as markup, `
             + 'so its wording is proposed, not agreed.');
-          lines.push(...await changesOf(dealId, s.tag, rec.docId));
+          const changes = await changesOf(dealId, s.tag, rec.docId, changesRoom);
+          lines.push(...changes.lines);
+          changesRoom -= changes.used;
         }
         const k = kindsOf(dealId); if (k.pairs.has(rec.docId)) lines.push(blacklineLine(s, mine, k.pairs.get(rec.docId) ?? null, k.against.get(rec.docId)));
         // another project's document (docs/other-project-documents-design.md): read, never a main source
@@ -1458,7 +1639,7 @@ export function nodeAi(o: AiOptions) {
     for (let round = 1; ; round++) {
       let reply: Record<string, unknown> | null;
       try {
-        const { files, listing, got } = await send(sent);
+        const { files, listing, got } = await send(sent, using);
         // a finding is not reassessed on part of what was chosen while the rest is out of reach
         if (kind === 'reassess' && lostSome(sent, got)) return fail({ kind: 'failed', message: 'The documents for this could not be opened on this PC' });
         if (got.length < sent.length) sent.splice(0, sent.length, ...got);        // what could not be opened on this PC was not read, and cannot be cited
@@ -1703,7 +1884,7 @@ export function nodeAi(o: AiOptions) {
    * what was wrong with it, to be put right.
    */
   async function check(items: ChecklistItem[], sent: Sent[], model: string, redo?: Map<string, { why: string; said?: unknown }>, fix = true): Promise<(Map<string, Seen> & { cut?: ChecklistItem[] }) | null> {
-    const { files, listing, got } = await send(sent);
+    const { files, listing, got } = await send(sent, model);
     // the folder of one of them stopped answering since they were chosen: the items are not settled on the rest
     if (lostSome(sent, got)) { const why = awayWhy(sent[0].dealId, sent.filter((x) => !got.includes(x)).map((x) => x.rec.docId)); return new Map(items.map((it) => [it.id, { kind: 'weak' as const, why, reason: why }])); }
     if (!got.length) return null; sent = got;
@@ -2078,8 +2259,8 @@ export function nodeAi(o: AiOptions) {
     async addresses(i) {
       const prompt = [
         `This question was asked on a project-finance deal:\n${i.question}\n\n`,
-        `This answer was written from the deal's documents:\n${i.answer}\n\n`,
-        'Does the answer address the question: does it give what the question asks for? ',
+        `${answerFromDocs(i.answer)}\n\n`,
+        `Does the answer address the question: ${GIVES_WHAT_ASKED} `,
         'Say "yes" if it does, "partly" if it gives some of it, "no" if it does not. ',
         'Add "why": one short sentence, under twenty words, saying what it gives or leaves out.\n',
         'Reply as JSON: {"verdict": "yes" | "partly" | "no", "why": "…"}',
@@ -2095,6 +2276,36 @@ export function nodeAi(o: AiOptions) {
       if (!verdict) return fail({ kind: 'failed', message: UNREAD_REPLY });
       // one short line on the card, however much it wrote
       return ok({ verdict, why: (strings(reply!.why)[0] ?? '').replace(/\s+/g, ' ').slice(0, 200) });
+    },
+    /**
+     * Which open questions an answer addresses (#1120): the standard model reads the answer and the questions, each by
+     * its permanent id, in one call where they fit, else in parts (`inParts`). Every question any part names is kept,
+     * as its id. A reply naming an id it was not shown is a failed reply and is asked again (#1105).
+     */
+    async suggestQuestion(i) {
+      try {
+        const model = (await models()).standard;
+        const lines = i.questions.map((q) => `${q.id}: ${q.text}`);
+        // the reply is one id however many questions are shown, so only the input limit sizes a part
+        const size = partSize({
+          cap: i.questions.length, out: 1, outLimit: Infinity, in: tokensEach(lines), inLimit: inLimit(model),
+        });
+        const done = await inParts(i.questions, size, async (part) => {
+          const ids = part.map((q) => q.id);
+          const prompt = suggestPrompt(i.answer, part);
+          const unusable = (text: string) => !namesOneShown(text, ids);
+          const reply = await askJson<{ question?: unknown }>(
+            { kind: 'suggestQuestion', model, system: JSON_ONLY, prompt, unusable }, ['question'],
+          );
+          if (!reply) throw new Error(UNREAD_REPLY);
+          const named = namedId(String(reply.question ?? ''), ids);
+          return { got: new Map(named === null ? [] : [[0, named]]) };
+        });
+        // what the parts that were asked named is kept even when a later part could not be asked; parts are in order
+        const named = [...done.got].sort(([a], [b]) => a - b).map(([, id]) => id);
+        if (named.length || done.stopped === undefined) return ok(named);
+        return failure(done.stopped, UNREACHED);
+      } catch (e) { return failure(e, UNREACHED); }
     },
     /** One answer from two versions. An empty reply, or one with a note to confirm, is sent back once (#1058). */
     async merge(i) {
@@ -2188,118 +2399,29 @@ export function nodeAi(o: AiOptions) {
       return ok([...done.got.values()].sort((a, b) => a.n - b.n));
     },
     async phrase(i) {
-      // One question for the counterparty per point, in parts (parts.ts; decisions: Cut-off output): a part is sized from
-      // the fast model's limits (up to 120 points), and a reply cut off is dealt with as everywhere else, the points that
-      // came back whole kept. A part that brings nothing back for some points, or none (an empty reply, one that cannot be
-      // read, a point left out), is not the end of them: the points still without a question are asked again in parts
-      // half the size, round after round, down to each point alone, asked twice; so a failed part is always split until
-      // each of its points has been asked alone, whatever those points did before. Points of one kind go together (gaps,
-      // or findings), so a model that fails every part holding a finding fails only parts of findings, and points that
-      // failed alone in an earlier run of the deal are asked last, beside each other. A point left out twice by replies
-      // that answered others is set aside: the model will not phrase it (a model that never phrases findings, say).
-      // Calls are bounded. 13 that bring nothing back before any brings something, or 20 in a row that bring nothing
-      // back after, may be a block of failing points rather than the service down: the points still waiting
-      // are then asked alone, from across the list, and once one answers the rounds go on; 12 more with nothing and the
-      // run ends, failing, saying why, if nothing came back at all. More calls in all than four for each part the limits
-      // allow, and 40 and four for every 120 points (176 at 2,000 points, which take 17 when nothing fails; a Retry is allowed as many as the deal's largest run), end it too: what came back is offered, and the rest are null, for the dialog to count with Retry,
-      // which asks for just those. Any other error from the service fails the run as it is. Questions that came back are
-      // kept through a run that fails, so asking again pays only for what is missing.
-      let fast: string; try { fast = (await models()).fast; } catch (e) { return failure(e, UNREACHED); }
-      const key = (x: (typeof i.items)[number]) => JSON.stringify([x.kind, x.what, x.need]);
-      const line = (x: (typeof i.items)[number]) => `[${x.kind}] ${x.what.replace(/\s+/g, ' ')}${x.need ? ` — needed: ${x.need.replace(/\s+/g, ' ')}` : ''}`;
-      const had = phraseKept.get(i.dealId) ?? new Map<string, string>(); phraseKept.set(i.dealId, had);
-      const failedBefore = phraseFailed.get(i.dealId) ?? new Set<string>(); phraseFailed.set(i.dealId, failedBefore);
-      const n = i.items.length; const most0 = Math.max(n, phraseMost.get(i.dealId) ?? 0); phraseMost.set(i.dealId, most0); const out: (string | null | undefined)[] = i.items.map((x) => had.get(key(x)));
-      const first = partSize({ cap: CHECKLIST_BATCH, out: control.limits.phraseReplyTokens, outLimit: outLimit(fast), in: tokensEach(i.items.map(line)), inLimit: inLimit(fast) });
-      let why = '', answered = 0, empty = 0, streak = 0, calls = 0, whole = 0, probed = 0, start = 0, alone = false;
-      const leftOut = new Map<number, number>();      // how often a reply that answered others left a point out
-      const stop = (code: string) => Object.assign(new Error(code), { code });
-      const ask = async (part: number[]) => {
-        calls++; if (answered && calls > 4 * Math.ceil(most0 / first) + 40 + 4 * Math.ceil(most0 / CHECKLIST_BATCH)) throw stop('enough');
-        if (alone && empty - probed >= 12) throw stop(answered ? 'enough' : 'down');
-        if (!alone && ((!answered && empty >= 13) || (answered && streak >= 20))) { probed = empty; throw stop('alone'); }
-        // a reply cut off, whether the service says so or its JSON is left open, keeps what came before its last entry,
-        // which may be cut short; a whole reply with a stray quote in it is read as whole
-        // each point is named by a short tag of its own, not a running number, and a question is taken only for a tag of
-        // this part: a reply that leaves a point out, or puts two in another order, cannot move a question onto another point
-        const tags = tagsFor(part.length); const at = new Map(tags.map((t, m) => [t, m]));
-        let raw = '', cut = false;
-        try { raw = String(await complete({ kind: 'phrase', model: fast, system: JSON_ONLY, prompt: `These are unresolved points in the due diligence of a project-finance deal: checklist items no document settles yet ("gap"), and open findings ("finding"). Each starts with its id.\n${part.map((k, m) => `${tags[m]}: ${line(i.items[k])}`).join('\n')}\n\nWrite one question for the counterparty for each point, asking plainly for the document or confirmation that would settle it. One or two sentences each, polite and specific, in the deal team's voice; keep every name and figure; say nothing about how the point was found. Give every point a question, with that point's id.\nReply as JSON: {"items": [{"id": "${tags[0]}", "text": "…"}]}` }) ?? ''); }
-        catch (e) { if (!isCutOff(e)) throw e; cut = true; raw = (e as { text?: string }).text ?? ''; }
-        const reply = json<{ items?: unknown }>(raw, 'items'); const open = cut || jsonEnd(raw, 'items') === 'open'; if (open) cut = true;
-        const items = (listOf(reply?.items) as { id?: unknown; text?: unknown }[]).map((x) => ({ m: typeof x?.id === 'string' ? at.get(x.id.trim().toLowerCase()) : undefined, text: typeof x?.text === 'string' ? x.text.replace(/\s+/g, ' ').trim() : '' }));
-        // a tag given twice is not known to belong to either question; asked alone, a point's one question is its own
-        const twice = new Set(items.filter((x, j) => x.m !== undefined && items.findIndex((y) => y.m === x.m) !== j).map((x) => x.m));
-        if (part.length === 1 && items.filter((x) => x.text).length === 1) for (const x of items) if (x.text) x.m = 0;
-        const got = new Map<number, string>();
-        let last = -1;
-        for (const x of items) {
-          if (x.m === undefined || !x.text) continue;
-          last = x.m;
-          if (!twice.has(x.m)) got.set(x.m, fitText(x.text));
-        }
-        if (cut) got.delete(last);      // the last entry of a cut reply may be cut short
-        if (got.size) { answered++; streak = 0; }
-        else { empty++; streak++; why = cut ? `${SERVICE}’s reply was cut off, so nothing was added` : reply && Array.isArray(reply.items) ? `${SERVICE} left a point without a question, so nothing was added` : `${SERVICE}’s reply could not be read, so nothing was added`; }
-        if (part.length === 1 && !got.size) failedBefore.add(key(i.items[part[0]]));      // asked last by a later run
-        // asked alone from across the list, a point that answers shows the service is up: the rest go back to parts
-        if (alone && got.size) { const k = part[0]; out[k] = got.get(0)!; had.set(key(i.items[k]), out[k]!); failedBefore.delete(key(i.items[k])); alone = false; streak = 0; start = k; throw stop('found'); }
-        if (got.size && !cut) for (let k = 0; k < part.length; k++) if (!got.has(k)) leftOut.set(part[k], (leftOut.get(part[k]) ?? 0) + 1);
-        // a cut-off is dealt with as everywhere (parts.ts), unless nothing in it came back whole and a part as large has
-        // answered whole in this run: then the length is not at fault but some point in it, and the part is split like any
-        // other that brought nothing back, the next round asking it in halves
-        if (got.size === part.length) whole = Math.max(whole, part.length);
-        return { got, ...(cut && (got.size || part.length > whole) ? { cut: range(0, part.length).filter((k) => !got.has(k)) } : {}) };
-      };
-      // the points still waiting, as the lists a round asks in turn: those that never failed alone first, from the last
-      // point that answered when asked alone from across the list (a block of failing points is then left for last),
-      // then those that did; once a round has left some without a question, each kind in a list of its own; `spread`
-      // takes them one at a time from across the list instead
-      const lists = (ks: number[], grouped: boolean, spread: boolean) => {
-        const was = (k: number) => failedBefore.has(key(i.items[k]));
-        if (spread) return [ks.filter((k) => !was(k)).sort((a, b) => ((a * 0.6180339887) % 1) - ((b * 0.6180339887) % 1)), ks.filter(was)];
-        const by = (of: number[]) => (grouped ? ['gap', 'finding'].map((kind) => of.filter((k) => i.items[k].kind === kind)) : [of]);
-        const from = (of: number[]) => [...of.filter((k) => k >= start), ...of.filter((k) => k < start)];      // on from the point that answered alone
-        return [...by(from(ks.filter((k) => !was(k)))), ...by(ks.filter(was))].filter((l) => l.length);
-      };
-      let size = first, was = first; let solo = 0; const cutAlone: number[] = []; let ended = false;
-      rounds: for (let round = 0; solo < 2; round++) {
-        const todo = range(0, n).filter((k) => out[k] === undefined); if (!todo.length) break;
-        let next = size, most = 0;
-        for (let list of lists(todo, round > 0, alone)) for (let at0 = size; list.length; ) {
-          // three points in a row cut off alone stop a run of parts (parts.ts); the points it had not asked are asked on
-          // here, as the bounds above already tell a service that cuts everything from a block of failing points
-          const done = await inParts(list, at0, ask); const asked = list; list = done.stopped !== undefined && isCutOff(done.stopped) ? done.unasked.map((at) => asked[at]) : []; at0 = done.size;
-          for (const [at, text] of done.got) { const k = asked[at]; out[k] = text; had.set(key(i.items[k]), text); failedBefore.delete(key(i.items[k])); }
-          for (const at of done.left) if (!done.stopped || isCutOff(done.stopped)) { out[asked[at]] = null; cutAlone.push(asked[at]); }      // cut off even alone
-          for (const [k, m] of leftOut) if (m >= 2 && out[k] === undefined) out[k] = null;
-          const code = (done.stopped as { code?: string } | undefined)?.code;
-          if (code === 'alone') { alone = true; was = size; size = 1; continue rounds; }
-          if (code === 'found') { size = Math.max(1, Math.ceil(was / 2)); continue rounds; }      // on from where the rounds were
-          if (code === 'down') return fail({ kind: 'failed', message: why });
-          if (code === 'enough') { ended = true; break rounds; }
-          if (done.stopped !== undefined && !isCutOff(done.stopped)) return failure(done.stopped, UNREACHED);
-          next = Math.min(next, done.size); most = Math.max(most, Math.min(asked.length, done.size));
-        }
-        if (most <= 1) solo++;      // every point was asked alone
-        size = Math.max(1, Math.ceil(Math.min(next, most) / 2));      // half the largest part asked
+      // One question for the counterparty per point, in parts sized to the fast model's limits (parts.ts; decisions:
+      // docs/decisions.md line 167; #1109), each call asked again only by the shared
+      // quiet retry (`complete`). A reply cut off is dealt with as everywhere else (parts.ts): the points that came
+      // back whole are kept, and a point cut off even alone is offered for Retry (null). What a whole reply leaves is
+      // asked again (askPhrasePart), down to single points; a single point that brings nothing is offered for Retry.
+      // Points that failed alone in an earlier run of the deal are asked last. Any other error from the service fails
+      // the run; questions that came back are kept through it (phraseKept), so asking again pays only for the rest.
+      let fast: string;
+      try { fast = (await models()).fast; } catch (e) { return failure(e, UNREACHED); }
+      const run = phraseRunFor(i.dealId, i.items);
+      const size = partSize({
+        cap: CHECKLIST_BATCH, out: control.limits.phraseReplyTokens, outLimit: outLimit(fast),
+        in: tokensEach(i.items.map(phraseLine)), inLimit: inLimit(fast),
+      });
+      for (let list = run.queue.shift(); list; list = run.queue.shift()) {
+        const done = await inParts(list, size, (part) => askPhrasePart(run, fast, part));
+        keepPhrased(run, list, done);
+        if (done.stopped !== undefined && !isCutOff(done.stopped)) return failure(done.stopped, UNREACHED);
       }
-      // points cut off even alone are set aside for the rounds (parts.ts), and asked alone once more at the end: the trouble
-      // may have been a passing one
-      if (!ended && cutAlone.length) {
-        const done = await inParts(cutAlone, 1, ask);
-        for (const [at, text] of done.got) { const k = cutAlone[at]; out[k] = text; had.set(key(i.items[k]), text); failedBefore.delete(key(i.items[k])); }
-        const code = (done.stopped as { code?: string } | undefined)?.code;
-        if (done.stopped !== undefined && !isCutOff(done.stopped) && code !== 'enough' && code !== 'found') {
-          if (code === 'down' || code === 'alone') {
-            if (!answered) return fail({ kind: 'failed', message: why });
-          } else return failure(done.stopped, UNREACHED);
-        }
-      }
-      for (let k = 0; k < n; k++) if (out[k] === undefined) out[k] = null;
-      for (const x of i.items) had.delete(key(x));      // the caller holds these now; another run's are left to it
-      if (n && out.every((t) => t === null)) return fail({ kind: 'failed', message: why || `${SERVICE} left a point without a question, so nothing was added` });      // not one question came back
-      return ok(out as (string | null)[]);
+      for (const x of i.items) run.had.delete(phraseKey(x));      // the caller holds these now; another run's are left
+      // not one question came back
+      if (run.out.length && run.out.every((t) => t === null)) return fail({ kind: 'failed', message: run.why });
+      return ok(run.out as (string | null)[]);
     },
     async sameMeaning(i) {
       // The whole list and the general list go to the model in one call, which says which items ask for the same thing as
@@ -2547,7 +2669,7 @@ export function nodeAi(o: AiOptions) {
    */
   async function verify(dealId: string, f: Raised, model: string, core: string[], also: string[] = [], heard: Asked[] = []): Promise<{ stands: boolean; why: string } | null> {
     const docs = await sendable(dealId, await start(dealId, `${f.title} ${f.body.join(' ')}`, [...also, ...f.sources.map((x) => x.docId).filter((x): x is string => !!x)]   /* what prompted the re-check first: the cap never drops it */, width, core)); if (!docs.length) return null;
-    const sent = tagged(dealId, docs); const { files, listing, got } = await send(sent);
+    const sent = tagged(dealId, docs); const { files, listing, got } = await send(sent, model);
     if (!got.length || lostSome(sent, got)) return null;                        // a folder stopped answering since they were chosen: not judged on the rest
     // a closed finding is asked the other way round: "stands" is whether it stays closed
     const ask = f.closed ? `This finding was raised on the deal earlier, and a person has closed it.\nTitle: ${f.title}\nAs written: ${f.body.join(' ').replace(/\s*\[\d+\]/g, '')}\n\nGoing by the documents as they are now, does it stay closed? It does not if a document now shows the problem again, shows it was not settled, or makes it worse.\nReply as JSON: {"stands": true, "why": "one line"}`

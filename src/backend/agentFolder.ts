@@ -246,7 +246,7 @@ class FolderPass {
     const { kit } = this.run;
     const reading = this.startBatch(index);
     try {
-      const { files, listing, got } = await kit.send(reading.sent);
+      const { files, listing, got } = await kit.send(reading.sent, this.fast);
       if (!got.length) return this.notRead(reading, 'they could not be opened on this PC', 'could not be opened');
       const ask = { kind: 'folder', model: this.fast, system: kit.rules, files, prompt: this.ask(reading, listing) };
       const reply = await kit.askJson(ask, ['text', 'sources'], '{"text": "…", "sources": […]}');
