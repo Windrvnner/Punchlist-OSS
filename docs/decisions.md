@@ -191,7 +191,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Documents open in reading mode beside the conversation, with page keys and zoom.
 - Switching PDFs opens the cited page at the top and keeps the zoom (#447).
 - In the browser demo, a PDF without a preview shows its title, page number, and a preview status (#443).
-- Decided but not built: plain-symbol math, a named finding opening in a side pane, answer actions as icons, and a suggested open question card.
+- Decided but not built: plain-symbol math, a named finding opening in a side pane, and answer actions as icons.
+- A card under an answer suggests the open question the model proposes it addresses; only a person uses it (#1120).
 
 ## Deal memo
 

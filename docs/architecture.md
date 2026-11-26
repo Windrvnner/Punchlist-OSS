@@ -201,7 +201,9 @@ A deal's checklist is made up of its own item records, linked to the findings an
 - **Add All Unresolved to Q&A…** (`AddUnresolved`) reads the rows again before writing and applies one change with one
   **Undo**. The fast model phrases a question for each gap or open finding that has no linked question. It works in
   parts sized by `inParts` and asks again, one at a time, about any points that failed. Points still without a question
-  are counted and offered with **Retry**.
+  are counted and offered with **Retry**. The duplicate check (`sameMeaning`, `kind: 'questions'`) proposes a link
+  from a point to an open question that already asks for it, a part of the open questions at a time when they do not
+  fit one call; points it could not check are named in the footer (#1120).
 
 ## Q&A log, imports, and the memo
 
@@ -223,6 +225,10 @@ A deal's checklist is made up of its own item records, linked to the findings an
 ## Conversations
 
 A conversation belongs to one person and follows them between PCs. `src/backend/conversationLog.ts` keeps finished messages in per-PC `talk-<install>-<n>.jsonl` files in the shared folder, separate from the records, because a conversation never needs a choice between versions.
+
+Once an answer on a deal's or a finding's conversation finishes, `suggestQuestion` asks the standard model which open
+question it addresses, showing the questions as A1, A2 and so on in calls sized to its input limit. The proposal is
+kept for the session (`src/app/suggestedQuestion.ts`), and the card under the answer shows it (#1120).
 
 ## UI rules
 
