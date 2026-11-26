@@ -27,9 +27,10 @@ async function fileOf(ext: string, sheets: [string, (string | number)[][]][]): P
 
 /**
  * An .xlsx written by hand, as another program might write it: `rows` are the cells' XML (inside <row>), and cell style 1 is
- * a date with a time (number format 22), style 2 a date (14). LibreOffice is not used to write it, since it would save a
- * result for every formula. It says Excel wrote it, as files from Excel and openpyxl do: LibreOffice trusts the saved
- * results of such a file rather than working every formula out again.
+ * a date with a time (number format 22), style 2 a date (14), style 3 a number with two decimals (2), style 4 a
+ * percentage (9). LibreOffice is not used to write it, since it would save a result for every formula. It says Excel
+ * wrote it, as files from Excel and openpyxl do: LibreOffice trusts the saved results of such a file rather than
+ * working every formula out again.
  */
 function handMadeXlsx(rows: string[]): string {
   const dir = tmp(); const put = (name: string, xml: string) => { fs.mkdirSync(path.dirname(path.join(dir, 'x', name)), { recursive: true }); fs.writeFileSync(path.join(dir, 'x', name), `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n${xml}`); };
@@ -39,7 +40,13 @@ function handMadeXlsx(rows: string[]): string {
   put('_rels/.rels', `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${rel}/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="${rel}/extended-properties" Target="docProps/app.xml"/></Relationships>`);
   put('xl/workbook.xml', `<workbook xmlns="${main}" xmlns:r="${rel}"><sheets><sheet name="Log" sheetId="1" r:id="rId1"/></sheets></workbook>`);
   put('xl/_rels/workbook.xml.rels', `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="${rel}/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="${rel}/styles" Target="styles.xml"/></Relationships>`);
-  put('xl/styles.xml', `<styleSheet xmlns="${main}"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="22" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs></styleSheet>`);
+  const xf = (id: number) => `<xf numFmtId="${id}" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>`;
+  const font = '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>';
+  put('xl/styles.xml', `<styleSheet xmlns="${main}">${font}`
+    + '<fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders>'
+    + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+    + '<cellXfs count="5"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+    + `${xf(22)}${xf(14)}${xf(2)}${xf(9)}</cellXfs></styleSheet>`);
   put('xl/worksheets/sheet1.xml', `<worksheet xmlns="${main}"><sheetData>${rows.map((r, i) => `<row r="${i + 1}">${r}</row>`).join('')}</sheetData></worksheet>`);
   execFileSync('zip', ['-q', '-r', path.join(dir, 'book.xlsx'), '.'], { cwd: path.join(dir, 'x') });
   return path.join(dir, 'book.xlsx');
@@ -78,6 +85,19 @@ describe.skipIf(!has)('spreadsheets through LibreOffice', () => {
     }
   }, 60_000);
 
+  it('reads a number cell as the file shows it, so a formatted value is not turned into its stored one', async () => {
+    const f = handMadeXlsx([
+      text('A1', 'Question') + text('B1', 'Response'),
+      text('A2', 'Amount') + '<c r="B2" s="3"><v>1234.5</v></c>',
+      text('A3', 'Share') + '<c r="B3" s="4"><v>0.15</v></c>',
+      text('A4', 'Sent') + '<c r="B4" s="2"><v>46340</v></c>',
+    ]);
+    const bytes = new Uint8Array(fs.readFileSync(f));
+    const r = await libreOfficeSheets(lo).read(bytes, 'book.xlsx');
+    if (!r.ok) throw new Error(r.error.message);
+    // a real date cell stays YYYY-MM-DD
+    expect(r.value.rows.map((row) => row[1])).toEqual(['1234.50', '15%', '2026-11-14']);
+  }, 60_000);
   it('reads a date-and-time cell as its date', async () => {
     const f = handMadeXlsx([text('A1', 'Question') + text('B1', 'Received'), text('A2', 'Timed') + '<c r="B2" s="1"><v>46340.5</v></c>']);
     const r = await libreOfficeSheets(lo).read(new Uint8Array(fs.readFileSync(f)), 'book.xlsx'); if (!r.ok) throw new Error(r.error.message);
