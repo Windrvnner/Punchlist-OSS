@@ -7,7 +7,7 @@ import { strings } from './lenient';
 import { folderKey } from './folderList';
 import type { AgentRun } from './agentRun';
 import { cites, dealDocKey, foundAt, sameDoc, withPlaces } from './agentRun';
-import { codeOf, type Cited, type DealDoc, type Run, type Sent } from './agentKit';
+import { codeOf, type AgentKit, type Cited, type DealDoc, type Run, type Sent } from './agentKit';
 import type { ResearchStep } from '../ports';
 import { batchAsk, noun, oneLine, quoted, shorten } from './agentPrompts';
 
@@ -31,7 +31,7 @@ type Place = { read: Set<string>; agreed: boolean };
 /** a folder as listed for this run, by the folder's own name (or names, `; `-separated) */
 type FolderList = { label: string; docs: DealDoc[] };
 /** one batch of a folder read: its documents, and the places in the folder of the first and last it reads */
-type Batch = { first: number; last: number; recs: DealDoc[] };
+export type Batch = { first: number; last: number; recs: DealDoc[] };
 /** what a batch found, for the main session */
 type BatchFinding = { at: string; tags: string; text: string; places: string; got: Sent[] };
 /** one batch being read: its step, and the documents tagged for it, with those tagged before it */
@@ -178,29 +178,9 @@ export class FolderReader {
       + '"all": true.';
   }
 
-  /**
-   * The batches: `width` documents each, a blackline with its clean draft (which may be outside the folder), counted
-   * by their places in the folder.
-   */
+  /** the batches: `width` documents each, a blackline with its clean draft (`batchesOf`) */
   private batches(todo: DealDoc[]): Batch[] {
-    const { kit } = this.run;
-    const batches: Batch[] = [];
-    for (let i = 0; i < todo.length; i++) {
-      const doc = todo[i];
-      const recs = kit.withClean ? kit.withClean(doc.dealId, [doc.rec]) : [doc.rec];
-      const pair = recs.map((rec) => ({ dealId: doc.dealId, rec }));
-      let current = batches.at(-1);
-      const notIn = (batch: Batch) => pair.filter((p) => !batch.recs.some((y) => sameDoc(y, p)));
-      const full = !!current && current.recs.length > 0
-        && current.recs.length + notIn(current).length > this.limits.width;
-      if (!current || full) {
-        current = { first: i + 1, last: i + 1, recs: [] };
-        batches.push(current);
-      }
-      current.recs.push(...notIn(current));
-      current.last = i + 1;
-    }
-    return batches;
+    return batchesOf(todo, this.run.kit.withClean, this.limits.width);
   }
 }
 
@@ -390,4 +370,29 @@ class FolderPass {
 /** a step done, with its result */
 function finish(step: ResearchStep, result: string): void {
   Object.assign(step, { result, done: true });
+}
+
+/**
+ * Documents in their order cut into batches of `width` each, one call each: a blackline goes with its clean draft
+ * (which may be outside the list), and a batch it would overflow ends where it is, so the next one starts with the
+ * pair. Each batch keeps the places in the list of the first and last document it reads. A folder read's batches, and
+ * the pages of the chat's document search (agentSearch.ts).
+ */
+export function batchesOf(todo: DealDoc[], withClean: AgentKit['withClean'], width: number): Batch[] {
+  const batches: Batch[] = [];
+  for (let i = 0; i < todo.length; i++) {
+    const doc = todo[i];
+    const recs = withClean ? withClean(doc.dealId, [doc.rec]) : [doc.rec];
+    const pair = recs.map((rec) => ({ dealId: doc.dealId, rec }));
+    let current = batches.at(-1);
+    const notIn = (batch: Batch) => pair.filter((p) => !batch.recs.some((y) => sameDoc(y, p)));
+    const full = !!current && current.recs.length > 0 && current.recs.length + notIn(current).length > width;
+    if (!current || full) {
+      current = { first: i + 1, last: i + 1, recs: [] };
+      batches.push(current);
+    }
+    current.recs.push(...notIn(current));
+    current.last = i + 1;
+  }
+  return batches;
 }
