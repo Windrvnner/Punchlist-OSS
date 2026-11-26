@@ -183,7 +183,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - One chat reply has a room of `limits.partShare` of the tokens at which its conversation is compacted, less the
   conversation and question its prompt carries; every tool result counts against it. A folder read, and a search of
   findings or Q&A, takes half of what is left: each batch's findings, finding, or question comes back whole while it
-  fits, best first; past half of its share a folder batch gives its places, and the rest are counted (#480).
+  fits, best first; past half of its share a folder batch gives its places, and the rest are counted. A search of
+  everything gives findings half of what the documents left, and Q&A the rest (#480).
 - While chat works, it shows "Researching" with the full trace; once it has answered, it shows "Researched · N steps · N of M documents searched · time", never "read" (option D).
 - Tool calls run inline by default; the hybrid and native modes are set by `models.toolCalls`.
 - A question asked across deals reaches only the person's own deals.
