@@ -3621,16 +3621,15 @@ export function nodeAi(o: AiOptions) {
   const arrivalLines = (part: DocRecord[]) => part.map((r) => `${r.docId}: ${shown(r)}`);
   /**
    * How many targets one affects call takes: as many as fit the input limit beside the arrivals it lists, and as
-   * have a reply that fits the output limit when it names each of them with every arrival listed, as its ids are
-   * written (#1162)
+   * have a reply that fits the output limit when each is named with one arrival, as the ids are written (#1162). A
+   * target named with more is a longer reply: cut off, it is asked again in smaller parts, keeping what came whole.
    */
   function affectsSize(part: DocRecord[], targets: Target[], model: string): number {
     const share = control.limits.partShare / 100;
-    const docIds = part.map((r) => r.docId).join(' ');
     const room = Math.max(1, inLimit(model) - Math.ceil(tokensOf(arrivalLines(part).join('\n')) / share));
     return partSize({
-      cap: targets.length, out: tokensEach(targets.map((t) => `"${t.id} ${docIds}", `)), outLimit: outLimit(model),
-      in: tokensEach(targets.map((t) => t.line)), inLimit: room,
+      cap: targets.length, out: tokensEach(targets.map((t) => `"${t.id} ${part[0].docId}", `)),
+      outLimit: outLimit(model), in: tokensEach(targets.map((t) => t.line)), inLimit: room,
     });
   }
   /** the values an affects reply gives under "affected" */

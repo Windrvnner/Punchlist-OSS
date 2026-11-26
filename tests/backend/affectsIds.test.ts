@@ -116,11 +116,10 @@ describe('the affects prompt at deal scale (#1162)', () => {
     for (const targets of seen.values()) expect(targets.sort()).toEqual([...findings, ...items].sort());
   }, 120_000);
 
-  it('sizes a part by the reply it may bring: each target, with every arrival named beside it', async () => {
-    const OUT = 3000;
-    const arrived = arrivals(40);
-    const { s } = await dealScale({ out: OUT, arrived, findings: 30, items: 1 });
-    const reply = tokensOf(`${findingId(0)} ${arrived.map((r) => r.docId).join(' ')}`);
+  it('sizes a part by the reply it may bring: each target named with an arrival, by the ids as written', async () => {
+    const OUT = 600;
+    const { s } = await dealScale({ out: OUT, findings: 30, items: 1 });
+    const reply = tokensOf(`${findingId(0)} ${NOTICE.docId}`);
     const room = Math.floor((OUT * 0.6) / reply);
     expect(room).toBeLessThan(30);
     expect(s.affectCalls.length).toBeGreaterThan(1);
