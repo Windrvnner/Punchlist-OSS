@@ -18,8 +18,8 @@ import { showTip, hideTip } from './tip';
  * single line), and a name that is blank shows as "Unnamed file". The stored name is untouched.
  */
 export function displayName(name: string): string {
-  const shown = name.replace(/[\u0000-\u001F\u007F-\u009F\u2028\u2029]+/g, ' ').trim();
-  return shown || 'Unnamed file';
+  const shown = name.replace(/[\u0000-\u001F\u007F-\u009F\u2028\u2029]+/g, ' ');
+  return shown.trim() ? shown : 'Unnamed file';
 }
 /** A document's name as a title, without the file type at its end ("Technical advisor report"). */
 export const docTitle = (name: string): string => displayName(name).replace(/\.(pdf|docx?|xlsx?|pptx?)$/i, '');

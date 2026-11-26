@@ -101,7 +101,8 @@ describe.skipIf(!has)('what used to be refused', () => {
     const f = book({ rows: [`<row r="2">${n('A2', 1)}${t('B2', 'DSCR?')}</row>`] });
     const bytes = editXlsx(fs.readFileSync(f), 'Log', [{ kind: 'cell', row: 1, col: 2, value: 'pasted from a PDF\u0002\u000bpage 3' }]);
     const out = path.join(tmp(), 'out.xlsx'); fs.writeFileSync(out, bytes);
-    expect((await lo.sheets!(out))[0].grid[1][2]).toBe('pasted from a PDFpage 3');
+    // as typed: written as _x0002_ and _x000B_ (#1149)
+    expect((await lo.sheets!(out))[0].grid[1][2]).toBe('pasted from a PDF\u0002\u000bpage 3');
     expect(partText(readZip(bytes), 'xl/worksheets/sheet1.xml')).not.toMatch(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/);   // XML 1.0 has no place for them
   }, 60_000);
 
