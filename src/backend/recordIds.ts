@@ -63,11 +63,18 @@ export function citesUnsent(reply: unknown, sent: readonly ShownDoc[], spansDeal
     typeof doc !== 'string' || (!ids.includes(doc) && !byName(doc, sent, where)));
 }
 
+/** whether every document id in a model's text is one of these it was sent */
+const namesOnlySentDocs = (text: string, docIds: readonly string[]): boolean =>
+  recordIdsIn(text).filter((id) => id.startsWith('doc_')).every((id) => docIds.includes(id));
+
 /**
- * A reply its caller cannot use however it reads (retry.ts): its words name an id it was not shown (`shown`, or a
- * document sent), or a citation names a document it was not given (#1162). `keys`: the fields the reply is read for.
+ * A reply its caller cannot use however it reads (retry.ts): its words name a document id it was not sent, or, with
+ * `shown`, any other id but those; or a citation names a document it was not given (#1162). `keys`: the fields the
+ * reply is read for.
  */
 export const docsUnusable = (sent: readonly ShownDoc[], spansDeals: boolean, keys: string[],
-  where: (rec: DocRecord) => string, shown: readonly string[] = []) => (text: string): boolean =>
-  !namesOnlyShown(text, [...shown, ...sent.map((x) => x.rec.docId)])
-  || citesUnsent(readJson(text, keys), sent, spansDeals, where);
+  where: (rec: DocRecord) => string, shown?: readonly string[]) => (text: string): boolean => {
+  const docIds = sent.map((x) => x.rec.docId);
+  const named = shown ? namesOnlyShown(text, [...shown, ...docIds]) : namesOnlySentDocs(text, docIds);
+  return !named || citesUnsent(readJson(text, keys), sent, spansDeals, where);
+};

@@ -6,7 +6,7 @@
  *     (folder paths and file names included), which a search helper on the fast model reads on the model service,
  *     returning passages with document and page. Findings and Q&A are records the app holds, `searchPage` a page,
  *     each whole, with no model call (agentSearch.ts).
- *   - read: documents named by tag or path, at most eight in one call, attached to the main session's next turn.
+ *   - read: documents named by id or path, at most eight in one call, attached to the main session's next turn.
  *   - folder: a folder named as the person says it, and what to look for. The documents in it are put in the
  *     order to read them (ai.ts: a keyword and core-document ranking, then the fast model's order of its top), and the
  *     fast model reads them a batch at a time (`width` documents, the per-call cap), a few batches at once, most
@@ -38,9 +38,9 @@
  * Where the model service keeps conversations (`talk`), a chat is one conversation there (decisions: Long
  * conversations): the first turn of a new conversation is asked in full, and each later turn sends only what is
  * new (the results of the last tool, documents opened or attached since, the turn count), so what was said before is
- * not sent again. The conversation goes back with the answer (`thread`), with the documents' tags, so the next
- * question carries it on and numbers on from them. When it holds `compactAt` tokens (125k, or less for a model that
- * takes less), or the service no longer has it or refuses it as too long, or the person changed model, it is
+ * not sent again. The conversation goes back with the answer (`thread`), with the documents it opened, so the next
+ * question carries it on and may cite them by their ids. When it holds `compactAt` tokens (125k, or less for a model
+ * that takes less), or the service no longer has it or refuses it as too long, or the person changed model, it is
  * compacted: the whole conversation so far is put in the service's store as a transcript file, a new conversation
  * starts with that file attached and the turn asked in full, and the transcript of the last compaction is deleted.
  * Without `talk`, every turn is asked afresh with the conversation's last messages as text (agentTalk.ts).
@@ -60,7 +60,7 @@ import { ok, fail, type Result } from '../domain/result';
 import type { ModelThread, Research } from '../ports';
 import type { Source } from '../domain/model';
 import type { DocRecord } from './documents';
-import { strings, list as listOf, int } from './lenient';
+import { strings, list as listOf } from './lenient';
 import { TOO_LONG_ASK, TOO_LONG_REPLY, UNREAD_REPLY } from './limits';
 import { control, SERVICE } from '../control';
 import { codeOf, type AgentKit, type AgentOptions, type AgentQuestion } from './agentKit';
@@ -71,6 +71,7 @@ import { FolderMemory, FolderReader } from './agentFolder';
 import { KeptConversation, type Turn } from './agentTalk';
 import { inlineTools } from './agentPrompts';
 import { questionIdsIn, questionsForIds } from './qaRow';
+import { docsUnusable } from './recordIds';
 
 export type { AgentKit, AgentOptions, AgentQuestion, Cited, Sent, ToolMode } from './agentKit';
 
@@ -98,6 +99,8 @@ const pageChars = (limits: Limits, model: string) => (limits.compactAt(model) * 
 
 const SEARCHES: readonly What[] = ['documents', 'findings', 'qa', 'all'];
 const REPLY_SHAPE = '{"tool": …} or {"text": "…", "sources": […], "offer": {…}}';
+/** the fields a turn's reply is read for */
+const REPLY_KEYS = ['tool', 'text'];
 
 export function chatAgent(kit: AgentKit, opts: AgentOptions = {}) {
   const limits: Limits = {
@@ -191,7 +194,7 @@ class Answering {
     const must = question.deals.flatMap((dealId) => (question.must[dealId] ?? [])
       .map((docId) => kit.records(dealId).find((r) => r.docId === docId))
       .filter((r): r is DocRecord => !!r)
-      .map((rec) => run.tagOf(dealId, rec).tag));
+      .map((rec) => run.idOf(run.open(dealId, rec))));
     if (must.length) run.done.push(run.read(must, this.limits.width));
     if (!this.stopped) run.done.push(await search(run, 'all', question.message));
   }
@@ -204,7 +207,7 @@ class Answering {
     if (this.stopped && !run.steps.some((x) => x.text === 'Stopped')) {
       run.steps.push({ kind: 'stop', text: 'Stopped', result: 'answered from what was found', done: true });
     }
-    const { files, listing, got } = await kit.send(run.whole);
+    const { files, listing, got } = await kit.send(run.whole, run.spansDeals);
     // a document that cannot be opened on this PC was not read
     if (got.length < run.whole.length) run.whole = got;
     const turn = this.turnOf(turnNumber, last, files, listing);
@@ -231,7 +234,7 @@ class Answering {
     const { kit, question } = this;
     const docLine = (s: Sent) => {
       const pages = s.rec.pages ? ` (${s.rec.pages} pages)` : '';
-      return `${s.tag}: ${kit.where(s.rec)}${pages}${question.withDeal ? ` [deal ${s.dealId}]` : ''}`;
+      return `${this.run.idOf(s)}: ${kit.where(s.rec)}${pages}${question.withDeal ? ` [deal ${s.dealId}]` : ''}`;
     };
     const ending = this.stopped
       ? ' The person stopped the research: answer now from what you have, with no tool, and say what was not looked at.'
@@ -244,9 +247,9 @@ class Answering {
       turnLine,
       docLine,
       system: `${inlineTools(this.limits.width)}\n\n${kit.rules}`,
-      keys: ['tool', 'text'],
+      keys: REPLY_KEYS,
       shape: REPLY_SHAPE,
-      unusable: (text) => this.namesUnknownQuestion(text),
+      unusable: async (text) => (await this.namesUnknownQuestion(text)) || this.namesUnopenedDoc(text),
     };
   }
 
@@ -259,6 +262,15 @@ class Answering {
     if (!named.length) return false;
     const numbers = await this.run.questionNumbers([text]);
     return named.some((id) => !numbers.has(id));
+  }
+
+  /**
+   * Whether a reply names in its words a document id the conversation has not opened, or cites a document it has not
+   * opened: a failed reply, asked again (#1162)
+   */
+  private namesUnopenedDoc(text: string): boolean {
+    const { kit, run } = this;
+    return docsUnusable(run.opened, run.spansDeals, REPLY_KEYS, kit.where)(text);
   }
 
   /** the turn's whole prompt; `history`: with the conversation's last messages and its transcript */
@@ -275,7 +287,7 @@ class Answering {
           + 'something said earlier.\n\n'
         : '',
       `Question: ${question.message}\n\n`,
-      shown.length ? `Documents opened so far (cite them by tag):\n${shown.map(docLine).join('\n')}\n\n` : '',
+      shown.length ? `Documents opened so far (cite them by id):\n${shown.map(docLine).join('\n')}\n\n` : '',
       run.whole.length ? `Given to you whole with this message:\n${listing}\n\n` : '',
       `What you have done so far:\n${doneSoFar}`,
       run.notes ? `\n\nYour notes so far: ${run.notes}` : '',
@@ -294,7 +306,7 @@ class Answering {
       return search(this.run, what, query, pageNumber(reply.page));
     }
     if (tool === 'read') {
-      const named = listOf(reply.docs).map((x) => (int(x) !== null ? `D${x}` : String(x)));
+      const named = listOf(reply.docs).map(String);
       return this.run.read(named, this.limits.width);
     }
     if (tool === 'folder') {

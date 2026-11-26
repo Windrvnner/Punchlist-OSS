@@ -85,6 +85,11 @@ describe('docsUnusable (#1162)', () => {
   it('takes a reply that cites and names only what it was shown', () => {
     expect(check(JSON.stringify({ text: `Per ${question} and ${doc}.`, sources: [{ doc, page: 1 }] }))).toBe(false);
   });
+  it('without `shown`, looks in its words only for document ids', () => {
+    const docsOnly = docsUnusable([fa], false, ['text'], (r) => r.rel);
+    expect(docsOnly(JSON.stringify({ text: `Per ${finding}.`, sources: [] }))).toBe(false);
+    expect(docsOnly(JSON.stringify({ text: `Per doc_${HEX.replace(/a/g, 'b')}.`, sources: [] }))).toBe(true);
+  });
   it('refuses one naming an id it was not shown in its words, or citing a document it was not given', () => {
     expect(check(JSON.stringify({ text: `Per ${finding}.`, sources: [] }))).toBe(true);
     expect(check(JSON.stringify({ text: 'So. [1]', sources: [{ doc: 'D1', page: 1 }] }))).toBe(true);
