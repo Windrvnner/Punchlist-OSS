@@ -9,7 +9,7 @@ import type { AiService } from '../ports';
 import { unplaced, textLines, tableLines, tieOut, type LineRead, type TiedOut } from '../domain/listRead';
 import { prepareChecklist, suggestChecklistColumns, type ChecklistMapping } from '../domain/checklistImport';
 import { keepImport } from './keptImports';
-import { readImportBytes, MAX_IMPORT_BYTES, type ImportTable } from './transfer';
+import { readImportBytes, type ImportTable } from './transfer';
 import type { Store } from './store';
 import { ok, fail, type Result } from '../domain/result';
 
@@ -47,9 +47,8 @@ export const pastedLines = (text: string): string[] => textLines(text).map((l) =
  * A chosen file as a source for the model: a spreadsheet as its table (`table`, every row from the top of the sheet, so
  * that nothing above a heading row is passed over), anything else as its text. Nothing is changed.
  */
-export async function readListFile(store: Store, file: { name: string; size: number; arrayBuffer(): Promise<ArrayBuffer> }): Promise<Result<{ table: ImportTable } | { lines: string[] }>> {
+export async function readListFile(store: Store, file: { name: string; arrayBuffer(): Promise<ArrayBuffer> }): Promise<Result<{ table: ImportTable } | { lines: string[] }>> {
   if (!LIST_FILES.test(file.name)) return fail({ kind: 'invalid', message: 'Choose a spreadsheet, a Word file, a PDF or a text file' });
-  if (file.size > MAX_IMPORT_BYTES) return fail({ kind: 'invalid', message: 'That file is larger than 20 MB' });
   let bytes: Uint8Array;
   try { bytes = new Uint8Array(await file.arrayBuffer()); } catch { return fail({ kind: 'failed', message: 'The file could not be opened' }); }
   if (SHEET.test(file.name)) { const t = await readImportBytes(store, file.name, bytes, { headerRow: 1 }); return t.ok ? ok({ table: t.value }) : t; }

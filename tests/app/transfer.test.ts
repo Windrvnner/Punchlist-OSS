@@ -13,6 +13,7 @@ import { ImportQuestions, RevertImport } from '../../src/app/commands/importQues
 import { registry } from '../../src/app/commands/undo';
 import { dealQuestions, dealFindings } from '../../src/app/state';
 import { exportQuestions, exportFindings, readImportFile, previewImport } from '../../src/app/transfer';
+import { readListFile } from '../../src/app/listRead';
 import { search, loadAllForSearch } from '../../src/app/search';
 import { prepareImport, suggestMapping, TEXT_MAX } from '../../src/domain/importExport';
 
@@ -154,12 +155,42 @@ describe('export and import through the ports', () => {
     expect(t.ok && [t.value.rows[0][0], t.value.rows[0][2], t.value.rows[0][3]]).toEqual(['Curtailment risk', 'Technical', 'Open']);
   });
 
-  it('refuses files it cannot read, by type, size and content', async () => {
+  it('refuses files it cannot read, by type and content', async () => {
     const { store } = make(); await store.boot();
     expect((await readImportFile(store, fileOf('notes.docx', new Uint8Array([80, 75, 3, 4])))).ok).toBe(false);
-    expect((await readImportFile(store, { name: 'big.csv', size: 21 * 1024 * 1024, arrayBuffer: async () => new ArrayBuffer(0) })).ok).toBe(false);
     expect((await readImportFile(store, fileOf('bad.xlsx', new Uint8Array([1, 2, 3, 4])))).ok).toBe(false);
     expect((await readImportFile(store, fileOf('headers-only.csv', new TextEncoder().encode('Number,Question\n')))).ok).toBe(false);
+  });
+});
+
+describe('files of any size are read (#1060)', () => {
+  /** a Q&A log of 2,500 questions, each with a long response, about 21 MB */
+  const bigLog = () => {
+    const response = 'The lender confirms the covenant package as described. '.repeat(160);
+    const rows = Array.from({ length: 2500 }, (_, i) => `${i + 1},"Question ${i + 1} on the deal","${response}"`);
+    return new TextEncoder().encode(['No.,Question,Response', ...rows].join('\n'));
+  };
+
+  it('reads a Q&A log over 20 MB', async () => {
+    const { store } = make(); const bytes = bigLog();
+    expect(bytes.length).toBeGreaterThan(20 * 1024 * 1024);
+    const back = await readImportFile(store, fileOf('log.csv', bytes)); if (!back.ok) throw new Error(back.error.message);
+    expect(back.value.rows.length).toBe(2500);
+  });
+
+  it('reads a checklist file over 20 MB', async () => {
+    const { store } = make(); const bytes = bigLog();
+    const back = await readListFile(store, fileOf('list.csv', bytes)); if (!back.ok) throw new Error(back.error.message);
+    expect('table' in back.value && back.value.table.rows.length).toBe(2500);
+  });
+
+  it('a file that cannot be opened says so', async () => {
+    const { store } = make();
+    const broken = { name: 'log.csv', arrayBuffer: async (): Promise<ArrayBuffer> => { throw new Error('gone'); } };
+    for (const read of [readImportFile, readListFile]) {
+      const back = await read(store, broken);
+      expect(back.ok ? '' : back.error.message).toBe('The file could not be opened');
+    }
   });
 });
 
