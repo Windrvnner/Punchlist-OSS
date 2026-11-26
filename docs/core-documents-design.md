@@ -89,11 +89,11 @@ Reading 100 documents up front is acceptable, but nothing may stop further searc
 
 In this part, items that a check leaves not settled or as gaps are handed, a few at a time, to the chat agent's own
 tool-calling loop (`chatAgent`, src/backend/agent.ts), with its search and read tools unchanged: it searches and reads
-as often as it needs. Its existing ceilings are the safety stop: about `limits.chatTurns` turns (25) per run and
-`limits.searchCalls` (15) calls per search run, both inputs in the control file. An item that the agent still cannot
-settle stays a gap if nothing was found, and becomes "not settled" if the run stopped at a ceiling, saying so on
-hover. Questions in the chat already run on this loop. The extra calls per gap item are to be measured on the
-2,400-item checklist before the defaults are set.
+as often as it needs. Its only stops are the per-run rounds caps: about `limits.chatTurns` turns (25) per run and
+`limits.searchCalls` (15) calls per search run, both inputs in the control file; there is no per-deal cap, so
+the cost per deal is not otherwise bounded. An item that the agent still cannot settle stays a gap if nothing was
+found, and becomes "not settled" if the run stopped at a ceiling, saying so on hover. Questions in the chat already
+run on this loop. The extra calls per gap item are to be measured on the 2,400-item checklist before the defaults are set.
 
 ## Cost on a 1,779-file data room and a 2,400-item checklist
 
