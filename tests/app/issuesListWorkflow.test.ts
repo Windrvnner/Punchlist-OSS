@@ -177,7 +177,7 @@ it('hands a pasted list over untouched: tabs, CRLF and edge spaces stay as typed
   expect(attach.mock.calls[0][1].bytes).toEqual(new TextEncoder().encode(text));
 });
 
-it('reads no pasted list the model has not been given: a refused attach fails the read before the model call', async () => {
+it('fails a pasted list read before the model call when the attach is refused', async () => {
   const { store, dealId } = await seedDeal();
   store.services.docs.attach = async () => fail(rejected('Disk full'));
   const issuesList = vi.fn(proposedIssues);

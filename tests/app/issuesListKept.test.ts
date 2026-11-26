@@ -7,7 +7,8 @@ import {
   importKey, initializeKeptImports, keepImport, keptImport, keptImportsReady,
 } from '../../src/app/keptImports';
 import {
-  keepIssuesPaste, keptIssuesList, keptIssuesPaste, pointsByList, reviewIssuesList, submitIssuesList, type ReadIssuesList,
+  keepIssuesPaste, keptIssuesList, keptIssuesPaste, pointsByList, reviewIssuesList, submitIssuesList,
+  type ReadIssuesList,
 } from '../../src/app/issuesList';
 import { dealFindings } from '../../src/app/state';
 import type { ListPoint } from '../../src/domain/model';
