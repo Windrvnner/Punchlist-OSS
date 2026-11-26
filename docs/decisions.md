@@ -111,6 +111,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Updates add no columns and never write to a formula cell. To reply to one party, use Export filtered by Submitted By.
 - **Update Q&A Log** brings every column up to date and first saves the old version to the folder's archive; it never deletes anything else. A log open elsewhere is retried every 30 seconds for 20 minutes; the notice names who has it open only when the lock file does.
 - An edit made in the log wins over the app's value, exactly as written: a cell is compared character for character, so a "?" stays a "?". Only the file's own storage (line breaks kept as one "\n", control characters stored as a space or left out) is allowed for. Matching a row to a question only picks the row and never changes text. Where both changed, the question is in two versions.
+- A Q&A log cell is written exactly as given, in every format; a CSV cell that starts with =, +, - or @ gets no added character (#1107).
 - An edit saved to the log just before an update moved the log is merged in. Where its row is unclear, the person places it, and what can't be merged stays in the archive. "Not fully merged" comes first in the notice, which stays until dismissed.
 
 ## Findings
