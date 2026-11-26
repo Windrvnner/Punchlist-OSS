@@ -33,13 +33,29 @@ describe('covers: does an open question already ask for what a point lacks', () 
     expect(prompt).toContain('Has the insurance advisor issued its final report yet?');
     expect(prompt).not.toMatch(/\bQ\d/);
   });
-  it('takes no answer for a tag it did not offer, or one named twice, or one that is not true or false', async () => {
+  it('takes no answer for a tag it did not offer, or one that is not true or false', async () => {
     const { ask } = run((c) => {
-      const [a, b] = tagsIn(c);
-      const items = [{ id: 'zzz', covers: true }, { id: a, covers: true }, { id: a, covers: false }];
-      return { items: [...items, { id: b, covers: 'yes' }] };
+      const [a, b, d] = tagsIn(c);
+      const items = [{ id: 'zzz', covers: true }, { id: 'Q3', covers: true }, { id: a, covers: 'yes' }];
+      return { items: [...items, { id: b, covers: false }, { id: d, covers: true }] };
     });
-    expect(val(await ask())).toEqual([null, null, null]);
+    expect(val(await ask())).toEqual([null, false, true]);
+  });
+  it('takes no answer for a tag named twice, whatever the two say, and keeps the others', async () => {
+    const { ask } = run((c) => {
+      const [a, b, d] = tagsIn(c);
+      const twice = [{ id: a, covers: true }, { id: a, covers: true }];
+      return { items: [...twice, { id: b, covers: false }, { id: d, covers: true }] };
+    });
+    expect(val(await ask())).toEqual([null, false, true]);
+  });
+  it('sends the texts as written, a quarter such as Q3 2027 included, and no number to name a pair by', async () => {
+    const { s, ask } = run((c) => ({ items: tagsIn(c).map((id) => ({ id, covers: true })) }));
+    val(await ask([{ point: 'Q3 2027 DSCR certificate', question: 'Has the Q3 2027 DSCR certificate been sent?' }]));
+    const prompt = s.calls.find(isCovers)!.prompt;
+    expect(prompt).toContain('Point: Q3 2027 DSCR certificate');
+    expect(prompt).toContain('Question: Has the Q3 2027 DSCR certificate been sent?');
+    expect(prompt.replace(/Q3 2027/g, '')).not.toMatch(/\d/);
   });
   it('makes no call when there is nothing to check', async () => {
     const { s, ask } = run(() => ({ items: [] }));

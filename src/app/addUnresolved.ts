@@ -88,12 +88,12 @@ export async function prepareUnresolved(
   const { points, links: kept, candidates } = unresolvedPoints(state, dealId, approved);
   progress?.count(points.length);
   if (!points.length) return ok({ points: [], links: [], out: [] });
-  const [result, confirmed] = await Promise.all([
-    phrasePoints(store, dealId, points),
-    confirmedLinks(store.services.ai, dealId, candidates),
-  ]);
+  const result = await phrasePoints(store, dealId, points);
   if (progress?.signal.aborted) return;
   if (!result.ok) return result;
+  // Asked only once the points are phrased: a failed phrasing makes no model call for links.
+  const confirmed = await confirmedLinks(store.services.ai, dealId, candidates);
+  if (progress?.signal.aborted) return;
   const byKey = new Map(points.map((p) => [p.key, p]));
   const order = new Map(points.map((p, index) => [p.key, index]));
   const links = [...kept, ...confirmed].sort((a, b) => order.get(a.point)! - order.get(b.point)!);

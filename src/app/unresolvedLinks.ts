@@ -1,6 +1,6 @@
 import type { Question } from '../domain/model';
 import { control } from '../control';
-import { askedMatcher } from '../domain/suggest';
+import { askedMatcher, reaches } from '../domain/askedMatch';
 import type { AiService } from '../ports';
 import type { Unresolved } from './state';
 
@@ -30,8 +30,11 @@ export function canLinkUnresolved(q: Question, conflicted: boolean): boolean {
 /** An open question that names enough of a point's words for the model to be asked whether it covers the point. */
 export type AskedCandidate = { point: Unresolved; q: Question; confidence: number };
 
-/** What a point says to the model: its wording, and what it needs when it says so. */
-export const pointText = (point: Unresolved) => (point.need ? `${point.what} — needed: ${point.need}` : point.what);
+/**
+ * What a point says, to the keyword match and to the model alike: its wording and what it needs (a finding needs
+ * nothing, so its title alone). The confidence is worked out the same way for a gap and a finding.
+ */
+export const pointText = (point: Unresolved) => `${point.what} ${point.need}`.trim();
 
 /** The exact links a person approved that still hold, by point key: each question is kept for one point only. */
 function keepApproved(points: Unresolved[], pool: Question[], approved?: ApprovedLinks) {
@@ -54,8 +57,8 @@ function strongestPerQuestion(points: Unresolved[], pool: Question[], cutoff: nu
   const match = askedMatcher(pool);
   const best = new Map<string, AskedCandidate>();
   for (const point of points) {
-    const found = match(`${point.what} ${point.need}`);
-    if (!found || found.confidence < cutoff) continue;
+    const found = match(pointText(point));
+    if (!found || !reaches(found, cutoff)) continue;
     const rival = best.get(found.q.id);
     if (!rival || found.confidence > rival.confidence) {
       best.set(found.q.id, { point, q: found.q, confidence: found.confidence });
@@ -86,15 +89,15 @@ export function askedCandidates(
 }
 
 /**
- * The candidates the model says already cover their point. A model that is missing, fails, or gives no answer for a
- * pair makes no offer for it: the point is then asked as a new question. Nothing is linked here; a person ticks
- * each one.
+ * The candidates the model says already cover their point. A model that is missing, fails, rejects the call, or
+ * gives no answer for a pair makes no offer for it: the point is then asked as a new question. Nothing is linked
+ * here; a person ticks each one.
  */
 export async function confirmedLinks(ai: AiService, dealId: string, candidates: AskedCandidate[]) {
   if (!candidates.length || !ai.covers) return [];
   const checks = candidates.map(({ point, q }) => ({ point: pointText(point), question: q.text }));
-  const verdicts = await ai.covers({ dealId, checks });
-  if (!verdicts.ok) return [];
+  const verdicts = await ai.covers({ dealId, checks }).catch(() => undefined);
+  if (!verdicts?.ok) return [];
   const confirmed = candidates.filter((_, index) => verdicts.value[index] === true);
   return confirmed.map(({ point, q }) => ({ point: point.key, q }));
 }

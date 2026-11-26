@@ -28,6 +28,8 @@ async function fixture(partial: boolean) {
   })));
   store.services.ai.phrase = async ({ items }) => ok(items.map(({ what }) =>
     partial && what !== alphaTitle ? null : `Please document this requirement: ${what}.`));
+  // these tests are about approved links, not the check: the model confirms every candidate
+  store.services.ai.covers = async ({ checks }) => ok(checks.map(() => true));
   val(await store.dispatch(CreateFinding, { dealId, title: betaTitle, workstream: 'Legal' }));
   val(await store.dispatch(CreateFinding, { dealId, title: alphaTitle, workstream: 'Legal' }));
   val(await store.dispatch(CreateQuestion, { dealId, text: base }));

@@ -3,6 +3,7 @@
 // code scores the best question at or above `limits.askedCutoff`; the person still ticks every offer.
 import { expect, it, vi } from 'vitest';
 import { prepareUnresolved } from '../../src/app/addUnresolved';
+import { CreateFinding } from '../../src/app/commands/findings';
 import { CreateQuestion } from '../../src/app/commands/questions';
 import { askedCandidates, linkApproval } from '../../src/app/unresolvedLinks';
 import { itemId } from '../../src/domain/checklist';
@@ -52,17 +53,67 @@ it('makes no model call when no question clears the cutoff', async () => {
   expect(covers).not.toHaveBeenCalled();
 });
 
-it('offers nothing for a pair the model says no to, fails on, or does not answer', async () => {
-  for (const covers of [
-    async ({ checks }) => ok(checks.map(() => false)),
-    async ({ checks }) => ok(checks.map(() => null)),
-    async () => fail({ kind: 'failed', message: 'down' }),
-    undefined,
-  ] as (Covers | undefined)[]) {
-    const { links, preview } = await linksOf(await fixture(covers, [ASKS_INSURANCE]));
+const unanswered: [string, Covers][] = [
+  ['says no', async ({ checks }) => ok(checks.map(() => false))],
+  ['gives no answer', async ({ checks }) => ok(checks.map(() => null))],
+  ['fails', async () => fail({ kind: 'failed', message: 'down' })],
+  ['rejects the call', async () => { throw new Error('the bridge dropped'); }],
+];
+for (const [what, covers] of unanswered) {
+  it(`offers nothing, and still drafts both points, when the model ${what}`, async () => {
+    const asked = vi.fn(covers);
+    const { links, preview } = await linksOf(await fixture(asked, [ASKS_INSURANCE]));
+    expect(asked).toHaveBeenCalledTimes(1);
     expect(links).toEqual([]);
     expect(preview.points).toHaveLength(2);
-  }
+  });
+}
+
+it('offers nothing, and makes no call, when the service cannot check', async () => {
+  const { links, preview } = await linksOf(await fixture(undefined, [ASKS_INSURANCE]));
+  expect(links).toEqual([]);
+  expect(preview.points).toHaveLength(2);
+});
+
+it('makes no check when phrasing the questions fails, and none after the dialog is closed', async () => {
+  const covers = vi.fn(yes);
+  const env = await fixture(covers, [ASKS_INSURANCE]);
+  env.store.services.ai.phrase = async () => fail({ kind: 'failed', message: 'down' });
+  expect((await prepareUnresolved(env.store, env.dealId))?.ok).toBe(false);
+  expect(covers).not.toHaveBeenCalled();
+  env.store.services.ai.phrase = async ({ items }) => ok(items.map(() => 'Please provide it.'));
+  const wait = new AbortController();
+  const closing = prepareUnresolved(env.store, env.dealId, { count: () => wait.abort(), signal: wait.signal });
+  expect(await closing).toBeUndefined();
+});
+
+it('returns nothing when the dialog is closed while the links are being checked', async () => {
+  const wait = new AbortController();
+  const closing: Covers = async ({ checks }) => {
+    wait.abort();
+    return ok(checks.map(() => true));
+  };
+  const env = await fixture(closing, [ASKS_INSURANCE]);
+  expect(await prepareUnresolved(env.store, env.dealId, { count: () => {}, signal: wait.signal })).toBeUndefined();
+});
+
+it('works out the confidence the same way for a finding and a gap', async () => {
+  const env = await fixture(vi.fn(yes), [ASKS_INSURANCE], []);
+  val(await env.store.dispatch(CreateFinding, { dealId: env.dealId, title: INSURANCE, workstream: 'Legal' }));
+  const { preview } = await linksOf(env);
+  expect(preview.links.map(({ point }) => [point.kind, point.what])).toEqual([['finding', INSURANCE]]);
+  const asGap = point(INSURANCE);
+  const asFinding = { ...asGap, kind: 'finding' as const };
+  const pool = [question(1, ASKS_INSURANCE)];
+  const confidence = (p: Unresolved) => askedCandidates([p], pool, undefined, 0).candidates[0].confidence;
+  expect(confidence({ ...asGap, need: 'The final report from the insurance advisor' })).toBe(100);
+  expect(confidence(asFinding)).toBe(100);
+});
+
+it('checks a short point whose every word a long question names: no minimum word count is set', () => {
+  const long = question(1, 'Please describe the insurance programme: the advisor’s report, the broker and more.');
+  const got = askedCandidates([point('Insurance advisor')], [long], undefined, 80).candidates;
+  expect(got.map((c) => c.confidence)).toEqual([100]);
 });
 
 const point = (what: string): Unresolved => ({ key: 'i:' + what, kind: 'gap', what, need: '', workstream: '' });
