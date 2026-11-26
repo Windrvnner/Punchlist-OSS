@@ -79,7 +79,7 @@ export const typingIn = new Set<string>();
 /** `held`: a question whose response box holds text that is not saved, which a draft would hide: it is left alone too */
 export async function draftAll(store: Store, dealId: string, held: (q: Question) => boolean = () => false) {
   const todo = dealQuestions(store.get(), dealId).filter((q) => eligibleForDraft(q) && !held(q));
-  if (!todo.length) { store.toast('Nothing left to draft'); return; }
+  if (!todo.length) { store.toast('Nothing left to draft', 'done'); return; }
   stops.set(dealId, false);
   store.ui({ batch: { dealId, total: todo.length, done: 0, stopping: false } });
   const queue = todo.slice(); const asked = new Set<string>(); let refused = 0, skipped = 0;
@@ -117,7 +117,7 @@ export async function draftAll(store: Store, dealId: string, held: (q: Question)
   const found = n('found'), none = n('none'), failed = n('failed') + refused, pending = n('pending');
   const counts = [`${found} drafted`, none && `${none} without an answer`, failed && `${failed} failed`,
     pending && `${pending} still drafting`, skipped && `${skipped} skipped`].filter(Boolean).join(' · ');
-  store.toast(counts + (found ? '; review and accept' : ''), undefined, { glyph: failed ? 'warn' : 'done' });
+  store.toast(counts + (found ? '; review and accept' : ''), failed ? 'warn' : 'done');
 }
 
 export function stopDraftAll(store: Store, dealId: string) {

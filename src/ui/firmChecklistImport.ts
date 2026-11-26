@@ -361,9 +361,9 @@ function useBringIn(
     const said = broughtInSays(target.layer, target.name, result.value);
     const ids = result.value.opIds;
     const undo = () => void undoBringIn(store, ids).then((undone) => {
-      store.toast(undone.ok ? 'Undone' : undone.error.message);
+      store.toast(undone.ok ? 'Undone' : undone.error.message, undone.ok ? 'done' : 'warn');
     });
-    store.toast(said, { label: 'Undo All', run: undo });
+    store.toast(said, 'done', { label: 'Undo All', run: undo });
   };
   return { counts: selection.counts, run };
 }

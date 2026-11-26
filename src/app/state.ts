@@ -68,7 +68,8 @@ export interface Toast {
   more?: string;
   /** The part of the message that gives way when it does not fit. */
   cut?: string;
-  glyph?: 'done' | 'warn';
+  /** What the notice reports: completed work, or a failure or refusal. Set by the caller, never read from the words. */
+  glyph: 'done' | 'warn';
 }
 
 /** What kind of deal a new deal is, picked on the New deal form: its structure, sector and technology. */

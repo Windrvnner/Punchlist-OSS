@@ -371,7 +371,7 @@ describe('toasts', () => {
     const m = make(); await m.store.boot();
     vi.useFakeTimers();
     try {
-      m.store.toast('First', { label: 'Undo', run() {} }); m.store.toast('Second', { label: 'Undo', run() {} });
+      m.store.toast('First', 'done', { label: 'Undo', run() {} }); m.store.toast('Second', 'done', { label: 'Undo', run() {} });
       expect(m.store.get().ui.toasts.map((x) => x.text)).toEqual(['First', 'Second']);
       vi.advanceTimersByTime(Store.TOAST_MS - 100);
       m.store.holdToasts(); vi.advanceTimersByTime(60000);
@@ -637,7 +637,7 @@ describe('Undo of a withdrawn response', () => {
 describe('notices', () => {
   it('at most three show: a fourth pushes out the oldest and its Undo with it, so Ctrl Z never reaches one that was not on screen', async () => {
     const m = make(); await m.store.boot();
-    for (const n of [1, 2, 3, 4]) m.store.toast(`Notice ${n}`, { label: 'Undo', run: () => {} });
+    for (const n of [1, 2, 3, 4]) m.store.toast(`Notice ${n}`, 'done', { label: 'Undo', run: () => {} });
     expect(m.store.get().ui.toasts.map((t) => t.text)).toEqual(['Notice 2', 'Notice 3', 'Notice 4']);
   });
 });

@@ -214,7 +214,7 @@ export async function startIndexing(store: Store, dealId: string, folders: Folde
     // one notice a deal, however often it is pressed; "Retry now", since the app is already retrying by itself
     const notices = noticesOf.get(store) ?? new Map<string, number>(); noticesOf.set(store, notices);
     const was = notices.get(dealId); if (was !== undefined) store.dismissToast(was);
-    notices.set(dealId, store.toast('Couldn’t start indexing',
+    notices.set(dealId, store.toast('Couldn’t start indexing', 'warn',
       { label: 'Retry Now', run: () => void startIndexing(store, dealId, folders) }));
     void watchIndexing(store, dealId, { wanted: folders, why });         // and it is tried again without being asked, further apart each time
     return;

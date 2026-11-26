@@ -26,14 +26,14 @@ function offerAttachmentRetry(store: Store, target: AttachmentTarget, file: File
   retryTargets.set(run, target);
   const dealName = store.get().deals[target.dealId]?.name;
   const destination = dealName ? ` to ${dealName}` : '';
-  store.toast(`Couldn’t attach ${file.name}${destination} ·`, { label: 'Retry', run });
+  store.toast(`Couldn’t attach ${file.name}${destination} ·`, 'warn', { label: 'Retry', run });
 }
 
 let seq = 0;
 export async function attachFiles(store: Store, ctx: AttachmentTarget, files: File[]) {
   // past the most one message can take, a file is not attached, and the person is told, rather than it being dropped when sent
   const room = Math.max(0, MAX_ATTACHED - store.get().ui.attachments.filter((a) => a.conv === ctx.conv).length);
-  if (files.length > room) store.toast(`${files.length - room} not attached: ${MAX_ATTACHED} files is the most for one message`);
+  if (files.length > room) store.toast(`${files.length - room} not attached: ${MAX_ATTACHED} files is the most for one message`, 'warn');
   for (const file of files.slice(0, room)) {
     const id = `a${Date.now().toString(36)}${seq++}`;
     store.ui((ui) => ({ attachments: [...ui.attachments, { id, name: file.name, dealId: ctx.dealId, findingId: ctx.findingId, conv: ctx.conv, state: 'pending' }] }));
@@ -213,7 +213,7 @@ export async function filesSendable(store: Store, dealId: string, files: { doc: 
   const checked = files.map((file) => file.docId);
   const missing = await unsendableOf(store, dealId, checked);
   if (missing === 'recovering') {
-    store.toast(WAITING_FOR_ATTACHMENTS);
+    store.toast(WAITING_FOR_ATTACHMENTS, 'warn');
     return false;
   }
   markMissing(store, dealId, checked, missing);
@@ -222,9 +222,9 @@ export async function filesSendable(store: Store, dealId: string, files: { doc: 
   // one file is named, its name giving way when the line is too short; several are counted, and named on hover
   const [only] = names;
   if (names.length === 1) {
-    store.toast(`Couldn’t find ${only} — attach it again`, undefined, false, undefined, only);
+    store.toast(`Couldn’t find ${only} — attach it again`, 'warn', undefined, false, undefined, only);
   } else {
-    store.toast(`Couldn’t find ${names.length} files — attach them again`, undefined, false, names.join(', '));
+    store.toast(`Couldn’t find ${names.length} files — attach them again`, 'warn', undefined, false, names.join(', '));
   }
   return false;
 }
@@ -258,7 +258,7 @@ export async function chipsSendable(store: Store, key: string) {
     for (;;) {
       const chips = composerChips(store.get(), key);
       if (chips.some((chip) => chip.state === 'pending')) {
-        store.toast(WAITING_FOR_ATTACHMENTS);
+        store.toast(WAITING_FOR_ATTACHMENTS, 'warn');
         return false;
       }
       // A file which finished attaching during the previous check is checked too.

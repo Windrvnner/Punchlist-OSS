@@ -236,7 +236,7 @@ async function logTypedQuestion(store: Store, dealId: string, question: string, 
     idempotencyKey: 'ask-addq-' + dealId, noRetry: true,
   });
   if (result.ok) return;
-  if (result.error.kind === 'invalid') store.toast(result.error.message);
+  if (result.error.kind === 'invalid') store.toast(result.error.message, 'warn');
   if (keptForRetry(store, before, dealId, question)) return;
   setComposerText(key, boxWithRefused(key, typed, composerText(key)));
   view.textChanged?.();
@@ -283,7 +283,7 @@ export async function sendTyped(store: Store, scope: Scope, view: SendView) {
 
 export async function ask(store: Store, scope: Scope, text: string) {
   text = text.trim(); if (!text) return;
-  const ro = store.readOnly(); if (ro) { store.toast(ro); return; }   // read-only while nobody is signed in: nothing new is asked
+  const ro = store.readOnly(); if (ro) { store.toast(ro, 'warn'); return; }   // read-only while nobody is signed in: nothing new is asked
   const key = convKey(scope);
   const atts = store.get().ui.attachments.filter((a) => a.conv === key && a.state === 'done' && a.doc && a.docId);
   if (atts.length) store.ui((ui) => ({ attachments: ui.attachments.filter((a) => !atts.includes(a)) }));
@@ -309,7 +309,7 @@ function failedReply(store: Store, key: string, messageId: string) {
 }
 
 export async function retry(store: Store, scope: Scope, messageId: string) {
-  const ro = store.readOnly(); if (ro) { store.toast(ro); return; }
+  const ro = store.readOnly(); if (ro) { store.toast(ro, 'warn'); return; }
   const key = convKey(scope);
   const before = failedReply(store, key, messageId);
   if (!before) return;

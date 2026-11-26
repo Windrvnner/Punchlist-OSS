@@ -94,7 +94,6 @@ export const CreateDeal = define({
       indexFolders: input.indexHere ? deal.folders.map((folder) => folder.path) : undefined,
       message: `${name} created`,
       alwaysSay: input.indexHere,
-      messageGlyph: input.indexHere ? 'done' : undefined,
       // the firm's general list goes on the new deal straight after, in an operation of its own: a deal's items are filed
       // under the deal, and this change is filed with the list of deals
       effect: async () => { const items = missingItems(state, deal); return items.length ? { command: 'AddDealItems', input: { dealId: id, items, fresh: true } } : null; },

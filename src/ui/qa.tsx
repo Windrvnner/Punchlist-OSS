@@ -393,7 +393,7 @@ function MoreMenu({ dealId, hasQuestions }: { dealId: string; hasQuestions: bool
             setOpen(false);
             void showQaLogUpdate(store, dealId);
           }}>Update Q&A Log</button>
-          {log && <button type="button" class="fb" role="menuitem" id="qa-logdir" aria-label="Log folder" aria-description={logPath(log)} onMouseEnter={(e) => showTip(e.currentTarget as HTMLElement, logPath(log))} onMouseLeave={(e) => hideTip(e.currentTarget as HTMLElement)} onClick={() => { setOpen(false); void chooseLogFolder(store, dealId).then((r) => { if (!r.ok) store.toast(r.error.message); }); }}><Icon name="folder" size={16} /></button>}</div>}
+          {log && <button type="button" class="fb" role="menuitem" id="qa-logdir" aria-label="Log folder" aria-description={logPath(log)} onMouseEnter={(e) => showTip(e.currentTarget as HTMLElement, logPath(log))} onMouseLeave={(e) => hideTip(e.currentTarget as HTMLElement)} onClick={() => { setOpen(false); void chooseLogFolder(store, dealId).then((r) => { if (!r.ok) store.toast(r.error.message, 'warn'); }); }}><Icon name="folder" size={16} /></button>}</div>}
         <button type="button" class="mi" role="menuitem" id="qa-export" disabled={!hasQuestions}
           onClick={() => openDialog('exportQa')}>Export Q&A Log…</button>
         {/* the seldom used ways back, apart from Import so neither is pressed for the other */}
@@ -747,11 +747,11 @@ function DraftActions({ q, typed, over, elsewhere = false }: {
     setAsk(null);
     const result = await useQuestionDraft(store, q, asked ? { ...asked, elsewhere } : undefined);
     if (result.kind === 'responseChanged') {
-      store.toast('The response was changed elsewhere, so the draft wasn’t used. Nothing was changed.');
+      store.toast('The response was changed elsewhere, so the draft wasn’t used. Nothing was changed.', 'warn');
     } else if (result.kind === 'textNotSaved') {
-      store.toast('Your text couldn’t be saved, so the draft wasn’t used. Nothing was changed.');
+      store.toast('Your text couldn’t be saved, so the draft wasn’t used. Nothing was changed.', 'warn');
     } else if (result.kind === 'refused') {
-      store.toast(result.message);
+      store.toast(result.message, 'warn');
     }
   };
   const b = (label: string, run: () => void, pri = false) => <span class="needs" title={ro ?? undefined}><button type="button" class={`btn sm${pri ? ' pri' : ''}`} disabled={!!ro} title={ro ?? undefined} onClick={run}>{label}</button></span>;

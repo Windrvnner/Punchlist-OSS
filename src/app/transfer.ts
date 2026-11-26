@@ -80,7 +80,7 @@ async function saveSheet(
   const file = await store.services.sheets.write(sheetName, fit.table);
   if (!file.ok) return file;
   const r = await store.services.fs.save(`${safeFileName(fileName)}.${file.value.ext}`, file.value.bytes, MIME[file.value.ext]);
-  if (r.ok && r.value === 'saved' && fit.cut) store.toast(`${fit.cut} cell${fit.cut === 1 ? ' was' : 's were'} longer than Excel allows and ${fit.cut === 1 ? 'was' : 'were'} cut at 32,767 characters in the file. Nothing in the app changed.`, undefined, true);
+  if (r.ok && r.value === 'saved' && fit.cut) store.toast(`${fit.cut} cell${fit.cut === 1 ? ' was' : 's were'} longer than Excel allows and ${fit.cut === 1 ? 'was' : 'were'} cut at 32,767 characters in the file. Nothing in the app changed.`, 'warn', undefined, true);
   return r;
 }
 
