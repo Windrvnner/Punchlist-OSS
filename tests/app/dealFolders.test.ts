@@ -2,7 +2,7 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { MemoryLocal } from '../../src/adapters/local';
 import {
-  AddFolders, DeleteDeal, matchesDealName, RecordIndexingProgress, RemoveFolder,
+  AddFolders, CreateDeal, DeleteDeal, matchesDealName, RecordIndexingProgress, RemoveFolder,
 } from '../../src/app/commands/deals';
 import {
   addDealFolders, chosenDealFolder, droppedFolderPaths, pickDealFolders,
@@ -87,6 +87,13 @@ describe('folder actions run without a window', () => {
     expect(keptNewDeal()).toMatchObject({
       name: 'Lucérne', path: 'D:/Transactions/Still typing', folders: [debt, permits], reading: [],
     });
+  });
+
+  it('creating a deal refuses one folder written two ways as listed twice', async () => {
+    const { store } = await fixture();
+    const same = [{ ...debt, path: 'C:/Deals/A' }, { ...debt, path: 'C:\\deals\\a\\' }];
+    const result = await store.dispatch(CreateDeal, { name: 'Lucérne', folders: same, indexHere: true });
+    expect(result).toMatchObject({ ok: false, error: { message: expect.stringContaining('listed twice') } });
   });
 
   it('indexes committed folders by path, resumes an unfinished restore and skips a complete one', async () => {

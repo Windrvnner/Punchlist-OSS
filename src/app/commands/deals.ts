@@ -4,6 +4,7 @@ import { Deal, DealGroup, DealId, Folder, Tombstone, memberId } from '../../doma
 import { firstMember } from './members';
 import { ok, fail, notFound, rejected } from '../../domain/result';
 import { ItemId, key, leftBehind, turnedOffIn } from '../../domain/checklist';
+import { windowsPath } from '../../domain/sheets';
 import { addItems, missingItems, setOff, usableFirm } from './checklist';
 
 /** the longest a folder's label can be, on a new deal, on folders added later and when it is changed */
@@ -69,9 +70,8 @@ export const CreateDeal = define({
   }),
   targets: () => [],
   plan(state, input, ctx) {
-    const norm = (p: string) => p.replace(/[\\/]+$/, '').toLowerCase();
     const seen = new Set<string>();
-    for (const f of input.folders) { if (seen.has(norm(f.path))) return fail(rejected(`${f.path} is listed twice`)); seen.add(norm(f.path)); }
+    for (const f of input.folders) { if (seen.has(windowsPath(f.path))) return fail(rejected(`${f.path} is listed twice`)); seen.add(windowsPath(f.path)); }
     const id = ctx.ids.next('d');
     const name = withProject(cleanName(input.name));
     if (name.length > DEAL_NAME_MAX) return fail(rejected(`Keep the name under ${DEAL_NAME_MAX} characters`));
@@ -102,9 +102,7 @@ export const CreateDeal = define({
   },
 });
 
-/** A folder path as a key: the same folder written with / or \, in another case, or with a trailing separator, is one key. */
-export const pathKey = (p: string): string => p.toLowerCase().replace(/\//g, '\\').replace(/\\+$/, '');
-export const folderInside = (path: string, parent: string) => pathKey(path).startsWith(pathKey(parent) + '\\');
+export const folderInside = (path: string, parent: string) => windowsPath(path).startsWith(windowsPath(parent) + '\\');
 
 /** Why `f` cannot go on beside `folders`: it is inside one of them, or holds one. Null when it overlaps none. */
 export function overlap(folders: Folder[], f: { path: string; label?: string }): string | null {
@@ -118,8 +116,8 @@ export function overlap(folders: Folder[], f: { path: string; label?: string }):
 
 /** Where a folder whose row is `at` (removed rows counted) goes among the folders on the deal: after the ones listed above it. */
 function liveAt(d: Pick<Deal, 'removed'>, at: number, path: string, n: number): number {
-  const key = pathKey(path);
-  return Math.max(0, Math.min(n, at - d.removed.filter((r) => pathKey(r.path) !== key && r.at < at).length));
+  const key = windowsPath(path);
+  return Math.max(0, Math.min(n, at - d.removed.filter((r) => windowsPath(r.path) !== key && r.at < at).length));
 }
 
 export const AddFolders = define({
@@ -129,15 +127,15 @@ export const AddFolders = define({
   plan(state, input, ctx) {
     const d = state.deals[input.dealId];
     if (!d) return fail(notFound('Deal not found', input.dealId));
-    const have = new Set(d.folders.map((f) => pathKey(f.path)));
-    for (const f of input.folders) { if (have.has(pathKey(f.path))) return fail(rejected(`${f.label || f.path} is already on this deal`)); have.add(pathKey(f.path)); }
+    const have = new Set(d.folders.map((f) => windowsPath(f.path)));
+    for (const f of input.folders) { if (have.has(windowsPath(f.path))) return fail(rejected(`${f.label || f.path} is already on this deal`)); have.add(windowsPath(f.path)); }
     // a folder inside one on the deal, or holding one, would have its documents read twice (the dialog says so first;
     // this holds when a folder was put back while another inside it waited to be added)
     for (const [i, f] of input.folders.entries()) { const o = overlap([...d.folders, ...input.folders.slice(0, i).map((x) => Folder.parse(x))], f); if (o) return fail(rejected(o)); }
     // a removed folder added again is indexed again, in its own row: it is no longer listed as removed, and no row moves
     const folders = [...d.folders]; let removed = d.removed;
     for (const f of input.folders.map((x) => Folder.parse({ ...x, indexed: 0, reviewed: 0 }))) {
-      const was = removed.find((r) => pathKey(r.path) === pathKey(f.path));
+      const was = removed.find((r) => windowsPath(r.path) === windowsPath(f.path));
       if (!was) { folders.push(f); continue; }
       removed = removed.filter((r) => r !== was);
       folders.splice(liveAt({ removed }, was.at, f.path, folders.length), 0, f);
@@ -188,7 +186,7 @@ export const RemoveFolder = define({
     const f = d.folders[i];
     // where it stood among the deal's folders, removed ones counted, so Restore puts it back there whatever was removed or restored since
     const at = foldersWithRemoved(d).findIndex((r) => !r.gone && r.f.path === f.path);
-    const removed = [...d.removed.filter((r) => pathKey(r.path) !== pathKey(f.path)), { ...f, at }];
+    const removed = [...d.removed.filter((r) => windowsPath(r.path) !== windowsPath(f.path)), { ...f, at }];
     const deal: Deal = { ...d, folders: d.folders.filter((_, j) => j !== i), removed, updatedAt: ctx.at };
     return ok({
       dealId: d.id, upserts: [{ kind: 'deal', record: deal, expectedRev: d.rev }],
@@ -205,8 +203,8 @@ export const RemoveFolder = define({
  */
 export function foldersWithRemoved(d: Pick<Deal, 'folders' | 'removed'>): { f: Folder; gone?: Deal['removed'][number] }[] {
   const rows: { f: Folder; gone?: Deal['removed'][number] }[] = d.folders.map((f) => ({ f }));
-  const on = new Set(d.folders.map((f) => pathKey(f.path)));       // one on the deal again (from another PC, say) is listed once, as on it
-  for (const r of [...d.removed].sort((a, b) => a.at - b.at)) if (!on.has(pathKey(r.path))) rows.splice(Math.min(r.at, rows.length), 0, { f: r, gone: r });
+  const on = new Set(d.folders.map((f) => windowsPath(f.path)));       // one on the deal again (from another PC, say) is listed once, as on it
+  for (const r of [...d.removed].sort((a, b) => a.at - b.at)) if (!on.has(windowsPath(r.path))) rows.splice(Math.min(r.at, rows.length), 0, { f: r, gone: r });
   return rows;
 }
 
@@ -218,14 +216,14 @@ export const RestoreFolder = define({
   plan(state, input, ctx) {
     const d = state.deals[input.dealId];
     if (!d) return fail(notFound('Deal not found', input.dealId));
-    if (d.folders.some((f) => pathKey(f.path) === pathKey(input.folder.path))) return fail(rejected(`${input.folder.label || input.folder.path} is already on this deal`));
+    if (d.folders.some((f) => windowsPath(f.path) === windowsPath(input.folder.path))) return fail(rejected(`${input.folder.label || input.folder.path} is already on this deal`));
     // a folder added since, inside this one or around it, would have its documents read twice: it says which
     const o = overlap(d.folders, input.folder); if (o) return fail(rejected(o));
     const folders = [...d.folders]; folders.splice(liveAt(d, input.at, input.folder.path, folders.length), 0, input.folder);
     // Only the unread files remain when an unfinished folder is put back.
     const unfinished = input.folder.indexed < input.folder.files;
     const stage = unfinished ? 'indexing' : d.stage;
-    const deal: Deal = { ...d, folders, stage, removed: d.removed.filter((r) => pathKey(r.path) !== pathKey(input.folder.path)), updatedAt: ctx.at };
+    const deal: Deal = { ...d, folders, stage, removed: d.removed.filter((r) => windowsPath(r.path) !== windowsPath(input.folder.path)), updatedAt: ctx.at };
     return ok({
       dealId: d.id, upserts: [{ kind: 'deal', record: deal, expectedRev: d.rev }],
       audit: [{ kind: 'edited', recordId: d.id, dealId: d.id, field: 'folders', to: [input.folder.path] }],
