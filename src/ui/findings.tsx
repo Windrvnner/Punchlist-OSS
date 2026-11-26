@@ -6,7 +6,7 @@ import { limitClass, limitTitle } from './limit';
 import { checkingSays, watchCheck } from '../app/checking';
 import { showTip, hideTip } from './tip';
 import { ReadOnlyContext } from './editField';
-import { useAppState, useStore, fmtDate, whenText , useDismiss, useMinuteTick } from './hooks';
+import { useAppState, useStore, fmtDate, whenText, whenInSentence, useDismiss, useMinuteTick } from './hooks';
 import { afterDeletingFinding } from './nav';
 import { Icon } from './icons';
 import { ChoiceCheck } from './moreMenu';
@@ -80,7 +80,7 @@ export function Brief({ paragraphs, deal, onFinding, marked }: { paragraphs: str
 }
 
 /** when a closed finding was closed, as its row says it: "Closed yesterday", "Closed 3 days ago", "Closed Nov 14" */
-const closedText = (at: string) => { const w = whenText(at); return `Closed ${/^[A-Z][a-z]{2} \d/.test(w) ? w : w[0].toLowerCase() + w.slice(1)}`; };
+const closedText = (at: string) => `Closed ${whenInSentence(at)}`;
 
 /**
  * The Findings ⋯ menu, matching Q&A's: Import…, Export…, then the seldom used Deleted… apart from them
@@ -406,7 +406,7 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
   const marked = new Set(f.body.flatMap((b) => splitCited(b, f.sources.length).flatMap((p) => p.refs)));
   const docs = byDocument(f.sources);
   const listed = !fewDocuments(f.sources);
-  const raised = f.origin !== 'ai' && f.raisedBy ? `Raised by ${f.raisedBy} · ${fmtDate(localYmd(f.raisedAt))}` : `identified ${whenText(f.raisedAt).toLowerCase()}`;
+  const raised = f.origin !== 'ai' && f.raisedBy ? `Raised by ${f.raisedBy} · ${fmtDate(localYmd(f.raisedAt))}` : `identified ${whenInSentence(f.raisedAt)}`;
   const commit = async (status: 'open' | 'closed', text: string) => { const r = await store.dispatch(SetFindingStatus, { dealId, findingId, status, note: text.trim() || undefined }, { idempotencyKey: 'fst-' + f.id }); if (r.ok) setNote(null); };
   const del = async () => {
     const result = await store.dispatch(DeleteFinding, { dealId, findingId }, { idempotencyKey: 'fdel-' + f.id });
