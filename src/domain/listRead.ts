@@ -53,7 +53,7 @@ export function tableRowsAsWritten(columns: string[], rows: string[][]): string[
 const withoutEdgeSpaces = (line: string) => line.replace(/^[^\S\t\r\n]+|[^\S\t\r\n]+$/g, '');
 
 /** Text as lines: every line break counts, so a line number means the same line to the person, the model and the app. */
-export const textLines = (text: string): string[] => text.replace(/\r\n?/g, '\n').split('\n');
+export const textLines = (text: string): string[] => text.split(/\r\n?|\n/);
 
 /** a word of a line's leading label: a number, letter, roman numeral or bullet, or a word such as "Section" before one */
 const LABEL = /^((section|part|article|schedule|annex|exhibit|appendix|item)|[-•*–—:.()[\]0-9]+|\(?([a-z]|[ivxlc]+)\)?[.):]?|\d+(\.\d+)*[a-z]?[.):]?)$/i;

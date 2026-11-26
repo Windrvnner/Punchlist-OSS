@@ -96,3 +96,9 @@ describe('a list read by the model, tied out line by line', () => {
     expect(unplaced(lines, reads([{ n: 1, k: 'item', text: 'Site control covers the array', section: 'Real estate' }]))).toEqual([1]);
   });
 });
+
+describe('text as lines', () => {
+  it('splits at every line break and changes nothing else of a line', () => {
+    expect(textLines(' a \r\n\tb  c\rd\n\ne ')).toEqual([' a ', '\tb  c', 'd', '', 'e ']);
+  });
+});
