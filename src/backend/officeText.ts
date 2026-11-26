@@ -53,12 +53,14 @@ export function officeText(bytes: Uint8Array, name: string): OfficeText {
       .filter(([n]) => n.includes(`/${kind}`))
       .sort((a, b) => +a[0].replace(/\D/g, '') - +b[0].replace(/\D/g, ''))
       .map(([, x]) => textOf(x.toString('utf8'), 'a:t', 'a:p'));
-    const slides = read('slide'); const notes = read('notesSlide');   // the speaker notes are text of the file too
+    const slides = read('slide');
+    const notes = read('notesSlide');   // the speaker notes are text of the file too
     return { text: [...slides, ...notes].join('\n'), first: slides[0] ?? '', tracked: 0 };
   }
   const wanted = /^word\/(?:header\d*|footer\d*|footnotes|endnotes)\.xml$/;
   const parts = unzip(bytes, (n) => n === 'word/document.xml' || wanted.test(n));
-  const doc = parts.get('word/document.xml'); if (!doc) throw new Error('not a Word document');
+  const doc = parts.get('word/document.xml');
+  if (!doc) throw new Error('not a Word document');
   const xml = doc.toString('utf8');
   // text moved away keeps its words in w:t at the old place: as accepted, only the new place has them
   const words = (part: string) => textOf(part.replace(/<w:moveFrom\b[^>]*>[\s\S]*?<\/w:moveFrom>/g, ''), 'w:t', 'w:p');

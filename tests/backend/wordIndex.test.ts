@@ -18,7 +18,8 @@ describe("each PC's word index", () => {
     const w = countWords(text, 'Environmental Permit Schedule');
     expect(Object.fromEntries(w.counts))
       .toEqual({ permit: 2, granted: 1, '12': 1, '2026': 1, cover: 1, air: 1, emission: 1 });
-    expect(w.length).toBe(8); expect(w.title).toEqual(['environmental', 'permit', 'schedule']);
+    expect(w.length).toBe(8);
+    expect(w.title).toEqual(['environmental', 'permit', 'schedule']);
     expect(countWords(Array.from({ length: 60 }, (_, i) => `word${String.fromCharCode(97 + (i % 26))}${String.fromCharCode(97 + Math.floor(i / 26))}`).join(' ')).title.length).toBe(TITLE_WORDS);
   });
   it('ranks a match in the name above the title, and the title above the body, by the agreed weights', () => {

@@ -2,9 +2,46 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { crc32 } from 'node:zlib';
 import { officeText, DIRECT } from '../../src/backend/officeText';
 
 const fixture = (n: string) => new Uint8Array(fs.readFileSync(path.join(__dirname, 'fixtures', n)));
+
+/** a zip of the given parts, stored uncompressed: enough for `officeText`'s reader */
+function zipOf(parts: Record<string, string>): Uint8Array {
+  const locals: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+  for (const [name, text] of Object.entries(parts)) {
+    const nameBytes = Buffer.from(name);
+    const data = Buffer.from(text);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt32LE(crc32(data), 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBytes.length, 26);
+    const head = Buffer.alloc(46);
+    head.writeUInt32LE(0x02014b50, 0);
+    head.writeUInt32LE(crc32(data), 16);
+    head.writeUInt32LE(data.length, 20);
+    head.writeUInt32LE(data.length, 24);
+    head.writeUInt16LE(nameBytes.length, 28);
+    head.writeUInt32LE(offset, 42);
+    locals.push(local, nameBytes, data);
+    central.push(head, nameBytes);
+    offset += 30 + nameBytes.length + data.length;
+  }
+  const directory = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(central.length / 2, 10);
+  end.writeUInt32LE(directory.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return new Uint8Array(Buffer.concat([...locals, directory, end]));
+}
+const word = (text: string) => `<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`;
+const slide = (text: string) => `<a:p><a:r><a:t>${text}</a:t></a:r></a:p>`;
 
 describe('Word and PowerPoint text read straight from the file', () => {
   it("reads a Word file's paragraphs, with its tracked changes accepted, and counts them as LibreOffice does", () => {
@@ -28,5 +65,23 @@ describe('Word and PowerPoint text read straight from the file', () => {
     expect(() => officeText(new TextEncoder().encode('not a zip'), 'Broken.docx')).toThrow();
     expect(() => officeText(fixture('Deck.pptx'), 'Deck.docx')).toThrow('not a Word document');
     expect(['a.docx', 'a.DOCM', 'a.pptx', 'a.pptm'].every((n) => DIRECT.test(n))).toBe(true); expect(['a.doc', 'a.ppt', 'a.rtf', 'a.pdf'].some((n) => DIRECT.test(n))).toBe(false);
+  });
+  it('reads a Word file\'s header, footnotes and endnotes and a deck\'s speaker notes, after the body (#1025)', () => {
+    const docx = officeText(zipOf({
+      'word/document.xml': word('Body BODYTEXT'),
+      'word/header1.xml': word('HEADERONLY'),
+      'word/footnotes.xml': word('FOOTNOTEONLY'),
+      'word/endnotes.xml': word('ENDNOTEONLY'),
+    }), 'Memo.docx');
+    const lines = (text: string) => text.split('\n').filter(Boolean);
+    expect(lines(docx.text)).toEqual(['Body BODYTEXT', 'HEADERONLY', 'FOOTNOTEONLY', 'ENDNOTEONLY']);
+    expect(docx.first).toBe(docx.text.split('\n')[0] + '\n');
+    const pptx = officeText(zipOf({
+      'ppt/slides/slide1.xml': slide('SLIDEONE'),
+      'ppt/slides/slide2.xml': slide('SLIDETWO'),
+      'ppt/notesSlides/notesSlide1.xml': slide('NOTESONLY'),
+    }), 'Deck.pptx');
+    expect(lines(pptx.text)).toEqual(['SLIDEONE', 'SLIDETWO', 'NOTESONLY']);
+    expect(pptx.first).toBe('SLIDEONE\n');
   });
 });
