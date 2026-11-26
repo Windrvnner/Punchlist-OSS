@@ -56,7 +56,7 @@ function matchingFinding(index: ReturnType<typeof findingIndex>, list: DocumentR
 function destinationsFor(index: ReturnType<typeof findingIndex>, list: DocumentRef, points: readonly Point[]) {
   const destinations: Destination[] = [];
   for (const point of points) {
-    const text = fitText(point.text.trim());
+    const text = fitText(point.text);
     const finding = matchingFinding(index, list, { ...point, text });
     const { after } = point;
     const earlier = after === undefined ? undefined : destinations[after];
@@ -85,10 +85,10 @@ export function issuesListReviewPlan(
   findings: Iterable<Finding>, list: DocumentRef, points: readonly IssuePoint[], kept: ReadonlySet<number>,
 ) {
   const index = findingIndex(findings);
-  // Keep the attached name for choosing the explicit join (#409), then predict the command with its parsed name.
+  // Keep the attached name for choosing the explicit join (#409), then predict the command with it as given.
   const references = points.map((point, position) => proposedReference(index, list, point, position));
   const choices = points.map(({ n, text }, position) => ({
     n, text, own: kept.has(position), ...references[position],
   }));
-  return { references, destinations: destinationsFor(index, { ...list, doc: list.doc.trim() }, choices) };
+  return { references, destinations: destinationsFor(index, list, choices) };
 }

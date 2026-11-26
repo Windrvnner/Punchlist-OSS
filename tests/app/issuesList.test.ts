@@ -257,6 +257,23 @@ describe('importing an issues list', () => {
     expect(store.get().findings[had[0]].onLists!.map((m) => m.text)).toEqual(['First section, point one.', 'Second section, point one.']);
     expect(dealFindings(store.get(), dealId).find((f) => f.title === 'C')!.workstream).toBe('');
   });
+  it('stores a point and the list name exactly as given, edge spaces included, and refuses a point of only spaces', async () => {
+    const { store, dealId } = await dealWith(0);
+    const text = '  Indented point, as counsel wrote it.\n';
+    const list = ` ${LIST} `;
+    const blank = await store.dispatch(ImportIssuesList, {
+      dealId, doc: DOC, list, points: [{ n: '1', text: '   ', title: '   ', workstream: 'Legal' }],
+    });
+    expect(blank.ok).toBe(false);
+    const made = await store.dispatch(ImportIssuesList, {
+      dealId, doc: DOC, list, points: [{ n: '1', text, title: text, workstream: 'Legal' }],
+    });
+    expect(made.ok).toBe(true);
+    const [finding] = dealFindings(store.get(), dealId);
+    expect(finding.title).toBe(text);
+    expect(finding.body).toEqual([text]);
+    expect(finding.onLists?.map((mark) => [mark.list, mark.text])).toEqual([[list, text]]);
+  });
   it('the same list brought in again on this PC raises nothing twice, even when no point is said to repeat anything', async () => {
     const { store, dealId } = await dealWith(5);
     const pts = Array.from({ length: 150 }, (_, k) => ({ n: String(k + 1), text: `Point ${k + 1} as counsel wrote it.`, title: `Point ${k + 1}`, workstream: 'Legal' }));
