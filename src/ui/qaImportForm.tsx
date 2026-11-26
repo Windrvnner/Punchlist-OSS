@@ -3,7 +3,7 @@
  * questions the deal already has), a preview of the first rows, what the import will overwrite, and the footer that
  * says what Import will do.
  */
-import { fmtDate } from './hooks';
+import { shownDate } from './hooks';
 import { LeaveFoot } from './dialogs';
 import { checkedOf, chosenOf } from './fieldValue';
 import { showTip, hideTip } from './tip';
@@ -190,7 +190,7 @@ function previewCell(field: ImportField, row: QaPreviewRow, mapping: Mapping) {
   const value = String(row.cells[mapping[field]!] ?? '');
   if (field !== 'received' && field !== 'responded') return value;
   const typed = row.dates[field];
-  return fmtDate(typed) || typed;   // not a real date: shown as written
+  return shownDate(typed);   // not a real date: shown as written
 }
 
 /** What happens to questions the deal already has: merged, or added again as new */
@@ -247,7 +247,7 @@ function ChangesRow({ changes }: { changes: ImportChange[] }) {
 /** A value in the changes table as the Q&A page shows it: dates formatted, the status capitalized, a dash for none */
 function changeText(change: { field: string }, value: string) {
   if (!value) return '—';
-  if (change.field === 'Received' || change.field === 'Date') return fmtDate(value) || value;
+  if (change.field === 'Received' || change.field === 'Date') return shownDate(value);
   if (change.field === 'Status') return value.charAt(0).toUpperCase() + value.slice(1);
   return value;
 }

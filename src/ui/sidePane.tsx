@@ -5,7 +5,7 @@
  * A suggested open question opens here too, to be checked before an answer becomes its response.
  */
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
-import { useAppState, useStore, lastInput, fmtDate } from './hooks';
+import { useAppState, useStore, lastInput, shownDate } from './hooks';
 import { Icon } from './icons';
 import { FindingOpening, findingHref } from './findings';
 import { STATUS_LABEL } from './qa';
@@ -78,7 +78,7 @@ function QuestionCheck({ q, answer, close }: { q: Question; answer: Message; clo
   if (answerWasUsed(q, answer)) return (
     <div class="qcheck" ref={box}>
       <div class="qmeta"><b>Q{q.n}</b><span class="st">{STATUS_LABEL[q.status]}</span>{[q.workstream, q.priority, q.askedBy].filter(Boolean).map((x) => <span key={x}>{x}</span>)}</div>
-      {q.received && <p class="qrec">Received {fmtDate(q.received)}</p>}
+      {q.received && <p class="qrec">Received {shownDate(q.received)}</p>}
       <p class="qfull" id="side-q">{q.text}</p>
       <p class="qused" id="side-used" tabIndex={-1} role="status"><Icon name="check" size={14} />This answer is now its response</p>
       <div class="plbl">Response</div>
@@ -88,7 +88,7 @@ function QuestionCheck({ q, answer, close }: { q: Question; answer: Message; clo
   return (
     <div class="qcheck" ref={box}>
       <div class="qmeta"><b>Q{q.n}</b><span class="st">{STATUS_LABEL[q.status]}</span>{[q.workstream, q.priority, q.askedBy].filter(Boolean).map((x) => <span key={x}>{x}</span>)}</div>
-      {q.received && <p class="qrec">Received {fmtDate(q.received)}</p>}
+      {q.received && <p class="qrec">Received {shownDate(q.received)}</p>}
       <p class="qfull" id="side-q">{q.text}</p>
       <div class="plbl">Current Response</div>
       {responseToReplace(q) !== null

@@ -1,7 +1,7 @@
 // The parts of a conversation's page: the trail at its top, what it is about, its exchanges, and what it says when
 // what it was about is gone.
 import type { ComponentChildren } from 'preact';
-import { useAppState, useStore, fmtDate } from './hooks';
+import { useAppState, useStore, shownDate } from './hooks';
 import type { Store } from '../app/store';
 import { Icon } from './icons';
 import { Ref } from './ref';
@@ -120,7 +120,7 @@ export function QuestionOpening({ question, onOpen }: { question: Question; onOp
     return <div class="opening"><div class="lbl">Q{question.n}</div><ConflictView conflict={conflict} /></div>;
   }
   const by = question.askedBy ? ` · ${question.askedBy}` : '';
-  const received = question.received ? ` · ${fmtDate(question.received)}` : '';
+  const received = question.received ? ` · ${shownDate(question.received)}` : '';
   const hasDraft = question.draft?.status === 'found' && question.draft.text;
   return (
     <div class="opening"><div class="lbl">Q{question.n}{by}{received}</div>

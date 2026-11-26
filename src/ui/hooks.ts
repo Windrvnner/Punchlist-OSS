@@ -82,6 +82,8 @@ export const fmtDate = (ymd: string) => {
   const d = new Date(ymd + 'T12:00:00');
   return isNaN(+d) ? '' : formatLocalDate(d, d.getFullYear() !== new Date().getFullYear());
 };
+/** a question's date as shown: a real date formatted, text typed in a date field as written (#1022) */
+export const shownDate = (value: string) => fmtDate(value) || value;
 export { fmtDateTime } from '../domain/dateTime';
 export const whenText = (iso: string) => {
   const d = new Date(iso); const h = (Date.now() - +d) / 36e5;
