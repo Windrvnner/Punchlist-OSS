@@ -13,7 +13,7 @@ import type { Folder } from '../../src/backend/logRepository';
 import { signedOut } from '../../src/backend/signInToken';
 import { SERVICE } from '../../src/control';
 import { tokensOf } from '../../src/backend/limits';
-import { qid, LISTED_ID, listedIds } from './reviewKit';
+import { qid, LISTED_ID, listedIds, listed } from './reviewKit';
 
 class Mem implements Folder { files = new Map<string, string>(); list() { return [...this.files.keys()]; } size(n: string) { return this.files.get(n)?.length ?? -1; } read(n: string) { return this.files.get(n) ?? null; } append(n: string, t: string) { this.files.set(n, (this.files.get(n) ?? '') + t); } write(n: string, t: string) { this.files.set(n, t); } }
 import { wordIndex as makeIndex, countWords, type WordIndex } from '../../src/backend/wordIndex';
@@ -58,7 +58,8 @@ const isFillAsk = (c: { prompt: string }) => c.prompt.includes('were not settled
 /** what a test's script says, as the main session's answer: the same words and citations, tagged by the main session's own list; no "need", which only the search helper's reading has */
 const asAnswer = (r: unknown) => { if (!r || typeof r !== 'object' || Array.isArray(r)) return r; const { need: _n, ...rest } = r as Record<string, unknown>; return rest; };
 /** the ids a pick's listing gives these documents, in the order asked for */
-const idsOf = (c: Call, ...docs: DocRecord[]) => docs.map((d) => new RegExp(`^(doc_[0-9a-f]{24})(?: \\*)?: (?:.*/)?${d.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?: — .*)?$`, 'm').exec(c.prompt)?.[1] ?? 'doc_?');
+const idsOf = (c: Call, ...docs: DocRecord[]) =>
+  docs.map((d) => listed(c).find((r) => r.path === d.name || r.path.endsWith(`/${d.name}`))?.id ?? 'doc_?');
 
 /**
  * `calls` are the questions put to the model. `coreCalls` catch any ask about which documents are core: there should be none, as core.ts works them out.
@@ -2184,7 +2185,6 @@ describe('documents by their permanent id (#1162)', () => {
     const s = setup(() => ({ status: 'none' }), { d1: many }, { library: [], shortlist: 300, pick: () => ({ read: [] }) });
     await draftOf(s, 'What does the facility schedule say?');
     const tokens = tokensOf(s.pickCalls[0].prompt);
-    console.log(`pick prompt at 300 documents: ${tokens} tokens`);
     expect(s.pickCalls[0].prompt).toContain(`${many[0].docId}: `);
     expect(tokens).toBeLessThan(20_000);
   });
