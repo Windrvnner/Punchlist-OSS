@@ -625,9 +625,10 @@ export function nodeAi(o: AiOptions) {
         return fail({ kind: 'failed', message: 'It could not be read as an issues list' });
       }
       const given = reply.points as { n?: unknown; text?: unknown }[];
-      // the point's text is the model's reply as given: the list's words are never normalized (#1026)
-      const texts = given.map((p) => ({ n: clean(p?.n), text: typeof p?.text === 'string' ? p.text : '' }));
-      return ok(texts.filter((p) => p.text.trim()));
+      // the point's words are the reply's as given, inner spacing and line breaks included: only its edges are
+      // trimmed, as the import command trims them too (#1026)
+      const texts = given.map((p) => ({ n: clean(p?.n), text: typeof p?.text === 'string' ? p.text.trim() : '' }));
+      return ok(texts.filter((p) => p.text));
     } catch (e) { return failure(e, 'The file could not be read'); }
   }
   async function askJson<T = Record<string, unknown>>(input: Ask, keys: string[], shape?: string, fix = true): Promise<T | null> {
@@ -2124,8 +2125,8 @@ export function nodeAi(o: AiOptions) {
     async issuesList(i) {
       // Two steps. The list is read from its file in one call, each point in the list's own words. Then the points are
       // sorted into workstreams and compared with the deal's findings and each other, with no file: the whole list in
-      // one call, as the checklist's duplicate check is asked, in parts only for a list longer than ISSUES_BATCH. A reply that cannot be
-      // read is asked for again for half as many points. Nothing is half done: a point that cannot be read or sorted
+      // one call, as the checklist's duplicate check is asked, in parts only for a list longer than ISSUES_BATCH. A reply
+      // that cannot be read is asked for again for half as many points. Nothing is half done: a point that cannot be read or sorted
       // fails the whole, to be asked again.
       // a call that fails (a timeout, a server error) is asked again twice by every call's own retry (retry.ts), which
       // also covers that case, so it is not asked again here too; only a reply that cannot be read is (`unread`), twice
