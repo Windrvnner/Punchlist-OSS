@@ -31,17 +31,31 @@ type UnresolvedRowsProps = {
 };
 const label = (point: Unresolved) => `${point.kind === 'finding' ? 'Finding' : 'Gap'} · ${point.what}`;
 
+type PreviewUpdate = (preview: UnresolvedPreview | null) => UnresolvedPreview | null;
+type UncheckedLineProps = {
+  preview: UnresolvedPreview | null; hidden: boolean; after: boolean; busy: boolean;
+  retry: () => Promise<PreviewUpdate>; onRetried: (update: PreviewUpdate) => void;
+};
+
 /**
  * The points the open questions could not be checked for yet (#1120), in their own place in the footer beside the
- * count and the points not drafted, with Retry for just those.
+ * count and the points not drafted, with Retry for just those; nothing when every point was checked.
  */
-function UncheckedLine({ count, after, checking, busy, onRetry }: {
-  count: number; after: boolean; checking: boolean; busy: boolean; onRetry: () => void;
-}) {
+function UncheckedLine({ preview, hidden, after, busy, retry, onRetried }: UncheckedLineProps) {
+  const [checking, setChecking] = useState(false);
+  const count = preview?.unchecked.length ?? 0;
+  if (!count || hidden) return null;
+  const again = async () => {
+    if (checking || busy) return;
+    setChecking(true);
+    const update = await retry();
+    setChecking(false);
+    onRetried(update);
+  };
   const points = `${count.toLocaleString('en-US')} point${count === 1 ? '' : 's'}`;
-  return <span id="au-unchecked">{after ? '· ' : ''}{checking ? 'Checking open questions…' : <>
-    {points} not checked against open questions. <button type="button" class="tundo" id="au-retry-links"
-      disabled={busy} onClick={onRetry}>Retry</button></>}</span>;
+  return <span id="au-unchecked" title={`${points} not checked against open questions`}>{after ? '· ' : ''}
+    {checking ? 'Checking…' : <>{count.toLocaleString('en-US')} unchecked. <button type="button" class="tundo"
+      id="au-retry-links" disabled={busy} onClick={() => void again()}>Retry</button></>}</span>;
 }
 
 function UnresolvedRows({ preview, draftPoints, linkedPoints, checkPoint, checkLink }: UnresolvedRowsProps) {
@@ -98,14 +112,6 @@ export function AddUnresolvedDialog({ dealId }: { dealId: string }) {
     setRedo(false);
     if (update) setReady(update);
   };
-  const [relink, setRelink] = useState(false);
-  const retryLinks = async () => {
-    if (!ready || relink || busy) return;
-    setRelink(true);
-    const update = await retryUnresolvedLinks(store, dealId, choices.linked);
-    setRelink(false);
-    setReady(update);
-  };
   const selected = selectUnresolved(ready, choices.off, choices.linked);
   const { points: kept, links, draftPoints, linkedPoints } = selected;
   const checkLink = (link: UnresolvedPreview['links'][number], on: boolean) => {
@@ -147,8 +153,8 @@ export function AddUnresolvedDialog({ dealId }: { dealId: string }) {
       </div>
       {/* an unreadable checklist leaves only Retry, in the line above: no footer with a button that can do nothing */}
       {!(!ready && error === unread) && <div class="xfoot"><span id="au-count" class={error ? 'err' : ''} role={error ? 'alert' : undefined}>{(!ready && error === unread ? '' : error) || (!ready ? (count ? `Phrasing ${plural(count)}` : '') : [kept.length && plural(kept.length), links.length && `${links.length.toLocaleString('en-US')} linked`].filter(Boolean).join(' · '))}</span>
-        {ready && !error && ready.unchecked.length > 0 && <UncheckedLine count={ready.unchecked.length}
-          after={kept.length + links.length > 0} checking={relink} busy={busy} onRetry={() => void retryLinks()} />}
+        <UncheckedLine preview={ready} hidden={!!error} after={kept.length + links.length > 0} busy={busy}
+          retry={() => retryUnresolvedLinks(store, dealId, choices.linked)} onRetried={setReady} />
         {/* points with no question, beside the count, where it stays in view however long the list */}
         {ready && !error && ready.out.length > 0 && <span id="au-out">{kept.length || links.length ? '· ' : ''}{redo ? `Drafting ${ready.out.length.toLocaleString('en-US')} more…` : <>{ready.out.length.toLocaleString('en-US')} point{ready.out.length === 1 ? '' : 's'} could not be drafted. <button type="button" class="tundo" id="au-retry-out" disabled={busy} onClick={() => void retryOut()}>Retry</button></>}</span>}<span class="grow" />
         {error && !ready && error !== unread ? <button class="btn sm pri" type="button" id="au-retry" onClick={() => setTries(tries + 1)}>Retry</button>

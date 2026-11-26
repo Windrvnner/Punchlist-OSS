@@ -1495,8 +1495,13 @@ textarea.rsv-r.draftbox{field-sizing:content;min-height:calc(5 * 1.6em + 20px);r
 .lnkdlg .lout{padding:9px 8px 9px 34px;border-top:1px solid var(--line);font-size:13px;color:var(--ink-2)}.lnkdlg .lout b{font-weight:500;color:var(--ink);margin-right:6px}
 .lnkdlg .xfoot{flex:none;margin-top:0}
 .lnkdlg .llist>.loadfail,.lnkdlg .llist>.emptyline{padding:0}   /* in line with the title, as the group labels are */
-#au-out{margin-left:-4px}   /* the gap before it is then as wide as the space after its dot */
-#au-out .tundo{background:none;border:0;padding:0;margin-left:2px;font:inherit;font-weight:500;color:var(--accent);cursor:pointer}#au-out .tundo:hover{text-decoration:underline;text-underline-offset:3px}   /* points that could not be drafted, beside the count */
+/* beside the count, on its line: points that could not be drafted, and points not checked against open questions */
+#au-count,#au-out,#au-unchecked{white-space:nowrap}
+#au-out,#au-unchecked{margin-left:-4px}   /* the gap before it is then as wide as the space after its dot */
+#au-unchecked{min-width:0;overflow:hidden;text-overflow:ellipsis}   /* the last to give way, its words in its tooltip */
+#au-out .tundo,#au-unchecked .tundo{background:none;border:0;padding:0;margin-left:2px;font:inherit;font-weight:500;
+  color:var(--accent);cursor:pointer}
+#au-out .tundo:hover,#au-unchecked .tundo:hover{text-decoration:underline;text-underline-offset:3px}
 .lnkdlg .srow{border-top:0}
 .lnkdlg .phrow{display:grid;grid-template-columns:14px minmax(0,1fr);gap:12px;padding:12px 8px}.lnkdlg .phrow+.phrow{border-top:1px solid var(--line)}
 .lnkdlg .phrow .bx{width:14px;height:14px;border-radius:4px;border:1px solid var(--line)}
