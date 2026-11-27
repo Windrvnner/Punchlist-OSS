@@ -7,7 +7,9 @@ export const ALLOWANCE_FILES = [
   'scripts/vendor-names-allowance.json',
   'scripts/skipped-tests-allowance.json',
 ];
-export const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' });
+// History output is large, so the buffer is far above the default.
+export const git = (cwd, ...args) =>
+  execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
 // A skipped test is listed once for each platform it is skipped on.
 export const keyOf = ({ file, kind, line, platform }) =>
   JSON.stringify(kind === 'skipped' ? [file, kind, line, platform] : [file, kind, line]);

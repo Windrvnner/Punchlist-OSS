@@ -1,8 +1,10 @@
 // Refuses a commit that carries an API key, a sign-in token or a .env file. Run by the pre-commit hook on what is
-// staged (the content git will commit, not the file on disk, which may differ), and by CI on every tracked file.
-// Prints file names only, never what matched.
+// staged (the content git will commit, not the file on disk, which may differ), and by CI on every tracked file and on
+// everything the branch's commits add, even what a later commit removed. Prints file names and short commit ids only,
+// never what matched.
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import { addedFiles, addedText, branchRange } from './branch-commits.mjs';
 
 const all = process.argv.includes('--all');
 const git = (...args) => execFileSync('git', args, { maxBuffer: 512 * 1024 * 1024 });
@@ -28,13 +30,25 @@ const PRIVATE_KEY = /-----BEGIN ([A-Z]+ )*PRIVATE KEY( BLOCK)?-----/;
 let own = '';
 try { own = /^PUNCHLIST_AI_KEY=(.+)$/m.exec(fs.readFileSync('.env', 'utf8'))?.[1].trim() ?? ''; } catch { /* no .env here (CI) */ }
 
+const isEnvFile = (name) => /(^|\/)\.env($|\.)/.test(name) && !name.endsWith('.env.example');
+const looksLikeSecret = (text) => KEY.test(text) || PRIVATE_KEY.test(text) || (own.length >= 16 && text.includes(own));
+
 const bad = [];
 for (const f of files) {
-  if (/(^|\/)\.env($|\.)/.test(f) && !f.endsWith('.env.example')) { bad.push(`${f} (an env file)`); continue; }
+  if (isEnvFile(f)) { bad.push(`${f} (an env file)`); continue; }
   let text;
   try { text = (all ? fs.readFileSync(f) : git('show', `:${f}`)).toString('latin1'); }
   catch { bad.push(`${f} (could not be read to check)`); continue; }
-  const ownKey = own.length >= 16 && text.includes(own);
-  if (KEY.test(text) || PRIVATE_KEY.test(text) || ownKey) bad.push(`${f} (looks like an API key or token)`);
+  if (looksLikeSecret(text)) bad.push(`${f} (looks like an API key or token)`);
+}
+// A secret a branch commit added is in the history even when a later commit removed it.
+const range = all ? branchRange() : null;
+if (range) {
+  for (const { sha, file } of addedFiles(range)) {
+    if (isEnvFile(file)) bad.push(`${file} (an env file, added in ${sha.slice(0, 8)})`);
+  }
+  for (const { sha, file, text } of addedText(range)) {
+    if (looksLikeSecret(text)) bad.push(`${file} (looks like an API key or token, added in ${sha.slice(0, 8)})`);
+  }
 }
 if (bad.length) { console.error(`Refused: secrets must stay in .env, which git ignores.\n  ${bad.join('\n  ')}`); process.exit(1); }
