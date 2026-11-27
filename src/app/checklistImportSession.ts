@@ -452,8 +452,9 @@ export class ChecklistImportSession {
     try {
       const result = await submitChecklist(this.store, this.key, target, selection.items, file);
       if (!result.ok) return this.activity('', `Couldn’t import: ${result.error.message}`);
-      this.busy = '';
-      this.back();
+      // Once written, the dialog goes back to the lists, even if this session was closed during the write.
+      this.dispose();
+      this.store.ui({ firmChecklist: { step: 'lists' } });
       showChecklistOutcome(this.store, target.layer, target.name, result.value);
     } catch (error) {
       this.activity('', `Couldn’t import: ${error instanceof Error ? error.message : String(error)}`);

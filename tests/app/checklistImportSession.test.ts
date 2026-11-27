@@ -120,7 +120,7 @@ it('keeps new typing from a reopened import while its previous instance finishes
     held.release();
     await write;
   }
-  expect(app.store.get().ui.firmChecklist?.step).toBe('import');
+  expect(app.store.get().ui.firmChecklist?.step).toBe('lists');
   expect(app.store.get().ui.toasts.some((toast) => toast.action?.label === 'Undo All')).toBe(true);
   second.close();
   const reopened = open();
