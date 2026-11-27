@@ -206,6 +206,7 @@ describe('a draft beside a document that cannot be opened on this PC', () => {
     val(await s.ai.answer(ask('What ratio does the facility agreement markup set?')));
     const last = s.calls.filter((c) => c.prompt.startsWith('Documents:')).at(-1)!;
     expect(sentNames(last)).toEqual(expect.arrayContaining([DRAFT.name, FA.name]));
+    expect(last.files.length).toBe(2);
     expect(wasLines(last.prompt).length).toBe(LISTED);
     // 1,000 and 500 refused: the shorter list is kept when the document that could not be opened is taken out
     expect(refused.n).toBe(2);

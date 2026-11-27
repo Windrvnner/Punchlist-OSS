@@ -1591,7 +1591,8 @@ export function nodeAi(o: AiOptions) {
     Promise<{ files: string[]; listing: string; got: Sent[] }> {
     const files: string[] = []; const lines: string[] = []; const got: Sent[] = [];
     const idOf = (s: Sent) => docHandle(s, spansDeals);
-    share.listed = 0;                                                     // counted afresh for this request (#1381)
+    // the passages this request lists are counted afresh (#1381)
+    share.listed = 0;
     for (const dealId of new Set(sent.map((s) => s.dealId))) {
       const mine = sent.filter((s) => s.dealId === dealId); const ids = await o.keeper.ensure(await o.docs.wanted(dealId, mine.map((s) => s.rec.docId)));
       describeSoon(dealId, mine.map((s) => s.rec.docId));                          // a document that is read is worth describing: once, and not waited for
