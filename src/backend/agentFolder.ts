@@ -10,16 +10,11 @@ import { cites, dealDocKey, foundAt, sameDoc, withPlaces } from './agentRun';
 import { codeOf, type AgentKit, type Cited, type DealDoc, type Run, type Sent } from './agentKit';
 import type { ResearchStep } from '../ports';
 import type { DocRecord } from './documents';
-import { batchAsk, noun, oneLine, quoted, shorten } from './agentPrompts';
+import { batchAsk, noun, oneLine, quoted } from './agentPrompts';
 import { docsUnusable } from './recordIds';
 
 /** batches of a folder review read at the same time */
 const AT_ONCE = 3;
-/**
- * the most characters one folder read tells the main session of what it found: well inside a model's context however
- * large the folder
- */
-const FOLDER_TEXT = 24_000;
 /** the fields a batch's reply is read for */
 const BATCH_KEYS = ['text', 'sources'];
 /** about how many characters listing one document to cite adds to the main session's prompt, apart from its handle */
@@ -84,8 +79,8 @@ export class FolderReader {
    * found, for the prompt. A folder read for the same thing before in this conversation reads only what was not read
    * then (documents added since included); for something else, or in another conversation, it is read again. More
    * than `folderDocs` documents still to read are read only when the person has `agreed`. What goes back is bounded
-   * (`FOLDER_TEXT`): batches that found nothing are counted, not listed, and past the bound a batch that found
-   * something gives its places only. Throws only when the service cannot be reached.
+   * (the run's `pages.chars`, #480): batches that found nothing are counted, not listed, and past the bound a batch
+   * that found something gives its places only. Throws only when the service cannot be reached.
    */
   async read(said: string, lookFor: string, agreed: boolean): Promise<string> {
     const look = oneLine(lookFor).toLowerCase();
@@ -315,7 +310,7 @@ class FolderPass {
     this.findings[reading.index] = {
       at: reading.at,
       ids: got.map((x) => this.run.idOf(x)).join(', '),
-      text: shorten(withPlaces(text, ids, sources), 1200),
+      text: withPlaces(text, ids, sources),
       places: [...new Set(sources.map((x, i) => `${ids[i]} ${x.loc}`))].join(', '),
       got,
     };
@@ -351,6 +346,7 @@ class FolderPass {
    * is counted, and its documents are not listed to the model, so the prompt stays bounded however large the folder.
    */
   private boundedFindings(): string[] {
+    const room = this.run.pages.chars;
     let used = 0;
     let over = 0;
     const lines: string[] = [];
@@ -360,8 +356,8 @@ class FolderPass {
       const short = `${finding.at}: passages at ${finding.places}.`;
       const newDocs = finding.got.filter((x) => !this.before.has(x));
       const listing = newDocs.reduce((sum, x) => sum + listingChars(this.run.idOf(x)), 0);
-      const line = used + full.length + listing <= FOLDER_TEXT / 2 ? full
-        : used + short.length + listing <= FOLDER_TEXT ? short
+      const line = used + full.length + listing <= room / 2 ? full
+        : used + short.length + listing <= room ? short
         : '';
       if (line) {
         lines.push(line);

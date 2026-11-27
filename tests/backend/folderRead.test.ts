@@ -4,6 +4,7 @@
  * reading them a batch at a time, at realistic scale (a data room of 700 documents, 400 of them in the folder).
  */
 import { describe, it, expect } from 'vitest';
+import { control } from '../../src/control';
 import { nodeAi, type AiOptions } from '../../src/backend/ai';
 import { listingChars } from '../../src/backend/agentFolder';
 import { StandInService } from '../../src/backend/service';
@@ -123,6 +124,11 @@ describe('a name that is only a number', () => {
   });
 });
 
+/** a model's room at the default `limits.compactAt`, in characters (agent.ts `pageChars`) */
+const DEFAULT_ROOM = (125_000 * control.limits.charsPerToken) / 2;
+/** the room at a stand-in `compactAt` of this many tokens */
+const roomAt = (compactAt: number) => (compactAt * control.limits.charsPerToken) / 2;
+
 describe('reading a whole folder from the chat', () => {
   /** the grid permit's tag, as the batch that read it gave it, and a stand-in that finds the expiry in it alone */
   const gridReads = (seen: { tag?: string }) => (c: Call) => { const g = listed(c).find((x) => x.path.endsWith('Interconnection permit.pdf')); if (g) seen.tag = g.tag; return g ? { text: 'It expires on March 1, 2031. [1]', sources: [{ doc: g.tag, page: 1, quote: 'expires on March 1, 2031' }] } : { text: '', sources: [] }; };
@@ -179,7 +185,8 @@ describe('reading a whole folder from the chat', () => {
     });
     expect((await s.ai.answer(ask('Review the permits folder'))).ok).toBe(true);
     expect(s.batches.length).toBe(250);
-    const next = s.turns[1].prompt; expect(next.length).toBeLessThan(40_000);
+    const next = s.turns[1].prompt;
+    expect(next.length).toBeLessThan(DEFAULT_ROOM + 20_000);   // the room, plus the turn's own fixed text
     expect(next).toContain('You had all 2000 documents in VDR/Permits read');
     expect(next).toMatch(/Documents \d+–\d+: passages at doc_\w+ p\. 1/);
     expect(next).toMatch(/\d+ more batches found passages, past what fits here/);
@@ -305,6 +312,75 @@ describe('reading a whole folder from the chat', () => {
       expect(t.batches.length, toolCalls).toBe(1);
       const result = toolCalls === 'native' ? String((seen[1].results as { text: string }[])[0].text) : seen[1].prompt; expect(result, toolCalls).toContain('You had all 12 documents in VDR/Permits read for “expiry”');
     }
+  });
+});
+
+/** a folder of `count` documents where every batch finds something, its text `Batch <n> MARK<n> ` then `filler` */
+function everyBatchFinds(count: number, filler: string, more: Partial<AiOptions> = {}) {
+  const recs = Array.from({ length: count }, (_v, i) => doc(`Permits/Permit ${String(i + 1).padStart(4, '0')}.pdf`));
+  const turn = (_c: Call, k: number) =>
+    k === 1 ? { tool: 'folder', folder: 'permits', lookFor: 'expiry' } : { text: 'ok', sources: [] };
+  return setup(recs, turn, {
+    folderDocs: 5000,
+    reads: (c, k) => {
+      const first = listed(c)[0];
+      return { text: `Batch ${k} MARK${k}END ${filler} [1]`, sources: [{ doc: first.tag, page: 1, quote: 'expires' }] };
+    },
+    ...more,
+  });
+}
+/** what the folder read handed the next turn: the batches' findings, as lines, and the count past the room */
+function handed(prompt: string) {
+  const block = prompt.slice(prompt.indexOf('What they say:\n'));
+  const lines = block.split('\n').filter((l) => /^Documents \d+–\d+:/.test(l));
+  const places = lines.filter((l) => l.includes('passages at')).length;
+  const over = Number(/(\d+) more batches? found passages/.exec(block)?.[1] ?? 0);
+  return { block, full: lines.length - places, places, over };
+}
+
+describe('a folder read is bounded by the model\'s room (#480)', () => {
+  it('a 200-document folder hands every batch\'s findings to the next turn (#480)', async () => {
+    const s = everyBatchFinds(200, 'It expires in 2030 under conditions on noise, dust and water use.');
+    expect((await s.ai.answer(ask('Review the permits folder'))).ok).toBe(true);
+    expect(s.batches.length).toBe(25);
+    const next = s.turns[1].prompt;
+    for (let k = 1; k <= 25; k++) expect(next, `batch ${k}`).toContain(`MARK${k}END`);
+    expect(next).not.toContain('passages at');
+    expect(next).not.toContain('more batches');
+  });
+
+  it('a batch\'s findings longer than 1,200 characters reach the next turn whole (#480)', async () => {
+    const s = everyBatchFinds(8, `${'x'.repeat(1500)} MARKLATE`);
+    expect((await s.ai.answer(ask('Review the permits folder'))).ok).toBe(true);
+    const found = /Documents 1–8: .*$/m.exec(s.turns[1].prompt)![0];
+    expect(found.indexOf('MARKLATE')).toBeGreaterThan(1500);
+  });
+
+  it('the findings and their listing fit the room; each batch is full, places, or counted (#480)', async () => {
+    const compactAt = 2000;
+    const s = everyBatchFinds(200, 'y'.repeat(600), { compactAt });
+    expect((await s.ai.answer(ask('Review the permits folder'))).ok).toBe(true);
+    const { block, full, places, over } = handed(s.turns[1].prompt);
+    expect(full).toBeGreaterThan(0);
+    expect(places).toBeGreaterThan(0);
+    expect(over).toBeGreaterThan(0);
+    expect(full + places + over).toBe(25);
+    // each kept batch cites one document, which the prompt lists after the findings
+    const listing = (full + places) * listingChars(`doc_${'0'.repeat(24)}`);
+    const findings = block.slice(0, block.search(/\d+ more batches? found passages/));
+    expect(findings.length + listing).toBeLessThanOrEqual(roomAt(compactAt));
+  });
+
+  it('a smaller room lists fewer batches in full (#480)', async () => {
+    const fullAt = async (compactAt: number) => {
+      const s = everyBatchFinds(200, 'z'.repeat(600), { compactAt });
+      expect((await s.ai.answer(ask('Review the permits folder'))).ok).toBe(true);
+      return handed(s.turns[1].prompt).full;
+    };
+    const small = await fullAt(3000);
+    const large = await fullAt(9000);
+    expect(small).toBeGreaterThan(0);
+    expect(small).toBeLessThan(large);
   });
 });
 

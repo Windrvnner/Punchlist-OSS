@@ -90,10 +90,10 @@ type Limits = {
 };
 
 /**
- * the most characters a page of findings or questions may hold: half of what the kept conversation holds before it is
- * compacted, so that a search of everything, which gives a page of each in one result, never outgrows what one call
- * may send; the same whichever is searched, so that a page asked for by kind starts where a search of everything's
- * page of that kind stopped (recordSearch.ts `pageOf`, #1091)
+ * the most characters a page of findings or questions, or one folder read's result, may hold: half of what the kept
+ * conversation holds before it is compacted, so that a search of everything, which gives a page of each in one
+ * result, never outgrows what one call may send; the same whichever is searched, so that a page asked for by kind
+ * starts where a search of everything's page of that kind stopped (recordSearch.ts `pageOf`, #1091)
  */
 const pageChars = (limits: Limits, model: string) => (limits.compactAt(model) * control.limits.charsPerToken) / 2;
 

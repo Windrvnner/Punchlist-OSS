@@ -1,7 +1,7 @@
 /**
  * The chat's search of the records the app holds (findings and the Q&A log): ranked by the same BM25 keyword scoring
  * as documents (wordIndex.ts `bm25`), with each record's words counted as the index counts a document's, and any
- * ranking cut into pages of at most one size (#1102) that fit a folder read's text bound (#1091).
+ * ranking cut into pages of at most one size (#1102) that fit the room a folder read's findings have (#1091, #480).
  */
 import { bm25, countWords } from './wordIndex';
 
@@ -30,7 +30,8 @@ export function rankRecords<T>(records: T[], q: Set<string>, text: (x: T) => str
 
 /**
  * page `page` (from 1) of a ranking: at most `size` records, and only as many of them as fit in `chars` characters of
- * their `line`s, as a folder read lists what fits (agentFolder.ts `FOLDER_TEXT`, #1091); the rest go on the next pages.
+ * their `line`s, as a folder read lists what fits (agentFolder.ts `boundedFindings`, #1091, #480); the rest go on the
+ * next pages.
  * A record longer than that has a page of its own, whole. A page past the last has no items.
  */
 export function pageOf<T>(ranked: T[], page: number, size: number, chars: number, line: (x: T) => string): Page<T> {
