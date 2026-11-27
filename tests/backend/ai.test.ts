@@ -2420,8 +2420,8 @@ describe('documents and runners together, on a real folder', () => {
     expect(fs.readdirSync(path.join(root, 'shared')).filter((n) => n.startsWith('checks-'))).toEqual(['checks-office-d1.jsonl']);                       // beside the deal's other shared files, and a second window on the same folder reads it
     expect(val(await nodeAi({ service: svc, docs: { records: docs.records, wanted: docs.wanted }, keeper, repo, shared, installId: 'home' }).gaps('d1'))).toEqual([{ title: 'The model has been audited' }]);
     await ai.described('d1');
-    // three documents read, three descriptions, once each
-    expect(svc.calls.filter((c) => c.prompt.startsWith('Describe')).length).toBe(3);
+    // two documents read, two descriptions, once each
+    expect(svc.calls.filter((c) => c.prompt.startsWith('Describe')).length).toBe(2);
     expect(svc.calls.filter(isCoreAsk).length).toBe(0);                                                                        // and no model is asked which are core
     fs.rmSync(root, { recursive: true, force: true });
   });
