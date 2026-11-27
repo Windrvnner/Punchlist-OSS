@@ -45,11 +45,21 @@ describe('an edit kept aside, merged into the log', () => {
     expect(m.ask.map((x) => [x.question, x.rows.map((r) => r.line)])).toEqual([['A brand new question sroe put in', [501]], ['Question 500 reworded by sroe', [501]]]);   // which is question 500 is asked, never guessed
   });
 
-  it('asks about every row they reworded, however many, and appends none of them as new questions', () => {
-    const base = grid(); const kept = grid(); const log = grid();
-    const reworded = [100, 400, 700, 1000, 1300, 1600, 1900];
+  /** seven rows of a 2,000-row log, each reworded in their kept copy with a response put in */
+  const reworded = [100, 400, 700, 1000, 1300, 1600, 1900];
+  /** the kept copy with those rows reworded, and `more` rows after them */
+  const rewordedKept = (...more: string[][]) => {
+    const kept = grid();
     for (const i of reworded) kept[i] = [String(i), `${q(i)} (typo fixed)`, `sroe on ${i}`, ''];
-    const m = mergeKept(table(base), table(kept), table(log), 'Question', undefined, undefined, 'No.');
+    kept.push(...more);
+    return kept;
+  };
+  /** the kept copy merged into an unchanged log */
+  const mergeReworded = (kept: string[][]) =>
+    mergeKept(table(grid()), table(kept), table(grid()), 'Question', undefined, undefined, 'No.');
+
+  it('asks about every row they reworded, however many, and appends none of them as new questions', () => {
+    const m = mergeReworded(rewordedKept());
     expect(m.added).toBe(0);
     expect(m.steps.filter((s) => s.kind === 'rows')).toEqual([]);
     expect(m.ask.map((x) => x.question)).toEqual(reworded.map((i) => `${q(i)} (typo fixed)`));
@@ -58,11 +68,7 @@ describe('an edit kept aside, merged into the log', () => {
   });
 
   it('asks about every reworded row and a new question beside them, and appends nothing', () => {
-    const base = grid(); const kept = grid(); const log = grid();
-    const reworded = [100, 400, 700, 1000, 1300, 1600, 1900];
-    for (const i of reworded) kept[i] = [String(i), `${q(i)} (typo fixed)`, `sroe on ${i}`, ''];
-    kept.push(['', 'A brand new question sroe put in', 'sroe on the new one', '']);
-    const m = mergeKept(table(base), table(kept), table(log), 'Question', undefined, undefined, 'No.');
+    const m = mergeReworded(rewordedKept(['', 'A brand new question sroe put in', 'sroe on the new one', '']));
     expect(m.added).toBe(0);
     expect(m.steps.filter((s) => s.kind === 'rows')).toEqual([]);
     const asked = [...reworded.map((i) => `${q(i)} (typo fixed)`), 'A brand new question sroe put in'];
