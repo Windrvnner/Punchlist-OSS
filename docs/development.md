@@ -112,8 +112,9 @@ any reference to `setTimeout`, `setInterval`, or `requestIdleCallback`;
 a call of a list method named in `scripts/pane-of-glass-rules.mjs` (such as `.sort`, `.filter`, `.slice`, `.forEach`,
 `.reverse`, or `.indexOf`) or of `Object.groupBy` or `Map.groupBy`;
 a `for`, `while`, or `do` loop;
-a comparison of a `.length` or `.size` read with anything but 0, an assignment to `.length`, and a numeric
-`maxLength`, `minLength`, `min`, or `max` attribute;
+a comparison with anything but 0 of a plain dotted `.length` or `.size` read, or of `+` or `-` arithmetic containing
+one (computed reads such as `rows['length']` and other arithmetic such as `rows.length * 2` are not caught), an
+assignment to `.length`, and a numeric `maxLength`, `minLength`, `min`, or `max` attribute;
 `Date.parse`, `Date.UTC`, `Date.now`, and `new Date` with arguments;
 and a regex literal or a `RegExp` call.
 Any other method, property, or construct is review's job, for example `.split`, `.trim`, `.startsWith`, `.pop`,
