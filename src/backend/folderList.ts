@@ -15,7 +15,7 @@ export const folderKey = (s: string) => plain(s).replace(/^\d+(?: \d+)* /, '').r
 const plain = (s: string) => withoutTheAndFolder(` ${tokens(s).join(' ')} `);
 /**
  * a space-padded name without the word "folder" and a leading "the", spaces collapsed. A "folder" inside a name goes
- * too, as it does in the words; folders whose names are then equal are left to the word match
+ * too, as it does in the words
  */
 const withoutTheAndFolder = (padded: string) => padded
   .replace(/ folders? /g, ' ')

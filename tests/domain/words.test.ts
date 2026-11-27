@@ -13,4 +13,3 @@ describe('the words the search index keeps, shared by the app and the backend (#
     expect(fold('agreements')).toBe('agreement');
   });
 });
-
