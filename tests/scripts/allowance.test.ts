@@ -51,6 +51,11 @@ describe('platform in the key of a skipped entry', () => {
     ]);
   });
 
+  it('carries no platform into the entries of any other kind', () => {
+    const match = { file, kind: 'list', line, platform: 'linux' };
+    expect(groupMatches([match, { ...match, platform: 'win32' }])).toEqual(found(2));
+  });
+
   it('lists the same skipped test once for each platform', () => {
     const seen = [{ ...skipped, platform: 'linux' }, { ...skipped, platform: 'win32' }];
     expect(problems(seen, seen)).toEqual([]);

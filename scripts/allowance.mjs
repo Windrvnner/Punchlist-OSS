@@ -17,7 +17,7 @@ export function groupMatches(matches) {
   const grouped = new Map();
   for (const { file, kind, line, platform, number } of matches) {
     const entry = { file, kind, line: line.trim(), count: 0 };
-    if (platform !== undefined) entry.platform = platform;
+    if (kind === 'skipped') entry.platform = platform;
     const known = grouped.get(keyOf(entry)) ?? entry;
     known.count += 1;
     // Line numbers are for display only; they are not part of the key.
