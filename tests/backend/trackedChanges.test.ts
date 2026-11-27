@@ -3,7 +3,7 @@
 // the rest counted, and again, until none is listed, before any document is left out (#1381). Tested at deal scale:
 // a 150-page facility agreement draft with 1,000 changed passages beside the deal's other documents.
 import { describe, it, expect } from 'vitest';
-import { tooLong, withFewerChanges, changesFor, type ChangeShare } from '../../src/backend/limits';
+import { tooLong, withFewerChanges, type ChangeShare } from '../../src/backend/limits';
 import {
   setup, doc, deal, finding, itemsIn, OK, val, ask, sentNames, clauseChanges, wasLines, isVerifyAsk, affectedAs,
   type Call,
@@ -196,10 +196,25 @@ describe('a draft whose request is refused as too long later in a run', () => {
   });
 });
 
+describe('a draft beside a document that cannot be opened on this PC', () => {
+  it("an answer's read keeps halving the changes once it sends fewer documents, with no request refused again", async () => {
+    const wanted = async (_d: string, ids: string[]) => [DRAFT, FA].filter((r) => ids.includes(r.docId))
+      .map((r) => ({ docId: r.docId, name: r.name, read: () => new TextEncoder().encode(r.name) }));
+    const s = setup(() => ({ text: 'The ratio is 1.20x.', sources: [] }), { d1: [DRAFT, FA, TS] },
+      { changes: clauseChanges(PASSAGES), library: [], wanted });
+    await deal(s.repo); const refused = refusing(s);
+    val(await s.ai.answer(ask('What ratio does the facility agreement markup set?')));
+    const last = s.calls.filter((c) => c.prompt.startsWith('Documents:')).at(-1)!;
+    expect(sentNames(last)).toEqual(expect.arrayContaining([DRAFT.name, FA.name]));
+    expect(wasLines(last.prompt).length).toBe(LISTED);
+    // 1,000 and 500 refused: the shorter list is kept when the document that could not be opened is taken out
+    expect(refused.n).toBe(2);
+  });
+});
+
 describe('the halving of a change list ends', () => {
   /** a request that lists floor(n / 2^halvings) of `n` changes, as send() does, and is always refused as too long */
   const refusedListing = (n: number, sent: number[]) => async (share: ChangeShare) => {
-    changesFor(share, 'd1');
     share.listed = Math.floor(n / 2 ** share.halvings);
     sent.push(share.listed);
     throw tooLong('too long', 400);

@@ -59,7 +59,7 @@ import {
   readJson, unfinished, list as listOf, strings, prose, PARAGRAPH_SEAM, int, pageOf, word, isObject,
 } from './lenient';
 import { listReadPrompt, listReply, readListInParts } from './listReadAi';
-import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK, changesFor,
+import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK,
   withFewerChanges, type ChangeShare } from './limits';
 import { UNREAD_REPLY, UNUSABLE_REPLY, UNREACHED, CUT_ON_IT, CUT_BEFORE_IT, UNUSABLE_ON_IT } from './limits';
 import { inParts, partSize, type PartReply, type PartsDone } from './parts';
@@ -1591,7 +1591,7 @@ export function nodeAi(o: AiOptions) {
     Promise<{ files: string[]; listing: string; got: Sent[] }> {
     const files: string[] = []; const lines: string[] = []; const got: Sent[] = [];
     const idOf = (s: Sent) => docHandle(s, spansDeals);
-    changesFor(share, sent.map((s) => `${s.dealId}|${s.rec.docId}`).join(' '));
+    share.listed = 0;                                                     // counted afresh for this request (#1381)
     for (const dealId of new Set(sent.map((s) => s.dealId))) {
       const mine = sent.filter((s) => s.dealId === dealId); const ids = await o.keeper.ensure(await o.docs.wanted(dealId, mine.map((s) => s.rec.docId)));
       describeSoon(dealId, mine.map((s) => s.rec.docId));                          // a document that is read is worth describing: once, and not waited for
