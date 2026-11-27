@@ -1,5 +1,33 @@
 [
   {
+    "file": "src/ui/addUnresolved.tsx",
+    "kind": "limit",
+    "line": "<Modal onClose={shut} label=\"Add all unresolved to Q&A\" blur className={`sdlg xdlg lnkdlg ${(!ready && !error) || (ready && ready.points.length + ready.links.length > 8) ? 'tall' : ''}`}>",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/addUnresolved.tsx",
+    "kind": "limit",
+    "line": "{ready && !error && ready.out.length > 0 && <span id=\"au-out\">{kept.length || links.length ? '· ' : ''}{redo ? `Drafting ${ready.out.length.toLocaleString('en-US')} more…` : <>{ready.out.length.toLocaleString('en-US')} point{ready.out.length === 1 ? '' : 's'} could not be drafted. <button type=\"button\" class=\"tundo\" id=\"au-retry-out\" disabled={busy} onClick={() => void retryOut()}>Retry</button></>}</span>}<span class=\"grow\" />",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/addUnresolved.tsx",
+    "kind": "list",
+    "line": "{!(!ready && error === unread) && <div class=\"xfoot\"><span id=\"au-count\" class={error ? 'err' : ''} role={error ? 'alert' : undefined}>{(!ready && error === unread ? '' : error) || (!ready ? (count ? `Phrasing ${plural(count)}` : '') : [kept.length && plural(kept.length), links.length && `${links.length.toLocaleString('en-US')} linked`].filter(Boolean).join(' · '))}</span>",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/answer.tsx",
+    "kind": "list",
+    "line": "const page = DEAL_PAGES.find(([id]) => id === offer.page)?.[1] ?? '';",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
     "file": "src/ui/answer.tsx",
     "kind": "list",
     "line": "const suggested = deal ? (suggest ?? []).map((id) => state.questions[id]).filter((q) => !!q) : [];",
@@ -12,6 +40,20 @@
     "line": "return tags.filter(Boolean).join(' · ');",
     "count": 1,
     "issue": 1264
+  },
+  {
+    "file": "src/ui/answerCards.tsx",
+    "kind": "list",
+    "line": "location.hash = href.slice(1);",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/app.tsx",
+    "kind": "limit",
+    "line": "if (name.length <= 32 || w.length < 5) return name;",
+    "count": 2,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
   },
   {
     "file": "src/ui/app.tsx",
@@ -36,10 +78,38 @@
   },
   {
     "file": "src/ui/app.tsx",
+    "kind": "list",
+    "line": "requestAnimationFrame(() => { const back = backTo.map((sel) => document.querySelector<HTMLElement>(sel)).find(Boolean); if (back) back.focus(); else if (!document.activeElement || document.activeElement === document.body) document.getElementById('view')?.focus({ preventScroll: true }); });",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/app.tsx",
+    "kind": "list",
+    "line": "return `${w.slice(0, 2).join(' ')}…${w.slice(-2).join(' ')}`;",
+    "count": 2,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/app.tsx",
+    "kind": "loop",
+    "line": "let card: HTMLElement | null = t; while (card && !card.querySelector(':scope > .cacts')) card = card.parentElement;",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/app.tsx",
     "kind": "pattern",
     "line": "const startedOn = useRef<string | null>((/d_[0-9A-Za-z]+/.exec(location.hash) ?? [null])[0]);",
     "count": 1,
     "issue": 1356
+  },
+  {
+    "file": "src/ui/app.tsx",
+    "kind": "pattern",
+    "line": "const t = e.target as HTMLElement; const typing = /INPUT|TEXTAREA|SELECT/.test(t.tagName) || t.isContentEditable;",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
   },
   {
     "file": "src/ui/checklist.tsx",
@@ -50,10 +120,52 @@
   },
   {
     "file": "src/ui/checklist.tsx",
+    "kind": "limit",
+    "line": "{searched.length > 0 && <> Searched for {searched.map((x, i) => <Fragment key={x.q}>{i ? (i === searched.length - 1 ? ' and ' : ', ') : ''}<span title={said(x.n)} aria-description={said(x.n)}>“{x.q}”</span></Fragment>)}.</>}",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/checklist.tsx",
+    "kind": "limit",
+    "line": "{un.length > 0 && ` ${names(un)} ${un.length === 1 ? 'has' : 'have'} no readable text and ${un.length === 1 ? 'was' : 'were'} not read.`}",
+    "count": 2,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/checklist.tsx",
+    "kind": "list",
+    "line": "aria-label=\"Show\">{filters.filter(([k]) => !folded.some(([f]) => f === k)).map(([k, l]) =>",
+    "count": 2,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/checklist.tsx",
+    "kind": "list",
+    "line": "const cut = [...b.querySelectorAll(':scope > .ckp')].map((c) => c.getBoundingClientRect()).find((x) => x.top < top && x.bottom > top);",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/checklist.tsx",
     "kind": "list",
     "line": "const first = r.sources?.[0]; const where = first ? `${first.doc}, ${first.loc}${r.sources!.length > 1 ? ` and ${r.sources!.length - 1} more` : ''}` : r.docs.slice(0, 2).map((x) => x.name).join(', ') + (r.docs.length > 2 ? ` and ${r.docs.length - 2} more` : '');",
     "count": 1,
     "issue": 1298
+  },
+  {
+    "file": "src/ui/checklist.tsx",
+    "kind": "list",
+    "line": "const hidden = folded.some(([k]) => k === on);   // the filter that is on is in the menu",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/checklist.tsx",
+    "kind": "list",
+    "line": "const index = shown.findIndex(({ row }) => row.id === activeId);",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
   },
   {
     "file": "src/ui/checklist.tsx",
@@ -75,6 +187,20 @@
     "line": "if (end + letter.length > room) break;",
     "count": 1,
     "issue": 1304
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "limit",
+    "line": "if (fitted.length > words.length) document.execCommand('insertLineBreak');",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "limit",
+    "line": "if (letters.length <= TAG_MAX) return letters.join('');",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
   },
   {
     "file": "src/ui/citedEditor.tsx",
@@ -110,6 +236,13 @@
     "line": "if (start + piece.text.length > end) return text.slice(0, piece.ref ? start : end);",
     "count": 1,
     "issue": 1311
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "list",
+    "line": "return `${letters.slice(0, TAG_MAX - 1).join('').trimEnd()}…`;",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
   },
   {
     "file": "src/ui/citedEditor.tsx",
@@ -163,9 +296,65 @@
   {
     "file": "src/ui/citedEditor.tsx",
     "kind": "pattern",
+    "line": "const words = fitted.replace(/\\n+$/, '');",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "pattern",
     "line": "else out = out.replace(/[ \\t]+$/, '');   // the space before a marker left out goes with it",
     "count": 1,
     "issue": 1324
+  },
+  {
+    "file": "src/ui/closeSettled.tsx",
+    "kind": "limit",
+    "line": "<Modal onClose={shut} label=\"Close settled questions\" blur className={`sdlg xdlg lnkdlg ${!failed && (!fresh || close.length + out.length > 8) ? 'tall' : ''}`}>",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/closeSettled.tsx",
+    "kind": "list",
+    "line": ": `satisfied · ${where.replace(/ /g, (space, index) => (index > where.lastIndexOf(',') ? ' ' : space))}`;",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/closeSettled.tsx",
+    "kind": "pattern",
+    "line": ": `satisfied · ${where.replace(/ /g, (space, index) => (index > where.lastIndexOf(',') ? ' ' : space))}`;",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/composerParts.tsx",
+    "kind": "limit",
+    "line": "if (state.models.length < 2) return null;",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/composerParts.tsx",
+    "kind": "list",
+    "line": "const current = state.models.find((model) => model.id === state.model);",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/conflict.tsx",
+    "kind": "list",
+    "line": "const at = queue.findIndex((x) => x.id === c.id);",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/conflict.tsx",
+    "kind": "list",
+    "line": "const changedOn = c.versions.filter((v) => !v.deleted).map((v) => v.from).join(' and ');",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
   },
   {
     "file": "src/ui/conflict.tsx",
@@ -173,6 +362,76 @@
     "line": "const data = (c.versions.find((v) => v.data)?.data ?? null) as { title?: string; text?: string } | null;",
     "count": 1,
     "issue": 1357
+  },
+  {
+    "file": "src/ui/conflict.tsx",
+    "kind": "list",
+    "line": "const deletedOn = c.versions.filter((v) => v.deleted).map((v) => v.from).join(' and ');",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/conflict.tsx",
+    "kind": "list",
+    "line": "const others = c.versions.filter((v) => v.id !== picked).map((v) => `${v.here ? 'This PC' : v.from}’s version`).join(' and ');",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/conflict.tsx",
+    "kind": "list",
+    "line": "const pv = c.versions.find((v) => v.id === picked);",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/conflict.tsx",
+    "kind": "list",
+    "line": "const shown = fields.filter(([k]) => compared.shown.includes(k));",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/conflict.tsx",
+    "kind": "list",
+    "line": "const st = compared.statusOnLine ? fields.find(([k]) => k === 'status') : undefined;",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/connection.tsx",
+    "kind": "date",
+    "line": "const [now, set] = useState(() => Date.now());",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/connection.tsx",
+    "kind": "date",
+    "line": "useEffect(() => { const t = setInterval(() => set(Date.now()), 30_000); return () => clearInterval(t); }, []);",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/connection.tsx",
+    "kind": "loop",
+    "line": "for (const t of ['keydown', 'mousedown', 'wheel']) document.addEventListener(t, off, true);",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/connection.tsx",
+    "kind": "loop",
+    "line": "return () => { for (const t of ['keydown', 'mousedown', 'wheel']) document.removeEventListener(t, off, true); };",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/connection.tsx",
+    "kind": "timer",
+    "line": "useEffect(() => { const t = setInterval(() => set(Date.now()), 30_000); return () => clearInterval(t); }, []);",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
   },
   {
     "file": "src/ui/conversation.tsx",
@@ -197,10 +456,73 @@
   },
   {
     "file": "src/ui/deal.tsx",
+    "kind": "limit",
+    "line": "const fits = (k: number) => { h.textContent = k >= letters.length ? name : `${letters.slice(0, k).join('').trimEnd()}…${tail}`; return h.scrollWidth <= room; };",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/deal.tsx",
+    "kind": "limit",
+    "line": "const text = lo >= letters.length ? name : `${letters.slice(0, lo).join('').trimEnd()}…${tail}`;",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/deal.tsx",
+    "kind": "list",
+    "line": "<span class=\"tp\">{DEAL_PAGES.find((p) => p[0] === route)![1]}</span>",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/deal.tsx",
     "kind": "list",
     "line": "const facts = [d.target, d.side, indexing, d.milestone, folderLabel].filter(Boolean).join(' · ');",
     "count": 1,
     "issue": 1262
+  },
+  {
+    "file": "src/ui/deal.tsx",
+    "kind": "list",
+    "line": "const fits = (k: number) => { h.textContent = k >= letters.length ? name : `${letters.slice(0, k).join('').trimEnd()}…${tail}`; return h.scrollWidth <= room; };",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/deal.tsx",
+    "kind": "list",
+    "line": "const text = lo >= letters.length ? name : `${letters.slice(0, lo).join('').trimEnd()}…${tail}`;",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/deal.tsx",
+    "kind": "loop",
+    "line": "if (fits(hi)) lo = hi; else while (lo < hi - 1) { const mid = (lo + hi) >> 1; if (fits(mid)) lo = mid; else hi = mid; }",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/dealLabel.tsx",
+    "kind": "list",
+    "line": "<span class=\"twin-focus\">{label.slice(focus.start, focus.end)}</span>",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/dealLabel.tsx",
+    "kind": "list",
+    "line": "<span>{label.slice(0, focus.start)}</span>",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/dealLabel.tsx",
+    "kind": "list",
+    "line": "<span>{label.slice(focus.end)}</span>",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
   },
   {
     "file": "src/ui/dealLabel.tsx",
@@ -211,10 +533,38 @@
   },
   {
     "file": "src/ui/deleted.tsx",
+    "kind": "limit",
+    "line": "{(groups.length > 1 || lists.length > 0) && (",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/deleted.tsx",
+    "kind": "list",
+    "line": "const at = buttons().findIndex((button) => button.dataset.restore === key);",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/deleted.tsx",
+    "kind": "list",
+    "line": "const at = fromAsk ?? buttons().findIndex((b) => b.dataset.restore === key);",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/deleted.tsx",
     "kind": "list",
     "line": "lists.some((list) => list.doc === request.confirmation.input.doc);",
     "count": 1,
     "issue": 1286
+  },
+  {
+    "file": "src/ui/deleted.tsx",
+    "kind": "list",
+    "line": "requestAnimationFrame(() => buttons().find((button) => button.dataset.restore === request?.key)?.focus());",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
   },
   {
     "file": "src/ui/dialogs.tsx",
@@ -232,10 +582,66 @@
   },
   {
     "file": "src/ui/dialogs.tsx",
+    "kind": "limit",
+    "line": "if (e.shiftKey && (i <= 0)) { e.preventDefault(); f[f.length - 1].focus(); } else if (!e.shiftKey && (i === -1 || i === f.length - 1)) { e.preventDefault(); f[0].focus(); }",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/dialogs.tsx",
+    "kind": "list",
+    "line": "<p class=\"ddtext\"><b>{d.name}</b>{label.slice(d.name.length)} will be deleted with its findings and its Q&amp;A.",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/dialogs.tsx",
+    "kind": "list",
+    "line": "const a = document.activeElement; const i = f.indexOf(a as HTMLElement);",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/dialogs.tsx",
+    "kind": "list",
+    "line": "const f = [...ref.current.querySelectorAll<HTMLElement>('button,[href],input,select,textarea,[tabindex]:not([tabindex=\"-1\"])')].filter((el) => !(el as HTMLButtonElement).disabled && el.getClientRects().length);",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/dialogs.tsx",
+    "kind": "list",
+    "line": "const shown = (sel: string) => [...(ref.current?.querySelectorAll<HTMLElement>(sel) ?? [])].find((el) => !(el as HTMLButtonElement).disabled && el.getClientRects().length > 0);",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/dialogs.tsx",
+    "kind": "list",
+    "line": "if (i === -1 && a && ref.current.contains(a)) { const after = (el: HTMLElement) => !!(a.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING); e.preventDefault(); (e.shiftKey ? [...f].reverse().find((el) => !after(el)) ?? f[f.length - 1] : f.find(after) ?? f[0]).focus(); return; }",
+    "count": 3,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/dialogs.tsx",
     "kind": "list",
     "line": "onClick={() => set({ folders: nd.folders.filter((_, at) => at !== index) })}>",
     "count": 1,
     "issue": 1299
+  },
+  {
+    "file": "src/ui/dialogs.tsx",
+    "kind": "list",
+    "line": "xs.find((b) => b.getAttribute('aria-label') === `Remove ${path}`)?.focus();",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+  },
+  {
+    "file": "src/ui/dialogs.tsx",
+    "kind": "loop",
+    "line": "const ro = new ResizeObserver(under); const watch = () => { if (d) for (const c of d.children) ro.observe(c); };   // parts shown later too",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
   },
   {
     "file": "src/ui/docMenu.tsx",
@@ -243,6 +649,13 @@
     "line": "<div class={`dm-r ${on ? 'on' : ''} ${many ? 'many' : ''} ${pages.length === 1 ? 'single' : ''} ${also ? 'also' : ''}`} onClick={() => pick(on ? current : pages[0].i)}>",
     "count": 1,
     "issue": 1312
+  },
+  {
+    "file": "src/ui/docMenu.tsx",
+    "kind": "limit",
+    "line": "const many = pages.length > 3;",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
   },
   {
     "file": "src/ui/docMenu.tsx",
@@ -264,6 +677,13 @@
     "line": "return { text: names.length === 1 ? `Also in ${names[0]}` : `Also in ${names.length} more folders: ${names.join(', ')}`, title: rest.map((p) => [...p.folder.split('/').filter(Boolean), p.name].join(' › ')).join('\\n') };",
     "count": 1,
     "issue": 1312
+  },
+  {
+    "file": "src/ui/docMenu.tsx",
+    "kind": "list",
+    "line": "const on = g.items.some((it) => it.i === current);",
+    "count": 1,
+    "decision": "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
   },
   {
     "file": "src/ui/docMenu.tsx",
