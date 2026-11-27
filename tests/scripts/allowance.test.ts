@@ -226,6 +226,7 @@ describe('git failures', () => {
 
   it('names the error code when git wrote nothing to stderr', () => {
     // output larger than the buffer stops git with an empty stderr
-    expect(() => gitBytes('.', '--version', { maxBuffer: 4 })).toThrow('git --version failed (exit 0): ENOBUFS');
+    // the exit status depends on when git is stopped, so only the cause is asserted
+    expect(() => gitBytes('.', '--version', { maxBuffer: 4 })).toThrow(/ENOBUFS$/);
   });
 });
