@@ -61,5 +61,131 @@
     "line": "const short = mode >= 1; const folded = mode >= 2 ? filters.filter(([k]) => RARE.includes(k)) : [];",
     "count": 1,
     "issue": 1298
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "limit",
+    "line": "const full = editorText(box).length - selectedText().length >= TEXT_MAX;",
+    "count": 1,
+    "issue": 1304
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "limit",
+    "line": "if (end + letter.length > room) break;",
+    "count": 1,
+    "issue": 1304
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "limit",
+    "line": "if (start + piece.text.length > end) return text.slice(0, piece.ref ? start : end);",
+    "count": 1,
+    "issue": 1304
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "limit",
+    "line": "if (text.length <= room) return text;",
+    "count": 1,
+    "issue": 1304
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "list",
+    "line": "&& clip.sources.every((x: Source) => typeof x?.docId === 'string' && typeof x?.loc === 'string');",
+    "count": 1,
+    "issue": 1311
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "list",
+    "line": "const at = from ? sources.findIndex((x) => x.docId === from.docId && x.loc === from.loc) : -1;",
+    "count": 1,
+    "issue": 1311
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "list",
+    "line": "if (start + piece.text.length > end) return text.slice(0, piece.ref ? start : end);",
+    "count": 1,
+    "issue": 1311
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "list",
+    "line": "return text.slice(0, end);",
+    "count": 1,
+    "issue": 1311
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "loop",
+    "line": "for (const code of Array.from(page.querySelectorAll('script, style'))) code.remove();",
+    "count": 1,
+    "issue": 1319
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "loop",
+    "line": "for (const letter of graphemes(text)) {",
+    "count": 1,
+    "issue": 1319
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "loop",
+    "line": "for (const node of Array.from(root.childNodes)) out += nodeText(node);",
+    "count": 1,
+    "issue": 1319
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "loop",
+    "line": "for (const piece of markerPieces(clip.text, clip.sources.length)) {",
+    "count": 1,
+    "issue": 1319
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "loop",
+    "line": "for (const piece of markerPieces(text, sourceCount)) {",
+    "count": 1,
+    "issue": 1319
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "pattern",
+    "line": "const fitted = fitTo(text.replace(/\\r\\n?/g, '\\n'), Math.max(0, room), sources.length);",
+    "count": 1,
+    "issue": 1324
+  },
+  {
+    "file": "src/ui/citedEditor.tsx",
+    "kind": "pattern",
+    "line": "else out = out.replace(/[ \\t]+$/, '');   // the space before a marker left out goes with it",
+    "count": 1,
+    "issue": 1324
+  },
+  {
+    "file": "src/ui/conflict.tsx",
+    "kind": "list",
+    "line": "const data = (c.versions.find((v) => v.data)?.data ?? null) as { title?: string; text?: string } | null;",
+    "count": 1,
+    "issue": 1357
+  },
+  {
+    "file": "src/ui/conversation.tsx",
+    "kind": "limit",
+    "line": "for (let i = 0; i < thread.length; i += 2) pairs.push([thread[i], thread[i + 1]]);",
+    "count": 1,
+    "issue": 1253
+  },
+  {
+    "file": "src/ui/conversation.tsx",
+    "kind": "loop",
+    "line": "for (let i = 0; i < thread.length; i += 2) pairs.push([thread[i], thread[i + 1]]);",
+    "count": 1,
+    "issue": 1253
   }
 ]
