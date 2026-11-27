@@ -1,5 +1,6 @@
 import { firmOf, type Layer } from '../domain/checklist';
 import type { Deal } from '../domain/model';
+import { checkingSays } from './checking';
 import { checklistRows } from './checklistView';
 import { folderIndexCounts, liveFolders } from './indexing';
 import { offFindingCount, type State } from './state';
@@ -77,4 +78,23 @@ export function uncheckedChecklistCount(
 export function checkLeftCount(check: State['checks'][string] | undefined, deep: boolean) {
   if (deep || check?.failedAt || !check?.left || check.left.changed) return 0;
   return check.left.items + check.left.findings;
+}
+
+/** Shared progress can take the line while this PC can still run a check. */
+export function checkLine(state: State, dealId: string) {
+  const check = state.checks[dealId];
+  const deal = state.deals[dealId];
+  if (!deal) return null;
+  const deep = !!check?.offerDeep && !check.left && !check.failedAt;
+  const rest = checkLeftCount(check, deep);
+  const unchecked = uncheckedChecklistCount(state, deal);
+  const shared = checkingSays(check?.checking, check?.busy === 'deep');
+  const warn = !check?.busy && (!!check?.failedAt || !!check?.left || deep || unchecked > 0);
+  const common = { run: { deep, leftOnly: !!rest }, rest, busy: check?.busy, shared, warn };
+  if (shared || check?.busy) return { ...common, kind: 'running' as const };
+  if (check?.failedAt) return { ...common, kind: 'failed' as const, at: check.failedAt };
+  if (check?.left) return { ...common, kind: 'left' as const, ...check.left };
+  if (deep) return { ...common, kind: 'deep' as const, at: check.at, ...check.offerDeep! };
+  if (unchecked) return { ...common, kind: 'unchecked' as const, unchecked };
+  return null;
 }
