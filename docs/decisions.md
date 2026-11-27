@@ -402,6 +402,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
   typing that is not composing in the focused field, Retry, or Take Theirs (#997).
 - A batch issue follows the Batch template: each fix is a sub-issue of the batch, listed as a plain bullet with no
   checkbox (#1238).
+- Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384).
 
 ## Deal screen
 
