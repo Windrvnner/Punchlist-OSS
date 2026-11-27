@@ -34,10 +34,8 @@ it('opens every deal landing, conversation and record route', () => {
 
 it('retains loose text and complete literal braces around several finding links', () => {
   const paragraph = ` Keep {literal} {Permit A|${findingId}} and {cl. 4|other} {B|${findingId}}.  `;
-  expect(briefParts(paragraph)).toEqual([
-    { text: ' Keep {literal} ' }, { text: 'Permit A', findingId }, { text: ' and {cl. 4|other} ' },
-    { text: 'B', findingId }, { text: '.  ' },
-  ]);
+  const parts = briefParts(paragraph).map((part) => typeof part === 'string' ? part : [part[1], part[2]]);
+  expect(parts).toEqual([' Keep {literal} ', ['Permit A', findingId], ' and {cl. 4|other} ', ['B', findingId], '.  ']);
   expect(withoutFindingLinks(paragraph)).toBe(' Keep {literal} Permit A and {cl. 4|other} B.  ');
 });
 

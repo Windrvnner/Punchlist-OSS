@@ -342,22 +342,22 @@ function answered(store: Store, scope: Scope, pending: Message, replied: Replied
   };
 }
 
-/** An answer's text as it leaves the conversation, as a response or a question: finding links as words, no [n] markers. */
-type BriefPart = { text: string; findingId?: string };
+/** A finding link in a brief, "{phrase|f_…}": the phrase is group 1 and the finding's id group 2. */
+const FINDING_LINKS = /\{([^|}]+)\|(f_[0-9A-Z]{26})\}/g;
 
-export function briefParts(paragraph: string): BriefPart[] {
-  const parts: BriefPart[] = [];
+/** A brief paragraph in order: its plain text as strings, and each finding link as its match. */
+export function briefParts(paragraph: string): (string | RegExpMatchArray)[] {
+  const parts: (string | RegExpMatchArray)[] = [];
   let start = 0;
-  for (const match of paragraph.matchAll(/\{([^|}]+)\|(f_[0-9A-Z]{26})\}/g)) {
-    if (match.index > start) parts.push({ text: paragraph.slice(start, match.index) });
-    parts.push({ text: match[1], findingId: match[2] });
-    start = match.index + match[0].length;
+  for (const link of paragraph.matchAll(FINDING_LINKS)) {
+    parts.push(paragraph.slice(start, link.index), link);
+    start = link.index + link[0].length;
   }
-  if (start < paragraph.length) parts.push({ text: paragraph.slice(start) });
-  return parts;
+  return [...parts, paragraph.slice(start)].filter((part) => part !== '');
 }
 
-export const withoutFindingLinks = (text: string) => briefParts(text).map((part) => part.text).join('');
+/** An answer's text as it leaves the conversation, as a response or a question: finding links as words, no [n] markers. */
+export const withoutFindingLinks = (text: string) => text.replace(FINDING_LINKS, '$1');
 export const answerText = (m: Message) => withoutMarkers(withoutFindingLinks(m.text), m.sources?.length ?? 0);
 
 /** A new question from a finding starts with the answer. On a deal, it starts with what was asked. */

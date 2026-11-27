@@ -68,32 +68,15 @@ export function Cited({ text, sources, onOpen, whole, onMore }: { text: string; 
  */
 export function Brief({ paragraphs, deal, onFinding, marked }: { paragraphs: string[]; deal: Deal; onFinding?: (f: Finding) => void; marked?: string }) {
   const s = useAppState();
-  return <>{paragraphs.map((p, i) => <p key={i}>{briefParts(p).map(({ text, findingId }, j) => {
-    const f = findingId && s.findings[findingId];
-    if (!f) return <span key={j}>{text}</span>;
+  return <>{paragraphs.map((p, i) => <p key={i}>{briefParts(p).map((m, j) => {
+    if (typeof m === 'string') return <span key={j}>{m}</span>;
+    const f = s.findings[m[2]];
+    if (!f) return <span key={j}>{m[1]}</span>;
     const open = () => { if (onFinding) onFinding(f); else location.hash = findingHref(f).slice(1); };
     // a finding raised by hand with nothing cited still opens from here; it has no sources to show on hover
-    if (!f.sources.length) return <span key={j} class="ref">
-      <span class={`rb ${f.id === marked ? 'on' : ''}`} role="button" tabIndex={0} onClick={open}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            open();
-          }
-        }}>{text}</span></span>;
-    const more = () => {
-      const shown = sourceLists.get(f.id);
-      wantSources = f.id;
-      open();
-      requestAnimationFrame(() => {
-        if (shown && wantSources === f.id && sourceLists.get(f.id) === shown) {
-          wantSources = null;
-          shown();
-        }
-      });
-    };
-    return <Ref key={j} text={text} sources={f.sources} className={f.id === marked ? 'on' : ''}
-      onOpen={open} openText="Open finding" onMore={more} />;
+    if (!f.sources.length) return <span key={j} class="ref"><span class={`rb ${f.id === marked ? 'on' : ''}`} role="button" tabIndex={0} onClick={open} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}>{m[1]}</span></span>;
+    // every source is within reach: a long list shows a few and "N more", which opens the finding at its full list
+    return <Ref key={j} text={m[1]} sources={f.sources} className={f.id === marked ? 'on' : ''} onOpen={open} openText="Open finding" onMore={() => { const shown = sourceLists.get(f.id); wantSources = f.id; open(); requestAnimationFrame(() => { if (shown && wantSources === f.id && sourceLists.get(f.id) === shown) { wantSources = null; shown(); } }); }} />;
   })}</p>)}</>;
 }
 
