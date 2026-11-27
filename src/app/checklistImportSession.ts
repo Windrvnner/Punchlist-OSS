@@ -80,6 +80,7 @@ export class ChecklistImportSession {
   private review: Review | null;
   private choices: ChecklistChoices;
   private lines: string[] | null;
+  // Each file read, model reply and sheet read takes a token. Only the latest token's result is used.
   private readonly requests = checklistRequests();
   private readonly reader: ReturnType<typeof checklistReading>;
   private readonly reviewer: ReturnType<typeof checklistReviewSession>;
@@ -238,12 +239,12 @@ export class ChecklistImportSession {
     if (!this.choices.remove.has(at)) this.choose({ useReword: toggled(this.choices.useReword, at) });
   };
 
+  // #377: Retain checkmarks on locked rows so restoring a removed item also restores its wording choice.
   setAllWording = (checked: boolean) => {
-    if (!this.review) return;
-    const { remove, useReword } = this.choices;
-    const { eligible } = checklistWordingChoices(this.review, remove, useReword, this.busy === 'importing');
-    const next = new Set(useReword);
-    for (const at of eligible) {
+    const { wording } = this.view.listReview;
+    if (!wording) return;
+    const next = new Set(this.choices.useReword);
+    for (const at of wording.eligible) {
       if (checked) next.add(at);
       else next.delete(at);
     }
@@ -326,6 +327,7 @@ export class ChecklistImportSession {
   };
 
   reread = (where: ImportLocation, accept?: (read: ImportTable) => void) => {
+    // While columns are chosen, a newer sheet or heading row read replaces the one still being read.
     if (!this.live || (this.busy && !(this.choices.byColumns && this.busy === 'reading'))) return Promise.resolve();
     return this.readTable(where, false, accept);
   };
