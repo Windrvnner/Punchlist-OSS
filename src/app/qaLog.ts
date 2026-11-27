@@ -373,7 +373,7 @@ export type QaLogUpdateOutcome =
   | { kind: 'busy' | 'canceled' }
   | { kind: 'failed'; error: Failure; unmerged: number }
   | { kind: 'retrying'; by?: string; retry: RetryLog }
-  | { kind: 'retryLimit'; retry: RetryLog }
+  | { kind: 'retryLimit'; minutes: number; retry: RetryLog }
   | { kind: 'created'; unmerged: number }
   | { kind: 'updated'; counts: UpdateCounts; versions: number; clashed: number;
       action?: { kind: 'resolve' } | { kind: 'show'; questionId: string } };
@@ -426,7 +426,7 @@ export function updateQaLog(store: Store, dealId: string, options: UpdateOptions
 function waitForLog(store: Store, dealId: string, options: UpdateOptions,
   updates: LogUpdates, tries: number, by?: string): QaLogUpdateOutcome {
   const retry = () => updateQaLog(store, dealId, options);
-  if (tries >= LOG_RETRIES) return { kind: 'retryLimit', retry };
+  if (tries >= LOG_RETRIES) return { kind: 'retryLimit', minutes: RETRY_MS * LOG_RETRIES / 60_000, retry };
   const queued: WaitingUpdate = {
     timer: setTimeout(() => void retryWhenIdle(store, dealId, options, updates, queued), RETRY_MS),
     tries: tries + 1,
