@@ -46,11 +46,28 @@ function issuesEndpoint(repository) {
   return new URL(`https://api.github.com/repos/${repository}/issues`);
 }
 
-// A server error or a rate limit (403 or 429) is often gone a moment later, so it is asked again.
+// A server error or a rate limit is often gone a little later, so it is asked again. A 403 is a rate limit only when
+// GitHub says so (no requests left, or a retry-after header); any other 403 is a missing permission.
 const attempts = 3;
 const retryWaitMs = 2000;
-const isTransient = (status) => status >= 500 || status === 403 || status === 429;
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const noRequestsLeft = (headers) => headers.get('x-ratelimit-remaining') === '0';
+
+function isRateLimit({ status, headers }) {
+  if (status === 429) return true;
+  return status === 403 && (noRequestsLeft(headers) || headers.has('retry-after'));
+}
+
+const isTransient = (response) => response.status >= 500 || isRateLimit(response);
+
+// How long GitHub asks to wait: retry-after seconds; else, with no requests left, until x-ratelimit-reset (epoch
+// seconds); else 2 seconds. GitHub sends the rate-limit headers with every answer, so only an empty limit counts.
+function retryDelayMs({ headers }) {
+  if (headers.has('retry-after')) return Number(headers.get('retry-after')) * 1000;
+  if (!noRequestsLeft(headers) || !headers.has('x-ratelimit-reset')) return retryWaitMs;
+  return Math.max(0, Number(headers.get('x-ratelimit-reset')) * 1000 - Date.now());
+}
 
 async function openIssuesPage({ endpoint, token, fetch, wait }, page) {
   if (!token) throw new Error('GITHUB_TOKEN is required');
@@ -61,8 +78,8 @@ async function openIssuesPage({ endpoint, token, fetch, wait }, page) {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
     });
     if (response.ok) return response.json();
-    if (attempt === attempts || !isTransient(response.status)) throw new Error(`GitHub answered ${response.status}`);
-    await wait(retryWaitMs);
+    if (attempt === attempts || !isTransient(response)) throw new Error(`GitHub answered ${response.status}`);
+    await wait(retryDelayMs(response));
   }
 }
 

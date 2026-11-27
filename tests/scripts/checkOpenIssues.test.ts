@@ -15,12 +15,12 @@ afterEach(() => {
 });
 
 // A fake fetch serving the given open-issue pages, then an empty page; it records every requested URL.
-function githubServing(pages: object[][], status = 200) {
+function githubServing(pages: object[][], status = 200, headers: Record<string, string> = {}) {
   const requested: URL[] = [];
   const fetch = async (url: URL) => {
     requested.push(new URL(url));
     const page = Number(new URL(url).searchParams.get('page'));
-    return new Response(JSON.stringify(pages[page - 1] ?? []), { status });
+    return new Response(JSON.stringify(pages[page - 1] ?? []), { status, headers });
   };
   return { fetch, requested };
 }
@@ -94,7 +94,7 @@ describe('issues named by the allowances', () => {
     expect(result.stderr).not.toContain('Cannot reach GitHub');
   });
 
-  it.each([403, 429, 500, 503])('fails when GitHub answers %i on all three attempts', async (status) => {
+  it.each([429, 500, 503])('fails when GitHub answers %i on all three attempts', async (status) => {
     const github = githubServing([[{ number: 5 }]], status);
     const waits: number[] = [];
     const wait = async (ms: number) => { waits.push(ms); };
@@ -103,6 +103,39 @@ describe('issues named by the allowances', () => {
     expect(result.stderr).toContain(`the issues the allowances name (GitHub answered ${status})`);
     expect(github.requested).toHaveLength(3);
     expect(waits).toHaveLength(2);
+  });
+
+  // Waits for each answer; `headers` are the answer's rate-limit headers.
+  async function waitsFor(status: number, headers: Record<string, string>) {
+    const github = githubServing([[{ number: 5 }]], status, headers);
+    const waits: number[] = [];
+    const wait = async (ms: number) => { waits.push(ms); };
+    const result = await checkOpenIssues({ env: goodEnv, fetch: github.fetch, root: repoNaming([5]), wait });
+    return { result, waits, requested: github.requested };
+  }
+
+  it('fails at once on a 403 that is not a rate limit', async () => {
+    const { result, requested } = await waitsFor(403, {});
+    expect(result.stderr).toContain('GitHub answered 403');
+    expect(requested).toHaveLength(1);
+  });
+
+  it('waits until the rate limit resets on a 403 with no requests left', async () => {
+    const reset = String(Math.ceil(Date.now() / 1000) + 30);
+    const { waits, requested } = await waitsFor(403, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': reset });
+    expect(requested).toHaveLength(3);
+    for (const ms of waits) expect(ms).toBeGreaterThan(25_000);
+    for (const ms of waits) expect(ms).toBeLessThanOrEqual(31_000);
+  });
+
+  it('waits the seconds that retry-after gives, and 2 seconds on a server error', async () => {
+    expect((await waitsFor(429, { 'retry-after': '7' })).waits).toEqual([7000, 7000]);
+    expect((await waitsFor(403, { 'retry-after': '3' })).waits).toEqual([3000, 3000]);
+    expect((await waitsFor(502, {})).waits).toEqual([2000, 2000]);
+    // GitHub sends the rate-limit headers with every answer; they set the wait only when no requests are left.
+    const reset = String(Math.ceil(Date.now() / 1000) + 3600);
+    const spare = { 'x-ratelimit-remaining': '4999', 'x-ratelimit-reset': reset };
+    expect((await waitsFor(502, spare)).waits).toEqual([2000, 2000]);
   });
 
   it('retries a server error or rate limit and passes once GitHub answers', async () => {
