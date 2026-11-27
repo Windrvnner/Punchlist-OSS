@@ -93,7 +93,14 @@ Skipped-test entries also carry `platform` and `reason`.
 its matches and removes entries that no longer match; neither adds an issue or decision.
 `node scripts/check-allowance-history.mjs` compares each allowance file with `main`.
 Every entry, whether it cites an issue or a decision, can only be kept, lowered, or removed.
-So a new flagged line in `src/ui` cannot be added: it belongs in `src/app`, formatting helpers included.
+So a new flagged line in `src/ui` cannot be added: it belongs in `src/app`, formatting helpers included, unless it
+is an edit of a listed line that the move rule below accepts.
+Editing a listed line (renaming a variable, reformatting) changes its text, and so its key.
+Its entry may move to the new text when the diff with `main` shows the edit plainly: the same file, kind, and issue or
+decision; the old text no longer in the file; and the old line removed and the new line added in one hunk.
+The moved entries together take at most the old entry's count.
+To move one, run `node scripts/check-pane-of-glass.mjs --list`, which prints the new text, and change the entry's
+`line` to it, keeping its issue or decision.
 An entry whose issue `main` already names cannot switch to another issue or to a decision; a decision entry can
 switch to an issue.
 A `decision` entry needs a decision already on `main`'s `scripts/verified-decisions.json`, so a decision verified in a
