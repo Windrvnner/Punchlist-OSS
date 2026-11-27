@@ -71,6 +71,10 @@ it('settles off only on a mounted checklist after listeners see the triggering s
       await Promise.resolve();
       expect(turns).toEqual(['off', 'all']);
     }
+    turns.length = 0;
+    for (const filter of ['off', 'off', 'off'] as const) store.ui({ checklistFilter: filter });
+    await Promise.resolve();
+    expect(turns).toEqual(['off', 'off', 'off', 'all']);
   } finally {
     store.closing();
     await app.repo.close();
