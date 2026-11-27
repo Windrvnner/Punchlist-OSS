@@ -130,7 +130,7 @@ export function Answer({ scope, message: answer, asked, onOpen, suggest }: {
 }
 
 /**
- * What the answer says: cited sentence by sentence when it has sources ;
+ * What the answer says: cited sentence by sentence when it has sources,
  * else, in a deal, with its findings named as links that open them beside the conversation.
  */
 function AnswerText({ answer, plain, whole, deal, onOpen }: {
