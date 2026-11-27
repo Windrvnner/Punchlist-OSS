@@ -100,7 +100,7 @@ export function FindingLinks({ dealId, f, pane }: { dealId: string; f: Finding; 
       {item && <>
         <div class="lbl">Checklist Item</div>
         <p class="dtxt" id="f-item">
-          <a href={'#' + pageHash('checklist', dealId)} onClick={(e) => openItem(e, item.id)}>{item.text}</a>
+          <a href={`#${pageHash('checklist', dealId)}`} onClick={(e) => openItem(e, item.id)}>{item.text}</a>
         </p>
       </>}
       {asked.length > 0 && <><div class="lbl">Asked</div><AskedList dealId={dealId} qs={asked} id="f-asked" /></>}

@@ -77,7 +77,7 @@ export function PageTop({ deal: d, route, placeholder, noAsk = false }: { deal: 
       <div class="trail">
         <a class="th" href="#deals">Home</a><span class="sep">›</span>
         {route === 'overview' ? <span class="tn" title={d.name}>{d.name}</span> : <>
-          <a class="tn" href={'#' + pageHash('overview', d.id)} title={d.name}>{d.name}</a><span class="sep">›</span>
+          <a class="tn" href={`#${pageHash('overview', d.id)}`} title={d.name}>{d.name}</a><span class="sep">›</span>
           <span class="tp">{DEAL_PAGES.find((p) => p[0] === route)![1]}</span>
         </>}
         {facts && <><span class="sep">·</span><span class="facts">{facts}</span></>}

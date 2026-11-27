@@ -48,7 +48,7 @@ export function markText(f: Finding, questions?: Record<string, { n: number } | 
 /** the dot after a finding's workstream: none when it has no workstream (an imported point the model could not place), so no line starts with a dot */
 const dot = (f: { workstream: string }) => (f.workstream ? ' · ' : '');
 export const findingHref = (f: { dealId: string; id: string }) =>
-  '#' + scopeHash({ kind: 'finding', dealId: f.dealId, findingId: f.id });
+  `#${scopeHash({ kind: 'finding', dealId: f.dealId, findingId: f.id })}`;
 
 /** Text whose sentences end in [n] become cited phrases pointing at sources[n-1]. */
 export function Cited({ text, sources, onOpen, whole, onMore }: { text: string; sources: Source[]; onOpen?: (s: Source) => void; whole?: boolean; onMore?: () => void }) {

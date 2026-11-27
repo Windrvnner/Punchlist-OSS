@@ -153,10 +153,9 @@ function gather(s: State, query: string, itemsShown: number): { hits: Hit[]; ite
     // them; a deal with no items of its own lists what its check holds, once its Checklist has been read
     const own: { id: string; text: string }[] = itemsOf.get(d.id) ?? []; const rows = s.checklists[d.id];
     let here: ReturnType<typeof inDeal> | undefined;   // an item has no place in the deal, so every item hit in it says the same
-    const make = (it: { id: string; text: string }): Hit => ({
-      key: `item|${d.id}|${it.id}`, kind: 'item', title: it.text, ...(here ??= inDeal()),
-      hash: pageHash('checklist', d.id), ui: { selectedChecklist: it.id, checklistFilter: 'all' },
-    });
+    const make = (it: { id: string; text: string }): Hit => ({ key: `item|${d.id}|${it.id}`, kind: 'item',
+      title: it.text, ...(here ??= inDeal()), hash: pageHash('checklist', d.id),
+      ui: { selectedChecklist: it.id, checklistFilter: 'all' } });
     const list = own.length || !Array.isArray(rows) ? own : rows;
     if (list.length) { const x = indexOf(list, `${list === own ? 'items' : 'rows'}|${d.id}`); for (const i of matching(x, l, lq)) { found[itemRank(x, i, l)].push({ it: x.items[i], make }); items++; } }
     for (const q of dealQuestions(s, d.id)) {

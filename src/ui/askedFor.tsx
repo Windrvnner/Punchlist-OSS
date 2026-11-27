@@ -26,7 +26,7 @@ export function AskedFor({ q }: { q: Question }) {
   };
   const link = f
     ? <a href={findingHref(f)} title={`The finding “${name}”`}>“{name}”</a>
-    : <a href={'#' + pageHash('checklist', q.dealId)} title={`The checklist item “${name}”`}
+    : <a href={`#${pageHash('checklist', q.dealId)}`} title={`The checklist item “${name}”`}
       onClick={openItem}>“{name}”</a>;
   return <span class="sub qfor" id="q-for">Asked for {link}</span>;
 }

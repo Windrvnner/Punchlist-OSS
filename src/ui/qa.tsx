@@ -669,7 +669,7 @@ function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted 
             aria-label="Delete question" disabled={!!ro} title={ro ?? 'Delete'}
             onClick={() => setAsking(true)}><Icon name="trash" size={15} /></button></span>
           <a class="btn sm" id="q-discuss"
-            href={'#' + scopeHash({ kind: 'question', dealId: q.dealId, questionId: q.id })}>Discuss</a>
+            href={`#${scopeHash({ kind: 'question', dealId: q.dealId, questionId: q.id })}`}>Discuss</a>
           <CloseDetail onClose={onClose} />
         </div>
       </div>

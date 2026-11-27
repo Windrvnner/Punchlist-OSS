@@ -42,7 +42,7 @@ export function OverviewPage({ dealId }: { dealId: string }) {
         <section class={`twocol ov ${gaps.length ? '' : 'solo'} ${waiting ? 'first' : 'under'}`}>
           {gaps.length > 0 && <div><div class="lbl flagsl"><span role="heading"
             aria-level={2}>Gaps in the Documents</span></div><ul class="gaps linked">{gaps.map((g) => <li key={g.key}><a
-            href={'#' + pageHash('checklist', d.id)}
+            href={`#${pageHash('checklist', d.id)}`}
             onClick={() => store.ui({ checklistFilter: 'gap' })}>{g.title}</a>{g.need &&
             <span>{g.need}</span>}</li>)}</ul></div>}
           <div><Documents deal={d} /></div>
@@ -106,7 +106,7 @@ function Standing({ deal: d }: { deal: Deal }) {
   const qf = (status: 'open' | 'answered' | 'closed') => () => store.ui({ qaFilter: { ...store.get().ui.qaFilter, status } });
   const lines: Line[] = [
     {
-      id: 'ov-findings', title: 'Findings', href: '#' + pageHash('findings', d.id),
+      id: 'ov-findings', title: 'Findings', href: `#${pageHash('findings', d.id)}`,
       go: ff('open'), total: findings.total,
       segs: [
         { k: 'open', n: findings.open, word: 'open', go: ff('open'),
@@ -116,7 +116,7 @@ function Standing({ deal: d }: { deal: Deal }) {
     },
     ...(c ? [checklistLine(d.id, c, cf)] : []),
     {
-      id: 'ov-qa', title: 'Q&A', href: '#' + pageHash('qa', d.id), go: qf('open'), total: questions.total,
+      id: 'ov-qa', title: 'Q&A', href: `#${pageHash('qa', d.id)}`, go: qf('open'), total: questions.total,
       segs: [
         { k: 'open', n: questions.open, word: 'open', go: qf('open') },
         { k: 'prog', n: questions.answered, word: 'answered', go: qf('answered') },

@@ -36,9 +36,9 @@ export function Trail({ scope, deal, backToList }: {
   return (
     <span class="back"><a href="#deals">Home</a>
       {deal && <><Sep /><a class="dn" href={`#${dealHash(state.prefs, deal.id)}`} title={deal.name}>{deal.name}</a></>}
-      {scope.kind === 'question' && <><Sep /><a href={'#' + pageHash('qa', scope.dealId)}>Q&amp;A</a>
+      {scope.kind === 'question' && <><Sep /><a href={`#${pageHash('qa', scope.dealId)}`}>Q&amp;A</a>
         {question && <><Sep /><span class="here" aria-current="page">Q{question.n}</span></>}</>}
-      {scope.kind === 'finding' && <><Sep /><a href={'#' + pageHash('findings', scope.dealId)}>Findings</a></>}
+      {scope.kind === 'finding' && <><Sep /><a href={`#${pageHash('findings', scope.dealId)}`}>Findings</a></>}
       {scope.kind === 'all' && <><Sep /><span class="here" aria-current="page">All deals</span></>}
       {backToList && <><Sep /><a id="back-checklist" href={`#${backToList}`} onClick={backToChecklist}>Checklist</a></>}
     </span>
