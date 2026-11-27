@@ -3,9 +3,8 @@
  * Unresolved preview, or logging a question it drafted. The model only proposes; code checks the proposal against the
  * deals and the conversation, and nothing runs until a person presses the button.
  */
-import { myDeals } from './state';
 import type { Scope } from './conversations';
-import { DEAL_PAGES, pageHash, type Landing, type State } from './state';
+import { DEAL_PAGES, pageHash, type Landing, type State, myDeals } from './state';
 import type { Store } from './store';
 import { openNewDeal } from './dealFolders';
 import { openAddUnresolved } from './addUnresolved';

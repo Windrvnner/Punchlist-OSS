@@ -33,7 +33,9 @@ export const SEARCH_FROM = 9;
  * `float` puts the open menu on the page rather than inside the button's parent, for use in a pop-up, whose scrolling
  * would otherwise cut it off; a float menu closes when what is under it scrolls.
  */
-export function PickList({ id, label, names, cur, onPick, className, float, end, disabled, title, empty = 'Not set', chev }: {
+export function PickList({
+  id, label, names, cur, onPick, className, float, end, disabled, title, empty = 'Not set', chev,
+}: {
   id: string; label: string; names: PickName[]; cur: string; onPick: (v: string) => void;
   className: string; float?: boolean; end?: boolean; disabled?: boolean; title?: string; empty?: string;
   /** a drawn chevron after the value, as an editable value that is picked from a list ends in (design.md, Editable values) */

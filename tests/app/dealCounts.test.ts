@@ -3,7 +3,8 @@ import { expect, it } from 'vitest';
 import { checklistView } from '../../src/app/checklistView';
 import { memoItems } from '../../src/app/memo';
 import {
-  checklistStandingParts, checkLine, checklistListCounts, checklistStandingCounts, checkLeftCount, findingCounts, indexingTotals, questionCounts,
+  checklistStandingParts, checkLine, checklistListCounts, checklistStandingCounts,
+  checkLeftCount, findingCounts, indexingTotals, questionCounts,
   uncheckedChecklistCount,
 } from '../../src/app/dealCounts';
 import { removableIssuesLists, visibleDeletedNotes } from '../../src/app/deletedView';

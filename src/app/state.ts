@@ -1,3 +1,4 @@
+import { freshDealUi } from './dealUi';
 import { distinguishingWords, type TwinFocus } from './dealLabel';
 import type { Deal, Question, Finding, Tombstone, Member, Operation, DealId, QuestionId, FindingId, AuditEntry, Source, Folder, RecordKind, ClashKind } from '../domain/model';
 import type { Item, ListRecord } from '../domain/checklist';
@@ -219,7 +220,6 @@ export interface State {
 }
 
 export { dealUiOnRouteChange, isMine, myDeals, pickNames, DEAL_UI_DEFAULTS } from './dealUi';
-import { freshDealUi } from './dealUi';
 
 export const initialState = (can = capabilities()): State => ({
   can,

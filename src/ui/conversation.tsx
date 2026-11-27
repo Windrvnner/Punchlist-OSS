@@ -3,7 +3,6 @@
 import type { RefObject } from 'preact';
 import { useSlashCommands } from './slashMenu';
 import { SERVICE } from '../control';
-import { myDeals } from '../app/state';
 import { ReadOnlyContext } from './editField';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { useAppState, useStore, lastInput } from './hooks';
@@ -17,7 +16,7 @@ import {
 } from '../app/conversations';
 import { isOwnFiles, type Deal, type Question, type Source } from '../domain/model';
 import { attachFiles, composerChips } from '../app/attachments';
-import { type Message, type State, isReading, askAbout, askAcross } from '../app/state';
+import { type Message, type State, isReading, askAbout, askAcross, myDeals } from '../app/state';
 import { DocPanel } from './docPanel';
 import { PastList } from './pastList';
 import { useRotatingExample } from './homeExamples';

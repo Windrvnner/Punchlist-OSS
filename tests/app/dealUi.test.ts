@@ -104,7 +104,8 @@ it('uses the same twenty owned deals for search, loading and answers across a fo
     vi.spyOn(store, 'refreshChecklist').mockResolvedValue(undefined);
     await loadAllForSearch(store);
     expect(load.mock.calls.map(([id]) => id)).toEqual(expected);
-    const answer = vi.spyOn(store.services.ai, 'answer').mockResolvedValue({ ok: true, value: { text: 'No gaps.', sources: [] } });
+    const answer = vi.spyOn(store.services.ai, 'answer')
+      .mockResolvedValue({ ok: true, value: { text: 'No gaps.', sources: [] } });
     await ask(store, { kind: 'all' }, 'Which agreements lack lender consent?');
     expect(answer.mock.calls[0][0].dealIds).toEqual(expected);
     for (const entry of Object.values(state.deals)) {

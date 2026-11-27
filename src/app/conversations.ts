@@ -4,11 +4,10 @@
  * message it was requested for, so navigating, retrying or deleting mid-flight
  * cannot misplace it.
  */
-import { myDeals } from './state';
 import { carriedThread } from './threads';
 import { checkedOffer } from './answerOffer';
 import type { Store } from './store';
-import { dealQuestions, type State, type Message } from './state';
+import { dealQuestions, type State, type Message, myDeals } from './state';
 import { docKey, ownFilesId, type Question, type Source } from '../domain/model';
 import { CreateQuestion, UseAsResponse } from './commands/questions';
 import { findQuestions } from '../domain/suggest';

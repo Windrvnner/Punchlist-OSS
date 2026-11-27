@@ -1,12 +1,13 @@
-import { pageHash } from '../app/state';
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useAppState, useStore } from './hooks';
 import type { Layer } from '../domain/checklist';
 import { Icon } from './icons';
 import { AI_LABEL } from '../control';
 import type { Deal } from '../domain/model';
-import { askAbout, dealHash, dealTwin, type UiState } from '../app/state';
-import { checklistListCounts, checklistStandingCounts, checklistStandingParts, findingCounts, questionCounts } from '../app/dealCounts';
+import { askAbout, dealHash, dealTwin, type UiState, pageHash } from '../app/state';
+import {
+  checklistListCounts, checklistStandingCounts, checklistStandingParts, findingCounts, questionCounts,
+} from '../app/dealCounts';
 import { folderProgress, overviewStatus, type FolderProgressNotice } from '../app/indexing';
 import { openLocate } from '../app/relink';
 import { PageTop, Stalled, NoRoom, INDEXING_LINE, INDEXING_TIP, useDealLock } from './deal';
@@ -41,7 +42,8 @@ export function OverviewPage({ dealId }: { dealId: string }) {
         <section class={`twocol ov ${gaps.length ? '' : 'solo'} ${waiting ? 'first' : 'under'}`}>
           {gaps.length > 0 && <div><div class="lbl flagsl"><span role="heading"
             aria-level={2}>Gaps in the Documents</span></div><ul class="gaps linked">{gaps.map((g) => <li key={g.key}><a
-            href={'#' + pageHash('checklist', d.id)} onClick={() => store.ui({ checklistFilter: 'gap' })}>{g.title}</a>{g.need &&
+            href={'#' + pageHash('checklist', d.id)}
+            onClick={() => store.ui({ checklistFilter: 'gap' })}>{g.title}</a>{g.need &&
             <span>{g.need}</span>}</li>)}</ul></div>}
           <div><Documents deal={d} /></div>
         </section>
@@ -104,7 +106,8 @@ function Standing({ deal: d }: { deal: Deal }) {
   const qf = (status: 'open' | 'answered' | 'closed') => () => store.ui({ qaFilter: { ...store.get().ui.qaFilter, status } });
   const lines: Line[] = [
     {
-      id: 'ov-findings', title: 'Findings', href: '#' + pageHash('findings', d.id), go: ff('open'), total: findings.total,
+      id: 'ov-findings', title: 'Findings', href: '#' + pageHash('findings', d.id),
+      go: ff('open'), total: findings.total,
       segs: [
         { k: 'open', n: findings.open, word: 'open', go: ff('open'),
           sub: [['may be out of date', findings.reassess, ff('reassess')]] },

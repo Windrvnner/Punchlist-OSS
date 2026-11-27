@@ -114,7 +114,8 @@ export function checklistStandingParts(counts: NonNullable<ReturnType<typeof che
     ] },
     { k: 'prog', word: 'not settled', n: counts.open, filter: 'open' },
     counts.person ? { k: 'done', word: 'settled', n: counts.settled, sub: [
-      { word: 'satisfied', n: counts.satisfied, filter: 'satisfied' }, { word: 'by a person', n: counts.person, filter: 'person' },
+      { word: 'satisfied', n: counts.satisfied, filter: 'satisfied' },
+      { word: 'by a person', n: counts.person, filter: 'person' },
     ] } : { k: 'done', word: 'satisfied', n: counts.satisfied, filter: 'satisfied' },
   ];
   const off = counts.off ? { n: counts.off, open: counts.offOpen, filter: 'off' as const } : null;
