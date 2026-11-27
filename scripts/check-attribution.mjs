@@ -3,8 +3,7 @@
 // person or an email address (personAttribution.mjs). Prints file names and commit ids only.
 // Files are read as committed in HEAD. Commits are those the branch adds to main, and so is the text they add, even
 // text a later commit removed; on main itself (none added) the messages of the latest 200. Without main it fails.
-import { execFileSync } from 'node:child_process';
-import { git } from './allowance.mjs';
+import { git, gitBytes } from './allowance.mjs';
 import { aiAttributionIn } from './aiAttribution.mjs';
 import { addedText, branchRange } from './branch-commits.mjs';
 import { personAttributionIn } from './personAttribution.mjs';
@@ -21,12 +20,15 @@ function committedFiles() {
     .map((row) => /^\d+ (\w+) ([0-9a-f]+)\t(.*)$/s.exec(row))
     .filter((entry) => entry[1] === 'blob');
   const input = entries.map((entry) => `${entry[2]}\n`).join('');
-  const answer = execFileSync('git', ['cat-file', '--batch'], { cwd, input, maxBuffer: 512 * 1024 * 1024 });
+  const answer = gitBytes(cwd, 'cat-file', '--batch', { input });
   const files = [];
   let at = 0;
   for (const entry of entries) {
     const lineEnd = answer.indexOf('\n', at);
-    const size = Number(answer.subarray(at, lineEnd).toString().split(' ')[2]);
+    const header = /^[0-9a-f]+ blob (\d+)$/.exec(answer.subarray(at, lineEnd).toString());
+    // git answers "<id> missing" with a zero exit status when it cannot unpack an object.
+    if (!header) throw new Error(`${entry[3]} could not be read to check`);
+    const size = Number(header[1]);
     files.push({ file: entry[3], content: answer.subarray(lineEnd + 1, lineEnd + 1 + size) });
     at = lineEnd + size + 2;
   }

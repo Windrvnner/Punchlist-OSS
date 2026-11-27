@@ -153,5 +153,18 @@ describe('the attribution check on the history and the committed files', () => {
     expect(out.status).toBe(1);
     expect(out.stderr).toContain('git fetch');
   });
-});
 
+  it('prints a generic message, and no file content, when git fails', () => {
+    const r = repo();
+    r.track('a.md', `Clean text ${'SECRET-BODY'}\n`);
+    r.commit('Add a note');
+    const id = execFileSync('git', ['rev-parse', 'HEAD:a.md'], { cwd: r.dir, encoding: 'utf8' }).trim();
+    const object = path.join(r.dir, '.git', 'objects', id.slice(0, 2), id.slice(2));
+    fs.chmodSync(object, 0o644);
+    fs.writeFileSync(object, 'corrupt SECRET-BODY');
+    const out = r.check();
+    expect(out.status).toBe(1);
+    expect(out.stderr).toContain('could not be read to check');
+    expect(out.stderr).not.toContain('SECRET-BODY');
+  });
+});
