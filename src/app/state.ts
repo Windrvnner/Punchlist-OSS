@@ -603,3 +603,5 @@ export function dealLabel(s: Pick<State, 'deals'>, d: Deal): string {
   const twin = dealTwin(s, d, true).replaceAll(' · ', ', ');
   return twin ? `${d.name} (${twin})` : d.name;
 }
+
+export const showsResponder = (q: Question) => q.status !== 'open' || !!q.respondedBy || !!q.response;
