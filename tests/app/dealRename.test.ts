@@ -2,7 +2,10 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { MemoryLocal } from '../../src/adapters/local';
 import { EditDeal } from '../../src/app/commands/deals';
+import { ImportQuestions } from '../../src/app/commands/importQuestions';
 import { KEPT_TEXT_KEY } from '../../src/ports';
+import { portfolioQuestions } from '../fixtures/portfolioQuestions';
+import { ELSEWHERE } from '../adapters/memRepo';
 import { recoveryApp, recoveryDeal, type RecoveryApp } from './recoveryKit';
 
 const original = 'Project Recovery fixture';
@@ -95,4 +98,118 @@ it.each(['enter', 'blur'] as const)('saves a restored untouched rename on %s', a
   expect(deal().name).toBe(stored);
   expect(field.kept).toBeUndefined();
   expect(field.editing).toBe(false);
+});
+
+it('drops fresh typing on Escape and closes a same-name save without a command', async () => {
+  const { field, deal } = await fixture();
+  const dispatch = vi.spyOn(app.store, 'dispatch');
+  field.typed(raw);
+  field.escape();
+  expect(field.kept).toBeUndefined();
+  field.open();
+  field.typed('  Project Recovery fixture  ');
+  await field.submit('enter');
+  expect(field.kept).toBeUndefined();
+  expect(field.editing).toBe(false);
+  expect(deal().name).toBe(original);
+  expect(dispatch).not.toHaveBeenCalled();
+});
+
+it('warns on blank Enter and discards the blank only on blur', async () => {
+  const { field, deal } = await fixture(raw);
+  field.typed('  ');
+  await field.submit('enter');
+  expect(app.store.get().ui.toasts.at(-1)?.text).toBe('A deal needs a name');
+  expect(field.editing).toBe(true);
+  expect(field.kept?.text).toBe('  ');
+  await field.submit('blur');
+  expect(field.editing).toBe(false);
+  expect(field.kept).toBeUndefined();
+  expect(deal().name).toBe(original);
+});
+
+it('keeps the exact refused spelling on Escape after more typing', async () => {
+  const { field } = await fixture();
+  const long = '  ' + 'Solar  Wind '.repeat(13);
+  field.typed(long);
+  await field.submit('blur');
+  expect(field.editing).toBe(true);
+  expect(field.kept?.text).toBe(long);
+  expect(app.store.get().ui.toasts.at(-1)?.text).toContain('Keep the name under');
+  field.typed('Temporary edit');
+  field.escape();
+  expect(field.kept?.text).toBe(long);
+});
+
+it('sign-out closes the box and a later sign-in waits for an explicit save', async () => {
+  const { field, deal } = await fixture();
+  const lock = vi.spyOn(app.store, 'readOnly').mockReturnValue('Sign in to Intelligence to make changes');
+  field.typed(raw);
+  await field.submit('enter');
+  expect(field.editing).toBe(false);
+  expect(field.kept?.text).toBe(raw);
+  expect(app.store.get().ui.toasts.at(-1)?.text).toBe('Sign in to Intelligence to make changes');
+  lock.mockRestore();
+  expect(deal().name).toBe(original);
+  field.open();
+  await field.submit('blur');
+  expect(deal().name).toBe(stored);
+});
+
+it('asks before overwriting a peer rename and uses the current name only on Keep Mine', async () => {
+  const { field, deal, id } = await fixture();
+  field.typed(raw);
+  app.repo.peer.change('deal', id, { ...deal(), name: 'Project West' }, ELSEWHERE);
+  await app.repo.sync();
+  await field.submit('enter');
+  expect(field.changedElsewhere).toBe(true);
+  expect(deal().name).toBe('Project West');
+  field.escape();
+  expect(field.kept?.text).toBe(raw);
+  field.open();
+  await field.submit('blur');
+  await field.submit('mine');
+  expect(deal().name).toBe(stored);
+  expect(field.kept).toBeUndefined();
+});
+
+it('submits the untouched name from the box if a peer renamed the deal while it was open', async () => {
+  const { field, deal, id } = await fixture();
+  app.repo.peer.change('deal', id, { ...deal(), name: 'Project Western Wind' }, ELSEWHERE);
+  await app.repo.sync();
+  await vi.waitFor(() => expect(deal().name).toBe('Project Western Wind'));
+  await field.submit('enter');
+  expect(field.editing).toBe(true);
+  expect(field.changedElsewhere).toBe(true);
+  expect(field.kept?.text).toBe(original);
+  field.takeTheirs();
+  expect(deal().name).toBe('Project Western Wind');
+  expect(field.kept).toBeUndefined();
+});
+
+it('holds a two-version deal rename for a choice among 104 unrelated question conflicts', async () => {
+  const { field, deal, id } = await fixture();
+  const rows = portfolioQuestions().slice(0, 104).map((text, index) => ({
+    n: index + 1, text, askedBy: 'Counsel', received: '2026-11-01', workstream: 'Financing', priority: 'High',
+    response: '', respondedBy: '', responded: '', status: '',
+  } as const));
+  expect((await app.store.dispatch(ImportQuestions, { dealId: id, mode: 'merge', rows })).ok).toBe(true);
+  for (const question of Object.values(app.store.get().questions)) {
+    const peer = { ...question, response: 'See the updated credit agreement.' };
+    app.repo.peer.edit('question', question.id, peer, ELSEWHERE);
+  }
+  app.repo.peer.edit('deal', id, { ...deal(), counterparty: 'Western Infrastructure' }, ELSEWHERE);
+  await app.repo.sync();
+  await vi.waitFor(() => expect(Object.keys(app.store.get().conflicts)).toHaveLength(105));
+  field.typed(raw);
+  await field.submit('enter');
+  expect(field.changedElsewhere).toBe(true);
+  expect(field.kept?.text).toBe(raw);
+  await field.submit('mine');
+  expect(field.changedElsewhere).toBe(true);
+  field.takeTheirs();
+  expect(field.editing).toBe(false);
+  expect(field.kept).toBeUndefined();
+  expect(deal().name).toBe(original);
+  expect(Object.keys(app.store.get().conflicts)).toHaveLength(105);
 });
