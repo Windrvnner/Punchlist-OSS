@@ -1,3 +1,4 @@
+import { scopeHash } from '../app/conversations';
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { RefObject } from 'preact';
 import { useAppState, useStore, fmtDate, useDismiss } from './hooks';
@@ -7,9 +8,9 @@ import { questionFieldCommit, type EditableQuestionField } from '../app/question
 import { Icon } from './icons';
 import { ChoiceCheck } from './moreMenu';
 import { PageTop } from './deal';
-import { sharedNumbers, nextQuestionNumber, qaVersions, qaChanged, workstreamForNew, type State }
+import { sharedNumbers, nextQuestionNumber, qaVersions, qaChanged, showsResponder, workstreamForNew, type State }
   from '../app/state';
-import { hasLogVersion, qaEditorWorkstreams, qaPageView } from '../app/qaView';
+import { hasLogVersion, keepOpenQuestion, openQuestionFor, qaEditorWorkstreams, qaPageView } from '../app/qaView';
 import { settledQuestion } from '../app/settledView';
 import { SettledLine, CloseThisQuestion } from './closeSettled';
 import { ConflictView } from './conflict';
@@ -22,9 +23,9 @@ import { createdRecord } from '../app/createdRecord';
 import { EditDeal } from '../app/commands/deals';
 import { DiscardDraft } from '../app/commands/drafts';
 import {
-  draftAll, draftReplacesResponse, requestQuestionDraft, stopDraftAll, typingIn, useQuestionDraft,
+  canRequestDraft, draftAll, draftReplacesResponse, requestQuestionDraft, stopDraftAll, typingIn, useQuestionDraft,
 } from '../app/drafting';
-import { isDraftStale } from '../domain/transitions';
+import { canSetQuestionStatus, isDraftStale } from '../domain/transitions';
 import { Ref } from './ref';
 import { visibleDeletedNotes } from '../app/deletedView';
 import { WORKSTREAMS, type Question, type QuestionStatus } from '../domain/model';
@@ -78,16 +79,13 @@ export function QaPage({ dealId }: { dealId: string }) {
   const [readyFor, setReadyFor] = useState<string | null>(null); const ready = readyFor === dealId;
   useLayoutEffect(() => {
     if (ready || load !== 'loaded') return;
-    const saved = store.get().prefs.qaOpen[dealId];
-    if (!store.get().ui.selectedQuestion && saved && store.get().questions[saved]?.dealId === dealId) store.ui({ selectedQuestion: saved });
+    const saved = openQuestionFor(store.get(), dealId);
+    if (saved) store.ui({ selectedQuestion: saved });
     setReadyFor(dealId);
   }, [ready, load, dealId]);
   useLayoutEffect(() => {                                  // with the frame that shows it, so leaving the page straight after closing cannot lose the change
     if (!ready) return;
-    const now = sel?.id ?? null; const all = store.get().prefs.qaOpen;
-    if ((all[dealId] ?? null) === now) return;
-    const next = { ...all }; if (now) next[dealId] = now; else delete next[dealId];
-    store.setPrefs({ qaOpen: next });
+    keepOpenQuestion(store, dealId, sel?.id ?? null);
   }, [ready, sel?.id, dealId]);
   useEffect(() => {
     if (sel) markQaLogSeen(store, sel.id);
@@ -606,12 +604,12 @@ function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted 
   // A draft goes under the box while there is a response or text in it, so both are in sight. In an
   // empty box with the focus it waits, as above, until the box is left
   const stacked = !!q.draft && !drafting && (holds || !!q.response.trim());
-  const offer = q.status === 'open' && !q.draft && !!q.text.trim();   // Draft from documents, with the box empty or not
+  const offer = canRequestDraft(q) && !q.draft;   // Draft from documents, with the box empty or not
   const left = useRef(false);   // the box was left empty with a draft waiting: the draft takes its place, and the focus does not go to its buttons
   // a draft held back while the empty box has the focus still says so on the label line
   const sub = drafting || (q.draft && !stacked) ? draftSub(q) : prov;
   // who responded and when gives way while a draft is offered or waiting: Draft from documents takes its place on the label line
-  const answered = q.status !== 'open' || !!q.respondedBy || !!q.response;
+  const answered = showsResponder(q);
   // Responded by and its date show once filled, or while text typed in them is kept unsaved; empty, they
   // show only while the Response line is pointed at or has the focus, so they can still be typed in. Once shown for a
   // question they stay until another question opens, so a field emptied while in use (by the person, or by another PC) never
@@ -644,7 +642,9 @@ function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted 
         <div class="qlead">
           <span class="n">Q{q.n}</span>
           <Pick name="q-status" list="q-st" label="Status" wrap="stpick" cls="stsel" chev value={q.status} ro={ro} onPick={(v) => setStatus(v as QuestionStatus)}
-            options={(['open', 'answered', 'closed'] as const).map((x) => ({ v: x, text: STATUS_LABEL[x], off: x === 'answered' && !q.response.trim() }))} />{/* Answered needs a response */}
+            options={(['open', 'answered', 'closed'] as const).map((x) => ({
+              v: x, text: STATUS_LABEL[x], off: !canSetQuestionStatus(q, x),
+            }))} />
           {/* the details: each still a choice, shown as plain values with an icon for what they are */}
           <div class="qprops">
             {/* the deal's own workstreams (an imported log keeps the other side's) after the app's, as the table's filter lists them */}
@@ -668,7 +668,8 @@ function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted 
           <span class="needs" title={ro ?? undefined}><button type="button" class="btn sm ico del"
             aria-label="Delete question" disabled={!!ro} title={ro ?? 'Delete'}
             onClick={() => setAsking(true)}><Icon name="trash" size={15} /></button></span>
-          <a class="btn sm" id="q-discuss" href={`#q-${q.dealId}-${q.id}`}>Discuss</a>
+          <a class="btn sm" id="q-discuss"
+            href={`#${scopeHash({ kind: 'question', dealId: q.dealId, questionId: q.id })}`}>Discuss</a>
           <CloseDetail onClose={onClose} />
         </div>
       </div>

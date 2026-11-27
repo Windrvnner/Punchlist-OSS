@@ -4,11 +4,12 @@
  */
 import type { Store } from './store';
 import type { TwinFocus } from './dealLabel';
-import { type State, type UiState, dealQuestions, dealFindings, dealHash, dealTwinLabels } from './state';
-import { conversationDocs, docIndex } from './conversations';
+import {
+  type State, type UiState, dealQuestions, dealFindings, dealHash, dealTwinLabels, pageHash, myDeals,
+} from './state';
+import { conversationDocs, docIndex, scopeHash } from './conversations';
 import { docKey } from '../domain/model';
 import type { Item } from '../domain/checklist';
-import { isMine } from './commands/members';
 
 export type HitKind = 'deal' | 'finding' | 'item' | 'question' | 'document';
 // The deal, its disambiguator and the place within the deal (for example, Q7 or p. 4).
@@ -116,7 +117,7 @@ function gather(s: State, query: string, itemsShown: number): { hits: Hit[]; ite
   const has = (...parts: (string | number)[]) => { const t = fold(parts.join(' ')); return t.includes(l) || (lq.length >= 3 && squash(t).includes(lq)); };
   const twinOf = dealTwinLabels(Object.values(s.deals));
   const itemsOf = itemsByDeal(s.items);
-  for (const d of Object.values(s.deals).filter((x) => isMine(s, x.id))) {   // the person's own deals: others are joined through Add deal
+  for (const d of myDeals(s)) {   // the person's own deals: others are joined through Add deal
     // a deal that shares its name says on its second line only what differs, as the sidebar does; the hover gives both
     if (!l || has(d.name, d.target, d.counterparty, d.product, d.sector, d.technology)) {
       const focus = twinOf(d, 'focus');
@@ -139,7 +140,7 @@ function gather(s: State, query: string, itemsShown: number): { hits: Hit[]; ite
       };
     };
     for (const f of dealFindings(s, d.id)) {
-      const hash = `finding-${d.id}-${f.id}`;
+      const hash = scopeHash({ kind: 'finding', dealId: d.id, findingId: f.id });
       if (has(f.title, f.workstream, f.body.join(' ').replace(/\s*\[\d+\]/g, ''))) out.push({ key: f.id, kind: 'finding', title: f.title, ...inDeal(), hash });
       const docs = conversationDocs(s, { kind: 'finding', dealId: d.id, findingId: f.id });
       const seen = new Set<string>();
@@ -152,13 +153,15 @@ function gather(s: State, query: string, itemsShown: number): { hits: Hit[]; ite
     // them; a deal with no items of its own lists what its check holds, once its Checklist has been read
     const own: { id: string; text: string }[] = itemsOf.get(d.id) ?? []; const rows = s.checklists[d.id];
     let here: ReturnType<typeof inDeal> | undefined;   // an item has no place in the deal, so every item hit in it says the same
-    const make = (it: { id: string; text: string }): Hit => ({ key: `item|${d.id}|${it.id}`, kind: 'item', title: it.text, ...(here ??= inDeal()), hash: `checklist-${d.id}`, ui: { selectedChecklist: it.id, checklistFilter: 'all' } });
+    const make = (it: { id: string; text: string }): Hit => ({ key: `item|${d.id}|${it.id}`, kind: 'item',
+      title: it.text, ...(here ??= inDeal()), hash: pageHash('checklist', d.id),
+      ui: { selectedChecklist: it.id, checklistFilter: 'all' } });
     const list = own.length || !Array.isArray(rows) ? own : rows;
     if (list.length) { const x = indexOf(list, `${list === own ? 'items' : 'rows'}|${d.id}`); for (const i of matching(x, l, lq)) { found[itemRank(x, i, l)].push({ it: x.items[i], make }); items++; } }
     for (const q of dealQuestions(s, d.id)) {
       if (!has(q.text, 'q' + q.n, q.response)) continue;
       out.push({
-        key: q.id, kind: 'question', title: q.text || `Q${q.n}`, ...inDeal(`Q${q.n}`), hash: `qa-${d.id}`,
+        key: q.id, kind: 'question', title: q.text || `Q${q.n}`, ...inDeal(`Q${q.n}`), hash: pageHash('qa', d.id),
         ui: questionSearchPatch(s.ui.route, d.id, q.id),
       });
     }
@@ -187,8 +190,7 @@ export function searchGroups(s: State, query: string, expanded: readonly HitKind
 
 /** #491: Search waits only for the unvisited or loading deals in My Deals. */
 export function ownDealsLoading(state: Pick<State, 'deals' | 'dealLoad' | 'members' | 'user'>): boolean {
-  return Object.keys(state.deals).some((id) =>
-    isMine(state, id) && (state.dealLoad[id] === 'loading' || state.dealLoad[id] === undefined));
+  return myDeals(state).some(({ id }) => state.dealLoad[id] === 'loading' || state.dealLoad[id] === undefined);
 }
 
 /**
@@ -196,7 +198,7 @@ export function ownDealsLoading(state: Pick<State, 'deals' | 'dealLoad' | 'membe
  * own has its check's items read too, once, so they can be found as well.
  */
 export async function loadAllForSearch(store: Store) {
-  const mine = Object.keys(store.get().deals).filter((id) => isMine(store.get(), id));
+  const mine = myDeals(store.get()).map((deal) => deal.id);
   await Promise.all(mine.map((id) => store.loadDeal(id, { gaps: false })));
   const s = store.get(); const withItems = new Set(Object.values(s.items).map((it) => it.dealId));
   await Promise.all(mine.filter((id) => s.deals[id] && s.checklists[id] === undefined && !withItems.has(id)).map((id) => store.refreshChecklist(id)));

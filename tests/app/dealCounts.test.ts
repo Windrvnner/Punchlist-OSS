@@ -3,7 +3,8 @@ import { expect, it } from 'vitest';
 import { checklistView } from '../../src/app/checklistView';
 import { memoItems } from '../../src/app/memo';
 import {
-  checklistListCounts, checklistStandingCounts, checkLeftCount, findingCounts, indexingTotals, questionCounts,
+  checklistStandingParts, checkLine, checklistListCounts, checklistStandingCounts,
+  checkLeftCount, findingCounts, indexingTotals, questionCounts,
   uncheckedChecklistCount,
 } from '../../src/app/dealCounts';
 import { removableIssuesLists, visibleDeletedNotes } from '../../src/app/deletedView';
@@ -433,4 +434,42 @@ it('counts the firm lists for the selected layer and the latest check’s unfini
   expect(checkLeftCount(check, false)).toBe(33);
   expect(checkLeftCount(check, true)).toBe(0);
   expect(checkLeftCount({ ...check, left: { ...check.left, changed: true } }, false)).toBe(0);
+});
+
+it('selects the Overview check independently of the run mode and warning tone', () => {
+  const state = checklistDeal();
+  state.deals[dealId] = { ...state.deals[dealId], stage: 'ready' };
+  const deep = { size: 12, overturned: 4 };
+  const left = { at: updatedAt, items: 3, findings: 2 };
+  const check = { at: null, offerDeep: deep };
+  function line(patch: Partial<typeof state.checks[string]>) {
+    state.checks[dealId] = { ...check, ...patch };
+    return checkLine(state, dealId);
+  }
+  const normal = { deep: false, rest: 0 };
+  expect(line({ busy: 'deep', failedAt: updatedAt, left })).toMatchObject({ kind: 'running', warn: false, ...normal });
+  expect(line({ failedAt: updatedAt, left })).toMatchObject({ kind: 'failed', warn: true, ...normal });
+  expect(line({ left })).toMatchObject({ kind: 'left', warn: true, deep: false, rest: 5 });
+  expect(line({ left: { ...left, changed: true } })).toMatchObject({ kind: 'left', warn: true, ...normal });
+  expect(line({})).toMatchObject({ kind: 'deep', warn: true, deep: true, rest: 0 });
+  expect(line({ offerDeep: null })).toMatchObject({ kind: 'unchecked', warn: true, unchecked: 1, ...normal });
+  const checking = { quiet: [], with: [], signIn: true };
+  expect(line({ checking, left })).toMatchObject({ kind: 'running', warn: true, deep: false, rest: 5 });
+  expect(line({ busy: 'quick', left })).toMatchObject({ kind: 'running', warn: false, deep: false, rest: 5 });
+  state.deals[dealId] = { ...state.deals[dealId], stage: 'indexing' };
+  expect(line({ offerDeep: null })).toBeNull();
+  expect(line({ checking, offerDeep: null })).toMatchObject({ kind: 'running', warn: false, ...normal });
+});
+
+it('describes the standing segments and exactly which checklist filters they open', () => {
+  const counts = checklistStandingCounts(checklistDeal(), dealId)!;
+  expect(checklistStandingParts(counts)).toEqual([
+    { k: 'open', n: 119, filter: 'all', sub: [
+      { filter: 'finding', n: 117 }, { filter: 'gap', n: 1 }, { filter: 'gone', n: 1 },
+    ] },
+    { k: 'prog', n: 21, filter: 'open' },
+    { k: 'done', n: 2017, sub: [{ filter: 'satisfied', n: 2016 }, { filter: 'person', n: 1 }] },
+  ]);
+  const plain = checklistStandingParts({ ...counts, person: 0, settled: 2016 });
+  expect(plain.at(-1)).toEqual({ k: 'done', n: 2016, filter: 'satisfied' });
 });

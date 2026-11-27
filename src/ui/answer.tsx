@@ -13,7 +13,7 @@ import {
   answerQuestionChoices, answerText, askVerdict, dealIdOf, questionFromAnswer, responseToReplace, useAnswer,
   withoutFindingLinks, type Scope,
 } from '../app/conversations';
-import { splitCited } from '../domain/cite';
+import { restsOnAllSources } from '../domain/cite';
 import { DEAL_PAGES, type Message, type State } from '../app/state';
 import type { Deal, Question, Source } from '../domain/model';
 import { QuestionCard, FindingCard } from './answerCards';
@@ -85,7 +85,7 @@ export function Answer({ scope, message: answer, asked, onOpen, suggest }: {
   // An answer is cited the way a finding is: [n] after a sentence points at the nth source. Without markers the whole
   // answer rests on all its sources. Text that leaves as a response or a question goes without the markers.
   const sourceCount = answer.sources?.length ?? 0;
-  const marked = sourceCount > 0 && splitCited(plain, sourceCount).some((part) => part.refs.length > 0);
+  const whole = restsOnAllSources([plain], sourceCount);
   const clean = answerText(answer);
   const closeUseCard = () => {
     if (card === 'use') closeCard();
@@ -111,7 +111,7 @@ export function Answer({ scope, message: answer, asked, onOpen, suggest }: {
     <div class="ai">
       {answer.research && <ResearchView research={answer.research} sources={answer.sources} dealId={dealIdOf(scope)}
         onOpen={openFromAnswer} />}
-      <AnswerText answer={answer} plain={plain} marked={marked} deal={deal} onOpen={openFromAnswer} />
+      <AnswerText answer={answer} plain={plain} whole={whole} deal={deal} onOpen={openFromAnswer} />
       <AnswerActs scope={scope} hasDeal={!!deal} clean={clean} openCard={openCard} askUse={use.askUse} />
       {answer.offer && <OfferButton offer={answer.offer} openCard={(button) => openCard(button, 'offer')} />}
       {card === 'use' && deal && <UsePicker id={answer.id} deal={deal}
@@ -130,15 +130,15 @@ export function Answer({ scope, message: answer, asked, onOpen, suggest }: {
 }
 
 /**
- * What the answer says: cited sentence by sentence when it has sources (`marked`: it has markers to cite them by);
+ * What the answer says: cited sentence by sentence when it has sources,
  * else, in a deal, with its findings named as links that open them beside the conversation.
  */
-function AnswerText({ answer, plain, marked, deal, onOpen }: {
-  answer: Message; plain: string; marked: boolean; deal: Deal | null | undefined; onOpen: (src: Source) => void;
+function AnswerText({ answer, plain, whole, deal, onOpen }: {
+  answer: Message; plain: string; whole: boolean; deal: Deal | null | undefined; onOpen: (src: Source) => void;
 }) {
   const store = useStore();
   const state = useAppState();
-  if (answer.sources?.length) return <Cited text={plain} sources={answer.sources} whole={!marked} onOpen={onOpen} />;
+  if (answer.sources?.length) return <Cited text={plain} sources={answer.sources} whole={whole} onOpen={onOpen} />;
   if (!deal) return <p>{plain}</p>;
   const sideFinding = state.ui.side?.kind === 'finding' ? state.ui.side.id : undefined;
   return (

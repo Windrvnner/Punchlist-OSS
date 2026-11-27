@@ -11,7 +11,7 @@ import { FindingOpening, findingHref } from './findings';
 import { STATUS_LABEL } from './qa';
 import { navigate } from './nav';
 import { answerText, answerWasUsed, responseToReplace, useAnswer } from '../app/conversations';
-import type { Message } from '../app/state';
+import { pageHash, type Message } from '../app/state';
 import type { Question, Source } from '../domain/model';
 
 /** `thread`: the conversation beside it, where the answer a suggested question was offered for is */
@@ -29,7 +29,10 @@ export function SidePane({ onOpen, thread }: { onOpen: (s: Source) => void; thre
     return (
       <aside class="sidepane glass" id="sidepane" aria-label="Question" tabIndex={-1} ref={pane}>
         <div class="sphead"><span class="t">Question</span><span class="grow" />
-          {q && <button type="button" class="btn sm" id="side-page" onClick={() => navigate(store, `qa-${q.dealId}`, { selectedQuestion: q.id, qaFilter: { status: 'all', workstream: '', text: '' } })}>Open in Q&amp;A</button>}
+          {q && <button type="button" class="btn sm" id="side-page"
+            onClick={() => navigate(store, pageHash('qa', q.dealId), {
+              selectedQuestion: q.id, qaFilter: { status: 'all', workstream: '', text: '' },
+            })}>Open in Q&amp;A</button>}
           <button type="button" class="btn sm ico" id="side-close" aria-label="Close" title="Close" onClick={close}><Icon name="close" size={14} /></button></div>
         <div class="spbody">{q && answer ? <QuestionCheck key={q.id + answer.id} q={q} answer={answer} close={close} /> : <p class="emptyline">That question is no longer here.</p>}</div>
       </aside>

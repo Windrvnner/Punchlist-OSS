@@ -16,6 +16,7 @@
  *                 folders.json                                where a deal's folders are on this PC, when not where the deal says
  *                 folder-rules.json                           what folders located here taught: this start of a path is that one on this PC
  */
+import { pageOf } from '../domain/cite';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -1108,7 +1109,8 @@ export function nodeDocuments(o: DocumentsOptions) {
         const i = open.indexOf(d.docId); if (i >= 0) open.splice(i, 1); open.push(d.docId);
         while (open.length > KEPT_OPEN) { const old = open.shift() as string; discard(old); }
       }
-      const m = /p\.\s*(\d+)/.exec(loc); return ok({ kind: 'pdf', url: urlFor(tokenFor(file)), page: m ? +m[1] : 1, ...(d.pages !== undefined ? { pages: d.pages } : {}) });
+      return ok({ kind: 'pdf', url: urlFor(tokenFor(file)), page: pageOf(loc) ?? 1,
+        ...(d.pages !== undefined ? { pages: d.pages } : {}) });
     }),
     attach: safe(async (dealId, file) => {
       const hash = hashBytes(file.bytes); const docId = docIdFor(hash);
