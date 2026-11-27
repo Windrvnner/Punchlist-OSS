@@ -1,5 +1,6 @@
-// Fails when an allowance file grows relative to main: an issue entry may only be kept, lowered or removed, and a
-// decision must already be on main's scripts/verified-decisions.json. Needs full history (CI's static job has it).
+// Fails when an allowance file grows relative to main: every entry, whether it cites an issue or a decision, may only
+// be kept, lowered or removed, and a decision must already be on main's scripts/verified-decisions.json.
+// Needs full history (CI's static job has it).
 import { existsSync, readFileSync } from 'node:fs';
 import { ALLOWANCE_FILES, committedJson, describe, git, keyOf, mergeBase } from './allowance.mjs';
 import { scanUi } from './ui-scan.mjs';
@@ -32,7 +33,7 @@ function growthProblems(entries, ceiling) {
   for (const entry of entries) {
     const onMain = ceiling.find((each) => keyOf(each) === keyOf(entry));
     const allowed = onMain?.count ?? 0;
-    if (entry.issue !== undefined && entry.count > allowed) {
+    if (entry.count > allowed) {
       problems.push(`${describe(entry)}: count ${entry.count} is above main's ${allowed}`);
     }
     problems.push(...[swapProblem(entry, onMain)].filter(Boolean));

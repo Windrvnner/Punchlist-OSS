@@ -92,12 +92,12 @@ Skipped-test entries also carry `platform` and `reason`.
 `node scripts/check-pane-of-glass.mjs --list` prints the matches not yet listed, and `--lower` lowers each count to
 its matches and removes entries that no longer match; neither adds an issue or decision.
 `node scripts/check-allowance-history.mjs` compares each allowance file with `main`.
-An `issue` entry can only be kept, lowered, or removed.
-An entry whose issue `main` already names cannot switch to another issue or to a decision.
+Every entry, whether it cites an issue or a decision, can only be kept, lowered, or removed.
+So a new flagged line in `src/ui` cannot be added: it belongs in `src/app`, formatting helpers included.
+An entry whose issue `main` already names cannot switch to another issue or to a decision; a decision entry can
+switch to an issue.
 A `decision` entry needs a decision already on `main`'s `scripts/verified-decisions.json`, so a decision verified in a
 pull request cannot be used in that same pull request.
-A `decision` entry has no count ceiling: it can be added or raised in any pull request, so review checks every
-`decision` entry a pull request adds or raises.
 An allowance file that `main` does not have yet has no ceiling, except the pane-of-glass baseline: when `main` has no
 array baseline, the ceiling is the matches `main`'s own `src/ui` has.
 `node scripts/check-open-issues.mjs` runs in CI only and fails when an issue named in an allowance is not open.

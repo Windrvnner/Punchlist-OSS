@@ -115,10 +115,48 @@ describe('allowance history', () => {
     expect(result.stderr).toContain(`${baselineFile} must be a JSON array of entries`);
   });
 
-  it('accepts a decision that main verifies', () => {
-    const repo = repository({ [baselineFile]: [], [verifiedFile]: ['A decision.'] });
-    repo.write(baselineFile, [entry(1, { issue: undefined, decision: 'A decision.' })]);
+  it('accepts a decision that main verifies on an entry main already has', () => {
+    const decided = entry(1, { issue: undefined, decision: 'A decision.' });
+    const repo = repository({ [baselineFile]: [decided], [verifiedFile]: ['A decision.'] });
+    repo.write(screen, 'store.services.ai\nother');
     expect(repo.run().status).toBe(0);
+  });
+
+  it.each([['a list', []], ['no list', {}]])('rejects a new line listed under a decision (main has %s)', (_, onMain) => {
+    const repo = repository({ [baselineFile]: onMain, [verifiedFile]: ['A decision.'] });
+    repo.write(screen, 'store.services.ai\nrows.filter(keep).slice(0, 3)');
+    const decided = { kind: 'list', line: 'rows.filter(keep).slice(0, 3)', issue: undefined, decision: 'A decision.' };
+    repo.write(baselineFile, [entry(2, decided)]);
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('list "rows.filter(keep).slice(0, 3)": count 2 is above main\'s 0');
+  });
+
+  it('keeps and lowers a decision entry of main without a problem', () => {
+    const decided = { issue: undefined, decision: 'A decision.' };
+    const repo = repository({ [baselineFile]: [entry(2, decided)], [verifiedFile]: ['A decision.'] });
+    repo.write(baselineFile, [entry(2, decided)]);
+    expect(repo.run().stderr).toBe('');
+    repo.write(baselineFile, [entry(1, decided)]);
+    expect(repo.run().stderr).toBe('');
+  });
+
+  it('rejects a raised decision entry', () => {
+    const decided = { issue: undefined, decision: 'A decision.' };
+    const repo = repository({ [baselineFile]: [entry(1, decided)], [verifiedFile]: ['A decision.'] });
+    repo.write(baselineFile, [entry(2, decided)]);
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("count 2 is above main's 1");
+  });
+
+  it('accepts a decision entry of main moved to an issue', () => {
+    const decided = entry(1, { issue: undefined, decision: 'A decision.' });
+    const repo = repository({ [baselineFile]: [decided], [verifiedFile]: ['A decision.'] });
+    repo.write(baselineFile, [entry(1)]);
+    const result = repo.run();
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
   });
 
   it('requires main to verify a committed increase in a shallow single-branch clone', () => {
