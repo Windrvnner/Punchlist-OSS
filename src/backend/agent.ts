@@ -159,10 +159,17 @@ class Answering {
     const limit = limits.compactAt(question.model) * control.limits.charsPerToken;
     // a page of findings or questions is half of it, the same each time it is asked for (recordSearch.ts `pageOf`)
     this.run = new AgentRun(kit, question, progress, { width, searchPage, chars: limit / 2, limit });
-    // what a tool result may add depends on the prompt as it stands: the text the next turn would send (#480)
-    this.run.held = () => this.turnNow?.full(true).length ?? 0;
+    // what a tool result may add depends on what the model holds: a kept conversation's tokens count too (#480)
+    this.run.held = () => this.held();
     this.folders = new FolderReader(this.run, folderMemory, limits);
     this.conversation = new KeptConversation(this.run, limits.compactAt, limits.width);
+  }
+
+  /** how many characters the model holds once the turn is sent again: none before the first turn (#480) */
+  private held(): number {
+    if (!this.turnNow) return 0;
+    if (!this.kit.talk) return this.turnNow.full(true).length;
+    return this.conversation.held(this.turnNow, control.limits.charsPerToken);
   }
 
   /** whether the person has stopped the answer: read afresh each time, since they can stop it at any moment */

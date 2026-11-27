@@ -45,7 +45,10 @@ export class AgentRun {
   readonly searched = new Set<string>();
   /** what the main session has learned so far, as it last wrote it */
   notes = '';
-  /** how many characters the turn's prompt holds now: the agent sets it to the length of the prompt it would send */
+  /**
+   * how many characters the model holds once the turn is sent again: the agent sets it, counting a kept conversation's
+   * tokens (#480)
+   */
   held: () => number = () => 0;
   /**
    * `pages`: how many a search gives at a time, documents (`width`) and findings or questions (`searchPage`), as the

@@ -459,6 +459,34 @@ describe('a folder read is bounded by the model\'s room (#480)', () => {
       expect(resultCost(s.turns[0].prompt, s.turns[1].prompt)).toBeLessThanOrEqual(room);
     });
 
+  it('a kept conversation\'s tokens count against the room (#480)', async () => {
+    const recs = Array.from({ length: 200 }, (_v, i) => doc(`Permits/Permit ${String(i + 1).padStart(4, '0')}.pdf`));
+    const turn = (c: Call) => (c.prompt.includes('Review the permits folder') && !c.prompt.includes('What they say')
+      ? { tool: 'folder', folder: 'permits', lookFor: 'expiry' }
+      : { text: 'ok', sources: [] });
+    const reads = (c: Call, k: number) =>
+      ({ text: `Batch ${k} ${'y'.repeat(600)} [1]`, sources: [{ doc: listed(c)[0].tag, page: 1, quote: 'y' }] });
+    // a conversation already holding `earlier` tokens of talk before this one's
+    const fullWith = async (earlier: number) => {
+      const s = setup(recs, turn, { talks: true, folderDocs: 5000, reads });
+      const converse = s.svc.converse.bind(s.svc);
+      s.svc.converse = async (input) => {
+        const conversed = await converse(input);
+        return { ...conversed, tokens: conversed.tokens! + earlier };
+      };
+      const one = await s.ai.answer(ask('Hello'));
+      if (!one.ok) throw new Error('the first answer failed');
+      const thread = one.value.thread!;
+      const history = [{ role: 'me' as const, text: 'Hello' }, { role: 'ai' as const, text: 'ok' }];
+      expect((await s.ai.answer({ ...ask('Review the permits folder'), history, thread })).ok).toBe(true);
+      return handed(s.turns.at(-1)!.prompt);
+    };
+    expect((await fullWith(0)).full).toBe(25);
+    const kept = await fullWith(115_000);
+    expect(kept.full).toBeLessThan(25);
+    expect(kept.full + kept.places + kept.over).toBe(25);
+  });
+
   it('a smaller room lists fewer batches in full (#480)', async () => {
     const fullAt = async (compactAt: number) => {
       const s = everyBatchFinds(200, 'z'.repeat(600), { compactAt });
