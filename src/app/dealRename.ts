@@ -55,20 +55,20 @@ export class DealRename {
     const result = await this.store.dispatch(EditDeal, { dealId: this.id, name }, { quiet: true, over: sent.base });
     this.saving = false;
     const outcome = fieldSaveOutcome(result, 'record');
-    // FieldSave's rule: only the text sent is settled by its result; newer typing stays kept.
+    // FieldSave's rule: a result settles only the text sent; newer typing stays kept.
     if ((this.kept?.text ?? sent.text) === sent.text) this.keep(outcome.kind === 'saved' ? undefined : sent);
     if (!this.gone) this.show(outcome, sent);
   }
 
   private show(outcome: FieldSaveOutcome, sent: FieldDraft) {
-    if (!this.editing || (outcome.kind === 'saved' && this.kept)) return this.input.render();
-    if (outcome.kind === 'saved') return this.close(undefined);
+    if (outcome.kind === 'saved') return this.kept || !this.editing ? this.input.render() : this.close(undefined);
     this.entry = sent;
     this.changedElsewhere = outcome.kind === 'changedElsewhere';
     if (outcome.kind === 'changedElsewhere') return this.input.render();
     const locked = this.store.readOnly();
     this.store.toast(locked ?? outcome.reason, 'warn');
-    if (locked) this.close(this.kept);
+    if (!this.editing) this.input.render();
+    else if (locked) this.close(this.kept);
     else this.input.focus();
   }
 }

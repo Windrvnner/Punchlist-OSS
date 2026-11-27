@@ -7,7 +7,7 @@ import { KEPT_TEXT_KEY, type Transaction } from '../../src/ports';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { ELSEWHERE } from '../adapters/memRepo';
 import {
-  holdRecoveryWrite, operationWrite, recoveryApp, recoveryDeal, type RecoveryApp,
+  failRecoveryWrite, holdRecoveryWrite, operationWrite, recoveryApp, recoveryDeal, type RecoveryApp,
 } from './recoveryKit';
 
 const original = 'Project Recovery fixture';
@@ -228,4 +228,19 @@ it('asks for a choice when a rename meets any conflict, not only a changed name'
   await field.submit('enter');
   expect(field.changedElsewhere).toBe(true);
   expect(field.kept?.text).toBe(raw);
+});
+
+it('still says why a rename failed after Escape closed the box during its save', async () => {
+  const { field } = await fixture();
+  failRecoveryWrite(app, writesDeal, 'The shared folder is unavailable');
+  const gate = holdRecoveryWrite(app, writesDeal);
+  field.typed(raw);
+  const saving = field.submit('enter');
+  await gate.entered;
+  field.escape();
+  gate.release();
+  await saving;
+  expect(field.editing).toBe(false);
+  expect(field.kept?.text).toBe(raw);
+  expect(app.store.get().ui.toasts.at(-1)?.text).toBe('The shared folder is unavailable');
 });
