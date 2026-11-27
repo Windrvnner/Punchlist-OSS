@@ -8,7 +8,8 @@
 import { decodeText } from '../domain/textEncoding';
 import type { AiService } from '../ports';
 import {
-  cellText, fillUnplaced, unplaced, textLines, tableLines, tieOut, readingOf, type ListReading, type TiedOut,
+  cellText, fillUnplaced, unplaced, textLines, tableLines, tableRowsAsWritten, tieOut, readingOf, type ListReading,
+  type TiedOut,
 } from '../domain/listRead';
 import { prepareChecklist, suggestChecklistColumns, type ChecklistMapping } from '../domain/checklistImport';
 import { keepImport } from './keptImports';
@@ -16,17 +17,19 @@ import { readImportBytes, type ImportTable } from './transfer';
 import type { Store } from './store';
 import { ok, fail, type Result } from '../domain/result';
 
-/** `oneColumn`: the lines are a table of one column, each line a cell as it is (domain/listRead) */
-export async function readList(ai: AiService, lines: string[], oneColumn = false): Promise<Result<ListReading>> {
+/** `cellRows`: the numbers of the lines built from cells, the only lines read as cell rows (domain/listRead) */
+export async function readList(
+  ai: AiService, lines: string[], cellRows: ReadonlySet<number> = new Set(),
+): Promise<Result<ListReading>> {
   if (!ai.readList) return fail({ kind: 'rejected', message: 'The backend does not offer this' });
   const first = await ai.readList({ lines });
   // the first reading failing fails the read: the person sees why, with Retry, and the text stays as it is
   if (!first.ok) return first;
-  const reading = readingOf(first.value, oneColumn);
+  const reading = readingOf(first.value, cellRows);
   if (!unplaced(lines, reading).length) return ok(reading);
   const again = await ai.readList({ lines, thorough: true });
   // a thorough reading that fails leaves the unplaced lines out, listed for the person, keeping the first reading
-  return ok(again.ok ? fillUnplaced(lines, reading, readingOf(again.value, oneColumn)) : reading);
+  return ok(again.ok ? fillUnplaced(lines, reading, readingOf(again.value, cellRows)) : reading);
 }
 
 /** The files a list can be brought in from: spreadsheets, documents and plain text. */
@@ -34,23 +37,26 @@ export const LIST_FILES = /\.(xlsx|xlsm|xls|xlsb|ods|csv|docx|docm|doc|odt|rtf|p
 export const LIST_ACCEPT = '.xlsx,.xlsm,.xls,.xlsb,.ods,.csv,.docx,.docm,.doc,.odt,.rtf,.pdf,.txt,.text,.md';
 const SHEET = /\.(xlsx|xlsm|xls|xlsb|ods|csv)$/i; const PLAIN = /\.(txt|text|md)$/i;
 
-/**
- * Pasted text as lines. Text copied from a spreadsheet comes with its cells split by tabs: those are written " | ", as a
- * table's rows are given to the model, so a paste from Excel reads as the table it is.
- */
-export const pastedLines = (text: string): string[] => textLines(text).map(pastedLine);
-
-/**
- * A line with tabs between two or more cells as table cells, each written as cellText writes it; any other line, a
- * line with no tab or with one cell and a tab at its edge, is text and stays as written (#1227).
- */
-function pastedLine(line: string): string {
-  if (!line.includes('\t')) return line;
+/** a pasted line's cells when it has two or more, split at its tabs; none for a text line (#1227) */
+function pastedCells(line: string): string[] | null {
+  if (!line.includes('\t')) return null;
   const cells = line.split(/\s*\t\s*/);
   if (cells[0] === '') cells.shift();
   if (cells[cells.length - 1] === '') cells.pop();
-  return cells.length > 1 ? cells.map(cellText).join(' | ') : line;
+  return cells.length > 1 ? cells : null;
 }
+
+/**
+ * Pasted text as lines. Text copied from a spreadsheet comes with its cells split by tabs: those are written " | ", as a
+ * table's rows are given to the model, so a paste from Excel reads as the table it is. A line with one cell and a tab
+ * at its edge is text and stays as written.
+ */
+export const pastedLines = (text: string): string[] =>
+  textLines(text).map((line) => pastedCells(line)?.map(cellText).join(' | ') ?? line);
+
+/** the numbers (from 1) of the pasted lines built from cells */
+const pastedCellRows = (text: string): number[] =>
+  textLines(text).flatMap((line, i) => (pastedCells(line) ? [i + 1] : []));
 
 /**
  * A chosen file as a source for the model: a spreadsheet as its table (`table`, every row from the top of the sheet, so
@@ -80,7 +86,11 @@ export async function readListFile(
 }
 
 type ChecklistFile = Parameters<typeof readListFile>[1];
-interface ChecklistText { name: string; lines: string[] }
+/**
+ * `written`: a paste as pasted, line for line with `lines` (which the model reads), for a line brought in (#1061).
+ * `cellRows`: the numbers of the lines built from cells, the only lines read as cell rows (#1227).
+ */
+export interface ChecklistText { name: string; lines: string[]; written?: string[]; cellRows?: number[] }
 interface MappedChecklistTable { table: ImportTable; mapping: ChecklistMapping }
 
 function mappedTable(table: ImportTable): MappedChecklistTable {
@@ -112,16 +122,29 @@ export function clearChecklistHeading(key: string) {
 }
 
 export function checklistPaste(paste: string): ChecklistText | null {
-  return paste.trim() ? { name: '', lines: pastedLines(paste) } : null;
+  if (!paste.trim()) return null;
+  return { name: '', lines: pastedLines(paste), written: textLines(paste), cellRows: pastedCellRows(paste) };
 }
 
 export function checklistSourceLines(text: ChecklistText | null, table: ImportTable | null) {
   return text?.lines ?? (table ? tableLines(table.columns, table.rows) : null);
 }
 
-/** whether the lines are a table of one column, whose cells are read as they are */
-export const checklistOneColumn = (text: ChecklistText | null, table: ImportTable | null): boolean =>
-  !text && table?.columns.length === 1;
+/** The lines as the source writes them, line for line with `checklistSourceLines`, for a line brought in (#1061) */
+export function checklistWrittenLines(text: ChecklistText | null, table: ImportTable | null) {
+  if (text) return text.written ?? text.lines;
+  return table ? tableRowsAsWritten(table.columns, table.rows) : null;
+}
+
+/**
+ * The numbers of the lines built from cells: a table of several columns has every row so, a table of one column none,
+ * and a text its pasted lines that had tabs between cells (#1227).
+ */
+export function checklistCellRows(text: ChecklistText | null, table: ImportTable | null): ReadonlySet<number> {
+  if (text) return new Set(text.cellRows ?? []);
+  const rows = table && table.columns.length > 1 ? table.rows.length + 1 : 0;
+  return new Set(Array.from({ length: rows }, (_, k) => k + 1));
+}
 
 /** Later work (a file read, a model call, or leaving) takes the place of an earlier reply. */
 export function checklistRequests() {
@@ -171,7 +194,7 @@ export async function rereadChecklistTable(
 interface ReadSource {
   lines: string[] | null;
   byColumns: boolean;
-  oneColumn: boolean;
+  cellRows: ReadonlySet<number>;
 }
 
 interface KeptReading {
@@ -196,32 +219,36 @@ export function checklistReading(store: Store, requests: ReturnType<typeof check
     if (!current?.lines || current.byColumns || requests.tableReadPending()) return;
     const ticket = requests.newToken();
     events.started();
-    const reply = await readList(store.services.ai, current.lines, current.oneColumn);
+    const reply = await readList(store.services.ai, current.lines, current.cellRows);
     if (source !== current || !requests.isLatest(ticket)) return;
     events.finished(reply);
     return reply;
   }
 
   async function sourceChanged(
-    lines: string[] | null, byColumns: boolean, events: ReadingEvents, oneColumn = false,
+    lines: string[] | null, byColumns: boolean, events: ReadingEvents, cellRows: ReadonlySet<number> = new Set(),
   ) {
     if (sameSource(lines, byColumns)) return;
     const first = !source;
-    source = { lines, byColumns, oneColumn };
+    source = { lines, byColumns, cellRows };
     if (first && alreadyRead) return;
     return read(events);
   }
 
-  function retry(lines: string[] | null, byColumns: boolean, events: ReadingEvents, oneColumn = false) {
-    if (!sameSource(lines, byColumns)) source = { lines, byColumns, oneColumn };
+  function retry(
+    lines: string[] | null, byColumns: boolean, events: ReadingEvents, cellRows: ReadonlySet<number> = new Set(),
+  ) {
+    if (!sameSource(lines, byColumns)) source = { lines, byColumns, cellRows };
     return read(events);
   }
 
   return { sourceChanged, retry };
 }
 
-export function tieChecklistLines(lines: string[] | null, reading: ListReading | null, bringIn?: Set<number>) {
-  return lines && reading ? tieOut(lines, reading, bringIn) : null;
+export function tieChecklistLines(
+  lines: string[] | null, reading: ListReading | null, bringIn?: Set<number>, written?: string[] | null,
+) {
+  return lines && reading ? tieOut(lines, reading, bringIn, written ?? lines) : null;
 }
 
 export function checklistItemsAsRead(

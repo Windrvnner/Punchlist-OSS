@@ -8,6 +8,7 @@ import type { ChecklistMapping } from '../domain/checklistImport';
 import { LAYERS, type Layer } from '../domain/checklist';
 import { keptImport, keepImport } from './keptImports';
 import type { Asked, Review } from './checklistImport';
+import type { ChecklistText } from './listRead';
 
 /** Every choice and check mark, kept beside the list */
 export interface ChecklistChoices {
@@ -33,7 +34,7 @@ export interface ChecklistChoices {
 export interface ChecklistKept {
   paste?: string;
   table?: ImportTable | null;
-  text?: { name: string; lines: string[] } | null;
+  text?: ChecklistText | null;
   reads?: ListReading | null;
   review?: Review | null;
   choices?: ChecklistChoices;
@@ -72,10 +73,23 @@ function isChecklistKept(value: unknown): value is ChecklistKept {
  * (#1073).
  */
 function inCurrentShape(kept: ChecklistKept): ChecklistKept {
-  const old: unknown = kept.reads;
-  if (!(old instanceof Map)) return kept;
-  const hasCells = kept.table || kept.text?.lines.some((line) => line.includes(' | '));
-  return hasCells ? { ...kept, reads: null } : { ...kept, reads: { reads: old } };
+  const marked = withCellRows(kept);
+  const old: unknown = marked.reads;
+  if (!(old instanceof Map)) return marked;
+  const hasCells = marked.table || marked.text?.lines.some((line) => line.includes(' | '));
+  return hasCells ? { ...marked, reads: null } : { ...marked, reads: { reads: old } };
+}
+
+/**
+ * A kept text from before the app marked the lines it built from cells (`cellRows`) took those lines to be the ones
+ * that hold " | "; that is the one place a line is taken for a row of cells by its characters, for what was kept then
+ * (#1227).
+ */
+function withCellRows(kept: ChecklistKept): ChecklistKept {
+  const text = kept.text;
+  if (!text || text.cellRows) return kept;
+  const cellRows = text.lines.flatMap((line, i) => (line.includes(' | ') ? [i + 1] : []));
+  return { ...kept, text: { ...text, cellRows } };
 }
 
 /**

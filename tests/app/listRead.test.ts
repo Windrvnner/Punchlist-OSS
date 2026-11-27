@@ -1,7 +1,12 @@
 // Reading a list in, whole: one reading, and when it leaves lines unplaced, one whole reading by the thorough model.
 import { describe, it, expect } from 'vitest';
-import { checklistSourceLines, pastedLines, readList } from '../../src/app/listRead';
-import { tableLines, tieOut, textLines, type LineRead, type ListReply } from '../../src/domain/listRead';
+import {
+  checklistCellRows, checklistPaste, checklistSourceLines, checklistWrittenLines, pastedLines, readList,
+  tieChecklistLines,
+} from '../../src/app/listRead';
+import {
+  tableLines, tieOut, textLines, type LineRead, type ListReading, type ListReply,
+} from '../../src/domain/listRead';
 import { mockAi } from '../../src/adapters/mocks';
 import { ok, fail, type Result } from '../../src/domain/result';
 import type { AiService } from '../../src/ports';
@@ -67,7 +72,7 @@ describe('reading a table whose first reading named no columns', () => {
     const lines = tableLines(['No', 'Requirement'], [['1', 'Title report'], ['2', 'Check Debt | Equity obligations']]);
     const placed: LineRead[] = [{ n: 1, k: 'columns' }, { n: 2, k: 'item' }, { n: 3, k: 'item' }];
     const { ai, calls } = fake([reading(placed), { lines: placed, cells: { item: 2 } }]);
-    const t = tieOut(lines, unwrap(await readList(ai, lines)));
+    const t = tieOut(lines, unwrap(await readList(ai, lines, new Set([1, 2, 3]))));
     expect(calls.map((c) => c.thorough)).toEqual([undefined, true]);
     expect(t.items).toEqual([]);
     expect(t.left).toEqual([2, 3]);
@@ -76,7 +81,8 @@ describe('reading a table whose first reading named no columns', () => {
   it('writes a pasted cell\'s own " | " and backslash so that it stays one cell', () => {
     const lines = pastedLines('No\tRequirement\n1\tCheck Debt | Equity obligations\n2\tC:\\dir\\file');
     const placed: LineRead[] = [{ n: 1, k: 'columns' }, { n: 2, k: 'item' }, { n: 3, k: 'item' }];
-    const t = tieOut(lines, { reads: new Map(placed.map((r) => [r.n, r])), cells: { item: 2 } });
+    const reads = new Map(placed.map((r) => [r.n, r]));
+    const t = tieOut(lines, { reads, cells: { item: 2 }, cellRows: new Set([1, 2, 3]) });
     expect(t.items.map((i) => i.text)).toEqual(['Check Debt | Equity obligations', 'C:\\dir\\file']);
   });
 });
@@ -98,16 +104,65 @@ describe('the stand-in reading the mock-up list', () => {
 });
 
 describe('a person\'s file content is never altered on its way in', () => {
+  const placed = (ks: LineRead['k'][]): LineRead[] => ks.map((k, i) => ({ n: i + 1, k }));
   it('keeps a pasted line with one cell and a trailing tab as written, not escaped', () => {
     expect(pastedLines('a\\b\t')).toEqual(['a\\b\t']);
     expect(pastedLines('a\\b|c\td\te')).toEqual(['a\\\\b\\|c | d | e']);
+    expect(checklistPaste('a\\b\t')!.cellRows).toEqual([]);
   });
-  it('reads a one-column table whole, and says so in the reading, so its cells import as written', async () => {
-    const table = { columns: ['Item'], rows: [['Review A | B agreement'], ['Path C:\\docs']] };
-    const lines = checklistSourceLines(null, table as never)!;
-    const placed: LineRead[] = [{ n: 1, k: 'columns' }, { n: 2, k: 'item' }, { n: 3, k: 'item' }];
-    const model = fake([{ lines: placed, cells: { item: 1 } }]);
-    const read = unwrap(await readList(model.ai, lines, true));
-    expect(tieOut(lines, read).items.map((i) => i.text)).toEqual(['Review A | B agreement', 'Path C:\\docs']);
+  it('reads a one-column table\'s lines as text, so its cells import as written', async () => {
+    const table = { columns: ['Item'], rows: [['Review A | B agreement'], ['Path C:\\docs']] } as never;
+    const lines = checklistSourceLines(null, table)!;
+    const cellRows = checklistCellRows(null, table);
+    expect(cellRows.size).toBe(0);
+    const model = fake([{ lines: placed(['columns', 'item', 'item']), cells: { item: 1 } }]);
+    const read = unwrap(await readList(model.ai, lines, cellRows));
+    const items = tieChecklistLines(lines, read, undefined, checklistWrittenLines(null, table))!.items;
+    expect(items.map((i) => i.text)).toEqual(['Review A | B agreement', 'Path C:\\docs']);
+  });
+  it('marks every row of a table of several columns, and only the tabbed lines of a paste, as cell rows', () => {
+    const table = { columns: ['A', 'B'], rows: [['1', '2']] } as never;
+    expect([...checklistCellRows(null, table)]).toEqual([1, 2]);
+    const paste = checklistPaste('Share D:\\srv | read only\n1.2\tInsurance\tLender')!;
+    expect([...checklistCellRows(paste, null)]).toEqual([2]);
+  });
+  it('lists, brings in and appends pasted text holding " | " as pasted, though a column is named', async () => {
+    const pasted = ['Share D:\\srv | read only', 'Note a \\| b | c', 'Item', 'rest | of it'];
+    const source = checklistPaste(pasted.join('\n'))!;
+    const lines = checklistSourceLines(source, null)!;
+    const written = checklistWrittenLines(source, null);
+    const cellRows = checklistCellRows(source, null);
+    const model = fake([{ lines: placed(['left', 'left', 'item', 'more']), cells: { item: 1 } }]);
+    const read = unwrap(await readList(model.ai, lines, cellRows));
+    expect(tieChecklistLines(lines, read, undefined, written)!.leftText).toEqual(lines.slice(0, 2));
+    const brought = tieChecklistLines(lines, read, new Set([1, 2]), written)!.items;
+    expect(brought.map((i) => i.text)).toEqual(['Share D:\\srv | read only', 'Note a \\| b | c', 'Item rest | of it']);
+  });
+});
+
+describe('a pasted line keeps its own text (#1061)', () => {
+  const pasted = [
+    'Insurance', '1.2\tInsurance certificates\tLender to confirm', '1.3\tBroker letter', '\tand cover note',
+  ];
+  const source = checklistPaste(pasted.join('\n'))!;
+  const lines = checklistSourceLines(source, null)!;
+  const written = checklistWrittenLines(source, null);
+  const reading = (cells?: { item: number }): ListReading => ({
+    reads: new Map<number, LineRead>([
+      [1, { n: 1, k: 'section' }], [2, { n: 2, k: 'left' }], [3, { n: 3, k: 'item' }], [4, { n: 4, k: 'more' }],
+    ]),
+    ...(cells ? { cells } : {}),
+    cellRows: checklistCellRows(source, null),
+  });
+
+  it('brings a left-out pasted line in exactly as pasted, its tabs included', () => {
+    expect(lines[1]).toBe('1.2 | Insurance certificates | Lender to confirm');   // as the model reads it
+    const tied = tieChecklistLines(lines, reading({ item: 2 }), new Set([2]), written)!;
+    expect(tied.items[0].text).toBe('1.2\tInsurance certificates\tLender to confirm');
+  });
+
+  it('joins the rest of an item on the line below as pasted, not as the model reads it', () => {
+    const tied = tieChecklistLines(lines, reading({ item: 2 }), new Set(), written)!;
+    expect(tied.items.map((i) => i.text)).toEqual(['Broker letter \tand cover note']);
   });
 });

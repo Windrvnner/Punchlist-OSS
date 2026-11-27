@@ -154,8 +154,10 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
   before cost: the standard model reads the whole list in one call and names each line's kind by a handle that no line's
   own text can be taken for, and for a table the columns that hold the item, section and subsection, and the headings
   of section and subsection rows, and the thorough model retries lines it couldn't place, by the first reading's
-  columns. A cell's or line's own text is never altered, even where it holds " | " or a backslash. A list the service
+  columns. Only a line the app built from cells (a table's rows, a paste's tab-separated lines) is read as a row of
+  cells; any other line is text and is never split or altered, even where it holds " | " or a backslash. A list the service
   refuses as too long, or answers with a reply cut off, is read in halves, down to one line (#1227).
+- A spreadsheet row brought in keeps every cell, separated by tabs, as a spreadsheet copies a row (#1061).
 - An item that joins two conditions becomes two items, and "(if applicable)" goes only on an item that may not apply to every deal.
 - Findings is the worklist and the Checklist is the coverage record; nothing is opened or closed on the Checklist.
 - An opened gap says what is needed and which documents were read, naming any that couldn't be read.
@@ -445,7 +447,7 @@ These decisions are built and wait to be confirmed:
 - Once two PCs' imports of one list have synced, the second PC's Undo of its import is refused.
 - The recovered copy of a deal deleted elsewhere is built, including who sees it, what it holds, and its notice's wording (#220).
 - Periodic records whose names differ only by a period are a series and take one place in the core set, their newest member's; every document stays searchable (docs/core-families-design.md).
-- An issues list or an advisor report is read like the app's other documents: the model reads the whole file once and returns each issues-list point in the list's own words, never reworded, and each advisor-report issue with its place in the file. There is no paging and no stop rule (#1026).
+- An issues list or an advisor report is read like the app's other documents: the model reads the whole file once and returns each issues-list point in the list's own words, never reworded, with its spacing and line breaks as written (#1059), and each advisor-report issue with its place in the file. There is no paging and no stop rule (#1026).
 - A document's word index and a search no longer drop a word or number for its length, and a Word file is indexed from
   its body and all its header, footer, footnote and endnote parts (#1025).
 - The core set and a document's most-used words split text as the word index does and drop no word, letter or number

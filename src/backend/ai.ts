@@ -824,10 +824,10 @@ export function nodeAi(o: AiOptions) {
         if (!got || !Array.isArray(got.points)) throw Object.assign(new Error(UNREAD_REPLY), { code: 'unread' });
         return got.points as { n?: unknown; text?: unknown }[];
       });
-      // the list's own words, number and point alike, are the reply's as given, inner spacing and line breaks
-      // included: only their edges are trimmed, as the import command trims them too (#1026)
-      const edges = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
-      return ok(reply.map((p) => ({ n: edges(p?.n), text: edges(p?.text) })).filter((p) => p.text));
+      // the list's own words, number and point alike, are the reply's as given, spacing and line breaks included;
+      // a point with no words (or only white space) is no point (#1059)
+      const given = (v: unknown) => (typeof v === 'string' ? v : '');
+      return ok(reply.map((p) => ({ n: given(p?.n), text: given(p?.text) })).filter((p) => p.text.trim()));
     } catch (e) {
       if ((e as { code?: string })?.code === 'unread') return fail({ kind: 'failed', message: UNREAD_REPLY });
       return failure(e, 'The file could not be read');
@@ -2531,7 +2531,7 @@ export function nodeAi(o: AiOptions) {
       const read = got.value;
       if (!read.length) return fail({ kind: 'failed', message: 'No points were found in it' });
       // a point the list numbers nothing is known by its place
-      const points = read.map((p, k) => ({ ...p, n: p.n || String(k + 1) }));
+      const points = read.map((p, k) => ({ ...p, n: p.n.trim() ? p.n : String(k + 1) }));
       const fs = i.findings.map((f) => `${f.title.replace(/\s+/g, ' ')}${f.text ? `: ${clean(f.text.replace(/\s*\[\d+\]/g, ''))}` : ''}`);
       const ws = new Map(i.workstreams.map((w) => [w.toLowerCase(), w]));
       const sorted = new Map<number, { title: string; workstream: string; same?: { finding: string } | { point: number } }>();

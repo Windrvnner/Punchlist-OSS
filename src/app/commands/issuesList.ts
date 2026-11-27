@@ -17,10 +17,12 @@ import { issuesListDestinations } from '../issuesListJoins';
 /** what a finding's history says when an import marks it: its page leaves it out of the last change, as the mark itself says it */
 export const LISTED = 'Issues list imported';
 const plural = (n: number, w: string) => `${n.toLocaleString('en-US')} ${w}${n === 1 ? '' : 's'}`;
+/** text kept as given, its edge spaces included; one that is all white space says nothing and is refused (#1059) */
+const Given = z.string().refine((value) => value.trim() !== '', 'Nothing written');
 const Point = z.object({
   n: z.string().min(1),
-  text: z.string().trim().min(1),
-  title: z.string().trim().min(1),
+  text: Given,
+  title: Given,
   workstream: z.string(),
   join: FindingId.optional(),
   after: z.number().int().nonnegative().optional(),
@@ -47,7 +49,9 @@ function pointId(state: { findings: Record<string, unknown>; tombstones: Record<
 export const ImportIssuesList = define({
   name: 'ImportIssuesList',
   // the list: `doc`, its file's id (as the documents service gives it, from the file's bytes), and `list`, its file's name
-  input: z.object({ dealId: DealId, doc: z.string().min(1), list: z.string().trim().min(1), points: z.array(Point).min(1, 'Nothing to import') }),
+  input: z.object({
+    dealId: DealId, doc: z.string().min(1), list: Given, points: z.array(Point).min(1, 'Nothing to import'),
+  }),
   targets: (_s, i) => [...new Set(i.points.flatMap((p) => (p.join ? [p.join] : [])))],
   plan(state, input, ctx) {
     const d = state.deals[input.dealId];

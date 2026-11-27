@@ -1,10 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import {
-  fillUnplaced, tieOut, unplaced, tableLines, textLines, type LineRead, type ListCells, type ListReading, type TiedOut,
+  fillUnplaced, tieOut, unplaced, tableLines, tableRowsAsWritten, textLines, type LineRead, type ListCells,
+  type ListReading, type TiedOut,
 } from '../../src/domain/listRead';
 
-const reading = (rs: LineRead[], cells?: ListCells): ListReading =>
-  ({ reads: new Map(rs.map((r) => [r.n, r])), ...(cells ? { cells } : {}) });
+/** the line numbers of a list of up to 99 lines that the app built from cells (a table's rows) */
+const ALL_ROWS: ReadonlySet<number> = new Set(Array.from({ length: 99 }, (_, k) => k + 1));
+/** a reading of a text list, or with `cells` of a table, whose every line is a cell row */
+const reading = (rs: LineRead[], cells?: ListCells, cellRows?: ReadonlySet<number>): ListReading => ({
+  reads: new Map(rs.map((r) => [r.n, r])),
+  ...(cells ? { cells } : {}),
+  ...(cellRows ? { cellRows } : cells ? { cellRows: ALL_ROWS } : {}),
+});
+const tableReading = (rs: LineRead[], cells?: ListCells) => reading(rs, cells, ALL_ROWS);
 const kinds = (pairs: [number, LineRead['k']][]): LineRead[] => pairs.map(([n, k]) => ({ n, k }));
 /** every line accounted for: the counts add up to the number of lines */
 const addsUp = ({ count: c }: TiedOut) => c.items + c.more + c.headings + c.blank + c.left === c.lines;
@@ -121,47 +129,86 @@ describe('a list read whole by the model, tied out line by line', () => {
   it('keeps the first reading\'s columns when they place no row, and lists the rows left out', () => {
     const lines = tableLines(['No', 'Description'], [['1', 'Site'], ['2', 'Title report']]);
     const read = kinds([[1, 'columns'], [2, 'item'], [3, 'item']]);
-    for (const first of [reading(read, { item: 5 }), reading(read)]) {
-      const filled = fillUnplaced(lines, first, reading(read, { item: 2 }));
+    for (const first of [tableReading(read, { item: 5 }), tableReading(read)]) {
+      const filled = fillUnplaced(lines, first, tableReading(read, { item: 2 }));
       expect(filled.cells).toEqual(first.cells);
       expect(tieOut(lines, filled).items).toEqual([]);
       expect(unplaced(lines, filled)).toEqual([2, 3]);
     }
   });
 
-  it('keeps a one-column table\'s cells whole, with their own pipes and backslashes, unescaped', () => {
-    const rows = [['Review A | B agreement'], ['Path C:\\docs'], ['a\\|b']];
-    const lines = tableLines(['Item'], rows);
-    expect(lines.slice(1)).toEqual(rows.map((r) => r[0]));
-    const read = kinds([[1, 'columns'], [2, 'item'], [3, 'item'], [4, 'item']]);
-    const t = tieOut(lines, { ...reading(read, { item: 1 }), oneColumn: true });
-    expect(t.items.map((i) => i.text)).toEqual(rows.map((r) => r[0]));
-  });
-
-  describe('a table row brought in, appended or listed as left out is the cells as the file holds them', () => {
+  describe('only a line the app built from cells is read as a row of cells (#1227)', () => {
+    const TEXT = ['Share D:\\srv | read only', 'Note a \\| b | c'];
+    const left = kinds([[1, 'left'], [2, 'left']]);
     const rows = [['Left', 'D:\\x | y'], ['Next', 'Path C:\\a|b']];
     const lines = tableLines(['Item', 'Path'], rows);
-    const asHeld = rows.map((r) => r.join(' | '));
-    it('brings a left-out row in with its backslash and pipe as written', () => {
-      const read = reading(kinds([[1, 'columns'], [2, 'left'], [3, 'left']]), { item: 2 });
-      expect(tieOut(lines, read, new Set([2, 3])).items.map((i) => i.text)).toEqual(asHeld);
+    const written = tableRowsAsWritten(['Item', 'Path'], rows);
+    it('lists a text line holding " | " as it is, with its backslash and pipe', () => {
+      expect(tieOut(TEXT, reading(left)).leftText).toEqual(TEXT);
     });
-    it('appends a row read as the rest of the item above it with its backslash and pipe as written', () => {
-      const read = reading(kinds([[1, 'columns'], [2, 'item'], [3, 'more']]), { item: 2 });
-      expect(tieOut(lines, read).items.map((i) => i.text)).toEqual([`D:\\x | y ${asHeld[1]}`]);
+    it('brings a text line holding " | " in as it is', () => {
+      expect(tieOut(TEXT, reading(left), new Set([1, 2])).items.map((i) => i.text)).toEqual(TEXT);
     });
-    it('lists a left-out row as the cells are written in the file', () => {
-      const read = reading(kinds([[1, 'columns'], [2, 'left'], [3, 'left']]), { item: 2 });
-      expect(tieOut(lines, read).leftText).toEqual(asHeld);
+    it('appends a text line holding " | " to the item above as it is', () => {
+      const first = ['First item', ...TEXT];
+      const t = tieOut(first, reading(kinds([[1, 'item'], [2, 'more'], [3, 'more']])));
+      expect(t.items.map((i) => i.text)).toEqual([`First item ${TEXT[0]} ${TEXT[1]}`]);
     });
-    it('keeps a one-column table\'s line and a text line as they are on every path', () => {
-      const one = ['A | B\\c', 'plain \\| text'];
-      const read = { ...reading(kinds([[1, 'left'], [2, 'left']])), oneColumn: true };
-      const t = tieOut(one, read, new Set([1]));
-      expect(t.items.map((i) => i.text)).toEqual([one[0]]);
-      expect(t.leftText).toEqual([one[1]]);
-      expect(tieOut(one, reading(kinds([[1, 'left'], [2, 'left']]))).leftText).toEqual(one);
+    it('takes a text line holding " | " whole as an item or heading when the model names a column for it', () => {
+      const read = reading(kinds([[1, 'section'], [2, 'item']]), { item: 1, heading: 1 }, new Set());
+      const t = tieOut(TEXT, read);
+      expect(t.items).toEqual([{ section: TEXT[0], text: TEXT[1], lines: [2] }]);
+      expect(unplaced(TEXT, read)).toEqual([]);
     });
+    it('keeps a one-column table\'s cells whole on every path, with their own pipes and backslashes', () => {
+      const cells = [['Review A | B agreement'], ['Path C:\\docs'], ['a\\|b']];
+      const one = tableLines(['Item'], cells);
+      expect(one.slice(1)).toEqual(cells.map((c) => c[0]));
+      const read = reading(kinds([[1, 'columns'], [2, 'item'], [3, 'left'], [4, 'left']]), { item: 1 }, new Set());
+      const t = tieOut(one, read, new Set([3]));
+      expect(t.items.map((i) => i.text)).toEqual([cells[0][0], cells[1][0]]);
+      expect(t.leftText).toEqual([cells[2][0]]);
+    });
+    it('reads a multi-column row\'s cells, and brings it in, appends it and lists it as the source writes it', () => {
+      const cellsRead = reading(kinds([[1, 'columns'], [2, 'item'], [3, 'item']]), { item: 2 }, ALL_ROWS);
+      const items = tieOut(lines, cellsRead, new Set(), written).items;
+      expect(items.map((i) => i.text)).toEqual(['D:\\x | y', 'Path C:\\a|b']);
+      const out = reading(kinds([[1, 'columns'], [2, 'left'], [3, 'left']]), { item: 2 }, ALL_ROWS);
+      expect(tieOut(lines, out, new Set(), written).leftText).toEqual(written.slice(1));
+      expect(tieOut(lines, out, new Set([2, 3]), written).items.map((i) => i.text)).toEqual(written.slice(1));
+      const more = reading(kinds([[1, 'columns'], [2, 'item'], [3, 'more']]), { item: 2 }, ALL_ROWS);
+      expect(tieOut(lines, more, new Set(), written).items.map((i) => i.text)).toEqual([`D:\\x | y ${written[2]}`]);
+    });
+  });
+
+  it('words a table row\'s item as its cell is written, a line break inside it kept (#1061)', () => {
+    const columns = ['Area', 'Requirement'];
+    const rows = [['Land', 'Site control\ncovers the array'], ['Land', ' Permits ']];
+    const lines = tableLines(columns, rows);
+    expect(lines[1]).toBe('Land | Site control covers the array');   // as the model reads it
+    const read = tableReading(kinds([[1, 'columns'], [2, 'item'], [3, 'item']]), { item: 2, section: 1 });
+    const t = tieOut(lines, read, new Set(), tableRowsAsWritten(columns, rows));
+    expect(t.items.map((i) => i.text)).toEqual(['Site control\ncovers the array', ' Permits ']);
+  });
+
+  it('brings a left-out table row in with its cells as a spreadsheet copies them (#1061)', () => {
+    const columns = ['Ref', 'Item', 'Notes'];
+    const rows = [
+      ['1.1', 'Title report', ''], ['1.2', 'Insurance certificates', 'Lender to confirm'], ['', 'Survey', ''],
+    ];
+    const lines = tableLines(columns, rows);
+    const written = tableRowsAsWritten(columns, rows);
+    expect(written).toHaveLength(lines.length);
+    const read = tableReading(kinds([[1, 'columns'], [2, 'item'], [3, 'left'], [4, 'item']]), { item: 2 });
+    expect(tieOut(lines, read, new Set(), written).left).toEqual([3]);
+    const brought = tieOut(lines, read, new Set([3]), written).items.map((i) => i.text);
+    expect(brought).toEqual(['Title report', '1.2\tInsurance certificates\tLender to confirm', 'Survey']);
+    // empty cells at a row's edges and a line break inside a cell are kept
+    expect(tableRowsAsWritten(columns, [['', 'Two\nlines', '']])[1]).toBe('\tTwo\nlines\t');
+  });
+
+  it('splits text at every line break and changes nothing else of a line (#1059)', () => {
+    expect(textLines(' a \r\n\tb  c\rd\n\ne ')).toEqual([' a ', '\tb  c', 'd', '', 'e ']);
   });
 
   it('keeps a cell whole when its own text holds " | " or a backslash, and the columns after it in place', () => {
@@ -200,7 +247,7 @@ describe('a list read whole by the model, tied out line by line', () => {
     expect(unplaced(lines, reading(read, { item: 2, heading: 1 }))).toEqual([2, 4]);
     expect(unplaced(lines, reading(kinds([[1, 'columns'], [3, 'item']]), { item: 5 }))).toEqual([2, 3, 4]);
     // a table read with no columns named
-    expect(unplaced(lines, reading(kinds([[3, 'item']])))).toEqual([1, 2, 3, 4]);
+    expect(unplaced(lines, tableReading(kinds([[3, 'item']])))).toEqual([1, 2, 3, 4]);
   });
 
   it('ties out a 2,000-line list with 100 headings, every line counted and every item worded as its line', () => {

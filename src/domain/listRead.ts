@@ -32,15 +32,16 @@ export interface ListReply { lines: LineRead[]; cells?: ListCells }
 export interface ListReading extends ListLayout { reads: Map<number, LineRead> }
 
 /**
- * How a list's lines are laid out: a table's columns as the model named them, and whether the list is a table of one
- * column, whose lines are each cell as it is, never split at " | " or unescaped (#1227).
+ * How a list's lines are laid out: a table's columns as the model named them, and `cellRows`, the numbers of the lines
+ * the app built from cells (a spreadsheet's rows, a paste's tab-separated lines). Only those lines are split at " | ";
+ * every other line is text, taken as it is, whatever its characters (#1227).
  */
-export interface ListLayout { cells?: ListCells; oneColumn?: boolean }
+export interface ListLayout { cells?: ListCells; cellRows?: ReadonlySet<number> }
 
-export const readingOf = (reply: ListReply, oneColumn = false): ListReading => ({
+export const readingOf = (reply: ListReply, cellRows?: ReadonlySet<number>): ListReading => ({
   reads: new Map(reply.lines.map((r) => [r.n, r])),
   ...(reply.cells ? { cells: reply.cells } : {}),
-  ...(oneColumn ? { oneColumn } : {}),
+  ...(cellRows?.size ? { cellRows } : {}),
 });
 
 /** an item, with the lines it came from */
@@ -74,39 +75,46 @@ export function tableLines(columns: string[], rows: string[][]): string[] {
   return [line(columns), ...rows.map(line)];
 }
 
+/**
+ * A table's rows as a spreadsheet copies them, line for line with `tableLines`: each row's cells separated by tabs, its
+ * cells' own line breaks kept, and so are empty cells at the row's edges. A left-out row a person brings in comes in
+ * so (decisions: Checklist; #1061).
+ */
+export function tableRowsAsWritten(columns: string[], rows: string[][]): string[] {
+  const row = (r: string[]) => r.map((c) => String(c ?? '')).join('\t');
+  return [row(columns), ...rows.map(row)];
+}
+
 /** Text as lines: every line break counts, so a line number means the same line to the person, the model and the app. */
-export const textLines = (text: string): string[] => text.replace(/\r\n?/g, '\n').split('\n');
+export const textLines = (text: string): string[] => text.split(/\r\n?|\n/);
 
 /** a table row's cells, as tableLines joins them, each as its own text (an escaped backslash or pipe undone) */
 const rowCells = (line: string) => line.split(' | ').map(uncellText);
 const uncellText = (cell: string) => cell.replace(/\\([\\|])/g, '$1');
 
 /**
- * A line as the file holds it: a table row of several cells as its cells are written, their escapes undone and joined
- * with " | "; a text line, or the line of a table of one column, as it is (#1227).
+ * The cell a column names, as the source writes it: from the row's own tab-separated cells (`own`) when they are as
+ * many as the line's, so that a line break in the cell stays, else from the line's. '' when the line is not a cell
+ * row (the app did not build it from cells, `cellRows`) or the column is past the row.
  */
-function asWritten(line: string, { oneColumn }: ListLayout): string {
+function cellAt(line: string, own: string, n: number, column: number | undefined, layout: ListLayout): string {
+  if (!layout.cellRows?.has(n) || !column || column < 1) return '';
   const cells = rowCells(line);
-  return oneColumn || cells.length === 1 ? line : cells.join(' | ');
-}
-
-/** the cell a column names, as written, or '' when the line is not a table row or the column is past it */
-function cellAt(line: string, column: number | undefined, oneColumn?: boolean): string {
-  if (oneColumn) return '';
-  const cells = rowCells(line);
-  return cells.length > 1 && column && column >= 1 ? (cells[column - 1] ?? '') : '';
+  const ownCells = own.split('\t');
+  return (ownCells.length === cells.length ? ownCells : cells)[column - 1] ?? '';
 }
 
 /**
- * The words a line's item or heading stands for, exactly as the file has them, edge spaces and tabs included (#1215):
- * a line that is not a table row whole, a table row the cell the model's columns name: the item column for an item,
- * the heading or subheading column for a section or subsection row. '' when there are none.
+ * The words a line's item or heading stands for, exactly as the source writes them, edge spaces and tabs included
+ * (#1215): a line that is not a cell row whole (`own`, the line as `written` gives it), a cell row the cell the model's
+ * columns name: the item column for an item, the heading or subheading column for a section or subsection row. '' when
+ * there are none.
  */
-function wordsOf(line: string, k: LineRead['k'], { cells, oneColumn }: ListLayout): string {
-  // a line with no " | " is text, as it is: its backslashes and pipes are its own, whatever columns the model names
-  if (oneColumn || rowCells(line).length === 1) return line.trim() ? line : '';
-  const column = k === 'item' ? cells?.item : k === 'section' ? cells?.heading : cells?.subheading;
-  const cell = cellAt(line, column);
+function wordsOf(line: string, own: string, r: LineRead, layout: ListLayout): string {
+  if (!layout.cellRows?.has(r.n)) return line.trim() ? own : '';
+  const { cells } = layout;
+  const column = r.k === 'item' ? cells?.item : r.k === 'section' ? cells?.heading : cells?.subheading;
+  const cell = cellAt(line, own, r.n, column, layout);
   return key(cell) ? cell : '';
 }
 
@@ -137,15 +145,19 @@ function usable(line: string, r: LineRead | undefined, layout: ListLayout): bool
   if (!r) return false;
   if (r.k === 'left' || r.k === 'columns' || r.k === 'more') return true;
   if (r.k !== 'item' && r.k !== 'section' && r.k !== 'subsection') return false;
-  return !!wordsOf(line, r.k, layout).trim();
+  return !!wordsOf(line, line, r, layout).trim();
 }
 
 /**
  * Every line accounted for. `bringIn` holds lines left out that a person checked: each becomes an item where it sits,
- * under the heading above it, with its own words. A reading that is not usable leaves its line out; a "more" line with
- * no item above it in the same section is left out too, never joined to an item it does not belong to.
+ * under the heading above it, with its own words as the source writes them (`written`, line for line with `lines`:
+ * a pasted line as pasted, a table row as `tableRowsAsWritten` gives it), as does the rest of an item on a line below
+ * it and a line shown as left out (`leftText`). A reading that is not usable leaves its line out; a "more" line with no
+ * item above it in the same section is left out too, never joined to an item it does not belong to.
  */
-export function tieOut(lines: string[], reading: ListReading, bringIn: ReadonlySet<number> = new Set()): TiedOut {
+export function tieOut(
+  lines: string[], reading: ListReading, bringIn: ReadonlySet<number> = new Set(), written = lines,
+): TiedOut {
   const count = { lines: lines.length, items: 0, more: 0, headings: 0, blank: 0, left: 0 };
   const tied: TiedOut = { items: [], left: [], leftText: [], count };
   const at: TieState = { section: '', subsection: '', last: null };
@@ -156,16 +168,17 @@ export function tieOut(lines: string[], reading: ListReading, bringIn: ReadonlyS
       return;
     }
     const r = reading.reads.get(n);
-    const placed = !!r && usable(line, r, reading) && place(tied, at, line, r, reading);
+    const own = written[i] ?? line;
+    const placed = !!r && usable(line, r, reading) && place(tied, at, { line, own }, r, reading);
     if (placed) return;
     if (!bringIn.has(n)) {
       tied.left.push(n);
-      tied.leftText.push(asWritten(line, reading));
+      tied.leftText.push(own);
       count.left++;
       return;
     }
     // a line brought in comes in exactly as written, its bullet or list number included
-    addItem(tied, at, asWritten(line, reading), n);
+    addItem(tied, at, own, n);
     at.last = null;
   });
   return tied;
@@ -173,6 +186,9 @@ export function tieOut(lines: string[], reading: ListReading, bringIn: ReadonlyS
 
 /** where a tie-out has got to: the headings over the next item, and the item a "more" line would join */
 interface TieState { section: string; subsection: string; last: ReadItem | null }
+
+/** a line as the model reads it, and as its source writes it */
+interface SourceLine { line: string; own: string }
 
 /** a new item under the headings above it */
 function addItem(tied: TiedOut, at: TieState, text: string, n: number) {
@@ -187,11 +203,12 @@ function addItem(tied: TiedOut, at: TieState, text: string, n: number) {
  * Accounts for a line with a usable reading; false when it is to be left out: "left", or a "more" line with no item
  * above it.
  */
-function place(tied: TiedOut, at: TieState, line: string, r: LineRead, layout: ListLayout): boolean {
+function place(tied: TiedOut, at: TieState, source: SourceLine, r: LineRead, layout: ListLayout): boolean {
+  const { line, own } = source;
   if (r.k === 'left') return false;
   if (r.k === 'section' || r.k === 'subsection') {
     if (r.k === 'section') at.subsection = '';
-    at[r.k] = wordsOf(line, r.k, layout);
+    at[r.k] = wordsOf(line, own, r, layout);
     at.last = null;
     tied.count.headings++;
     return true;
@@ -202,14 +219,14 @@ function place(tied: TiedOut, at: TieState, line: string, r: LineRead, layout: L
   }
   if (r.k === 'more') {
     if (!at.last) return false;
-    // the rest of the item as written, after a space (#1215)
-    at.last.text = `${at.last.text} ${asWritten(line, layout)}`;
+    // the rest of the item as the source writes it, after a space (#1215)
+    at.last.text = `${at.last.text} ${own}`;
     at.last.lines.push(r.n);
     tied.count.more++;
     return true;
   }
-  rowHeadings(at, line, layout);
-  addItem(tied, at, wordsOf(line, r.k, layout), r.n);
+  rowHeadings(at, source, r.n, layout);
+  addItem(tied, at, wordsOf(line, own, r, layout), r.n);
   return true;
 }
 
@@ -217,9 +234,9 @@ function place(tied: TiedOut, at: TieState, line: string, r: LineRead, layout: L
  * A table row's own section cell starts that section (and no subsection) for it and the rows under it, as a section
  * filled in only on the first row of each section is laid out; its subsection cell does the same within the section.
  */
-function rowHeadings(at: TieState, line: string, { cells, oneColumn }: ListLayout) {
-  const section = cellAt(line, cells?.section, oneColumn);
-  const subsection = cellAt(line, cells?.subsection, oneColumn);
+function rowHeadings(at: TieState, { line, own }: SourceLine, n: number, layout: ListLayout) {
+  const section = cellAt(line, own, n, layout.cells?.section, layout);
+  const subsection = cellAt(line, own, n, layout.cells?.subsection, layout);
   if (key(section) && key(section) !== key(at.section)) {
     at.section = section;
     at.subsection = '';

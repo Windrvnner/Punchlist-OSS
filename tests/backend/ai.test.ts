@@ -1481,6 +1481,21 @@ describe('the first pass', () => {
     expect(r.written.length).toBe(1); expect((await storedFindings(s.repo))[0].sources.map((x) => [x.doc, x.loc])).toEqual([['ENV-2024-0043.pdf', 'p. 4'], ['Scan 7.pdf', 'p. 1']]); expect(r.gaps).toEqual([{ title: 'The link to the network is contracted' }]);                // the offer was read and does not settle it: there is no document behind the item
   });
 
+  it('a quote the model gives for a place cited twice is stored exactly as given, edge spaces included', async () => {
+    const quote = '  Lock-up Ratio means 1.25:1\n';
+    const one = { broad: [{ id: 'x1', text: 'The lock-up ratio is agreed' }], product: [], sector: [] };
+    const sources = (c: Call) => [{ doc: tag(c, FA), page: 14 }, { doc: tag(c, FA), page: 14, quote }];
+    const body = ['It is set at 1.25x. [1] And again. [2]'];
+    const finding = (c: Call) => ({
+      result: 'finding', title: 'The lock-up ratio is open', workstream: 'Legal', body, next: '', sources: sources(c),
+    });
+    const answer = (c: Call) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...finding(c) })) });
+    const s = setup(answer, undefined, { checklist: () => one });
+    await deal(s.repo);
+    val(await s.ai.firstPass('d1'));
+    expect((await storedFindings(s.repo))[0].sources.map((x) => x.quote)).toEqual([quote]);
+  });
+
   it('an item a blackline alone supports is never settled; with its clean draft cited too, it is', async () => {
     const BL = doc(74, 'Credit Agreement (blackline).pdf', { pages: 30, summary: 'The lock-up ratio agreed, as changed.' }); const one = { broad: [{ id: 'k1', text: 'The lock-up ratio is agreed' }], product: [], sector: [] };
     const run = async (cite: (c: Call) => object[]) => { const s = setup((c) => ({ items: itemsIn(c).map((it) => ({ id: it.tag, ...(c.prompt.includes('Add "where"') ? { result: 'ok', where: cite(c) } : { result: 'ok' }) })) }), { d1: [FA, BL] }, { checklist: () => one }); await deal(s.repo); return { r: val(await s.ai.firstPass('d1')), s }; };
