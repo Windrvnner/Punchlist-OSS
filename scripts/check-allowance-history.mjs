@@ -1,8 +1,10 @@
 // Fails when an allowance file grows relative to main: every entry, whether it cites an issue or a decision, may only
 // be kept, lowered or removed, and a decision must already be on main's scripts/verified-decisions.json.
+// A pane-of-glass entry may move to the new text of an edited line (scripts/allowance-moves.mjs).
 // Needs full history (CI's static job has it).
 import { existsSync, readFileSync } from 'node:fs';
 import { ALLOWANCE_FILES, committedJson, describe, git, keyOf, mergeBase } from './allowance.mjs';
+import { movedLines } from './allowance-moves.mjs';
 import { scanUi } from './ui-scan.mjs';
 
 const paneOfGlassFile = ALLOWANCE_FILES[0];
@@ -28,11 +30,11 @@ function swapProblem(entry, onMain) {
   return `${describe(entry)}: ${now} replaces main's issue ${onMain.issue}`;
 }
 
-function growthProblems(entries, ceiling) {
+function growthProblems(entries, ceiling, movedAllowance) {
   const problems = [];
   for (const entry of entries) {
     const onMain = ceiling.find((each) => keyOf(each) === keyOf(entry));
-    const allowed = onMain?.count ?? 0;
+    const allowed = onMain?.count ?? movedAllowance(entry);
     if (entry.count > allowed) {
       problems.push(`${describe(entry)}: count ${entry.count} is above main's ${allowed}`);
     }
@@ -57,7 +59,8 @@ function historyProblems(at) {
       continue;
     }
     const ceiling = ceilingFor(file, at);
-    if (ceiling) problems.push(...growthProblems(entries, ceiling));
+    const movedAllowance = file === paneOfGlassFile ? movedLines(ceiling, at) : () => 0;
+    if (ceiling) problems.push(...growthProblems(entries, ceiling, movedAllowance));
     problems.push(...decisionProblems(entries, verifiedOnMain));
   }
   return problems;

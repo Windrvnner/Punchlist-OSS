@@ -107,6 +107,67 @@ describe('allowance history', () => {
     expect(decided.stderr).toContain("decision replaces main's issue 7");
   });
 
+  describe('an entry moved to the new text of an edited line', () => {
+    const filler = ['const a = 1;', 'const b = 2;', 'const c = 3;', 'const d = 4;', 'const e = 5;'];
+    const before = ['import x from "y";', 'store.services.ai', ...filler].join('\n');
+    const renamed = entry(1, { line: 'state.services.ai' });
+    // main lists `store.services.ai` once, by issue, or (with no array baseline) by main's own screens.
+    const edited = (onMain: unknown = [entry(1)]) => repository({ [baselineFile]: onMain, [screen]: before });
+
+    it.each([['a list', [entry(1)]], ['no list', {}]])('accepts a renamed line (main has %s)', (_, onMain) => {
+      const repo = edited(onMain);
+      repo.write(screen, before.replace('store.services.ai', 'state.services.ai'));
+      repo.write(baselineFile, [renamed]);
+      const result = repo.run();
+      expect(result.stderr).toBe('');
+      expect(result.status).toBe(0);
+    });
+
+    it('rejects a new line elsewhere when the listed line is deleted in another hunk', () => {
+      const repo = edited();
+      repo.write(screen, [...before.split('\n').filter((row) => row !== 'store.services.ai'), 'state.services.ai']
+        .join('\n'));
+      repo.write(baselineFile, [renamed]);
+      const result = repo.run();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(`${screen} services "state.services.ai": count 1 is above main's 0`);
+    });
+
+    it('rejects a moved entry whose count is above the old count', () => {
+      const repo = edited();
+      repo.write(screen, before.replace('store.services.ai', 'state.services.ai'));
+      repo.write(baselineFile, [entry(2, { line: 'state.services.ai' })]);
+      const result = repo.run();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("count 2 is above main's 1");
+    });
+
+    it('rejects two entries that take more than the old count', () => {
+      const repo = edited();
+      repo.write(screen, before.replace('store.services.ai', 'state.services.ai\nstate.services.ai2'));
+      repo.write(baselineFile, [renamed, entry(1, { line: 'state.services.ai2' })]);
+      const result = repo.run();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(`${screen} services "state.services.ai2": count 1 is above main's 0`);
+    });
+
+    it('rejects a moved entry while the old line is still in the file', () => {
+      const repo = edited();
+      repo.write(screen, before.replace('store.services.ai', 'store.services.ai\nstate.services.ai'));
+      repo.write(baselineFile, [entry(1), renamed]);
+      const result = repo.run();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("state.services.ai\": count 1 is above main's 0");
+    });
+
+    it('rejects a moved entry that cites another issue', () => {
+      const repo = edited();
+      repo.write(screen, before.replace('store.services.ai', 'state.services.ai'));
+      repo.write(baselineFile, [entry(1, { line: 'state.services.ai', issue: 8 })]);
+      expect(repo.run().status).toBe(1);
+    });
+  });
+
   it('reports an allowance file that is not an array', () => {
     const repo = repository({ [baselineFile]: [] });
     repo.write(baselineFile, {});
