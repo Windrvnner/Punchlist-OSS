@@ -1342,6 +1342,24 @@ describe('deal memo model replies', () => {
     expect(memo.risks![0].body).toEqual(short);
   });
 
+  it('keeps a key risk write-up of one very long unbroken word without sending it back (#806)', async () => {
+    const token = [`${'x'.repeat(6_000)} [1]`];
+    const standIn = await setupMemoReplies([distributionRisk], (call) => citedRiskReply(call, token));
+    const memo = val(await standIn.ai.memo!('d1'));
+    expect(standIn.calls.filter(memoWrite)).toHaveLength(1);
+    expect(memo.risks![0].body).toEqual(token);
+  });
+
+  it.each([
+    ['empty', []],
+    ['advising', [`${creditWords} The lenders should ask for a waiver. [1]`]],
+  ])('falls back to the findings\' own words when the write-up is %s (#806)', async (_name, paragraphs) => {
+    const standIn = await setupMemoReplies([distributionRisk], (call) => citedRiskReply(call, paragraphs));
+    const memo = val(await standIn.ai.memo!('d1'));
+    expect(standIn.calls.filter(memoWrite).map(({ model }) => model)).toEqual(['standard', 'standard', 'thorough']);
+    expect(memo.risks![0]).toEqual(distributionRisk);
+  });
+
   it('keeps the edge spaces and tabs of the paragraphs a key risk write-up comes back with', async () => {
     const edged = [` ${creditWords} [1]`, `\t${termWords} [2]`];
     const standIn = await setupMemoReplies([distributionRisk], (call) => citedRiskReply(call, edged));
