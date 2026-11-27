@@ -6,7 +6,8 @@
 //
 // `--lower` lowers each entry's count to its matches and removes unmatched entries; it never adds an entry.
 // `--list` prints the groups not yet listed, as entries without an issue or decision.
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { allowanceProblems, decisionEntries, entryProblems, lowerAllowance, unlistedMatches } from './allowance.mjs';
 import { slashPath } from './pane-of-glass-matches.mjs';
 import { scanUi } from './ui-scan.mjs';
@@ -53,8 +54,11 @@ function readAllowance() {
   }
 }
 
+// A symbolic link to a file is scanned as the file it points to.
+const isFileOrLinkToOne = (entry) =>
+  entry.isFile() || (entry.isSymbolicLink() && statSync(path.join(entry.parentPath, entry.name)).isFile());
 const files = readdirSync('src/ui', { recursive: true, withFileTypes: true })
-  .filter((entry) => entry.isFile())
+  .filter(isFileOrLinkToOne)
   .map((entry) => slashPath(entry.parentPath, entry.name))
   .sort();
 const found = scanUi(files, read);

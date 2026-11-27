@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { spawnSync } from 'node:child_process';
 import {
-  copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
+  copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -48,6 +48,16 @@ describe('UI dependency checks', () => {
     const readability = commands.indexOf('node scripts/check-readability.mjs');
     expect(readability).toBeGreaterThanOrEqual(0);
     expect(commands.indexOf('node scripts/check-pane-of-glass.mjs')).toBeGreaterThan(readability);
+  });
+
+  it('scans a screen file that is a symbolic link', () => {
+    const repo = fixture();
+    repo.write('shared/Linked.tsx', 'for (const row of rows) show(row);\n');
+    mkdirSync(path.join(repo.dir, 'src/ui'), { recursive: true });
+    symlinkSync(path.join(repo.dir, 'shared/Linked.tsx'), path.join(repo.dir, 'src/ui/Linked.tsx'));
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('src/ui/Linked.tsx loop "for (const row of rows) show(row);": 1 not listed');
   });
 
   it('reports the file, kind and line of each forbidden dependency', () => {
