@@ -447,13 +447,12 @@ export class ChecklistImportSession {
     const selection = this.selection(this.review, remove, useReword);
     const file = this.table?.name ?? this.text?.name ?? '';
     const target = this.target;
-    const dialog = this.store.get().ui.firmChecklist;
     this.activity('importing');
     try {
       const result = await submitChecklist(this.store, this.key, target, selection.items, file, this.instance);
       if (!result.ok) return this.activity('', `Couldn’t import: ${result.error.message}`);
       this.busy = '';
-      if (this.live && this.store.get().ui.firmChecklist === dialog) this.back();
+      this.back();
       showChecklistOutcome(this.store, target.layer, target.name, result.value);
     } catch (error) {
       this.activity('', `Couldn’t import: ${error instanceof Error ? error.message : String(error)}`);
