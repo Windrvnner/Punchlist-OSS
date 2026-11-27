@@ -46,7 +46,10 @@ export function mockTextReads(lines: string[]): LineRead[] {
   lines.forEach((raw, k) => {
     const n = k + 1;
     const line = raw.trim();
-    if (!line) { inItem = false; return; }
+    if (!line) {
+      inItem = false;
+      return;
+    }
     const kind = plain ? plainKind(line, n) : numberedKind(raw, line, inItem);
     if (kind === 'item' || kind === 'more') inItem = true;
     else if (kind === 'section' || kind === 'subsection') inItem = false;

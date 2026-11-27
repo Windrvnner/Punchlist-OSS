@@ -22,7 +22,11 @@ export interface LineRead {
  * as a section (`heading`) or a subsection (`subheading`).
  */
 export interface ListCells {
-  item: number; section?: number; subsection?: number; heading?: number; subheading?: number;
+  item: number;
+  section?: number;
+  subsection?: number;
+  heading?: number;
+  subheading?: number;
 }
 
 /** the model's reading of a whole list, as the service sends it: each named line's kind, and a table's columns */
@@ -185,7 +189,11 @@ export function tieOut(
 }
 
 /** where a tie-out has got to: the headings over the next item, and the item a "more" line would join */
-interface TieState { section: string; subsection: string; last: ReadItem | null }
+interface TieState {
+  section: string;
+  subsection: string;
+  last: ReadItem | null;
+}
 
 /** a line as the model reads it, and as its source writes it */
 interface SourceLine { line: string; own: string }

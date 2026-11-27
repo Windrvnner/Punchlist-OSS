@@ -155,8 +155,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
   own text can be taken for, and for a table the columns that hold the item, section and subsection, and the headings
   of section and subsection rows, and the thorough model retries lines it couldn't place, by the first reading's
   columns. Only a line the app built from cells (a table's rows, a paste's tab-separated lines) is read as a row of
-  cells; any other line is text and is never split or altered, even where it holds " | " or a backslash. A list the service
-  refuses as too long, or answers with a reply cut off, is read in halves, down to one line (#1227).
+  cells; any other line is text and is never split or altered, even where it holds " | " or a backslash. A list
+  the service refuses as too long, or answers with a reply cut off, is read in halves, down to one line (#1227).
 - A spreadsheet row brought in keeps every cell, separated by tabs, as a spreadsheet copies a row (#1061).
 - An item that joins two conditions becomes two items, and "(if applicable)" goes only on an item that may not apply to every deal.
 - Findings is the worklist and the Checklist is the coverage record; nothing is opened or closed on the Checklist.

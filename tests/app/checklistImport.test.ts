@@ -393,7 +393,8 @@ it('discards late model replies when the source changes or the dialog leaves', a
     const events = { started: vi.fn(), finished: vi.fn() };
     const earlier = reading.sourceChanged(lines, false, events);
     const newer = await reading.sourceChanged(revised, false, events);
-    expect(model.mock.calls[1][0].lines).toBe(revised); expect(value(newer!).reads.get(1)?.k).toBe('section');
+    expect(model.mock.calls[1][0].lines).toBe(revised);
+    expect(value(newer!).reads.get(1)?.k).toBe('section');
     release(ok(modelReading(lines)));
     expect(await earlier).toBeUndefined();
 

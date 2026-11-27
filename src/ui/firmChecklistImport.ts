@@ -189,7 +189,11 @@ async function updateTableRead(
 }
 
 /** the lines as the model reads them, as the source writes them, and which are built from cells */
-interface ListSourceLines { lines: string[] | null; written: string[] | null; cellRows: ReadonlySet<number> }
+interface ListSourceLines {
+  lines: string[] | null;
+  written: string[] | null;
+  cellRows: ReadonlySet<number>;
+}
 
 /**
  * The model's reading of the lines, tied out line by line. It reads the list as soon as there is one, and again for

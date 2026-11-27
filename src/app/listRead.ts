@@ -91,7 +91,12 @@ type ChecklistFile = Parameters<typeof readListFile>[1];
  * `written`: a paste as pasted, line for line with `lines` (which the model reads), for a line brought in (#1061).
  * `cellRows`: the numbers of the lines built from cells, the only lines read as cell rows (#1227).
  */
-export interface ChecklistText { name: string; lines: string[]; written?: string[]; cellRows?: number[] }
+export interface ChecklistText {
+  name: string;
+  lines: string[];
+  written?: string[];
+  cellRows?: number[];
+}
 interface MappedChecklistTable { table: ImportTable; mapping: ChecklistMapping }
 
 function mappedTable(table: ImportTable): MappedChecklistTable {
