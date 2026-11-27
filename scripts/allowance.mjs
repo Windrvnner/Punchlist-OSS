@@ -2,9 +2,14 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 
 const platforms = ['linux', 'win32'];
+export const ALLOWANCE_FILES = [
+  'scripts/pane-of-glass-baseline.json',
+  'scripts/vendor-names-allowance.json',
+  'scripts/skipped-tests-allowance.json',
+];
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' });
 // A skipped test is listed once for each platform it is skipped on.
-const keyOf = ({ file, kind, line, platform }) =>
+export const keyOf = ({ file, kind, line, platform }) =>
   JSON.stringify(kind === 'skipped' ? [file, kind, line, platform] : [file, kind, line]);
 const describe = ({ file, kind, line }) => `${file} ${kind} "${line}"`;
 
@@ -97,18 +102,22 @@ export function allowanceProblems(found, allowance, { decisions, verified, scope
   ];
 }
 
-// The file at the merge base of HEAD with main, or null when it is absent there or there is no Git checkout.
-export function committedJson(path, cwd = process.cwd()) {
+// The merge base of HEAD with main, or null when there is no Git checkout (exported sources have no history).
+// In a Git checkout, HEAD alone cannot prove an allowance is valid, so a missing main throws.
+export function mergeBase(cwd = process.cwd()) {
   for (const ref of ['origin/main', 'main']) {
     const base = spawnSync('git', ['merge-base', 'HEAD', ref], { cwd, encoding: 'utf8' });
-    if (base.status !== 0) continue;
-    const at = base.stdout.trim();
-    if (!git(cwd, 'ls-tree', '--name-only', at, '--', path).trim()) return null;
-    return JSON.parse(git(cwd, 'show', `${at}:${path}`));
+    if (base.status === 0) return base.stdout.trim();
   }
-  // Exported sources have no history. In a Git checkout, HEAD alone cannot prove an allowance is valid.
   if (spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd }).status !== 0) return null;
   const shallow = git(cwd, 'rev-parse', '--is-shallow-repository').trim() === 'true';
   const fetch = `git fetch ${shallow ? '--unshallow ' : ''}origin +refs/heads/main:refs/remotes/origin/main`;
   throw new Error(`Cannot compare with main. Run ${fetch} and retry.`);
+}
+
+// The file at the merge base of HEAD with main, or null when it is absent there or there is no Git checkout.
+export function committedJson(path, cwd = process.cwd()) {
+  const at = mergeBase(cwd);
+  if (at === null || !git(cwd, 'ls-tree', '--name-only', at, '--', path).trim()) return null;
+  return JSON.parse(git(cwd, 'show', `${at}:${path}`));
 }

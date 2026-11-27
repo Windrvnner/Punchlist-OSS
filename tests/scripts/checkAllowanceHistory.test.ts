@@ -1,0 +1,129 @@
+// @vitest-environment node
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { afterEach, describe, expect, it } from 'vitest';
+
+const script = path.resolve('scripts/check-allowance-history.mjs');
+const baselineFile = 'scripts/pane-of-glass-baseline.json';
+const vendorFile = 'scripts/vendor-names-allowance.json';
+const verifiedFile = 'scripts/verified-decisions.json';
+const screen = 'src/ui/Screen.tsx';
+const directories: string[] = [];
+type Entry = { file: string; kind: string; line: string; count: number; issue?: number; decision?: string };
+
+const entry = (count: number, extra: Partial<Entry> = {}): Entry =>
+  ({ file: screen, kind: 'services', line: 'store.services.ai', count, issue: 7, ...extra });
+
+function git(dir: string, ...args: string[]) {
+  const identity = ['-c', 'user.name=test', '-c', 'user.email=test@example.com'];
+  return execFileSync('git', [...identity, ...args], { cwd: dir, encoding: 'utf8' });
+}
+
+const check = (cwd: string) => spawnSync(process.execPath, [script], { cwd, encoding: 'utf8' });
+
+// A repository whose `main` holds the given files; `write` changes the working tree afterwards.
+function repository(committed: Record<string, unknown>) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'allowance-history-'));
+  directories.push(dir);
+  function write(file: string, content: unknown) {
+    const destination = path.join(dir, file);
+    mkdirSync(path.dirname(destination), { recursive: true });
+    writeFileSync(destination, typeof content === 'string' ? content : JSON.stringify(content));
+  }
+  write(screen, 'store.services.ai');
+  write(verifiedFile, []);
+  for (const [file, content] of Object.entries(committed)) write(file, content);
+  git(dir, 'init', '-q', '-b', 'main');
+  git(dir, 'add', '.');
+  git(dir, 'commit', '-qm', 'Record main');
+  git(dir, 'switch', '-qc', 'topic');
+  return { dir, write, run: () => check(dir) };
+}
+
+afterEach(() => {
+  for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+describe('allowance history', () => {
+  it('runs after the pane-of-glass check in the static check', () => {
+    const { scripts } = JSON.parse(execFileSync('cat', ['package.json'], { encoding: 'utf8' }));
+    const commands = scripts['check:static'].split(' && ');
+    const paneOfGlass = commands.indexOf('node scripts/check-pane-of-glass.mjs');
+    expect(commands.indexOf('node scripts/check-allowance-history.mjs')).toBeGreaterThan(paneOfGlass);
+  });
+
+  it.each([true, false])('rejects a manual increase when main has a baseline (%s)', (hasBaseline) => {
+    const repo = repository(hasBaseline ? { [baselineFile]: [entry(1)] } : { [baselineFile]: {} });
+    repo.write(screen, 'store.services.ai\nstore.services.ai');
+    repo.write(baselineFile, [entry(2)]);
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${screen} services "store.services.ai": count 2 is above main's 1`);
+  });
+
+  it('keeps, lowers and removes entries of main without a problem', () => {
+    const repo = repository({ [baselineFile]: [entry(2), entry(1, { line: 'other' })] });
+    repo.write(baselineFile, [entry(1)]);
+    const result = repo.run();
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+
+  it('accepts every entry of a vendor file that main does not have yet', () => {
+    const repo = repository({ [baselineFile]: [] });
+    repo.write(vendorFile, [entry(3)]);
+    expect(repo.run().status).toBe(0);
+  });
+
+  it('rejects an issue entry added to a vendor file main already has', () => {
+    const repo = repository({ [baselineFile]: [], [vendorFile]: [] });
+    repo.write(vendorFile, [entry(1)]);
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('count 1 is above main\'s 0');
+  });
+
+  it('refuses a decision that main does not verify, even if the pull request verifies it', () => {
+    const repo = repository({ [baselineFile]: [] });
+    repo.write(verifiedFile, ['A decision.']);
+    repo.write(baselineFile, [entry(1, { issue: undefined, decision: 'A decision.' })]);
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('decision is not on main\'s scripts/verified-decisions.json');
+  });
+
+  it('accepts a decision that main verifies', () => {
+    const repo = repository({ [baselineFile]: [], [verifiedFile]: ['A decision.'] });
+    repo.write(baselineFile, [entry(1, { issue: undefined, decision: 'A decision.' })]);
+    expect(repo.run().status).toBe(0);
+  });
+
+  it('requires main to verify a committed increase in a shallow single-branch clone', () => {
+    const repo = repository({ [baselineFile]: [entry(1)] });
+    repo.write(baselineFile, [entry(2)]);
+    git(repo.dir, 'commit', '-qam', 'Raise the allowance');
+    const clone = path.join(repo.dir, 'shallow');
+    git(repo.dir, 'clone', '-q', '--depth=1', '--single-branch', pathToFileURL(repo.dir).href, clone);
+    const fetch = ['fetch', '--unshallow', 'origin', '+refs/heads/main:refs/remotes/origin/main'];
+    const missing = check(clone);
+    expect(missing.status).toBe(1);
+    expect(missing.stderr).toContain(['git', ...fetch].join(' '));
+
+    git(clone, ...fetch);
+    const result = check(clone);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("count 2 is above main's 1");
+  });
+
+  it('names the missing reference when a repository has no committed baseline or main', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'allowance-history-'));
+    directories.push(dir);
+    git(dir, 'init', '-q', '-b', 'topic');
+    const result = check(dir);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('git fetch origin +refs/heads/main:refs/remotes/origin/main');
+  });
+});

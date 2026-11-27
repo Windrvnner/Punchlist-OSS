@@ -8,9 +8,9 @@
 // `--lower` lowers each entry's count to its matches and removes unmatched entries; it never adds an entry.
 // `--list` prints the groups not yet listed, as entries without an issue or decision.
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { basename } from 'node:path';
-import { allowanceProblems, decisionEntries, groupMatches } from './allowance.mjs';
-import { matchesIn, slashPath, splitLines } from './pane-of-glass-matches.mjs';
+import { allowanceProblems, decisionEntries } from './allowance.mjs';
+import { slashPath } from './pane-of-glass-matches.mjs';
+import { scanUi } from './ui-scan.mjs';
 
 const baselinePath = 'scripts/pane-of-glass-baseline.json';
 const read = (file) => readFileSync(file, 'utf8');
@@ -21,23 +21,6 @@ const limits = [
   'identical trimmed lines; edits inside a loop body.',
   'See "The frontend is a pane of glass" in CLAUDE.md.',
 ];
-
-function uiSource(file) {
-  return /\.tsx?$/.test(file) && !basename(file).includes('.test.');
-}
-
-// Each match of each screen, with the text of its line.
-function scan(files) {
-  const found = [];
-  for (const file of files.filter(uiSource)) {
-    const source = read(file);
-    const lines = splitLines(source);
-    for (const [kind, numbers] of Object.entries(matchesIn(file, source))) {
-      for (const number of numbers) found.push({ file, kind, line: lines[number - 1] });
-    }
-  }
-  return groupMatches(found);
-}
 
 function lowered(allowance, found) {
   const seen = new Map(found.map(({ file, kind, line, count }) => [JSON.stringify([file, kind, line]), count]));
@@ -69,7 +52,7 @@ const files = readdirSync('src/ui', { recursive: true, withFileTypes: true })
   .filter((entry) => entry.isFile())
   .map((entry) => slashPath(entry.parentPath, entry.name))
   .sort();
-const found = scan(files);
+const found = scanUi(files, read);
 const allowance = JSON.parse(read(baselinePath));
 if (!Array.isArray(allowance)) {
   fail([`${baselinePath} must be a JSON array of entries.`]);
