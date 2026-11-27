@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -49,7 +49,7 @@ afterEach(() => {
 
 describe('allowance history', () => {
   it('runs after the pane-of-glass check in the static check', () => {
-    const { scripts } = JSON.parse(execFileSync('cat', ['package.json'], { encoding: 'utf8' }));
+    const { scripts } = JSON.parse(readFileSync('package.json', 'utf8'));
     const commands = scripts['check:static'].split(' && ');
     const paneOfGlass = commands.indexOf('node scripts/check-pane-of-glass.mjs');
     expect(commands.indexOf('node scripts/check-allowance-history.mjs')).toBeGreaterThan(paneOfGlass);

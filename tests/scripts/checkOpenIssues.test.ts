@@ -96,6 +96,39 @@ describe('issues named by the allowances', () => {
     expect(result.stderr).toContain(`the issues the allowances name (GitHub answered ${status})`);
   });
 
+  it.each(['owner', 'owner/name/extra', 'own er/name', 'owner/na?me', '../name', ''])(
+    'refuses GITHUB_REPOSITORY %j',
+    async (repository) => {
+      const env = { GITHUB_TOKEN: 't', GITHUB_REPOSITORY: repository, GITHUB_API_URL: unreachable };
+      const result = await runCli(repoNaming([5]), env);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('GITHUB_REPOSITORY must be owner/name');
+      expect(result.stderr).not.toContain('Cannot reach GitHub');
+    },
+  );
+
+  it.each(['http://example.com', 'ftp://127.0.0.1', 'not a url', 'http://127.0.0.1.example.com'])(
+    'refuses GITHUB_API_URL %j',
+    async (api) => {
+      const env = { GITHUB_TOKEN: 't', GITHUB_REPOSITORY: 'o/r', GITHUB_API_URL: api };
+      const result = await runCli(repoNaming([5]), env);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('GITHUB_API_URL must be https, or http on a loopback host');
+      expect(result.stderr).not.toContain('Cannot reach GitHub');
+    },
+  );
+
+  it.each(['https://127.0.0.1:1', 'http://localhost:1', 'http://[::1]:1'])(
+    'accepts GITHUB_API_URL %j and then tries to reach it',
+    async (api) => {
+      const env = { GITHUB_TOKEN: 't', GITHUB_REPOSITORY: 'o/r.x-y_z', GITHUB_API_URL: api };
+      const result = await runCli(repoNaming([5]), env);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('Cannot reach GitHub to check the issues the allowances name');
+      expect(result.stderr).not.toContain('must be');
+    },
+  );
+
   it('names each issue that is not open and passes when all are open', async () => {
     const api = await githubServing([[{ number: 5 }]]);
     const env = { GITHUB_TOKEN: 't', GITHUB_REPOSITORY: 'o/r', GITHUB_API_URL: api };

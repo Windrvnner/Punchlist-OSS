@@ -38,11 +38,28 @@ function issuesNamed() {
   return [...new Set(numbers)];
 }
 
-async function openIssuesPage(page) {
-  const { GITHUB_TOKEN: token, GITHUB_REPOSITORY: repository } = process.env;
-  const api = process.env.GITHUB_API_URL ?? 'https://api.github.com';
-  if (!token || !repository) throw new Error('GITHUB_TOKEN and GITHUB_REPOSITORY are required');
-  const response = await fetch(`${api}/repos/${repository}/issues?state=open&per_page=100&page=${page}`, {
+const LOOPBACK_HOSTS = ['127.0.0.1', 'localhost', '[::1]', '::1'];
+
+// The issues endpoint for the environment's repository; the token only ever goes to https or a loopback stub.
+function issuesEndpoint({ GITHUB_REPOSITORY: repository, GITHUB_API_URL: apiUrl = 'https://api.github.com' }) {
+  if (!/^(?!\.+\/)[\w.-]+\/(?!\.+$)[\w.-]+$/.test(repository ?? '')) throw new Error('GITHUB_REPOSITORY must be owner/name');
+  const refusal = new Error('GITHUB_API_URL must be https, or http on a loopback host');
+  let api;
+  try {
+    api = new URL(apiUrl);
+  } catch {
+    throw refusal;
+  }
+  if (api.protocol !== 'https:' && !(api.protocol === 'http:' && LOOPBACK_HOSTS.includes(api.hostname))) throw refusal;
+  return new URL(`${api.pathname.replace(/\/$/, '')}/repos/${repository}/issues`, api);
+}
+
+async function openIssuesPage(endpoint, page) {
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) throw new Error('GITHUB_TOKEN is required');
+  const url = new URL(endpoint);
+  url.search = new URLSearchParams({ state: 'open', per_page: '100', page: String(page) }).toString();
+  const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
   });
   if (!response.ok) throw new Error(`GitHub answered ${response.status}`);
@@ -58,8 +75,16 @@ async function main() {
     process.exitCode = 1;
     return;
   }
+  let endpoint;
   try {
-    const closed = await closedIssues(named, openIssuesPage);
+    endpoint = issuesEndpoint(process.env);
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+    return;
+  }
+  try {
+    const closed = await closedIssues(named, (page) => openIssuesPage(endpoint, page));
     for (const number of closed) console.error(`#${number} is not an open issue`);
     if (closed.length) process.exitCode = 1;
   } catch (error) {
