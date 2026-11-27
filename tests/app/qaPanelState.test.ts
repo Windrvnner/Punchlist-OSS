@@ -20,6 +20,9 @@ it('keeps an open panel per deal and restores only an existing question on that 
     keepOpenQuestion(store, dealId, q.id);
     expect(store.get().prefs).toBe(prefs);
     expect(openQuestionFor(store.get(), dealId)).toBe(q.id);
+    store.ui({ selectedQuestion: 'explicit-navigation' });
+    expect(openQuestionFor(store.get(), dealId)).toBeNull();
+    store.ui({ selectedQuestion: null });
     expect(openQuestionFor(store.get(), 'other')).toBeNull();
     store.setPrefs({ qaOpen: { ...prefs.qaOpen, absent: 'missing' } });
     expect(openQuestionFor(store.get(), 'absent')).toBeNull();

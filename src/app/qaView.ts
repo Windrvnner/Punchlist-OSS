@@ -119,6 +119,7 @@ export function queueView(state: State, scope: QueueScope) {
 }
 
 export function openQuestionFor(state: State, dealId: string) {
+  if (state.ui.selectedQuestion) return null;
   const saved = state.prefs.qaOpen[dealId];
   return saved && state.questions[saved]?.dealId === dealId ? saved : null;
 }

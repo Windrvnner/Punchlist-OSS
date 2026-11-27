@@ -7,7 +7,8 @@ import { RecordQaLogExport, RestoreQaVersion } from '../../src/app/commands/qaLo
 import { SetResponse } from '../../src/app/commands/questions';
 import { registry } from '../../src/app/commands/undo';
 import {
-  canRequestDraft, eligibleForDraft, editResponseMerge, hasLogVersion, keepResolvedMerges, keepResponseVersion, lastQuestionEditor, requestQuestionDraft,
+  canRequestDraft, eligibleForDraft, editResponseMerge, hasLogVersion, keepResolvedMerges,
+  keepResponseVersion, lastQuestionEditor, requestQuestionDraft,
   responseMergeView, selectResponseMerge, setResponseMergeSide, useQuestionDraft, watchResponseMerges,
 } from '../../src/app/drafting';
 import { initializeKeptText, saveKeptDrafts } from '../../src/app/keptText';

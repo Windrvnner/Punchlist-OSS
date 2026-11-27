@@ -19,7 +19,9 @@ const QUESTION_MOVES: Record<QuestionStatus, QuestionStatus[]> = {
 };
 
 function statusRefusal(q: Question, to: QuestionStatus) {
-  if (q.status !== to && !QUESTION_MOVES[q.status].includes(to)) return `A question cannot go from ${q.status} to ${to}`;
+  if (q.status !== to && !QUESTION_MOVES[q.status].includes(to)) {
+    return `A question cannot go from ${q.status} to ${to}`;
+  }
   if (to === 'answered' && !q.response.trim()) return 'A question is answered only when it has a response';
 }
 

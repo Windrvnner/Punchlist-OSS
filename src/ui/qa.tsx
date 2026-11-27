@@ -79,9 +79,8 @@ export function QaPage({ dealId }: { dealId: string }) {
   const [readyFor, setReadyFor] = useState<string | null>(null); const ready = readyFor === dealId;
   useLayoutEffect(() => {
     if (ready || load !== 'loaded') return;
-    const latest = store.get();
-    const saved = openQuestionFor(latest, dealId);
-    if (!latest.ui.selectedQuestion && saved) store.ui({ selectedQuestion: saved });
+    const saved = openQuestionFor(store.get(), dealId);
+    if (saved) store.ui({ selectedQuestion: saved });
     setReadyFor(dealId);
   }, [ready, load, dealId]);
   useLayoutEffect(() => {                                  // with the frame that shows it, so leaving the page straight after closing cannot lose the change
@@ -643,7 +642,9 @@ function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted 
         <div class="qlead">
           <span class="n">Q{q.n}</span>
           <Pick name="q-status" list="q-st" label="Status" wrap="stpick" cls="stsel" chev value={q.status} ro={ro} onPick={(v) => setStatus(v as QuestionStatus)}
-            options={(['open', 'answered', 'closed'] as const).map((x) => ({ v: x, text: STATUS_LABEL[x], off: !canSetQuestionStatus(q, x) }))} />{/* Answered needs a response */}
+            options={(['open', 'answered', 'closed'] as const).map((x) => ({
+              v: x, text: STATUS_LABEL[x], off: !canSetQuestionStatus(q, x),
+            }))} />
           {/* the details: each still a choice, shown as plain values with an icon for what they are */}
           <div class="qprops">
             {/* the deal's own workstreams (an imported log keeps the other side's) after the app's, as the table's filter lists them */}
@@ -667,7 +668,8 @@ function Detail({ q, busy, onClose, onKeyDown, pos, of, step, nextId, onDeleted 
           <span class="needs" title={ro ?? undefined}><button type="button" class="btn sm ico del"
             aria-label="Delete question" disabled={!!ro} title={ro ?? 'Delete'}
             onClick={() => setAsking(true)}><Icon name="trash" size={15} /></button></span>
-          <a class="btn sm" id="q-discuss" href={'#' + scopeHash({ kind: 'question', dealId: q.dealId, questionId: q.id })}>Discuss</a>
+          <a class="btn sm" id="q-discuss"
+            href={'#' + scopeHash({ kind: 'question', dealId: q.dealId, questionId: q.id })}>Discuss</a>
           <CloseDetail onClose={onClose} />
         </div>
       </div>
