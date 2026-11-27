@@ -133,6 +133,69 @@ describe("a draft's tracked changes in a request refused as too long", () => {
   });
 });
 
+describe('a draft whose request is refused as too long later in a run', () => {
+  it('a turn in a kept conversation starts a new one, then lists fewer changes rather than fail', async () => {
+    let turn = 0;
+    const answer = (c: Call) => {
+      if (!isTurn(c)) return { text: '', sources: [] };
+      turn++;
+      return turn === 1 ? { tool: 'read', docs: [DRAFT.name] } : { text: 'The ratio is 1.20x.', sources: [] };
+    };
+    const s = setup(answer, { d1: [DRAFT, FA, TS] }, { changes: clauseChanges(PASSAGES), library: [] });
+    await deal(s.repo);
+    const talked: { conversation?: string; lines: number; refused: boolean }[] = [];
+    const converse = s.svc.converse.bind(s.svc);
+    s.svc.converse = async (input) => {
+      const seen = { conversation: input.conversation, lines: wasLines(input.prompt).length, refused: true };
+      talked.push(seen);
+      const r = await converse(input);
+      seen.refused = false;
+      return r;
+    };
+    refusing(s);
+    val(await s.ai.answer(ask('What ratio does the facility agreement markup set?')));
+    expect(talked.map((t) => [t.conversation ?? 'new', t.lines, t.refused])).toEqual([
+      ['new', 0, false], ['conv_1', PASSAGES, true],
+      ['new', PASSAGES, true], ['new', 500, true], ['new', LISTED, false],
+    ]);
+  });
+
+  it("an answer's second round, with other documents, lists every change again, then fewer", async () => {
+    const letter = doc(3, 'Pricing letter.pdf', { words: ['pricing', 'letter', 'fees'] });
+    const memo = doc(4, 'Facility memo.pdf', { words: ['facility', 'agreement', 'ratio', 'margin'] });
+    const reads = (_c: Call, n: number) => (n === 1 ? { status: 'none', need: ['the pricing letter fees'] }
+      : { status: 'found', text: 'The ratio is 1.20x.', sources: [] });
+    const s = setup(reads, { d1: [DRAFT, FA, memo, letter] },
+      { changes: clauseChanges(PASSAGES), library: [], width: 3 });
+    await deal(s.repo); const refused = refusing(s);
+    const question = 'What ratio does the facility markup set?';
+    val(await s.ai.draft({ dealId: 'd1', questionId: 'q_1', questionText: question }));
+    const second = s.calls.at(-1)!;
+    expect(s.calls.length).toBe(2);
+    expect(sentNames(second)).toEqual(expect.arrayContaining([DRAFT.name, letter.name]));
+    expect(wasLines(second.prompt).length).toBe(LISTED);
+    // 1,000 and 500 refused in each round
+    expect(refused.n).toBe(4);
+  });
+
+  it('a check handful refused for its documents lists every change again once it sends fewer', async () => {
+    const items = Array.from({ length: 12 }, (_, k) => ({ id: `c${k + 1}`, text: `Facility point ${k + 1}` }));
+    const s = setup(settles, { d1: [DRAFT, FA, TS] }, checking(items));
+    await deal(s.repo); refusing(s);
+    const refusesThree = s.svc.complete.bind(s.svc);
+    s.svc.complete = async (input) => {
+      if (isCheck(input.prompt) && (input.files?.length ?? 0) > 2) throw tooLong('too long', 400);
+      return refusesThree(input);
+    };
+    const r = val(await s.ai.firstPass('d1'));
+    const checks = s.calls.filter((c) => isCheck(c.prompt));
+    expect(r.unsettled).toEqual([]);
+    expect(checks.length).toBeGreaterThan(0);
+    expect(checks.every((c) => sentNames(c).includes(DRAFT.name) && c.files.length === 2)).toBe(true);
+    expect(checks.every((c) => wasLines(c.prompt).length === LISTED)).toBe(true);
+  });
+});
+
 describe('the halving of a change list ends', () => {
   /** a request that lists floor(n / 2^halvings) of `n` changes, as send() does, and is always refused as too long */
   const refusedListing = (n: number, sent: number[]) => async (share: ChangeShare) => {
