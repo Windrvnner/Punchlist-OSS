@@ -3,7 +3,7 @@
 // the rest counted, and again, until none is listed, before any document is left out (#1381). Tested at deal scale:
 // a 150-page facility agreement draft with 1,000 changed passages beside the deal's other documents.
 import { describe, it, expect } from 'vitest';
-import { tooLong } from '../../src/backend/limits';
+import { tooLong, withFewerChanges, changesFor, type ChangeShare } from '../../src/backend/limits';
 import {
   setup, doc, deal, finding, itemsIn, OK, val, ask, sentNames, clauseChanges, wasLines, isVerifyAsk, affectedAs,
   type Call,
@@ -130,5 +130,27 @@ describe("a draft's tracked changes in a request refused as too long", () => {
     const last = s.calls.filter((c) => c.prompt.startsWith('Documents:')).at(-1)!;
     expect(sentNames(last)).toContain(DRAFT.name);
     expect(wasLines(last.prompt).length).toBe(PASSAGES);
+  });
+});
+
+describe('the halving of a change list ends', () => {
+  /** a request that lists floor(n / 2^halvings) of `n` changes, as send() does, and is always refused as too long */
+  const refusedListing = (n: number, sent: number[]) => async (share: ChangeShare) => {
+    changesFor(share, 'd1');
+    share.listed = Math.floor(n / 2 ** share.halvings);
+    sent.push(share.listed);
+    throw tooLong('too long', 400);
+  };
+
+  it('a draft of one change is asked once more with none listed, then the refusal stands', async () => {
+    const sent: number[] = [];
+    await expect(withFewerChanges(refusedListing(1, sent))).rejects.toThrow('too long');
+    expect(sent).toEqual([1, 0]);
+  });
+
+  it('a request with no draft is not asked again', async () => {
+    const sent: number[] = [];
+    await expect(withFewerChanges(refusedListing(0, sent))).rejects.toThrow('too long');
+    expect(sent).toEqual([0]);
   });
 });
