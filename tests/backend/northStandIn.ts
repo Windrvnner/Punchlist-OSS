@@ -52,13 +52,36 @@ interface StandInOptions {
   fileTool?: string;
 }
 
-export async function northStandIn(o: StandInOptions = {}) {
-  const tokens = new Set(o.tokens ?? ['good-token']);
-  const files = new Map<string, StandInFile>();
-  const chats: ChatBody[] = []; const seen: { method: string; path: string; auth?: string }[] = []; const conversations = new Set<string>();
-  const faults: Fault[] = [];
-  let n = 0, requests = 0;
-  const models = (o.models?.map((m, i) => ({ id: `m${i + 1}`, ...m })) ?? [
+type Reply = {
+  send: (status: number, body: unknown, headers?: Record<string, string>) => void;
+  error: (status: number, code: string, message: string, extra?: { type?: string; retryAfter?: number }) => void;
+};
+
+/** what one stand-in server keeps between calls */
+interface StandIn {
+  o: StandInOptions;
+  tokens: Set<string>;
+  files: Map<string, StandInFile>;
+  chats: ChatBody[];
+  seen: { method: string; path: string; auth?: string }[];
+  conversations: Set<string>;
+  faults: Fault[];
+  models: Record<string, unknown>[];
+  counts: { files: number; requests: number };
+}
+
+/** a call as the handlers see it */
+interface Call {
+  req: http.IncomingMessage;
+  res: http.ServerResponse;
+  url: URL;
+  p: string;
+  body: Buffer;
+  reply: Reply;
+}
+
+function defaultModels(o: StandInOptions) {
+  return (o.models?.map((m, i) => ({ id: `m${i + 1}`, ...m })) ?? [
     { id: 'm1', name: 'model-fast', display_name: 'Model Fast' },
     { id: 'm2', name: 'model-standard', display_name: 'Model Standard' },
     { id: 'm3', name: 'model-thorough', display_name: 'Model Thorough' },
@@ -68,80 +91,300 @@ export async function northStandIn(o: StandInOptions = {}) {
     provider: { name: 'cohere_platform', instance: 'p1' },
     created_at: 1_700_000_000_000,
   }));
-  const page = o.pageSize ?? 2;
-  const fileObject = (f: StandInFile) => ({ object: 'file', id: f.id, filename: f.filename, bytes: f.bytes.length, created_at: f.created_at, status: f.failed ? 'error' : f.looks >= (o.processAfter ?? 1) ? 'processed' : 'uploaded', ...(f.failed ? { status_details: f.failed } : {}) });
-  /** one page of a list, and the token for the next (the offset, as an opaque-looking string) */
-  const paged = <T>(all: T[], url: URL) => { const at = Number(Buffer.from(url.searchParams.get('next_token') ?? '', 'base64url').toString() || 0); const limit = Math.min(Number(url.searchParams.get('limit') ?? page), page); const data = all.slice(at, at + limit); return { data, next_token: at + limit < all.length ? Buffer.from(String(at + limit)).toString('base64url') : null }; };
+}
 
-  const server = http.createServer(async (req, res) => {
-    const id = `req_${++requests}`;
-    const url = new URL(req.url ?? '/', 'http://x'); const p = url.pathname.replace(/^\/api/, '');
-    const send = (status: number, body: unknown, headers: Record<string, string> = {}) => { res.writeHead(status, { 'content-type': 'application/json', 'x-request-id': id, ...headers }); res.end(JSON.stringify(body)); };
-    const error = (status: number, code: string, message: string, extra: { type?: string; retryAfter?: number } = {}) => {
-      const retryable = status === 429 || status === 503;
-      send(status, { error_type: extra.type ?? TYPES[status] ?? 'invalid_request_error', error_code: code, message, request_id: id, status_code: status, is_retryable: retryable, trace_id: null, details: extra.retryAfter !== undefined ? { retry_after_seconds: extra.retryAfter } : {} },
-        { 'x-north-error-code': code, ...(retryable && extra.retryAfter !== undefined ? { 'retry-after': String(extra.retryAfter) } : {}) });
-    };
-    const body = await new Promise<Buffer>((resolve) => { const parts: Buffer[] = []; req.on('data', (c) => parts.push(c)); req.on('end', () => resolve(Buffer.concat(parts))); });
-    seen.push({ method: req.method ?? '', path: p, auth: req.headers.authorization });
-    if (req.method === 'GET' && url.pathname === '/') { res.writeHead(200, { 'content-type': 'text/html', ...(o.ssoToken ? { 'set-cookie': `north_session=${typeof o.ssoToken === 'function' ? o.ssoToken() : o.ssoToken}; Path=/; HttpOnly` } : {}) }); res.end('<!doctype html><title>North</title><p>Signed in.</p>'); return; }
-    if (!url.pathname.startsWith('/api/')) return error(404, 'NOT_FOUND', 'Not found.');
-    const fault = faults.findIndex((f) => p.startsWith(f.path));
-    if (fault >= 0) { const f = faults.splice(fault, 1)[0]; if (f.drop) { req.socket.destroy(); return; } return error(f.status ?? 500, f.code ?? 'STAND_IN_FAULT', f.message ?? 'A fault the test asked for.', { type: f.type, retryAfter: f.retryAfter }); }
-    const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
-    const exp = token?.split('.').length === 3 ? (() => { try { return JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString()).exp as number | undefined; } catch { return undefined; } })() : undefined;
-    if (!token || !tokens.has(token) || (exp !== undefined && exp * 1000 < Date.now())) return error(401, 'INVALID_TOKEN', 'Your session has expired. Please sign in again.');
+function fileObject(s: StandInFile, processAfter: number) {
+  const status = s.failed ? 'error' : s.looks >= processAfter ? 'processed' : 'uploaded';
+  return {
+    object: 'file',
+    id: s.id,
+    filename: s.filename,
+    bytes: s.bytes.length,
+    created_at: s.created_at,
+    status,
+    ...(s.failed ? { status_details: s.failed } : {}),
+  };
+}
 
-    if (req.method === 'GET' && p === '/v1/users/me')
-      return send(200, {
-        id: 'u1',
-        created_at: '2026-01-15T09:30:00Z',
-        updated_at: '2026-01-15T09:30:00Z',
-        first_name: 'jdoe',
-        last_name: '',
-        locale: 'en-US',
-        email: 'jdoe@example.com',
-      });
-    if (req.method === 'GET' && p === '/v2/models') return send(200, paged(models, url));
-    if (req.method === 'GET' && p === '/v1/models') return send(200, models.map((m) => ({ id: m.name })));
-    if (req.method === 'POST' && p === '/v1/files') {
-      let form: FormData; try { form = await new Request('http://x', { method: 'POST', headers: { 'content-type': req.headers['content-type'] ?? '' }, body: new Uint8Array(body) }).formData(); } catch { return error(400, 'INVALID_MULTIPART', 'Expected a multipart form with a file.'); }
-      const f = form.get('file'); if (!(f instanceof File)) return error(422, 'VALIDATION_ERROR', 'Request validation failed.');
-      if (/[^\u0000-ɏ]/.test(f.name)) return error(400, 'INVALID_FILENAME', 'File names must use the Latin alphabet.');
-      const file: StandInFile = { id: `file_${++n}`, filename: f.name, bytes: new Uint8Array(await f.arrayBuffer()), created_at: Math.floor(Date.now() / 1000), looks: 0, ...(o.failFile?.test(f.name) ? { failed: 'The file could not be parsed.' } : {}) };
-      files.set(file.id, file); return send(200, fileObject(file));
-    }
-    if (req.method === 'GET' && p === '/v1/files') return send(200, paged([...files.values()].map(fileObject), url));
-    const one = /^\/v1\/files\/([^/]+)$/.exec(p);
-    if (one) {
-      const f = files.get(one[1]); if (!f) return error(404, 'FILE_NOT_FOUND', 'File not found.');
-      if (req.method === 'GET') { f.looks++; return send(200, fileObject(f)); }
-      if (req.method === 'DELETE') { files.delete(f.id); return send(200, { id: f.id, deleted: true }); }
-    }
-    // the person's agents (List Agents), with North's own tools by name
-    if (req.method === 'GET' && p === '/v1/agents') return send(200, [{ id: 'ag_1', name: 'Research', tools: [{ type: 'north_tool', north_tool: { name: 'file_reader' } }, { type: 'function', function: { name: 'lookup' } }] }, { id: 'ag_2', name: 'Web', tools: [{ type: 'north_tool', north_tool: { name: 'web_search' } }] }]);
-    if (req.method === 'POST' && p === '/v1/chat') {
-      let b: ChatBody; try { b = JSON.parse(body.toString()); } catch { return error(400, 'INVALID_JSON', 'The request body is not JSON.'); }
-      if (b.stream !== false) return error(422, 'VALIDATION_ERROR', 'Request validation failed.');
-      if (!Array.isArray(b.messages) || !b.messages.every((m) => ['user', 'system', 'assistant', 'tool'].includes(m?.role))) return error(422, 'VALIDATION_ERROR', 'Request validation failed.');
-      const given: StandInFile[] = [];
-      for (const fid of b.file_ids ?? []) { const f = files.get(fid); if (!f) return error(404, 'FILE_NOT_FOUND', `File ${fid} not found.`); if (fileObject(f).status !== 'processed') return error(400, 'FILE_NOT_READY', `File ${fid} is still being processed.`); given.push(f); }
-      // a conversation North does not have (never started, or deleted) is not found, as any missing resource is
-      if (b.conversation?.id && !conversations.has(b.conversation.id)) return error(404, 'CONVERSATION_NOT_FOUND', 'Conversation not found.');
-      // as North does: a client tool's result sent back as a role:tool message fails with a 500
-      if (o.rejectToolResults && b.messages.some((m) => m.role === 'tool')) return error(500, 'INTERNAL_ERROR', 'An internal error occurred.');
-      chats.push(b);
-      // with `fileTool`, a call that lists tools reads its files only when that North tool is among them, as North's default tools are left out then
-      const reads = !b.tools || !o.fileTool || (b.tools as { type?: string; north_tool?: { name?: string } }[]).some((t) => t.type === 'north_tool' && t.north_tool?.name === o.fileTool);
-      const a = o.answer?.(b, reads ? given : []) ?? 'ok'; const r = typeof a === 'string' ? { text: a } : a;
-      const conv = b.conversation?.id ?? `conv_${chats.length}`; conversations.add(conv);
-      // tool calls (NorthToolCall on the Chat page) come back on the assistant message, with finish_reason TOOL_CALL
-      const calls = 'calls' in r && r.calls?.length ? { tool_calls: r.calls.map((c, i) => ({ id: `tc_${chats.length}_${i}`, tool_call_id: `call_${chats.length}_${i}`, type: 'function', function: c })) } : {};
-      return send(200, { conversation_id: conv, finish_reason: r.finish ?? (calls.tool_calls ? 'TOOL_CALL' : 'COMPLETE'), messages: [{ role: 'assistant', id: `msg_${chats.length}`, content: r.text === undefined ? [] : [{ type: 'text', text: r.text }], ...calls }], usage: { billed_units: { input_tokens: 10, output_tokens: 2 }, tokens: { input_tokens: 12, output_tokens: 2 }, cached_tokens: 0 } });
-    }
-    return error(404, 'NOT_FOUND', 'Not found.');
+/** one page of a list, and the token for the next (the offset, as an opaque-looking string) */
+function paged<T>(all: T[], url: URL, page: number) {
+  const at = Number(Buffer.from(url.searchParams.get('next_token') ?? '', 'base64url').toString() || 0);
+  const limit = Math.min(Number(url.searchParams.get('limit') ?? page), page);
+  const data = all.slice(at, at + limit);
+  return { data, next_token: at + limit < all.length ? Buffer.from(String(at + limit)).toString('base64url') : null };
+}
+
+function makeReply(res: http.ServerResponse, id: string): Reply {
+  const send: Reply['send'] = (status, body, headers = {}) => {
+    res.writeHead(status, { 'content-type': 'application/json', 'x-request-id': id, ...headers });
+    res.end(JSON.stringify(body));
+  };
+  const error: Reply['error'] = (status, code, message, extra = {}) => {
+    const retryable = status === 429 || status === 503;
+    const retryAfter = extra.retryAfter;
+    send(status, {
+      error_type: extra.type ?? TYPES[status] ?? 'invalid_request_error',
+      error_code: code,
+      message,
+      request_id: id,
+      status_code: status,
+      is_retryable: retryable,
+      trace_id: null,
+      details: retryAfter !== undefined ? { retry_after_seconds: retryAfter } : {},
+    }, {
+      'x-north-error-code': code,
+      ...(retryable && retryAfter !== undefined ? { 'retry-after': String(retryAfter) } : {}),
+    });
+  };
+  return { send, error };
+}
+
+function readBody(req: http.IncomingMessage) {
+  return new Promise<Buffer>((resolve) => {
+    const parts: Buffer[] = [];
+    req.on('data', (c) => parts.push(c));
+    req.on('end', () => resolve(Buffer.concat(parts)));
   });
+}
+
+/** the home page, which stands in for the SSO page; it sets the token cookie when `ssoToken` is given */
+function homePage({ o }: StandIn, { res }: Call) {
+  const token = typeof o.ssoToken === 'function' ? o.ssoToken() : o.ssoToken;
+  const cookie = o.ssoToken ? { 'set-cookie': `north_session=${token}; Path=/; HttpOnly` } : {};
+  res.writeHead(200, { 'content-type': 'text/html', ...cookie });
+  res.end('<!doctype html><title>North</title><p>Signed in.</p>');
+}
+
+/** the next fault whose path matches, if any; a drop destroys the connection */
+function fireFault({ faults }: StandIn, { req, p, reply }: Call) {
+  const at = faults.findIndex((f) => p.startsWith(f.path));
+  if (at < 0) return false;
+  const f = faults.splice(at, 1)[0];
+  if (f.drop) {
+    req.socket.destroy();
+    return true;
+  }
+  const message = f.message ?? 'A fault the test asked for.';
+  reply.error(f.status ?? 500, f.code ?? 'STAND_IN_FAULT', message, { type: f.type, retryAfter: f.retryAfter });
+  return true;
+}
+
+function tokenExpiry(token: string) {
+  if (token.split('.').length !== 3) return undefined;
+  try {
+    return JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString()).exp as number | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** answers 401 and returns false when the bearer token is missing, unknown or expired */
+function authorized({ tokens }: StandIn, { req, reply }: Call) {
+  const token = /^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1];
+  const exp = token ? tokenExpiry(token) : undefined;
+  if (token && tokens.has(token) && (exp === undefined || exp * 1000 >= Date.now())) return true;
+  reply.error(401, 'INVALID_TOKEN', 'Your session has expired. Please sign in again.');
+  return false;
+}
+
+const me = {
+  id: 'u1',
+  created_at: '2026-01-15T09:30:00Z',
+  updated_at: '2026-01-15T09:30:00Z',
+  first_name: 'jdoe',
+  last_name: '',
+  locale: 'en-US',
+  email: 'jdoe@example.com',
+};
+
+const agents = [
+  {
+    id: 'ag_1',
+    name: 'Research',
+    tools: [
+      { type: 'north_tool', north_tool: { name: 'file_reader' } },
+      { type: 'function', function: { name: 'lookup' } },
+    ],
+  },
+  { id: 'ag_2', name: 'Web', tools: [{ type: 'north_tool', north_tool: { name: 'web_search' } }] },
+];
+
+async function uploadFile(s: StandIn, { req, body, reply }: Call) {
+  const headers = { 'content-type': req.headers['content-type'] ?? '' };
+  let form: FormData;
+  try {
+    form = await new Request('http://x', { method: 'POST', headers, body: new Uint8Array(body) }).formData();
+  } catch {
+    return reply.error(400, 'INVALID_MULTIPART', 'Expected a multipart form with a file.');
+  }
+  const f = form.get('file');
+  if (!(f instanceof File)) return reply.error(422, 'VALIDATION_ERROR', 'Request validation failed.');
+  if (/[^\u0000-ɏ]/.test(f.name)) {
+    return reply.error(400, 'INVALID_FILENAME', 'File names must use the Latin alphabet.');
+  }
+  const file: StandInFile = {
+    id: `file_${++s.counts.files}`,
+    filename: f.name,
+    bytes: new Uint8Array(await f.arrayBuffer()),
+    created_at: Math.floor(Date.now() / 1000),
+    looks: 0,
+    ...(s.o.failFile?.test(f.name) ? { failed: 'The file could not be parsed.' } : {}),
+  };
+  s.files.set(file.id, file);
+  return reply.send(200, fileObject(file, s.o.processAfter ?? 1));
+}
+
+/** the /v1/files routes; false when the call is not one of them */
+async function fileRoutes(s: StandIn, call: Call) {
+  const { req, url, p, reply } = call;
+  const processAfter = s.o.processAfter ?? 1;
+  if (req.method === 'POST' && p === '/v1/files') {
+    await uploadFile(s, call);
+    return true;
+  }
+  if (req.method === 'GET' && p === '/v1/files') {
+    const all = [...s.files.values()].map((f) => fileObject(f, processAfter));
+    reply.send(200, paged(all, url, s.o.pageSize ?? 2));
+    return true;
+  }
+  const one = /^\/v1\/files\/([^/]+)$/.exec(p);
+  if (!one) return false;
+  const f = s.files.get(one[1]);
+  if (!f) {
+    reply.error(404, 'FILE_NOT_FOUND', 'File not found.');
+    return true;
+  }
+  if (req.method === 'GET') {
+    f.looks++;
+    reply.send(200, fileObject(f, processAfter));
+    return true;
+  }
+  if (req.method !== 'DELETE') return false;
+  s.files.delete(f.id);
+  reply.send(200, { id: f.id, deleted: true });
+  return true;
+}
+
+/** the files a chat names, or an error answer (and null) when one is missing or not processed yet */
+function chatFiles(s: StandIn, b: ChatBody, reply: Reply) {
+  const given: StandInFile[] = [];
+  for (const fid of b.file_ids ?? []) {
+    const f = s.files.get(fid);
+    if (!f) return reply.error(404, 'FILE_NOT_FOUND', `File ${fid} not found.`) ?? null;
+    if (fileObject(f, s.o.processAfter ?? 1).status !== 'processed') {
+      return reply.error(400, 'FILE_NOT_READY', `File ${fid} is still being processed.`) ?? null;
+    }
+    given.push(f);
+  }
+  return given;
+}
+
+/** the chat body, or an error answer (and null) when it is not valid */
+function chatBody(body: Buffer, reply: Reply) {
+  let b: ChatBody;
+  try {
+    b = JSON.parse(body.toString());
+  } catch {
+    return reply.error(400, 'INVALID_JSON', 'The request body is not JSON.') ?? null;
+  }
+  const roles = ['user', 'system', 'assistant', 'tool'];
+  const invalid = b.stream !== false || !Array.isArray(b.messages) || !b.messages.every((m) => roles.includes(m?.role));
+  return invalid ? (reply.error(422, 'VALIDATION_ERROR', 'Request validation failed.') ?? null) : b;
+}
+
+/** with `fileTool`, a call that lists tools reads its files only when that North tool is among them */
+function readsFiles(o: StandInOptions, b: ChatBody) {
+  if (!b.tools || !o.fileTool) return true;
+  const tools = b.tools as { type?: string; north_tool?: { name?: string } }[];
+  return tools.some((t) => t.type === 'north_tool' && t.north_tool?.name === o.fileTool);
+}
+
+function chatAnswer(s: StandIn, b: ChatBody, given: StandInFile[], reply: Reply) {
+  const a = s.o.answer?.(b, readsFiles(s.o, b) ? given : []) ?? 'ok';
+  const r = typeof a === 'string' ? { text: a } : a;
+  const conv = b.conversation?.id ?? `conv_${s.chats.length}`;
+  s.conversations.add(conv);
+  // tool calls (NorthToolCall on the Chat page) come back on the assistant message, with finish_reason TOOL_CALL
+  const n = s.chats.length;
+  const toolCall = (c: { name: string; arguments: string }, i: number) =>
+    ({ id: `tc_${n}_${i}`, tool_call_id: `call_${n}_${i}`, type: 'function', function: c });
+  const calls = 'calls' in r && r.calls?.length ? { tool_calls: r.calls.map(toolCall) } : {};
+  const content = r.text === undefined ? [] : [{ type: 'text', text: r.text }];
+  reply.send(200, {
+    conversation_id: conv,
+    finish_reason: r.finish ?? (calls.tool_calls ? 'TOOL_CALL' : 'COMPLETE'),
+    messages: [{ role: 'assistant', id: `msg_${n}`, content, ...calls }],
+    usage: {
+      billed_units: { input_tokens: 10, output_tokens: 2 },
+      tokens: { input_tokens: 12, output_tokens: 2 },
+      cached_tokens: 0,
+    },
+  });
+}
+
+function chat(s: StandIn, { body, reply }: Call) {
+  const b = chatBody(body, reply);
+  if (!b) return;
+  const given = chatFiles(s, b, reply);
+  if (!given) return;
+  // a conversation North does not have (never started, or deleted) is not found, as any missing resource is
+  if (b.conversation?.id && !s.conversations.has(b.conversation.id)) {
+    return reply.error(404, 'CONVERSATION_NOT_FOUND', 'Conversation not found.');
+  }
+  // as North does: a client tool's result sent back as a role:tool message fails with a 500
+  if (s.o.rejectToolResults && b.messages?.some((m) => m.role === 'tool')) {
+    return reply.error(500, 'INTERNAL_ERROR', 'An internal error occurred.');
+  }
+  s.chats.push(b);
+  chatAnswer(s, b, given, reply);
+}
+
+/** the routes that need a signed-in call */
+async function apiRoutes(s: StandIn, call: Call) {
+  const { req, url, p, reply } = call;
+  const get = req.method === 'GET';
+  if (get && p === '/v1/users/me') return reply.send(200, me);
+  if (get && p === '/v2/models') return reply.send(200, paged(s.models, url, s.o.pageSize ?? 2));
+  if (get && p === '/v1/models') return reply.send(200, s.models.map((m) => ({ id: m.name })));
+  if (await fileRoutes(s, call)) return;
+  // the person's agents (List Agents), with North's own tools by name
+  if (get && p === '/v1/agents') return reply.send(200, agents);
+  if (req.method === 'POST' && p === '/v1/chat') return chat(s, call);
+  return reply.error(404, 'NOT_FOUND', 'Not found.');
+}
+
+async function handle(s: StandIn, req: http.IncomingMessage, res: http.ServerResponse) {
+  const id = `req_${++s.counts.requests}`;
+  const url = new URL(req.url ?? '/', 'http://x');
+  const p = url.pathname.replace(/^\/api/, '');
+  const reply = makeReply(res, id);
+  const call: Call = { req, res, url, p, body: await readBody(req), reply };
+  s.seen.push({ method: req.method ?? '', path: p, auth: req.headers.authorization });
+  if (req.method === 'GET' && url.pathname === '/') return homePage(s, call);
+  if (!url.pathname.startsWith('/api/')) return reply.error(404, 'NOT_FOUND', 'Not found.');
+  if (fireFault(s, call) || !authorized(s, call)) return;
+  return apiRoutes(s, call);
+}
+
+export async function northStandIn(o: StandInOptions = {}) {
+  const s: StandIn = {
+    o,
+    tokens: new Set(o.tokens ?? ['good-token']),
+    files: new Map(),
+    chats: [],
+    seen: [],
+    conversations: new Set(),
+    faults: [],
+    models: defaultModels(o),
+    counts: { files: 0, requests: 0 },
+  };
+  const server = http.createServer((req, res) => handle(s, req, res));
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  return { address, files, chats, conversations, seen, faults, tokens, close: () => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }) };
+  const close = () => new Promise<void>((resolve) => {
+    server.closeAllConnections();
+    server.close(() => resolve());
+  });
+  const { files, chats, conversations, seen, faults, tokens } = s;
+  return { address, files, chats, conversations, seen, faults, tokens, close };
 }
