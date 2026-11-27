@@ -42,7 +42,9 @@ const asWritten = (s: string) => withoutTheAndFolder(` ${s.trim().toLowerCase().
  * one, so a folder named exactly as typed wins over the other. Several equal names, or none, leave it to the words.
  */
 const namedAsTyped = (dirs: string[], typed: string) => {
-  const same = dirs.filter((d) => asWritten(d.split('/').at(-1)!) === asWritten(typed));
+  const name = asWritten(typed);
+  if (!name) return [];   // a name of only a number says nothing: "2024." is not "2025."
+  const same = dirs.filter((d) => asWritten(d.split('/').at(-1)!) === name);
   return same.length === 1 ? same : [];
 };
 

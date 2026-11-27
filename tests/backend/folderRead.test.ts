@@ -111,6 +111,13 @@ describe('a number set aside from a folder name', () => {
   });
 });
 
+describe('a name that is only a number', () => {
+  it('is not equal to another such name once its number is set aside', () => {
+    expect(matchFolders(foldersOf(['VDR/2025./A.pdf', 'VDR/Other/B.pdf']), '2024.')).toEqual([]);
+    expect(matchFolders(foldersOf(['VDR/1-/A.pdf', 'VDR/Other/B.pdf']), '7-')).toEqual([]);
+  });
+});
+
 describe('reading a whole folder from the chat', () => {
   /** the grid permit's tag, as the batch that read it gave it, and a stand-in that finds the expiry in it alone */
   const gridReads = (seen: { tag?: string }) => (c: Call) => { const g = listed(c).find((x) => x.path.endsWith('Interconnection permit.pdf')); if (g) seen.tag = g.tag; return g ? { text: 'It expires on March 1, 2031. [1]', sources: [{ doc: g.tag, page: 1, quote: 'expires on March 1, 2031' }] } : { text: '', sources: [] }; };
