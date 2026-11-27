@@ -2,7 +2,7 @@
 // The readability hints (CLAUDE.md, "Readable code"): a too-complex function the branch changes anywhere, a new
 // function over 60 lines, and a file over 500 lines the branch makes longer are listed. The check never fails.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -81,5 +81,12 @@ describe('the readability hints', () => {
     expect(result.stdout).not.toContain('src/cut.ts');
     expect(result.stdout).not.toContain('src/full.ts');
     expect(result.stdout).not.toContain('src/new.ts');
+  });
+});
+
+describe('package.json', () => {
+  it('keeps every line within 120 characters', () => {
+    const long = readFileSync('package.json', 'utf8').split('\n').filter((row) => row.length > 120);
+    expect(long).toEqual([]);
   });
 });

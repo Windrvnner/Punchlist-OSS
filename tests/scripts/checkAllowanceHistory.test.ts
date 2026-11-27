@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { staticCommands } from './staticSteps';
 
 const script = path.resolve('scripts/check-allowance-history.mjs');
 const baselineFile = 'scripts/pane-of-glass-baseline.json';
@@ -49,8 +50,7 @@ afterEach(() => {
 
 describe('allowance history', () => {
   it('runs after the pane-of-glass check in the static check', () => {
-    const { scripts } = JSON.parse(readFileSync('package.json', 'utf8'));
-    const commands = scripts['check:static'].split(' && ');
+    const commands = staticCommands();
     const paneOfGlass = commands.indexOf('node scripts/check-pane-of-glass.mjs');
     expect(commands.indexOf('node scripts/check-allowance-history.mjs')).toBeGreaterThan(paneOfGlass);
   });

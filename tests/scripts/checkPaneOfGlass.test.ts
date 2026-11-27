@@ -6,6 +6,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { staticCommands } from './staticSteps';
 // @ts-expect-error the script is plain JavaScript
 import { slashPath } from '../../scripts/pane-of-glass-matches.mjs';
 
@@ -43,8 +44,7 @@ afterEach(() => {
 
 describe('UI dependency checks', () => {
   it('runs the guard after readability in the static check', () => {
-    const { scripts } = JSON.parse(readFileSync('package.json', 'utf8'));
-    const commands = scripts['check:static'].split(' && ');
+    const commands = staticCommands();
     const readability = commands.indexOf('node scripts/check-readability.mjs');
     expect(readability).toBeGreaterThanOrEqual(0);
     expect(commands.indexOf('node scripts/check-pane-of-glass.mjs')).toBeGreaterThan(readability);
