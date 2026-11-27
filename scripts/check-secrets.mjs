@@ -39,10 +39,17 @@ const looksLikeSecret = (text) => KEY.test(text) || PRIVATE_KEY.test(text) || (o
 
 const bad = [];
 for (const f of files) {
-  if (isEnvFile(f)) { bad.push(`${f} (an env file)`); continue; }
+  if (isEnvFile(f)) {
+    bad.push(`${f} (an env file)`);
+    continue;
+  }
   let text;
-  try { text = (all ? fs.readFileSync(f) : gitBytes(cwd, 'show', `:${f}`)).toString('latin1'); }
-  catch { bad.push(`${f} (could not be read to check)`); continue; }
+  try {
+    text = (all ? fs.readFileSync(f) : gitBytes(cwd, 'show', `:${f}`)).toString('latin1');
+  } catch {
+    bad.push(`${f} (could not be read to check)`);
+    continue;
+  }
   if (looksLikeSecret(text)) bad.push(`${f} (looks like an API key or token)`);
 }
 // A secret a branch commit added is in the history even when a later commit removed it.

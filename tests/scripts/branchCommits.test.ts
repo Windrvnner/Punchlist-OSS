@@ -126,6 +126,16 @@ describe('the branch commits', () => {
     expect(addedFiles(range, dir).map((item: { file: string }) => item.file)).toEqual(['say "hi"\tnow.txt']);
   });
 
+  it('reads the control characters git writes as letter escapes', () => {
+    const { dir, git, commit } = repo();
+    git('checkout', '-q', '-b', 'feature');
+    const name = 'a\x07b\x08c\x0cd\re\x0bf.txt';
+    commit(name, 'one\n');
+    const range = branchRange(dir);
+    expect(addedText(range, dir).map((item: { file: string }) => item.file)).toEqual([name]);
+    expect(addedFiles(range, dir).map((item: { file: string }) => item.file)).toEqual([name]);
+  });
+
   it('returns null on main', () => {
     expect(branchRange(repo().dir)).toBeNull();
   });

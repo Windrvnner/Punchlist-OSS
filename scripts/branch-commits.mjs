@@ -23,7 +23,9 @@ function commitChunks(log) {
   return chunks;
 }
 
-const ESCAPES = { t: '\t', n: '\n', '"': '"', '\\': '\\' };
+const ESCAPES = {
+  a: '\x07', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '"': '"', '\\': '\\',
+};
 
 // A file name as git prints it: plain, or in double quotes with C escapes (quote, tab, newline, octal bytes).
 function unquote(name) {
