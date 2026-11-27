@@ -7,11 +7,11 @@ export const ALLOWANCE_FILES = [
   'scripts/vendor-names-allowance.json',
   'scripts/skipped-tests-allowance.json',
 ];
-const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' });
+export const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' });
 // A skipped test is listed once for each platform it is skipped on.
 export const keyOf = ({ file, kind, line, platform }) =>
   JSON.stringify(kind === 'skipped' ? [file, kind, line, platform] : [file, kind, line]);
-const describe = ({ file, kind, line }) => `${file} ${kind} "${line}"`;
+export const describe = ({ file, kind, line }) => `${file} ${kind} "${line}"`;
 
 export function groupMatches(matches) {
   const grouped = new Map();

@@ -20,8 +20,9 @@ afterEach(() => {
 });
 
 // Serves the given open-issue pages at /repos/o/r/issues, then an empty page; returns its address.
-async function githubServing(pages: object[][]) {
+async function githubServing(pages: object[][], status = 200) {
   const server = createServer((request, response) => {
+    response.statusCode = status;
     const page = Number(new URL(request.url ?? '', 'http://x').searchParams.get('page'));
     response.end(JSON.stringify(pages[page - 1] ?? []));
   });
@@ -75,6 +76,14 @@ describe('issues named by the allowances', () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toContain('Cannot reach GitHub to check the issues the allowances name');
     }
+  });
+
+  it.each([403, 500])('fails when GitHub answers %i', async (status) => {
+    const api = await githubServing([[{ number: 5 }]], status);
+    const env = { GITHUB_TOKEN: 't', GITHUB_REPOSITORY: 'o/r', GITHUB_API_URL: api };
+    const result = await runCli(repoNaming([5]), env);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`the issues the allowances name (GitHub answered ${status})`);
   });
 
   it('names each issue that is not open and passes when all are open', async () => {

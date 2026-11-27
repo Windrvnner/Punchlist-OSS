@@ -12,7 +12,9 @@ export async function closedIssues(numbers, fetchPage) {
   for (let page = 1; ; page += 1) {
     const items = await fetchPage(page);
     if (items.length === 0) break;
-    for (const item of items) if (!item.pull_request) open.add(item.number);
+    for (const item of items) {
+      if (!item.pull_request) open.add(item.number);
+    }
   }
   return numbers.filter((number) => !open.has(number));
 }
@@ -21,7 +23,9 @@ function issuesNamed() {
   const numbers = [];
   for (const file of ALLOWANCE_FILES.filter(existsSync)) {
     const entries = JSON.parse(readFileSync(file, 'utf8'));
-    for (const { issue } of Array.isArray(entries) ? entries : []) if (issue !== undefined) numbers.push(issue);
+    for (const { issue } of Array.isArray(entries) ? entries : []) {
+      if (issue !== undefined) numbers.push(issue);
+    }
   }
   return [...new Set(numbers)];
 }

@@ -95,6 +95,26 @@ describe('allowance history', () => {
     expect(result.stderr).toContain('decision is not on main\'s scripts/verified-decisions.json');
   });
 
+  it('rejects an entry moved to another issue or to a decision', () => {
+    const repo = repository({ [baselineFile]: [entry(1)], [verifiedFile]: ['A decision.'] });
+    repo.write(baselineFile, [entry(1, { issue: 8 })]);
+    const swapped = repo.run();
+    expect(swapped.status).toBe(1);
+    expect(swapped.stderr).toContain("issue 8 replaces main's issue 7");
+    repo.write(baselineFile, [entry(1, { issue: undefined, decision: 'A decision.' })]);
+    const decided = repo.run();
+    expect(decided.status).toBe(1);
+    expect(decided.stderr).toContain("decision replaces main's issue 7");
+  });
+
+  it('reports an allowance file that is not an array', () => {
+    const repo = repository({ [baselineFile]: [] });
+    repo.write(baselineFile, {});
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${baselineFile} must be a JSON array of entries`);
+  });
+
   it('accepts a decision that main verifies', () => {
     const repo = repository({ [baselineFile]: [], [verifiedFile]: ['A decision.'] });
     repo.write(baselineFile, [entry(1, { issue: undefined, decision: 'A decision.' })]);

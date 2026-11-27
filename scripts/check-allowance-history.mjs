@@ -1,19 +1,16 @@
 // Fails when an allowance file grows relative to main: an issue entry may only be kept, lowered or removed, and a
 // decision must already be on main's scripts/verified-decisions.json. Needs full history (CI's static job has it).
-import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { ALLOWANCE_FILES, committedJson, keyOf, mergeBase } from './allowance.mjs';
+import { ALLOWANCE_FILES, committedJson, describe, git, keyOf, mergeBase } from './allowance.mjs';
 import { scanUi } from './ui-scan.mjs';
 
 const paneOfGlassFile = ALLOWANCE_FILES[0];
 const verifiedFile = 'scripts/verified-decisions.json';
-const describe = ({ file, kind, line }) => `${file} ${kind} "${line}"`;
 
 // On the branch introducing an allowance, main's own screens are the record of the exceptions that already exist.
 function mainScreenMatches(at) {
-  const git = (...args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28 });
-  const files = git('ls-tree', '-r', '-z', '--name-only', at, '--', 'src/ui').split('\0').filter(Boolean);
-  return scanUi(files, (file) => git('show', `${at}:${file}`));
+  const files = git(process.cwd(), 'ls-tree', '-r', '-z', '--name-only', at, '--', 'src/ui').split('\0');
+  return scanUi(files.filter(Boolean), (file) => git(process.cwd(), 'show', `${at}:${file}`));
 }
 
 // Main's entries for the file, or null when main has no list and nothing limits the file.
@@ -23,11 +20,22 @@ function ceilingFor(file, at) {
   return file === paneOfGlassFile ? mainScreenMatches(at) : null;
 }
 
+// An entry that main justifies with an issue keeps that issue: moving it to another issue or a decision is a swap.
+function swapProblem(entry, onMain) {
+  if (onMain?.issue === undefined || entry.issue === onMain.issue) return null;
+  const now = entry.issue === undefined ? 'decision' : `issue ${entry.issue}`;
+  return `${describe(entry)}: ${now} replaces main's issue ${onMain.issue}`;
+}
+
 function growthProblems(entries, ceiling) {
   const problems = [];
-  for (const entry of entries.filter((each) => each.issue !== undefined)) {
-    const allowed = ceiling.find((each) => keyOf(each) === keyOf(entry))?.count ?? 0;
-    if (entry.count > allowed) problems.push(`${describe(entry)}: count ${entry.count} is above main's ${allowed}`);
+  for (const entry of entries) {
+    const onMain = ceiling.find((each) => keyOf(each) === keyOf(entry));
+    const allowed = onMain?.count ?? 0;
+    if (entry.issue !== undefined && entry.count > allowed) {
+      problems.push(`${describe(entry)}: count ${entry.count} is above main's ${allowed}`);
+    }
+    problems.push(...[swapProblem(entry, onMain)].filter(Boolean));
   }
   return problems;
 }
@@ -43,7 +51,10 @@ function historyProblems(at) {
   const problems = [];
   for (const file of ALLOWANCE_FILES.filter(existsSync)) {
     const entries = JSON.parse(readFileSync(file, 'utf8'));
-    if (!Array.isArray(entries)) continue;
+    if (!Array.isArray(entries)) {
+      problems.push(`${file} must be a JSON array of entries.`);
+      continue;
+    }
     const ceiling = ceilingFor(file, at);
     if (ceiling) problems.push(...growthProblems(entries, ceiling));
     problems.push(...decisionProblems(entries, verifiedOnMain));
