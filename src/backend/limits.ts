@@ -82,20 +82,20 @@ export function changesFor(share: ChangeShare, docs: string): void {
   share.docs = docs;
   share.listed = 0;
 }
-/** after a refusal: whether listing fewer changes could shorten the request, in which case it now will */
-export function fewerChanges(share: ChangeShare, e: unknown): boolean {
-  if (!isTooLong(e) || !share.listed) return false;
-  share.halvings++;
-  return true;
-}
-/** `run` again with fewer changes listed, while a refusal as too long can be met that way */
+/**
+ * `run` again with half as many changes listed after each refusal as too long, while the last request listed any: the
+ * one way every request with a draft meets that refusal before a document is left out (#1381)
+ */
 export async function withFewerChanges<T>(run: (share: ChangeShare) => Promise<T>): Promise<T> {
   const share = allChanges();
   for (;;) {
     try {
       return await run(share);
     } catch (e) {
-      if (!fewerChanges(share, e)) throw e;
+      if (!isTooLong(e) || !share.listed) {
+        throw e;
+      }
+      share.halvings++;
     }
   }
 }

@@ -271,7 +271,9 @@ class FolderPass {
   private async askBatch(reading: BatchReading, share: ChangeShare) {
     const { kit } = this.run;
     const { files, listing, got } = await kit.send(reading.sent, this.run.spansDeals, share);
-    if (!got.length) return null;
+    if (!got.length) {
+      return null;
+    }
     const prompt = this.ask(reading, listing);
     // a reply citing a document the batch was not given is asked again (#1162)
     const unusable = docsUnusable(got, this.run.spansDeals, BATCH_KEYS, kit.where);

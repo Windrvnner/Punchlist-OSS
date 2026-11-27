@@ -214,7 +214,9 @@ class Answering {
     }
     // a turn refused as too long lists fewer tracked changes, while it lists any (#1381)
     const reply = await withFewerChanges((share) => this.reply(turnNumber, last, share));
-    if (!reply) return fail({ kind: 'failed', message: UNREAD_REPLY });
+    if (!reply) {
+      return fail({ kind: 'failed', message: UNREAD_REPLY });
+    }
     const tool = typeof reply.tool === 'string' ? reply.tool.trim().toLowerCase() : '';
     if (strings(reply.notes).length) run.notes = strings(reply.notes).join(' ');
     if (!tool || (last && !strings(reply.text).length)) return this.answered(reply, last);

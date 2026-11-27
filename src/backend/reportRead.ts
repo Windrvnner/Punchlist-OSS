@@ -259,11 +259,16 @@ export async function read(
   // refused as too long, it is sent again with fewer of its tracked changes listed, while any are (#1381)
   const sentAndAsked = await withFewerChanges(async (share) => {
     const s = await k.send(rec, share);
-    if (!s) return null;
+    if (!s) {
+      return null;
+    }
     const r = new ReportRead(k, rec, s, before);
     return { r, got: await ask(r, known) };
   });
-  if (!sentAndAsked) return 'lost';            // cannot be sent from this PC: left for one that can, not a try
+  // cannot be sent from this PC: left for one that can, not a try
+  if (!sentAndAsked) {
+    return 'lost';
+  }
   const { r, got } = sentAndAsked;
   if (!got.reply) return null;
   if (notReport(got.reply)) return 'not';
