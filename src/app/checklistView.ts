@@ -158,26 +158,19 @@ export function checklistView(state: State, dealId: string) {
 /** Leaving Turned off clears it only where the Checklist is mounted, even while a read is still pending. */
 export function settleChecklistFilter(store: Store) {
   let queued = false;
-  let lastItems: State['items'] | undefined;
-  let lastDeal: string | undefined;
   function active(state: State) {
     const route = state.ui.route;
     return state.boot.stage === 'ready' && state.ui.checklistFilter === 'off' && route.name === 'checklist'
       && state.deals[route.dealId] ? route.dealId : undefined;
   }
   store.subscribe((state) => {
-    const dealId = active(state);
-    if (!dealId || (dealId === lastDeal && state.items === lastItems) || queued) return;
+    if (!active(state) || queued) return;
     queued = true;
     queueMicrotask(() => {
       queued = false;
       const latest = store.get();
       const id = active(latest);
-      if (!id) return;
-      lastDeal = id;
-      lastItems = latest.items;
-      if (Object.values(lastItems).some((item) => item.dealId === id && item.off)) return;
-      lastDeal = undefined;
+      if (!id || Object.values(latest.items).some((item) => item.dealId === id && item.off)) return;
       store.ui({ checklistFilter: 'all' });
     });
   });
