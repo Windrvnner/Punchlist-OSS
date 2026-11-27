@@ -16,7 +16,8 @@ export function gitBytes(cwd, ...args) {
   try {
     return execFileSync('git', args, { cwd, maxBuffer: 512 * 1024 * 1024, stdio: 'pipe', ...options });
   } catch (error) {
-    const cause = String(error.stderr ?? error.code ?? '').trim();
+    // An empty stderr (a Buffer, so never falsy itself) falls through to the error code, such as ENOBUFS.
+    const cause = String(error.stderr ?? '').trim() || String(error.code ?? '');
     throw new Error(`git ${args[0]} failed (exit ${error.status ?? 'none'}): ${cause}`);
   }
 }

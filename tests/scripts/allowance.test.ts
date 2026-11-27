@@ -6,7 +6,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  allowanceProblems, committedJson, decisionEntries, groupMatches, lowerAllowance, unlistedMatches,
+  allowanceProblems, committedJson, decisionEntries, gitBytes, groupMatches, lowerAllowance, unlistedMatches,
 // @ts-expect-error the script is plain JavaScript
 } from '../../scripts/allowance.mjs';
 
@@ -222,5 +222,10 @@ describe('git failures', () => {
     const child = spawnSync(process.execPath, ['--input-type=module', '-e', code], { encoding: 'utf8' });
     expect(child.stderr).toBe('');
     expect(child.stdout).toBe('git rev-parse failed (exit 128): fatal: Needed a single revision\n');
+  });
+
+  it('names the error code when git wrote nothing to stderr', () => {
+    // output larger than the buffer stops git with an empty stderr
+    expect(() => gitBytes('.', '--version', { maxBuffer: 4 })).toThrow('git --version failed (exit 0): ENOBUFS');
   });
 });
