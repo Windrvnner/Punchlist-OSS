@@ -8,7 +8,7 @@ import type { ChecklistMapping } from '../domain/checklistImport';
 import { LAYERS, type Layer } from '../domain/checklist';
 import { keptImport, keepImport } from './keptImports';
 import type { Asked, Review } from './checklistImport';
-import type { ChecklistText } from './listRead';
+import { clearedHeading, type ChecklistText } from './listRead';
 
 /** Every choice and check mark, kept beside the list */
 export interface ChecklistChoices {
@@ -120,8 +120,8 @@ function keepPasteAlone(key: string, paste: string, setAside: boolean): boolean 
   if (setAside) {
     if (!paste.trim()) return true;
     const nothingElse = { table: null, text: null, reads: null, review: null, choices: undefined };
-    const clearedHeading = keptImport(key)?.headingDraft != null ? { headingDraft: null } : {};
-    keepImport(key, { paste, ...nothingElse, ...clearedHeading });
+    const heading = keptImport(key)?.headingDraft != null ? clearedHeading : {};
+    keepImport(key, { paste, ...nothingElse, ...heading });
     return false;
   }
   if (paste.trim() || keptImport(key)?.paste) keepImport(key, { paste });

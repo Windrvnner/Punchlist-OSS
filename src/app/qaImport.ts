@@ -1,3 +1,4 @@
+import { clearedHeading } from './listRead';
 import { Operation } from '../domain/model';
 import { fail, ok, type Result } from '../domain/result';
 import {
@@ -93,7 +94,7 @@ export function keepQaImport(key: string, table: ImportTable, choices: QaChoices
 /** A newly accepted file replaces the previous attempt and any kept heading edit. */
 export function replaceQaImport(store: Store, key: string) {
   releaseQaAttempt(store, key);
-  keepImport(key, { submission: null, headingDraft: null });
+  keepImport(key, { submission: null, ...clearedHeading });
 }
 
 export function clearQaImport(store: Store, key: string) {

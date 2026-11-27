@@ -13,7 +13,7 @@ import {
   type TiedOut,
 } from '../domain/listRead';
 import { prepareChecklist, suggestChecklistColumns, type ChecklistMapping } from '../domain/checklistImport';
-import { keepImport } from './keptImports';
+import { keptImport, keepImport } from './keptImports';
 import { readImportBytes, type ImportTable } from './transfer';
 import type { Store } from './store';
 import { ok, fail, type Result } from '../domain/result';
@@ -123,9 +123,11 @@ export async function readChecklistColumns(
   return read.ok ? ok(mappedTable(read.value)) : read;
 }
 
+export const clearedHeading = { headingDraft: null };
+
 /** A successfully replaced source starts without the previous table's heading draft (#380). */
 export function clearChecklistHeading(key: string) {
-  keepImport(key, { headingDraft: null });
+  keepImport(key, clearedHeading);
 }
 
 export function checklistPaste(paste: string): ChecklistText | null {
@@ -275,4 +277,116 @@ export function checklistItemsAsRead(
 
 export function checklistReadCounts(table: ImportTable | null, lines: string[] | null, paste: ChecklistText | null) {
   return { rows: table?.rows.length ?? 0, lines: lines?.length ?? 0, pasted: paste?.lines.length ?? 0 };
+}
+
+export type Heading = Pick<ImportTable, 'sheet' | 'headerRow' | 'lastRow' | 'bytes'>;
+export type ReadRow = (row: number, accept: (heading: Heading) => void) => Promise<void>;
+// The numeric forms a native number input accepts, including integral decimals and exponents.
+const NUMBER_TEXT = /^-?(?:(\d+)(?:\.(\d+))?|\.(\d+))(?:[eE]([+-]?\d+))?$/;
+
+/** The heading row a number input's text names, or null when it is not a whole row on the sheet. */
+export function headingRow(text: string, lastRow: number): number | null {
+  const number = NUMBER_TEXT.exec(text);
+  if (!number) return null;
+  const value = Number(text);
+  if (!Number.isInteger(value) || value < 1 || value > lastRow) return null;
+  // A decimal near an integer can round to that integer as a Number. Check the original digits.
+  const [, whole = '', fraction, fractionOnly = '', exponent = '0'] = number;
+  const afterDot = fraction ?? fractionOnly;
+  const decimalPlaces = afterDot.length - Number(exponent);
+  return decimalPlaces > 0 && /[1-9]/.test((whole + afterDot).slice(-decimalPlaces)) ? null : value;
+}
+
+type HeadingDraft = Pick<Heading, 'sheet' | 'headerRow'> & { text: string };
+
+export function keptHeadingDraft(key: string, { sheet, headerRow }: Heading) {
+  const draft = keptImport(key)?.headingDraft as Partial<HeadingDraft> | null | undefined;
+  return draft?.sheet === sheet && draft.headerRow === headerRow && typeof draft.text === 'string'
+    ? draft.text : String(headerRow);
+}
+
+export function keepHeadingDraft(key: string, { sheet, headerRow }: Heading, text: string) {
+  const headingDraft: HeadingDraft | null = text === String(headerRow) ? null : { sheet, headerRow, text };
+  keepImport(key, { headingDraft });
+}
+
+/** A typed heading follows the accepted preview; bounds come from its sheet only (#380). */
+export class HeadingRowDraft {
+  private text: string;
+  private sheet: string;
+  private queuedSheet?: string;
+  private pending?: { sheet: string; row: number };
+
+  constructor(private key: string, private table: Heading, private changed: () => void) {
+    this.sheet = table.sheet;
+    this.text = keptHeadingDraft(key, table);
+  }
+
+  get view() {
+    const { headerRow, lastRow } = this.table;
+    const max = this.sheet === this.table.sheet ? lastRow : undefined;
+    const row = headingRow(this.text, max ?? Number.POSITIVE_INFINITY);
+    const unused = !this.pending && max !== undefined && row !== headerRow;
+    const reason = row === null ? 'range' : unused ? 'preview' : undefined;
+    return { text: this.text, max, headerRow, reason };
+  }
+
+  dispose() {
+    this.pending = undefined;
+    this.queuedSheet = undefined;
+  }
+
+  async pick(text: string, read: ReadRow) {
+    this.text = text;
+    keepHeadingDraft(this.key, this.table, text);
+    if (this.sheet !== this.table.sheet) {
+      this.queuedSheet = this.sheet;
+      this.changed();
+      return;
+    }
+    const row = headingRow(text, this.table.lastRow);
+    if (row === null || row === (this.pending?.row ?? this.table.headerRow)) {
+      this.changed();
+      return;
+    }
+    const request = { sheet: this.sheet, row };
+    this.pending = request;
+    this.changed();
+    try {
+      await read(row, (accepted) => {
+        if (this.pending !== request) return;
+        this.table = accepted;
+        keepHeadingDraft(this.key, accepted, this.text);
+      });
+    } finally {
+      if (this.pending === request) {
+        this.pending = undefined;
+        this.changed();
+      }
+    }
+  }
+
+  update(table: Heading, sheet: string, read: ReadRow) {
+    const before = this.table;
+    const previousSheet = this.sheet;
+    this.sheet = sheet;
+    this.table = table;
+    if (this.pending?.sheet !== sheet) this.pending = undefined;
+    if (this.queuedSheet !== sheet) this.queuedSheet = undefined;
+    if (before.bytes !== table.bytes) {
+      this.dispose();
+      this.text = keptHeadingDraft(this.key, table);
+    } else if (before.sheet !== table.sheet || before.headerRow !== table.headerRow) {
+      if (this.queuedSheet === table.sheet) {
+        this.queuedSheet = undefined;
+        void this.pick(this.text, read);
+        return;
+      }
+      this.text = String(table.headerRow);
+      keepHeadingDraft(this.key, table, this.text);
+    } else if (previousSheet === sheet && before.lastRow === table.lastRow) {
+      return;
+    }
+    this.changed();
+  }
 }
