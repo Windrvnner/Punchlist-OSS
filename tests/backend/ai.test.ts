@@ -1748,7 +1748,7 @@ describe('the first pass', () => {
     await deal(s.repo);
     const r = val(await s.ai.firstPass('d1'));
     const turn = s.fillCalls.find((c) => isTurn(c))!; expect(turn.model).toBe('standard');                                             // the check's model runs the agent
-    expect(turn.prompt).toContain('1. Decommissioning is provided for Still needed: a decommissioning plan');                         // with what the check said it still needs
+    expect(turn.prompt).toContain('- Decommissioning is provided for Still needed: a decommissioning plan');                         // with what the check said it still needs
     expect(s.calls.map((c) => [itemsIn(c).map((it) => it.text).join(), sentNames(c).join()])).toEqual([['Decommissioning is provided for', 'Credit Agreement.pdf'], ['Decommissioning is provided for', 'DEC-77.pdf']]);   // the cited plan is read against the item, as on its last look
     expect(r.gaps).toEqual([]); expect(r.unsettled).toEqual([]);
     expect(val(await s.ai.checklist('d1')).find((x) => x.id === 'x1')).toMatchObject({ result: 'satisfied', sources: [{ doc: 'DEC-77.pdf', loc: 'p. 1' }] });
@@ -1768,7 +1768,7 @@ describe('the first pass', () => {
     // found nothing: each run hands over at most four items, and every item stays a gap with what was searched for
     const s = setup(gapAll, { d1: [FA, TS] }, opts); await deal(s.repo);
     const r = val(await s.ai.firstPass('d1')); expect(r.gaps.length).toBe(6);
-    const turns = s.fillCalls.filter((c) => isTurn(c)); expect(turns.length).toBe(2); expect(turns[0].prompt).toContain('4. Gap item 4'); expect(turns[0].prompt).not.toContain('Gap item 5'); expect(turns[1].prompt).toContain('2. Gap item 6');
+    const turns = s.fillCalls.filter((c) => isTurn(c)); expect(turns.length).toBe(2); expect(turns[0].prompt).toContain('- Gap item 4'); expect(turns[0].prompt).not.toContain('Gap item 5'); expect(turns[1].prompt).toContain('- Gap item 6');
     expect(turns[0].prompt).toContain('(searched already, finding nothing: "decommissioning plan"');                                 // the check's searches go with them, so they are not made again
     const g1 = val(await s.ai.checklist('d1')).find((x) => x.id === 'g1')!; expect(g1.result).toBe('gap'); expect(g1.searched?.[0]).toEqual({ q: 'decommissioning plan', n: 0 });
     // a run whose reply cannot be used: no more items are handed over in that check
@@ -2405,14 +2405,14 @@ describe('documents and runners together, on a real folder', () => {
     ai = nodeAi({ service: svc, docs: { records: docs.records, wanted: docs.wanted, describe: docs.describe, undescribed: docs.undescribed }, keeper, repo, shared, installId: 'office', checklist: () => ({ broad: [{ id: 'b1', text: 'The lock-up ratio is the same in the credit agreement and the term sheet' }], product: [], sector: [{ id: 's1', text: 'The model has been audited' }] }) });
     val(await docs.index('d1', [{ path: vdr, label: 'VDR', files: 0, size: '', indexed: 0, reviewed: 0 }])); await docs.settled('d1'); await Promise.all(passes);
     // indexing counted the words, page numbers included (#1147); only what was read was described: the menu is
-    // read too, as its page number answers to the "1." of the follow-up search, as it does in the word index
+    // not read: the follow-up search lists items in plain lines, so no number matches its page number (#1162)
     const pageNumbers = (n: number) => Array.from({ length: n }, (_, i) => String(i + 1)).sort();
     expect(docs.records('d1').map((r) => [r.rel, r.pages, r.words, r.summary])).toEqual([
       ['01 Finance/Credit Agreement.pdf', 20, ['facility', ...pageNumbers(20)], 'This is Credit Agreement.pdf.'],
       ['01 Finance/Term sheet.pdf', 5, ['sheet', 'term', ...pageNumbers(5)], 'This is Term sheet.pdf.'],
-      ['09 Misc/Lunch menu.pdf', 1, ['1', 'menu'], 'This is Lunch menu.pdf.'],
+      ['09 Misc/Lunch menu.pdf', 1, ['1', 'menu'], undefined],
     ]);
-    expect(svc.uploads).toBe(3);   // and only those three were ever sent
+    expect(svc.uploads).toBe(2);   // and only those two were ever sent
     const found = val(await repo.list('finding', 'd1')).map((l) => l.envelope.data as { title: string; sources: { doc: string; docId: string; loc: string }[] }); expect(found.map((f) => f.title)).toEqual(['Lock-up differs']);
     const a = val(await ai.answer({ dealId: 'd1', message: 'What is the lock-up?', history: [], model: 'standard' })); expect(a.sources.length).toBe(1);
     for (const src of [...found[0].sources, ...a.sources]) expect(val(await docs.page('d1', { doc: src.doc, docId: src.docId }, src.loc))).toMatchObject({ kind: 'pdf', page: Number(src.loc.slice(3)) });

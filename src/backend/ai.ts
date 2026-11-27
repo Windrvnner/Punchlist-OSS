@@ -3697,6 +3697,7 @@ export function nodeAi(o: AiOptions) {
       if (k < 0) continue;
       const had = got.get(k) ?? [];
       for (const r of part.filter((x) => named.includes(x.docId))) if (!had.includes(r)) had.push(r);
+      got.delete(k);   // so the named come in the order the reply gave them
       got.set(k, had);
     }
     return { got, ...(cut ? { cut: these.map((_, k) => k).filter((k) => !got.has(k)) } : {}) };
