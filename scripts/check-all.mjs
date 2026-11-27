@@ -23,6 +23,8 @@ const display = process.platform !== 'linux' || !!process.env.DISPLAY;
 const desktopSuites = process.platform === 'linux' ? ['smoke', 'signin', 'qaLogRecovery'] : ['smoke', 'signin'];
 const steps = [
   ['npm', ['run', 'check']],
+  // reads the report the Vitest step above just wrote to PUNCHLIST_GATE_DIR
+  ['node', ['scripts/check-skipped-tests.mjs', '--scope', 'platform']],
   ['npm', ['exec', '--', 'vite', 'build']],
   ['npm', ['run', 'browser', '--', '--jobs', '2']],
   ['node', ['scripts/desktop-build.mjs']],

@@ -38,6 +38,8 @@ jobs:
       - run: node scripts/check-open-issues.mjs
         env:
           GITHUB_TOKEN: ${{ github.token }}
+      # every tracked test file must match the include list in scripts/vitest-files.mjs
+      - run: node scripts/check-skipped-tests.mjs --files
 
   # the unit, backend and end-to-end tests, in three groups at once
   unit:
@@ -64,6 +66,9 @@ jobs:
       - run: npm test -- --shard ${{ matrix.shard }}/3
         env:
           PUNCHLIST_OFFICE: required
+          PUNCHLIST_GATE_DIR: out/gate/ci-unit-${{ matrix.shard }}
+      # a test that skipped must be listed in scripts/skipped-tests-allowance.json
+      - run: node scripts/check-skipped-tests.mjs out/gate/ci-unit-${{ matrix.shard }}/vitest.json
 
   # the required check named "check": passes only when the static checks and every unit test group passed
   check:
@@ -144,6 +149,11 @@ jobs:
         run: node tests/desktop/signin.spec.mjs
       - if: ${{ !cancelled() }}
         run: npx vitest run tests/desktop
+        env:
+          PUNCHLIST_GATE_DIR: out/gate/ci-desktop-windows
+      # the Windows entries of the skipped-test allowance are checked here, where they skip
+      - if: ${{ !cancelled() }}
+        run: node scripts/check-skipped-tests.mjs out/gate/ci-desktop-windows/vitest.json --scope desktop
       # the Q&A log recovery test, where Windows file locks matter most; LibreOffice writes its workbook fixture
       - if: ${{ !cancelled() }}
         run: |
