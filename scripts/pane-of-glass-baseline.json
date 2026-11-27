@@ -313,5 +313,131 @@
     "line": "const isNumber = (cell: string) => /^[\\d.,()%-]+$/.test(cell);",
     "count": 1,
     "issue": 1245
+  },
+  {
+    "file": "src/ui/drafts.tsx",
+    "kind": "list",
+    "line": "const cur = drafts.find((d) => d.docId === docId); if (!cur) return null;",
+    "count": 1,
+    "issue": 1247
+  },
+  {
+    "file": "src/ui/drafts.tsx",
+    "kind": "pattern",
+    "line": "const m = d.date ? /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(d.date) : null;",
+    "count": 1,
+    "issue": 1250
+  },
+  {
+    "file": "src/ui/editField.tsx",
+    "kind": "loop",
+    "line": "for (const exit of leaving) exit();",
+    "count": 1,
+    "issue": 1256
+  },
+  {
+    "file": "src/ui/findings.tsx",
+    "kind": "limit",
+    "line": "const why = qs.length ? `Response received on ${qs.slice(0, 3).join(', ')}${qs.length > 3 ? ` and ${qs.length - 3} more` : ''}` : f.updatedWhy === CHECK_REASON ? `Found by the check on ${fmtDate(localYmd(f.updatedAt))}` : f.updatedWhy;",
+    "count": 1,
+    "issue": 1290
+  },
+  {
+    "file": "src/ui/findings.tsx",
+    "kind": "list",
+    "line": "const src = part.refs.map((n) => sources[n - 1]).filter(Boolean);",
+    "count": 1,
+    "issue": 1302
+  },
+  {
+    "file": "src/ui/findings.tsx",
+    "kind": "list",
+    "line": "const why = qs.length ? `Response received on ${qs.slice(0, 3).join(', ')}${qs.length > 3 ? ` and ${qs.length - 3} more` : ''}` : f.updatedWhy === CHECK_REASON ? `Found by the check on ${fmtDate(localYmd(f.updatedAt))}` : f.updatedWhy;",
+    "count": 1,
+    "issue": 1302
+  },
+  {
+    "file": "src/ui/findings.tsx",
+    "kind": "pattern",
+    "line": "{prev && <details class=\"prev\"><summary>Previous version · {fmtDate(localYmd(prev.at))}{wasReviewed ? ` · reviewed by ${wasReviewed.by}` : ''}</summary><p class=\"dtxt\">{(prev.from as string[]).join(' ').replace(/\\s*\\[\\d+\\]/g, '')}</p></details>}",
+    "count": 1,
+    "issue": 1361
+  },
+  {
+    "file": "src/ui/findingsHead.tsx",
+    "kind": "list",
+    "line": "const hasExtraFilters = [FF.workstream, FF.reviewed].some(Boolean);",
+    "count": 1,
+    "issue": 1316
+  },
+  {
+    "file": "src/ui/foldersParts.tsx",
+    "kind": "list",
+    "line": "const drop = () => change(folders.filter((_, j) => j !== i));",
+    "count": 1,
+    "issue": 1362
+  },
+  {
+    "file": "src/ui/homeExamples.ts",
+    "kind": "limit",
+    "line": "if (names.length > 1) examples.splice(2, 0, ABOUT_TWO.replace('{a}', () => names[0]).replace('{b}', () => names[1]));",
+    "count": 1,
+    "issue": 1364
+  },
+  {
+    "file": "src/ui/homeExamples.ts",
+    "kind": "list",
+    "line": "const names = dealNames.filter((name) => name.trim());",
+    "count": 1,
+    "issue": 1365
+  },
+  {
+    "file": "src/ui/homeExamples.ts",
+    "kind": "list",
+    "line": "if (names.length > 1) examples.splice(2, 0, ABOUT_TWO.replace('{a}', () => names[0]).replace('{b}', () => names[1]));",
+    "count": 1,
+    "issue": 1365
+  },
+  {
+    "file": "src/ui/limit.ts",
+    "kind": "limit",
+    "line": "export const atLimit = (text: string) => text.length >= TEXT_MAX;",
+    "count": 1,
+    "issue": 1265
+  },
+  {
+    "file": "src/ui/overview.tsx",
+    "kind": "limit",
+    "line": ": <EditField keep={`${d.id}:${k}`} read={readDeal(d.id, k)} label={label} placeholder=\"Not set\" className=\"edit inl\" cap={{}} value={d[k]} rev={d.rev} maxLength={80} commit={(v, over) => store.dispatch(EditDeal, { dealId: d.id, [k]: v }, { quiet: true, over })} />}</div>);",
+    "count": 1,
+    "issue": 1315
+  },
+  {
+    "file": "src/ui/pastList.tsx",
+    "kind": "list",
+    "line": "return [dealName, conversation.about].filter(Boolean).join(' · ');",
+    "count": 1,
+    "issue": 1369
+  },
+  {
+    "file": "src/ui/pickList.tsx",
+    "kind": "list",
+    "line": "const known = names.some((x) => key(x.name) === key(cur));",
+    "count": 1,
+    "issue": 1372
+  },
+  {
+    "file": "src/ui/placeKept.tsx",
+    "kind": "list",
+    "line": "const edit = a.cells.filter((c) => c.changed).map((c) => `${c.heading}: ${shown(c.theirs)}`).join(' · ');",
+    "count": 1,
+    "issue": 1248
+  },
+  {
+    "file": "src/ui/placeKept.tsx",
+    "kind": "list",
+    "line": "const left = chose.filter((c) => c === undefined).length;",
+    "count": 1,
+    "issue": 1248
   }
 ]
