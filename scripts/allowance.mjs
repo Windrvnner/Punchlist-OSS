@@ -3,13 +3,16 @@ import { execFileSync, spawnSync } from 'node:child_process';
 
 const platforms = ['linux', 'win32'];
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' });
-const keyOf = ({ file, kind, line }) => JSON.stringify([file, kind, line]);
+// A skipped test is listed once for each platform it is skipped on.
+const keyOf = ({ file, kind, line, platform }) =>
+  JSON.stringify(kind === 'skipped' ? [file, kind, line, platform] : [file, kind, line]);
 const describe = ({ file, kind, line }) => `${file} ${kind} "${line}"`;
 
 export function groupMatches(matches) {
   const grouped = new Map();
-  for (const { file, kind, line } of matches) {
+  for (const { file, kind, line, platform } of matches) {
     const entry = { file, kind, line: line.trim(), count: 0 };
+    if (platform !== undefined) entry.platform = platform;
     const known = grouped.get(keyOf(entry)) ?? entry;
     known.count += 1;
     grouped.set(keyOf(entry), known);
@@ -42,7 +45,7 @@ function shapeProblem(entry) {
 function decisionProblem(entry, decisions, verified) {
   if (entry.decision === undefined) return null;
   if (!verified.includes(entry.decision)) return 'decision is not on scripts/verified-decisions.json';
-  if (decisions.some((text) => text.includes(entry.decision))) return null;
+  if (decisions.includes(entry.decision)) return null;
   return 'decision is not word for word in docs/decisions.md';
 }
 

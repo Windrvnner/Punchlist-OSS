@@ -34,6 +34,24 @@ describe('groupMatches', () => {
   });
 });
 
+describe('platform in the key of a skipped entry', () => {
+  const skipped = { file: 't.test.ts', kind: 'skipped', line: 'it', count: 1, issue: 7, reason: 'x' };
+
+  it('carries the platform of a match into the grouped entry', () => {
+    const match = { file: 't.test.ts', kind: 'skipped', line: 'it', platform: 'linux' };
+    expect(groupMatches([match, { ...match, platform: 'win32' }, match])).toEqual([
+      { ...match, count: 2 },
+      { ...match, platform: 'win32', count: 1 },
+    ]);
+  });
+
+  it('lists the same skipped test once for each platform', () => {
+    const seen = [{ ...skipped, platform: 'linux' }, { ...skipped, platform: 'win32' }];
+    expect(problems(seen, seen)).toEqual([]);
+    expect(problems(seen, [seen[0]]).join('\n')).toContain('1 not listed');
+  });
+});
+
 describe('decisionEntries', () => {
   it('joins an entry and its indented continuation lines with single spaces', () => {
     const markdown = '# T\n\n- first entry\n  wraps here\n- second\n\ntext\n';
@@ -80,6 +98,12 @@ describe('allowanceProblems', () => {
       .toContain('decision is not word for word in docs/decisions.md');
   });
 
+  it('refuses a decision that is only a fragment of a decisions.md entry', () => {
+    const decided = entry({ issue: undefined, decision: 'A rule' });
+    expect(problems(found(), [decided], { decisions: ['A rule that wraps.'], verified: ['A rule'] }).join('\n'))
+      .toContain('decision is not word for word in docs/decisions.md');
+  });
+
   it('accepts a verified decision whose decisions.md entry wraps onto a second line', () => {
     const decisions = decisionEntries('- A rule that\n  wraps.\n');
     const decided = entry({ issue: undefined, decision: 'A rule that wraps.' });
@@ -93,7 +117,7 @@ describe('allowanceProblems', () => {
 
   it('refuses a skipped entry without a reason or a known platform', () => {
     const skipped = { file: 't.test.ts', kind: 'skipped', line: 'it', count: 1, issue: 7 };
-    const seen = [{ file: 't.test.ts', kind: 'skipped', line: 'it', count: 1 }];
+    const seen = [{ file: 't.test.ts', kind: 'skipped', line: 'it', count: 1, platform: 'linux' }];
     expect(problems(seen, [{ ...skipped, platform: 'linux', reason: 'x' }])).toEqual([]);
     expect(problems(seen, [{ ...skipped, platform: 'linux', reason: '' }]).join('\n')).toContain('reason');
     expect(problems(seen, [{ ...skipped, platform: 'mac', reason: 'x' }]).join('\n')).toContain('platform');
@@ -143,6 +167,20 @@ describe('committedJson', () => {
     git(dir, 'switch', '-q', '-c', 'work');
     commit(dir, 'a.json', '[2]');
     expect(() => committedJson('a.json', dir)).toThrow(/Cannot compare with main\. Run git fetch .* and retry\./);
+  });
+
+  it('asks to unshallow when the clone is shallow', () => {
+    const source = repository();
+    commit(source, 'a.json', '[1]');
+    commit(source, 'b.json', '[1]');
+    const dir = mkdtempSync(path.join(tmpdir(), 'allowance-'));
+    directories.push(dir);
+    git(dir, 'clone', '-q', '--depth', '1', `file://${source}`, 'clone');
+    const clone = path.join(dir, 'clone');
+    git(clone, 'switch', '-q', '-c', 'work');
+    git(clone, 'branch', '-q', '-D', 'main');
+    git(clone, 'update-ref', '-d', 'refs/remotes/origin/main');
+    expect(() => committedJson('a.json', clone)).toThrow('Run git fetch --unshallow origin');
   });
 
   it('returns null outside a Git checkout, as in exported sources', () => {
