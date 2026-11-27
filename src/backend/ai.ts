@@ -59,7 +59,8 @@ import {
   readJson, unfinished, list as listOf, strings, prose, PARAGRAPH_SEAM, int, pageOf, word, isObject,
 } from './lenient';
 import { listReadPrompt, listReply, readListInParts } from './listReadAi';
-import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK } from './limits';
+import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK, allChanges, fewerChanges,
+  withFewerChanges, type ChangeShare } from './limits';
 import { UNREAD_REPLY, UNUSABLE_REPLY, UNREACHED, CUT_ON_IT, CUT_BEFORE_IT, UNUSABLE_ON_IT } from './limits';
 import { inParts, partSize, type PartReply, type PartsDone } from './parts';
 import { tokens, fold, indexWords } from './words';
@@ -1098,8 +1099,8 @@ export function nodeAi(o: AiOptions) {
       release: async (keys) => { if (o.shared) await release(dealId, keys).catch(() => undefined); },
       ask: (input, keys) => askJson(input, keys),
       unusable: (sent, keys, shown) => docsUnusable(sent, false, keys, where, shown),
-      send: async (rec, model) => {
-        const r = await send(sentOf(dealId, [rec]), model);
+      send: async (rec, share) => {
+        const r = await send(sentOf(dealId, [rec]), false, share);
         return r.got.length ? { files: r.files, listing: r.listing, sent: r.got } : null;
       },
       fit: (text, cited, sent) => fit(text, cited, sent, false, true),
@@ -1516,34 +1517,28 @@ export function nodeAi(o: AiOptions) {
     const not = new Set([...given.map((r) => r.docId), ...skip]);
     return withClean(dealId, [...given, ...((await pick(dealId, question, not, room - given.length, core)) ?? top(dealId, question, not, room - given.length, core, true))]);
   }
-  /** a draft's tracked changes as prompt lines, and the tokens they take */
-  type ChangeLines = { lines: string[]; used: number };
   /**
    * A Word file's tracked changes as prompt lines: each changed passage as it was and as it reads now, with who changed
-   * what and when. They are listed while their tokens fit in `room`, what is left of the prompt's budget for tracked
-   * changes, and the rest is counted (#1092). `used` is the tokens the listed passages took.
+   * what and when. Every passage is listed, or after refusals as too long the first of them that `share` leaves, and
+   * the rest are counted (#1381). The passages listed are added to `share.listed`.
    */
-  async function changesOf(dealId: string, id: string, docId: string, room: number): Promise<ChangeLines> {
-    const none: ChangeLines = { lines: [], used: 0 };
-    if (!o.docs.changes) return none;
-    let r: Result<ChangeList>; try { r = await o.docs.changes(dealId, docId); } catch { return none; }
-    if (!r.ok || !r.value.passages.length) return none;
+  async function changesOf(dealId: string, id: string, docId: string, share: ChangeShare): Promise<string[]> {
+    if (!o.docs.changes) return [];
+    let r: Result<ChangeList>; try { r = await o.docs.changes(dealId, docId); } catch { return []; }
+    if (!r.ok || !r.value.passages.length) return [];
+    const passages = r.value.passages;
+    const listed = Math.floor(passages.length / 2 ** share.halvings);
+    share.listed += listed;
     const out = [`  The changes in ${id}, read from the file itself (these are fact, not a reading):`];
-    let used = 0, left = 0;
-    for (const p of r.value.passages) {
+    for (const p of passages.slice(0, listed)) {
       const who = p.changes.map((c) => `${c.kind}${c.text ? ` "${c.text.replace(/\s+/g, ' ').trim()}"` : ''}${c.by ? ` by ${c.by}` : ''}${c.at ? ` on ${c.at.slice(0, 10)}` : ''}`).join('; ');
-      const line = `  - was: "${p.before.replace(/\s+/g, ' ').trim()}" / now: "${p.after.replace(/\s+/g, ' ').trim()}" (${who})`;
-      const tokens = tokensOf(line);
-      if (used + tokens > room) {
-        left++;
-        continue;
-      }
-      out.push(line);
-      used += tokens;
+      const was = p.before.replace(/\s+/g, ' ').trim(); const now = p.after.replace(/\s+/g, ' ').trim();
+      out.push(`  - was: "${was}" / now: "${now}" (${who})`);
     }
+    const left = passages.length - listed;
     if (left) out.push(`  - and ${left} more changed passage${left === 1 ? '' : 's'}, not listed here.`);
     if (!r.value.complete) out.push('  Some changes are in parts of the file this list does not reach.');
-    return { lines: out, used };
+    return out;
   }
   /**
    * What the model is told of a blackline: the clean draft is the truth for the deal's terms,
@@ -1582,16 +1577,15 @@ export function nodeAi(o: AiOptions) {
   }
   /**
    * Put these documents in the store and describe them for the prompt. `got` are the ones that are really there: a
-   * document whose file cannot be found on this PC is left out, and nothing may be recorded as read from it. `model`
-   * is the one the prompt goes to: the drafts' tracked changes share one budget, the share of its input limit that a
-   * part may fill, drawn on in the order the drafts are listed (#1092). `spansDeals`: the prompt spans several deals,
+   * document whose file cannot be found on this PC is left out, and nothing may be recorded as read from it. A
+   * draft's tracked changes are listed as `share` leaves them (#1381). `spansDeals`: the prompt spans several deals,
    * so each document is named with its deal (#1162).
    */
-  async function send(sent: Sent[], model: string, spansDeals = false):
+  async function send(sent: Sent[], spansDeals = false, share = allChanges()):
     Promise<{ files: string[]; listing: string; got: Sent[] }> {
     const files: string[] = []; const lines: string[] = []; const got: Sent[] = [];
     const idOf = (s: Sent) => docHandle(s, spansDeals);
-    let changesRoom = Math.floor((inLimit(model) * control.limits.partShare) / 100);
+    share.listed = 0;
     for (const dealId of new Set(sent.map((s) => s.dealId))) {
       const mine = sent.filter((s) => s.dealId === dealId); const ids = await o.keeper.ensure(await o.docs.wanted(dealId, mine.map((s) => s.rec.docId)));
       describeSoon(dealId, mine.map((s) => s.rec.docId));                          // a document that is read is worth describing: once, and not waited for
@@ -1604,9 +1598,7 @@ export function nodeAi(o: AiOptions) {
         if (rec.tracked) {
           lines.push(`  ${idOf(s)} has ${rec.tracked} tracked changes. Its pages show them as markup, `
             + 'so its wording is proposed, not agreed.');
-          const changes = await changesOf(dealId, idOf(s), rec.docId, changesRoom);
-          lines.push(...changes.lines);
-          changesRoom -= changes.used;
+          lines.push(...await changesOf(dealId, idOf(s), rec.docId, share));
         }
         const k = kindsOf(dealId);
         const against = k.against.get(rec.docId) ?? 'own';
@@ -1811,13 +1803,14 @@ export function nodeAi(o: AiOptions) {
     let using = model;
     let pool: Sent[] | undefined;
     let canRetry = readCanRetry(model, again);
+    const share = allChanges();
     // checked on every reply, whether or not it can be sent back: it names only the ids it was shown, and cites only
     // the documents it was given (#1105, #1162)
     const unusable = docsUnusable(sent, deals.length > 1, keys, where, again?.shown);
     for (let round = 1; ; round++) {
       let reply: Record<string, unknown> | null;
       try {
-        const { files, listing, got } = await send(sent, using, deals.length > 1);
+        const { files, listing, got } = await send(sent, deals.length > 1, share);
         // a finding is not reassessed on part of what was chosen while the rest is out of reach
         if (kind === 'reassess' && lostSome(sent, got)) return fail({ kind: 'failed', message: 'The documents for this could not be opened on this PC' });
         if (got.length < sent.length) sent.splice(0, sent.length, ...got);        // what could not be opened on this PC was not read, and cannot be cited
@@ -1836,6 +1829,9 @@ export function nodeAi(o: AiOptions) {
           }
         }
       } catch (e) {
+        // a request refused as too long lists fewer tracked changes, while it lists any, before a document is left
+        // out (#1381)
+        if (fewerChanges(share, e)) { round--; continue; }
         // a request the service refuses as too long is asked again with the likeliest half of the documents, down to one (limits.ts)
         // one too long even alone is left out, and the others are tried without it
         if (isTooLong(e) && sent.length > 1) { pool ??= [...sent]; sent.splice(Math.ceil(sent.length / 2)); round--; continue; }
@@ -2079,8 +2075,10 @@ export function nodeAi(o: AiOptions) {
    * when the service fails. With `redo`, the items are ones whose first replies could not be used: each is sent back with
    * what was wrong with it, to be put right.
    */
-  async function check(items: ChecklistItem[], sent: Sent[], model: string, redo?: Map<string, { why: string; said?: unknown }>, fix = true): Promise<(Map<string, Seen> & { cut?: ChecklistItem[] }) | null> {
-    const { files, listing, got } = await send(sent, model);
+  async function check(items: ChecklistItem[], sent: Sent[], model: string,
+    redo?: Map<string, { why: string; said?: unknown }>, fix = true,
+    share = allChanges()): Promise<(Map<string, Seen> & { cut?: ChecklistItem[] }) | null> {
+    const { files, listing, got } = await send(sent, false, share);
     // the folder of one of them stopped answering since they were chosen: the items are not settled on the rest
     if (lostSome(sent, got)) { const why = awayWhy(sent[0].dealId, sent.filter((x) => !got.includes(x)).map((x) => x.rec.docId)); return new Map(items.map((it) => [it.id, { kind: 'weak' as const, why, reason: why }])); }
     if (!got.length) return null; sent = got;
@@ -2944,12 +2942,20 @@ export function nodeAi(o: AiOptions) {
    */
   async function verify(dealId: string, f: Raised, model: string, core: string[], also: string[] = [], heard: Asked[] = []): Promise<{ stands: boolean; why: string } | null> {
     const docs = await sendable(dealId, await start(dealId, `${f.title} ${f.body.join(' ')}`, [...also, ...f.sources.map((x) => x.docId).filter((x): x is string => !!x)]   /* what prompted the re-check first: the cap never drops it */, width, core)); if (!docs.length) return null;
-    const sent = sentOf(dealId, docs); const { files, listing, got } = await send(sent, model);
-    if (!got.length || lostSome(sent, got)) return null;                        // a folder stopped answering since they were chosen: not judged on the rest
     // a closed finding is asked the other way round: "stands" is whether it stays closed
     const ask = f.closed ? `This finding was raised on the deal earlier, and a person has closed it.\nTitle: ${f.title}\nAs written: ${f.body.join(' ').replace(/\s*\[\d+\]/g, '')}\n\nGoing by the documents as they are now, does it stay closed? It does not if a document now shows the problem again, shows it was not settled, or makes it worse.\nReply as JSON: {"stands": true, "why": "one line"}`
       : `This finding was raised on the deal earlier.\nTitle: ${f.title}\nAs written: ${f.body.join(' ').replace(/\s*\[\d+\]/g, '')}${await responsesOn(dealId, f.id, heard)}\n\nGoing by the documents as they are now, and any responses above, does it still stand as written? It does not if a document or a response now says otherwise, settles it, or makes it worse.\nReply as JSON: {"stands": true, "why": "one line"}`;
-    const reply = await askJson<{ stands?: unknown; why?: unknown }>({ kind: 'verify', model, system: JSON_ONLY, files, prompt: `Documents:\n${listing}\n\n${ask}` }, ['stands', 'why']);
+    const sent = sentOf(dealId, docs);
+    // a request refused as too long lists fewer tracked changes, while it lists any (#1381)
+    const reply = await withFewerChanges(async (share) => {
+      const { files, listing, got } = await send(sent, false, share);
+      // a folder stopped answering since they were chosen: not judged on the rest
+      if (!got.length || lostSome(sent, got)) return undefined;
+      const prompt = `Documents:\n${listing}\n\n${ask}`;
+      return askJson<{ stands?: unknown; why?: unknown }>({ kind: 'verify', model, system: JSON_ONLY, files, prompt },
+        ['stands', 'why']);
+    });
+    if (reply === undefined) return null;
     const said = typeof reply?.stands === 'boolean' ? reply.stands : ['true', 'yes'].includes(word(reply?.stands)) ? true : ['false', 'no'].includes(word(reply?.stands)) ? false : null;
     return said === null ? null : { stands: said, why: typeof reply!.why === 'string' ? reply!.why : '' };
   }
@@ -3208,6 +3214,7 @@ export function nodeAi(o: AiOptions) {
       let pending = items; let rest = docs.filter((d) => !tooLongAlone.has(d.docId));
       while (pending.length && rest.length) {
         let using = rest.slice(0, r.docs); const todo = pending;
+        const share = allChanges();
         const replyEach = model === m.fast ? control.limits.glanceReplyTokens : control.limits.checkReplyTokens;
         const inEach = tokensEach(todo.map(checkLine));
         const replyRoom = { out: replyEach, outLimit: outLimit(model) };
@@ -3216,10 +3223,12 @@ export function nodeAi(o: AiOptions) {
         const done = await inParts(todo, size, async (part) => {
           for (;;) {
             try {
-              const seen = await check(part, sentOf(dealId, using), model, redo, fix);
+              const seen = await check(part, sentOf(dealId, using), model, redo, fix, share);
               return { got: new Map(part.flatMap((it, k) => (seen?.has(it.id) ? [[k, seen.get(it.id)!] as const] : []))), ...(seen?.cut ? { cut: seen.cut.map((it) => part.indexOf(it)) } : {}) };
             } catch (e) {
               if (!isTooLong(e)) throw e;
+              // fewer tracked changes are listed, while any are, before a document is left out (#1381)
+              if (fewerChanges(share, e)) continue;
               // fewer items would not shorten it much: the documents are halved, and one too long alone ends this handful
               if (using.length <= 1) throw Object.assign(e as Error, { code: 'doctoolong' });
               using = using.slice(0, Math.ceil(using.length / 2)); r.docs = using.length;

@@ -5,6 +5,7 @@ import type { Source } from '../domain/model';
 import type { DocRecord } from './documents';
 import type { ToolSpec } from './service';
 import type { QaRecord } from './qaRow';
+import type { ChangeShare } from './limits';
 
 /** a document a model was given, cited by its id (recordIds.ts `docHandle`, #1162) */
 export interface Sent { dealId: string; rec: DocRecord }
@@ -68,10 +69,11 @@ export interface AgentKit {
   /** the words of a text as a search compares them; with `dealId`, the deal's short names given their long form too */
   words(text: string, dealId?: string): Set<string>;
   /**
-   * put documents in the store and list them for a prompt to `model`, each by its id (`spansDeals`: with its deal);
-   * `got` are those really there
+   * put documents in the store and list them for a prompt, each by its id (`spansDeals`: with its deal), a draft's
+   * tracked changes as `share` leaves them (#1381); `got` are those really there
    */
-  send(sent: Sent[], model: string, spansDeals?: boolean): Promise<{ files: string[]; listing: string; got: Sent[] }>;
+  send(sent: Sent[], spansDeals?: boolean, share?: ChangeShare):
+    Promise<{ files: string[]; listing: string; got: Sent[] }>;
   /** keep the citations that can be stood behind, renumbering the markers in the text */
   fit(text: string, cited: Cited[] | undefined, sent: Sent[], withDeal: boolean): { text: string; sources: Source[] };
   /** a document's path from its deal's folder, as prompts show it */
