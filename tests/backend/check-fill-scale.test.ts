@@ -34,7 +34,7 @@ it('on the 2,400-item checklist every item a check leaves open goes to the chat 
   // a run's first turn carries its items
   const firsts = s.fillCalls.filter(isTurn);
   const turns = [...s.fillCalls, ...s.calls].filter(isTurn);
-  const listedIn = (c: Call) => [...c.prompt.split('\n\n')[0].matchAll(/^\d+\. (.*?)(?: Still needed:.*)?$/gm)];
+  const listedIn = (c: Call) => [...c.prompt.split('\n\n')[0].matchAll(/^- (.*?)(?: Still needed:.*)?$/gm)];
   const handed = firsts.flatMap((c) => listedIn(c).map((m) => m[1]));
   const open = r.gaps.length + r.unsettled.length;
   expect(open).toBeGreaterThan(100);                                                         // a deal-sized number of gaps
