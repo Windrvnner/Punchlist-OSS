@@ -26,7 +26,7 @@ import { SetFindingStatus, ReviewFinding, DeleteFinding, TITLE_MAX } from '../ap
 import { findingHistory, reassess, type FindingHistoryEvent } from '../app/findings';
 import type { Deal, Finding, Source } from '../domain/model';
 import { localYmd, CHECK_REASON } from '../domain/model';
-import { splitCited } from '../domain/cite';
+import { restsOnAllSources, splitCited } from '../domain/cite';
 import { SERVICE } from '../control';
 import { keptDrafts, hasTexts } from '../app/keptText';
 import { useSaveOut } from './saveOut';
@@ -412,7 +412,7 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
   const lastText = last ? historyText(last) : '';
   const busy = s.ui.reassessing.includes(f.id);
   // which sources the detail's markers point at
-  const marked = new Set(f.body.flatMap((b) => splitCited(b, f.sources.length).flatMap((p) => p.refs)));
+  const whole = restsOnAllSources(f.body, f.sources.length, f.ownWords);
   const docs = byDocument(f.sources);
   const listed = !fewDocuments(f.sources);
   const raisedBy = `Raised by ${f.raisedBy} · ${fmtDate(localYmd(f.raisedAt))}`;
@@ -454,7 +454,7 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
         {note && <div class="fnote" data-holds-work onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setNoteState(null); requestAnimationFrame(() => document.getElementById('f-status')?.focus()); } }}><div class="lbl">{note.status === 'open' ? 'Reopen' : 'Mark closed'}</div><textarea maxLength={TEXT_MAX} id="fnote-text" rows={2} placeholder="Note (optional)" aria-label="Note" ref={(el) => { if (el && !el.dataset.f) { el.dataset.f = '1'; el.focus(); } }} value={note.text} onInput={(e) => setNote({ ...note, text: (e.currentTarget as HTMLTextAreaElement).value })} /><div class="cacts"><button type="button" class="btn sm pri" id="fnote-save" onClick={() => void commit(note.status, note.text)}>Save</button><button type="button" class="btn sm" onClick={() => setNote(null)}>Cancel</button></div></div>}
         {/* up to four documents, its sources as chips above the detail, as under an answer */}
         {!busy && !listed && <SourceChips sources={f.sources} onOpen={onOpen} dealId={dealId} />}
-        {busy ? <div class="ai pending" aria-label="Updating"><span class="dots"><i /><i /><i /></span></div> : f.body.map((b, i) => <p class="dtxt" key={i}><Cited text={b} sources={f.sources} onOpen={onOpen} whole={!marked.size && !f.ownWords} onMore={listed ? showSources : undefined} /></p>)}
+        {busy ? <div class="ai pending" aria-label="Updating"><span class="dots"><i /><i /><i /></span></div> : f.body.map((b, i) => <p class="dtxt" key={i}><Cited text={b} sources={f.sources} onOpen={onOpen} whole={whole} onMore={listed ? showSources : undefined} /></p>)}
         {/* more documents than a pop shows: every one, with its places, in a list like Previous version */}
         {!busy && listed && <details class="prev fsrcs" id="f-sources" ref={srcList} open={srcOpen} onToggle={(e) => setSrcOpen((e.currentTarget as HTMLDetailsElement).open)}><summary>{docs.length} sources</summary>
           <div class="sgl">{docs.map((g) => <div class="sgr" key={g.doc.docId}>

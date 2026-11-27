@@ -76,3 +76,9 @@ export function pageOf(loc: string): number | null {
   const digits = pageDigits(loc);
   return digits === undefined ? null : Number(digits);
 }
+
+/** A whole answer or finding can cite its sources when none of its sentences cites a particular source. */
+export function restsOnAllSources(texts: string[], sourceCount: number, ownWords = false) {
+  return sourceCount > 0 && !ownWords
+    && !texts.some((text) => splitCited(text, sourceCount).some((part) => part.refs.length));
+}
