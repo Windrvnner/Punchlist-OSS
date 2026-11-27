@@ -140,26 +140,6 @@ function StatusMenu({ status, choose }: { status: string; choose: (x: 'open' | '
     </button>))}</div>;
 }
 
-function checkLineText(line: NonNullable<ReturnType<typeof checkLine>>) {
-  const on = (iso: string) => fmtDate(localYmd(iso));
-  const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
-  switch (line.kind) {
-    case 'running':
-      return line.shared?.text ?? `Checking the checklist and findings${line.busy === 'deep' ? ' in depth' : ''}`;
-    case 'failed': return `The check on ${on(line.at)} did not finish`;
-    case 'left': {
-      const out = [line.items && n(line.items, 'checklist item', 'checklist items'),
-        line.findings && n(line.findings, 'finding', 'findings')].filter(Boolean).join(' and ');
-      return `${on(line.at)} check left out ${out}`;
-    }
-    case 'deep': {
-      const spot = line.at ? `${on(line.at)} spot` : 'Spot';
-      return `${spot} check disagreed with ${line.overturned} of its ${line.size} results`;
-    }
-    case 'unchecked': return `${n(line.unchecked, 'checklist item', 'checklist items')} not checked yet`;
-  }
-}
-
 /**
  * Check again, shown on Overview under the three blocks only when a check is due: while one runs; when
  * the latest check did not finish, left something out, or its spot check disagreed with the quick results; and when
@@ -168,9 +148,12 @@ function checkLineText(line: NonNullable<ReturnType<typeof checkLine>>) {
  * the button runs the check in depth.
  */
 export function CheckLine({ deal: d }: { deal: Deal }) {
-  const store = useStore(); const s = useAppState(); const ro = useContext(ReadOnlyContext);
+  const store = useStore(); const s = useAppState(); const c = s.checks[d.id]; const ro = useContext(ReadOnlyContext);
   useEffect(() => s.can.checkAll ? watchCheck(store, d.id) : undefined, [store, d.id, s.can.checkAll]);
+  const on = (iso: string) => fmtDate(localYmd(iso)); const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
+  const out = c?.left ? [c.left.items ? n(c.left.items, 'checklist item', 'checklist items') : '', c.left.findings ? n(c.left.findings, 'finding', 'findings') : ''].filter(Boolean).join(' and ') : '';
   const line = checkLine(s, d.id);
+  const kind = line?.kind;
   const shared = line?.shared;
   // the names shown on hover go when the line no longer has them
   // the names go in the same frame as the line that named them, not a frame after it (#695)
@@ -178,21 +161,26 @@ export function CheckLine({ deal: d }: { deal: Deal }) {
   useLayoutEffect(() => {
     if (!shared?.who && lineRef.current) hideTip(lineRef.current);
   }, [shared?.who]);
-  const said = line && checkLineText(line);
+  const checking = `Checking the checklist and findings${c?.busy === 'deep' ? ' in depth' : ''}`;
+  const spot = c?.at ? `${on(c.at)} spot` : 'Spot';
+  const said = kind === 'running' ? shared?.text ?? checking
+    : kind === 'failed' ? `The check on ${on(c!.failedAt!)} did not finish`
+    : kind === 'left' ? `${on(c!.left!.at)} check left out ${out}`
+    : kind === 'deep' ? `${spot} check disagreed with ${c!.offerDeep!.overturned} of its ${c!.offerDeep!.size} results`
+    : kind === 'unchecked' ? `${n(line!.unchecked, 'checklist item', 'checklist items')} not checked yet` : '';
   // the line goes once nothing is due; if the focus was in it, it moves to the deal's ⋯, where Check again stays, not to the page
   const had = useRef(false);
   useEffect(() => { if (!said && had.current) { had.current = false; if (!document.activeElement || document.activeElement === document.body) document.getElementById('deal-more')?.focus(); } }, [!!said]);
-  if (!s.can.checkAll || !line) return null;
-  const { warn, busy, run, rest } = line;
-  const { deep, leftOnly } = run;
+  if (!s.can.checkAll || !said) return null;
+  const { warn, deep, rest } = line!;
   return <div class="ovcheck" id="ov-check" onFocusIn={() => { had.current = true; }} onFocusOut={(e) => { if (e.relatedTarget && !(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) had.current = false; }}>
     {said && <span ref={lineRef} class={`when ${warn ? 'warn' : ''}`} id="f-checked" role="status" {...(shared?.who ? { tabIndex: 0, 'aria-description': shared.who, onMouseEnter: (e: MouseEvent) => showTip(e.currentTarget as HTMLElement, shared.who!), onMouseLeave: (e: MouseEvent) => hideTip(e.currentTarget as HTMLElement), onFocus: (e: FocusEvent) => showTip(e.currentTarget as HTMLElement, shared.who!, 0), onBlur: (e: FocusEvent) => hideTip(e.currentTarget as HTMLElement) } : {})}>{warn && <i class="dot" aria-hidden="true" />}{said}</span>}
     {/* while a check runs the button is off but keeps the focus (aria-disabled, not disabled, which would drop the focus to the page) */}
     <span class="needs" title={ro ?? undefined}><button type="button" class="btn sm"
-      id={deep ? 'f-check-deep' : leftOnly ? 'f-check-left' : 'f-check'} disabled={!!ro}
-      aria-disabled={busy ? true : undefined} title={ro ?? undefined}
-      onClick={() => { if (!busy) void store.checkEverything(d.id, deep, leftOnly); }}>{busy ? 'Checking' : deep
-      ? 'Check Again in Depth' : leftOnly ? `Check the ${rest} Left Out` : 'Check Again'}</button></span>
+      id={deep ? 'f-check-deep' : rest ? 'f-check-left' : 'f-check'} disabled={!!ro}
+      aria-disabled={c?.busy ? true : undefined} title={ro ?? undefined}
+      onClick={() => { if (!c?.busy) void store.checkEverything(d.id, deep, !!rest); }}>{c?.busy ? 'Checking' : deep
+      ? 'Check Again in Depth' : rest ? `Check the ${rest} Left Out` : 'Check Again'}</button></span>
   </div>;
 }
 

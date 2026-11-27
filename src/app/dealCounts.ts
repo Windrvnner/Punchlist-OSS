@@ -80,23 +80,22 @@ export function checkLeftCount(check: State['checks'][string] | undefined, deep:
   return check.left.items + check.left.findings;
 }
 
-/** Shared progress can take the line while this PC can still run a check. */
+/** Which check is due on Overview's Check again line, whether it warns, and which check its button runs. */
 export function checkLine(state: State, dealId: string) {
   const check = state.checks[dealId];
   const deal = state.deals[dealId];
   if (!deal) return null;
   const deep = !!check?.offerDeep && !check.left && !check.failedAt;
+  // what the latest check left out can be checked on its own while the documents are the ones it checked
   const rest = checkLeftCount(check, deep);
-  const unchecked = uncheckedChecklistCount(state, deal);
   const shared = checkingSays(check?.checking, check?.busy === 'deep');
+  // checklist items no check has reached yet, such as items brought in since the last one; not while the first pass
+  // is still reading
+  const unchecked = uncheckedChecklistCount(state, deal);
   const warn = !check?.busy && (!!check?.failedAt || !!check?.left || deep || unchecked > 0);
-  const common = { run: { deep, leftOnly: !!rest }, rest, busy: check?.busy, shared, warn };
-  if (shared || check?.busy) return { ...common, kind: 'running' as const };
-  if (check?.failedAt) return { ...common, kind: 'failed' as const, at: check.failedAt };
-  if (check?.left) return { ...common, kind: 'left' as const, ...check.left };
-  if (deep) return { ...common, kind: 'deep' as const, at: check.at, ...check.offerDeep! };
-  if (unchecked) return { ...common, kind: 'unchecked' as const, unchecked };
-  return null;
+  const kind = shared || check?.busy ? 'running' as const : check?.failedAt ? 'failed' as const
+    : check?.left ? 'left' as const : deep ? 'deep' as const : unchecked ? 'unchecked' as const : null;
+  return kind && { kind, warn, deep, rest, shared, unchecked };
 }
 
 type StandingSub = 'finding' | 'gap' | 'gone' | 'satisfied' | 'person';

@@ -446,23 +446,19 @@ it('selects the Overview check independently of the run mode and warning tone', 
     state.checks[dealId] = { ...check, ...patch };
     return checkLine(state, dealId);
   }
-  const normal = { deep: false, leftOnly: false };
-  expect(line({ busy: 'deep', failedAt: updatedAt, left })).toMatchObject({
-    kind: 'running', warn: false, busy: 'deep', run: normal,
-  });
-  expect(line({ failedAt: updatedAt, left })).toMatchObject({ kind: 'failed', warn: true, run: normal, at: updatedAt });
-  expect(line({ left })).toMatchObject({ kind: 'left', warn: true, rest: 5, run: { deep: false, leftOnly: true } });
-  expect(line({ left: { ...left, changed: true } })).toMatchObject({ kind: 'left', warn: true, rest: 0, run: normal });
-  expect(line({})).toMatchObject({ kind: 'deep', warn: true, at: null, run: { deep: true, leftOnly: false } });
-  expect(line({ offerDeep: null })).toMatchObject({ kind: 'unchecked', warn: true, unchecked: 1, run: normal });
+  const normal = { deep: false, rest: 0 };
+  expect(line({ busy: 'deep', failedAt: updatedAt, left })).toMatchObject({ kind: 'running', warn: false, ...normal });
+  expect(line({ failedAt: updatedAt, left })).toMatchObject({ kind: 'failed', warn: true, ...normal });
+  expect(line({ left })).toMatchObject({ kind: 'left', warn: true, deep: false, rest: 5 });
+  expect(line({ left: { ...left, changed: true } })).toMatchObject({ kind: 'left', warn: true, ...normal });
+  expect(line({})).toMatchObject({ kind: 'deep', warn: true, deep: true, rest: 0 });
+  expect(line({ offerDeep: null })).toMatchObject({ kind: 'unchecked', warn: true, unchecked: 1, ...normal });
   const checking = { quiet: [], with: [], signIn: true };
-  expect(line({ checking, left })).toMatchObject({ kind: 'running', warn: true, run: { deep: false, leftOnly: true } });
-  expect(line({ busy: 'quick', left })).toMatchObject({
-    kind: 'running', warn: false, busy: 'quick', run: { deep: false, leftOnly: true },
-  });
+  expect(line({ checking, left })).toMatchObject({ kind: 'running', warn: true, deep: false, rest: 5 });
+  expect(line({ busy: 'quick', left })).toMatchObject({ kind: 'running', warn: false, deep: false, rest: 5 });
   state.deals[dealId] = { ...state.deals[dealId], stage: 'indexing' };
   expect(line({ offerDeep: null })).toBeNull();
-  expect(line({ checking, offerDeep: null })).toMatchObject({ kind: 'running', warn: false, run: normal });
+  expect(line({ checking, offerDeep: null })).toMatchObject({ kind: 'running', warn: false, ...normal });
 });
 
 it('describes the standing segments and exactly which checklist filters they open', () => {
