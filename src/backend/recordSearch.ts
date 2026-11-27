@@ -1,7 +1,7 @@
 /**
  * The chat's search of the records the app holds (findings and the Q&A log): ranked by the same BM25 keyword scoring
  * as documents (wordIndex.ts `bm25`), with each record's words counted as the index counts a document's, and any
- * ranking cut into pages of at most one size (#1102) that fit the room a folder read's findings have (#1091, #480).
+ * ranking cut into pages of at most one size (#1102) that fit what a page may hold (#1091).
  */
 import { bm25, countWords } from './wordIndex';
 

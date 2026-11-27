@@ -89,14 +89,6 @@ type Limits = {
   turns: number; width: number; folderDocs: number; searchPage: number; compactAt: (model: string) => number;
 };
 
-/**
- * the most characters a page of findings or questions may hold: half of what the kept conversation holds before it
- * is compacted, so that a search of everything, which gives a page of each in one result, never outgrows what one
- * call may send; the same whichever is searched, so that a page asked for by kind starts where a search of
- * everything's page of that kind stopped (recordSearch.ts `pageOf`, #1091)
- */
-const pageChars = (limits: Limits, model: string) => (limits.compactAt(model) * control.limits.charsPerToken) / 2;
-
 const SEARCHES: readonly What[] = ['documents', 'findings', 'qa', 'all'];
 const REPLY_SHAPE = '{"tool": …} or {"text": "…", "sources": […], "offer": {…}}';
 /** the fields a turn's reply is read for */
@@ -165,10 +157,10 @@ class Answering {
   ) {
     const { width, searchPage } = limits;
     const limit = limits.compactAt(question.model) * control.limits.charsPerToken;
-    const chars = pageChars(limits, question.model);
-    this.run = new AgentRun(kit, question, progress, { width, searchPage, chars, limit });
+    // a page of findings or questions is half of it, the same each time it is asked for (recordSearch.ts `pageOf`)
+    this.run = new AgentRun(kit, question, progress, { width, searchPage, chars: limit / 2, limit });
     // what a tool result may add depends on the prompt as it stands: the text the next turn would send (#480)
-    this.run.held = () => (this.turnNow ?? this.turnOf(1, false, [], '')).full(true).length;
+    this.run.held = () => this.turnNow?.full(true).length ?? 0;
     this.folders = new FolderReader(this.run, folderMemory, limits);
     this.conversation = new KeptConversation(this.run, limits.compactAt, limits.width);
   }

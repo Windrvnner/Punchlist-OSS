@@ -49,8 +49,9 @@ export class AgentRun {
   held: () => number = () => 0;
   /**
    * `pages`: how many a search gives at a time, documents (`width`) and findings or questions (`searchPage`), as the
-   * agent's limits set them; `chars`: the most characters a page of findings or questions may hold (agent.ts
-   * `pageChars`); `limit`: the characters a turn's prompt may hold before the conversation is compacted
+   * agent's limits set them; `chars`: the most characters a page of findings or questions may hold (half of
+   * `limit`, so that a page asked for by number is cut the same each time); `limit`: the characters a turn's prompt
+   * may hold before the conversation is compacted
    */
   constructor(
     readonly kit: AgentKit,
@@ -146,7 +147,7 @@ export class AgentRun {
    * conversation is compacted, so earlier results and the next one together stay within it (#480)
    */
   room(): number {
-    return Math.max(0, (this.pages.limit - this.held()) / 2);
+    return (this.pages.limit - this.held()) / 2;
   }
 
   /** a new step, shown as being worked on */

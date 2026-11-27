@@ -192,6 +192,8 @@ export class FolderReader {
 class FolderPass {
   /** what was opened before this read: still listed, whatever it finds */
   private readonly before: Set<Sent>;
+  /** what this read may hand the main session: the room the prompt had left before this read opened anything */
+  private readonly room: number;
   /** what this read was given and could read: kept for the conversation only if the read ends without failing */
   readonly readNow = new Set<string>();
   /** how many documents the batches read */
@@ -213,6 +215,7 @@ class FolderPass {
     private readonly batches: Batch[],
   ) {
     this.before = new Set(run.opened);
+    this.room = run.room();
   }
 
   /** whether the person stopped the read before every batch was started */
@@ -342,12 +345,12 @@ class FolderPass {
   }
 
   /**
-   * What was found, bounded by the run's room: in full for the first half of it, then by its places alone; a batch
-   * past it is counted, and its documents are not listed to the model, so the prompt stays bounded however large the
-   * folder. The first batch always gives its places, however little room is left, so a read never says nothing.
+   * What was found, bounded by the room this read began with: in full for the first half of it, then by its places
+   * alone; a batch past it is counted, and its documents are not listed to the model, so the prompt stays bounded
+   * however large the folder. The first batch always gives its places, however little room is left, so a read never
+   * says nothing.
    */
   private boundedFindings(): string[] {
-    const room = this.run.room();
     let used = 0;
     let over = 0;
     const lines: string[] = [];
@@ -357,7 +360,7 @@ class FolderPass {
       const short = `${finding.at}: passages at ${finding.places}.`;
       const newDocs = finding.got.filter((x) => !this.before.has(x));
       const listing = newDocs.reduce((sum, x) => sum + listingChars(this.run.idOf(x)), 0);
-      const line = fittingLine(full, short, used + listing, room, !lines.length);
+      const line = fittingLine(full, short, used + listing, this.room, !lines.length);
       if (line) {
         lines.push(line);
         used += line.length + listing;

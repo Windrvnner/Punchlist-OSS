@@ -214,7 +214,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - While chat works, it shows "Researching" with the full trace; once it has answered, it shows "Researched · N steps · N of M documents searched · time", never "read" (option D).
 - Tool calls run inline by default; the hybrid and native modes are set by `models.toolCalls`.
 - The chat's search gives its results a page at a time, ranked by one keyword scoring (BM25): documents `limits.docsPerCall` a page from the ranking, findings and Q&A `limits.searchPage` a page, or fewer when that many would hold more than half of what the kept conversation holds before it is compacted, each record whole and each Q&A row in full. The model asks for any page (#1102, #1091).
-- What a folder read hands the chat is bounded by half of what is left before compaction in the turn's prompt (`limits.compactAt` less the text the prompt already holds): batches' findings in full for half of it, then by their places alone (the first batch always), then counted; never a fixed size, and no batch's text is cut (#480).
+- What a folder read hands the chat is bounded by half of what is left before compaction in the turn's prompt (`limits.compactAt` × `limits.charsPerToken` characters, less the characters the prompt held when the read began, halved): batches' findings in full for half of it, then by their places alone (the first batch always), then counted; never a fixed size, and no batch's text is cut (#480).
 - A question asked across deals reaches only the person's own deals.
 - A chat is one conversation on the model service; past its limit, it is compacted into an uploaded transcript.
 - Each PC keeps its own word index of the data room; nothing is added to the shared folder.

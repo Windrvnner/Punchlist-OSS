@@ -124,10 +124,18 @@ describe('a name that is only a number', () => {
   });
 });
 
-/** a model's room at the default `limits.compactAt`, in characters (agent.ts `pageChars`) */
+/** a model's room at the default `limits.compactAt`, in characters (agent.ts `Answering`) */
 const DEFAULT_ROOM = (125_000 * control.limits.charsPerToken) / 2;
 /** the room at a stand-in `compactAt` of this many tokens */
 const roomAt = (compactAt: number) => (compactAt * control.limits.charsPerToken) / 2;
+
+/** a batch's reply that finds something in each of its documents, at length */
+const everyDocumentSays = (c: Call) => {
+  const l = listed(c);
+  const conditions = 'conditions on noise, dust, water use, traffic and reporting that the sponsor meets every quarter';
+  const text = l.map((x, i) => `${x.path} expires in 2030 and carries ${conditions}. [${i + 1}]`);
+  return { text: text.join(' '), sources: l.map((x) => ({ doc: x.tag, page: 1, quote: 'expires in 2030' })) };
+};
 
 describe('reading a whole folder from the chat', () => {
   /** the grid permit's tag, as the batch that read it gave it, and a stand-in that finds the expiry in it alone */
@@ -181,12 +189,14 @@ describe('reading a whole folder from the chat', () => {
     const s = setup(recs, (_c, k) => (k === 1 ? { tool: 'folder', folder: 'permits', lookFor: 'expiry' } : { text: 'ok', sources: [] }), {
       folderDocs: 5000,
       // every batch finds something in each of its documents, at length
-      reads: (c) => { const l = listed(c); return { text: l.map((x, i) => `${x.path} expires in 2030 and carries conditions on noise, dust, water use, traffic and reporting that the sponsor must meet every quarter. [${i + 1}]`).join(' '), sources: l.map((x) => ({ doc: x.tag, page: 1, quote: 'expires in 2030' })) }; },
+      reads: everyDocumentSays,
     });
     expect((await s.ai.answer(ask('Review the permits folder'))).ok).toBe(true);
     expect(s.batches.length).toBe(250);
     const next = s.turns[1].prompt;
-    expect(next.length).toBeLessThan(DEFAULT_ROOM + 20_000);   // the room, plus the turn's own fixed text
+    // what the read added to the prompt is within the room it had, plus the result's own heading
+    const room = (DEFAULT_ROOM * 2 - s.turns[0].prompt.length) / 2;
+    expect(next.length - s.turns[0].prompt.length).toBeLessThanOrEqual(room + 400);
     expect(next).toContain('You had all 2000 documents in VDR/Permits read');
     expect(next).toMatch(/Documents \d+–\d+: passages at doc_\w+ p\. 1/);
     expect(next).toMatch(/\d+ more batches found passages, past what fits here/);
@@ -368,7 +378,8 @@ describe('a folder read is bounded by the model\'s room (#480)', () => {
     // each kept batch cites one document, which the prompt lists after the findings
     const listing = (full + places) * listingChars(`doc_${'0'.repeat(24)}`);
     const findings = block.slice(0, block.search(/\d+ more batches? found passages/));
-    expect(findings.length + listing).toBeLessThanOrEqual(roomAt(compactAt));
+    const room = (roomAt(compactAt) * 2 - s.turns[0].prompt.length) / 2;
+    expect(findings.length + listing).toBeLessThanOrEqual(room);
   });
 
   it('six folder reads in one answer keep every turn\'s prompt within the room before compaction (#480)', async () => {
@@ -384,11 +395,32 @@ describe('a folder read is bounded by the model\'s room (#480)', () => {
     expect((await s.ai.answer(ask('Review the permits folder'))).ok).toBe(true);
     expect(s.turns.length).toBe(7);
     const limit = compactAt * control.limits.charsPerToken;
-    for (const t of s.turns) expect(t.prompt.length).toBeLessThanOrEqual(limit);
+    // the room leaves out each result's own heading, a few hundred characters
+    for (const t of s.turns) expect(t.prompt.length).toBeLessThanOrEqual(limit + 400);
     // the later reads fall back to places, then to counts: nothing is dropped without being counted
     const last = handed(s.turns[6].prompt);
     expect(last.places + last.over).toBeGreaterThan(0);
     expect(s.turns[6].prompt).toMatch(/more batches? found passages/);
+  });
+
+  it.each([4800, 5600])('a folder of %i documents hands back what main did, never one batch (#480)', async (count) => {
+    const recs = Array.from({ length: count }, (_v, i) => doc(`Permits/Permit ${String(i + 1).padStart(4, '0')}.pdf`));
+    const turn = (_c: Call, k: number) =>
+      k === 1 ? { tool: 'folder', folder: 'permits', lookFor: 'expiry' } : { text: 'ok', sources: [] };
+    const s = setup(recs, turn, { folderDocs: 10_000, reads: everyDocumentSays });
+    expect((await s.ai.answer(ask('Review the permits folder'))).ok).toBe(true);
+    const { full, places, over } = handed(s.turns[1].prompt);
+    expect(full + places + over).toBe(count / 8);
+    // main's fixed 24,000 characters gave 18 lines at this size
+    expect(full + places).toBeGreaterThanOrEqual(18);
+  }, 60_000);
+
+  it('a read with no room left still gives its first batch\'s places, the rest counted (#480)', async () => {
+    const s = everyBatchFinds(40, 'q'.repeat(300), { compactAt: 300 });
+    expect((await s.ai.answer(ask('Review the permits folder'))).ok).toBe(true);
+    const { full, places, over } = handed(s.turns[1].prompt);
+    expect(s.turns[0].prompt.length).toBeGreaterThan(300 * control.limits.charsPerToken);
+    expect([full, places, over]).toEqual([0, 1, 4]);
   });
 
   it('a smaller room lists fewer batches in full (#480)', async () => {
