@@ -29,7 +29,8 @@ afterEach(() => {
   for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-describe('the branch commits', () => {
+// Each test builds a Git repository, which can take several seconds on a busy machine.
+describe('the branch commits', { timeout: 20_000 }, () => {
   it('lists the lines a branch commit adds', () => {
     const { dir, git, commit } = repo();
     git('checkout', '-q', '-b', 'feature');

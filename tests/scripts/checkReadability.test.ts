@@ -46,7 +46,8 @@ function flat(name: string, lines: number) {
   return [`export function ${name}(x: number): number {`, ...body, '  return x;', '}', ''].join('\n');
 }
 
-describe('the readability hints', () => {
+// Each test builds a Git repository and runs the script, which can take several seconds on a busy machine.
+describe('the readability hints', { timeout: 20_000 }, () => {
   it('list a too-complex function the branch grew without touching its first line', () => {
     const result = branch({ 'src/a.ts': complex(8) }, { 'src/a.ts': complex(12) });
     expect(result.status).toBe(0);
