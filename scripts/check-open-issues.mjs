@@ -46,19 +46,29 @@ function issuesEndpoint(repository) {
   return new URL(`https://api.github.com/repos/${repository}/issues`);
 }
 
-async function openIssuesPage({ endpoint, token, fetch }, page) {
+// A server error or a rate limit (403 or 429) is often gone a moment later, so it is asked again.
+const attempts = 3;
+const retryWaitMs = 2000;
+const isTransient = (status) => status >= 500 || status === 403 || status === 429;
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function openIssuesPage({ endpoint, token, fetch, wait }, page) {
   if (!token) throw new Error('GITHUB_TOKEN is required');
   const url = new URL(endpoint);
   url.search = new URLSearchParams({ state: 'open', per_page: '100', page: String(page) }).toString();
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-  });
-  if (!response.ok) throw new Error(`GitHub answered ${response.status}`);
-  return response.json();
+  for (let attempt = 1; ; attempt += 1) {
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+    });
+    if (response.ok) return response.json();
+    if (attempt === attempts || !isTransient(response.status)) throw new Error(`GitHub answered ${response.status}`);
+    await wait(retryWaitMs);
+  }
 }
 
-// Runs the check; `fetch` is a parameter so tests need no network. Returns the exit status and what it printed.
-export async function checkOpenIssues({ env, fetch, root = '.' }) {
+// Runs the check; `fetch` and `wait` are parameters so tests need no network and no delay.
+// Returns the exit status and what it printed.
+export async function checkOpenIssues({ env, fetch, root = '.', wait = pause }) {
   const lines = [];
   const result = (status) => ({ status, stderr: lines.join('\n') });
   let named;
@@ -71,7 +81,7 @@ export async function checkOpenIssues({ env, fetch, root = '.' }) {
     return result(1);
   }
   try {
-    const source = { endpoint, token: env.GITHUB_TOKEN, fetch };
+    const source = { endpoint, token: env.GITHUB_TOKEN, fetch, wait };
     const closed = await closedIssues(named, (page) => openIssuesPage(source, page));
     for (const number of closed) lines.push(`#${number} is not an open issue`);
     return result(closed.length ? 1 : 0);

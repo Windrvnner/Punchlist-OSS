@@ -94,11 +94,38 @@ describe('issues named by the allowances', () => {
     expect(result.stderr).not.toContain('Cannot reach GitHub');
   });
 
-  it.each([403, 500])('fails when GitHub answers %i', async (status) => {
-    const fetch = githubServing([[{ number: 5 }]], status).fetch;
-    const result = await checkOpenIssues({ env: goodEnv, fetch, root: repoNaming([5]) });
+  it.each([403, 429, 500, 503])('fails when GitHub answers %i on all three attempts', async (status) => {
+    const github = githubServing([[{ number: 5 }]], status);
+    const waits: number[] = [];
+    const wait = async (ms: number) => { waits.push(ms); };
+    const result = await checkOpenIssues({ env: goodEnv, fetch: github.fetch, root: repoNaming([5]), wait });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(`the issues the allowances name (GitHub answered ${status})`);
+    expect(github.requested).toHaveLength(3);
+    expect(waits).toHaveLength(2);
+  });
+
+  it('retries a server error or rate limit and passes once GitHub answers', async () => {
+    const statuses = [502, 429, 200, 200];
+    const requested: URL[] = [];
+    const fetch = async (url: URL) => {
+      requested.push(new URL(url));
+      const body = requested.length === 3 ? [{ number: 5 }] : [];
+      return new Response(JSON.stringify(body), { status: statuses[requested.length - 1] });
+    };
+    const wait = async () => {};
+    const result = await checkOpenIssues({ env: goodEnv, fetch, root: repoNaming([5]), wait });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+    expect(requested).toHaveLength(4);
+  });
+
+  it('fails at once on another answer such as 404', async () => {
+    const github = githubServing([[{ number: 5 }]], 404);
+    const wait = async () => {};
+    const result = await checkOpenIssues({ env: goodEnv, fetch: github.fetch, root: repoNaming([5]), wait });
+    expect(result.stderr).toContain('GitHub answered 404');
+    expect(github.requested).toHaveLength(1);
   });
 
   it.each(['owner', 'owner/name/extra', 'own er/name', 'owner/na?me', '../name', ''])(
