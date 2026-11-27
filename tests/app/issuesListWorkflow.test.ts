@@ -4,6 +4,7 @@ import { CreateDeal } from '../../src/app/commands/deals';
 import { DeleteFinding, SetFindingStatus } from '../../src/app/commands/findings';
 import { ImportIssuesList } from '../../src/app/commands/issuesList';
 import { readIssuesList, readPastedIssuesList, reviewIssuesList } from '../../src/app/issuesList';
+import { pastedLineCount } from '../../src/app/listRead';
 import { dealFindings } from '../../src/app/state';
 import { WORKSTREAMS } from '../../src/domain/model';
 import { fail, ok, rejected } from '../../src/domain/result';
@@ -185,4 +186,10 @@ it('fails a pasted list read before the model call when the attach is refused', 
   const read = await readPastedIssuesList(store, dealId, '1. Fees letter');
   expect(read?.ok).toBe(false);
   expect(issuesList).not.toHaveBeenCalled();
+});
+
+it('counts no lines in a paste that is empty or only spaces, so Next stays off', () => {
+  expect(pastedLineCount('')).toBe(0);
+  expect(pastedLineCount(' \n\t \n ')).toBe(0);
+  expect(pastedLineCount('1. Change of control\n2. Fees letter')).toBe(2);
 });
