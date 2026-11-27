@@ -14,12 +14,15 @@ import { scanUi } from './ui-scan.mjs';
 
 const baselinePath = 'scripts/pane-of-glass-baseline.json';
 const read = (file) => readFileSync(file, 'utf8');
+const openIssuesNotice = 'Issues named in the allowances are checked as open by CI (scripts/check-open-issues.mjs).';
 const limits = [
   'Rules written as plain if logic on state are not visible to this check; review covers them.',
   'Also not visible: Math.min and Math.max; .flatMap, .at and .includes; Intl and toLocale...String;',
   'requestAnimationFrame; a limit given by a named constant (including changing its value); a swap between',
-  'identical trimmed lines; edits inside a loop body.',
+  'identical trimmed lines; edits inside a loop body; references that are not called (`const f = Date.now`,',
+  '`rows.sort` passed as a value).',
   'See "The frontend is a pane of glass" in CLAUDE.md.',
+  openIssuesNotice,
 ];
 
 function decisionLists() {
@@ -66,6 +69,7 @@ if (typeof allowance === 'string') {
   const missing = unlistedMatches(found, allowance);
   const entries = missing.map(({ file, kind, line, missing: count }) => ({ file, kind, line, count }));
   console.log(JSON.stringify(entries, null, 2));
+  console.error(openIssuesNotice);
   if (missing.length) process.exitCode = 1;
 } else {
   if (process.argv.includes('--lower')) {
@@ -74,5 +78,5 @@ if (typeof allowance === 'string') {
     const problems = allowanceProblems(found, allowance, { ...decisionLists(), scope: () => true });
     if (problems.length) fail(problems);
   }
-  console.log('Issues named in the allowances are checked as open by CI (scripts/check-open-issues.mjs).');
+  if (!process.exitCode) console.log(openIssuesNotice);
 }

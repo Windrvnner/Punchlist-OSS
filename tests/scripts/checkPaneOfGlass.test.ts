@@ -260,7 +260,18 @@ describe('the line-by-line allowance', () => {
     expect(stderr).toContain('Rules written as plain if logic on state are not visible to this check');
     expect(stderr).toContain('Math.min');
     expect(stderr).toContain('requestAnimationFrame');
+    expect(stderr).toContain('references that are not called');
     expect(stderr).toContain('"The frontend is a pane of glass" in CLAUDE.md');
+  });
+
+  it('tells how the allowances are kept on a failing run, a --list run and a malformed baseline', () => {
+    const notice = 'checked as open by CI (scripts/check-open-issues.mjs)';
+    const repo = fixture();
+    repo.write(file, serviceLine);
+    expect(repo.run().stderr).toContain(notice);
+    expect(repo.run('--list').stderr).toContain(notice);
+    repo.write(baselineFile, '[{');
+    expect(repo.run().stderr).toContain(notice);
   });
 
   it('reports a stale entry and an unlisted match, without changing the file', () => {

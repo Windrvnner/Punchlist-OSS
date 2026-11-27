@@ -63,7 +63,10 @@ npx vitest run tests/app/coreWorkflows.test.ts --environment node --no-file-para
 The static checks scan tracked files for secrets and attribution.
 They also scan the text each branch commit adds, and its commit message, so a secret or attribution added and then
 removed in the same branch still fails.
-On `main` itself history is not re-scanned; the pull-request run is the gate.
+The history scan of secrets runs with `--all` (`npm run check:tracked` and CI), not in the pre-commit hook.
+On `main` itself the added text of past commits is not re-scanned for attribution or secrets; the pull-request run is
+the gate.
+Attribution still scans the latest 200 commit messages there.
 Attribution includes a role credited with a decision and an email address other than an example or no-reply one.
 The readability script also lists added `src/` lines that name a guess (overlap, fuzzy, fallback, repair and the like).
 After readability hints, `scripts/check-pane-of-glass.mjs` checks UI imports, service and repository access,
@@ -71,18 +74,25 @@ browser storage, cookies, the Cache API, network calls, timers, list work, loops
 A UI `import()` or `require()` call must name its module with a plain string, `require` is
 used only in such a call, and UI code reads `import.meta` only as `import.meta.env`; anything else counts as an import.
 Every match is listed line by line in `scripts/pane-of-glass-baseline.json`, a JSON array of allowances.
-The vendor-name test over all of `src` and the model list the app shows, and the skipped-test gate, use the same format
+The vendor-name test and the skipped-test gate use the same format
 in `scripts/vendor-names-allowance.json` and `scripts/skipped-tests-allowance.json`.
 An allowance is `{ file, kind, line, count, issue }` or `{ file, kind, line, count, decision }`.
 `line` is the trimmed text of the matching line, and `count` is how many times it matches in that file.
+For a model name `line` is the model name, and for a skipped test it is the test's full name.
+The vendor-name test reads the string literals, template parts, and JSX text of `src/**/*.ts(x)`, plus the model names
+each connector returns.
+It does not read comments, html, css, or json files, names held only in identifiers, or names split by concatenation.
 Exactly one of `issue` (an open issue number) or `decision` (a line of `docs/decisions.md` that is on
 `scripts/verified-decisions.json`) is set.
 Skipped-test entries also carry `platform` and `reason`.
 `node scripts/check-pane-of-glass.mjs --list` prints the matches not yet listed, and `--lower` lowers each count to
 its matches and removes entries that no longer match; neither adds an issue or decision.
 `node scripts/check-allowance-history.mjs` compares each allowance file with `main`.
-An entry can only be kept, lowered, or removed, and a `decision` must be on `main`'s copy of
-`scripts/verified-decisions.json`, so a decision verified in a pull request cannot be used in that same pull request.
+An `issue` entry can only be kept, lowered, or removed.
+An entry whose issue `main` already names cannot switch to another issue or to a decision.
+A `decision` entry needs a decision already on `main`'s `scripts/verified-decisions.json`, so a decision verified in a
+pull request cannot be used in that same pull request.
+An allowance file that `main` does not have yet has no ceiling.
 `node scripts/check-open-issues.mjs` runs in CI only and fails when an issue named in an allowance is not open.
 If the checkout lacks the history needed for comparison, the diagnostic gives the Git command to fetch it.
 `node scripts/check-skipped-tests.mjs <vitest.json>` fails on a skipped test that is not listed.
@@ -90,7 +100,8 @@ Each CI job passes its own scope, so an entry that no longer matches is reported
 `node scripts/check-skipped-tests.mjs --files` fails on a test file that Vitest never runs.
 The pane-of-glass check cannot see plain `if` logic on state; `Math.min` and `Math.max`; `.flatMap`, `.at`, and
 `.includes`; `Intl` and `toLocale...String`; `requestAnimationFrame`; a limit given by a named constant (including
-changing its value); a swap between identical trimmed lines; or edits inside a loop body.
+changing its value); a swap between identical trimmed lines; edits inside a loop body; or references that are not called
+(`const f = Date.now`, `rows.sort` passed as a value).
 Review covers them.
 
 The GitHub Actions workflow also builds the Windows installer when it is started by hand.

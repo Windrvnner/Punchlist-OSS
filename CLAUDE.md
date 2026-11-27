@@ -115,7 +115,8 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   carry a person and a date) and carry no AI attribution trailers. Product terms and data fields such as `owner` are
   fine. State decisions plainly ("Decision: X"). Attribution blocks a merge, like lost work.
   `scripts/check-attribution.mjs` refuses a role credited with a decision ("the owner wants") and any email address
-  other than an example or no-reply one, in tracked files and the branch's commit messages.
+  other than an example or no-reply one, in tracked files, the branch's commit messages, and the text each branch
+  commit adds.
 - Clean contributions: everything written to GitHub (issues, comments, pull requests, reviews, commit messages,
   docs, and code comments) follows ordinary open-source hygiene. It carries no personal information, no internal or
   private links, no references to non-public systems or services, and no text copied from third-party documentation.
@@ -140,7 +141,7 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   shell either: with it set, every plain test run includes the paid AI check (`vitest.config.ts`). `npm run ai:check`
   reads `.env` only for the Claude backend. Live runs make paid calls, so they are rare. Claude sends every tier to
   Haiku by default. `PUNCHLIST_LIVE_ROUTING=1` routes each tier to its configured Claude model.
-- A pre-commit check (`scripts/check-secrets.mjs`) blocks keys and `.env` files.
+- A pre-commit check (`scripts/check-secrets.mjs`) blocks keys and `.env` files; with `--all` (CI) it also scans the text each branch commit adds.
 - The end user manages security around the app (network, sign-in, and devices). Don't over-engineer it. The app's own basics still hold: no secrets in the repo, careful input handling, robust error handling, and self-recovery.
 
 ## Product rules
