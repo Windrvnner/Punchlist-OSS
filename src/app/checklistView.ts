@@ -151,7 +151,7 @@ export function checklistView(state: State, dealId: string) {
   const offIds = new Set(offRows.map((row) => row.id));
   const grouped = byList || on === 'all';
   const flaggedAbove = !byList && (on === 'all' || on === 'finding');
-  return { counts, filters, on, shown, selected, byList, grouped, flaggedAbove, offIds,
+  return { counts, filters, on, shown, selected, grouped, flaggedAbove, offIds,
     offOpen: offFindingCount(state, dealId) };
 }
 
