@@ -4,7 +4,9 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import { control, SERVICE } from '../../src/control';
 import fs from 'node:fs';
-import { pair, aiOf, roots, checks, verifies, logOf, roundsOf, allEnded, until, FAST, type Pair } from './splitKit';
+import {
+  pair, aiOf, stallFreeClock, roots, checks, verifies, logOf, roundsOf, allEnded, until, FAST, type Pair,
+} from './splitKit';
 import { SetFindingStatus, DeleteFinding } from '../../src/app/commands/findings';
 import { view } from '../../src/backend/rounds';
 import { roundOfWork } from '../../src/backend/roundsObserver';
@@ -118,7 +120,16 @@ describe('two PCs share a deal\'s checks', () => {
   }, 60000);
   it('3. a PC that drops off half-way with no `left`: the other takes its pieces over after the lapse; every piece is done once, apart from the batch in flight', async () => {
     // batches of five: twenty blocks, given out by a hash of the PCs' ids, so the laptop all but always owns two
-    const p = await pair({ items: 100, batch: 5, scriptA: { delay: 30 }, scriptB: { delay: 30 } });
+    // each PC's clock skips a stall: a PC that is merely starved of CPU for longer than the lapse would take itself to
+    // have slept and drop its batch in flight, which is not what this case is about (#1230)
+    const p = await pair({
+      items: 100,
+      batch: 5,
+      scriptA: { delay: 30 },
+      scriptB: { delay: 30 },
+      nowA: stallFreeClock(),
+      nowB: stallFreeClock(),
+    });
     try {
       const laptopId = p.B.backend.installId;
       // the office's checks wait until the laptop has finished a batch, so the laptop has one done however busy the
