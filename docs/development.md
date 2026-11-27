@@ -98,6 +98,8 @@ array baseline, the ceiling is the matches `main`'s own `src/ui` has.
 If the checkout lacks the history needed for comparison, the diagnostic gives the Git command to fetch it.
 `node scripts/check-skipped-tests.mjs <vitest.json>` fails on a skipped test that is not listed.
 Each CI job passes its own scope, so an entry that no longer matches is reported only by the job that could see it.
+A skipped-test entry with `root: true` is for a skip that happens only when the tests run as root: it excuses a
+skip, and is reported when it no longer matches, only in a run as root (CI never runs as root).
 `node scripts/check-skipped-tests.mjs --files` fails on a test file that Vitest never runs.
 The pane-of-glass check cannot see plain `if` logic on state; `Math.min` and `Math.max`; `.flatMap`, `.at`, and
 `.includes`; `Intl` and `toLocale...String`; `requestAnimationFrame`; a limit given by a named constant (including

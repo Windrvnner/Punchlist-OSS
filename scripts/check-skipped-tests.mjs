@@ -5,12 +5,13 @@
 // The report is the one a run writes to PUNCHLIST_GATE_DIR (default: that folder's vitest.json). A skipped test is
 // listed with its file, name, platform and a reason. The scope says which listed entries this run could have seen, so
 // an entry that no longer matches is reported only then: "never" for a shard of the unit tests, "desktop" for the
-// Windows run of tests/desktop, "platform" for a whole run on this machine.
+// Windows run of tests/desktop, "platform" for a whole run on this machine. An entry with `root: true` counts only in a
+// run as root.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { allowanceProblems, decisionEntries, groupMatches } from './allowance.mjs';
+import { allowanceProblems, decisionEntries, entryProblems, groupMatches } from './allowance.mjs';
 import { vitestResults } from './gate-compare.mjs';
 import { insideGate } from './gate-dir.mjs';
 import { liveExclude, testInclude } from './vitest-files.mjs';
@@ -25,8 +26,15 @@ export function skippedMatches(report, platform) {
     .map(({ file, fullName }) => ({ file, kind: 'skipped', line: fullName, platform }));
 }
 
-export function skippedProblems(matches, allowance, { decisions, verified, scope }) {
-  return allowanceProblems(groupMatches(matches), allowance, { decisions, verified, scope });
+// An entry with `root: true` stands for a skip that happens only when the run is root (#1242). It excuses a skip, and
+// can go stale, only in a run as root; in any other run only its shape is checked.
+export function skippedProblems(matches, allowance, { decisions, verified, scope, root }) {
+  const active = allowance.filter((entry) => root || entry.root !== true);
+  const rootOnly = allowance.filter((entry) => !active.includes(entry));
+  return [
+    ...entryProblems(rootOnly, decisions, verified),
+    ...allowanceProblems(groupMatches(matches), active, { decisions, verified, scope }),
+  ];
 }
 
 // The test files, among `files`, that no Vitest include pattern covers and that the live exclusions do not leave out.
@@ -75,7 +83,9 @@ function reportProblems(args) {
   const decisions = decisionEntries(readFileSync('docs/decisions.md', 'utf8'));
   const verified = JSON.parse(readFileSync('scripts/verified-decisions.json', 'utf8'));
   const matches = skippedMatches(report, process.platform);
-  return skippedProblems(matches, allowance, { decisions, verified, scope: scopes[scopeName] });
+  // The check runs in the same job as Vitest, so this process is root exactly when the tests ran as root.
+  const root = process.getuid?.() === 0;
+  return skippedProblems(matches, allowance, { decisions, verified, scope: scopes[scopeName], root });
 }
 
 function main() {

@@ -51,6 +51,31 @@ describe('skipped tests in a Vitest report', () => {
     expect(problems(found, [listed()], () => true).join('\n')).toContain('no match: remove this entry');
   });
 
+  describe('a root-only entry', () => {
+    const rootOnly = listed({ root: true });
+    const platformScope = (entry: { platform?: string }) => entry.platform === 'linux';
+    const run = (statuses: string[], root: boolean) =>
+      skippedProblems(skippedMatches(report(statuses), 'linux'), [rootOnly], {
+        decisions: [], verified: [], scope: platformScope, root,
+      }) as string[];
+
+    it('is out of scope in a run that is not root and where the test passed', () => {
+      expect(run(['passed'], false)).toEqual([]);
+    });
+
+    it('does not excuse a skip in a run that is not root', () => {
+      expect(run(['skipped'], false).join('\n')).toContain('not listed');
+    });
+
+    it('excuses a skip in a run as root', () => {
+      expect(run(['skipped'], true)).toEqual([]);
+    });
+
+    it('is reported as stale in a run as root where the test passed', () => {
+      expect(run(['passed'], true).join('\n')).toContain('no match: remove this entry');
+    });
+  });
+
   it('reads the file from tests/ on, with forward slashes', () => {
     const results = vitestResults(report(['skipped'], 'C:\\work\\Punchlist\\tests\\desktop\\folder.test.ts'));
     expect(results).toEqual([{ file: 'tests/desktop/folder.test.ts', fullName: 'test 0', status: 'skipped' }]);

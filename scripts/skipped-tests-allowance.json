@@ -5,6 +5,7 @@
     "line": "the Punchlist folder finds a folder it cannot list, and one it cannot write to, by trying",
     "count": 1,
     "platform": "linux",
+    "root": true,
     "reason": "Skipped when the run is root, which reads any folder; the test needs an ordinary user",
     "issue": 1242
   },
