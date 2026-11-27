@@ -16,6 +16,7 @@ export class DealRename {
   private entry?: NameDraft;
   private over = { base: '' };   // the name typed over
   private saving = false;
+  private next?: 'enter' | 'blur';   // Enter or leaving the box while a save is out, sent once it lands
   private gone = false;
 
   constructor(private store: Store, private id: string, private input: RenameInput) {}
@@ -47,6 +48,7 @@ export class DealRename {
   }
 
   async submit(event: 'enter' | 'blur' | 'mine') {
+    if (this.saving && event !== 'mine') this.next = event;
     if (this.gone || !this.editing || this.saving || (this.changedElsewhere && event !== 'mine')) return;
     const deal = this.store.get().deals[this.id];
     const name = cleanName(this.text);
@@ -62,6 +64,9 @@ export class DealRename {
     if ((this.kept?.text ?? sent.text) === sent.text) this.keep(outcome.kind === 'saved' ? undefined : sent);
     else if (outcome.kind === 'saved') this.adoptSaved(sent);
     if (!this.gone) this.show(outcome, sent);
+    const next = this.next;
+    this.next = undefined;
+    if (next && outcome.kind === 'saved' && this.kept) await this.submit(next);
   }
 
   /** Newer typing and the entry draft now lie over the name just saved, as FieldSave adopts a base (#1204). */

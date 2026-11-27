@@ -271,3 +271,18 @@ it.each(['same box', 'restarted app'] as const)('saves typing kept through a sav
   expect(deal().name).toBe('Project North  Ridge');
   expect(target.kept).toBeUndefined();
 });
+
+it('saves newer typing when the box is left while an earlier save is out', async () => {
+  const { field, deal } = await fixture();
+  const gate = holdRecoveryWrite(app, writesDeal);
+  field.typed(raw);
+  const saving = field.submit('enter');
+  await gate.entered;
+  field.typed('North  Ridge');
+  const left = field.submit('blur');
+  gate.release();
+  await Promise.all([saving, left]);
+  await vi.waitFor(() => expect(deal().name).toBe('Project North  Ridge'));
+  expect(field.editing).toBe(false);
+  expect(field.kept).toBeUndefined();
+});
