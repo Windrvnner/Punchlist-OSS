@@ -1,6 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { dealRows, interruptedOperations, isInterrupted, railDealGroups } from '../app/dealView';
-import { commandLabel } from '../app/commandLabels';
+import { dealRows, dismissInterrupted, interruptedView, railDealGroups } from '../app/dealView';
+import { commandLabel, commandPlace } from '../app/commandLabels';
 import { undoFromNotice } from '../app/undoNotice';
 import { StoreContext, useAppState, useStore, lastInput, nameDir } from './hooks';
 import { Icon } from './icons';
@@ -366,16 +366,6 @@ export function Notices() {
   );
 }
 
-/** Where an interrupted action was: the question or finding and its deal, so Retry says what it would write. */
-function opPlace(s: State, input: unknown): string {
-  const i = (input ?? {}) as { dealId?: unknown; questionId?: unknown; findingId?: unknown };
-  const d = typeof i.dealId === 'string' ? s.deals[i.dealId] : undefined;
-  const q = typeof i.questionId === 'string' ? s.questions[i.questionId] : undefined;
-  const f = typeof i.findingId === 'string' ? s.findings[i.findingId] : undefined;
-  const what = q ? `Q${q.n}` : f ? `“${f.title.length > 48 ? f.title.slice(0, 47).trimEnd() + '…' : f.title}”` : '';
-  return [what, d?.name].filter(Boolean).join(' on ');
-}
-
 /** Offline: says so until the connection is back, with Retry Now; ✕ hides it until the next time. */
 function NetBar() {
   const store = useStore();
@@ -389,32 +379,26 @@ function NetBar() {
   );
 }
 
-const INTERRUPTED_ROWS = 3;
-
 /** Hidden and overflowed actions stay counted, and Show starts the next group with the first hidden action (#565). */
 function InterruptedBar() {
   const s = useAppState();
   const [first, setFirst] = useState<string>();
   const [dismissed, setDismissed] = useState<string[]>([]);
   const bar = useRef<HTMLDivElement>(null);
-  const ops = interruptedOperations(s);
-  const start = Math.max(0, ops.findIndex((op) => op.id === first));
-  const ordered = [...ops.slice(start), ...ops.slice(0, start)];
-  const showing = ordered.filter((op) => !dismissed.includes(op.id)).slice(0, INTERRUPTED_ROWS);
-  const hidden = ordered.filter((op) => !showing.includes(op));
+  const { showing, hidden } = interruptedView(s, first, dismissed);
   const show = () => {
     setFirst(hidden[0].id);
     setDismissed([]);
     requestAnimationFrame(() => bar.current?.querySelector<HTMLElement>('.intop .tundo')?.focus());
   };
   const hide = (id: string) => {
-    setDismissed([...dismissed.filter((key) => isInterrupted(s.ops[key])), id]);
+    setDismissed((current) => dismissInterrupted(s, current, id));
   };
-  if (!ops.length) return null;
+  if (!showing.length && !hidden.length) return null;
   return (
     <div class="intbar" role="status" ref={bar}>
       {showing.map((op) => (
-        <Interrupted key={op.id} id={op.id} what={commandLabel(op.command, op.input)} where={opPlace(s, op.input)}
+        <Interrupted key={op.id} id={op.id} what={commandLabel(op.command, op.input)} where={commandPlace(s, op.input)}
           onHide={() => hide(op.id)} />))}
       {hidden.length > 0 && (
         <Notice glyph="warn" actions={[{ label: 'Show', run: show }]}>

@@ -254,8 +254,8 @@ See reference screenshot 13.
 - **Standing notices:** Offline reads "**Not connected** Retrying" with Retry Now; while nobody is signed in to
   Intelligence, "**Read-only** Not signed in to Intelligence" with Sign In; an interrupted action, "**<action>
   interrupted** <where>" with Retry and Discard, which asks first in the confirm dialog (#1055).
-- **Interrupted actions out of view:** The summary counts dismissed and overflowed actions. **Show** brings another
-  group into view and focuses its first Retry. The summary stays while any interrupted action is out of view (#565).
+- **Interrupted actions out of view:** Up to three interrupted actions show. The summary counts dismissed and overflowed actions.
+  **Show** brings another group into view and focuses its first Retry. The summary stays while any interrupted action is out of view (#565).
 
 ## Connection card
 
