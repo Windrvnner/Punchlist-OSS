@@ -1,4 +1,5 @@
 import { LAYERS, type Item, type ItemFrom } from '../domain/checklist';
+import type { Store } from './store';
 import type { ChecklistRow } from '../ports';
 import { itemStanding, offFindingCount, type ItemKind, type State } from './state';
 
@@ -148,5 +149,36 @@ export function checklistView(state: State, dealId: string) {
     : byStanding(kept, checklist, on);
   const selected = kept.find((row) => row.id === selectedChecklist);
   const offIds = new Set(offRows.map((row) => row.id));
-  return { counts, filters, on, shown, selected, byList, offIds, offOpen: offFindingCount(state, dealId) };
+  const grouped = byList || on === 'all';
+  const flaggedAbove = !byList && (on === 'all' || on === 'finding');
+  return { counts, filters, on, shown, selected, byList, grouped, flaggedAbove, offIds,
+    offOpen: offFindingCount(state, dealId) };
+}
+
+/** Leaving Turned off clears it only where the Checklist is mounted, even while a read is still pending. */
+export function settleChecklistFilter(store: Store) {
+  let queued = false;
+  let lastItems: State['items'] | undefined;
+  let lastDeal: string | undefined;
+  function active(state: State) {
+    const route = state.ui.route;
+    return state.boot.stage === 'ready' && state.ui.checklistFilter === 'off' && route.name === 'checklist'
+      && state.deals[route.dealId] ? route.dealId : undefined;
+  }
+  store.subscribe((state) => {
+    const dealId = active(state);
+    if (!dealId || (dealId === lastDeal && state.items === lastItems) || queued) return;
+    queued = true;
+    queueMicrotask(() => {
+      queued = false;
+      const latest = store.get();
+      const id = active(latest);
+      if (!id) return;
+      lastDeal = id;
+      lastItems = latest.items;
+      if (Object.values(lastItems).some((item) => item.dealId === id && item.off)) return;
+      lastDeal = undefined;
+      store.ui({ checklistFilter: 'all' });
+    });
+  });
 }

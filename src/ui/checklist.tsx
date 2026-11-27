@@ -160,19 +160,15 @@ export function ChecklistPage({ dealId }: { dealId: string }) {
     dealId, s.checklists[dealId], s.items, s.findings, s.conflicts, s.tombstones, s.dealLoad[dealId],
     s.ui.checklistFilter, s.ui.selectedChecklist,
   ]);
-  const anyOff = view.counts.off > 0;
-  useEffect(() => { if (!anyOff && s.ui.checklistFilter === 'off') store.ui({ checklistFilter: 'all' }); }, [anyOff, s.ui.checklistFilter]);
   // items no longer in the firm's list, marked with an icon (linking design, section 5): worked out again only when the
   // items, the lists or the deal's layers change, not on every move through the list (it reads every wording)
   const unlisted = useMemo(() => (d ? unlistedItems(s, d) : new Set<string>()), [s.items, s.firmList, s.conflicts, dealId, d?.product, d?.sector, d?.technology]);
   if (!d) return null;
   const rows = s.checklists[d.id];
-  const { counts, on, shown, selected: sel, byList, offIds, offOpen } = view;
+  const { counts, on, shown, selected: sel, grouped, flaggedAbove, offIds, offOpen } = view;
   const filters: [Filter, string][] = view.filters.map((key) => [key, `${FILTER_LABEL[key]} ${counts[key]}`]);
   const wide = !sel;
-  const grouped = byList || on === 'all';
   const rises = grouped && counts.all > 0;
-  const flaggedAbove = !byList && (on === 'all' || on === 'finding');
   // items are records of their own, so a deal in two versions does not hold them: only a read-only page does
   const locked = inherited;
   // one stop for Tab in the list: the open item, else the first; the arrow keys, Home and End move through the items
