@@ -69,7 +69,13 @@ function retryAfterMs(value) {
 
 // How long GitHub asks to wait: retry-after seconds; else, with no requests left, until x-ratelimit-reset (epoch
 // seconds); else 2 seconds. GitHub sends the rate-limit headers with every answer, so only an empty limit counts.
+// A header that cannot be read counts as missing.
 function retryDelayMs({ headers }) {
+  const asked = askedDelayMs(headers);
+  return Number.isNaN(asked) ? retryWaitMs : asked;
+}
+
+function askedDelayMs(headers) {
   if (headers.has('retry-after')) return retryAfterMs(headers.get('retry-after'));
   if (!noRequestsLeft(headers) || !headers.has('x-ratelimit-reset')) return retryWaitMs;
   return Math.max(0, Number(headers.get('x-ratelimit-reset')) * 1000 - Date.now());
@@ -82,8 +88,11 @@ function boundedDelayMs(response) {
   const ms = retryDelayMs(response);
   if (ms <= longestWaitMs) return ms;
   const asked = Math.ceil(ms / 1000);
-  throw new Error(`GitHub asked to wait ${asked} seconds, longer than ${longestWaitMs / 1000}`);
+  throw new TooLongWait(`GitHub asked to wait ${asked} seconds, longer than ${longestWaitMs / 1000}`);
 }
+
+// GitHub answered, so this failure is reported as it is, not as GitHub being out of reach.
+class TooLongWait extends Error {}
 
 async function openIssuesPage({ endpoint, token, fetch, wait }, page) {
   if (!token) throw new Error('GITHUB_TOKEN is required');
@@ -119,7 +128,8 @@ export async function checkOpenIssues({ env, fetch, root = '.', wait = pause }) 
     for (const number of closed) lines.push(`#${number} is not an open issue`);
     return result(closed.length ? 1 : 0);
   } catch (error) {
-    lines.push(`Cannot reach GitHub to check the issues the allowances name (${error.message})`);
+    if (error instanceof TooLongWait) lines.push(error.message);
+    else lines.push(`Cannot reach GitHub to check the issues the allowances name (${error.message})`);
     return result(1);
   }
 }

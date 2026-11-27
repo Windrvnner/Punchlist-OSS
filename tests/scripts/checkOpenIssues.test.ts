@@ -141,9 +141,27 @@ describe('issues named by the allowances', () => {
   it('fails without waiting when GitHub asks for a wait longer than five minutes', async () => {
     const { result, waits, requested } = await waitsFor(429, { 'retry-after': '3600' });
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('GitHub asked to wait 3600 seconds, longer than 300');
+    expect(result.stderr).toBe('GitHub asked to wait 3600 seconds, longer than 300');
     expect(waits).toEqual([]);
     expect(requested).toHaveLength(1);
+  });
+
+  it('fails without waiting when the rate limit resets more than five minutes away', async () => {
+    const reset = String(Math.ceil(Date.now() / 1000) + 3600);
+    const { result, waits } = await waitsFor(403, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': reset });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/^GitHub asked to wait \d+ seconds, longer than 300$/);
+    expect(waits).toEqual([]);
+  });
+
+  it('waits exactly five minutes when GitHub asks for that', async () => {
+    expect((await waitsFor(429, { 'retry-after': '300' })).waits).toEqual([300_000, 300_000]);
+  });
+
+  it('waits 2 seconds when retry-after or x-ratelimit-reset cannot be read', async () => {
+    expect((await waitsFor(429, { 'retry-after': 'soon' })).waits).toEqual([2000, 2000]);
+    const unread = { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': 'later' };
+    expect((await waitsFor(403, unread)).waits).toEqual([2000, 2000]);
   });
 
   it('reads a retry-after header given as an HTTP date', async () => {
