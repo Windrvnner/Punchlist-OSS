@@ -3,7 +3,7 @@
  * writing the file format itself is the SpreadsheetCodec port's job (LibreOffice in the app).
  */
 import type { Question, Finding, QuestionStatus } from './model';
-import { localYmd, WORKSTREAMS } from './model';
+import { localYmd } from './model';
 import { splitCited } from './cite';
 import { isRealDate } from './model';
 import { AI_LABEL } from '../control';
@@ -95,10 +95,9 @@ const STATUS: Record<string, QuestionStatus> = { open: 'open', outstanding: 'ope
 /**
  * Apply a column mapping to a raw table. Rows without a question are skipped and counted; so are values that could not be read.
  * The question and response are kept exactly as written, spaces and line breaks included, so the app's own export comes
- * back unchanged. Names and workstream are identities, not prose: "Lender A " is the submitter
- * "Lender A", so the spaces around them go (the text inside is untouched). The values that are read as something else
- * (number, dates, priority, status) ignore the spaces around them too. A question of only spaces is a question, as one
- * made in the app can be.
+ * back unchanged, and so are the names and the workstream: each is kept whole, as its cell gives it. The values that are
+ * read as something else (number, dates, priority, status) ignore the spaces around them. A question of only spaces
+ * is a question, as one made in the app can be.
  * A numeric date valid both ways is settled by context, not by one format per file or column:
  * first the row's other date (a question is received before it is responded to), then the nearest settled dates above
  * and below it in its column (logs mostly run in date order: the reading between them, else the one much nearer them),
@@ -108,7 +107,7 @@ const STATUS: Record<string, QuestionStatus> = { open: 'open', outstanding: 'ope
 export function prepareImport(table: string[][], mapping: Mapping, lines?: number[], o: { today?: string } = {}): Prepared {
   const today = o.today ?? localYmd(new Date().toISOString());
   const get = (r: string[], k: ImportField) => (mapping[k] == null ? '' : String(r[mapping[k]!] ?? ''));
-  // a value read as a number, date, priority, status or workstream is read without control characters; text is
+  // a value read as a number, date, priority or status is read without control characters; text is
   // kept whole
   const read = (r: string[], k: ImportField) => (
     get(r, k).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
@@ -137,13 +136,11 @@ export function prepareImport(table: string[][], mapping: Mapping, lines?: numbe
     const nRaw = read(r, 'n').trim().replace(/^q/i, '');
     // the app numbers past Q999999, so a 7-digit number it exported reads back
     const n = /^\d{1,9}$/.test(nRaw) && +nRaw > 0 ? +nRaw : null;
-    const wsGiven = get(r, 'workstream');
-    const wsRaw = read(r, 'workstream').trim();
-    // the app's spelling where it is one of ours; otherwise kept as written
-    const ws = WORKSTREAMS.find((w) => w.toLowerCase() === wsRaw.toLowerCase()) ?? wsGiven;
+    // the workstream as the log writes it, capitals included: never put into the app's spelling (#1059)
+    const ws = get(r, 'workstream');
     if (pr && !PRIORITY[pr.toLowerCase()]) { out.unknownValues++; unread('priority', pr); }
     if (st && !STATUS[st.toLowerCase()]) { out.unknownValues++; unread('status', st); }
-    // names and workstream are stored as the cell gives them; only the workstream lookup above reads it trimmed
+    // names and workstream are kept whole, as the cell gives them
     const row: ImportRow = {
       n, text, askedBy: get(r, 'askedBy'), received: '', workstream: ws,
       priority: PRIORITY[pr.toLowerCase()] ?? '', response: get(r, 'response'),
@@ -207,10 +204,14 @@ export function questionsSheet(rows: Question[]): (string | number)[][] {
   return [['#', 'Workstream', 'Priority', 'Submitted by', 'Question', 'Received', 'Status', 'Response', 'Responded by', 'Date', 'Response origin'],
     ...rows.map((q) => [q.n, q.workstream, q.priority, q.askedBy, q.text, q.received, STATUS_LABEL[q.status], q.response, q.respondedBy, q.responded, origin(q)])];
 }
+/** A person's finding whose title the model wrote (an issues-list point) carries the AI mark on its title (#1063). */
+const personOrigin = (f: Finding) => (f.aiTitle ? `${AI_LABEL} title` : 'Person');
 export function findingsSheet(rows: Finding[]): (string | number)[][] {
   // the finding's own words, without the citation markers (the Sources column lists what they point to)
   const detail = (f: Finding) => f.body.map((p) => splitCited(p, f.sources.length).map((x) => x.text).join('')).join('\n\n');
-  const origin = (f: Finding) => (f.origin === 'ai' ? AI_LABEL : f.origin === 'chat' ? 'From conversation' : 'Person');
+  const origin = (f: Finding) => (
+    f.origin === 'ai' ? AI_LABEL : f.origin === 'chat' ? 'From conversation' : personOrigin(f)
+  );
   // no Reviewed by: a person in the app is never named in a spreadsheet
   const sources = (f: Finding) => f.sources.map((s) => s.doc + (s.loc ? ` · ${s.loc}` : '')).join('\n');
   const reviewedOn = (f: Finding) => (f.reviewed ? longDate(f.reviewed.at) : '');

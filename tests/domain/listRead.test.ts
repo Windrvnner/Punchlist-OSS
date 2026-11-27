@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tieOut, unplaced, tableLines, textLines, type LineRead } from '../../src/domain/listRead';
+import { tieOut, unplaced, tableLines, tableRowsAsWritten, textLines, type LineRead } from '../../src/domain/listRead';
 
 const reads = (rs: LineRead[]) => new Map(rs.map((r) => [r.n, r]));
 const LINES = textLines(['Proseware Solar checklist', '', '1. Site', '   1.1  Title report for the whole site', '   1.2  Leases cover the array and the', '        gen-tie route', 'Page 2 of 6', '2. Permits', '   2.1  Conditional use permit issued'].join('\r\n'));
@@ -44,6 +44,34 @@ describe('a list read by the model, tied out line by line', () => {
     expect(tieOut(given, new Map(), new Set([1, 2, 3, 4])).items.map((i) => i.text)).toEqual(given);
   });
 
+  it('brings a left-out table row in with its cells as a spreadsheet copies them (#1061)', () => {
+    const columns = ['Ref', 'Item', 'Notes'];
+    const rows = [
+      ['1.1', 'Title report', ''], ['1.2', 'Insurance certificates', 'Lender to confirm'], ['', 'Survey', ''],
+    ];
+    const lines = tableLines(columns, rows);
+    const written = tableRowsAsWritten(columns, rows);
+    expect(written).toHaveLength(lines.length);
+    const read = reads([{ n: 1, k: 'columns' }, { n: 2, k: 'item', text: 'Title report' }, { n: 3, k: 'left' },
+      { n: 4, k: 'item', text: 'Survey' }]);
+    expect(tieOut(lines, read, new Set(), written).left).toEqual([3]);
+    const brought = tieOut(lines, read, new Set([3]), written).items.map((i) => i.text);
+    expect(brought).toEqual(['Title report', '1.2\tInsurance certificates\tLender to confirm', 'Survey']);
+    // empty cells at a row's edges and a line break inside a cell are kept
+    expect(tableRowsAsWritten(columns, [['', 'Two\nlines', '']])[1]).toBe('\tTwo\nlines\t');
+  });
+
+  it('words a table row\'s item as its cell is written, a line break inside it kept (#1061)', () => {
+    const columns = ['Area', 'Requirement'];
+    const rows = [['Land', 'Site control\ncovers the array'], ['Land', ' Permits ']];
+    const lines = tableLines(columns, rows);
+    expect(lines[1]).toBe('Land | Site control covers the array');   // as the model reads it
+    const read = reads([{ n: 1, k: 'columns' }, { n: 2, k: 'item', text: 'Site control covers the array',
+      section: 'Land' }, { n: 3, k: 'item', text: 'Permits', section: 'Land' }]);
+    const t = tieOut(lines, read, new Set(), tableRowsAsWritten(columns, rows));
+    expect(t.items.map((i) => i.text)).toEqual(['Site control\ncovers the array', ' Permits ']);
+  });
+
   it('reads a table row with its own section and subsection, and the heading row as a heading', () => {
     const lines = tableLines(['Area', 'Requirement'], [['Interconnection', 'Network upgrade costs  capped'], ['Land', 'Site control covers the array']]);
     expect(lines[1]).toBe('Interconnection | Network upgrade costs  capped');   // the cell's own spacing stays
@@ -66,5 +94,11 @@ describe('a list read by the model, tied out line by line', () => {
   it('does not take a section the row does not hold', () => {
     const lines = ['Land | Site control covers the array'];
     expect(unplaced(lines, reads([{ n: 1, k: 'item', text: 'Site control covers the array', section: 'Real estate' }]))).toEqual([1]);
+  });
+});
+
+describe('text as lines', () => {
+  it('splits at every line break and changes nothing else of a line', () => {
+    expect(textLines(' a \r\n\tb  c\rd\n\ne ')).toEqual([' a ', '\tb  c', 'd', '', 'e ']);
   });
 });
