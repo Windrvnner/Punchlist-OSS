@@ -13,14 +13,16 @@ export type FieldSaveOutcome =
   | { kind: 'saved'; written: boolean }
   | { kind: 'changedElsewhere' }
   | { kind: 'refused'; reason: string }
-  | { kind: 'failed'; unreachable: boolean };
+  | { kind: 'failed'; unreachable: boolean; reason: string };
 
-function fieldSaveOutcome(result: FieldCommitResult): FieldSaveOutcome {
+function fieldSaveOutcome(result: FieldCommitResult, conflicts: 'field' | 'record'): FieldSaveOutcome {
   if (result.ok) return { kind: 'saved', written: !result.value?.unchanged };
   const { error } = result;
-  if (error?.kind === 'conflict' && isChangedElsewhere(error)) return { kind: 'changedElsewhere' };
+  if (error?.kind === 'conflict' && (conflicts === 'record' || isChangedElsewhere(error))) {
+    return { kind: 'changedElsewhere' };
+  }
   if (error?.kind === 'invalid' || error?.kind === 'rejected') return { kind: 'refused', reason: error.message };
-  return { kind: 'failed', unreachable: error?.kind === 'unreachable' };
+  return { kind: 'failed', unreachable: error?.kind === 'unreachable', reason: error?.message ?? '' };
 }
 
 export type FieldSaveView = {
@@ -51,15 +53,42 @@ export type FieldInput = {
   show(view: FieldSaveView): void;
 };
 
+/** A field's persisted draft and the result of saving over the value it was typed on. */
+export class FieldSave {
+  base: string;
+  protected baseRev: number;
+
+  constructor(record: FieldValue, protected keep: string | undefined, draft?: FieldDraft) {
+    this.base = draft?.base ?? record.value;
+    this.baseRev = draft?.rev ?? record.rev;
+  }
+
+  protected keepOverBase(text: string, rev = this.baseRev) {
+    this.restore({ text, base: this.base, rev });
+  }
+
+  get kept(): FieldDraft | undefined {
+    return this.keep === undefined ? undefined : unsavedFields.get(this.keep);
+  }
+
+  protected restore(draft: FieldDraft | undefined) {
+    if (this.keep === undefined) return;
+    if (draft) unsavedFields.set(this.keep, draft);
+    else unsavedFields.delete(this.keep);
+  }
+
+  protected async send(text: string, over: string, commit: FieldCommit, conflicts: 'field' | 'record') {
+    return fieldSaveOutcome(await commit(text, over), conflicts);
+  }
+}
+
 /**
  * One field's save state, and when typing saves: after a pause, or when the field is left. The input owns focus,
  * native date parts and input-method composition, and reports its events.
  */
-export class FieldSave {
+export class EditFieldSave extends FieldSave {
   view: FieldSaveView;
-  base: string;
   seen: FieldValue;
-  private baseRev: number;
   private retryDraft: string | undefined;
   private gone = false;
   private jumped = false;
@@ -72,10 +101,10 @@ export class FieldSave {
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
-    record: FieldValue, private keep: string | undefined, draft: FieldDraft | undefined, private input: FieldInput,
+    record: FieldValue, keep: string | undefined, draft: FieldDraft | undefined, private input: FieldInput,
   ) {
+    super(record, keep, draft);
     this.seen = record;
-    this.base = draft?.base ?? record.value;
     const external = !!draft && (draft.base !== record.value || draft.rev !== record.rev);
     this.baseRev = external ? -1 : record.rev;
     this.retryDraft = draft?.text;
@@ -106,13 +135,9 @@ export class FieldSave {
   private keepText(text: string) {
     if (this.keep === undefined || this.input.partial()) return;
     // After unmount the off-screen watch owns the kept revision unless a save moves its base.
-    const kept = this.gone ? unsavedFields.get(this.keep) : undefined;
+    const kept = this.gone ? this.kept : undefined;
     const rev = kept?.base === this.base ? kept.rev : this.baseRev;
-    unsavedFields.set(this.keep, { text, base: this.base, rev: this.view.external ? -1 : rev });
-  }
-
-  private forgetText() {
-    if (this.keep !== undefined) unsavedFields.delete(this.keep);
+    this.keepOverBase(text, this.view.external ? -1 : rev);
   }
 
   keepCurrent() {
@@ -200,8 +225,8 @@ export class FieldSave {
     if (value !== this.base) return;
     if (this.baseRev === previousRev && rev === previousRev + 1) {
       this.baseRev = rev;
-      const kept = this.keep === undefined ? undefined : unsavedFields.get(this.keep);
-      if (this.keep !== undefined && kept && kept.rev >= 0) unsavedFields.set(this.keep, { ...kept, rev });
+      const kept = this.kept;
+      if (kept && kept.rev >= 0) this.restore({ ...kept, rev });
     } else if (this.inFlight.length) {
       if (rev > previousRev + 1) this.jumped = true;
     } else if (this.input.text() === value) this.baseRev = rev;
@@ -232,7 +257,7 @@ export class FieldSave {
     const again = this.resending;
     this.resending = false;
     const over = this.base;
-    const outcome = fieldSaveOutcome(await commit(text, over));
+    const outcome = await this.send(text, over, commit, 'field');
     this.saving--;
     this.handleOutcome(text, over, outcome, commit, again);
     return outcome;
@@ -271,7 +296,7 @@ export class FieldSave {
     if (outcome.kind === 'saved') {
       // The record's layout effect observes the write before a normalized value is matched to this attempt.
       setTimeout(() => this.settleAttempt(text, true, outcome.written, commit), 0);
-      if (this.keep !== undefined && unsavedFields.get(this.keep)?.text === text) this.forgetText();
+      if (this.kept?.text === text) this.restore(undefined);
       this.waits = false;
       if (!this.saving) this.show({ status: 'idle' });
       return;
@@ -309,7 +334,7 @@ export class FieldSave {
     if (stored === undefined) return;
     this.base = stored;
     this.baseRev = this.arrived.length ? -1 : this.seen.rev;
-    const kept = this.keep === undefined ? undefined : unsavedFields.get(this.keep);
+    const kept = this.kept;
     if (kept) this.keepText(kept.text);
   }
 
@@ -320,11 +345,11 @@ export class FieldSave {
     if (!this.input.partial() && text === now) {
       this.takeBase(now);
       this.show({ external: false });
-      this.forgetText();
+      this.restore(undefined);
       return;
     }
     if (!this.input.partial() && text === over) {
-      this.forgetText();
+      this.restore(undefined);
       if (now !== over) {
         this.input.replaceText(now);
         this.takeBase(now);
@@ -349,7 +374,7 @@ export class FieldSave {
 
   takeTheirs(value: string, commit: FieldCommit) {
     this.stopTimer();
-    this.forgetText();
+    this.restore(undefined);
     this.takeBase(value);
     this.input.replaceText(value);
     this.show({ external: false, status: 'idle' });
@@ -358,7 +383,7 @@ export class FieldSave {
 
   escape(text: string, entry: FieldAtFocus | null, commit: FieldCommit) {
     if (!entry) {
-      this.forgetText();
+      this.restore(undefined);
       this.show({ status: 'idle' });
       void this.save(text, commit);
       return;

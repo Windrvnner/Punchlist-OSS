@@ -26,7 +26,7 @@ async function startDrafts() {
 
 async function field(restored?: string) {
   await startDrafts();
-  const { FieldSave } = await import('../../src/app/fieldSave');
+  const { EditFieldSave } = await import('../../src/app/fieldSave');
   const { restoreFieldDraft, unsavedFields } = await import('../../src/app/fieldDrafts');
   const key = 'q_credit:question';
   let text = restored ?? original;
@@ -44,7 +44,7 @@ async function field(restored?: string) {
     show: () => {},
   };
   if (restored !== undefined) unsavedFields.set(key, { text: restored, base: original, rev: 1 });
-  const save = new FieldSave({ value: original, rev: 1 }, key, restoreFieldDraft(key, original), input);
+  const save = new EditFieldSave({ value: original, rev: 1 }, key, restoreFieldDraft(key, original), input);
   const pending: {
     value: string;
     over: string;
@@ -302,4 +302,14 @@ it('marks handed text changed elsewhere when the record itself has not changed (
   expect(text()).toBe(`${firstEdit}\n\n${handed}`);
   expect(save.view.external).toBe(true);
   expect(unsavedFields.get(key)).toEqual({ text: `${firstEdit}\n\n${handed}`, base: original, rev: -1 });
+});
+
+it('keeps a two-version record refusal on an edit field waiting for Retry', async () => {
+  const { save, type, pending, commit, key, unsavedFields } = await field();
+  type(firstEdit);
+  const saving = save.save(firstEdit, commit);
+  pending[0].resolve({ ok: false, error: { kind: 'conflict', message: 'This record has two versions. Choose one.' } });
+  await saving;
+  expect(save.view).toMatchObject({ external: false, status: 'failed' });
+  expect(unsavedFields.get(key)).toMatchObject({ text: firstEdit, base: original });
 });

@@ -18,7 +18,7 @@ beforeEach(async () => {
 afterEach(() => vi.useRealTimers());
 
 async function field() {
-  const { FieldSave } = await import('../../src/app/fieldSave');
+  const { EditFieldSave } = await import('../../src/app/fieldSave');
   let text = original;
   let composition: FieldComposition = 'idle';
   const input: FieldInput = {
@@ -34,7 +34,7 @@ async function field() {
     landedEntryText: () => {},
     show: () => {},
   };
-  const save = new FieldSave({ value: original, rev: 1 }, undefined, undefined, input);
+  const save = new EditFieldSave({ value: original, rev: 1 }, undefined, undefined, input);
   const sent: string[] = [];
   const commit: FieldCommit = async (value) => {
     sent.push(value);
