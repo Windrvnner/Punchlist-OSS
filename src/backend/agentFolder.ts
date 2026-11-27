@@ -357,8 +357,9 @@ class FolderPass {
   private boundedFindings(room: number): string[] {
     let reserve = 0;
     let fit = this.fitFindings(room);
-    // fewer findings fit beside a longer line, which counts more of them: it settles once the line no longer grows
-    while (fit.over.length && reserve !== moreCost(fit.over.length)) {
+    // fewer findings fit beside a longer line, which counts more of them: the reserve only grows, up to the line that
+    // counts every batch, so this ends with the line within what it reserved
+    while (fit.over.length && reserve < moreCost(fit.over.length)) {
       reserve = moreCost(fit.over.length);
       fit = this.fitFindings(room - reserve);
     }
