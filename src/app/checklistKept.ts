@@ -3,7 +3,7 @@
  * what was kept (#381). The storage itself is in keptImports.ts.
  */
 import type { ImportTable } from './transfer';
-import type { LineRead } from '../domain/listRead';
+import type { ListReading } from '../domain/listRead';
 import type { ChecklistMapping } from '../domain/checklistImport';
 import { LAYERS, type Layer } from '../domain/checklist';
 import { keptImport, keepImport } from './keptImports';
@@ -35,7 +35,7 @@ export interface ChecklistKept {
   paste?: string;
   table?: ImportTable | null;
   text?: ChecklistText | null;
-  reads?: Map<number, LineRead> | null;
+  reads?: ListReading | null;
   review?: Review | null;
   choices?: ChecklistChoices;
 }
@@ -61,8 +61,35 @@ function isChecklistKept(value: unknown): value is ChecklistKept {
   if (!kept || typeof kept !== 'object') return false;
   if (kept.paste !== undefined && typeof kept.paste !== 'string') return false;
   if (kept.text && !Array.isArray(kept.text.lines)) return false;
-  if (kept.reads && !(kept.reads instanceof Map)) return false;
+  if (kept.reads && !(kept.reads instanceof Map) && !(kept.reads.reads instanceof Map)) return false;
   return isKeptTable(kept.table) && isKeptReview(kept.review) && isKeptChoices(kept.choices);
+}
+
+/**
+ * A kept import from before a reading carried its table's columns holds its lines' readings as a bare Map by line
+ * number. A text's lines are shown with that Map as the reading. A table's rows, and the lines of text pasted from a
+ * spreadsheet (cells joined with " | "), cannot be worded without the columns the reading named, so the reading is
+ * dropped and the list is read again, keeping its pasted text, table and choices, and no row is silently left out
+ * (#1073).
+ */
+function inCurrentShape(kept: ChecklistKept): ChecklistKept {
+  const marked = withCellRows(kept);
+  const old: unknown = marked.reads;
+  if (!(old instanceof Map)) return marked;
+  const hasCells = marked.table || marked.text?.lines.some((line) => line.includes(' | '));
+  return hasCells ? { ...marked, reads: null } : { ...marked, reads: { reads: old } };
+}
+
+/**
+ * A kept text from before the app marked the lines it built from cells (`cellRows`) took those lines to be the ones
+ * that hold " | "; that is the one place a line is taken for a row of cells by its characters, for what was kept then
+ * (#1227).
+ */
+function withCellRows(kept: ChecklistKept): ChecklistKept {
+  const text = kept.text;
+  if (!text || text.cellRows) return kept;
+  const cellRows = text.lines.flatMap((line, i) => (line.includes(' | ') ? [i + 1] : []));
+  return { ...kept, text: { ...text, cellRows } };
 }
 
 /**
@@ -72,7 +99,7 @@ function isChecklistKept(value: unknown): value is ChecklistKept {
 export function readKeptChecklist(key: string, fresh: boolean): { left: ChecklistKept | null; unreadable: boolean } {
   const kept = fresh ? undefined : keptImport(key);
   const readable = isChecklistKept(kept);
-  return { left: readable ? kept : null, unreadable: kept !== undefined && !readable };
+  return { left: readable ? inCurrentShape(kept) : null, unreadable: kept !== undefined && !readable };
 }
 
 /**

@@ -10,8 +10,7 @@ import { CHECK_REASON, type Deal, type Folder, type RecordKind } from '../domain
 import { ok, fail, type Result } from '../domain/result';
 import { fold, indexWords } from '../backend/words';
 import { key } from '../domain/checklist';
-import type { LineRead } from '../domain/listRead';
-import { suggestChecklistColumns, type ChecklistMapping } from '../domain/checklistImport';
+import { mockTableReading, mockTextReads } from './mockListRead';
 
 /** a repository that can tell the app about a record written by something other than a window (the backend's pipeline; here, the mocks) */
 export type Announcing = Repository & { announce(kind: RecordKind, id: string): void };
@@ -409,37 +408,10 @@ export const mockAi = (opts: MockOptions = {}, repo?: Repository): AiService => 
   // Stand-ins for the fast model as a checklist is brought in. Rewording spells out a few common abbreviations and turns
   // "a / b" or "a; b" into a sentence; the real one is a model's judgment. Same meaning is two items sharing most of
   // their telling words and the same figures.
-  // Stand-in for the model reading a list in, by the look of each line: a table row ("a | b") takes its item, section
-  // and subsection cells, the columns known by the heading row; "1." or "Section 1" alone is a section, an indented line with no
-  // number a subsection, a line numbered "1.2", "a)" or bulleted an item, an indented line after an item its rest, and a
-  // line of a "Page 2 of 6" kind, a title or a note is left out. The real one is a model's judgment. window.__readList
-  // = { skip: [n] } leaves those lines out of the reply, and { wrong: [n] } answers them with words the line does not hold.
+  // Stand-in for the model reading a whole list in, by the look of each line (mockListRead.ts)
   readList: (i) => gate(opts, 'readList', () => {
-    const hook = (globalThis as { __readList?: { skip?: number[]; wrong?: number[] } }).__readList ?? {};
-    const only = new Set(i.only ?? i.lines.map((_, k) => k + 1)); const out: LineRead[] = []; let inItem = false; let cols: ChecklistMapping | undefined;
     const table = i.lines.filter((l) => l.includes(' | ')).length > i.lines.filter((l) => l.trim()).length / 2;
-    // a list with no numbers or bullets at all is one item a line, under a heading row if it starts with one
-    const plain = !table && !i.lines.some((l) => /^\s*(\d+(\.\d+)*\.?|[a-z]\)|[-•])\s+\S/i.test(l));
-    i.lines.forEach((raw, k) => {
-      const n = k + 1; const line = raw.trim(); let r: LineRead;
-      if (!line) { inItem = false; return; }
-      if (table) {
-        // the columns are told apart by the heading row, as the columns step suggests them
-        cols ??= suggestChecklistColumns(i.lines[0].split(' | ').map((c) => c.trim()));
-        const cells = raw.split(' | ').map((c) => c.trim()); const cell = (c: number | null | undefined) => (c == null ? '' : cells[c] ?? '');
-        const text = cell(cols.item); const section = cell(cols.section); const subsection = cell(cols.subsection);
-        r = n === 1 ? { n, k: 'columns' } : text ? { n, k: 'item', text, ...(section ? { section } : {}), ...(subsection ? { subsection } : {}) } : { n, k: 'left' };
-      } else if (plain) r = /^page \d+ of \d+$/i.test(line) ? { n, k: 'left' } : n === 1 && /^(checklist )?items?$|^requirements?$|^description$/i.test(line) ? { n, k: 'columns' } : { n, k: 'item', text: line };
-      else if (/^(page \d+ of \d+|note:|draft\b|confidential\b)/i.test(line) || /\.$/.test(line) && !/^(\d+(\.\d+)+|[a-z]\)|[-•*])\s/i.test(line)) r = { n, k: 'left' };
-      else if (/^\d+\.\s+\S/.test(line) && !/^\d+\.\d/.test(line)) { r = { n, k: 'section', text: line.replace(/^\d+\.\s+/, '') }; inItem = false; }
-      else if (/^(\d+(\.\d+)+|[a-z]\)|[-•])\s+/i.test(line)) { r = { n, k: 'item', text: line.replace(/^(\d+(\.\d+)+|[a-z]\)|[-•])\s+/i, '') }; inItem = true; }
-      else if (inItem && /^\s{4,}/.test(raw)) r = { n, k: 'more' };
-      else if (/^\s+/.test(raw) && line.length <= 40) { r = { n, k: 'subsection', text: line }; inItem = false; }
-      else r = { n, k: 'left' };
-      if (!only.has(n) || hook.skip?.includes(n)) return;
-      out.push(hook.wrong?.includes(n) && r.text ? { ...r, text: `${r.text} as reworded` } : r);
-    });
-    return out;
+    return table ? mockTableReading(i.lines) : { lines: mockTextReads(i.lines) };
   }),
   reword: (i) => gate(opts, 'reword', () => i.items.flatMap((t, at) => {
     const ABBR: [RegExp, string][] = [[/\bLTSA\b/g, 'long-term service agreement'], [/\bIE\b/g, 'independent engineer'], [/\byrs\b/g, 'years'], [/≥/g, 'at least'], [/\bO&M\b/g, 'operation and maintenance']];

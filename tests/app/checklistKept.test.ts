@@ -51,6 +51,36 @@ describe('reading a kept checklist import', () => {
   });
 });
 
+describe('a checklist import kept with a bare Map of readings (#1073)', () => {
+  const rows = ['Item | Section', 'Audited accounts | Financial', 'Lease | Property'];
+  const oldReads = new Map([[2, { k: 'item', words: 'Audited accounts' }], [3, { k: 'item', words: 'Lease' }]]);
+
+  it('reads again text pasted from a spreadsheet, so no row is left out', () => {
+    const text = { name: 'list.txt', lines: rows };
+    keepImport(key, { ...whole, table: null, text, reads: oldReads });
+    const { left } = readKeptChecklist(key, false);
+    // before the app marked its cell rows, a line holding " | " was one
+    const cellRows = rows.flatMap((line, i) => (line.includes(' | ') ? [i + 1] : []));
+    expect(cellRows.length).toBeGreaterThan(0);
+    expect(left).toEqual({ ...whole, table: null, text: { ...text, cellRows }, reads: null });
+  });
+
+  it('keeps the cell rows of a text that has them, and marks none in plain text', () => {
+    const marked = { name: 'list.txt', lines: ['a | b', 'c | d'], cellRows: [2] };
+    keepImport(key, { ...whole, table: null, text: marked, reads: null });
+    expect(readKeptChecklist(key, false).left?.text).toEqual(marked);
+    const plain = { name: 'list.txt', lines: ['Audited accounts', 'Lease'] };
+    keepImport(key, { ...whole, table: null, text: plain, reads: oldReads });
+    expect(readKeptChecklist(key, false).left?.text?.cellRows).toEqual([]);
+  });
+
+  it('shows plain text with the Map as its reading', () => {
+    const text = { name: 'list.txt', lines: ['Audited accounts', 'Lease'] };
+    keepImport(key, { ...whole, table: null, text, reads: oldReads });
+    expect(readKeptChecklist(key, false).left?.reads).toEqual({ reads: oldReads });
+  });
+});
+
 describe('keeping the checklist import as it changes', () => {
   it('writes a list over whole and stops setting aside', () => {
     keepImport(key, { paste: 'An earlier paste', headingDraft: '3' });

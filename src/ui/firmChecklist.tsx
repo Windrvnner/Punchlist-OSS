@@ -179,7 +179,7 @@ function ImportChecklistDialog(props: ImportProps & { fresh: boolean }) {
   // from the mapping or the review alike, and Back returns to that step as it was left
   if (choosingHere && split) return chooseStep(view, split);
   if (review && listReview.shown) return reviewStep(view, review);
-  if (!source.byColumns && lines) return readStep(view, lines);
+  if (!source.byColumns && lines) return readStep(view);
   if (!table) return null;
   return columnsStep(view, table);
 }

@@ -11,11 +11,11 @@ import {
   type Asked, type ChecklistReviewChange, type ListTarget, type Review,
 } from '../app/checklistImport';
 import {
-  checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistReading, checklistRequests,
+  checklistCellRows, checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistReading, checklistRequests,
   checklistSourceLines, checklistWrittenLines, clearChecklistHeading, loadChecklistSource, rereadChecklistTable,
   tieChecklistLines, type ChecklistText,
 } from '../app/listRead';
-import type { LineRead } from '../domain/listRead';
+import type { ListReading } from '../domain/listRead';
 import type { ChecklistMapping } from '../domain/checklistImport';
 import type { ListItem } from '../domain/checklist';
 import { NOT_DONE, broughtInSays, toggled } from './firmChecklistReview';
@@ -63,7 +63,8 @@ export function useListSource(store: Store, work: Work, keeper: Keeper) {
   const { table, text, mapping, byColumns } = file;
   const lines = useMemo(() => checklistSourceLines(text, table), [text, table]);
   const written = useMemo(() => checklistWrittenLines(text, table), [text, table]);
-  const reading = useModelReading(store, work, { lines, written }, byColumns, left);
+  const cellRows = checklistCellRows(text, table);
+  const reading = useModelReading(store, work, { lines, written, cellRows }, byColumns, left);
   const prepared = useMemo(
     () => checklistItemsAsRead(byColumns, table, mapping, reading.tied),
     [byColumns, table, mapping, reading.tied],
@@ -187,16 +188,22 @@ async function updateTableRead(
   });
 }
 
+/** the lines as the model reads them, as the source writes them, and which are built from cells */
+interface ListSourceLines {
+  lines: string[] | null;
+  written: string[] | null;
+  cellRows: ReadonlySet<number>;
+}
+
 /**
  * The model's reading of the lines, tied out line by line. It reads the list as soon as there is one, and again for
  * another sheet; Retry asks again. `bringIn` holds the lines left out that a person checked to bring in.
  */
 function useModelReading(
-  store: Store, work: Work, source: { lines: string[] | null; written: string[] | null }, byColumns: boolean,
-  left: ChecklistKept | null,
+  store: Store, work: Work, source: ListSourceLines, byColumns: boolean, left: ChecklistKept | null,
 ) {
-  const { lines, written } = source;
-  const [reads, setReads] = useState<Map<number, LineRead> | null>(left?.reads ?? null);
+  const { lines, written, cellRows } = source;
+  const [reads, setReads] = useState<ListReading | null>(left?.reads ?? null);
   const [readFailed, setReadFailed] = useState<Asked | ''>(left?.choices?.readFailed ?? '');
   const [bringIn, setBringIn] = useState<Set<number>>(left?.choices?.bringIn ?? new Set());
   const [reading] = useState(() => checklistReading(store, work, {
@@ -219,9 +226,9 @@ function useModelReading(
       setBringIn(new Set());
     },
   };
-  const readNow = () => reading.retry(lines, byColumns, events);
+  const readNow = () => reading.retry(lines, byColumns, events, cellRows);
   // biome-ignore lint/correctness/useExhaustiveDependencies: each change of source goes to the same app session
-  useEffect(() => { void reading.sourceChanged(lines, byColumns, events); }, [lines, byColumns]);
+  useEffect(() => { void reading.sourceChanged(lines, byColumns, events, cellRows); }, [lines, byColumns]);
   /** the lines the model left out, before any is checked to bring in: the "Left out" list */
   const tiedBase = useMemo(() => tieChecklistLines(lines, reads), [lines, reads]);
   const tied = useMemo(() => tieChecklistLines(lines, reads, bringIn, written), [lines, reads, bringIn, written]);

@@ -144,9 +144,9 @@ it('scans a folder, matches its deal, imports lender issues, and adds the result
 async function readMasterChecklist(store: Store, questions: string[], requests: ReturnType<typeof checklistRequests>) {
   const source = checklistPaste(['Portfolio due diligence', ...questions].join('\n'));
   const lines = checklistSourceLines(source, null)!;
-  store.services.ai.readList = async ({ lines }) => ok(lines.map((text, index) => ({
-    n: index + 1, k: index === 0 ? 'section' : 'item', text,
-  })));
+  store.services.ai.readList = async ({ lines }) => ok({
+    lines: lines.map((_, index) => ({ n: index + 1, k: index === 0 ? 'section' : 'item' })),
+  });
   const reader = checklistReading(store, requests);
   const readings = val((await reader.sourceChanged(lines, false, { started: () => {}, finished: () => {} }))!);
   const tied = tieChecklistLines(lines, readings);

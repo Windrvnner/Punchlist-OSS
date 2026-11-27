@@ -150,7 +150,16 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - With no lists, the **Firm’s Checklist** dialog shows one 160px drop area, "Drop a checklist here, or choose a file…"; an import under way reopens as it was left.
 - A deal has no "Add an item": the checklist stays based on the master checklist.
 - **Turn Off Item** is in an item's ⋯ menu; a turned-off item stays in place, dimmed.
-- A list can be pasted in or imported from any clearly laid-out file. The model reads it, every line is accounted for, and lines left out are listed with a checkbox to bring them in. A line brought in comes in exactly as written, its bullet or number included; every item's wording is kept exactly as the file gives it, and a line the model reads is stored as the line is written (its edge spaces aside), never as the model words it. Here accuracy comes before cost: the standard model reads the list, and the thorough model retries lines it couldn't place.
+- A list can be pasted in or imported from any clearly laid-out file. The model reads it, every line is accounted for,
+  and lines left out are listed with a checkbox to bring them in. A line brought in comes in exactly as written, its
+  bullet or number included; every item's wording is kept exactly as the file gives it, and a line the model reads is
+  stored as the line is written, edge spaces and tabs included, never as the model words it. Here accuracy comes
+  before cost: the standard model reads the whole list in one call and names each line's kind by a handle that no line's
+  own text can be taken for, and for a table the columns that hold the item, section and subsection, and the headings
+  of section and subsection rows, and the thorough model retries lines it couldn't place, by the first reading's
+  columns. Only a line the app built from cells (a table's rows, a paste's tab-separated lines) is read as a row of
+  cells; any other line is text and is never split or altered, even where it holds " | " or a backslash. A list
+  the service refuses as too long, or answers with a reply cut off, is read in halves, down to one line (#1227).
 - A spreadsheet row brought in keeps every cell, separated by tabs, as a spreadsheet copies a row (#1061).
 - An item that joins two conditions becomes two items, and "(if applicable)" goes only on an item that may not apply to every deal.
 - Findings is the worklist and the Checklist is the coverage record; nothing is opened or closed on the Checklist.

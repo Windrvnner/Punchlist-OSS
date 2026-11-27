@@ -12,7 +12,7 @@ import {
   loadChecklistSource, readChecklistColumns, rereadChecklistTable, tieChecklistLines,
 } from '../../src/app/listRead';
 import { firmOf, listId, norm } from '../../src/domain/checklist';
-import type { LineRead } from '../../src/domain/listRead';
+import type { LineRead, ListReply } from '../../src/domain/listRead';
 import { fail, ok, type Result } from '../../src/domain/result';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
 import { recoveryApp } from './recoveryKit';
@@ -46,24 +46,26 @@ async function readyApp() {
 
 function modelRead(line: string, index: number, last: number): LineRead[] {
   const n = index + 1;
-  if (index === 0) return [{ n, k: 'section', text: line }];
+  if (index === 0) return [{ n, k: 'section' }];
   if (index === last) return [{ n, k: 'left' }];
-  return line ? [{ n, k: 'item', text: line }] : [];
+  return line ? [{ n, k: 'item' }] : [];
 }
+
+const modelReading = (lines: string[]) => ({ lines: lines.flatMap((l, k) => modelRead(l, k, lines.length)) });
 
 async function preparePaste(app: Awaited<ReturnType<typeof readyApp>>, questions: string[]) {
   const paste = [HEADING, '', ...questions, questions[0], NOTE].join('\n');
   const source = checklistPaste(paste)!;
   const lines = checklistSourceLines(source, null)!;
   const answers = lines.flatMap((line, at) => modelRead(line, at, lines.length - 1));
-  const readList = vi.fn<NonNullable<typeof app.store.services.ai.readList>>(async ({ only }) =>
-    ok(only ? answers.filter(({ n }) => only.includes(n)) : answers.filter(({ n }) => n !== 4)));
+  const readList = vi.fn<NonNullable<typeof app.store.services.ai.readList>>(async ({ thorough }) =>
+    ok({ lines: thorough ? answers : answers.filter(({ n }) => n !== 4) }));
   app.store.services.ai.readList = readList;
   const reading = checklistReading(app.store, checklistRequests());
   const reads = value((await reading.sourceChanged(lines, false, READ_EVENTS))!);
   const tied = tieChecklistLines(lines, reads)!;
   const prepared = checklistItemsAsRead(false, null, { item: null, section: null }, tied)!;
-  expect(readList.mock.calls.map(([request]) => request.only)).toEqual([undefined, [4]]);
+  expect(readList.mock.calls.map(([request]) => request.thorough)).toEqual([undefined, true]);
   expect(checklistReadCounts(null, lines, source)).toEqual({ lines: 2_380, pasted: 2_380, rows: 0 });
   expect(tied.count).toEqual({ lines: 2_380, items: 2_377, headings: 1, blank: 1, more: 0, left: 1 });
   expect(tied.left).toEqual([2_380]);
@@ -207,13 +209,12 @@ it('resumes unfinished reading and skips the initial read for a kept result or f
     const primary = portfolioQuestions();
     const revised = [HEADING, ...primary.slice(1)];
     const { store } = app;
-    const model = vi.fn<NonNullable<typeof store.services.ai.readList>>(async ({ lines }) =>
-      ok(lines.flatMap((line, at) => modelRead(line, at, lines.length))));
+    const model = vi.fn<NonNullable<typeof store.services.ai.readList>>(async ({ lines }) => ok(modelReading(lines)));
     store.services.ai.readList = model;
     const events = { started: vi.fn(), finished: vi.fn() };
     const unfinished = checklistReading(store, checklistRequests(), { reads: null, readFailed: '' });
     const restored = value((await unfinished.sourceChanged(primary, false, events))!);
-    expect(restored.size).toBe(primary.length);
+    expect(restored.reads.size).toBe(primary.length);
     expect(await unfinished.sourceChanged(primary, false, events)).toBeUndefined();
 
     const complete = checklistReading(store, checklistRequests(), { reads: restored });
@@ -382,10 +383,9 @@ it('discards late model replies when the source changes or the dialog leaves', a
     const { store } = app;
     const lines = portfolioQuestions();
     const revised = [HEADING, ...lines.slice(1)];
-    let release!: (result: Result<LineRead[]>) => void;
-    const held = new Promise<Result<LineRead[]>>((resolve) => { release = resolve; });
-    const model = vi.fn<NonNullable<typeof store.services.ai.readList>>(async ({ lines: input }) =>
-      ok(input.flatMap((line, at) => modelRead(line, at, input.length))));
+    let release!: (result: Result<ListReply>) => void;
+    const held = new Promise<Result<ListReply>>((resolve) => { release = resolve; });
+    const model = vi.fn<NonNullable<typeof store.services.ai.readList>>(async (i) => ok(modelReading(i.lines)));
     model.mockReturnValueOnce(held);
     store.services.ai.readList = model;
     const requests = checklistRequests();
@@ -393,8 +393,9 @@ it('discards late model replies when the source changes or the dialog leaves', a
     const events = { started: vi.fn(), finished: vi.fn() };
     const earlier = reading.sourceChanged(lines, false, events);
     const newer = await reading.sourceChanged(revised, false, events);
-    expect(value(newer!).get(1)?.text).toBe(HEADING);
-    release(ok(lines.flatMap((line, at) => modelRead(line, at, lines.length))));
+    expect(model.mock.calls[1][0].lines).toBe(revised);
+    expect(value(newer!).reads.get(1)?.k).toBe('section');
+    release(ok(modelReading(lines)));
     expect(await earlier).toBeUndefined();
 
     const retry = reading.retry(revised, false, events);

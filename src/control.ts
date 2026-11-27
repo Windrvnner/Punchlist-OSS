@@ -295,7 +295,6 @@ const SPEC = {
       1_000,
     ),
     rewordReplyTokens: count(80, 'The same for one item\'s new wording on import.', 10, 2_000),
-    readLineTokens: count(40, 'The same for what one line of a list brought in is (a heading, an item and its words, or not an item).', 5, 1_000),
     phraseReplyTokens: count(80, 'The same for one question to the counterparty drafted by Add all unresolved.', 10, 2_000),
     ratingReplyTokens: count(25, 'The same for one finding\'s risk rating in the memo.', 5, 500),
     charsPerToken: count(3, 'Characters taken as one token when the app counts the text it sends (English averages about four, so three counts on the high side).', 1, 8),

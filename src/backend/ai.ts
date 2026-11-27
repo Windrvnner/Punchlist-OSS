@@ -58,7 +58,7 @@ import { coversPrompt, readCovers, tagsFor } from './covers';
 import {
   readJson, unfinished, list as listOf, strings, prose, PARAGRAPH_SEAM, int, pageOf, word, isObject,
 } from './lenient';
-import type { LineRead } from '../domain/listRead';
+import { listReadPrompt, listReply, readListInParts } from './listReadAi';
 import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK } from './limits';
 import { UNREAD_REPLY, UNUSABLE_REPLY, UNREACHED, CUT_ON_IT, CUT_BEFORE_IT, UNUSABLE_ON_IT } from './limits';
 import { inParts, partSize, type PartReply, type PartsDone } from './parts';
@@ -2642,44 +2642,25 @@ export function nodeAi(o: AiOptions) {
       return ok([...done.got].sort((a, b) => a[0] - b[0]).map(([at, r]) => ({ at, ...r })));
     },
     async readList(i) {
-      // What each line of a list is. The standard model reads it (the thorough one when asked, for lines left
-      // unplaced): accuracy matters more than cost here. Lines go in parts sized from the model's limits,
-      // each with the six lines before it for context; a reply lists the lines in order, so after a cut-off the lines past
-      // its last whole one are asked again. Nothing is checked here: the app checks each reading against its line.
+      // What each line of a list is, read whole in one call (#1227): the standard model, or the thorough one when
+      // asked, names each line's kind by number and a table's columns (listReadAi.ts). A request the service refuses as
+      // too long, or a reply cut off at the length limit (`split`: not asked for shorter), is asked again in halves
+      // (parts.ts `inParts`); a read that still fails fails whole, so half a list is never shown as all of it.
       let model: string;
       try {
         const m = await models();
         model = i.thorough ? m.thorough : m.standard;
       } catch (e) { return failure(e, UNREACHED); }
-      const lines = i.lines.map((l) => l.replace(/\s+$/, ''));
-      const wanted = (i.only ?? lines.map((_, k) => k + 1)).filter((n) => n >= 1 && n <= lines.length && lines[n - 1].trim());
-      if (!wanted.length) return ok([]);
-      const KINDS = new Set(['section', 'subsection', 'item', 'more', 'columns', 'left']);
-      const done = await inParts(wanted, partSize({ cap: 200, out: control.limits.readLineTokens, outLimit: outLimit(model), in: tokensEach(wanted.map((n) => lines[n - 1])), inLimit: inLimit(model) }), async (part) => {
-        // each asked line with the six before it; lines asked far apart (asked again) do not bring the lines between them
-        const asked = new Set(part); const near = new Set<number>(); for (const n of part) for (let m = Math.max(1, n - 6); m <= n; m++) near.add(m);
-        const shown = [...near].sort((a, b) => a - b).map((n, k, all) => `${k && all[k - 1] !== n - 1 ? '…\n' : ''}${n}${asked.has(n) ? ':' : ' (context only):'} ${lines[n - 1]}`).join('\n');
-        let reply: { lines?: unknown } | null; let cut = false;
-        try { reply = await askJson({ kind: 'readList', split: true, model, system: JSON_ONLY, prompt: `A firm's due diligence checklist for project-finance deals was pasted or imported as the numbered lines below. A table's row has its cells joined by " | ".\n${shown}\n\nSay what each line not marked "context only" is, one entry per line, in order, leaving none out:\n- "section" or "subsection": a heading that the items under it belong to;\n- "item": one thing to check; "text" is the item's words exactly as the line has them, with its leading number, letter or bullet as it is (for a table row, the cell that holds the item; "section" and "subsection" the row's own cells for those, left out when the cell is blank, as a blank cell takes the one above);\n- "more": the rest of the item on the line above (a long item wrapped onto the next line);\n- "columns": a table's heading row;\n- "left": anything else (a title, a note, a page number or footer, a date).\nNever reword, shorten or merge: take the words as they are.\nReply as JSON: {"lines": [{"n": 3, "k": "section", "text": "Site and real estate"}, {"n": 4, "k": "item", "text": "Title report for the whole site"}, {"n": 5, "k": "more"}, {"n": 6, "k": "left"}]}` }, ['lines']); }
-        catch (e) { if (!isCutOff(e)) throw e; cut = true; reply = (e as { partial?: { lines?: unknown } | null }).partial ?? null; }
-        if (!cut && (!reply || !Array.isArray(reply.lines))) {
-          throw Object.assign(new Error(UNREAD_REPLY), { code: 'unread' });
-        }
-        const rows = listOf(reply?.lines) as Record<string, unknown>[]; const kept = cut ? rows.slice(0, -1) : rows;
-        const got = new Map<number, LineRead>(); let last = -1;
-        const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '');   // only checked against the line, never kept
-        for (const x of kept) {
-          const n = int(x?.n); const at = n === null ? -1 : part.indexOf(n); const k = String(x?.k ?? '');
-          if (at < 0 || !KINDS.has(k) || got.has(at)) continue; last = Math.max(last, at);
-          const r: LineRead = { n: n!, k: k as LineRead['k'] };
-          if (text(x.text)) r.text = text(x.text); if (text(x.section)) r.section = text(x.section); if (text(x.subsection)) r.subsection = text(x.subsection);
-          got.set(at, r);
-        }
-        return { got, ...(cut ? { cut: range(last + 1, part.length) } : {}) };
-      });
-      // a reply that cannot be read or a part cut off even alone fails the read, so a person never sees half a list as all of it
-      if (done.stopped !== undefined) return stoppedOn(done.stopped);
-      return ok([...done.got.values()].sort((a, b) => a.n - b.n));
+      if (!i.lines.some((l) => l.trim())) return ok({ lines: [] });
+      try {
+        const done = await readListInParts(i.lines, async (span) => {
+          const prompt = listReadPrompt(i.lines, span);
+          const ask: Ask = { kind: 'readList', split: true, model, system: JSON_ONLY, prompt };
+          const reply = await askJson(ask, ['lines']);
+          return reply ? listReply(reply, i.lines, span) : null;
+        });
+        return done.read ? ok(done.read) : stoppedOn(done.stopped);
+      } catch (e) { return failure(e, UNREAD_REPLY); }
     },
     async phrase(i) {
       // One question for the counterparty per point, in parts sized to the fast model's limits (parts.ts; decisions:

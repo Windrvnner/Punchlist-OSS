@@ -532,37 +532,6 @@ describe('the duplicate check on a list of deal size', () => {
   }, 30_000);
 });
 
-describe('reading a list in, line by line', () => {
-  const isRead = (c: Call) => c.prompt.includes('Say what each line not marked "context only" is');
-  /** the lines a call asks about, by number, and the context lines shown before them */
-  const asked = (c: Call) => c.prompt.split('\n').filter((l) => /^\d+: /.test(l)).map((l) => Number(l.split(':')[0]));
-  const context = (c: Call) => c.prompt.split('\n').filter((l) => /^\d+ \(context only\): /.test(l)).map((l) => Number(l.split(' ')[0]));
-  const list = ['1. Site', '', '1.1 Title report', 'Page 2 of 6', ...Array.from({ length: 400 }, (_, i) => `1.${i + 2} Item ${i + 2} is in place`)];
-  it('asks about every line that is not blank, with the lines before each part for context, and keeps each reading by its line number', async () => {
-    const s = setup((c) => (!isRead(c) ? {} : { lines: asked(c).map((n) => (n === 1 ? { n, k: 'section', text: 'Site' } : n === 4 ? { n, k: 'left' } : { n, k: 'item', text: list[n - 1].replace(/^[\d.]+ /, '') })).concat([{ n: 2, k: 'item', text: 'a blank line' } as never, { n: 9999, k: 'item' } as never, { n: 5, k: 'nonsense' } as never]) }), {}, { shared: new Mem(), installId: 'pc' });
-    const out = val(await s.ai.readList!({ lines: list }));
-    const calls = s.calls.filter(isRead);
-    expect(calls.flatMap(asked)).toEqual(list.flatMap((l, i) => (l.trim() ? [i + 1] : [])));
-    expect(calls.length).toBeGreaterThan(1);
-    // each part after the first shows the six lines before it for context, and asks nothing about them
-    for (const c of calls.slice(1)) expect(context(c)).toEqual(range(asked(c)[0] - 6, asked(c)[0]));
-    expect(out.length).toBe(403); expect(out.find((r) => r.n === 2)).toBeUndefined();
-    expect(out.slice(0, 3)).toEqual([{ n: 1, k: 'section', text: 'Site' }, { n: 3, k: 'item', text: 'Title report' }, { n: 4, k: 'left' }]);
-  });
-  it('asks about just the lines named, on the thorough model when asked to', async () => {
-    const s = setup((c) => (!isRead(c) ? {} : { lines: asked(c).map((n) => ({ n, k: 'left' })) }), {}, { shared: new Mem(), installId: 'pc' });
-    const out = val(await s.ai.readList!({ lines: list, only: [4, 50], thorough: true }));
-    const calls = s.calls.filter(isRead);
-    expect(calls.flatMap(asked)).toEqual([4, 50]); expect(calls.map((c) => c.model)).toEqual(['thorough']);
-    expect(out.map((r) => r.n)).toEqual([4, 50]);
-  });
-  it('a reply that cannot be read fails the read, so half a list is never shown as all of it', async () => {
-    const s = setup((c) => (isRead(c) ? 'not JSON at all' : {}), {}, { shared: new Mem(), installId: 'pc' });
-    const r = await s.ai.readList!({ lines: list.slice(0, 5) });
-    expect(r.ok).toBe(false);
-  });
-});
-
 describe('model-written text is kept whole up to one Excel cell (#1104)', () => {
   const isPhrase = (c: Call) => c.prompt.includes('Write one question for the counterparty');
   const point = [{ kind: 'gap' as const, id: recordId('gap', 0), what: 'Point 1', need: 'The signed copy' }];
