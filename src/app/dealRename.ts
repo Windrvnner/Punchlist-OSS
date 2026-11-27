@@ -1,22 +1,26 @@
 import { cleanName, EditDeal } from './commands/deals';
-import { type FieldDraft, unsavedFields } from './fieldDrafts';
 import { fieldSaveOutcome, type FieldSaveOutcome } from './fieldSave';
+import { hasTexts, keptDrafts } from './keptText';
 import type { Store } from './store';
 
 type RenameInput = { render(): void; close(): void; focus(): void };
+type NameDraft = { text: string; base: string };
+
+/** A deal name being typed, by deal, kept on this PC until it is saved or let go: `base` is the name typed over. */
+const keptNames = keptDrafts('deal-name', hasTexts('text', 'base'));
 
 /** Saves the deal name on Enter or blur, its typing kept like an edit field's. Escape restores the entry draft. */
 export class DealRename {
   editing = false;
   changedElsewhere = false;
-  private entry?: FieldDraft;
-  private over = { base: '', rev: 0 };   // the name typed over
+  private entry?: NameDraft;
+  private over = { base: '' };   // the name typed over
   private saving = false;
   private gone = false;
 
   constructor(private store: Store, private id: string, private input: RenameInput) {}
 
-  get kept() { return unsavedFields.get('deal-name:' + this.id); }
+  get kept() { return keptNames.get(this.id); }
   get text() { return this.kept?.text ?? this.over.base; }
   typed(text: string) { this.keep({ ...this.over, text }); }
   escape() { this.close(this.entry); }
@@ -24,20 +28,19 @@ export class DealRename {
   dispose() { this.gone = true; }
 
   open() {
-    const { name, rev } = this.store.get().deals[this.id];
     this.entry = this.kept;
-    this.over = this.entry ?? { base: name, rev };
+    this.over = this.entry ?? { base: this.store.get().deals[this.id].name };
     this.editing = true;
     this.changedElsewhere = false;
     this.input.render();
   }
 
-  private keep(draft: FieldDraft | undefined) {
-    if (draft) unsavedFields.set('deal-name:' + this.id, draft);
-    else unsavedFields.delete('deal-name:' + this.id);
+  private keep(draft: NameDraft | undefined) {
+    if (draft) keptNames.set(this.id, draft);
+    else keptNames.delete(this.id);
   }
 
-  private close(draft: FieldDraft | undefined) {
+  private close(draft: NameDraft | undefined) {
     this.keep(draft);
     this.editing = false;
     this.input.close();
@@ -49,7 +52,7 @@ export class DealRename {
     const name = cleanName(this.text);
     if (!name && event !== 'blur') return this.store.toast('A deal needs a name', 'warn');
     if (!name || name === deal.name) return this.takeTheirs();
-    if (event === 'mine') this.over = { base: deal.name, rev: deal.rev };
+    if (event === 'mine') this.over = { base: deal.name };
     const sent = { ...this.over, text: this.text };
     this.saving = true;
     const result = await this.store.dispatch(EditDeal, { dealId: this.id, name }, { quiet: true, over: sent.base });
@@ -62,16 +65,16 @@ export class DealRename {
   }
 
   /** Newer typing and the entry draft now lie over the name just saved, as FieldSave adopts a base (#1204). */
-  private adoptSaved(sent: FieldDraft) {
+  private adoptSaved(sent: NameDraft) {
     const deal = this.store.get().deals[this.id];
     const kept = this.kept;
     if (!deal || !kept) return;
-    this.over = { base: deal.name, rev: deal.rev };
+    this.over = { base: deal.name };
     this.keep({ ...kept, ...this.over });
     this.entry = this.entry?.text === sent.text ? undefined : this.entry && { ...this.entry, ...this.over };
   }
 
-  private show(outcome: FieldSaveOutcome, sent: FieldDraft) {
+  private show(outcome: FieldSaveOutcome, sent: NameDraft) {
     if (outcome.kind === 'saved') return this.kept || !this.editing ? this.input.render() : this.close(undefined);
     this.entry = sent;
     this.changedElsewhere = outcome.kind === 'changedElsewhere';

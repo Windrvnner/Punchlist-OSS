@@ -28,7 +28,7 @@ async function fixture(kept?: string) {
   const id = await recoveryDeal(app);
   const local = new MemoryLocal();
   if (kept !== undefined) {
-    local.write(KEPT_TEXT_KEY, { 'edit-field': [[`deal-name:${id}`, { text: kept, base: original, rev: 1 }]] });
+    local.write(KEPT_TEXT_KEY, { 'deal-name': [[id, { text: kept, base: original }]] });
   }
   async function start() {
     vi.resetModules();
@@ -63,7 +63,8 @@ it('keeps typing through a pause and sends only the edge-trimmed command on Ente
 });
 
 it.each(['enter', 'blur'] as const)('saves a restored untouched rename on %s', async (event) => {
-  const { field, deal } = await fixture(raw);
+  const { field, header, deal } = await fixture(raw);
+  expect(header().kept).toEqual({ text: raw, base: original });
   expect(field.kept?.text).toBe(raw);
   await field.submit(event);
   expect(deal().name).toBe(stored);
