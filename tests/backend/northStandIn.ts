@@ -33,18 +33,41 @@ const TYPES: Record<number, string> = { 400: 'invalid_request_error', 401: 'auth
 /** a JWT with the given payload; the stand-in reads `exp` and does not check the signature */
 export const jwt = (payload: Record<string, unknown>) => [{ alg: 'RS256', typ: 'JWT' }, payload].map((p) => Buffer.from(JSON.stringify(p)).toString('base64url')).join('.') + '.c2ln';
 
-export async function northStandIn(o: { ssoToken?: string | (() => string); answer?: (body: ChatBody, files: StandInFile[]) => string | { text?: string; finish?: string; calls?: { name: string; arguments: string }[] }; tokens?: string[]; processAfter?: number; pageSize?: number; failFile?: RegExp; rejectToolResults?: boolean; fileTool?: string } = {}) {
+/** the model list the stand-in serves, in place of its default */
+type ModelNames = { name: string; display_name: string }[];
+
+interface StandInOptions {
+  ssoToken?: string | (() => string);
+  answer?: (body: ChatBody, files: StandInFile[]) => string | {
+    text?: string;
+    finish?: string;
+    calls?: { name: string; arguments: string }[];
+  };
+  tokens?: string[];
+  processAfter?: number;
+  pageSize?: number;
+  models?: ModelNames;
+  failFile?: RegExp;
+  rejectToolResults?: boolean;
+  fileTool?: string;
+}
+
+export async function northStandIn(o: StandInOptions = {}) {
   const tokens = new Set(o.tokens ?? ['good-token']);
   const files = new Map<string, StandInFile>();
   const chats: ChatBody[] = []; const seen: { method: string; path: string; auth?: string }[] = []; const conversations = new Set<string>();
   const faults: Fault[] = [];
   let n = 0, requests = 0;
-  const models = [
+  const models = (o.models?.map((m, i) => ({ id: `m${i + 1}`, ...m })) ?? [
     { id: 'm1', name: 'model-fast', display_name: 'Model Fast' },
     { id: 'm2', name: 'model-standard', display_name: 'Model Standard' },
     { id: 'm3', name: 'model-thorough', display_name: 'Model Thorough' },
     { id: 'm4', name: 'command-a', display_name: 'Command A', max_tokens: 4000, context_length: 128_000 },
-  ].map((m) => ({ ...m, provider: { name: 'cohere_platform', instance: 'p1' }, created_at: 1_700_000_000_000 }));
+  ]).map((m) => ({
+    ...m,
+    provider: { name: 'cohere_platform', instance: 'p1' },
+    created_at: 1_700_000_000_000,
+  }));
   const page = o.pageSize ?? 2;
   const fileObject = (f: StandInFile) => ({ object: 'file', id: f.id, filename: f.filename, bytes: f.bytes.length, created_at: f.created_at, status: f.failed ? 'error' : f.looks >= (o.processAfter ?? 1) ? 'processed' : 'uploaded', ...(f.failed ? { status_details: f.failed } : {}) });
   /** one page of a list, and the token for the next (the offset, as an opaque-looking string) */
