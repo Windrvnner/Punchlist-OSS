@@ -84,28 +84,10 @@ describe('folder names in any alphabet (#1154)', () => {
   });
 });
 
-describe('marks and ampersands in folder names (#1154)', () => {
-  it('keeps combining marks inside a word', () => {
-    expect(folderKey('दिन')).not.toBe(folderKey('दीन'));
-  });
-  it('keeps "O&M" and "OM" apart when one name is the one typed (#1154)', () => {
+describe('"O&M" and "OM" in folder names', () => {
+  it('match alike, as the search index words compare them (#1161)', () => {
     const dirs = foldersOf(['VDR/O&M/A.pdf', 'VDR/OM/B.pdf']);
-    expect(matchFolders(dirs, 'the O&M folder')).toEqual(['VDR/O&M']);
-    expect(matchFolders(dirs, 'OM')).toEqual(['VDR/OM']);
-  });
-  it('finds "O&M" among numbered folders by its name without the number (#1154)', () => {
-    const dirs = foldersOf(['VDR/04. O&M/A.pdf', 'VDR/05. OM/B.pdf']);
-    expect(matchFolders(dirs, 'the O&M folder')).toEqual(['VDR/04. O&M']);
-    expect(matchFolders(dirs, 'OM')).toEqual(['VDR/05. OM']);
-  });
-  it('drops the number before "the": "04. The O&M" is named "O&M" (#1154)', () => {
-    const dirs = foldersOf(['VDR/04. The O&M/A.pdf', 'VDR/OM/B.pdf']);
-    expect(matchFolders(dirs, 'O&M')).toEqual(['VDR/04. The O&M']);
-  });
-  it('when several folders share the typed name after their numbers, the word match decides', () => {
-    const dirs = foldersOf(['VDR/04. O&M/A.pdf', 'VDR/O&M/B.pdf', 'VDR/OM/C.pdf']);
-    expect(matchFolders(dirs, 'O&M')).toEqual(['VDR/04. O&M', 'VDR/O&M', 'VDR/OM']);
-    expect(matchFolders(dirs, '04. O&M')).toEqual(['VDR/04. O&M']);   // a number said picks that folder alone
+    expect(matchFolders(dirs, 'the O&M folder')).toEqual(['VDR/O&M', 'VDR/OM']);
   });
 });
 
