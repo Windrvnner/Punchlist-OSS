@@ -76,14 +76,14 @@ export function keptIssuesList(key: string): IssuesListKept | null {
   return readable ? kept : null;
 }
 
-/** The paste typed into the box and not yet read, as it was kept; nothing if what was kept is not text (#1021). */
+/** The paste typed into the box and not yet read, as it was kept; nothing if what was kept is not text (#1229). */
 export function keptIssuesPaste(key: string): string {
   const paste = keptImport(key)?.paste;
   return typeof paste === 'string' ? paste : '';
 }
 
 /**
- * Keeps the paste box as typed, so closing or a reload loses none of it (#1021). Nothing is written for an empty box
+ * Keeps the paste box as typed, so closing or a reload loses none of it (#1229). Nothing is written for an empty box
  * unless one was kept; opened past a kept import it could not show (`fresh`), that one is left until something is
  * typed.
  */
@@ -100,7 +100,7 @@ export interface IssuesListSubmission {
 
 /**
  * Imports the list. The kept list is let go first, so a reload while it runs never offers it again; a failure keeps
- * it again as it is then (`now`), not as Import found it. A paste typed and not read is kept again with it (#1021).
+ * it again as it is then (`now`), not as Import found it. A paste typed and not read is kept again with it (#1229).
  */
 export async function submitIssuesList(
   store: Store, key: string, { dealId, list, points }: IssuesListSubmission, now: () => IssuesListKept | null,

@@ -70,7 +70,7 @@ it('lets the kept list go while the import runs and keeps it again when the impo
     restore();
     expect(refused.ok).toBe(false);
     expect(keptIssuesList(key)).toMatchObject({ list, kept: new Set([5, 9]) });
-    // the paste typed and not read survives the failed import, and goes with a successful one (#1021)
+    // the paste typed and not read survives the failed import, and goes with a successful one (#1229)
     expect(keptIssuesPaste(key)).toBe('1. a');
     const held = holdRecoveryWrite(app, (tx) => tx.writes.some((write) => write.kind === 'finding'));
     const sending = submitIssuesList(app.store, key, { dealId, list, points: input }, now);
