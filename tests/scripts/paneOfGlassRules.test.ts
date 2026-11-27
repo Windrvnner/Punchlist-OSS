@@ -46,6 +46,16 @@ describe('pane-of-glass rule kinds', () => {
     ['const input = <input max={-1} />;', 'limit'],
     ['const input = <input min="1" />;', 'limit'],
     ['async function f() { for await (const x of xs) use(x); }', 'loop'],
+    ['rows.forEach(use);', 'list'],
+    ['rows.reverse();', 'list'],
+    ['rows.toReversed();', 'list'],
+    ['rows.indexOf(row);', 'list'],
+    ['rows.lastIndexOf(row);', 'list'],
+    ['Object.groupBy(rows, keyOf);', 'list'],
+    ['Map.groupBy(rows, keyOf);', 'list'],
+    ['rows.length = 3;', 'limit'],
+    ['const over = seen.size > 5;', 'limit'],
+    ['const over = 5 <= seen.size - 1;', 'limit'],
   ])('records %s as %s on line 1', (source, kind) => {
     expect(newKinds(source)[kind]).toEqual([1]);
   });
@@ -60,6 +70,15 @@ describe('pane-of-glass rule kinds', () => {
     'const more = i < rows.length * 2;',
     'const input = <input min="abc" />;',
     '// setTimeout(save, 500) rows.filter(a)\nconst name = "setTimeout";',
+    'forEach(rows, use);',
+    'const flip = rows.reverse;',
+    'indexOf(rows, row);',
+    'lodash.groupBy(rows, keyOf);',
+    'rows.groupBy(keyOf);',
+    'row.count = 3;',
+    'const count = rows.length;',
+    'const empty = seen.size === 0;',
+    'const more = seen.size * 2 > 5;',
   ])('records nothing for %s', (source) => {
     expect(newKinds(source)).toEqual({});
   });
