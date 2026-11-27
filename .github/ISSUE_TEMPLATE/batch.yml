@@ -15,7 +15,7 @@ body:
     attributes:
       label: Fixes
       description: "One line per fix: `- #N summary`. No checkboxes. Attach each fix as a sub-issue of this batch."
-      value: "- #"
+      placeholder: "- #N summary"
     validations:
       required: true
   - type: textarea
@@ -38,3 +38,4 @@ body:
       label: Status
       description: The label is set to To decide; change it when this says otherwise.
       options: [To decide, To design, Decided, Building, On hold, Later]
+      default: 0

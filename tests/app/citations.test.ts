@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  byDocument, canAddToSources, fewDocuments, inSources, menuSections, newerThan, popDocuments, shownDrafts, sourceChips,
+  byDocument, pageOf, canAddToSources, fewDocuments, inSources,
+  menuSections, newerThan, popDocuments, shownDrafts, sourceChips,
 } from '../../src/app/citations';
 import type { DocRef } from '../../src/app/conversations';
 import type { Source } from '../../src/domain/model';
@@ -133,4 +134,13 @@ describe('Add to Sources', () => {
     expect(canAddToSources(finding, { doc: 'Land lease.pdf', state: 'done' })).toBe(false);
     expect(canAddToSources(finding, { doc: 'Credit agreement (draft 3).pdf', docId: 'doc_ca3' })).toBe(false);
   });
+});
+
+it('reads numeric pages while reading-mode groups distinguish the original digits', async () => {
+  expect(pageOf('p. 12 · cl. 4')).toBe(12);
+  expect(pageOf('Ops!F12')).toBeNull();
+  const { findDoc } = await import('../../src/app/conversations');
+  const source = { doc: 'Permit.pdf', docId: 'permit', loc: 'p. 0012' };
+  const doc = { ...source, from: 'From the finding' };
+  expect(findDoc([{ ...doc, loc: 'p. 12' }, doc], source)).toBe(1);
 });

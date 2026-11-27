@@ -13,14 +13,17 @@ export type FieldSaveOutcome =
   | { kind: 'saved'; written: boolean }
   | { kind: 'changedElsewhere' }
   | { kind: 'refused'; reason: string }
-  | { kind: 'failed'; unreachable: boolean };
+  | { kind: 'failed'; unreachable: boolean; reason: string };
 
-function fieldSaveOutcome(result: FieldCommitResult): FieldSaveOutcome {
+/** A field's conflict is only a changed value; a deal rename treats any record conflict as one (#1204). */
+export function fieldSaveOutcome(result: FieldCommitResult, conflicts: 'field' | 'record'): FieldSaveOutcome {
   if (result.ok) return { kind: 'saved', written: !result.value?.unchanged };
   const { error } = result;
-  if (error?.kind === 'conflict' && isChangedElsewhere(error)) return { kind: 'changedElsewhere' };
+  if (error?.kind === 'conflict' && (conflicts === 'record' || isChangedElsewhere(error))) {
+    return { kind: 'changedElsewhere' };
+  }
   if (error?.kind === 'invalid' || error?.kind === 'rejected') return { kind: 'refused', reason: error.message };
-  return { kind: 'failed', unreachable: error?.kind === 'unreachable' };
+  return { kind: 'failed', unreachable: error?.kind === 'unreachable', reason: error?.message ?? '' };
 }
 
 export type FieldSaveView = {
@@ -232,7 +235,7 @@ export class FieldSave {
     const again = this.resending;
     this.resending = false;
     const over = this.base;
-    const outcome = fieldSaveOutcome(await commit(text, over));
+    const outcome = fieldSaveOutcome(await commit(text, over), 'field');
     this.saving--;
     this.handleOutcome(text, over, outcome, commit, again);
     return outcome;

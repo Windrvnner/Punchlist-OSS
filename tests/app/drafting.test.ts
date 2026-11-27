@@ -1,17 +1,19 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from 'vitest';
 import { MemoryLocal } from '../../src/adapters/local';
-import { ApplyDraft, RestoreQuestionSnapshot } from '../../src/app/commands/drafts';
+import { ApplyDraft, RequestDraft, RestoreQuestionSnapshot } from '../../src/app/commands/drafts';
 import { ImportQuestions } from '../../src/app/commands/importQuestions';
 import { RecordQaLogExport, RestoreQaVersion } from '../../src/app/commands/qaLogs';
 import { SetResponse } from '../../src/app/commands/questions';
 import { registry } from '../../src/app/commands/undo';
 import {
-  editResponseMerge, hasLogVersion, keepResolvedMerges, keepResponseVersion, lastQuestionEditor, requestQuestionDraft,
+  canRequestDraft, eligibleForDraft, editResponseMerge, hasLogVersion, keepResolvedMerges,
+  keepResponseVersion, lastQuestionEditor, requestQuestionDraft,
   responseMergeView, selectResponseMerge, setResponseMergeSide, useQuestionDraft, watchResponseMerges,
 } from '../../src/app/drafting';
 import { initializeKeptText, saveKeptDrafts } from '../../src/app/keptText';
 import { keepImportedLog } from '../../src/app/qaLog';
+import { wordingHash } from '../../src/domain/model';
 import { dealQuestions } from '../../src/app/state';
 import type { Store } from '../../src/app/store';
 import type { Question } from '../../src/domain/model';
@@ -357,4 +359,29 @@ it('leaves a kept merge alone until its question and deal are loaded', () => {
   const stop = keepResolvedMerges(store, handFieldText);
   stop();
   expect(responseMergeView('q_not_loaded').draft).toEqual({ text: TYPED, ai: '' });
+});
+
+it('shares single-request rules while Draft all limits replacements on a portfolio', async () => {
+  const { store, dealId, question } = await fixture(QUESTIONS.length);
+  const q = question(2020);
+  const draft = { status: 'found' as const, forWording: wordingHash(q.text), text: DRAFT, sources: [],
+    at: q.updatedAt, opId: 'op_example' };
+  for (const [record, single, batch] of [
+    [q, true, true], [{ ...q, draft }, true, false], [{ ...q, draft: { ...draft, status: 'failed' } }, true, true],
+    [{ ...q, text: q.text + '?', draft }, true, true], [{ ...q, response: TYPED }, true, false],
+    [{ ...q, text: ' ' }, false, false], [{ ...q, status: 'closed' }, false, false],
+  ] as const) {
+    expect(canRequestDraft(record)).toBe(single);
+    expect(eligibleForDraft(record)).toBe(batch);
+  }
+  const target = { dealId, questionId: q.id };
+  for (const [record, empty, message] of [
+    [{ status: 'closed', text: '', response: TYPED }, true, 'This question already has a response'],
+    [{ status: 'closed', text: '', response: TYPED }, false, 'Only an open question can be drafted'],
+    [{ status: 'open', text: '   ' }, false, 'Write the question first'],
+  ] as const) {
+    Object.assign(store.get().questions[q.id], record);
+    expect(await store.dispatch(RequestDraft, { ...target, empty }, { quiet: true }))
+      .toMatchObject({ ok: false, error: { message } });
+  }
 });

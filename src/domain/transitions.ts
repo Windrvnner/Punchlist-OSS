@@ -18,10 +18,19 @@ const QUESTION_MOVES: Record<QuestionStatus, QuestionStatus[]> = {
   closed: ['open', 'answered'],
 };
 
+function statusRefusal(q: Question, to: QuestionStatus) {
+  if (q.status !== to && !QUESTION_MOVES[q.status].includes(to)) {
+    return `A question cannot go from ${q.status} to ${to}`;
+  }
+  if (to === 'answered' && !q.response.trim()) return 'A question is answered only when it has a response';
+}
+
+export const canSetQuestionStatus = (q: Question, to: QuestionStatus) => !statusRefusal(q, to);
+
 export function setQuestionStatus(q: Question, to: QuestionStatus, ctx: Ctx): Result<Changed<Question>> {
   if (q.status === to) return ok({ record: q, audit: [] });
-  if (!QUESTION_MOVES[q.status].includes(to)) return fail(rejected(`A question cannot go from ${q.status} to ${to}`));
-  if (to === 'answered' && !q.response.trim()) return fail(rejected('A question is answered only when it has a response'));
+  const refusal = statusRefusal(q, to);
+  if (refusal) return fail(rejected(refusal));
   return ok({ record: { ...q, status: to, updatedAt: ctx.at }, audit: [{ kind: 'status', field: 'status', from: q.status, to }] });
 }
 
