@@ -46,7 +46,15 @@ describe('two PCs share a deal\'s checks', () => {
   it('1. started together: every piece is done once, the work is split, and both show the same results and codes', async () => {
     // meet: the office's model calls wait until the laptop has joined, so "together" holds on a busy machine too; otherwise the
     // office could finish every block before the laptop's first (#131)
-    const p = await pair({ meet: true, items: 100, scriptA: { finding: (n) => n % 9 === 0 }, scriptB: { finding: (n) => n % 9 === 0 } });
+    // stallFreeClock: a PC starved of CPU for a lapse does not take itself to have slept and redo its batch (#1230)
+    const p = await pair({
+      meet: true,
+      items: 100,
+      scriptA: { finding: (n) => n % 9 === 0 },
+      scriptB: { finding: (n) => n % 9 === 0 },
+      nowA: stallFreeClock(),
+      nowB: stallFreeClock(),
+    });
     try {
       await Promise.all([aiOf(p.A).firstPass(p.dealId), aiOf(p.B).firstPass(p.dealId)]); await allEnded(p);
       // if both opened a round before either saw the other's (within one sync gap), the two were merged, and what each did before then may have been done by both (accepted in the design); otherwise every item once
@@ -62,7 +70,8 @@ describe('two PCs share a deal\'s checks', () => {
   }, 60000);
 
   it('2. a second PC joins half-way: it takes its share at its next batch, and nothing is done twice beyond the one block the known limit allows', async () => {
-    const p = await pair({ items: 100, scriptA: { delay: 60 } });
+    // stallFreeClock: a PC starved of CPU for a lapse does not take itself to have slept and redo its batch (#1230)
+    const p = await pair({ items: 100, scriptA: { delay: 60 }, nowA: stallFreeClock(), nowB: stallFreeClock() });
     try {
       const a = aiOf(p.A).firstPass(p.dealId);
       await until('the office to be part-way', () => checks(p.svcA).length >= 2);
@@ -702,7 +711,10 @@ describe('two PCs share a deal\'s checks', () => {
   }, 60000);
   it('20e. a document indexed while this PC runs its own first pass alone: the pass carries on rather than being '
     + 'written off, and no item goes to the model twice', async () => {
-    const p = await pair({ items: 80, one: true, scriptA: { delay: 60, finding: (n) => n % 10 === 3 } });
+    // stallFreeClock: indexing the new document can starve the PC of CPU for a lapse, not a sleep (#1230)
+    const p = await pair({
+      items: 80, one: true, scriptA: { delay: 60, finding: (n) => n % 10 === 3 }, nowA: stallFreeClock(),
+    });
     try {
       const run = aiOf(p.A).firstPass(p.dealId);
       const checked = () => checks(p.svcA).filter(([m]) => m !== 'fast').length;
