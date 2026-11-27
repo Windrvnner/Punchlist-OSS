@@ -26,6 +26,22 @@ export function link(a: string, b: string, every = 20) {
   return { pause(way: 'ab' | 'ba' | 'both') { if (way !== 'ba') on.ab = false; if (way !== 'ab') on.ba = false; }, resume() { on.ab = true; on.ba = true; }, stop() { clearInterval(timer); }, now() { one(a, b); one(b, a); } };
 }
 
+/**
+ * A PC's clock that does not count a stall. Time moves with the real clock, except that a pause longer than `step`
+ * between two readings counts as `step`: a machine that is starved of CPU for longer than a lapse has not slept, and
+ * the app takes a PC that was silent that long for one that slept, and drops the batch it had in flight (#1230).
+ */
+export function stallFreeClock(step = 100) {
+  let last = Date.now();
+  let now = last;
+  return () => {
+    const real = Date.now();
+    now += Math.min(real - last, step);
+    last = real;
+    return now;
+  };
+}
+
 export const ITEM = (i: number) => ({ id: `c${i}`, text: `Clause ${i} of the finance documents is in order` });
 export const numOf = (text: string) => +(/Clause (\d+)/.exec(text)?.[1] ?? 0);
 
