@@ -1,1 +1,3 @@
-["Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."]
+[
+  "Formatting a value for display, and screen-only state such as focus, an open menu, or scroll position, stay in `src/ui` (#1384)."
+]
