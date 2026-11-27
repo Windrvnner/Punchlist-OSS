@@ -220,8 +220,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Key risks lists every High risk, then the oldest Medium risks up to `memo.keyRisks`, A to Z within each severity.
 - The memo keeps usable risk groups when other entries in the model's reply are malformed.
   Each open finding has one risk, on its own if the model left it out (#658).
-- The memo limits a key risk write-up to two paragraphs and 200 words. If retries yield no usable write-up,
-  it uses the findings' own cited words (#659).
+- The memo asks for a key risk write-up of at most two paragraphs and 200 words. A longer one is sent back to be
+  shortened through the usual retry and escalation, and is kept as the model wrote it if it stays long (#659, #806).
 - The memo reports facts only: no recommendation, mitigants, next steps, or judging words.
 - A memo whose one-page summary can't be written fails with Retry and is not saved (#1065).
 - **Deal Memo…** in the deal header's ⋯ menu asks where to save (Word or PDF), then makes the memo; there is no review step.
@@ -363,6 +363,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Keep friction low, with as few controls and steps as possible.
 - The attribution check allows a `Co-authored-by` trailer naming exactly the repository's own coding-agent identity (set in `scripts/aiAttribution.mjs`) and refuses every other AI co-author trailer (#877).
 - Never guess identities. Never cite finding codes.
+- The unused references module is removed (#770).
 - Deleting a finding or a question asks first ("Delete Q38?", with **Keep It** or **Delete**), as do removing a folder and a list swap that turns items off; each keeps its Undo.
 - Close every gap as soon as it is found; fix confirmed Critical and Major issues rather than stopping to report them.
 - Say how an ambiguous instruction is being read. Ask about a product decision before it is built.
