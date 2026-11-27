@@ -187,9 +187,6 @@ export function encodeLike(text: string, like: Uint8Array): Uint8Array {
     case 'utf-8': return new TextEncoder().encode(text);
     case 'utf-16le-bom': return new Uint8Array([0xff, 0xfe, ...utf16Bytes(text, false)]);
     case 'utf-16be-bom': return new Uint8Array([0xfe, 0xff, ...utf16Bytes(text, true)]);
-    case 'utf-16le': return new Uint8Array(utf16Bytes(text, false));
-    case 'utf-16be': return new Uint8Array(utf16Bytes(text, true));
-    case 'windows-1252-bom': return new Uint8Array([0xef, 0xbb, 0xbf, ...cp1252(text)]);
     default: return new Uint8Array(cp1252(text));
   }
 }
@@ -217,6 +214,12 @@ export function readCsv(bytes: Uint8Array, opts?: { sheet?: string; headerRow?: 
     const message = 'That file is a workbook saved with a .csv name. Rename it to .xlsx and try again';
     return fail({ kind: 'invalid' as const, message });
   }
-  const table = tableFrom([{ name: 'Sheet1', grid: parseCsv(decodeText(bytes)) }], opts);
+  let text: string;
+  try {
+    text = decodeText(bytes);
+  } catch (e) {
+    return fail({ kind: 'invalid' as const, message: (e as Error).message });
+  }
+  const table = tableFrom([{ name: 'Sheet1', grid: parseCsv(text) }], opts);
   return table ? ok(table) : fail({ kind: 'invalid' as const, message: 'The file has no rows' });
 }
