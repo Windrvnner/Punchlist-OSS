@@ -70,6 +70,10 @@ describe('pane-of-glass rule kinds', () => {
     expect(newKinds('rows\n  .filter(a)\n  .slice(0, 3);').list).toEqual([2, 3]);
   });
 
+  it('records two limit attributes on one element once each, on the same line', () => {
+    expect(newKinds('const input = <input min="1" max={9} />;').limit).toEqual([1, 1]);
+  });
+
   it('keeps the existing kinds running beside the new ones', () => {
     const found = matchesIn(file, 'localStorage.getItem("a");\nfetch(url).then(x => x.slice(1));');
     expect(found.storage).toEqual([1]);

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  allowanceProblems, committedJson, decisionEntries, groupMatches,
+  allowanceProblems, committedJson, decisionEntries, groupMatches, lowerAllowance, unlistedMatches,
 // @ts-expect-error the script is plain JavaScript
 } from '../../scripts/allowance.mjs';
 
@@ -20,6 +20,12 @@ describe('groupMatches', () => {
   it('groups identical lines into one entry with a count', () => {
     const match = { file, kind: 'list', line: '  x.filter(Boolean)' };
     expect(groupMatches([match, match])).toEqual(found(2));
+  });
+
+  it('carries the line numbers of matches that have them, outside the key', () => {
+    const match = { file, kind: 'list', line };
+    const grouped = groupMatches([{ ...match, number: 4 }, { ...match, number: 9 }]);
+    expect(grouped).toEqual([{ ...found(2)[0], lines: [4, 9] }]);
   });
 
   it('sorts by file, kind and line', () => {
@@ -187,5 +193,17 @@ describe('committedJson', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'allowance-'));
     directories.push(dir);
     expect(committedJson('a.json', dir)).toBeNull();
+  });
+});
+
+describe('unlistedMatches and lowerAllowance', () => {
+  it('reports each group by how many matches it is short of', () => {
+    expect(unlistedMatches(found(3), [entry({ count: 1 })])).toEqual([{ ...found(3)[0], missing: 2 }]);
+    expect(unlistedMatches(found(1), [entry({ count: 1 })])).toEqual([]);
+  });
+
+  it('lowers counts to the matches and drops entries without one', () => {
+    const other = entry({ line: 'gone()' });
+    expect(lowerAllowance(found(1), [entry({ count: 4 }), other])).toEqual([entry({ count: 1 })]);
   });
 });

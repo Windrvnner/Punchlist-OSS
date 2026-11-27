@@ -170,12 +170,10 @@ describe('UI dependency checks', () => {
     const result = repo.run();
     expect(result.status).toBe(1);
     const flagged = { services: [1, 3, 6, 7, 10], storage: [2, 4, 8, 9], repo: [5, 7] };
-    for (const [kind, numbers] of Object.entries(flagged)) {
-      for (const number of numbers) {
-        expect(result.stderr).toContain(`${file} ${kind} "${lines[number - 1]}": 1 not listed`);
-      }
-    }
-    expect(result.stderr).not.toContain('"const title = store[(\'title\' as const)]"');
+    const expected = Object.entries(flagged)
+      .flatMap(([kind, numbers]) => numbers.map((number) => `${kind} "${lines[number - 1]}"`));
+    const reported = [...result.stderr.matchAll(/^\S+ (\w+ ".*"): \d+ not listed/gm)].map((found) => found[1]);
+    expect(reported.sort()).toEqual(expected.sort());
   });
 
   it('resolves a relative layer name from the importing file', () => {
@@ -265,7 +263,7 @@ describe('the line-by-line allowance', () => {
     expect(stderr).toContain('"The frontend is a pane of glass" in CLAUDE.md');
   });
 
-  it('refuses a stale entry and a missing decision, without changing the file', () => {
+  it('reports a stale entry and an unlisted match, without changing the file', () => {
     const repo = fixture([listed(oldFile, 'storage', 'localStorage.clear()')]);
     repo.write(file, serviceLine);
     const before = repo.baselineText();
@@ -300,6 +298,58 @@ describe('the line-by-line allowance', () => {
     expect(repo.run('--lower').status).toBe(0);
     expect(JSON.parse(repo.baselineText())).toEqual([listed(file, 'services', serviceLine)]);
     expect(repo.run().status).toBe(0);
+  });
+
+  it('--lower refuses, leaving the file unchanged, when a match is unlisted beside a lowerable entry', () => {
+    const repo = fixture([listed(file, 'services', serviceLine, 3)]);
+    repo.write(file, `${serviceLine}\nstore.services.ids`);
+    const before = repo.baselineText();
+    const result = repo.run('--lower');
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('store.services.ids": 1 not listed');
+    expect(repo.baselineText()).toBe(before);
+  });
+
+  it('--lower does not drop a malformed entry', () => {
+    const repo = fixture([{ ...listed(file, 'services', serviceLine), count: 0 }]);
+    repo.write(file, serviceLine);
+    const before = repo.baselineText();
+    const result = repo.run('--lower');
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('needs a positive count');
+    expect(repo.baselineText()).toBe(before);
+  });
+
+  it('--list prints only the shortfall of a partly listed group', () => {
+    const repo = fixture([listed(file, 'services', serviceLine, 1)]);
+    repo.write(file, `${serviceLine}\n${serviceLine}\n${serviceLine}`);
+    const result = repo.run('--list');
+    expect(JSON.parse(result.stdout)).toEqual([{ file, kind: 'services', line: serviceLine, count: 2 }]);
+  });
+
+  it('names the lines of an unlisted match', () => {
+    const repo = fixture();
+    repo.write(file, `\n${serviceLine}\n${serviceLine}`);
+    expect(repo.run().stderr).toContain(`"${serviceLine}": 2 not listed (lines 2, 3)`);
+  });
+
+  it.each(['js', 'jsx', 'mjs', 'cjs', 'mts', 'cts'])('checks a .%s screen too', (extension) => {
+    const repo = fixture();
+    repo.write(`src/ui/helper.${extension}`, 'localStorage.clear()');
+    repo.write(`src/ui/helper.test.${extension}`, 'localStorage.clear()');
+    const result = repo.run();
+    expect(result.stderr).toContain(`src/ui/helper.${extension} storage "localStorage.clear()"`);
+    expect(result.stderr).not.toContain('helper.test');
+  });
+
+  it('fails with a message, not a stack trace, on a baseline with a syntax error', () => {
+    const repo = fixture();
+    repo.write('src/ui/title.ts', 'export const title = "Checklist"');
+    repo.write(baselineFile, '[{');
+    const result = repo.run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${baselineFile} is not valid JSON`);
+    expect(result.stderr).not.toContain('node:internal');
   });
 
   it('--lower never adds an entry', () => {

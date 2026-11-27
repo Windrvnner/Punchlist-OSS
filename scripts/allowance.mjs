@@ -15,11 +15,13 @@ const describe = ({ file, kind, line }) => `${file} ${kind} "${line}"`;
 
 export function groupMatches(matches) {
   const grouped = new Map();
-  for (const { file, kind, line, platform } of matches) {
+  for (const { file, kind, line, platform, number } of matches) {
     const entry = { file, kind, line: line.trim(), count: 0 };
     if (platform !== undefined) entry.platform = platform;
     const known = grouped.get(keyOf(entry)) ?? entry;
     known.count += 1;
+    // Line numbers are for display only; they are not part of the key.
+    if (number !== undefined) (known.lines ??= []).push(number);
     grouped.set(keyOf(entry), known);
   }
   const text = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -61,7 +63,7 @@ function countProblem(entry, seen) {
 }
 
 // Problems with each entry as written: its shape, a repeat, or a decision that is not on both lists.
-function entryProblems(allowance, decisions, verified) {
+export function entryProblems(allowance, decisions, verified) {
   const problems = [];
   const listed = new Set();
   for (const entry of allowance) {
@@ -73,13 +75,27 @@ function entryProblems(allowance, decisions, verified) {
   return problems;
 }
 
+// Each group of matches that outnumbers its entry, with how many matches it is short of.
+export function unlistedMatches(found, allowance) {
+  const allowed = new Map(allowance.map((entry) => [keyOf(entry), entry.count]));
+  return found
+    .map((match) => ({ ...match, missing: match.count - (allowed.get(keyOf(match)) ?? 0) }))
+    .filter((match) => match.missing > 0);
+}
+
 function unlistedProblems(found, allowance) {
-  const problems = [];
-  for (const match of found) {
-    const allowed = allowance.find((entry) => keyOf(entry) === keyOf(match))?.count ?? 0;
-    if (match.count > allowed) problems.push(`${describe(match)}: ${match.count - allowed} not listed`);
-  }
-  return problems;
+  return unlistedMatches(found, allowance).map((match) => {
+    const where = match.lines ? ` (lines ${match.lines.join(', ')})` : '';
+    return `${describe(match)}: ${match.missing} not listed${where}`;
+  });
+}
+
+// The allowance with each count lowered to its matches and the entries without a match removed.
+export function lowerAllowance(found, allowance) {
+  const seen = new Map(found.map((match) => [keyOf(match), match.count]));
+  return allowance
+    .map((entry) => ({ ...entry, count: Math.min(entry.count, seen.get(keyOf(entry)) ?? 0) }))
+    .filter((entry) => entry.count > 0);
 }
 
 function staleProblems(found, allowance) {
