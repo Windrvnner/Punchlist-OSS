@@ -439,5 +439,96 @@
     "line": "const left = chose.filter((c) => c === undefined).length;",
     "count": 1,
     "issue": 1248
+  },
+  {
+    "file": "src/ui/qa.tsx",
+    "kind": "list",
+    "line": "[mark(r), hide.response && (waiting(r) || beside(r)) ? rowDraftNote(r) : ''].filter(Boolean).join(' · ');",
+    "count": 1,
+    "issue": 1266
+  },
+  {
+    "file": "src/ui/research.tsx",
+    "kind": "list",
+    "line": "const drafts = useDrafts(dealId, docId); const newer = newerThan(drafts, docId); const me = drafts.find((d) => d.docId === docId);",
+    "count": 1,
+    "issue": 1375
+  },
+  {
+    "file": "src/ui/research.tsx",
+    "kind": "pattern",
+    "line": "const now = (text: string) => text.replace(/^Searched /, 'Searching ').replace(/^Reviewed /, 'Reviewing ').replace(/^Listed /, 'Listing ');",
+    "count": 3,
+    "issue": 1376
+  },
+  {
+    "file": "src/ui/search.tsx",
+    "kind": "pattern",
+    "line": "const PAGES = /^(Q\\d+|(pp?\\.|pages?) ?\\d[\\d,;–—\\- ]*)$/i;",
+    "count": 1,
+    "issue": 1283
+  },
+  {
+    "file": "src/ui/searchMark.tsx",
+    "kind": "limit",
+    "line": "for (let i = 0; i < text.length; i++) {",
+    "count": 1,
+    "issue": 1287
+  },
+  {
+    "file": "src/ui/searchMark.tsx",
+    "kind": "loop",
+    "line": "for (const c of one) {",
+    "count": 1,
+    "issue": 1291
+  },
+  {
+    "file": "src/ui/searchMark.tsx",
+    "kind": "loop",
+    "line": "for (let at = folded.indexOf(q); at >= 0; at = folded.indexOf(q, at + q.length)) {",
+    "count": 1,
+    "issue": 1291
+  },
+  {
+    "file": "src/ui/searchMark.tsx",
+    "kind": "loop",
+    "line": "for (let i = 0; i < text.length; i++) {",
+    "count": 1,
+    "issue": 1291
+  },
+  {
+    "file": "src/ui/searchMark.tsx",
+    "kind": "pattern",
+    "line": "const one = space ? ' ' : text[i].normalize('NFD').replace(/\\p{M}+/gu, '').toLowerCase();",
+    "count": 1,
+    "issue": 1294
+  },
+  {
+    "file": "src/ui/searchMark.tsx",
+    "kind": "pattern",
+    "line": "const space = /\\s/.test(text[i]);",
+    "count": 1,
+    "issue": 1294
+  },
+  {
+    "file": "src/ui/settings.tsx",
+    "kind": "limit",
+    "line": "{s.models.length > 1 && <div class=\"srow\" id=\"s-modelrow\"><div class=\"k\">Default Model</div><div class=\"seg\"",
+    "count": 1,
+    "issue": 1296
+  },
+  {
+    "file": "src/ui/sidePane.tsx",
+    "kind": "list",
+    "line": "const q = s.questions[side.id]; const answer = thread.find((m) => m.id === side.answer && m.state === 'done');",
+    "count": 1,
+    "issue": 1300
+  },
+  {
+    "file": "src/ui/transfer.tsx",
+    "kind": "list",
+    "line": "const allFirms = firms.every((firm) => filter.askedBy.includes(firm));",
+    "count": 1,
+    "issue": 1318
   }
 ]
