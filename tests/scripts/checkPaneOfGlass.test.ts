@@ -11,7 +11,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 const script = path.resolve('scripts/check-pane-of-glass.mjs');
 const baselineFile = 'scripts/pane-of-glass-baseline.json';
 const directories: string[] = [];
-type Baseline = Record<string, Partial<Record<'import' | 'storage' | 'network' | 'services' | 'repo' | 'pattern', number>>>;
+type Kind = 'import' | 'storage' | 'network' | 'services' | 'repo' | 'pattern';
+type Baseline = Record<string, Partial<Record<Kind, number>>>;
 
 function git(dir: string, ...args: string[]) {
   const identity = ['-c', 'user.name=test', '-c', 'user.email=test@example.com'];
