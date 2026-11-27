@@ -1,20 +1,13 @@
-/**
- * The firm's checklist: its lists, and bringing one in from a spreadsheet. Mapped and previewed like
- * the Q&A import, then reviewed: suggested rewordings and duplicates, each used only if a person checks it.
- * The import's steps are in firmChecklistSteps.tsx and firmChecklistRead.tsx, what it
- * wires up in firmChecklistImport.ts, how it is kept in firmChecklistKept.ts, and its review in app/checklistImport.ts.
- */
-import { useEffect, useState } from 'preact/hooks';
+/** The firm's checklists and the steps of its import, presented in one mounted dialog. */
+import { useEffect, useLayoutEffect, useReducer, useState } from 'preact/hooks';
 import { versionsWord } from '../app/state';
 import { useAppState, useStore, fmtDateTime } from './hooks';
 import { Modal } from './dialogs';
 import { ConflictView } from './conflict';
-import { LAYER_NAMES, firmOf, type Layer } from '../domain/checklist';
-import { checklistShelf, listTarget, type ListTarget } from '../app/checklistImport';
+import { LAYER_NAMES, type Layer } from '../domain/checklist';
+import { checklistShelf } from '../app/checklistImport';
 import { plural } from './counts';
-import { useLeaving, useListReview, useListSource, useWork } from './firmChecklistImport';
-import type { ListReview, ListSource } from './firmChecklistImport';
-import { useKeepImport, useKeeper, dropKept, type KeptNow } from './firmChecklistKept';
+import { ChecklistImportSession } from '../app/checklistImportSession';
 import { useKeptImportsReady, useFreshOnCrash } from './keptImports';
 import { FileDrop } from './fileDrop';
 import { LIST_ACCEPT } from '../app/listRead';
@@ -129,96 +122,49 @@ function KeptChecklistImport(props: ImportProps) {
 /** Bringing a list in: a file or a paste, read by the model, reviewed, then brought in. */
 function ImportChecklistDialog(props: ImportProps & { fresh: boolean }) {
   const store = useStore();
-  const state = useAppState();
-  const keeper = useKeeper(props.layer, props.name, props.fresh);
-  const kept = keeper.left?.choices;
-  const work = useWork();
-  const source = useListSource(store, work, keeper);
-  useDroppedFile(source, props.dropped, props.taken);
-  const [layer, setLayer] = useState<Layer>(kept?.layer ?? props.layer ?? 'broad');
-  const [name, setName] = useState(kept?.name ?? props.name ?? '');
-  const firm = firmOf(state.firmList);
-  const target = listTarget(state, firm, layer, name);
-  const listReview = useListReview(store, work, source.prepared, target, keeper);
-  useKeepImport(keeper, keptNow(source, listReview, layer, name));
-  const exit = useLeaving(store, work);
-  const { split } = target;
-  const [choosingHere, setChoosingHere] = useChoosingHere(split);
-
-  const { review } = listReview;
-  const { table, text, lines } = source;
-  const fileName = table?.name ?? text?.name ?? '';
+  const [session] = useState(() => new ChecklistImportSession(store, props));
+  const [, redraw] = useReducer((n: number) => n + 1, 0);
+  useLayoutEffect(() => {
+    const off = session.subscribe(() => redraw(null));
+    void session.start();
+    return () => {
+      off();
+      session.dispose();
+    };
+  }, [session]);
+  const { dropped, taken } = props;
+  useEffect(() => {
+    if (dropped) {
+      taken?.();
+      void session.loadDropped(dropped);
+    }
+  }, [session, dropped]);
+  const [restart, setRestart] = useState(false);
+  const current = session.view;
+  const { target, step, source, listReview } = current;
+  const isSplit = !!target.split;
+  useEffect(() => {
+    const unfocused = !document.activeElement || document.activeElement === document.body;
+    if (isSplit && unfocused) document.getElementById('cl-choose')?.focus();
+  }, [isSplit]);
+  const list = target.layer === 'broad' ? 'General' : target.name;
   const view: ImportView = {
-    title: review ? `Import a Checklist · ${layer === 'broad' ? 'General' : name}` : 'Import a Checklist',
-    can: state.can, work, source, listReview, target, exit, setLayer, setName,
+    ...current, title: listReview.review ? `Import a Checklist · ${list}` : 'Import a Checklist',
+    exit: { restart, setRestart, back: session.back, close: session.close },
     change: () => {
-      work.drop();
-      source.forget();
-      work.setError('');
-      exit.setRestart(false);
+      setRestart(false);
+      session.change();
     },
     startOver: () => {
-      work.newToken();
-      dropKept(keeper);
-      exit.setRestart(false);
-      work.setBusy('');
-      work.setError('');
-      source.reset();
-      listReview.reset();
-      setLayer(props.layer ?? 'broad');
-      setName(props.name ?? '');
+      setRestart(false);
+      session.startOver();
     },
-    chooseHere: () => {
-      work.setError('');
-      setChoosingHere(true);
-    },
-    stopChoosing: () => setChoosingHere(false),
-    bringItIn: () => void listReview.run(fileName),
   };
-  if (!table && !text) return pickStep(view);
-  // from the mapping or the review alike, and Back returns to that step as it was left
-  if (choosingHere && split) return chooseStep(view, split);
-  if (review && listReview.shown) return reviewStep(view, review);
-  if (!source.byColumns && lines) return readStep(view);
-  if (!table) return null;
-  return columnsStep(view, table);
-}
-
-/** A list split while its review is open is chosen from here, and Back returns to the review, check marks and all */
-function useChoosingHere(split: ListTarget['split']) {
-  const [choosingHere, setChoosingHere] = useState(false);
-  useEffect(() => {
-    if (!split && choosingHere) setChoosingHere(false);
-  }, [split, choosingHere]);
-  // a split turns Next or Import off under the focus, which then drops to the page: Choose…, the one step left,
-  // takes it
-  const isSplit = !!split;
-  useEffect(() => {
-    const dropped = !document.activeElement || document.activeElement === document.body;
-    if (isSplit && dropped) document.getElementById('cl-choose')?.focus();
-  }, [isSplit]);
-  return [choosingHere, setChoosingHere] as const;
-}
-
-/** The import's state as it is kept */
-function keptNow(source: ListSource, listReview: ListReview, layer: Layer, name: string): KeptNow {
-  const { paste, table, text, reads, mapping, readFailed, byColumns, bringIn } = source;
-  const { review, askReword, askSame, shown, useReword, remove } = listReview;
-  const choices = {
-    mapping, layer, name, askReword, askSame, shown, useReword, remove, readFailed, byColumns, bringIn,
-  };
-  return { paste, table, text, reads, review, askedFor: listReview.askedFor, choices };
-}
-
-/**
- * Reads a file dropped on the empty firm's checklist, as if dropped on the import's own drop area. An import already
- * under way on this PC opens as it was left instead, with its list, reading and choices, so nothing in it is lost.
- */
-function useDroppedFile(source: ListSource, dropped?: File | null, taken?: () => void) {
-  // biome-ignore lint/correctness/useExhaustiveDependencies: run once for each file dropped, not on every render
-  useEffect(() => {
-    if (!dropped) return;
-    taken?.();
-    if (!source.table && !source.text) void source.load(dropped);
-  }, [dropped]);
+  switch (step) {
+    case 'pick': return pickStep(view);
+    case 'choose': return chooseStep(view, target.split!);
+    case 'review': return reviewStep(view, listReview.review!);
+    case 'read': return readStep(view);
+    case 'columns': return columnsStep(view, source.table!);
+  }
 }
