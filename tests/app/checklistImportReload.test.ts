@@ -93,3 +93,10 @@ it('keeps the draft when the list write fails, through a reload', async () => {
   expect(keptImport(KEY)).toEqual(draft);
   expect(await reloadKept(port)).toEqual(draft);
 });
+
+it('retains the original draft after a thrown write', async () => {
+  const { draft, submit, store } = await pastedApp();
+  store.dispatch = async () => { throw new Error('Write interrupted'); };
+  await expect(submit()).rejects.toThrow('Write interrupted');
+  expect(keptImport(KEY)).toEqual(draft);
+});

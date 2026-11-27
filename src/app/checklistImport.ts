@@ -460,8 +460,10 @@ export function checklistSelection(review: Review | null, remove: Set<number>, u
 export function checklistWordingChoices(
   review: Review, remove: Set<number>, useReword: Set<number>, importing: boolean,
 ) {
-  const eligible = importing ? [] : review.rewords.map(({ at }) => at).filter((at) => !remove.has(at));
-  return { eligible, allChecked: eligible.length > 0 && eligible.every((at) => useReword.has(at)) };
+  // A removed item's wording, and every wording while the list is brought in, cannot be changed.
+  const locked = (at: number) => importing || remove.has(at);
+  const eligible = review.rewords.map(({ at }) => at).filter((at) => !locked(at));
+  return { eligible, locked, allChecked: eligible.length > 0 && eligible.every((at) => useReword.has(at)) };
 }
 
 export function checklistTotals(lists: FirmLayerList[]) {

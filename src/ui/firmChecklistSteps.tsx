@@ -11,14 +11,12 @@ import { Modal } from './dialogs';
 import { FileDrop, PasteNext, PasteRow } from './fileDrop';
 import { ConflictView } from './conflict';
 import { LIST_ACCEPT } from '../app/listRead';
-import type { Layer } from '../domain/checklist';
 import { SERVICE } from '../control';
-import type { Capabilities } from '../app/capabilities';
-import type { Leaving, ListReview, ListSource, Work } from './firmChecklistImport';
+import type { ChecklistImportView } from '../app/checklistImportSession';
 import {
-  checklistReviewCounts, checklistWordingChoices, pairKey, type ListTarget, type Pair, type Review, type Rewording,
+  checklistReviewCounts, pairKey, type ListTarget, type Pair, type Review, type Rewording,
 } from '../app/checklistImport';
-import { NOT_DONE } from './firmChecklistReview';
+import { NOT_DONE } from '../app/checklistOutcome';
 import { plural } from './counts';
 
 /** the tooltip on a checklist's "choose a file…": the kinds of file it reads */
@@ -33,24 +31,11 @@ export const Head = ({ title, onClose, disabled }: { title: string; onClose: () 
 );
 
 /** Everything the steps show and do, gathered by ImportChecklistDialog on each render. */
-export interface ImportView {
+export interface ImportView extends ChecklistImportView {
   title: string;
-  can: Pick<Capabilities, 'reword' | 'sameMeaning'>;
-  work: Work;
-  source: ListSource;
-  listReview: ListReview;
-  target: ListTarget;
-  exit: Leaving;
-  setLayer: (layer: Layer) => void;
-  setName: (name: string) => void;
-  /** back to step 1, the paste box as it was left */
+  exit: { restart: boolean; setRestart: (value: boolean) => void; back: () => void; close: () => void };
   change: () => void;
-  /** clears the import, once the person has said so */
   startOver: () => void;
-  /** to the choice between a list's two versions, and back */
-  chooseHere: () => void;
-  stopChoosing: () => void;
-  bringItIn: () => void;
 }
 
 /** Step 1: a file, or the list pasted in. */
@@ -69,7 +54,7 @@ export function pickStep(view: ImportView) {
   );
 }
 
-function dropZone(source: ListSource) {
+function dropZone(source: ChecklistImportView['source']) {
   return <FileDrop id="cl-drop" browseId="cl-browse" fileId="cl-file" accept={LIST_ACCEPT}
     words="Drop a file here, or" browseTitle={LIST_TIP} onFile={(file) => void source.load(file)} />;
 }
@@ -122,7 +107,7 @@ function wordingRow(view: ImportView, review: Review, count: number) {
   return (
     <div class="srow top"><div class="k">Wording</div><div>
       <div class="rv-h" title={count ? 'Only checked items take the new wording' : undefined}>
-        {count > 0 && wordingSelection(view, review, count)}
+        {count > 0 && wordingSelection(view, count)}
         {notDone && <b>Not asked</b>}
         {!notDone && !count && <b>No suggestions</b>}
         {notDone && <span>{notDone}</span>}
@@ -137,27 +122,14 @@ function wordingRow(view: ImportView, review: Review, count: number) {
   );
 }
 
-function rewordingLocked({ listReview, work }: ImportView, at: number) {
-  return listReview.remove.has(at) || work.busy === 'importing';
-}
-
-function wordingSelection(view: ImportView, review: Review, suggestions: number) {
-  const { useReword, setUseReword, remove } = view.listReview;
+function wordingSelection(view: ImportView, suggestions: number) {
   const count = plural(suggestions, 'suggestion');
-  const { eligible, allChecked } = checklistWordingChoices(review, remove, useReword, view.work.busy === 'importing');
-  // #377: Retain checkmarks on locked rows so restoring a removed item also restores its wording choice.
-  const setAll = (checked: boolean) => setUseReword((previous) => {
-    const next = new Set(previous);
-    for (const at of eligible) {
-      if (checked) next.add(at);
-      else next.delete(at);
-    }
-    return next;
-  });
+  const { eligible, allChecked } = view.listReview.wording!;
   return (
     <label class="xcheck" style="min-height:24px" title="Select or clear all available wording suggestions">
       <input id="cl-reword-all" type="checkbox" aria-label={`${count}, select or clear all`} aria-controls="cl-rewords"
-        checked={allChecked} disabled={!eligible.length} onChange={(event) => setAll(event.currentTarget.checked)} />
+        checked={allChecked} disabled={!eligible.length}
+        onChange={(event) => view.listReview.setAllWording(event.currentTarget.checked)} />
       <b>{count}</b>
     </label>
   );
@@ -169,7 +141,7 @@ function rewordingRow(view: ImportView, review: Review, rewording: Rewording) {
   return (
     <label class="rv-row" key={at} title={rewording.earlier ? 'Taken when this list was last imported' : undefined}>
       <input type="checkbox" data-reword={at} checked={listReview.useReword.has(at)}
-        disabled={rewordingLocked(view, at)} onChange={() => listReview.flipReword(at)} />
+        disabled={listReview.wording!.locked(at)} onChange={() => listReview.flipReword(at)} />
       <div>
         <div class="rv-was"><i>Was</i>{review.items[at].text}</div>
         {[rewording.text, ...(rewording.also ?? [])].map((text, k) => (
@@ -248,9 +220,9 @@ function reviewFooter(view: ImportView) {
       <button class="btn sm" type="button" disabled={work.busy === 'importing'}
         onClick={view.listReview.backToList}>Back</button>
       {split && chooseButton(view)}
-      <span class="needs" title={split ? `${target.splitSays}. Choose one first` : undefined}>
+      <span class="needs" title={view.whyBringIn}>
         <button key={split ? 'held' : 'go'} class={`btn sm${split ? '' : ' pri'}`} type="button" id="cl-go"
-          disabled={!view.listReview.counts.items || !!work.busy || !!split} onClick={view.bringItIn}>Import</button>
+          disabled={!view.canBringIn} onClick={view.bringItIn}>Import</button>
       </span>
     </div>
   );
