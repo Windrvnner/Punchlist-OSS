@@ -1721,7 +1721,7 @@ export function nodeAi(o: AiOptions) {
       escalate: tiers.thorough,
       usable(reply: Record<string, unknown>) {
         const paragraphs = parasOf(reply);
-        return paragraphs.length > 0 && !hasUnwritableText(paragraphs) && !paragraphs.some(advises);
+        return paragraphs.length > 0 && !paragraphs.some(advises);
       },
       wrong: 'it is empty, or it gives advice or a judgment: write it again with facts only',
     };
