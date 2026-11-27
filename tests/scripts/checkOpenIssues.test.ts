@@ -78,6 +78,16 @@ describe('issues named by the allowances', () => {
     }
   });
 
+  it('says an allowance file is malformed, not that GitHub cannot be reached', async () => {
+    const api = await githubServing([[{ number: 5 }]]);
+    const dir = repoNaming([5]);
+    writeFileSync(path.join(dir, ALLOWANCE_FILES[0]), '[{');
+    const result = await runCli(dir, { GITHUB_TOKEN: 't', GITHUB_REPOSITORY: 'o/r', GITHUB_API_URL: api });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${ALLOWANCE_FILES[0]} is not valid JSON`);
+    expect(result.stderr).not.toContain('Cannot reach GitHub');
+  });
+
   it.each([403, 500])('fails when GitHub answers %i', async (status) => {
     const api = await githubServing([[{ number: 5 }]], status);
     const env = { GITHUB_TOKEN: 't', GITHUB_REPOSITORY: 'o/r', GITHUB_API_URL: api };

@@ -19,10 +19,18 @@ export async function closedIssues(numbers, fetchPage) {
   return numbers.filter((number) => !open.has(number));
 }
 
+function readEntries(file) {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch (error) {
+    throw new Error(`${file} is not valid JSON: ${error.message}`);
+  }
+}
+
 function issuesNamed() {
   const numbers = [];
   for (const file of ALLOWANCE_FILES.filter(existsSync)) {
-    const entries = JSON.parse(readFileSync(file, 'utf8'));
+    const entries = readEntries(file);
     for (const { issue } of Array.isArray(entries) ? entries : []) {
       if (issue !== undefined) numbers.push(issue);
     }
@@ -42,8 +50,16 @@ async function openIssuesPage(page) {
 }
 
 async function main() {
+  let named;
   try {
-    const closed = await closedIssues(issuesNamed(), openIssuesPage);
+    named = issuesNamed();
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+    return;
+  }
+  try {
+    const closed = await closedIssues(named, openIssuesPage);
     for (const number of closed) console.error(`#${number} is not an open issue`);
     if (closed.length) process.exitCode = 1;
   } catch (error) {
