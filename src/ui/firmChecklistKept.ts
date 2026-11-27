@@ -7,6 +7,7 @@
  */
 import { useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { ImportTable } from '../app/transfer';
+import type { ChecklistText } from '../app/listRead';
 import type { LineRead } from '../domain/listRead';
 import type { Layer } from '../domain/checklist';
 import { dropImport, importKey } from '../app/keptImports';
@@ -33,7 +34,7 @@ export type Keeper = ReturnType<typeof useKeeper>;
 export interface KeptNow {
   paste: string;
   table: ImportTable | null;
-  text: { name: string; lines: string[] } | null;
+  text: ChecklistText | null;
   reads: Map<number, LineRead> | null;
   review: Review | null;
   /** read when the import is written, as it is then */

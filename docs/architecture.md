@@ -40,7 +40,7 @@ The design uses no event sourcing, no CQRS, and no message bus. A command is a f
 
   A derived ID is fixed when the record is created: edits and renumbering never change it. A question's number is display data only.
 - Every record has a revision number, `rev`, that only increases. A write must name the `rev` it read, or it is refused as a conflict.
-- Text keeps its line breaks. Dates are `YYYY-MM-DD` or empty, and timestamps are full ISO 8601.
+- Text keeps its line breaks; a spreadsheet cell's line break is stored as one "\n". Dates are `YYYY-MM-DD` or empty, and timestamps are full ISO 8601.
 - Records keep any fields that the current build does not recognize. A record from a newer schema than `CURRENT_SCHEMA` is read-only. A record and the journal line that carries it are marked with the lowest schema that holds their content (`schemaOf`, `lineSchema`), so only records with a newer field, such as a draft's citation boundary, are read-only to an older build.
 - Status and response changes go only through `src/domain/transitions.ts`, which commands call and the UI never does. Only a command that a person triggered changes a record's state. The backend adds findings and may mark a finding "to reassess", and nothing more.
 

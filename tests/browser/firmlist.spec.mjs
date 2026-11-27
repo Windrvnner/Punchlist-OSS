@@ -219,6 +219,24 @@ const itemsOf = (page, id) => page.evaluate((d) => Object.values(store.get().ite
   await ctx.close();
 }
 
+{ // A pasted line left out and brought in keeps its tabs, as pasted, not the " | " the model reads (#1061)
+  const { ctx, page, id } = await start();
+  await page.click('#u-menu'); await page.waitForSelector('#s-checklist-open');
+  await page.click('#s-checklist-open'); await page.waitForSelector('#fl-import'); await page.click('#fl-import');
+  const tabbedPaste = ['Insurance', '1.1 Policy in place', '1.2 Survey delivered', 'Note:\tLender to confirm'];
+  await page.fill('#cl-paste', tabbedPaste.join('\n'));
+  await page.click('#cl-paste-next'); await page.waitForSelector('#cl-line'); await read(page);
+  await page.click('[data-bringin="4"]');
+  await page.click('[data-layer=broad]'); await page.click('#cl-next'); await page.waitForSelector('#cl-go');
+  await page.click('#cl-go'); await page.waitForSelector('#fl-count');
+  const saved = await page.evaluate((d) => Object.values(store.get().items)
+    .filter((i) => i.dealId === d).map((i) => i.text), id);
+  const tabbed = saved.includes('Note:\tLender to confirm') && !saved.some((t) => t.includes(' | '));
+  say('a pasted line brought in keeps its tabs', tabbed, JSON.stringify(saved));
+  say('no errors on the page', page.errors.length === 0, JSON.stringify(page.errors));
+  await ctx.close();
+}
+
 { // Items the duplicate check missed (a part the service did not answer) are counted, and Retry, or Back then Next, asks about them alone, keeping the check marks
   const { ctx, page } = await start();
   const w = (i) => String.fromCharCode(97 + Math.floor(i / 26) % 26, 97 + (i % 26), 97 + Math.floor(i / 676));
