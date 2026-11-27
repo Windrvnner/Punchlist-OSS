@@ -62,21 +62,21 @@ export class DealRename {
     const outcome = fieldSaveOutcome(result, 'record');
     // FieldSave's rule: a result settles only the text sent; newer typing stays kept.
     if ((this.kept?.text ?? sent.text) === sent.text) this.keep(outcome.kind === 'saved' ? undefined : sent);
-    else if (outcome.kind === 'saved') this.adoptSaved(sent);
+    else if (outcome.kind === 'saved') this.adoptSaved();
     if (!this.gone) this.show(outcome, sent);
     const next = this.next;
     this.next = undefined;
     if (next && outcome.kind === 'saved' && this.kept) await this.submit(next);
   }
 
-  /** Newer typing and the entry draft now lie over the name just saved, as FieldSave adopts a base (#1204). */
-  private adoptSaved(sent: NameDraft) {
+  /** Newer typing now lies over the name just saved, as FieldSave adopts a base; Escape lets it go (#1204). */
+  private adoptSaved() {
     const deal = this.store.get().deals[this.id];
     const kept = this.kept;
     if (!deal || !kept) return;
     this.over = { base: deal.name };
     this.keep({ ...kept, ...this.over });
-    this.entry = this.entry?.text === sent.text ? undefined : this.entry && { ...this.entry, ...this.over };
+    this.entry = undefined;
   }
 
   private show(outcome: FieldSaveOutcome, sent: NameDraft) {
