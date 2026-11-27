@@ -45,6 +45,18 @@ describe('an edit kept aside, merged into the log', () => {
     expect(m.ask.map((x) => [x.question, x.rows.map((r) => r.line)])).toEqual([['A brand new question sroe put in', [501]], ['Question 500 reworded by sroe', [501]]]);   // which is question 500 is asked, never guessed
   });
 
+  it('asks about every row they reworded, however many, and appends none of them as new questions', () => {
+    const base = grid(); const kept = grid(); const log = grid();
+    const reworded = [100, 400, 700, 1000, 1300, 1600, 1900];
+    for (const i of reworded) kept[i] = [String(i), `${q(i)} (typo fixed)`, `sroe on ${i}`, ''];
+    const m = mergeKept(table(base), table(kept), table(log), 'Question', undefined, undefined, 'No.');
+    expect(m.added).toBe(0);
+    expect(m.steps.filter((s) => s.kind === 'rows')).toEqual([]);
+    expect(m.ask.map((x) => x.question)).toEqual(reworded.map((i) => `${q(i)} (typo fixed)`));
+    // each is asked among the rows not lined up, its own among them
+    for (const [k, x] of m.ask.entries()) expect(x.rows.map((r) => r.line)).toContain(reworded[k] + 1);
+  });
+
   describe('a reworded row is never lined up with another by place: the answer stays with its question', () => {
     const H = ['No.', 'Question', 'Submitted by', 'Category', 'Status', 'Response'];
     const g = () => [H, ...Array.from({ length: N }, (_, k) => [String(k + 1), q(k + 1), 'Lender A', k % 3 ? 'Legal' : 'Finance', 'Open', ''])];
