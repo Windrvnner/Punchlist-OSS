@@ -57,9 +57,16 @@ export async function readListFile(
   try { bytes = new Uint8Array(await file.arrayBuffer()); } catch { return fail({ kind: 'failed', message: 'The file could not be opened' }); }
   if (SHEET.test(file.name)) { const t = await readImportBytes(store, file.name, bytes, { headerRow: 1 }); return t.ok ? ok({ table: t.value }) : t; }
   let text: string;
-  // UTF-8, UTF-16 or Windows-1252, as a CSV is read (#382)
-  if (PLAIN.test(file.name)) text = decodeText(bytes);
-  else { const sheets = store.services.sheets; if (!sheets.text) return fail({ kind: 'invalid', message: 'Only spreadsheets and text files can be read here' }); const r = await sheets.text(bytes, file.name); if (!r.ok) return r; text = r.value; }
+  // by byte-order mark, else UTF-8, else Windows-1252, as a CSV is read (#382)
+  if (PLAIN.test(file.name)) {
+    try { text = decodeText(bytes); } catch (e) { return fail({ kind: 'invalid', message: (e as Error).message }); }
+  } else {
+    const sheets = store.services.sheets;
+    if (!sheets.text) return fail({ kind: 'invalid', message: 'Only spreadsheets and text files can be read here' });
+    const r = await sheets.text(bytes, file.name);
+    if (!r.ok) return r;
+    text = r.value;
+  }
   const lines = textLines(text.replace(/^\uFEFF/, ''));
   return lines.some((l) => l.trim()) ? ok({ lines }) : fail({ kind: 'invalid', message: 'The file has no text' });
 }
