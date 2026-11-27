@@ -59,8 +59,8 @@ import {
   readJson, unfinished, list as listOf, strings, prose, PARAGRAPH_SEAM, int, pageOf, word, isObject,
 } from './lenient';
 import { listReadPrompt, listReply, readListInParts } from './listReadAi';
-import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK, allChanges, fewerChanges,
-  changesFor, withFewerChanges, type ChangeShare } from './limits';
+import { cutOff, isCutOff, isTooLong, tokensOf, tooLong, TOO_LONG_REPLY, TOO_LONG_ASK, changesFor,
+  withFewerChanges, type ChangeShare } from './limits';
 import { UNREAD_REPLY, UNUSABLE_REPLY, UNREACHED, CUT_ON_IT, CUT_BEFORE_IT, UNUSABLE_ON_IT } from './limits';
 import { inParts, partSize, type PartReply, type PartsDone } from './parts';
 import { tokens, fold, indexWords } from './words';
@@ -1779,6 +1779,58 @@ export function nodeAi(o: AiOptions) {
     const dealId = deals[0];
     return [{ dealId, recs: await start(dealId, lookFor, must[dealId] ?? [], width, core[dealId]) }];
   }
+  /** what an answer's read asks with, and the model it is on: one that escalates changes `using` and `canRetry` */
+  type ReadAgain = {
+    escalate: string; usable: (reply: Record<string, unknown>) => boolean; wrong: string; shown?: string[];
+  };
+  type ReadAsking = {
+    kind: string; ask: string; shape: string; keys: string[]; deals: string[]; again?: ReadAgain;
+    unusable: (text: string) => boolean; using: string; canRetry: boolean;
+  };
+  /**
+   * One round of an answer's read: `sent` is sent and the question asked. A request refused as too long lists fewer
+   * tracked changes, while it lists any, before `read` leaves a document out (#1381). What cannot be opened on this PC
+   * is taken out of `sent`, since it was not read and cannot be cited.
+   */
+  async function readRound(sent: Sent[], round: number, asking: ReadAsking):
+    Promise<Result<Record<string, unknown> | null>> {
+    const unopened = { kind: 'failed', message: 'The documents for this could not be opened on this PC' } as const;
+    return withFewerChanges(async (share) => {
+      const { files, listing, got } = await send(sent, asking.deals.length > 1, share);
+      // a finding is not reassessed on part of what was chosen while the rest is out of reach
+      if (asking.kind === 'reassess' && lostSome(sent, got)) return fail(unopened);
+      if (got.length < sent.length) sent.splice(0, sent.length, ...got);
+      if (!sent.length) return fail(unopened);
+      return ok(await askRead(asking, files, readPrompt(listing, sent.length, round, asking)));
+    });
+  }
+  /** the prompt of an answer's read: in the first round the model may say what else it needs */
+  function readPrompt(listing: string, count: number, round: number, asking: ReadAsking): string {
+    const inAll = asking.deals.reduce((sum, d) => sum + o.docs.records(d).length, 0);
+    const room = asking.deals.length > 1 ? 'these data rooms' : 'the data room';
+    const need = round === 1
+      ? ' If a document you were not given is needed to answer, add "need": ["a few words describing it"].'
+      : '';
+    return `Documents:\n${listing}\n\nThese are ${count} of the ${inAll} documents in ${room}: the ones chosen as `
+      + 'likeliest to bear on this. You have not seen the others, so do not say what the data room as a whole does or '
+      + `does not contain; say what these documents show.\n\n${asking.ask}\n\nReply as JSON: ${asking.shape}${need}`;
+  }
+  /**
+   * Ask an answer's read: a reply that cannot be used is sent back once to the same model, and only if that fails too
+   * the question goes once to the `escalate` model.
+   */
+  async function askRead(asking: ReadAsking, files: string[], prompt: string): Promise<Record<string, unknown> | null> {
+    const { kind, again, keys, shape, unusable } = asking;
+    const reply = await askJson({ kind, model: asking.using, system: RULES, files, prompt, unusable }, keys, shape);
+    if (!again || !asking.canRetry || (reply && again.usable(reply))) return reply;
+    const correction = readCorrection(prompt, reply, again);
+    const sendBack = { kind, model: asking.using, system: RULES, files, prompt: correction, unusable };
+    const corrected = await askCorrection(sendBack, keys, shape);
+    if (corrected && again.usable(corrected)) return corrected;
+    asking.canRetry = false;
+    asking.using = again.escalate;
+    return askJson({ kind, model: asking.using, system: RULES, files, prompt, unusable }, keys, shape, false);
+  }
   /**
    * One question, read from documents, in up to two rounds: the second only if the model says what is missing and
    * something answers to it. With `again`, a reply that cannot be used is sent back to the same model with what is
@@ -1788,11 +1840,7 @@ export function nodeAi(o: AiOptions) {
    */
   async function read(
     kind: string, deals: string[], model: string, ask: string, lookFor: string, must: Record<string, string[]>,
-    shape: string,
-    again?: {
-      escalate: string; usable: (reply: Record<string, unknown>) => boolean; wrong: string; shown?: string[];
-    },
-    page?: DealDoc[],
+    shape: string, again?: ReadAgain, page?: DealDoc[],
   ): Promise<Result<{ reply: Record<string, unknown>; sent: Sent[] }>> {
     const keys = [...shape.matchAll(/"([a-z]+)":/g)].map((m) => m[1]).concat('need');                // the fields this question asks for
     const sent: Sent[] = [];
@@ -1806,41 +1854,20 @@ export function nodeAi(o: AiOptions) {
     try { for (const x of await firstRead(deals, lookFor, must, core, page)) add(x.dealId, x.recs); }
     catch (e) { return failure(e, 'The documents could not be read'); }
     if (!sent.length) return ok({ reply: {}, sent });
-    let using = model;
     let pool: Sent[] | undefined;
-    let canRetry = readCanRetry(model, again);
-    const share = allChanges();
     // checked on every reply, whether or not it can be sent back: it names only the ids it was shown, and cites only
     // the documents it was given (#1105, #1162)
     const unusable = docsUnusable(sent, deals.length > 1, keys, where, again?.shown);
+    const asking: ReadAsking = {
+      kind, ask, shape, keys, deals, again, unusable, using: model, canRetry: readCanRetry(model, again),
+    };
     for (let round = 1; ; round++) {
       let reply: Record<string, unknown> | null;
       try {
-        const { files, listing, got } = await send(sent, deals.length > 1, share);
-        // a finding is not reassessed on part of what was chosen while the rest is out of reach
-        if (kind === 'reassess' && lostSome(sent, got)) return fail({ kind: 'failed', message: 'The documents for this could not be opened on this PC' });
-        if (got.length < sent.length) sent.splice(0, sent.length, ...got);        // what could not be opened on this PC was not read, and cannot be cited
-        if (!sent.length) return fail({ kind: 'failed', message: 'The documents for this could not be opened on this PC' });
-        const inAll = deals.reduce((sum, d) => sum + o.docs.records(d).length, 0);
-        const prompt = `Documents:\n${listing}\n\nThese are ${sent.length} of the ${inAll} documents in ${deals.length > 1 ? 'these data rooms' : 'the data room'}: the ones chosen as likeliest to bear on this. You have not seen the others, so do not say what the data room as a whole does or does not contain; say what these documents show.\n\n${ask}\n\nReply as JSON: ${shape}${round === 1 ? ' If a document you were not given is needed to answer, add "need": ["a few words describing it"].' : ''}`;
-        reply = await askJson({ kind, model: using, system: RULES, files, prompt, unusable }, keys, shape);
-        if (again && canRetry && (!reply || !again.usable(reply))) {
-          const correction = readCorrection(prompt, reply, again);
-          const sendBack = { kind, model: using, system: RULES, files, prompt: correction, unusable };
-          reply = await askCorrection(sendBack, keys, shape);
-          if (!reply || !again.usable(reply)) {
-            canRetry = false;
-            using = again.escalate;
-            reply = await askJson({ kind, model: using, system: RULES, files, prompt, unusable }, keys, shape, false);
-          }
-        }
+        const asked = await readRound(sent, round, asking);
+        if (!asked.ok) return fail(asked.error);
+        reply = asked.value;
       } catch (e) {
-        // a request refused as too long lists fewer tracked changes, while it lists any, before a document is left
-        // out (#1381)
-        if (fewerChanges(share, e)) {
-          round--;
-          continue;
-        }
         // a request the service refuses as too long is asked again with the likeliest half of the documents, down to one (limits.ts)
         // one too long even alone is left out, and the others are tried without it
         if (isTooLong(e) && sent.length > 1) { pool ??= [...sent]; sent.splice(Math.ceil(sent.length / 2)); round--; continue; }
@@ -2079,14 +2106,20 @@ export function nodeAi(o: AiOptions) {
       return docs(text) || unknownIds(rows.map((r) => r?.id), ids).length > 0;
     };
   };
+  /** how a handful of checklist items is checked: the tracked changes `share` leaves (#1381), and items sent back */
+  type CheckHow = {
+    model: string; share: ChangeShare; redo?: Map<string, { why: string; said?: unknown }>; fix: boolean;
+  };
+  type Checked = (Map<string, Seen> & { cut?: ChecklistItem[] }) | null;
+  /** `check`, listing fewer tracked changes while a refusal as too long can be met that way (#1381) */
+  const checkHandful = (items: ChecklistItem[], sent: Sent[], model: string, redo: CheckHow['redo'], fix: boolean) =>
+    withFewerChanges((share) => check(items, sent, { model, share, redo, fix }));
   /**
    * Ask one model about some checklist items against some documents. Null when its reply cannot be read at all. Throws
    * when the service fails. With `redo`, the items are ones whose first replies could not be used: each is sent back with
    * what was wrong with it, to be put right.
    */
-  async function check(items: ChecklistItem[], sent: Sent[], model: string, share: ChangeShare,
-    redo?: Map<string, { why: string; said?: unknown }>, fix = true,
-  ): Promise<(Map<string, Seen> & { cut?: ChecklistItem[] }) | null> {
+  async function check(items: ChecklistItem[], sent: Sent[], { model, share, redo, fix }: CheckHow): Promise<Checked> {
     const { files, listing, got } = await send(sent, false, share);
     // the folder of one of them stopped answering since they were chosen: the items are not settled on the rest
     if (lostSome(sent, got)) { const why = awayWhy(sent[0].dealId, sent.filter((x) => !got.includes(x)).map((x) => x.rec.docId)); return new Map(items.map((it) => [it.id, { kind: 'weak' as const, why, reason: why }])); }
@@ -2946,6 +2979,21 @@ export function nodeAi(o: AiOptions) {
   /** a finding as the checks see it; `closed`: a person closed it, and documents may bring that into question */
   type Raised = { id: string; rev: number; title: string; body: string[]; sources: Source[]; closed?: true };
   /**
+   * A re-check's reply on `sent`, listing fewer tracked changes while a refusal as too long can be met that way
+   * (#1381). Undefined when a folder stopped answering since they were chosen: it is not judged on the rest.
+   */
+  async function verifyAsk(sent: Sent[], model: string, ask: string) {
+    return withFewerChanges(async (share) => {
+      const { files, listing, got } = await send(sent, false, share);
+      if (!got.length || lostSome(sent, got)) {
+        return undefined;
+      }
+      const prompt = `Documents:\n${listing}\n\n${ask}`;
+      const asked = { kind: 'verify', model, system: JSON_ONLY, files, prompt };
+      return askJson<{ stands?: unknown; why?: unknown }>(asked, ['stands', 'why']);
+    });
+  }
+  /**
    * Whether a finding still stands as written, going by the documents now (its own, any given in `also`, and what the
    * pick adds) and by the responses that bear on it, with any given in `heard`. Null when there is nothing to read it against, none of it can be opened on this PC, or the reply cannot be used. Throws when the service fails.
    */
@@ -2954,17 +3002,10 @@ export function nodeAi(o: AiOptions) {
     // a closed finding is asked the other way round: "stands" is whether it stays closed
     const ask = f.closed ? `This finding was raised on the deal earlier, and a person has closed it.\nTitle: ${f.title}\nAs written: ${f.body.join(' ').replace(/\s*\[\d+\]/g, '')}\n\nGoing by the documents as they are now, does it stay closed? It does not if a document now shows the problem again, shows it was not settled, or makes it worse.\nReply as JSON: {"stands": true, "why": "one line"}`
       : `This finding was raised on the deal earlier.\nTitle: ${f.title}\nAs written: ${f.body.join(' ').replace(/\s*\[\d+\]/g, '')}${await responsesOn(dealId, f.id, heard)}\n\nGoing by the documents as they are now, and any responses above, does it still stand as written? It does not if a document or a response now says otherwise, settles it, or makes it worse.\nReply as JSON: {"stands": true, "why": "one line"}`;
-    const sent = sentOf(dealId, docs);
-    // a request refused as too long lists fewer tracked changes, while it lists any (#1381)
-    const reply = await withFewerChanges(async (share) => {
-      const { files, listing, got } = await send(sent, false, share);
-      // a folder stopped answering since they were chosen: not judged on the rest
-      if (!got.length || lostSome(sent, got)) return undefined;
-      const prompt = `Documents:\n${listing}\n\n${ask}`;
-      return askJson<{ stands?: unknown; why?: unknown }>({ kind: 'verify', model, system: JSON_ONLY, files, prompt },
-        ['stands', 'why']);
-    });
-    if (reply === undefined) return null;
+    const reply = await verifyAsk(sentOf(dealId, docs), model, ask);
+    if (reply === undefined) {
+      return null;
+    }
     const said = typeof reply?.stands === 'boolean' ? reply.stands : ['true', 'yes'].includes(word(reply?.stands)) ? true : ['false', 'no'].includes(word(reply?.stands)) ? false : null;
     return said === null ? null : { stands: said, why: typeof reply!.why === 'string' ? reply!.why : '' };
   }
@@ -3223,7 +3264,6 @@ export function nodeAi(o: AiOptions) {
       let pending = items; let rest = docs.filter((d) => !tooLongAlone.has(d.docId));
       while (pending.length && rest.length) {
         let using = rest.slice(0, r.docs); const todo = pending;
-        const share = allChanges();
         const replyEach = model === m.fast ? control.limits.glanceReplyTokens : control.limits.checkReplyTokens;
         const inEach = tokensEach(todo.map(checkLine));
         const replyRoom = { out: replyEach, outLimit: outLimit(model) };
@@ -3232,12 +3272,10 @@ export function nodeAi(o: AiOptions) {
         const done = await inParts(todo, size, async (part) => {
           for (;;) {
             try {
-              const seen = await check(part, sentOf(dealId, using), model, share, redo, fix);
+              const seen = await checkHandful(part, sentOf(dealId, using), model, redo, fix);
               return { got: new Map(part.flatMap((it, k) => (seen?.has(it.id) ? [[k, seen.get(it.id)!] as const] : []))), ...(seen?.cut ? { cut: seen.cut.map((it) => part.indexOf(it)) } : {}) };
             } catch (e) {
               if (!isTooLong(e)) throw e;
-              // fewer tracked changes are listed, while any are, before a document is left out (#1381)
-              if (fewerChanges(share, e)) continue;
               // fewer items would not shorten it much: the documents are halved, and one too long alone ends this handful
               if (using.length <= 1) throw Object.assign(e as Error, { code: 'doctoolong' });
               using = using.slice(0, Math.ceil(using.length / 2)); r.docs = using.length;
