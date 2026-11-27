@@ -144,6 +144,11 @@ describe('two PCs share a deal\'s checks', () => {
       const inSecondBatch = (c: Parameters<typeof itemsIn>[0]) => itemsIn(c).length > 0 && checks(p.svcB).length >= 2;
       p.svcB.set({ delay: 30, hold: (c) => (inSecondBatch(c as any) ? dropOff.inBatch() : undefined) });
       const a = aiOf(p.A).firstPass(p.dealId);
+      // the laptop starts once the office holds its first block, and the office has said so: it joins that round and
+      // leaves the office's block alone, rather than the two taking the same first block before either has seen the
+      // other (the known limit; #1230)
+      await until('the office to hold its first block', () => checks(p.svcA).length > 0);
+      p.net.now();
       void aiOf(p.B).firstPass(p.dealId);
       await until('the laptop to drop off', () => dropOff.at > 0);
       const t0 = dropOff.at;
