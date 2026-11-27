@@ -11,7 +11,7 @@ import {
   type Asked, type ChecklistReviewChange, type ListTarget, type Review,
 } from '../app/checklistImport';
 import {
-  checklistItemsAsRead, checklistPaste, checklistReadCounts, checklistReading, checklistRequests,
+  checklistItemsAsRead, checklistPaste, checklistOneColumn, checklistReadCounts, checklistReading, checklistRequests,
   checklistSourceLines, clearChecklistHeading, loadChecklistSource, rereadChecklistTable, tieChecklistLines,
 } from '../app/listRead';
 import type { ListReading } from '../domain/listRead';
@@ -61,7 +61,8 @@ export function useListSource(store: Store, work: Work, keeper: Keeper) {
   const file = useListFile(store, work, keeper, pasteSource);
   const { table, text, mapping, byColumns } = file;
   const lines = useMemo(() => checklistSourceLines(text, table), [text, table]);
-  const reading = useModelReading(store, work, lines, byColumns, left);
+  const oneColumn = checklistOneColumn(text, table);
+  const reading = useModelReading(store, work, lines, byColumns, left, oneColumn);
   const prepared = useMemo(
     () => checklistItemsAsRead(byColumns, table, mapping, reading.tied),
     [byColumns, table, mapping, reading.tied],
@@ -190,7 +191,7 @@ async function updateTableRead(
  * another sheet; Retry asks again. `bringIn` holds the lines left out that a person checked to bring in.
  */
 function useModelReading(
-  store: Store, work: Work, lines: string[] | null, byColumns: boolean, left: ChecklistKept | null,
+  store: Store, work: Work, lines: string[] | null, byColumns: boolean, left: ChecklistKept | null, oneColumn: boolean,
 ) {
   const [reads, setReads] = useState<ListReading | null>(left?.reads ?? null);
   const [readFailed, setReadFailed] = useState<Asked | ''>(left?.choices?.readFailed ?? '');
@@ -215,9 +216,9 @@ function useModelReading(
       setBringIn(new Set());
     },
   };
-  const readNow = () => reading.retry(lines, byColumns, events);
+  const readNow = () => reading.retry(lines, byColumns, events, oneColumn);
   // biome-ignore lint/correctness/useExhaustiveDependencies: each change of source goes to the same app session
-  useEffect(() => { void reading.sourceChanged(lines, byColumns, events); }, [lines, byColumns]);
+  useEffect(() => { void reading.sourceChanged(lines, byColumns, events, oneColumn); }, [lines, byColumns]);
   /** the lines the model left out, before any is checked to bring in: the "Left out" list */
   const tiedBase = useMemo(() => tieChecklistLines(lines, reads), [lines, reads]);
   const tied = useMemo(() => tieChecklistLines(lines, reads, bringIn), [lines, reads, bringIn]);

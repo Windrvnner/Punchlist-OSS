@@ -16,16 +16,17 @@ import { readImportBytes, type ImportTable } from './transfer';
 import type { Store } from './store';
 import { ok, fail, type Result } from '../domain/result';
 
-export async function readList(ai: AiService, lines: string[]): Promise<Result<ListReading>> {
+/** `oneColumn`: the lines are a table of one column, each line a cell as it is (domain/listRead) */
+export async function readList(ai: AiService, lines: string[], oneColumn = false): Promise<Result<ListReading>> {
   if (!ai.readList) return fail({ kind: 'rejected', message: 'The backend does not offer this' });
   const first = await ai.readList({ lines });
   // the first reading failing fails the read: the person sees why, with Retry, and the text stays as it is
   if (!first.ok) return first;
-  const reading = readingOf(first.value);
+  const reading = readingOf(first.value, oneColumn);
   if (!unplaced(lines, reading).length) return ok(reading);
   const again = await ai.readList({ lines, thorough: true });
   // a thorough reading that fails leaves the unplaced lines out, listed for the person, keeping the first reading
-  return ok(again.ok ? fillUnplaced(lines, reading, readingOf(again.value)) : reading);
+  return ok(again.ok ? fillUnplaced(lines, reading, readingOf(again.value, oneColumn)) : reading);
 }
 
 /** The files a list can be brought in from: spreadsheets, documents and plain text. */
@@ -39,10 +40,17 @@ const SHEET = /\.(xlsx|xlsm|xls|xlsb|ods|csv)$/i; const PLAIN = /\.(txt|text|md)
  */
 export const pastedLines = (text: string): string[] => textLines(text).map(pastedLine);
 
-/** a line with tabs as table cells, each written as cellText writes it; a line with none is text, as it is */
-const pastedLine = (line: string): string => line.includes('\t')
-  ? line.split(/\s*\t\s*/).map(cellText).join(' | ').replace(/^ \| | \| $/g, '')
-  : line;
+/**
+ * A line with tabs between two or more cells as table cells, each written as cellText writes it; any other line, a
+ * line with no tab or with one cell and a tab at its edge, is text and stays as written (#1227).
+ */
+function pastedLine(line: string): string {
+  if (!line.includes('\t')) return line;
+  const cells = line.split(/\s*\t\s*/);
+  if (cells[0] === '') cells.shift();
+  if (cells[cells.length - 1] === '') cells.pop();
+  return cells.length > 1 ? cells.map(cellText).join(' | ') : line;
+}
 
 /**
  * A chosen file as a source for the model: a spreadsheet as its table (`table`, every row from the top of the sheet, so
@@ -104,6 +112,10 @@ export function checklistSourceLines(text: ChecklistText | null, table: ImportTa
   return text?.lines ?? (table ? tableLines(table.columns, table.rows) : null);
 }
 
+/** whether the lines are a table of one column, whose cells are read as they are */
+export const checklistOneColumn = (text: ChecklistText | null, table: ImportTable | null): boolean =>
+  !text && table?.columns.length === 1;
+
 /** Later work (a file read, a model call, or leaving) takes the place of an earlier reply. */
 export function checklistRequests() {
   let generation = 0;
@@ -152,6 +164,7 @@ export async function rereadChecklistTable(
 interface ReadSource {
   lines: string[] | null;
   byColumns: boolean;
+  oneColumn: boolean;
 }
 
 interface KeptReading {
@@ -176,22 +189,24 @@ export function checklistReading(store: Store, requests: ReturnType<typeof check
     if (!current?.lines || current.byColumns || requests.tableReadPending()) return;
     const ticket = requests.newToken();
     events.started();
-    const reply = await readList(store.services.ai, current.lines);
+    const reply = await readList(store.services.ai, current.lines, current.oneColumn);
     if (source !== current || !requests.isLatest(ticket)) return;
     events.finished(reply);
     return reply;
   }
 
-  async function sourceChanged(lines: string[] | null, byColumns: boolean, events: ReadingEvents) {
+  async function sourceChanged(
+    lines: string[] | null, byColumns: boolean, events: ReadingEvents, oneColumn = false,
+  ) {
     if (sameSource(lines, byColumns)) return;
     const first = !source;
-    source = { lines, byColumns };
+    source = { lines, byColumns, oneColumn };
     if (first && alreadyRead) return;
     return read(events);
   }
 
-  function retry(lines: string[] | null, byColumns: boolean, events: ReadingEvents) {
-    if (!sameSource(lines, byColumns)) source = { lines, byColumns };
+  function retry(lines: string[] | null, byColumns: boolean, events: ReadingEvents, oneColumn = false) {
+    if (!sameSource(lines, byColumns)) source = { lines, byColumns, oneColumn };
     return read(events);
   }
 

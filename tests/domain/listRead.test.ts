@@ -118,23 +118,24 @@ describe('a list read whole by the model, tied out line by line', () => {
     expect(unplaced(lines, filled)).toEqual([]);
   });
 
-  it('reads the table from the second reading\'s columns when the first reading named none', () => {
+  it('keeps the first reading\'s columns when they place no row, and lists the rows left out', () => {
     const lines = tableLines(['No', 'Description'], [['1', 'Site'], ['2', 'Title report']]);
-    const first = reading(kinds([[1, 'columns'], [2, 'item'], [3, 'item']]));
-    const second = reading(kinds([[1, 'columns'], [2, 'item'], [3, 'item']]), { item: 2 });
-    const filled = fillUnplaced(lines, first, second);
-    expect(filled.cells).toEqual({ item: 2 });
-    expect(tieOut(lines, filled).items.map((i) => i.text)).toEqual(['Site', 'Title report']);
-    expect(unplaced(lines, filled)).toEqual([]);
+    const read = kinds([[1, 'columns'], [2, 'item'], [3, 'item']]);
+    for (const first of [reading(read, { item: 5 }), reading(read)]) {
+      const filled = fillUnplaced(lines, first, reading(read, { item: 2 }));
+      expect(filled.cells).toEqual(first.cells);
+      expect(tieOut(lines, filled).items).toEqual([]);
+      expect(unplaced(lines, filled)).toEqual([2, 3]);
+    }
   });
 
-  it('reads the table from the second reading\'s columns when the first reading\'s place no row', () => {
-    const lines = tableLines(['No', 'Description'], [['1', 'Site'], ['2', 'Title report']]);
-    const first = reading(kinds([[1, 'columns'], [2, 'item'], [3, 'item']]), { item: 5 });
-    const second = reading(kinds([[1, 'columns'], [2, 'item'], [3, 'item']]), { item: 2 });
-    const filled = fillUnplaced(lines, first, second);
-    expect(filled.cells).toEqual({ item: 2 });
-    expect(tieOut(lines, filled).items.map((i) => i.text)).toEqual(['Site', 'Title report']);
+  it('keeps a one-column table\'s cells whole, with their own pipes and backslashes, unescaped', () => {
+    const rows = [['Review A | B agreement'], ['Path C:\\docs'], ['a\\|b']];
+    const lines = tableLines(['Item'], rows);
+    expect(lines.slice(1)).toEqual(rows.map((r) => r[0]));
+    const read = kinds([[1, 'columns'], [2, 'item'], [3, 'item'], [4, 'item']]);
+    const t = tieOut(lines, { ...reading(read, { item: 1 }), oneColumn: true });
+    expect(t.items.map((i) => i.text)).toEqual(rows.map((r) => r[0]));
   });
 
   it('keeps a cell whole when its own text holds " | " or a backslash, and the columns after it in place', () => {

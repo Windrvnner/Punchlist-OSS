@@ -1,6 +1,6 @@
 // Reading a list in, whole: one reading, and when it leaves lines unplaced, one whole reading by the thorough model.
 import { describe, it, expect } from 'vitest';
-import { pastedLines, readList } from '../../src/app/listRead';
+import { checklistSourceLines, pastedLines, readList } from '../../src/app/listRead';
 import { tableLines, tieOut, textLines, type LineRead, type ListReply } from '../../src/domain/listRead';
 import { mockAi } from '../../src/adapters/mocks';
 import { ok, fail, type Result } from '../../src/domain/result';
@@ -63,14 +63,14 @@ describe('reading a list in, whole, every line accounted for', () => {
 });
 
 describe('reading a table whose first reading named no columns', () => {
-  it('imports the rows by the columns the thorough reading names', async () => {
+  it('leaves the rows out and listed, as the thorough reading\'s columns are not taken', async () => {
     const lines = tableLines(['No', 'Requirement'], [['1', 'Title report'], ['2', 'Check Debt | Equity obligations']]);
     const placed: LineRead[] = [{ n: 1, k: 'columns' }, { n: 2, k: 'item' }, { n: 3, k: 'item' }];
     const { ai, calls } = fake([reading(placed), { lines: placed, cells: { item: 2 } }]);
     const t = tieOut(lines, unwrap(await readList(ai, lines)));
     expect(calls.map((c) => c.thorough)).toEqual([undefined, true]);
-    expect(t.items.map((i) => i.text)).toEqual(['Title report', 'Check Debt | Equity obligations']);
-    expect(t.left).toEqual([]);
+    expect(t.items).toEqual([]);
+    expect(t.left).toEqual([2, 3]);
   });
 
   it('writes a pasted cell\'s own " | " and backslash so that it stays one cell', () => {
@@ -94,5 +94,20 @@ describe('the stand-in reading the mock-up list', () => {
     expect(t.items.map((i) => unnumbered(i.section ?? ''))).toEqual(ITEMS.map((i) => i.s));
     expect(t.left.map((n) => lines[n - 1].trim())).toEqual(LEFT_OUT);
     const c = t.count; expect(c.items + c.more + c.headings + c.blank + c.left).toBe(lines.length);
+  });
+});
+
+describe('a person\'s file content is never altered on its way in', () => {
+  it('keeps a pasted line with one cell and a trailing tab as written, not escaped', () => {
+    expect(pastedLines('a\\b\t')).toEqual(['a\\b\t']);
+    expect(pastedLines('a\\b|c\td\te')).toEqual(['a\\\\b\\|c | d | e']);
+  });
+  it('reads a one-column table whole, and says so in the reading, so its cells import as written', async () => {
+    const table = { columns: ['Item'], rows: [['Review A | B agreement'], ['Path C:\\docs']] };
+    const lines = checklistSourceLines(null, table as never)!;
+    const placed: LineRead[] = [{ n: 1, k: 'columns' }, { n: 2, k: 'item' }, { n: 3, k: 'item' }];
+    const model = fake([{ lines: placed, cells: { item: 1 } }]);
+    const read = unwrap(await readList(model.ai, lines, true));
+    expect(tieOut(lines, read).items.map((i) => i.text)).toEqual(['Review A | B agreement', 'Path C:\\docs']);
   });
 });

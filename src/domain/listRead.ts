@@ -29,10 +29,19 @@ export interface ListCells {
 export interface ListReply { lines: LineRead[]; cells?: ListCells }
 
 /** the reading the app ties out: each line's kind, by its number, and a table's columns */
-export interface ListReading { reads: Map<number, LineRead>; cells?: ListCells }
+export interface ListReading extends ListLayout { reads: Map<number, LineRead> }
 
-export const readingOf = (reply: ListReply): ListReading =>
-  ({ reads: new Map(reply.lines.map((r) => [r.n, r])), ...(reply.cells ? { cells: reply.cells } : {}) });
+/**
+ * How a list's lines are laid out: a table's columns as the model named them, and whether the list is a table of one
+ * column, whose lines are each cell as it is, never split at " | " or unescaped (#1227).
+ */
+export interface ListLayout { cells?: ListCells; oneColumn?: boolean }
+
+export const readingOf = (reply: ListReply, oneColumn = false): ListReading => ({
+  reads: new Map(reply.lines.map((r) => [r.n, r])),
+  ...(reply.cells ? { cells: reply.cells } : {}),
+  ...(oneColumn ? { oneColumn } : {}),
+});
 
 /** an item, with the lines it came from */
 export type ReadItem = ListItem & { lines: number[] };
@@ -47,15 +56,19 @@ export interface TiedOut {
 }
 
 /**
- * A cell as written in a line: its backslashes and pipes are escaped, so that a " | " in the cell's own text is never
- * taken for the separator between cells (decision: #1073).
+ * A cell as written in a line of a table of several columns: its backslashes and pipes are escaped, so that a " | " in
+ * the cell's own text is never taken for the separator between cells (#1227).
  */
 export const cellText = (cell: string): string => cell.replace(/[\\|]/g, '\\$&');
 
-/** A table as lines for the model: the heading row, then each row, its cells joined by " | ". */
+/**
+ * A table as lines for the model: the heading row, then each row, its cells joined by " | ". The one cell of a table
+ * of one column is the line as it is, with nothing escaped (#1227).
+ */
 export function tableLines(columns: string[], rows: string[][]): string[] {
   // a line break inside a cell would split the row, so it becomes a space; the cell's other characters are kept
-  const line = (r: string[]) => r.map((c) => cellText(String(c ?? '').replace(/\r\n?|\n/g, ' '))).join(' | ');
+  const written = columns.length > 1 ? cellText : (cell: string) => cell;
+  const line = (r: string[]) => r.map((c) => written(String(c ?? '').replace(/\r\n?|\n/g, ' '))).join(' | ');
   return [line(columns), ...rows.map(line)];
 }
 
@@ -67,7 +80,8 @@ const rowCells = (line: string) => line.split(' | ').map(uncellText);
 const uncellText = (cell: string) => cell.replace(/\\([\\|])/g, '$1');
 
 /** the cell a column names, as written, or '' when the line is not a table row or the column is past it */
-function cellAt(line: string, column: number | undefined): string {
+function cellAt(line: string, column: number | undefined, oneColumn?: boolean): string {
+  if (oneColumn) return '';
   const cells = rowCells(line);
   return cells.length > 1 && column && column >= 1 ? (cells[column - 1] ?? '') : '';
 }
@@ -77,9 +91,9 @@ function cellAt(line: string, column: number | undefined): string {
  * a line that is not a table row whole, a table row the cell the model's columns name: the item column for an item,
  * the heading or subheading column for a section or subsection row. '' when there are none.
  */
-function wordsOf(line: string, k: LineRead['k'], cells: ListCells | undefined): string {
+function wordsOf(line: string, k: LineRead['k'], { cells, oneColumn }: ListLayout): string {
   // a line with no " | " is text, as it is: its backslashes and pipes are its own, whatever columns the model names
-  if (rowCells(line).length === 1) return line.trim() ? line : '';
+  if (oneColumn || rowCells(line).length === 1) return line.trim() ? line : '';
   const column = k === 'item' ? cells?.item : k === 'section' ? cells?.heading : cells?.subheading;
   const cell = cellAt(line, column);
   return key(cell) ? cell : '';
@@ -89,38 +103,30 @@ function wordsOf(line: string, k: LineRead['k'], cells: ListCells | undefined): 
 export function unplaced(lines: string[], reading: ListReading): number[] {
   const out: number[] = [];
   lines.forEach((line, i) => {
-    if (key(line) && !usable(line, reading.reads.get(i + 1), reading.cells)) out.push(i + 1);
+    if (key(line) && !usable(line, reading.reads.get(i + 1), reading)) out.push(i + 1);
   });
   return out;
 }
 
 /**
  * The first reading, with the lines it left unplaced taken from a second reading of the whole list: what the first
- * placed is kept. A table's columns are the first reading's, or the second's when the first's place no item or
- * heading (none named, or named wrong); a line those columns cannot place stays unplaced.
+ * placed is kept, and so are its columns. A line those columns cannot place stays unplaced.
  */
 export function fillUnplaced(lines: string[], first: ListReading, second: ListReading): ListReading {
-  const columns = placesWords(lines, first) ? first.cells : (second.cells ?? first.cells);
   const reads = new Map(first.reads);
   for (const n of unplaced(lines, first)) {
     const again = second.reads.get(n);
-    if (again && usable(lines[n - 1], again, columns)) reads.set(n, again);
+    if (again && usable(lines[n - 1], again, first)) reads.set(n, again);
   }
-  return columns ? { reads, cells: columns } : { reads };
+  return { ...first, reads };
 }
 
-/** whether the reading places any item or heading, by its own columns */
-const placesWords = (lines: string[], reading: ListReading): boolean => lines.some((line, i) => {
-  const r = reading.reads.get(i + 1);
-  return !!r && (r.k === 'item' || r.k === 'section' || r.k === 'subsection') && usable(line, r, reading.cells);
-});
-
 /** a reading is usable when its kind is known and an item or heading has words in its line */
-function usable(line: string, r: LineRead | undefined, cells: ListCells | undefined): boolean {
+function usable(line: string, r: LineRead | undefined, layout: ListLayout): boolean {
   if (!r) return false;
   if (r.k === 'left' || r.k === 'columns' || r.k === 'more') return true;
   if (r.k !== 'item' && r.k !== 'section' && r.k !== 'subsection') return false;
-  return !!wordsOf(line, r.k, cells).trim();
+  return !!wordsOf(line, r.k, layout).trim();
 }
 
 /**
@@ -139,7 +145,7 @@ export function tieOut(lines: string[], reading: ListReading, bringIn: ReadonlyS
       return;
     }
     const r = reading.reads.get(n);
-    const placed = !!r && usable(line, r, reading.cells) && place(tied, at, line, r, reading.cells);
+    const placed = !!r && usable(line, r, reading) && place(tied, at, line, r, reading);
     if (placed) return;
     if (!bringIn.has(n)) {
       tied.left.push(n);
@@ -169,11 +175,11 @@ function addItem(tied: TiedOut, at: TieState, text: string, n: number) {
  * Accounts for a line with a usable reading; false when it is to be left out: "left", or a "more" line with no item
  * above it.
  */
-function place(tied: TiedOut, at: TieState, line: string, r: LineRead, cells: ListCells | undefined): boolean {
+function place(tied: TiedOut, at: TieState, line: string, r: LineRead, layout: ListLayout): boolean {
   if (r.k === 'left') return false;
   if (r.k === 'section' || r.k === 'subsection') {
     if (r.k === 'section') at.subsection = '';
-    at[r.k] = wordsOf(line, r.k, cells);
+    at[r.k] = wordsOf(line, r.k, layout);
     at.last = null;
     tied.count.headings++;
     return true;
@@ -190,8 +196,8 @@ function place(tied: TiedOut, at: TieState, line: string, r: LineRead, cells: Li
     tied.count.more++;
     return true;
   }
-  rowHeadings(at, line, cells);
-  addItem(tied, at, wordsOf(line, r.k, cells), r.n);
+  rowHeadings(at, line, layout);
+  addItem(tied, at, wordsOf(line, r.k, layout), r.n);
   return true;
 }
 
@@ -199,9 +205,9 @@ function place(tied: TiedOut, at: TieState, line: string, r: LineRead, cells: Li
  * A table row's own section cell starts that section (and no subsection) for it and the rows under it, as a section
  * filled in only on the first row of each section is laid out; its subsection cell does the same within the section.
  */
-function rowHeadings(at: TieState, line: string, cells: ListCells | undefined) {
-  const section = cellAt(line, cells?.section);
-  const subsection = cellAt(line, cells?.subsection);
+function rowHeadings(at: TieState, line: string, { cells, oneColumn }: ListLayout) {
+  const section = cellAt(line, cells?.section, oneColumn);
+  const subsection = cellAt(line, cells?.subsection, oneColumn);
   if (key(section) && key(section) !== key(at.section)) {
     at.section = section;
     at.subsection = '';

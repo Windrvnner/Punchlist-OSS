@@ -153,8 +153,9 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
   stored as the line is written, edge spaces and tabs included, never as the model words it. Here accuracy comes
   before cost: the standard model reads the whole list in one call and names each line's kind by a handle that no line's
   own text can be taken for, and for a table the columns that hold the item, section and subsection, and the headings
-  of section and subsection rows, and the thorough model retries lines it couldn't place. A list the service refuses as
-  too long, or answers with a reply cut off, is read in halves, down to one line (#1227).
+  of section and subsection rows, and the thorough model retries lines it couldn't place, by the first reading's
+  columns. A cell's or line's own text is never altered, even where it holds " | " or a backslash. A list the service
+  refuses as too long, or answers with a reply cut off, is read in halves, down to one line (#1227).
 - An item that joins two conditions becomes two items, and "(if applicable)" goes only on an item that may not apply to every deal.
 - Findings is the worklist and the Checklist is the coverage record; nothing is opened or closed on the Checklist.
 - An opened gap says what is needed and which documents were read, naming any that couldn't be read.
