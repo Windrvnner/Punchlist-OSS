@@ -6,21 +6,14 @@ import { Modal, LeaveFoot } from './dialogs';
 import type { ChecklistMapping } from '../domain/checklistImport';
 import { LAYERS, LAYER_NAMES, LIST_NAME_MAX, type Layer } from '../domain/checklist';
 import { SERVICE } from '../control';
-import type { ListSource } from './firmChecklistImport';
-import { NOT_DONE } from './firmChecklistReview';
+import type { ChecklistImportView } from '../app/checklistImportSession';
+import { NOT_DONE } from '../app/checklistOutcome';
 import { plural } from './counts';
 import { Head, chooseButton, statusLine, type ImportView } from './firmChecklistSteps';
 import { HeadingRowField } from './headingRowField';
 
+type ListSource = ChecklistImportView['source'];
 type Table = NonNullable<ListSource['table']>;
-
-/** Why Next is off, as its tooltip says */
-function whyNoNext({ source, target }: ImportView): string | undefined {
-  if (source.readFailed && !source.byColumns) return 'The list was not read';
-  if (!target.named) return `Name the ${LAYER_NAMES[target.layer].one.toLowerCase()}, as deals will pick it`;
-  if (target.split) return `${target.splitSays}. Choose one first`;
-  return undefined;
-}
 
 /** The footer of step 2, before the review: Next asks for the review, and the line says what Next will take. */
 function nextFooter(view: ImportView, line: string, tip?: string) {
@@ -29,18 +22,16 @@ function nextFooter(view: ImportView, line: string, tip?: string) {
     return <LeaveFoot id="cl-restart-ask" ask="Clear this import and start over?" go="Start Over"
       keep={() => exit.setRestart(false)} leave={view.startOver} />;
   }
-  const { work, source, target, listReview } = view;
+  const { work, target, listReview, whyNext: why } = view;
   const { split } = target;
-  const why = whyNoNext(view);
-  const noColumn = source.byColumns && source.mapping.item === null;
-  const waiting = listReview.waiting && !why && !noColumn;
+  const { waiting } = listReview;
   const status = waiting && !work.busy && !work.error ? `Asking ${SERVICE}` : line;
   return (
     <div class="xfoot">{statusLine(view, status, tip)}<span class="grow" />
       {split && chooseButton(view)}
       <span class="needs" title={why}>
         <button key={split ? 'held' : 'next'} class={`btn sm${split ? '' : ' pri'}`} type="button" id="cl-next"
-          title={why} disabled={!source.prepared?.count || !!why || !!work.busy || noColumn || waiting}
+          title={why} disabled={!view.canNext}
           onClick={() => void listReview.next()}>Next</button>
       </span>
     </div>
@@ -196,11 +187,8 @@ function notReadLine({ work, source }: ImportView, readFailed: Exclude<ListSourc
   );
 }
 
-function readPreview({ tied }: ListSource, reading: boolean) {
-  const rows = tied ? tied.items.slice(0, 5) : [];
-  const withSection = rows.some((row) => row.section);
-  const withSub = rows.some((row) => row.subsection);
-  return previewTable(rows, withSection, withSub, reading ? 'Reading the list' : 'No items', 'cl-sec');
+function readPreview({ preview, withSection, withSub }: ListSource, reading: boolean) {
+  return previewTable(preview, withSection, withSub, reading ? 'Reading the list' : 'No items', 'cl-sec');
 }
 
 /** Every line the model left out, each with a checkbox to bring it in as an item where it sits. */
@@ -223,8 +211,7 @@ function leftOutRow(source: ListSource) {
 /** Step 2 by the columns chosen by hand: the fallback for a table the model could not read. */
 export function columnsStep(view: ImportView, table: Table) {
   const { title, exit, source } = view;
-  const { mapping, prepared } = source;
-  const rows = mapping.item === null ? [] : (prepared?.items ?? []).slice(0, 5);
+  const { mapping, preview } = source;
   return (
     <Modal onClose={exit.close} label={title} blur className="sdlg imdlg">
       <Head title={title} onClose={exit.close} />
@@ -235,7 +222,7 @@ export function columnsStep(view: ImportView, table: Table) {
         {COLUMNS.map(([column, label]) => columnPicker(view, table, column, label))}
       </div></div>
       <div class="srow top"><div class="k">Preview</div>
-        {previewTable(rows, mapping.section !== null, mapping.subsection != null, 'No rows with an item')}
+        {previewTable(preview, mapping.section !== null, mapping.subsection != null, 'No rows with an item')}
       </div>
       {reviewChoices(view)}
       {nextFooter(view, columnsLine(view))}
@@ -263,11 +250,8 @@ function headingsRow(source: ListSource, table: Table) {
 const COLUMNS = [['item', 'Item'], ['section', 'Section'], ['subsection', 'Subsection']] as const;
 
 function columnPicker(view: ImportView, table: Table, column: keyof ChecklistMapping, label: string) {
-  const { mapping, setMapping } = view.source;
-  const chosen = (value: string) => {
-    setMapping({ ...mapping, [column]: value === '' ? null : +value });
-    view.work.setError('');
-  };
+  const { mapping, pickColumn } = view.source;
+  const chosen = (value: string) => pickColumn(column, value === '' ? null : +value);
   return (
     <label key={column}><span>{label}</span>
       <select class="field" aria-label={label} data-clmap={column}
