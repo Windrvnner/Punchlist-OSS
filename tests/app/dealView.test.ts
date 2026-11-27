@@ -19,7 +19,8 @@ it('retains each dismissed and overflowed action through recovery with 104 unres
   const { rows } = prepareImport(texts.map((text) => [text]), suggestMapping(['Question']));
   expect(await before.store.dispatch(ImportQuestions, { dealId, mode: 'append', rows })).toMatchObject({ ok: true });
   for (const q of Object.values(before.store.get().questions)) {
-    before.repo.peer.edit('question', q.id, { ...q, response: 'Counsel is confirming the executed instrument.' }, ELSEWHERE);
+    const peer = { ...q, response: 'Counsel is confirming the executed instrument.' };
+    before.repo.peer.edit('question', q.id, peer, ELSEWHERE);
   }
   const ops = texts.slice(0, 11).map((text) => Operation.parse({
     id: derivedId('op', [text]), command: 'CreateQuestion', startedAt: ELSEWHERE.at,
