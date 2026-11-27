@@ -21,9 +21,8 @@ function liveQuestion(state: any, input: { dealId: string; questionId: string })
   return q;
 }
 
-export function canRequestDraft(q: Question) {
-  return q.status === 'open' && !!q.text.trim();
-}
+/** Draft from Documents is offered, and RequestDraft accepts, only an open question with text. */
+export const canRequestDraft = (q: Question) => q.status === 'open' && !!q.text.trim();
 
 export const RequestDraft = define({
   name: 'RequestDraft',
@@ -36,9 +35,8 @@ export const RequestDraft = define({
     const q = liveQuestion(state, input);
     if (!q) return fail(notFound('Question not found', input.questionId));
     if (input.empty && q.response.trim()) return fail(rejected('This question already has a response'));
-    if (!canRequestDraft(q)) {
-      return fail(rejected(q.status !== 'open' ? 'Only an open question can be drafted' : 'Write the question first'));
-    }
+    if (!canRequestDraft(q)) return fail(rejected(q.status !== 'open' ? 'Only an open question can be drafted'
+      : 'Write the question first'));
     const next: Question = { ...q, draft: { status: 'pending', text: '', sources: [], forWording: wordingHash(q.text), opId: ctx.opId, at: ctx.at }, updatedAt: ctx.at };
     const { dealId, questionId } = input; const text = q.text; const requestOpId = ctx.opId;
     return ok({
