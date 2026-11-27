@@ -195,8 +195,7 @@ The rest of the project is documented in these places:
 
 A batch is a Build list issue with the `batch` label that lists several fixes, each worked as its own pull request.
 A batch is opened from the **Batch** template. Each fix is a sub-issue of the batch and is listed under Fixes as
-a plain bullet (`- #N summary`), never as a task-list checkbox. An issue has one parent, so a fix that moves to
-another batch moves there as a sub-issue and is listed under Moved to another batch.
+a plain bullet (`- #N summary`), never as a task-list checkbox.
 Its **How the batch is worked** section sets that batch's own rules. These rules hold for every batch, in addition:
 
 - Set the definition of done in the batch issue before the first pull request, with separate acceptance criteria for
