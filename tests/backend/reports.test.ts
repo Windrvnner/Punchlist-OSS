@@ -469,6 +469,36 @@ describe('third-party reports at deal scale', () => {
     );
   });
 
+  it('a report refused as too long for its tracked changes is looked at and read with fewer of them listed, '
+    + 'and counts no try (#1381)', async () => {
+    const docs = room().filter((d) =>
+      /^(Independent Engineer Report|Tax Opinion|Legal Due Diligence Report)\.pdf$/.test(d.name));
+    const changeLine = (n: number) => `  - was: "Clause ${n}: 1.15x." / now: "Clause ${n}: 1.20x." (insert "1.20x")`;
+    const listedIn = (prompt: string) => prompt.split('\n').filter((l) => l.startsWith('  - was: ')).length;
+    const { k, log, findings, calls } = kit(docs, {
+      answer: ({ prompt }) =>
+        (listedIn(prompt) > 300 ? Object.assign(new Error('too long'), { code: 'toolong' }) : undefined),
+    });
+    // each report has 1,000 changed passages, listed as the app lists them: halved after each refusal
+    const send = k.send;
+    k.send = async (rec, share = { halvings: 0, listed: 0 }) => {
+      const s = (await send(rec, share))!;
+      const listed = Math.floor(1_000 / 2 ** share.halvings);
+      share.listed = listed;
+      const lines = Array.from({ length: listed }, (_, n) => changeLine(n + 1));
+      return { ...s, listing: [s.listing, ...lines, `  - and ${1_000 - listed} more changed passages`].join('\n') };
+    };
+    await sweep(k);
+    const answered = calls.filter((c) => (c.kind === 'report' || c.kind === 'reportLook') && listedIn(c.prompt) <= 300);
+    expect(answered.some((c) => c.kind === 'reportLook' && c.name === 'Tax Opinion.pdf')).toBe(true);
+    expect(answered.every((c) => listedIn(c.prompt) === 250)).toBe(true);
+    expect(log.filter((l) => l.tried).length).toBe(0);
+    expect(raisedTitles(findings).sort()).toEqual([
+      ...ISSUES['Independent Engineer Report.pdf'], ...ISSUES['Tax Opinion.pdf'],
+      ...ISSUES['Legal Due Diligence Report.pdf'],
+    ].sort());
+  });
+
   it('a failure that is not the document’s own (a usage limit, a bad key) stops the sweep and counts no try, '
     + 'so every report is read once it is put right', async () => {
     const docs = room().filter((d) =>
