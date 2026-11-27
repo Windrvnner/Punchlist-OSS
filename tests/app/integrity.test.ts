@@ -163,12 +163,12 @@ describe('data integrity follow-ups', () => {
     expect(r.ok).toBe(false); expect((r as any).error.message).toMatch(/^Row 5:/);
   });
 
-  it('an import keeps the other side’s workstream, uses our spelling where it is ours, keeps controls', async () => {
+  it('an import keeps each workstream as written, capitals included, and keeps controls', async () => {
     const { prepareImport, suggestMapping } = await import('../../src/domain/importExport');
     const tb = readCsv(new TextEncoder().encode('Question,Workstream\nOne,LEGAL\nTwo,Offtake & marketing\n"Thr\u0000ee\u0007",tax\n')); if (!tb.ok) throw new Error('csv');
     const p = prepareImport(tb.value.rows, suggestMapping(tb.value.columns));
-    expect(p.rows.map((r) => [r.text, r.workstream])).toEqual([
-      ['One', 'Legal'], ['Two', 'Offtake & marketing'], ['Thr\u0000ee\u0007', 'Tax'],
+    expect(p.rows.map((r) => [r.text, r.workstream])).toEqual([   // #1059
+      ['One', 'LEGAL'], ['Two', 'Offtake & marketing'], ['Thr\u0000ee\u0007', 'tax'],
     ]);
   });
 

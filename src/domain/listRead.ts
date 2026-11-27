@@ -39,8 +39,21 @@ export function tableLines(columns: string[], rows: string[][]): string[] {
   return [line(columns), ...rows.map(line)];
 }
 
+/**
+ * A table's rows as a spreadsheet copies them, line for line with `tableLines`: each row's cells separated by tabs, its
+ * cells' own line breaks kept, and so are empty cells at the row's edges. A left-out row a person brings in comes in
+ * so (decisions: Checklist; #1061).
+ */
+export function tableRowsAsWritten(columns: string[], rows: string[][]): string[] {
+  const row = (r: string[]) => r.map((c) => String(c ?? '')).join('\t');
+  return [row(columns), ...rows.map(row)];
+}
+
+/** A line without the spaces at its ends (decisions: Checklist, "its edge spaces aside"); tabs and line breaks stay. */
+const withoutEdgeSpaces = (line: string) => line.replace(/^[^\S\t\r\n]+|[^\S\t\r\n]+$/g, '');
+
 /** Text as lines: every line break counts, so a line number means the same line to the person, the model and the app. */
-export const textLines = (text: string): string[] => text.replace(/\r\n?/g, '\n').split('\n');
+export const textLines = (text: string): string[] => text.split(/\r\n?|\n/);
 
 /** a word of a line's leading label: a number, letter, roman numeral or bullet, or a word such as "Section" before one */
 const LABEL = /^((section|part|article|schedule|annex|exhibit|appendix|item)|[-•*–—:.()[\]0-9]+|\(?([a-z]|[ivxlc]+)\)?[.):]?|\d+(\.\d+)*[a-z]?[.):]?)$/i;
@@ -59,12 +72,17 @@ function holds(line: string, part: string): boolean {
 }
 
 /**
- * The words a reading stands for, exactly as the line has them: for a table row ("a | b") the whole cell the reading names,
- * otherwise the whole line without its edge spaces, numbering and bullets included. The model's own wording is only checked against the line.
+ * The words a reading stands for, exactly as the source writes them (`own`, the line as `written` gives it): for a
+ * table row ("a | b") the whole cell the reading names, taken from the row's own cells (tab-separated) so that a line
+ * break in the cell stays; otherwise the whole line without its edge spaces, numbering and bullets included. The
+ * model's own wording is only checked against the line (#1061).
  */
-function asWritten(line: string, part: string): string {
+function asWritten(line: string, part: string, own = line): string {
   const cells = line.split(' | ');
-  return cells.length > 1 ? cells.find((c) => key(c) === key(part)) ?? part : line.trim();   // edge spaces are layout
+  if (cells.length === 1) return own.trim();   // edge spaces are layout
+  const ownCells = own.split('\t');
+  const from = ownCells.length === cells.length ? ownCells : cells;
+  return from.find((c) => key(c) === key(part)) ?? part;
 }
 
 /**
@@ -87,10 +105,14 @@ function usable(line: string, r: LineRead | undefined): boolean {
 
 /**
  * Every line accounted for. `bringIn` holds lines left out that a person checked: each becomes an item where it sits,
- * under the heading above it, with its own words. A reading that is not usable leaves its line out; a "more" line with
- * no item above it in the same section is left out too, never joined to an item it does not belong to.
+ * under the heading above it, with its own words as the source writes them (`written`, line for line with `lines`:
+ * a pasted line as pasted, a table row as `tableRowsAsWritten` gives it), as does the rest of an item on a line
+ * below it. A reading that is not usable leaves its line out; a "more" line with no item above it in the same section
+ * is left out too, never joined to an item it does not belong to.
  */
-export function tieOut(lines: string[], reads: ReadonlyMap<number, LineRead>, bringIn: ReadonlySet<number> = new Set()): TiedOut {
+export function tieOut(
+  lines: string[], reads: ReadonlyMap<number, LineRead>, bringIn: ReadonlySet<number> = new Set(), written = lines,
+): TiedOut {
   const items: ReadItem[] = []; const left: number[] = [];
   const count = { lines: lines.length, items: 0, more: 0, headings: 0, blank: 0, left: 0 };
   let section = ''; let subsection = ''; let last: ReadItem | null = null;
@@ -101,21 +123,27 @@ export function tieOut(lines: string[], reads: ReadonlyMap<number, LineRead>, br
     const n = i + 1;
     if (!key(line)) { count.blank++; return; }
     const r = reads.get(n);
+    const words = (part: string) => asWritten(line, part, written[i]);
     if (!usable(line, r)) { leave(n); return; }
-    if (r!.k === 'section') { section = asWritten(line, r!.text!); subsection = ''; last = null; count.headings++; return; }
-    if (r!.k === 'subsection') { subsection = asWritten(line, r!.text!); last = null; count.headings++; return; }
+    if (r!.k === 'section') { section = words(r!.text!); subsection = ''; last = null; count.headings++; return; }
+    if (r!.k === 'subsection') { subsection = words(r!.text!); last = null; count.headings++; return; }
     if (r!.k === 'columns') { count.headings++; return; }
     if (r!.k === 'more') {
       if (!last) { leave(n); return; }
-      const it: ReadItem = last; it.text = `${it.text} ${line.trim()}`; it.lines.push(n); count.more++; return;
+      const it: ReadItem = last;
+      it.text = `${it.text} ${withoutEdgeSpaces(written[i])}`;
+      it.lines.push(n);
+      count.more++;
+      return;
     }
     if (r!.k === 'item') {
       // a table row's own section cell starts that section (and no subsection) for it and the rows under it, as a section
       // filled in only on the first row of each section is laid out; its subsection cell does the same within the section
-      const s = r!.section ? asWritten(line, r!.section) : ''; const sub = r!.subsection ? asWritten(line, r!.subsection) : '';
+      const s = r!.section ? words(r!.section) : '';
+      const sub = r!.subsection ? words(r!.subsection) : '';
       if (key(s) && key(s) !== key(section)) { section = s; subsection = ''; }
       if (key(sub)) subsection = sub;
-      add(asWritten(line, r!.text!), n);
+      add(words(r!.text!), n);
       return;
     }
     leave(n);
@@ -124,7 +152,7 @@ export function tieOut(lines: string[], reads: ReadonlyMap<number, LineRead>, br
 
   function leave(n: number) {
     // a line brought in comes in exactly as written, its bullet or list number included
-    if (bringIn.has(n)) { add(lines[n - 1], n); last = null; return; }
+    if (bringIn.has(n)) { add(written[n - 1], n); last = null; return; }
     left.push(n); count.left++;
   }
 }

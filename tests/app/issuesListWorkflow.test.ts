@@ -126,7 +126,7 @@ it('stops before the model call when a file selection changes during attachment'
   expect(read).not.toHaveBeenCalled();
 });
 
-it('preserves the explicit model join for an attached name with surrounding spaces', async () => {
+it('keeps an attached name with surrounding spaces as given, and the import agrees with the preview', async () => {
   const { store, dealId, byTitle } = await seedDeal();
   const prior = byTitle.get(POINTS[8].title)!;
   const proposed = byTitle.get(POINTS[0].title)!;
@@ -142,15 +142,16 @@ it('preserves the explicit model join for an attached name with surrounding spac
   ] });
   const list = val((await readIssuesList(store, dealId, { ...FILE, name: revised.doc }))!);
   const review = reviewIssuesList(store.get(), dealId, list, new Set());
-  const expected = [proposed, prior, prior];
-  expect(review.goes.map((target) => typeof target === 'number' ? target : target?.id)).toEqual(expected);
+  // no earlier mark is on a list of this name, so only the model's proposals join
+  const goes = review.goes.map((target) => (typeof target === 'number' ? target : target?.id));
+  expect(goes).toEqual([proposed, undefined, 1]);
   val(await store.dispatch(ImportIssuesList, { dealId, doc: revised.docId, list: revised.doc, points: review.input }));
 
-  const findings = dealFindings(store.get(), dealId);
-  for (const [index, point] of list.points.entries()) {
-    const marked = findings.filter((finding) => finding.onLists?.some((mark) => (
-      mark.doc === revised.docId && mark.n === point.n && mark.list === DOC.doc
-    )));
-    expect(marked.map(({ id }) => id)).toEqual([expected[index]]);
-  }
+  const marks = dealFindings(store.get(), dealId).flatMap((finding) => (finding.onLists ?? [])
+    .filter((mark) => mark.doc === revised.docId).map((mark) => ({ n: mark.n, list: mark.list, id: finding.id })));
+  expect(marks.map(({ list }) => list)).toEqual([revised.doc, revised.doc, revised.doc]);
+  const on = (n: string) => marks.find((mark) => mark.n === n)!.id;
+  expect(on(POINTS[0].n)).toBe(proposed);
+  expect(on(POINTS[1].n)).toBe(on(POINTS[2].n));
+  expect([prior, proposed]).not.toContain(on(POINTS[1].n));
 });
