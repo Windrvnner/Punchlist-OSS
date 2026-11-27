@@ -4,7 +4,9 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import { control, SERVICE } from '../../src/control';
 import fs from 'node:fs';
-import { pair, aiOf, roots, checks, verifies, logOf, roundsOf, allEnded, until, FAST, type Pair } from './splitKit';
+import {
+  pair, aiOf, stallFreeClock, roots, checks, verifies, logOf, roundsOf, allEnded, until, FAST, type Pair,
+} from './splitKit';
 import { SetFindingStatus, DeleteFinding } from '../../src/app/commands/findings';
 import { view } from '../../src/backend/rounds';
 import { roundOfWork } from '../../src/backend/roundsObserver';
@@ -44,7 +46,15 @@ describe('two PCs share a deal\'s checks', () => {
   it('1. started together: every piece is done once, the work is split, and both show the same results and codes', async () => {
     // meet: the office's model calls wait until the laptop has joined, so "together" holds on a busy machine too; otherwise the
     // office could finish every block before the laptop's first (#131)
-    const p = await pair({ meet: true, items: 100, scriptA: { finding: (n) => n % 9 === 0 }, scriptB: { finding: (n) => n % 9 === 0 } });
+    // stallFreeClock: a PC starved of CPU for a lapse does not take itself to have slept and redo its batch (#1230)
+    const p = await pair({
+      meet: true,
+      items: 100,
+      scriptA: { finding: (n) => n % 9 === 0 },
+      scriptB: { finding: (n) => n % 9 === 0 },
+      nowA: stallFreeClock(),
+      nowB: stallFreeClock(),
+    });
     try {
       await Promise.all([aiOf(p.A).firstPass(p.dealId), aiOf(p.B).firstPass(p.dealId)]); await allEnded(p);
       // if both opened a round before either saw the other's (within one sync gap), the two were merged, and what each did before then may have been done by both (accepted in the design); otherwise every item once
@@ -60,7 +70,8 @@ describe('two PCs share a deal\'s checks', () => {
   }, 60000);
 
   it('2. a second PC joins half-way: it takes its share at its next batch, and nothing is done twice beyond the one block the known limit allows', async () => {
-    const p = await pair({ items: 100, scriptA: { delay: 60 } });
+    // stallFreeClock: a PC starved of CPU for a lapse does not take itself to have slept and redo its batch (#1230)
+    const p = await pair({ items: 100, scriptA: { delay: 60 }, nowA: stallFreeClock(), nowB: stallFreeClock() });
     try {
       const a = aiOf(p.A).firstPass(p.dealId);
       await until('the office to be part-way', () => checks(p.svcA).length >= 2);
@@ -118,7 +129,16 @@ describe('two PCs share a deal\'s checks', () => {
   }, 60000);
   it('3. a PC that drops off half-way with no `left`: the other takes its pieces over after the lapse; every piece is done once, apart from the batch in flight', async () => {
     // batches of five: twenty blocks, given out by a hash of the PCs' ids, so the laptop all but always owns two
-    const p = await pair({ items: 100, batch: 5, scriptA: { delay: 30 }, scriptB: { delay: 30 } });
+    // each PC's clock skips a stall: a PC that is merely starved of CPU for longer than the lapse would take itself to
+    // have slept and drop its batch in flight, which is not what this case is about (#1230)
+    const p = await pair({
+      items: 100,
+      batch: 5,
+      scriptA: { delay: 30 },
+      scriptB: { delay: 30 },
+      nowA: stallFreeClock(),
+      nowB: stallFreeClock(),
+    });
     try {
       const laptopId = p.B.backend.installId;
       // the office's checks wait until the laptop has finished a batch, so the laptop has one done however busy the
@@ -133,6 +153,11 @@ describe('two PCs share a deal\'s checks', () => {
       const inSecondBatch = (c: Parameters<typeof itemsIn>[0]) => itemsIn(c).length > 0 && checks(p.svcB).length >= 2;
       p.svcB.set({ delay: 30, hold: (c) => (inSecondBatch(c as any) ? dropOff.inBatch() : undefined) });
       const a = aiOf(p.A).firstPass(p.dealId);
+      // the laptop starts once the office holds its first block, and the office has said so: it joins that round and
+      // leaves the office's block alone, rather than the two taking the same first block before either has seen the
+      // other (the known limit; #1230)
+      await until('the office to hold its first block', () => checks(p.svcA).length > 0);
+      p.net.now();
       void aiOf(p.B).firstPass(p.dealId);
       await until('the laptop to drop off', () => dropOff.at > 0);
       const t0 = dropOff.at;
@@ -686,7 +711,10 @@ describe('two PCs share a deal\'s checks', () => {
   }, 60000);
   it('20e. a document indexed while this PC runs its own first pass alone: the pass carries on rather than being '
     + 'written off, and no item goes to the model twice', async () => {
-    const p = await pair({ items: 80, one: true, scriptA: { delay: 60, finding: (n) => n % 10 === 3 } });
+    // stallFreeClock: indexing the new document can starve the PC of CPU for a lapse, not a sleep (#1230)
+    const p = await pair({
+      items: 80, one: true, scriptA: { delay: 60, finding: (n) => n % 10 === 3 }, nowA: stallFreeClock(),
+    });
     try {
       const run = aiOf(p.A).firstPass(p.dealId);
       const checked = () => checks(p.svcA).filter(([m]) => m !== 'fast').length;

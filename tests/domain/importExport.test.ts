@@ -136,6 +136,20 @@ describe('prepareImport', () => {
     expect(JSON.stringify(sheet)).not.toContain('adoe');
     expect(sheet[1][6]).toBe('2026-11-10');
   });
+  it('keeps a workstream cell as the log writes it, capitals included (#1059)', () => {
+    const m = { ...suggestMapping(['Question', 'Workstream']) };
+    const p = prepareImport([['Is the permit issued?', 'legal'], ['Is the PPA signed?', ' Legal ']], m);
+    expect(p.rows.map((r) => r.workstream)).toEqual(['legal', ' Legal ']);
+  });
+  it('marks an issues-list finding\'s AI title in the Origin column, as the screen does (#1063)', () => {
+    const base = { body: ['b'], workstream: '', status: 'open', raisedAt: '2026-11-09T10:00:00.000Z', sources: [] };
+    const rows = [
+      { ...base, title: 'Imported', origin: 'human', aiTitle: true },
+      { ...base, title: 'Typed', origin: 'human' },
+      { ...base, title: 'Checked', origin: 'ai' },
+    ];
+    expect(findingsSheet(rows as never).slice(1).map((r) => r[5])).toEqual(['AI title', 'Person', 'AI']);
+  });
   it('keeps text as written: leading spaces, trailing line breaks and a question of only spaces', () => {
     const m = suggestMapping(['Number', 'Question', 'Response', 'Submitted by', 'Priority', 'Received']);
     const p = prepareImport([[' 3 ', '  Indented question', 'Yes.\n', ' Lender A ', ' High ', ' 2026-11-02 '], ['4', '   ', '', '', '', '']], m);

@@ -7,7 +7,9 @@
  */
 import { decodeText } from '../domain/textEncoding';
 import type { AiService } from '../ports';
-import { unplaced, textLines, tableLines, tieOut, type LineRead, type TiedOut } from '../domain/listRead';
+import {
+  unplaced, textLines, tableLines, tableRowsAsWritten, tieOut, type LineRead, type TiedOut,
+} from '../domain/listRead';
 import { prepareChecklist, suggestChecklistColumns, type ChecklistMapping } from '../domain/checklistImport';
 import { keepImport } from './keptImports';
 import { readImportBytes, type ImportTable } from './transfer';
@@ -72,7 +74,8 @@ export async function readListFile(
 }
 
 type ChecklistFile = Parameters<typeof readListFile>[1];
-interface ChecklistText { name: string; lines: string[] }
+/** `written`: a paste as pasted, line for line with `lines` (which the model reads), for a line brought in (#1061) */
+export interface ChecklistText { name: string; lines: string[]; written?: string[] }
 interface MappedChecklistTable { table: ImportTable; mapping: ChecklistMapping }
 
 function mappedTable(table: ImportTable): MappedChecklistTable {
@@ -104,11 +107,20 @@ export function clearChecklistHeading(key: string) {
 }
 
 export function checklistPaste(paste: string): ChecklistText | null {
-  return paste.trim() ? { name: '', lines: pastedLines(paste) } : null;
+  return paste.trim() ? { name: '', lines: pastedLines(paste), written: textLines(paste) } : null;
 }
+
+/** The lines in a paste box, as the paste step counts them: none while it holds only spaces */
+export const pastedLineCount = (paste: string) => checklistPaste(paste)?.lines.length ?? 0;
 
 export function checklistSourceLines(text: ChecklistText | null, table: ImportTable | null) {
   return text?.lines ?? (table ? tableLines(table.columns, table.rows) : null);
+}
+
+/** The lines as the source writes them, line for line with `checklistSourceLines`, for a line brought in (#1061) */
+export function checklistWrittenLines(text: ChecklistText | null, table: ImportTable | null) {
+  if (text) return text.written ?? text.lines;
+  return table ? tableRowsAsWritten(table.columns, table.rows) : null;
 }
 
 /** Later work (a file read, a model call, or leaving) takes the place of an earlier reply. */
@@ -205,8 +217,10 @@ export function checklistReading(store: Store, requests: ReturnType<typeof check
   return { sourceChanged, retry };
 }
 
-export function tieChecklistLines(lines: string[] | null, reads: Map<number, LineRead> | null, bringIn?: Set<number>) {
-  return lines && reads ? tieOut(lines, reads, bringIn) : null;
+export function tieChecklistLines(
+  lines: string[] | null, reads: Map<number, LineRead> | null, bringIn?: Set<number>, written?: string[] | null,
+) {
+  return lines && reads ? tieOut(lines, reads, bringIn, written ?? lines) : null;
 }
 
 export function checklistItemsAsRead(

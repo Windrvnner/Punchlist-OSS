@@ -404,7 +404,7 @@ describe('documents on real folders', () => {
     const rates = (x: ReturnType<typeof pc>) => x.docs.records('d1').find((r) => r.name === 'Rates.csv')!;
     for (const [i, at] of ['2026-12-01T00:00:00.000Z', '2026-12-02T00:00:00.000Z'].entries()) {
       sayEmpty(at);
-      fs.rmSync(path.join(root, 'local-office', 'words3-d1.jsonl'), { force: true });
+      fs.rmSync(path.join(root, 'local-office', 'words4-d1.jsonl'), { force: true });
       const restarted = pc(root, 'office', undefined, { index: true });
       expect(rates(restarted).words).toEqual([]);
       await indexAll(restarted, vdr);
@@ -418,7 +418,7 @@ describe('documents on real folders', () => {
     put(vdr, 'Rates.csv', 'Tenor,Margin\nSenior term loan,2.25\n');
     const a = pc(root, 'office', undefined, { index: true });
     await indexAll(a, vdr);
-    const current = path.join(root, 'local-office', 'words3-d1.jsonl');
+    const current = path.join(root, 'local-office', 'words4-d1.jsonl');
     fs.renameSync(current, path.join(root, 'local-office', 'words-d1.jsonl'));      // what the older build left
     const restarted = pc(root, 'office', undefined, { index: true });
     expect(val(await restarted.docs.freshen!('d1'))).toBe('running');
@@ -440,7 +440,7 @@ describe('documents on real folders', () => {
     await indexAll(pc(root, 'office', undefined, { index: true, convert: flakyConverter(down) }), vdr);
     // what an earlier build left: an empty record, and an index that lacks the file while another document keeps it
     const docId = idOf(MODEL);
-    const indexFile = path.join(root, 'local-office', 'words3-d1.jsonl');
+    const indexFile = path.join(root, 'local-office', 'words4-d1.jsonl');
     const others = fs.readFileSync(indexFile, 'utf8').split('\n').filter((l) => l && JSON.parse(l).d !== docId);
     fs.writeFileSync(indexFile, `${others.join('\n')}\n`);
     const emptied = { v: 1, pc: 'office', at: '2026-12-01T00:00:00.000Z', docId, hash: hashBytes(MODEL),
@@ -487,7 +487,7 @@ describe('documents on real folders', () => {
     expect(expected.counts.size).toBeGreaterThan(200_000);
     const record = a.docs.records('d1').find((r) => r.name === 'Names.csv')!;
     expect(record.words).toEqual(topWords(text));
-    const lines = fs.readFileSync(path.join(root, 'local-office', 'words3-d1.jsonl'), 'utf8').trim().split('\n');
+    const lines = fs.readFileSync(path.join(root, 'local-office', 'words4-d1.jsonl'), 'utf8').trim().split('\n');
     const line = lines.map((l) => JSON.parse(l)).find((l) => l.d === record.docId);
     expect(line.n).toBe(expected.length);
     expect(line.t).toBe(expected.title.join(' '));

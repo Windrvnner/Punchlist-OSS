@@ -130,7 +130,10 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Title, workstream, and detail stay editable; a finding has no next step. The fast model fills in the
   workstream from the firm's list only, or leaves it blank.
 - The workstreams are Technical, Legal, Commercial, Financial, Structure, Insurance, Tax, Regulatory & permits, Real estate, HR & benefits, IT & cyber, Antitrust & FDI, Compliance, and Environmental & social. A firm can set its own in `firm.workstreams`, and a record keeps a workstream that was taken off the list.
-- An issues list (PDF, Word, or email) imports into Findings. Each point joins an existing finding it repeats, or becomes a new finding titled with the point's own words; points are compared with open and closed findings and shown under **Already Raised** (each with **Keep separate**) and **New Findings** before **Import**.
+- An issues list (PDF, Word, or email) imports into Findings. It can also be pasted as text (#1229).
+  Each point joins an existing finding it repeats, or becomes a new finding titled with the point's own words;
+  points are compared with open and closed findings and shown under **Already Raised** (each with **Keep separate**) and
+  **New Findings** before **Import**.
 - A finding's page shows the checklist item that raised it, the questions asked about the finding or its item, and **Ask the Counterparty** while the finding is open and its item is turned on. The question is linked to both and takes the finding's workstream (#2).
 - A file attached on a finding goes with the next message only, and joins the finding's sources through **Add to Sources**.
 - Every source of a finding is within reach, listed by document with its places. A hover lists up to four documents; a longer list opens under the detail (flow A).
@@ -148,6 +151,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A deal has no "Add an item": the checklist stays based on the master checklist.
 - **Turn Off Item** is in an item's ⋯ menu; a turned-off item stays in place, dimmed.
 - A list can be pasted in or imported from any clearly laid-out file. The model reads it, every line is accounted for, and lines left out are listed with a checkbox to bring them in. A line brought in comes in exactly as written, its bullet or number included; every item's wording is kept exactly as the file gives it, and a line the model reads is stored as the line is written (its edge spaces aside), never as the model words it. Here accuracy comes before cost: the standard model reads the list, and the thorough model retries lines it couldn't place.
+- A spreadsheet row brought in keeps every cell, separated by tabs, as a spreadsheet copies a row (#1061).
 - An item that joins two conditions becomes two items, and "(if applicable)" goes only on an item that may not apply to every deal.
 - Findings is the worklist and the Checklist is the coverage record; nothing is opened or closed on the Checklist.
 - An opened gap says what is needed and which documents were read, naming any that couldn't be read.
@@ -204,6 +208,12 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - A question asked across deals reaches only the person's own deals.
 - A chat is one conversation on the model service; past its limit, it is compacted into an uploaded transcript.
 - Each PC keeps its own word index of the data room; nothing is added to the shared folder.
+- A folder's name is compared with the typed name by the search index's word split, so letters of any
+  alphabet are kept (#1154).
+- The index's word split keeps a letter's combining marks (vowel signs, accents) inside its word and
+  normalizes nothing: a composed and a decomposed accent are different words (#1154).
+- A folder named exactly as typed ranks ahead of folders that only share its words. The names are compared as
+  written, with case, a leading number, "the" and "folder" set aside (#1154, #1157).
 - Documents open in reading mode beside the conversation, with page keys and zoom.
 - Switching PDFs opens the cited page at the top and keeps the zoom (#447).
 - In the browser demo, a PDF without a preview shows its title, page number, and a preview status (#443).
@@ -219,8 +229,8 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Key risks lists every High risk, then the oldest Medium risks up to `memo.keyRisks`, A to Z within each severity.
 - The memo keeps usable risk groups when other entries in the model's reply are malformed.
   Each open finding has one risk, on its own if the model left it out (#658).
-- The memo limits a key risk write-up to two paragraphs and 200 words. If retries yield no usable write-up,
-  it uses the findings' own cited words (#659).
+- The memo asks for a key risk write-up of at most two paragraphs and 200 words. A longer one is sent back to be
+  shortened through the usual retry and escalation, and is kept as the model wrote it if it stays long (#659, #806).
 - The memo reports facts only: no recommendation, mitigants, next steps, or judging words.
 - A memo whose one-page summary can't be written fails with Retry and is not saved (#1065).
 - **Deal Memo…** in the deal header's ⋯ menu asks where to save (Word or PDF), then makes the memo; there is no review step.
@@ -370,6 +380,7 @@ Many entries refer to the control file, `src/control.ts`, where a deployment set
 - Keep friction low, with as few controls and steps as possible.
 - The attribution check allows a `Co-authored-by` trailer naming exactly the repository's own coding-agent identity (set in `scripts/aiAttribution.mjs`) and refuses every other AI co-author trailer (#877).
 - Never guess identities. Never cite finding codes.
+- The unused references module is removed (#770).
 - Deleting a finding or a question asks first ("Delete Q38?", with **Keep It** or **Delete**), as do removing a folder and a list swap that turns items off; each keeps its Undo.
 - Close every gap as soon as it is found; fix confirmed Critical and Major issues rather than stopping to report them.
 - Say how an ambiguous instruction is being read. Ask about a product decision before it is built.
@@ -445,7 +456,7 @@ These decisions are built and wait to be confirmed:
 - Once two PCs' imports of one list have synced, the second PC's Undo of its import is refused.
 - The recovered copy of a deal deleted elsewhere is built, including who sees it, what it holds, and its notice's wording (#220).
 - Periodic records whose names differ only by a period are a series and take one place in the core set, their newest member's; every document stays searchable (docs/core-families-design.md).
-- An issues list or an advisor report is read like the app's other documents: the model reads the whole file once and returns each issues-list point in the list's own words, never reworded, and each advisor-report issue with its place in the file. There is no paging and no stop rule (#1026).
+- An issues list or an advisor report is read like the app's other documents: the model reads the whole file once and returns each issues-list point in the list's own words, never reworded, with its spacing and line breaks as written (#1059), and each advisor-report issue with its place in the file. There is no paging and no stop rule (#1026).
 - A document's word index and a search no longer drop a word or number for its length, and a Word file is indexed from
   its body and all its header, footer, footnote and endnote parts (#1025).
 - The core set and a document's most-used words split text as the word index does and drop no word, letter or number

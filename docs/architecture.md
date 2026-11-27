@@ -40,7 +40,7 @@ The design uses no event sourcing, no CQRS, and no message bus. A command is a f
 
   A derived ID is fixed when the record is created: edits and renumbering never change it. A question's number is display data only.
 - Every record has a revision number, `rev`, that only increases. A write must name the `rev` it read, or it is refused as a conflict.
-- Text keeps its line breaks. Dates are `YYYY-MM-DD` or empty, and timestamps are full ISO 8601.
+- Text keeps its line breaks; a spreadsheet cell's line break is stored as one "\n". Dates are `YYYY-MM-DD` or empty, and timestamps are full ISO 8601.
 - Records keep any fields that the current build does not recognize. A record from a newer schema than `CURRENT_SCHEMA` is read-only. A record and the journal line that carries it are marked with the lowest schema that holds their content (`schemaOf`, `lineSchema`), so only records with a newer field, such as a draft's citation boundary, are read-only to an older build.
 - Status and response changes go only through `src/domain/transitions.ts`, which commands call and the UI never does. Only a command that a person triggered changes a record's state. The backend adds findings and may mark a finding "to reassess", and nothing more.
 
@@ -236,9 +236,9 @@ A deal's checklist is made up of its own item records, linked to the findings an
   where available. `src/app/qaImport.ts` submits the prepared rows through `ImportQuestions`. That workflow resumes retained
   submissions by their journal correlation and finishes the saved log choice.
 - **The master checklist** is brought in pasted or from a file, read line by line by the model, and tied out so that every line is accounted for (`src/app/listRead.ts`, `src/domain/listRead.ts`). Its items go to every deal that uses the list and is not marked Closed, with one **Undo** for all of them.
-- **An issues list** is attached and read through `src/app/issuesList.ts`. The model reads the file once, then proposes
-  titles and matches (`issuesList` in `src/backend/ai.ts`). The preview and import command resolve the same matches
-  through `src/app/issuesListJoins.ts`.
+- **An issues list** is attached or pasted as text, and read through `src/app/issuesList.ts`. The model reads the
+  file once, then proposes titles and matches (`issuesList` in `src/backend/ai.ts`). The preview and import command
+  resolve the same matches through `src/app/issuesListJoins.ts`.
 - **An import in progress** (the file, the model's reading, the choices, and the check marks) is kept on each PC,
   part by part, through the `KeptImports` port. Both shells use the IndexedDB adapter. `src/app/keptImports.ts` keeps
   the parts and coordinates Q&A submission checkpoints. A submission reaches the store before its operation starts
