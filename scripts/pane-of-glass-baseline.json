@@ -187,5 +187,131 @@
     "line": "for (let i = 0; i < thread.length; i += 2) pairs.push([thread[i], thread[i + 1]]);",
     "count": 1,
     "issue": 1253
+  },
+  {
+    "file": "src/ui/deal.tsx",
+    "kind": "limit",
+    "line": "<span class=\"tfacts\"><ReadOnlyContext.Provider value={locked}><EditField keep={`${d.id}:counterparty`} read={readDeal(d.id, 'counterparty')} label=\"Counterparty\" placeholder=\"Counterparty\" className=\"edit inl\" cap={{ cls: 'lift', icon: <Icon name=\"building\" size={14} /> }} value={d.counterparty} rev={d.rev} maxLength={80} commit={(v, over) => store.dispatch(EditDeal, { dealId: d.id, counterparty: v }, { quiet: true, over })} /></ReadOnlyContext.Provider></span></div>",
+    "count": 1,
+    "issue": 1257
+  },
+  {
+    "file": "src/ui/deal.tsx",
+    "kind": "list",
+    "line": "const facts = [d.target, d.side, indexing, d.milestone, folderLabel].filter(Boolean).join(' · ');",
+    "count": 1,
+    "issue": 1262
+  },
+  {
+    "file": "src/ui/dealLabel.tsx",
+    "kind": "pattern",
+    "line": "const label = text.replace(/\\s+/g, ' ');",
+    "count": 1,
+    "issue": 1276
+  },
+  {
+    "file": "src/ui/deleted.tsx",
+    "kind": "list",
+    "line": "lists.some((list) => list.doc === request.confirmation.input.doc);",
+    "count": 1,
+    "issue": 1286
+  },
+  {
+    "file": "src/ui/dialogs.tsx",
+    "kind": "limit",
+    "line": ": <input class=\"field\" id={`nd-${k}`} aria-labelledby={`nd-${k}-l`} placeholder=\"Not set\" maxLength={80} value={kinds[k] ?? ''} onInput={(e) => set({ [k]: (e.currentTarget as HTMLInputElement).value })} />}</div>);",
+    "count": 1,
+    "issue": 1293
+  },
+  {
+    "file": "src/ui/dialogs.tsx",
+    "kind": "limit",
+    "line": "<input class=\"field\" id=\"nd-cp\" maxLength={80} value={nd.counterparty ?? ''}",
+    "count": 1,
+    "issue": 1293
+  },
+  {
+    "file": "src/ui/dialogs.tsx",
+    "kind": "list",
+    "line": "onClick={() => set({ folders: nd.folders.filter((_, at) => at !== index) })}>",
+    "count": 1,
+    "issue": 1299
+  },
+  {
+    "file": "src/ui/docMenu.tsx",
+    "kind": "limit",
+    "line": "<div class={`dm-r ${on ? 'on' : ''} ${many ? 'many' : ''} ${pages.length === 1 ? 'single' : ''} ${also ? 'also' : ''}`} onClick={() => pick(on ? current : pages[0].i)}>",
+    "count": 1,
+    "issue": 1312
+  },
+  {
+    "file": "src/ui/docMenu.tsx",
+    "kind": "limit",
+    "line": "const secs = menuSections(docs, aside); const current = aside ? -1 : index ?? 0; const titled = headed || secs.length > 1;",
+    "count": 1,
+    "issue": 1312
+  },
+  {
+    "file": "src/ui/docMenu.tsx",
+    "kind": "limit",
+    "line": "if (all.length < 2) return null;",
+    "count": 1,
+    "issue": 1312
+  },
+  {
+    "file": "src/ui/docMenu.tsx",
+    "kind": "limit",
+    "line": "return { text: names.length === 1 ? `Also in ${names[0]}` : `Also in ${names.length} more folders: ${names.join(', ')}`, title: rest.map((p) => [...p.folder.split('/').filter(Boolean), p.name].join(' › ')).join('\\n') };",
+    "count": 1,
+    "issue": 1312
+  },
+  {
+    "file": "src/ui/docMenu.tsx",
+    "kind": "list",
+    "line": "return { text: names.length === 1 ? `Also in ${names[0]}` : `Also in ${names.length} more folders: ${names.join(', ')}`, title: rest.map((p) => [...p.folder.split('/').filter(Boolean), p.name].join(' › ')).join('\\n') };",
+    "count": 1,
+    "issue": 1317
+  },
+  {
+    "file": "src/ui/docPanel.tsx",
+    "kind": "limit",
+    "line": "const canStep = aside ? docs.length > 0 : docs.length > 1;",
+    "count": 1,
+    "issue": 1340
+  },
+  {
+    "file": "src/ui/docPanel.tsx",
+    "kind": "limit",
+    "line": "const citationCount = !aside && docs.length > 1 ? `Citation ${(index ?? 0) + 1} of ${docs.length}` : null;",
+    "count": 1,
+    "issue": 1340
+  },
+  {
+    "file": "src/ui/docPanel.tsx",
+    "kind": "list",
+    "line": "const citing = docs.findIndex((doc) => docKey(doc) === docKey(current) && pageNo(doc.loc) === to);",
+    "count": 1,
+    "issue": 969
+  },
+  {
+    "file": "src/ui/docPanel.tsx",
+    "kind": "list",
+    "line": "const listed = docs.findIndex((doc) => doc.docId === draft.docId);",
+    "count": 1,
+    "issue": 969
+  },
+  {
+    "file": "src/ui/docPanel.tsx",
+    "kind": "pattern",
+    "line": "const cited = page.cell ? /^([A-Z]+)(\\d+)$/.exec(page.cell) : null;",
+    "count": 1,
+    "issue": 1245
+  },
+  {
+    "file": "src/ui/docPanel.tsx",
+    "kind": "pattern",
+    "line": "const isNumber = (cell: string) => /^[\\d.,()%-]+$/.test(cell);",
+    "count": 1,
+    "issue": 1245
   }
 ]
