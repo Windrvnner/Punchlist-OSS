@@ -6,6 +6,7 @@ import { listTarget, submitChecklist } from '../../src/app/checklistImport';
 import {
   importKey, initializeKeptImports, keepImport, keptImport, keptImportsReady, saveImport,
 } from '../../src/app/keptImports';
+import { keepChecklistImport } from '../../src/app/checklistKept';
 import { checklistPaste } from '../../src/app/listRead';
 import { firmOf, listId } from '../../src/domain/checklist';
 import { portfolioQuestions } from '../fixtures/portfolioQuestions';
@@ -92,4 +93,34 @@ it('keeps the draft when the list write fails, through a reload', async () => {
   expect(store.get().firmList[listId('technology', 'Renewables')]).toBeUndefined();
   expect(keptImport(KEY)).toEqual(draft);
   expect(await reloadKept(port)).toEqual(draft);
+});
+
+it('holds workflow keeps for this key until a pending write settles', async () => {
+  const { draft, submit } = await pastedApp();
+  const before = keptImport(KEY);
+  const held = holdListWrite();
+  const pending = submit();
+  await held.entered;
+  try {
+    keepChecklistImport(KEY, { paste: 'Interrupted edit' }, false);
+    expect(keptImport(KEY)).toEqual(before);
+    keepChecklistImport('checklist', { paste: 'Other list' }, false);
+    expect(keptImport('checklist')?.paste).toBe('Other list');
+    expect((await submit()).ok).toBe(false);
+  } finally {
+    held.release();
+    expect((await pending).ok).toBe(true);
+  }
+  expect(keptImport(KEY)).toBeUndefined();
+  keepChecklistImport(KEY, { paste: draft.paste }, false);
+  expect(keptImport(KEY)?.paste).toBe(draft.paste);
+});
+
+it('releases the key after a thrown write and retains the original draft', async () => {
+  const { draft, submit, store } = await pastedApp();
+  store.dispatch = async () => { throw new Error('Write interrupted'); };
+  await expect(submit()).rejects.toThrow('Write interrupted');
+  expect(keptImport(KEY)).toEqual(draft);
+  keepChecklistImport(KEY, { paste: 'Resume the review' }, false);
+  expect(keptImport(KEY)?.paste).toBe('Resume the review');
 });

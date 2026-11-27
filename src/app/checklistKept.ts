@@ -10,6 +10,15 @@ import { keptImport, keepImport } from './keptImports';
 import type { Asked, Review } from './checklistImport';
 import { clearedHeading, type ChecklistText } from './listRead';
 
+const submitting = new Set<string>();
+
+/** Each way into the checklist import holds its own draft during the write (#931). */
+export function holdChecklistSubmission(key: string) {
+  if (submitting.has(key)) return null;
+  submitting.add(key);
+  return () => submitting.delete(key);
+}
+
 /** Every choice and check mark, kept beside the list */
 export interface ChecklistChoices {
   mapping: ChecklistMapping;
@@ -107,6 +116,7 @@ export function readKeptChecklist(key: string, fresh: boolean): { left: Checklis
  * paste box is kept, as typed. Returns whether a kept import that was not shown is still set aside (#381).
  */
 export function keepChecklistImport(key: string, now: ChecklistKept & { paste: string }, setAside: boolean): boolean {
+  if (submitting.has(key)) return setAside;
   const { paste, table, text } = now;
   if (!table && !text) return keepPasteAlone(key, paste, setAside);
   keepImport(key, { ...now });
