@@ -59,8 +59,11 @@ export class DealRename {
     this.saving = true;
     const result = await this.store.dispatch(EditDeal, { dealId: this.id, name }, { quiet: true, over: sent.base });
     this.saving = false;
-    const outcome = fieldSaveOutcome(result, 'record');
-    // FieldSave's rule: a result settles only the text sent; newer typing stays kept.
+    await this.settle(fieldSaveOutcome(result, 'record'), sent);
+  }
+
+  /** As in FieldSave, a result settles only the text sent; an Enter or blur during the save then sends newer typing. */
+  private async settle(outcome: FieldSaveOutcome, sent: NameDraft) {
     if ((this.kept?.text ?? sent.text) === sent.text) this.keep(outcome.kind === 'saved' ? undefined : sent);
     else if (outcome.kind === 'saved') this.adoptSaved();
     if (!this.gone) this.show(outcome, sent);
