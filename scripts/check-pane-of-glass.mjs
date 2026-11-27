@@ -1,98 +1,85 @@
-// Keep the remaining exceptions to "The frontend is a pane of glass" in CLAUDE.md from growing.
-import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { basename } from 'node:path';
-import { matchesIn } from './pane-of-glass-matches.mjs';
+// Keep "The frontend is a pane of glass" in CLAUDE.md true: every access the check finds in a screen is listed line
+// by line in scripts/pane-of-glass-baseline.json, with the issue that removes it or the decision that keeps it.
+//
+// It catches only the syntax forms that scripts/pane-of-glass-rules.mjs and pane-of-glass-matches.mjs list. Any other
+// method, property or construct is review's job (docs/development.md).
+//
+// `--lower` lowers each entry's count to its matches and removes unmatched entries; it never adds an entry.
+// `--list` prints the groups not yet listed, as entries without an issue or decision.
+import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { allowanceProblems, decisionEntries, entryProblems, lowerAllowance, unlistedMatches } from './allowance.mjs';
+import { slashPath } from './pane-of-glass-matches.mjs';
+import { scanUi } from './ui-scan.mjs';
 
 const baselinePath = 'scripts/pane-of-glass-baseline.json';
-const lower = process.argv.includes('--lower');
-const lowerCommand = 'node scripts/check-pane-of-glass.mjs --lower';
 const read = (file) => readFileSync(file, 'utf8');
-const git = (...args) => execFileSync('git', args, { encoding: 'utf8' });
+const openIssuesNotice = 'Issues named in the allowances are checked as open by CI (scripts/check-open-issues.mjs).';
+const limits = [
+  'Only the syntax forms listed in docs/development.md are caught. Any other method, property or construct is',
+  "review's job: for example .map, .flatMap, .includes, .join, .concat, .at, .replace without a regex, .split,",
+  '.trim, .startsWith, .pop, .shift, Array.from, new Set, a bare .length read, Math.min, Math.max, a method name held',
+  'in a variable, Function.prototype.call, destructured length or Date.parse, performance.now, queueMicrotask, plain',
+  'if logic on state, references that are not called, and named constants.',
+  'See "The frontend is a pane of glass" in CLAUDE.md.',
+  openIssuesNotice,
+];
 
-function uiSource(file) {
-  return /\.tsx?$/.test(file) && !basename(file).includes('.test.');
+function decisionLists() {
+  return {
+    decisions: decisionEntries(read('docs/decisions.md')),
+    verified: JSON.parse(read('scripts/verified-decisions.json')),
+  };
 }
 
-function scan(files, contents) {
-  const found = {};
-  for (const file of files.filter(uiSource).sort()) {
-    const lines = matchesIn(file, contents(file));
-    if (Object.keys(lines).length) found[file] = lines;
-  }
-  return found;
-}
-
-function countsFor(found) {
-  const counts = {};
-  for (const [file, kinds] of Object.entries(found)) {
-    counts[file] = Object.fromEntries(Object.entries(kinds).map(([kind, lines]) => [kind, lines.length]));
-  }
-  return counts;
-}
-
-function committedCounts(ref) {
-  if (!git('ls-tree', '--name-only', ref, '--', baselinePath).trim()) return null;
-  return JSON.parse(git('show', `${ref}:${baselinePath}`));
-}
-
-// Comparing the proposed baseline with main catches an edit that raises both the count and its allowance.
-function committedBaseline() {
-  for (const ref of ['origin/main', 'main']) {
-    const base = spawnSync('git', ['merge-base', 'HEAD', ref], { encoding: 'utf8' });
-    if (base.status !== 0) continue;
-    const at = base.stdout.trim();
-    const counts = committedCounts(at);
-    if (counts) return counts;
-    // On the branch introducing the check, main's source is the record of its existing exceptions.
-    const files = git('ls-tree', '-r', '-z', '--name-only', at, '--', 'src/ui').split('\0');
-    return countsFor(scan(files, (file) => git('show', `${at}:${file}`)));
-  }
-  // Exported sources have no history. In a Git checkout, HEAD alone cannot prove a committed allowance is valid.
-  if (spawnSync('git', ['rev-parse', '--show-toplevel']).status !== 0) return null;
-  const shallow = git('rev-parse', '--is-shallow-repository').trim() === 'true';
-  const fetch = `git fetch ${shallow ? '--unshallow ' : ''}origin +refs/heads/main:refs/remotes/origin/main`;
-  throw new Error(`Cannot compare the UI baseline with main. Run ${fetch} and retry.`);
-}
-
-function countProblem(count, entry, limit) {
-  if (entry !== undefined && (!Number.isSafeInteger(entry) || entry <= 0)) return 'invalid baseline entry';
-  const allowed = entry ?? 0;
-  if (limit !== null && allowed > limit) return `the baseline cannot rise above the committed count of ${limit}`;
-  if (count > allowed) return `${count} exceeds the baseline of ${allowed}`;
-  if (count < allowed && !lower) return `lower the baseline in this pull request with ${lowerCommand}`;
-  return null;
-}
-
-function compareFile(file, lines, baseline, committed) {
-  const problems = [];
-  for (const kind of new Set([...Object.keys(lines), ...Object.keys(baseline)])) {
-    const matches = lines[kind] ?? [];
-    const limit = committed ? (committed[kind] ?? 0) : null;
-    const problem = countProblem(matches.length, baseline[kind], limit);
-    if (problem) {
-      const where = matches.length ? `lines ${matches.join(', ')}` : 'no matching lines';
-      problems.push(`${file} ${kind} (${where}): ${problem}`);
-    }
-  }
-  return problems;
-}
-
-const files = readdirSync('src/ui', { recursive: true, withFileTypes: true })
-  .filter((entry) => entry.isFile())
-  .map((entry) => `${entry.parentPath.replaceAll('\\', '/')}/${entry.name}`);
-const found = scan(files, read);
-const baseline = JSON.parse(read(baselinePath));
-const committed = committedBaseline();
-const problems = [];
-for (const file of new Set([...Object.keys(found), ...Object.keys(baseline)])) {
-  const ceiling = committed ? (committed[file] ?? {}) : null;
-  problems.push(...compareFile(file, found[file] ?? {}, baseline[file] ?? {}, ceiling));
-}
-if (problems.length) {
-  console.error(problems.join('\n'));
-  console.error('See "The frontend is a pane of glass" in CLAUDE.md.');
+function fail(problems) {
+  console.error([...problems, ...limits].join('\n'));
   process.exitCode = 1;
-} else if (lower) {
-  writeFileSync(baselinePath, `${JSON.stringify(countsFor(found), null, 2)}\n`);
+}
+
+// --lower first refuses a malformed entry, so none is dropped unseen; then it lowers and checks again.
+function lowerAndWrite(allowance) {
+  const { decisions, verified } = decisionLists();
+  const malformed = entryProblems(allowance, decisions, verified);
+  const next = lowerAllowance(found, allowance);
+  const problems = malformed.length ? malformed : allowanceProblems(found, next, { decisions, verified });
+  if (problems.length) fail(problems);
+  else writeFileSync(baselinePath, `${JSON.stringify(next, null, 2)}\n`);
+}
+
+function readAllowance() {
+  try {
+    return JSON.parse(read(baselinePath));
+  } catch (error) {
+    return `${baselinePath} is not valid JSON: ${error.message}`;
+  }
+}
+
+// A symbolic link to a file is scanned as the file it points to.
+const isFileOrLinkToOne = (entry) =>
+  entry.isFile() || (entry.isSymbolicLink() && statSync(path.join(entry.parentPath, entry.name)).isFile());
+const files = readdirSync('src/ui', { recursive: true, withFileTypes: true })
+  .filter(isFileOrLinkToOne)
+  .map((entry) => slashPath(entry.parentPath, entry.name))
+  .sort();
+const found = scanUi(files, read);
+const allowance = readAllowance();
+if (typeof allowance === 'string') {
+  fail([allowance]);
+} else if (!Array.isArray(allowance)) {
+  fail([`${baselinePath} must be a JSON array of entries.`]);
+} else if (process.argv.includes('--list')) {
+  const missing = unlistedMatches(found, allowance);
+  const entries = missing.map(({ file, kind, line, missing: count }) => ({ file, kind, line, count }));
+  console.log(JSON.stringify(entries, null, 2));
+  console.error(openIssuesNotice);
+  if (missing.length) process.exitCode = 1;
+} else {
+  if (process.argv.includes('--lower')) {
+    lowerAndWrite(allowance);
+  } else {
+    const problems = allowanceProblems(found, allowance, { ...decisionLists(), scope: () => true });
+    if (problems.length) fail(problems);
+  }
+  if (!process.exitCode) console.log(openIssuesNotice);
 }

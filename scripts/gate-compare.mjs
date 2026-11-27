@@ -21,14 +21,17 @@ export function readGate(dir) {
   return { gate, vitest: read('vitest.json'), browser: read('browser.json'), smoke: read('smoke.json') };
 }
 
-/** Vitest results by "file > full name", the file taken from tests/ on so two checkouts compare equal. */
-function vitestStatuses(vitest) {
-  const statuses = new Map();
-  for (const file of vitest?.testResults ?? []) {
+/** Each Vitest assertion with its file taken from tests/ on, with / separators, so two checkouts compare equal. */
+export function vitestResults(vitest) {
+  return (vitest?.testResults ?? []).flatMap((file) => {
     const name = file.name.replace(/\\/g, '/').replace(/^.*?(?=tests\/)/, '');
-    for (const test of file.assertionResults ?? []) statuses.set(`${name} > ${test.fullName}`, test.status);
-  }
-  return statuses;
+    return (file.assertionResults ?? []).map((test) => ({ file: name, fullName: test.fullName, status: test.status }));
+  });
+}
+
+/** Vitest results by "file > full name". */
+function vitestStatuses(vitest) {
+  return new Map(vitestResults(vitest).map(({ file, fullName, status }) => [`${file} > ${fullName}`, status]));
 }
 
 /** Problems with the tests: each passing before and not passing after, or a browser suite that lost checks. */

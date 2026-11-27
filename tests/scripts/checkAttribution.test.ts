@@ -35,7 +35,7 @@ function repo() {
     git('add', file);
   };
   const check = () => spawnSync('node', [script], { cwd: dir, encoding: 'utf8' });
-  return { commit, track, check, git };
+  return { commit, track, check, git, dir };
 }
 
 describe('the attribution check', () => {
@@ -90,5 +90,88 @@ describe('the attribution check on main and on a fresh history', () => {
     const out = r.check();
     expect(out.status).toBe(1);
     expect(out.stderr).toContain('commit');
+  });
+});
+
+describe('the attribution check on the history and the committed files', () => {
+  const onTopic = () => {
+    const r = repo();
+    r.track('a.md', 'Clean\n');
+    r.commit('Start');
+    r.git('checkout', '-q', '-b', 'topic');
+    return r;
+  };
+
+  it('refuses attribution added in one commit and removed in the next', () => {
+    const r = onTopic();
+    r.track('a.md', `Clean\n${refused.credit}\n`);
+    r.commit('Add a note');
+    r.track('a.md', 'Clean\n');
+    r.commit('Remove the note');
+    const out = r.check();
+    expect(out.status).toBe(1);
+    expect(out.stderr).toContain('a.md');
+    expect(out.stderr).not.toContain(refused.credit);
+  });
+
+  it('refuses a wrapped attribution phrase added then removed', () => {
+    const r = onTopic();
+    r.track('a.md', `Clean\n${refused.wrappedCredit}\n`);
+    r.commit('Add a note');
+    r.track('a.md', 'Clean\n');
+    r.commit('Remove the note');
+    const out = r.check();
+    expect(out.status).toBe(1);
+    expect(out.stderr).toContain('a.md');
+  });
+
+  it('reads the committed file, not the working tree', () => {
+    const clean = repo();
+    clean.track('a.md', 'Clean\n');
+    clean.commit('Add a note');
+    fs.writeFileSync(path.join(clean.dir, 'a.md'), refused.link);
+    expect(clean.check().status).toBe(0);
+    const dirty = repo();
+    dirty.track('a.md', refused.link);
+    dirty.commit('Add a note');
+    fs.writeFileSync(path.join(dirty.dir, 'a.md'), 'Clean\n');
+    expect(dirty.check().status).toBe(1);
+  });
+
+  it('reads a committed file that is missing on disk', () => {
+    const r = repo();
+    r.track('a.md', refused.link);
+    r.commit('Add a note');
+    fs.rmSync(path.join(r.dir, 'a.md'));
+    expect(r.check().status).toBe(1);
+  });
+
+  it('fails without main, and prints the fetch command', () => {
+    const r = onTopic();
+    r.git('branch', '-m', 'main', 'other');
+    const out = r.check();
+    expect(out.status).toBe(1);
+    expect(out.stderr).toContain('git fetch');
+  });
+
+  it('prints a generic message, and no file content, when git fails', () => {
+    const r = repo();
+    r.track('a.md', `Clean text ${'SECRET-BODY'}\n`);
+    r.commit('Add a note');
+    const id = execFileSync('git', ['rev-parse', 'HEAD:a.md'], { cwd: r.dir, encoding: 'utf8' }).trim();
+    const object = path.join(r.dir, '.git', 'objects', id.slice(0, 2), id.slice(2));
+    fs.chmodSync(object, 0o644);
+    fs.writeFileSync(object, 'corrupt SECRET-BODY');
+    const out = r.check();
+    expect(out.status).toBe(1);
+    expect(out.stderr).toContain('a.md could not be read to check');
+    expect(out.stderr).not.toContain('SECRET-BODY');
+  });
+
+  it('names the git command and its error when run outside a repository', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attribution-nogit-'));
+    const out = spawnSync('node', [script], { cwd: dir, encoding: 'utf8' });
+    expect(out.status).toBe(1);
+    expect(out.stderr).toContain('git ls-tree failed (exit 128): fatal: not a git repository');
   });
 });

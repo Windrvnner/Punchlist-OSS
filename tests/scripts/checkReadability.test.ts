@@ -2,7 +2,7 @@
 // The readability hints (CLAUDE.md, "Readable code"): a too-complex function the branch changes anywhere, a new
 // function over 60 lines, and a file over 500 lines the branch makes longer are listed. The check never fails.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -46,7 +46,8 @@ function flat(name: string, lines: number) {
   return [`export function ${name}(x: number): number {`, ...body, '  return x;', '}', ''].join('\n');
 }
 
-describe('the readability hints', () => {
+// Each test builds a Git repository and runs the script, which can take several seconds on a busy machine.
+describe('the readability hints', { timeout: 20_000 }, () => {
   it('list a too-complex function the branch grew without touching its first line', () => {
     const result = branch({ 'src/a.ts': complex(8) }, { 'src/a.ts': complex(12) });
     expect(result.status).toBe(0);
@@ -81,5 +82,12 @@ describe('the readability hints', () => {
     expect(result.stdout).not.toContain('src/cut.ts');
     expect(result.stdout).not.toContain('src/full.ts');
     expect(result.stdout).not.toContain('src/new.ts');
+  });
+});
+
+describe('package.json', () => {
+  it('keeps every line within 120 characters', () => {
+    const long = readFileSync('package.json', 'utf8').split('\n').filter((row) => row.length > 120);
+    expect(long).toEqual([]);
   });
 });

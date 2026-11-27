@@ -1,0 +1,143 @@
+// Fails when an allowance names an issue that is not open, so a closed issue cannot keep an exception alive.
+// It reads GitHub, so only CI runs it (the static job, with GITHUB_TOKEN).
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { ALLOWANCE_FILES } from './allowance.mjs';
+
+export { ALLOWANCE_FILES };
+
+// The numbers, among `numbers`, that are not an open issue (a pull request number is not an issue).
+export async function closedIssues(numbers, fetchPage) {
+  const open = new Set();
+  for (let page = 1; ; page += 1) {
+    const items = await fetchPage(page);
+    if (items.length === 0) break;
+    for (const item of items) {
+      if (!item.pull_request) open.add(item.number);
+    }
+  }
+  return numbers.filter((number) => !open.has(number));
+}
+
+function readEntries(file) {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch (error) {
+    throw new Error(`${file} is not valid JSON: ${error.message}`);
+  }
+}
+
+function issuesNamed(root) {
+  const numbers = [];
+  for (const file of ALLOWANCE_FILES.map((name) => path.join(root, name)).filter(existsSync)) {
+    const entries = readEntries(file);
+    for (const { issue } of Array.isArray(entries) ? entries : []) {
+      if (issue !== undefined) numbers.push(issue);
+    }
+  }
+  return [...new Set(numbers)];
+}
+
+// The issues endpoint for the environment's repository. The host is fixed, so the token only ever goes to GitHub.
+function issuesEndpoint(repository) {
+  const ownerAndName = /^(?!\.+\/)[\w.-]+\/(?!\.+$)[\w.-]+$/;
+  if (!ownerAndName.test(repository ?? '')) throw new Error('GITHUB_REPOSITORY must be owner/name');
+  return new URL(`https://api.github.com/repos/${repository}/issues`);
+}
+
+// A server error or a rate limit is often gone a little later, so it is asked again. A 403 is a rate limit only when
+// GitHub says so (no requests left, or a retry-after header); any other 403 is a missing permission.
+const attempts = 3;
+const retryWaitMs = 2000;
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const noRequestsLeft = (headers) => headers.get('x-ratelimit-remaining') === '0';
+
+function isRateLimit({ status, headers }) {
+  if (status === 429) return true;
+  return status === 403 && (noRequestsLeft(headers) || headers.has('retry-after'));
+}
+
+const isTransient = (response) => response.status >= 500 || isRateLimit(response);
+
+// A retry-after header is a number of seconds or an HTTP date (RFC 9110, section 10.2.3).
+function retryAfterMs(value) {
+  if (/^\d+$/.test(value.trim())) return Number(value) * 1000;
+  return Math.max(0, new Date(value).getTime() - Date.now());
+}
+
+// How long GitHub asks to wait: retry-after seconds; else, with no requests left, until x-ratelimit-reset (epoch
+// seconds); else 2 seconds. GitHub sends the rate-limit headers with every answer, so only an empty limit counts.
+// A header that cannot be read counts as missing.
+function retryDelayMs({ headers }) {
+  const asked = askedDelayMs(headers);
+  return Number.isNaN(asked) ? retryWaitMs : asked;
+}
+
+function askedDelayMs(headers) {
+  if (headers.has('retry-after')) return retryAfterMs(headers.get('retry-after'));
+  if (!noRequestsLeft(headers) || !headers.has('x-ratelimit-reset')) return retryWaitMs;
+  return Math.max(0, Number(headers.get('x-ratelimit-reset')) * 1000 - Date.now());
+}
+
+// A CI job is not held longer than this: a longer wait fails the check, and the job is re-run later (#1384).
+const longestWaitMs = 5 * 60_000;
+
+function boundedDelayMs(response) {
+  const ms = retryDelayMs(response);
+  if (ms <= longestWaitMs) return ms;
+  const asked = Math.ceil(ms / 1000);
+  throw new TooLongWait(`GitHub asked to wait ${asked} seconds, longer than ${longestWaitMs / 1000}`);
+}
+
+// GitHub answered, so this failure is reported as it is, not as GitHub being out of reach.
+class TooLongWait extends Error {}
+
+async function openIssuesPage({ endpoint, token, fetch, wait }, page) {
+  if (!token) throw new Error('GITHUB_TOKEN is required');
+  const url = new URL(endpoint);
+  url.search = new URLSearchParams({ state: 'open', per_page: '100', page: String(page) }).toString();
+  for (let attempt = 1; ; attempt += 1) {
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+    });
+    if (response.ok) return response.json();
+    if (attempt === attempts || !isTransient(response)) throw new Error(`GitHub answered ${response.status}`);
+    await wait(boundedDelayMs(response));
+  }
+}
+
+// Runs the check; `fetch` and `wait` are parameters so tests need no network and no delay.
+// Returns the exit status and what it printed.
+export async function checkOpenIssues({ env, fetch, root = '.', wait = pause }) {
+  const lines = [];
+  const result = (status) => ({ status, stderr: lines.join('\n') });
+  let named;
+  let endpoint;
+  try {
+    named = issuesNamed(root);
+    endpoint = issuesEndpoint(env.GITHUB_REPOSITORY);
+  } catch (error) {
+    lines.push(error.message);
+    return result(1);
+  }
+  try {
+    const source = { endpoint, token: env.GITHUB_TOKEN, fetch, wait };
+    const closed = await closedIssues(named, (page) => openIssuesPage(source, page));
+    for (const number of closed) lines.push(`#${number} is not an open issue`);
+    return result(closed.length ? 1 : 0);
+  } catch (error) {
+    if (error instanceof TooLongWait) lines.push(error.message);
+    else lines.push(`Cannot reach GitHub to check the issues the allowances name (${error.message})`);
+    return result(1);
+  }
+}
+
+async function main() {
+  const { status, stderr } = await checkOpenIssues({ env: process.env, fetch });
+  if (stderr) console.error(stderr);
+  process.exitCode = status;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();

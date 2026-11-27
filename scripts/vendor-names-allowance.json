@@ -1,0 +1,58 @@
+[
+  {
+    "file": "src/backend/claude.ts",
+    "kind": "model name",
+    "line": "Claude Haiku 5.5",
+    "count": 1,
+    "issue": 1241
+  },
+  {
+    "file": "src/backend/claude.ts",
+    "kind": "model name",
+    "line": "Claude Opus 5.5",
+    "count": 1,
+    "issue": 1241
+  },
+  {
+    "file": "src/backend/claude.ts",
+    "kind": "model name",
+    "line": "Claude Sonnet 5.5",
+    "count": 1,
+    "issue": 1241
+  },
+  {
+    "file": "src/backend/claude.ts",
+    "kind": "model name",
+    "line": "claude-custom",
+    "count": 1,
+    "issue": 1241
+  },
+  {
+    "file": "src/backend/north.ts",
+    "kind": "model name",
+    "line": "GPT Model",
+    "count": 1,
+    "issue": 1241
+  },
+  {
+    "file": "src/backend/north.ts",
+    "kind": "model name",
+    "line": "gpt-model",
+    "count": 1,
+    "issue": 1241
+  },
+  {
+    "file": "src/backend/north.ts",
+    "kind": "model name",
+    "line": "gpt-plain",
+    "count": 1,
+    "issue": 1241
+  },
+  {
+    "file": "src/backend/openai.ts",
+    "kind": "model name",
+    "line": "gpt-model",
+    "count": 1,
+    "issue": 1241
+  }
+]

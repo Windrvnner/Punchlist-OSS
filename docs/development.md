@@ -60,16 +60,86 @@ Store with stand-in ports. Run the test in Node without a window.
 npx vitest run tests/app/coreWorkflows.test.ts --environment node --no-file-parallelism
 ```
 
-The static checks scan tracked files for secrets and attribution, and commit messages for attribution. Attribution
-includes a role credited with a decision and an email address other than an example or no-reply one.
+The static checks scan tracked files for secrets and attribution.
+They also scan the text each branch commit adds, and its commit message, so a secret or attribution added and then
+removed in the same branch still fails.
+The history scan of secrets runs with `--all` (`npm run check:tracked` and CI), not in the pre-commit hook.
+On `main` itself the added text of past commits is not re-scanned for attribution or secrets; the pull-request run is
+the gate.
+Attribution still scans the latest 200 commit messages there.
+Attribution includes a role credited with a decision and an email address other than an example or no-reply one.
 The readability script also lists added `src/` lines that name a guess (overlap, fuzzy, fallback, repair and the like).
 After readability hints, `scripts/check-pane-of-glass.mjs` checks UI imports, service and repository access,
-browser storage, cookies, the Cache API, and network calls. The committed `scripts/pane-of-glass-baseline.json` is
-`{}`, so any match fails. A UI `import()` or `require()` call must name its module with a plain string, `require` is
+browser storage, cookies, the Cache API, network calls, timers, list work, loops, length limits, dates, and patterns.
+A UI `import()` or `require()` call must name its module with a plain string, `require` is
 used only in such a call, and UI code reads `import.meta` only as `import.meta.env`; anything else counts as an import.
-The guard compares the baseline with the branch point on `main` and refuses increases. On a branch with existing
-entries, use `node scripts/check-pane-of-glass.mjs --lower` and commit the lower baseline when removing an access.
+Every match is listed line by line in `scripts/pane-of-glass-baseline.json`, a JSON array of allowances.
+The vendor-name test and the skipped-test gate use the same format
+in `scripts/vendor-names-allowance.json` and `scripts/skipped-tests-allowance.json`.
+An allowance is `{ file, kind, line, count, issue }` or `{ file, kind, line, count, decision }`.
+`line` is the trimmed text of the matching line, and `count` is how many times it matches in that file.
+For a model name `line` is the model name, and for a skipped test it is the test's full name.
+The vendor-name test reads the string literals, template parts, and JSX text of `src/ui/**/*.ts(x)` and
+`src/app/**/*.ts(x)`, plus the model names each connector returns.
+Code that names a provider elsewhere is not flagged.
+Text written outside `src/ui` and `src/app` that can still reach a screen is not scanned, such as the control-file
+startup errors in `src/control.ts` and backend error messages; the known lines are tracked in #1241.
+It does not read comments, html, css, or json files, names held only in identifiers, names split by concatenation,
+or names with a digit attached (`gpt4o`, `claude3`).
+Exactly one of `issue` (an open issue number) or `decision` (a line of `docs/decisions.md` that is on
+`scripts/verified-decisions.json`) is set.
+A decision never covers a `timer` entry: a timer decides when something happens (#1407).
+Skipped-test entries also carry `platform` and `reason`.
+`node scripts/check-pane-of-glass.mjs --list` prints the matches not yet listed, and `--lower` lowers each count to
+its matches and removes entries that no longer match; neither adds an issue or decision.
+`node scripts/check-allowance-history.mjs` compares each allowance file with `main`.
+Every entry, whether it cites an issue or a decision, can only be kept, lowered, or removed.
+So a new flagged line in `src/ui` cannot be added: it belongs in `src/app`, formatting helpers included, unless it
+is an edit of a listed line that the move rule below accepts.
+Editing a listed line (renaming a variable, reformatting) changes its text, and so its key.
+An `issue` entry may move to the new text when the diff with `main` shows a one-for-one swap: the same file, kind,
+and issue; the old line and the new line at the same position of one hunk that removes as many lines as it adds;
+and the old line's matches on the branch fallen by the moved count, so one of two identical lines can move.
+The moved entries together take at most what the old entry lost.
+The check cannot tell an edit from a replacement: a swap may put a different match of the same kind, under the same
+issue, in the old line's place, so review still reads every moved line.
+To move one, run `node scripts/check-pane-of-glass.mjs --list`, which prints the new text, and change the entry's
+`line` to it, keeping its issue.
+A `decision` entry never moves: to edit a line listed under a decision, first move the formatting into a helper the
+check does not flag, or relabel the entry under an open issue in an earlier pull request.
+Renaming a screen file is not a move; its entries count as new.
+An entry whose issue `main` already names cannot switch to another issue or to a decision; a decision entry can
+switch to an issue.
+A `decision` entry needs a decision already on `main`'s `scripts/verified-decisions.json`, so a decision verified in a
+pull request cannot be used in that same pull request.
+An allowance file that `main` does not have yet has no ceiling, except the pane-of-glass baseline: when `main` has no
+array baseline, the ceiling is the matches `main`'s own `src/ui` has.
+`node scripts/check-open-issues.mjs` runs in CI only and fails when an issue named in an allowance is not open.
 If the checkout lacks the history needed for comparison, the diagnostic gives the Git command to fetch it.
+`node scripts/check-skipped-tests.mjs <vitest.json>` fails on a skipped test that is not listed.
+Each CI job passes its own scope, so an entry that no longer matches is reported only by the job that could see it.
+A skipped-test entry with `root: true` is for a skip that happens only when the tests run as root: it excuses a
+skip, and is reported when it no longer matches, only in a run as root (CI never runs as root).
+`node scripts/check-skipped-tests.mjs --files` fails on a test file that Vitest never runs.
+It compares the tracked `.test` and `.spec.ts(x)` files under `tests/` with what `vitest list` gives, so an
+`exclude` in `vitest.config.ts` counts; only the live tests and the AI check, which a plain run leaves out, are not
+reported.
+The timer, list, loop, limit, date, and pattern kinds catch only these forms:
+any reference to `setTimeout`, `setInterval`, or `requestIdleCallback`;
+a call of a list method named in `scripts/pane-of-glass-rules.mjs` (such as `.sort`, `.filter`, `.slice`, `.forEach`,
+`.reverse`, or `.indexOf`) or of `Object.groupBy` or `Map.groupBy`;
+a `for`, `while`, or `do` loop;
+a comparison with anything but 0 of a plain dotted `.length` or `.size` read, or of `+` or `-` arithmetic containing
+one (computed reads such as `rows['length']` and other arithmetic such as `rows.length * 2` are not caught), an
+assignment to `.length`, and a numeric `maxLength`, `minLength`, `min`, or `max` attribute;
+`Date.parse`, `Date.UTC`, `Date.now`, and `new Date` with arguments;
+and a regex literal or a `RegExp` call.
+Any other method, property, or construct is review's job, for example `.map`, `.flatMap`, `.includes`, `.join`,
+`.concat`, `.at`, `.replace` without a regex, `.split`, `.trim`, `.startsWith`, `.pop`, `.shift`, `Array.from`,
+`new Set`, a bare `.length` read, `Math.min`, `Math.max`, a method name held in a variable,
+`Function.prototype.call`, destructured `length` or `Date.parse`, `performance.now`, `queueMicrotask`, plain `if`
+logic on state, references that are not called (`const f = Date.now`, `rows.sort` passed as a value), and named
+constants.
 
 The GitHub Actions workflow also builds the Windows installer when it is started by hand.
 

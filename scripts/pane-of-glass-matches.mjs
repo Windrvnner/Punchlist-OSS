@@ -1,7 +1,8 @@
 // Match syntax, so examples in comments, strings, regexes and JSX text never count as UI dependencies.
 import { posix } from 'node:path';
 import { parseSync, Visitor } from 'vite';
-import { literalText, unwrapped } from './pane-of-glass-syntax.mjs';
+import { ruleChecks } from './pane-of-glass-rules.mjs';
+import { literalText, propertyNames, stringValues, unwrapped } from './pane-of-glass-syntax.mjs';
 
 // Persistence and network access belong in src/app and src/backend: browser storage, cookies, the Cache API, and
 // the browser's own ways to reach a server (a model service among them).
@@ -13,44 +14,11 @@ const layerPath = /^(?:backend|adapters|desktop|shell)(?:\/|$)/;
 const requireNames = new Set(['require', 'createRequire']);
 const externalModule = /^(?:node:|(?:electron|fs|path)(?:\/|$))/;
 
-function concatenate(left, right) {
-  return left.flatMap((prefix) => right.map((suffix) => prefix + suffix));
-}
-
-function templateValues(node) {
-  let values = [node.quasis[0].value.cooked];
-  for (const [index, expression] of node.expressions.entries()) {
-    const tail = node.quasis[index + 1].value.cooked;
-    values = concatenate(values, stringValues(expression)).map((value) => value + tail);
-  }
-  return values;
-}
-
-// Only inspect syntax. A placeholder preserves the known parts of a string around a runtime value.
-function stringValues(expression) {
-  if (!expression) return [];
-  const node = unwrapped(expression);
-  const text = literalText(node);
-  if (text !== null) return [text];
-  if (node.type === 'TemplateLiteral') return templateValues(node);
-  if (node.type === 'BinaryExpression' && node.operator === '+') {
-    return concatenate(stringValues(node.left), stringValues(node.right));
-  }
-  if (node.type === 'ConditionalExpression') return [...stringValues(node.consequent), ...stringValues(node.alternate)];
-  if (node.type === 'LogicalExpression') return [...stringValues(node.left), ...stringValues(node.right)];
-  return ['*'];
-}
-
 function forbiddenModule(file, name) {
   if (externalModule.test(name)) return true;
   if (!name.startsWith('.')) return layerPath.test(name.replace(/^\/?src\//, ''));
   const target = posix.join(posix.dirname(file), name);
   return target.startsWith('src/') && layerPath.test(target.slice('src/'.length));
-}
-
-function propertyNames(key, computed) {
-  if (!computed && (key.type === 'Identifier' || key.type === 'JSXIdentifier')) return [key.name];
-  return stringValues(key);
 }
 
 // Decision: a UI module names what it loads with a plain string, so the check never has to work out a path (#848).
@@ -104,6 +72,17 @@ function moduleChecks(file, record) {
   };
 }
 
+// Runs every handler given for a node type, so two sets that both handle one type both run.
+function composed(...handlerSets) {
+  const byType = {};
+  for (const handlers of handlerSets) {
+    for (const [type, handler] of Object.entries(handlers)) (byType[type] ??= []).push(handler);
+  }
+  return Object.fromEntries(Object.entries(byType).map(([type, list]) => [type, (node) => {
+    for (const handler of list) handler(node);
+  }]));
+}
+
 export function matchesIn(file, source) {
   const parsed = parseSync(file, source, { range: true });
   if (parsed.errors.length) throw new Error(`${file}: ${parsed.errors[0].message}`);
@@ -138,8 +117,7 @@ export function matchesIn(file, source) {
     }
   }
   const { readsEnv, usesRequire, ...modules } = moduleChecks(file, record);
-  new Visitor({
-    ...modules,
+  new Visitor(composed(modules, ruleChecks(record), {
     MemberExpression(node) {
       readsEnv(node);
       checkMember(node);
@@ -152,15 +130,25 @@ export function matchesIn(file, source) {
       if (storageNames.has(node.name)) record('storage', node);
       if (networkNames.has(node.name)) record('network', node);
     },
-  }).visit(parsed.program);
+  })).visit(parsed.program);
   return matchingLines(offsets, source);
+}
+
+// Line numbers count every kind of line break, as the editor does.
+export function splitLines(text) {
+  return text.split(/\r\n|[\r\n\u2028\u2029]/);
 }
 
 function matchingLines(offsets, source) {
   const lines = {};
   for (const kind of Object.keys(offsets).sort()) {
     lines[kind] = [...offsets[kind]].sort((a, b) => a - b)
-      .map((offset) => source.slice(0, offset).split(/\r\n|[\r\n\u2028\u2029]/).length);
+      .map((offset) => splitLines(source.slice(0, offset)).length);
   }
   return lines;
+}
+
+// A path joined with `/`, even when the directory was read with `\` separators, so entries read the same everywhere.
+export function slashPath(directory, name) {
+  return `${directory.replaceAll('\\', '/')}/${name}`;
 }

@@ -1,44 +1,13 @@
 // @vitest-environment node
-// Screens name no vendor, and the service name and the AI label come from the control file (names.service,
-// names.aiContent), never written in (docs/review-prompt.md, Privacy). Reads every string and JSX text in src/ui and
-// src/app; comments are not read.
-import { readdirSync, readFileSync } from 'node:fs';
-import { parseSync, Visitor } from 'vite';
+// The scan for vendor names, which the allowance checks across src (tests/app/vendorModelNames.test.ts). The service
+// name and the AI label come from the control file (names.service, names.aiContent), never written in
+// (docs/review-prompt.md, Privacy).
 import { describe, expect, it } from 'vitest';
+import { screenVendorMatches, vendorMatchesIn } from './vendorNamesKit';
+// @ts-expect-error the script is plain JavaScript
+import { allowanceProblems, groupMatches } from '../../scripts/allowance.mjs';
 
-// Model vendors and providers, their model families, and the default service name. Built at run time, so this file
-// holds none of them as text.
-const NAMES = ['Cla' + 'ude', 'Anthropic', 'ChatGPT', 'GPT', 'OpenAI', 'Copilot', 'Gemini', 'Cohere', 'Mistral',
-  'Llama', 'North', 'Haiku', 'Sonnet', 'Opus', 'Azure', 'Bedrock', 'Vertex', 'Intel' + 'ligence'];
-// in any case, so a name written in capitals or lower case is caught too
-const VENDOR = new RegExp(`\\b(${NAMES.join('|')})\\b`, 'i');
-
-/** Each string literal, template part and JSX text in a source file that names a vendor, with its line. */
-function vendorNamesIn(file: string, source: string): string[] {
-  const found: string[] = [];
-  const check = (start: number, text: string) => {
-    const line = source.slice(0, start).split('\n').length;
-    if (VENDOR.test(text)) found.push(`${file}:${line} ${text.trim().slice(0, 60)}`);
-  };
-  new Visitor({
-    Literal(node) {
-      if (typeof node.value === 'string') check(node.start, node.value);
-    },
-    TemplateLiteral(node) {
-      for (const part of node.quasis) check(part.start, part.value.cooked ?? '');
-    },
-    JSXText: (node) => check(node.start, node.value),
-  }).visit(parseSync(file, source).program);
-  return found;
-}
-
-function screenSources(): string[] {
-  const files = readdirSync('src', { recursive: true, encoding: 'utf8' })
-    .map((file) => `src/${file.replaceAll('\\', '/')}`);
-  return files.filter((file) => /^src\/(ui|app)\/.*\.tsx?$/.test(file)).sort();
-}
-
-describe('vendor names on screen', () => {
+describe('the vendor name scan', () => {
   it('finds a vendor or the default service name in a string or JSX text, and not in a comment', () => {
     const service = 'Intel' + 'ligence';
     const vendor = 'Cla' + 'ude';
@@ -50,13 +19,28 @@ describe('vendor names on screen', () => {
       "export const plain = 'Northwest office';",
       `export const tip = <button title="Ask ${vendor.toUpperCase()}" />;`,
     ].join('\n');
-    expect(vendorNamesIn('src/ui/x.tsx', source).map((line) => line.split(' ')[0])).toEqual([
-      'src/ui/x.tsx:2', 'src/ui/x.tsx:3', 'src/ui/x.tsx:4', 'src/ui/x.tsx:6',
+    expect(vendorMatchesIn('src/ui/x.tsx', source).map((match) => match.number)).toEqual([2, 3, 4, 6]);
+  });
+
+  it('refuses a vendor name written in src/ui and does not scan src/backend', () => {
+    const source = `export const label = '${'Cla' + 'ude'} Haiku';`;
+    const files = ['src/ui/x.tsx', 'src/backend/x.ts'];
+    const found = groupMatches(screenVendorMatches(files, () => source));
+    expect(found).toEqual([{ file: 'src/ui/x.tsx', kind: 'vendor', line: source, count: 2, lines: [1, 1] }]);
+    const problems: string[] = allowanceProblems(found, [], { decisions: [], verified: [] });
+    expect(problems).toEqual([expect.stringContaining('2 not listed')]);
+  });
+
+  it('records each occurrence at its own line, deep in a multi-line template too', () => {
+    const vendor = 'Cla' + 'ude';
+    const source = ['export const text = `', 'plain', `ask ${vendor} or ${vendor}`, `and ${vendor}`, '`;'].join('\n');
+    const matches = vendorMatchesIn('src/app/x.ts', source);
+    expect(matches.map((match) => [match.number, match.line])).toEqual([
+      [3, `ask ${vendor} or ${vendor}`], [3, `ask ${vendor} or ${vendor}`], [4, `and ${vendor}`],
     ]);
   });
 
-  it('is in no screen or app source', () => {
-    const found = screenSources().flatMap((file) => vendorNamesIn(file, readFileSync(file, 'utf8')));
-    expect(found).toEqual([]);
+  it('fails on a source that does not parse, rather than reading none of it', () => {
+    expect(() => vendorMatchesIn('src/app/x.ts', 'export const = ;')).toThrow(/x\.ts/);
   });
 });
