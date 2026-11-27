@@ -1,16 +1,17 @@
-import { pageOf } from '../domain/cite';
-export { pageOf };
-
-/** Reading mode opens only the first place of a grouped citation. */
-export const firstCitationPage = (loc: string) => pageOf(loc.split(' · ')[0]);
 /**
  * How citations are grouped, ordered and counted wherever they are shown (#950): the reading-mode document list,
  * a cited phrase's pop and a finding's list of sources, the source chips under an answer, a finding or a question,
  * and whether an attached file can be added to a finding's sources. The screens only show what these return.
  */
+import { pageOf } from '../domain/cite';
 import { docKey, type Finding, type Source } from '../domain/model';
 import type { DocRef } from './conversations';
 import type { DraftRef } from '../ports';
+
+export { pageOf };
+
+/** Reading mode opens only the first place of a grouped citation. */
+export const firstCitationPage = (loc: string) => pageOf(loc.split(' · ')[0]);
 
 /** Up to this many documents a pop lists them all; beyond it, with somewhere to send the rest, it lists POP_SHOWN. */
 export const POP_ALL = 4;

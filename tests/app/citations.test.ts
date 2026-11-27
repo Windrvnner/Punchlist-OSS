@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  byDocument, firstCitationPage, pageOf, canAddToSources, fewDocuments, inSources, menuSections, newerThan, popDocuments, shownDrafts, sourceChips,
+  byDocument, firstCitationPage, pageOf, canAddToSources, fewDocuments, inSources,
+  menuSections, newerThan, popDocuments, shownDrafts, sourceChips,
 } from '../../src/app/citations';
 import type { DocRef } from '../../src/app/conversations';
 import type { Source } from '../../src/domain/model';

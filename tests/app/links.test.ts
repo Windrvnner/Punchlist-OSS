@@ -21,12 +21,15 @@ it('opens every deal landing, conversation and record route', () => {
   const conv = 'cabcd';
   const routes: [Scope, object][] = [
     [{ kind: 'all' }, { name: 'chat' }], [{ kind: 'all', conv }, { name: 'chat', conv }],
-    [{ kind: 'deal', dealId }, { name: 'chat', dealId }], [{ kind: 'deal', dealId, conv }, { name: 'chat', dealId, conv }],
+    [{ kind: 'deal', dealId }, { name: 'chat', dealId }],
+    [{ kind: 'deal', dealId, conv }, { name: 'chat', dealId, conv }],
     [{ kind: 'finding', dealId, findingId }, { name: 'finding', dealId, findingId }],
     [{ kind: 'question', dealId, questionId }, { name: 'question', dealId, questionId }],
   ];
   for (const [scope, route] of routes) expect(routeFromHash('#' + scopeHash(scope))).toEqual(route);
-  for (const hash of ['', '#deals', '#unknown', '#finding-invalid']) expect(routeFromHash(hash)).toEqual({ name: 'home' });
+  for (const hash of ['', '#deals', '#unknown', '#finding-invalid']) {
+    expect(routeFromHash(hash)).toEqual({ name: 'home' });
+  }
 });
 
 it('retains loose text and complete literal braces around several finding links', () => {
@@ -59,7 +62,9 @@ it('opens actual search hits with their document, checklist and question selecti
   expect(route('item')).toEqual({ name: 'checklist', dealId });
   expect(hit('item').ui).toEqual({ selectedChecklist: 'permit-item', checklistFilter: 'all' });
   expect(route('question')).toEqual({ name: 'qa', dealId });
-  expect(hit('question').ui).toEqual({ selectedQuestion: questionId, qaFilter: { status: 'all', workstream: '', text: '' } });
+  expect(hit('question').ui).toEqual({
+    selectedQuestion: questionId, qaFilter: { status: 'all', workstream: '', text: '' },
+  });
   state.ui.route = { name: 'checklist', dealId };
   expect(hit('question').ui).toEqual({ selectedQuestion: questionId });
 });

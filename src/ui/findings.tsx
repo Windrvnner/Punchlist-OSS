@@ -73,9 +73,27 @@ export function Brief({ paragraphs, deal, onFinding, marked }: { paragraphs: str
     if (!f) return <span key={j}>{text}</span>;
     const open = () => { if (onFinding) onFinding(f); else location.hash = findingHref(f).slice(1); };
     // a finding raised by hand with nothing cited still opens from here; it has no sources to show on hover
-    if (!f.sources.length) return <span key={j} class="ref"><span class={`rb ${f.id === marked ? 'on' : ''}`} role="button" tabIndex={0} onClick={open} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}>{text}</span></span>;
-    // every source is within reach: a long list shows a few and "N more", which opens the finding at its full list
-    return <Ref key={j} text={text} sources={f.sources} className={f.id === marked ? 'on' : ''} onOpen={open} openText="Open finding" onMore={() => { const shown = sourceLists.get(f.id); wantSources = f.id; open(); requestAnimationFrame(() => { if (shown && wantSources === f.id && sourceLists.get(f.id) === shown) { wantSources = null; shown(); } }); }} />;
+    if (!f.sources.length) return <span key={j} class="ref">
+      <span class={`rb ${f.id === marked ? 'on' : ''}`} role="button" tabIndex={0} onClick={open}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            open();
+          }
+        }}>{text}</span></span>;
+    const more = () => {
+      const shown = sourceLists.get(f.id);
+      wantSources = f.id;
+      open();
+      requestAnimationFrame(() => {
+        if (shown && wantSources === f.id && sourceLists.get(f.id) === shown) {
+          wantSources = null;
+          shown();
+        }
+      });
+    };
+    return <Ref key={j} text={text} sources={f.sources} className={f.id === marked ? 'on' : ''}
+      onOpen={open} openText="Open finding" onMore={more} />;
   })}</p>)}</>;
 }
 
@@ -134,8 +152,10 @@ function checkLineText(line: NonNullable<ReturnType<typeof checkLine>>) {
         line.findings && n(line.findings, 'finding', 'findings')].filter(Boolean).join(' and ');
       return `${on(line.at)} check left out ${out}`;
     }
-    case 'deep':
-      return `${line.at ? `${on(line.at)} spot` : 'Spot'} check disagreed with ${line.overturned} of its ${line.size} results`;
+    case 'deep': {
+      const spot = line.at ? `${on(line.at)} spot` : 'Spot';
+      return `${spot} check disagreed with ${line.overturned} of its ${line.size} results`;
+    }
     case 'unchecked': return `${n(line.unchecked, 'checklist item', 'checklist items')} not checked yet`;
   }
 }
@@ -454,7 +474,9 @@ export function FindingOpening({ dealId, findingId, onOpen, pane }: { dealId: st
         {note && <div class="fnote" data-holds-work onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setNoteState(null); requestAnimationFrame(() => document.getElementById('f-status')?.focus()); } }}><div class="lbl">{note.status === 'open' ? 'Reopen' : 'Mark closed'}</div><textarea maxLength={TEXT_MAX} id="fnote-text" rows={2} placeholder="Note (optional)" aria-label="Note" ref={(el) => { if (el && !el.dataset.f) { el.dataset.f = '1'; el.focus(); } }} value={note.text} onInput={(e) => setNote({ ...note, text: (e.currentTarget as HTMLTextAreaElement).value })} /><div class="cacts"><button type="button" class="btn sm pri" id="fnote-save" onClick={() => void commit(note.status, note.text)}>Save</button><button type="button" class="btn sm" onClick={() => setNote(null)}>Cancel</button></div></div>}
         {/* up to four documents, its sources as chips above the detail, as under an answer */}
         {!busy && !listed && <SourceChips sources={f.sources} onOpen={onOpen} dealId={dealId} />}
-        {busy ? <div class="ai pending" aria-label="Updating"><span class="dots"><i /><i /><i /></span></div> : f.body.map((b, i) => <p class="dtxt" key={i}><Cited text={b} sources={f.sources} onOpen={onOpen} whole={whole} onMore={listed ? showSources : undefined} /></p>)}
+        {busy ? <div class="ai pending" aria-label="Updating"><span class="dots"><i /><i /><i /></span></div>
+          : f.body.map((b, i) => <p class="dtxt" key={i}><Cited text={b} sources={f.sources} onOpen={onOpen}
+            whole={whole} onMore={listed ? showSources : undefined} /></p>)}
         {/* more documents than a pop shows: every one, with its places, in a list like Previous version */}
         {!busy && listed && <details class="prev fsrcs" id="f-sources" ref={srcList} open={srcOpen} onToggle={(e) => setSrcOpen((e.currentTarget as HTMLDetailsElement).open)}><summary>{docs.length} sources</summary>
           <div class="sgl">{docs.map((g) => <div class="sgr" key={g.doc.docId}>

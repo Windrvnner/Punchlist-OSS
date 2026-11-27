@@ -1,11 +1,10 @@
-import { pageHash } from '../app/state';
 /**
  * Navigation with intent: go to a route and, once it is the current route, apply a
  * UI patch (which question is selected, which document is open). The Shell collects
  * the patch when it applies the route, so the two land in one state change.
  */
 import type { Store } from '../app/store';
-import type { UiState } from '../app/state';
+import { pageHash, type UiState } from '../app/state';
 import { lastInput } from './hooks';
 
 let pending: { hash: string; patch: Partial<UiState> } | null = null;
@@ -58,4 +57,5 @@ export function takeFocusAfter(): string[] {
  */
 let beforeFinding = '';
 if (typeof window !== 'undefined') window.addEventListener('hashchange', (e) => { const old = new URL(e.oldURL).hash.slice(1); if (!old.startsWith('finding-')) beforeFinding = old; });
-export const afterDeletingFinding = (dealId: string) => (beforeFinding === pageHash('checklist', dealId) ? beforeFinding : pageHash('findings', dealId));
+export const afterDeletingFinding = (dealId: string) =>
+  beforeFinding === pageHash('checklist', dealId) ? beforeFinding : pageHash('findings', dealId);

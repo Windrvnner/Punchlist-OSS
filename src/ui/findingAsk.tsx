@@ -1,11 +1,10 @@
-import { pageHash } from '../app/state';
 /**
  * A finding's links (linking design, sections 6 and 13; decisions, Checklist): the checklist item that raised it, the
  * questions asked about it or its item, and Ask the counterparty, with the Checklist pane's card.
  */
 import { useContext, useEffect, useState } from 'preact/hooks';
 import { askedAbout, findingAskTarget } from '../app/asking';
-import { findingItem } from '../app/state';
+import { findingItem, pageHash } from '../app/state';
 import { CreateQuestion } from '../app/commands/questions';
 import type { Finding } from '../domain/model';
 import { AskCard, AskedList, useLogQuestion } from './askCounterparty';

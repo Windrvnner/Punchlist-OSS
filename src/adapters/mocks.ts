@@ -1,9 +1,9 @@
-import { pageOf } from '../domain/cite';
 /**
  * Demo adapters. Every call takes real time (configurable latency), returns a
  * fresh copy of its data, and never shares references with the caller. The
  * production backend replaces these with adapters for the same ports.
  */
+import { pageOf } from '../domain/cite';
 import { candidates, ruleFrom, rewrite, topsOf, under, key as pathKey, type Rule, deeper } from '../domain/relink';
 import { ulid } from 'ulid';
 import type { AiService, DocumentService, FileSystem, Session, Clock, Ids, Repository, ChecklistRow, Research, ResearchStep, CheckState, IssuePoint } from '../ports';

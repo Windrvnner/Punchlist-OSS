@@ -1,11 +1,10 @@
-import { scopeHash } from '../app/conversations';
-import { pageHash } from '../app/state';
 /**
  * Stepping through the records on a deal changed on two PCs (the stepper on the two-PC versions panel).
  * It stays on the page a person is on: the Q&A panel steps through questions, a finding's page through findings.
  */
+import { scopeHash } from '../app/conversations';
 import type { Store } from '../app/store';
-import type { Conflict } from '../app/state';
+import { pageHash, type Conflict } from '../app/state';
 import { navigate } from './nav';
 
 /** opens a record in two versions where it is settled: a question in the Q&A panel, a finding on its page */

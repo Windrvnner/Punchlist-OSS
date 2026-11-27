@@ -1,4 +1,3 @@
-import { pageHash } from '../app/state';
 // The parts of a conversation's page: the trail at its top, what it is about, its exchanges, and what it says when
 // what it was about is gone.
 import type { ComponentChildren } from 'preact';
@@ -17,7 +16,7 @@ import { docKey, type Deal, type Question, type Source, type Tombstone } from '.
 import { addToSources } from '../app/attachments';
 import { RestoreQuestion } from '../app/commands/questions';
 import { RestoreFinding } from '../app/commands/findings';
-import { dealHash, type Message } from '../app/state';
+import { dealHash, type Message, pageHash } from '../app/state';
 import { KeptAsk } from './findingAsk';
 import { editDrafts } from '../app/findingDrafts';
 
