@@ -1,10 +1,9 @@
 // Scans screens for the pane-of-glass matches; shared by the check and by the history check of main's screens.
-import { basename } from 'node:path';
 import { groupMatches } from './allowance.mjs';
 import { matchesIn, splitLines } from './pane-of-glass-matches.mjs';
 
 function uiSource(file) {
-  return /\.(?:[cm]?[jt]s|[jt]sx)$/.test(file) && !basename(file).includes('.test.');
+  return /\.(?:[cm]?[jt]s|[jt]sx)$/.test(file);
 }
 
 // Each match of each screen among `files`, with the text of its line, grouped by line text.

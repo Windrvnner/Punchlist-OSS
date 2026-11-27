@@ -188,7 +188,7 @@ describe('UI dependency checks', () => {
     expect(result.stderr).not.toContain('topBar.ts');
   });
 
-  it('ignores test files, comments and literal text and checks expressions in templates and JSX', () => {
+  it('ignores comments and literal text and checks expressions in templates and JSX', () => {
     // The regex literal below is itself a pattern match, which the allowance lists.
     const repo = fixture([listed('src/ui/view.tsx', 'pattern', 'const pattern = /localStorage/')]);
     const examples = "import '../backend/table'; localStorage.getItem(key); store.services.repo.read()";
@@ -204,8 +204,6 @@ describe('UI dependency checks', () => {
       "const table = import('../app/table')",
       'const cookie = draft.label',
     ].join('\n');
-    repo.write('src/ui/view.test.tsx', examples);
-    repo.write('src/ui/nested/view.test.ts', examples);
     repo.write(page, clean);
     expect(repo.run().status).toBe(0);
     repo.write(page, clean + '\nconst value = <b>{`${store.services}`}</b>');
@@ -343,13 +341,13 @@ describe('the line-by-line allowance', () => {
     expect(repo.run().stderr).toContain(`"${serviceLine}": 2 not listed (lines 2, 3)`);
   });
 
-  it.each(['js', 'jsx', 'mjs', 'cjs', 'mts', 'cts'])('checks a .%s screen too', (extension) => {
+  it.each(['js', 'jsx', 'mjs', 'cjs', 'mts', 'cts'])('checks a .%s screen and its test file too', (extension) => {
     const repo = fixture();
     repo.write(`src/ui/helper.${extension}`, 'localStorage.clear()');
     repo.write(`src/ui/helper.test.${extension}`, 'localStorage.clear()');
     const result = repo.run();
     expect(result.stderr).toContain(`src/ui/helper.${extension} storage "localStorage.clear()"`);
-    expect(result.stderr).not.toContain('helper.test');
+    expect(result.stderr).toContain(`src/ui/helper.test.${extension} storage "localStorage.clear()"`);
   });
 
   it('fails with a message, not a stack trace, on a baseline with a syntax error', () => {
