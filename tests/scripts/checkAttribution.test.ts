@@ -164,7 +164,7 @@ describe('the attribution check on the history and the committed files', () => {
     fs.writeFileSync(object, 'corrupt SECRET-BODY');
     const out = r.check();
     expect(out.status).toBe(1);
-    expect(out.stderr).toContain('could not be read to check');
+    expect(out.stderr).toContain('a.md could not be read to check');
     expect(out.stderr).not.toContain('SECRET-BODY');
   });
 });

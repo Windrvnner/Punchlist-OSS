@@ -141,7 +141,8 @@ npm run ai:check -- <openai|claude|north>    # the AI check on a live service, w
   shell either: with it set, every plain test run includes the paid AI check (`vitest.config.ts`). `npm run ai:check`
   reads `.env` only for the Claude backend. Live runs make paid calls, so they are rare. Claude sends every tier to
   Haiku by default. `PUNCHLIST_LIVE_ROUTING=1` routes each tier to its configured Claude model.
-- A pre-commit check (`scripts/check-secrets.mjs`) blocks keys and `.env` files; with `--all` (CI) it also scans the text each branch commit adds.
+- A pre-commit check (`scripts/check-secrets.mjs`) blocks keys and `.env` files; with `--all` (CI) it also scans
+  the text each branch commit adds.
 - The end user manages security around the app (network, sign-in, and devices). Don't over-engineer it. The app's own basics still hold: no secrets in the repo, careful input handling, robust error handling, and self-recovery.
 
 ## Product rules

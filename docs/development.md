@@ -92,7 +92,8 @@ An `issue` entry can only be kept, lowered, or removed.
 An entry whose issue `main` already names cannot switch to another issue or to a decision.
 A `decision` entry needs a decision already on `main`'s `scripts/verified-decisions.json`, so a decision verified in a
 pull request cannot be used in that same pull request.
-An allowance file that `main` does not have yet has no ceiling.
+An allowance file that `main` does not have yet has no ceiling, except the pane-of-glass baseline: when `main` has no
+array baseline, the ceiling is the matches `main`'s own `src/ui` has.
 `node scripts/check-open-issues.mjs` runs in CI only and fails when an issue named in an allowance is not open.
 If the checkout lacks the history needed for comparison, the diagnostic gives the Git command to fetch it.
 `node scripts/check-skipped-tests.mjs <vitest.json>` fails on a skipped test that is not listed.
