@@ -3,6 +3,7 @@
  * fresh copy of its data, and never shares references with the caller. The
  * production backend replaces these with adapters for the same ports.
  */
+import { pageOf } from '../domain/cite';
 import { candidates, ruleFrom, rewrite, topsOf, under, key as pathKey, type Rule, deeper } from '../domain/relink';
 import { ulid } from 'ulid';
 import type { AiService, DocumentService, FileSystem, Session, Clock, Ids, Repository, ChecklistRow, Research, ResearchStep, CheckState, IssuePoint } from '../ports';
@@ -166,8 +167,8 @@ export function mockDocuments(opts: MockOptions = {}): DocumentService {
           for (let r = Math.max(1, cr - 8); r <= cr + 8; r++) rows.push({ r, cells: cols.map((c, i) => (i === 0 ? (r === cr ? 'Referenced line' : `Line ${r}`) : c + r === cell ? '140.0' : '')) });
           return { kind: 'sheet' as const, name: doc, cols, rows, cell };
         }
-        const pm = /p\.\s*(\d+)/.exec(loc);
-        const real = opts.pdf?.(doc) ?? null; const n = pm ? +pm[1] : 1;
+        const real = opts.pdf?.(doc) ?? null;
+        const n = pageOf(loc) ?? 1;
         // the demo's documents run to a few hundred pages (deal documents do), and always as far as the page cited
         const pages = real?.pages ?? Math.max(n, 180 + (id.charCodeAt(id.length - 1) % 5) * 40);
         return { kind: 'pdf' as const, url: real?.url ?? null, page: real?.pages ? ((n - 1) % real.pages) + 1 : n, pages };

@@ -16,16 +16,9 @@ import { readDeal } from '../app/fieldDrafts';
 import { ConflictView } from './conflict';
 import { runMemo } from '../app/memo';
 import { openDeleteDeal } from '../app/dealSetup';
-import { keptDrafts, hasTexts } from '../app/keptText';
+import { DealRename } from '../app/dealRename';
 import { num } from './counts';
 
-/**
- * A new deal name being typed, by deal, kept on this PC as it is typed until it is saved or let go: `text`, and `base`, the
- * name it was typed over. One that could not be saved (signed out, say) waits behind "Rename not saved" by the name.
- */
-const keptNames = keptDrafts('deal-name', hasTexts('text', 'base'));
-
-/** Why the deal's own details cannot be edited just now, if they cannot: they are in a clash until a version is chosen. */
 /**
  * A recovered copy's page heading: when the whole name has no room, its own name is cut by whole letters with a "…", so
  * " (recovered)" always shows, one space after it, and nothing is clipped through a letter. The room is the
@@ -72,14 +65,7 @@ export function PageTop({ deal: d, route, placeholder, noAsk = false }: { deal: 
     overview: 0,
   };
   const { folders, indexed } = indexingTotals(s, d);
-  const [renaming, setRenaming] = useState(false);
-  // the rename box closes back onto ⋯, where Rename was chosen, unless the focus has already gone elsewhere (a click
-  // on ⋯ itself, which saves the name as the box loses the focus, leaves it in the menu that opens)
-  const renamed = () => {
-    setRenaming(false);
-    const active = document.activeElement;
-    if (!active || active === document.body || active.id === 'deal-name') document.getElementById('deal-more')?.focus();
-  };
+  const rename = useDealRename(d.id);
   const indexing = d.stage === 'indexing' ? indexingLabel(s.ui.indexStalled.includes(d.id), indexed) : '';
   const folderLabel = folders ? `${folders} folder${folders > 1 ? 's' : ''}` : '';
   const facts = [d.target, d.side, indexing, d.milestone, folderLabel].filter(Boolean).join(' · ');
@@ -88,18 +74,24 @@ export function PageTop({ deal: d, route, placeholder, noAsk = false }: { deal: 
   const locked = useDealLock(d);
   return (
     <>
-      <div class="trail"><a class="th" href="#deals">Home</a><span class="sep">›</span>{route === 'overview' ? <span class="tn" title={d.name}>{d.name}</span> : <><a class="tn" href={`#overview-${d.id}`} title={d.name}>{d.name}</a><span class="sep">›</span><span class="tp">{DEAL_PAGES.find((p) => p[0] === route)![1]}</span></>}{facts && <><span class="sep">·</span><span class="facts">{facts}</span></>}
+      <div class="trail">
+        <a class="th" href="#deals">Home</a><span class="sep">›</span>
+        {route === 'overview' ? <span class="tn" title={d.name}>{d.name}</span> : <>
+          <a class="tn" href={`#${pageHash('overview', d.id)}`} title={d.name}>{d.name}</a><span class="sep">›</span>
+          <span class="tp">{DEAL_PAGES.find((p) => p[0] === route)![1]}</span>
+        </>}
+        {facts && <><span class="sep">·</span><span class="facts">{facts}</span></>}
         {/* the counterparty sits at the right end of the line, on every tab; the deal's structure, sector and technology are on Overview */}
         <span class="tfacts"><ReadOnlyContext.Provider value={locked}><EditField keep={`${d.id}:counterparty`} read={readDeal(d.id, 'counterparty')} label="Counterparty" placeholder="Counterparty" className="edit inl" cap={{ cls: 'lift', icon: <Icon name="building" size={14} /> }} value={d.counterparty} rev={d.rev} maxLength={80} commit={(v, over) => store.dispatch(EditDeal, { dealId: d.id, counterparty: v }, { quiet: true, over })} /></ReadOnlyContext.Provider></span></div>
       <div class="headrow">
-        <DealName deal={d} renaming={renaming} open={() => setRenaming(true)} done={renamed} />
+        <DealName deal={d} {...rename} />
         <div class="dtabs">{DEAL_PAGES.map(([page, label]) => {
           const count = tabCounts[page];
           return <a key={page} href={`#${pageHash(page, d.id)}`} class={route === page ? 'on' : ''}
             aria-current={route === page ? 'page' : undefined}>{label}{count
               ? <span>{num(count)}<i> open</i></span> : null}</a>;
         })}</div>
-        <DealActions deal={d} renaming={renaming} rename={() => setRenaming(true)} />
+        <DealActions deal={d} renaming={rename.field.editing} rename={() => rename.field.open()} />
       </div>
       {/* on Q&A an open question takes the ask box's place, at the top of the page (design G) */}
       {!noAsk && <div class="askslot"><Composer scope={{ kind: 'deal', dealId: d.id }} launch="deal" placeholder={placeholder} /></div>}
@@ -174,82 +166,59 @@ function CheckAgain({ deal: d, signedOut, done }: { deal: Deal; signedOut: strin
   </MenuItem>;
 }
 
-/**
- * The deal's name; in place it becomes a field. Enter or clicking away saves. Escape leaves the name as it was: a new
- * rename is dropped, but a name already kept (one that could not be saved, or changed elsewhere) stays kept behind
- * "Rename not saved". Only a save, Take theirs, or emptying the name lets a kept name go.
- */
-function DealName({ deal: d, renaming, open, done }: { deal: Deal; renaming: boolean; open: () => void; done: () => void }) {
-  const store = useStore(); const ref = useRef<HTMLInputElement>(null); const settled = useRef(false);
-  const base = useRef(d.name);                                       // the name the box was opened on: what the new one is typed over
-  const [moved, setMoved] = useState(false);                         // the name was changed elsewhere since: the person chooses
-  const held = useRef<{ text: string; base: string } | null>(null);   // the name kept when the box opened (or when a save of it was refused): Escape puts it back
+function useDealRename(dealId: string) {
+  const store = useStore();
+  const input = useRef<HTMLInputElement>(null);
+  const [, redraw] = useState(0);
+  const render = () => redraw((version) => version + 1);
+  // focus goes back to ⋯ unless a click moved it
+  const close = () => {
+    render();
+    const active = document.activeElement;
+    if (!active || active === document.body || active === input.current) document.getElementById('deal-more')?.focus();
+  };
+  const [field] = useState(() => new DealRename(store, dealId, { render, close, focus: () => input.current?.focus() }));
+  useLayoutEffect(() => () => field.dispose(), [field]);
+  return { field, input };
+}
+
+/** The deal's name, which Rename turns into a field in place. */
+function DealName({ deal: d, field, input }: { deal: Deal } & ReturnType<typeof useDealRename>) {
   // a name longer than the field fades out at its edges instead of being cut through a letter
-  const over = () => { const i = ref.current; i?.classList.toggle('over', i.scrollWidth > i.clientWidth + 1); };
-  // kept on this PC as it is typed, so a crash or a page change keeps it
-  const typed = () => {
-    const input = ref.current;
-    if (input) {
-      input.maxLength = dealNameRoom(input.value);
-      keptNames.set(d.id, { text: input.value, base: base.current });
-    }
+  const over = () => input.current?.classList.toggle('over', input.current.scrollWidth > input.current.clientWidth + 1);
+  useLayoutEffect(() => {
+    if (!field.editing) return;
+    input.current?.focus();
+    input.current?.select();
     over();
-  };
-  useLayoutEffect(() => { if (renaming) { settled.current = false; setMoved(false); base.current = keptNames.get(d.id)?.base ?? d.name; held.current = keptNames.get(d.id) ?? null; ref.current?.focus(); ref.current?.select(); over(); } }, [renaming]);
-  const kept = keptNames.get(d.id);
-  // a copy kept from a deal deleted elsewhere keeps "(recovered)" in view, its own name shortened instead
+  }, [field.editing]);
   const [head, tail] = recoveredParts(d.name);
-  if (!renaming) return <>{tail ? <RecoveredTitle name={d.name} head={head} tail={tail} /> : <h1 class="ttl left" title={d.name} dir={nameDir(d.name)}>{d.name}</h1>}
-    {/* a name that could not be saved waits here: the person opens it when they choose, so it never takes the focus */}
-    {kept && <button type="button" class="linkb keptname" id="deal-name-kept" title={kept.text} onClick={open}>Rename not saved</button>}</>;
-  const letGo = () => { settled.current = true; keptNames.delete(d.id); done(); };
-  // Escape: a kept name stays kept (the box only closes); a new rename never refused is dropped, as before
-  const dismiss = () => { const h = held.current; if (h) { keptNames.set(d.id, h); settled.current = true; done(); } else letGo(); };
-  // Enter on an emptied name says why it can't be saved and stays in the field; leaving the field keeps the old name
-  const save = async (enter = false, mine = false) => {
-    if (settled.current || !ref.current) return;   // the box already gone (the page left): what it held stays as it was kept
-    if (moved && !mine) return;                     // waiting for Keep mine / Take theirs
-    const v = ref.current.value.trim();
-    if (!v && enter) {
-      store.toast('A deal needs a name', 'warn');
-      return;
-    }
-    settled.current = true;
-    if (!v || v === d.name) { letGo(); return; }
-    // typed over `base`: if the name has changed elsewhere since, nothing is written and the person chooses (as a field does)
-    const r = await store.dispatch(EditDeal, { dealId: d.id, name: v }, { quiet: true, over: mine ? d.name : base.current });
-    if (r.ok) { keptNames.delete(d.id); done(); return; }
-    keptNames.set(d.id, { text: v, base: base.current }); settled.current = false; held.current = { text: v, base: base.current };
-    if (r.error.kind === 'conflict') { setMoved(true); return; }
-    const ro = store.readOnly();
-    // signed out: the name is kept and the box closes, giving the page back; "Rename not saved" opens it again
-    if (ro) {
-      store.toast(ro, 'warn');
-      settled.current = true;
-      done();
-      return;
-    }
-    store.toast(r.error.message, 'warn');
-    ref.current?.focus();
-  };
+  if (!field.editing) return <>{tail ? <RecoveredTitle name={d.name} head={head} tail={tail} />
+    : <h1 class="ttl left" title={d.name} dir={nameDir(d.name)}>{d.name}</h1>}
+    {field.kept && <button type="button" class="linkb keptname" id="deal-name-kept" title={field.kept.text}
+      onClick={() => field.open()}>Rename not saved</button>}</>;
   const keyDown = (e: KeyboardEvent) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      void save(true);
+      void field.submit('enter');
     } else if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
-      dismiss();
+      field.escape();
     }
   };
-  const shown = kept?.text ?? d.name;
-  return <h1 class="ttl left renaming"><input class="rename" id="deal-name" ref={ref} aria-label="Deal name"
-    maxLength={dealNameRoom(shown)} defaultValue={shown} onInput={typed} onBlur={() => void save()}
-    onKeyDown={keyDown} />
-    {moved && <span class="efstate ext" id="deal-name-moved">Changed elsewhere · <button type="button"
-      onMouseDown={(e) => e.preventDefault()} onClick={() => { base.current = d.name; setMoved(false);
-      void save(true, true); }}>Keep Mine</button> <button type="button" onMouseDown={(e) => e.preventDefault()}
-      onClick={letGo}>Take Theirs</button></span>}</h1>;
+  const typed = (box: HTMLInputElement) => {
+    box.maxLength = dealNameRoom(box.value);
+    field.typed(box.value);
+    over();
+  };
+  const keepFocus = (e: MouseEvent) => e.preventDefault();
+  return <h1 class="ttl left renaming"><input class="rename" id="deal-name" ref={input} aria-label="Deal name"
+    maxLength={dealNameRoom(field.text)} defaultValue={field.text} onInput={(e) => typed(e.currentTarget)}
+    onBlur={() => void field.submit('blur')} onKeyDown={keyDown} />
+    {field.changedElsewhere && <span class="efstate ext" id="deal-name-moved">Changed elsewhere · <button type="button"
+      onMouseDown={keepFocus} onClick={() => void field.submit('mine')}>Keep Mine</button> <button type="button"
+      onMouseDown={keepFocus} onClick={() => field.takeTheirs()}>Take Theirs</button></span>}</h1>;
 }
 
 /**

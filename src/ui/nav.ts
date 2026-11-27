@@ -4,7 +4,7 @@
  * the patch when it applies the route, so the two land in one state change.
  */
 import type { Store } from '../app/store';
-import type { UiState } from '../app/state';
+import { pageHash, type UiState } from '../app/state';
 import { lastInput } from './hooks';
 
 let pending: { hash: string; patch: Partial<UiState> } | null = null;
@@ -24,7 +24,7 @@ export function focusSearchResult(store: Store, id: string, focus: () => void) {
 
 /** opens a deal's Checklist with one item open beside the list */
 export const openChecklistItem = (store: Store, dealId: string, itemId: string) =>
-  navigate(store, `checklist-${dealId}`, { selectedChecklist: itemId });
+  navigate(store, pageHash('checklist', dealId), { selectedChecklist: itemId });
 
 export function takeNavPatch(): Partial<UiState> {
   const p = pending && location.hash === '#' + pending.hash ? pending.patch : {};
@@ -57,4 +57,5 @@ export function takeFocusAfter(): string[] {
  */
 let beforeFinding = '';
 if (typeof window !== 'undefined') window.addEventListener('hashchange', (e) => { const old = new URL(e.oldURL).hash.slice(1); if (!old.startsWith('finding-')) beforeFinding = old; });
-export const afterDeletingFinding = (dealId: string) => (beforeFinding === `checklist-${dealId}` ? beforeFinding : `deal-${dealId}`);
+export const afterDeletingFinding = (dealId: string) =>
+  beforeFinding === pageHash('checklist', dealId) ? beforeFinding : pageHash('findings', dealId);
