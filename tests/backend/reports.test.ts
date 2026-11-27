@@ -884,7 +884,8 @@ describe('third-party reports in the app’s checks', () => {
     const s = setupReports(script, { d1: marked },
       { shared, installId: 'pc1', checklist, reports: looks, changes: clauseChanges(1_000) });
     await deal(s.repo);
-    const orig = s.svc.complete.bind(s.svc); let refused = 0;
+    const orig = s.svc.complete.bind(s.svc);
+    let refused = 0;
     s.svc.complete = async (input) => {
       if (wasLines(input.prompt).length > 300) {
         if (/is a report by an outside advisor|Read the first pages/.test(input.prompt)) refused++;
