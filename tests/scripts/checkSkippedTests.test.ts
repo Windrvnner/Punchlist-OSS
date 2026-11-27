@@ -4,8 +4,10 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-// @ts-expect-error the scripts are plain JavaScript
-import { isTestFile, skippedMatches, skippedProblems, unrunTestFiles } from '../../scripts/check-skipped-tests.mjs';
+import {
+  isTestFile, skippedMatches, skippedProblems, unrunTestFiles, vitestRunFiles,
+  // @ts-expect-error the script is plain JavaScript
+} from '../../scripts/check-skipped-tests.mjs';
 import { isAiCheck, isLive, liveExclude } from '../../scripts/vitest-files.mjs';
 // @ts-expect-error the script is plain JavaScript
 import { vitestResults } from '../../scripts/gate-compare.mjs';
@@ -83,16 +85,32 @@ describe('skipped tests in a Vitest report', () => {
 });
 
 describe('test files Vitest never runs', () => {
-  it('refuses a test file outside the include list', () => {
-    const problems = unrunTestFiles(['tests/ui/a.test.ts', 'tests/ui/b.test.tsx']);
+  it('refuses a test file that Vitest does not list', () => {
+    const problems = unrunTestFiles(['tests/ui/a.test.ts', 'tests/ui/b.test.tsx'], ['tests/ui/b.test.tsx']);
     expect(problems).toEqual(['tests/ui/a.test.ts is never run by Vitest']);
   });
 
-  it('refuses a test file of any shape Vitest could run, outside the include list', () => {
-    const problems = unrunTestFiles(['tests/ui/a.test.mjs', 'tests/ui/b.test.jsx', 'tests/ui/c.test.cts']);
-    expect(problems).toHaveLength(3);
-    expect(['a.test.mjs', 'b.test.tsx', 'c.test.cjs'].every((name) => isTestFile(`tests/x/${name}`))).toBe(true);
+  it('counts .test files of any shape and .spec.ts(x) files, not the .spec.mjs files CI runs with node', () => {
+    const names = ['a.test.mjs', 'b.test.tsx', 'c.test.cjs', 'd.spec.ts', 'e.spec.tsx'];
+    expect(names.every((name) => isTestFile(`tests/x/${name}`))).toBe(true);
     expect(isTestFile('tests/desktop/smoke.spec.mjs')).toBe(false);
+    expect(unrunTestFiles(['tests/ui/d.spec.ts'], [])).toEqual(['tests/ui/d.spec.ts is never run by Vitest']);
+  });
+
+  it('excuses only the live tests and the AI check that a plain run leaves out', () => {
+    const live = ['tests/e2e/live-agent.test.ts', 'tests/e2e/ai-check-live.test.ts'];
+    expect(unrunTestFiles(live, [])).toEqual([]);
+  });
+
+  it('reads the files Vitest runs from its own configuration, exclusions included', () => {
+    const config = path.join(gateRoot, 'vitest.config.mjs');
+    const excluded = 'tests/scripts/browserReason.test.ts';
+    const root = JSON.stringify(process.cwd());
+    writeFileSync(config, `export default { test: { root: ${root}, include: ['tests/scripts/browser*.test.ts'],
+      exclude: [${JSON.stringify(excluded)}] } };`);
+    const listed = vitestRunFiles(['--config', config]);
+    expect(listed).toContain('tests/scripts/browserShard.test.ts');
+    expect(listed).not.toContain(excluded);
   });
 
   it('finds none among the tracked test files', () => {

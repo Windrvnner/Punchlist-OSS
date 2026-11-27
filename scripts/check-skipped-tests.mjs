@@ -14,7 +14,7 @@ import { pathToFileURL } from 'node:url';
 import { allowanceProblems, decisionEntries, entryProblems, groupMatches } from './allowance.mjs';
 import { vitestResults } from './gate-compare.mjs';
 import { insideGate } from './gate-dir.mjs';
-import { testInclude } from './vitest-files.mjs';
+import { liveExclude } from './vitest-files.mjs';
 
 const allowancePath = 'scripts/skipped-tests-allowance.json';
 const notRun = new Set(['skipped', 'pending', 'todo']);
@@ -37,12 +37,23 @@ export function skippedProblems(matches, allowance, { decisions, verified, scope
   ];
 }
 
-// The test files, among `files`, that no Vitest include pattern covers.
-export function unrunTestFiles(files) {
-  const covered = (file) => testInclude.some((pattern) => path.matchesGlob(file, pattern));
+// The test files, among `files`, that Vitest does not list in `runFiles`. A plain run leaves out the live tests and
+// the AI check (scripts/vitest-files.mjs), so they are not reported; any other exclusion is.
+export function unrunTestFiles(files, runFiles) {
+  const leftOutOnPurpose = (file) => liveExclude({}).some((pattern) => path.matchesGlob(file, pattern));
   return files
-    .filter((file) => !covered(file))
+    .filter((file) => !runFiles.includes(file) && !leftOutOnPurpose(file))
     .map((file) => `${file} is never run by Vitest`);
+}
+
+// The files Vitest itself would run, from its configuration's include and exclude, as paths from the repository root.
+// The live switches are cleared so the list is the one a plain run uses.
+export function vitestRunFiles(args = []) {
+  const vitest = path.resolve('node_modules/vitest/vitest.mjs');
+  const env = { ...process.env, PUNCHLIST_LIVE: '', PUNCHLIST_AI_CHECK: '' };
+  const listed = execFileSync(process.execPath, [vitest, 'list', '--filesOnly', '--json', ...args], { env });
+  const fromRoot = (file) => path.relative(process.cwd(), file).split(path.sep).join('/');
+  return JSON.parse(listed.toString('utf8')).map(({ file }) => fromRoot(file));
 }
 
 const scopes = {
@@ -61,8 +72,9 @@ function readReport(reportPath) {
   throw new Error(`No Vitest report at ${reportPath}`);
 }
 
-// Every shape of test file Vitest could run (its default include is *.{test,spec}, ours only .test).
-export const isTestFile = (file) => /^tests\/.*\.test\.[mc]?[jt]sx?$/.test(file);
+// Every shape of test file Vitest could run (its default include is *.{test,spec}, ours only .test). The .spec.mjs
+// files are not among them: CI runs those with node (.github/workflows/ci.yml).
+export const isTestFile = (file) => /^tests\/.*(?:\.test\.[mc]?[jt]sx?|\.spec\.tsx?)$/.test(file);
 
 function trackedTestFiles() {
   const tracked = execFileSync('git', ['ls-files', '-z', 'tests'], { encoding: 'utf8' }).split('\0');
@@ -89,7 +101,7 @@ function reportProblems(args) {
 function main() {
   const args = process.argv.slice(2);
   try {
-    const problems = args.includes('--files') ? unrunTestFiles(trackedTestFiles()) : reportProblems(args);
+    const problems = args.includes('--files') ? unrunTestFiles(trackedTestFiles(), vitestRunFiles()) : reportProblems(args);
     for (const problem of problems) console.error(problem);
     if (problems.length) process.exitCode = 1;
   } catch (error) {

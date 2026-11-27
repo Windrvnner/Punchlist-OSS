@@ -114,6 +114,9 @@ Each CI job passes its own scope, so an entry that no longer matches is reported
 A skipped-test entry with `root: true` is for a skip that happens only when the tests run as root: it excuses a
 skip, and is reported when it no longer matches, only in a run as root (CI never runs as root).
 `node scripts/check-skipped-tests.mjs --files` fails on a test file that Vitest never runs.
+It compares the tracked `.test` and `.spec.ts(x)` files under `tests/` with what `vitest list` gives, so an
+`exclude` in `vitest.config.ts` counts; only the live tests and the AI check, which a plain run leaves out, are not
+reported.
 The timer, list, loop, limit, date, and pattern kinds catch only these forms:
 any reference to `setTimeout`, `setInterval`, or `requestIdleCallback`;
 a call of a list method named in `scripts/pane-of-glass-rules.mjs` (such as `.sort`, `.filter`, `.slice`, `.forEach`,
