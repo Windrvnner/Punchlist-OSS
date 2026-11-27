@@ -222,6 +222,16 @@ describe('allowance history', () => {
       expect(result.stderr).toContain("deals.services.open\": count 1 is above main's 0");
     });
 
+    it('rejects a decision entry of main relabeled to an issue and moved in the same change', () => {
+      const onMain = [entry(1, decided)];
+      const repo = repository({ [baselineFile]: onMain, [verifiedFile]: ['A decision.'], [screen]: before });
+      repo.write(screen, before.replace('store.services.ai', 'deals.services.open'));
+      repo.write(baselineFile, [entry(1, { line: 'deals.services.open' })]);
+      const result = repo.run();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("deals.services.open\": count 1 is above main's 0");
+    });
+
     it('rejects a moved entry that cites another issue', () => {
       const repo = edited();
       repo.write(screen, before.replace('store.services.ai', 'state.services.ai'));
